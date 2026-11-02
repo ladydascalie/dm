@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/hinshun/vt10x"
 )
 
 type paneConn struct {
@@ -702,6 +704,14 @@ func (s *server) handleReq(cl *client, m Msg) {
 		}
 		s.reply(cl, m, map[string]any{"lines": lines, "status": st}, nil)
 
+	case "history":
+		lines, err := s.paneHistory(m.Target, m.Lines)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, map[string]any{"lines": lines}, nil)
+
 	case "status":
 		s.mu.Lock()
 		pc := s.panes[m.Target]
@@ -901,7 +911,83 @@ func (s *server) paneLines(id string) ([]string, Status, error) {
 	if m.St != nil {
 		st = *m.St
 	}
-	return m.Lines, st, nil
+	var res struct {
+		Lines []string `json:"lines"`
+	}
+	_ = json.Unmarshal(m.Res, &res)
+	return res.Lines, st, nil
+}
+
+// paneHistory replays the pane's ring into a tall terminal and returns the
+// rows immediately above the live screen, oldest first.
+func (s *server) paneHistory(id string, n int) ([]string, error) {
+	if n <= 0 {
+		return nil, fmt.Errorf("history needs lines > 0")
+	}
+	r, ok := s.paneRect(id)
+	if !ok || r.W <= 0 || r.H <= 0 {
+		return nil, fmt.Errorf("no pane %q", id)
+	}
+	rp := readPaneReplay(s.st.Name, id)
+	if !rp.ok {
+		return nil, fmt.Errorf("no pane %q", id)
+	}
+	vt := vt10x.New(vt10x.WithSize(r.W, r.H+2000))
+	if _, err := vt.Write(rp.data); err != nil {
+		return nil, err
+	}
+	_, bottom := contentRows(vt)
+	if bottom == 0 {
+		return []string{}, nil
+	}
+	end := bottom - r.H
+	if end < 0 {
+		end = 0
+	}
+	start := end - n
+	if start < 0 {
+		start = 0
+	}
+	out := make([]string, 0, end-start)
+	for y := start; y < end; y++ {
+		out = append(out, historyRow(vt, y, r.W))
+	}
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return out, nil
+}
+
+// historyRow renders one terminal row as plain text.
+func historyRow(v vt10x.View, y, cols int) string {
+	var b strings.Builder
+	for x := 0; x < cols; x++ {
+		g := v.Cell(x, y)
+		if g.Char == 0 || g.Char < 0x20 {
+			b.WriteByte(' ')
+			continue
+		}
+		b.WriteRune(g.Char)
+	}
+	return strings.TrimRight(b.String(), " \x00")
+}
+
+// paneRect finds a pane's current rectangle in any window.
+func (s *server) paneRect(id string) (Rect, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, w := range ws.Windows {
+			if !findLeaf(w.Root, id) {
+				continue
+			}
+			rects := map[string]Rect{}
+			layout(w.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
+			r, ok := rects[id]
+			return r, ok
+		}
+	}
+	return Rect{}, false
 }
 
 func (s *server) writeTo(id, text string, enter bool) error {

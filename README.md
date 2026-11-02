@@ -106,10 +106,15 @@ dm read p1 --lines 20
 dm status
 ```
 
-Actions: `write-to`, `exec`, `read`, `status`, `keys`, `split`, `focus`,
-`focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
+Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
+`focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
 `next-window`, `prev-window`, `select-window`, `new-workspace`,
 `next-workspace`, `prev-workspace`, `rename-window`, `list`, `ping`.
+
+`history` takes `target` and an integer `lines` and replies with
+`{"lines": ["..."]}`: up to `lines` text rows immediately above the live
+screen, oldest first, trailing blanks trimmed. `lines` must be positive.
+`dm read <pane> --scrollback N` prints the same rows.
 
 `dm exec` prints the response as JSON. A failed action exits non-zero.
 

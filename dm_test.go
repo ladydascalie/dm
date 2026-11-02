@@ -630,6 +630,38 @@ func TestWindowsAndWorkspaces(t *testing.T) {
 	}
 }
 
+// History returns rows that scrolled off the screen; the plain read does not.
+func TestPaneHistory(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "hist")
+	root := h.focus("hist")
+	h.run("write-to", root, "-s", "hist", "--msg",
+		`for i in $(seq 1 80); do echo HIST-$(printf %03d $i); done`, "--enter")
+	h.waitFor("hist", root, "HIST-080")
+	time.Sleep(200 * time.Millisecond)
+
+	screen := h.run("read", root, "-s", "hist")
+	if strings.Contains(screen, "HIST-001") {
+		t.Fatalf("HIST-001 still on screen:\n%s", screen)
+	}
+
+	// -s before the pane id and --scrollback after it: the CLI reorders both.
+	hist := h.run("read", "-s", "hist", root, "--scrollback", "60")
+	if !strings.Contains(hist, "HIST-001") {
+		t.Fatalf("history missing HIST-001:\n%s", hist)
+	}
+	if strings.Contains(hist, "HIST-080") {
+		t.Fatalf("history repeated the live screen:\n%s", hist)
+	}
+
+	if out, err := h.try("read", root, "-s", "hist", "--scrollback", "0"); err == nil {
+		t.Fatalf("--scrollback 0 accepted: %q", out)
+	}
+	if out, err := h.try("read", "nope", "-s", "hist", "--scrollback", "5"); err == nil {
+		t.Fatalf("unknown pane accepted: %q", out)
+	}
+}
+
 func readPID(t *testing.T, path string) int {
 	t.Helper()
 	b, err := os.ReadFile(path)
