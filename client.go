@@ -50,6 +50,13 @@ type tui struct {
 	escAt   time.Time
 	inbuf   []byte
 	pending bool
+
+	dragging  bool
+	dragPane  string
+	dragAxis  string
+	dragStart int
+	dragSpace int
+	dragAt    time.Time
 }
 
 // runClient owns the terminal. A session switch returns to this loop with a new
@@ -533,7 +540,26 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	if t.snap == nil {
 		return
 	}
-	p := t.paneAt(ev.x-1, ev.y-1)
+	x, y := ev.x-1, ev.y-1
+	left := ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release
+	if t.dragging {
+		if ev.release || ev.btn&32 == 0 {
+			t.dragging = false
+			t.dirty = true
+			return
+		}
+		t.dragTo(x, y)
+		return
+	}
+	// A divider belongs to the mux, unless either side's app claims the mouse.
+	if left {
+		rect := Rect{0, 0, t.snap.Cols, t.snap.Rows - 1}
+		if n, r, _, ok := dividerHit(t.snap.Root, rect, x, y); ok && !t.splitClaimsMouse(n) {
+			t.startDrag(n, r)
+			return
+		}
+	}
+	p := t.paneAt(x, y)
 	if p == nil {
 		return
 	}
@@ -546,7 +572,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	}
 	// Left press on a pane focuses it. Apps that want the mouse already took
 	// the event above.
-	if ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release {
+	if left {
 		if t.snap.Focus != p.ID {
 			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: p.ID})
 		}
@@ -563,6 +589,59 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	} else {
 		t.scrollBy(-3)
 	}
+}
+
+// splitClaimsMouse reports whether any pane in the split wants mouse events.
+func (t *tui) splitClaimsMouse(n *Node) bool {
+	for _, id := range allPanes(n) {
+		if p := t.paneByID(id); p != nil && p.Mouse {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *tui) startDrag(n *Node, r Rect) {
+	ids := allPanes(n.Kids[0])
+	if len(ids) == 0 || len(n.Kids) != 2 {
+		return
+	}
+	t.dragging = true
+	t.dragPane = ids[0]
+	t.dragAxis = n.Dir
+	t.dragStart = r.X
+	space := r.W
+	if n.Dir == "col" {
+		t.dragStart = r.Y
+		space = r.H
+	}
+	t.dragSpace = space - 1
+	t.dragAt = time.Time{}
+	t.dirty = true
+}
+
+// dragTo sends the split ratio the pointer asks for, at most every 30 ms.
+func (t *tui) dragTo(x, y int) {
+	if t.dragSpace < 6 {
+		return
+	}
+	pos := x
+	if t.dragAxis == "col" {
+		pos = y
+	}
+	off := pos - t.dragStart
+	if off < 3 {
+		off = 3
+	}
+	if off > t.dragSpace-3 {
+		off = t.dragSpace - 3
+	}
+	if !t.dragAt.IsZero() && time.Since(t.dragAt) < 30*time.Millisecond {
+		return
+	}
+	t.dragAt = time.Now()
+	ratio := float64(off) / float64(t.dragSpace)
+	_ = t.conn.send(Msg{Type: "req", Action: "resize-split", Target: t.dragPane, Ratio: ratio})
 }
 
 type mouseEvent struct {

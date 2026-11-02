@@ -342,6 +342,44 @@ func layout(n *Node, r Rect, out map[string]Rect) {
 	}
 }
 
+// splitAt returns the split whose direct child is id, plus that split's rect.
+func splitAt(n *Node, id string, r Rect) (*Node, Rect, bool) {
+	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
+		return nil, Rect{}, false
+	}
+	for _, k := range n.Kids {
+		if k.Pane == id {
+			return n, r, true
+		}
+	}
+	k := len(n.Kids)
+	horizontal := n.Dir == "row"
+	space := r.W
+	if !horizontal {
+		space = r.H
+	}
+	space -= k - 1
+	if space < k {
+		space = k
+	}
+	sizes := splitSizes(n, space)
+	off := 0
+	for i, kid := range n.Kids {
+		size := sizes[i]
+		var kr Rect
+		if horizontal {
+			kr = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
+		} else {
+			kr = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
+		}
+		if sn, sr, ok := splitAt(kid, id, kr); ok {
+			return sn, sr, ok
+		}
+		off += size + 1
+	}
+	return nil, Rect{}, false
+}
+
 // splitSizes turns the node's weights into integer cell counts that sum to
 // space. A split without weights divides equally.
 func splitSizes(n *Node, space int) []int {

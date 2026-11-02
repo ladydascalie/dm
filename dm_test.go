@@ -662,6 +662,83 @@ func TestPaneHistory(t *testing.T) {
 	}
 }
 
+func TestDividerAt(t *testing.T) {
+	r := Rect{0, 0, 100, 29}
+
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	pane, axis, ok := dividerAt(row, r, 49, 5)
+	if !ok || pane != "a" || axis != "row" {
+		t.Fatalf("row divider: pane=%q axis=%q ok=%v", pane, axis, ok)
+	}
+	if _, _, ok := dividerAt(row, r, 10, 5); ok {
+		t.Fatal("row divider hit inside a pane")
+	}
+
+	col := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	pane, axis, ok = dividerAt(col, r, 5, 14)
+	if !ok || pane != "a" || axis != "col" {
+		t.Fatalf("col divider: pane=%q axis=%q ok=%v", pane, axis, ok)
+	}
+	if _, _, ok := dividerAt(col, r, 5, 2); ok {
+		t.Fatal("col divider hit inside a pane")
+	}
+}
+
+func (h *harness) rects(session string) map[string]Rect {
+	h.t.Helper()
+	tree := h.rpc(session, map[string]any{"action": "list"})
+	snap := tree["snapshot"].(map[string]any)
+	out := map[string]Rect{}
+	for _, raw := range snap["panes"].([]any) {
+		p := raw.(map[string]any)
+		rr := p["rect"].(map[string]any)
+		num := func(k string) int { return int(rr[k].(float64)) }
+		out[p["id"].(string)] = Rect{X: num("X"), Y: num("Y"), W: num("W"), H: num("H")}
+	}
+	return out
+}
+
+// Resizing a split changes both pane rects and never drops below three cells.
+func TestResizeSplit(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "rs")
+	root := h.focus("rs")
+	p2 := h.split("rs", root, "right")
+
+	before := h.rects("rs")
+	h.run("exec", `{"action":"resize-split","target":"`+root+`","ratio":0.25}`, "-s", "rs")
+	after := h.rects("rs")
+	if after[root].W >= before[root].W || after[p2].W <= before[p2].W {
+		t.Fatalf("widths did not move: before=%v after=%v", before, after)
+	}
+
+	h.run("exec", `{"action":"resize-split","target":"`+root+`","ratio":0}`, "-s", "rs")
+	min := h.rects("rs")
+	if min[root].W < 3 || min[p2].W < 3 {
+		t.Fatalf("minimum width ignored: %v", min)
+	}
+
+	// The same clamp applies to a column split, measured in rows.
+	p3 := h.split("rs", p2, "down")
+	before = h.rects("rs")
+	h.run("exec", `{"action":"resize-split","target":"`+p2+`","ratio":0.3}`, "-s", "rs")
+	after = h.rects("rs")
+	if after[p2].H == before[p2].H || after[p3].H == before[p3].H {
+		t.Fatalf("rows did not move: before=%v after=%v", before, after)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+p2+`","ratio":1}`, "-s", "rs")
+	min = h.rects("rs")
+	if min[p2].H < 3 || min[p3].H < 3 {
+		t.Fatalf("minimum height ignored: %v", min)
+	}
+
+	if out, err := h.try("exec", `{"action":"resize-split","target":"nope","ratio":0.5}`, "-s", "rs"); err == nil {
+		t.Fatalf("unknown pane accepted: %q", out)
+	}
+}
+
 func readPID(t *testing.T, path string) int {
 	t.Helper()
 	b, err := os.ReadFile(path)

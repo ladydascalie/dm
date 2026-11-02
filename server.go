@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -757,6 +758,14 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.afterMutation()
 		s.reply(cl, m, map[string]any{"pane": id}, err)
 
+	case "resize-split":
+		err := s.mutation(func() error { return s.resizeSplit(m.Target, m.Ratio) })
+		if err == nil {
+			s.syncSizes()
+			s.pushSnapshot()
+		}
+		s.reply(cl, m, nil, err)
+
 	case "focus":
 		err := s.mutation(func() error { return s.setFocus(m.Target) })
 		s.afterMutation()
@@ -1255,6 +1264,55 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 	}
 	s.watchPane(id)
 	return id, nil
+}
+
+// resizeSplit sets the weights of the split around target. Ratio is the share
+// the first child keeps, clamped so both children keep at least three cells.
+func (s *server) resizeSplit(target string, ratio float64) error {
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+		return fmt.Errorf("bad ratio")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, win := range ws.Windows {
+			if !findLeaf(win.Root, target) {
+				continue
+			}
+			parent, r, ok := splitAt(win.Root, target, Rect{0, 0, s.cols, s.rows - 1})
+			if !ok {
+				return fmt.Errorf("pane %q has no split", target)
+			}
+			if len(parent.Kids) != 2 {
+				return fmt.Errorf("split of %q has %d panes", target, len(parent.Kids))
+			}
+			horizontal := parent.Dir == "row"
+			space := r.W
+			if !horizontal {
+				space = r.H
+			}
+			space--
+			if space < 6 {
+				return fmt.Errorf("split of %q is too small", target)
+			}
+			if space == 6 {
+				parent.Sizes = []float64{0.5, 0.5}
+				return nil
+			}
+			const eps = 1e-9
+			lo := 3.0/float64(space) + eps
+			hi := 1 - 3.0/float64(space) - eps
+			if ratio < lo {
+				ratio = lo
+			}
+			if ratio > hi {
+				ratio = hi
+			}
+			parent.Sizes = []float64{ratio, 1 - ratio}
+			return nil
+		}
+	}
+	return fmt.Errorf("no pane %q", target)
 }
 
 func (s *server) setFocus(id string) error {

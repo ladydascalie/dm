@@ -209,6 +209,65 @@ func scrollStart(v vt10x.View, rectH, offset int) (start, max int) {
 	return start, max
 }
 
+// dividerAt reports the divider under x,y: the split's first pane and its
+// axis. Coordinates are zero-based terminal cells.
+func dividerAt(root *Node, r Rect, x, y int) (pane, axis string, ok bool) {
+	n, _, _, ok := dividerHit(root, r, x, y)
+	if !ok {
+		return "", "", false
+	}
+	ids := allPanes(n.Kids[0])
+	if len(ids) == 0 {
+		return "", "", false
+	}
+	return ids[0], n.Dir, true
+}
+
+// dividerHit returns the split under x,y, its rect and the divider offset from
+// the split's origin along its axis.
+func dividerHit(n *Node, r Rect, x, y int) (*Node, Rect, int, bool) {
+	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
+		return nil, Rect{}, 0, false
+	}
+	k := len(n.Kids)
+	horizontal := n.Dir == "row"
+	space := r.W
+	if !horizontal {
+		space = r.H
+	}
+	space -= k - 1
+	if space < k {
+		space = k
+	}
+	sizes := splitSizes(n, space)
+	off := 0
+	for i, kid := range n.Kids {
+		size := sizes[i]
+		var kr Rect
+		if horizontal {
+			kr = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
+		} else {
+			kr = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
+		}
+		if i < k-1 {
+			if horizontal {
+				if x == r.X+off+size && y >= r.Y && y < r.Y+r.H {
+					return n, r, off + size, true
+				}
+			} else {
+				if y == r.Y+off+size && x >= r.X && x < r.X+r.W {
+					return n, r, off + size, true
+				}
+			}
+		}
+		if sn, sr, so, ok := dividerHit(kid, kr, x, y); ok {
+			return sn, sr, so, ok
+		}
+		off += size + 1
+	}
+	return nil, Rect{}, 0, false
+}
+
 // drawBar paints the one-line status bar at the bottom.
 func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, toast, scroll string) {
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
