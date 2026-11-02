@@ -558,12 +558,10 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		t.dragTo(x, y, false)
 		return
 	}
-	// A divider belongs to the mux, unless either side's app claims the mouse.
+	// A divider belongs to the mux, unless its app claims the mouse.
 	if left {
-		rect := Rect{0, 0, t.snap.Cols, t.snap.Rows - 1}
-		first, second, axis, ok := dividerAt(t.snap.Root, rect, x, y)
-		if ok && !t.splitClaimsMouse(first, second) {
-			t.startDrag(first, second, axis)
+		if ds, ok := dragPress(t.snap, x, y); ok {
+			t.startDrag(ds)
 			return
 		}
 	}
@@ -599,32 +597,59 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	}
 }
 
-// splitClaimsMouse reports whether either pane beside the divider wants mouse
+// dragStart is the split a mouse press resolved to.
+type dragStart struct {
+	first  string
+	second string
+	axis   string
+	rect   Rect
+}
+
+// dragPress decides whether a left press at x,y starts a divider drag. The
+// split's own rect is used for the ratio, so nested splits keep their full
+// span. A pane that claimed the mouse anywhere in the split's subtree owns the
+// divider too, so no drag starts.
+func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
+	if snap == nil || snap.Root == nil {
+		return dragStart{}, false
+	}
+	n, first, second, axis, r, ok := dividerHit(snap.Root,
+		Rect{0, 0, snap.Cols, snap.Rows - 1}, x, y)
+	if !ok {
+		return dragStart{}, false
+	}
+	if splitClaimsMouse(snap, n) {
+		return dragStart{}, false
+	}
+	return dragStart{first: first, second: second, axis: axis, rect: r}, true
+}
+
+// splitClaimsMouse reports whether any pane in the split's subtree wants mouse
 // events.
-func (t *tui) splitClaimsMouse(first, second string) bool {
-	for _, id := range []string{first, second} {
-		if p := t.paneByID(id); p != nil && p.Mouse {
-			return true
+func splitClaimsMouse(snap *Snapshot, n *Node) bool {
+	if snap == nil || n == nil {
+		return false
+	}
+	for _, id := range allPanes(n) {
+		for i := range snap.Panes {
+			if snap.Panes[i].ID == id && snap.Panes[i].Mouse {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func (t *tui) startDrag(first, second, axis string) {
-	p1, p2 := t.paneByID(first), t.paneByID(second)
-	if p1 == nil || p2 == nil {
-		return
-	}
-	r := splitRect(p1.Rect, p2.Rect)
+func (t *tui) startDrag(d dragStart) {
 	t.dragging = true
-	t.dragFirst = first
-	t.dragSecond = second
-	t.dragAxis = axis
-	t.dragStart = r.X
-	space := r.W
-	if axis == "col" {
-		t.dragStart = r.Y
-		space = r.H
+	t.dragFirst = d.first
+	t.dragSecond = d.second
+	t.dragAxis = d.axis
+	t.dragStart = d.rect.X
+	space := d.rect.W
+	if d.axis == "col" {
+		t.dragStart = d.rect.Y
+		space = d.rect.H
 	}
 	t.dragSpace = space - 1
 	t.dragAt = time.Time{}

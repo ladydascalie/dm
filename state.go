@@ -342,24 +342,43 @@ func layout(n *Node, r Rect, out map[string]Rect) {
 	}
 }
 
-// splitRect returns the rectangle of the split bounded by two panes that sit
-// either side of its divider.
-func splitRect(first, second Rect) Rect {
-	x0, y0 := first.X, first.Y
-	x1, y1 := first.X+first.W, first.Y+first.H
-	if second.X < x0 {
-		x0 = second.X
+// nodeRect returns the rectangle layout assigns to a node in the tree.
+func nodeRect(n, target *Node, r Rect) (Rect, bool) {
+	if n == nil {
+		return Rect{}, false
 	}
-	if second.Y < y0 {
-		y0 = second.Y
+	if n == target {
+		return r, true
 	}
-	if second.X+second.W > x1 {
-		x1 = second.X + second.W
+	if n.Pane != "" || len(n.Kids) == 0 {
+		return Rect{}, false
 	}
-	if second.Y+second.H > y1 {
-		y1 = second.Y + second.H
+	k := len(n.Kids)
+	horizontal := n.Dir == "row"
+	space := r.W
+	if !horizontal {
+		space = r.H
 	}
-	return Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}
+	space -= k - 1
+	if space < k {
+		space = k
+	}
+	sizes := splitSizes(n, space)
+	off := 0
+	for i, kid := range n.Kids {
+		size := sizes[i]
+		var kr Rect
+		if horizontal {
+			kr = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
+		} else {
+			kr = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
+		}
+		if out, ok := nodeRect(kid, target, kr); ok {
+			return out, ok
+		}
+		off += size + 1
+	}
+	return Rect{}, false
 }
 
 // ancestorPath returns the nodes from root to id, inclusive.

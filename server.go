@@ -1294,17 +1294,10 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 			if len(split.Kids) != 2 {
 				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
 			}
-			rects := map[string]Rect{}
-			layout(win.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
-			r, ok := rects[first]
+			r, ok := nodeRect(win.Root, split, Rect{0, 0, s.cols, s.rows - 1})
 			if !ok {
-				return fmt.Errorf("no pane %q", first)
+				return fmt.Errorf("no rect for split of %q", first)
 			}
-			r2, ok := rects[second]
-			if !ok {
-				return fmt.Errorf("no pane %q", second)
-			}
-			r = splitRect(r, r2)
 			horizontal := split.Dir == "row"
 			space := r.W
 			if !horizontal {
@@ -1320,7 +1313,7 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 			}
 			const eps = 1e-9
 			lo := 3.0/float64(space) + eps
-			hi := 1 - 3.0/float64(space) - eps
+			hi := 1 - 3.0/float64(space) + eps
 			if ratio < lo {
 				ratio = lo
 			}

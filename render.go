@@ -209,11 +209,12 @@ func scrollStart(v vt10x.View, rectH, offset int) (start, max int) {
 	return start, max
 }
 
-// dividerAt reports the divider under x,y: the panes on its left/above side
-// and right/below side, plus the split's axis. Coordinates are zero-based.
-func dividerAt(n *Node, r Rect, x, y int) (first, second, axis string, ok bool) {
+// dividerHit reports the divider under x,y: the owning split, the panes on
+// its left/above and right/below side, the split's axis and its full rect.
+// Coordinates are zero-based terminal cells.
+func dividerHit(n *Node, r Rect, x, y int) (split *Node, first, second, axis string, sr Rect, ok bool) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
-		return "", "", "", false
+		return nil, "", "", "", Rect{}, false
 	}
 	k := len(n.Kids)
 	horizontal := n.Dir == "row"
@@ -243,19 +244,25 @@ func dividerAt(n *Node, r Rect, x, y int) (first, second, axis string, ok bool) 
 			if horizontal && x == kr.X+kr.W && y >= r.Y && y < r.Y+r.H {
 				first = paneAtRect(n.Kids[i], kr, x-1, y)
 				second = paneAtRect(n.Kids[i+1], rects[i+1], x+1, y)
-				return first, second, n.Dir, first != "" && second != ""
+				if first == "" || second == "" {
+					return nil, "", "", "", Rect{}, false
+				}
+				return n, first, second, n.Dir, r, true
 			}
 			if !horizontal && y == kr.Y+kr.H && x >= r.X && x < r.X+r.W {
 				first = paneAtRect(n.Kids[i], kr, x, y-1)
 				second = paneAtRect(n.Kids[i+1], rects[i+1], x, y+1)
-				return first, second, n.Dir, first != "" && second != ""
+				if first == "" || second == "" {
+					return nil, "", "", "", Rect{}, false
+				}
+				return n, first, second, n.Dir, r, true
 			}
 		}
-		if f, s, ax, hit := dividerAt(n.Kids[i], rects[i], x, y); hit {
-			return f, s, ax, hit
+		if sn, f, sec, ax, sr, hit := dividerHit(n.Kids[i], rects[i], x, y); hit {
+			return sn, f, sec, ax, sr, hit
 		}
 	}
-	return "", "", "", false
+	return nil, "", "", "", Rect{}, false
 }
 
 // paneAtRect returns the pane leaf under x,y inside a node's rectangle.

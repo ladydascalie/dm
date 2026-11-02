@@ -67,7 +67,8 @@ bottom right. The box clears after 3 seconds of no input.
 Drag a divider with the left mouse button to resize the split. The client
 sends `resize-split` with the two panes beside the divider and the ratio, at
 most every 30 ms plus a final call on release. Both sides keep at least three
-cells. A divider is ignored when the program on either side claimed the mouse.
+cells. A divider is ignored when any pane in that split's subtree claimed the
+mouse, because the app owns the whole area.
 
 In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel

@@ -698,6 +698,21 @@ func TestPaneHistory(t *testing.T) {
 		t.Fatalf("history includes leading blank rows:\n%q", blank)
 	}
 
+	// A blank row immediately above the live screen is part of the window.
+	h.run("new", "-s", "histg")
+	root = h.focus("histg")
+	rows := h.rects("histg")[root].H
+	// sh -c keeps the shell prompt out of the picture until the sleep ends.
+	cmd := fmt.Sprintf(`sh -c "printf '\033[H\033[2J'; echo TOP; echo; `+
+		`for i in \$(seq 1 %d); do echo TAIL-\$(printf %%03d \$i); done; `+
+		`printf '\033[%d;1H'; sleep 15"`, rows, rows+2)
+	h.run("write-to", root, "-s", "histg", "--msg", cmd, "--enter")
+	h.waitFor("histg", root, "TAIL-023")
+	time.Sleep(200 * time.Millisecond)
+	if got := h.history("histg", root, 1); len(got) != 1 || got[0] != "" {
+		t.Fatalf("blank row above the live screen not returned: %q", got)
+	}
+
 	// A pane with no scrollback answers empty, not an error.
 	h.run("new", "-s", "short")
 	root = h.focus("short")
@@ -732,37 +747,89 @@ func TestDividerAt(t *testing.T) {
 
 	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5}}
-	first, second, axis, ok := dividerAt(row, r, 49, 5)
-	if !ok || first != "a" || second != "b" || axis != "row" {
-		t.Fatalf("row divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
+	n, first, second, axis, sr, ok := dividerHit(row, r, 49, 5)
+	if !ok || n != row || first != "a" || second != "b" || axis != "row" || sr != r {
+		t.Fatalf("row divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
 	}
-	if _, _, _, ok := dividerAt(row, r, 10, 5); ok {
+	if _, _, _, _, _, ok := dividerHit(row, r, 10, 5); ok {
 		t.Fatal("row divider hit inside a pane")
 	}
 
 	col := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5}}
-	first, second, axis, ok = dividerAt(col, r, 5, 14)
-	if !ok || first != "a" || second != "b" || axis != "col" {
-		t.Fatalf("col divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
+	n, first, second, axis, sr, ok = dividerHit(col, r, 5, 14)
+	if !ok || n != col || first != "a" || second != "b" || axis != "col" || sr != r {
+		t.Fatalf("col divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
 	}
-	if _, _, _, ok := dividerAt(col, r, 5, 2); ok {
+	if _, _, _, _, _, ok := dividerHit(col, r, 5, 2); ok {
 		t.Fatal("col divider hit inside a pane")
 	}
 
-	// Nested: the outer divider must name one pane on each side of itself,
-	// and the inner divider must name the pair around the inner split.
+	// Nested: the outer hit must carry the outer split's full rect, not the
+	// bounding box of the two leaves. The inner hit carries the col rect.
 	nested := &Node{Dir: "row", Kids: []*Node{
 		{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "c"}}},
 		{Pane: "b"},
 	}}
-	first, second, axis, ok = dividerAt(nested, r, 49, 5)
-	if !ok || first != "a" || second != "b" || axis != "row" {
-		t.Fatalf("outer divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
+	n, first, second, axis, sr, ok = dividerHit(nested, r, 49, 5)
+	if !ok || n != nested || first != "a" || second != "b" || axis != "row" || sr != r {
+		t.Fatalf("outer divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
 	}
-	first, second, axis, ok = dividerAt(nested, r, 5, 14)
-	if !ok || first != "a" || second != "c" || axis != "col" {
-		t.Fatalf("inner divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
+	inner := nested.Kids[0]
+	n, first, second, axis, sr, ok = dividerHit(nested, r, 5, 14)
+	if !ok || n != inner || first != "a" || second != "c" || axis != "col" ||
+		sr != (Rect{X: 0, Y: 0, W: 49, H: 29}) {
+		t.Fatalf("inner divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
+	}
+}
+
+func testSnapshot(root *Node, cols, rows int, mouse map[string]bool) *Snapshot {
+	snap := &Snapshot{Root: root, Cols: cols, Rows: rows}
+	rects := map[string]Rect{}
+	layout(root, Rect{0, 0, cols, rows - 1}, rects)
+	for _, id := range allPanes(root) {
+		snap.Panes = append(snap.Panes, PaneInfo{ID: id, Rect: rects[id], Mouse: mouse[id]})
+	}
+	return snap
+}
+
+// DragPress is the press decision: dividers start a drag, panes and splits
+// whose subtree claimed the mouse do not. handleMouse must call it.
+func TestDragPress(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	snap := testSnapshot(row, 100, 30, nil)
+	ds, ok := dragPress(snap, 49, 5)
+	if !ok || ds.first != "a" || ds.second != "b" || ds.axis != "row" ||
+		ds.rect != (Rect{X: 0, Y: 0, W: 100, H: 29}) {
+		t.Fatalf("divider press: %+v ok=%v", ds, ok)
+	}
+	if _, ok := dragPress(snap, 10, 5); ok {
+		t.Fatal("pane press started a drag")
+	}
+
+	// The press path itself must use dragPress.
+	tui := &tui{snap: snap}
+	tui.handleMouse(mouseEvent{btn: 0, x: 50, y: 6})
+	if !tui.dragging {
+		t.Fatal("handleMouse did not start a drag on a divider")
+	}
+
+	// Any mouse-claiming pane in the owning split's subtree owns the divider.
+	nested := &Node{Dir: "row", Kids: []*Node{
+		{Pane: "a"},
+		{Dir: "row", Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
+	}}
+	snap = testSnapshot(nested, 100, 30, map[string]bool{"c": true})
+	if _, ok := dragPress(snap, 49, 5); ok {
+		t.Fatal("drag started although the split's subtree claimed the mouse")
+	}
+	if _, ok := dragPress(snap, 74, 5); ok {
+		t.Fatal("inner drag started although its subtree claimed the mouse")
 	}
 }
 
@@ -815,18 +882,27 @@ func TestResizeSplit(t *testing.T) {
 		t.Fatalf("inner drag changed widths: before=%v after=%v", before, after)
 	}
 
-	// Ratios 0 and 1 clamp to the three-cell minimum on both sides.
-	for _, ratio := range []string{"0", "1"} {
-		h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":`+ratio+`}`, "-s", "rs")
-		got := h.rects("rs")
-		if got[p1].W < 3 || got[p2].W < 3 {
-			t.Fatalf("ratio %s ignored the minimum width: %v", ratio, got)
-		}
-		h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":`+ratio+`}`, "-s", "rs")
-		got = h.rects("rs")
-		if got[p1].H < 3 || got[p3].H < 3 {
-			t.Fatalf("ratio %s ignored the minimum height: %v", ratio, got)
-		}
+	// Ratios 0 and 1 clamp the squeezed side to exactly three cells. Leaving
+	// both sides merely >= 3 would also pass an even split without a clamp.
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":0}`, "-s", "rs")
+	got := h.rects("rs")
+	if got[p1].W != 3 || got[p2].W <= 3 {
+		t.Fatalf("ratio 0 width: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":1}`, "-s", "rs")
+	got = h.rects("rs")
+	if got[p2].W != 3 || got[p1].W <= 3 {
+		t.Fatalf("ratio 1 width: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":0}`, "-s", "rs")
+	got = h.rects("rs")
+	if got[p1].H != 3 || got[p3].H <= 3 {
+		t.Fatalf("ratio 0 height: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":1}`, "-s", "rs")
+	got = h.rects("rs")
+	if got[p3].H != 3 || got[p1].H <= 3 {
+		t.Fatalf("ratio 1 height: %v", got)
 	}
 	if focus := h.focus("rs"); focus != p3 {
 		t.Fatalf("resize moved focus to %q", focus)
@@ -834,6 +910,28 @@ func TestResizeSplit(t *testing.T) {
 
 	if out, err := h.try("exec", `{"action":"resize-split","target":"nope","other":"`+p2+`","ratio":0.5}`, "-s", "rs"); err == nil {
 		t.Fatalf("unknown pane accepted: %q", out)
+	}
+
+	// Same-axis nesting: row{ q1, row{q2,q3} }. The outer divider spans the
+	// whole row, so the minimum is exactly 3 cells, not the leaf bounding box.
+	h.run("new", "-s", "rs2")
+	q1 := h.focus("rs2")
+	q2 := h.split("rs2", q1, "right")
+	q3 := h.split("rs2", q2, "right")
+	tree := h.rpc("rs2", map[string]any{"action": "list"})
+	cols := int(tree["snapshot"].(map[string]any)["cols"].(float64))
+	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":0}`, "-s", "rs2")
+	got = h.rects("rs2")
+	if got[q1].W != 3 {
+		t.Fatalf("outer minimum with same-axis nesting = %v, want 3", got)
+	}
+	if got[q2].W+got[q3].W+1 != cols-1-3 {
+		t.Fatalf("outer right side width: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":1}`, "-s", "rs2")
+	got = h.rects("rs2")
+	if got[q1].W != cols-1-3 || got[q2].W+got[q3].W+1 != 3 {
+		t.Fatalf("outer maximum with same-axis nesting: %v", got)
 	}
 }
 
