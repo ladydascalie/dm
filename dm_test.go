@@ -818,6 +818,31 @@ func TestDragPress(t *testing.T) {
 	if !tui.dragging {
 		t.Fatal("handleMouse did not start a drag on a divider")
 	}
+	// startDrag must take its origin and cell space from the pressed rect.
+	if tui.dragStart != ds.rect.X || tui.dragSpace != ds.rect.W-1 {
+		t.Fatalf("startDrag stored start=%d space=%d, want %d/%d",
+			tui.dragStart, tui.dragSpace, ds.rect.X, ds.rect.W-1)
+	}
+
+	// Same-axis nesting: the outer hit carries the owning split's full rect,
+	// not the bounding box of the two adjacent leaves.
+	same := &Node{Dir: "row", Kids: []*Node{
+		{Pane: "a"},
+		{Dir: "row", Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
+	}}
+	snap = testSnapshot(same, 100, 30, nil)
+	// The root is what layout hands its tree: the whole pane area.
+	want := Rect{X: 0, Y: 0, W: snap.Cols, H: snap.Rows - 1}
+	ds, ok = dragPress(snap, 49, 5)
+	if !ok || ds.first != "a" || ds.second != "b" || ds.rect != want {
+		t.Fatalf("same-axis outer press: %+v ok=%v, want rect %v", ds, ok, want)
+	}
+	tui.snap = snap
+	tui.startDrag(ds)
+	if tui.dragStart != want.X || tui.dragSpace != want.W-1 {
+		t.Fatalf("same-axis startDrag stored start=%d space=%d, want %d/%d",
+			tui.dragStart, tui.dragSpace, want.X, want.W-1)
+	}
 
 	// Any mouse-claiming pane in the owning split's subtree owns the divider.
 	nested := &Node{Dir: "row", Kids: []*Node{
