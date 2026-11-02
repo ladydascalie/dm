@@ -31,10 +31,14 @@ type Msg struct {
 	Keys []byte `json:"keys,omitempty"`
 	Data []byte `json:"data,omitempty"`
 
-	OK    bool            `json:"ok,omitempty"`
-	Error string          `json:"error,omitempty"`
-	Snap  *Snapshot       `json:"snap,omitempty"`
-	Lines int             `json:"lines,omitempty"` // history request: row count
+	OK    bool      `json:"ok,omitempty"`
+	Error string    `json:"error,omitempty"`
+	Snap  *Snapshot `json:"snap,omitempty"`
+	// Lines is the pane read reply. It stays in the envelope because pane
+	// daemons outlive servers, and moving it would break every old pane.
+	Lines []string `json:"lines,omitempty"`
+	// Count is the history request: how many rows above the screen.
+	Count int             `json:"count,omitempty"`
 	St    *Status         `json:"st,omitempty"`
 	Res   json.RawMessage `json:"res,omitempty"`
 }

@@ -209,7 +209,7 @@ func runCLI(argv []string) error {
 		if c.scrollback >= 0 {
 			action = "history"
 		}
-		m, err := rpc(c.session, Msg{Action: action, Target: c.args[0], Lines: c.scrollback})
+		m, err := rpc(c.session, Msg{Action: action, Target: c.args[0], Count: c.scrollback})
 		if err != nil {
 			return err
 		}

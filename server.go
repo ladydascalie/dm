@@ -150,6 +150,16 @@ func runServer(args []string) error {
 			log.Printf("pane %s: %v", id, err)
 			continue
 		}
+		// A pane outlives the server: seed its status and modes from the pane
+		// itself, or a restart would show every agent as unknown.
+		rp := readPaneReplay(s.st.Name, id)
+		if rp.ok {
+			s.mu.Lock()
+			if pc := s.panes[id]; pc != nil {
+				pc.st, pc.alt, pc.mouse = rp.st, rp.alt, rp.mouse
+			}
+			s.mu.Unlock()
+		}
 		s.watchPane(id)
 	}
 	s.syncSizes()
@@ -706,7 +716,7 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.reply(cl, m, map[string]any{"lines": lines, "status": st}, nil)
 
 	case "history":
-		lines, err := s.paneHistory(m.Target, m.Lines)
+		lines, err := s.paneHistory(m.Target, m.Count)
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
@@ -920,6 +930,10 @@ func (s *server) paneLines(id string) ([]string, Status, error) {
 	if m.St != nil {
 		st = *m.St
 	}
+	if m.Lines != nil {
+		return m.Lines, st, nil
+	}
+	// A pane started by the short-lived build that moved rows into Res.
 	var res struct {
 		Lines []string `json:"lines"`
 	}

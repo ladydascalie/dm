@@ -257,8 +257,8 @@ func (p *paneProc) serve(c net.Conn) {
 			dead := p.dead
 			p.mu.Unlock()
 			lines := splitLines(text)
-			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, St: &st,
-				Res: jsonRaw(map[string]any{"lines": lines, "title": title, "dead": dead})})
+			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, St: &st, Lines: lines,
+				Res: jsonRaw(map[string]any{"title": title, "dead": dead})})
 		case "replay":
 			p.mu.Lock()
 			data := append([]byte(nil), p.ring...)

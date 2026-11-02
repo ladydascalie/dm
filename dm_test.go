@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -127,6 +128,26 @@ func TestDrawSessionsWidth(t *testing.T) {
 	if len(widths) != 1 {
 		t.Fatalf("box rows have different widths: %v", widths)
 	}
+}
+
+// A pane daemon outlives the server, so the read reply must keep its shape.
+func TestReadReplyStaysBackwardCompatible(t *testing.T) {
+	old, err := readMsg(bytes.NewReader(frame(t, `{"type":"resp","lines":["a","b"]}`)))
+	if err != nil || len(old.Lines) != 2 || old.Lines[1] != "b" {
+		t.Fatalf("old read reply: %+v %v", old, err)
+	}
+	req, err := readMsg(bytes.NewReader(frame(t, `{"type":"req","action":"history","count":7}`)))
+	if err != nil || req.Count != 7 || req.Lines != nil {
+		t.Fatalf("history request: %+v %v", req, err)
+	}
+}
+
+func frame(t *testing.T, payload string) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	binary.Write(&b, binary.BigEndian, uint32(len(payload)))
+	b.WriteString(payload)
+	return b.Bytes()
 }
 
 func TestParseStatusWireFormat(t *testing.T) {
@@ -679,7 +700,7 @@ func TestPaneHistory(t *testing.T) {
 	if out, err := h.try("read", root, "-s", "hist", "--scrollback", "0"); err == nil {
 		t.Fatalf("--scrollback 0 accepted: %q", out)
 	}
-	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","lines":-1}`, "-s", "hist"); err == nil {
+	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","count":-1}`, "-s", "hist"); err == nil {
 		t.Fatalf("negative lines accepted: %q", out)
 	}
 	if out, err := h.try("read", "nope", "-s", "hist", "--scrollback", "5"); err == nil {
@@ -725,14 +746,14 @@ func TestPaneHistory(t *testing.T) {
 	root = h.focus("alt")
 	h.run("write-to", root, "-s", "alt", "--msg", `printf '\033[?1049h'; sleep 3`, "--enter")
 	waitMode(t, h, "alt", true, false)
-	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","lines":5}`, "-s", "alt"); err == nil {
+	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","count":5}`, "-s", "alt"); err == nil {
 		t.Fatalf("alt pane returned history: %q", out)
 	}
 }
 
 func (h *harness) history(session, pane string, n int) []string {
 	h.t.Helper()
-	res := h.rpc(session, map[string]any{"action": "history", "target": pane, "lines": n})
+	res := h.rpc(session, map[string]any{"action": "history", "target": pane, "count": n})
 	raw, _ := res["lines"].([]any)
 	out := make([]string, 0, len(raw))
 	for _, v := range raw {
