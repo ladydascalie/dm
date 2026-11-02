@@ -947,10 +947,15 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("history needs lines > 0")
 	}
-	r, ok := s.paneRect(id)
-	if !ok || r.W <= 0 || r.H <= 0 {
+	// The tall replay must use the pane's own PTY size, not its layout rect:
+	// a pane in an inactive workspace keeps its 80x24 PTY until it is shown.
+	s.mu.Lock()
+	ps := s.st.Panes[id]
+	s.mu.Unlock()
+	if ps == nil || ps.Cols <= 0 || ps.Rows <= 0 {
 		return nil, fmt.Errorf("no pane %q", id)
 	}
+	r := Rect{W: ps.Cols, H: ps.Rows}
 	rp := readPaneReplay(s.st.Name, id)
 	if !rp.ok {
 		return nil, fmt.Errorf("no pane %q", id)
@@ -996,24 +1001,6 @@ func historyRow(v vt10x.View, y, cols int) string {
 		b.WriteRune(g.Char)
 	}
 	return strings.TrimRight(b.String(), " \x00")
-}
-
-// paneRect finds a pane's current rectangle in any window.
-func (s *server) paneRect(id string) (Rect, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, ws := range s.st.Workspaces {
-		for _, w := range ws.Windows {
-			if !findLeaf(w.Root, id) {
-				continue
-			}
-			rects := map[string]Rect{}
-			layout(w.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
-			r, ok := rects[id]
-			return r, ok
-		}
-	}
-	return Rect{}, false
 }
 
 func (s *server) writeTo(id, text string, enter bool) error {

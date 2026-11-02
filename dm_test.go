@@ -691,6 +691,28 @@ func TestPaneHistory(t *testing.T) {
 		t.Fatalf("history window does not end above the live screen: last=%d\n%v", last, hist)
 	}
 
+	// A pane in a background workspace keeps its own PTY size. The tall replay
+	// must use that, not the inactive window's layout rect.
+	bgRes := h.rpc("hist", map[string]any{"action": "new-workspace", "name": "bg",
+		"window": "t", "cwd": "/tmp", "nofocus": true})
+	bg, _ := bgRes["pane"].(string)
+	if bg == "" {
+		t.Fatalf("background pane: %v", bgRes)
+	}
+	h.run("write-to", bg, "-s", "hist", "--msg",
+		`for i in $(seq 1 60); do echo BG-$(printf %03d $i); done`, "--enter")
+	h.waitFor("hist", bg, "BG-060")
+	time.Sleep(200 * time.Millisecond)
+	bgHist := h.history("hist", bg, 5)
+	if len(bgHist) != 5 {
+		t.Fatalf("background history rows = %d, want 5: %v", len(bgHist), bgHist)
+	}
+	lastBg := 0
+	fmt.Sscanf(bgHist[len(bgHist)-1], "BG-%d", &lastBg)
+	if lastBg < 30 || lastBg > 45 {
+		t.Fatalf("background history window is not next to the screen: last=%d\n%v", lastBg, bgHist)
+	}
+
 	// A wide window reaches the first row; -s before the pane id works.
 	wide := h.run("read", "-s", "hist", root, "--scrollback", "60")
 	if !strings.Contains(wide, "HIST-001") {
