@@ -342,6 +342,74 @@ func layout(n *Node, r Rect, out map[string]Rect) {
 	}
 }
 
+// nodeRect returns the rectangle layout assigns to a node in the tree.
+func nodeRect(n, target *Node, r Rect) (Rect, bool) {
+	if n == nil {
+		return Rect{}, false
+	}
+	if n == target {
+		return r, true
+	}
+	if n.Pane != "" || len(n.Kids) == 0 {
+		return Rect{}, false
+	}
+	k := len(n.Kids)
+	horizontal := n.Dir == "row"
+	space := r.W
+	if !horizontal {
+		space = r.H
+	}
+	space -= k - 1
+	if space < k {
+		space = k
+	}
+	sizes := splitSizes(n, space)
+	off := 0
+	for i, kid := range n.Kids {
+		size := sizes[i]
+		var kr Rect
+		if horizontal {
+			kr = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
+		} else {
+			kr = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
+		}
+		if out, ok := nodeRect(kid, target, kr); ok {
+			return out, ok
+		}
+		off += size + 1
+	}
+	return Rect{}, false
+}
+
+// ancestorPath returns the nodes from root to id, inclusive.
+func ancestorPath(n *Node, id string, path []*Node) []*Node {
+	if n == nil {
+		return nil
+	}
+	path = append(path, n)
+	if n.Pane == id {
+		return path
+	}
+	for _, k := range n.Kids {
+		if p := ancestorPath(k, id, path); p != nil {
+			return p
+		}
+	}
+	return nil
+}
+
+// lowestCommonAncestor returns the deepest node on both paths.
+func lowestCommonAncestor(a, b []*Node) *Node {
+	var lca *Node
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			break
+		}
+		lca = a[i]
+	}
+	return lca
+}
+
 // splitSizes turns the node's weights into integer cell counts that sum to
 // space. A split without weights divides equally.
 func splitSizes(n *Node, space int) []int {

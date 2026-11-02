@@ -14,6 +14,7 @@ type Msg struct {
 	Action  string  `json:"action,omitempty"` // req action
 	Target  string  `json:"target,omitempty"` // pane id
 	Dir     string  `json:"dir,omitempty"`    // left right up down
+	Other   string  `json:"other,omitempty"`  // resize-split: pane on the other side
 	Msg     string  `json:"msg,omitempty"`
 	Enter   bool    `json:"enter,omitempty"`
 	Name    string  `json:"name,omitempty"`
@@ -33,7 +34,7 @@ type Msg struct {
 	OK    bool            `json:"ok,omitempty"`
 	Error string          `json:"error,omitempty"`
 	Snap  *Snapshot       `json:"snap,omitempty"`
-	Lines []string        `json:"lines,omitempty"`
+	Lines int             `json:"lines,omitempty"` // history request: row count
 	St    *Status         `json:"st,omitempty"`
 	Res   json.RawMessage `json:"res,omitempty"`
 }

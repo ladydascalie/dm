@@ -64,6 +64,12 @@ bottom right. The box clears after 3 seconds of no input.
 | `)` | next workspace |
 | `d` / `q` | detach |
 
+Drag a divider with the left mouse button to resize the split. The client
+sends `resize-split` with the two panes beside the divider and the ratio, at
+most every 30 ms plus a final call on release. Both sides keep at least three
+cells. A divider is ignored when any pane in that split's subtree claimed the
+mouse, because the app owns the whole area.
+
 In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel
 enters scrollback directly.
@@ -106,10 +112,15 @@ dm read p1 --lines 20
 dm status
 ```
 
-Actions: `write-to`, `exec`, `read`, `status`, `keys`, `split`, `focus`,
-`focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
+Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
+`focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
 `next-window`, `prev-window`, `select-window`, `new-workspace`,
 `next-workspace`, `prev-workspace`, `rename-window`, `list`, `ping`.
+
+`history` takes `target` and an integer `lines` and replies with
+`{"lines": ["..."]}`: up to `lines` text rows immediately above the live
+screen, oldest first, trailing blanks trimmed. `lines` must be positive.
+`dm read <pane> --scrollback N` prints the same rows.
 
 `dm exec` prints the response as JSON. A failed action exits non-zero.
 

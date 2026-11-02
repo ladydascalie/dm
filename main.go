@@ -19,6 +19,7 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm exec '<json>' [-s name]   send an action as JSON
   dm write-to <pane> --msg T   type text into a pane (--enter to accept)
   dm read <pane> [--lines N]   print a pane's screen
+  dm read <pane> --scrollback N  print N rows above the screen
   dm split <pane> --dir D      split a pane: left right up down
   dm focus <pane>              focus a pane
   dm next-pane | dm prev-pane
@@ -58,15 +59,16 @@ func exit(err error) {
 }
 
 type cmdFlags struct {
-	fs      *flag.FlagSet
-	session string
-	msg     string
-	enter   bool
-	dir     string
-	msgJSON string
-	lines   int
-	jsonOut bool
-	args    []string
+	fs         *flag.FlagSet
+	session    string
+	msg        string
+	enter      bool
+	dir        string
+	msgJSON    string
+	lines      int
+	scrollback int
+	jsonOut    bool
+	args       []string
 }
 
 func newFlags(name string) *cmdFlags {
@@ -81,6 +83,7 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.BoolVar(&c.enter, "enter", false, "press enter after the message")
 	c.fs.StringVar(&c.dir, "dir", "right", "split direction: left right up down")
 	c.fs.IntVar(&c.lines, "lines", 0, "number of screen lines")
+	c.fs.IntVar(&c.scrollback, "scrollback", -1, "history rows above the screen")
 	c.fs.BoolVar(&c.jsonOut, "json", false, "print JSON")
 	_ = c.fs.Parse(reorder(args))
 	c.args = c.fs.Args()
@@ -90,7 +93,7 @@ func (c *cmdFlags) parse(args []string) {
 func reorder(args []string) []string {
 	withValue := map[string]bool{"-s": true, "--s": true, "-msg": true, "--msg": true,
 		"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
-		"-lines": true, "--lines": true}
+		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true}
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -202,7 +205,11 @@ func runCLI(argv []string) error {
 		if len(c.args) < 1 {
 			return fmt.Errorf("read needs a pane id")
 		}
-		m, err := rpc(c.session, Msg{Action: "read", Target: c.args[0]})
+		action := "read"
+		if c.scrollback >= 0 {
+			action = "history"
+		}
+		m, err := rpc(c.session, Msg{Action: action, Target: c.args[0], Lines: c.scrollback})
 		if err != nil {
 			return err
 		}

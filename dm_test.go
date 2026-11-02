@@ -630,6 +630,336 @@ func TestWindowsAndWorkspaces(t *testing.T) {
 	}
 }
 
+// History returns the rows above the live screen, oldest first, using the
+// same reachable window as the client's scrollback.
+func TestPaneHistory(t *testing.T) {
+	h := newHarness(t)
+
+	h.run("new", "-s", "hist")
+	root := h.focus("hist")
+	h.run("write-to", root, "-s", "hist", "--msg",
+		`for i in $(seq 1 80); do echo HIST-$(printf %03d $i); done`, "--enter")
+	h.waitFor("hist", root, "HIST-080")
+	time.Sleep(200 * time.Millisecond)
+
+	screen := h.run("read", root, "-s", "hist")
+	if strings.Contains(screen, "HIST-001") {
+		t.Fatalf("HIST-001 still on screen:\n%s", screen)
+	}
+
+	// Enough history for the requested window: exact count, oldest first.
+	hist := h.history("hist", root, 20)
+	if len(hist) != 20 {
+		t.Fatalf("history returned %d rows, want 20:\n%v", len(hist), hist)
+	}
+	last, numbered := 0, 0
+	for _, line := range hist {
+		var num int
+		if _, err := fmt.Sscanf(line, "HIST-%d", &num); err == nil {
+			numbered++
+			if num <= last {
+				t.Fatalf("history not oldest first at %q:\n%v", line, hist)
+			}
+			last = num
+		}
+	}
+	if numbered != 20 {
+		t.Fatalf("history returned %d numbered rows, want 20:\n%v", numbered, hist)
+	}
+	if last >= 80 {
+		t.Fatalf("history window does not end above the live screen: last=%d\n%v", last, hist)
+	}
+
+	// A wide window reaches the first row; -s before the pane id works.
+	wide := h.run("read", "-s", "hist", root, "--scrollback", "60")
+	if !strings.Contains(wide, "HIST-001") {
+		t.Fatalf("history missing HIST-001:\n%s", wide)
+	}
+
+	if out, err := h.try("read", root, "-s", "hist", "--scrollback", "0"); err == nil {
+		t.Fatalf("--scrollback 0 accepted: %q", out)
+	}
+	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","lines":-1}`, "-s", "hist"); err == nil {
+		t.Fatalf("negative lines accepted: %q", out)
+	}
+	if out, err := h.try("read", "nope", "-s", "hist", "--scrollback", "5"); err == nil {
+		t.Fatalf("unknown pane accepted: %q", out)
+	}
+
+	// Leading blank rows are not reachable, like the client's scrollStart.
+	h.run("new", "-s", "histb")
+	root = h.focus("histb")
+	h.run("write-to", root, "-s", "histb", "--msg",
+		`printf '\033[H\033[2J\033[10;1H'; for i in $(seq 1 80); do echo BLANK-$(printf %03d $i); done`, "--enter")
+	h.waitFor("histb", root, "BLANK-080")
+	time.Sleep(200 * time.Millisecond)
+	blank := h.history("histb", root, 500)
+	if len(blank) == 0 || strings.TrimSpace(blank[0]) == "" {
+		t.Fatalf("history includes leading blank rows:\n%q", blank)
+	}
+
+	// A blank row immediately above the live screen is part of the window.
+	h.run("new", "-s", "histg")
+	root = h.focus("histg")
+	rows := h.rects("histg")[root].H
+	// sh -c keeps the shell prompt out of the picture until the sleep ends.
+	cmd := fmt.Sprintf(`sh -c "printf '\033[H\033[2J'; echo TOP; echo; `+
+		`for i in \$(seq 1 %d); do echo TAIL-\$(printf %%03d \$i); done; `+
+		`printf '\033[%d;1H'; sleep 15"`, rows, rows+2)
+	h.run("write-to", root, "-s", "histg", "--msg", cmd, "--enter")
+	h.waitFor("histg", root, "TAIL-023")
+	time.Sleep(200 * time.Millisecond)
+	if got := h.history("histg", root, 1); len(got) != 1 || got[0] != "" {
+		t.Fatalf("blank row above the live screen not returned: %q", got)
+	}
+
+	// A pane with no scrollback answers empty, not an error.
+	h.run("new", "-s", "short")
+	root = h.focus("short")
+	if got := h.history("short", root, 5); len(got) != 0 {
+		t.Fatalf("short pane returned %v", got)
+	}
+
+	// The client refuses scrollback on the alternate screen; so does the server.
+	h.run("new", "-s", "alt")
+	root = h.focus("alt")
+	h.run("write-to", root, "-s", "alt", "--msg", `printf '\033[?1049h'; sleep 3`, "--enter")
+	waitMode(t, h, "alt", true, false)
+	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","lines":5}`, "-s", "alt"); err == nil {
+		t.Fatalf("alt pane returned history: %q", out)
+	}
+}
+
+func (h *harness) history(session, pane string, n int) []string {
+	h.t.Helper()
+	res := h.rpc(session, map[string]any{"action": "history", "target": pane, "lines": n})
+	raw, _ := res["lines"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		line, _ := v.(string)
+		out = append(out, line)
+	}
+	return out
+}
+
+func TestDividerAt(t *testing.T) {
+	r := Rect{0, 0, 100, 29}
+
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	n, first, second, axis, sr, ok := dividerHit(row, r, 49, 5)
+	if !ok || n != row || first != "a" || second != "b" || axis != "row" || sr != r {
+		t.Fatalf("row divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
+	}
+	if _, _, _, _, _, ok := dividerHit(row, r, 10, 5); ok {
+		t.Fatal("row divider hit inside a pane")
+	}
+
+	col := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	n, first, second, axis, sr, ok = dividerHit(col, r, 5, 14)
+	if !ok || n != col || first != "a" || second != "b" || axis != "col" || sr != r {
+		t.Fatalf("col divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
+	}
+	if _, _, _, _, _, ok := dividerHit(col, r, 5, 2); ok {
+		t.Fatal("col divider hit inside a pane")
+	}
+
+	// Nested: the outer hit must carry the outer split's full rect, not the
+	// bounding box of the two leaves. The inner hit carries the col rect.
+	nested := &Node{Dir: "row", Kids: []*Node{
+		{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "c"}}},
+		{Pane: "b"},
+	}}
+	n, first, second, axis, sr, ok = dividerHit(nested, r, 49, 5)
+	if !ok || n != nested || first != "a" || second != "b" || axis != "row" || sr != r {
+		t.Fatalf("outer divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
+	}
+	inner := nested.Kids[0]
+	n, first, second, axis, sr, ok = dividerHit(nested, r, 5, 14)
+	if !ok || n != inner || first != "a" || second != "c" || axis != "col" ||
+		sr != (Rect{X: 0, Y: 0, W: 49, H: 29}) {
+		t.Fatalf("inner divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
+			n, first, second, axis, sr, ok)
+	}
+}
+
+func testSnapshot(root *Node, cols, rows int, mouse map[string]bool) *Snapshot {
+	snap := &Snapshot{Root: root, Cols: cols, Rows: rows}
+	rects := map[string]Rect{}
+	layout(root, Rect{0, 0, cols, rows - 1}, rects)
+	for _, id := range allPanes(root) {
+		snap.Panes = append(snap.Panes, PaneInfo{ID: id, Rect: rects[id], Mouse: mouse[id]})
+	}
+	return snap
+}
+
+// DragPress is the press decision: dividers start a drag, panes and splits
+// whose subtree claimed the mouse do not. handleMouse must call it.
+func TestDragPress(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	snap := testSnapshot(row, 100, 30, nil)
+	ds, ok := dragPress(snap, 49, 5)
+	if !ok || ds.first != "a" || ds.second != "b" || ds.axis != "row" ||
+		ds.rect != (Rect{X: 0, Y: 0, W: 100, H: 29}) {
+		t.Fatalf("divider press: %+v ok=%v", ds, ok)
+	}
+	if _, ok := dragPress(snap, 10, 5); ok {
+		t.Fatal("pane press started a drag")
+	}
+
+	// The press path itself must use dragPress.
+	tui := &tui{snap: snap}
+	tui.handleMouse(mouseEvent{btn: 0, x: 50, y: 6})
+	if !tui.dragging {
+		t.Fatal("handleMouse did not start a drag on a divider")
+	}
+	// startDrag must take its origin and cell space from the pressed rect.
+	if tui.dragStart != ds.rect.X || tui.dragSpace != ds.rect.W-1 {
+		t.Fatalf("startDrag stored start=%d space=%d, want %d/%d",
+			tui.dragStart, tui.dragSpace, ds.rect.X, ds.rect.W-1)
+	}
+
+	// Same-axis nesting: the outer hit carries the owning split's full rect,
+	// not the bounding box of the two adjacent leaves.
+	same := &Node{Dir: "row", Kids: []*Node{
+		{Pane: "a"},
+		{Dir: "row", Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
+	}}
+	snap = testSnapshot(same, 100, 30, nil)
+	// The root is what layout hands its tree: the whole pane area.
+	want := Rect{X: 0, Y: 0, W: snap.Cols, H: snap.Rows - 1}
+	ds, ok = dragPress(snap, 49, 5)
+	if !ok || ds.first != "a" || ds.second != "b" || ds.rect != want {
+		t.Fatalf("same-axis outer press: %+v ok=%v, want rect %v", ds, ok, want)
+	}
+	tui.snap = snap
+	tui.startDrag(ds)
+	if tui.dragStart != want.X || tui.dragSpace != want.W-1 {
+		t.Fatalf("same-axis startDrag stored start=%d space=%d, want %d/%d",
+			tui.dragStart, tui.dragSpace, want.X, want.W-1)
+	}
+
+	// Any mouse-claiming pane in the owning split's subtree owns the divider.
+	nested := &Node{Dir: "row", Kids: []*Node{
+		{Pane: "a"},
+		{Dir: "row", Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
+	}}
+	snap = testSnapshot(nested, 100, 30, map[string]bool{"c": true})
+	if _, ok := dragPress(snap, 49, 5); ok {
+		t.Fatal("drag started although the split's subtree claimed the mouse")
+	}
+	if _, ok := dragPress(snap, 74, 5); ok {
+		t.Fatal("inner drag started although its subtree claimed the mouse")
+	}
+}
+
+func (h *harness) rects(session string) map[string]Rect {
+	h.t.Helper()
+	tree := h.rpc(session, map[string]any{"action": "list"})
+	snap := tree["snapshot"].(map[string]any)
+	out := map[string]Rect{}
+	for _, raw := range snap["panes"].([]any) {
+		p := raw.(map[string]any)
+		rr := p["rect"].(map[string]any)
+		num := func(k string) int { return int(rr[k].(float64)) }
+		out[p["id"].(string)] = Rect{X: num("X"), Y: num("Y"), W: num("W"), H: num("H")}
+	}
+	return out
+}
+
+// A nested drag resizes the outer split, not the inner one, and clamps.
+func TestResizeSplit(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "rs")
+	p1 := h.focus("rs")
+	p2 := h.split("rs", p1, "right")
+	p3 := h.split("rs", p1, "down")
+	if focus := h.focus("rs"); focus != p3 {
+		t.Fatalf("focus = %q, want %q", focus, p3)
+	}
+
+	before := h.rects("rs")
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":0.25}`, "-s", "rs")
+	after := h.rects("rs")
+	if after[p2].W <= before[p2].W || after[p1].W >= before[p1].W {
+		t.Fatalf("outer widths did not move: before=%v after=%v", before, after)
+	}
+	if after[p1].H != before[p1].H || after[p3].H != before[p3].H {
+		t.Fatalf("inner heights moved with the outer drag: before=%v after=%v", before, after)
+	}
+	if focus := h.focus("rs"); focus != p3 {
+		t.Fatalf("resize moved focus to %q", focus)
+	}
+
+	// The inner split still resizes along its own axis.
+	before = after
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":0.7}`, "-s", "rs")
+	after = h.rects("rs")
+	if after[p1].H == before[p1].H || after[p3].H == before[p3].H {
+		t.Fatalf("inner heights did not move: before=%v after=%v", before, after)
+	}
+	if after[p1].W != before[p1].W || after[p2].W != before[p2].W {
+		t.Fatalf("inner drag changed widths: before=%v after=%v", before, after)
+	}
+
+	// Ratios 0 and 1 clamp the squeezed side to exactly three cells. Leaving
+	// both sides merely >= 3 would also pass an even split without a clamp.
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":0}`, "-s", "rs")
+	got := h.rects("rs")
+	if got[p1].W != 3 || got[p2].W <= 3 {
+		t.Fatalf("ratio 0 width: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":1}`, "-s", "rs")
+	got = h.rects("rs")
+	if got[p2].W != 3 || got[p1].W <= 3 {
+		t.Fatalf("ratio 1 width: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":0}`, "-s", "rs")
+	got = h.rects("rs")
+	if got[p1].H != 3 || got[p3].H <= 3 {
+		t.Fatalf("ratio 0 height: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":1}`, "-s", "rs")
+	got = h.rects("rs")
+	if got[p3].H != 3 || got[p1].H <= 3 {
+		t.Fatalf("ratio 1 height: %v", got)
+	}
+	if focus := h.focus("rs"); focus != p3 {
+		t.Fatalf("resize moved focus to %q", focus)
+	}
+
+	if out, err := h.try("exec", `{"action":"resize-split","target":"nope","other":"`+p2+`","ratio":0.5}`, "-s", "rs"); err == nil {
+		t.Fatalf("unknown pane accepted: %q", out)
+	}
+
+	// Same-axis nesting: row{ q1, row{q2,q3} }. The outer divider spans the
+	// whole row, so the minimum is exactly 3 cells, not the leaf bounding box.
+	h.run("new", "-s", "rs2")
+	q1 := h.focus("rs2")
+	q2 := h.split("rs2", q1, "right")
+	q3 := h.split("rs2", q2, "right")
+	tree := h.rpc("rs2", map[string]any{"action": "list"})
+	cols := int(tree["snapshot"].(map[string]any)["cols"].(float64))
+	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":0}`, "-s", "rs2")
+	got = h.rects("rs2")
+	if got[q1].W != 3 {
+		t.Fatalf("outer minimum with same-axis nesting = %v, want 3", got)
+	}
+	if got[q2].W+got[q3].W+1 != cols-1-3 {
+		t.Fatalf("outer right side width: %v", got)
+	}
+	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":1}`, "-s", "rs2")
+	got = h.rects("rs2")
+	if got[q1].W != cols-1-3 || got[q2].W+got[q3].W+1 != 3 {
+		t.Fatalf("outer maximum with same-axis nesting: %v", got)
+	}
+}
+
 func readPID(t *testing.T, path string) int {
 	t.Helper()
 	b, err := os.ReadFile(path)

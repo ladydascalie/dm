@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -16,6 +17,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/hinshun/vt10x"
 )
 
 type paneConn struct {
@@ -702,6 +705,14 @@ func (s *server) handleReq(cl *client, m Msg) {
 		}
 		s.reply(cl, m, map[string]any{"lines": lines, "status": st}, nil)
 
+	case "history":
+		lines, err := s.paneHistory(m.Target, m.Lines)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, map[string]any{"lines": lines}, nil)
+
 	case "status":
 		s.mu.Lock()
 		pc := s.panes[m.Target]
@@ -746,6 +757,14 @@ func (s *server) handleReq(cl *client, m Msg) {
 		})
 		s.afterMutation()
 		s.reply(cl, m, map[string]any{"pane": id}, err)
+
+	case "resize-split":
+		err := s.mutation(func() error { return s.resizeSplit(m.Target, m.Other, m.Ratio) })
+		if err == nil {
+			s.syncSizes()
+			s.pushSnapshot()
+		}
+		s.reply(cl, m, nil, err)
 
 	case "focus":
 		err := s.mutation(func() error { return s.setFocus(m.Target) })
@@ -901,7 +920,86 @@ func (s *server) paneLines(id string) ([]string, Status, error) {
 	if m.St != nil {
 		st = *m.St
 	}
-	return m.Lines, st, nil
+	var res struct {
+		Lines []string `json:"lines"`
+	}
+	_ = json.Unmarshal(m.Res, &res)
+	return res.Lines, st, nil
+}
+
+// paneHistory replays the pane's ring into a tall terminal and returns the
+// rows immediately above the live screen, oldest first.
+func (s *server) paneHistory(id string, n int) ([]string, error) {
+	if n <= 0 {
+		return nil, fmt.Errorf("history needs lines > 0")
+	}
+	r, ok := s.paneRect(id)
+	if !ok || r.W <= 0 || r.H <= 0 {
+		return nil, fmt.Errorf("no pane %q", id)
+	}
+	rp := readPaneReplay(s.st.Name, id)
+	if !rp.ok {
+		return nil, fmt.Errorf("no pane %q", id)
+	}
+	if rp.alt {
+		return nil, fmt.Errorf("pane %q is on the alternate screen", id)
+	}
+	vt := vt10x.New(vt10x.WithSize(r.W, r.H+2000))
+	if _, err := vt.Write(rp.data); err != nil {
+		return nil, err
+	}
+	top, bottom := contentRows(vt)
+	if bottom == 0 {
+		return []string{}, nil
+	}
+	end := bottom - r.H
+	if end < 0 {
+		end = 0
+	}
+	start := end - n
+	if start < top {
+		start = top
+	}
+	if start > end {
+		start = end
+	}
+	out := make([]string, 0, end-start)
+	for y := start; y < end; y++ {
+		out = append(out, historyRow(vt, y, r.W))
+	}
+	return out, nil
+}
+
+// historyRow renders one terminal row as plain text.
+func historyRow(v vt10x.View, y, cols int) string {
+	var b strings.Builder
+	for x := 0; x < cols; x++ {
+		g := v.Cell(x, y)
+		if g.Char == 0 || g.Char < 0x20 {
+			b.WriteByte(' ')
+			continue
+		}
+		b.WriteRune(g.Char)
+	}
+	return strings.TrimRight(b.String(), " \x00")
+}
+
+// paneRect finds a pane's current rectangle in any window.
+func (s *server) paneRect(id string) (Rect, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, w := range ws.Windows {
+			if !findLeaf(w.Root, id) {
+				continue
+			}
+			rects := map[string]Rect{}
+			layout(w.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
+			r, ok := rects[id]
+			return r, ok
+		}
+	}
+	return Rect{}, false
 }
 
 func (s *server) writeTo(id, text string, enter bool) error {
@@ -1169,6 +1267,64 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 	}
 	s.watchPane(id)
 	return id, nil
+}
+
+// resizeSplit sets the weights of the split between two adjacent panes. Ratio
+// is the share the first child keeps, clamped so both sides keep three cells.
+func (s *server) resizeSplit(first, second string, ratio float64) error {
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) {
+		return fmt.Errorf("bad ratio")
+	}
+	if first == "" || second == "" || first == second {
+		return fmt.Errorf("resize-split needs two panes")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, win := range ws.Windows {
+			if !findLeaf(win.Root, first) || !findLeaf(win.Root, second) {
+				continue
+			}
+			pa := ancestorPath(win.Root, first, nil)
+			pb := ancestorPath(win.Root, second, nil)
+			split := lowestCommonAncestor(pa, pb)
+			if split == nil || split.Pane != "" {
+				return fmt.Errorf("panes %q and %q share no split", first, second)
+			}
+			if len(split.Kids) != 2 {
+				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
+			}
+			r, ok := nodeRect(win.Root, split, Rect{0, 0, s.cols, s.rows - 1})
+			if !ok {
+				return fmt.Errorf("no rect for split of %q", first)
+			}
+			horizontal := split.Dir == "row"
+			space := r.W
+			if !horizontal {
+				space = r.H
+			}
+			space--
+			if space < 6 {
+				return fmt.Errorf("split between %q and %q is too small", first, second)
+			}
+			if space == 6 {
+				split.Sizes = []float64{0.5, 0.5}
+				return nil
+			}
+			const eps = 1e-9
+			lo := 3.0/float64(space) + eps
+			hi := 1 - 3.0/float64(space) + eps
+			if ratio < lo {
+				ratio = lo
+			}
+			if ratio > hi {
+				ratio = hi
+			}
+			split.Sizes = []float64{ratio, 1 - ratio}
+			return nil
+		}
+	}
+	return fmt.Errorf("no pane %q", first)
 }
 
 func (s *server) setFocus(id string) error {
