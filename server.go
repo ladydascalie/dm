@@ -759,7 +759,7 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.reply(cl, m, map[string]any{"pane": id}, err)
 
 	case "resize-split":
-		err := s.mutation(func() error { return s.resizeSplit(m.Target, m.Ratio) })
+		err := s.mutation(func() error { return s.resizeSplit(m.Target, m.Other, m.Ratio) })
 		if err == nil {
 			s.syncSizes()
 			s.pushSnapshot()
@@ -941,11 +941,14 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	if !rp.ok {
 		return nil, fmt.Errorf("no pane %q", id)
 	}
+	if rp.alt {
+		return nil, fmt.Errorf("pane %q is on the alternate screen", id)
+	}
 	vt := vt10x.New(vt10x.WithSize(r.W, r.H+2000))
 	if _, err := vt.Write(rp.data); err != nil {
 		return nil, err
 	}
-	_, bottom := contentRows(vt)
+	top, bottom := contentRows(vt)
 	if bottom == 0 {
 		return []string{}, nil
 	}
@@ -954,15 +957,15 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 		end = 0
 	}
 	start := end - n
-	if start < 0 {
-		start = 0
+	if start < top {
+		start = top
+	}
+	if start > end {
+		start = end
 	}
 	out := make([]string, 0, end-start)
 	for y := start; y < end; y++ {
 		out = append(out, historyRow(vt, y, r.W))
-	}
-	for len(out) > 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
 	}
 	return out, nil
 }
@@ -1266,37 +1269,53 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 	return id, nil
 }
 
-// resizeSplit sets the weights of the split around target. Ratio is the share
-// the first child keeps, clamped so both children keep at least three cells.
-func (s *server) resizeSplit(target string, ratio float64) error {
+// resizeSplit sets the weights of the split between two adjacent panes. Ratio
+// is the share the first child keeps, clamped so both sides keep three cells.
+func (s *server) resizeSplit(first, second string, ratio float64) error {
 	if math.IsNaN(ratio) || math.IsInf(ratio, 0) {
 		return fmt.Errorf("bad ratio")
+	}
+	if first == "" || second == "" || first == second {
+		return fmt.Errorf("resize-split needs two panes")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
 		for _, win := range ws.Windows {
-			if !findLeaf(win.Root, target) {
+			if !findLeaf(win.Root, first) || !findLeaf(win.Root, second) {
 				continue
 			}
-			parent, r, ok := splitAt(win.Root, target, Rect{0, 0, s.cols, s.rows - 1})
+			pa := ancestorPath(win.Root, first, nil)
+			pb := ancestorPath(win.Root, second, nil)
+			split := lowestCommonAncestor(pa, pb)
+			if split == nil || split.Pane != "" {
+				return fmt.Errorf("panes %q and %q share no split", first, second)
+			}
+			if len(split.Kids) != 2 {
+				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
+			}
+			rects := map[string]Rect{}
+			layout(win.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
+			r, ok := rects[first]
 			if !ok {
-				return fmt.Errorf("pane %q has no split", target)
+				return fmt.Errorf("no pane %q", first)
 			}
-			if len(parent.Kids) != 2 {
-				return fmt.Errorf("split of %q has %d panes", target, len(parent.Kids))
+			r2, ok := rects[second]
+			if !ok {
+				return fmt.Errorf("no pane %q", second)
 			}
-			horizontal := parent.Dir == "row"
+			r = splitRect(r, r2)
+			horizontal := split.Dir == "row"
 			space := r.W
 			if !horizontal {
 				space = r.H
 			}
 			space--
 			if space < 6 {
-				return fmt.Errorf("split of %q is too small", target)
+				return fmt.Errorf("split between %q and %q is too small", first, second)
 			}
 			if space == 6 {
-				parent.Sizes = []float64{0.5, 0.5}
+				split.Sizes = []float64{0.5, 0.5}
 				return nil
 			}
 			const eps = 1e-9
@@ -1308,11 +1327,11 @@ func (s *server) resizeSplit(target string, ratio float64) error {
 			if ratio > hi {
 				ratio = hi
 			}
-			parent.Sizes = []float64{ratio, 1 - ratio}
+			split.Sizes = []float64{ratio, 1 - ratio}
 			return nil
 		}
 	}
-	return fmt.Errorf("no pane %q", target)
+	return fmt.Errorf("no pane %q", first)
 }
 
 func (s *server) setFocus(id string) error {

@@ -209,27 +209,67 @@ func scrollStart(v vt10x.View, rectH, offset int) (start, max int) {
 	return start, max
 }
 
-// dividerAt reports the divider under x,y: the split's first pane and its
-// axis. Coordinates are zero-based terminal cells.
-func dividerAt(root *Node, r Rect, x, y int) (pane, axis string, ok bool) {
-	n, _, _, ok := dividerHit(root, r, x, y)
-	if !ok {
-		return "", "", false
-	}
-	ids := allPanes(n.Kids[0])
-	if len(ids) == 0 {
-		return "", "", false
-	}
-	return ids[0], n.Dir, true
-}
-
-// dividerHit returns the split under x,y, its rect and the divider offset from
-// the split's origin along its axis.
-func dividerHit(n *Node, r Rect, x, y int) (*Node, Rect, int, bool) {
+// dividerAt reports the divider under x,y: the panes on its left/above side
+// and right/below side, plus the split's axis. Coordinates are zero-based.
+func dividerAt(n *Node, r Rect, x, y int) (first, second, axis string, ok bool) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
-		return nil, Rect{}, 0, false
+		return "", "", "", false
 	}
 	k := len(n.Kids)
+	horizontal := n.Dir == "row"
+	space := r.W
+	if !horizontal {
+		space = r.H
+	}
+	space -= k - 1
+	if space < k {
+		space = k
+	}
+	sizes := splitSizes(n, space)
+	rects := make([]Rect, k)
+	off := 0
+	for i := range n.Kids {
+		size := sizes[i]
+		if horizontal {
+			rects[i] = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
+		} else {
+			rects[i] = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
+		}
+		off += size + 1
+	}
+	for i := 0; i < k; i++ {
+		if i < k-1 {
+			kr := rects[i]
+			if horizontal && x == kr.X+kr.W && y >= r.Y && y < r.Y+r.H {
+				first = paneAtRect(n.Kids[i], kr, x-1, y)
+				second = paneAtRect(n.Kids[i+1], rects[i+1], x+1, y)
+				return first, second, n.Dir, first != "" && second != ""
+			}
+			if !horizontal && y == kr.Y+kr.H && x >= r.X && x < r.X+r.W {
+				first = paneAtRect(n.Kids[i], kr, x, y-1)
+				second = paneAtRect(n.Kids[i+1], rects[i+1], x, y+1)
+				return first, second, n.Dir, first != "" && second != ""
+			}
+		}
+		if f, s, ax, hit := dividerAt(n.Kids[i], rects[i], x, y); hit {
+			return f, s, ax, hit
+		}
+	}
+	return "", "", "", false
+}
+
+// paneAtRect returns the pane leaf under x,y inside a node's rectangle.
+func paneAtRect(n *Node, r Rect, x, y int) string {
+	if n == nil {
+		return ""
+	}
+	if n.Pane != "" {
+		return n.Pane
+	}
+	k := len(n.Kids)
+	if k == 0 {
+		return ""
+	}
 	horizontal := n.Dir == "row"
 	space := r.W
 	if !horizontal {
@@ -249,23 +289,12 @@ func dividerHit(n *Node, r Rect, x, y int) (*Node, Rect, int, bool) {
 		} else {
 			kr = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
 		}
-		if i < k-1 {
-			if horizontal {
-				if x == r.X+off+size && y >= r.Y && y < r.Y+r.H {
-					return n, r, off + size, true
-				}
-			} else {
-				if y == r.Y+off+size && x >= r.X && x < r.X+r.W {
-					return n, r, off + size, true
-				}
-			}
-		}
-		if sn, sr, so, ok := dividerHit(kid, kr, x, y); ok {
-			return sn, sr, so, ok
+		if x >= kr.X && x < kr.X+kr.W && y >= kr.Y && y < kr.Y+kr.H {
+			return paneAtRect(kid, kr, x, y)
 		}
 		off += size + 1
 	}
-	return nil, Rect{}, 0, false
+	return ""
 }
 
 // drawBar paints the one-line status bar at the bottom.

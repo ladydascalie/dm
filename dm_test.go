@@ -630,9 +630,11 @@ func TestWindowsAndWorkspaces(t *testing.T) {
 	}
 }
 
-// History returns rows that scrolled off the screen; the plain read does not.
+// History returns the rows above the live screen, oldest first, using the
+// same reachable window as the client's scrollback.
 func TestPaneHistory(t *testing.T) {
 	h := newHarness(t)
+
 	h.run("new", "-s", "hist")
 	root := h.focus("hist")
 	h.run("write-to", root, "-s", "hist", "--msg",
@@ -645,21 +647,84 @@ func TestPaneHistory(t *testing.T) {
 		t.Fatalf("HIST-001 still on screen:\n%s", screen)
 	}
 
-	// -s before the pane id and --scrollback after it: the CLI reorders both.
-	hist := h.run("read", "-s", "hist", root, "--scrollback", "60")
-	if !strings.Contains(hist, "HIST-001") {
-		t.Fatalf("history missing HIST-001:\n%s", hist)
+	// Enough history for the requested window: exact count, oldest first.
+	hist := h.history("hist", root, 20)
+	if len(hist) != 20 {
+		t.Fatalf("history returned %d rows, want 20:\n%v", len(hist), hist)
 	}
-	if strings.Contains(hist, "HIST-080") {
-		t.Fatalf("history repeated the live screen:\n%s", hist)
+	last, numbered := 0, 0
+	for _, line := range hist {
+		var num int
+		if _, err := fmt.Sscanf(line, "HIST-%d", &num); err == nil {
+			numbered++
+			if num <= last {
+				t.Fatalf("history not oldest first at %q:\n%v", line, hist)
+			}
+			last = num
+		}
+	}
+	if numbered != 20 {
+		t.Fatalf("history returned %d numbered rows, want 20:\n%v", numbered, hist)
+	}
+	if last >= 80 {
+		t.Fatalf("history window does not end above the live screen: last=%d\n%v", last, hist)
+	}
+
+	// A wide window reaches the first row; -s before the pane id works.
+	wide := h.run("read", "-s", "hist", root, "--scrollback", "60")
+	if !strings.Contains(wide, "HIST-001") {
+		t.Fatalf("history missing HIST-001:\n%s", wide)
 	}
 
 	if out, err := h.try("read", root, "-s", "hist", "--scrollback", "0"); err == nil {
 		t.Fatalf("--scrollback 0 accepted: %q", out)
 	}
+	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","lines":-1}`, "-s", "hist"); err == nil {
+		t.Fatalf("negative lines accepted: %q", out)
+	}
 	if out, err := h.try("read", "nope", "-s", "hist", "--scrollback", "5"); err == nil {
 		t.Fatalf("unknown pane accepted: %q", out)
 	}
+
+	// Leading blank rows are not reachable, like the client's scrollStart.
+	h.run("new", "-s", "histb")
+	root = h.focus("histb")
+	h.run("write-to", root, "-s", "histb", "--msg",
+		`printf '\033[H\033[2J\033[10;1H'; for i in $(seq 1 80); do echo BLANK-$(printf %03d $i); done`, "--enter")
+	h.waitFor("histb", root, "BLANK-080")
+	time.Sleep(200 * time.Millisecond)
+	blank := h.history("histb", root, 500)
+	if len(blank) == 0 || strings.TrimSpace(blank[0]) == "" {
+		t.Fatalf("history includes leading blank rows:\n%q", blank)
+	}
+
+	// A pane with no scrollback answers empty, not an error.
+	h.run("new", "-s", "short")
+	root = h.focus("short")
+	if got := h.history("short", root, 5); len(got) != 0 {
+		t.Fatalf("short pane returned %v", got)
+	}
+
+	// The client refuses scrollback on the alternate screen; so does the server.
+	h.run("new", "-s", "alt")
+	root = h.focus("alt")
+	h.run("write-to", root, "-s", "alt", "--msg", `printf '\033[?1049h'; sleep 3`, "--enter")
+	waitMode(t, h, "alt", true, false)
+	if out, err := h.try("exec", `{"action":"history","target":"`+root+`","lines":5}`, "-s", "alt"); err == nil {
+		t.Fatalf("alt pane returned history: %q", out)
+	}
+}
+
+func (h *harness) history(session, pane string, n int) []string {
+	h.t.Helper()
+	res := h.rpc(session, map[string]any{"action": "history", "target": pane, "lines": n})
+	raw, _ := res["lines"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		line, _ := v.(string)
+		out = append(out, line)
+	}
+	return out
 }
 
 func TestDividerAt(t *testing.T) {
@@ -667,22 +732,37 @@ func TestDividerAt(t *testing.T) {
 
 	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5}}
-	pane, axis, ok := dividerAt(row, r, 49, 5)
-	if !ok || pane != "a" || axis != "row" {
-		t.Fatalf("row divider: pane=%q axis=%q ok=%v", pane, axis, ok)
+	first, second, axis, ok := dividerAt(row, r, 49, 5)
+	if !ok || first != "a" || second != "b" || axis != "row" {
+		t.Fatalf("row divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
 	}
-	if _, _, ok := dividerAt(row, r, 10, 5); ok {
+	if _, _, _, ok := dividerAt(row, r, 10, 5); ok {
 		t.Fatal("row divider hit inside a pane")
 	}
 
 	col := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5}}
-	pane, axis, ok = dividerAt(col, r, 5, 14)
-	if !ok || pane != "a" || axis != "col" {
-		t.Fatalf("col divider: pane=%q axis=%q ok=%v", pane, axis, ok)
+	first, second, axis, ok = dividerAt(col, r, 5, 14)
+	if !ok || first != "a" || second != "b" || axis != "col" {
+		t.Fatalf("col divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
 	}
-	if _, _, ok := dividerAt(col, r, 5, 2); ok {
+	if _, _, _, ok := dividerAt(col, r, 5, 2); ok {
 		t.Fatal("col divider hit inside a pane")
+	}
+
+	// Nested: the outer divider must name one pane on each side of itself,
+	// and the inner divider must name the pair around the inner split.
+	nested := &Node{Dir: "row", Kids: []*Node{
+		{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "c"}}},
+		{Pane: "b"},
+	}}
+	first, second, axis, ok = dividerAt(nested, r, 49, 5)
+	if !ok || first != "a" || second != "b" || axis != "row" {
+		t.Fatalf("outer divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
+	}
+	first, second, axis, ok = dividerAt(nested, r, 5, 14)
+	if !ok || first != "a" || second != "c" || axis != "col" {
+		t.Fatalf("inner divider: first=%q second=%q axis=%q ok=%v", first, second, axis, ok)
 	}
 }
 
@@ -700,41 +780,59 @@ func (h *harness) rects(session string) map[string]Rect {
 	return out
 }
 
-// Resizing a split changes both pane rects and never drops below three cells.
+// A nested drag resizes the outer split, not the inner one, and clamps.
 func TestResizeSplit(t *testing.T) {
 	h := newHarness(t)
 	h.run("new", "-s", "rs")
-	root := h.focus("rs")
-	p2 := h.split("rs", root, "right")
+	p1 := h.focus("rs")
+	p2 := h.split("rs", p1, "right")
+	p3 := h.split("rs", p1, "down")
+	if focus := h.focus("rs"); focus != p3 {
+		t.Fatalf("focus = %q, want %q", focus, p3)
+	}
 
 	before := h.rects("rs")
-	h.run("exec", `{"action":"resize-split","target":"`+root+`","ratio":0.25}`, "-s", "rs")
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":0.25}`, "-s", "rs")
 	after := h.rects("rs")
-	if after[root].W >= before[root].W || after[p2].W <= before[p2].W {
-		t.Fatalf("widths did not move: before=%v after=%v", before, after)
+	if after[p2].W <= before[p2].W || after[p1].W >= before[p1].W {
+		t.Fatalf("outer widths did not move: before=%v after=%v", before, after)
+	}
+	if after[p1].H != before[p1].H || after[p3].H != before[p3].H {
+		t.Fatalf("inner heights moved with the outer drag: before=%v after=%v", before, after)
+	}
+	if focus := h.focus("rs"); focus != p3 {
+		t.Fatalf("resize moved focus to %q", focus)
 	}
 
-	h.run("exec", `{"action":"resize-split","target":"`+root+`","ratio":0}`, "-s", "rs")
-	min := h.rects("rs")
-	if min[root].W < 3 || min[p2].W < 3 {
-		t.Fatalf("minimum width ignored: %v", min)
-	}
-
-	// The same clamp applies to a column split, measured in rows.
-	p3 := h.split("rs", p2, "down")
-	before = h.rects("rs")
-	h.run("exec", `{"action":"resize-split","target":"`+p2+`","ratio":0.3}`, "-s", "rs")
+	// The inner split still resizes along its own axis.
+	before = after
+	h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":0.7}`, "-s", "rs")
 	after = h.rects("rs")
-	if after[p2].H == before[p2].H || after[p3].H == before[p3].H {
-		t.Fatalf("rows did not move: before=%v after=%v", before, after)
+	if after[p1].H == before[p1].H || after[p3].H == before[p3].H {
+		t.Fatalf("inner heights did not move: before=%v after=%v", before, after)
 	}
-	h.run("exec", `{"action":"resize-split","target":"`+p2+`","ratio":1}`, "-s", "rs")
-	min = h.rects("rs")
-	if min[p2].H < 3 || min[p3].H < 3 {
-		t.Fatalf("minimum height ignored: %v", min)
+	if after[p1].W != before[p1].W || after[p2].W != before[p2].W {
+		t.Fatalf("inner drag changed widths: before=%v after=%v", before, after)
 	}
 
-	if out, err := h.try("exec", `{"action":"resize-split","target":"nope","ratio":0.5}`, "-s", "rs"); err == nil {
+	// Ratios 0 and 1 clamp to the three-cell minimum on both sides.
+	for _, ratio := range []string{"0", "1"} {
+		h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p2+`","ratio":`+ratio+`}`, "-s", "rs")
+		got := h.rects("rs")
+		if got[p1].W < 3 || got[p2].W < 3 {
+			t.Fatalf("ratio %s ignored the minimum width: %v", ratio, got)
+		}
+		h.run("exec", `{"action":"resize-split","target":"`+p1+`","other":"`+p3+`","ratio":`+ratio+`}`, "-s", "rs")
+		got = h.rects("rs")
+		if got[p1].H < 3 || got[p3].H < 3 {
+			t.Fatalf("ratio %s ignored the minimum height: %v", ratio, got)
+		}
+	}
+	if focus := h.focus("rs"); focus != p3 {
+		t.Fatalf("resize moved focus to %q", focus)
+	}
+
+	if out, err := h.try("exec", `{"action":"resize-split","target":"nope","other":"`+p2+`","ratio":0.5}`, "-s", "rs"); err == nil {
 		t.Fatalf("unknown pane accepted: %q", out)
 	}
 }
