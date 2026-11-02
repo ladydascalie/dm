@@ -1,0 +1,813 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"net"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/hinshun/vt10x"
+	"golang.org/x/term"
+)
+
+const (
+	histMax  = 512 << 10
+	histRows = 2000
+)
+
+type tui struct {
+	session string
+	conn    *conn
+	cols    int
+	rows    int
+	snap    *Snapshot
+	vts     map[string]vt10x.Terminal
+	armed   bool
+	toast   string
+	toastAt time.Time
+	dirty   bool
+
+	mode     string // "" or "sessions" or "scroll"
+	sessions []SessionInfo
+	sel      int
+
+	hist     map[string][]byte
+	scroll   string // pane id shown from scrollback
+	offset   int
+	maxOff   int
+	scrollVT vt10x.Terminal
+
+	quit     bool
+	switchTo string
+
+	armAt   time.Time
+	escAt   time.Time
+	inbuf   []byte
+	pending bool
+}
+
+// runClient owns the terminal. A session switch returns to this loop with a new
+// name, so raw mode and the stdin reader survive it.
+func runClient(name string) error {
+	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return fmt.Errorf("dm needs a terminal; use dm exec or dm read otherwise")
+	}
+	old, err := term.MakeRaw(fd)
+	if err != nil {
+		return err
+	}
+	defer term.Restore(fd, old)
+
+	keys := make(chan []byte, 64)
+	go stdinReader(keys)
+	winch := make(chan os.Signal, 1)
+	signal.Notify(winch, syscall.SIGWINCH)
+	defer signal.Stop(winch)
+
+	var out bytes.Buffer
+	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h")
+	os.Stdout.Write(out.Bytes())
+	defer os.Stdout.WriteString("\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
+
+	for {
+		next, err := runSession(fd, name, keys, winch)
+		if err != nil {
+			return err
+		}
+		if next == "" {
+			return nil
+		}
+		name = next
+		os.Stdout.WriteString("\x1b[0m\x1b[2J\x1b[H")
+	}
+}
+
+func stdinReader(keys chan<- []byte) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if n > 0 {
+			keys <- append([]byte(nil), buf[:n]...)
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal) (string, error) {
+	c, err := dialServer(name)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+
+	t := &tui{session: name, conn: c, vts: map[string]vt10x.Terminal{},
+		hist: map[string][]byte{}}
+	t.cols, t.rows, _ = term.GetSize(fd)
+
+	done := make(chan struct{})
+	defer close(done)
+	msgs := make(chan Msg, 256)
+	go func() {
+		for {
+			m, err := readMsg(c)
+			if err != nil {
+				close(msgs)
+				return
+			}
+			select {
+			case msgs <- m:
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	if err := t.conn.send(Msg{Type: "attach", Cols: t.cols, Rows: t.rows}); err != nil {
+		return "", err
+	}
+
+	ticker := time.NewTicker(16 * time.Millisecond)
+	defer ticker.Stop()
+	lastDraw := time.Time{}
+
+	for {
+		select {
+		case b, ok := <-keys:
+			if !ok {
+				return "", nil
+			}
+			t.inbuf = append(t.inbuf, b...)
+			t.processInput()
+		case m, ok := <-msgs:
+			if !ok {
+				return "", nil
+			}
+			t.apply(m)
+		case <-winch:
+			cols, rows, err := term.GetSize(fd)
+			if err == nil && (cols != t.cols || rows != t.rows) {
+				t.cols, t.rows = cols, rows
+				_ = t.conn.send(Msg{Type: "resize", Cols: cols, Rows: rows})
+				t.dirty = true
+			}
+		case <-ticker.C:
+			now := time.Now()
+			if t.toast != "" && now.Sub(t.toastAt) > 3*time.Second {
+				t.toast = ""
+				t.dirty = true
+			}
+			if t.armed && now.Sub(t.armAt) > 3*time.Second {
+				t.armed = false
+				t.inbuf = nil
+				t.dirty = true
+			}
+			if t.armed && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
+				t.pending = false
+				t.inbuf = t.inbuf[:0]
+				t.disarm()
+			}
+			if t.dirty && now.Sub(lastDraw) > 15*time.Millisecond {
+				t.draw()
+				lastDraw = now
+				t.dirty = false
+			}
+		}
+		if t.quit {
+			return "", nil
+		}
+		if t.switchTo != "" {
+			return t.switchTo, nil
+		}
+	}
+}
+
+func (t *tui) apply(m Msg) {
+	switch m.Type {
+	case "snapshot":
+		t.snap = m.Snap
+		if t.scroll != "" {
+			p := t.paneByID(t.scroll)
+			if p == nil {
+				t.exitScroll()
+			} else if t.scrollVT != nil {
+				c, r := t.scrollVT.Size()
+				if c != p.Rect.W || r != p.Rect.H+histRows {
+					t.exitScroll()
+				}
+			}
+		}
+		for _, p := range m.Snap.Panes {
+			vt := t.vts[p.ID]
+			if vt != nil {
+				c, r := vt.Size()
+				if c != p.Rect.W || r != p.Rect.H {
+					vt.Resize(p.Rect.W, p.Rect.H)
+				}
+			} else {
+				t.vts[p.ID] = vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+			}
+		}
+		keep := map[string]bool{}
+		for _, p := range m.Snap.Panes {
+			keep[p.ID] = true
+		}
+		for id := range t.vts {
+			if !keep[id] {
+				delete(t.vts, id)
+			}
+		}
+		t.dirty = true
+	case "replay":
+		if p := t.paneByID(m.Target); p != nil {
+			vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+			_, _ = vt.Write(m.Data)
+			t.vts[m.Target] = vt
+			t.hist[m.Target] = append([]byte(nil), m.Data...)
+		}
+		t.dirty = true
+	case "bytes":
+		if vt := t.vts[m.Target]; vt != nil {
+			_, _ = vt.Write(m.Data)
+			h := append(t.hist[m.Target], m.Data...)
+			if len(h) > histMax {
+				h = h[len(h)-histMax:]
+			}
+			t.hist[m.Target] = h
+			t.dirty = true
+		}
+	case "close":
+		t.quit = true
+	case "exit":
+		t.toast = "pane " + m.Target + " exited"
+		t.toastAt = time.Now()
+		t.dirty = true
+	case "resp":
+		if !m.OK {
+			t.toast = m.Error
+			t.toastAt = time.Now()
+			t.dirty = true
+		}
+	}
+}
+
+func (t *tui) paneByID(id string) *PaneInfo {
+	if t.snap == nil {
+		return nil
+	}
+	for i := range t.snap.Panes {
+		if t.snap.Panes[i].ID == id {
+			return &t.snap.Panes[i]
+		}
+	}
+	return nil
+}
+
+func (t *tui) processInput() {
+	for len(t.inbuf) > 0 {
+		if ev, n, ok := parseMouse(t.inbuf); ok {
+			t.inbuf = t.inbuf[n:]
+			t.handleMouse(ev)
+			continue
+		} else if n == 0 {
+			return // partial sequence, wait for the rest
+		}
+		if t.mode == "sessions" {
+			if !t.pickerKey() {
+				return
+			}
+			continue
+		}
+		if t.mode == "scroll" {
+			if !t.scrollKey() {
+				return
+			}
+			continue
+		}
+		if !t.armed {
+			if i := bytes.IndexByte(t.inbuf, 0x02); i >= 0 {
+				if i > 0 {
+					_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf[:i]})
+				}
+				t.inbuf = t.inbuf[i+1:]
+				t.arm()
+				continue
+			}
+			_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf})
+			t.inbuf = nil
+			return
+		}
+		b := t.inbuf[0]
+		if b == 0x1b {
+			if len(t.inbuf) < 3 {
+				if !t.pending {
+					t.pending = true
+					t.escAt = time.Now()
+				}
+				return
+			}
+			seq := string(t.inbuf[:3])
+			t.inbuf = t.inbuf[3:]
+			switch seq {
+			case "\x1b[A":
+				t.action("focus-dir", func(m *Msg) { m.Dir = "up" })
+			case "\x1b[B":
+				t.action("focus-dir", func(m *Msg) { m.Dir = "down" })
+			case "\x1b[C":
+				t.action("focus-dir", func(m *Msg) { m.Dir = "right" })
+			case "\x1b[D":
+				t.action("focus-dir", func(m *Msg) { m.Dir = "left" })
+			default:
+				t.disarm()
+			}
+			continue
+		}
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		t.key(b)
+	}
+}
+
+// pickerKey consumes one key while the session picker is open. It returns false
+// when it needs more bytes for an escape sequence.
+func (t *tui) pickerKey() bool {
+	b := t.inbuf[0]
+	if b == 0x1b {
+		if len(t.inbuf) < 3 {
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		seq := string(t.inbuf[:3])
+		t.inbuf = t.inbuf[3:]
+		switch seq {
+		case "\x1b[A":
+			t.moveSel(-1)
+		case "\x1b[B":
+			t.moveSel(1)
+		case "\x1b[C", "\x1b[D":
+			t.closePicker()
+		default:
+			t.closePicker()
+		}
+		return true
+	}
+	t.inbuf = t.inbuf[1:]
+	t.pending = false
+	switch b {
+	case '\r', '\n':
+		t.pickSession()
+	case 'j':
+		t.moveSel(1)
+	case 'k':
+		t.moveSel(-1)
+	case 'q', 's':
+		t.closePicker()
+	default:
+		if b >= '1' && b <= '9' {
+			if i := int(b - '1'); i < len(t.sessions) {
+				t.sel = i
+				t.pickSession()
+				return true
+			}
+		}
+		t.closePicker()
+	}
+	return true
+}
+
+// scrollKey consumes one key in scrollback mode. It returns false when it
+// needs more bytes for an escape sequence.
+func (t *tui) scrollKey() bool {
+	b := t.inbuf[0]
+	if b == 0x1b {
+		if len(t.inbuf) < 3 {
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		seq := string(t.inbuf[:3])
+		t.inbuf = t.inbuf[3:]
+		switch seq {
+		case "\x1b[A":
+			t.scrollBy(1)
+		case "\x1b[B":
+			t.scrollBy(-1)
+		case "\x1b[5", "\x1b[6":
+			// PgUp/PgDn arrive as ESC [ 5 ~ / ESC [ 6 ~: keep the fourth byte.
+			if len(t.inbuf) > 0 && t.inbuf[0] == '~' {
+				t.inbuf = t.inbuf[1:]
+			}
+			if seq == "\x1b[5" {
+				t.scrollBy(t.panHeight())
+			} else {
+				t.scrollBy(-t.panHeight())
+			}
+		default:
+			t.exitScroll()
+		}
+		return true
+	}
+	t.inbuf = t.inbuf[1:]
+	t.pending = false
+	switch b {
+	case 'k':
+		t.scrollBy(1)
+	case 'j':
+		t.scrollBy(-1)
+	case 'g':
+		t.scrollBy(t.maxOff)
+	case 'G', 'q', '[', 0x1b:
+		t.exitScroll()
+	default:
+		t.exitScroll()
+	}
+	return true
+}
+
+func (t *tui) panHeight() int {
+	if p := t.paneByID(t.scroll); p != nil {
+		return p.Rect.H
+	}
+	return 10
+}
+
+func (t *tui) scrollBy(n int) {
+	if t.scroll == "" {
+		t.exitScroll()
+		return
+	}
+	t.offset += n
+	if t.offset <= 0 {
+		t.exitScroll()
+		return
+	}
+	if t.offset > t.maxOff {
+		t.offset = t.maxOff
+	}
+	t.dirty = true
+}
+
+func (t *tui) exitScroll() {
+	t.scroll = ""
+	t.scrollVT = nil
+	t.offset = 0
+	t.maxOff = 0
+	t.mode = ""
+	t.inbuf = nil
+	t.dirty = true
+}
+
+// startScroll builds a tall terminal from the pane's byte history. The live
+// screen keeps updating; the tall one is a frozen snapshot until the user
+// returns to the bottom.
+func (t *tui) startScroll(p *PaneInfo) {
+	if p.Alt {
+		t.toast = "app is on the alternate screen; use its own scroll"
+		t.toastAt = time.Now()
+		t.dirty = true
+		return
+	}
+	vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H+histRows))
+	_, _ = vt.Write(t.hist[p.ID])
+	t.scrollVT = vt
+	t.scroll = p.ID
+	t.offset = 0
+	_, t.maxOff = scrollStart(vt, p.Rect.H, 0)
+	t.mode = "scroll"
+	t.armed = false
+}
+
+func (t *tui) startScrollOnFocus() {
+	if t.snap == nil {
+		return
+	}
+	p := t.paneByID(t.snap.Focus)
+	if p == nil {
+		return
+	}
+	if p.Alt {
+		t.disarm()
+		t.toast = "app is on the alternate screen; use its own scroll"
+		t.toastAt = time.Now()
+		t.dirty = true
+		return
+	}
+	t.startScroll(p)
+	if t.maxOff == 0 {
+		t.exitScroll()
+		t.toast = "no scrollback yet"
+		t.toastAt = time.Now()
+		return
+	}
+	t.offset = 1
+	t.dirty = true
+}
+
+func (t *tui) paneAt(x, y int) *PaneInfo {
+	if t.snap == nil {
+		return nil
+	}
+	for i := range t.snap.Panes {
+		r := t.snap.Panes[i].Rect
+		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
+			return &t.snap.Panes[i]
+		}
+	}
+	return nil
+}
+
+func (t *tui) handleMouse(ev mouseEvent) {
+	if t.snap == nil {
+		return
+	}
+	p := t.paneAt(ev.x-1, ev.y-1)
+	if p == nil {
+		return
+	}
+	// A pane that enabled mouse reporting gets the event instead. The pane
+	// daemon owns the mode; the client's VT may have missed the enable
+	// sequence if it scrolled out of the replay ring.
+	if p.Mouse {
+		_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
+		return
+	}
+	// Left press on a pane focuses it. Apps that want the mouse already took
+	// the event above.
+	if ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release {
+		if t.snap.Focus != p.ID {
+			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: p.ID})
+		}
+		return
+	}
+	if ev.btn&64 == 0 {
+		return
+	}
+	if t.scroll != p.ID {
+		t.startScroll(p)
+	}
+	if ev.btn&1 == 0 {
+		t.scrollBy(3)
+	} else {
+		t.scrollBy(-3)
+	}
+}
+
+type mouseEvent struct {
+	btn     int
+	x, y    int
+	release bool
+	raw     []byte
+}
+
+// parseMouse reads an SGR mouse sequence: ESC [ < b ; x ; y M|m. n is the bytes
+// consumed; n == 0 means the sequence is still incomplete.
+func parseMouse(b []byte) (ev mouseEvent, n int, ok bool) {
+	if len(b) < 3 || b[0] != 0x1b || b[1] != '[' || b[2] != '<' {
+		return ev, -1, false
+	}
+	end := -1
+	for i := 3; i < len(b) && i < 48; i++ {
+		if b[i] == 'M' || b[i] == 'm' {
+			end = i
+			break
+		}
+		if (b[i] < '0' || b[i] > '9') && b[i] != ';' {
+			return ev, -1, false
+		}
+	}
+	if end < 0 {
+		return ev, 0, false
+	}
+	parts := strings.Split(string(b[3:end]), ";")
+	if len(parts) != 3 {
+		return ev, end + 1, false
+	}
+	btn, err1 := strconv.Atoi(parts[0])
+	x, err2 := strconv.Atoi(parts[1])
+	y, err3 := strconv.Atoi(parts[2])
+	if err1 != nil || err2 != nil || err3 != nil {
+		return ev, end + 1, false
+	}
+	ev = mouseEvent{btn: btn, x: x, y: y, release: b[end] == 'm', raw: append([]byte(nil), b[:end+1]...)}
+	return ev, end + 1, true
+}
+
+func (t *tui) moveSel(step int) {
+	if len(t.sessions) == 0 {
+		return
+	}
+	t.sel = (t.sel + step + len(t.sessions)) % len(t.sessions)
+	t.dirty = true
+}
+
+func (t *tui) pickSession() {
+	if len(t.sessions) == 0 {
+		t.closePicker()
+		return
+	}
+	name := t.sessions[t.sel].Name
+	t.closePicker()
+	if name == t.session {
+		return
+	}
+	t.switchTo = name
+}
+
+func (t *tui) openPicker() {
+	sessions, err := listSessionInfo()
+	if err != nil {
+		t.toast = err.Error()
+		t.toastAt = time.Now()
+		t.disarm()
+		return
+	}
+	if len(sessions) == 0 {
+		t.toast = "no sessions"
+		t.toastAt = time.Now()
+		t.disarm()
+		return
+	}
+	t.sessions = sessions
+	t.sel = 0
+	for i, s := range sessions {
+		if s.Name == t.session {
+			t.sel = i
+		}
+	}
+	t.mode = "sessions"
+	t.armed = false
+	t.dirty = true
+}
+
+func (t *tui) closePicker() {
+	t.mode = ""
+	t.inbuf = nil
+	t.dirty = true
+}
+
+func (t *tui) key(b byte) {
+	switch b {
+	case 0x02:
+		_ = t.conn.send(Msg{Type: "keys", Keys: []byte{0x02}})
+		t.disarm()
+	case '|':
+		t.action("split", func(m *Msg) { m.Dir = "right" })
+	case '-', '_':
+		t.action("split", func(m *Msg) { m.Dir = "down" })
+	case '<':
+		t.action("split", func(m *Msg) { m.Dir = "left" })
+	case '[':
+		t.startScrollOnFocus()
+	case '^':
+		t.action("split", func(m *Msg) { m.Dir = "up" })
+	case 'h':
+		t.action("focus-dir", func(m *Msg) { m.Dir = "left" })
+	case 'j':
+		t.action("focus-dir", func(m *Msg) { m.Dir = "down" })
+	case 'k':
+		t.action("focus-dir", func(m *Msg) { m.Dir = "up" })
+	case 'l':
+		t.action("focus-dir", func(m *Msg) { m.Dir = "right" })
+	case 'n':
+		t.action("next-pane", nil)
+	case 'p':
+		t.action("prev-pane", nil)
+	case 'x':
+		t.action("close-pane", nil)
+	case 'c':
+		t.action("new-window", nil)
+	case 'w':
+		t.action("next-window", nil)
+	case 'W':
+		t.action("prev-window", nil)
+	case 't':
+		t.action("new-workspace", nil)
+	case ')':
+		t.action("next-workspace", nil)
+	case 's':
+		t.openPicker()
+	case '?':
+		t.disarm()
+	case 'd', 'q':
+		t.quit = true
+	case 0x1b:
+		t.disarm()
+	default:
+		if b >= '0' && b <= '9' {
+			idx := int(b - '1')
+			if b == '0' {
+				idx = 9
+			}
+			t.action("select-window", func(m *Msg) { m.Index = idx })
+			return
+		}
+		t.toast = fmt.Sprintf("no binding for %q", string(b))
+		t.toastAt = time.Now()
+		t.disarm()
+	}
+}
+
+func (t *tui) arm() {
+	t.armed = true
+	t.armAt = time.Now()
+	t.toast = ""
+	t.dirty = true
+}
+
+func (t *tui) disarm() {
+	t.armed = false
+	t.dirty = true
+}
+
+func (t *tui) action(name string, fill func(*Msg)) {
+	m := Msg{Type: "req", Action: name}
+	if t.snap != nil {
+		m.Target = t.snap.Focus
+	}
+	if fill != nil {
+		fill(&m)
+	}
+	_ = t.conn.send(m)
+	t.disarm()
+}
+
+func (t *tui) draw() {
+	if t.snap == nil {
+		return
+	}
+	var b bytes.Buffer
+	b.WriteString("\x1b[0m\x1b[?7l\x1b[2J\x1b[H")
+	win := t.snap
+	for _, p := range win.Panes {
+		if p.ID == t.scroll && t.scrollVT != nil {
+			start, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
+			drawPaneFrom(&b, t.scrollVT, p.Rect, start)
+			continue
+		}
+		if vt := t.vts[p.ID]; vt != nil {
+			drawPane(&b, vt, p.Rect)
+		}
+	}
+	if t.snap.Root != nil {
+		drawDividers(&b, t.snap.Root, Rect{0, 0, t.snap.Cols, t.snap.Rows - 1})
+	}
+	scrollInfo := ""
+	if t.scroll != "" {
+		scrollInfo = fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)
+	}
+	drawBar(&b, win, t.armed, t.toast, scrollInfo)
+	if t.armed {
+		drawHelp(&b, win.Cols, win.Rows)
+	}
+	if t.mode == "sessions" {
+		drawSessions(&b, win.Cols, win.Rows, t.sessions, t.sel, t.session)
+	}
+	if p := t.paneByID(win.Focus); p != nil && t.mode == "" {
+		if vt := t.vts[p.ID]; vt != nil {
+			vt.Lock()
+			cur := vt.Cursor()
+			visible := vt.CursorVisible()
+			vt.Unlock()
+			if visible && cur.X < p.Rect.W && cur.Y < p.Rect.H {
+				fmt.Fprintf(&b, "\x1b[%d;%dH\x1b[?25h", p.Rect.Y+cur.Y+1, p.Rect.X+cur.X+1)
+			} else {
+				b.WriteString("\x1b[?25l")
+			}
+		}
+	}
+	b.WriteString("\x1b[?7h")
+	os.Stdout.Write(b.Bytes())
+}
+
+// conn wraps the server socket with a write mutex.
+type conn struct {
+	net.Conn
+	mu sync.Mutex
+}
+
+func dialServer(name string) (*conn, error) {
+	nc, err := ensureServer(name)
+	if err != nil {
+		return nil, err
+	}
+	return &conn{Conn: nc}, nil
+}
+
+func (c *conn) send(m Msg) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return writeMsg(c.Conn, m)
+}
