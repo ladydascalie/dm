@@ -1114,18 +1114,11 @@ func (s *server) attach(cl *client, m Msg) {
 		s.mu.Unlock()
 		cl.deliver(Msg{Type: "snapshot", Snap: snap})
 	}
-	for _, id := range ids {
-		rp := readPaneReplay(s.st.Name, id)
-		if !rp.ok {
-			continue
-		}
-		s.mu.Lock()
-		if pc := s.panes[id]; pc != nil {
-			pc.alt, pc.mouse = rp.alt, rp.mouse
-		}
-		s.mu.Unlock()
-		cl.deliver(Msg{Type: "replay", Target: id, Data: rp.data, St: &rp.st})
-	}
+	// History is not pushed at attach: the ring is 512 KiB per pane, and a
+	// nested client would carry it through the outer pty. The client asks for
+	// it with a "replay" request when it wants history. Its alternate-screen
+	// and mouse facts came back with sendScreens above, and later mode
+	// changes still arrive from the pane.
 	cl.resume()
 }
 
@@ -1297,6 +1290,21 @@ func (s *server) handleReq(cl *client, m Msg) {
 			return
 		}
 		s.reply(cl, m, map[string]any{"lines": lines}, nil)
+
+	case "replay":
+		// The pane's history ring, on demand. Attach no longer pushes it.
+		rp := readPaneReplay(s.st.Name, m.Target)
+		if !rp.ok {
+			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
+			return
+		}
+		s.mu.Lock()
+		if pc := s.panes[m.Target]; pc != nil {
+			pc.alt, pc.mouse = rp.alt, rp.mouse
+		}
+		s.mu.Unlock()
+		cl.deliver(Msg{Type: "replay", Target: m.Target, Data: rp.data, St: &rp.st})
+		s.reply(cl, m, map[string]any{"pane": m.Target}, nil)
 
 	case "status":
 		s.mu.Lock()
