@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hinshun/vt10x"
 )
@@ -2099,6 +2100,372 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 				t.Fatalf("bar wrote past its row at %d,%d: %q", x, y, g.Char)
 			}
 		}
+	}
+}
+
+// barTestSnap is the footer snapshot the segment tests share: a middle active
+// window and an agent in focus, so every elision step has room to show.
+func barTestSnap(cols int) *Snapshot {
+	return &Snapshot{
+		Session:      "dev",
+		Workspace:    "workspace-a",
+		Windows:      []string{"api-server", "web", "docs"},
+		ActiveWindow: 1,
+		Focus:        "w1p2",
+		Panes: []PaneInfo{
+			{ID: "w1p1", Name: "bash"},
+			{ID: "w1p2", Name: "shell", Status: "idle"},
+		},
+		All: []AllPane{
+			{ID: "w1p1", Agent: false},
+			{ID: "w1p2", Agent: true, Status: "idle"},
+		},
+		Cols: cols,
+		Rows: 24,
+	}
+}
+
+// barTexts is the text of each span, in paint order.
+func barTexts(segs []barSeg) []string {
+	out := make([]string, 0, len(segs))
+	for _, seg := range segs {
+		out = append(out, seg.text)
+	}
+	return out
+}
+
+// barElideStage names the rung of the elision ladder barTestSnap has reached.
+func barElideStage(segs []barSeg) string {
+	var text strings.Builder
+	chips := 0
+	for _, seg := range segs {
+		if seg.pin {
+			continue
+		}
+		text.WriteString(seg.text)
+		if len(seg.text) == 1 && seg.text[0] >= '1' && seg.text[0] <= '9' {
+			chips++
+		}
+	}
+	all := text.String()
+	switch {
+	case strings.Contains(all, " api-server"):
+		return "full"
+	case chips == 3:
+		return "names"
+	case !strings.Contains(all, "workspace-a"):
+		if strings.Contains(all, "dev") {
+			return "workspace"
+		}
+		if strings.Contains(all, " idle") {
+			return "session"
+		}
+		if strings.Contains(all, " shell") {
+			return "status"
+		}
+		return "name"
+	}
+	return "chips"
+}
+
+// TestBarSegmentOrder pins the footer's left block order, its colours, and the
+// single gutter cell between segments, with the pinned right block last.
+func TestBarSegmentOrder(t *testing.T) {
+	snap := barTestSnap(80)
+	glyph, colour := railGlyph("idle", nerdFonts())
+	segs := barSegments(snap, true, "READY")
+	left := []string{"dev", " ", "workspace-a", " ", "1 api-server", " ",
+		"2 web", " ", "3 docs", " ", glyph, " w1p2", " shell", " idle"}
+	want := append(append([]string{}, left...), "PREFIX ", "READY")
+	got := barTexts(segs)
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("bar spans = %q, want %q", got, want)
+	}
+
+	// Session, then workspace, then one chip per window in index order, then
+	// the focus chip, then the pinned block.
+	if segs[0].fg != railText {
+		t.Fatalf("session colour = %v, want railText", segs[0].fg)
+	}
+	if segs[2].fg != railHeader {
+		t.Fatalf("workspace colour = %v, want railHeader", segs[2].fg)
+	}
+	if segs[4].fg != railDim || segs[4].bg != railBG || segs[8].fg != railDim {
+		t.Fatalf("inactive chips = %+v %+v, want railDim on railBG", segs[4], segs[8])
+	}
+	if segs[6].bg != railFocusBG {
+		t.Fatalf("active chip bg = %v, want railFocusBG", segs[6].bg)
+	}
+	if segs[10].fg != colour {
+		t.Fatalf("focus glyph colour = %v, want %v", segs[10].fg, colour)
+	}
+	if segs[11].fg != railText || !segs[11].bold {
+		t.Fatalf("pane id = %+v, want bold railText", segs[11])
+	}
+	if segs[12].fg != railDim || segs[13].fg != railDim {
+		t.Fatalf("pane name and status = %v %v, want railDim", segs[12].fg, segs[13].fg)
+	}
+	for _, i := range []int{10, 11, 12, 13} {
+		if segs[i].bg != railFocusBG {
+			t.Fatalf("focus span %d bg = %v, want railFocusBG", i, segs[i].bg)
+		}
+	}
+
+	// One gutter cell between segments, and only between them.
+	gutters := 0
+	for i, seg := range segs {
+		if seg.pin {
+			continue
+		}
+		if seg.text == " " && seg.bg == railBG {
+			gutters++
+			if i%2 == 0 {
+				t.Fatalf("gutter at span %d sits inside a chip", i)
+			}
+		}
+	}
+	if gutters != 5 {
+		t.Fatalf("gutters = %d, want 5", gutters)
+	}
+
+	// The pinned block comes last, and nothing follows it.
+	for i := 0; i < len(left); i++ {
+		if segs[i].pin {
+			t.Fatalf("span %d is pinned inside the left block", i)
+		}
+	}
+	if segs[len(left)].text != "PREFIX " || !segs[len(left)].pin {
+		t.Fatalf("span %d = %+v, want the pinned PREFIX", len(left), segs[len(left)])
+	}
+	if segs[len(segs)-1].text != "READY" || !segs[len(segs)-1].pin {
+		t.Fatalf("last span = %+v, want the pinned info", segs[len(segs)-1])
+	}
+	if barCells(segs) > snap.Cols {
+		t.Fatalf("bar spans %d cells, want <= %d", barCells(segs), snap.Cols)
+	}
+}
+
+// TestBarElide walks the elision ladder: each width stops at the rung it needs
+// and never paints past the column count.
+func TestBarElide(t *testing.T) {
+	glyph, _ := railGlyph("idle", nerdFonts())
+	cases := []struct {
+		cols int
+		want string
+		text []string
+	}{
+		{80, "full", []string{"dev", " ", "workspace-a", " ", "1 api-server",
+			" ", "2 web", " ", "3 docs", " ", glyph, " w1p2", " shell", " idle"}},
+		{50, "names", []string{"dev", " ", "workspace-a", " ", "1", " ", "2",
+			" ", "3", " ", glyph, " w1p2", " shell", " idle"}},
+		{34, "workspace", []string{"dev", " ", "workspace…", " ", "2", " ",
+			glyph, " w1p2", " shell", " idle"}},
+		{20, "status", []string{"…", " ", "…", " ", "2", " ", glyph, " w1p2",
+			" shell"}},
+		{36, "chips", nil},
+		{24, "session", nil},
+		{14, "name", nil},
+	}
+	for _, c := range cases {
+		segs := barSegments(barTestSnap(c.cols), false, "")
+		if got := barCells(segs); got > c.cols {
+			t.Fatalf("cols %d: spans paint %d cells: %q", c.cols, got, barTexts(segs))
+		}
+		if got := barElideStage(segs); got != c.want {
+			t.Fatalf("cols %d: elision reached %q, want %q: %q",
+				c.cols, got, c.want, barTexts(segs))
+		}
+		if c.text != nil {
+			if got := strings.Join(barTexts(segs), "|"); got != strings.Join(c.text, "|") {
+				t.Fatalf("cols %d: spans = %q, want %q", c.cols, got, c.text)
+			}
+		}
+	}
+
+	// The active window chip survives every width that keeps a chip at all.
+	for _, cols := range []int{60, 40, 33, 30, 25, 22, 18, 16, 12} {
+		segs := barSegments(barTestSnap(cols), false, "")
+		if barCells(segs) > cols {
+			t.Fatalf("cols %d: spans paint %d cells", cols, barCells(segs))
+		}
+		text := strings.Join(barTexts(segs), "")
+		if cols >= 30 && !strings.Contains(text, "2") {
+			t.Fatalf("cols %d: active chip dropped: %q", cols, text)
+		}
+		// Only the shrinking rungs end a name with an ellipsis; a dropped
+		// chip or window name leaves no mark.
+		switch barElideStage(segs) {
+		case "workspace", "session", "status", "name":
+			if !strings.Contains(text, "…") {
+				t.Fatalf("cols %d: elided line has no ellipsis: %q", cols, text)
+			}
+		}
+	}
+
+	// A zero or negative width paints nothing.
+	for _, cols := range []int{0, -5} {
+		if segs := barSegments(barTestSnap(cols), true, "READY"); len(segs) != 0 {
+			t.Fatalf("cols %d: spans = %q, want none", cols, barTexts(segs))
+		}
+	}
+	if segs := barSegments(nil, false, ""); len(segs) != 0 {
+		t.Fatalf("nil snapshot: spans = %q, want none", barTexts(segs))
+	}
+}
+
+// TestBarPinned keeps the pinned block whole while the left block gives way:
+// both segments survive at 34 columns, and info survives alone at 20.
+func TestBarPinned(t *testing.T) {
+	snap := &Snapshot{
+		Session:      "long-session-name",
+		Workspace:    "a-very-long-workspace-name",
+		Windows:      []string{"a-very-long-window-name-one", "two"},
+		ActiveWindow: 0,
+		Focus:        "w1p1",
+		Panes:        []PaneInfo{{ID: "w1p1", Name: "a-long-pane-name", Status: "working"}},
+		All:          []AllPane{{ID: "w1p1", Agent: true}},
+		Cols:         34,
+		Rows:         24,
+	}
+	info := "12 rows above, 4 hidden"
+
+	segs := barSegments(snap, true, info)
+	var pinned []barSeg
+	for _, seg := range segs {
+		if seg.pin {
+			pinned = append(pinned, seg)
+		}
+	}
+	if len(pinned) != 2 {
+		t.Fatalf("pinned spans = %q, want PREFIX and info", barTexts(segs))
+	}
+	if pinned[0].text != "PREFIX " || pinned[1].text != info {
+		t.Fatalf("pinned spans = %q %q, want PREFIX and the whole info",
+			pinned[0].text, pinned[1].text)
+	}
+	if barCells(segs) > snap.Cols {
+		t.Fatalf("spans paint %d cells, want <= %d", barCells(segs), snap.Cols)
+	}
+
+	// 20 columns hold the info alone: PREFIX goes whole, never the left block's
+	// room, and the left block gives way first.
+	snap.Cols = 20
+	segs = barSegments(snap, true, info)
+	if len(segs) != 1 || !segs[0].pin {
+		t.Fatalf("20 cols: spans = %q, want the pinned info alone", barTexts(segs))
+	}
+	if strings.Contains(segs[0].text, "PREFIX") {
+		t.Fatalf("20 cols: PREFIX survived: %q", segs[0].text)
+	}
+	if !strings.HasSuffix(segs[0].text, "…") {
+		t.Fatalf("20 cols: clipped info has no ellipsis: %q", segs[0].text)
+	}
+	if got := barCells(segs); got != 20 {
+		t.Fatalf("20 cols: spans paint %d cells, want 20", got)
+	}
+
+	// An unarmed bar carries no PREFIX at all.
+	snap.Cols = 80
+	segs = barSegments(snap, false, info)
+	for _, seg := range segs {
+		if seg.pin && seg.text == "PREFIX " {
+			t.Fatalf("unarmed bar painted PREFIX: %q", barTexts(segs))
+		}
+	}
+}
+
+// TestBarWideRunes keeps wide runes whole and inside the column count.
+func TestBarWideRunes(t *testing.T) {
+	glyph, _ := railGlyph("working", nerdFonts())
+	sources := []string{"日本語セッション", "作業ディレクトリ", "1 一二三",
+		"2 四五六", " w1p1", " 日本語", " working", glyph}
+	snap := &Snapshot{
+		Session:      "日本語セッション",
+		Workspace:    "作業ディレクトリ",
+		Windows:      []string{"一二三", "四五六"},
+		ActiveWindow: 0,
+		Focus:        "w1p1",
+		Panes:        []PaneInfo{{ID: "w1p1", Name: "日本語", Status: "working"}},
+		All:          []AllPane{{ID: "w1p1", Agent: true}},
+		Rows:         24,
+	}
+	for _, cols := range []int{80, 41, 40, 21, 8, 3, 1} {
+		snap.Cols = cols
+		segs := barSegments(snap, false, "")
+		if got := barCells(segs); got > cols {
+			t.Fatalf("cols %d: spans paint %d cells", cols, got)
+		}
+		for _, seg := range segs {
+			text := strings.TrimSuffix(seg.text, "…")
+			if strings.ContainsRune(text, utf8.RuneError) {
+				t.Fatalf("cols %d: split rune in %q", cols, seg.text)
+			}
+			if text == "" || text == " " {
+				continue
+			}
+			// Every painted run is a whole-rune prefix of the text it came from.
+			whole := false
+			for _, src := range sources {
+				if strings.HasPrefix(src, text) {
+					whole = true
+					break
+				}
+			}
+			if !whole {
+				t.Fatalf("cols %d: %q is not a whole rune prefix of a source",
+					cols, seg.text)
+			}
+		}
+	}
+}
+
+// TestBarFocusChipState reads the focus chip from the focused pane: an agent
+// shows its state glyph and colour, a shell shows the prompt marker.
+func TestBarFocusChipState(t *testing.T) {
+	nerd := nerdFonts()
+	snap := &Snapshot{
+		Session: "s",
+		Focus:   "w1p1",
+		Panes:   []PaneInfo{{ID: "w1p1", Name: "agent", Status: "blocked"}},
+		All:     []AllPane{{ID: "w1p1", Agent: true, Status: "blocked"}},
+		Cols:    80,
+		Rows:    24,
+	}
+	glyph, colour := railGlyph("blocked", nerd)
+	segs := barSegments(snap, false, "")
+	if len(segs) < 4 {
+		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
+	}
+	chip := segs[2]
+	if chip.text != glyph {
+		t.Fatalf("blocked glyph = %q, want %q", chip.text, glyph)
+	}
+	if chip.fg != colour {
+		t.Fatalf("blocked glyph colour = %v, want %v", chip.fg, colour)
+	}
+	if chip.bg != railFocusBG {
+		t.Fatalf("blocked glyph bg = %v, want railFocusBG", chip.bg)
+	}
+	if colour == railDim {
+		t.Fatal("blocked shares the shell colour")
+	}
+	if got := segs[len(segs)-1].text; got != " blocked" {
+		t.Fatalf("status word = %q, want blocked", got)
+	}
+
+	// A shell reports no state: it gets the prompt marker in dim text, and its
+	// empty status reads as unknown.
+	snap.Panes[0] = PaneInfo{ID: "w1p1", Name: "bash"}
+	snap.All[0] = AllPane{ID: "w1p1", Agent: false}
+	segs = barSegments(snap, false, "")
+	if len(segs) < 4 {
+		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
+	}
+	if segs[2].text != "▶" || segs[2].fg != railDim {
+		t.Fatalf("shell glyph = %+v, want dim ▶", segs[2])
+	}
+	if got := segs[len(segs)-1].text; got != " unknown" {
+		t.Fatalf("shell status word = %q, want unknown", got)
 	}
 }
 
