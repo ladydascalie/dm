@@ -105,8 +105,9 @@ the folder name alone outside git. A pane that reports no directory falls back
 to the window name. Two spaces follow with the git branch in dim grey when it
 differs from the folder. The folder names the window, so it outranks the
 branch: a narrow rail drops the branch whole before it cuts the folder. The
-folder and the git state come from the window's focused pane, or from its
-first pane in a repository. The right edge of that line carries the
+folder and the git state come from one pane: the window's focused pane when it
+is in a repository, else its first pane in a repository, else the focused pane,
+else the window's first pane. The right edge of that line carries the
 uncommitted change count: an amber dot when the tree is dirty, then `+N` in
 green and `-M` in red, with a zero side hidden, or `clean` in dim grey when
 nothing changed. A pane outside a repository gets no stats tail: a directory

@@ -1753,6 +1753,66 @@ func TestRailWindowFolderLine(t *testing.T) {
 	}
 }
 
+// TestRailWindowBranchEqualsFolder draws the branch once when it equals the
+// folder: the folder is the label, so a dim second copy would repeat it.
+func TestRailWindowBranchEqualsFolder(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	// One window, so the colour check below sees this line and no other.
+	snap := railOnePane("working", "pi", defaultRail, 60, 6)
+	snap.All[0].Cwd, snap.All[0].Root = "/work/main", "/work"
+	snap.All[0].Branch = "main"
+	snap.All[0].InRepo = true
+	snap.All[0].Dirty, snap.All[0].Added = true, 3
+	line := railRows(t, snap)[1]
+	if want := "  ▾ main"; !strings.HasPrefix(line, want) {
+		t.Fatalf("window line = %q, want it to start with %q", line, want)
+	}
+	if want := "● +3"; !strings.HasSuffix(line, want) {
+		t.Fatalf("window line = %q, want it to end with %q", line, want)
+	}
+	if n := strings.Count(line, "main"); n != 1 {
+		t.Fatalf("window line draws the folder %d times: %q", n, line)
+	}
+	if n := runeCells(line); n != snap.Rail {
+		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
+	}
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, railWindowFg.fg()+"main") {
+		t.Fatalf("folder is not in the window colour: %q", out)
+	}
+	if strings.Contains(out, railDim.fg()+"main") {
+		t.Fatalf("equal branch is still drawn in the dim colour: %q", out)
+	}
+}
+
+// TestRailWindowFolderNested draws a folder below the repository root: the
+// relative path keeps its forward slash on the 34 column line.
+func TestRailWindowFolderNested(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].Cwd, snap.All[0].Root = "/work/dm/a/b", "/work/dm"
+	snap.All[0].Worktree = ""
+	snap.All[0].Branch = "lean-branch"
+	if items := railItems(snap); items[1].folder != "a/b" {
+		t.Fatalf("window folder = %q, want a/b", items[1].folder)
+	}
+	line := railRows(t, snap)[1]
+	if want := "  ▾ a/b  lean-branch"; !strings.HasPrefix(line, want) {
+		t.Fatalf("window line = %q, want it to start with %q", line, want)
+	}
+	if want := "● +12 -4"; !strings.HasSuffix(line, want) {
+		t.Fatalf("window line = %q, want it to end with %q", line, want)
+	}
+	if strings.Contains(line, `\`) {
+		t.Fatalf("nested folder used a backslash: %q", line)
+	}
+	if n := runeCells(line); n != snap.Rail {
+		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
+	}
+}
+
 // TestRailWindowFolderFocus takes the window folder from the focused pane, the
 // pane the git state comes from, then from the window's first pane.
 func TestRailWindowFolderFocus(t *testing.T) {
