@@ -24,7 +24,9 @@ window id is per session. A workspace id is per session.
 Counters only move forward, so an id is never reused after a close. A pane that
 is split off gets the next number in its window; the existing pane keeps its id.
 Names and labels stay separate and editable: a window's name, a workspace's
-name, a pane's recorded agent name.
+name, a pane's recorded agent name. A name is a cosmetic label. Renaming a
+workspace leaves the id alone, so `s1` stays `s1`, and the action takes the
+id, so a background workspace can be renamed.
 
 State written before this scheme is migrated once, in tree order, on load.
 
@@ -63,8 +65,14 @@ bottom right. It stays until an action runs or `esc` dismisses it.
 | `s` | switch session (picker: j/k, enter, esc) |
 | `a` | quick switch palette: panes, windows, workspaces |
 | `)` | next workspace |
-| `r` | cycle the sidebar: full, thin, hidden |
+| `r` | rename the active workspace |
+| `b` | cycle the sidebar: full, thin, hidden |
 | `d` / `q` | detach |
+
+`prefix r` opens the rename prompt as a line above the status bar. It starts
+from the workspace's current name, so typing appends to it. Backspace deletes
+one character and `ctrl+u` clears the line. `enter` commits, `esc` cancels, and
+an empty name cancels too. The right-click menu offers the same row.
 
 Drag a divider with the left mouse button to resize the split. The client
 sends `resize-split` with the two panes beside the divider and the ratio, at
@@ -140,7 +148,7 @@ stat reaches WCAG AA contrast on both the rail and the focused row. Icons use
 Nerd Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces
 them and `DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns
 by default, at most a third of the screen and never wider than 46 columns;
-`set-rail` changes it. `prefix r` cycles the sidebar through three states:
+`set-rail` changes it. `prefix b` cycles the sidebar through three states:
 full, thin, and hidden. The thin rail is four columns: the agent bar, one
 state glyph per pane, and no names. It always lists panes, folded or not, and
 leaves a blank row where a workspace or window line would sit. A hidden or
@@ -260,9 +268,10 @@ right press, drag and release runs the row under the release. The release of
 the press that opened the menu, and clicks on the title or border, do not
 dismiss it; a click outside does. The menu
 offers split right/down/left/up, focus, close pane, scrollback, new window, new
-workspace, switch session and detach. If the program in that pane enabled mouse reporting
-itself, the event is forwarded to it instead. That is how `pi`, `htop` and
-`vim` keep their own scrolling: they own the wheel when they ask for it.
+workspace, rename workspace, switch session and detach. If the program in that
+pane enabled mouse reporting itself, the event is forwarded to it instead.
+That is how `pi`, `htop` and `vim` keep their own scrolling: they own the
+wheel when they ask for it.
 
 Alternate-screen programs have no terminal scrollback to show. Their screen is
 painted in place, not scrolled, so dm refuses to open its own scrollback for
@@ -333,6 +342,7 @@ so anything one CLI verb does, an agent can do with one action.
 dm exec '{"action":"split","target":"p1","dir":"left"}'
 dm exec '{"action":"focus-dir","dir":"right"}'
 dm exec '{"action":"new-window","name":"tests"}'
+dm rename-workspace s1 api-work
 dm write-to p1 --msg "go test ./..." --enter
 dm read p1 --lines 20
 dm status
@@ -341,9 +351,9 @@ dm status
 Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
 `focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
 `next-window`, `prev-window`, `select-window`, `new-workspace`,
-`next-workspace`, `prev-workspace`, `rename-window`, `toggle-fold`, `list`,
-`ping`. `toggle-fold` takes a window id as `target` and replies with the new
-`unfolded` state.
+`next-workspace`, `prev-workspace`, `rename-window`, `rename-workspace`,
+`toggle-fold`, `list`, `ping`. `toggle-fold` takes a window id as `target`
+and replies with the new `unfolded` state.
 
 `history` takes `target` and an integer `lines` and replies with
 `{"lines": ["..."]}`: up to `lines` text rows immediately above the live
