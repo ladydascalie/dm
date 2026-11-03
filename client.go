@@ -1930,12 +1930,13 @@ func (t *tui) draw() {
 		}
 		old := b.p.rows
 		b.p.buf = append(b.p.buf[:0], b.buf.Bytes()...)
+		// Every band's rows matter, not only an overlay's: the rows it writes
+		// go under a standing overlay, and the rows an overlay takes and leaves
+		// belong to the panes again.
+		b.p.rows = bandRows(b.p.buf)
 		if !b.overlay {
 			continue
 		}
-		// An overlay's pixels move with its bytes: the rows it leaves and the
-		// rows it takes belong to the panes again.
-		b.p.rows = bandRows(b.buf.Bytes())
 		overlayChanged = true
 		if !full {
 			for _, y := range old {
@@ -1982,15 +1983,29 @@ func (t *tui) draw() {
 	if padFreed {
 		body.Write(blank.Bytes())
 	}
+	// The rows already written this frame, by any layer. An overlay is painted
+	// last, so one that is older in the paint order goes back on top of every
+	// row that a pane row, a freed divider or a band wrote this frame.
+	written := map[int]bool{}
+	for y := range dirty {
+		written[y] = true
+	}
+	for _, y := range bandRows(blank.Bytes()) {
+		written[y] = true
+	}
 	for i := range bands {
 		b := &bands[i]
 		// A band that moved an overlay comes back whole, and an overlay goes
-		// back on top whenever a row under it was repainted.
+		// back on top whenever a row under it was written.
 		if !b.write {
-			b.write = overlayChanged || (b.overlay && rowsHit(b.p.rows, dirty))
+			b.write = overlayChanged || (b.overlay && rowsHit(b.p.rows, written))
 		}
-		if b.write {
-			body.Write(b.p.buf)
+		if !b.write {
+			continue
+		}
+		body.Write(b.p.buf)
+		for _, y := range b.p.rows {
+			written[y] = true
 		}
 	}
 
@@ -2095,6 +2110,10 @@ func mix(h, v uint64) uint64 {
 
 // bandRows returns the rows a band's bytes address, in screen order. A band
 // writes with absolute cursor moves, so its own bytes say where it lands.
+// It reads every cursor position form: ESC [ row ; col H, ESC [ row H and the
+// bare ESC [ H (both finals, H and f, like a terminal does). A band that moves
+// the cursor another way addresses no row here, so keep bands on absolute
+// moves: TestBandsUseAbsoluteCursorMoves fails if one does.
 func bandRows(buf []byte) []int {
 	var rows []int
 	seen := map[int]bool{}
@@ -2102,23 +2121,25 @@ func bandRows(buf []byte) []int {
 		if buf[i] != 0x1b || buf[i+1] != '[' {
 			continue
 		}
-		j, n, digits := i+2, 0, 0
-		for j < len(buf) && buf[j] >= '0' && buf[j] <= '9' {
+		j := i + 2
+		n := 0
+		for j < len(buf) && (buf[j] >= '0' && buf[j] <= '9') {
 			n = n*10 + int(buf[j]-'0')
 			j++
-			digits++
 		}
-		if digits == 0 || j >= len(buf) || buf[j] != ';' {
-			continue
-		}
-		j++
-		for j < len(buf) && buf[j] >= '0' && buf[j] <= '9' {
+		// The rest of the parameter bytes, up to the final byte.
+		for j < len(buf) && (buf[j] == ';' || (buf[j] >= '0' && buf[j] <= '9')) {
 			j++
 		}
-		if j >= len(buf) || buf[j] != 'H' || n < 1 {
+		if j >= len(buf) || (buf[j] != 'H' && buf[j] != 'f') {
 			continue
 		}
-		if y := n - 1; !seen[y] {
+		// A zero or one row, or a bare move, is the top row.
+		y := 0
+		if n > 1 {
+			y = n - 1
+		}
+		if !seen[y] {
 			seen[y] = true
 			rows = append(rows, y)
 		}

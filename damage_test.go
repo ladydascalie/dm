@@ -347,3 +347,608 @@ func frameRows(s string) map[int]bool {
 	}
 	return rows
 }
+
+// oracle compares the accumulated diff frames against a clean full repaint of
+// the same state.
+func checkFrame(t *testing.T, live vt10x.Terminal, tr *tui, label string, raw []byte) {
+	t.Helper()
+	clone := *tr
+	var buf bytes.Buffer
+	clone.out = &buf
+	clone.laysig = ""
+	clone.rowsig = nil
+	clone.last = lastFrame{}
+	clone.draw()
+	if buf.Len() == 0 {
+		t.Fatalf("%s: oracle frame empty", label)
+	}
+	ref := vt10x.New(vt10x.WithSize(tr.snap.Cols, tr.snap.Rows))
+	ref.Write(buf.Bytes())
+	cols, rows := live.Size()
+	for y := 0; y < rows; y++ {
+		for x := 0; x < cols; x++ {
+			a, b := normCell(live.Cell(x, y)), normCell(ref.Cell(x, y))
+			if a.Char != b.Char || a.FG != b.FG || a.BG != b.BG || a.Mode != b.Mode {
+				t.Fatalf("%s: cell %d,%d live=%q/%v/%v/%v ref=%q/%v/%v/%v byte=%q",
+					label, x, y, a.Char, a.FG, a.BG, a.Mode, b.Char, b.FG, b.BG, b.Mode, frameBytes(tr))
+			}
+		}
+	}
+	if bytes.Contains(raw, []byte("\x1b[?25h")) && live.Cursor() != ref.Cursor() {
+		t.Fatalf("%s: visible cursor live=%v ref=%v", label, live.Cursor(), ref.Cursor())
+	}
+}
+
+func frameBytes(tr *tui) []byte {
+	if tr.out == nil {
+		return nil
+	}
+	if b, ok := tr.out.(*bytes.Buffer); ok {
+		return b.Bytes()
+	}
+	return nil
+}
+
+func scene(t *testing.T, f *frameTUI, live vt10x.Terminal) {
+	t.Helper()
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	vt := f.tui.vts[f.snap.Panes[0].ID]
+	vt.Write([]byte("\x1b[3;1HROW-THREE"))
+	step("row-three")
+	vt.Write([]byte("\x1b[3;1HROW-CHANGED"))
+	step("row-changed")
+	f.tui.notify("saved")
+	step("toast-up")
+	f.tui.toasts = nil
+	step("toast-gone")
+	f.tui.armed = true
+	step("help-up")
+	f.tui.armed = false
+	step("help-gone")
+	p := f.snap.Panes[0]
+	f.tui.selText = &selection{pane: p.ID, anchor: cell{x: 2, y: 3}, focus: cell{x: 8, y: 6}, w: p.Rect.W, h: p.Rect.H}
+	step("selection")
+	f.tui.selText = nil
+	step("selection-gone")
+	f.snap.All[0].Name = "beta"
+	step("rail")
+	f.snap.All[0].Status = "working"
+	step("rail-status")
+	step("steady")
+}
+
+func TestOracleOnePane(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	scene(t, f, live)
+}
+
+func TestOracleResize(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	f.frame()
+	live.Write([]byte("\x1b[2J"))
+	// live must match the accumulated picture; feed the whole history instead.
+	// Rebuild from scratch: first frame then resize.
+	f2 := newFrameTUI(t, 100, 20, 34)
+	live = vt10x.New(vt10x.WithSize(100, 20))
+	f2.frame()
+	live.Write([]byte(f2.out.String()))
+	f2.out.Reset()
+	f2.tui.draw()
+
+	p := f2.snap.Panes[0]
+	vt := f2.tui.vts[p.ID]
+	vt.Write([]byte("\x1b[2;1Hhello"))
+	f2.out.Reset()
+	f2.tui.draw()
+	live.Write([]byte(f2.out.String()))
+	checkFrame(t, live, f2.tui, "pre-resize", nil)
+}
+
+func TestOracleDividerHover(t *testing.T) {
+	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	snap := &Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
+	rects := map[string]Rect{}
+	layout(root, paneAreaFor(100, 20, 0), rects)
+	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
+	snap.All = []AllPane{
+		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+	}
+	out := &bytes.Buffer{}
+	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	for _, p := range snap.Panes {
+		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		tr.vts[p.ID] = vt
+		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s", p.ID)))
+	}
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	step := func(label string) {
+		out.Reset()
+		tr.draw()
+		live.Write(out.Bytes())
+		checkFrame(t, live, tr, label, out.Bytes())
+	}
+	step("first")
+	boxes := childBoxRects(root, paneAreaFor(100, 20, 0))
+	zone := padRect(root, boxes, 0)
+	tr.padZone, tr.padAxis = zone, root.Dir
+	step("hover")
+	tr.padZone = Rect{}
+	step("unhover")
+	tr.vts["a"].Write([]byte("\x1b[5;1Hchange-a"))
+	step("row-a")
+	tr.vts["b"].Write([]byte("\x1b[5;1Hchange-b"))
+	step("row-b")
+}
+
+func TestOracleScrollback(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	p := f.snap.Panes[0]
+	vt := f.tui.vts[p.ID]
+	for i := 0; i < 80; i++ {
+		vt.Write([]byte(fmt.Sprintf("LINE-%03d\r\n", i)))
+	}
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	// Enter scrollback the way exitScroll/enterScroll do it.
+	f.tui.scrollVT = vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H+histRows))
+	f.tui.scrollVT.Write([]byte("HIST-ONE\r\nHIST-TWO"))
+	f.tui.scroll = p.ID
+	f.tui.mode = "scroll"
+	step("enter")
+	f.tui.offset = 3
+	step("offset-3")
+	f.tui.offset = 1
+	step("offset-1")
+	f.tui.offset = 0
+	step("offset-0")
+	f.tui.exitScroll()
+	step("exit")
+	step("steady")
+}
+
+func TestOracleModes(t *testing.T) {
+	f := newFrameTUI(t, 100, 24, 34)
+	live := vt10x.New(vt10x.WithSize(100, 24))
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	f.snap.All[0].Name = "alpha-renamed"
+	f.tui.mode = "sessions"
+	f.tui.sessions = []SessionInfo{{Name: "main", Live: true}, {Name: "two"}, {Name: "three", Live: true}}
+	f.tui.sel = 1
+	f.tui.session = "main"
+	step("picker")
+	f.tui.sel = 2
+	step("picker-move")
+	f.tui.sessions = append(f.tui.sessions, SessionInfo{Name: "four", Live: true})
+	step("picker-grow")
+	f.tui.mode = ""
+	step("picker-close")
+	f.tui.menu = &menu{x: 10, y: 4, w: 30, title: "pane", items: []menuItem{{label: "split", key: "|"}, {label: "close", key: "x"}}}
+	f.tui.mode = "menu"
+	step("menu")
+	f.tui.menu.sel = 1
+	step("menu-sel")
+	f.tui.menu = nil
+	f.tui.mode = ""
+	step("menu-close")
+	step("steady")
+}
+
+func TestOracleOverlayOverGap(t *testing.T) {
+	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	snap := &Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
+	rects := map[string]Rect{}
+	layout(root, paneAreaFor(100, 20, 0), rects)
+	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
+	snap.All = []AllPane{
+		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+	}
+	out := &bytes.Buffer{}
+	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	for _, p := range snap.Panes {
+		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		tr.vts[p.ID] = vt
+		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s-content", p.ID)))
+	}
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	step := func(label string) {
+		out.Reset()
+		tr.draw()
+		live.Write(out.Bytes())
+		checkFrame(t, live, tr, label, out.Bytes())
+	}
+	step("first")
+	boxes := childBoxRects(root, paneAreaFor(100, 20, 0))
+	tr.padZone, tr.padAxis = padRect(root, boxes, 0), root.Dir
+	step("hover")
+	tr.toasts = []toast{{text: "divider-hover-toast"}}
+	step("toast-over-divider")
+	tr.toasts = nil
+	step("toast-gone")
+	tr.padZone = Rect{}
+	step("unhover")
+}
+
+func TestOracleToastsShrink(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	f.tui.toasts = []toast{{text: "a much longer toast message than before"}}
+	step("long")
+	f.tui.toasts = []toast{{text: "short"}, {text: "second"}}
+	step("two-short")
+	f.tui.toasts = []toast{{text: "second"}}
+	step("one")
+	f.tui.toasts = nil
+	step("none")
+	f.tui.armed = true
+	step("help")
+	f.tui.toasts = []toast{{text: "overlap"}}
+	step("help+toast")
+	f.tui.armed = false
+	step("help-off")
+	f.tui.toasts = nil
+	step("done")
+}
+
+func TestOracleResizeLive(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	raw := f.frame()
+	live.Write([]byte(raw))
+	checkFrame(t, live, f.tui, "first", []byte(raw))
+
+	f.snap.Cols, f.snap.Rows = 120, 24
+	f.snap.Rail = effectiveRail(120, f.snap.Rail)
+	relayout(f.snap)
+	p := f.snap.Panes[0]
+	f.tui.vts[p.ID].Resize(p.Rect.W, p.Rect.H)
+	f.tui.vts[p.ID].Write([]byte("\x1b[1;1HSIZED"))
+	live.Resize(120, 24)
+	raw = f.frame()
+	live.Write([]byte(raw))
+	checkFrame(t, live, f.tui, "resize", []byte(raw))
+
+	f.snap.Rail = 0
+	relayout(f.snap)
+	p = f.snap.Panes[0]
+	f.tui.vts[p.ID].Resize(p.Rect.W, p.Rect.H)
+	raw = f.frame()
+	live.Write([]byte(raw))
+	checkFrame(t, live, f.tui, "rail-hidden", []byte(raw))
+}
+
+func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *Snapshot) {
+	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	snap := &Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "a"}
+	rects := map[string]Rect{}
+	layout(root, paneAreaFor(cols, rows, rail), rects)
+	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
+	snap.All = []AllPane{
+		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+	}
+	out := &bytes.Buffer{}
+	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	for _, p := range snap.Panes {
+		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		tr.vts[p.ID] = vt
+		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s-content", p.ID)))
+	}
+	return tr, out, snap
+}
+
+// A toast is up, then the divider is hovered: the divider band paints after
+// the toasts band, so the toast must be painted again.
+func TestOracleDividerOverToast(t *testing.T) {
+	tr, out, snap := twoPaneTUI(100, 20, 0)
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	step := func(label string) {
+		out.Reset()
+		tr.draw()
+		live.Write(out.Bytes())
+		checkFrame(t, live, tr, label, out.Bytes())
+	}
+	step("first")
+	tr.toasts = []toast{{text: "a toast that spans the divider pad"}}
+	step("toast")
+	boxes := childBoxRects(snap.Root, paneAreaFor(100, 20, 0))
+	tr.padZone, tr.padAxis = padRect(snap.Root, boxes, 0), snap.Root.Dir
+	step("hover-over-toast")
+	tr.padZone = Rect{}
+	step("unhover")
+}
+
+// A help box over the rail on a narrow screen, then a rail label change.
+func TestOracleRailUnderHelp(t *testing.T) {
+	f := newFrameTUI(t, 40, 14, 13)
+	live := vt10x.New(vt10x.WithSize(40, 14))
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	f.tui.armed = true
+	step("help")
+	f.snap.All[0].Name = "renamed-pane"
+	step("rail-change-under-help")
+	f.snap.All[0].Status = "working"
+	f.snap.All[0].Agent = true
+	step("rail-status-under-help")
+	f.tui.armed = false
+	step("help-off")
+}
+
+// A wide toast over the rail on a narrow screen, then a rail label change.
+func TestOracleRailUnderToast(t *testing.T) {
+	f := newFrameTUI(t, 40, 14, 13)
+	live := vt10x.New(vt10x.WithSize(40, 14))
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	f.tui.toasts = []toast{{text: "a toast wide enough to cover the rail"}}
+	step("toast")
+	f.snap.All[0].Name = "renamed-pane"
+	step("rail-change-under-toast")
+	f.snap.All[0].Status = "working"
+	f.snap.All[0].Agent = true
+	step("rail-status-under-toast")
+}
+
+func TestOraclePalette(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	rect := paletteRect(100, 20)
+	pvt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
+	pvt.Write([]byte("\x1b[1;1HPALETTE-ONE"))
+	f.tui.pal = &palette{vt: pvt, rect: rect}
+	step("open")
+	pvt.Write([]byte("\x1b[2;1Htyped"))
+	step("type")
+	pvt.Write([]byte("\x1b[3;1Hmore"))
+	step("type2")
+	f.tui.pal = nil
+	step("close")
+	step("steady")
+}
+
+// The palette floats over the rail columns; a rail change must not eat it.
+func TestOracleRailUnderPalette(t *testing.T) {
+	f := newFrameTUI(t, 100, 30, 34)
+	live := vt10x.New(vt10x.WithSize(100, 30))
+	step := func(label string) {
+		raw := f.frame()
+		live.Write([]byte(raw))
+		checkFrame(t, live, f.tui, label, []byte(raw))
+	}
+	step("first")
+	rect := paletteRect(100, 30)
+	pvt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
+	pvt.Write([]byte("\x1b[1;1HPALETTE-ONE"))
+	f.tui.pal = &palette{vt: pvt, rect: rect}
+	step("open")
+	f.snap.All[0].Status = "working"
+	f.snap.All[0].Agent = true
+	step("rail-change-under-palette")
+}
+
+// A toast up, then a divider hover, with the default rail.
+func TestOracleDefaultRailDividerOverToast(t *testing.T) {
+	tr, out, snap := twoPaneTUI(120, 30, 34)
+	live := vt10x.New(vt10x.WithSize(120, 30))
+	step := func(label string) {
+		out.Reset()
+		tr.draw()
+		live.Write(out.Bytes())
+		checkFrame(t, live, tr, label, out.Bytes())
+	}
+	step("first")
+	tr.toasts = []toast{{text: "saved"}}
+	step("toast")
+	boxes := childBoxRects(snap.Root, paneAreaFor(120, 30, 34))
+	tr.padZone, tr.padAxis = padRect(snap.Root, boxes, 0), snap.Root.Dir
+	step("hover")
+}
+
+// A split changes the layout with the same screen size: it must clear and
+// paint everything.
+func TestOracleSplit(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	live := vt10x.New(vt10x.WithSize(100, 20))
+	raw := f.frame()
+	live.Write([]byte(raw))
+	checkFrame(t, live, f.tui, "first", []byte(raw))
+
+	f.snap.Root = &Node{Dir: "row", Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}}}
+	f.snap.Panes = []PaneInfo{{ID: "w1p1"}, {ID: "w1p2"}}
+	relayout(f.snap)
+	for _, p := range f.snap.Panes {
+		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		f.tui.vts[p.ID] = vt
+		vt.Write([]byte("\x1b[2;1H" + p.ID))
+	}
+	raw = f.frame()
+	if !strings.Contains(raw, "\x1b[2J") {
+		t.Fatalf("a split did not clear: %q", raw)
+	}
+	live.Write([]byte(raw))
+	checkFrame(t, live, f.tui, "split", []byte(raw))
+
+	f.snap.Focus = "w1p2"
+	raw = f.frame()
+	if !strings.Contains(raw, "\x1b[2J") {
+		t.Fatalf("a focus change did not clear: %q", raw)
+	}
+	live.Write([]byte(raw))
+	checkFrame(t, live, f.tui, "focus", []byte(raw))
+}
+
+// Every written frame is bracketed exactly once.
+func TestOracleBrackets(t *testing.T) {
+	f := newFrameTUI(t, 100, 20, 34)
+	vt := f.tui.vts[f.snap.Panes[0].ID]
+	for i := 0; i < 5; i++ {
+		vt.Write([]byte(fmt.Sprintf("\x1b[%d;1HSTEP-%d", i+1, i)))
+		raw := f.frame()
+		if raw == "" {
+			t.Fatalf("step %d wrote nothing", i)
+		}
+		if !strings.HasPrefix(raw, "\x1b[?2026h") || !strings.HasSuffix(raw, "\x1b[?2026l") {
+			t.Fatalf("step %d unbracketed", i)
+		}
+		if strings.Count(raw, "\x1b[?2026h") != 1 || strings.Count(raw, "\x1b[?2026l") != 1 {
+			t.Fatalf("step %d double bracketed", i)
+		}
+	}
+	if got := f.frame(); got != "" {
+		t.Fatalf("steady frame wrote %d bytes", len(got))
+	}
+}
+
+// A band is tracked by the cursor moves its bytes carry, so bandRows must read
+// every absolute form: row;col, a bare row and a bare home.
+func TestBandRowsReadsEveryCursorForm(t *testing.T) {
+	cases := []struct {
+		name string
+		buf  string
+		want []int
+	}{
+		{"row and col", "\x1b[3;7Hx", []int{2}},
+		{"row only", "\x1b[3Hx", []int{2}},
+		{"home", "\x1b[Hx", []int{0}},
+		{"row one", "\x1b[1Hx", []int{0}},
+		{"zero row is the top", "\x1b[0;0Hx", []int{0}},
+		{"hvp final", "\x1b[4f", []int{3}},
+		{"screen order, once each", "\x1b[9;9Hx\x1b[2Hx\x1b[3;1Hx", []int{1, 2, 8}},
+		{"sgr and clears are not moves", "\x1b[0m\x1b[1;96m\x1b[2J\x1b[K", nil},
+		{"relative moves address no row", "\x1b[2Ax\x1b[1By\x1b[3Cz", nil},
+	}
+	for _, c := range cases {
+		got := bandRows([]byte(c.buf))
+		if len(got) != len(c.want) {
+			t.Fatalf("%s: rows %v, want %v", c.name, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("%s: rows %v, want %v", c.name, got, c.want)
+			}
+		}
+	}
+}
+
+// Every band lands with an absolute move, because bandRows can see no other
+// kind. A band that switched to a relative move would leave stale cells under
+// a standing overlay with no test to catch it, so scan every frame instead.
+func TestBandsUseAbsoluteCursorMoves(t *testing.T) {
+	f := newFrameTUI(t, 100, 24, 34)
+	steps := []struct {
+		name string
+		arm  func()
+	}{
+		{"first", func() {}},
+		{"toast", func() { f.tui.notify("a toast that lands on the bar") }},
+		{"help", func() { f.tui.armed = true }},
+		{"palette", func() {
+			f.tui.armed = false
+			rect := paletteRect(f.snap.Cols, f.snap.Rows)
+			pvt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
+			f.tui.pal = &palette{vt: pvt, rect: rect}
+		}},
+		{"menu", func() {
+			f.tui.pal = nil
+			f.tui.menu = &menu{x: 9, y: 3, w: 20, title: "pane", items: []menuItem{{label: "split", key: "|"}}}
+			f.tui.mode = "menu"
+		}},
+		{"sessions", func() {
+			f.tui.menu = nil
+			f.tui.mode = "sessions"
+			f.tui.sessions = []SessionInfo{{Name: "main", Live: true}}
+		}},
+		{"rail", func() {
+			f.tui.mode = ""
+			f.snap.All[0].Name = "renamed"
+		}},
+	}
+	for _, s := range steps {
+		s.arm()
+		raw := f.frame()
+		if raw == "" {
+			t.Fatalf("%s: frame wrote nothing", s.name)
+		}
+		if got := relMoves([]byte(raw)); len(got) > 0 {
+			t.Fatalf("%s: frame carries relative cursor moves %q", s.name, got)
+		}
+	}
+
+	// The divider band only draws between two panes.
+	tr, out, snap := twoPaneTUI(100, 24, 0)
+	out.Reset()
+	tr.draw()
+	boxes := childBoxRects(snap.Root, paneAreaFor(100, 24, 0))
+	tr.padZone, tr.padAxis = padRect(snap.Root, boxes, 0), snap.Root.Dir
+	out.Reset()
+	tr.draw()
+	if got := relMoves(out.Bytes()); len(got) > 0 {
+		t.Fatalf("hover frame carries relative cursor moves %q", got)
+	}
+	// The scan has to see a relative move, or the guard above is silent.
+	if got := relMoves([]byte("\x1b[2A\x1b[3;4B")); len(got) != 2 {
+		t.Fatalf("the relative-move scan found %q, want two", got)
+	}
+}
+
+// relMoves returns the relative cursor moves in a frame. A band must not use
+// one: bandRows reads absolute moves only.
+func relMoves(buf []byte) []string {
+	var out []string
+	for i := 0; i+2 < len(buf); i++ {
+		if buf[i] != 0x1b || buf[i+1] != '[' {
+			continue
+		}
+		j := i + 2
+		for j < len(buf) && (buf[j] == ';' || (buf[j] >= '0' && buf[j] <= '9')) {
+			j++
+		}
+		if j >= len(buf) {
+			continue
+		}
+		switch buf[j] {
+		case 'A', 'B', 'C', 'D', 'E', 'F', 'G':
+			out = append(out, string(buf[i:j+1]))
+		}
+	}
+	return out
+}
