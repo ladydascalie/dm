@@ -1278,6 +1278,32 @@ func TestMenuHoverHighlights(t *testing.T) {
 	}
 }
 
+// A wheel event is not a left press: it must not start a selection, a divider
+// drag or a menu item.
+func TestWheelIsNotAPress(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
+	tui.handleMouse(mouseEvent{btn: 64, x: 5, y: 5})
+	if tui.press != nil || tui.dragging {
+		t.Fatalf("wheel started a press or drag: press=%+v dragging=%v", tui.press, tui.dragging)
+	}
+	// On a pad, a wheel must not start a resize drag either.
+	padX := tui.paneByID("b").Rect.X - 2
+	tui.handleMouse(mouseEvent{btn: 64, x: padX + 1, y: 5})
+	if tui.dragging {
+		t.Fatal("wheel on a pad started a drag")
+	}
+	// With a menu open, a wheel must not run an item or close it.
+	tui.openMenu(tui.paneByID("b"), 10, 5)
+	ran := false
+	tui.menu.items[0].run = func() { ran = true }
+	tui.handleMouse(mouseEvent{btn: 64, x: tui.menu.x + 2, y: tui.menu.y + 2})
+	if ran || tui.menu == nil {
+		t.Fatalf("wheel over the menu: ran=%v menu=%+v", ran, tui.menu)
+	}
+}
+
 func TestMenuRightDragPicks(t *testing.T) {
 	row := &Node{Pane: "a"}
 	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}

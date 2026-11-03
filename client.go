@@ -1128,6 +1128,9 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		inside := x >= m.x && x < m.x+m.w && y >= m.y && y < m.y+len(m.items)+2
 		row := m.itemAt(x, y)
 		motion := ev.btn&32 != 0
+		if ev.btn&64 != 0 {
+			return // a wheel over the menu is not a click
+		}
 		if motion {
 			// Hover or drag: light up the row under the pointer.
 			if row >= 0 && row != m.sel {
@@ -1136,7 +1139,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			}
 			return
 		}
-		if ev.btn&3 == 0 && !ev.release {
+		if ev.btn&3 == 0 && ev.btn&64 == 0 && !ev.release {
 			// Left press: a row runs, an outside point closes the menu and
 			// keeps going, so one click both dismisses and focuses.
 			if row >= 0 {
@@ -1187,7 +1190,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		}
 		return
 	}
-	left := ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release
+	left := ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release
 	if t.dragging {
 		if ev.release {
 			t.dragTo(x, y, true)
