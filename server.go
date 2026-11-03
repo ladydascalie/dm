@@ -1385,16 +1385,19 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 				space = r.H
 			}
 			space--
-			if space < 6 {
+			// A pane box is border + content + border, so the smallest
+			// content a drag may leave is 3 cells, a 5-cell box.
+			const minBox = 5
+			if space < 2 {
 				return fmt.Errorf("split between %q and %q is too small", first, second)
 			}
-			if space == 6 {
+			if space < 2*minBox {
 				split.Sizes = []float64{0.5, 0.5}
 				return nil
 			}
 			const eps = 1e-9
-			lo := 3.0/float64(space) + eps
-			hi := 1 - 3.0/float64(space) + eps
+			lo := float64(minBox)/float64(space) + eps
+			hi := 1 - float64(minBox)/float64(space) + eps
 			if ratio < lo {
 				ratio = lo
 			}

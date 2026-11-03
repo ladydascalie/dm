@@ -309,7 +309,9 @@ func pruneLeaf(root *Node, target string) (*Node, bool) {
 // childRects returns the rectangle of each child of n inside r. Each split
 // burns one cell between neighbours for its divider, so no two children share
 // a cell. A leaf has no children and returns nil.
-func childRects(n *Node, r Rect) []Rect {
+// childBoxRects divides a split's area into its children's boxes. One pad cell
+// separates adjacent boxes; the boxes themselves carry the border.
+func childBoxRects(n *Node, r Rect) []Rect {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
 		return nil
 	}
@@ -337,36 +339,47 @@ func childRects(n *Node, r Rect) []Rect {
 	return rects
 }
 
+// padRect is the empty cell between child i's box and child i+1's box.
+func padRect(n *Node, boxes []Rect, i int) Rect {
+	b := boxes[i]
+	if n.Dir == "row" {
+		return Rect{X: b.X + b.W, Y: b.Y, W: 1, H: b.H}
+	}
+	return Rect{X: b.X, Y: b.Y + b.H, W: b.W, H: 1}
+}
+
 // layout assigns a rectangle to every pane. Each split burns one column or row
 // for the divider, so panes never share a cell.
-func layout(n *Node, r Rect, out map[string]Rect) {
+func layout(n *Node, area Rect, out map[string]Rect) {
 	if n == nil {
 		return
 	}
 	if n.Pane != "" {
-		out[n.Pane] = r
+		out[n.Pane] = insetBox(area)
 		return
 	}
-	rects := childRects(n, r)
+	boxes := childBoxRects(n, area)
 	for i, kid := range n.Kids {
-		layout(kid, rects[i], out)
+		layout(kid, boxes[i], out)
 	}
 }
 
 // nodeRect returns the rectangle layout assigns to a node in the tree.
-func nodeRect(n, target *Node, r Rect) (Rect, bool) {
+func nodeRect(n, target *Node, area Rect) (Rect, bool) {
 	if n == nil {
 		return Rect{}, false
 	}
 	if n == target {
-		return r, true
+		if n.Pane != "" {
+			return insetBox(area), true
+		}
+		return area, true
 	}
-	if n.Pane != "" || len(n.Kids) == 0 {
+	if n.Pane != "" {
 		return Rect{}, false
 	}
-	rects := childRects(n, r)
-	for i, kid := range n.Kids {
-		if out, ok := nodeRect(kid, target, rects[i]); ok {
+	for i, b := range childBoxRects(n, area) {
+		if out, ok := nodeRect(n.Kids[i], target, b); ok {
 			return out, ok
 		}
 	}
@@ -402,14 +415,19 @@ func lowestCommonAncestor(a, b []*Node) *Node {
 	return lca
 }
 
-// paneArea is the rectangle the pane tree lives in. One cell on each edge is
-// the frame, and the last row is the status bar. Very small terminals fall back
-// to no frame rather than a negative rect.
+// paneArea is the rectangle the pane boxes live in. Each leaf is a box: a
+// border, the content, and a border. Adjacent boxes keep one empty cell between
+// them, the pad a resize control will live on. The last row is the status bar.
 func paneArea(cols, rows int) Rect {
-	if cols < 4 || rows < 5 {
-		return Rect{0, 0, cols, rows - 1}
+	return Rect{0, 0, cols, rows - 1}
+}
+
+// insetBox is the content rect of a boxed pane.
+func insetBox(b Rect) Rect {
+	if b.W < 3 || b.H < 3 {
+		return Rect{X: b.X, Y: b.Y, W: maxInt(1, b.W), H: maxInt(1, b.H)}
 	}
-	return Rect{1, 1, cols - 2, rows - 3}
+	return Rect{X: b.X + 1, Y: b.Y + 1, W: b.W - 2, H: b.H - 2}
 }
 
 // splitSizes turns the node's weights into integer cell counts that sum to

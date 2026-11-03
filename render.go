@@ -190,36 +190,33 @@ func screenBytes(vt vt10x.View) []byte {
 	return b.Bytes()
 }
 
-// dividerRect returns the one-cell divider between child i and child i+1:
-// the cell immediately after child i along the split's axis.
-func dividerRect(n *Node, rects []Rect, i int) Rect {
-	kr := rects[i]
-	if n.Dir == "row" {
-		return Rect{X: kr.X + kr.W, Y: kr.Y, W: 1, H: kr.H}
-	}
-	return Rect{X: kr.X, Y: kr.Y + kr.H, W: kr.W, H: 1}
-}
-
-func drawDividers(buf *bytes.Buffer, n *Node, r Rect) {
-	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
+// drawPaneBox draws the border of one pane. The active pane is bright cyan;
+// the rest are dim, so the active one reads at a glance.
+func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
+	x0, y0 := content.X-1, content.Y-1
+	x1, y1 := content.X+content.W, content.Y+content.H
+	if content.W <= 0 || content.H <= 0 || x0 < 0 || y0 < 0 {
 		return
 	}
-	rects := childRects(n, r)
-	for i, kid := range n.Kids {
-		drawDividers(buf, kid, rects[i])
-		if i >= len(rects)-1 {
-			continue
-		}
-		d := dividerRect(n, rects, i)
+	if active {
+		buf.WriteString("\x1b[0m\x1b[1;96m")
+	} else {
 		buf.WriteString("\x1b[0m\x1b[90m")
-		if n.Dir == "row" {
-			for y := 0; y < d.H; y++ {
-				fmt.Fprintf(buf, "\x1b[%d;%dH│", d.Y+y+1, d.X+1)
-			}
-		} else {
-			fmt.Fprintf(buf, "\x1b[%d;%dH", d.Y+1, d.X+1)
-			buf.WriteString(strings.Repeat("─", d.W))
-		}
+	}
+	put := func(x, y int, s string) {
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
+	}
+	put(x0, y0, "┌")
+	put(x1, y0, "┐")
+	put(x0, y1, "└")
+	put(x1, y1, "┘")
+	for x := x0 + 1; x < x1; x++ {
+		put(x, y0, "─")
+		put(x, y1, "─")
+	}
+	for y := y0 + 1; y < y1; y++ {
+		put(x0, y, "│")
+		put(x1, y, "│")
 	}
 }
 
@@ -278,129 +275,58 @@ func scrollStart(v vt10x.View, rectH, offset int) (start, max int) {
 	return start, max
 }
 
-// dividerHit reports the divider under x,y: the owning split, the panes on
-// its left/above and right/below side, the split's axis and its full rect.
-// Coordinates are zero-based terminal cells.
-func dividerHit(n *Node, r Rect, x, y int) (split *Node, first, second, axis string, sr Rect, ok bool) {
+// padHit reports the pad cell under x,y: the owning split, the panes on each
+// side of the pad, the axis and the split's area. Coordinates are zero-based.
+func padHit(n *Node, area Rect, x, y int) (split *Node, first, second, axis string, sr Rect, ok bool) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
 		return nil, "", "", "", Rect{}, false
 	}
-	rects := childRects(n, r)
+	boxes := childBoxRects(n, area)
 	horizontal := n.Dir == "row"
-	for i, kr := range rects {
-		if i < len(rects)-1 {
-			d := dividerRect(n, rects, i)
-			if x >= d.X && x < d.X+d.W && y >= d.Y && y < d.Y+d.H {
+	for i := range n.Kids {
+		if i < len(boxes)-1 {
+			p := padRect(n, boxes, i)
+			if x >= p.X && x < p.X+p.W && y >= p.Y && y < p.Y+p.H {
 				if horizontal {
-					first = paneAtRect(n.Kids[i], kr, kr.X+kr.W-1, y)
-					second = paneAtRect(n.Kids[i+1], rects[i+1], rects[i+1].X, y)
+					first = leafAt(n.Kids[i], boxes[i], p.X-2, y)
+					second = leafAt(n.Kids[i+1], boxes[i+1], p.X+2, y)
 				} else {
-					first = paneAtRect(n.Kids[i], kr, x, kr.Y+kr.H-1)
-					second = paneAtRect(n.Kids[i+1], rects[i+1], x, rects[i+1].Y)
+					first = leafAt(n.Kids[i], boxes[i], x, p.Y-2)
+					second = leafAt(n.Kids[i+1], boxes[i+1], x, p.Y+2)
 				}
 				if first == "" || second == "" {
 					return nil, "", "", "", Rect{}, false
 				}
-				return n, first, second, n.Dir, r, true
+				return n, first, second, n.Dir, area, true
 			}
 		}
-		if sn, f, sec, ax, sr, hit := dividerHit(n.Kids[i], kr, x, y); hit {
+		if sn, f, sec, ax, sr, hit := padHit(n.Kids[i], boxes[i], x, y); hit {
 			return sn, f, sec, ax, sr, hit
 		}
 	}
 	return nil, "", "", "", Rect{}, false
 }
 
-// paneAtRect returns the pane leaf under x,y inside a node's rectangle.
-func paneAtRect(n *Node, r Rect, x, y int) string {
+// leafAt returns the leaf pane whose content rect contains x,y.
+func leafAt(n *Node, area Rect, x, y int) string {
 	if n == nil {
 		return ""
 	}
 	if n.Pane != "" {
-		return n.Pane
+		r := insetBox(area)
+		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
+			return n.Pane
+		}
+		return ""
 	}
-	for i, kr := range childRects(n, r) {
-		if x >= kr.X && x < kr.X+kr.W && y >= kr.Y && y < kr.Y+kr.H {
-			return paneAtRect(n.Kids[i], kr, x, y)
+	for i, b := range childBoxRects(n, area) {
+		if x >= b.X && x < b.X+b.W && y >= b.Y && y < b.Y+b.H {
+			if id := leafAt(n.Kids[i], b, x, y); id != "" {
+				return id
+			}
 		}
 	}
 	return ""
-}
-
-// drawFrame paints the outer border of the pane area. Every pane has a box;
-// drawFocusFrame recolours the active one on top.
-func drawFrame(buf *bytes.Buffer, cols, rows int) {
-	if cols < 4 || rows < 5 {
-		return
-	}
-	right, bottom := cols-1, rows-2
-	buf.WriteString("\x1b[0m\x1b[90m")
-	put := func(x, y int, s string) {
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
-	}
-	put(0, 0, "┌")
-	put(right, 0, "┐")
-	put(0, bottom, "└")
-	put(right, bottom, "┘")
-	for x := 1; x < right; x++ {
-		put(x, 0, "─")
-		put(x, bottom, "─")
-	}
-	for y := 1; y < bottom; y++ {
-		put(0, y, "│")
-		put(right, y, "│")
-	}
-}
-
-// drawFocusFrame wraps the active pane in box drawing characters in cyan. A
-// corner that sits on the outer frame uses a junction, so the frame line is not
-// broken by a stray corner glyph.
-func drawFocusFrame(buf *bytes.Buffer, r Rect, cols, rows int) {
-	if r.W <= 0 || r.H <= 0 {
-		return
-	}
-	x0, y0 := r.X-1, r.Y-1
-	x1, y1 := r.X+r.W, r.Y+r.H
-	if x0 < 0 || y0 < 0 {
-		return
-	}
-	buf.WriteString("\x1b[0m\x1b[1;36m")
-	put := func(x, y int, s string) {
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
-	}
-	topLeft, topRight, botLeft, botRight := "┌", "┐", "└", "┘"
-	if y0 == 0 && x0 > 0 {
-		topLeft = "┬"
-	} else if x0 == 0 && y0 > 0 {
-		topLeft = "├"
-	}
-	if y0 == 0 && x1 < cols-1 {
-		topRight = "┬"
-	} else if x1 == cols-1 && y0 > 0 {
-		topRight = "┤"
-	}
-	if y1 == rows-2 && x0 > 0 {
-		botLeft = "┴"
-	} else if x0 == 0 && y1 < rows-2 {
-		botLeft = "├"
-	}
-	if y1 == rows-2 && x1 < cols-1 {
-		botRight = "┴"
-	} else if x1 == cols-1 && y1 < rows-2 {
-		botRight = "┤"
-	}
-	put(x0, y0, topLeft)
-	put(x1, y0, topRight)
-	put(x0, y1, botLeft)
-	put(x1, y1, botRight)
-	for x := x0 + 1; x < x1; x++ {
-		put(x, y0, "─")
-		put(x, y1, "─")
-	}
-	for y := y0 + 1; y < y1; y++ {
-		put(x0, y, "│")
-		put(x1, y, "│")
-	}
 }
 
 // drawBar paints the one-line status bar at the bottom.

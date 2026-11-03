@@ -643,7 +643,7 @@ func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
 	if snap == nil || snap.Root == nil {
 		return dragStart{}, false
 	}
-	n, first, second, axis, r, ok := dividerHit(snap.Root,
+	n, first, second, axis, r, ok := padHit(snap.Root,
 		paneArea(snap.Cols, snap.Rows), x, y)
 	if !ok {
 		return dragStart{}, false
@@ -902,18 +902,10 @@ func (t *tui) draw() {
 		if p.ID == t.scroll && t.scrollVT != nil {
 			start, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
 			drawPaneFrom(&b, t.scrollVT, p.Rect, start)
-			continue
-		}
-		if vt := t.vts[p.ID]; vt != nil {
+		} else if vt := t.vts[p.ID]; vt != nil {
 			drawPane(&b, vt, p.Rect)
 		}
-	}
-	drawFrame(&b, t.snap.Cols, t.snap.Rows)
-	if t.snap.Root != nil {
-		drawDividers(&b, t.snap.Root, paneArea(t.snap.Cols, t.snap.Rows))
-	}
-	if p := t.paneByID(win.Focus); p != nil {
-		drawFocusFrame(&b, p.Rect, t.snap.Cols, t.snap.Rows)
+		drawPaneBox(&b, p.Rect, p.ID == win.Focus)
 	}
 	scrollInfo := ""
 	if t.scroll != "" {

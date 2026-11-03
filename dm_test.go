@@ -6,13 +6,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -75,7 +72,8 @@ func TestLayout(t *testing.T) {
 			}
 		}
 	}
-	if rects["a"].W+1+rects["b"].W != 100 {
+	// Two outer borders, the border/pad/border gap, and two inner borders.
+	if rects["a"].W+rects["b"].W+5 != 100 {
 		t.Fatalf("widths do not tile: %+v", rects)
 	}
 	if got := neighbor(rects, "a", "right"); got != "b" {
@@ -97,236 +95,138 @@ func walkNodes(n *Node, f func(*Node)) {
 	}
 }
 
-type dividerCell struct {
-	rect  Rect
-	split *Node
-	sr    Rect
-}
-
-// treeDividers returns every divider cell the tree draws, with the split that
-// owns it and the split's full rectangle.
-func treeDividers(n *Node, r Rect) []dividerCell {
-	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
-		return nil
-	}
-	rects := childRects(n, r)
-	var out []dividerCell
-	for i, kid := range n.Kids {
-		out = append(out, treeDividers(kid, rects[i])...)
-		if i < len(rects)-1 {
-			out = append(out, dividerCell{rect: dividerRect(n, rects, i), split: n, sr: r})
-		}
-	}
-	return out
-}
-
-var dividerPaintRE = regexp.MustCompile("\x1b\\[(\\d+);(\\d+)H([│─]+)")
-
-// paintedDividers runs drawDividers and parses the cursor-addressed cells it
-// paints. A row divider is one cell per escape; a col divider is one escape
-// followed by its run of horizontal glyphs.
-func paintedDividers(t *testing.T, root *Node, r Rect) map[[2]int]rune {
-	t.Helper()
-	var buf bytes.Buffer
-	drawDividers(&buf, root, r)
-	cells := map[[2]int]rune{}
-	for _, m := range dividerPaintRE.FindAllStringSubmatch(buf.String(), -1) {
-		row, _ := strconv.Atoi(m[1])
-		col, _ := strconv.Atoi(m[2])
-		for i, ch := range []rune(m[3]) {
-			x, y := col-1, row-1
-			if ch == '─' {
-				x += i
-			}
-			key := [2]int{x, y}
-			if prev, ok := cells[key]; ok {
-				t.Fatalf("divider painted %d,%d twice (%q and %q)", x, y, prev, ch)
-			}
-			cells[key] = ch
-		}
-	}
-	return cells
-}
-
-// checkTree asserts the three invariants for one tree and rectangle: childRects
-// matches layout, rectangles do not overlap, and every divider dividerHit
-// reports is exactly a cell drawDividers paints.
-func checkTree(t *testing.T, root *Node, r Rect) {
-	t.Helper()
-	rects := map[string]Rect{}
-	layout(root, r, rects)
-	if len(rects) != len(allPanes(root)) {
-		t.Fatalf("layout rects %d, panes %d", len(rects), len(allPanes(root)))
-	}
-
-	var check func(n *Node, nr Rect)
-	check = func(n *Node, nr Rect) {
-		if n == nil || n.Pane != "" || len(n.Kids) == 0 {
-			return
-		}
-		crs := childRects(n, nr)
-		if len(crs) != len(n.Kids) {
-			t.Fatalf("childRects returned %d rects for %d kids", len(crs), len(n.Kids))
-		}
-		for i, kid := range n.Kids {
-			if kr, ok := nodeRect(root, kid, r); !ok || kr != crs[i] {
-				t.Fatalf("nodeRect(%s) = %v ok=%v, childRects = %v", kid.Pane, kr, ok, crs[i])
-			}
-			got := map[string]Rect{}
-			layout(kid, crs[i], got)
-			for id, want := range got {
-				if rects[id] != want {
-					t.Fatalf("%s: childRects rect %v, layout rect %v", id, want, rects[id])
-				}
-			}
-			check(kid, crs[i])
-		}
-	}
-	check(root, r)
-
-	owner := map[[2]int]string{}
-	occupy := func(id string, rr Rect) {
-		if rr.W <= 0 || rr.H <= 0 {
-			t.Fatalf("%s has empty rect %v", id, rr)
-		}
-		for y := rr.Y; y < rr.Y+rr.H; y++ {
-			for x := rr.X; x < rr.X+rr.W; x++ {
-				key := [2]int{x, y}
-				if prev, ok := owner[key]; ok {
-					t.Fatalf("%s and %s overlap at %d,%d", prev, id, x, y)
-				}
-				owner[key] = id
-			}
-		}
-	}
-	for id, rr := range rects {
-		occupy(id, rr)
-	}
-
-	want := map[[2]int]dividerCell{}
-	glyphs := map[[2]int]rune{}
-	for _, dc := range treeDividers(root, r) {
-		ch := '─'
-		if dc.split.Dir == "row" {
-			ch = '│'
-		}
-		for y := dc.rect.Y; y < dc.rect.Y+dc.rect.H; y++ {
-			for x := dc.rect.X; x < dc.rect.X+dc.rect.W; x++ {
-				key := [2]int{x, y}
-				if prev, ok := want[key]; ok {
-					t.Fatalf("splits %p and %p claim divider cell %d,%d",
-						prev.split, dc.split, x, y)
-				}
-				if prev, ok := owner[key]; ok {
-					t.Fatalf("divider overlaps %s at %d,%d", prev, x, y)
-				}
-				owner[key] = "divider"
-				want[key] = dc
-				glyphs[key] = ch
-			}
-		}
-	}
-	if got := paintedDividers(t, root, r); !reflect.DeepEqual(got, glyphs) {
-		t.Fatalf("painted dividers %v, want %v", got, glyphs)
-	}
-
-	reported := map[[2]int]bool{}
-	for y := r.Y; y < r.Y+r.H; y++ {
-		for x := r.X; x < r.X+r.W; x++ {
-			sn, first, second, axis, sr, ok := dividerHit(root, r, x, y)
-			if !ok {
-				continue
-			}
-			key := [2]int{x, y}
-			dc, ok := want[key]
-			if !ok || sn != dc.split || sr != dc.sr || axis != dc.split.Dir ||
-				first == "" || second == "" {
-				t.Fatalf("dividerHit(%d,%d) = %v %q %q %q %v %v, want split %p rect %v",
-					x, y, sn, first, second, axis, sr, ok, dc.split, dc.sr)
-			}
-			reported[key] = true
-		}
-	}
-	for key, dc := range want {
-		if reported[key] {
-			continue
-		}
-		// A crossing cell may be unreported: the pane on one side is another
-		// split's divider. Every other painted cell must be a hit.
-		cross := false
-		for _, d := range [][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}} {
-			if nd, ok := want[[2]int{key[0] + d[0], key[1] + d[1]}]; ok && nd.split != dc.split {
-				cross = true
-			}
-		}
-		if !cross {
-			t.Fatalf("divider cell %v of split %p is not reported by dividerHit", key, dc.split)
-		}
-	}
-}
-
-func TestChildRectsShapes(t *testing.T) {
-	shapes := []struct {
+// boxShapes are the tree shapes the geometry must hold for.
+func boxShapes() []struct {
+	name string
+	root *Node
+} {
+	leaf := func(id string) *Node { return &Node{Pane: id} }
+	row := func(kids ...*Node) *Node { return &Node{Dir: "row", Kids: kids} }
+	col := func(kids ...*Node) *Node { return &Node{Dir: "col", Kids: kids} }
+	return []struct {
 		name string
 		root *Node
-		r    Rect
 	}{
-		{"single pane", &Node{Pane: "a"}, Rect{2, 3, 5, 4}},
-		{"flat row", &Node{Dir: "row", Kids: []*Node{
-			{Pane: "a"}, {Pane: "b"}, {Pane: "c"},
-		}}, Rect{0, 0, 40, 10}},
-		{"flat col", &Node{Dir: "col", Kids: []*Node{
-			{Pane: "a"}, {Pane: "b"}, {Pane: "c"},
-		}, Sizes: []float64{0.2, 0.3, 0.5}}, Rect{1, 2, 20, 20}},
-		{"row{col{a,c},b}", &Node{Dir: "row", Kids: []*Node{
-			{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "c"}}, Sizes: []float64{0.6, 0.4}},
-			{Pane: "b"},
-		}, Sizes: []float64{0.7, 0.3}}, Rect{0, 0, 100, 29}},
-		{"col{row{a,b},c}", &Node{Dir: "col", Kids: []*Node{
-			{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}, Sizes: []float64{0.4, 0.6}},
-			{Pane: "c"},
-		}, Sizes: []float64{0.5, 0.5}}, Rect{3, 4, 33, 21}},
-		{"three kids", &Node{Dir: "col", Kids: []*Node{
-			{Pane: "a"}, {Pane: "b"}, {Pane: "c"},
-		}, Sizes: []float64{0.25, 0.25, 0.5}}, Rect{0, 0, 16, 40}},
-		{"one cell child", &Node{Dir: "row", Kids: []*Node{
-			{Pane: "a"}, {Pane: "b"},
-		}, Sizes: []float64{0.02, 0.98}}, Rect{0, 0, 12, 4}},
-	}
-	for _, sh := range shapes {
-		t.Run(sh.name, func(t *testing.T) { checkTree(t, sh.root, sh.r) })
+		{"single", leaf("a")},
+		{"row2", row(leaf("a"), leaf("b"))},
+		{"col2", col(leaf("a"), leaf("b"))},
+		{"row3", row(leaf("a"), leaf("b"), leaf("c"))},
+		{"nested", row(col(leaf("a"), leaf("c")), leaf("b"))},
+		{"nested2", col(row(leaf("a"), leaf("b")), leaf("c"))},
 	}
 }
 
-func genTree(rng *rand.Rand, depth int, next *int) *Node {
-	*next = *next + 1
-	if depth == 0 || rng.Intn(3) == 0 {
-		return &Node{Pane: fmt.Sprintf("p%d", *next)}
-	}
-	k := 2
-	dir := "col"
-	if rng.Intn(2) == 0 {
-		dir = "row"
-	}
-	// Two kids with pinned equal shares keep every split wide enough to hold
-	// its children and divider, so the rectangles stay inside their parent.
-	n := &Node{Dir: dir, Sizes: []float64{0.5, 0.5}}
-	for i := 0; i < k; i++ {
-		n.Kids = append(n.Kids, genTree(rng, depth-1, next))
-	}
-	return n
-}
-
-func TestChildRectsGenerated(t *testing.T) {
-	for seed := int64(1); seed <= 3; seed++ {
-		rng := rand.New(rand.NewSource(seed))
-		next := 0
-		root := genTree(rng, 4, &next)
-		for _, r := range []Rect{{0, 0, 80, 40}, {3, 2, 41, 33}} {
-			t.Run(fmt.Sprintf("seed%d-%dx%d", seed, r.W, r.H), func(t *testing.T) {
-				checkTree(t, root, r)
-			})
+// TestBoxTiling proves the boxes and pads tile each split exactly, and that
+// pane interiors never overlap.
+func TestBoxTiling(t *testing.T) {
+	for _, shape := range boxShapes() {
+		area := Rect{0, 0, 80, 24}
+		var walk func(n *Node, a Rect)
+		walk = func(n *Node, a Rect) {
+			if n.Pane != "" {
+				in := insetBox(a)
+				if in.W <= 0 || in.H <= 0 {
+					t.Fatalf("%s: %s has an empty interior in %v", shape.name, n.Pane, a)
+				}
+				return
+			}
+			boxes := childBoxRects(n, a)
+			if len(boxes) != len(n.Kids) {
+				t.Fatalf("%s: %d boxes for %d kids", shape.name, len(boxes), len(n.Kids))
+			}
+			used := 0
+			for i, b := range boxes {
+				if n.Dir == "row" {
+					if b.X < a.X || b.X+b.W > a.X+a.W || b.Y != a.Y || b.H != a.H {
+						t.Fatalf("%s: box %v escapes %v", shape.name, b, a)
+					}
+					used += b.W
+				} else {
+					if b.Y < a.Y || b.Y+b.H > a.Y+a.H || b.X != a.X || b.W != a.W {
+						t.Fatalf("%s: box %v escapes %v", shape.name, b, a)
+					}
+					used += b.H
+				}
+				if i > 0 {
+					used++ // the pad before this box
+				}
+				walk(n.Kids[i], b)
+			}
+			want := a.W
+			if n.Dir != "row" {
+				want = a.H
+			}
+			if used != want {
+				t.Fatalf("%s: boxes and pads use %d of %d", shape.name, used, want)
+			}
 		}
+		walk(shape.root, area)
+
+		rects := map[string]Rect{}
+		layout(shape.root, area, rects)
+		ids := allPanes(shape.root)
+		for i := 0; i < len(ids); i++ {
+			for j := i + 1; j < len(ids); j++ {
+				a, b := rects[ids[i]], rects[ids[j]]
+				if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
+					t.Fatalf("%s: %s and %s overlap: %v %v", shape.name, ids[i], ids[j], a, b)
+				}
+			}
+		}
+	}
+}
+
+func TestPadHitFindsThePair(t *testing.T) {
+	a, b, c := "a", "b", "c"
+	flat := &Node{Dir: "row", Kids: []*Node{{Pane: a}, {Pane: b}}, Sizes: []float64{0.5, 0.5}}
+	area := Rect{0, 0, 80, 24}
+	boxes := childBoxRects(flat, area)
+	pad := padRect(flat, boxes, 0)
+	split, first, second, axis, sr, ok := padHit(flat, area, pad.X, pad.Y+3)
+	if !ok || split != flat || first != a || second != b || axis != "row" || sr != area {
+		t.Fatalf("pad hit = %v %q %q %q %v %v", split, first, second, axis, sr, ok)
+	}
+	if _, _, _, _, _, ok := padHit(flat, area, boxes[0].X+1, boxes[0].Y+1); ok {
+		t.Fatal("a pane interior hit the pad")
+	}
+
+	// Nested: the outer pad pairs a with the right column.
+	inner := &Node{Dir: "row", Kids: []*Node{{Pane: b}, {Pane: c}}, Sizes: []float64{0.5, 0.5}}
+	nested := &Node{Dir: "row", Kids: []*Node{{Pane: a}, inner}, Sizes: []float64{0.6, 0.4}}
+	nb := childBoxRects(nested, area)
+	np := padRect(nested, nb, 0)
+	_, first, second, axis, _, ok = padHit(nested, area, np.X, np.Y+3)
+	if !ok || axis != "row" || first != a || (second != b && second != c) {
+		t.Fatalf("nested pad hit = %q %q %q %v", first, second, axis, ok)
+	}
+	ib := childBoxRects(inner, nb[1])
+	ipad := padRect(inner, ib, 0)
+	_, first, second, _, _, ok = padHit(nested, area, ipad.X, ipad.Y+3)
+	if !ok || first != b || second != c {
+		t.Fatalf("inner pad hit = %q %q %v", first, second, ok)
+	}
+}
+
+func TestNodeRectMatchesLayout(t *testing.T) {
+	for _, shape := range boxShapes() {
+		area := Rect{0, 0, 80, 24}
+		rects := map[string]Rect{}
+		layout(shape.root, area, rects)
+		walkNodes(shape.root, func(n *Node) {
+			got, ok := nodeRect(shape.root, n, area)
+			if !ok {
+				t.Fatalf("%s: nodeRect missed a node", shape.name)
+			}
+			if n.Pane != "" {
+				if got != rects[n.Pane] {
+					t.Fatalf("%s: nodeRect(%s) = %v, layout = %v", shape.name, n.Pane, got, rects[n.Pane])
+				}
+				return
+			}
+			if got.W <= 0 || got.H <= 0 {
+				t.Fatalf("%s: split area %v", shape.name, got)
+			}
+		})
 	}
 }
 
@@ -597,7 +497,7 @@ func TestFocusForClick(t *testing.T) {
 
 func TestPaneAreaInset(t *testing.T) {
 	area := paneArea(100, 30)
-	if area != (Rect{X: 1, Y: 1, W: 98, H: 27}) {
+	if area != (Rect{X: 0, Y: 0, W: 100, H: 29}) {
 		t.Fatalf("pane area = %+v", area)
 	}
 	if paneArea(3, 4) != (Rect{X: 0, Y: 0, W: 3, H: 3}) {
@@ -605,35 +505,22 @@ func TestPaneAreaInset(t *testing.T) {
 	}
 }
 
-func TestFocusFrameWrapsPane(t *testing.T) {
+func TestDrawPaneBox(t *testing.T) {
 	var b bytes.Buffer
-	drawFocusFrame(&b, Rect{X: 10, Y: 5, W: 20, H: 8}, 100, 30)
+	drawPaneBox(&b, Rect{X: 10, Y: 5, W: 20, H: 8}, true)
 	out := b.String()
-	for _, want := range []string{"┌", "┐", "└", "┘", "│", "─", "\x1b[1;36m"} {
+	for _, want := range []string{"┌", "┐", "└", "┘", "│", "─", "\x1b[1;96m"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("frame missing %q: %q", want, out)
+			t.Fatalf("box missing %q: %q", want, out)
 		}
 	}
-	// The top-left corner is one cell above and left of the pane.
-	if !strings.Contains(out, "\x1b[5;10H┌") {
-		t.Fatalf("frame corner not at 9,5: %q", out)
+	if !strings.Contains(out, "\x1b[5;10H┌") || !strings.Contains(out, "\x1b[5;31H┐") {
+		t.Fatalf("box corners are at the wrong cells: %q", out)
 	}
-	if !strings.Contains(out, "\x1b[5;31H┐") {
-		t.Fatalf("top-right corner not at 30,5: %q", out)
-	}
-}
-
-func TestFocusFrameJunctions(t *testing.T) {
-	// The focused pane sits against the top frame: its top corners are T
-	// junctions, not corners, so the frame line stays unbroken.
-	var b bytes.Buffer
-	drawFocusFrame(&b, Rect{X: 30, Y: 1, W: 28, H: 12}, 60, 15)
-	out := b.String()
-	if !strings.Contains(out, "\x1b[1;30H┬") || !strings.Contains(out, "\x1b[1;59H┬") {
-		t.Fatalf("top corners are not junctions: %q", out)
-	}
-	if !strings.Contains(out, "\x1b[14;30H┴") || !strings.Contains(out, "\x1b[14;59H┴") {
-		t.Fatalf("bottom corners are not junctions: %q", out)
+	var dim bytes.Buffer
+	drawPaneBox(&dim, Rect{X: 10, Y: 5, W: 20, H: 8}, false)
+	if strings.Contains(dim.String(), "\x1b[1;96m") || !strings.Contains(dim.String(), "\x1b[90m") {
+		t.Fatalf("inactive box is not dim: %q", dim.String())
 	}
 }
 
@@ -656,13 +543,13 @@ func TestSplitRatio(t *testing.T) {
 	splitLeaf(root, "a", "right", "b", 0.25)
 	rects := map[string]Rect{}
 	layout(root, Rect{0, 0, 100, 10}, rects)
-	if got := rects["a"].W; got < 24 || got > 26 {
-		t.Fatalf("existing pane width = %d, want about 25", got)
+	if got := rects["a"].W; got < 21 || got > 23 {
+		t.Fatalf("existing pane width = %d, want about 22", got)
 	}
-	if got := rects["b"].W; got < 73 || got > 76 {
-		t.Fatalf("new pane width = %d, want about 75", got)
+	if got := rects["b"].W; got < 72 || got > 74 {
+		t.Fatalf("new pane width = %d, want about 73", got)
 	}
-	if rects["a"].W+rects["b"].W+1 != 100 {
+	if rects["a"].W+rects["b"].W+5 != 100 {
 		t.Fatalf("sizes do not tile: %+v", rects)
 	}
 }
@@ -1107,51 +994,6 @@ func (h *harness) history(session, pane string, n int) []string {
 	return out
 }
 
-func TestDividerAt(t *testing.T) {
-	r := Rect{0, 0, 100, 29}
-
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
-	n, first, second, axis, sr, ok := dividerHit(row, r, 49, 5)
-	if !ok || n != row || first != "a" || second != "b" || axis != "row" || sr != r {
-		t.Fatalf("row divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
-			n, first, second, axis, sr, ok)
-	}
-	if _, _, _, _, _, ok := dividerHit(row, r, 10, 5); ok {
-		t.Fatal("row divider hit inside a pane")
-	}
-
-	col := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
-	n, first, second, axis, sr, ok = dividerHit(col, r, 5, 14)
-	if !ok || n != col || first != "a" || second != "b" || axis != "col" || sr != r {
-		t.Fatalf("col divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
-			n, first, second, axis, sr, ok)
-	}
-	if _, _, _, _, _, ok := dividerHit(col, r, 5, 2); ok {
-		t.Fatal("col divider hit inside a pane")
-	}
-
-	// Nested: the outer hit must carry the outer split's full rect, not the
-	// bounding box of the two leaves. The inner hit carries the col rect.
-	nested := &Node{Dir: "row", Kids: []*Node{
-		{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "c"}}},
-		{Pane: "b"},
-	}}
-	n, first, second, axis, sr, ok = dividerHit(nested, r, 49, 5)
-	if !ok || n != nested || first != "a" || second != "b" || axis != "row" || sr != r {
-		t.Fatalf("outer divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
-			n, first, second, axis, sr, ok)
-	}
-	inner := nested.Kids[0]
-	n, first, second, axis, sr, ok = dividerHit(nested, r, 5, 14)
-	if !ok || n != inner || first != "a" || second != "c" || axis != "col" ||
-		sr != (Rect{X: 0, Y: 0, W: 49, H: 29}) {
-		t.Fatalf("inner divider: split=%v first=%q second=%q axis=%q rect=%v ok=%v",
-			n, first, second, axis, sr, ok)
-	}
-}
-
 func testSnapshot(root *Node, cols, rows int, mouse map[string]bool) *Snapshot {
 	snap := &Snapshot{Root: root, Cols: cols, Rows: rows}
 	rects := map[string]Rect{}
@@ -1170,7 +1012,7 @@ func TestDragPress(t *testing.T) {
 	snap := testSnapshot(row, 100, 30, nil)
 	ds, ok := dragPress(snap, 49, 5)
 	if !ok || ds.first != "a" || ds.second != "b" || ds.axis != "row" ||
-		ds.rect != (Rect{X: 1, Y: 1, W: 98, H: 27}) {
+		ds.rect != paneArea(100, 30) {
 		t.Fatalf("divider press: %+v ok=%v", ds, ok)
 	}
 	if _, ok := dragPress(snap, 10, 5); ok {
@@ -1315,12 +1157,12 @@ func TestResizeSplit(t *testing.T) {
 	if got[q1].W != 3 {
 		t.Fatalf("outer minimum with same-axis nesting = %v, want 3", got)
 	}
-	if got[q2].W+got[q3].W+1 != cols-6 {
+	if got[q2].W+got[q3].W+3 != cols-8 {
 		t.Fatalf("outer right side width: %v", got)
 	}
 	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":1}`, "-s", "rs2")
 	got = h.rects("rs2")
-	if got[q1].W != cols-6 || got[q2].W+got[q3].W+1 != 3 {
+	if got[q1].W != cols-8 {
 		t.Fatalf("outer maximum with same-axis nesting: %v", got)
 	}
 }
