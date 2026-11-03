@@ -101,10 +101,19 @@ func TestThinRailFoldState(t *testing.T) {
 		thinPane("w2p1", "s2", "w2", "blocked", false),
 	}
 	open := thinSnapshot(panes)
-	folded := thinSnapshot(panes)
-	for i := range folded.All {
-		folded.All[i].WindowUnfolded = false
-		folded.All[i].Message = "a note no thin row can show"
+	// Fold a copy: folding the shared slice would fold the open snapshot too,
+	// and the comparison below would only be comparing a snapshot to itself.
+	frozen := append([]AllPane(nil), panes...)
+	for i := range frozen {
+		frozen[i].WindowUnfolded = false
+		frozen[i].Message = "a note no thin row can show"
+	}
+	folded := thinSnapshot(frozen)
+	if folded.All[0].WindowUnfolded || folded.All[0].Message == "" {
+		t.Fatalf("folded snapshot was not folded: %+v", folded.All[0])
+	}
+	if !open.All[0].WindowUnfolded || open.All[0].Message != "" {
+		t.Fatalf("folding the copy changed the open snapshot: %+v", open.All[0])
 	}
 
 	openItems, foldedItems := railItems(open), railItems(folded)
@@ -119,6 +128,14 @@ func TestThinRailFoldState(t *testing.T) {
 				i, foldedItems[i], openItems[i])
 		}
 	}
+	// The folded window carries a message that an expanded rail would draw as
+	// a note row. No thin row may carry it, or any other header row.
+	for i, it := range foldedItems {
+		if it.kind != railPane {
+			t.Fatalf("folded thin row %d is kind %d, want a pane: %+v",
+				i, it.kind, it)
+		}
+	}
 
 	openVT, foldedVT := thinScreen(t, open), thinScreen(t, folded)
 	openVT.Lock()
@@ -131,6 +148,69 @@ func TestThinRailFoldState(t *testing.T) {
 				t.Fatalf("cell %d,%d: folded %q, unfolded %q", x, y, b.Char, a.Char)
 			}
 		}
+	}
+}
+
+// TestThinRailGlyphColumn draws the two states a thin row can leave empty: a
+// shell with no state shows a blank at the glyph column, an agent with no
+// state shows the fallback mark there.
+func TestThinRailGlyphColumn(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	shell := thinPane("w1p1", "s1", "w1", "", false)
+	agent := thinPane("w1p2", "s1", "w1", "", false)
+	agent.Agent = true
+	snap := thinSnapshot([]AllPane{shell, agent})
+	vt := thinScreen(t, snap)
+	vt.Lock()
+	defer vt.Unlock()
+	if g := vt.Cell(2, 0); !thinBlank(g) {
+		t.Fatalf("shell row glyph = %q at column 2, want a blank", g.Char)
+	}
+	if g := vt.Cell(2, 1); g.Char != '?' {
+		t.Fatalf("agent row glyph = %q at column 2, want ?", g.Char)
+	}
+	// The mark before the glyph keeps its column: an agent bar on the agent
+	// row and a blank on the shell row.
+	if g := vt.Cell(0, 1); g.Char != '\u258e' {
+		t.Fatalf("agent row mark = %q at column 0, want the agent bar", g.Char)
+	}
+	if g := vt.Cell(0, 0); !thinBlank(g) {
+		t.Fatalf("shell row mark = %q at column 0, want a blank", g.Char)
+	}
+}
+
+// TestThinRailFocusBackground paints the focused pane row with railFocusBG and
+// leaves every other row on the rail background, so one row of a stack of
+// glyph rows reads as the focused one.
+func TestThinRailFocusBackground(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := thinSnapshot([]AllPane{
+		thinPane("w1p1", "s1", "w1", "working", false),
+		thinPane("w1p2", "s1", "w1", "idle", true),
+		thinPane("w2p1", "s2", "w2", "blocked", false),
+	})
+	ground := func(c rgb) vt10x.Color { return vt10x.Color(c.r<<16 | c.g<<8 | c.b) }
+	vt := thinScreen(t, snap)
+	vt.Lock()
+	defer vt.Unlock()
+	for y := 0; y < snap.Rows-1; y++ {
+		want := ground(railBG)
+		if y == 1 {
+			want = ground(railFocusBG)
+		}
+		for x := 0; x < snap.Rail; x++ {
+			if g := vt.Cell(x, y); g.BG != want {
+				t.Fatalf("cell %d,%d bg = %v, want %v", x, y, g.BG, want)
+			}
+		}
+	}
+	// The focused row is the bold one, on its glyph cell.
+	focus := vt.Cell(2, 1)
+	if focus.Char != '○' || focus.Mode&attrBold == 0 {
+		t.Fatalf("focused glyph = %q mode %d, want a bold ○", focus.Char, focus.Mode)
+	}
+	if g := vt.Cell(2, 0); g.Mode&attrBold != 0 {
+		t.Fatalf("unfocused glyph is bold: mode %d", g.Mode)
 	}
 }
 
