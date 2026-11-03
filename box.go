@@ -40,6 +40,19 @@ type entry struct {
 	Msg   string    `json:"msg"`
 }
 
+// watch is one reader's place in the log: the pane, its filter and the highest
+// seq served under it. Filter is an exact key or a branch, never both. Parked
+// is true while a msg-wait on the filter is outstanding. Every field is always
+// present, so a reader can tell an empty filter from a missing one.
+type watch struct {
+	Pane      string    `json:"pane"`
+	Key       string    `json:"key"`
+	KeyPrefix string    `json:"keyPrefix"`
+	Cursor    int       `json:"cursor"`
+	Parked    bool      `json:"parked"`
+	At        time.Time `json:"at"`
+}
+
 // boxState is the closed set of states an entry can carry. "clear" is a pane
 // status, not a box state, and parseState rejects it.
 type boxState string
@@ -95,6 +108,9 @@ type listReq struct {
 	KeyPrefix string `json:"keyPrefix"`
 	Limit     int    `json:"limit"`
 	AfterSeq  *int   `json:"afterSeq"`
+	// From is the reader pane. Empty means the caller is not a pane and records
+	// nothing; a non-empty id is shape-checked here and the server looks it up.
+	From string `json:"from"`
 }
 
 // clearReq is the msg-clear request. An empty key clears every entry.
@@ -115,6 +131,8 @@ type waitReq struct {
 	State     boxState `json:"state,omitempty"`
 	TimeoutMs int      `json:"timeoutMs"`
 	AfterSeq  *int     `json:"afterSeq"`
+	// From is the reader pane, as on list: empty records nothing.
+	From string `json:"from"`
 }
 
 // schemaReq is the msg-schema request: no fields.
@@ -149,6 +167,14 @@ type schemaReply struct {
 	Schema map[string]any `json:"schema"`
 }
 
+// watchersReq is the msg-watchers request: no fields.
+type watchersReq struct{}
+
+// watchersReply carries every live watch, sorted by pane, key and keyPrefix.
+type watchersReply struct {
+	Watchers []watch `json:"watchers"`
+}
+
 // boxAction is one frozen action: the request the decoder builds, the reply the
 // server sends, and the request fields the schema marks required. Validation
 // enforces the same required set: parseState rejects an empty state, and the
@@ -180,6 +206,10 @@ var boxWire = map[string]boxAction{
 		request:  func() any { return &waitReq{} },
 		reply:    waitReply{},
 		required: []string{"timeoutMs"},
+	},
+	"msg-watchers": {
+		request: func() any { return &watchersReq{} },
+		reply:   watchersReply{},
 	},
 	"msg-schema": {
 		request: func() any { return &schemaReq{} },
@@ -238,14 +268,17 @@ func validateBoxReq(action string, req any) error {
 		if _, err := parseState(string(r.State)); err != nil {
 			return err
 		}
-		if r.From != "" && !paneIDShape(r.From) {
-			return fmt.Errorf("box: from %q is not a pane id", r.From)
+		if err := checkFrom(r.From); err != nil {
+			return err
 		}
 		if err := checkText("key", r.Key, boxMaxKey); err != nil {
 			return err
 		}
 		return checkText("msg", r.Msg, boxMaxMsg)
 	case *listReq:
+		if err := checkFrom(r.From); err != nil {
+			return err
+		}
 		if err := checkTopic(r.Key, r.KeyPrefix); err != nil {
 			return err
 		}
@@ -263,6 +296,9 @@ func validateBoxReq(action string, req any) error {
 				return err
 			}
 		}
+		if err := checkFrom(r.From); err != nil {
+			return err
+		}
 		if err := checkTopic(r.Key, r.KeyPrefix); err != nil {
 			return err
 		}
@@ -273,7 +309,7 @@ func validateBoxReq(action string, req any) error {
 			return fmt.Errorf("box: timeoutMs %d, want 1 to %d", r.TimeoutMs, boxMaxWaitMs)
 		}
 		return nil
-	case *schemaReq:
+	case *schemaReq, *watchersReq:
 		return nil
 	}
 	return fmt.Errorf("box: %s has no validator for %T", action, req)
@@ -345,6 +381,16 @@ func (e entry) validate() error {
 	return checkText("msg", e.Msg, boxMaxMsg)
 }
 
+// checkFrom is the optional reader pane on a read. Empty means the caller is
+// not a pane; a non-empty id must look like a pane id. The server checks that
+// the id exists in the session tree.
+func checkFrom(from string) error {
+	if from != "" && !paneIDShape(from) {
+		return fmt.Errorf("box: from %q is not a pane id", from)
+	}
+	return nil
+}
+
 // paneIDShape is the addressable pane id: a window id and a pane number, w3p1.
 // The server checks the id exists in the session tree; this is the cheap shape
 // check that keeps junk out before that lookup.
@@ -412,6 +458,8 @@ func typeSchema(t reflect.Type) map[string]any {
 		return s
 	case reflect.Int:
 		return map[string]any{"type": "integer"}
+	case reflect.Bool:
+		return map[string]any{"type": "boolean"}
 	case reflect.Slice:
 		return map[string]any{"type": "array", "items": typeSchema(t.Elem())}
 	case reflect.Map, reflect.Interface:

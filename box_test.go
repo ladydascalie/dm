@@ -14,6 +14,7 @@ type schemaProp struct {
 	Format               string                `json:"format"`
 	Enum                 []string              `json:"enum"`
 	Properties           map[string]schemaProp `json:"properties"`
+	Items                *schemaProp           `json:"items"`
 	Required             []string              `json:"required"`
 	AdditionalProperties *bool                 `json:"additionalProperties"`
 }
@@ -39,6 +40,9 @@ func readBoxSchema(t *testing.T) schemaDoc {
 	}
 	return doc
 }
+
+// emptyReqActions are the actions whose request carries no field.
+var emptyReqActions = map[string]bool{"msg-schema": true, "msg-watchers": true}
 
 func sameStrings(a, b []string) bool {
 	if len(a) != len(b) {
@@ -200,7 +204,7 @@ func TestMessageBoxSchemaMatchesEnum(t *testing.T) {
 		if shape.Request.Type != "object" || shape.Reply.Type != "object" {
 			t.Fatalf("%s shapes = %+v / %+v", action, shape.Request, shape.Reply)
 		}
-		if len(shape.Request.Properties) == 0 && action != "msg-schema" {
+		if len(shape.Request.Properties) == 0 && !emptyReqActions[action] {
 			t.Fatalf("%s request schema = %+v", action, shape.Request)
 		}
 		if len(shape.Reply.Properties) == 0 {
@@ -408,5 +412,151 @@ func TestMessageBoxWaitFields(t *testing.T) {
 		if !c.ok && err == nil {
 			t.Fatalf("%s accepted, want an error", c.name)
 		}
+	}
+}
+
+// TestMessageBoxGoldenWatch pins the frozen watch JSON, field order included.
+func TestMessageBoxGoldenWatch(t *testing.T) {
+	want := `{"pane":"w1p2","key":"lane/a","keyPrefix":"","cursor":7,"parked":true,"at":"2026-11-03T14:40:12Z"}`
+	w := watch{
+		Pane:   "w1p2",
+		Key:    "lane/a",
+		Cursor: 7,
+		Parked: true,
+		At:     time.Date(2026, time.November, 3, 14, 40, 12, 0, time.UTC),
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal watch: %v", err)
+	}
+	if string(b) != want {
+		t.Fatalf("watch json =\n %s\nwant\n %s", b, want)
+	}
+	var back watch
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatalf("decode watch: %v", err)
+	}
+	if back.Pane != w.Pane || back.Key != w.Key || back.KeyPrefix != w.KeyPrefix ||
+		back.Cursor != w.Cursor || back.Parked != w.Parked || !back.At.Equal(w.At) {
+		t.Fatalf("watch round trip = %+v", back)
+	}
+
+	reply, err := json.Marshal(watchersReply{Watchers: []watch{w}})
+	if err != nil {
+		t.Fatalf("marshal watchers reply: %v", err)
+	}
+	if got, want := string(reply), `{"watchers":[`+want+`]}`; got != want {
+		t.Fatalf("watchers reply json =\n %s\nwant\n %s", got, want)
+	}
+}
+
+// TestMessageBoxSchemaReadsAndWatchers proves the derived schema already names
+// from on both reads and the six watcher fields, and that neither read makes
+// from required.
+func TestMessageBoxSchemaReadsAndWatchers(t *testing.T) {
+	doc := readBoxSchema(t)
+	for _, action := range []string{"msg-list", "msg-wait"} {
+		req := doc.Actions[action].Request
+		if req.Properties["from"].Type != "string" {
+			t.Fatalf("%s from schema = %+v", action, req.Properties["from"])
+		}
+		for _, name := range req.Required {
+			if name == "from" {
+				t.Fatalf("%s marks from required: %v", action, req.Required)
+			}
+		}
+	}
+	if got := doc.Actions["msg-list"].Request.Required; len(got) != 0 {
+		t.Fatalf("list required = %v, want none", got)
+	}
+	if got := doc.Actions["msg-wait"].Request.Required; !sameStrings(got, []string{"timeoutMs"}) {
+		t.Fatalf("wait required = %v, want [timeoutMs]", got)
+	}
+
+	watchers, ok := doc.Actions["msg-watchers"]
+	if !ok {
+		t.Fatal("schema has no msg-watchers action")
+	}
+	if got := watchers.Request.Required; len(got) != 0 {
+		t.Fatalf("watchers required = %v, want none", got)
+	}
+	list := watchers.Reply.Properties["watchers"]
+	if list.Type != "array" || list.Items == nil {
+		t.Fatalf("watchers reply schema = %+v", list)
+	}
+	w := *list.Items
+	if w.Type != "object" {
+		t.Fatalf("watch schema type = %q", w.Type)
+	}
+	if want := []string{"pane", "key", "keyPrefix", "cursor", "parked", "at"}; !sameStrings(w.Required, want) {
+		t.Fatalf("watch required = %v, want %v", w.Required, want)
+	}
+	for name, want := range map[string]string{"pane": "string", "key": "string", "keyPrefix": "string", "cursor": "integer", "parked": "boolean"} {
+		if got := w.Properties[name].Type; got != want {
+			t.Fatalf("watch %s type = %q, want %q", name, got, want)
+		}
+	}
+	if at := w.Properties["at"]; at.Type != "string" || at.Format != "date-time" {
+		t.Fatalf("watch at schema = %+v", at)
+	}
+}
+
+// TestMessageBoxReadsFrom proves an explicit empty from is accepted on both
+// reads, a malformed one is refused, and a pane id is kept.
+func TestMessageBoxReadsFrom(t *testing.T) {
+	cases := []struct {
+		name   string
+		action string
+		raw    string
+		ok     bool
+	}{
+		{"list empty from", "msg-list", `{"from":""}`, true},
+		{"list pane from", "msg-list", `{"from":"w3p1"}`, true},
+		{"list bad from", "msg-list", `{"from":"lane"}`, false},
+		{"list pane id without a pane", "msg-list", `{"from":"w3p"}`, false},
+		{"wait empty from", "msg-wait", `{"timeoutMs":1000,"from":""}`, true},
+		{"wait pane from", "msg-wait", `{"timeoutMs":1000,"from":"w12p34"}`, true},
+		{"wait bad from", "msg-wait", `{"timeoutMs":1000,"from":"3p1"}`, false},
+	}
+	for _, c := range cases {
+		got, err := parseBoxReq(c.action, json.RawMessage(c.raw))
+		if c.ok && err != nil {
+			t.Fatalf("%s rejected: %v", c.name, err)
+		}
+		if !c.ok && err == nil {
+			t.Fatalf("%s accepted, want an error", c.name)
+		}
+		if !c.ok {
+			continue
+		}
+		switch req := got.(type) {
+		case *listReq:
+			if req.From != "w3p1" && req.From != "" {
+				t.Fatalf("%s from = %q", c.name, req.From)
+			}
+		case *waitReq:
+			if req.From != "w12p34" && req.From != "" {
+				t.Fatalf("%s from = %q", c.name, req.From)
+			}
+		default:
+			t.Fatalf("%s decoded to %T", c.name, got)
+		}
+	}
+}
+
+// TestMessageBoxWatchersRequest proves msg-watchers decodes an empty request
+// and refuses a field it does not name.
+func TestMessageBoxWatchersRequest(t *testing.T) {
+	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(` { } `)} {
+		got, err := parseBoxReq("msg-watchers", raw)
+		if err != nil {
+			t.Fatalf("msg-watchers %q rejected: %v", raw, err)
+		}
+		if _, ok := got.(*watchersReq); !ok {
+			t.Fatalf("msg-watchers %q decoded to %T", raw, got)
+		}
+	}
+	if _, err := parseBoxReq("msg-watchers", json.RawMessage(`{"pane":"w1p1"}`)); err == nil {
+		t.Fatal("msg-watchers accepted a field, want an error")
 	}
 }
