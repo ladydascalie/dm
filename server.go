@@ -115,6 +115,7 @@ type branchEntry struct {
 type gitInfo struct {
 	branch   string
 	worktree string
+	inRepo   bool
 	dirty    bool
 	added    int
 	deleted  int
@@ -157,7 +158,7 @@ var detectGit = func(cwd string) gitInfo {
 	if len(lines) < 4 {
 		return gitInfo{}
 	}
-	info := gitInfo{branch: lines[0]}
+	info := gitInfo{branch: lines[0], inRepo: true}
 	root := filepath.Clean(lines[1])
 	gd, cd := lines[2], lines[3]
 	if !filepath.IsAbs(gd) {
@@ -627,6 +628,7 @@ func (s *server) allPanesLocked() []AllPane {
 					gi := s.gitFor(ps.Cwd)
 					info.Branch = gi.branch
 					info.Worktree = gi.worktree
+					info.InRepo = gi.inRepo
 					info.Dirty = gi.dirty
 					info.Added = gi.added
 					info.Deleted = gi.deleted

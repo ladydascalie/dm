@@ -1195,8 +1195,8 @@ func TestRailContrast(t *testing.T) {
 	}
 }
 
-// TestRailAccent holds a workspace to one hue for its whole life and keeps the
-// six accents distinct, so two workspaces never share a colour by accident.
+// TestRailAccent keeps railAccent stable per id and the six palette hues
+// distinct. Giving two live workspaces different hues is railItems' job.
 func TestRailAccent(t *testing.T) {
 	for _, ws := range []string{"main", "work", "dm-git-w1", ""} {
 		first, second := railAccent(ws), railAccent(ws)
@@ -1227,6 +1227,7 @@ func TestRailNerdIcons(t *testing.T) {
 	t.Setenv("DM_NERD", "1")
 	agent := railOnePane("working", "pi", 12, 40, 6)
 	agent.All[0].Agent = true
+	agent.All[0].InRepo = true
 	var b bytes.Buffer
 	drawRail(&b, agent)
 	out := b.String()
@@ -1244,14 +1245,15 @@ func TestRailNerdIcons(t *testing.T) {
 	if strings.Contains(out, "\u258e") {
 		t.Fatalf("nerd rail drew the fallback bar: %q", out)
 	}
-	// The full rail nests: accent bar at 0, caret at 2, pane mark at 4, glyph at 6.
+	// The full rail nests: accent bar at 0, caret at 2, pane mark at 6, glyph
+	// at 8, under the note line at 4.
 	vt := vt10x.New(vt10x.WithSize(40, 6))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw nerd rail: %v", err)
 	}
 	vt.Lock()
 	bar, caret := vt.Cell(0, 0).Char, vt.Cell(2, 1).Char
-	mark, glyph := vt.Cell(4, 2).Char, vt.Cell(6, 2).Char
+	mark, glyph := vt.Cell(6, 2).Char, vt.Cell(8, 2).Char
 	vt.Unlock()
 	if bar != '▌' || caret != '\uf0d7' || mark != '\uf135' || glyph != '\uf013' {
 		t.Fatalf("nerd columns = %q %q %q %q, want bar caret robot gear",
@@ -1283,10 +1285,11 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 			t.Fatalf("draw shell rail: %v", err)
 		}
 		vt.Lock()
-		glyph, text := vt.Cell(6, 2).Char, vt.Cell(8, 2).Char
+		glyph, text := vt.Cell(8, 2).Char, vt.Cell(10, 2).Char
 		vt.Unlock()
 		if glyph != ' ' || text != 'w' {
-			t.Fatalf("shell row status %q = %q at 6, %q at 8: want a blank cell", status, glyph, text)
+			t.Fatalf("shell row status %q = %q at 8, %q at 10: want a blank cell",
+				status, glyph, text)
 		}
 	}
 
@@ -1298,10 +1301,10 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 		t.Fatalf("draw agent rail: %v", err)
 	}
 	vt.Lock()
-	glyph := vt.Cell(6, 2).Char
+	glyph := vt.Cell(8, 2).Char
 	vt.Unlock()
 	if glyph != '?' {
-		t.Fatalf("agent row without a status = %q at 6, want ?", glyph)
+		t.Fatalf("agent row without a status = %q at 8, want ?", glyph)
 	}
 }
 
@@ -1309,7 +1312,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 // two cells a shell leaves blank, and its app= stands in for a missing name.
 func TestRailAgentMarker(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	agent := railOnePane("unknown", "", 12, 40, 6)
+	agent := railOnePane("unknown", "", 20, 40, 6)
 	agent.All[0].Agent = true
 	agent.All[0].App = "pi"
 	var b bytes.Buffer
@@ -1322,7 +1325,7 @@ func TestRailAgentMarker(t *testing.T) {
 		t.Fatalf("agent row does not show the app: %q", out)
 	}
 
-	shell := railOnePane("unknown", "", 12, 40, 6)
+	shell := railOnePane("unknown", "", 20, 40, 6)
 	b.Reset()
 	drawRail(&b, shell)
 	out = b.String()
@@ -1490,8 +1493,9 @@ func TestRailBranchLabel(t *testing.T) {
 	}
 }
 
-// TestRailWindowWorktree puts the linked worktree folder on the window line, so
-// dungeon lanes are told apart above their panes, and never on a pane row.
+// TestRailWindowWorktree labels the window line with the branch first: the
+// branch names the work, and the linked worktree folder only stands in when no
+// branch exists.
 func TestRailWindowWorktree(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railOnePane("working", "pi", defaultRail, 60, 6)
@@ -1499,29 +1503,30 @@ func TestRailWindowWorktree(t *testing.T) {
 	snap.All[0].Worktree = "dm-rail-w1"
 	snap.All[0].Branch = "dm-rail"
 	items := railItems(snap)
-	if len(items) != 3 || items[1].worktree != "dm-rail-w1" || items[1].text != "dm-rail-w1" {
-		t.Fatalf("window line = %+v, want the worktree label", items)
+	if len(items) != 3 || items[1].branch != "dm-rail" || items[1].text != "dm-rail" {
+		t.Fatalf("window line = %+v, want the branch label", items)
 	}
-	if items[2].worktree != "" {
-		t.Fatalf("pane row still carries the worktree: %+v", items[2])
+	if items[1].worktree != "dm-rail-w1" {
+		t.Fatalf("window line lost the worktree: %+v", items[1])
 	}
 	var b bytes.Buffer
 	drawRail(&b, snap)
-	if !strings.Contains(b.String(), "dm-rail-w1") {
-		t.Fatalf("worktree not drawn: %q", b.String())
+	out := b.String()
+	if !strings.Contains(out, "dm-rail") || strings.Contains(out, "dm-rail-w1") {
+		t.Fatalf("window line = %q, want the branch and not the folder", out)
 	}
 
-	// The branch is the next label, then the window name.
-	snap.All[0].Worktree = ""
-	if items := railItems(snap); items[1].text != "dm-rail" {
-		t.Fatalf("window line without a worktree = %q", items[1].text)
-	}
+	// The folder stands in without a branch, then the window name.
 	snap.All[0].Branch = ""
+	if items := railItems(snap); items[1].text != "dm-rail-w1" {
+		t.Fatalf("window line without a branch = %q", items[1].text)
+	}
+	snap.All[0].Worktree = ""
 	if items := railItems(snap); items[1].text != "one" {
 		t.Fatalf("window line without git = %q", items[1].text)
 	}
 
-	// A shell window still names its worktree: the line belongs to the window.
+	// The line belongs to the window, so a shell still names its worktree.
 	snap = railOnePane("unknown", "", defaultRail, 60, 6)
 	snap.All[0].Worktree = "dm-rail-w1"
 	if items := railItems(snap); items[1].text != "dm-rail-w1" {
@@ -1542,8 +1547,8 @@ func railTree(rail int) *Snapshot {
 			ID: "w1p1", Name: "pi", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
 			Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
-			Worktree: "dm-rail-w1", Branch: "lenient-branch", Dirty: true,
-			Added: 12, Deleted: 4, Message: "working hard",
+			Worktree: "dm-rail-w1", Branch: "lenient-branch", InRepo: true,
+			Dirty: true, Added: 12, Deleted: 4, Message: "working hard",
 		},
 		{
 			ID: "w2p1", Workspace: "s2", WorkspaceName: "work", Window: "w2",
@@ -1724,15 +1729,21 @@ func TestRailTreeHit(t *testing.T) {
 func TestRailWorkspaceAccent(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railTree(defaultRail)
-	if railAccent("s1") == railAccent("s2") {
-		t.Fatalf("sample workspaces share the accent %v", railAccent("s1"))
+	want := map[string]rgb{}
+	for _, it := range railItems(snap) {
+		if it.kind == railWorkspace {
+			want[it.workspace] = it.accent
+		}
+	}
+	if len(want) != 2 || want["s1"] == want["s2"] {
+		t.Fatalf("workspace accents = %v, want two distinct hues", want)
 	}
 	var b bytes.Buffer
 	drawRail(&b, snap)
 	out := b.String()
-	for _, ws := range []string{"s1", "s2"} {
-		if !strings.Contains(out, railAccent(ws).fg()+"▌") {
-			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, railAccent(ws), out)
+	for ws, accent := range want {
+		if !strings.Contains(out, accent.fg()+"▌") {
+			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
 		}
 	}
 	vt := vt10x.New(vt10x.WithSize(100, 12))
@@ -1753,6 +1764,160 @@ func TestRailWorkspaceAccent(t *testing.T) {
 	}
 	if !gapRow {
 		t.Fatal("gap row is not empty")
+	}
+}
+
+// TestAllPaneInRepo carries the in-repo flag onto the wire row, so a directory
+// git never saw cannot look clean.
+func TestAllPaneInRepo(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	old := detectGit
+	detectGit = func(cwd string) gitInfo {
+		if cwd == "/work/dm" {
+			return gitInfo{branch: "dm-rail", inRepo: true}
+		}
+		return gitInfo{}
+	}
+	defer func() { detectGit = old }()
+
+	st := newState("inrepo")
+	id := rootPane(st)
+	st.Panes[id].Cwd = "/work/dm"
+	s := railServer(st)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := s.snapshotLocked()
+		if len(snap.All) == 1 && snap.All[0].Branch == "dm-rail" {
+			if !snap.All[0].InRepo {
+				t.Fatalf("AllPane.InRepo = false, want true")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("git state never reached the snapshot: %+v", snap.All)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestRailAccentDistinct gives live workspaces distinct hues even when their
+// ids hash to the same preferred slot.
+func TestRailAccentDistinct(t *testing.T) {
+	ids := []string{"s2", "s3", "s4", "s5"}
+	if railAccent("s3") != railAccent("s4") || railAccent("s2") != railAccent("s5") {
+		t.Fatalf("fixture ids do not collide: %v %v %v %v",
+			railAccent("s2"), railAccent("s3"), railAccent("s4"), railAccent("s5"))
+	}
+	snap := &Snapshot{Cols: 100, Rows: 20, Rail: defaultRail}
+	for _, id := range ids {
+		snap.All = append(snap.All, AllPane{
+			ID: id + "p1", Workspace: id, WorkspaceName: id,
+			Window: id + "w1", WindowName: "one", WindowUnfolded: true,
+		})
+	}
+	seen := map[rgb]string{}
+	want := map[string]rgb{}
+	for _, it := range railItems(snap) {
+		if it.kind != railWorkspace {
+			continue
+		}
+		if prev, ok := seen[it.accent]; ok {
+			t.Fatalf("workspaces %q and %q share accent %v", prev, it.workspace, it.accent)
+		}
+		seen[it.accent] = it.workspace
+		want[it.workspace] = it.accent
+	}
+	if len(want) != len(ids) || len(seen) != len(ids) {
+		t.Fatalf("rail has %d workspace accents, want %d", len(seen), len(ids))
+	}
+	// drawRail paints the carried accent, not a fresh hash.
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	for ws, accent := range want {
+		if !strings.Contains(out, accent.fg()+"▌") {
+			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
+		}
+	}
+}
+
+// TestRailNoStatsOutsideRepo keeps a directory git never saw free of a clean
+// claim: the rail draws no stats tail there.
+func TestRailNoStatsOutsideRepo(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].InRepo = false
+	line := railRows(t, snap)[1]
+	for _, absent := range []string{"clean", "+", "●"} {
+		if strings.Contains(line, absent) {
+			t.Fatalf("non-repo window line shows %q: %q", absent, line)
+		}
+	}
+	if regexp.MustCompile(`-[0-9]`).MatchString(line) {
+		t.Fatalf("non-repo window line shows a line count: %q", line)
+	}
+	// A repo with nothing to report says so.
+	snap.All[0].InRepo = true
+	snap.All[0].Dirty, snap.All[0].Added, snap.All[0].Deleted = false, 0, 0
+	line = railRows(t, snap)[1]
+	if !strings.Contains(line, "clean") {
+		t.Fatalf("clean repo window line = %q", line)
+	}
+}
+
+// TestRailStatsWholeAtClamp draws a long branch with the fullest pair at the
+// 26 column clamp: the label elides and the pair survives whole.
+func TestRailStatsWholeAtClamp(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(effectiveRail(80, defaultRail))
+	if snap.Rail != 26 {
+		t.Fatalf("clamp width = %d, want 26", snap.Rail)
+	}
+	snap.All[0].Worktree = ""
+	snap.All[0].Branch = strings.Repeat("a-branch-that-runs-long-", 3)
+	snap.All[0].Dirty, snap.All[0].Added, snap.All[0].Deleted = true, 5000, 3000
+	line := railRows(t, snap)[1]
+	if !strings.Contains(line, "● +5000 -3000") {
+		t.Fatalf("pair at the clamp = %q", line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Fatalf("long branch was not elided: %q", line)
+	}
+	if n := runeCells(line); n > snap.Rail {
+		t.Fatalf("window line %q is %d cells, want <= %d", line, n, snap.Rail)
+	}
+}
+
+// TestRailStatsDropWhole gives up the stats before it draws half a pair.
+func TestRailStatsDropWhole(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(7)
+	line := railRows(t, snap)[1]
+	for _, absent := range []string{"+", "-", "●", "clean"} {
+		if strings.Contains(line, absent) {
+			t.Fatalf("rail %d draws %q of the stats: %q", snap.Rail, absent, line)
+		}
+	}
+	// One column more fits the whole pair.
+	if line := railRows(t, railTree(8))[1]; !strings.Contains(line, "● +12 -4") {
+		t.Fatalf("rail 8 = %q, want the whole pair", line)
+	}
+}
+
+// TestRailNoteElision cuts the message with an ellipsis inside the rail.
+func TestRailNoteElision(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].Message = strings.Repeat("a very long status message ", 3)
+	note := railRows(t, snap)[2]
+	if !strings.Contains(note, "…") {
+		t.Fatalf("note line was not elided: %q", note)
+	}
+	if n := runeCells(note); n > snap.Rail {
+		t.Fatalf("note line %q is %d cells, want <= %d", note, n, snap.Rail)
+	}
+	if !strings.HasPrefix(note, "    a very") {
+		t.Fatalf("note line lost its indent or text: %q", note)
 	}
 }
 

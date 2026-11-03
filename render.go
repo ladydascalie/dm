@@ -455,8 +455,10 @@ type railItem struct {
 	count     int
 	added     int
 	deleted   int
+	accent    rgb
 	agent     bool
 	dirty     bool
+	inRepo    bool
 	folded    bool
 	focus     bool
 	active    bool
@@ -500,6 +502,28 @@ func railItems(snap *Snapshot) []railItem {
 		}
 		return AllPane{}, false
 	}
+	// A workspace keeps its preferred hue when it is free. When two live
+	// workspaces hash alike, the later one takes the next free slot, so no two
+	// workspaces in a session ever share an accent.
+	used := map[rgb]bool{}
+	accent := func(id string) rgb {
+		pref := railAccent(id)
+		start := 0
+		for i, a := range railAccents {
+			if a == pref {
+				start = i
+				break
+			}
+		}
+		for i := 0; i < len(railAccents); i++ {
+			a := railAccents[(start+i)%len(railAccents)]
+			if !used[a] {
+				used[a] = true
+				return a
+			}
+		}
+		return pref
+	}
 	var out []railItem
 	ws, win := "", ""
 	for _, p := range snap.All {
@@ -514,7 +538,8 @@ func railItems(snap *Snapshot) []railItem {
 			}
 			out = append(out, railItem{
 				kind: railWorkspace, text: name, workspace: p.Workspace,
-				count: panes[p.Workspace], active: p.WorkspaceActive,
+				count: panes[p.Workspace], accent: accent(p.Workspace),
+				active: p.WorkspaceActive,
 			})
 		}
 		if p.Window != win {
@@ -527,16 +552,17 @@ func railItems(snap *Snapshot) []railItem {
 				if src, ok := source(p.Window); ok {
 					item.branch = src.Branch
 					item.worktree = src.Worktree
+					item.inRepo = src.InRepo
 					item.dirty = src.Dirty
 					item.added = src.Added
 					item.deleted = src.Deleted
 					item.message = src.Message
 				}
 				switch {
-				case item.worktree != "":
-					item.text = item.worktree
 				case item.branch != "":
 					item.text = item.branch
+				case item.worktree != "":
+					item.text = item.worktree
 				}
 			}
 			out = append(out, item)
@@ -795,6 +821,9 @@ func writeRailSeg(buf *bytes.Buffer, seg railSeg, bg rgb, bold bool) {
 // railStats is the right-aligned git tail of a window line: an amber dot when
 // the tree is dirty, then the added and deleted line counts, or "clean".
 func railStats(it railItem) []railSeg {
+	if !it.inRepo {
+		return nil
+	}
 	var segs []railSeg
 	if it.dirty {
 		segs = append(segs, railSeg{text: "●", colour: railWorking})
@@ -882,7 +911,7 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 						name = railHeader
 					}
 					left = []railSeg{
-						{text: "▌", colour: railAccent(it.workspace)},
+						{text: "▌", colour: it.accent},
 						{text: " ", colour: name},
 						{text: it.text, colour: name, bold: true},
 					}
@@ -939,7 +968,7 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 					}
 				} else {
 					left = []railSeg{
-						{text: "    ", colour: base},
+						{text: "      ", colour: base},
 						{text: mark, colour: colour},
 						{text: g, colour: colour},
 						{text: " " + it.text, colour: base},
@@ -951,8 +980,8 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		}
 		rightCells := segCells(right)
 		if rightCells > w {
-			right = clipSegs(right, w)
-			rightCells = segCells(right)
+			// A tail that does not fit goes whole: half a stats pair lies.
+			right, rightCells = nil, 0
 		}
 		budget := w - rightCells
 		if rightCells > 0 && budget > 0 {

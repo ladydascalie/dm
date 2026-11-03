@@ -98,13 +98,15 @@ pane count at the right edge in dim grey. The accent is one of six hues picked
 by a stable hash of the workspace id, so a workspace keeps its hue for the
 life of the session. One blank row separates workspace blocks.
 
-Each window follows with its fold caret and a label: the linked worktree
-folder when its pane has one, else the git branch, else the window name. The
-git state comes from the window's focused pane, or from its first pane in a
-repository. The right edge of that line carries the uncommitted change count:
-an amber dot when the tree is dirty, then `+N` in green and `-M` in red, with
-a zero side hidden, or `clean` in dim grey when nothing changed. A window
-whose pane has a status message gets a dim second line under its label.
+Each window follows with its fold caret and a label: the git branch when its
+pane is in a repository, else the linked worktree folder, else the window
+name. The git state comes from the window's focused pane, or from its first
+pane in a repository. The right edge of that line carries the uncommitted
+change count: an amber dot when the tree is dirty, then `+N` in green and `-M`
+in red, with a zero side hidden, or `clean` in dim grey when nothing changed.
+A pane outside a repository gets no stats tail: a directory git never saw
+cannot be clean. A window whose pane has a status message gets a dim second
+line under its label.
 
 Windows start folded; click a window line or its second line to unfold or fold
 it, and the fold is stored in the state file. An unfolded pane row labels
@@ -123,8 +125,9 @@ folder of the pane it was created from; `rename-window` overrides the name. A
 window whose label is still the old positional number is renamed from its
 pane's folder when the session loads.
 
-A long label is cut with `…` before the right-aligned stats lose a cell, so
-the git state always stays visible. The rail paints its own dark background
+A long label is cut with `…` so the right-aligned stats fit. When even that
+cannot, the rail draws no tail at all, never half a pair. The rail paints its
+own dark background
 and uses explicit RGB colours, not palette slots, so every label, glyph and
 stat reaches WCAG AA contrast on both the rail and the focused row. Icons use
 Nerd Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces
