@@ -1686,7 +1686,8 @@ var keymap = [][2]string{
 	{"t", "new workspace"},
 	{")", "next workspace"},
 	{"s", "switch session"},
-	{"r", "cycle rail: full, thin, hidden"},
+	{"r", "rename workspace"},
+	{"b", "cycle rail: full, thin, hidden"},
 	{"d / q", "detach"},
 	{"ctrl+b", "send prefix"},
 }
@@ -1740,6 +1741,66 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		pad(" j/k move  enter switch  esc cancel"))
 	fmt.Fprintf(buf, "\x1b[%d;%dH└%s┘", y+4+len(sessions), x+1, strings.Repeat("─", w-2))
 	buf.WriteString("\x1b[0m")
+}
+
+// drawRename paints the rename prompt as one full row above the status bar,
+// over the last pane row, on the rail ground. The label and the caret are
+// fixed: the draft takes what is left and loses its head first, so a long name
+// still shows its end and the caret stays on screen. drawRename writes at most
+// snap.Cols cells and touches one row.
+func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string) {
+	if snap == nil || snap.Rows < 2 || snap.Cols < 1 {
+		return
+	}
+	const caret = "▏"
+	labelRoom := snap.Cols - runeCells(caret)
+	if labelRoom < 0 {
+		labelRoom = 0
+	}
+	segs := clipSegs([]railSeg{{text: " rename workspace " + id + ": ", colour: railDim}}, labelRoom)
+	draftRoom := snap.Cols - runeCells(caret) - segCells(segs)
+	segs = append(segs,
+		railSeg{text: elideRename(draft, draftRoom), colour: railText},
+		railSeg{text: caret, colour: barAccent},
+	)
+	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m", snap.Rows-1)
+	buf.WriteString(railBG.bg())
+	for _, seg := range segs {
+		buf.WriteString(seg.colour.fg())
+		buf.WriteString(seg.text)
+	}
+	if pad := snap.Cols - segCells(segs); pad > 0 {
+		buf.WriteString(railBG.bg())
+		buf.WriteString(strings.Repeat(" ", pad))
+	}
+	buf.WriteString("\x1b[0m")
+}
+
+// elideRename keeps the last budget cells of s and marks a cut head with an
+// ellipsis. It never splits a wide rune.
+func elideRename(s string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if runeCells(s) <= budget {
+		return s
+	}
+	room := budget - 1 // the ellipsis takes one cell
+	if room <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	used := 0
+	i := len(r)
+	for i > 0 {
+		w := runeWidth(r[i-1])
+		if used+w > room {
+			break
+		}
+		used += w
+		i--
+	}
+	return "…" + string(r[i:])
 }
 
 func maxInt(a, b int) int {
