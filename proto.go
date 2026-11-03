@@ -68,16 +68,38 @@ type PaneInfo struct {
 	Mouse bool `json:"mouse,omitempty"`
 }
 
+// AllPane is one pane anywhere in the session, for a sidebar that lists the
+// whole fleet. Panes stays the active window; All is everything, grouped by
+// workspace then window in tree order.
+type AllPane struct {
+	ID              string `json:"id"`
+	Name            string `json:"name,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Message         string `json:"message,omitempty"`
+	Agent           bool   `json:"agent"`
+	Workspace       string `json:"workspace"`
+	WorkspaceName   string `json:"workspaceName"`
+	Window          string `json:"window"`
+	WindowName      string `json:"windowName"`
+	Focus           bool   `json:"focus,omitempty"`
+	WorkspaceActive bool   `json:"workspaceActive,omitempty"`
+	WindowActive    bool   `json:"windowActive,omitempty"`
+}
+
 type Snapshot struct {
 	Session      string     `json:"session"`
 	Workspace    string     `json:"workspace"`
 	Windows      []string   `json:"windows"`
 	ActiveWindow int        `json:"activeWindow"`
 	Panes        []PaneInfo `json:"panes"`
-	Focus        string     `json:"focus"`
-	Cols         int        `json:"cols"`
-	Rows         int        `json:"rows"`
-	Root         *Node      `json:"root"`
+	// All lists every pane in the session; Panes is the active window only.
+	All []AllPane `json:"all,omitempty"`
+	// Rail is the effective sidebar width the server used. Zero hides it.
+	Rail  int    `json:"rail"`
+	Focus string `json:"focus"`
+	Cols  int    `json:"cols"`
+	Rows  int    `json:"rows"`
+	Root  *Node  `json:"root"`
 }
 
 const maxFrame = 16 << 20

@@ -56,6 +56,11 @@ type State struct {
 	NextWorkspace int `json:"nextWorkspace,omitempty"`
 	NextWindow    int `json:"nextWindow,omitempty"`
 	IDVersion     int `json:"idVersion,omitempty"`
+
+	// Rail is the requested sidebar width. RailSet tells an explicit 0 (hidden)
+	// from a state written before the rail existed.
+	Rail    int  `json:"rail,omitempty"`
+	RailSet bool `json:"railSet,omitempty"`
 }
 
 func stateDir() string {
@@ -85,6 +90,8 @@ func newState(name string) *State {
 		NextWorkspace: 1,
 		NextWindow:    1,
 		IDVersion:     2,
+		Rail:          defaultRail,
+		RailSet:       true,
 		Workspaces: []*Workspace{{
 			ID:   "s1",
 			Name: "main",
@@ -126,6 +133,11 @@ func loadState(name string) (*State, error) {
 	}
 	st.Name = name
 	changed := false
+	if !st.RailSet {
+		st.Rail = defaultRail
+		st.RailSet = true
+		changed = true
+	}
 	if st.IDVersion < 2 {
 		st.migrateIDs()
 		st.IDVersion = 2
@@ -415,11 +427,48 @@ func lowestCommonAncestor(a, b []*Node) *Node {
 	return lca
 }
 
-// paneArea is the rectangle the pane boxes live in. Each leaf is a box: a
+// defaultRail is the width a session asks for when it has none yet.
+const defaultRail = 26
+
+// maxRail is the widest rail cols allows: a third of the screen, capped at 30.
+func maxRail(cols int) int {
+	m := cols / 3
+	if m > 30 {
+		m = 30
+	}
+	if m < 0 {
+		m = 0
+	}
+	return m
+}
+
+// effectiveRail clamps a requested width to what the screen can give.
+func effectiveRail(cols, rail int) int {
+	if rail < 0 {
+		rail = 0
+	}
+	if m := maxRail(cols); rail > m {
+		rail = m
+	}
+	return rail
+}
+
+// paneAreaFor is the rectangle the pane boxes live in. Each leaf is a box: a
 // border, the content, and a border. Adjacent boxes keep one empty cell between
 // them, the pad a resize control will live on. The last row is the status bar.
+// The rail takes the left columns before the first box.
+func paneAreaFor(cols, rows, rail int) Rect {
+	rail = effectiveRail(cols, rail)
+	w := cols - rail
+	if w < 1 {
+		w = 1
+	}
+	return Rect{rail, 0, w, rows - 1}
+}
+
+// paneArea is the pane area with no rail.
 func paneArea(cols, rows int) Rect {
-	return Rect{0, 0, cols, rows - 1}
+	return paneAreaFor(cols, rows, 0)
 }
 
 // insetBox is the content rect of a boxed pane.

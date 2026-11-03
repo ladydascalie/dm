@@ -544,6 +544,227 @@ func TestPaneAreaInset(t *testing.T) {
 	}
 }
 
+// railServer is an in-process server with no panes and no clients. Layout and
+// snapshots do not need a spawned process.
+func railServer(st *State) *server {
+	return &server{st: st, panes: map[string]*paneConn{},
+		clients: map[*client]bool{}, cols: st.Cols, rows: st.Rows}
+}
+
+// rootPane gives a state a single focused pane in its first window.
+func rootPane(st *State) string {
+	w := st.win()
+	id := w.newPaneID()
+	w.Root = &Node{Pane: id}
+	w.Focus = id
+	st.Panes[id] = &PaneState{}
+	return id
+}
+
+func TestRailGeometry(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := newState("rail")
+	id := rootPane(st)
+	s := railServer(st)
+
+	snap := s.snapshotLocked()
+	if snap.Rail != 26 {
+		t.Fatalf("new session rail = %d, want 26", snap.Rail)
+	}
+	p := snap.Panes[0]
+	if p.ID != id || p.Rect.X-1 != 26 {
+		t.Fatalf("new session pane %q box starts at %d, want 26", p.ID, p.Rect.X-1)
+	}
+	if area := paneAreaFor(80, 24, snap.Rail); area.X != 26 || p.Rect.X != area.X+1 {
+		t.Fatalf("pane rect %+v does not sit inside area %+v", p.Rect, area)
+	}
+
+	// Rail 0 hides it and the pane starts at the screen edge.
+	if rail := s.setRail(0); rail != 0 {
+		t.Fatalf("set-rail 0 effective = %d", rail)
+	}
+	snap = s.snapshotLocked()
+	if snap.Rail != 0 || snap.Panes[0].Rect.X-1 != 0 {
+		t.Fatalf("hidden rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
+	}
+
+	// A width over the clamp uses the clamp: a third of 120 is 40, the cap 30.
+	s.cols = 120
+	if rail := s.setRail(50); rail != 30 {
+		t.Fatalf("set-rail 50 at 120 cols effective = %d, want 30", rail)
+	}
+	snap = s.snapshotLocked()
+	if snap.Rail != 30 || snap.Panes[0].Rect.X-1 != 30 {
+		t.Fatalf("clamped rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
+	}
+	if area := paneAreaFor(120, 24, 45); area != (Rect{X: 30, Y: 0, W: 90, H: 23}) {
+		t.Fatalf("paneAreaFor clamps to %+v", area)
+	}
+	// The third-of-screen clamp binds below the 30 cap.
+	if area := paneAreaFor(60, 24, 30); area.X != 20 || area.W != 40 {
+		t.Fatalf("paneAreaFor third clamp = %+v", area)
+	}
+	// A negative request is no rail.
+	if area := paneAreaFor(80, 24, -5); area.X != 0 {
+		t.Fatalf("negative rail area = %+v", area)
+	}
+}
+
+func TestRailState(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := newState("rr")
+	s := railServer(st)
+	s.cols = 100
+	if rail := s.setRail(30); rail != 30 {
+		t.Fatalf("set-rail 30 effective = %d", rail)
+	}
+
+	got, err := loadState("rr")
+	if err != nil {
+		t.Fatalf("loadState: %v", err)
+	}
+	if got.Rail != 30 || !got.RailSet {
+		t.Fatalf("reload rail = %d set=%v, want 30 true", got.Rail, got.RailSet)
+	}
+
+	// A state written before the rail existed asks for the default and is
+	// saved with it.
+	old := &State{Name: "old", Cols: 80, Rows: 24,
+		Panes:      map[string]*PaneState{},
+		Workspaces: []*Workspace{{ID: "s1", Name: "main"}},
+		IDVersion:  2,
+	}
+	if err := old.save(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(statePath("old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	delete(raw, "rail")
+	delete(raw, "railSet")
+	b, _ = json.Marshal(raw)
+	if err := os.WriteFile(statePath("old"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = loadState("old")
+	if err != nil {
+		t.Fatalf("loadState old: %v", err)
+	}
+	if got.Rail != 26 || !got.RailSet {
+		t.Fatalf("state without railSet = %d set=%v, want 26 true", got.Rail, got.RailSet)
+	}
+	saved, err := os.ReadFile(statePath("old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), "\"rail\": 26") ||
+		!strings.Contains(string(saved), "\"railSet\": true") {
+		t.Fatalf("state without railSet was not saved: %s", saved)
+	}
+}
+
+func TestRailAllPanes(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := newState("all")
+	st.Workspaces = []*Workspace{
+		{ID: "s1", Name: "main", Active: 0, Windows: []*Window{{
+			ID: "w1", Name: "one", Focus: "w1p1",
+			Root: &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+				Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}}},
+		}}},
+		{ID: "s2", Name: "work", Active: 0, Windows: []*Window{{
+			ID: "w2", Name: "two", Focus: "w2p1",
+			Root: &Node{Dir: "col", Sizes: []float64{0.5, 0.5},
+				Kids: []*Node{{Pane: "w2p1"}, {Pane: "w2p2"}}},
+		}}},
+	}
+	st.Active = 0
+	st.Panes = map[string]*PaneState{
+		"w1p1": {Name: "alpha"},
+		"w1p2": {},
+		"w2p1": {},
+		"w2p2": {},
+	}
+	s := railServer(st)
+	s.panes["w1p2"] = &paneConn{st: Status{State: "working", Message: "working hard"}}
+	s.panes["w2p1"] = &paneConn{st: Status{State: "unknown", Message: "unreported"}}
+
+	snap := s.snapshotLocked()
+	if len(snap.Panes) != 2 {
+		t.Fatalf("active window panes = %d, want 2", len(snap.Panes))
+	}
+	if len(snap.All) != 4 {
+		t.Fatalf("All = %d panes, want 4: %+v", len(snap.All), snap.All)
+	}
+	wantIDs := []string{"w1p1", "w1p2", "w2p1", "w2p2"}
+	for i, want := range wantIDs {
+		if snap.All[i].ID != want {
+			t.Fatalf("All[%d] = %q, want %q", i, snap.All[i].ID, want)
+		}
+	}
+	first := snap.All[0]
+	if first.Name != "alpha" || !first.Agent || !first.Focus ||
+		!first.WorkspaceActive || !first.WindowActive {
+		t.Fatalf("named agent row = %+v", first)
+	}
+	if first.Workspace != "s1" || first.WorkspaceName != "main" ||
+		first.Window != "w1" || first.WindowName != "one" {
+		t.Fatalf("first row group = %+v", first)
+	}
+	byStatus := snap.All[1]
+	if !byStatus.Agent || byStatus.Status != "working" ||
+		byStatus.Message != "working hard" || byStatus.Name != "" {
+		t.Fatalf("working pane row = %+v", byStatus)
+	}
+	unknown := snap.All[2]
+	if unknown.Agent || unknown.Status != "unknown" || unknown.Message != "unreported" ||
+		unknown.Workspace != "s2" || unknown.Window != "w2" ||
+		unknown.WorkspaceActive || unknown.WindowActive || unknown.Focus {
+		t.Fatalf("unknown-status shell row = %+v", unknown)
+	}
+	silent := snap.All[3]
+	if silent.Agent || silent.Status != "" || silent.Name != "" {
+		t.Fatalf("silent shell row = %+v", silent)
+	}
+}
+
+func TestSetRailAction(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "ra")
+	tree := h.rpc("ra", map[string]any{"action": "list"})
+	snap := tree["snapshot"].(map[string]any)
+	cols := int(snap["cols"].(float64))
+	rows := int(snap["rows"].(float64))
+	if rail := int(snap["rail"].(float64)); rail != effectiveRail(cols, 26) {
+		t.Fatalf("new session rail = %d, want %d", rail, effectiveRail(cols, 26))
+	}
+	pane := h.focus("ra")
+	if x := h.rects("ra")[pane].X; x != paneAreaFor(cols, rows, 26).X+1 {
+		t.Fatalf("pane starts at x=%d, want rail+border %d", x, paneAreaFor(cols, rows, 26).X+1)
+	}
+
+	if res := h.rpc("ra", map[string]any{"action": "set-rail", "index": 0}); res["rail"] != float64(0) {
+		t.Fatalf("set-rail 0 = %v", res["rail"])
+	}
+	if x := h.rects("ra")[pane].X; x != 1 {
+		t.Fatalf("hidden rail pane starts at x=%d, want 1", x)
+	}
+
+	want := maxRail(cols)
+	res := h.rpc("ra", map[string]any{"action": "set-rail", "index": 500})
+	if got := int(res["rail"].(float64)); got != want {
+		t.Fatalf("set-rail 500 = %d, want clamp %d", got, want)
+	}
+	if x := h.rects("ra")[pane].X; x != want+1 {
+		t.Fatalf("clamped rail pane starts at x=%d, want %d", x, want+1)
+	}
+}
+
 func TestDrawPaneBox(t *testing.T) {
 	var b bytes.Buffer
 	drawPaneBox(&b, Rect{X: 10, Y: 5, W: 20, H: 8}, true)
@@ -1842,6 +2063,9 @@ func (h *harness) rects(session string) map[string]Rect {
 func TestResizeSplit(t *testing.T) {
 	h := newHarness(t)
 	h.run("new", "-s", "rs")
+	// This test measures the pane area exactly. Hide the rail, which a new
+	// session otherwise asks for, so the wrapper stays rail-zero.
+	h.run("exec", `{"action":"set-rail","index":0}`, "-s", "rs")
 	p1 := h.focus("rs")
 	p2 := h.split("rs", p1, "right")
 	p3 := h.split("rs", p1, "down")
@@ -1906,6 +2130,7 @@ func TestResizeSplit(t *testing.T) {
 	// Same-axis nesting: row{ q1, row{q2,q3} }. The outer divider spans the
 	// whole row, so the minimum is exactly 3 cells, not the leaf bounding box.
 	h.run("new", "-s", "rs2")
+	h.run("exec", `{"action":"set-rail","index":0}`, "-s", "rs2")
 	q1 := h.focus("rs2")
 	q2 := h.split("rs2", q1, "right")
 	q3 := h.split("rs2", q2, "right")
