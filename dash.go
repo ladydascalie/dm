@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// dashRows flattens a session into palette entries, one per pane. The target
-// id leads, because television's output template takes the first field, then
-// the pane's label and where it lives. A workspace or a window row would only
-// repeat the row of the pane it holds, so the palette lists panes alone.
+// dashRows flattens a session into the rows a palette jump uses, one per pane.
+// The target id leads, then the pane's label and where it lives. A workspace or
+// a window row would only repeat the row of the pane it holds, so dash lists
+// panes alone.
 func dashRows(session string) ([]string, error) {
 	m, err := rpc(session, Msg{Action: "list"})
 	if err != nil {
@@ -40,7 +40,7 @@ func dashRows(session string) ([]string, error) {
 	return rows, nil
 }
 
-// paneLabel names a pane for the palette: its name when it has one, then its
+// paneLabel names a pane in a palette row: its name when it has one, then its
 // live state, branch and worktree. The id already leads the row, so the label
 // never repeats it, and the row ends with the workspace and window it lives
 // in.
@@ -74,7 +74,7 @@ func paneLabel(p AllPane) string {
 	return name
 }
 
-// dash prints the entries, one per line.
+// dash prints the rows a palette jump uses, one per line.
 func dash(session string) error {
 	rows, err := dashRows(session)
 	if err != nil {
@@ -86,7 +86,7 @@ func dash(session string) error {
 	return nil
 }
 
-// peek prints the screen of one pane, for the palette preview.
+// peek prints the screen a palette row shows.
 func peek(session, target string, lines int) error {
 	m, err := rpc(session, Msg{Action: "read", Target: target})
 	if err != nil {

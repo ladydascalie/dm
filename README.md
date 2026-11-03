@@ -74,16 +74,17 @@ app's PTY covers only its content rect, so the border press is not its event.
 
 ## Palette
 
-`prefix a` floats a quick switcher over the panes. It is television, run on its
-own PTY, so the list is fuzzy matched: type an id or a name, then enter to land
-there. One row per pane, leading with its id (`w2p3`), so an id can be typed
-directly, and ending with the workspace and window it lives in. A workspace or
-window row would only repeat the pane it holds, so the palette lists panes
-alone. The preview
-pane shows the live screen the row would land on. Press the prefix key again to
-close it and change nothing. `esc` also closes it, but television 0.15.9 prints
-the highlighted entry when it quits, so a bare `esc` lands on that row. `dm dash` prints the same rows outside the TUI, and `dm peek <id>`
-prints the preview, so the palette can be driven from a shell.
+`prefix a` floats a quick switcher over the panes. It is native: no child
+process and no PTY. It floats the rail tree: a workspace header, its window
+lines and their pane rows. Type to filter the tree; the query is a
+case-insensitive subsequence over an id, name, folder, branch, worktree, window
+or workspace name. Down and up, or ctrl+n and ctrl+p, move the selection, and
+enter lands on the selected row. Backspace edits the query and ctrl+u clears
+it. Press the prefix key again or `esc` to close without picking. It previews
+the selected pane's live screen: from the local VT in the active window and
+from the server's read elsewhere. It takes no mouse input. `dm dash` prints the
+pane rows outside the TUI, and `dm peek <id>` prints the screen a row shows, so
+the palette can be driven from a shell.
 
 The palette is client owned: it starts when the key is pressed and ends when
 the choice is taken, so it never enters the session tree and never survives a
