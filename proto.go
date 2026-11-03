@@ -85,6 +85,11 @@ type AllPane struct {
 	// Worktree is the linked worktree's folder name; empty for the main
 	// checkout or a directory outside git.
 	Worktree string `json:"worktree,omitempty"`
+	// Dirty is true when a tracked file has an uncommitted change. Added and
+	// Deleted count the lines the working tree gains and loses against HEAD.
+	Dirty   bool `json:"dirty,omitempty"`
+	Added   int  `json:"added,omitempty"`
+	Deleted int  `json:"deleted,omitempty"`
 	// WindowUnfolded is the rail fold state of the pane's window.
 	WindowUnfolded  bool   `json:"windowUnfolded,omitempty"`
 	Workspace       string `json:"workspace"`
