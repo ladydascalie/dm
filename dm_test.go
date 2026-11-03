@@ -1220,7 +1220,8 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-// Only the selected cells turn on reverse video.
+// The selected glyphs, and only them, are reversed. Parse the SGR state rather
+// than count sequences: an off-by-one paints the cell after the selection.
 func TestSelectionHighlight(t *testing.T) {
 	vt := testVT(t, 10, 2, "abcdef\r\nghijkl")
 	plain := &bytes.Buffer{}
@@ -1230,14 +1231,41 @@ func TestSelectionHighlight(t *testing.T) {
 	}
 	marked := &bytes.Buffer{}
 	drawPaneFrom(marked, vt, Rect{0, 0, 10, 2}, 0, &selRange{lo: 1, hi: 3})
-	if got := strings.Count(marked.String(), "\x1b[7m"); got != 3 {
-		t.Fatalf("reverse video count = %d, want 3: %q", got, marked.String())
-	}
-	for _, want := range []string{"a", "b", "c", "d", "e"} {
-		if !strings.Contains(marked.String(), want) {
-			t.Fatalf("marked paint lost %q", want)
+	rev := reversedCells(marked.String())
+	for ch, want := range map[rune]bool{'a': false, 'b': true, 'c': true, 'd': true, 'e': false, 'g': false} {
+		if rev[ch] != want {
+			t.Fatalf("%q reversed=%v want %v (%q)", ch, rev[ch], want, marked.String())
 		}
 	}
+}
+
+// reversedCells walks an ANSI stream and reports each printed rune's reverse state.
+func reversedCells(s string) map[rune]bool {
+	out := map[rune]bool{}
+	on := false
+	for i := 0; i < len(s); {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			j := i + 2
+			for j < len(s) && (s[j] < 0x40 || s[j] > 0x7e) {
+				j++
+			}
+			if j < len(s) && s[j] == 'm' {
+				for _, p := range strings.Split(s[i+2:j], ";") {
+					switch p {
+					case "7":
+						on = true
+					case "0", "27":
+						on = false
+					}
+				}
+			}
+			i = j + 1
+			continue
+		}
+		out[rune(s[i])] = on
+		i++
+	}
+	return out
 }
 
 func TestDrawMenu(t *testing.T) {

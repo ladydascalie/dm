@@ -123,7 +123,11 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel *selRa
 			} else {
 				g = normCell(g)
 			}
+			selected := sel.has(y*r.W + x)
 			buf.WriteString(sgr(g, cur))
+			if selected {
+				buf.WriteString("\x1b[7m")
+			}
 			gg := g
 			cur = &gg
 			if g.Char < 0x20 {
@@ -131,10 +135,8 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel *selRa
 			} else {
 				buf.WriteRune(g.Char)
 			}
-			if sel.has(y*r.W + x) {
-				// A full SGR follows, so the next cell drops the reverse.
-				buf.WriteString("\x1b[7m")
-				cur = nil
+			if selected {
+				buf.WriteString("\x1b[27m")
 			}
 		}
 	}
