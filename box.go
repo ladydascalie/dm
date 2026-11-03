@@ -135,6 +135,22 @@ type waitReq struct {
 	From string `json:"from"`
 }
 
+// subReq is the msg-sub request: a stream of entries under one topic filter.
+// The fields are the read fields minus the timeout, because a subscription runs
+// until its connection goes. AfterSeq is the cursor a reconnecting reader
+// resumes at; absent means 0.
+type subReq struct {
+	// From is the subscribing pane. Empty means the caller is not a pane and
+	// records nothing; a non-empty id must name a pane in the session tree.
+	From      string `json:"from"`
+	Key       string `json:"key"`
+	KeyPrefix string `json:"keyPrefix"`
+	// State is omitted when empty, so an any-state subscriber's request matches
+	// the published schema. The decoder still accepts an explicit empty state.
+	State    boxState `json:"state,omitempty"`
+	AfterSeq *int     `json:"afterSeq"`
+}
+
 // schemaReq is the msg-schema request: no fields.
 type schemaReq struct{}
 
@@ -158,6 +174,14 @@ type clearReply struct {
 // waitReply carries the entry that satisfied the wait. Trimmed is true when
 // the cursor named a row the box has already dropped.
 type waitReply struct {
+	Entry   entry `json:"entry"`
+	Trimmed bool  `json:"trimmed"`
+}
+
+// subFrame is one msg-sub frame, delivered on the subscribing connection only.
+// Trimmed is true on the first frame of a stream whose cursor sat behind the
+// oldest kept row, and false on every frame after it.
+type subFrame struct {
 	Entry   entry `json:"entry"`
 	Trimmed bool  `json:"trimmed"`
 }
@@ -206,6 +230,10 @@ var boxWire = map[string]boxAction{
 		request:  func() any { return &waitReq{} },
 		reply:    waitReply{},
 		required: []string{"timeoutMs"},
+	},
+	"msg-sub": {
+		request: func() any { return &subReq{} },
+		reply:   subFrame{},
 	},
 	"msg-watchers": {
 		request: func() any { return &watchersReq{} },
@@ -309,6 +337,20 @@ func validateBoxReq(action string, req any) error {
 			return fmt.Errorf("box: timeoutMs %d, want 1 to %d", r.TimeoutMs, boxMaxWaitMs)
 		}
 		return nil
+	case *subReq:
+		// An empty state asks for any state, which a subscriber needs.
+		if r.State != "" {
+			if _, err := parseState(string(r.State)); err != nil {
+				return err
+			}
+		}
+		if err := checkFrom(r.From); err != nil {
+			return err
+		}
+		if err := checkTopic(r.Key, r.KeyPrefix); err != nil {
+			return err
+		}
+		return checkAfter(r.AfterSeq)
 	case *schemaReq, *watchersReq:
 		return nil
 	}

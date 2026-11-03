@@ -70,29 +70,33 @@ func newClient(c net.Conn) *client {
 	return cl
 }
 
-// deliver queues a frame and returns. It never writes the socket and never
-// waits on it: a stalled client must not block the pane read loop.
-func (c *client) deliver(m Msg) {
+// deliver queues a frame and reports whether it went into the queue. A frame
+// for a closed client, or one bigger than the whole outbound bound, is dropped,
+// and a caller that owns a cursor must not advance past it. It never writes the
+// socket and never waits on it: a stalled client must not block the pane read
+// loop.
+func (c *client) deliver(m Msg) bool {
 	c.mu.Lock()
-	c.enqueueLocked(m)
+	queued := c.enqueueLocked(m)
 	c.mu.Unlock()
+	return queued
 }
 
-// enqueueLocked appends m to the queue under the byte bound. On overflow it
-// drops the queued "bytes" frames, marks the client stale and stops queueing
-// output, so the writer resyncs from the pane screens instead of replaying a
-// backlog.
-func (c *client) enqueueLocked(m Msg) {
+// enqueueLocked appends m to the queue under the byte bound and reports whether
+// it queued. On overflow it drops the queued "bytes" frames, marks the client
+// stale and stops queueing output, so the writer resyncs from the pane screens
+// instead of replaying a backlog.
+func (c *client) enqueueLocked(m Msg) bool {
 	if c.cond == nil {
 		c.cond = sync.NewCond(&c.mu)
 	}
 	if c.closed {
-		return
+		return false
 	}
 	if c.stale && m.Type == "bytes" {
 		// The client already owes itself a picture. Queueing more output
 		// would only rebuild the backlog the overflow threw away.
-		return
+		return false
 	}
 	n := msgBytes(m)
 	if c.qbytes+n > outboundBytes {
@@ -106,13 +110,14 @@ func (c *client) enqueueLocked(m Msg) {
 		if n > outboundBytes {
 			// A single frame bigger than the whole bound never ships; the
 			// resync rebuilds it piecemeal.
-			return
+			return false
 		}
 	}
 	c.queue = append(c.queue, m)
 	c.qbytes += n
 	c.startWriter()
 	c.cond.Broadcast()
+	return true
 }
 
 // dropBytesLocked removes every queued "bytes" frame. The caller holds c.mu.
@@ -1120,7 +1125,7 @@ func (s *server) attach(cl *client, m Msg) {
 	ids := allPanes(s.st.win().Root)
 	s.mu.Unlock()
 	cl.deliver(Msg{Type: "snapshot", Snap: snap})
-	if s.sendScreens(ids, cl.deliver) {
+	if s.sendScreens(ids, func(m Msg) { cl.deliver(m) }) {
 		// The pane's alt or mouse mode changed since the snapshot was built.
 		// Send a fresh one so the client's pane info is not one event stale.
 		s.mu.Lock()
@@ -1206,7 +1211,7 @@ func (s *server) resyncClient(cl *client) {
 	ids := allPanes(s.st.win().Root)
 	s.mu.Unlock()
 	cl.deliver(Msg{Type: "snapshot", Snap: snap})
-	s.sendScreens(ids, cl.deliver)
+	s.sendScreens(ids, func(m Msg) { cl.deliver(m) })
 }
 
 type paneReplay struct {
@@ -1557,6 +1562,18 @@ func (s *server) handleReq(cl *client, m Msg) {
 		e, trimmed, err := s.boxWait(cl, req.(*waitReq))
 		s.reply(cl, m, waitReply{Entry: e, Trimmed: trimmed}, err)
 
+	case "msg-sub":
+		req, err := parseBoxReq(m.Action, m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		// A stream has no completion reply. A bad request answered above; a
+		// stream that ends because its connection went answers nothing.
+		if err := s.boxSub(cl, req.(*subReq)); err != nil && !errors.Is(err, errBoxGone) {
+			s.reply(cl, m, nil, err)
+		}
+
 	case "msg-watchers":
 		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
 			s.reply(cl, m, nil, err)
@@ -1906,6 +1923,117 @@ func (s *server) boxWait(cl *client, req *waitReq) (entry, bool, error) {
 			return entry{}, trimmed, fmt.Errorf("box: client gone")
 		}
 	}
+}
+
+// errBoxGone reports a stream whose connection went. A stream has no reply, so
+// the handler stops without one and the watch it left behind ages out like any
+// other.
+var errBoxGone = errors.New("box: client gone")
+
+// boxSub streams the log to one connection: the oldest entry past the cursor
+// that matches the topic and the state, then the next, for as long as the
+// connection lives. It scans and registers under s.mu and delivers outside it,
+// so a post never waits on a socket. Nothing matching parks the handler on a
+// boxWaiter with the wake channel a post already nudges. The watch it leaves is
+// parked from the first frame to the last, its cursor follows the stream, and a
+// disconnected client releases the handler through boxPollWait.
+func (s *server) boxSub(cl *client, req *subReq) error {
+	cursor := 0
+	if req.AfterSeq != nil {
+		cursor = *req.AfterSeq
+	}
+	k := boxWatchKeyOf(req.From, req.Key, req.KeyPrefix)
+	w := &boxWaiter{wake: make(chan struct{}, 1)}
+
+	// unpark clears the parked mark of the watch this stream left behind. It
+	// takes s.mu itself, so no caller holds it.
+	unpark := func() {
+		if req.From == "" {
+			return
+		}
+		s.mu.Lock()
+		s.boxSetWatchLocked(k, cursor, false)
+		s.mu.Unlock()
+	}
+
+	s.mu.Lock()
+	if err := s.boxReadLocked(req.From); err != nil {
+		s.mu.Unlock()
+		return err
+	}
+	// The gap is decided once, at the start: an empty log has no gap, so the
+	// first entry that arrives later carries trimmed false.
+	trimmed := s.boxTrimmedLocked(req.AfterSeq)
+	if req.From != "" {
+		s.boxSetWatchLocked(k, cursor, true)
+	}
+	s.mu.Unlock()
+
+	for {
+		s.mu.Lock()
+		before := cursor
+		e, ok := s.boxSubFindLocked(req, &cursor)
+		if req.From != "" && cursor != before {
+			// The watch stays parked while the stream runs; only its cursor
+			// moves, so a view shows the reader where it is.
+			s.boxSetWatchLocked(k, cursor, true)
+		}
+		if !ok {
+			s.boxWatchLocked(w)
+		}
+		s.mu.Unlock()
+
+		if ok {
+			frame := subFrame{Entry: e, Trimmed: trimmed}
+			if !cl.deliver(Msg{Type: "msg", Res: jsonRaw(frame)}) {
+				// The frame never reached the queue, so the cursor must not
+				// pass it: a reconnect resumes at this entry.
+				s.mu.Lock()
+				cursor = before
+				if req.From != "" {
+					s.boxSetWatchLocked(k, cursor, true)
+				}
+				s.mu.Unlock()
+				unpark()
+				return errBoxGone
+			}
+			trimmed = false
+			continue
+		}
+
+		timer := time.NewTimer(boxPollWait)
+		select {
+		case <-w.wake:
+			timer.Stop()
+		case <-timer.C:
+		}
+		s.boxUnwatch(w)
+		if connGone(cl.c) {
+			unpark()
+			return errBoxGone
+		}
+	}
+}
+
+// boxSubFindLocked is the read a stream blocks on: the oldest entry past the
+// cursor that matches the topic and, when one is named, the state. It advances
+// the cursor over every entry it scans, the state-skipped ones included, so a
+// reconnect never rescans them. The caller holds s.mu.
+func (s *server) boxSubFindLocked(req *subReq, cursor *int) (entry, bool) {
+	for _, e := range s.st.Box {
+		if e.Seq <= *cursor {
+			continue
+		}
+		*cursor = e.Seq
+		if !boxMatch(e, req.Key, req.KeyPrefix, nil) {
+			continue
+		}
+		if req.State != "" && e.State != req.State {
+			continue
+		}
+		return e, true
+	}
+	return entry{}, false
 }
 
 // connGone reports whether the peer has closed its side of a unix socket. The
