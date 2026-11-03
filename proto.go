@@ -82,6 +82,10 @@ type AllPane struct {
 	Agent   bool   `json:"agent"`
 	App     string `json:"app,omitempty"`
 	Branch  string `json:"branch,omitempty"`
+	// Cwd is the pane's working directory. Root is the repository's toplevel
+	// for that directory, empty outside git.
+	Cwd  string `json:"cwd,omitempty"`
+	Root string `json:"root,omitempty"`
 	// Worktree is the linked worktree's folder name; empty for the main
 	// checkout or a directory outside git.
 	Worktree string `json:"worktree,omitempty"`

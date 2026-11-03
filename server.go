@@ -111,14 +111,18 @@ type branchEntry struct {
 }
 
 // gitInfo is what the rail shows for a working directory: the branch, for a
-// linked worktree its own folder name, and the uncommitted change counts.
+// linked worktree its own folder name, the repository root, and the
+// uncommitted change counts.
 type gitInfo struct {
 	branch   string
 	worktree string
-	inRepo   bool
-	dirty    bool
-	added    int
-	deleted  int
+	// root is the repository's toplevel as git reports it, cleaned. It is the
+	// folder a linked worktree shares with its main checkout.
+	root    string
+	inRepo  bool
+	dirty   bool
+	added   int
+	deleted int
 }
 
 // gitOutput runs one git command against cwd with the one second timeout the
@@ -165,6 +169,7 @@ var detectGit = func(cwd string) gitInfo {
 		info.branch = b
 	}
 	root := filepath.Clean(lines[1])
+	info.root = root
 	gd, cd := lines[2], lines[3]
 	if !filepath.IsAbs(gd) {
 		gd = filepath.Join(cwd, gd)
@@ -631,6 +636,8 @@ func (s *server) allPanesLocked() []AllPane {
 					info.Name = ps.Name
 					info.App = ps.App
 					gi := s.gitFor(ps.Cwd)
+					info.Cwd = ps.Cwd
+					info.Root = gi.root
 					info.Branch = gi.branch
 					info.Worktree = gi.worktree
 					info.InRepo = gi.inRepo

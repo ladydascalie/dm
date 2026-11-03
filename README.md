@@ -99,15 +99,20 @@ stable hash of the workspace id picks the preferred one, and the rail gives up
 to six live workspaces distinct hues. A workspace keeps its accent while the
 workspace list holds. One blank row separates workspace blocks.
 
-Each window follows with its fold caret and a label: the git branch when its
-pane is in a repository, else the linked worktree folder, else the window
-name. The git state comes from the window's focused pane, or from its first
-pane in a repository. The right edge of that line carries the uncommitted
-change count: an amber dot when the tree is dirty, then `+N` in green and `-M`
-in red, with a zero side hidden, or `clean` in dim grey when nothing changed.
-A pane outside a repository gets no stats tail: a directory git never saw
-cannot be clean. A window whose pane has a status message gets a dim second
-line under its label.
+Each window follows with its fold caret and its folder: the pane's path below
+the repository root, the folder's own name when the pane sits at the root, and
+the folder name alone outside git. A pane that reports no directory falls back
+to the window name. Two spaces follow with the git branch in dim grey when it
+differs from the folder. The folder names the window, so it outranks the
+branch: a narrow rail drops the branch whole before it cuts the folder. The
+folder and the git state come from one pane: the window's focused pane when it
+is in a repository, else its first pane in a repository, else the focused pane,
+else the window's first pane. The right edge of that line carries the
+uncommitted change count: an amber dot when the tree is dirty, then `+N` in
+green and `-M` in red, with a zero side hidden, or `clean` in dim grey when
+nothing changed. A pane outside a repository gets no stats tail: a directory
+git never saw cannot be clean. A window whose pane has a status message gets a
+dim second line under its folder.
 
 Windows start folded; click a window line or its second line to unfold or fold
 it, and the fold is stored in the state file. An unfolded pane row labels
@@ -126,8 +131,9 @@ folder of the pane it was created from; `rename-window` overrides the name. A
 window whose label is still the old positional number is renamed from its
 pane's folder when the session loads.
 
-A long label is cut with `…` so the right-aligned stats fit. When even that
-cannot, the rail draws no tail at all, never half a pair. The rail paints its
+A long label is cut with `…` so the right-aligned stats fit, and the branch is
+dropped first. When even that cannot, the rail draws no tail at all, never half
+a pair. The rail paints its
 own dark background
 and uses explicit RGB colours, not palette slots, so every label, glyph and
 stat reaches WCAG AA contrast on both the rail and the focused row. Icons use
