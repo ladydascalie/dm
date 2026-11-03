@@ -487,7 +487,8 @@ func TestAltScreenAndMouseMode(t *testing.T) {
 
 func waitMode(t *testing.T, h *harness, session string, alt, mouse bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	start := time.Now()
+	deadline := start.Add(waitBudget)
 	for {
 		tree := h.rpc(session, map[string]any{"action": "list"})
 		snap := tree["snapshot"].(map[string]any)
@@ -500,7 +501,8 @@ func waitMode(t *testing.T, h *harness, session string, alt, mouse bool) {
 			}
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("pane never reached alt=%v mouse=%v: %v", alt, mouse, snap["panes"])
+			t.Fatalf("pane never reached alt=%v mouse=%v within the %s wait budget (waited %s): %v",
+				alt, mouse, waitBudget, time.Since(start).Round(time.Millisecond), snap["panes"])
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -3207,9 +3209,16 @@ func (h *harness) split(session, target, dir string) string {
 	return id
 }
 
+// waitBudget bounds how long waitFor polls for a needle. A pane runs the
+// operator's login shell, so its startup (zshrc, git status, plugin
+// bootstraps) delays the first command: input typed before the shell reads it
+// waits in the PTY, and the output lands late. Budget for a cold shell start.
+const waitBudget = 30 * time.Second
+
 func (h *harness) waitFor(session, pane, needle string) string {
 	h.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	start := time.Now()
+	deadline := start.Add(waitBudget)
 	var last string
 	for time.Now().Before(deadline) {
 		out, err := h.try("read", pane, "-s", session)
@@ -3219,7 +3228,8 @@ func (h *harness) waitFor(session, pane, needle string) string {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	h.t.Fatalf("pane %s never showed %q; last read:\n%s", pane, needle, last)
+	h.t.Fatalf("pane %s never showed %q within the %s wait budget (waited %s); last read:\n%s",
+		pane, needle, waitBudget, time.Since(start).Round(time.Millisecond), last)
 	return last
 }
 
