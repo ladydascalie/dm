@@ -140,6 +140,11 @@ folder of the pane it was created from; `rename-window` overrides the name. A
 window whose label is still the old positional number is renamed from its
 pane's folder when the session loads.
 
+A pane keeps the server told where its shell is, so a `cd` moves the folder
+the rail shows, the git state beside it, and the folder the next pane, window
+or workspace opens in. The folder follows the shell, not the launch: a window
+created after a `cd` belongs where the shell went.
+
 A long label is cut with `…` so the right-aligned stats fit, and the branch is
 dropped first. When even that cannot, the rail draws no tail at all, never half
 a pair. The rail paints its

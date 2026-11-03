@@ -4316,6 +4316,79 @@ func TestWindowAutoName(t *testing.T) {
 	}
 }
 
+// TestNewPaneFollowsShellCwd opens a new pane where its source pane's shell is
+// now, not where that pane was born: dm launched from /a, the pane cd'd to /b,
+// so a new window, workspace or split belongs to /b.
+func TestNewPaneFollowsShellCwd(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "cwd")
+	root := h.focus("cwd")
+
+	now := filepath.Join(t.TempDir(), "now")
+	if err := os.MkdirAll(now, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.run("write-to", root, "-s", "cwd", "--msg", "cd "+now, "--enter")
+	deadline := time.Now().Add(waitBudget)
+	for {
+		ps := h.sessionState("cwd").Panes[root]
+		if ps != nil && ps.Cwd == now {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pane %s never recorded %q", root, now)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// A workspace takes the folder the active pane stands in, and so does the
+	// window the workspace is born with.
+	h.rpc("cwd", map[string]any{"action": "new-workspace", "name": "second"})
+	st := h.sessionState("cwd")
+	if len(st.Workspaces) != 2 {
+		t.Fatalf("workspaces = %d, want 2", len(st.Workspaces))
+	}
+	ws := st.Workspaces[1]
+	if id := ws.Windows[0].Focus; st.Panes[id] == nil || st.Panes[id].Cwd != now {
+		t.Fatalf("new workspace pane cwd = %+v, want %q", st.Panes[id], now)
+	}
+	if name := ws.Windows[0].Name; name != "now" {
+		t.Fatalf("new workspace window name = %q, want now", name)
+	}
+
+	// A split inherits the same folder, whichever workspace its target is in.
+	res := h.rpc("cwd", map[string]any{"action": "split", "target": root, "dir": "right"})
+	split := res["pane"].(string)
+	if ps := h.sessionState("cwd").Panes[split]; ps == nil || ps.Cwd != now {
+		t.Fatalf("split pane cwd = %+v, want %q", ps, now)
+	}
+}
+
+// TestShellCwd reads a process's directory through /proc and survives a pid
+// that has none.
+func TestShellCwd(t *testing.T) {
+	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "-c", "cd "+want+"; sleep 10")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	deadline := time.Now().Add(5 * time.Second)
+	for shellCwd(cmd.Process.Pid) != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("shellCwd(%d) never reached %q", cmd.Process.Pid, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := shellCwd(-1); got != "" {
+		t.Fatalf("shellCwd(-1) = %q, want empty", got)
+	}
+}
+
 func TestFolderName(t *testing.T) {
 	cases := map[string]string{"/": "root", "/a/b/": "b", "/home/b": "b", "": "", ".": "root"}
 	for dir, want := range cases {

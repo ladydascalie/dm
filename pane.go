@@ -27,7 +27,7 @@ type paneProc struct {
 	session string
 	sock    string
 	shell   string
-	cwd     string
+	cwd     string // where the shell is now, not where it started; guarded by mu
 
 	ptmx *os.File
 	cmd  *exec.Cmd
@@ -185,6 +185,7 @@ func runPane(args []string) error {
 	}()
 
 	go p.readLoop()
+	go p.watchCwd()
 	go func() {
 		_ = cmd.Wait()
 		p.shutdown()
@@ -307,6 +308,43 @@ func (p *paneProc) cursorPos() (row, col int) {
 	return c.Y, c.X
 }
 
+// cwdEvery is how often a pane asks the kernel where its shell is. One
+// readlink per pane per interval: a shell's own process carries the cwd, so a
+// builtin cd moves it and /proc reports it without any shell integration.
+const cwdEvery = 500 * time.Millisecond
+
+// shellCwd is the directory a process stands in, or empty when the kernel will
+// not say, as when the directory is gone.
+func shellCwd(pid int) string {
+	dir, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
+// watchCwd follows the shell around the filesystem and reports each move. The
+// poll is the coalescer: a burst of cds costs one report.
+func (p *paneProc) watchCwd() {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return
+	}
+	pid := p.cmd.Process.Pid
+	for {
+		time.Sleep(cwdEvery)
+		dir := shellCwd(pid)
+		if dir == "" {
+			continue
+		}
+		p.mu.Lock()
+		if dir != p.cwd {
+			p.cwd = dir
+			p.broadcastLocked(Msg{Type: "cwd", Cwd: dir})
+		}
+		p.mu.Unlock()
+	}
+}
+
 func (p *paneProc) setStatus(st Status) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -394,6 +432,11 @@ func (p *paneProc) serve(c net.Conn) {
 			st := p.st
 			p.mu.Unlock()
 			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, St: &st})
+		case "cwd":
+			p.mu.Lock()
+			dir := p.cwd
+			p.mu.Unlock()
+			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, Cwd: dir})
 		case "ping":
 			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true})
 		case "kill":

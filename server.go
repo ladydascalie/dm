@@ -555,6 +555,9 @@ func (s *server) ensurePane(id string) error {
 		s.mu.Lock()
 		s.panes[id] = pc
 		s.mu.Unlock()
+		// A daemon that outlived a server has gone wherever its shell went, so
+		// ask it where that is instead of trusting the state file.
+		s.setPaneCwd(id, s.liveCwd(id))
 		return nil
 	}
 	s.mu.Lock()
@@ -633,6 +636,8 @@ func (s *server) watchPane(id string) {
 						s.notifyPaneState(id, to, message)
 					}
 				}
+			case "cwd":
+				s.setPaneCwd(id, m.Cwd)
 			case "mode":
 				var mi struct {
 					Alt   bool `json:"alt"`
@@ -2088,6 +2093,11 @@ func (s *server) activeIDs() []string {
 }
 
 func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (string, error) {
+	// A split opens in the folder its source pane stands in now. Ask before
+	// taking the lock, for the same reason a window asks.
+	if cwd == "" {
+		cwd = s.inheritedCwd(target)
+	}
 	switch dir {
 	case "left", "right", "up", "down":
 	default:
@@ -2293,6 +2303,74 @@ func (s *server) closePane(target string) error {
 	return nil
 }
 
+// setPaneCwd records where a pane's shell stands and redraws when it moved. A
+// move is the rail's folder, its git labels and the folder the next pane opens
+// in, all at once.
+func (s *server) setPaneCwd(id, cwd string) {
+	if cwd == "" {
+		return
+	}
+	s.mu.Lock()
+	ps := s.st.Panes[id]
+	if ps == nil || ps.Cwd == cwd {
+		s.mu.Unlock()
+		return
+	}
+	ps.Cwd = cwd
+	_ = s.st.save()
+	s.mu.Unlock()
+	s.pushSnapshot()
+}
+
+// liveCwd is where a pane's shell stands now. It asks the pane, because the
+// recorded cwd is the folder the pane was born in and a cd never rewrites it.
+// The recorded cwd answers when the pane daemon cannot: a dead daemon, or one
+// spawned by an older binary.
+func (s *server) liveCwd(id string) string {
+	if id != "" {
+		if m, err := paneRequest(s.st.Name, id, Msg{Type: "req", Action: "cwd"}); err == nil && m.Cwd != "" {
+			return m.Cwd
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ps := s.st.Panes[id]; ps != nil {
+		return ps.Cwd
+	}
+	return ""
+}
+
+// inheritPaneLocked is the pane a new pane takes its folder from: target names
+// a pane, or a workspace whose active pane answers, or nothing at all for the
+// active workspace. The caller holds s.mu.
+func (s *server) inheritPaneLocked(target string) string {
+	if target != "" && s.st.Panes[target] != nil {
+		return target
+	}
+	ws := s.st.ws()
+	for _, cand := range s.st.Workspaces {
+		if target != "" && cand.ID != target {
+			continue
+		}
+		ws = cand
+		break
+	}
+	if ws == nil || len(ws.Windows) == 0 {
+		return ""
+	}
+	return ws.Windows[ws.Active].Focus
+}
+
+// inheritedCwd is where the pane a new pane inherits from stands now, or empty
+// when there is nothing to ask. It runs before the caller takes s.mu, because
+// asking a pane is a socket round trip.
+func (s *server) inheritedCwd(target string) string {
+	s.mu.Lock()
+	id := s.inheritPaneLocked(target)
+	s.mu.Unlock()
+	return s.liveCwd(id)
+}
+
 // windowCwdLocked is the starting directory of a workspace's active pane, or
 // the server's own directory when the workspace has none. The caller holds
 // s.mu.
@@ -2307,6 +2385,11 @@ func (s *server) windowCwdLocked(ws *Workspace) string {
 }
 
 func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, string, error) {
+	// The new pane opens where its source pane stands now, so the window's
+	// folder name and its shell agree. Ask before taking the lock.
+	if cwd == "" {
+		cwd = s.inheritedCwd(wsID)
+	}
 	s.mu.Lock()
 	ws := s.st.ws()
 	src := ""
@@ -2399,6 +2482,11 @@ func (s *server) selectWindow(i int) error {
 }
 
 func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string, string, string, error) {
+	// Ask the pane before taking the lock: the folder is where the user is now,
+	// and asking is a socket round trip.
+	if cwd == "" {
+		cwd = s.inheritedCwd("")
+	}
 	s.mu.Lock()
 	if name == "" {
 		name = "ws" + strconv.Itoa(len(s.st.Workspaces)+1)
