@@ -20,6 +20,10 @@ import (
 const (
 	histMax  = 512 << 10
 	histRows = 2000
+
+	// escTimeout bounds how long a lone escape or a partial escape sequence
+	// waits for the rest of its bytes.
+	escTimeout = 40 * time.Millisecond
 )
 
 type tui struct {
@@ -57,8 +61,9 @@ type tui struct {
 	pasteDeadline time.Time // set while a paste start marker is still arriving
 	pasteOff      bool      // one pass with paste detection off
 
-	selText *selection // text selected with the mouse, nil when none
-	press   *heldPress // left press waiting for a drag or a click
+	selText        *selection // text selected with the mouse, nil when none
+	press          *heldPress // left press waiting for a drag or a click
+	swallowRelease bool       // the menu took a click; its release belongs to nobody
 
 	dragging   bool
 	dragFirst  string
@@ -187,9 +192,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 				t.inbuf = nil
 				t.dirty = true
 			}
-			if !t.pasteDeadline.IsZero() && now.Sub(t.pasteDeadline) > 40*time.Millisecond {
-				t.staleInput()
-			}
+			t.expirePaste(now)
 			if t.armed && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
 				t.pending = false
 				t.inbuf = t.inbuf[:0]
@@ -256,11 +259,12 @@ func (t *tui) apply(m Msg) {
 				delete(t.vts, id)
 			}
 		}
-		if t.selText != nil && !keep[t.selText.pane] {
-			t.selText = nil
-		}
-		if t.press != nil && !keep[t.press.pane] {
-			t.press = nil
+		if t.selText != nil {
+			p := t.paneByID(t.selText.pane)
+			if p == nil || p.Rect.W != t.selText.w || p.Rect.H != t.selText.h {
+				// The anchor and focus are in the old geometry.
+				t.clearSelection()
+			}
 		}
 		t.dirty = true
 	case "screen":
@@ -503,14 +507,12 @@ var (
 )
 
 // takePaste reports whether the buffer starts with a bracketed paste. When the
-// whole sequence is present it returns it and its length. When only the start
-// marker has partly arrived it returns n == 0 so the caller keeps buffering.
-// One byte is not treated as a partial marker: a bare escape must stay instant.
+// whole sequence is present it returns it and its length. When the start marker
+// has only partly arrived it returns n == 0 so the caller keeps buffering. A
+// lone escape counts as a partial marker: a read can split before the paste
+// arrives, and the deadline decides whether it was a real escape.
 func takePaste(buf []byte) (seq []byte, n int, started bool) {
 	if len(buf) < len(pasteStart) {
-		if len(buf) < 2 {
-			return nil, 0, false
-		}
 		return nil, 0, bytes.HasPrefix(pasteStart, buf)
 	}
 	if !bytes.HasPrefix(buf, pasteStart) {
@@ -529,6 +531,16 @@ func (t *tui) takePaste() (seq []byte, n int, started bool) {
 		return nil, 0, false
 	}
 	return takePaste(t.inbuf)
+}
+
+// expirePaste flushes a start marker that never completed once its deadline
+// passes. A real lone escape reaches the pane this way.
+func (t *tui) expirePaste(now time.Time) bool {
+	if t.pasteDeadline.IsZero() || now.Sub(t.pasteDeadline) <= escTimeout {
+		return false
+	}
+	t.staleInput()
+	return true
 }
 
 // staleInput handles bytes that looked like the start of a paste and then
@@ -576,6 +588,9 @@ func (t *tui) processInput() {
 			t.inbuf = rest
 			continue
 		}
+		// These bytes cannot start a paste, so any earlier partial marker is
+		// disproved and must not be flushed early.
+		t.pasteDeadline = time.Time{}
 		if ev, n, ok := parseMouse(t.inbuf); ok {
 			t.inbuf = t.inbuf[n:]
 			t.handleMouse(ev)
@@ -888,6 +903,14 @@ type selection struct {
 	pane   string
 	anchor cell
 	focus  cell
+
+	// w and h are the pane's content size when the press landed. A snapshot
+	// that changes the geometry drops the selection.
+	w, h int
+
+	// moved is set once the pointer passed the drag threshold, so a jitter on
+	// a click stays a click.
+	moved bool
 }
 
 // heldPress is a left press on a pane that has not been forwarded yet. A drag
@@ -930,8 +953,22 @@ func (t *tui) selFocus(x, y int) {
 	if c.y >= p.Rect.H {
 		c.y = p.Rect.H - 1
 	}
-	if c != t.selText.focus {
-		t.selText.focus = c
+	s := t.selText
+	if !s.moved {
+		dx, dy := c.x-s.anchor.x, c.y-s.anchor.y
+		if dx < 0 {
+			dx = -dx
+		}
+		if dy < 0 {
+			dy = -dy
+		}
+		if dx < 2 && dy < 2 {
+			return // a one-cell jitter is still a click
+		}
+		s.moved = true
+	}
+	if c != s.focus {
+		s.focus = c
 		t.dirty = true
 	}
 }
@@ -949,9 +986,12 @@ func (s *selection) rangeIn(w int) *selRange {
 	return &selRange{lo: lo, hi: hi}
 }
 
+// clearSelection drops the selection and the press held for it. A press that
+// outlives its selection would forward a phantom click to the app on release.
 func (t *tui) clearSelection() {
-	if t.selText != nil {
+	if t.selText != nil || t.press != nil {
 		t.selText = nil
+		t.press = nil
 		t.dirty = true
 	}
 }
@@ -1019,6 +1059,14 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	if t.snap == nil {
 		return
 	}
+	if ev.release && ev.btn&3 == 0 && t.swallowRelease {
+		// The menu already ran this click; its release is not the app's.
+		t.swallowRelease = false
+		return
+	}
+	if !ev.release && ev.btn&32 == 0 {
+		t.swallowRelease = false
+	}
 	x, y := ev.x-1, ev.y-1
 	if t.mode == "menu" {
 		if t.menu == nil {
@@ -1042,6 +1090,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			// keeps going, so one click both dismisses and focuses.
 			if row >= 0 {
 				t.menuPick(row)
+				t.swallowRelease = true
 				return
 			}
 			if inside {
@@ -1108,9 +1157,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			t.selFocus(x, y)
 			return
 		}
-		t.press = nil
-		t.selText = nil
-		t.dirty = true
+		t.clearSelection()
 	}
 	// A divider belongs to the mux, unless its app claims the mouse.
 	if left {
@@ -1134,7 +1181,8 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		if c, ok := cellAt(p, x, y); ok {
 			t.press = &heldPress{pane: p.ID, mouse: p.Mouse,
 				raws: [][]byte{ev.raw}}
-			t.selText = &selection{pane: p.ID, anchor: c, focus: c}
+			t.selText = &selection{pane: p.ID, anchor: c, focus: c,
+				w: p.Rect.W, h: p.Rect.H}
 			t.dirty = true
 			return
 		}
