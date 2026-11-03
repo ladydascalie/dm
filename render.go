@@ -329,6 +329,39 @@ func leafAt(n *Node, area Rect, x, y int) string {
 	return ""
 }
 
+// drawMenu paints the right-click menu over the panes.
+func drawMenu(buf *bytes.Buffer, m *menu) {
+	if m == nil || m.w < 8 {
+		return
+	}
+	inner := m.w - 2
+	title := menuPad("─ "+m.title+" ", inner, '─')
+	fmt.Fprintf(buf, "\x1b[0m\x1b[90m\x1b[%d;%dH┌%s┐", m.y+1, m.x+1, title)
+	for i, it := range m.items {
+		line := menuPad(fmt.Sprintf(" %-22s %-4s", it.label, it.key), inner, ' ')
+		colour := "\x1b[0m\x1b[90m"
+		if i == m.sel {
+			colour = "\x1b[0m\x1b[30;46m"
+		}
+		fmt.Fprintf(buf, "\x1b[%d;%dH│%s%s\x1b[0m\x1b[90m│", m.y+2+i, m.x+1, colour, line)
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH└%s┘", m.y+len(m.items)+2, m.x+1, strings.Repeat("─", inner))
+	buf.WriteString("\x1b[0m")
+}
+
+// menuPad truncates or pads s to exactly w runes.
+func menuPad(s string, w int, fill rune) string {
+	r := []rune(s)
+	if len(r) > w {
+		r = r[:w]
+	}
+	out := string(r)
+	if n := w - len(r); n > 0 {
+		out += strings.Repeat(string(fill), n)
+	}
+	return out
+}
+
 // drawBar paints the one-line status bar at the bottom.
 func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, toast, scroll string) {
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)

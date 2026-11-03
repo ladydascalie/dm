@@ -524,6 +524,89 @@ func TestDrawPaneBox(t *testing.T) {
 	}
 }
 
+func TestMenuClampsAndHits(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	p := tui.paneByID("b")
+	tui.openMenu(p, 98, 28)
+	m := tui.menu
+	if m == nil || tui.mode != "menu" {
+		t.Fatalf("menu not opened: %+v mode=%q", m, tui.mode)
+	}
+	if m.x+m.w > 100 || m.y+len(m.items)+2 > 30 {
+		t.Fatalf("menu escapes the screen: %+v", m)
+	}
+	if got := m.itemAt(m.x+2, m.y+1); got != 0 {
+		t.Fatalf("first item row = %d", got)
+	}
+	if got := m.itemAt(m.x+2, m.y+len(m.items)+1); got != -1 {
+		t.Fatalf("bottom border hit = %d", got)
+	}
+	if got := m.itemAt(0, 0); got != -1 {
+		t.Fatalf("point outside the menu hit = %d", got)
+	}
+}
+
+func TestRightPressOpensMenuOverMousePane(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	snap := testSnapshot(row, 100, 30, map[string]bool{"b": true})
+	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
+	// A right press on pane b, whose app owns the mouse, still opens the menu.
+	tui.handleMouse(mouseEvent{btn: 2, x: 80, y: 5})
+	if tui.mode != "menu" || tui.menu == nil || tui.menu.pane != "b" {
+		t.Fatalf("right press: mode=%q menu=%+v", tui.mode, tui.menu)
+	}
+	// A left press on a menu row runs that item and closes the menu.
+	done := false
+	tui.menu.items[0].run = func() { done = true }
+	tui.handleMouse(mouseEvent{btn: 0, x: tui.menu.x + 2, y: tui.menu.y + 1 + 1})
+	if !done || tui.mode != "" || tui.menu != nil {
+		t.Fatalf("menu pick: done=%v mode=%q", done, tui.mode)
+	}
+}
+
+func TestMenuKeyboard(t *testing.T) {
+	row := &Node{Pane: "a"}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui.openMenu(tui.paneByID("a"), 10, 10)
+	if len(tui.menu.items) < 3 {
+		t.Fatalf("menu items = %d", len(tui.menu.items))
+	}
+	tui.inbuf = []byte("j")
+	if !tui.menuKey() || tui.menu.sel != 1 {
+		t.Fatalf("j did not move: %+v", tui.menu)
+	}
+	tui.inbuf = []byte("k")
+	tui.menuKey() // back to 0
+	tui.inbuf = []byte("k")
+	tui.menuKey() // wraps to the last item
+	if tui.menu == nil || tui.menu.sel != len(tui.menu.items)-1 {
+		t.Fatalf("wrap up failed: %+v", tui.menu)
+	}
+	tui.inbuf = []byte("q")
+	tui.menuKey()
+	if tui.menu != nil || tui.mode != "" {
+		t.Fatalf("q did not close: %+v %q", tui.menu, tui.mode)
+	}
+}
+
+func TestDrawMenu(t *testing.T) {
+	m := &menu{x: 2, y: 3, w: 30, title: "w1p2 pi", items: []menuItem{
+		{label: "Split right", key: "|"},
+		{label: "Close pane", key: "x"},
+	}, sel: 1}
+	var b bytes.Buffer
+	drawMenu(&b, m)
+	out := b.String()
+	for _, want := range []string{"Split right", "Close pane", "w1p2 pi", "\x1b[30;46m"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("menu missing %q: %q", want, out)
+		}
+	}
+}
+
 func TestBarHighlightsFocus(t *testing.T) {
 	snap := &Snapshot{
 		Session: "main", Workspace: "main", Windows: []string{"1"}, Focus: "w1p2",

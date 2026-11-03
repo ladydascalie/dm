@@ -33,9 +33,10 @@ type tui struct {
 	toastAt time.Time
 	dirty   bool
 
-	mode     string // "" or "sessions" or "scroll"
+	mode     string // "" or "sessions" or "scroll" or "menu"
 	sessions []SessionInfo
 	sel      int
+	menu     *menu
 
 	hist     map[string][]byte
 	scroll   string // pane id shown from scrollback
@@ -80,9 +81,9 @@ func runClient(name string) error {
 	defer signal.Stop(winch)
 
 	var out bytes.Buffer
-	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1006h")
+	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1006h")
 	os.Stdout.Write(out.Bytes())
-	defer os.Stdout.WriteString("\x1b[?1006l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
+	defer os.Stdout.WriteString("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
 
 	for {
 		next, err := runSession(fd, name, keys, winch)
@@ -182,6 +183,17 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 				t.pending = false
 				t.inbuf = t.inbuf[:0]
 				t.disarm()
+			}
+			if t.mode != "" && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
+				t.pending = false
+				switch t.mode {
+				case "menu":
+					t.closeMenu()
+				case "sessions":
+					t.closePicker()
+				case "scroll":
+					t.exitScroll()
+				}
 			}
 			if t.dirty && now.Sub(lastDraw) > 15*time.Millisecond {
 				t.draw()
@@ -298,6 +310,166 @@ func (t *tui) paneByID(id string) *PaneInfo {
 	return nil
 }
 
+// menu is one open context menu: where it sits, its title, its items and the
+// selected row. pane is the pane the right click landed on.
+type menu struct {
+	x, y  int
+	w     int
+	title string
+	pane  string
+	items []menuItem
+	sel   int
+}
+
+type menuItem struct {
+	label string
+	key   string
+	run   func()
+}
+
+// openMenu builds the pane menu at a zero-based terminal point, clamped to the
+// screen, and takes over input.
+func (t *tui) openMenu(p *PaneInfo, x, y int) {
+	if t.snap == nil {
+		return
+	}
+	title := p.ID
+	if p.Name != "" {
+		title += " " + p.Name
+	}
+	items := []menuItem{
+		{"Split right", "|", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "right" }) }},
+		{"Split down", "-", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "down" }) }},
+		{"Split left", "<", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "left" }) }},
+		{"Split up", "^", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "up" }) }},
+		{"Focus", "", func() { t.actionOn(p.ID, "focus", nil) }},
+		{"Close pane", "x", func() { t.actionOn(p.ID, "close-pane", nil) }},
+		{"Scrollback", "[", func() { t.startScroll(p) }},
+		{"New window", "c", func() { t.action("new-window", nil) }},
+		{"New workspace", "t", func() { t.action("new-workspace", nil) }},
+		{"Switch session", "s", func() { t.openPicker() }},
+		{"Detach", "d", func() { t.quit = true }},
+	}
+	w := 34
+	if w > t.snap.Cols-2 {
+		w = t.snap.Cols - 2
+	}
+	h := len(items) + 2
+	x = clampInt(x, 0, t.snap.Cols-w)
+	y = clampInt(y, 0, t.snap.Rows-h)
+	t.menu = &menu{x: x, y: y, w: w, title: title, pane: p.ID, items: items}
+	t.mode = "menu"
+	t.armed = false
+	t.dirty = true
+}
+
+func clampInt(v, lo, hi int) int {
+	if hi < lo {
+		return lo
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func (t *tui) closeMenu() {
+	t.menu = nil
+	t.mode = ""
+	t.inbuf = nil
+	t.dirty = true
+}
+
+// menuKey consumes one key while the menu is open. It returns false when it
+// needs more bytes for an escape sequence.
+func (t *tui) menuKey() bool {
+	if t.menu == nil {
+		t.closeMenu()
+		return true
+	}
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	b := t.inbuf[0]
+	if b == 0x1b {
+		if len(t.inbuf) < 3 {
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		seq := string(t.inbuf[:3])
+		t.inbuf = t.inbuf[3:]
+		switch seq {
+		case "\x1b[A":
+			t.menuMove(-1)
+		case "\x1b[B":
+			t.menuMove(1)
+		default:
+			t.closeMenu()
+		}
+		return true
+	}
+	t.inbuf = t.inbuf[1:]
+	t.pending = false
+	switch b {
+	case 'j':
+		t.menuMove(1)
+	case 'k':
+		t.menuMove(-1)
+	case '\r', '\n':
+		t.menuPick(t.menu.sel)
+	case 'q', 0x1b:
+		t.closeMenu()
+	default:
+		if b >= '1' && b <= '9' {
+			if i := int(b - '1'); i < len(t.menu.items) {
+				t.menuPick(i)
+				return true
+			}
+		}
+		t.closeMenu()
+	}
+	return true
+}
+
+func (t *tui) menuMove(step int) {
+	if t.menu == nil || len(t.menu.items) == 0 {
+		return
+	}
+	t.menu.sel = (t.menu.sel + step + len(t.menu.items)) % len(t.menu.items)
+	t.dirty = true
+}
+
+func (t *tui) menuPick(i int) {
+	if t.menu == nil || i < 0 || i >= len(t.menu.items) {
+		t.closeMenu()
+		return
+	}
+	item := t.menu.items[i]
+	t.closeMenu()
+	item.run()
+}
+
+// menuRow returns the item index at a zero-based point, or -1.
+func (m *menu) itemAt(x, y int) int {
+	if m == nil {
+		return -1
+	}
+	if x < m.x+1 || x >= m.x+m.w-1 {
+		return -1
+	}
+	i := y - (m.y + 1)
+	if i < 0 || i >= len(m.items) {
+		return -1
+	}
+	return i
+}
+
 func (t *tui) processInput() {
 	for len(t.inbuf) > 0 {
 		if ev, n, ok := parseMouse(t.inbuf); ok {
@@ -309,6 +481,12 @@ func (t *tui) processInput() {
 		}
 		if t.mode == "sessions" {
 			if !t.pickerKey() {
+				return
+			}
+			continue
+		}
+		if t.mode == "menu" {
+			if !t.menuKey() {
 				return
 			}
 			continue
@@ -573,6 +751,31 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		return
 	}
 	x, y := ev.x-1, ev.y-1
+	if t.mode == "menu" {
+		left := ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release
+		if left && t.menu != nil {
+			if i := t.menu.itemAt(x, y); i >= 0 {
+				t.menuPick(i)
+			} else {
+				t.closeMenu()
+			}
+		} else if ev.btn&3 == 2 && ev.btn&32 == 0 && !ev.release {
+			t.closeMenu()
+		}
+		return
+	}
+	// Right press is the mux's context menu, even over an app that owns the
+	// mouse. It is a window-manager gesture, not the app's.
+	if ev.btn&3 == 2 && ev.btn&32 == 0 && !ev.release {
+		p := t.paneAt(x, y)
+		if p == nil {
+			p = t.paneByID(t.snap.Focus)
+		}
+		if p != nil {
+			t.openMenu(p, x, y)
+		}
+		return
+	}
 	left := ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release
 	if t.dragging {
 		if ev.release {
@@ -880,10 +1083,15 @@ func (t *tui) disarm() {
 }
 
 func (t *tui) action(name string, fill func(*Msg)) {
-	m := Msg{Type: "req", Action: name}
+	target := ""
 	if t.snap != nil {
-		m.Target = t.snap.Focus
+		target = t.snap.Focus
 	}
+	t.actionOn(target, name, fill)
+}
+
+func (t *tui) actionOn(target, name string, fill func(*Msg)) {
+	m := Msg{Type: "req", Action: name, Target: target}
 	if fill != nil {
 		fill(&m)
 	}
@@ -917,6 +1125,9 @@ func (t *tui) draw() {
 	}
 	if t.mode == "sessions" {
 		drawSessions(&b, win.Cols, win.Rows, t.sessions, t.sel, t.session)
+	}
+	if t.mode == "menu" && t.menu != nil {
+		drawMenu(&b, t.menu)
 	}
 	if p := t.paneByID(win.Focus); p != nil && t.mode == "" {
 		if vt := t.vts[p.ID]; vt != nil {

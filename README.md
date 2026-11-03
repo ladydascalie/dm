@@ -76,9 +76,16 @@ enters scrollback directly.
 
 ## Scrollback and mouse
 
-Mouse reporting is always on, there is no setting (SGR 1000 + 1006, disabled
-again on detach). Left click focuses the pane under the pointer and the wheel
-scrolls the pane under the pointer. If the program in that pane enabled mouse reporting
+Mouse reporting is always on, there is no setting (SGR 1000 + 1002 + 1006,
+disabled again on detach). Left click focuses the pane under the pointer, the
+wheel scrolls the pane under the pointer, and dragging the one-cell pad between
+two boxes resizes that split.
+
+Right click opens the pane menu, even over a program that owns the mouse: it is
+a window-manager gesture, not the app's. Move with `j`/`k` or the arrows,
+`enter` or a digit to run, `esc` or `q` to close, or click a row. The menu
+offers split right/down/left/up, focus, close pane, scrollback, new window, new
+workspace, switch session and detach. If the program in that pane enabled mouse reporting
 itself, the event is forwarded to it instead. That is how `pi`, `htop` and
 `vim` keep their own scrolling: they own the wheel when they ask for it.
 
