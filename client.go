@@ -1953,7 +1953,7 @@ func (t *tui) toggleRail() {
 }
 
 // toggleRailControl is a click on the rail's bottom row: full <-> thin. Hiding
-// stays on `prefix r`, so a thin rail expands here instead of going hidden.
+// stays on `prefix b`, so a thin rail expands here instead of going hidden.
 func (t *tui) toggleRailControl() {
 	want := t.railToggleWidth(false)
 	t.action("set-rail", func(m *Msg) { m.Index = want })
@@ -1962,7 +1962,7 @@ func (t *tui) toggleRailControl() {
 // railToggleWidth is the width a rail toggle asks for. The key and the bottom
 // control both take their width from here, so the two routes cannot drift. A
 // hidden or thin rail comes back at the last expanded width, or the default
-// when none was seen. hide lets `prefix r` reach the hidden state; the control
+// when none was seen. hide lets `prefix b` reach the hidden state; the control
 // passes false and expands instead.
 func (t *tui) railToggleWidth(hide bool) int {
 	rail := 0
