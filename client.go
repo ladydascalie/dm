@@ -365,6 +365,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			t.expireToasts(now)
 			t.expirePaste(now)
 			t.expireSwitcher(now)
+			t.flushBoxWatchers(now)
 			if t.armed && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
 				t.pending = false
 				t.inbuf = t.inbuf[:0]
@@ -520,6 +521,10 @@ func (t *tui) apply(m Msg) {
 			t.takeBoxList(m)
 			break
 		}
+		if m.Action == "msg-watchers" {
+			t.takeBoxWatchers(m)
+			break
+		}
 		if !m.OK {
 			t.notify(m.Error)
 		}
@@ -528,6 +533,12 @@ func (t *tui) apply(m Msg) {
 		// closed one needs nothing.
 		if t.box != nil {
 			t.boxRequest()
+		}
+	case "watch":
+		// A watch appeared, advanced, unparked or went. An open view asks for
+		// the list again, at most once per boxWatchInterval.
+		if t.box != nil {
+			t.boxWatchers(time.Now())
 		}
 	}
 	// A ring that just landed belongs to the scrollback wait it answers, if

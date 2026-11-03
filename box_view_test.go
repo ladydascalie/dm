@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -90,7 +91,7 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 	// true colour as r<<16|g<<8|b.
 	want := boxStateColour(stateDone)
 	screen.Lock()
-	got := screen.Cell(r.X+boxSeqW+1, r.Y).FG
+	got := screen.Cell(r.X+boxReceiptW+boxSeqW+1, r.Y).FG
 	screen.Unlock()
 	if got != vt10x.Color(want.r<<16|want.g<<8|want.b) {
 		t.Fatalf("done colour = %v, want %v", got, want)
@@ -199,7 +200,8 @@ func TestBoxListReplyFillsView(t *testing.T) {
 func TestBoxPushRefreshesOpenView(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02m")
-	nextBoxMsg(t, got) // the request the open sent
+	nextBoxMsg(t, got) // the log the open asked for
+	nextBoxMsg(t, got) // the watcher list the open asked for
 	tui.apply(Msg{Type: "box"})
 	if m := nextBoxMsg(t, got); m.Action != "msg-list" {
 		t.Fatalf("push asked for %q, want msg-list", m.Action)
@@ -247,5 +249,317 @@ func TestBoxPostPushesAndEchoes(t *testing.T) {
 	}
 	if reply.Action != "msg-post" {
 		t.Fatalf("reply action = %q, want msg-post", reply.Action)
+	}
+}
+
+// boxWatches is a presence list in the server's order: pane, then key, then
+// branch. The first watch is parked, so the title and the page have a wait to
+// show, and the second trails one seq behind the newest entry.
+func boxWatches() []watch {
+	at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	return []watch{
+		{Pane: "w1p1", Key: "lane/a", Cursor: 9, Parked: true, At: at},
+		{Pane: "w1p2", KeyPrefix: "lane/", Cursor: 8, At: at},
+	}
+}
+
+// TestBoxViewRequestsWatchers: the open asks for the log and the watcher list.
+// A watch push inside the 100 ms window is held back; once the window passes
+// the push asks again, and a closed view asks for nothing.
+func TestBoxViewRequestsWatchers(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02m")
+	if m := nextBoxMsg(t, got); m.Action != "msg-list" {
+		t.Fatalf("open asked for %q, want msg-list", m.Action)
+	}
+	ask := nextBoxMsg(t, got)
+	if ask.Action != "msg-watchers" {
+		t.Fatalf("open asked for %q, want msg-watchers", ask.Action)
+	}
+	var req watchersReq
+	if err := json.Unmarshal(ask.Res, &req); err != nil {
+		t.Fatalf("watchers request: %v", err)
+	}
+
+	tui.apply(Msg{Type: "watch"})
+	noMsg(t, got)
+	if !tui.box.watchWant {
+		t.Fatal("a held-back ask is not marked for the ticker")
+	}
+
+	tui.box.watchAt = time.Now().Add(-boxWatchInterval)
+	tui.apply(Msg{Type: "watch"})
+	if m := nextBoxMsg(t, got); m.Action != "msg-watchers" {
+		t.Fatalf("push asked for %q, want msg-watchers", m.Action)
+	}
+
+	feed(tui, "q")
+	tui.apply(Msg{Type: "watch"})
+	noMsg(t, got)
+}
+
+// TestBoxViewWatchFlush: the ticker sends the ask that the window held back.
+func TestBoxViewWatchFlush(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02m")
+	nextBoxMsg(t, got)
+	nextBoxMsg(t, got)
+	tui.apply(Msg{Type: "watch"})
+	noMsg(t, got)
+	tui.box.watchAt = time.Now().Add(-boxWatchInterval)
+	tui.flushBoxWatchers(time.Now())
+	if m := nextBoxMsg(t, got); m.Action != "msg-watchers" {
+		t.Fatalf("flush asked for %q, want msg-watchers", m.Action)
+	}
+}
+
+// TestBoxViewWatcherPage: a watch push asks for the list, the reply fills the
+// page, and w swaps the log for the page and back. The page rows carry pane,
+// filter, cursor and the wait mark, and the hint names the key.
+func TestBoxViewWatcherPage(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02m")
+	nextBoxMsg(t, got) // msg-list
+	nextBoxMsg(t, got) // msg-watchers
+	list, err := json.Marshal(listReply{Entries: boxEntries()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(Msg{Type: "resp", Action: "msg-list", OK: true, Res: list})
+
+	tui.box.watchAt = time.Now().Add(-boxWatchInterval)
+	tui.apply(Msg{Type: "watch"})
+	if m := nextBoxMsg(t, got); m.Action != "msg-watchers" {
+		t.Fatalf("push asked for %q, want msg-watchers", m.Action)
+	}
+	res, err := json.Marshal(watchersReply{Watchers: boxWatches()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(Msg{Type: "resp", Action: "msg-watchers", OK: true, Res: res})
+
+	feed(tui, "w")
+	r := tui.box.float.Rect
+	screen := boxScreen(t, tui.box, tui.snap.Cols, tui.snap.Rows)
+	first := boxScreenRow(screen, r.Y, r.X, r.W)
+	for _, want := range []string{"w1p1", "lane/a", "@9", "wait"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("page row %q misses %q", first, want)
+		}
+	}
+	second := boxScreenRow(screen, r.Y+1, r.X, r.W)
+	for _, want := range []string{"w1p2", "lane/*", "@8"} {
+		if !strings.Contains(second, want) {
+			t.Fatalf("page row %q misses %q", second, want)
+		}
+	}
+	if strings.Contains(second, "wait") {
+		t.Fatalf("page row %q carries a wait mark on an unparked watch", second)
+	}
+	if hint := boxScreenRow(screen, r.Y+r.H, r.X+2, r.W-2); !strings.Contains(hint, "w log") {
+		t.Fatalf("hint = %q, want the log key", hint)
+	}
+
+	feed(tui, "w")
+	screen = boxScreen(t, tui.box, tui.snap.Cols, tui.snap.Rows)
+	if row := boxScreenRow(screen, r.Y, r.X, r.W); !strings.Contains(row, "gate green") {
+		t.Fatalf("row after w = %q, want the log again", row)
+	}
+	if hint := boxScreenRow(screen, r.Y+r.H, r.X+2, r.W-2); !strings.Contains(hint, "w watchers") {
+		t.Fatalf("hint = %q, want the page key", hint)
+	}
+}
+
+// TestBoxViewTitleWatching: the title counts parked watches, omits the count
+// when none is parked, and keeps the entry count.
+func TestBoxViewTitleWatching(t *testing.T) {
+	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0})
+	b.set(boxEntries())
+	b.watchers = boxWatches()
+	b.paint()
+	if got, want := b.title(), " box  4 entries  1 watching "; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+	b.watchers[1].Parked = true
+	if got, want := b.title(), " box  4 entries  2 watching "; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+	b.watchers = nil
+	if got, want := b.title(), " box  4 entries "; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+}
+
+// receiptWatches is boxWatches plus a watch on another key with a high cursor.
+// It matches neither lane/a entry, so the receipt count proves the filter is
+// part of the rule and not just the cursor.
+func receiptWatches() []watch {
+	return append(boxWatches(), watch{Pane: "w1p3", Key: "lane/b", Cursor: 9})
+}
+
+// TestBoxViewReceipt: a wide view prefixes each row with the number of watches
+// served that entry. A narrow view drops the marker whole.
+func TestBoxViewReceipt(t *testing.T) {
+	wide := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0})
+	wide.watchers = receiptWatches()
+	wide.set(boxEntries())
+	if wide.float.Rect.W < boxReceiptMinW {
+		t.Fatalf("wide rect = %d, want at least %d", wide.float.Rect.W, boxReceiptMinW)
+	}
+	screen := boxScreen(t, wide, 100, 30)
+	r := wide.float.Rect
+	if row := boxScreenRow(screen, r.Y, r.X, r.W); !strings.HasPrefix(row, " 1 ") || !strings.Contains(row, "gate green") {
+		t.Fatalf("first row = %q, want one receipt", row)
+	}
+	if row := boxScreenRow(screen, r.Y+1, r.X, r.W); !strings.HasPrefix(row, " 2 ") {
+		t.Fatalf("second row = %q, want two receipts", row)
+	}
+
+	narrow := newBoxView(&Snapshot{Cols: 50, Rows: 30, Rail: 0})
+	narrow.watchers = receiptWatches()
+	narrow.set(boxEntries())
+	if narrow.float.Rect.W >= boxReceiptMinW {
+		t.Fatalf("narrow rect = %d, want under %d", narrow.float.Rect.W, boxReceiptMinW)
+	}
+	screen = boxScreen(t, narrow, 50, 30)
+	r = narrow.float.Rect
+	want := boxRowText(boxEntries()[0], r.W, -1)
+	if got := boxScreenRow(screen, r.Y, r.X, r.W); got != want {
+		t.Fatalf("narrow row = %q, want no marker %q", got, want)
+	}
+}
+
+// TestBoxViewReceiptBoundary: the marker is drawn at exactly boxReceiptMinW
+// columns and dropped one column short. The rect is the screen width less the
+// six cells boxViewRect keeps clear.
+func TestBoxViewReceiptBoundary(t *testing.T) {
+	entries := boxEntries()[:1]
+	for _, tc := range []struct {
+		cols int
+		want int
+	}{
+		{66, boxReceiptMinW},
+		{65, boxReceiptMinW - 1},
+	} {
+		snap := &Snapshot{Cols: tc.cols, Rows: 30, Rail: 0}
+		b := newBoxView(snap)
+		b.watchers = boxWatches()
+		b.set(entries)
+		if got := b.float.Rect.W; got != tc.want {
+			t.Fatalf("cols %d: rect = %d, want %d", tc.cols, got, tc.want)
+		}
+		screen := boxScreen(t, b, tc.cols, 30)
+		r := b.float.Rect
+		row := boxScreenRow(screen, r.Y, r.X, r.W)
+		if tc.want >= boxReceiptMinW {
+			if !strings.HasPrefix(row, " 1 ") {
+				t.Fatalf("cols %d: row = %q, want the receipt marker", tc.cols, row)
+			}
+			continue
+		}
+		if want := boxRowText(entries[0], r.W, -1); row != want {
+			t.Fatalf("cols %d: row = %q, want no marker %q", tc.cols, row, want)
+		}
+	}
+}
+
+// TestBoxViewAnchor: a scrolled-back window keeps its top entry when the log
+// grows and names what arrived above it. At the top the view follows the
+// newest entry and the count clears.
+func TestBoxViewAnchor(t *testing.T) {
+	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0})
+	entries := make([]entry, 40)
+	for i := range entries {
+		entries[i] = entry{Seq: 40 - i, State: stateNote, Msg: "note"}
+	}
+	b.set(entries)
+	b.scroll(5)
+	top := b.entries[b.off].Seq
+	if top != 35 {
+		t.Fatalf("top = %d, want 35", top)
+	}
+
+	// Two pushes, one entry each: the count must add up, not restart from the
+	// current index.
+	b.set(append([]entry{{Seq: 41, State: stateNote, Msg: "note"}}, entries...))
+	if got := b.entries[b.off].Seq; got != top {
+		t.Fatalf("top seq = %d after one entry, want %d", got, top)
+	}
+	if b.new != 1 {
+		t.Fatalf("new = %d after one entry, want 1", b.new)
+	}
+	b.set(append([]entry{{Seq: 42, State: stateNote, Msg: "note"}}, b.entries...))
+	if got := b.entries[b.off].Seq; got != top {
+		t.Fatalf("top seq = %d after two entries, want %d", got, top)
+	}
+	if b.new != 2 {
+		t.Fatalf("new = %d after two entries, want 2", b.new)
+	}
+	if got := b.title(); !strings.Contains(got, "+2") {
+		t.Fatalf("title = %q, want the arrival count", got)
+	}
+
+	b.scroll(-b.off)
+	b.set(append([]entry{{Seq: 44, State: stateNote, Msg: "note"}}, b.entries...))
+	if b.off != 0 || b.new != 0 || strings.Contains(b.title(), "+") {
+		t.Fatalf("off = %d, new = %d, title = %q, want the newest entry", b.off, b.new, b.title())
+	}
+}
+
+// TestBoxViewWatcherPageEmptyLog: the contract makes a parked wait appear
+// before the first entry. The float sizes from the watches, so the page shows
+// every watch, and the page has its own offset.
+func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
+	few := append(boxWatches(), watch{Pane: "w1p3", Key: "lane/b", Cursor: 4})
+	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0})
+	b.setWatchers(few)
+	if got, want := b.float.Rect.H, len(few); got != want {
+		t.Fatalf("height = %d, want one row per watch %d", got, want)
+	}
+	b.togglePage()
+	screen := boxScreen(t, b, 100, 30)
+	r := b.float.Rect
+	for i, w := range few {
+		row := boxScreenRow(screen, r.Y+i, r.X, r.W)
+		if !strings.Contains(row, w.Pane) {
+			t.Fatalf("row %d = %q, want pane %s", i, row, w.Pane)
+		}
+	}
+	if b.pOff != 0 || b.off != 0 {
+		t.Fatalf("offsets = %d/%d, want both at the first row", b.pOff, b.off)
+	}
+	if got := b.title(); !strings.Contains(got, "1 watching") {
+		t.Fatalf("title = %q, want the parked wait", got)
+	}
+
+	// More watches than the cap: the page scrolls on its own offset and the
+	// log stays at the top.
+	many := make([]watch, 25)
+	for i := range many {
+		many[i] = watch{Pane: fmt.Sprintf("p%02d", i+1), Key: "lane/a", Cursor: i}
+	}
+	b = newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0})
+	b.set(boxEntries())
+	b.setWatchers(many)
+	if b.float.Rect.H != 22 {
+		t.Fatalf("height = %d, want the cap of 22 rows", b.float.Rect.H)
+	}
+	b.togglePage()
+	b.scroll(100)
+	if got := b.pOff; got != len(many)-b.float.Rect.H {
+		t.Fatalf("page offset = %d, want the last page %d", got, len(many)-b.float.Rect.H)
+	}
+	if b.off != 0 {
+		t.Fatalf("log offset = %d, want the page to scroll alone", b.off)
+	}
+	screen = boxScreen(t, b, 100, 30)
+	r = b.float.Rect
+	last := boxScreenRow(screen, r.Y+r.H-1, r.X, r.W)
+	if !strings.Contains(last, many[len(many)-1].Pane) {
+		t.Fatalf("last row = %q, want the oldest watch %s", last, many[len(many)-1].Pane)
+	}
+	b.scroll(-100)
+	if b.pOff != 0 {
+		t.Fatalf("page offset = %d after scrolling back, want the first watch", b.pOff)
 	}
 }
