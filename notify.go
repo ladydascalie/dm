@@ -34,19 +34,17 @@ func systemNotify(title, body string) {
 	if title == "" || os.Getenv("DM_NOTIFY") == "0" {
 		return
 	}
-	path, err := exec.LookPath("notify-send")
-	if err != nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
-	cmd := exec.CommandContext(ctx, path, "-a", "dm", "-t", "10000", "-u", "normal", title, body)
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return
-	}
+	// The lookup and the fork happen in the goroutine: the caller is the pane
+	// watch loop, and a loaded host must not stall status handling.
 	go func() {
+		path, err := exec.LookPath("notify-send")
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 		defer cancel()
-		_ = cmd.Wait()
+		cmd := exec.CommandContext(ctx, path, "-a", "dm", "-t", "10000", "-u", "normal", title, body)
+		_ = cmd.Run()
 	}()
 }
 
