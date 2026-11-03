@@ -1350,7 +1350,7 @@ func TestRailAgentMarker(t *testing.T) {
 		t.Fatalf("draw thin agent rail: %v", err)
 	}
 	vt.Lock()
-	bar, glyph := vt.Cell(0, 2).Char, vt.Cell(2, 2).Char
+	bar, glyph := vt.Cell(0, 0).Char, vt.Cell(2, 0).Char
 	vt.Unlock()
 	if bar != '\u258e' || glyph != '●' {
 		t.Fatalf("thin agent row = %q at 0, %q at 2", bar, glyph)
@@ -1466,11 +1466,18 @@ func TestRailFold(t *testing.T) {
 		t.Fatalf("window row is a pane hit: %q", got)
 	}
 
-	// The thin rail is a glyph column, so it lists panes regardless of the fold.
+	// The thin rail is a glyph column, so it lists panes regardless of the fold
+	// and has no workspace or window row to unfold.
 	snap.Rail = collapsedRail
 	items = railItems(snap)
-	if len(items) != 4 {
-		t.Fatalf("thin rail rows = %d, want 4: %+v", len(items), items)
+	if len(items) != 2 || items[0].kind != railPane || items[1].kind != railPane {
+		t.Fatalf("thin rail rows = %+v, want the two panes", items)
+	}
+	if items[0].pane != "w1p1" || items[1].pane != "w1p2" {
+		t.Fatalf("thin rail panes = %q, %q, want w1p1, w1p2", items[0].pane, items[1].pane)
+	}
+	if got := railWindowAt(snap, 3, 0); got != "" {
+		t.Fatalf("thin rail row folds a window: %q", got)
 	}
 }
 
@@ -2190,7 +2197,7 @@ func TestRailToggle(t *testing.T) {
 }
 
 // TestRailCollapsed draws and hits the thin rail. It shows one state glyph per
-// pane and no names, inside the fixed collapsed width.
+// pane and no names, from the first row, inside the fixed collapsed width.
 func TestRailCollapsed(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railOnePane("working", "alpha", collapsedRail, 40, 6)
@@ -2212,7 +2219,7 @@ func TestRailCollapsed(t *testing.T) {
 	vt.Lock()
 	glyphX := -1
 	for x := 0; x < 40; x++ {
-		g := vt.Cell(x, 2)
+		g := vt.Cell(x, 0)
 		if g.Char == '●' {
 			glyphX = x
 		}
@@ -2221,11 +2228,11 @@ func TestRailCollapsed(t *testing.T) {
 	if glyphX != 2 {
 		t.Fatalf("state glyph at x=%d, want 2", glyphX)
 	}
-	if got := railPaneAt(snap, 2, 2); got != "w1p1" {
+	if got := railPaneAt(snap, 2, 0); got != "w1p1" {
 		t.Fatalf("thin rail hit = %q, want w1p1", got)
 	}
 	// Past the fixed width is pane area, not rail.
-	if got := railPaneAt(snap, collapsedRail, 2); got != "" {
+	if got := railPaneAt(snap, collapsedRail, 0); got != "" {
 		t.Fatalf("hit past collapsed width = %q", got)
 	}
 }
