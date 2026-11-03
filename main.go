@@ -22,6 +22,7 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm read <pane> --scrollback N  print N rows above the screen
   dm split <pane> --dir D      split a pane: left right up down
   dm focus <pane>              focus a pane
+  dm rename-workspace <ws> <name>  rename a workspace
   dm next-pane | dm prev-pane
   dm status [pane]             show OSC 7501 agent status
   dm list                      print the pane tree as JSON
@@ -245,6 +246,14 @@ func runCLI(argv []string) error {
 			return fmt.Errorf("focus needs a pane id")
 		}
 		return printRPC(c.session, Msg{Action: "focus", Target: c.args[0]})
+
+	case "rename-workspace":
+		c := newFlags("rename-workspace")
+		c.parse(argv[1:])
+		if len(c.args) < 2 {
+			return fmt.Errorf("rename-workspace needs a workspace id and a name")
+		}
+		return printRPC(c.session, Msg{Action: "rename-workspace", Target: c.args[0], Name: c.args[1]})
 
 	case "next-pane", "prev-pane", "new-window", "next-window", "prev-window":
 		c := newFlags(argv[0])
