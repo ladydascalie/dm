@@ -107,6 +107,12 @@ programs; for streamed output it is exact.
 Mouse reporting means normal drag no longer selects text. Hold Shift while
 dragging to use the terminal's own selection.
 
+dm enables bracketed paste (2004) on attach and disables it again on detach, so
+ctrl+shift+v inserts newlines literally. The client sends a paste to the focused
+pane as one chunk and never reads a byte inside it as a dm key: an embedded
+ctrl+b does not arm the prefix, and newlines do not submit. A paste also closes
+an open menu, picker or scrollback first.
+
 ## RPC
 
 Every client speaks newline-free, length-prefixed JSON over the session socket

@@ -739,6 +739,141 @@ func TestMenuKeyboard(t *testing.T) {
 	}
 }
 
+// pasteTUI builds a client with a real snapshot and a conn over net.Pipe, and
+// a reader that collects every message the client sends.
+func pasteTUI(t *testing.T) (*tui, chan Msg) {
+	t.Helper()
+	row := &Node{Pane: "a"}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
+	a, b := net.Pipe()
+	t.Cleanup(func() {
+		a.Close()
+		b.Close()
+	})
+	tui.conn = &conn{Conn: a}
+	got := make(chan Msg, 16)
+	go func() {
+		for {
+			m, err := readMsg(b)
+			if err != nil {
+				close(got)
+				return
+			}
+			got <- m
+		}
+	}()
+	return tui, got
+}
+
+func nextMsg(t *testing.T, got chan Msg) Msg {
+	t.Helper()
+	select {
+	case m, ok := <-got:
+		if !ok {
+			t.Fatal("conn closed")
+		}
+		return m
+	case <-time.After(time.Second):
+		t.Fatal("no message")
+	}
+	return Msg{}
+}
+
+func noMsg(t *testing.T, got chan Msg) {
+	t.Helper()
+	select {
+	case m := <-got:
+		t.Fatalf("unexpected extra message: %+v", m)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// A paste is one keys message with its newlines intact. The Enter inside it is
+// text, so a second message never follows.
+func TestPasteIsOneKeysMessage(t *testing.T) {
+	tui, got := pasteTUI(t)
+	paste := "\x1b[200~line one\nline two\n\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(paste)...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != paste {
+		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
+	}
+	noMsg(t, got)
+	if len(tui.inbuf) != 0 || tui.armed {
+		t.Fatalf("paste left state: inbuf=%q armed=%v", tui.inbuf, tui.armed)
+	}
+}
+
+// A ctrl+b inside a paste is text, not a prefix arm.
+func TestPasteCtrlBDoesNotArm(t *testing.T) {
+	tui, got := pasteTUI(t)
+	paste := "\x1b[200~a\x02b\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(paste)...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != paste {
+		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
+	}
+	if tui.armed {
+		t.Fatal("ctrl+b in a paste armed the prefix")
+	}
+	noMsg(t, got)
+}
+
+// A paste split across two reads is buffered and forwarded once, intact.
+func TestPasteSpansReads(t *testing.T) {
+	tui, got := pasteTUI(t)
+	head := "\x1b[200~first\n"
+	tail := "second\n\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(head)...)
+	tui.processInput()
+	noMsg(t, got)
+	if len(tui.inbuf) == 0 {
+		t.Fatal("partial paste was not buffered")
+	}
+	tui.inbuf = append(tui.inbuf, []byte(tail)...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != head+tail {
+		t.Fatalf("split paste came through as %+v (%q)", m, m.Keys)
+	}
+	noMsg(t, got)
+}
+
+// A paste closes an open menu and reaches the pane instead of a menu item.
+func TestPasteClosesMenu(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.openMenu(tui.paneByID("a"), 10, 5)
+	if tui.menu == nil {
+		t.Fatal("menu did not open")
+	}
+	paste := "\x1b[200~x\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(paste)...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != paste {
+		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
+	}
+	if tui.menu != nil || tui.mode != "" {
+		t.Fatalf("paste left the menu open: %+v %q", tui.menu, tui.mode)
+	}
+}
+
+// A start marker that never completes is not a paste. The stall path sends
+// the bytes down the normal input path instead of holding them forever.
+func TestPasteStallFallsBack(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, []byte("\x1b[")...)
+	tui.processInput()
+	noMsg(t, got)
+	tui.staleInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b[" {
+		t.Fatalf("stalled marker came through as %+v (%q)", m, m.Keys)
+	}
+}
+
 func TestDrawMenu(t *testing.T) {
 	m := &menu{x: 2, y: 3, w: 30, title: "w1p2 pi", items: []menuItem{
 		{label: "Split right", key: "|"},

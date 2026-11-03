@@ -53,6 +53,9 @@ type tui struct {
 	inbuf   []byte
 	pending bool
 
+	pasteDeadline time.Time // set while a paste start marker is still arriving
+	pasteOff      bool      // one pass with paste detection off
+
 	dragging   bool
 	dragFirst  string
 	dragSecond string
@@ -82,9 +85,9 @@ func runClient(name string) error {
 	defer signal.Stop(winch)
 
 	var out bytes.Buffer
-	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h")
 	os.Stdout.Write(out.Bytes())
-	defer os.Stdout.WriteString("\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
+	defer os.Stdout.WriteString("\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
 
 	for {
 		next, err := runSession(fd, name, keys, winch)
@@ -179,6 +182,9 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 				t.armed = false
 				t.inbuf = nil
 				t.dirty = true
+			}
+			if !t.pasteDeadline.IsZero() && now.Sub(t.pasteDeadline) > 40*time.Millisecond {
+				t.staleInput()
 			}
 			if t.armed && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
 				t.pending = false
@@ -481,8 +487,85 @@ func (m *menu) itemAt(x, y int) int {
 	return i
 }
 
+var (
+	pasteStart = []byte("\x1b[200~")
+	pasteEnd   = []byte("\x1b[201~")
+)
+
+// takePaste reports whether the buffer starts with a bracketed paste. When the
+// whole sequence is present it returns it and its length. When only the start
+// marker has partly arrived it returns n == 0 so the caller keeps buffering.
+// One byte is not treated as a partial marker: a bare escape must stay instant.
+func takePaste(buf []byte) (seq []byte, n int, started bool) {
+	if len(buf) < len(pasteStart) {
+		if len(buf) < 2 {
+			return nil, 0, false
+		}
+		return nil, 0, bytes.HasPrefix(pasteStart, buf)
+	}
+	if !bytes.HasPrefix(buf, pasteStart) {
+		return nil, 0, false
+	}
+	i := bytes.Index(buf[len(pasteStart):], pasteEnd)
+	if i < 0 {
+		return nil, 0, true
+	}
+	n = len(pasteStart) + i + len(pasteEnd)
+	return buf[:n], n, true
+}
+
+func (t *tui) takePaste() (seq []byte, n int, started bool) {
+	if t.pasteOff {
+		return nil, 0, false
+	}
+	return takePaste(t.inbuf)
+}
+
+// staleInput handles bytes that looked like the start of a paste and then
+// stalled. They take the normal input path once.
+func (t *tui) staleInput() {
+	t.pasteDeadline = time.Time{}
+	t.pasteOff = true
+	t.processInput()
+	t.pasteOff = false
+}
+
+// forwardPaste sends a bracketed paste to the focused pane as one keys message.
+// A paste closes any open menu, picker or scrollback first and disarms the
+// prefix: its bytes are text for the pane, never dm commands.
+func (t *tui) forwardPaste(seq []byte) {
+	t.pasteDeadline = time.Time{}
+	t.pending = false
+	t.disarm()
+	switch t.mode {
+	case "menu":
+		t.closeMenu()
+	case "sessions":
+		t.closePicker()
+	case "scroll":
+		t.exitScroll()
+	default:
+		t.mode = ""
+	}
+	_ = t.conn.send(Msg{Type: "keys", Keys: seq})
+}
+
 func (t *tui) processInput() {
 	for len(t.inbuf) > 0 {
+		if seq, n, started := t.takePaste(); started {
+			if n == 0 {
+				// The marker is still arriving. Keep buffering; the ticker
+				// sends these bytes down the normal path if they stall.
+				if t.pasteDeadline.IsZero() {
+					t.pasteDeadline = time.Now()
+				}
+				return
+			}
+			rest := append([]byte(nil), t.inbuf[n:]...)
+			t.forwardPaste(seq)
+			t.inbuf = rest
+			continue
+		}
 		if ev, n, ok := parseMouse(t.inbuf); ok {
 			t.inbuf = t.inbuf[n:]
 			t.handleMouse(ev)
@@ -509,12 +592,24 @@ func (t *tui) processInput() {
 			continue
 		}
 		if !t.armed {
-			if i := bytes.IndexByte(t.inbuf, 0x02); i >= 0 {
-				if i > 0 {
-					_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf[:i]})
+			pi := -1
+			if !t.pasteOff {
+				pi = bytes.Index(t.inbuf, pasteStart)
+			}
+			ci := bytes.IndexByte(t.inbuf, 0x02)
+			if ci >= 0 && (pi < 0 || ci < pi) {
+				if ci > 0 {
+					_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf[:ci]})
 				}
-				t.inbuf = t.inbuf[i+1:]
+				t.inbuf = t.inbuf[ci+1:]
 				t.arm()
+				continue
+			}
+			if pi > 0 {
+				// Plain bytes before a paste are keys; the paste itself is
+				// handled at the head of the buffer on the next pass.
+				_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf[:pi]})
+				t.inbuf = append([]byte(nil), t.inbuf[pi:]...)
 				continue
 			}
 			_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf})
