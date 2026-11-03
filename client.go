@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +45,9 @@ type tui struct {
 	armed   bool
 	toasts  []toast // oldest first, newest last
 	dirty   bool
+
+	// out is the frame sink: os.Stdout in a session, a buffer in a test.
+	out io.Writer
 
 	mode     string // "" or "sessions" or "scroll" or "menu"
 	sessions []SessionInfo
@@ -95,6 +100,57 @@ type tui struct {
 	// its byte stream, nil once the child has gone.
 	pal    *palette
 	palOut chan []byte
+
+	// rowsig holds one fingerprint per pane content row, so a steady frame
+	// repaints only the rows that moved. laysig is the shape of the picture:
+	// when it changes the next frame repaints whole. last is what the previous
+	// frame painted, so each band is written only when its bytes change.
+	rowsig map[string][]uint64
+	laysig string
+	last   lastFrame
+}
+
+// paint is the bytes one band of the screen painted last frame and, for an
+// overlay, the screen rows those bytes cover.
+type paint struct {
+	buf  []byte
+	rows []int
+}
+
+// lastFrame is what the previous frame painted. The bands are kept apart
+// because each one changes on its own: a rail label must not cost a pane
+// repaint.
+type lastFrame struct {
+	box    paint
+	grip   paint
+	div    paint
+	rail   paint
+	bar    paint
+	toasts paint
+	pal    paint
+	help   paint
+	sess   paint
+	menu   paint
+
+	divRect Rect   // divider zone the last frame painted
+	cur     string // cursor block the last frame wrote
+}
+
+// frameOpen and frameClose bracket a frame so the terminal swaps it in whole.
+// A terminal that does not know the sequence ignores it.
+const (
+	frameOpen  = "\x1b[?2026h"
+	frameClose = "\x1b[?2026l"
+)
+
+// panePaint is one pane's content for one frame: the terminal to read, the
+// first row to show from it and the selection to mark.
+type panePaint struct {
+	id   string
+	rect Rect
+	vt   vt10x.View
+	row0 int
+	sel  *selRange
 }
 
 // toast is one short message for the operator. Its time is when it was raised,
@@ -1664,62 +1720,325 @@ func (t *tui) actionOn(target, name string, fill func(*Msg)) {
 	t.disarm()
 }
 
+// draw writes one frame. A frame that changes one cell writes one row: the
+// rows of every pane are fingerprinted, and each band of the picture (the
+// boxes, the grips, the divider, the rail, the bar, the toasts and the
+// overlays) is compared with its own bytes from the previous frame. A steady
+// frame writes nothing. A frame never clears the screen unless the picture
+// itself is not stable.
 func (t *tui) draw() {
-	if t.snap == nil {
+	win := t.snap
+	if win == nil || win.Cols < 1 || win.Rows < 1 {
 		return
 	}
-	var b bytes.Buffer
-	b.WriteString("\x1b[0m\x1b[?7l\x1b[2J\x1b[H")
-	win := t.snap
+
+	// The bands that own a whole buffer of bytes. Each one is rendered every
+	// frame and written only when its bytes differ from the last frame's.
+	var box, grip, div, rail, bar, toasts, pal, help, sess, menu bytes.Buffer
 	for _, p := range win.Panes {
-		if p.ID == t.scroll && t.scrollVT != nil {
-			start, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
-			drawPaneFrom(&b, t.scrollVT, p.Rect, start, nil)
-		} else if vt := t.vts[p.ID]; vt != nil {
-			var sr *selRange
-			if t.selText != nil && t.selText.pane == p.ID {
-				sr = t.selText.rangeIn(p.Rect.W)
-			}
-			drawPaneFrom(&b, vt, p.Rect, 0, sr)
-		}
-		drawPaneBox(&b, p.Rect, p.ID == win.Focus)
+		drawPaneBox(&box, p.Rect, p.ID == win.Focus)
 	}
-	drawGrips(&b, win)
-	drawDivider(&b, t.padZone, t.padAxis)
-	drawRail(&b, win)
-	drawBar(&b, win, t.armed, t.barInfo())
-	drawToasts(&b, win, t.toasts)
+	drawGrips(&grip, win)
+	drawDivider(&div, t.padZone, t.padAxis)
+	drawRail(&rail, win)
+	drawBar(&bar, win, t.armed, t.barInfo())
+	drawToasts(&toasts, win, t.toasts)
 	if t.pal != nil {
-		drawPaneFrom(&b, t.pal.vt, t.pal.rect, 0, nil)
-		drawPaneBox(&b, t.pal.rect, true)
+		drawPaneFrom(&pal, t.pal.vt, t.pal.rect, 0, nil)
+		drawPaneBox(&pal, t.pal.rect, true)
 	}
 	if t.armed {
-		drawHelp(&b, win.Cols, win.Rows)
+		drawHelp(&help, win.Cols, win.Rows)
 	}
 	if t.mode == "sessions" {
-		drawSessions(&b, win.Cols, win.Rows, t.sessions, t.sel, t.session)
+		drawSessions(&sess, win.Cols, win.Rows, t.sessions, t.sel, t.session)
 	}
 	if t.mode == "menu" && t.menu != nil {
-		drawMenu(&b, t.menu)
+		drawMenu(&menu, t.menu)
 	}
-	if t.pal != nil {
-		b.WriteString("\x1b[?25l")
+
+	// A picture that is not stable repaints whole and may clear: a size, a
+	// layout, a pane set, a scroll or a screen-owning mode changed.
+	sig := t.layoutSig(win)
+	full := t.laysig != sig
+	t.laysig = sig
+
+	// The divider paints over the borders and grips between two panes, so a
+	// divider that moves leaves cells the boxes must paint again.
+	padFreed := !full && !bytes.Equal(t.last.div.buf, div.Bytes())
+	var blank bytes.Buffer
+	if padFreed {
+		blankRect(&blank, t.last.divRect)
 	}
-	if p := t.paneByID(win.Focus); p != nil && t.mode == "" && t.pal == nil {
-		if vt := t.vts[p.ID]; vt != nil {
-			vt.Lock()
-			cur := vt.Cursor()
-			visible := vt.CursorVisible()
-			vt.Unlock()
-			if visible && cur.X < p.Rect.W && cur.Y < p.Rect.H {
-				fmt.Fprintf(&b, "\x1b[%d;%dH\x1b[?25h", p.Rect.Y+cur.Y+1, p.Rect.X+cur.X+1)
-			} else {
-				b.WriteString("\x1b[?25l")
+	t.last.divRect = Rect{}
+	if div.Len() > 0 {
+		t.last.divRect = t.padZone
+	}
+
+	dirty := map[int]bool{}
+	bands := []struct {
+		p       *paint
+		buf     *bytes.Buffer
+		overlay bool
+		force   bool
+		write   bool
+	}{
+		{p: &t.last.box, buf: &box, force: padFreed},
+		{p: &t.last.grip, buf: &grip, force: padFreed},
+		{p: &t.last.div, buf: &div},
+		{p: &t.last.rail, buf: &rail},
+		{p: &t.last.bar, buf: &bar},
+		{p: &t.last.toasts, buf: &toasts, overlay: true},
+		{p: &t.last.pal, buf: &pal, overlay: true},
+		{p: &t.last.help, buf: &help, overlay: true},
+		{p: &t.last.sess, buf: &sess, overlay: true},
+		{p: &t.last.menu, buf: &menu, overlay: true},
+	}
+	// An overlay paints on top of everything, so the rows it leaves need the
+	// whole picture back: the panes under it and the bands around it. Without a
+	// clear the rows would keep the overlay's glyphs.
+	overlayChanged := false
+	for i := range bands {
+		b := &bands[i]
+		b.write = full || b.force || !bytes.Equal(b.p.buf, b.buf.Bytes())
+		if !b.write {
+			continue
+		}
+		old := b.p.rows
+		b.p.buf = append(b.p.buf[:0], b.buf.Bytes()...)
+		if !b.overlay {
+			continue
+		}
+		// An overlay's pixels move with its bytes: the rows it leaves and the
+		// rows it takes belong to the panes again.
+		b.p.rows = bandRows(b.buf.Bytes())
+		overlayChanged = true
+		if !full {
+			for _, y := range old {
+				dirty[y] = true
+			}
+			for _, y := range b.p.rows {
+				dirty[y] = true
 			}
 		}
 	}
-	b.WriteString("\x1b[?7h")
-	os.Stdout.Write(b.Bytes())
+
+	// Pane rows: fingerprint each content row and repaint only the rows that
+	// moved. The fingerprint covers the cells, the selection on them and the
+	// scrollback row they come from.
+	paints := t.panePaints(win)
+	sigs := make(map[string][]uint64, len(paints))
+	for _, pp := range paints {
+		sigs[pp.id] = paneRowSigs(pp)
+	}
+	if !full {
+		for _, pp := range paints {
+			old := t.rowsig[pp.id]
+			for row, s := range sigs[pp.id] {
+				if row >= len(old) || old[row] != s {
+					dirty[pp.rect.Y+row] = true
+				}
+			}
+		}
+	}
+	t.rowsig = sigs
+
+	var body bytes.Buffer
+	for y := 0; y < win.Rows; y++ {
+		if !full && !dirty[y] {
+			continue
+		}
+		for _, pp := range paints {
+			if y < pp.rect.Y || y >= pp.rect.Y+pp.rect.H {
+				continue
+			}
+			drawPaneRow(&body, pp.vt, pp.rect, y-pp.rect.Y, pp.row0, pp.sel)
+		}
+	}
+	if padFreed {
+		body.Write(blank.Bytes())
+	}
+	for i := range bands {
+		b := &bands[i]
+		// A band that moved an overlay comes back whole, and an overlay goes
+		// back on top whenever a row under it was repainted.
+		if !b.write {
+			b.write = overlayChanged || (b.overlay && rowsHit(b.p.rows, dirty))
+		}
+		if b.write {
+			body.Write(b.p.buf)
+		}
+	}
+
+	cur := t.cursorBlock()
+	if body.Len() == 0 && !full && cur == t.last.cur {
+		return
+	}
+	var out bytes.Buffer
+	out.WriteString(frameOpen)
+	out.WriteString("\x1b[?7l")
+	if full {
+		out.WriteString("\x1b[0m\x1b[2J\x1b[H")
+	}
+	out.Write(body.Bytes())
+	out.WriteString(cur)
+	out.WriteString("\x1b[?7h")
+	out.WriteString(frameClose)
+	t.writeFrame(out.Bytes())
+	t.last.cur = cur
+}
+
+// writeFrame sends one frame to the frame writer.
+func (t *tui) writeFrame(b []byte) {
+	w := t.out
+	if w == nil {
+		w = os.Stdout
+	}
+	_, _ = w.Write(b)
+}
+
+// layoutSig is the shape of the picture. When it changes the cells cannot be
+// diffed against the last frame: the size, the layout, a pane, the scrollback,
+// the mode or the palette moved, so the next frame repaints whole.
+func (t *tui) layoutSig(win *Snapshot) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%dx%d r%d", win.Cols, win.Rows, win.Rail)
+	for _, p := range win.Panes {
+		fmt.Fprintf(&b, " %s:%d,%d,%d,%d", p.ID, p.Rect.X, p.Rect.Y, p.Rect.W, p.Rect.H)
+	}
+	fmt.Fprintf(&b, " f=%s m=%s s=%s", win.Focus, t.mode, t.scroll)
+	if t.pal != nil {
+		fmt.Fprintf(&b, " p=%+v", t.pal.rect)
+	}
+	return b.String()
+}
+
+// panePaints is the content each pane shows this frame.
+func (t *tui) panePaints(win *Snapshot) []panePaint {
+	out := make([]panePaint, 0, len(win.Panes))
+	for _, p := range win.Panes {
+		pp := panePaint{id: p.ID, rect: p.Rect}
+		if p.ID == t.scroll && t.scrollVT != nil {
+			pp.vt = t.scrollVT
+			pp.row0, _ = scrollStart(t.scrollVT, p.Rect.H, t.offset)
+		} else {
+			pp.vt = t.vts[p.ID]
+			if t.selText != nil && t.selText.pane == p.ID {
+				pp.sel = t.selText.rangeIn(p.Rect.W)
+			}
+		}
+		if pp.vt != nil {
+			out = append(out, pp)
+		}
+	}
+	return out
+}
+
+// paneRowSigs fingerprints one pane's content rows. Every visible change moves
+// the row's hash: the glyph, its colours, its mode, the selection over it and
+// the scrollback row it comes from.
+func paneRowSigs(pp panePaint) []uint64 {
+	cols, rows := pp.vt.Size()
+	out := make([]uint64, pp.rect.H)
+	pp.vt.Lock()
+	defer pp.vt.Unlock()
+	for row := 0; row < pp.rect.H; row++ {
+		h := uint64(14695981039346656037)
+		for x := 0; x < pp.rect.W; x++ {
+			var g vt10x.Glyph
+			if x < cols && pp.row0+row < rows {
+				g = normCell(pp.vt.Cell(x, pp.row0+row))
+			} else {
+				g = normCell(g)
+			}
+			h = mix(h, uint64(g.Char))
+			h = mix(h, uint64(g.FG))
+			h = mix(h, uint64(g.BG))
+			h = mix(h, uint64(g.Mode))
+			if pp.sel.has(row*pp.rect.W + x) {
+				h = mix(h, 1)
+			}
+		}
+		out[row] = h
+	}
+	return out
+}
+
+// mix folds one value into a row fingerprint (FNV-1a).
+func mix(h, v uint64) uint64 {
+	return (h ^ v) * 1099511628211
+}
+
+// bandRows returns the rows a band's bytes address, in screen order. A band
+// writes with absolute cursor moves, so its own bytes say where it lands.
+func bandRows(buf []byte) []int {
+	var rows []int
+	seen := map[int]bool{}
+	for i := 0; i+2 < len(buf); i++ {
+		if buf[i] != 0x1b || buf[i+1] != '[' {
+			continue
+		}
+		j, n, digits := i+2, 0, 0
+		for j < len(buf) && buf[j] >= '0' && buf[j] <= '9' {
+			n = n*10 + int(buf[j]-'0')
+			j++
+			digits++
+		}
+		if digits == 0 || j >= len(buf) || buf[j] != ';' {
+			continue
+		}
+		j++
+		for j < len(buf) && buf[j] >= '0' && buf[j] <= '9' {
+			j++
+		}
+		if j >= len(buf) || buf[j] != 'H' || n < 1 {
+			continue
+		}
+		if y := n - 1; !seen[y] {
+			seen[y] = true
+			rows = append(rows, y)
+		}
+	}
+	sort.Ints(rows)
+	return rows
+}
+
+// rowsHit reports whether any of rows is in the dirty set.
+func rowsHit(rows []int, dirty map[int]bool) bool {
+	for _, y := range rows {
+		if dirty[y] {
+			return true
+		}
+	}
+	return false
+}
+
+// cursorBlock is the tail of a frame that places the cursor, or hides it. It
+// is empty when the frame leaves the cursor alone.
+func (t *tui) cursorBlock() string {
+	if t.pal != nil {
+		return "\x1b[?25l"
+	}
+	win := t.snap
+	if win == nil || t.mode != "" {
+		return ""
+	}
+	p := t.paneByID(win.Focus)
+	if p == nil {
+		return ""
+	}
+	vt := t.vts[p.ID]
+	if vt == nil {
+		return ""
+	}
+	vt.Lock()
+	cur := vt.Cursor()
+	visible := vt.CursorVisible()
+	vt.Unlock()
+	if visible && cur.X < p.Rect.W && cur.Y < p.Rect.H {
+		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", p.Rect.Y+cur.Y+1, p.Rect.X+cur.X+1)
+	}
+	return "\x1b[?25l"
 }
 
 // conn wraps the server socket with a write mutex.
