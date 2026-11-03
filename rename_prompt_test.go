@@ -9,11 +9,13 @@ import (
 )
 
 // renamePromptTUI is a client on a snapshot whose active workspace is s1 with
-// the label main, plus a second workspace the prompt must never pick.
+// the label main, plus a second workspace the prompt must never pick. The
+// snapshot carries the label in Workspace, as the server sends it, and the
+// prompt resolves the id from the rail entries.
 func renamePromptTUI(t *testing.T) (*tui, chan Msg) {
 	t.Helper()
 	tr, got := clientTUI(t, nil)
-	tr.snap.Workspace = "s1"
+	tr.snap.Workspace = "main"
 	tr.snap.All = []AllPane{
 		{ID: "a", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true},
 		{ID: "z", Workspace: "s2", WorkspaceName: "work", Window: "w1", WindowName: "one"},

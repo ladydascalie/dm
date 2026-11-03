@@ -87,9 +87,14 @@ type postReq struct {
 }
 
 // listReq is the msg-list request. Limit zero or less means the whole box.
+// Key is an exact topic and KeyPrefix a branch of the topic tree; naming both
+// is ambiguous and fails. AfterSeq, when the request carries it, is a cursor:
+// only entries past it are listed, so a reader can catch up without repeats.
 type listReq struct {
-	Key   string `json:"key"`
-	Limit int    `json:"limit"`
+	Key       string `json:"key"`
+	KeyPrefix string `json:"keyPrefix"`
+	Limit     int    `json:"limit"`
+	AfterSeq  *int   `json:"afterSeq"`
 }
 
 // clearReq is the msg-clear request. An empty key clears every entry.
@@ -97,11 +102,19 @@ type clearReq struct {
 	Key string `json:"key"`
 }
 
-// waitReq is the msg-wait request.
+// waitReq is the msg-wait request. Without AfterSeq it waits for the newest
+// entry of the topic to carry the state, which is a status board. With
+// AfterSeq it returns the oldest entry past the cursor that matches, so a
+// subscriber sees every message in order. State is optional, and empty means
+// any state.
 type waitReq struct {
-	Key       string   `json:"key"`
-	State     boxState `json:"state"`
+	Key       string `json:"key"`
+	KeyPrefix string `json:"keyPrefix"`
+	// State is omitted when empty, so an any-state subscriber's request matches
+	// the published schema. The decoder still accepts an explicit empty state.
+	State     boxState `json:"state,omitempty"`
 	TimeoutMs int      `json:"timeoutMs"`
+	AfterSeq  *int     `json:"afterSeq"`
 }
 
 // schemaReq is the msg-schema request: no fields.
@@ -112,9 +125,11 @@ type postReply struct {
 	Entry entry `json:"entry"`
 }
 
-// listReply carries entries newest first.
+// listReply carries entries newest first. Trimmed is true when the cursor
+// named a row the box has already dropped, so the list starts after a gap.
 type listReply struct {
 	Entries []entry `json:"entries"`
+	Trimmed bool    `json:"trimmed"`
 }
 
 // clearReply carries how many entries went.
@@ -122,9 +137,11 @@ type clearReply struct {
 	Cleared int `json:"cleared"`
 }
 
-// waitReply carries the entry that satisfied the wait.
+// waitReply carries the entry that satisfied the wait. Trimmed is true when
+// the cursor named a row the box has already dropped.
 type waitReply struct {
-	Entry entry `json:"entry"`
+	Entry   entry `json:"entry"`
+	Trimmed bool  `json:"trimmed"`
 }
 
 // schemaReply carries the box wire as JSON Schema.
@@ -162,7 +179,7 @@ var boxWire = map[string]boxAction{
 	"msg-wait": {
 		request:  func() any { return &waitReq{} },
 		reply:    waitReply{},
-		required: []string{"state", "timeoutMs"},
+		required: []string{"timeoutMs"},
 	},
 	"msg-schema": {
 		request: func() any { return &schemaReq{} },
@@ -229,7 +246,10 @@ func validateBoxReq(action string, req any) error {
 		}
 		return checkText("msg", r.Msg, boxMaxMsg)
 	case *listReq:
-		if err := checkText("key", r.Key, boxMaxKey); err != nil {
+		if err := checkTopic(r.Key, r.KeyPrefix); err != nil {
+			return err
+		}
+		if err := checkAfter(r.AfterSeq); err != nil {
 			return err
 		}
 		r.Limit = clampLimit(r.Limit)
@@ -237,7 +257,16 @@ func validateBoxReq(action string, req any) error {
 	case *clearReq:
 		return checkText("key", r.Key, boxMaxKey)
 	case *waitReq:
-		if _, err := parseState(string(r.State)); err != nil {
+		// An empty state asks for any state, which a subscriber needs.
+		if r.State != "" {
+			if _, err := parseState(string(r.State)); err != nil {
+				return err
+			}
+		}
+		if err := checkTopic(r.Key, r.KeyPrefix); err != nil {
+			return err
+		}
+		if err := checkAfter(r.AfterSeq); err != nil {
 			return err
 		}
 		if r.TimeoutMs <= 0 || r.TimeoutMs > boxMaxWaitMs {
@@ -248,6 +277,42 @@ func validateBoxReq(action string, req any) error {
 		return nil
 	}
 	return fmt.Errorf("box: %s has no validator for %T", action, req)
+}
+
+// checkTopic applies the text rule to the two topic fields and refuses a
+// request that names both: an exact topic and a branch are different reads.
+func checkTopic(key, prefix string) error {
+	if key != "" && prefix != "" {
+		return fmt.Errorf("box: key and keyPrefix are exclusive")
+	}
+	if err := checkText("key", key, boxMaxKey); err != nil {
+		return err
+	}
+	return checkText("keyPrefix", prefix, boxMaxKey)
+}
+
+// checkAfter refuses a cursor below zero. Absent is not zero: absent means no
+// cursor, which is the status board read.
+func checkAfter(after *int) error {
+	if after != nil && *after < 0 {
+		return fmt.Errorf("box: afterSeq %d, want 0 or more", *after)
+	}
+	return nil
+}
+
+// boxMatch reports whether an entry passes one read: an exact topic, a topic
+// prefix and a cursor. An empty filter field admits everything.
+func boxMatch(e entry, key, prefix string, after *int) bool {
+	if key != "" && e.Key != key {
+		return false
+	}
+	if prefix != "" && !strings.HasPrefix(e.Key, prefix) {
+		return false
+	}
+	if after != nil && e.Seq <= *after {
+		return false
+	}
+	return true
 }
 
 // checkText applies the text rule to a key or a message: a byte cap, valid

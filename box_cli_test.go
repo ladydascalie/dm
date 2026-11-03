@@ -228,6 +228,49 @@ func TestBoxCLISchema(t *testing.T) {
 	}
 }
 
+// TestBoxCLIStream proves the topic stream reads through the binary: a branch
+// filter, a cursor, and a wait that takes no state.
+func TestBoxCLIStream(t *testing.T) {
+	h := newHarness(t)
+	s := "boxstream"
+	env := h.env
+	post := func(key, state, msg string) {
+		boxRun(t, h, env, "msg", "post", "-s", s, "--key", key, "--state", state, "--msg", msg)
+	}
+	post("msg/a", "note", "one")
+	post("msg/a", "working", "two")
+	post("msg/b", "done", "three")
+
+	rows := boxLines(boxRun(t, h, env, "msg", "list", "-s", s, "--prefix", "msg/"))
+	if len(rows) != 3 {
+		t.Fatalf("branch list has %d rows, want 3:\n%s", len(rows), strings.Join(rows, "\n"))
+	}
+	// A cursor keeps only the rows past it, newest first.
+	rows = boxLines(boxRun(t, h, env, "msg", "list", "-s", s, "--prefix", "msg/", "--after", "1"))
+	if len(rows) != 2 {
+		t.Fatalf("cursor list has %d rows, want 2:\n%s", len(rows), strings.Join(rows, "\n"))
+	}
+	if seq, _, _, _ := boxFields(t, rows[1]); seq != "2" {
+		t.Fatalf("oldest row past the cursor = %s, want 2", seq)
+	}
+
+	// The stream wait returns the oldest unseen entry and needs no state.
+	seq, key, _, msg := boxFields(t, boxRun(t, h, env, "msg", "wait", "-s", s,
+		"--prefix", "msg/", "--after", "0", "--timeout", "2s"))
+	if seq != "1" || key != "msg/a" || msg != "one" {
+		t.Fatalf("stream wait = %s %s %q, want the first entry", seq, key, msg)
+	}
+
+	// Naming an exact topic and a branch is refused by the server.
+	out, err := boxTry(t, h, env, "msg", "list", "-s", s, "--key", "msg/a", "--prefix", "msg/")
+	if err == nil {
+		t.Fatalf("key plus prefix exited zero:\n%s", out)
+	}
+	if !strings.Contains(out, "exclusive") {
+		t.Fatalf("key plus prefix output = %q, want the exclusivity error", out)
+	}
+}
+
 // TestBoxCLIFromPane proves from follows DM_PANE only inside the target
 // session. A pane id that is not in the session's tree is rejected, which shows
 // the value was sent; a shell in another session sends an empty from.

@@ -64,6 +64,7 @@ bottom right. It stays until an action runs or `esc` dismisses it.
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
 | `a` | quick switch palette: panes, windows, workspaces |
+| `m` | message box: the session's log as a floating pane |
 | `)` | next workspace |
 | `r` | rename the active workspace |
 | `b` | cycle the sidebar: full, thin, hidden |
@@ -443,35 +444,40 @@ Five actions. Each takes its request in the `res` field of the envelope.
 | action | request | reply |
 | --- | --- | --- |
 | `msg-post` | `key`, `state`, `msg`, `from` | `{"entry":{...}}` |
-| `msg-list` | `key`, `limit` | `{"entries":[...]}`, newest first |
-| `msg-wait` | `key`, `state`, `timeoutMs` | `{"entry":{...}}` |
+| `msg-list` | `key` or `keyPrefix`, `afterSeq`, `limit` | `{"entries":[...],"trimmed":false}`, newest first |
+| `msg-wait` | `key` or `keyPrefix`, `state`, `afterSeq`, `timeoutMs` | `{"entry":{...},"trimmed":false}` |
 | `msg-clear` | `key` | `{"cleared":N}` |
 | `msg-schema` | none | `{"schema":{...}}` |
 
-`state` is required on post and wait, and `timeoutMs` on wait. `limit` clamps
-to the box, and zero or less means the whole box. `timeoutMs` runs from 1 to
-3600000. An unknown field, an unknown action, an unknown state or a `from`
-outside the tree fails the request, so nothing is silently ignored.
-`msg-schema` serves these shapes as JSON Schema, built from the Go types and
-the one state enum.
+`state` is required on post and optional on wait, where an empty state asks for
+any state. `timeoutMs` is required on wait. `limit` clamps to the box, and zero
+or less means the whole box. `timeoutMs` runs from 1 to 3600000. `key` and
+`keyPrefix` are exclusive: a read names an exact topic or a branch, never both.
+`afterSeq` takes 0 or more, and leaving it out is not the same as 0. An unknown
+field, an unknown action, an unknown state or a `from` outside the tree fails
+the request, so nothing is silently ignored. `msg-schema` serves these shapes as
+JSON Schema, built from the Go types and the one state enum.
 
 The CLI:
 
 ```sh
 dm msg post --state blocked --key lane/a --msg "ready for review"
-dm msg list [--key lane/a] [--limit 20] [--json]
-dm msg wait --key lane/a --state done [--timeout 5m]
+dm msg list [--key lane/a | --prefix lane/] [--after SEQ] [--limit 20] [--json]
+dm msg wait [--key lane/a | --prefix lane/] [--state done] [--after SEQ] [--timeout 5m]
 dm msg clear [--key lane/a]
 dm msg schema
 ```
 
 `post` prints the stored entry as one row. `list` prints newest first as
 `SEQ KEY STATE FROM MSG` and cuts only the message to the terminal width;
-`--json` prints the reply unchanged. `clear` prints the count. `schema` prints
-the schema, so `dm msg schema | jq .actions` reads. The wait timeout defaults
-to 5 minutes and takes any duration up to one hour.
+`--json` prints the reply unchanged. `wait` prints the entry it found, or the
+reply on `--json`. `clear` prints the count. `schema` prints the schema, so
+`dm msg schema | jq .actions` reads. The wait timeout defaults to 5 minutes and
+takes any duration up to one hour. `--after` carries the cursor. Leave it off
+to read the status board; `--after 0` starts at the first entry.
 
-A wait matches the newest entry for its key, not any entry. It returns at once
+Without `afterSeq` a wait matches the newest entry under its topic, not any
+entry. It returns at once
 when that entry already carries the wanted state. Otherwise it parks until a
 post changes the newest entry for the key, until a clear exposes an older one,
 or until the timeout. Only the newest entry counts, so a newer `blocked`
@@ -502,6 +508,68 @@ The box is not a queue. Nothing is consumed: a list, a wait and a repeat of
 either read the same entries, and every reader sees the whole log for its
 key. A clear is the only thing that removes entries, apart from the caps
 dropping the oldest at the bound, and a clear never resets `seq`.
+
+## Topics and subscriptions
+
+The key is a topic, and it is a flat string, so a publisher names a branch:
+`msg/broadcast`, `reply/w1p1`. A reader names an exact topic with `key` or a
+branch with `keyPrefix`.
+
+Two read shapes come from the one log.
+
+- Without `afterSeq` a wait reads a status board. The newest entry under the
+  topic is the state of the world, and only it counts, as described above.
+- With `afterSeq` a wait reads a stream. It returns the oldest entry past the
+  cursor that matches the topic and, when a state is named, that state. Nothing
+  already handled comes back and nothing unseen is skipped. The cursor is the
+  `seq` of the last entry the reader handled. The reader keeps it, so the
+  server holds no subscription state.
+
+`trimmed` on a list or wait reply says the cursor sits behind the oldest row
+the box still keeps, so the entries in between are gone. A subscriber that sees
+it has missed messages and should resynchronise.
+
+An orchestrator and three workers:
+
+```sh
+# orchestrator, pane w1p0: one broadcast, no per-worker copy
+dm msg post --key msg/broadcast --state note --msg "read tasklist.md"
+
+# worker w1p1 follows the branch and keeps its own cursor
+c=$(cat .cursor 2>/dev/null || echo 0)
+entry=$(dm msg wait --prefix msg/ --after "$c" --timeout 1h --json)
+jq -r '.entry.msg' <<<"$entry"
+jq -r '.entry.seq' <<<"$entry" > .cursor
+
+# the worker reports on its own reply topic
+dm msg post --key reply/w1p1 --state done --msg "backend done"
+
+# the orchestrator reads the reports in order, from its own cursor
+dm msg wait --prefix reply/ --after "$(cat .orch.cursor)" --state done --timeout 1h
+```
+
+Every reader keeps its own cursor, so two orchestrators both see every report.
+A post wakes every parked wait, and each wait re-reads the log from its own
+cursor. The cursor lives with the reader: a restarted subscriber resumes where
+its cursor file says.
+
+Conventions the box does not enforce, and the ones to keep:
+
+- Post a pointer, not a document. `read tasklist.md`, not the tasklist. An
+  entry stays one row and the structured data stays in a file, passed once.
+- A worker posts `working` before it starts, so a replayed cursor shows the
+  work already began.
+- Liveness is the wait timeout. A dead pane posts nothing, so the orchestrator
+  treats a timeout as a lost worker.
+
+`prefix m` floats the box over the panes. One row per entry, newest first, as
+`SEQ STATE KEY FROM MSG`, with the state in the colour the rail gives that
+status. `j`, `k` and the arrows scroll one row and the wheel scrolls three;
+`g` and `G` jump to the newest and the oldest row. The box grows with the log
+up to 22 rows and then scrolls, and its title names the rows in view. A post or
+a clear anywhere in the session refreshes an open view, so it follows a lane
+without a keypress. `esc`, `q` or the prefix key closes it. The view is
+read-only: it posts nothing and clears nothing.
 
 ## Durability
 

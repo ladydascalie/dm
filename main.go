@@ -33,8 +33,8 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm dash [-s name]            print the palette rows
   dm peek <id> [--lines N]     print the screen a palette row lands on
   dm msg post --state S [--key K] [--msg T]
-  dm msg list [--key K] [--limit N] [--json]
-  dm msg wait --key K --state S [--timeout 5m]
+  dm msg list [--key K | --prefix P] [--after SEQ] [--limit N] [--json]
+  dm msg wait [--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]
   dm msg clear [--key K]
   dm msg schema
 
@@ -81,8 +81,10 @@ type cmdFlags struct {
 	scrollback int
 	jsonOut    bool
 	key        string
+	keyPrefix  string
 	state      string
 	limit      int
+	after      int
 	timeout    time.Duration
 	args       []string
 }
@@ -102,8 +104,10 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.IntVar(&c.scrollback, "scrollback", -1, "history rows above the screen")
 	c.fs.BoolVar(&c.jsonOut, "json", false, "print JSON")
 	c.fs.StringVar(&c.key, "key", "", "box key")
+	c.fs.StringVar(&c.keyPrefix, "prefix", "", "box key prefix")
 	c.fs.StringVar(&c.state, "state", "", "box state: note working blocked done error")
 	c.fs.IntVar(&c.limit, "limit", 0, "list rows, 0 for the whole box")
+	c.fs.IntVar(&c.after, "after", -1, "box seq cursor: entries after this one")
 	c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, "wait timeout")
 	_ = c.fs.Parse(reorder(args))
 	c.args = c.fs.Args()
@@ -115,6 +119,7 @@ func reorder(args []string) []string {
 		"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
 		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true,
 		"-key": true, "--key": true, "-state": true, "--state": true,
+		"-prefix": true, "--prefix": true, "-after": true, "--after": true,
 		"-limit": true, "--limit": true, "-timeout": true, "--timeout": true}
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
@@ -433,8 +438,11 @@ func boxPostVerb(c *cmdFlags) error {
 }
 
 // boxListVerb prints the box newest first, or the reply unchanged on --json.
+// With --after the rows are what the cursor has not seen, and a dropped gap is
+// reported on stderr.
 func boxListVerb(c *cmdFlags) error {
-	raw, err := json.Marshal(listReq{Key: c.key, Limit: c.limit})
+	raw, err := json.Marshal(listReq{Key: c.key, KeyPrefix: c.keyPrefix,
+		Limit: c.limit, AfterSeq: c.boxCursor()})
 	if err != nil {
 		return err
 	}
@@ -454,18 +462,30 @@ func boxListVerb(c *cmdFlags) error {
 		return err
 	}
 	boxPrint(rep.Entries, boxTermWidth())
+	if rep.Trimmed {
+		fmt.Fprintln(os.Stderr, "dm: entries between the cursor and the oldest kept row are gone")
+	}
 	return nil
 }
 
-// boxWaitVerb blocks until the key reaches the state and prints the entry. The
-// reply arrives only when the wait ends, so it needs a deadline of its own: the
-// one rpc sets is ten seconds, and a wait may run for an hour.
+// boxWaitVerb blocks until the read finds an entry and prints it. Without
+// --after it waits for the topic's newest entry to carry --state, which is the
+// status board. With --after it returns the oldest entry past the cursor, so a
+// subscriber sees every message in order. The reply arrives only when the wait
+// ends, so it needs a deadline of its own: the one rpc sets is ten seconds,
+// and a wait may run for an hour.
 func boxWaitVerb(c *cmdFlags) error {
-	st, err := parseState(c.state)
-	if err != nil {
-		return err
+	var st boxState
+	if c.state != "" {
+		parsed, err := parseState(c.state)
+		if err != nil {
+			return err
+		}
+		st = parsed
 	}
-	raw, err := json.Marshal(waitReq{Key: c.key, State: st, TimeoutMs: int(c.timeout / time.Millisecond)})
+	raw, err := json.Marshal(waitReq{Key: c.key, KeyPrefix: c.keyPrefix,
+		State: st, TimeoutMs: int(c.timeout / time.Millisecond),
+		AfterSeq: c.boxCursor()})
 	if err != nil {
 		return err
 	}
@@ -476,12 +496,29 @@ func boxWaitVerb(c *cmdFlags) error {
 	if !m.OK {
 		return fmt.Errorf("%s", m.Error)
 	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
 	var rep waitReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		return err
 	}
 	boxPrint([]entry{rep.Entry}, 0)
+	if rep.Trimmed {
+		fmt.Fprintln(os.Stderr, "dm: entries between the cursor and the oldest kept row are gone")
+	}
 	return nil
+}
+
+// boxCursor turns the -after flag into the request cursor. A negative flag is
+// absent: the request carries no afterSeq, so the read is the status board.
+func (c *cmdFlags) boxCursor() *int {
+	if c.after < 0 {
+		return nil
+	}
+	n := c.after
+	return &n
 }
 
 // boxClearVerb clears one key, or the whole box when no key is given, and

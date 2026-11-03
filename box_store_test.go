@@ -273,6 +273,12 @@ func TestBoxListNewestFirstAndFiltered(t *testing.T) {
 		{`{"limit":2}`, []int{4, 3}},
 		{`{"key":"lane/a","limit":1}`, []int{3}},
 		{`{"key":"lane/zzz"}`, nil},
+		{`{"keyPrefix":"lane/"}`, []int{4, 3, 2, 1}},
+		{`{"keyPrefix":"lane/a"}`, []int{3, 1}},
+		{`{"afterSeq":2}`, []int{4, 3}},
+		{`{"afterSeq":2,"keyPrefix":"lane/a"}`, []int{3}},
+		{`{"afterSeq":4}`, nil},
+		{`{"afterSeq":0,"limit":1}`, []int{4}},
 	}
 	for _, c := range cases {
 		got := seqs(list(c.res).Entries)
@@ -289,6 +295,133 @@ func TestBoxListNewestFirstAndFiltered(t *testing.T) {
 	m := boxCall(t, s, cl, conn, "msg-list", `{"key":"lane/zzz"}`)
 	if !strings.Contains(string(m.Res), `"entries":[]`) {
 		t.Fatalf("empty list reply = %s", m.Res)
+	}
+}
+
+// TestBoxPubSubRead proves the cursor read: entries come back in order, once
+// each, so a subscriber sees the whole topic stream.
+func TestBoxPubSubRead(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	boxPost(t, s, cl, conn, "msg/broadcast", "note", "read tasklist.md")
+	boxPost(t, s, cl, conn, "msg/broadcast", "working", "backend started")
+	boxPost(t, s, cl, conn, "msg/frontend", "done", "frontend green")
+
+	wait := func(res string) waitReply {
+		t.Helper()
+		m := boxCall(t, s, cl, conn, "msg-wait", res)
+		if !m.OK {
+			t.Fatalf("wait %s: %s", res, m.Error)
+		}
+		var rep waitReply
+		if err := json.Unmarshal(m.Res, &rep); err != nil {
+			t.Fatalf("wait reply: %v", err)
+		}
+		return rep
+	}
+
+	// A cursor returns the oldest unseen entry, not the newest: the first
+	// message on the branch survives the second.
+	if got := wait(`{"keyPrefix":"msg/","afterSeq":0,"timeoutMs":1000}`); got.Entry.Seq != 1 || got.Entry.Msg != "read tasklist.md" {
+		t.Fatalf("first stream read = %+v, want seq 1", got.Entry)
+	}
+	if got := wait(`{"keyPrefix":"msg/","afterSeq":1,"timeoutMs":1000}`); got.Entry.Seq != 2 {
+		t.Fatalf("second stream read = %+v, want seq 2", got.Entry)
+	}
+	// The state filter skips what the subscriber does not want.
+	if got := wait(`{"keyPrefix":"msg/","afterSeq":0,"state":"done","timeoutMs":1000}`); got.Entry.Seq != 3 {
+		t.Fatalf("done read = %+v, want seq 3", got.Entry)
+	}
+	// A wait without a state matches any entry.
+	if got := wait(`{"keyPrefix":"msg/","afterSeq":2,"timeoutMs":1000}`); got.Entry.Seq != 3 {
+		t.Fatalf("any-state read = %+v, want seq 3", got.Entry)
+	}
+	// The exclusive topic read still works.
+	if got := wait(`{"key":"msg/broadcast","afterSeq":1,"timeoutMs":1000}`); got.Entry.Seq != 2 {
+		t.Fatalf("exact read = %+v, want seq 2", got.Entry)
+	}
+	// A parked cursor read wakes on the next post and returns it.
+	done := make(chan waitReply, 1)
+	go func() {
+		m := boxCall(t, s, cl, conn, "msg-wait", `{"keyPrefix":"msg/","afterSeq":3,"timeoutMs":2000}`)
+		var rep waitReply
+		_ = json.Unmarshal(m.Res, &rep)
+		done <- rep
+	}()
+	time.Sleep(20 * time.Millisecond)
+	boxPost(t, s, cl, conn, "msg/integration", "done", "integration green")
+	select {
+	case rep := <-done:
+		if rep.Entry.Seq != 4 || rep.Entry.Key != "msg/integration" {
+			t.Fatalf("woken read = %+v, want seq 4 on integration", rep.Entry)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the parked read never returned")
+	}
+}
+
+// TestBoxTrimmedCursor proves a cursor behind the retained log reports the gap
+// instead of silently starting at the oldest kept row.
+func TestBoxTrimmedCursor(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	boxPost(t, s, cl, conn, "msg/a", "note", "one")
+	boxPost(t, s, cl, conn, "msg/a", "note", "two")
+	m := boxCall(t, s, cl, conn, "msg-clear", `{}`)
+	if !m.OK {
+		t.Fatalf("clear: %s", m.Error)
+	}
+	boxPost(t, s, cl, conn, "msg/a", "note", "three")
+
+	m = boxCall(t, s, cl, conn, "msg-list", `{"afterSeq":0}`)
+	var list listReply
+	if err := json.Unmarshal(m.Res, &list); err != nil {
+		t.Fatalf("list reply: %v", err)
+	}
+	if !list.Trimmed || len(list.Entries) != 1 || list.Entries[0].Seq != 3 {
+		t.Fatalf("trimmed list = %+v, want the gap reported and seq 3", list)
+	}
+	// A cursor on the oldest kept row has no gap.
+	m = boxCall(t, s, cl, conn, "msg-list", `{"afterSeq":2}`)
+	if err := json.Unmarshal(m.Res, &list); err != nil {
+		t.Fatalf("list reply: %v", err)
+	}
+	if list.Trimmed {
+		t.Fatalf("cursor one before the oldest row reported a gap: %+v", list)
+	}
+	// A stream wait reports the same gap with the entry it returns.
+	m = boxCall(t, s, cl, conn, "msg-wait", `{"afterSeq":0,"timeoutMs":1000}`)
+	var wait waitReply
+	if err := json.Unmarshal(m.Res, &wait); err != nil {
+		t.Fatalf("wait reply: %v", err)
+	}
+	if !m.OK || !wait.Trimmed || wait.Entry.Seq != 3 {
+		t.Fatalf("trimmed wait = %s (%v), want the gap and seq 3", m.Res, m.Error)
+	}
+}
+
+// TestBoxTopicFieldsExclusive proves a read names an exact topic or a branch,
+// not both, and that a negative cursor is refused.
+func TestBoxTopicFieldsExclusive(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	for _, c := range []struct {
+		action string
+		res    string
+		want   string
+	}{
+		{"msg-list", `{"key":"a","keyPrefix":"b"}`, "exclusive"},
+		{"msg-wait", `{"key":"a","keyPrefix":"b","timeoutMs":1000}`, "exclusive"},
+		{"msg-list", `{"afterSeq":-1}`, "afterSeq"},
+		{"msg-wait", `{"afterSeq":-1,"timeoutMs":1000}`, "afterSeq"},
+	} {
+		m := boxCall(t, s, cl, conn, c.action, c.res)
+		if m.OK {
+			t.Fatalf("%s %s accepted", c.action, c.res)
+		}
+		if !strings.Contains(m.Error, c.want) {
+			t.Fatalf("%s %s error = %q, want %q", c.action, c.res, m.Error, c.want)
+		}
 	}
 }
 

@@ -1262,7 +1262,9 @@ func paneRequest(session, id string, m Msg) (Msg, error) {
 }
 
 func (s *server) reply(cl *client, m Msg, res any, err error) {
-	out := Msg{Type: "resp", ID: m.ID, Res: jsonRaw(res)}
+	// The action rides back, so a client can tell the replies it asked for
+	// apart from each other. ID stays the request tag it already was.
+	out := Msg{Type: "resp", Action: m.Action, ID: m.ID, Res: jsonRaw(res)}
 	if err != nil {
 		out.Error = err.Error()
 	} else {
@@ -1526,7 +1528,8 @@ func (s *server) handleReq(cl *client, m Msg) {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		s.reply(cl, m, listReply{Entries: s.boxList(req.(*listReq))}, nil)
+		entries, trimmed := s.boxList(req.(*listReq))
+		s.reply(cl, m, listReply{Entries: entries, Trimmed: trimmed}, nil)
 
 	case "msg-clear":
 		req, err := parseBoxReq(m.Action, m.Res)
@@ -1542,8 +1545,8 @@ func (s *server) handleReq(cl *client, m Msg) {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		e, err := s.boxWait(cl, req.(*waitReq))
-		s.reply(cl, m, waitReply{Entry: e}, err)
+		e, trimmed, err := s.boxWait(cl, req.(*waitReq))
+		s.reply(cl, m, waitReply{Entry: e, Trimmed: trimmed}, err)
 
 	case "msg-schema":
 		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
@@ -1585,22 +1588,35 @@ func (s *server) boxPost(req *postReq) (entry, error) {
 	s.st.trimBox()
 	s.boxWakeLocked()
 	_ = s.st.save()
+	// Every attached client learns the log moved. An open box view asks for
+	// the whole log again, so its picture is never a guess.
+	s.broadcastLocked(Msg{Type: "box"})
 	return e, nil
 }
 
-// boxList returns the entries newest first, for one key when the request names
-// one, capped at the clamped limit.
-func (s *server) boxList(req *listReq) []entry {
+// boxList returns the entries newest first that pass the request's topic and
+// cursor, capped at the clamped limit. Trimmed reports a cursor that names a
+// row the box has already dropped.
+func (s *server) boxList(req *listReq) ([]entry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]entry, 0, req.Limit)
 	for i := len(s.st.Box) - 1; i >= 0 && len(out) < req.Limit; i-- {
-		if req.Key != "" && s.st.Box[i].Key != req.Key {
+		if !boxMatch(s.st.Box[i], req.Key, req.KeyPrefix, req.AfterSeq) {
 			continue
 		}
 		out = append(out, s.st.Box[i])
 	}
-	return out
+	return out, s.boxTrimmedLocked(req.AfterSeq)
+}
+
+// boxTrimmedLocked reports whether the cursor sits behind the oldest row the
+// box still holds, so entries between the two are gone. The caller holds s.mu.
+func (s *server) boxTrimmedLocked(after *int) bool {
+	if after == nil || *after < 0 || len(s.st.Box) == 0 {
+		return false
+	}
+	return *after+1 < s.st.Box[0].Seq
 }
 
 // boxClear removes every entry for the key, or the whole log when the key is
@@ -1626,6 +1642,7 @@ func (s *server) boxClear(req *clearReq) int {
 	s.st.Box = kept
 	s.boxWakeLocked()
 	_ = s.st.save()
+	s.broadcastLocked(Msg{Type: "box"})
 	return cleared
 }
 
@@ -1670,40 +1687,69 @@ func (s *server) boxWakeLocked() {
 	}
 }
 
-// boxNewestLocked returns the newest entry for the key, or the newest entry of
-// the whole log when the key is empty. The caller holds s.mu.
-func (s *server) boxNewestLocked(key string) (entry, bool) {
+// boxNewestLocked returns the newest entry under the topic filter: the whole
+// log when both fields are empty. The caller holds s.mu.
+func (s *server) boxNewestLocked(key, prefix string) (entry, bool) {
 	for i := len(s.st.Box) - 1; i >= 0; i-- {
-		if key == "" || s.st.Box[i].Key == key {
+		if boxMatch(s.st.Box[i], key, prefix, nil) {
 			return s.st.Box[i], true
 		}
 	}
 	return entry{}, false
 }
 
-// boxWait blocks until the newest entry for its key carries the wanted state.
-// It holds no lock while blocked: it checks and registers under s.mu, sleeps
-// outside it, and re-checks after every wakeup. It returns the matching entry,
-// or on timeout the error "box: wait timed out" plus the newest entry it saw.
-// A disconnected client releases the waiter instead of holding it to the
-// timeout.
-func (s *server) boxWait(cl *client, req *waitReq) (entry, error) {
+// boxFindLocked is the read a wait blocks on. With a cursor it returns the
+// oldest entry past it that matches the topic and the state, so a subscriber
+// sees every message in order and no message is skipped. Without a cursor it
+// returns the newest matching entry and reports whether its state satisfies
+// the wait, which is the status board. The caller holds s.mu.
+func (s *server) boxFindLocked(req *waitReq) (entry, bool, bool) {
+	trimmed := s.boxTrimmedLocked(req.AfterSeq)
+	if req.AfterSeq == nil {
+		e, ok := s.boxNewestLocked(req.Key, req.KeyPrefix)
+		if !ok {
+			return entry{}, false, false
+		}
+		return e, req.State == "" || e.State == req.State, false
+	}
+	for _, e := range s.st.Box {
+		if !boxMatch(e, req.Key, req.KeyPrefix, req.AfterSeq) {
+			continue
+		}
+		if req.State != "" && e.State != req.State {
+			continue
+		}
+		return e, true, trimmed
+	}
+	return entry{}, false, trimmed
+}
+
+// boxWait blocks until the read finds an entry. Without a cursor it waits for
+// the newest entry under the topic to carry the state; with one it waits for
+// the oldest entry past the cursor, state-filtered when a state is named. It
+// holds no lock while blocked: it checks and registers under s.mu, sleeps
+// outside it, and re-checks after every wakeup. It returns the entry and
+// whether the cursor named a dropped row. On timeout it returns the error
+// "box: wait timed out" plus the newest entry it saw. A disconnected client
+// releases the waiter instead of holding it to the timeout.
+func (s *server) boxWait(cl *client, req *waitReq) (entry, bool, error) {
 	deadline := time.Now().Add(time.Duration(req.TimeoutMs) * time.Millisecond)
 	w := &boxWaiter{wake: make(chan struct{}, 1)}
 	for {
 		s.mu.Lock()
-		last, seen := s.boxNewestLocked(req.Key)
-		if seen && last.State == req.State {
+		e, ok, trimmed := s.boxFindLocked(req)
+		if ok {
 			s.mu.Unlock()
-			return last, nil
+			return e, trimmed, nil
 		}
+		last, _ := s.boxNewestLocked(req.Key, req.KeyPrefix)
 		s.boxWatchLocked(w)
 		s.mu.Unlock()
 
 		wait := time.Until(deadline)
 		if wait <= 0 {
 			s.boxUnwatch(w)
-			return last, fmt.Errorf("box: wait timed out")
+			return last, trimmed, fmt.Errorf("box: wait timed out")
 		}
 		if wait > boxPollWait {
 			wait = boxPollWait
@@ -1716,7 +1762,7 @@ func (s *server) boxWait(cl *client, req *waitReq) (entry, error) {
 		}
 		s.boxUnwatch(w)
 		if connGone(cl.c) {
-			return entry{}, fmt.Errorf("box: client gone")
+			return entry{}, trimmed, fmt.Errorf("box: client gone")
 		}
 	}
 }

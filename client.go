@@ -45,7 +45,11 @@ type tui struct {
 	vts     map[string]vt10x.Terminal
 	armed   bool
 	toasts  []toast // oldest first, newest last
-	dirty   bool
+	// floats are arbitrary floating panes rendered over the main layout.
+	floats []*FloatingPane
+	// box is the message-box float, nil when closed.
+	box   *boxView
+	dirty bool
 
 	// out is the frame sink: os.Stdout in a session, a buffer in a test.
 	out io.Writer
@@ -56,6 +60,10 @@ type tui struct {
 	menu     *menu
 	// renameDraft is the text the rename prompt holds while mode is "rename".
 	renameDraft string
+	// renameID is the active workspace's id while the prompt is open. The
+	// server looks a workspace up by id, so the request carries this, not the
+	// draft.
+	renameID string
 
 	// hist is each pane's replay ring. It is not filled as output arrives:
 	// the first scrollback entry asks the server for one replay and caches it
@@ -220,6 +228,23 @@ func (t *tui) expireToasts(now time.Time) {
 	t.dirty = true
 }
 
+// AddFloatingPane appends a floating pane to the client's render stack.
+func (t *tui) AddFloatingPane(f *FloatingPane) {
+	t.floats = append(t.floats, f)
+	t.dirty = true
+}
+
+// RemoveFloatingPane removes a floating pane by ID.
+func (t *tui) RemoveFloatingPane(id string) {
+	for i, f := range t.floats {
+		if f.ID == id {
+			t.floats = append(t.floats[:i], t.floats[i+1:]...)
+			t.dirty = true
+			return
+		}
+	}
+}
+
 // runClient owns the terminal. A session switch returns to this loop with a new
 // name, so raw mode and the stdin reader survive it.
 func runClient(name string) error {
@@ -347,6 +372,10 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			}
 			if t.mode != "" && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
 				t.pending = false
+				// The lone esc was consumed by the mode's key handler but left
+				// in the buffer. Drop it with the mode, so the next keypress
+				// does not forward a stray escape to a pane.
+				t.inbuf = t.inbuf[:0]
 				switch t.mode {
 				case "menu":
 					t.closeMenu()
@@ -354,6 +383,8 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 					t.closePicker()
 				case "scroll":
 					t.exitScroll()
+				case "box":
+					closeBoxView(t)
 				}
 			}
 			if t.dirty && now.Sub(lastDraw) > 15*time.Millisecond {
@@ -452,6 +483,10 @@ func (t *tui) apply(m Msg) {
 		if t.sw != nil {
 			t.sw.sync(m.Snap)
 		}
+		if t.box != nil {
+			t.box.sync(m.Snap)
+			t.dirty = true
+		}
 		t.dirty = true
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
@@ -481,8 +516,18 @@ func (t *tui) apply(m Msg) {
 			}
 			break
 		}
+		if m.Action == "msg-list" {
+			t.takeBoxList(m)
+			break
+		}
 		if !m.OK {
 			t.notify(m.Error)
+		}
+	case "box":
+		// A post or a clear landed. An open view asks for the log again; a
+		// closed one needs nothing.
+		if t.box != nil {
+			t.boxRequest()
 		}
 	}
 	// A ring that just landed belongs to the scrollback wait it answers, if
@@ -793,6 +838,41 @@ func (t *tui) processInput() {
 				continue
 			}
 			if !t.switcherKey() {
+				return
+			}
+			continue
+		}
+		if t.mode == "box" {
+			// While the view is up every key belongs to it: nothing reaches a
+			// pane. A lone esc is the close key, so it skips the paste marker
+			// check: a bare esc is not the start of one. A mouse event scrolls
+			// and a paste is swallowed whole.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.boxKey() {
+					return
+				}
+				continue
+			}
+			if ev, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				t.boxWheel(ev)
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if seq, n, started := t.takePaste(); started {
+				if n == 0 {
+					if t.pasteDeadline.IsZero() {
+						t.pasteDeadline = time.Now()
+					}
+					return
+				}
+				// A pasted block is text for nobody: the view is read-only.
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				_ = seq
+				continue
+			}
+			if !t.boxKey() {
 				return
 			}
 			continue
@@ -1877,18 +1957,21 @@ func (t *tui) closePicker() {
 }
 
 // openRenamePrompt takes over input for the active workspace's label. The
-// draft starts as the current name: the snapshot names no workspace itself, so
-// the name comes from the rail entries. A workspace the snapshot does not list
-// opens an empty draft; the prompt still opens.
+// draft starts as the current name from the snapshot, and the prompt resolves
+// the active workspace's id from the rail entries so the request targets the
+// id. A workspace the snapshot does not list opens an empty draft; the prompt
+// still opens.
 func (t *tui) openRenamePrompt() {
 	if t.snap == nil {
 		t.disarm()
 		return
 	}
 	t.renameDraft = ""
+	t.renameID = ""
 	for _, p := range t.snap.All {
-		if p.Workspace == t.snap.Workspace {
+		if p.WorkspaceName == t.snap.Workspace {
 			t.renameDraft = p.WorkspaceName
+			t.renameID = p.Workspace
 			break
 		}
 	}
@@ -1902,6 +1985,7 @@ func (t *tui) openRenamePrompt() {
 func (t *tui) closeRename() {
 	t.mode = ""
 	t.renameDraft = ""
+	t.renameID = ""
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
@@ -1916,7 +2000,7 @@ func (t *tui) submitRename() {
 		return
 	}
 	name := strings.TrimSpace(t.renameDraft)
-	target := t.snap.Workspace
+	target := t.renameID
 	t.closeRename()
 	if name == "" {
 		return
@@ -2004,6 +2088,8 @@ func (t *tui) key(b byte) {
 		t.openRenamePrompt()
 	case 'b':
 		t.toggleRail()
+	case 'm':
+		openBoxView(t)
 	case '?':
 		t.disarm()
 	case 'd', 'q':
@@ -2170,14 +2256,21 @@ func (t *tui) draw() {
 		t.last.divRect = t.padZone
 	}
 
+	var floatBufs []bytes.Buffer
+	for _, f := range t.floats {
+		var fb bytes.Buffer
+		f.Draw(&fb)
+		floatBufs = append(floatBufs, fb)
+	}
 	dirty := map[int]bool{}
-	bands := []struct {
+	type band struct {
 		p       *paint
 		buf     *bytes.Buffer
 		overlay bool
 		force   bool
 		write   bool
-	}{
+	}
+	bands := []band{
 		{p: &t.last.box, buf: &box, force: padFreed},
 		{p: &t.last.grip, buf: &grip, force: padFreed},
 		{p: &t.last.div, buf: &div},
@@ -2189,6 +2282,9 @@ func (t *tui) draw() {
 		{p: &t.last.sess, buf: &sess, overlay: true},
 		{p: &t.last.menu, buf: &menu, overlay: true},
 		{p: &t.last.rename, buf: &rename, overlay: true},
+	}
+	for i := range t.floats {
+		bands = append(bands, band{p: &t.floats[i].last, buf: &floatBufs[i], overlay: true})
 	}
 	// An overlay paints on top of everything, so the rows it leaves need the
 	// whole picture back: the panes under it and the bands around it. Without a
@@ -2316,6 +2412,9 @@ func (t *tui) layoutSig(win *Snapshot) string {
 	fmt.Fprintf(&b, "%dx%d r%d", win.Cols, win.Rows, win.Rail)
 	for _, p := range win.Panes {
 		fmt.Fprintf(&b, " %s:%d,%d,%d,%d", p.ID, p.Rect.X, p.Rect.Y, p.Rect.W, p.Rect.H)
+	}
+	for _, f := range t.floats {
+		fmt.Fprintf(&b, " F%s:%d,%d,%d,%d", f.ID, f.Rect.X, f.Rect.Y, f.Rect.W, f.Rect.H)
 	}
 	fmt.Fprintf(&b, " f=%s m=%s s=%s", win.Focus, t.mode, t.scroll)
 	if t.sw != nil {

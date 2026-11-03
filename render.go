@@ -1692,6 +1692,7 @@ var keymap = [][2]string{
 	{")", "next workspace"},
 	{"s", "switch session"},
 	{"r", "rename workspace"},
+	{"m", "message box"},
 	{"b", "cycle rail: full, thin, hidden"},
 	{"d / q", "detach"},
 	{"ctrl+b", "send prefix"},

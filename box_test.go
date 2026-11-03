@@ -144,14 +144,20 @@ func TestMessageBoxUnknownState(t *testing.T) {
 		}
 	}
 
-	// The request path refuses the same values.
+	// The request path refuses the same values. A wait alone admits an empty
+	// state, which asks for any state, so a subscriber can read a stream.
 	for _, raw := range []string{`{"state":"sleepy"}`, `{"state":""}`} {
 		if _, err := parseBoxReq("msg-post", json.RawMessage(raw)); err == nil {
 			t.Fatalf("post %s accepted, want a bad state error", raw)
 		}
-		if _, err := parseBoxReq("msg-wait", json.RawMessage(strings.TrimSuffix(raw, "}")+`,"timeoutMs":1000}`)); err == nil {
-			t.Fatalf("wait %s accepted, want a bad state error", raw)
+		if raw == `{"state":"sleepy"}` {
+			if _, err := parseBoxReq("msg-wait", json.RawMessage(`{"state":"sleepy","timeoutMs":1000}`)); err == nil {
+				t.Fatalf("wait %s accepted, want a bad state error", raw)
+			}
 		}
+	}
+	if _, err := parseBoxReq("msg-wait", json.RawMessage(`{"state":"","timeoutMs":1000}`)); err != nil {
+		t.Fatalf("a wait with an empty state rejected: %v", err)
 	}
 }
 
@@ -218,8 +224,18 @@ func TestMessageBoxSchemaMatchesEnum(t *testing.T) {
 	if got := doc.Actions["msg-wait"].Request.Properties["state"].Enum; !sameStrings(got, want) {
 		t.Fatalf("wait state enum = %v, want %v", got, want)
 	}
-	if got := doc.Actions["msg-wait"].Request.Required; !sameStrings(got, []string{"state", "timeoutMs"}) {
-		t.Fatalf("wait required = %v, want [state timeoutMs]", got)
+	if got := doc.Actions["msg-wait"].Request.Required; !sameStrings(got, []string{"timeoutMs"}) {
+		t.Fatalf("wait required = %v, want [timeoutMs]: state is optional, empty means any", got)
+	}
+	// The cursor and the branch are additions to both reads.
+	for _, action := range []string{"msg-list", "msg-wait"} {
+		req := doc.Actions[action].Request
+		if req.Properties["afterSeq"].Type != "integer" {
+			t.Fatalf("%s afterSeq schema = %+v", action, req.Properties["afterSeq"])
+		}
+		if req.Properties["keyPrefix"].Type != "string" {
+			t.Fatalf("%s keyPrefix schema = %+v", action, req.Properties["keyPrefix"])
+		}
 	}
 	if got := doc.Actions["msg-list"].Request.Required; len(got) != 0 {
 		t.Fatalf("list required = %v, want none", got)
@@ -363,7 +379,9 @@ func TestMessageBoxLimitClamp(t *testing.T) {
 	}
 }
 
-// TestMessageBoxWaitFields proves a wait needs a state and a bounded timeout.
+// TestMessageBoxWaitFields proves a wait needs a bounded timeout, takes an
+// optional state, and takes a cursor only when it is a whole number of rows
+// already seen.
 func TestMessageBoxWaitFields(t *testing.T) {
 	cases := []struct {
 		name string
@@ -371,12 +389,16 @@ func TestMessageBoxWaitFields(t *testing.T) {
 		ok   bool
 	}{
 		{"state and timeout", `{"state":"done","timeoutMs":1000}`, true},
-		{"no state", `{"timeoutMs":1000}`, false},
+		{"no state", `{"timeoutMs":1000}`, true},
+		{"empty state", `{"state":"","timeoutMs":1000}`, true},
 		{"no timeout", `{"state":"done"}`, false},
 		{"zero timeout", `{"state":"done","timeoutMs":0}`, false},
 		{"negative timeout", `{"state":"done","timeoutMs":-1}`, false},
 		{"timeout at the bound", `{"state":"done","timeoutMs":3600000}`, true},
 		{"timeout over the bound", `{"state":"done","timeoutMs":3600001}`, false},
+		{"cursor zero", `{"timeoutMs":1000,"afterSeq":0}`, true},
+		{"negative cursor", `{"timeoutMs":1000,"afterSeq":-1}`, false},
+		{"branch and exact topic", `{"timeoutMs":1000,"key":"a","keyPrefix":"b"}`, false},
 	}
 	for _, c := range cases {
 		_, err := parseBoxReq("msg-wait", json.RawMessage(c.raw))
