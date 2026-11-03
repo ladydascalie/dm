@@ -604,14 +604,15 @@ func TestRailGeometry(t *testing.T) {
 	s := railServer(st)
 
 	snap := s.snapshotLocked()
-	if snap.Rail != 26 {
-		t.Fatalf("new session rail = %d, want 26", snap.Rail)
+	want := effectiveRail(80, defaultRail)
+	if snap.Rail != want {
+		t.Fatalf("new session rail = %d, want %d", snap.Rail, want)
 	}
 	p := snap.Panes[0]
-	if p.ID != id || p.Rect.X-1 != 26 {
-		t.Fatalf("new session pane %q box starts at %d, want 26", p.ID, p.Rect.X-1)
+	if p.ID != id || p.Rect.X-1 != want {
+		t.Fatalf("new session pane %q box starts at %d, want %d", p.ID, p.Rect.X-1, want)
 	}
-	if area := paneAreaFor(80, 24, snap.Rail); area.X != 26 || p.Rect.X != area.X+1 {
+	if area := paneAreaFor(80, 24, snap.Rail); area.X != want || p.Rect.X != area.X+1 {
 		t.Fatalf("pane rect %+v does not sit inside area %+v", p.Rect, area)
 	}
 
@@ -633,17 +634,22 @@ func TestRailGeometry(t *testing.T) {
 		t.Fatalf("thin rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
 	}
 
-	// A width over the clamp uses the clamp: a third of 120 is 40, the cap 30.
+	// A width over the clamp uses the clamp: a third of 120 is 40, under the
+	// 46 cap.
 	s.cols = 120
-	if rail := s.setRail(50); rail != 30 {
-		t.Fatalf("set-rail 50 at 120 cols effective = %d, want 30", rail)
+	if rail := s.setRail(50); rail != 40 {
+		t.Fatalf("set-rail 50 at 120 cols effective = %d, want 40", rail)
 	}
 	snap = s.snapshotLocked()
-	if snap.Rail != 30 || snap.Panes[0].Rect.X-1 != 30 {
+	if snap.Rail != 40 || snap.Panes[0].Rect.X-1 != 40 {
 		t.Fatalf("clamped rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
 	}
-	if area := paneAreaFor(120, 24, 45); area != (Rect{X: 30, Y: 0, W: 90, H: 23}) {
+	if area := paneAreaFor(120, 24, 45); area != (Rect{X: 40, Y: 0, W: 80, H: 23}) {
 		t.Fatalf("paneAreaFor clamps to %+v", area)
+	}
+	// A wide screen stops at the 46 cap.
+	if m := maxRail(200); m != 46 {
+		t.Fatalf("maxRail(200) = %d, want 46", m)
 	}
 	// The third-of-screen clamp binds below the 30 cap.
 	if area := paneAreaFor(60, 24, 30); area.X != 20 || area.W != 40 {
@@ -685,8 +691,8 @@ func TestRailBranch(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	items := railItems(s.snapshotLocked())
-	if items[0].branch != "dm-rail" {
-		t.Fatalf("workspace branch = %q, want dm-rail", items[0].branch)
+	if len(items) < 2 || items[1].branch != "dm-rail" || items[1].text != "dm-rail" {
+		t.Fatalf("window line = %+v, want branch dm-rail", items)
 	}
 }
 
@@ -813,14 +819,14 @@ func TestRailState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadState old: %v", err)
 	}
-	if got.Rail != 26 || !got.RailSet {
-		t.Fatalf("state without railSet = %d set=%v, want 26 true", got.Rail, got.RailSet)
+	if got.Rail != defaultRail || !got.RailSet {
+		t.Fatalf("state without railSet = %d set=%v, want %d true", got.Rail, got.RailSet, defaultRail)
 	}
 	saved, err := os.ReadFile(statePath("old"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(saved), "\"rail\": 26") ||
+	if !strings.Contains(string(saved), fmt.Sprintf("\"rail\": %d", defaultRail)) ||
 		!strings.Contains(string(saved), "\"railSet\": true") {
 		t.Fatalf("state without railSet was not saved: %s", saved)
 	}
@@ -904,12 +910,14 @@ func TestSetRailAction(t *testing.T) {
 	snap := tree["snapshot"].(map[string]any)
 	cols := int(snap["cols"].(float64))
 	rows := int(snap["rows"].(float64))
-	if rail := int(snap["rail"].(float64)); rail != effectiveRail(cols, 26) {
-		t.Fatalf("new session rail = %d, want %d", rail, effectiveRail(cols, 26))
+	wantDefault := effectiveRail(cols, defaultRail)
+	if rail := int(snap["rail"].(float64)); rail != wantDefault {
+		t.Fatalf("new session rail = %d, want %d", rail, wantDefault)
 	}
 	pane := h.focus("ra")
-	if x := h.rects("ra")[pane].X; x != paneAreaFor(cols, rows, 26).X+1 {
-		t.Fatalf("pane starts at x=%d, want rail+border %d", x, paneAreaFor(cols, rows, 26).X+1)
+	if x := h.rects("ra")[pane].X; x != paneAreaFor(cols, rows, defaultRail).X+1 {
+		t.Fatalf("pane starts at x=%d, want rail+border %d", x,
+			paneAreaFor(cols, rows, defaultRail).X+1)
 	}
 
 	if res := h.rpc("ra", map[string]any{"action": "set-rail", "index": 0}); res["rail"] != float64(0) {
@@ -977,8 +985,8 @@ func TestRailReflow(t *testing.T) {
 			before.X-hidden.X, hidden.W-before.W, rail)
 	}
 
-	if res := h.rpc("reflow", map[string]any{"action": "set-rail", "index": 26}); res["rail"] != float64(rail) {
-		t.Fatalf("set-rail 26 = %v, want effective %d", res["rail"], rail)
+	if res := h.rpc("reflow", map[string]any{"action": "set-rail", "index": defaultRail}); res["rail"] != float64(rail) {
+		t.Fatalf("set-rail %d = %v, want effective %d", defaultRail, res["rail"], rail)
 	}
 	back := check("restored", rail)
 	if back != before {
@@ -1046,7 +1054,7 @@ func TestRailItemsGrouping(t *testing.T) {
 		{
 			ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true,
-			Focus: true, WindowUnfolded: true,
+			Focus: true, WindowUnfolded: true, Message: "working hard",
 		},
 		{
 			ID: "w1p2", Workspace: "s1", WorkspaceName: "main", Window: "w1",
@@ -1063,11 +1071,15 @@ func TestRailItemsGrouping(t *testing.T) {
 	}}
 	items := railItems(snap)
 	wantKinds := []railKind{
-		railWorkspace, railWindow, railPane, railPane,
-		railWindow, railPane, railWorkspace, railWindow, railPane,
+		railWorkspace, railWindow, railWindowNote, railPane, railPane,
+		railWindow, railPane,
+		railGap,
+		railWorkspace, railWindow, railPane,
 	}
 	wantText := []string{
-		"main", "one", "alpha", "w1p2", "two", "w1p3",
+		"main", "one", "working hard", "alpha", "w1p2",
+		"two", "w1p3",
+		"",
 		"work", "three", "pi",
 	}
 	if len(items) != len(wantKinds) {
@@ -1079,14 +1091,37 @@ func TestRailItemsGrouping(t *testing.T) {
 				items[i].kind, items[i].text, want, wantText[i])
 		}
 	}
-	if !items[0].active || items[6].active {
-		t.Fatalf("workspace headers active = %v, %v", items[0].active, items[6].active)
+	gaps := 0
+	for _, it := range items {
+		if it.kind == railGap {
+			gaps++
+		}
 	}
-	if items[8].agent != true || items[2].agent {
-		t.Fatalf("pane rows agent = %v, %v", items[2].agent, items[8].agent)
+	if gaps != 1 || items[7].kind != railGap {
+		t.Fatalf("rail has %d gaps, want one at row 7: %+v", gaps, items)
 	}
-	if !items[2].focus || items[3].focus {
-		t.Fatalf("pane rows focus = %v, %v", items[2].focus, items[3].focus)
+	if items[0].count != 3 || items[8].count != 1 {
+		t.Fatalf("workspace pane counts = %d, %d, want 3, 1", items[0].count, items[8].count)
+	}
+	if items[0].workspace != "s1" || items[8].workspace != "s2" {
+		t.Fatalf("workspace ids = %q, %q", items[0].workspace, items[8].workspace)
+	}
+	if !items[0].active || items[8].active {
+		t.Fatalf("workspace rows active = %v, %v", items[0].active, items[8].active)
+	}
+	if !items[10].agent || items[3].agent {
+		t.Fatalf("pane rows agent = %v, %v", items[10].agent, items[3].agent)
+	}
+	if !items[3].focus || items[4].focus {
+		t.Fatalf("pane rows focus = %v, %v", items[3].focus, items[4].focus)
+	}
+	// A folded window drops its note line and its panes but keeps the window
+	// line, whose message still belongs to the window.
+	snap.All[0].WindowUnfolded = false
+	for _, it := range railItems(snap) {
+		if it.kind == railWindowNote {
+			t.Fatalf("folded rail drew a note line: %+v", it)
+		}
 	}
 }
 
@@ -1097,11 +1132,11 @@ func TestRailGlyphPerState(t *testing.T) {
 		glyph  string
 		colour rgb
 	}{
-		{"working", "●", rgb{224, 169, 76}},
-		{"idle", "○", rgb{159, 176, 207}},
-		{"blocked", "▲", rgb{224, 112, 90}},
-		{"done", "✓", rgb{95, 168, 135}},
-		{"error", "✕", rgb{228, 167, 158}},
+		{"working", "●", rgb{245, 190, 80}},
+		{"idle", "○", rgb{120, 200, 225}},
+		{"blocked", "▲", rgb{255, 110, 110}},
+		{"done", "✓", rgb{110, 225, 145}},
+		{"error", "✕", rgb{255, 130, 160}},
 		{"unknown", "?", railDim},
 		{"", "?", railDim},
 	}
@@ -1132,11 +1167,21 @@ func TestRailContrast(t *testing.T) {
 		"dim":     railDim,
 		"header":  railHeader,
 		"window":  railWindowFg,
-		"working": {224, 169, 76},
-		"idle":    {159, 176, 207},
-		"blocked": {224, 112, 90},
-		"done":    {95, 168, 135},
-		"error":   {228, 167, 158},
+		"diffAdd": railDiffAdd,
+		"diffDel": railDiffDel,
+	}
+	for i, accent := range railAccents {
+		foregrounds[fmt.Sprintf("accent %d", i)] = accent
+	}
+	for _, status := range []string{
+		"working", "idle", "blocked", "done", "error", "unknown", "",
+	} {
+		fallback, colour := railGlyph(status, false)
+		_, nerdColour := railGlyph(status, true)
+		if fallback == "" || nerdColour != colour {
+			t.Fatalf("state %q differs between glyph forms", status)
+		}
+		foregrounds["state "+status] = colour
 	}
 	for name, fg := range foregrounds {
 		for bgName, bg := range map[string]rgb{"rail": railBG, "focus": railFocusBG} {
@@ -1150,35 +1195,69 @@ func TestRailContrast(t *testing.T) {
 	}
 }
 
-// TestRailNerdIcons draws with Nerd Font icons: a robot for agents, a terminal
-// for shells, and an icon for every state.
+// TestRailAccent keeps railAccent stable per id and the six palette hues
+// distinct. Giving two live workspaces different hues is railItems' job.
+func TestRailAccent(t *testing.T) {
+	for _, ws := range []string{"main", "work", "dm-git-w1", ""} {
+		first, second := railAccent(ws), railAccent(ws)
+		if first != second {
+			t.Fatalf("railAccent(%q) = %v then %v", ws, first, second)
+		}
+	}
+	if len(railAccents) != 6 {
+		t.Fatalf("railAccents has %d hues, want 6", len(railAccents))
+	}
+	seen := map[rgb]bool{}
+	for _, accent := range railAccents {
+		if seen[accent] {
+			t.Fatalf("accent %v repeats in railAccents", accent)
+		}
+		seen[accent] = true
+	}
+	for _, ws := range []string{"main", "work", "scratch", "s1", "s2", "ws1", "ws6"} {
+		if got := railAccent(ws); !seen[got] {
+			t.Fatalf("railAccent(%q) = %v, which is not in railAccents", ws, got)
+		}
+	}
+}
+
+// TestRailNerdIcons draws with Nerd Font icons: a caret on the window line, a
+// robot for agents, a terminal for shells, and an icon for every state.
 func TestRailNerdIcons(t *testing.T) {
 	t.Setenv("DM_NERD", "1")
 	agent := railOnePane("working", "pi", 12, 40, 6)
 	agent.All[0].Agent = true
+	agent.All[0].InRepo = true
 	var b bytes.Buffer
 	drawRail(&b, agent)
 	out := b.String()
-	for _, want := range []string{"\uf07b", "\uf0d7", "\uf135", "\uf013", "pi"} {
+	for _, want := range []string{"\uf07b", "\uf0d7", "\uf135", "\uf013", "pi", "clean"} {
+		if want == "\uf07b" {
+			continue
+		}
 		if !strings.Contains(out, want) {
 			t.Fatalf("nerd rail missing %q: %q", want, out)
 		}
 	}
+	if strings.Contains(out, "\uf07b") {
+		t.Fatalf("nerd rail still draws the old folder icon: %q", out)
+	}
 	if strings.Contains(out, "\u258e") {
 		t.Fatalf("nerd rail drew the fallback bar: %q", out)
 	}
-	// The full rail nests: folder at 0, caret at 2, pane mark at 4, glyph at 6.
+	// The full rail nests: accent bar at 0, caret at 2, pane mark at 6, glyph
+	// at 8, under the note line at 4.
 	vt := vt10x.New(vt10x.WithSize(40, 6))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw nerd rail: %v", err)
 	}
 	vt.Lock()
-	folder, caret := vt.Cell(0, 0).Char, vt.Cell(2, 1).Char
-	mark, glyph := vt.Cell(4, 2).Char, vt.Cell(6, 2).Char
+	bar, caret := vt.Cell(0, 0).Char, vt.Cell(2, 1).Char
+	mark, glyph := vt.Cell(6, 2).Char, vt.Cell(8, 2).Char
 	vt.Unlock()
-	if folder != '\uf07b' || caret != '\uf0d7' || mark != '\uf135' || glyph != '\uf013' {
-		t.Fatalf("nerd columns = %q %q %q %q, want folder caret robot gear",
-			folder, caret, mark, glyph)
+	if bar != '▌' || caret != '\uf0d7' || mark != '\uf135' || glyph != '\uf013' {
+		t.Fatalf("nerd columns = %q %q %q %q, want bar caret robot gear",
+			bar, caret, mark, glyph)
 	}
 
 	shell := railOnePane("unknown", "", 12, 40, 6)
@@ -1206,10 +1285,11 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 			t.Fatalf("draw shell rail: %v", err)
 		}
 		vt.Lock()
-		glyph, text := vt.Cell(6, 2).Char, vt.Cell(8, 2).Char
+		glyph, text := vt.Cell(8, 2).Char, vt.Cell(10, 2).Char
 		vt.Unlock()
 		if glyph != ' ' || text != 'w' {
-			t.Fatalf("shell row status %q = %q at 6, %q at 8: want a blank cell", status, glyph, text)
+			t.Fatalf("shell row status %q = %q at 8, %q at 10: want a blank cell",
+				status, glyph, text)
 		}
 	}
 
@@ -1221,10 +1301,10 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 		t.Fatalf("draw agent rail: %v", err)
 	}
 	vt.Lock()
-	glyph := vt.Cell(6, 2).Char
+	glyph := vt.Cell(8, 2).Char
 	vt.Unlock()
 	if glyph != '?' {
-		t.Fatalf("agent row without a status = %q at 6, want ?", glyph)
+		t.Fatalf("agent row without a status = %q at 8, want ?", glyph)
 	}
 }
 
@@ -1232,7 +1312,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 // two cells a shell leaves blank, and its app= stands in for a missing name.
 func TestRailAgentMarker(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	agent := railOnePane("unknown", "", 12, 40, 6)
+	agent := railOnePane("unknown", "", 20, 40, 6)
 	agent.All[0].Agent = true
 	agent.All[0].App = "pi"
 	var b bytes.Buffer
@@ -1245,7 +1325,7 @@ func TestRailAgentMarker(t *testing.T) {
 		t.Fatalf("agent row does not show the app: %q", out)
 	}
 
-	shell := railOnePane("unknown", "", 12, 40, 6)
+	shell := railOnePane("unknown", "", 20, 40, 6)
 	b.Reset()
 	drawRail(&b, shell)
 	out = b.String()
@@ -1390,58 +1470,454 @@ func TestRailFold(t *testing.T) {
 	}
 }
 
-// TestRailBranchLabel shows the workspace branch from its focused pane.
-// TestRailWorktreeSuffix shows a linked worktree after an agent's pane label,
-// dimmed, and never for a shell.
-func TestRailWorktreeSuffix(t *testing.T) {
-	t.Setenv("DM_NERD", "0")
-	snap := railOnePane("working", "pi", 26, 60, 6)
-	snap.All[0].Agent = true
-	snap.All[0].Worktree = "dm-rail-w1"
-	items := railItems(snap)
-	if len(items) != 3 || items[2].worktree != "dm-rail-w1" {
-		t.Fatalf("pane worktree = %+v", items)
-	}
-	var b bytes.Buffer
-	drawRail(&b, snap)
-	out := b.String()
-	if !strings.Contains(out, "dm-rail-w1") {
-		t.Fatalf("worktree not drawn: %q", out)
-	}
-	if !strings.Contains(out, railDim.fg()) {
-		t.Fatalf("worktree is not dim: %q", out)
-	}
-	// The thin rail has no room for it.
-	snap.Rail = collapsedRail
-	if items := railItems(snap); items[len(items)-1].worktree != "dm-rail-w1" {
-		t.Fatalf("thin rail dropped the worktree: %+v", items)
-	}
-
-	// A shell in a worktree stays plain.
-	snap = railOnePane("unknown", "", 26, 60, 6)
-	snap.All[0].Worktree = "dm-rail-w1"
-	if items := railItems(snap); items[2].worktree != "" {
-		t.Fatalf("shell row carries a worktree: %+v", items)
-	}
-}
-
+// TestRailBranchLabel gives the window line the branch of its focused pane.
 func TestRailBranchLabel(t *testing.T) {
 	snap := railTestSnapshot(20)
 	snap.All[0].Branch = "dm-rail"
 	snap.All[1].Branch = "other"
 	items := railItems(snap)
-	if items[0].branch != "dm-rail" {
-		t.Fatalf("workspace branch = %q, want the focused pane's dm-rail", items[0].branch)
+	if items[1].branch != "dm-rail" || items[1].text != "dm-rail" {
+		t.Fatalf("window line = %q/%q, want the focused pane's dm-rail",
+			items[1].branch, items[1].text)
 	}
+	// Without a focused pane in the window, the first pane with a branch wins.
 	snap.All[0].Focus = false
 	items = railItems(snap)
-	if items[0].branch != "dm-rail" {
-		t.Fatalf("workspace branch without focus = %q", items[0].branch)
+	if items[1].branch != "dm-rail" {
+		t.Fatalf("window branch without focus = %q", items[1].branch)
 	}
 	snap.All[1].Focus = true
 	items = railItems(snap)
-	if items[0].branch != "other" {
-		t.Fatalf("workspace branch with w1p2 focused = %q", items[0].branch)
+	if items[1].branch != "other" {
+		t.Fatalf("window branch with w1p2 focused = %q", items[1].branch)
+	}
+}
+
+// TestRailWindowWorktree labels the window line with the branch first: the
+// branch names the work, and the linked worktree folder only stands in when no
+// branch exists.
+func TestRailWindowWorktree(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railOnePane("working", "pi", defaultRail, 60, 6)
+	snap.All[0].Agent = true
+	snap.All[0].Worktree = "dm-rail-w1"
+	snap.All[0].Branch = "dm-rail"
+	items := railItems(snap)
+	if len(items) != 3 || items[1].branch != "dm-rail" || items[1].text != "dm-rail" {
+		t.Fatalf("window line = %+v, want the branch label", items)
+	}
+	if items[1].worktree != "dm-rail-w1" {
+		t.Fatalf("window line lost the worktree: %+v", items[1])
+	}
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, "dm-rail") || strings.Contains(out, "dm-rail-w1") {
+		t.Fatalf("window line = %q, want the branch and not the folder", out)
+	}
+
+	// The folder stands in without a branch, then the window name.
+	snap.All[0].Branch = ""
+	if items := railItems(snap); items[1].text != "dm-rail-w1" {
+		t.Fatalf("window line without a branch = %q", items[1].text)
+	}
+	snap.All[0].Worktree = ""
+	if items := railItems(snap); items[1].text != "one" {
+		t.Fatalf("window line without git = %q", items[1].text)
+	}
+
+	// The line belongs to the window, so a shell still names its worktree.
+	snap = railOnePane("unknown", "", defaultRail, 60, 6)
+	snap.All[0].Worktree = "dm-rail-w1"
+	if items := railItems(snap); items[1].text != "dm-rail-w1" {
+		t.Fatalf("shell window line = %q", items[1].text)
+	}
+}
+
+// railTree is two workspaces, each with one unfolded window. The first is a
+// dirty linked worktree with stats and a message; the second is clean.
+func railTree(rail int) *Snapshot {
+	snap := &Snapshot{
+		Cols: 100, Rows: 12, Rail: rail,
+		Root: &Node{Pane: "w1p1"}, Focus: "w1p1",
+	}
+	snap.Panes = []PaneInfo{{ID: "w1p1", Status: "working"}}
+	snap.All = []AllPane{
+		{
+			ID: "w1p1", Name: "pi", Status: "working", Agent: true,
+			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
+			Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+			Worktree: "dm-rail-w1", Branch: "lenient-branch", InRepo: true,
+			Dirty: true, Added: 12, Deleted: 4, Message: "working hard",
+		},
+		{
+			ID: "w2p1", Workspace: "s2", WorkspaceName: "work", Window: "w2",
+			WindowName: "two", WindowUnfolded: true, Branch: "main",
+		},
+	}
+	return snap
+}
+
+// railRows draws a rail and returns the text of each row inside the rail width.
+func railRows(t *testing.T, snap *Snapshot) []string {
+	t.Helper()
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw rail: %v", err)
+	}
+	out := make([]string, snap.Rows-1)
+	vt.Lock()
+	for y := range out {
+		var sb strings.Builder
+		for x := 0; x < snap.Rail; x++ {
+			g := vt.Cell(x, y)
+			if g.Char == 0 {
+				sb.WriteByte(' ')
+				continue
+			}
+			sb.WriteRune(g.Char)
+		}
+		out[y] = strings.TrimRight(sb.String(), " ")
+	}
+	vt.Unlock()
+	return out
+}
+
+// TestRailWindowStats draws the git tail of the window line: the pair, one side
+// alone, clean, and the dirty dot without a line count.
+func TestRailWindowStats(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	cases := []struct {
+		name    string
+		dirty   bool
+		added   int
+		deleted int
+		want    []string
+		absent  []string
+	}{
+		{"both", true, 12, 4, []string{"●", "+12", "-4"}, nil},
+		{"added", false, 3, 0, []string{"+3"}, []string{"-3", "clean"}},
+		{"deleted", false, 0, 5, []string{"-5"}, []string{"+5", "clean"}},
+		{"clean", false, 0, 0, []string{"clean"}, []string{"+"}},
+		{"dirty only", true, 0, 0, []string{"●"}, []string{"clean"}},
+	}
+	for _, c := range cases {
+		snap := railTree(defaultRail)
+		snap.All[0].Dirty, snap.All[0].Added, snap.All[0].Deleted = c.dirty, c.added, c.deleted
+		line := railRows(t, snap)[1]
+		for _, want := range c.want {
+			if !strings.Contains(line, want) {
+				t.Fatalf("%s: window line missing %q: %q", c.name, want, line)
+			}
+		}
+		for _, absent := range c.absent {
+			if strings.Contains(line, absent) {
+				t.Fatalf("%s: window line shows %q: %q", c.name, absent, line)
+			}
+		}
+	}
+
+	// The pair keeps its colours and ends flush at the right edge.
+	snap := railTree(defaultRail)
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, railDiffAdd.fg()+"+12") ||
+		!strings.Contains(out, railDiffDel.fg()+"-4") {
+		t.Fatalf("stats colours missing: %q", out)
+	}
+	vt := vt10x.New(vt10x.WithSize(100, 12))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw tree rail: %v", err)
+	}
+	vt.Lock()
+	last := vt.Cell(defaultRail-1, 1).Char
+	vt.Unlock()
+	if last != '4' {
+		t.Fatalf("stats end at %q, want the last column", last)
+	}
+}
+
+// TestRailWindowStatsTruncate keeps a long branch label inside the rail and
+// never drops the right-aligned stats.
+func TestRailWindowStatsTruncate(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].Worktree = ""
+	snap.All[0].Branch = strings.Repeat("verylongbranch-", 6)
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, "…") {
+		t.Fatalf("long label was not elided: %q", out)
+	}
+	if !strings.Contains(out, "verylongbranch") {
+		t.Fatalf("label lost its head: %q", out)
+	}
+	if !strings.Contains(out, "+12") || !strings.Contains(out, "-4") {
+		t.Fatalf("stats dropped at %d cols: %q", defaultRail, out)
+	}
+	vt := vt10x.New(vt10x.WithSize(100, 12))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw truncated rail: %v", err)
+	}
+	vt.Lock()
+	for y := 0; y < 12; y++ {
+		for x := defaultRail; x < 100; x++ {
+			if g := vt.Cell(x, y); g.Char != 0 && g.Char != ' ' {
+				vt.Unlock()
+				t.Fatalf("rail wrote %q at %d,%d, past width %d", g.Char, x, y, defaultRail)
+			}
+		}
+	}
+	vt.Unlock()
+}
+
+// TestRailTreeHit folds a window from its line and from its note line, and
+// leaves a gap row and a workspace row inert.
+func TestRailTreeHit(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(30)
+	// Rows: 0 workspace, 1 window, 2 note, 3 pane, 4 gap, 5 workspace, 6 window.
+	if got := railWindowAt(snap, 3, 1); got != "w1" {
+		t.Fatalf("window line hit = %q, want w1", got)
+	}
+	if got := railWindowAt(snap, 3, 2); got != "w1" {
+		t.Fatalf("note line hit = %q, want w1", got)
+	}
+	if got := railWindowAt(snap, 3, 0); got != "" {
+		t.Fatalf("workspace row folded %q", got)
+	}
+	if got := railWindowAt(snap, 3, 4); got != "" {
+		t.Fatalf("gap row folded %q", got)
+	}
+	if got := railPaneAt(snap, 3, 1); got != "" {
+		t.Fatalf("window line focused pane %q", got)
+	}
+	if got := railPaneAt(snap, 3, 2); got != "" {
+		t.Fatalf("note line focused pane %q", got)
+	}
+	if got := railPaneAt(snap, 3, 3); got != "w1p1" {
+		t.Fatalf("pane row hit = %q, want w1p1", got)
+	}
+
+	tui, got := clientTUI(t, nil)
+	tui.snap = snap
+	// One-based mouse rows: window 2, note 3, workspace 1, gap 5.
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
+	if m := nextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
+		t.Fatalf("window line click sent %+v, want toggle-fold w1", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 2})
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 3})
+	if m := nextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
+		t.Fatalf("note line click sent %+v, want toggle-fold w1", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 3})
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	noMsg(t, got)
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 5})
+	noMsg(t, got)
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 5})
+}
+
+// TestRailWorkspaceAccent paints the bar in the workspace's own hue, keeps the
+// pane count at the right edge, and leaves a gap row empty.
+func TestRailWorkspaceAccent(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	want := map[string]rgb{}
+	for _, it := range railItems(snap) {
+		if it.kind == railWorkspace {
+			want[it.workspace] = it.accent
+		}
+	}
+	if len(want) != 2 || want["s1"] == want["s2"] {
+		t.Fatalf("workspace accents = %v, want two distinct hues", want)
+	}
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	for ws, accent := range want {
+		if !strings.Contains(out, accent.fg()+"▌") {
+			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
+		}
+	}
+	vt := vt10x.New(vt10x.WithSize(100, 12))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw accent rail: %v", err)
+	}
+	vt.Lock()
+	count := vt.Cell(defaultRail-1, 0).Char
+	gapRow := true
+	for x := 0; x < defaultRail; x++ {
+		if g := vt.Cell(x, 4); g.Char != 0 && g.Char != ' ' {
+			gapRow = false
+		}
+	}
+	vt.Unlock()
+	if count != '1' {
+		t.Fatalf("workspace count at the right edge = %q, want 1", count)
+	}
+	if !gapRow {
+		t.Fatal("gap row is not empty")
+	}
+}
+
+// TestAllPaneInRepo carries the in-repo flag onto the wire row, so a directory
+// git never saw cannot look clean.
+func TestAllPaneInRepo(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	old := detectGit
+	detectGit = func(cwd string) gitInfo {
+		if cwd == "/work/dm" {
+			return gitInfo{branch: "dm-rail", inRepo: true}
+		}
+		return gitInfo{}
+	}
+	defer func() { detectGit = old }()
+
+	st := newState("inrepo")
+	id := rootPane(st)
+	st.Panes[id].Cwd = "/work/dm"
+	s := railServer(st)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := s.snapshotLocked()
+		if len(snap.All) == 1 && snap.All[0].Branch == "dm-rail" {
+			if !snap.All[0].InRepo {
+				t.Fatalf("AllPane.InRepo = false, want true")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("git state never reached the snapshot: %+v", snap.All)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestRailAccentDistinct gives live workspaces distinct hues even when their
+// ids hash to the same preferred slot.
+func TestRailAccentDistinct(t *testing.T) {
+	ids := []string{"s2", "s3", "s4", "s5"}
+	if railAccent("s3") != railAccent("s4") || railAccent("s2") != railAccent("s5") {
+		t.Fatalf("fixture ids do not collide: %v %v %v %v",
+			railAccent("s2"), railAccent("s3"), railAccent("s4"), railAccent("s5"))
+	}
+	snap := &Snapshot{Cols: 100, Rows: 20, Rail: defaultRail}
+	for _, id := range ids {
+		snap.All = append(snap.All, AllPane{
+			ID: id + "p1", Workspace: id, WorkspaceName: id,
+			Window: id + "w1", WindowName: "one", WindowUnfolded: true,
+		})
+	}
+	seen := map[rgb]string{}
+	want := map[string]rgb{}
+	for _, it := range railItems(snap) {
+		if it.kind != railWorkspace {
+			continue
+		}
+		if prev, ok := seen[it.accent]; ok {
+			t.Fatalf("workspaces %q and %q share accent %v", prev, it.workspace, it.accent)
+		}
+		seen[it.accent] = it.workspace
+		want[it.workspace] = it.accent
+	}
+	if len(want) != len(ids) || len(seen) != len(ids) {
+		t.Fatalf("rail has %d workspace accents, want %d", len(seen), len(ids))
+	}
+	// drawRail paints the carried accent, not a fresh hash.
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	for ws, accent := range want {
+		if !strings.Contains(out, accent.fg()+"▌") {
+			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
+		}
+	}
+}
+
+// TestRailNoStatsOutsideRepo keeps a directory git never saw free of a clean
+// claim: the rail draws no stats tail there.
+func TestRailNoStatsOutsideRepo(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].InRepo = false
+	line := railRows(t, snap)[1]
+	for _, absent := range []string{"clean", "+", "●"} {
+		if strings.Contains(line, absent) {
+			t.Fatalf("non-repo window line shows %q: %q", absent, line)
+		}
+	}
+	if regexp.MustCompile(`-[0-9]`).MatchString(line) {
+		t.Fatalf("non-repo window line shows a line count: %q", line)
+	}
+	// A repo with nothing to report says so.
+	snap.All[0].InRepo = true
+	snap.All[0].Dirty, snap.All[0].Added, snap.All[0].Deleted = false, 0, 0
+	line = railRows(t, snap)[1]
+	if !strings.Contains(line, "clean") {
+		t.Fatalf("clean repo window line = %q", line)
+	}
+}
+
+// TestRailStatsWholeAtClamp draws a long branch with the fullest pair at the
+// 26 column clamp: the label elides and the pair survives whole.
+func TestRailStatsWholeAtClamp(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(effectiveRail(80, defaultRail))
+	if snap.Rail != 26 {
+		t.Fatalf("clamp width = %d, want 26", snap.Rail)
+	}
+	snap.All[0].Worktree = ""
+	snap.All[0].Branch = strings.Repeat("a-branch-that-runs-long-", 3)
+	snap.All[0].Dirty, snap.All[0].Added, snap.All[0].Deleted = true, 5000, 3000
+	line := railRows(t, snap)[1]
+	if !strings.Contains(line, "● +5000 -3000") {
+		t.Fatalf("pair at the clamp = %q", line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Fatalf("long branch was not elided: %q", line)
+	}
+	if n := runeCells(line); n > snap.Rail {
+		t.Fatalf("window line %q is %d cells, want <= %d", line, n, snap.Rail)
+	}
+}
+
+// TestRailStatsDropWhole gives up the stats before it draws half a pair.
+func TestRailStatsDropWhole(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(7)
+	line := railRows(t, snap)[1]
+	for _, absent := range []string{"+", "-", "●", "clean"} {
+		if strings.Contains(line, absent) {
+			t.Fatalf("rail %d draws %q of the stats: %q", snap.Rail, absent, line)
+		}
+	}
+	// One column more fits the whole pair.
+	if line := railRows(t, railTree(8))[1]; !strings.Contains(line, "● +12 -4") {
+		t.Fatalf("rail 8 = %q, want the whole pair", line)
+	}
+}
+
+// TestRailNoteElision cuts the message with an ellipsis inside the rail.
+func TestRailNoteElision(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].Message = strings.Repeat("a very long status message ", 3)
+	note := railRows(t, snap)[2]
+	if !strings.Contains(note, "…") {
+		t.Fatalf("note line was not elided: %q", note)
+	}
+	if n := runeCells(note); n > snap.Rail {
+		t.Fatalf("note line %q is %d cells, want <= %d", note, n, snap.Rail)
+	}
+	if !strings.HasPrefix(note, "    a very") {
+		t.Fatalf("note line lost its indent or text: %q", note)
 	}
 }
 
@@ -1450,8 +1926,8 @@ func TestRailToggle(t *testing.T) {
 	// A client that has only seen a hidden rail asks for the default.
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
 	tui.key('r')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 26 {
-		t.Fatalf("toggle from hidden sent %+v, want set-rail 26", m)
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != defaultRail {
+		t.Fatalf("toggle from hidden sent %+v, want set-rail %d", m, defaultRail)
 	}
 	// A full rail collapses to the thin width, not to hidden.
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 30, RailWant: 30, Cols: 100, Rows: 30}})
