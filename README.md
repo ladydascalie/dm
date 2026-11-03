@@ -150,6 +150,90 @@ In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel
 enters scrollback directly.
 
+## Status bar
+
+The last row of the screen is the status bar: one line of segments on explicit
+RGB, one idea per segment, with a single gutter cell of the bar ground between
+neighbours. The order is fixed: the session name, the workspace name, one chip
+per window, the focus chip, then the pinned right block.
+
+- The session name is railText, then the workspace name in railHeader.
+- One chip per window, in window order, is `N name`, with the number being the
+  window's 1-based position in the window list. A chip keeps its number when a
+  neighbour is dropped. The active window's chip reads as active: a `▸` in
+  barAccent, then the chip in bold railText, both on railFocusBG. The other
+  chips are railDim on the ground.
+- The focus chip sits on railFocusBG. It leads with the focused pane's state
+  glyph in that state's colour, then the pane id in bold railText, then the
+  pane name and the status word in railDim. A missing status reads `unknown`; a
+  shell reports no state at all, so it shows `▶` in railDim instead of a glyph.
+  The focused pane is the entry in the window's pane list whose id is the focus.
+
+Colours are explicit RGB, never palette slots, so a theme cannot map them onto a
+background they fail on: railBG (#1f1e27) for the ground and the gutter,
+railFocusBG (#272633) for the active window chip and the focus chip, railText
+(#e9eaf1), railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb) for the
+active mark, and the state colours of the rail glyph table. Every footer
+foreground reaches WCAG AA, 4.5:1 or better, on both grounds it is painted on:
+railDim on railFocusBG is the tightest at 4.89:1, and the barAccent mark reaches
+7.49:1 on the focus fill it sits on, 8.30:1 on the ground.
+
+At 80 columns, with the session `pi-footer-2026`, the workspace `main`, three
+windows and the second one active, a blocked focus pane `w1p2` named `shell`,
+the prefix unarmed, and a scroll position pinned at the right. State glyphs are
+drawn here in their Unicode form, without Nerd Fonts:
+
+```
+pi-footer-2026 main 1 api ▸ 2 web 3 docs ▲ w1p2 shell blocked   SCROLL w1p2 +1/9
+```
+
+cells 1-14 the session name, 15 the gutter, 16-19 the workspace name, 20 the
+gutter, 21-25 window 1, 26 the gutter, 27-28 the active window mark, 29-33 the
+active window chip, 34 the gutter, 35-40 window 3, 41 the gutter, 42 the blocked
+glyph, 43-47 the pane id, 48-53 the pane name, 54-61 the status word, 62-64
+padding on the ground, 65-80 the pinned scroll info.
+
+The pinned right block holds `PREFIX ` while `armed` is set, then the
+transient info text when there is one: `SCROLL <pane> +<offset>/<max>` while
+scrolling, or `drag to resize` while the pointer rests on a divider. It is
+anchored to the last column, and one cell of ground always separates it from the
+left block, even when the left block would otherwise fill the row. When the
+pinned block cannot fit, its leftmost segment goes whole, `PREFIX ` first and
+then the info, and the survivor is clipped at its right with `…`. The left block
+is dropped entirely before a pinned segment is.
+The bar never paints past the column count, and it pads the rest of its row on
+the ground, so no cell of the previous frame shows through.
+
+At 34 columns, with the session `work-2026`, the prefix armed and no scroll
+position, the ladder runs through five rungs: the chips lose their names, the
+outer chips go, both names shrink to `…`, and the focus chip drops its status
+word but keeps its name. `PREFIX ` stays pinned at the right, seven cells clear
+of the last chip:
+
+```
+… … ▸ 2 ▲ w1p2 shell       PREFIX 
+```
+
+cells 1 the session tail, 2 the gutter, 3 the workspace tail, 4 the gutter, 5-6
+the active window mark, 7 its number, 8 the gutter, 9 the blocked glyph, 10-14
+the pane id, 15-20 the pane name, 21-27 padding on the ground, 28-34 `PREFIX `.
+
+The left block elides in a fixed order, stopping as soon as the line fits:
+
+1. window chips lose their name and keep the number
+2. trailing window chips go, never the active one
+3. the workspace name shrinks with a trailing `…`
+4. the session name shrinks with a trailing `…`
+5. the focus chip drops the status word, then the pane name
+6. the focus chip keeps its glyph and its pane id last
+
+Width is cells, not runes. A wide rune takes two cells, and a wide rune that
+would straddle a limit is dropped whole rather than split. A width of zero or
+less paints nothing.
+
+The toast stack sits above the bar, bottom right: the bar keeps its full row
+while toasts float over the panes, and no toast is painted on the bar row.
+
 ## Scrollback and mouse
 
 Mouse reporting is always on, there is no setting (SGR 1000 + 1002 + 1003 +
@@ -162,8 +246,9 @@ cells.
 
 Every divider carries a dim grip dot pair at its midpoint, so the handle is
 visible before the pointer arrives. Hovering repaints the whole divider with
-heavy line glyphs and shows `drag to resize` in the status bar. The hover and the press resolve through the
-same `padHit` zone, so what lights up is exactly what will drag. No-button
+heavy line glyphs and shows `drag to resize` in the pinned right block of the
+status bar, flush with the last column. The hover and the press resolve through
+the same `padHit` zone, so what lights up is exactly what will drag. No-button
 motion is the mux's own: dm uses it for that hover and does not forward it to
 pane apps, which asked for button motion only.
 
@@ -208,7 +293,8 @@ pane as one chunk and never reads a byte inside it as a dm key: an embedded
 ctrl+b does not arm the prefix, and newlines do not submit. A paste also closes
 an open menu, picker or scrollback first.
 
-Small actions answer with a toast, not a suffix on the status bar. The client
+Small actions answer with a toast, not text in the status bar: the bar's right
+block is reserved for the scroll position and the divider hint. The client
 keeps up to three, each with the time it was raised, and draws them bottom
 right just above the bar, newest at the bottom: one row of bright text inside a
 dim border, as wide as the longest text plus its two border cells, clamped to

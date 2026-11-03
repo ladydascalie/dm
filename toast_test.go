@@ -143,14 +143,23 @@ func TestBarDropsToastSuffix(t *testing.T) {
 		Cols: 60, Rows: 24,
 		Panes: []PaneInfo{{ID: "w1p1", Status: "working"}},
 	}
-	var b bytes.Buffer
-	drawBar(&b, snap, false, "SCROLL w1p1 +1/9")
-	out := b.String()
-	if !strings.Contains(out, "main | main | win 1/1 1") {
-		t.Fatalf("bar lost its content: %q", out)
+	info := "SCROLL w1p1 +1/9"
+	glyph, _ := railGlyph("working", nerdFonts())
+	want := []string{"main", " ", "main", " ", "▸ ", "1 1", " ", glyph,
+		" w1p1", " working", info}
+	got := barTexts(barSegments(snap, false, info))
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("bar spans = %q, want %q", got, want)
 	}
-	if !strings.Contains(out, "SCROLL w1p1 +1/9") {
+
+	var b bytes.Buffer
+	drawBar(&b, snap, false, info)
+	out := b.String()
+	if !strings.Contains(out, info) {
 		t.Fatalf("bar lost its scroll segment: %q", out)
+	}
+	if strings.Contains(out, " | ") {
+		t.Fatalf("bar still draws the inline string: %q", out)
 	}
 	if strings.Contains(out, "! ") {
 		t.Fatalf("bar still draws a toast suffix: %q", out)

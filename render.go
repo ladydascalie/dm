@@ -658,6 +658,12 @@ var (
 	railDiffAdd  = rgb{120, 220, 130} // #78dc82 diff stats, added lines
 	railDiffDel  = rgb{255, 125, 125} // #ff7d7d diff stats, deleted lines
 	railWorking  = rgb{245, 190, 80}  // #f5be50 working amber, dirty dot
+
+	// The status bar reuses the rail's ground, focus fill, text and dim. It adds
+	// one accent for the active window mark and names the ground it paints
+	// between segments. There is no second background.
+	barAccent = rgb{122, 192, 235} // #7ac0eb cyan, active window mark
+	barGutter = railBG             // ground between segments
 )
 
 // railAccents are the six workspace hues, in a fixed order. Each one is
@@ -1223,65 +1229,379 @@ func menuPad(s string, w int, fill rune) string {
 	return out
 }
 
-// drawBar paints the one-line status bar at the bottom.
-func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, scroll string) {
+// drawBar paints the one-line status bar on the last row. It paints the
+// segment model span by span: reset, ground, foreground, weight, text. The
+// pinned block is anchored to the last column and the gutter fills the gap, so
+// the whole row is written and no cell of the previous frame shows through.
+// drawBar writes at most snap.Cols cells and never touches another row.
+func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, info string) {
+	if snap == nil || snap.Rows < 1 || snap.Cols < 1 {
+		return
+	}
+	segs := barSegments(snap, armed, info)
+	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
-	buf.WriteString("\x1b[0m\x1b[7m")
-	line := fmt.Sprintf(" %s | %s | win %d/%d %s | ", snap.Session, snap.Workspace,
-		snap.ActiveWindow+1, len(snap.Windows), strings.Join(snap.Windows, " "))
-	hlStart, hlEnd := 0, 0
-	for _, p := range snap.Panes {
-		if p.ID != snap.Focus {
+	writeBarSegs(buf, left)
+	if pad := snap.Cols - barCells(segs); pad > 0 {
+		buf.WriteString("\x1b[0m" + barGutter.bg() + strings.Repeat(" ", pad))
+	}
+	writeBarSegs(buf, pinned)
+	buf.WriteString("\x1b[0m")
+}
+
+// barSplitPinned splits a span run at its first pinned span: the left block,
+// then the right block that is anchored to the last column.
+func barSplitPinned(segs []barSeg) (left, pinned []barSeg) {
+	for i, seg := range segs {
+		if seg.pin {
+			return segs[:i], segs[i:]
+		}
+	}
+	return segs, nil
+}
+
+// writeBarSegs paints spans left to right, each one reset before its colours.
+func writeBarSegs(buf *bytes.Buffer, segs []barSeg) {
+	for _, seg := range segs {
+		if seg.text == "" {
 			continue
 		}
-		st := p.Status
-		if st == "" {
-			st = "unknown"
+		buf.WriteString("\x1b[0m" + seg.bg.bg() + seg.fg.fg())
+		if seg.bold {
+			buf.WriteString("\x1b[1m")
 		}
-		seg := "▶ " + p.ID
-		if p.Name != "" {
-			seg += " " + p.Name
-		}
-		seg += " " + st + " "
-		hlStart = len([]rune(line))
-		line += seg
-		hlEnd = len([]rune(line))
+		buf.WriteString(seg.text)
 	}
-	if armed {
-		line += "PREFIX "
+}
+
+// barSeg is one painted span of the status bar. A pinned segment belongs to
+// the right block, which sits flush against the last column; the rest form the
+// left block, in paint order.
+type barSeg struct {
+	text string
+	fg   rgb
+	bg   rgb
+	bold bool
+	pin  bool
+}
+
+// barCells is the painted cell width of a span run.
+func barCells(segs []barSeg) int {
+	n := 0
+	for _, seg := range segs {
+		n += runeCells(seg.text)
 	}
-	if scroll != "" {
-		line += scroll + " "
+	return n
+}
+
+// barClipText keeps the longest prefix of s that fits budget cells. A wide rune
+// that would straddle the limit is dropped, never half painted.
+func barClipText(s string, budget int) string {
+	if budget <= 0 {
+		return ""
 	}
-	width := snap.Cols
-	runes := []rune(line)
-	cut, cells := 0, 0
-	for cut < len(runes) {
-		rw := runeWidth(runes[cut])
-		if cells+rw > width {
+	var b strings.Builder
+	for _, r := range s {
+		w := runeWidth(r)
+		if w > budget {
 			break
 		}
-		cells += rw
-		cut++
+		b.WriteRune(r)
+		budget -= w
 	}
-	runes = runes[:cut]
-	if hlEnd > len(runes) {
-		hlEnd = len(runes)
+	return b.String()
+}
+
+// barElideText shrinks s to budget cells and ends it with an ellipsis.
+func barElideText(s string, budget int) string {
+	if budget <= 0 {
+		return ""
 	}
-	if hlStart > hlEnd {
-		hlStart = hlEnd
+	if budget == 1 {
+		return "…"
 	}
-	buf.WriteString(string(runes[:hlStart]))
-	if hlEnd > hlStart {
-		buf.WriteString("\x1b[0m\x1b[30;46m")
-		buf.WriteString(string(runes[hlStart:hlEnd]))
-		buf.WriteString("\x1b[0m\x1b[7m")
+	return barClipText(s, budget-1) + "…"
+}
+
+// barClipSegs keeps the first budget cells of a span run, whole runes only.
+func barClipSegs(segs []barSeg, budget int) []barSeg {
+	var out []barSeg
+	for _, seg := range segs {
+		if budget <= 0 {
+			break
+		}
+		text := barClipText(seg.text, budget)
+		if text == "" {
+			// The run ended on a wide rune the budget cannot hold, so no later
+			// span can be painted in order either.
+			break
+		}
+		budget -= runeCells(text)
+		seg.text = text
+		out = append(out, seg)
 	}
-	buf.WriteString(string(runes[hlEnd:]))
-	if pad := width - cells; pad > 0 {
-		buf.WriteString(strings.Repeat(" ", pad))
+	return out
+}
+
+// barJoin lays groups left to right with one background gutter cell between
+// them, so neighbouring chips never touch.
+func barJoin(groups [][]barSeg) []barSeg {
+	var out []barSeg
+	for i, group := range groups {
+		if i > 0 {
+			out = append(out, barSeg{text: " ", fg: railDim, bg: railBG})
+		}
+		out = append(out, group...)
 	}
-	buf.WriteString("\x1b[0m")
+	return out
+}
+
+// barWindow is one window chip of the left block: its index in the window
+// list, its name, and whether it is the active window.
+type barWindow struct {
+	num    int
+	name   string
+	active bool
+}
+
+// barFocusChip is the focus chip of the left block: a state mark, the pane id,
+// and the pane name and status word while they survive elision.
+type barFocusChip struct {
+	glyph  string
+	colour rgb
+	id     string
+	name   string
+	status string
+}
+
+// barLeft is the left block while it is being elided. The strings hold their
+// current, already shrunk text, and the flags hold the parts still shown.
+type barLeft struct {
+	session   string
+	workspace string
+	windows   []barWindow
+	focus     *barFocusChip
+	winNames  bool
+	showName  bool
+	showStat  bool
+}
+
+// barFocus builds the focus chip from the focused pane. An agent reports a
+// state, so it takes that state's glyph and colour; a shell gets the prompt
+// marker in dim text. A pane the snapshot does not list gets no chip.
+func barFocus(snap *Snapshot) *barFocusChip {
+	var p PaneInfo
+	found := false
+	for _, cand := range snap.Panes {
+		if cand.ID == snap.Focus {
+			p, found = cand, true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	status := p.Status
+	if status == "" {
+		status = "unknown"
+	}
+	// The rail's pane list carries the agent flag; a status word alone marks an
+	// agent when the list is absent.
+	agent := status != "unknown"
+	for _, a := range snap.All {
+		if a.ID == snap.Focus {
+			agent = a.Agent
+			break
+		}
+	}
+	glyph, colour := "▶", railDim
+	if agent {
+		glyph, colour = railGlyph(status, nerdFonts())
+	}
+	return &barFocusChip{
+		glyph: glyph, colour: colour,
+		id: p.ID, name: p.Name, status: status,
+	}
+}
+
+// barLeftFor reads the left block from a snapshot in its full, unelided form.
+func barLeftFor(snap *Snapshot) *barLeft {
+	l := &barLeft{
+		session:   snap.Session,
+		workspace: snap.Workspace,
+		winNames:  true,
+		showName:  true,
+		showStat:  true,
+	}
+	for i, name := range snap.Windows {
+		l.windows = append(l.windows, barWindow{num: i + 1, name: name, active: i == snap.ActiveWindow})
+	}
+	l.focus = barFocus(snap)
+	return l
+}
+
+// groups builds the left block spans as they currently stand: session,
+// workspace, one chip per window, then the focus chip.
+func (l *barLeft) groups() [][]barSeg {
+	var out [][]barSeg
+	if l.session != "" {
+		out = append(out, []barSeg{{text: l.session, fg: railText, bg: railBG}})
+	}
+	if l.workspace != "" {
+		out = append(out, []barSeg{{text: l.workspace, fg: railHeader, bg: railBG}})
+	}
+	for _, w := range l.windows {
+		if w.active {
+			// The active window reads as active: an accent mark, then the chip
+			// in bold on the focus fill.
+			text := strconv.Itoa(w.num)
+			if l.winNames && w.name != "" {
+				text += " " + w.name
+			}
+			out = append(out, []barSeg{
+				{text: "▸ ", fg: barAccent, bg: railFocusBG},
+				{text: text, fg: railText, bg: railFocusBG, bold: true},
+			})
+			continue
+		}
+		text := strconv.Itoa(w.num)
+		if l.winNames && w.name != "" {
+			text += " " + w.name
+		}
+		out = append(out, []barSeg{{text: text, fg: railDim, bg: railBG}})
+	}
+	if l.focus != nil {
+		chip := []barSeg{
+			{text: l.focus.glyph, fg: l.focus.colour, bg: railFocusBG},
+			{text: " " + l.focus.id, fg: railText, bg: railFocusBG, bold: true},
+		}
+		if l.showName && l.focus.name != "" {
+			chip = append(chip, barSeg{text: " " + l.focus.name, fg: railDim, bg: railFocusBG})
+		}
+		if l.showStat && l.focus.status != "" {
+			chip = append(chip, barSeg{text: " " + l.focus.status, fg: railDim, bg: railFocusBG})
+		}
+		out = append(out, chip)
+	}
+	return out
+}
+
+// fit elides the left block to budget cells in the ladder the footer uses:
+// window names, then trailing window chips, then the workspace name, then the
+// session name, then the focus chip's status word and name. The focus chip
+// keeps its glyph and id last, and the result never exceeds the budget.
+func (l *barLeft) fit(budget int) []barSeg {
+	if budget <= 0 {
+		return nil
+	}
+	cur := func() []barSeg { return barJoin(l.groups()) }
+	if segs := cur(); barCells(segs) <= budget {
+		return segs
+	}
+
+	// 1. Window chips lose their name and keep the number.
+	l.winNames = false
+	if segs := cur(); barCells(segs) <= budget {
+		return segs
+	}
+
+	// 2. Trailing window chips go, never the active one.
+	for len(l.windows) > 1 {
+		i := len(l.windows) - 1
+		for i >= 0 && l.windows[i].active {
+			i--
+		}
+		if i < 0 {
+			break
+		}
+		l.windows = append(l.windows[:i], l.windows[i+1:]...)
+		if segs := cur(); barCells(segs) <= budget {
+			return segs
+		}
+	}
+
+	// 3. The workspace name, then 4. the session name, shrink to a trailing
+	// ellipsis. A name that cannot shrink leaves its ellipsis alone; later
+	// steps make the room.
+	for _, name := range []*string{&l.workspace, &l.session} {
+		if *name == "" {
+			continue
+		}
+		avail := budget - (barCells(cur()) - runeCells(*name))
+		if avail < 1 {
+			avail = 1
+		}
+		*name = barElideText(*name, avail)
+		if segs := cur(); barCells(segs) <= budget {
+			return segs
+		}
+	}
+
+	// 5. The focus chip drops its status word, then its name.
+	l.showStat = false
+	if segs := cur(); barCells(segs) <= budget {
+		return segs
+	}
+	l.showName = false
+	if segs := cur(); barCells(segs) <= budget {
+		return segs
+	}
+
+	// 6. Only the glyph and the id are left; a line too narrow for that is cut.
+	return barClipSegs(cur(), budget)
+}
+
+// barPinned is the right block: the prefix flag while armed, then the scroll
+// info. Both are anchored to the last column, so both are pinned.
+func barPinned(armed bool, info string) []barSeg {
+	var out []barSeg
+	if armed {
+		out = append(out, barSeg{text: "PREFIX ", fg: railText, bg: railBG, bold: true, pin: true})
+	}
+	if info != "" {
+		out = append(out, barSeg{text: info, fg: railDim, bg: railBG, pin: true})
+	}
+	return out
+}
+
+// barFitPinned fits the right block to cols cells on its own. A pinned segment
+// goes whole, leftmost first, and the survivor is clipped with an ellipsis.
+func barFitPinned(segs []barSeg, cols int) []barSeg {
+	for barCells(segs) > cols {
+		if len(segs) > 1 {
+			segs = segs[1:]
+			continue
+		}
+		if len(segs) == 0 {
+			break
+		}
+		segs[0].text = barElideText(segs[0].text, cols)
+		break
+	}
+	return segs
+}
+
+// barSegments returns the status bar as spans in paint order: the left block,
+// then the pinned right block. It sizes the left block against the room the
+// pinned block leaves, minus one gutter cell, so the blocks never touch and the
+// line never runs past snap.Cols cells. The pinned block is never dropped to
+// make room for the left one.
+func barSegments(snap *Snapshot, armed bool, info string) []barSeg {
+	if snap == nil || snap.Cols <= 0 {
+		return nil
+	}
+	right := barFitPinned(barPinned(armed, info), snap.Cols)
+	budget := snap.Cols - barCells(right)
+	if len(right) > 0 {
+		// Keep one gutter cell between the blocks. drawBar spends it as part of
+		// the pad, so the pinned block still ends on the last column.
+		budget--
+	}
+	if budget < 0 {
+		budget = 0
+	}
+	left := barLeftFor(snap).fit(budget)
+	return append(left, right...)
 }
 
 // drawToasts paints the toast stack in the bottom-right corner, just above the
