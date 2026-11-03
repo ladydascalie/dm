@@ -543,6 +543,18 @@ func (t *tui) startScrollOnFocus() {
 	t.dirty = true
 }
 
+// focusForClick is the pane a left press must focus, or "" when focus is
+// already there or the event is not a plain left press.
+func focusForClick(p *PaneInfo, cur string, ev mouseEvent) string {
+	if ev.btn&3 != 0 || ev.btn&32 != 0 || ev.btn&64 != 0 || ev.release {
+		return ""
+	}
+	if cur == p.ID {
+		return ""
+	}
+	return p.ID
+}
+
 func (t *tui) paneAt(x, y int) *PaneInfo {
 	if t.snap == nil {
 		return nil
@@ -588,19 +600,18 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	if p == nil {
 		return
 	}
-	// A pane that enabled mouse reporting gets the event instead. The pane
-	// daemon owns the mode; the client's VT may have missed the enable
-	// sequence if it scrolled out of the replay ring.
+	// A left press focuses the pane even when the app owns the mouse. The
+	// mux's focus is not the app's business; tmux does the same.
+	if focus := focusForClick(p, t.snap.Focus, ev); focus != "" {
+		_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: focus})
+	}
 	if p.Mouse {
+		// The pane daemon owns the mode; the client's VT may have missed the
+		// enable sequence if it scrolled out of the replay ring.
 		_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
 		return
 	}
-	// Left press on a pane focuses it. Apps that want the mouse already took
-	// the event above.
 	if left {
-		if t.snap.Focus != p.ID {
-			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: p.ID})
-		}
 		return
 	}
 	if ev.btn&64 == 0 {
@@ -898,7 +909,11 @@ func (t *tui) draw() {
 		}
 	}
 	if t.snap.Root != nil {
-		drawDividers(&b, t.snap.Root, Rect{0, 0, t.snap.Cols, t.snap.Rows - 1})
+		focus := Rect{}
+		if p := t.paneByID(t.snap.Focus); p != nil {
+			focus = p.Rect
+		}
+		drawDividers(&b, t.snap.Root, Rect{0, 0, t.snap.Cols, t.snap.Rows - 1}, focus)
 	}
 	scrollInfo := ""
 	if t.scroll != "" {

@@ -128,7 +128,7 @@ var dividerPaintRE = regexp.MustCompile("\x1b\\[(\\d+);(\\d+)H([│─]+)")
 func paintedDividers(t *testing.T, root *Node, r Rect) map[[2]int]rune {
 	t.Helper()
 	var buf bytes.Buffer
-	drawDividers(&buf, root, r)
+	drawDividers(&buf, root, r, Rect{})
 	cells := map[[2]int]rune{}
 	for _, m := range dividerPaintRE.FindAllStringSubmatch(buf.String(), -1) {
 		row, _ := strconv.Atoi(m[1])
@@ -573,6 +573,73 @@ func TestIDsAreAddressable(t *testing.T) {
 	}
 	if _, ok := old.Panes["w1p1"]; !ok {
 		t.Fatalf("pane state not remapped: %v", old.Panes)
+	}
+}
+
+func TestFocusForClick(t *testing.T) {
+	p := &PaneInfo{ID: "w1p2", Mouse: true}
+	if got := focusForClick(p, "w1p1", mouseEvent{btn: 0}); got != "w1p2" {
+		t.Fatalf("left press on a mouse-claiming pane = %q", got)
+	}
+	if got := focusForClick(p, "w1p2", mouseEvent{btn: 0}); got != "" {
+		t.Fatalf("left press on the focused pane = %q", got)
+	}
+	if got := focusForClick(p, "w1p1", mouseEvent{btn: 64}); got != "" {
+		t.Fatalf("wheel focused a pane: %q", got)
+	}
+	if got := focusForClick(p, "w1p1", mouseEvent{btn: 0, release: true}); got != "" {
+		t.Fatalf("release focused a pane: %q", got)
+	}
+	if got := focusForClick(p, "w1p1", mouseEvent{btn: 32}); got != "" {
+		t.Fatalf("motion focused a pane: %q", got)
+	}
+}
+
+func TestDividerTouchesFocus(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	r := Rect{0, 0, 20, 10}
+	rects := childRects(row, r)
+	d := dividerRect(row, rects, 0)
+	if !dividerTouches(d, rects[0]) || !dividerTouches(d, rects[1]) {
+		t.Fatalf("divider between two panes touches neither: %+v", d)
+	}
+	if dividerTouches(d, Rect{X: 0, Y: 0, W: 1, H: 1}) {
+		t.Fatal("a far pane claims the divider")
+	}
+
+	// row{ row{a,b}, c }: the outer divider touches b, not a.
+	inner := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	root := &Node{Dir: "row", Kids: []*Node{inner, {Pane: "c"}},
+		Sizes: []float64{0.6, 0.4}}
+	rr := Rect{0, 0, 30, 10}
+	outer := childRects(root, rr)
+	innerRects := childRects(inner, outer[0])
+	outerDiv := dividerRect(root, outer, 0)
+	innerDiv := dividerRect(inner, innerRects, 0)
+	if !dividerTouches(innerDiv, innerRects[0]) {
+		t.Fatal("inner divider does not touch a")
+	}
+	if dividerTouches(outerDiv, innerRects[0]) {
+		t.Fatal("outer divider touches a, which is not on its edge")
+	}
+	if !dividerTouches(outerDiv, innerRects[1]) {
+		t.Fatal("outer divider does not touch b")
+	}
+}
+
+func TestBarHighlightsFocus(t *testing.T) {
+	snap := &Snapshot{
+		Session: "main", Workspace: "main", Windows: []string{"1"}, Focus: "w1p2",
+		Cols: 80, Rows: 24,
+		Panes: []PaneInfo{{ID: "w1p1", Status: "working"}, {ID: "w1p2", Name: "w2-7f", Status: "idle"}},
+	}
+	var b bytes.Buffer
+	drawBar(&b, snap, false, "", "")
+	out := b.String()
+	if !strings.Contains(out, "\x1b[30;46m") || !strings.Contains(out, "▶ w1p2 w2-7f idle") {
+		t.Fatalf("bar has no focus highlight: %q", out)
 	}
 }
 

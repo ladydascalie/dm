@@ -200,18 +200,22 @@ func dividerRect(n *Node, rects []Rect, i int) Rect {
 	return Rect{X: kr.X, Y: kr.Y + kr.H, W: kr.W, H: 1}
 }
 
-func drawDividers(buf *bytes.Buffer, n *Node, r Rect) {
+func drawDividers(buf *bytes.Buffer, n *Node, r Rect, focus Rect) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
 		return
 	}
 	rects := childRects(n, r)
 	for i, kid := range n.Kids {
-		drawDividers(buf, kid, rects[i])
+		drawDividers(buf, kid, rects[i], focus)
 		if i >= len(rects)-1 {
 			continue
 		}
 		d := dividerRect(n, rects, i)
-		buf.WriteString("\x1b[0m\x1b[90m")
+		if dividerTouches(d, focus) {
+			buf.WriteString("\x1b[0m\x1b[1;36m")
+		} else {
+			buf.WriteString("\x1b[0m\x1b[90m")
+		}
 		if n.Dir == "row" {
 			for y := 0; y < d.H; y++ {
 				fmt.Fprintf(buf, "\x1b[%d;%dH│", d.Y+y+1, d.X+1)
@@ -327,20 +331,43 @@ func paneAtRect(n *Node, r Rect, x, y int) string {
 	return ""
 }
 
+// dividerTouches reports whether a divider cell line runs along an edge of the
+// focused pane, so the active pane is visible as a bright frame.
+func dividerTouches(d, focus Rect) bool {
+	if d.W <= 0 || d.H <= 0 || focus.W <= 0 || focus.H <= 0 {
+		return false
+	}
+	overlapY := d.Y < focus.Y+focus.H && focus.Y < d.Y+d.H
+	overlapX := d.X < focus.X+focus.W && focus.X < d.X+d.W
+	if d.W == 1 {
+		return overlapY && (focus.X+focus.W == d.X || focus.X == d.X+1)
+	}
+	return overlapX && (focus.Y+focus.H == d.Y || focus.Y == d.Y+1)
+}
+
 // drawBar paints the one-line status bar at the bottom.
 func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, toast, scroll string) {
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
 	buf.WriteString("\x1b[0m\x1b[7m")
 	line := fmt.Sprintf(" %s | %s | win %d/%d %s | ", snap.Session, snap.Workspace,
 		snap.ActiveWindow+1, len(snap.Windows), strings.Join(snap.Windows, " "))
+	hlStart, hlEnd := 0, 0
 	for _, p := range snap.Panes {
-		if p.ID == snap.Focus {
-			st := p.Status
-			if st == "" {
-				st = "unknown"
-			}
-			line += fmt.Sprintf("[%s %s] ", p.ID, st)
+		if p.ID != snap.Focus {
+			continue
 		}
+		st := p.Status
+		if st == "" {
+			st = "unknown"
+		}
+		seg := "▶ " + p.ID
+		if p.Name != "" {
+			seg += " " + p.Name
+		}
+		seg += " " + st + " "
+		hlStart = len([]rune(line))
+		line += seg
+		hlEnd = len([]rune(line))
 	}
 	if armed {
 		line += "PREFIX "
@@ -356,7 +383,19 @@ func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, toast, scroll string
 	if len(runes) > width {
 		runes = runes[:width]
 	}
-	buf.WriteString(string(runes))
+	if hlEnd > len(runes) {
+		hlEnd = len(runes)
+	}
+	if hlStart > hlEnd {
+		hlStart = hlEnd
+	}
+	buf.WriteString(string(runes[:hlStart]))
+	if hlEnd > hlStart {
+		buf.WriteString("\x1b[0m\x1b[30;46m")
+		buf.WriteString(string(runes[hlStart:hlEnd]))
+		buf.WriteString("\x1b[0m\x1b[7m")
+	}
+	buf.WriteString(string(runes[hlEnd:]))
 	if pad := width - len(runes); pad > 0 {
 		buf.WriteString(strings.Repeat(" ", pad))
 	}
