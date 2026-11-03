@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -736,6 +737,506 @@ func TestMenuKeyboard(t *testing.T) {
 	tui.menuKey()
 	if tui.menu != nil || tui.mode != "" {
 		t.Fatalf("q did not close: %+v %q", tui.menu, tui.mode)
+	}
+}
+
+// clientTUI builds a client with a real snapshot and a conn over net.Pipe, and
+// a reader that collects every message the client sends.
+func clientTUI(t *testing.T, mouse map[string]bool) (*tui, chan Msg) {
+	t.Helper()
+	row := &Node{Pane: "a"}
+	snap := testSnapshot(row, 100, 30, mouse)
+	snap.Focus = "a"
+	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
+	a, b := net.Pipe()
+	t.Cleanup(func() {
+		a.Close()
+		b.Close()
+	})
+	tui.conn = &conn{Conn: a}
+	got := make(chan Msg, 16)
+	go func() {
+		for {
+			m, err := readMsg(b)
+			if err != nil {
+				close(got)
+				return
+			}
+			got <- m
+		}
+	}()
+	return tui, got
+}
+
+func pasteTUI(t *testing.T) (*tui, chan Msg) {
+	t.Helper()
+	return clientTUI(t, nil)
+}
+
+func nextMsg(t *testing.T, got chan Msg) Msg {
+	t.Helper()
+	select {
+	case m, ok := <-got:
+		if !ok {
+			t.Fatal("conn closed")
+		}
+		return m
+	case <-time.After(time.Second):
+		t.Fatal("no message")
+	}
+	return Msg{}
+}
+
+func noMsg(t *testing.T, got chan Msg) {
+	t.Helper()
+	select {
+	case m := <-got:
+		t.Fatalf("unexpected extra message: %+v", m)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// A paste is one keys message with its newlines intact. Bytes after the end
+// marker stay out of it and the prefix never arms: a client that forwarded the
+// whole buffer, or armed on its contents, fails here.
+func TestPasteIsOneKeysMessage(t *testing.T) {
+	tui, got := pasteTUI(t)
+	paste := "\x1b[200~line one\nline two\n\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(paste+"tail")...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != paste {
+		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
+	}
+	if tui.armed {
+		t.Fatal("the paste armed the prefix")
+	}
+	m = nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "tail" {
+		t.Fatalf("trailing bytes came through as %+v (%q)", m, m.Keys)
+	}
+	noMsg(t, got)
+	if len(tui.inbuf) != 0 || tui.armed {
+		t.Fatalf("paste left state: inbuf=%q armed=%v", tui.inbuf, tui.armed)
+	}
+}
+
+// A ctrl+b inside a paste is text, not a prefix arm.
+func TestPasteCtrlBDoesNotArm(t *testing.T) {
+	tui, got := pasteTUI(t)
+	paste := "\x1b[200~a\x02b\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(paste)...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != paste {
+		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
+	}
+	if tui.armed {
+		t.Fatal("ctrl+b in a paste armed the prefix")
+	}
+	noMsg(t, got)
+}
+
+// A paste split across two reads is buffered and forwarded once, intact.
+func TestPasteSpansReads(t *testing.T) {
+	tui, got := pasteTUI(t)
+	head := "\x1b[200~first\n"
+	tail := "second\n\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(head)...)
+	tui.processInput()
+	noMsg(t, got)
+	if len(tui.inbuf) == 0 {
+		t.Fatal("partial paste was not buffered")
+	}
+	tui.inbuf = append(tui.inbuf, []byte(tail)...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != head+tail {
+		t.Fatalf("split paste came through as %+v (%q)", m, m.Keys)
+	}
+	noMsg(t, got)
+}
+
+// A paste closes an open menu and reaches the pane instead of a menu item.
+func TestPasteClosesMenu(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.openMenu(tui.paneByID("a"), 10, 5)
+	if tui.menu == nil {
+		t.Fatal("menu did not open")
+	}
+	paste := "\x1b[200~x\x1b[201~"
+	tui.inbuf = append(tui.inbuf, []byte(paste)...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != paste {
+		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
+	}
+	if tui.menu != nil || tui.mode != "" {
+		t.Fatalf("paste left the menu open: %+v %q", tui.menu, tui.mode)
+	}
+}
+
+// A read that splits right after the escape still yields one paste: the lone
+// escape is held as a possible marker instead of going to the pane.
+func TestPasteSplitAtLoneEscape(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, 0x1b)
+	tui.processInput()
+	noMsg(t, got)
+	if tui.pasteDeadline.IsZero() {
+		t.Fatal("lone escape was not held")
+	}
+	tui.inbuf = append(tui.inbuf, []byte("[200~a\nb\x1b[201~")...)
+	tui.processInput()
+	m := nextMsg(t, got)
+	want := "\x1b[200~a\nb\x1b[201~"
+	if m.Type != "keys" || string(m.Keys) != want {
+		t.Fatalf("split paste came through as %+v (%q)", m, m.Keys)
+	}
+	noMsg(t, got)
+}
+
+// A real lone escape waits for the deadline and then reaches the pane.
+func TestLoneEscapeFlushedAfterDeadline(t *testing.T) {
+	tui, got := pasteTUI(t)
+	start := time.Now()
+	tui.inbuf = append(tui.inbuf, 0x1b)
+	tui.processInput()
+	noMsg(t, got)
+	if tui.expirePaste(start) {
+		t.Fatal("the escape expired before its deadline")
+	}
+	noMsg(t, got)
+	if !tui.expirePaste(start.Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the escape did not expire after its deadline")
+	}
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b" {
+		t.Fatalf("lone escape came through as %+v (%q)", m, m.Keys)
+	}
+	noMsg(t, got)
+}
+
+// Bytes that cannot start a paste disprove the partial marker, so its deadline
+// cannot flush a later, genuine paste early.
+func TestPartialMarkerDisprovedClearsDeadline(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, []byte("\x1b[2")...)
+	tui.processInput()
+	noMsg(t, got)
+	if tui.pasteDeadline.IsZero() {
+		t.Fatal("partial marker was not held")
+	}
+	tui.inbuf = append(tui.inbuf, 'x')
+	tui.processInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b[2x" {
+		t.Fatalf("disproved marker came through as %+v (%q)", m, m.Keys)
+	}
+	if !tui.pasteDeadline.IsZero() {
+		t.Fatal("disproved marker kept its deadline")
+	}
+	if tui.expirePaste(time.Now().Add(time.Second)) {
+		t.Fatal("a disproved marker was flushed again")
+	}
+}
+
+// A start marker that never completes is not a paste. The stall path sends
+// the bytes down the normal input path instead of holding them forever.
+func TestPasteStallFallsBack(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, []byte("\x1b[")...)
+	tui.processInput()
+	noMsg(t, got)
+	tui.staleInput()
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b[" {
+		t.Fatalf("stalled marker came through as %+v (%q)", m, m.Keys)
+	}
+}
+
+// testVT builds a terminal painted with data, the way a pane's VT looks.
+func testVT(t *testing.T, w, h int, data string) vt10x.Terminal {
+	t.Helper()
+	vt := vt10x.New(vt10x.WithSize(w, h))
+	if _, err := vt.Write([]byte(data)); err != nil {
+		t.Fatalf("write vt: %v", err)
+	}
+	return vt
+}
+
+// A backwards drag covers the same row-major range as the forward one.
+func TestSelectionRangeNormalizes(t *testing.T) {
+	s := &selection{pane: "a", anchor: cell{4, 2}, focus: cell{1, 0}}
+	r := s.rangeIn(10)
+	if r.lo != 1 || r.hi != 24 {
+		t.Fatalf("backwards range = %+v, want lo 1 hi 24", r)
+	}
+	s = &selection{pane: "a", anchor: cell{1, 0}, focus: cell{4, 2}}
+	if got := s.rangeIn(10); got.lo != 1 || got.hi != 24 {
+		t.Fatalf("forwards range = %+v", got)
+	}
+	if got := (*selection)(nil).rangeIn(10); got != nil {
+		t.Fatal("nil selection has a range")
+	}
+}
+
+func TestExtractSelection(t *testing.T) {
+	vt := testVT(t, 12, 3, "ab  cd\r\nsecond line\r\n")
+	cases := []struct {
+		name string
+		a, b cell
+		want string
+	}{
+		{"trailing spaces", cell{0, 0}, cell{6, 0}, "ab  cd"},
+		{"multiple rows", cell{0, 0}, cell{5, 1}, "ab  cd\nsecond"},
+		{"single cell", cell{1, 0}, cell{1, 0}, "b"},
+		{"backwards drag", cell{5, 1}, cell{0, 0}, "ab  cd\nsecond"},
+	}
+	for _, c := range cases {
+		if got := extractSelection(vt, 12, c.a, c.b); got != c.want {
+			t.Fatalf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestOSC52Clipboard(t *testing.T) {
+	t.Setenv("TMUX", "")
+	seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hi\nthere")) + "\x1b\\"
+	if got := osc52("hi\nthere"); got != seq {
+		t.Fatalf("osc52 = %q, want %q", got, seq)
+	}
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	inner := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hi")) + "\x1b\\"
+	want := "\x1bPtmux;" + strings.ReplaceAll(inner, "\x1b", "\x1b\x1b") + "\x1b\\"
+	if got := osc52("hi"); got != want {
+		t.Fatalf("tmux osc52 = %q, want %q", got, want)
+	}
+}
+
+// A click that never moves is not a selection: the app that claims the mouse
+// gets the press and the release.
+func TestClickForwardsToMouseApp(t *testing.T) {
+	tui, got := clientTUI(t, map[string]bool{"a": true})
+	p := tui.paneByID("a")
+	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello")
+	press := mouseEvent{btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;2;2M")}
+	release := mouseEvent{btn: 0, release: true, x: p.Rect.X + 2, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;2;2m")}
+	tui.handleMouse(press)
+	noMsg(t, got)
+	if tui.press == nil {
+		t.Fatal("press was not held")
+	}
+	tui.handleMouse(release)
+	m := nextMsg(t, got)
+	want := string(press.raw) + string(release.raw)
+	if m.Type != "keys" || string(m.Keys) != want {
+		t.Fatalf("click sent %+v (%q), want %q", m, m.Keys, want)
+	}
+	if tui.selText != nil || tui.press != nil {
+		t.Fatal("click left selection state behind")
+	}
+	noMsg(t, got)
+}
+
+// A left press held on a pane must not survive a right press and a menu pick.
+// Otherwise the later left release forwards a click the app never asked for.
+func TestRightPressCancelsHeldClick(t *testing.T) {
+	tui, got := clientTUI(t, map[string]bool{"a": true})
+	p := tui.paneByID("a")
+	x, y := p.Rect.X+2, p.Rect.Y+2
+	tui.handleMouse(mouseEvent{btn: 0, x: x, y: y, raw: []byte("\x1b[<0;3;3M")})
+	if tui.press == nil {
+		t.Fatal("press was not held")
+	}
+	tui.handleMouse(mouseEvent{btn: 2, x: x, y: y, raw: []byte("\x1b[<2;3;3M")})
+	if tui.menu == nil {
+		t.Fatal("right press did not open the menu")
+	}
+	if tui.press != nil {
+		t.Fatal("the held press survived the right press")
+	}
+	// Pick a menu row with the left button, then release the left button.
+	tui.handleMouse(mouseEvent{btn: 0, x: tui.menu.x + 2, y: tui.menu.y + 2,
+		raw: []byte("\x1b[<0;4;4M")})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: x, y: y,
+		raw: []byte("\x1b[<0;3;3m")})
+	deadline := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case m := <-got:
+			if m.Type == "keys" {
+				t.Fatalf("a phantom click reached the app: %q", m.Keys)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// A snapshot that changes the starting pane's rect drops the selection: its
+// cells belong to the old geometry.
+func TestSelectionClearsOnResize(t *testing.T) {
+	tui, _ := clientTUI(t, nil)
+	p := tui.paneByID("a")
+	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;1;1M")})
+	tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + 4, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<32;4;1M")})
+	if tui.selText == nil || !tui.selText.moved {
+		t.Fatal("drag did not select")
+	}
+	// The same geometry keeps the selection.
+	row := &Node{Pane: "a"}
+	same := testSnapshot(row, 100, 30, nil)
+	same.Focus = "a"
+	tui.apply(Msg{Type: "snapshot", Snap: same})
+	if tui.selText == nil {
+		t.Fatal("an unchanged snapshot dropped the selection")
+	}
+	// A resized pane drops it.
+	resized := testSnapshot(row, 90, 30, nil)
+	resized.Focus = "a"
+	tui.apply(Msg{Type: "snapshot", Snap: resized})
+	if tui.selText != nil || tui.press != nil {
+		t.Fatal("selection survived the resize")
+	}
+}
+
+// A one-cell jitter is not a drag: the app that owns the mouse still gets the
+// click.
+func TestClickJitterStaysAClick(t *testing.T) {
+	tui, got := clientTUI(t, map[string]bool{"a": true})
+	p := tui.paneByID("a")
+	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello")
+	press := mouseEvent{btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 2,
+		raw: []byte("\x1b[<0;3;3M")}
+	release := mouseEvent{btn: 0, release: true, x: p.Rect.X + 3, y: p.Rect.Y + 2,
+		raw: []byte("\x1b[<0;4;3m")}
+	motion := mouseEvent{btn: 32, x: p.Rect.X + 3, y: p.Rect.Y + 2,
+		raw: []byte("\x1b[<32;4;3M")}
+	tui.handleMouse(press)
+	tui.handleMouse(motion)
+	tui.handleMouse(release)
+	m := nextMsg(t, got)
+	if m.Type != "keys" {
+		t.Fatalf("jitter sent %+v", m)
+	}
+	// The held press, the jitter and the release all reach the app.
+	if want := string(press.raw) + string(motion.raw) + string(release.raw); string(m.Keys) != want {
+		t.Fatalf("jitter sent %q, want %q", m.Keys, want)
+	}
+	if tui.selText != nil || tui.press != nil {
+		t.Fatal("jitter left selection state behind")
+	}
+	noMsg(t, got)
+}
+
+// Two cells is a drag: the range is selected and nothing reaches the app.
+func TestTwoCellDragSelects(t *testing.T) {
+	tui, got := clientTUI(t, map[string]bool{"a": true})
+	p := tui.paneByID("a")
+	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello world")
+	oscOut := captureStdout(t, func() {
+		tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;1;1M")})
+		tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + 3, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<32;3;1M")})
+		tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 3, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;3;1m")})
+	})
+	noMsg(t, got)
+	if tui.toast != "copied 3 chars" {
+		t.Fatalf("toast = %q, want copied 3 chars", tui.toast)
+	}
+	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hel")) + "\x1b\\"
+	if !strings.Contains(oscOut, want) {
+		t.Fatalf("clipboard payload missing from %q", oscOut)
+	}
+}
+
+// A drag copies the range instead of forwarding anything to the app.
+func TestDragCopiesSelection(t *testing.T) {
+	tui, got := clientTUI(t, map[string]bool{"a": true})
+	p := tui.paneByID("a")
+	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello world\r\nsecond line")
+	oscOut := captureStdout(t, func() {
+		tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;1;1M")})
+		tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + 5, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<32;5;1M")})
+		tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 5, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;5;1m")})
+	})
+	noMsg(t, got)
+	if tui.selText != nil || tui.press != nil {
+		t.Fatal("drag left selection state behind")
+	}
+	if tui.toast != "copied 5 chars" {
+		t.Fatalf("toast = %q, want copied 5 chars", tui.toast)
+	}
+	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hello")) + "\x1b\\"
+	if !strings.Contains(oscOut, want) {
+		t.Fatalf("clipboard payload missing from %q", oscOut)
+	}
+}
+
+// A drag past the pane's edge stops at its content rect.
+func TestSelectionClampsToStartingPane(t *testing.T) {
+	tui, _ := clientTUI(t, nil)
+	p := tui.paneByID("a")
+	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;1;1M")})
+	tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + p.Rect.W + 40,
+		y: p.Rect.Y + p.Rect.H + 40, raw: []byte("\x1b[<32;99;99M")})
+	want := cell{x: p.Rect.W - 1, y: p.Rect.H - 1}
+	if tui.selText == nil || tui.selText.focus != want {
+		t.Fatalf("focus = %+v, want %+v", tui.selText, want)
+	}
+	if tui.selText.pane != "a" {
+		t.Fatalf("selection left its pane: %q", tui.selText.pane)
+	}
+}
+
+// captureStdout runs fn with os.Stdout on a pipe and returns what it printed.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = old
+	w.Close()
+	defer r.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// Only the selected cells turn on reverse video.
+func TestSelectionHighlight(t *testing.T) {
+	vt := testVT(t, 10, 2, "abcdef\r\nghijkl")
+	plain := &bytes.Buffer{}
+	drawPane(plain, vt, Rect{0, 0, 10, 2})
+	if strings.Contains(plain.String(), "\x1b[7m") {
+		t.Fatalf("unselected paint has reverse video: %q", plain.String())
+	}
+	marked := &bytes.Buffer{}
+	drawPaneFrom(marked, vt, Rect{0, 0, 10, 2}, 0, &selRange{lo: 1, hi: 3})
+	if got := strings.Count(marked.String(), "\x1b[7m"); got != 3 {
+		t.Fatalf("reverse video count = %d, want 3: %q", got, marked.String())
+	}
+	for _, want := range []string{"a", "b", "c", "d", "e"} {
+		if !strings.Contains(marked.String(), want) {
+			t.Fatalf("marked paint lost %q", want)
+		}
 	}
 }
 
