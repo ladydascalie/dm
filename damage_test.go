@@ -732,15 +732,13 @@ func TestOraclePalette(t *testing.T) {
 	}
 	step("first")
 	rect := paletteRect(100, 20)
-	pvt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
-	pvt.Write([]byte("\x1b[1;1HPALETTE-ONE"))
-	f.tui.pal = &palette{vt: pvt, rect: rect}
+	f.tui.sw = newSwitcher(rect, f.snap)
 	step("open")
-	pvt.Write([]byte("\x1b[2;1Htyped"))
+	f.tui.sw.appendText('t')
 	step("type")
-	pvt.Write([]byte("\x1b[3;1Hmore"))
+	f.tui.sw.appendText('y')
 	step("type2")
-	f.tui.pal = nil
+	f.tui.sw = nil
 	step("close")
 	step("steady")
 }
@@ -756,9 +754,7 @@ func TestOracleRailUnderPalette(t *testing.T) {
 	}
 	step("first")
 	rect := paletteRect(100, 30)
-	pvt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
-	pvt.Write([]byte("\x1b[1;1HPALETTE-ONE"))
-	f.tui.pal = &palette{vt: pvt, rect: rect}
+	f.tui.sw = newSwitcher(rect, f.snap)
 	step("open")
 	f.snap.All[0].Status = "working"
 	f.snap.All[0].Agent = true
@@ -884,11 +880,10 @@ func TestBandsUseAbsoluteCursorMoves(t *testing.T) {
 		{"palette", func() {
 			f.tui.armed = false
 			rect := paletteRect(f.snap.Cols, f.snap.Rows)
-			pvt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
-			f.tui.pal = &palette{vt: pvt, rect: rect}
+			f.tui.sw = newSwitcher(rect, f.snap)
 		}},
 		{"menu", func() {
-			f.tui.pal = nil
+			f.tui.sw = nil
 			f.tui.menu = &menu{x: 9, y: 3, w: 20, title: "pane", items: []menuItem{{label: "split", key: "|"}}}
 			f.tui.mode = "menu"
 		}},

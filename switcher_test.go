@@ -187,6 +187,18 @@ func TestSwitcherFilter(t *testing.T) {
 			want:  []string{"ws s1", "win w1", "pane w1p1", "pane w1p2"},
 			pick:  "w1p1",
 		},
+		{
+			// A workspace name keeps its whole subtree.
+			query: "docs",
+			want:  []string{"ws s2", "win w3", "pane w3p1"},
+			pick:  "w3p1",
+		},
+		{
+			// A window name keeps every pane under that window.
+			query: "two",
+			want:  []string{"ws s1", "win w2", "pane w2p1", "pane w2p2"},
+			pick:  "w2p1",
+		},
 	}
 	for _, c := range cases {
 		s := newSwitcher(Rect{W: 80, H: 24}, switcherSnap())

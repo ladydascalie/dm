@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -102,10 +103,15 @@ type tui struct {
 	railWant  int
 	railPress bool
 
-	// pal is the floating television switcher, nil when closed. palOut is
-	// its byte stream, nil once the child has gone.
-	pal    *palette
-	palOut chan []byte
+	// sw is the floating native switcher, nil when closed. swX and swY are
+	// the query cursor cell its last paint asked for, swAt and swPane are the
+	// last preview request, and swID numbers the next one.
+	sw     *switcher
+	swX    int
+	swY    int
+	swAt   time.Time
+	swPane string
+	swID   int
 
 	// rowsig holds one fingerprint per pane content row, so a steady frame
 	// repaints only the rows that moved. laysig is the shape of the picture:
@@ -278,7 +284,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		hist: map[string][]byte{},
 	}
 	t.cols, t.rows, _ = term.GetSize(fd)
-	defer closePalette(t)
+	defer closeSwitcher(t)
 
 	done := make(chan struct{})
 	defer close(done)
@@ -324,21 +330,13 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			if err == nil && (cols != t.cols || rows != t.rows) {
 				t.cols, t.rows = cols, rows
 				_ = t.conn.send(Msg{Type: "resize", Cols: cols, Rows: rows})
-				if t.pal != nil {
-					t.pal.resize(paletteRect(cols, rows))
-				}
 				t.dirty = true
 			}
-		case b, ok := <-t.palOut:
-			if !ok {
-				paletteClosed(t)
-				break
-			}
-			paletteBytes(t, b)
 		case <-ticker.C:
 			now := time.Now()
 			t.expireToasts(now)
 			t.expirePaste(now)
+			t.expireSwitcher(now)
 			if t.armed && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
 				t.pending = false
 				t.inbuf = t.inbuf[:0]
@@ -447,6 +445,10 @@ func (t *tui) apply(m Msg) {
 				t.clearSelection()
 			}
 		}
+		// Folds, names and statuses move under an open float.
+		if t.sw != nil {
+			t.sw.sync(m.Snap)
+		}
 		t.dirty = true
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
@@ -468,6 +470,14 @@ func (t *tui) apply(m Msg) {
 	case "exit":
 		t.notify("pane " + m.Target + " exited")
 	case "resp":
+		// A preview reply carries the id its request named. Only the newest id
+		// fills the band: an older one is dropped and a failure stays silent.
+		if m.ID > 0 {
+			if t.sw != nil && t.sw.acceptPreview(m.ID, previewLines(m)) {
+				t.dirty = true
+			}
+			break
+		}
 		if !m.OK {
 			t.notify(m.Error)
 		}
@@ -742,17 +752,39 @@ func (t *tui) forwardPaste(seq []byte) {
 
 func (t *tui) processInput() {
 	for len(t.inbuf) > 0 {
-		if t.pal != nil {
-			// The prefix key closes the float without choosing. A bare esc
-			// cannot: television prints the highlighted entry when it quits.
-			if bytes.IndexByte(t.inbuf, 0x02) >= 0 {
-				t.inbuf = nil
-				closePalette(t)
+		if t.sw != nil {
+			// While the float is up every key belongs to it: nothing reaches a
+			// pane. A mouse event and a paste are swallowed whole. A lone esc is
+			// the close key, so it skips the paste marker check: a bare esc is
+			// not the start of one.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.switcherKey() {
+					return
+				}
+				continue
+			}
+			if ev, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				_ = ev
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if seq, n, started := t.takePaste(); started {
+				if n == 0 {
+					if t.pasteDeadline.IsZero() {
+						t.pasteDeadline = time.Now()
+					}
+					return
+				}
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				_ = seq
+				continue
+			}
+			if !t.switcherKey() {
 				return
 			}
-			_, _ = t.pal.ptmx.Write(t.inbuf)
-			t.inbuf = nil
-			return
+			continue
 		}
 		if seq, n, started := t.takePaste(); started {
 			if n == 0 {
@@ -900,6 +932,140 @@ func (t *tui) pickerKey() bool {
 		t.closePicker()
 	}
 	return true
+}
+
+// switcherKey consumes one key while the native switcher is open. It follows
+// pickerKey's shape: it returns false when it needs more bytes for an escape
+// sequence. Nothing it handles reaches a pane.
+func (t *tui) switcherKey() bool {
+	b := t.inbuf[0]
+	if b == 0x1b {
+		if len(t.inbuf) < 3 {
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		seq := string(t.inbuf[:3])
+		t.inbuf = t.inbuf[3:]
+		switch seq {
+		case "\x1b[A":
+			t.sw.move(-1)
+			t.dirty = true
+		case "\x1b[B":
+			t.sw.move(1)
+			t.dirty = true
+		case "\x1b[C", "\x1b[D", "\x1b[Z":
+			// Left, right and shift-tab have no meaning in a list.
+		default:
+			closeSwitcher(t)
+		}
+		return true
+	}
+	t.inbuf = t.inbuf[1:]
+	t.pending = false
+	switch b {
+	case 0x02: // the prefix key, pressed again
+		closeSwitcher(t)
+	case '\r', '\n':
+		t.pickSwitcher()
+	case 0x03: // ctrl+c
+		closeSwitcher(t)
+	case 0x15: // ctrl+u
+		t.sw.clearQuery()
+		t.dirty = true
+	case 0x7f, 0x08: // backspace
+		t.sw.backspace()
+		t.dirty = true
+	case 0x0e: // ctrl+n, down
+		t.sw.move(1)
+		t.dirty = true
+	case 0x10: // ctrl+p, up
+		t.sw.move(-1)
+		t.dirty = true
+	case 'j':
+		t.sw.move(1)
+		t.dirty = true
+	case 'k':
+		t.sw.move(-1)
+		t.dirty = true
+	default:
+		if b >= 0x20 && b < 0x7f {
+			t.sw.appendText(rune(b))
+			t.dirty = true
+		}
+	}
+	return true
+}
+
+// pickSwitcher closes the float, then goes to its row. A workspace goes to
+// focus-workspace, a window to focus-window and a pane to focus. A gap row or
+// an empty selection closes silently.
+func (t *tui) pickSwitcher() {
+	target := ""
+	if it, ok := t.sw.selected(); ok && it.kind != railGap {
+		target = t.sw.target()
+	}
+	closeSwitcher(t)
+	if target != "" {
+		t.dispatchPick(target)
+	}
+}
+
+// expireSwitcher closes a float whose lone esc never finished arriving. A bare
+// esc is the close key, so a stalled one means close, the way a pending escape
+// in the other modes resolves to dismiss.
+func (t *tui) expireSwitcher(now time.Time) {
+	if t.sw == nil || !t.pending {
+		return
+	}
+	if now.Sub(t.escAt) <= escTimeout {
+		return
+	}
+	t.pending = false
+	t.inbuf = t.inbuf[:0]
+	closeSwitcher(t)
+}
+
+// askPreview sends a read request for the selected pane when the float shows a
+// preview the client does not already have. It asks at most once per pane per
+// 120 ms and never for a pane in the active window, whose screen is in t.vts.
+func (t *tui) askPreview() {
+	if t.sw == nil || t.snap == nil || !t.sw.previewDue() {
+		return
+	}
+	it, ok := t.sw.selected()
+	if !ok || it.kind != railPane || it.pane == "" {
+		return
+	}
+	if t.vts[it.pane] != nil {
+		return
+	}
+	if it.pane == t.swPane && time.Since(t.swAt) < 120*time.Millisecond {
+		return
+	}
+	t.swID++
+	t.swAt = time.Now()
+	t.swPane = it.pane
+	t.sw.setPreview(t.swID, it.pane)
+	_ = t.conn.send(Msg{Type: "req", Action: "read", Target: it.pane, ID: t.swID})
+}
+
+// previewLines pulls the lines out of a read reply. The reply carries them in
+// Res as an object with a lines array, so a malformed one yields no lines and
+// the band stays blank.
+func previewLines(m Msg) []string {
+	if len(m.Res) == 0 {
+		return nil
+	}
+	var res struct {
+		Lines []string `json:"lines"`
+	}
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		return nil
+	}
+	return res.Lines
 }
 
 // scrollKey consumes one key in scrollback mode. It returns false when it
@@ -1315,7 +1481,7 @@ func osc52(text string) string {
 }
 
 func (t *tui) handleMouse(ev mouseEvent) {
-	if t.pal != nil {
+	if t.sw != nil {
 		return // the float owns the pointer while it is open
 	}
 	if t.snap == nil {
@@ -1731,7 +1897,7 @@ func (t *tui) key(b byte) {
 	case ')':
 		t.action("next-workspace", nil)
 	case 'a':
-		openPalette(t)
+		openSwitcher(t)
 	case 's':
 		t.openPicker()
 	case 'r':
@@ -1867,9 +2033,9 @@ func (t *tui) draw() {
 	drawRail(&rail, win)
 	drawBar(&bar, win, t.armed, t.barInfo())
 	drawToasts(&toasts, win, t.toasts)
-	if t.pal != nil {
-		drawPaneFrom(&pal, t.pal.vt, t.pal.rect, 0, nil)
-		drawPaneBox(&pal, t.pal.rect, true)
+	if t.sw != nil {
+		t.swX, t.swY = drawSwitcher(&pal, t.sw, win, t.vts)
+		t.askPreview()
 	}
 	if t.armed {
 		drawHelp(&help, win.Cols, win.Rows)
@@ -2046,8 +2212,8 @@ func (t *tui) layoutSig(win *Snapshot) string {
 		fmt.Fprintf(&b, " %s:%d,%d,%d,%d", p.ID, p.Rect.X, p.Rect.Y, p.Rect.W, p.Rect.H)
 	}
 	fmt.Fprintf(&b, " f=%s m=%s s=%s", win.Focus, t.mode, t.scroll)
-	if t.pal != nil {
-		fmt.Fprintf(&b, " p=%+v", t.pal.rect)
+	if t.sw != nil {
+		fmt.Fprintf(&b, " p=%+v", t.sw.rect)
 	}
 	return b.String()
 }
@@ -2161,8 +2327,9 @@ func rowsHit(rows []int, dirty map[int]bool) bool {
 // cursorBlock is the tail of a frame that places the cursor, or hides it. It
 // is empty when the frame leaves the cursor alone.
 func (t *tui) cursorBlock() string {
-	if t.pal != nil {
-		return "\x1b[?25l"
+	if t.sw != nil {
+		// The float owns the cursor while it is up: the query cell, shown.
+		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.swY+1, t.swX+1)
 	}
 	win := t.snap
 	if win == nil || t.mode != "" {
