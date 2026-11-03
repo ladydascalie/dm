@@ -37,36 +37,166 @@ func (p *paneConn) send(m Msg) error {
 	return writeMsg(p.c, m)
 }
 
+// outboundBytes bounds what one client may have queued, in bytes. A client
+// past the bound is not reading: it gets a fresh picture instead of a backlog.
+const outboundBytes = 1 << 20
+
 type client struct {
-	c       net.Conn
-	mu      sync.Mutex
-	cols    int
-	rows    int
-	paused  bool
-	pending []Msg
+	c    net.Conn
+	mu   sync.Mutex
+	cond *sync.Cond // wakes the writer; guards the queue with mu
+
+	cols int
+	rows int
+	// paused holds the queue while the client is being caught up. A paused
+	// client queues; the writer does not touch the socket.
+	paused bool
+
+	queue  []Msg
+	qbytes int
+	// stale records that the queue overflowed and queued frames were
+	// dropped. The writer resyncs from a picture once the queue drains.
+	stale bool
+	// resync is the server's rebuild hook: one snapshot, then one screen per
+	// pane. It is nil until the client attaches.
+	resync func()
+	closed bool
+	writer sync.Once
 }
 
-func (c *client) send(m Msg) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return writeMsg(c.c, m)
+func newClient(c net.Conn) *client {
+	cl := &client{c: c}
+	cl.cond = sync.NewCond(&cl.mu)
+	return cl
 }
 
-// deliver queues pane output while the client is being caught up.
+// deliver queues a frame and returns. It never writes the socket and never
+// waits on it: a stalled client must not block the pane read loop.
 func (c *client) deliver(m Msg) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.paused {
-		if len(c.pending) < 4096 {
-			c.pending = append(c.pending, m)
-		}
-		return
-	}
-	_ = writeMsg(c.c, m)
+	c.enqueueLocked(m)
+	c.mu.Unlock()
 }
 
-// pause stops pane output from being written to the socket while the client is
-// being caught up. It takes c.mu, like deliver, so the flag has one owner.
+// enqueueLocked appends m to the queue under the byte bound. On overflow it
+// drops the queued "bytes" frames, marks the client stale and stops queueing
+// output, so the writer resyncs from the pane screens instead of replaying a
+// backlog.
+func (c *client) enqueueLocked(m Msg) {
+	if c.cond == nil {
+		c.cond = sync.NewCond(&c.mu)
+	}
+	if c.closed {
+		return
+	}
+	if c.stale && m.Type == "bytes" {
+		// The client already owes itself a picture. Queueing more output
+		// would only rebuild the backlog the overflow threw away.
+		return
+	}
+	n := msgBytes(m)
+	if c.qbytes+n > outboundBytes {
+		// Every queued output frame is a backlog, and the resync below sends
+		// a screen per pane, so the backlog goes.
+		c.dropBytesLocked()
+		c.stale = true
+		for c.qbytes+n > outboundBytes && len(c.queue) > 0 {
+			c.popLocked()
+		}
+		if n > outboundBytes {
+			// A single frame bigger than the whole bound never ships; the
+			// resync rebuilds it piecemeal.
+			return
+		}
+	}
+	c.queue = append(c.queue, m)
+	c.qbytes += n
+	c.startWriter()
+	c.cond.Broadcast()
+}
+
+// dropBytesLocked removes every queued "bytes" frame. The caller holds c.mu.
+func (c *client) dropBytesLocked() {
+	kept := c.queue[:0]
+	for _, m := range c.queue {
+		if m.Type == "bytes" {
+			c.qbytes -= msgBytes(m)
+			continue
+		}
+		kept = append(kept, m)
+	}
+	c.queue = kept
+}
+
+// popLocked removes the head frame and clears its slot, so a lagging client
+// does not pin the buffers of frames it already sent. The caller holds c.mu.
+func (c *client) popLocked() Msg {
+	m := c.queue[0]
+	c.queue[0] = Msg{}
+	c.queue = c.queue[1:]
+	c.qbytes -= msgBytes(m)
+	return m
+}
+
+// startWriter runs the one goroutine that owns the socket. Every client frame,
+// including replies, leaves through it.
+func (c *client) startWriter() {
+	c.writer.Do(func() { go c.writeLoop() })
+}
+
+func (c *client) writeLoop() {
+	for {
+		m, ok := c.next()
+		if !ok {
+			return
+		}
+		if err := writeMsg(c.c, m); err != nil {
+			c.shutdown()
+			return
+		}
+		if fn := c.takeResync(); fn != nil {
+			fn()
+		}
+	}
+}
+
+// next waits for a frame the writer may send. A paused client holds its
+// frames, so the writer waits instead of writing.
+func (c *client) next() (Msg, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for {
+		if c.closed {
+			return Msg{}, false
+		}
+		if !c.paused && len(c.queue) > 0 {
+			return c.popLocked(), true
+		}
+		c.cond.Wait()
+	}
+}
+
+// takeResync reports the server hook to run once a stale queue has drained.
+// The caller runs the hook off c.mu, because it queues frames again.
+func (c *client) takeResync() func() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.stale || c.paused || len(c.queue) > 0 || c.resync == nil {
+		return nil
+	}
+	c.stale = false
+	return c.resync
+}
+
+// setResync installs the rebuild hook the writer runs after an overflow.
+func (c *client) setResync(fn func()) {
+	c.mu.Lock()
+	c.resync = fn
+	c.mu.Unlock()
+}
+
+// pause stops pane output from reaching the socket while the client is being
+// caught up. It takes c.mu, like deliver, so the flag has one owner.
 func (c *client) pause() {
 	c.mu.Lock()
 	c.paused = true
@@ -75,12 +205,43 @@ func (c *client) pause() {
 
 func (c *client) resume() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, m := range c.pending {
-		_ = writeMsg(c.c, m)
-	}
-	c.pending = nil
 	c.paused = false
+	if c.cond != nil {
+		c.cond.Broadcast()
+	}
+	c.mu.Unlock()
+}
+
+// shutdown stops the writer. A frame already on the wire finishes or fails on
+// the closed connection.
+func (c *client) shutdown() {
+	c.mu.Lock()
+	c.closed = true
+	c.queue = nil
+	c.qbytes = 0
+	if c.cond != nil {
+		c.cond.Broadcast()
+	}
+	c.mu.Unlock()
+}
+
+// queuedBytes reports what the client still owes the wire.
+func (c *client) queuedBytes() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.qbytes
+}
+
+// queuedFrames reports how many frames are waiting on the writer.
+func (c *client) queuedFrames() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.queue)
+}
+
+// msgBytes counts what a frame costs on the wire, near enough to bound it.
+func msgBytes(m Msg) int {
+	return 64 + len(m.Data) + len(m.Keys) + len(m.Msg) + len(m.Name) + len(m.Res)
 }
 
 type server struct {
@@ -877,7 +1038,7 @@ func (s *server) syncSizes() {
 }
 
 func (s *server) serve(c net.Conn) {
-	cl := &client{c: c}
+	cl := newClient(c)
 	registered := false
 	defer func() {
 		if registered {
@@ -890,6 +1051,7 @@ func (s *server) serve(c net.Conn) {
 				s.pushSnapshot()
 			}
 		}
+		cl.shutdown()
 		c.Close()
 	}()
 
@@ -934,20 +1096,23 @@ func (s *server) attach(cl *client, m Msg) {
 	}
 	s.fitToClientsLocked()
 	s.mu.Unlock()
+	// A client that overflows later resyncs from a picture instead of a
+	// backlog: one snapshot, then one screen per pane.
+	cl.setResync(func() { s.resyncClient(cl) })
 	cl.pause()
 	s.syncSizes()
 	s.mu.Lock()
 	snap := s.snapshotLocked()
 	ids := allPanes(s.st.win().Root)
 	s.mu.Unlock()
-	_ = cl.send(Msg{Type: "snapshot", Snap: snap})
-	if s.sendScreens(ids, func(m Msg) { _ = cl.send(m) }) {
+	cl.deliver(Msg{Type: "snapshot", Snap: snap})
+	if s.sendScreens(ids, cl.deliver) {
 		// The pane's alt or mouse mode changed since the snapshot was built.
 		// Send a fresh one so the client's pane info is not one event stale.
 		s.mu.Lock()
 		snap = s.snapshotLocked()
 		s.mu.Unlock()
-		_ = cl.send(Msg{Type: "snapshot", Snap: snap})
+		cl.deliver(Msg{Type: "snapshot", Snap: snap})
 	}
 	for _, id := range ids {
 		rp := readPaneReplay(s.st.Name, id)
@@ -959,7 +1124,7 @@ func (s *server) attach(cl *client, m Msg) {
 			pc.alt, pc.mouse = rp.alt, rp.mouse
 		}
 		s.mu.Unlock()
-		_ = cl.send(Msg{Type: "replay", Target: id, Data: rp.data, St: &rp.st})
+		cl.deliver(Msg{Type: "replay", Target: id, Data: rp.data, St: &rp.st})
 	}
 	cl.resume()
 }
@@ -1023,6 +1188,18 @@ func (s *server) broadcastScreens(ids []string) {
 		s.broadcastLocked(m)
 		s.mu.Unlock()
 	})
+}
+
+// resyncClient rebuilds one client from a picture: a fresh snapshot, then one
+// screen per pane through readPaneScreen. The client's writer calls it after an
+// overflow drains, so a lagging client never replays a backlog.
+func (s *server) resyncClient(cl *client) {
+	s.mu.Lock()
+	snap := s.snapshotLocked()
+	ids := allPanes(s.st.win().Root)
+	s.mu.Unlock()
+	cl.deliver(Msg{Type: "snapshot", Snap: snap})
+	s.sendScreens(ids, cl.deliver)
 }
 
 type paneReplay struct {
@@ -1089,7 +1266,7 @@ func (s *server) reply(cl *client, m Msg, res any, err error) {
 	} else {
 		out.OK = true
 	}
-	_ = cl.send(out)
+	cl.deliver(out)
 }
 
 func (s *server) handleReq(cl *client, m Msg) {
