@@ -146,7 +146,14 @@ func runPane(args []string) error {
 func (p *paneProc) readLoop() {
 	buf := make([]byte, 32<<10)
 	var clean bytes.Buffer
-	filter := &oscFilter{status: p.setStatus, query: p.replyQuery}
+	filter := &oscFilter{
+		status: p.setStatus,
+		query:  p.replyQuery,
+		reply:  p.replyTerminal,
+		cursor: p.cursorPos,
+		fg:     termFG,
+		bg:     termBG,
+	}
 	for {
 		n, err := p.ptmx.Read(buf)
 		if n > 0 {
@@ -191,6 +198,21 @@ func (p *paneProc) replyQuery() {
 	go func() {
 		_, _ = p.ptmx.Write([]byte("\x1b]7501;?\x1b\\"))
 	}()
+}
+
+// replyTerminal writes a terminal reply into the PTY, which is the app's input.
+func (p *paneProc) replyTerminal(s string) {
+	go func() {
+		_, _ = p.ptmx.Write([]byte(s))
+	}()
+}
+
+// cursorPos is the VT cursor, zero-based, for a cursor position report.
+func (p *paneProc) cursorPos() (row, col int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.vt.Cursor()
+	return c.Y, c.X
 }
 
 func (p *paneProc) setStatus(st Status) {

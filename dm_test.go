@@ -315,6 +315,43 @@ func TestParseStatusWireFormat(t *testing.T) {
 	}
 }
 
+func TestTerminalQueriesAnswered(t *testing.T) {
+	var replies []string
+	f := &oscFilter{
+		reply:  func(r string) { replies = append(replies, r) },
+		cursor: func() (int, int) { return 4, 9 },
+		fg:     termFG,
+		bg:     termBG,
+	}
+	var out bytes.Buffer
+	// A colour query, a CPR, a DA1, and a normal SGR that must pass through.
+	f.feed([]byte("a\x1b]11;?\x1b\\b\x1b[6nc\x1b[cd\x1b[1me"), &out)
+	if out.String() != "abcd\x1b[1me" {
+		t.Fatalf("queries were not stripped: %q", out.String())
+	}
+	want := []string{
+		"\x1b]11;rgb:0000/0000/0000\x1b\\",
+		"\x1b[5;10R",
+		"\x1b[?1;2c",
+	}
+	if len(replies) != len(want) {
+		t.Fatalf("replies = %q", replies)
+	}
+	for i := range want {
+		if replies[i] != want[i] {
+			t.Fatalf("reply %d = %q, want %q", i, replies[i], want[i])
+		}
+	}
+
+	// A query split across reads is still answered.
+	replies = nil
+	f.feed([]byte("\x1b]10"), &out)
+	f.feed([]byte(";?\x07"), &out)
+	if len(replies) != 1 || !strings.HasPrefix(replies[0], "\x1b]10;") {
+		t.Fatalf("split OSC reply = %q", replies)
+	}
+}
+
 func TestOSC7501QueryReply(t *testing.T) {
 	queries := 0
 	f := &oscFilter{
