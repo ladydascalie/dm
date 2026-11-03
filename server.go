@@ -259,6 +259,10 @@ type server struct {
 	// check runs off s.mu and the result arrives with a later snapshot.
 	branchMu sync.Mutex
 	branches map[string]*branchEntry
+
+	// boxWaiters holds the msg-wait calls blocked right now. Post and clear
+	// wake every one; a waiter re-checks under s.mu, so the wakeup is a hint.
+	boxWaiters map[*boxWaiter]bool
 }
 
 // branchTTL is how long a detected git label stays fresh. A stale entry is
@@ -1527,6 +1531,15 @@ func (s *server) handleReq(cl *client, m Msg) {
 		}
 		s.reply(cl, m, clearReply{Cleared: s.boxClear(req.(*clearReq))}, nil)
 
+	case "msg-wait":
+		req, err := parseBoxReq(m.Action, m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		e, err := s.boxWait(cl, req.(*waitReq))
+		s.reply(cl, m, waitReply{Entry: e}, err)
+
 	case "msg-schema":
 		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
 			s.reply(cl, m, nil, err)
@@ -1559,6 +1572,7 @@ func (s *server) boxPost(req *postReq) (entry, error) {
 	}
 	s.st.Box = append(s.st.Box, e)
 	s.st.trimBox()
+	s.boxWakeLocked()
 	_ = s.st.save()
 	return e, nil
 }
@@ -1599,8 +1613,129 @@ func (s *server) boxClear(req *clearReq) int {
 		kept = nil
 	}
 	s.st.Box = kept
+	s.boxWakeLocked()
 	_ = s.st.save()
 	return cleared
+}
+
+// boxWaiter is one msg-wait parked on s.boxWaiters. The buffered channel holds
+// one nudge, so a wakeup that arrives between two checks is not lost.
+type boxWaiter struct {
+	wake chan struct{}
+}
+
+// boxPollWait bounds how long a wait sleeps before it looks at the client's
+// socket for a hangup. The client's read loop is inside the wait and cannot see
+// the EOF itself, so the wait polls for it. A missed hangup costs one timeout,
+// never a live waiter past this interval.
+const boxPollWait = 100 * time.Millisecond
+
+// boxWatchLocked registers a waiter. The caller holds s.mu and registers
+// before it unlocks, so a post cannot slip between the last check and the
+// registration.
+func (s *server) boxWatchLocked(w *boxWaiter) {
+	if s.boxWaiters == nil {
+		s.boxWaiters = map[*boxWaiter]bool{}
+	}
+	s.boxWaiters[w] = true
+}
+
+// boxUnwatch removes a waiter, on match, timeout or disconnect.
+func (s *server) boxUnwatch(w *boxWaiter) {
+	s.mu.Lock()
+	delete(s.boxWaiters, w)
+	s.mu.Unlock()
+}
+
+// boxWakeLocked nudges every waiter. The caller holds s.mu, and the non
+// blocking send means a waiter that is already running keeps its one pending
+// nudge.
+func (s *server) boxWakeLocked() {
+	for w := range s.boxWaiters {
+		select {
+		case w.wake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// boxNewestLocked returns the newest entry for the key, or the newest entry of
+// the whole log when the key is empty. The caller holds s.mu.
+func (s *server) boxNewestLocked(key string) (entry, bool) {
+	for i := len(s.st.Box) - 1; i >= 0; i-- {
+		if key == "" || s.st.Box[i].Key == key {
+			return s.st.Box[i], true
+		}
+	}
+	return entry{}, false
+}
+
+// boxWait blocks until the newest entry for its key carries the wanted state.
+// It holds no lock while blocked: it checks and registers under s.mu, sleeps
+// outside it, and re-checks after every wakeup. It returns the matching entry,
+// or on timeout the error "box: wait timed out" plus the newest entry it saw.
+// A disconnected client releases the waiter instead of holding it to the
+// timeout.
+func (s *server) boxWait(cl *client, req *waitReq) (entry, error) {
+	deadline := time.Now().Add(time.Duration(req.TimeoutMs) * time.Millisecond)
+	w := &boxWaiter{wake: make(chan struct{}, 1)}
+	for {
+		s.mu.Lock()
+		last, seen := s.boxNewestLocked(req.Key)
+		if seen && last.State == req.State {
+			s.mu.Unlock()
+			return last, nil
+		}
+		s.boxWatchLocked(w)
+		s.mu.Unlock()
+
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			s.boxUnwatch(w)
+			return last, fmt.Errorf("box: wait timed out")
+		}
+		if wait > boxPollWait {
+			wait = boxPollWait
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-w.wake:
+			timer.Stop()
+		case <-timer.C:
+		}
+		s.boxUnwatch(w)
+		if connGone(cl.c) {
+			return entry{}, fmt.Errorf("box: client gone")
+		}
+	}
+}
+
+// connGone reports whether the peer has closed its side of a unix socket. The
+// peek leaves the frame stream untouched: a frame waiting to be read is not a
+// close, and a socket that is not a unix socket never reports gone.
+func connGone(c net.Conn) bool {
+	uc, ok := c.(*net.UnixConn)
+	if !ok {
+		return false
+	}
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return true
+	}
+	gone := false
+	err = raw.Control(func(fd uintptr) {
+		var b [1]byte
+		n, _, rerr := syscall.Recvfrom(int(fd), b[:], syscall.MSG_PEEK|syscall.MSG_DONTWAIT)
+		switch {
+		case rerr == syscall.EAGAIN || rerr == syscall.EWOULDBLOCK || rerr == syscall.EINTR:
+			// Nothing to read and no hangup: keep waiting.
+		case rerr != nil:
+			gone = true
+		default:
+			gone = n == 0
+		}
+	})
+	return gone || err != nil
 }
 
 // paneInTreeLocked reports whether id is a pane in this session's layout, in
