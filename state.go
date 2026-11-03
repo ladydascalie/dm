@@ -488,8 +488,9 @@ func lowestCommonAncestor(a, b []*Node) *Node {
 	return lca
 }
 
-// defaultRail is the width a session asks for when it has none yet.
-const defaultRail = 26
+// defaultRail is the width a session asks for when it has none yet. It leaves
+// room for a window label and its right-aligned git stats.
+const defaultRail = 34
 
 // collapsedRail is the width of the thin rail: two leading spaces, the state
 // glyph, and one trailing space. The glyph keeps the column it has in the
@@ -499,11 +500,11 @@ const collapsedRail = 4
 // railCompact reports whether a rail width is the thin, glyph-only form.
 func railCompact(rail int) bool { return rail > 0 && rail <= collapsedRail }
 
-// maxRail is the widest rail cols allows: a third of the screen, capped at 30.
+// maxRail is the widest rail cols allows: a third of the screen, capped at 46.
 func maxRail(cols int) int {
 	m := cols / 3
-	if m > 30 {
-		m = 30
+	if m > 46 {
+		m = 46
 	}
 	if m < 0 {
 		m = 0

@@ -92,37 +92,49 @@ detach.
 ## Sidebar
 
 The left columns of the screen show a sidebar when the session asks for one.
-A workspace header carries a folder, its name, and the git branch of its
-focused pane when that pane is in a repository. Each window follows with a
-fold caret and its name. A new window is named after the folder it starts in,
-and it starts in the folder of the pane it was created from; `rename-window`
-overrides the name. A window whose label is still the old positional number is
-renamed from its pane's folder when the session loads. Pane rows are folded
-away by default; click a window row to unfold or fold it, and the fold is
-stored in the state file. An unfolded
-pane row labels itself with its recorded name, then the `app=` it last
-reported, then the pane id, with a state glyph in a colour per state beside
-the label. An agent pane in a linked git worktree also shows that worktree's
-folder name after its label, dimmed, so dungeon lanes in
-`repo.worktrees/<encounter>-<minion>` are told apart; shells and the main
-checkout carry none. A pane counts as an agent when it has a recorded name
-or has spoken the status protocol at least once; the rest are shells. An agent
-row leads with a rocket icon (or a `▎` bar without Nerd Fonts), a shell row with
-a terminal icon, and a dim shell row otherwise leaves those two cells blank, so
-the state glyph keeps its column. The report is sticky: `state=clear` does not
-demote an agent, and both the mark and the last `app=` are stored in the state
-file. The focused pane's row is highlighted, and a left click on a pane row
-focuses that pane.
+It is a tree of workspaces, windows and panes. A workspace row leads with a
+bar in the workspace's own accent colour, then its name in bold, then the
+pane count at the right edge in dim grey. The accent is one of six hues picked
+by a stable hash of the workspace id, so a workspace keeps its hue for the
+life of the session. One blank row separates workspace blocks.
 
-The rail paints its own dark background and uses explicit RGB colours, not
-palette slots, so every label and glyph reaches WCAG AA contrast on both the
-rail and the focused row. Icons use Nerd Font code points when `fc-list` finds a
-Nerd font; `DM_NERD=1` forces them and `DM_NERD=0` falls back to the Unicode
-glyphs. `prefix r` cycles the sidebar through three states: full, thin, and
-hidden. The thin rail is four columns: the agent bar, one state glyph per pane,
-and no names. It always lists panes, folded or not, because the glyph column is
-the whole fleet at a glance. A hidden or thin sidebar remembers the last full width, 26
-columns when none was ever chosen.
+Each window follows with its fold caret and a label: the linked worktree
+folder when its pane has one, else the git branch, else the window name. The
+git state comes from the window's focused pane, or from its first pane in a
+repository. The right edge of that line carries the uncommitted change count:
+an amber dot when the tree is dirty, then `+N` in green and `-M` in red, with
+a zero side hidden, or `clean` in dim grey when nothing changed. A window
+whose pane has a status message gets a dim second line under its label.
+
+Windows start folded; click a window line or its second line to unfold or fold
+it, and the fold is stored in the state file. An unfolded pane row labels
+itself with its recorded name, then the `app=` it last reported, then the pane
+id, with a state glyph in a colour per state beside the label. A pane counts
+as an agent when it has a recorded name or has spoken the status protocol at
+least once; the rest are shells. An agent row leads with a rocket icon (or a
+`▎` bar without Nerd Fonts), a shell row with a terminal icon, and a dim shell
+row otherwise leaves those two cells blank, so the state glyph keeps its
+column. The report is sticky: `state=clear` does not demote an agent, and both
+the mark and the last `app=` are stored in the state file. The focused pane's
+row is highlighted, and a left click on a pane row focuses that pane.
+
+A new window is named after the folder it starts in, and it starts in the
+folder of the pane it was created from; `rename-window` overrides the name. A
+window whose label is still the old positional number is renamed from its
+pane's folder when the session loads.
+
+A long label is cut with `…` before the right-aligned stats lose a cell, so
+the git state always stays visible. The rail paints its own dark background
+and uses explicit RGB colours, not palette slots, so every label, glyph and
+stat reaches WCAG AA contrast on both the rail and the focused row. Icons use
+Nerd Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces
+them and `DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns
+by default, at most a third of the screen and never wider than 46 columns;
+`set-rail` changes it. `prefix r` cycles the sidebar through three states:
+full, thin, and hidden. The thin rail is four columns: the agent bar, one
+state glyph per pane, and no names. It always lists panes, folded or not, and
+leaves a blank row where a workspace or window line would sit. A hidden or
+thin sidebar remembers the last full width.
 
 In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel
