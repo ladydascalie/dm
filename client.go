@@ -90,6 +90,11 @@ type tui struct {
 	// to no pane.
 	railWant  int
 	railPress bool
+
+	// pal is the floating television switcher, nil when closed. palOut is
+	// its byte stream, nil once the child has gone.
+	pal    *palette
+	palOut chan []byte
 }
 
 // toast is one short message for the operator. Its time is when it was raised,
@@ -203,6 +208,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		hist: map[string][]byte{},
 	}
 	t.cols, t.rows, _ = term.GetSize(fd)
+	defer closePalette(t)
 
 	done := make(chan struct{})
 	defer close(done)
@@ -248,8 +254,17 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			if err == nil && (cols != t.cols || rows != t.rows) {
 				t.cols, t.rows = cols, rows
 				_ = t.conn.send(Msg{Type: "resize", Cols: cols, Rows: rows})
+				if t.pal != nil {
+					t.pal.resize(paletteRect(cols, rows))
+				}
 				t.dirty = true
 			}
+		case b, ok := <-t.palOut:
+			if !ok {
+				paletteClosed(t)
+				break
+			}
+			paletteBytes(t, b)
 		case <-ticker.C:
 			now := time.Now()
 			t.expireToasts(now)
@@ -632,6 +647,18 @@ func (t *tui) forwardPaste(seq []byte) {
 
 func (t *tui) processInput() {
 	for len(t.inbuf) > 0 {
+		if t.pal != nil {
+			// The prefix key closes the float without choosing. A bare esc
+			// cannot: television prints the highlighted entry when it quits.
+			if bytes.IndexByte(t.inbuf, 0x02) >= 0 {
+				t.inbuf = nil
+				closePalette(t)
+				return
+			}
+			_, _ = t.pal.ptmx.Write(t.inbuf)
+			t.inbuf = nil
+			return
+		}
 		if seq, n, started := t.takePaste(); started {
 			if n == 0 {
 				// The marker is still arriving. Keep buffering; the ticker
@@ -1108,6 +1135,9 @@ func osc52(text string) string {
 }
 
 func (t *tui) handleMouse(ev mouseEvent) {
+	if t.pal != nil {
+		return // the float owns the pointer while it is open
+	}
 	if t.snap == nil {
 		return
 	}
@@ -1520,6 +1550,8 @@ func (t *tui) key(b byte) {
 		t.action("new-workspace", nil)
 	case ')':
 		t.action("next-workspace", nil)
+	case 'a':
+		openPalette(t)
 	case 's':
 		t.openPicker()
 	case 'r':
@@ -1657,6 +1689,10 @@ func (t *tui) draw() {
 	drawRail(&b, win)
 	drawBar(&b, win, t.armed, t.barInfo())
 	drawToasts(&b, win, t.toasts)
+	if t.pal != nil {
+		drawPaneFrom(&b, t.pal.vt, t.pal.rect, 0, nil)
+		drawPaneBox(&b, t.pal.rect, true)
+	}
 	if t.armed {
 		drawHelp(&b, win.Cols, win.Rows)
 	}
@@ -1666,7 +1702,10 @@ func (t *tui) draw() {
 	if t.mode == "menu" && t.menu != nil {
 		drawMenu(&b, t.menu)
 	}
-	if p := t.paneByID(win.Focus); p != nil && t.mode == "" {
+	if t.pal != nil {
+		b.WriteString("\x1b[?25l")
+	}
+	if p := t.paneByID(win.Focus); p != nil && t.mode == "" && t.pal == nil {
 		if vt := t.vts[p.ID]; vt != nil {
 			vt.Lock()
 			cur := vt.Cursor()

@@ -25,6 +25,8 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm next-pane | dm prev-pane
   dm status [pane]             show OSC 7501 agent status
   dm list                      print the pane tree as JSON
+  dm dash [-s name]            print the palette rows
+  dm peek <id> [--lines N]     print the screen a palette row lands on
 
 Actions are the same everywhere:
   {"action":"write-to","target":"p1","msg":"ls","enter":true}
@@ -288,6 +290,19 @@ func runCLI(argv []string) error {
 		_ = json.Unmarshal(m.Res, &st)
 		fmt.Printf("%s\t%s\t%s\n", target, st.State, st.Message)
 		return nil
+
+	case "dash":
+		c := newFlags("dash")
+		c.parse(argv[1:])
+		return dash(c.session)
+
+	case "peek":
+		c := newFlags("peek")
+		c.parse(argv[1:])
+		if len(c.args) < 1 {
+			return fmt.Errorf("peek needs a target")
+		}
+		return peek(c.session, c.args[0], c.lines)
 
 	case "list":
 		c := newFlags("list")

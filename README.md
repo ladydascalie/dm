@@ -61,6 +61,7 @@ bottom right. It stays until an action runs or `esc` dismisses it.
 | `0-9` | select window |
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
+| `a` | quick switch palette: panes, windows, workspaces |
 | `)` | next workspace |
 | `r` | cycle the sidebar: full, thin, hidden |
 | `d` / `q` | detach |
@@ -70,6 +71,21 @@ sends `resize-split` with the two panes beside the divider and the ratio, at
 most every 30 ms plus a final call on release. Both sides keep at least three
 cells. A divider always belongs to dm, even when a pane claims the mouse: the
 app's PTY covers only its content rect, so the border press is not its event.
+
+## Palette
+
+`prefix a` floats a quick switcher over the panes. It is television, run on its
+own PTY, so the list is fuzzy matched: type an id or a name, then enter to land
+there. Rows are workspaces, their windows, then their panes, each row leading
+with its id (`s1`, `w2`, `w2p3`), so an id can be typed directly. The preview
+pane shows the live screen the row would land on. Press the prefix key again to
+close it and change nothing. `esc` also closes it, but television 0.15.9 prints
+the highlighted entry when it quits, so a bare `esc` lands on that row. `dm dash` prints the same rows outside the TUI, and `dm peek <id>`
+prints the preview, so the palette can be driven from a shell.
+
+The palette is client owned: it starts when the key is pressed and ends when
+the choice is taken, so it never enters the session tree and never survives a
+detach.
 
 ## Sidebar
 
