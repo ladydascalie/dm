@@ -809,11 +809,7 @@ func railMark(agent, nerd bool) string {
 	}
 }
 
-// drawRail paints the sidebar above the status bar. The rail paints its own
-// background so contrast does not depend on the terminal theme. Rows past the
-// screen are clipped, and every row is written into at most Rail columns.
 // railSeg is one run of a rail row: its text, its colour, and its own weight.
-// drawRail composes a row from a left run and a right-aligned run.
 type railSeg struct {
 	text   string
 	colour rgb
@@ -918,6 +914,117 @@ func railStats(it railItem) []railSeg {
 	return out
 }
 
+// railRow composes one sidebar row at width w. left is the row's own run,
+// right the run pinned to the right edge and tail the run that follows left
+// and yields first. compact and nerd are the rail's own switches.
+func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSeg) {
+	switch it.kind {
+	case railWorkspace:
+		if !compact {
+			name := railText
+			if !it.active {
+				name = railHeader
+			}
+			left = []railSeg{
+				{text: "\u258c", colour: it.accent},
+				{text: " ", colour: name},
+				{text: it.text, colour: name, bold: true},
+			}
+			right = []railSeg{{text: strconv.Itoa(it.count), colour: railDim}}
+		}
+	case railWindow:
+		base := railWindowFg
+		if !compact {
+			caret := "\u25be"
+			if it.folded {
+				caret = "\u25b8"
+			}
+			if nerd {
+				caret = "\uf0d7"
+				if it.folded {
+					caret = "\uf0da"
+				}
+			}
+			// The folder names the window. A window whose panes reported no
+			// directory falls back to the window name.
+			label := it.folder
+			if label == "" {
+				label = it.text
+			}
+			left = []railSeg{
+				{text: "  ", colour: base},
+				{text: caret, colour: base},
+				{text: " ", colour: base},
+				{text: label, colour: base},
+			}
+			// The branch trails the folder in dim grey, and only when it says
+			// something the label does not.
+			if it.branch != "" && it.branch != label {
+				tail = []railSeg{
+					{text: "  ", colour: railDim},
+					{text: it.branch, colour: railDim},
+				}
+			}
+			right = railStats(it)
+		}
+	case railWindowNote:
+		if !compact {
+			base := railDim
+			left = []railSeg{
+				{text: "    ", colour: base},
+				{text: it.text, colour: base},
+			}
+		}
+	case railPane:
+		base := railDim
+		if it.focus || it.agent {
+			base = railText
+		}
+		g, colour := railGlyph(it.status, nerd)
+		// A shell has no state to report, so the fallback mark would be a
+		// question about nothing. Leave the cell blank instead.
+		if !it.agent && (it.status == "" || it.status == "unknown") {
+			g = " "
+		}
+		mark := railMark(it.agent, nerd)
+		if compact {
+			left = []railSeg{
+				{text: mark, colour: colour},
+				{text: g, colour: colour},
+			}
+		} else {
+			left = []railSeg{
+				{text: "      ", colour: base},
+				{text: mark, colour: colour},
+				{text: g, colour: colour},
+				{text: " " + it.text, colour: base},
+			}
+		}
+	case railGap:
+		// The rail background and nothing else.
+	}
+	rightCells := segCells(right)
+	if rightCells > w {
+		// A tail that does not fit goes whole: half a stats pair lies.
+		right, rightCells = nil, 0
+	}
+	budget := w - rightCells
+	if rightCells > 0 && budget > 0 {
+		budget--
+	}
+	// The folder outranks the branch: a window line gives up the branch tail
+	// whole, and only then elides the folder.
+	tailCells := segCells(tail)
+	leftCells := segCells(left) + tailCells
+	if tailCells > 0 && leftCells > budget {
+		tail, leftCells = nil, segCells(left)
+	}
+	if leftCells > budget {
+		left = elideSegs(left, budget)
+	}
+	return left, right, tail
+}
+
 // railPaneAt returns the pane whose row is under x,y, or "" for any other row,
 // an empty row, or a point outside the rail.
 func railPaneAt(snap *Snapshot, x, y int) string {
@@ -968,126 +1075,24 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	nerd := nerdFonts()
 	compact := railCompact(snap.Rail)
 	for y := 0; y < rows; y++ {
-		bg := railBG
-		base := railText
-		bold := false
 		var left, right, tail []railSeg
+		bg, bold := railBG, false
 		if y < len(items) {
 			it := items[y]
-			switch it.kind {
-			case railWorkspace:
-				if !compact {
-					name := railText
-					if !it.active {
-						name = railHeader
-					}
-					left = []railSeg{
-						{text: "▌", colour: it.accent},
-						{text: " ", colour: name},
-						{text: it.text, colour: name, bold: true},
-					}
-					right = []railSeg{{text: strconv.Itoa(it.count), colour: railDim}}
-				}
-			case railWindow:
-				base = railWindowFg
-				if !compact {
-					caret := "▾"
-					if it.folded {
-						caret = "▸"
-					}
-					if nerd {
-						caret = "\uf0d7"
-						if it.folded {
-							caret = "\uf0da"
-						}
-					}
-					// The folder names the window. A window whose panes
-					// reported no directory falls back to the window name.
-					label := it.folder
-					if label == "" {
-						label = it.text
-					}
-					left = []railSeg{
-						{text: "  ", colour: base},
-						{text: caret, colour: base},
-						{text: " ", colour: base},
-						{text: label, colour: base},
-					}
-					// The branch trails the folder in dim grey, and only when
-					// it says something the label does not.
-					if it.branch != "" && it.branch != label {
-						tail = []railSeg{
-							{text: "  ", colour: railDim},
-							{text: it.branch, colour: railDim},
-						}
-					}
-					right = railStats(it)
-				}
-			case railWindowNote:
-				if !compact {
-					base = railDim
-					left = []railSeg{
-						{text: "    ", colour: base},
-						{text: it.text, colour: base},
-					}
-				}
-			case railPane:
-				if it.focus {
-					bg, base, bold = railFocusBG, railText, true
-				} else if it.agent {
-					base = railText
-				} else {
-					base = railDim
-				}
-				g, colour := railGlyph(it.status, nerd)
-				// A shell has no state to report, so the fallback mark would be a
-				// question about nothing. Leave the cell blank instead.
-				if !it.agent && (it.status == "" || it.status == "unknown") {
-					g = " "
-				}
-				mark := railMark(it.agent, nerd)
-				if compact {
-					left = []railSeg{
-						{text: mark, colour: colour},
-						{text: g, colour: colour},
-					}
-				} else {
-					left = []railSeg{
-						{text: "      ", colour: base},
-						{text: mark, colour: colour},
-						{text: g, colour: colour},
-						{text: " " + it.text, colour: base},
-					}
-				}
-			case railGap:
-				// The rail background and nothing else.
+			left, right, tail = railRow(it, w, compact, nerd)
+			// A focused pane row paints its own background and every run bold.
+			if it.kind == railPane && it.focus {
+				bg, bold = railFocusBG, true
 			}
 		}
+		leftCells := segCells(left) + segCells(tail)
 		rightCells := segCells(right)
-		if rightCells > w {
-			// A tail that does not fit goes whole: half a stats pair lies.
-			right, rightCells = nil, 0
-		}
-		budget := w - rightCells
-		if rightCells > 0 && budget > 0 {
-			budget--
-		}
-		// The folder outranks the branch: a window line gives up the branch
-		// tail whole, and only then elides the folder.
-		tailCells := segCells(tail)
-		leftCells := segCells(left) + tailCells
-		if tailCells > 0 && leftCells > budget {
-			tail, tailCells = nil, 0
-			leftCells = segCells(left)
-		}
-		left = append(left, tail...)
-		if leftCells > budget {
-			left = elideSegs(left, budget)
-			leftCells = segCells(left)
-		}
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
 		buf.WriteString("\x1b[0m" + bg.bg())
 		for _, seg := range left {
+			writeRailSeg(buf, seg, bg, bold)
+		}
+		for _, seg := range tail {
 			writeRailSeg(buf, seg, bg, bold)
 		}
 		if pad := w - leftCells - rightCells; pad > 0 {
