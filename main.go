@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
+
+	"golang.org/x/term"
 )
 
 const usage = `dm - durable terminal multiplexer (prototype)
@@ -27,6 +31,11 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm list                      print the pane tree as JSON
   dm dash [-s name]            print the palette rows
   dm peek <id> [--lines N]     print the screen a palette row lands on
+  dm msg post --state S [--key K] [--msg T]
+  dm msg list [--key K] [--limit N] [--json]
+  dm msg wait --key K --state S [--timeout 5m]
+  dm msg clear [--key K]
+  dm msg schema
 
 Actions are the same everywhere:
   {"action":"write-to","target":"p1","msg":"ls","enter":true}
@@ -70,6 +79,10 @@ type cmdFlags struct {
 	lines      int
 	scrollback int
 	jsonOut    bool
+	key        string
+	state      string
+	limit      int
+	timeout    time.Duration
 	args       []string
 }
 
@@ -87,6 +100,10 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.IntVar(&c.lines, "lines", 0, "number of screen lines")
 	c.fs.IntVar(&c.scrollback, "scrollback", -1, "history rows above the screen")
 	c.fs.BoolVar(&c.jsonOut, "json", false, "print JSON")
+	c.fs.StringVar(&c.key, "key", "", "box key")
+	c.fs.StringVar(&c.state, "state", "", "box state: note working blocked done error")
+	c.fs.IntVar(&c.limit, "limit", 0, "list rows, 0 for the whole box")
+	c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, "wait timeout")
 	_ = c.fs.Parse(reorder(args))
 	c.args = c.fs.Args()
 }
@@ -95,7 +112,9 @@ func (c *cmdFlags) parse(args []string) {
 func reorder(args []string) []string {
 	withValue := map[string]bool{"-s": true, "--s": true, "-msg": true, "--msg": true,
 		"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
-		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true}
+		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true,
+		"-key": true, "--key": true, "-state": true, "--state": true,
+		"-limit": true, "--limit": true, "-timeout": true, "--timeout": true}
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -304,6 +323,11 @@ func runCLI(argv []string) error {
 		}
 		return peek(c.session, c.args[0], c.lines)
 
+	case "msg":
+		c := newFlags("msg")
+		c.parse(argv[1:])
+		return runBox(c)
+
 	case "list":
 		c := newFlags("list")
 		c.parse(argv[1:])
@@ -351,4 +375,249 @@ func printRPC(name string, req Msg) error {
 		fmt.Println(string(b))
 	}
 	return nil
+}
+
+// runBox dispatches the msg verbs. Each one is a thin wrapper on one box
+// action: the shapes come from box.go, so the CLI carries no wire of its own.
+func runBox(c *cmdFlags) error {
+	if len(c.args) == 0 {
+		return fmt.Errorf("msg needs a verb: post, list, wait, clear or schema")
+	}
+	switch c.args[0] {
+	case "post":
+		return boxPostVerb(c)
+	case "list":
+		return boxListVerb(c)
+	case "wait":
+		return boxWaitVerb(c)
+	case "clear":
+		return boxClearVerb(c)
+	case "schema":
+		return boxSchemaVerb(c)
+	}
+	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, clear or schema", c.args[0])
+}
+
+// boxPostVerb posts one entry and prints it as the server stored it.
+func boxPostVerb(c *cmdFlags) error {
+	st, err := parseState(c.state)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(postReq{Key: c.key, State: st, Msg: c.msg, From: boxFrom(c.session)})
+	if err != nil {
+		return err
+	}
+	m, err := rpc(c.session, Msg{Action: "msg-post", Res: raw})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var rep postReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	boxPrint([]entry{rep.Entry}, 0)
+	return nil
+}
+
+// boxListVerb prints the box newest first, or the reply unchanged on --json.
+func boxListVerb(c *cmdFlags) error {
+	raw, err := json.Marshal(listReq{Key: c.key, Limit: c.limit})
+	if err != nil {
+		return err
+	}
+	m, err := rpc(c.session, Msg{Action: "msg-list", Res: raw})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
+	var rep listReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	boxPrint(rep.Entries, boxTermWidth())
+	return nil
+}
+
+// boxWaitVerb blocks until the key reaches the state and prints the entry. The
+// reply arrives only when the wait ends, so it needs a deadline of its own: the
+// one rpc sets is ten seconds, and a wait may run for an hour.
+func boxWaitVerb(c *cmdFlags) error {
+	st, err := parseState(c.state)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(waitReq{Key: c.key, State: st, TimeoutMs: int(c.timeout / time.Millisecond)})
+	if err != nil {
+		return err
+	}
+	m, err := rpcWithin(c.session, Msg{Action: "msg-wait", Res: raw}, c.timeout+time.Minute)
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var rep waitReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	boxPrint([]entry{rep.Entry}, 0)
+	return nil
+}
+
+// boxClearVerb clears one key, or the whole box when no key is given, and
+// prints how many entries went.
+func boxClearVerb(c *cmdFlags) error {
+	raw, err := json.Marshal(clearReq{Key: c.key})
+	if err != nil {
+		return err
+	}
+	m, err := rpc(c.session, Msg{Action: "msg-clear", Res: raw})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var rep clearReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	fmt.Println(rep.Cleared)
+	return nil
+}
+
+// boxSchemaVerb prints the schema the running server serves, so the CLI holds
+// no copy of the wire.
+func boxSchemaVerb(c *cmdFlags) error {
+	m, err := rpc(c.session, Msg{Action: "msg-schema"})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var rep schemaReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(rep.Schema, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(b))
+	return nil
+}
+
+// rpcWithin is rpc with a read deadline the caller sets, because a blocking
+// wait replies long after the ten seconds rpc allows.
+func rpcWithin(name string, req Msg, wait time.Duration) (Msg, error) {
+	c, err := ensureServer(name)
+	if err != nil {
+		return Msg{}, err
+	}
+	defer c.Close()
+	req.Type = "req"
+	req.ID = 1
+	if err := writeMsg(c, req); err != nil {
+		return Msg{}, err
+	}
+	_ = c.SetReadDeadline(time.Now().Add(wait))
+	for {
+		got, err := readMsg(c)
+		if err != nil {
+			return Msg{}, err
+		}
+		if got.Type == "resp" {
+			return got, nil
+		}
+	}
+}
+
+// boxFrom is the sender's pane id. A pane exports DM_PANE and DM_SESSION; from
+// is only meaningful when that session is the one being written to, so a shell
+// elsewhere posts with an empty from.
+func boxFrom(session string) string {
+	if os.Getenv("DM_SESSION") != session {
+		return ""
+	}
+	return os.Getenv("DM_PANE")
+}
+
+// boxTermWidth is the columns a list row may use: the terminal, else $COLUMNS,
+// else zero, which means no limit.
+func boxTermWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n > 0 {
+		return n
+	}
+	return 0
+}
+
+// boxPrint writes entries one per row as SEQ KEY STATE FROM MSG. A width above
+// zero cuts the message to fit, with an ellipsis where it was cut.
+func boxPrint(entries []entry, width int) {
+	if len(entries) == 0 {
+		return
+	}
+	seqW, keyW, stateW, fromW := 1, 0, 0, 0
+	for _, e := range entries {
+		seqW = max(seqW, len(strconv.Itoa(e.Seq)))
+		keyW = max(keyW, boxCells(e.Key))
+		stateW = max(stateW, boxCells(string(e.State)))
+		fromW = max(fromW, boxCells(e.From))
+	}
+	msgW := -1 // no limit
+	if width > 0 {
+		msgW = max(width-(seqW+keyW+stateW+fromW+4), 0)
+	}
+	for _, e := range entries {
+		msg := e.Msg
+		if msgW >= 0 {
+			msg = boxElide(msg, msgW)
+		}
+		line := fmt.Sprintf("%*d %s %s %s %s", seqW, e.Seq,
+			boxPad(e.Key, keyW), boxPad(string(e.State), stateW), boxPad(e.From, fromW), msg)
+		fmt.Println(strings.TrimRight(line, " "))
+	}
+}
+
+// boxCells is how many terminal cells a string takes.
+func boxCells(s string) int {
+	n := 0
+	for _, r := range s {
+		n += runeWidth(r)
+	}
+	return n
+}
+
+// boxPad fills s on the right to w cells.
+func boxPad(s string, w int) string {
+	if n := boxCells(s); n < w {
+		return s + strings.Repeat(" ", w-n)
+	}
+	return s
+}
+
+// boxElide shrinks s to w cells and ends it with an ellipsis.
+func boxElide(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if boxCells(s) <= w {
+		return s
+	}
+	return barElideText(s, w)
 }
