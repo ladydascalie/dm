@@ -930,12 +930,12 @@ func railStats(it railItem) []railSeg {
 }
 
 // railPaneAt returns the pane whose row is under x,y, or "" for any other row,
-// an empty row, or a point outside the rail.
+// an empty row, a point outside the rail, or the rail's bottom control row.
 func railPaneAt(snap *Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
 	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-1 {
+	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
 		return ""
 	}
 	items := railItems(snap)
@@ -952,7 +952,7 @@ func railWindowAt(snap *Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
 	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-1 {
+	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
 		return ""
 	}
 	if railCompact(snap.Rail) {
@@ -968,13 +968,48 @@ func railWindowAt(snap *Snapshot, x, y int) string {
 	return items[y].window
 }
 
+// railControlAt reports whether x,y is the rail's bottom control row, whose
+// click toggles the rail between full and thin. The whole row inside the rail
+// is the target, so the row belongs to the control and to no item.
+func railControlAt(snap *Snapshot, x, y int) bool {
+	if snap == nil || snap.Rail <= 0 || snap.Rows < 2 {
+		return false
+	}
+	return x >= 0 && x < snap.Rail && y == snap.Rows-2
+}
+
+// railControlSegs is the left run of the control row: the move a click makes.
+// A rail wider than the thin one names the move and collapses. The thin rail
+// shows the expand caret in the state glyph's column and leaves the rest
+// blank, so a narrow rail loses no pane row to a label.
+func railControlSegs(compact, nerd bool) []railSeg {
+	if compact {
+		caret := "▶"
+		if nerd {
+			caret = "\uf0da"
+		}
+		return []railSeg{
+			{text: "  ", colour: railDim},
+			{text: caret, colour: railDim},
+		}
+	}
+	mark := "◀ "
+	if nerd {
+		mark = "\uf0d9 "
+	}
+	return []railSeg{
+		{text: mark, colour: railDim},
+		{text: "collapse", colour: railDim},
+	}
+}
+
 // drawRail paints the sidebar above the status bar. The rail paints its own
 // background so contrast does not depend on the terminal theme. Rows past the
 // screen are clipped, and every row is written into at most Rail columns. A
 // left run is elided with an ellipsis before the right-aligned stats give up a
 // cell, so the stats survive a narrow rail.
 func drawRail(buf *bytes.Buffer, snap *Snapshot) {
-	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 2 {
+	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
 	w := snap.Rail
@@ -982,12 +1017,17 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	items := railItems(snap)
 	nerd := nerdFonts()
 	compact := railCompact(snap.Rail)
+	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
+	// in rows 0..Rows-3 and clip there. Nothing overwrites the control row.
+	controlAt := snap.Rows - 2
 	for y := 0; y < rows; y++ {
 		bg := railBG
 		base := railText
 		bold := false
 		var left, right, tail []railSeg
-		if y < len(items) {
+		if y == controlAt {
+			left = railControlSegs(compact, nerd)
+		} else if y < len(items) {
 			it := items[y]
 			switch it.kind {
 			case railWorkspace:

@@ -1378,9 +1378,10 @@ func TestRailHit(t *testing.T) {
 			t.Fatalf("railPaneAt(%d,%d) = %q, want %q", c.x, c.y, got, c.want)
 		}
 	}
-	// The last row above the bar can be a pane row.
+	// The last item row above the control can be a pane row. The control
+	// takes Rows-2, so the item rows stop at Rows-3.
 	small := railTestSnapshot(10)
-	small.Rows = 4
+	small.Rows = 5
 	small.All = []AllPane{
 		{
 			ID: "w1p1", Workspace: "s1", WorkspaceName: "main", Window: "w1",

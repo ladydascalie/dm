@@ -74,13 +74,23 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 			t.Fatalf("railPaneAt(2,%d) = %q, want %q", y, got, id)
 		}
 	}
-	// The rows past the last pane are blank rail background, with no header,
-	// note or gap row taking their place.
-	for y := len(want); y < snap.Rows-1; y++ {
+	// The rows past the last pane and above the control are blank rail
+	// background, with no header, note or gap row taking their place. The
+	// control row below them holds the expand caret at the glyph column.
+	for y := len(want); y < snap.Rows-2; y++ {
 		for x := 0; x < snap.Rail; x++ {
 			if g := vt.Cell(x, y); !thinBlank(g) {
 				t.Fatalf("row %d past the last pane holds %q at %d", y, g.Char, x)
 			}
+		}
+	}
+	ctrl := snap.Rows - 2
+	if g := vt.Cell(2, ctrl); g.Char != '▶' {
+		t.Fatalf("control row %d glyph = %q at 2, want the expand caret", ctrl, g.Char)
+	}
+	for _, x := range []int{0, 1, 3} {
+		if g := vt.Cell(x, ctrl); !thinBlank(g) {
+			t.Fatalf("control row %d holds %q at %d, want a blank", ctrl, g.Char, x)
 		}
 	}
 	// A thin row is never a window row, so a fold click finds nothing.
@@ -233,7 +243,9 @@ func TestThinRailClips(t *testing.T) {
 	if len(items) != 8 {
 		t.Fatalf("thin rail has %d rows, want 8", len(items))
 	}
-	railRows := snap.Rows - 1
+	// The clipped pane rows stop at Rows-3: the control takes Rows-2 and the
+	// status bar takes Rows-1, so neither answers as a pane row.
+	railRows := snap.Rows - 2
 	vt := thinScreen(t, snap)
 	vt.Lock()
 	defer vt.Unlock()
@@ -245,9 +257,10 @@ func TestThinRailClips(t *testing.T) {
 			t.Fatalf("row %d glyph = %q, want the pane glyph", y, g.Char)
 		}
 	}
-	// The row below the last rail row is the status bar, not a pane row.
-	if got := railPaneAt(snap, 2, railRows); got != "" {
-		t.Fatalf("railPaneAt(2,%d) = %q, want the bar", railRows, got)
+	for _, y := range []int{railRows, railRows + 1} {
+		if got := railPaneAt(snap, 2, y); got != "" {
+			t.Fatalf("railPaneAt(2,%d) = %q, want no pane row", y, got)
+		}
 	}
 	for y := 0; y < snap.Rows; y++ {
 		for x := collapsedRail; x < snap.Cols; x++ {
