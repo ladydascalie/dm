@@ -150,6 +150,44 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel *selRa
 	}
 }
 
+// drawPaneRow paints one row of a pane's content: the same bytes a full pane
+// paint writes for that row.
+func drawPaneRow(buf *bytes.Buffer, vt vt10x.View, r Rect, row, row0 int, sel *selRange) {
+	drawPaneFrom(buf, vt, Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W))
+}
+
+// selRow moves a pane-wide cell range onto one row, nil when the row holds
+// none of it.
+func selRow(s *selRange, row, w int) *selRange {
+	if s == nil {
+		return nil
+	}
+	lo, hi := s.lo-row*w, s.hi-row*w
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > w-1 {
+		hi = w - 1
+	}
+	if lo > hi {
+		return nil
+	}
+	return &selRange{lo: lo, hi: hi}
+}
+
+// blankRect paints default blanks over a rectangle, so a band that left the
+// screen does not keep its glyphs.
+func blankRect(buf *bytes.Buffer, r Rect) {
+	if r.W <= 0 || r.H <= 0 {
+		return
+	}
+	line := "\x1b[0m" + strings.Repeat(" ", r.W)
+	for y := r.Y; y < r.Y+r.H; y++ {
+		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, r.X+1)
+		buf.WriteString(line)
+	}
+}
+
 // selOrder returns the two cells in row-major order.
 func selOrder(a, b cell) (cell, cell) {
 	if a.y > b.y || (a.y == b.y && a.x > b.x) {
