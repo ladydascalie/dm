@@ -259,6 +259,12 @@ func (p *paneProc) serve(c net.Conn) {
 			lines := splitLines(text)
 			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, St: &st, Lines: lines,
 				Res: jsonRaw(map[string]any{"title": title, "dead": dead})})
+		case "screen":
+			p.mu.Lock()
+			data := screenBytes(p.vt)
+			alt, mouse := modeInfo(p.vt.Mode())
+			p.mu.Unlock()
+			_ = sc.send(Msg{Type: "screen", Data: data, Res: modeRes(alt, mouse)})
 		case "replay":
 			p.mu.Lock()
 			data := append([]byte(nil), p.ring...)

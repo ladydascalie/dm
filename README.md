@@ -122,6 +122,12 @@ Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
 screen, oldest first, trailing blanks trimmed. `lines` must be positive.
 `dm read <pane> --scrollback N` prints the same rows.
 
+The visible screen is a snapshot, not a replay. Each pane daemon serialises its
+VT to canonical ANSI (`screen`), and the client writes that into a fresh
+terminal at the pane's rectangle. The output ring travels separately as
+`replay` and feeds only the scrollback history, so a client never rebuilds the
+picture from raw output.
+
 `dm exec` prints the response as JSON. A failed action exits non-zero.
 
 ## OSC 7501 agent status

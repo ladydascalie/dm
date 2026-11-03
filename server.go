@@ -425,6 +425,7 @@ func (s *server) paneExited(id string) {
 	ids := allPanes(s.st.win().Root)
 	s.mu.Unlock()
 
+	s.broadcastScreens(ids)
 	for _, pid := range ids {
 		rp := readPaneReplay(s.st.Name, pid)
 		if !rp.ok {
@@ -612,6 +613,7 @@ func (s *server) attach(cl *client, m Msg) {
 	ids := allPanes(s.st.win().Root)
 	s.mu.Unlock()
 	_ = cl.send(Msg{Type: "snapshot", Snap: snap})
+	s.sendScreens(ids, func(m Msg) { _ = cl.send(m) })
 	for _, id := range ids {
 		rp := readPaneReplay(s.st.Name, id)
 		if !rp.ok {
@@ -625,6 +627,63 @@ func (s *server) attach(cl *client, m Msg) {
 		_ = cl.send(Msg{Type: "replay", Target: id, Data: rp.data, St: &rp.st})
 	}
 	cl.resume()
+}
+
+// paneScreen is the pane's visible screen, serialised as ANSI for a fresh
+// terminal. It is the picture; the ring below is history.
+type paneScreen struct {
+	data  []byte
+	alt   bool
+	mouse bool
+	ok    bool
+}
+
+func readPaneScreen(session, id string) paneScreen {
+	var ps paneScreen
+	c, err := net.DialTimeout("unix", paneSock(session, id), time.Second)
+	if err != nil {
+		return ps
+	}
+	defer c.Close()
+	if err := writeMsg(c, Msg{Type: "req", Action: "screen", ID: 1}); err != nil {
+		return ps
+	}
+	m, err := readMsg(c)
+	if err != nil || m.Type != "screen" {
+		return ps
+	}
+	var extra struct {
+		Alt   bool `json:"alt"`
+		Mouse bool `json:"mouse"`
+	}
+	_ = json.Unmarshal(m.Res, &extra)
+	ps.data, ps.alt, ps.mouse, ps.ok = m.Data, extra.Alt, extra.Mouse, true
+	return ps
+}
+
+// sendScreens asks each pane for its visible screen and hands it to send. It
+// runs after a resize so the pane serialises at its new size.
+func (s *server) sendScreens(ids []string, send func(Msg)) {
+	for _, id := range ids {
+		ps := readPaneScreen(s.st.Name, id)
+		if !ps.ok {
+			continue
+		}
+		s.mu.Lock()
+		if pc := s.panes[id]; pc != nil {
+			pc.alt, pc.mouse = ps.alt, ps.mouse
+		}
+		s.mu.Unlock()
+		send(Msg{Type: "screen", Target: id, Data: ps.data})
+	}
+}
+
+func (s *server) broadcastScreens(ids []string) {
+	s.sendScreens(ids, func(m Msg) {
+		s.mu.Lock()
+		s.broadcastLocked(m)
+		s.mu.Unlock()
+	})
 }
 
 type paneReplay struct {
@@ -678,7 +737,7 @@ func paneRequest(session, id string, m Msg) (Msg, error) {
 		if err != nil {
 			return out, err
 		}
-		if got.Type == "resp" || got.Type == "replay" {
+		if got.Type == "resp" || got.Type == "replay" || got.Type == "screen" {
 			return got, nil
 		}
 	}
@@ -1052,10 +1111,12 @@ func (s *server) afterMutation() {
 	snap := s.snapshotLocked()
 	s.broadcastLocked(Msg{Type: "snapshot", Snap: snap})
 	s.mu.Unlock()
-	// Clients rebuild their VT after a layout change; replay the rings.
+	// Clients rebuild their VT after a layout change; send the screen, then
+	// replay the rings as history.
 	s.mu.Lock()
 	ids := allPanes(s.st.win().Root)
 	s.mu.Unlock()
+	s.broadcastScreens(ids)
 	for _, id := range ids {
 		rp := readPaneReplay(s.st.Name, id)
 		if !rp.ok {

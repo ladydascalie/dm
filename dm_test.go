@@ -1015,3 +1015,154 @@ func readPID(t *testing.T, path string) int {
 	}
 	return pid
 }
+
+// compareScreens fails unless two terminals agree cell for cell and on the
+// cursor, visibility, buffer, wrap and mouse modes.
+func compareScreens(t *testing.T, want, got vt10x.View) {
+	t.Helper()
+	wc, wr := want.Size()
+	gc, gr := got.Size()
+	if wc != gc || wr != gr {
+		t.Fatalf("size %dx%d, want %dx%d", gc, gr, wc, wr)
+	}
+	want.Lock()
+	defer want.Unlock()
+	got.Lock()
+	defer got.Unlock()
+	for y := 0; y < wr; y++ {
+		for x := 0; x < wc; x++ {
+			a := normCell(want.Cell(x, y))
+			b := normCell(got.Cell(x, y))
+			if a.Char != b.Char || a.FG != b.FG || a.BG != b.BG {
+				t.Fatalf("cell %d,%d = {%q %v %v}, want {%q %v %v}",
+					x, y, b.Char, b.FG, b.BG, a.Char, a.FG, a.BG)
+			}
+		}
+	}
+	if a, b := want.Cursor(), got.Cursor(); a.X != b.X || a.Y != b.Y {
+		t.Fatalf("cursor %d,%d, want %d,%d", b.X, b.Y, a.X, a.Y)
+	}
+	if want.CursorVisible() != got.CursorVisible() {
+		t.Fatalf("cursor visible = %v, want %v", got.CursorVisible(), want.CursorVisible())
+	}
+	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeAltScreen) != (b & vt10x.ModeAltScreen) {
+		t.Fatalf("alt = %v, want %v", b&vt10x.ModeAltScreen != 0, a&vt10x.ModeAltScreen != 0)
+	}
+	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeWrap) != (b & vt10x.ModeWrap) {
+		t.Fatalf("wrap = %v, want %v", b&vt10x.ModeWrap != 0, a&vt10x.ModeWrap != 0)
+	}
+	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeMouseMask) != (b & vt10x.ModeMouseMask) {
+		t.Fatalf("mouse mask = %v, want %v", b&vt10x.ModeMouseMask, a&vt10x.ModeMouseMask)
+	}
+	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeMouseSgr) != (b & vt10x.ModeMouseSgr) {
+		t.Fatalf("mouse sgr = %v, want %v", b&vt10x.ModeMouseSgr != 0, a&vt10x.ModeMouseSgr != 0)
+	}
+}
+
+// A snapshot written into a fresh terminal must reproduce the screen exactly.
+// Plain text, every colour class, reverse video, an alternate screen, a moved
+// cursor and the mode flags all have to survive; dropping any one fails.
+func TestScreenSnapshotRoundTrip(t *testing.T) {
+	src := vt10x.New(vt10x.WithSize(24, 6))
+	content := "\x1b[?1049h" + // alternate screen, the harder buffer
+		"PLAIN\r\n" +
+		"\x1b[31mRED\x1b[0m \x1b[44mBLUEBG\x1b[0m\r\n" +
+		"\x1b[38;5;196mPAL256\x1b[0m\r\n" +
+		"\x1b[38;2;30;144;255mTRUE\x1b[0m\r\n" +
+		"\x1b[7mREV\x1b[0m \x1b[31;42;7mMIXREV\x1b[0m" +
+		"\x1b[5;7H" + // cursor away from the end of the output
+		"\x1b[?25l" + // hidden cursor
+		"\x1b[?7l" + // wrap off
+		"\x1b[?1002h\x1b[?1006h" // mouse motion plus SGR
+	if _, err := src.Write([]byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	dst := vt10x.New(vt10x.WithSize(24, 6))
+	if _, err := dst.Write(screenBytes(src)); err != nil {
+		t.Fatal(err)
+	}
+	compareScreens(t, src, dst)
+
+	// The same on the primary screen with wrap on, which is the common case.
+	plain := vt10x.New(vt10x.WithSize(20, 3))
+	if _, err := plain.Write([]byte("\x1b[36mCYAN\x1b[0m text\x1b[2;3H")); err != nil {
+		t.Fatal(err)
+	}
+	plainDst := vt10x.New(vt10x.WithSize(20, 3))
+	if _, err := plainDst.Write(screenBytes(plain)); err != nil {
+		t.Fatal(err)
+	}
+	compareScreens(t, plain, plainDst)
+}
+
+// The pane action returns canonical ANSI for a live shell pane, not the ring.
+func TestScreenAction(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "snap")
+	pane := h.focus("snap")
+	h.run("write-to", pane, "-s", "snap", "--msg", "echo SNAP-MARK", "--enter")
+	h.waitFor("snap", pane, "SNAP-MARK")
+	t.Setenv("DM_STATE", h.stateDir())
+
+	m, err := paneRequest("snap", pane, Msg{Type: "req", Action: "screen"})
+	if err != nil {
+		t.Fatalf("screen: %v", err)
+	}
+	if m.Type != "screen" || len(m.Data) == 0 {
+		t.Fatalf("screen reply type=%q len=%d", m.Type, len(m.Data))
+	}
+	if !bytes.Contains(m.Data, []byte("\x1b[")) {
+		t.Fatalf("screen reply has no ANSI: %q", m.Data)
+	}
+	rect := h.rects("snap")[pane]
+	vt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
+	if _, err := vt.Write(m.Data); err != nil {
+		t.Fatal(err)
+	}
+	if got := vt.String(); !strings.Contains(got, "SNAP-MARK") {
+		t.Fatalf("screen snapshot lost the pane text:\n%s", got)
+	}
+}
+
+// A screen replaces the live VT; a later replay only replaces history.
+func TestClientScreenThenReplay(t *testing.T) {
+	src := vt10x.New(vt10x.WithSize(12, 3))
+	if _, err := src.Write([]byte("\x1b[33mLIVE-SCREEN\x1b[0m\x1b[2;4H")); err != nil {
+		t.Fatal(err)
+	}
+	data := screenBytes(src)
+
+	vts := map[string]vt10x.Terminal{"p1": vt10x.New(vt10x.WithSize(12, 3))}
+	_, _ = vts["p1"].Write([]byte("OLD CONTENT"))
+	hist := map[string][]byte{}
+
+	applyScreen(vts, "p1", Rect{W: 12, H: 3}, data)
+	applyReplay(hist, "p1", []byte("RING-HISTORY"))
+
+	live := vts["p1"]
+	if live == nil {
+		t.Fatal("screen did not install a VT")
+	}
+	got := live.String()
+	if !strings.Contains(got, "LIVE-SCREEN") {
+		t.Fatalf("live VT missing screen content:\n%s", got)
+	}
+	if strings.Contains(got, "OLD CONTENT") {
+		t.Fatalf("live VT kept the old content:\n%s", got)
+	}
+	if strings.Contains(got, "RING-HISTORY") {
+		t.Fatalf("replay wrote into the live VT:\n%s", got)
+	}
+	if string(hist["p1"]) != "RING-HISTORY" {
+		t.Fatalf("history = %q", hist["p1"])
+	}
+
+	// A second replay still leaves the live VT alone.
+	applyReplay(hist, "p1", []byte("MORE-HISTORY"))
+	if again := live.String(); again != got {
+		t.Fatalf("replay changed the live VT:\n%s", again)
+	}
+	if string(hist["p1"]) != "MORE-HISTORY" {
+		t.Fatalf("history = %q", hist["p1"])
+	}
+}
