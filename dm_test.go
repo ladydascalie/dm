@@ -1148,8 +1148,8 @@ func TestTwoCellDragSelects(t *testing.T) {
 			raw: []byte("\x1b[<0;3;1m")})
 	})
 	noMsg(t, got)
-	if tui.toast != "copied 3 chars" {
-		t.Fatalf("toast = %q, want copied 3 chars", tui.toast)
+	if len(tui.toasts) != 1 || tui.toasts[0].text != "copied 3 chars" {
+		t.Fatalf("toasts = %+v, want copied 3 chars", tui.toasts)
 	}
 	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hel")) + "\x1b\\"
 	if !strings.Contains(oscOut, want) {
@@ -1174,8 +1174,8 @@ func TestDragCopiesSelection(t *testing.T) {
 	if tui.selText != nil || tui.press != nil {
 		t.Fatal("drag left selection state behind")
 	}
-	if tui.toast != "copied 5 chars" {
-		t.Fatalf("toast = %q, want copied 5 chars", tui.toast)
+	if len(tui.toasts) != 1 || tui.toasts[0].text != "copied 5 chars" {
+		t.Fatalf("toasts = %+v, want copied 5 chars", tui.toasts)
 	}
 	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hello")) + "\x1b\\"
 	if !strings.Contains(oscOut, want) {
@@ -1290,7 +1290,7 @@ func TestBarHighlightsFocus(t *testing.T) {
 		Panes: []PaneInfo{{ID: "w1p1", Status: "working"}, {ID: "w1p2", Name: "w2-7f", Status: "idle"}},
 	}
 	var b bytes.Buffer
-	drawBar(&b, snap, false, "", "")
+	drawBar(&b, snap, false, "")
 	out := b.String()
 	if !strings.Contains(out, "\x1b[30;46m") || !strings.Contains(out, "▶ w1p2 w2-7f idle") {
 		t.Fatalf("bar has no focus highlight: %q", out)
