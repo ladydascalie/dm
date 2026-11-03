@@ -94,9 +94,10 @@ detach.
 The left columns of the screen show a sidebar when the session asks for one.
 It is a tree of workspaces, windows and panes. A workspace row leads with a
 bar in the workspace's own accent colour, then its name in bold, then the
-pane count at the right edge in dim grey. The accent is one of six hues picked
-by a stable hash of the workspace id, so a workspace keeps its hue for the
-life of the session. One blank row separates workspace blocks.
+pane count at the right edge in dim grey. The accent is one of six hues: a
+stable hash of the workspace id picks the preferred one, and the rail gives up
+to six live workspaces distinct hues. A workspace keeps its accent while the
+workspace list holds. One blank row separates workspace blocks.
 
 Each window follows with its fold caret and a label: the git branch when its
 pane is in a repository, else the linked worktree folder, else the window

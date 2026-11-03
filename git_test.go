@@ -1,6 +1,10 @@
 package main
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -78,5 +82,85 @@ func TestParseNumstat(t *testing.T) {
 	}
 	if a, d := parseNumstat([]byte("\n")); a != 0 || d != 0 {
 		t.Fatalf("parseNumstat on a blank line = %d, %d", a, d)
+	}
+}
+
+// gitRun runs one git command in dir, with a repo config isolated from the
+// operator's own.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_SYSTEM=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=dm", "GIT_AUTHOR_EMAIL=dm@example.com",
+		"GIT_COMMITTER_NAME=dm", "GIT_COMMITTER_EMAIL=dm@example.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+}
+
+// newGitRepo makes a temporary repo with one commit on main and one file.
+func newGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	gitRun(t, dir, "config", "user.name", "dm")
+	gitRun(t, dir, "config", "user.email", "dm@example.com")
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, dir, "add", "file.txt")
+	gitRun(t, dir, "commit", "-q", "-m", "first")
+	return dir
+}
+
+// TestDetectGitReal drives the production detectGit against real git: a clean
+// repo, a dirty file, a linked worktree, a detached HEAD and a plain directory.
+func TestDetectGitReal(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	repo := newGitRepo(t)
+	if got := detectGit(repo); !got.inRepo || got.branch != "main" ||
+		got.worktree != "" || got.dirty || got.added != 0 || got.deleted != 0 {
+		t.Fatalf("clean repo = %+v, want main, in repo, clean and zero counts", got)
+	}
+
+	// One more line on a tracked file is a dirty tree with an added count.
+	path := filepath.Join(repo, "file.txt")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(b, []byte("second\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := detectGit(repo)
+	if !got.dirty || got.added < 1 || got.deleted != 0 {
+		t.Fatalf("dirty repo = %+v, want dirty with an added line", got)
+	}
+
+	// A linked worktree reports its own branch and its own folder.
+	wt := filepath.Join(t.TempDir(), "lane-wt")
+	gitRun(t, repo, "worktree", "add", "-q", "-b", "lane", wt)
+	got = detectGit(wt)
+	if !got.inRepo || got.branch != "lane" || got.worktree != "lane-wt" ||
+		got.dirty || got.added != 0 || got.deleted != 0 {
+		t.Fatalf("linked worktree = %+v, want lane in lane-wt, clean", got)
+	}
+
+	// A detached checkout has no branch, so the folder names the line.
+	gitRun(t, wt, "checkout", "-q", "--detach")
+	got = detectGit(wt)
+	if got.branch != "" || got.worktree != "lane-wt" {
+		t.Fatalf("detached worktree = %+v, want no branch and the folder", got)
+	}
+
+	// A plain directory is outside git and returns the zero value.
+	if got := detectGit(t.TempDir()); got != (gitInfo{}) {
+		t.Fatalf("plain directory = %+v, want zero", got)
 	}
 }

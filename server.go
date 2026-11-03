@@ -158,7 +158,12 @@ var detectGit = func(cwd string) gitInfo {
 	if len(lines) < 4 {
 		return gitInfo{}
 	}
-	info := gitInfo{branch: lines[0], inRepo: true}
+	// A detached HEAD prints the literal HEAD. Leave the branch empty so the
+	// worktree folder, or the window name, labels the rail line.
+	info := gitInfo{inRepo: true}
+	if b := lines[0]; b != "HEAD" {
+		info.branch = b
+	}
 	root := filepath.Clean(lines[1])
 	gd, cd := lines[2], lines[3]
 	if !filepath.IsAbs(gd) {
