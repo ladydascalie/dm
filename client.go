@@ -78,6 +78,12 @@ type tui struct {
 	dragStart  int
 	dragSpace  int
 	dragAt     time.Time
+
+	// railWant is the last non-zero rail width seen, so the toggle can restore
+	// it. railPress marks a press that began in the rail, whose events belong
+	// to no pane.
+	railWant  int
+	railPress bool
 }
 
 // toast is one short message for the operator. Its time is when it was raised,
@@ -275,6 +281,14 @@ func (t *tui) apply(m Msg) {
 	switch m.Type {
 	case "snapshot":
 		t.snap = m.Snap
+		switch {
+		case m.Snap.RailWant > 0:
+			t.railWant = m.Snap.RailWant
+		case m.Snap.Rail > 0:
+			t.railWant = m.Snap.Rail
+		case t.railWant <= 0:
+			t.railWant = defaultRail
+		}
 		if t.scroll != "" {
 			p := t.paneByID(t.scroll)
 			if p == nil {
@@ -1154,6 +1168,12 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			return
 		}
 	}
+	// The rail owns every event inside its columns. A left press on a pane row
+	// focuses that pane; headers and empty space do nothing. A press that began
+	// in the rail keeps owning its drag and release, so nothing leaks to a pane.
+	if t.press == nil && !t.dragging && t.railClick(ev, x, y) {
+		return
+	}
 	// Right press is the mux's context menu, even over an app that owns the
 	// mouse. It is a window-manager gesture, not the app's.
 	if ev.btn&3 == 2 && ev.btn&32 == 0 && !ev.release {
@@ -1267,7 +1287,7 @@ func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
 		return dragStart{}, false
 	}
 	n, first, second, axis, r, ok := padHit(snap.Root,
-		paneArea(snap.Cols, snap.Rows), x, y)
+		paneAreaFor(snap.Cols, snap.Rows, snap.Rail), x, y)
 	if !ok {
 		return dragStart{}, false
 	}
@@ -1467,6 +1487,8 @@ func (t *tui) key(b byte) {
 		t.action("next-workspace", nil)
 	case 's':
 		t.openPicker()
+	case 'r':
+		t.toggleRail()
 	case '?':
 		t.disarm()
 	case 'd', 'q':
@@ -1485,6 +1507,53 @@ func (t *tui) key(b byte) {
 		t.notify(fmt.Sprintf("no binding for %q", string(b)))
 		t.disarm()
 	}
+}
+
+// toggleRail hides the rail when it is showing and restores the last requested
+// width when it is hidden. With no remembered width it asks for the default.
+func (t *tui) toggleRail() {
+	want := t.railWant
+	if want <= 0 {
+		want = defaultRail
+	}
+	if t.snap != nil && t.snap.Rail > 0 {
+		want = 0
+	}
+	t.action("set-rail", func(m *Msg) { m.Index = want })
+}
+
+// railClick consumes a mouse event over the sidebar. A left press on a pane row
+// focuses that pane. Every other rail event is swallowed so it never reaches a
+// pane, and a drag that began in the rail stays swallowed outside it.
+func (t *tui) railClick(ev mouseEvent, x, y int) bool {
+	if t.snap == nil || t.snap.Rail <= 0 {
+		return false
+	}
+	inside := x >= 0 && x < t.snap.Rail && y >= 0 && y < t.snap.Rows-1
+	if !inside {
+		if !t.railPress {
+			return false
+		}
+		if ev.release || ev.btn&32 != 0 {
+			if ev.release {
+				t.railPress = false
+			}
+			return true
+		}
+		t.railPress = false
+		return false
+	}
+	if ev.release {
+		t.railPress = false
+		return true
+	}
+	if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 {
+		t.railPress = true
+		if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
+			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: id})
+		}
+	}
+	return true
 }
 
 func (t *tui) arm() {
@@ -1536,6 +1605,7 @@ func (t *tui) draw() {
 		}
 		drawPaneBox(&b, p.Rect, p.ID == win.Focus)
 	}
+	drawRail(&b, win)
 	scrollInfo := ""
 	if t.scroll != "" {
 		scrollInfo = fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)

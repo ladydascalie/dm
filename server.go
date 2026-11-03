@@ -328,10 +328,41 @@ func (s *server) broadcastLocked(m Msg) {
 	}
 }
 
+// requestedRailLocked is the stored width, floored at zero, before the screen
+// clamp. The caller holds s.mu.
+func (s *server) requestedRailLocked() int {
+	if !s.st.RailSet {
+		return defaultRail
+	}
+	if s.st.Rail < 0 {
+		return 0
+	}
+	return s.st.Rail
+}
+
+// railLocked is the effective sidebar width for the current screen. The caller
+// holds s.mu.
+func (s *server) railLocked() int {
+	return effectiveRail(s.cols, s.requestedRailLocked())
+}
+
+// setRail records the requested width and returns the effective one. A
+// requested 0 hides the rail. The value is clamped when it is used, not when
+// it is stored, so a wider terminal restores a wider rail.
+func (s *server) setRail(requested int) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.st.Rail = requested
+	s.st.RailSet = true
+	rail := s.railLocked()
+	_ = s.st.save()
+	return rail
+}
+
 func (s *server) snapshotLocked() *Snapshot {
 	win := s.st.win()
 	rects := map[string]Rect{}
-	layout(win.Root, paneArea(s.cols, s.rows), rects)
+	layout(win.Root, paneAreaFor(s.cols, s.rows, s.railLocked()), rects)
 	snap := &Snapshot{
 		Session:      s.st.Name,
 		Workspace:    s.st.ws().Name,
@@ -340,6 +371,8 @@ func (s *server) snapshotLocked() *Snapshot {
 		Focus:        win.Focus,
 		Cols:         s.cols,
 		Rows:         s.rows,
+		Rail:         s.railLocked(),
+		RailWant:     s.requestedRailLocked(),
 		Root:         win.Root,
 	}
 	for _, w := range s.st.ws().Windows {
@@ -363,7 +396,41 @@ func (s *server) snapshotLocked() *Snapshot {
 		}
 		snap.Panes = append(snap.Panes, info)
 	}
+	snap.All = s.allPanesLocked()
 	return snap
+}
+
+// allPanesLocked lists every pane in the session in workspace, window, tree
+// order. A pane is an agent when it has a recorded name or has reported a
+// status other than empty or unknown; otherwise it is a shell. The caller holds
+// s.mu.
+func (s *server) allPanesLocked() []AllPane {
+	out := make([]AllPane, 0, len(s.st.Panes))
+	for i, ws := range s.st.Workspaces {
+		wsActive := i == s.st.Active
+		for j, w := range ws.Windows {
+			winActive := wsActive && j == ws.Active
+			for _, id := range allPanes(w.Root) {
+				info := AllPane{
+					ID: id, Workspace: ws.ID, WorkspaceName: ws.Name,
+					Window: w.ID, WindowName: w.Name,
+					WorkspaceActive: wsActive, WindowActive: winActive,
+					Focus: winActive && id == w.Focus,
+				}
+				if ps := s.st.Panes[id]; ps != nil {
+					info.Name = ps.Name
+				}
+				if pc := s.panes[id]; pc != nil {
+					info.Status = pc.st.State
+					info.Message = pc.st.Message
+				}
+				info.Agent = info.Name != "" ||
+					(info.Status != "" && info.Status != "unknown")
+				out = append(out, info)
+			}
+		}
+	}
+	return out
 }
 
 // paneExited removes a dead pane from the layout. A split collapses, focus
@@ -558,7 +625,7 @@ func (s *server) syncSizes() {
 	s.mu.Lock()
 	win := s.st.win()
 	rects := map[string]Rect{}
-	layout(win.Root, paneArea(s.cols, s.rows), rects)
+	layout(win.Root, paneAreaFor(s.cols, s.rows, s.railLocked()), rects)
 	s.st.Cols, s.st.Rows = s.cols, s.rows
 	var calls []func()
 	for id, r := range rects {
@@ -868,6 +935,12 @@ func (s *server) handleReq(cl *client, m Msg) {
 		})
 		s.afterMutation()
 		s.reply(cl, m, map[string]any{"pane": id}, err)
+
+	case "set-rail":
+		rail := s.setRail(m.Index)
+		s.syncSizes()
+		s.pushSnapshot()
+		s.reply(cl, m, map[string]any{"rail": rail}, nil)
 
 	case "resize-split":
 		err := s.mutation(func() error { return s.resizeSplit(m.Target, m.Other, m.Ratio) })
@@ -1398,7 +1471,8 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 			if len(split.Kids) != 2 {
 				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
 			}
-			r, ok := nodeRect(win.Root, split, paneArea(s.cols, s.rows))
+			r, ok := nodeRect(win.Root, split,
+				paneAreaFor(s.cols, s.rows, s.railLocked()))
 			if !ok {
 				return fmt.Errorf("no rect for split of %q", first)
 			}
@@ -1455,7 +1529,7 @@ func (s *server) focusDir(dir string) error {
 	defer s.mu.Unlock()
 	win := s.st.win()
 	rects := map[string]Rect{}
-	layout(win.Root, paneArea(s.cols, s.rows), rects)
+	layout(win.Root, paneAreaFor(s.cols, s.rows, s.railLocked()), rects)
 	n := neighbor(rects, win.Focus, dir)
 	if n == "" {
 		return fmt.Errorf("no pane %s of %s", dir, win.Focus)
