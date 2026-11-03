@@ -631,6 +631,12 @@ var (
 	railDiffAdd  = rgb{120, 220, 130} // #78dc82 diff stats, added lines
 	railDiffDel  = rgb{255, 125, 125} // #ff7d7d diff stats, deleted lines
 	railWorking  = rgb{245, 190, 80}  // #f5be50 working amber, dirty dot
+
+	// The status bar reuses the rail's ground, focus fill, text and dim. It adds
+	// one accent for the active window mark and names the ground it paints
+	// between segments. There is no second background.
+	barAccent = rgb{122, 192, 235} // #7ac0eb cyan, active window mark
+	barGutter = railBG             // ground between segments
 )
 
 // railAccents are the six workspace hues, in a fixed order. Each one is
@@ -1174,65 +1180,49 @@ func menuPad(s string, w int, fill rune) string {
 	return out
 }
 
-// drawBar paints the one-line status bar at the bottom.
-func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, scroll string) {
+// drawBar paints the one-line status bar on the last row. It paints the
+// segment model span by span: reset, ground, foreground, weight, text. The
+// pinned block is anchored to the last column and the gutter fills the gap, so
+// the whole row is written and no cell of the previous frame shows through.
+// drawBar writes at most snap.Cols cells and never touches another row.
+func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, info string) {
+	if snap == nil || snap.Rows < 1 || snap.Cols < 1 {
+		return
+	}
+	segs := barSegments(snap, armed, info)
+	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
-	buf.WriteString("\x1b[0m\x1b[7m")
-	line := fmt.Sprintf(" %s | %s | win %d/%d %s | ", snap.Session, snap.Workspace,
-		snap.ActiveWindow+1, len(snap.Windows), strings.Join(snap.Windows, " "))
-	hlStart, hlEnd := 0, 0
-	for _, p := range snap.Panes {
-		if p.ID != snap.Focus {
+	writeBarSegs(buf, left)
+	if pad := snap.Cols - barCells(segs); pad > 0 {
+		buf.WriteString("\x1b[0m" + barGutter.bg() + strings.Repeat(" ", pad))
+	}
+	writeBarSegs(buf, pinned)
+	buf.WriteString("\x1b[0m")
+}
+
+// barSplitPinned splits a span run at its first pinned span: the left block,
+// then the right block that is anchored to the last column.
+func barSplitPinned(segs []barSeg) (left, pinned []barSeg) {
+	for i, seg := range segs {
+		if seg.pin {
+			return segs[:i], segs[i:]
+		}
+	}
+	return segs, nil
+}
+
+// writeBarSegs paints spans left to right, each one reset before its colours.
+func writeBarSegs(buf *bytes.Buffer, segs []barSeg) {
+	for _, seg := range segs {
+		if seg.text == "" {
 			continue
 		}
-		st := p.Status
-		if st == "" {
-			st = "unknown"
+		buf.WriteString("\x1b[0m" + seg.bg.bg() + seg.fg.fg())
+		if seg.bold {
+			buf.WriteString("\x1b[1m")
 		}
-		seg := "▶ " + p.ID
-		if p.Name != "" {
-			seg += " " + p.Name
-		}
-		seg += " " + st + " "
-		hlStart = len([]rune(line))
-		line += seg
-		hlEnd = len([]rune(line))
+		buf.WriteString(seg.text)
 	}
-	if armed {
-		line += "PREFIX "
-	}
-	if scroll != "" {
-		line += scroll + " "
-	}
-	width := snap.Cols
-	runes := []rune(line)
-	cut, cells := 0, 0
-	for cut < len(runes) {
-		rw := runeWidth(runes[cut])
-		if cells+rw > width {
-			break
-		}
-		cells += rw
-		cut++
-	}
-	runes = runes[:cut]
-	if hlEnd > len(runes) {
-		hlEnd = len(runes)
-	}
-	if hlStart > hlEnd {
-		hlStart = hlEnd
-	}
-	buf.WriteString(string(runes[:hlStart]))
-	if hlEnd > hlStart {
-		buf.WriteString("\x1b[0m\x1b[30;46m")
-		buf.WriteString(string(runes[hlStart:hlEnd]))
-		buf.WriteString("\x1b[0m\x1b[7m")
-	}
-	buf.WriteString(string(runes[hlEnd:]))
-	if pad := width - cells; pad > 0 {
-		buf.WriteString(strings.Repeat(" ", pad))
-	}
-	buf.WriteString("\x1b[0m")
 }
 
 // barSeg is one painted span of the status bar. A pinned segment belongs to
@@ -1412,15 +1402,24 @@ func (l *barLeft) groups() [][]barSeg {
 		out = append(out, []barSeg{{text: l.workspace, fg: railHeader, bg: railBG}})
 	}
 	for _, w := range l.windows {
-		fg, bg := railDim, railBG
 		if w.active {
-			fg, bg = railText, railFocusBG
+			// The active window reads as active: an accent mark, then the chip
+			// in bold on the focus fill.
+			text := strconv.Itoa(w.num)
+			if l.winNames && w.name != "" {
+				text += " " + w.name
+			}
+			out = append(out, []barSeg{
+				{text: "▸ ", fg: barAccent, bg: railFocusBG},
+				{text: text, fg: railText, bg: railFocusBG, bold: true},
+			})
+			continue
 		}
 		text := strconv.Itoa(w.num)
 		if l.winNames && w.name != "" {
 			text += " " + w.name
 		}
-		out = append(out, []barSeg{{text: text, fg: fg, bg: bg}})
+		out = append(out, []barSeg{{text: text, fg: railDim, bg: railBG}})
 	}
 	if l.focus != nil {
 		chip := []barSeg{

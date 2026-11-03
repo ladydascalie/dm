@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -2174,68 +2175,94 @@ func TestBarSegmentOrder(t *testing.T) {
 	snap := barTestSnap(80)
 	glyph, colour := railGlyph("idle", nerdFonts())
 	segs := barSegments(snap, true, "READY")
-	left := []string{"dev", " ", "workspace-a", " ", "1 api-server", " ",
-		"2 web", " ", "3 docs", " ", glyph, " w1p2", " shell", " idle"}
-	want := append(append([]string{}, left...), "PREFIX ", "READY")
+
+	// Groups, in paint order: session, workspace, one chip per window in index
+	// order, the focus chip, then the pinned block.
+	groups := [][]string{
+		{"dev"},
+		{"workspace-a"},
+		{"1 api-server"},
+		{"▸ ", "2 web"},
+		{"3 docs"},
+		{glyph, " w1p2", " shell", " idle"},
+	}
+	var want []string
+	for k, group := range groups {
+		if k > 0 {
+			want = append(want, " ")
+		}
+		want = append(want, group...)
+	}
+	want = append(want, "PREFIX ", "READY")
 	got := barTexts(segs)
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("bar spans = %q, want %q", got, want)
 	}
 
-	// Session, then workspace, then one chip per window in index order, then
-	// the focus chip, then the pinned block.
 	if segs[0].fg != railText {
 		t.Fatalf("session colour = %v, want railText", segs[0].fg)
 	}
 	if segs[2].fg != railHeader {
 		t.Fatalf("workspace colour = %v, want railHeader", segs[2].fg)
 	}
-	if segs[4].fg != railDim || segs[4].bg != railBG || segs[8].fg != railDim {
-		t.Fatalf("inactive chips = %+v %+v, want railDim on railBG", segs[4], segs[8])
+	if segs[4].fg != railDim || segs[4].bg != railBG || segs[9].fg != railDim {
+		t.Fatalf("inactive chips = %+v %+v, want railDim on railBG", segs[4], segs[9])
 	}
-	if segs[6].bg != railFocusBG {
-		t.Fatalf("active chip bg = %v, want railFocusBG", segs[6].bg)
+
+	// The active window reads as active: an accent mark, then bold text on the
+	// focus fill.
+	mark, chip := segs[6], segs[7]
+	if mark.text != "▸ " || mark.fg != barAccent || mark.bg != railFocusBG {
+		t.Fatalf("active mark = %+v, want the accent ▸ on railFocusBG", mark)
 	}
-	if segs[10].fg != colour {
-		t.Fatalf("focus glyph colour = %v, want %v", segs[10].fg, colour)
+	if chip.text != "2 web" || !chip.bold || chip.bg != railFocusBG {
+		t.Fatalf("active chip = %+v, want bold on railFocusBG", chip)
 	}
-	if segs[11].fg != railText || !segs[11].bold {
-		t.Fatalf("pane id = %+v, want bold railText", segs[11])
+
+	// The state glyph is the only state colour on the bar.
+	if segs[11].fg != colour || segs[11].bg != railFocusBG {
+		t.Fatalf("focus glyph = %+v, want %v on railFocusBG", segs[11], colour)
 	}
-	if segs[12].fg != railDim || segs[13].fg != railDim {
-		t.Fatalf("pane name and status = %v %v, want railDim", segs[12].fg, segs[13].fg)
+	if segs[12].fg != railText || !segs[12].bold {
+		t.Fatalf("pane id = %+v, want bold railText", segs[12])
 	}
-	for _, i := range []int{10, 11, 12, 13} {
-		if segs[i].bg != railFocusBG {
-			t.Fatalf("focus span %d bg = %v, want railFocusBG", i, segs[i].bg)
+	if segs[13].fg != railDim || segs[14].fg != railDim {
+		t.Fatalf("pane name and status = %v %v, want railDim", segs[13].fg, segs[14].fg)
+	}
+	for _, k := range []int{11, 12, 13, 14} {
+		if segs[k].bg != railFocusBG {
+			t.Fatalf("focus span %d bg = %v, want railFocusBG", k, segs[k].bg)
 		}
 	}
 
-	// One gutter cell between segments, and only between them.
+	// One gutter cell between segments, and only between them: no group starts
+	// or ends with one, and none sits inside the focus chip.
 	gutters := 0
-	for i, seg := range segs {
+	for k, seg := range segs {
 		if seg.pin {
 			continue
 		}
-		if seg.text == " " && seg.bg == railBG {
+		if seg.text == " " {
 			gutters++
-			if i%2 == 0 {
-				t.Fatalf("gutter at span %d sits inside a chip", i)
-			}
+			continue
+		}
+		if seg.text == "" {
+			t.Fatalf("span %d is empty", k)
 		}
 	}
-	if gutters != 5 {
-		t.Fatalf("gutters = %d, want 5", gutters)
+	if gutters != len(groups)-1 {
+		t.Fatalf("gutters = %d, want %d", gutters, len(groups)-1)
 	}
 
 	// The pinned block comes last, and nothing follows it.
-	for i := 0; i < len(left); i++ {
-		if segs[i].pin {
-			t.Fatalf("span %d is pinned inside the left block", i)
+	left := len(want) - 2
+	for k := 0; k < left; k++ {
+		if segs[k].pin {
+			t.Fatalf("span %d is pinned inside the left block", k)
 		}
 	}
-	if segs[len(left)].text != "PREFIX " || !segs[len(left)].pin {
-		t.Fatalf("span %d = %+v, want the pinned PREFIX", len(left), segs[len(left)])
+	if segs[left].text != "PREFIX " || !segs[left].pin {
+		t.Fatalf("span %d = %+v, want the pinned PREFIX", left, segs[left])
 	}
 	if segs[len(segs)-1].text != "READY" || !segs[len(segs)-1].pin {
 		t.Fatalf("last span = %+v, want the pinned info", segs[len(segs)-1])
@@ -2255,16 +2282,18 @@ func TestBarElide(t *testing.T) {
 		text []string
 	}{
 		{80, "full", []string{"dev", " ", "workspace-a", " ", "1 api-server",
-			" ", "2 web", " ", "3 docs", " ", glyph, " w1p2", " shell", " idle"}},
-		{50, "names", []string{"dev", " ", "workspace-a", " ", "1", " ", "2",
-			" ", "3", " ", glyph, " w1p2", " shell", " idle"}},
-		{34, "workspace", []string{"dev", " ", "workspace…", " ", "2", " ",
+			" ", "▸ ", "2 web", " ", "3 docs", " ", glyph, " w1p2", " shell",
+			" idle"}},
+		{50, "names", []string{"dev", " ", "workspace-a", " ", "1", " ", "▸ ",
+			"2", " ", "3", " ", glyph, " w1p2", " shell", " idle"}},
+		{34, "workspace", []string{"dev", " ", "workspa…", " ", "▸ ", "2", " ",
 			glyph, " w1p2", " shell", " idle"}},
-		{20, "status", []string{"…", " ", "…", " ", "2", " ", glyph, " w1p2",
-			" shell"}},
-		{36, "chips", nil},
-		{24, "session", nil},
-		{14, "name", nil},
+		{20, "status", []string{"…", " ", "…", " ", "▸ ", "2", " ", glyph,
+			" w1p2", " shell"}},
+		{40, "chips", nil},
+		{30, "workspace", nil},
+		{26, "session", nil},
+		{16, "name", nil},
 	}
 	for _, c := range cases {
 		segs := barSegments(barTestSnap(c.cols), false, "")
@@ -2283,7 +2312,7 @@ func TestBarElide(t *testing.T) {
 	}
 
 	// The active window chip survives every width that keeps a chip at all.
-	for _, cols := range []int{60, 40, 33, 30, 25, 22, 18, 16, 12} {
+	for _, cols := range []int{60, 45, 40, 33, 30, 25, 22, 18, 16, 12} {
 		segs := barSegments(barTestSnap(cols), false, "")
 		if barCells(segs) > cols {
 			t.Fatalf("cols %d: spans paint %d cells", cols, barCells(segs))
@@ -2377,7 +2406,7 @@ func TestBarPinned(t *testing.T) {
 // TestBarWideRunes keeps wide runes whole and inside the column count.
 func TestBarWideRunes(t *testing.T) {
 	glyph, _ := railGlyph("working", nerdFonts())
-	sources := []string{"日本語セッション", "作業ディレクトリ", "1 一二三",
+	sources := []string{"日本語セッション", "作業ディレクトリ", "▸ ", "1 一二三",
 		"2 四五六", " w1p1", " 日本語", " working", glyph}
 	snap := &Snapshot{
 		Session:      "日本語セッション",
@@ -2419,9 +2448,9 @@ func TestBarWideRunes(t *testing.T) {
 	}
 }
 
-// TestBarFocusChipState reads the focus chip from the focused pane: an agent
-// shows its state glyph and colour, a shell shows the prompt marker.
-func TestBarFocusChipState(t *testing.T) {
+// TestBarFocusChip reads the focus chip from the focused pane: an agent shows
+// its state glyph and colour on the focus fill, a shell shows the prompt marker.
+func TestBarFocusChip(t *testing.T) {
 	nerd := nerdFonts()
 	snap := &Snapshot{
 		Session: "s",
@@ -2451,6 +2480,16 @@ func TestBarFocusChipState(t *testing.T) {
 	}
 	if got := segs[len(segs)-1].text; got != " blocked" {
 		t.Fatalf("status word = %q, want blocked", got)
+	}
+	// The painted bar carries the same glyph in that colour on the focus fill.
+	var b bytes.Buffer
+	drawBar(&b, snap, false, "")
+	out := b.String()
+	if !strings.Contains(out, colour.fg()+glyph) {
+		t.Fatalf("bar does not paint %q in %v: %q", glyph, colour, out)
+	}
+	if !strings.Contains(out, railFocusBG.bg()+colour.fg()+glyph) {
+		t.Fatalf("bar does not paint the glyph on railFocusBG: %q", out)
 	}
 
 	// A shell reports no state: it gets the prompt marker in dim text, and its
@@ -3421,17 +3460,92 @@ func TestDrawMenu(t *testing.T) {
 	}
 }
 
-func TestBarHighlightsFocus(t *testing.T) {
+// TestBarPadsToWidth paints the whole last row on the bar ground, so no cell of
+// the previous frame survives and the row reaches its final column.
+func TestBarPadsToWidth(t *testing.T) {
 	snap := &Snapshot{
-		Session: "main", Workspace: "main", Windows: []string{"1"}, Focus: "w1p2",
-		Cols: 80, Rows: 24,
-		Panes: []PaneInfo{{ID: "w1p1", Status: "working"}, {ID: "w1p2", Name: "w2-7f", Status: "idle"}},
+		Session: "dev", Workspace: "work", Windows: []string{"one", "two"},
+		ActiveWindow: 0, Focus: "w1p1",
+		Panes: []PaneInfo{{ID: "w1p1", Name: "bash"}},
+		All:   []AllPane{{ID: "w1p1", Agent: false}},
+		Cols:  60, Rows: 6,
+	}
+	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
+	// A previous frame leaves stale glyphs on the bar row.
+	if _, err := vt.Write([]byte(fmt.Sprintf("\x1b[%d;1H%s", snap.Rows, strings.Repeat("X", snap.Cols)))); err != nil {
+		t.Fatalf("stale frame: %v", err)
 	}
 	var b bytes.Buffer
 	drawBar(&b, snap, false, "")
-	out := b.String()
-	if !strings.Contains(out, "\x1b[30;46m") || !strings.Contains(out, "▶ w1p2 w2-7f idle") {
-		t.Fatalf("bar has no focus highlight: %q", out)
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw bar: %v", err)
+	}
+	vt.Lock()
+	defer vt.Unlock()
+	ground := vt10x.Color(barGutter.r<<16 | barGutter.g<<8 | barGutter.b)
+	for x := 0; x < snap.Cols; x++ {
+		cell := vt.Cell(x, snap.Rows-1)
+		if cell.Char == 'X' || cell.Char == 0 {
+			t.Fatalf("cell %d = %q, want a painted cell", x, cell.Char)
+		}
+	}
+	// The row is padded on the bar ground up to its final column.
+	last := vt.Cell(snap.Cols-1, snap.Rows-1)
+	if last.Char != ' ' || last.BG != ground {
+		t.Fatalf("last cell = %q bg %v, want a gutter space on %v",
+			last.Char, last.BG, ground)
+	}
+	if out := b.String(); !strings.Contains(out, "\x1b["+strconv.Itoa(snap.Rows)+";1H") {
+		t.Fatalf("bar does not start on row %d: %q", snap.Rows, out)
+	}
+}
+
+// TestBarUnarmed paints no prefix flag.
+func TestBarUnarmed(t *testing.T) {
+	snap := barTestSnap(80)
+	if out := barTexts(barSegments(snap, false, "12 rows above")); strings.Contains(strings.Join(out, ""), "PREFIX") {
+		t.Fatalf("unarmed spans carry PREFIX: %q", out)
+	}
+	var b bytes.Buffer
+	drawBar(&b, snap, false, "")
+	if strings.Contains(b.String(), "PREFIX") {
+		t.Fatalf("unarmed bar paints PREFIX: %q", b.String())
+	}
+	b.Reset()
+	drawBar(&b, snap, true, "")
+	if !strings.Contains(b.String(), "PREFIX") {
+		t.Fatalf("armed bar has no PREFIX: %q", b.String())
+	}
+}
+
+// TestBarContrast holds every footer foreground to WCAG AA on both grounds it
+// paints: the gutter and the focus fill.
+func TestBarContrast(t *testing.T) {
+	foregrounds := map[string]rgb{
+		"text":   railText,
+		"header": railHeader,
+		"dim":    railDim,
+		"accent": barAccent,
+	}
+	for _, status := range []string{
+		"working", "idle", "blocked", "done", "error", "unknown", "",
+	} {
+		fallback, colour := railGlyph(status, false)
+		_, nerdColour := railGlyph(status, true)
+		if fallback == "" || nerdColour != colour {
+			t.Fatalf("state %q differs between glyph forms", status)
+		}
+		foregrounds["state "+status] = colour
+	}
+	if barGutter != railBG {
+		t.Fatalf("bar ground = %v, want railBG", barGutter)
+	}
+	for name, fg := range foregrounds {
+		for bgName, bg := range map[string]rgb{"gutter": barGutter, "focus": railFocusBG} {
+			if r := contrast(fg, bg); r < 4.5 {
+				t.Fatalf("%s on %s = %.2f:1, want >= 4.5:1", name, bgName, r)
+			}
+		}
 	}
 }
 
