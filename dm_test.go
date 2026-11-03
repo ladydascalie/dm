@@ -128,7 +128,7 @@ var dividerPaintRE = regexp.MustCompile("\x1b\\[(\\d+);(\\d+)H([│─]+)")
 func paintedDividers(t *testing.T, root *Node, r Rect) map[[2]int]rune {
 	t.Helper()
 	var buf bytes.Buffer
-	drawDividers(&buf, root, r, Rect{})
+	drawDividers(&buf, root, r)
 	cells := map[[2]int]rune{}
 	for _, m := range dividerPaintRE.FindAllStringSubmatch(buf.String(), -1) {
 		row, _ := strconv.Atoi(m[1])
@@ -595,37 +595,45 @@ func TestFocusForClick(t *testing.T) {
 	}
 }
 
-func TestDividerTouchesFocus(t *testing.T) {
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
-	r := Rect{0, 0, 20, 10}
-	rects := childRects(row, r)
-	d := dividerRect(row, rects, 0)
-	if !dividerTouches(d, rects[0]) || !dividerTouches(d, rects[1]) {
-		t.Fatalf("divider between two panes touches neither: %+v", d)
+func TestPaneAreaInset(t *testing.T) {
+	area := paneArea(100, 30)
+	if area != (Rect{X: 1, Y: 1, W: 98, H: 27}) {
+		t.Fatalf("pane area = %+v", area)
 	}
-	if dividerTouches(d, Rect{X: 0, Y: 0, W: 1, H: 1}) {
-		t.Fatal("a far pane claims the divider")
+	if paneArea(3, 4) != (Rect{X: 0, Y: 0, W: 3, H: 3}) {
+		t.Fatalf("tiny area = %+v", paneArea(3, 4))
 	}
+}
 
-	// row{ row{a,b}, c }: the outer divider touches b, not a.
-	inner := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
-	root := &Node{Dir: "row", Kids: []*Node{inner, {Pane: "c"}},
-		Sizes: []float64{0.6, 0.4}}
-	rr := Rect{0, 0, 30, 10}
-	outer := childRects(root, rr)
-	innerRects := childRects(inner, outer[0])
-	outerDiv := dividerRect(root, outer, 0)
-	innerDiv := dividerRect(inner, innerRects, 0)
-	if !dividerTouches(innerDiv, innerRects[0]) {
-		t.Fatal("inner divider does not touch a")
+func TestFocusFrameWrapsPane(t *testing.T) {
+	var b bytes.Buffer
+	drawFocusFrame(&b, Rect{X: 10, Y: 5, W: 20, H: 8}, 100, 30)
+	out := b.String()
+	for _, want := range []string{"┌", "┐", "└", "┘", "│", "─", "\x1b[1;36m"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("frame missing %q: %q", want, out)
+		}
 	}
-	if dividerTouches(outerDiv, innerRects[0]) {
-		t.Fatal("outer divider touches a, which is not on its edge")
+	// The top-left corner is one cell above and left of the pane.
+	if !strings.Contains(out, "\x1b[5;10H┌") {
+		t.Fatalf("frame corner not at 9,5: %q", out)
 	}
-	if !dividerTouches(outerDiv, innerRects[1]) {
-		t.Fatal("outer divider does not touch b")
+	if !strings.Contains(out, "\x1b[5;31H┐") {
+		t.Fatalf("top-right corner not at 30,5: %q", out)
+	}
+}
+
+func TestFocusFrameJunctions(t *testing.T) {
+	// The focused pane sits against the top frame: its top corners are T
+	// junctions, not corners, so the frame line stays unbroken.
+	var b bytes.Buffer
+	drawFocusFrame(&b, Rect{X: 30, Y: 1, W: 28, H: 12}, 60, 15)
+	out := b.String()
+	if !strings.Contains(out, "\x1b[1;30H┬") || !strings.Contains(out, "\x1b[1;59H┬") {
+		t.Fatalf("top corners are not junctions: %q", out)
+	}
+	if !strings.Contains(out, "\x1b[14;30H┴") || !strings.Contains(out, "\x1b[14;59H┴") {
+		t.Fatalf("bottom corners are not junctions: %q", out)
 	}
 }
 
@@ -1028,7 +1036,7 @@ func TestPaneHistory(t *testing.T) {
 	}
 
 	// A wide window reaches the first row; -s before the pane id works.
-	wide := h.run("read", "-s", "hist", root, "--scrollback", "60")
+	wide := h.run("read", "-s", "hist", root, "--scrollback", "100")
 	if !strings.Contains(wide, "HIST-001") {
 		t.Fatalf("history missing HIST-001:\n%s", wide)
 	}
@@ -1064,7 +1072,7 @@ func TestPaneHistory(t *testing.T) {
 		`for i in \$(seq 1 %d); do echo TAIL-\$(printf %%03d \$i); done; `+
 		`printf '\033[%d;1H'; sleep 15"`, rows, rows+2)
 	h.run("write-to", root, "-s", "histg", "--msg", cmd, "--enter")
-	h.waitFor("histg", root, "TAIL-023")
+	h.waitFor("histg", root, fmt.Sprintf("TAIL-%03d", rows))
 	time.Sleep(200 * time.Millisecond)
 	if got := h.history("histg", root, 1); len(got) != 1 || got[0] != "" {
 		t.Fatalf("blank row above the live screen not returned: %q", got)
@@ -1147,7 +1155,7 @@ func TestDividerAt(t *testing.T) {
 func testSnapshot(root *Node, cols, rows int, mouse map[string]bool) *Snapshot {
 	snap := &Snapshot{Root: root, Cols: cols, Rows: rows}
 	rects := map[string]Rect{}
-	layout(root, Rect{0, 0, cols, rows - 1}, rects)
+	layout(root, paneArea(cols, rows), rects)
 	for _, id := range allPanes(root) {
 		snap.Panes = append(snap.Panes, PaneInfo{ID: id, Rect: rects[id], Mouse: mouse[id]})
 	}
@@ -1162,7 +1170,7 @@ func TestDragPress(t *testing.T) {
 	snap := testSnapshot(row, 100, 30, nil)
 	ds, ok := dragPress(snap, 49, 5)
 	if !ok || ds.first != "a" || ds.second != "b" || ds.axis != "row" ||
-		ds.rect != (Rect{X: 0, Y: 0, W: 100, H: 29}) {
+		ds.rect != (Rect{X: 1, Y: 1, W: 98, H: 27}) {
 		t.Fatalf("divider press: %+v ok=%v", ds, ok)
 	}
 	if _, ok := dragPress(snap, 10, 5); ok {
@@ -1189,7 +1197,7 @@ func TestDragPress(t *testing.T) {
 	}}
 	snap = testSnapshot(same, 100, 30, nil)
 	// The root is what layout hands its tree: the whole pane area.
-	want := Rect{X: 0, Y: 0, W: snap.Cols, H: snap.Rows - 1}
+	want := paneArea(snap.Cols, snap.Rows)
 	ds, ok = dragPress(snap, 49, 5)
 	if !ok || ds.first != "a" || ds.second != "b" || ds.rect != want {
 		t.Fatalf("same-axis outer press: %+v ok=%v, want rect %v", ds, ok, want)
@@ -1307,12 +1315,12 @@ func TestResizeSplit(t *testing.T) {
 	if got[q1].W != 3 {
 		t.Fatalf("outer minimum with same-axis nesting = %v, want 3", got)
 	}
-	if got[q2].W+got[q3].W+1 != cols-1-3 {
+	if got[q2].W+got[q3].W+1 != cols-6 {
 		t.Fatalf("outer right side width: %v", got)
 	}
 	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":1}`, "-s", "rs2")
 	got = h.rects("rs2")
-	if got[q1].W != cols-1-3 || got[q2].W+got[q3].W+1 != 3 {
+	if got[q1].W != cols-6 || got[q2].W+got[q3].W+1 != 3 {
 		t.Fatalf("outer maximum with same-axis nesting: %v", got)
 	}
 }

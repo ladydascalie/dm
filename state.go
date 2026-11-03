@@ -402,6 +402,16 @@ func lowestCommonAncestor(a, b []*Node) *Node {
 	return lca
 }
 
+// paneArea is the rectangle the pane tree lives in. One cell on each edge is
+// the frame, and the last row is the status bar. Very small terminals fall back
+// to no frame rather than a negative rect.
+func paneArea(cols, rows int) Rect {
+	if cols < 4 || rows < 5 {
+		return Rect{0, 0, cols, rows - 1}
+	}
+	return Rect{1, 1, cols - 2, rows - 3}
+}
+
 // splitSizes turns the node's weights into integer cell counts that sum to
 // space. A split without weights divides equally.
 func splitSizes(n *Node, space int) []int {

@@ -644,7 +644,7 @@ func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
 		return dragStart{}, false
 	}
 	n, first, second, axis, r, ok := dividerHit(snap.Root,
-		Rect{0, 0, snap.Cols, snap.Rows - 1}, x, y)
+		paneArea(snap.Cols, snap.Rows), x, y)
 	if !ok {
 		return dragStart{}, false
 	}
@@ -908,12 +908,12 @@ func (t *tui) draw() {
 			drawPane(&b, vt, p.Rect)
 		}
 	}
+	drawFrame(&b, t.snap.Cols, t.snap.Rows)
 	if t.snap.Root != nil {
-		focus := Rect{}
-		if p := t.paneByID(t.snap.Focus); p != nil {
-			focus = p.Rect
-		}
-		drawDividers(&b, t.snap.Root, Rect{0, 0, t.snap.Cols, t.snap.Rows - 1}, focus)
+		drawDividers(&b, t.snap.Root, paneArea(t.snap.Cols, t.snap.Rows))
+	}
+	if p := t.paneByID(win.Focus); p != nil {
+		drawFocusFrame(&b, p.Rect, t.snap.Cols, t.snap.Rows)
 	}
 	scrollInfo := ""
 	if t.scroll != "" {

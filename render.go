@@ -200,22 +200,18 @@ func dividerRect(n *Node, rects []Rect, i int) Rect {
 	return Rect{X: kr.X, Y: kr.Y + kr.H, W: kr.W, H: 1}
 }
 
-func drawDividers(buf *bytes.Buffer, n *Node, r Rect, focus Rect) {
+func drawDividers(buf *bytes.Buffer, n *Node, r Rect) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
 		return
 	}
 	rects := childRects(n, r)
 	for i, kid := range n.Kids {
-		drawDividers(buf, kid, rects[i], focus)
+		drawDividers(buf, kid, rects[i])
 		if i >= len(rects)-1 {
 			continue
 		}
 		d := dividerRect(n, rects, i)
-		if dividerTouches(d, focus) {
-			buf.WriteString("\x1b[0m\x1b[1;36m")
-		} else {
-			buf.WriteString("\x1b[0m\x1b[90m")
-		}
+		buf.WriteString("\x1b[0m\x1b[90m")
 		if n.Dir == "row" {
 			for y := 0; y < d.H; y++ {
 				fmt.Fprintf(buf, "\x1b[%d;%dH│", d.Y+y+1, d.X+1)
@@ -331,18 +327,80 @@ func paneAtRect(n *Node, r Rect, x, y int) string {
 	return ""
 }
 
-// dividerTouches reports whether a divider cell line runs along an edge of the
-// focused pane, so the active pane is visible as a bright frame.
-func dividerTouches(d, focus Rect) bool {
-	if d.W <= 0 || d.H <= 0 || focus.W <= 0 || focus.H <= 0 {
-		return false
+// drawFrame paints the outer border of the pane area. Every pane has a box;
+// drawFocusFrame recolours the active one on top.
+func drawFrame(buf *bytes.Buffer, cols, rows int) {
+	if cols < 4 || rows < 5 {
+		return
 	}
-	overlapY := d.Y < focus.Y+focus.H && focus.Y < d.Y+d.H
-	overlapX := d.X < focus.X+focus.W && focus.X < d.X+d.W
-	if d.W == 1 {
-		return overlapY && (focus.X+focus.W == d.X || focus.X == d.X+1)
+	right, bottom := cols-1, rows-2
+	buf.WriteString("\x1b[0m\x1b[90m")
+	put := func(x, y int, s string) {
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
 	}
-	return overlapX && (focus.Y+focus.H == d.Y || focus.Y == d.Y+1)
+	put(0, 0, "┌")
+	put(right, 0, "┐")
+	put(0, bottom, "└")
+	put(right, bottom, "┘")
+	for x := 1; x < right; x++ {
+		put(x, 0, "─")
+		put(x, bottom, "─")
+	}
+	for y := 1; y < bottom; y++ {
+		put(0, y, "│")
+		put(right, y, "│")
+	}
+}
+
+// drawFocusFrame wraps the active pane in box drawing characters in cyan. A
+// corner that sits on the outer frame uses a junction, so the frame line is not
+// broken by a stray corner glyph.
+func drawFocusFrame(buf *bytes.Buffer, r Rect, cols, rows int) {
+	if r.W <= 0 || r.H <= 0 {
+		return
+	}
+	x0, y0 := r.X-1, r.Y-1
+	x1, y1 := r.X+r.W, r.Y+r.H
+	if x0 < 0 || y0 < 0 {
+		return
+	}
+	buf.WriteString("\x1b[0m\x1b[1;36m")
+	put := func(x, y int, s string) {
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
+	}
+	topLeft, topRight, botLeft, botRight := "┌", "┐", "└", "┘"
+	if y0 == 0 && x0 > 0 {
+		topLeft = "┬"
+	} else if x0 == 0 && y0 > 0 {
+		topLeft = "├"
+	}
+	if y0 == 0 && x1 < cols-1 {
+		topRight = "┬"
+	} else if x1 == cols-1 && y0 > 0 {
+		topRight = "┤"
+	}
+	if y1 == rows-2 && x0 > 0 {
+		botLeft = "┴"
+	} else if x0 == 0 && y1 < rows-2 {
+		botLeft = "├"
+	}
+	if y1 == rows-2 && x1 < cols-1 {
+		botRight = "┴"
+	} else if x1 == cols-1 && y1 < rows-2 {
+		botRight = "┤"
+	}
+	put(x0, y0, topLeft)
+	put(x1, y0, topRight)
+	put(x0, y1, botLeft)
+	put(x1, y1, botRight)
+	for x := x0 + 1; x < x1; x++ {
+		put(x, y0, "─")
+		put(x, y1, "─")
+	}
+	for y := y0 + 1; y < y1; y++ {
+		put(x0, y, "│")
+		put(x1, y, "│")
+	}
 }
 
 // drawBar paints the one-line status bar at the bottom.

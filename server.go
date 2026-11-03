@@ -326,7 +326,7 @@ func (s *server) broadcastLocked(m Msg) {
 func (s *server) snapshotLocked() *Snapshot {
 	win := s.st.win()
 	rects := map[string]Rect{}
-	layout(win.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
+	layout(win.Root, paneArea(s.cols, s.rows), rects)
 	snap := &Snapshot{
 		Session:      s.st.Name,
 		Workspace:    s.st.ws().Name,
@@ -535,7 +535,7 @@ func (s *server) syncSizes() {
 	s.mu.Lock()
 	win := s.st.win()
 	rects := map[string]Rect{}
-	layout(win.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
+	layout(win.Root, paneArea(s.cols, s.rows), rects)
 	s.st.Cols, s.st.Rows = s.cols, s.rows
 	var calls []func()
 	for id, r := range rects {
@@ -1375,7 +1375,7 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 			if len(split.Kids) != 2 {
 				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
 			}
-			r, ok := nodeRect(win.Root, split, Rect{0, 0, s.cols, s.rows - 1})
+			r, ok := nodeRect(win.Root, split, paneArea(s.cols, s.rows))
 			if !ok {
 				return fmt.Errorf("no rect for split of %q", first)
 			}
@@ -1429,7 +1429,7 @@ func (s *server) focusDir(dir string) error {
 	defer s.mu.Unlock()
 	win := s.st.win()
 	rects := map[string]Rect{}
-	layout(win.Root, Rect{0, 0, s.cols, s.rows - 1}, rects)
+	layout(win.Root, paneArea(s.cols, s.rows), rects)
 	n := neighbor(rects, win.Focus, dir)
 	if n == "" {
 		return fmt.Errorf("no pane %s of %s", dir, win.Focus)
