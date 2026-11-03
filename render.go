@@ -190,41 +190,36 @@ func screenBytes(vt vt10x.View) []byte {
 	return b.Bytes()
 }
 
+// dividerRect returns the one-cell divider between child i and child i+1:
+// the cell immediately after child i along the split's axis.
+func dividerRect(n *Node, rects []Rect, i int) Rect {
+	kr := rects[i]
+	if n.Dir == "row" {
+		return Rect{X: kr.X + kr.W, Y: kr.Y, W: 1, H: kr.H}
+	}
+	return Rect{X: kr.X, Y: kr.Y + kr.H, W: kr.W, H: 1}
+}
+
 func drawDividers(buf *bytes.Buffer, n *Node, r Rect) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
 		return
 	}
-	k := len(n.Kids)
-	horizontal := n.Dir == "row"
-	space := r.W
-	if !horizontal {
-		space = r.H
-	}
-	space -= k - 1
-	if space < k {
-		space = k
-	}
-	sizes := splitSizes(n, space)
-	off := 0
+	rects := childRects(n, r)
 	for i, kid := range n.Kids {
-		size := sizes[i]
-		if horizontal {
-			drawDividers(buf, kid, Rect{X: r.X + off, Y: r.Y, W: size, H: r.H})
-		} else {
-			drawDividers(buf, kid, Rect{X: r.X, Y: r.Y + off, W: r.W, H: size})
+		drawDividers(buf, kid, rects[i])
+		if i >= len(rects)-1 {
+			continue
 		}
-		if i < k-1 {
-			buf.WriteString("\x1b[0m\x1b[90m")
-			if horizontal {
-				for y := 0; y < r.H; y++ {
-					fmt.Fprintf(buf, "\x1b[%d;%dH│", r.Y+y+1, r.X+off+size+1)
-				}
-			} else {
-				fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+off+size+1, r.X+1)
-				buf.WriteString(strings.Repeat("─", r.W))
+		d := dividerRect(n, rects, i)
+		buf.WriteString("\x1b[0m\x1b[90m")
+		if n.Dir == "row" {
+			for y := 0; y < d.H; y++ {
+				fmt.Fprintf(buf, "\x1b[%d;%dH│", d.Y+y+1, d.X+1)
 			}
+		} else {
+			fmt.Fprintf(buf, "\x1b[%d;%dH", d.Y+1, d.X+1)
+			buf.WriteString(strings.Repeat("─", d.W))
 		}
-		off += size + 1
 	}
 }
 
@@ -290,49 +285,26 @@ func dividerHit(n *Node, r Rect, x, y int) (split *Node, first, second, axis str
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
 		return nil, "", "", "", Rect{}, false
 	}
-	k := len(n.Kids)
+	rects := childRects(n, r)
 	horizontal := n.Dir == "row"
-	space := r.W
-	if !horizontal {
-		space = r.H
-	}
-	space -= k - 1
-	if space < k {
-		space = k
-	}
-	sizes := splitSizes(n, space)
-	rects := make([]Rect, k)
-	off := 0
-	for i := range n.Kids {
-		size := sizes[i]
-		if horizontal {
-			rects[i] = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
-		} else {
-			rects[i] = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
-		}
-		off += size + 1
-	}
-	for i := 0; i < k; i++ {
-		if i < k-1 {
-			kr := rects[i]
-			if horizontal && x == kr.X+kr.W && y >= r.Y && y < r.Y+r.H {
-				first = paneAtRect(n.Kids[i], kr, x-1, y)
-				second = paneAtRect(n.Kids[i+1], rects[i+1], x+1, y)
-				if first == "" || second == "" {
-					return nil, "", "", "", Rect{}, false
+	for i, kr := range rects {
+		if i < len(rects)-1 {
+			d := dividerRect(n, rects, i)
+			if x >= d.X && x < d.X+d.W && y >= d.Y && y < d.Y+d.H {
+				if horizontal {
+					first = paneAtRect(n.Kids[i], kr, kr.X+kr.W-1, y)
+					second = paneAtRect(n.Kids[i+1], rects[i+1], rects[i+1].X, y)
+				} else {
+					first = paneAtRect(n.Kids[i], kr, x, kr.Y+kr.H-1)
+					second = paneAtRect(n.Kids[i+1], rects[i+1], x, rects[i+1].Y)
 				}
-				return n, first, second, n.Dir, r, true
-			}
-			if !horizontal && y == kr.Y+kr.H && x >= r.X && x < r.X+r.W {
-				first = paneAtRect(n.Kids[i], kr, x, y-1)
-				second = paneAtRect(n.Kids[i+1], rects[i+1], x, y+1)
 				if first == "" || second == "" {
 					return nil, "", "", "", Rect{}, false
 				}
 				return n, first, second, n.Dir, r, true
 			}
 		}
-		if sn, f, sec, ax, sr, hit := dividerHit(n.Kids[i], rects[i], x, y); hit {
+		if sn, f, sec, ax, sr, hit := dividerHit(n.Kids[i], kr, x, y); hit {
 			return sn, f, sec, ax, sr, hit
 		}
 	}
@@ -347,33 +319,10 @@ func paneAtRect(n *Node, r Rect, x, y int) string {
 	if n.Pane != "" {
 		return n.Pane
 	}
-	k := len(n.Kids)
-	if k == 0 {
-		return ""
-	}
-	horizontal := n.Dir == "row"
-	space := r.W
-	if !horizontal {
-		space = r.H
-	}
-	space -= k - 1
-	if space < k {
-		space = k
-	}
-	sizes := splitSizes(n, space)
-	off := 0
-	for i, kid := range n.Kids {
-		size := sizes[i]
-		var kr Rect
-		if horizontal {
-			kr = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
-		} else {
-			kr = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
-		}
+	for i, kr := range childRects(n, r) {
 		if x >= kr.X && x < kr.X+kr.W && y >= kr.Y && y < kr.Y+kr.H {
-			return paneAtRect(kid, kr, x, y)
+			return paneAtRect(n.Kids[i], kr, x, y)
 		}
-		off += size + 1
 	}
 	return ""
 }

@@ -306,20 +306,14 @@ func pruneLeaf(root *Node, target string) (*Node, bool) {
 	return root, false
 }
 
-// layout assigns a rectangle to every pane. Each split burns one column or row
-// for the divider, so panes never share a cell.
-func layout(n *Node, r Rect, out map[string]Rect) {
-	if n == nil {
-		return
-	}
-	if n.Pane != "" {
-		out[n.Pane] = r
-		return
+// childRects returns the rectangle of each child of n inside r. Each split
+// burns one cell between neighbours for its divider, so no two children share
+// a cell. A leaf has no children and returns nil.
+func childRects(n *Node, r Rect) []Rect {
+	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
+		return nil
 	}
 	k := len(n.Kids)
-	if k == 0 {
-		return
-	}
 	horizontal := n.Dir == "row"
 	space := r.W
 	if !horizontal {
@@ -330,15 +324,32 @@ func layout(n *Node, r Rect, out map[string]Rect) {
 		space = k
 	}
 	sizes := splitSizes(n, space)
+	rects := make([]Rect, k)
 	off := 0
-	for i, kid := range n.Kids {
-		size := sizes[i]
+	for i := range n.Kids {
 		if horizontal {
-			layout(kid, Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}, out)
+			rects[i] = Rect{X: r.X + off, Y: r.Y, W: sizes[i], H: r.H}
 		} else {
-			layout(kid, Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}, out)
+			rects[i] = Rect{X: r.X, Y: r.Y + off, W: r.W, H: sizes[i]}
 		}
-		off += size + 1
+		off += sizes[i] + 1
+	}
+	return rects
+}
+
+// layout assigns a rectangle to every pane. Each split burns one column or row
+// for the divider, so panes never share a cell.
+func layout(n *Node, r Rect, out map[string]Rect) {
+	if n == nil {
+		return
+	}
+	if n.Pane != "" {
+		out[n.Pane] = r
+		return
+	}
+	rects := childRects(n, r)
+	for i, kid := range n.Kids {
+		layout(kid, rects[i], out)
 	}
 }
 
@@ -353,30 +364,11 @@ func nodeRect(n, target *Node, r Rect) (Rect, bool) {
 	if n.Pane != "" || len(n.Kids) == 0 {
 		return Rect{}, false
 	}
-	k := len(n.Kids)
-	horizontal := n.Dir == "row"
-	space := r.W
-	if !horizontal {
-		space = r.H
-	}
-	space -= k - 1
-	if space < k {
-		space = k
-	}
-	sizes := splitSizes(n, space)
-	off := 0
+	rects := childRects(n, r)
 	for i, kid := range n.Kids {
-		size := sizes[i]
-		var kr Rect
-		if horizontal {
-			kr = Rect{X: r.X + off, Y: r.Y, W: size, H: r.H}
-		} else {
-			kr = Rect{X: r.X, Y: r.Y + off, W: r.W, H: size}
-		}
-		if out, ok := nodeRect(kid, target, kr); ok {
+		if out, ok := nodeRect(kid, target, rects[i]); ok {
 			return out, ok
 		}
-		off += size + 1
 	}
 	return Rect{}, false
 }
