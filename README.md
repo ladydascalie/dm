@@ -270,11 +270,12 @@ them and tells you to use the program's. The pane daemon owns this fact: it
 reports `alt` and `mouse` in every snapshot, so a client that attached late
 still knows even when the enabling escape sequence has left the replay ring.
 
-Scrollback is built on demand: the client keeps the pane's last 512 KiB of raw
-output, replays it into a tall terminal (2000 rows), and draws a window into it
-at the current offset. It is a frozen snapshot taken when you scroll, so new
-output does not move the view. The replay is approximate for full-screen
-programs; for streamed output it is exact.
+Scrollback is built on demand: the first time you scroll a pane, the client asks
+the server for that pane's output ring, replays it into a tall terminal (2000
+rows), and draws a window into it at the current offset. The ring is cached per
+pane for that layout, so a second scroll asks for nothing. It is a frozen
+snapshot taken when you scroll, so new output does not move the view. The replay
+is approximate for full-screen programs; for streamed output it is exact.
 
 Mouse reporting means normal drag no longer selects text. Hold Shift while
 dragging to use the terminal's own selection.
@@ -309,6 +310,19 @@ of an attached client, because the operator is not looking at it. A focused
 pane with a client attached stays quiet, `DM_NOTIFY=0` turns notifications off,
 and a host without `notify-send` gets none.
 
+## Performance
+
+A frame paints only the rows that changed. Each pane row is fingerprinted, so
+a row is written again only when its glyphs or colours move; the sidebar, the
+status bar and each overlay are compared as whole bands and written only when
+their bytes differ. The client no longer clears the screen and repaints every
+cell on every frame: a steady frame writes nothing. Every written frame is
+wrapped in a synchronized update (`ESC [ ? 2026 h` to `ESC [ ? 2026 l`), so the
+terminal applies it in one go. A frame that clears is a full repaint, and it
+happens only when the picture is not stable: a resize, a pane added, closed or
+moved, a focus change, or entering and leaving scrollback, the menu, the picker
+or the palette.
+
 ## RPC
 
 Every client speaks newline-free, length-prefixed JSON over the session socket
@@ -338,9 +352,10 @@ screen, oldest first, trailing blanks trimmed. `lines` must be positive.
 
 The visible screen is a snapshot, not a replay. Each pane daemon serialises its
 VT to canonical ANSI (`screen`), and the client writes that into a fresh
-terminal at the pane's rectangle. The output ring travels separately as
-`replay` and feeds only the scrollback history, so a client never rebuilds the
-picture from raw output.
+terminal at the pane's rectangle. An attach carries those screens and no
+history. The output ring travels separately as `replay`, sent only when the
+client asks as scrollback opens, and feeds only the scrollback history, so a
+client never rebuilds the picture from raw output.
 
 `dm exec` prints the response as JSON. A failed action exits non-zero.
 
@@ -383,12 +398,21 @@ Two processes per session:
 
 ```
 dm __server   owns layout, focus, clients; persists state.json on every change
-dm __pane     one per pane; owns the PTY, VT screen, status and 512 KiB output ring
+dm __pane     one per pane; owns the PTY, VT screen, status and a fixed 512 KiB ring
 ```
 
 Each pane daemon has its own unix socket and is started with `setsid`, so it
 survives the server. The server, on start, reads `state.json` and **adopts** the
 still-running pane daemons instead of respawning them.
+
+A pane daemon watches its own socket path. When the path is gone, or names a
+different file, no client can reach that daemon, so it stops its shell and
+exits. An intact path is the normal state while the server restarts, so the
+daemon stays.
+
+A pane daemon holds a fixed 512 KiB output ring, allocated once, and runs with
+a 32 MiB memory ceiling. A pane is still its own Go process, and that process is
+the floor: the ceiling bounds a burst, it does not lower the floor.
 
 - Kill the client: nothing is lost, reattach.
 - More than one client may attach. They share one layout: the largest attached
@@ -399,8 +423,9 @@ still-running pane daemons instead of respawning them.
   session from inside one of its own panes, because the mirror is useless and
   competes for the shared size. Use `-s` for another session.
 - Kill the server (`kill -9`, crash, logout): panes keep running, including
-  their shells. The next CLI call or attach restarts the server and reconnects
-  the same pane processes. Content and status are still there.
+  their shells, because their sockets stay intact. The next CLI call or attach
+  restarts the server and reconnects the same pane processes. Content and
+  status are still there.
 - A pane whose shell exits is removed from the layout and its split collapses.
   Focus moves to a live neighbour.
 - The last pane of a window closes the window. The last window ends the session:
