@@ -328,14 +328,22 @@ func (s *server) broadcastLocked(m Msg) {
 	}
 }
 
+// requestedRailLocked is the stored width, floored at zero, before the screen
+// clamp. The caller holds s.mu.
+func (s *server) requestedRailLocked() int {
+	if !s.st.RailSet {
+		return defaultRail
+	}
+	if s.st.Rail < 0 {
+		return 0
+	}
+	return s.st.Rail
+}
+
 // railLocked is the effective sidebar width for the current screen. The caller
 // holds s.mu.
 func (s *server) railLocked() int {
-	rail := s.st.Rail
-	if !s.st.RailSet {
-		rail = defaultRail
-	}
-	return effectiveRail(s.cols, rail)
+	return effectiveRail(s.cols, s.requestedRailLocked())
 }
 
 // setRail records the requested width and returns the effective one. A
@@ -364,6 +372,7 @@ func (s *server) snapshotLocked() *Snapshot {
 		Cols:         s.cols,
 		Rows:         s.rows,
 		Rail:         s.railLocked(),
+		RailWant:     s.requestedRailLocked(),
 		Root:         win.Root,
 	}
 	for _, w := range s.st.ws().Windows {

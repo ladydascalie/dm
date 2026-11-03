@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/hinshun/vt10x"
 )
@@ -282,6 +283,89 @@ func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
 	}
 }
 
+// wideRanges are the East Asian Wide and Fullwidth code point ranges. They are
+// sorted and non-overlapping, so runeWidth can binary-search them.
+var wideRanges = [][2]rune{
+	{0x1100, 0x115F},
+	{0x2E80, 0x303E},
+	{0x3041, 0x33FF},
+	{0x3400, 0x4DBF},
+	{0x4E00, 0x9FFF},
+	{0xA000, 0xA4CF},
+	{0xA960, 0xA97F},
+	{0xAC00, 0xD7A3},
+	{0xF900, 0xFAFF},
+	{0xFE10, 0xFE19},
+	{0xFE30, 0xFE6F},
+	{0xFF00, 0xFF60},
+	{0xFFE0, 0xFFE6},
+	{0x1B000, 0x1B2FF},
+	{0x1F004, 0x1F004},
+	{0x1F0CF, 0x1F0CF},
+	{0x1F18E, 0x1F18E},
+	{0x1F191, 0x1F19A},
+	{0x1F200, 0x1F320},
+	{0x1F32D, 0x1F335},
+	{0x1F337, 0x1F37C},
+	{0x1F37E, 0x1F393},
+	{0x1F3A0, 0x1F3CA},
+	{0x1F3CF, 0x1F3D3},
+	{0x1F3E0, 0x1F3F0},
+	{0x1F3F4, 0x1F3F4},
+	{0x1F3F8, 0x1F43E},
+	{0x1F440, 0x1F440},
+	{0x1F442, 0x1F4FC},
+	{0x1F4FF, 0x1F53D},
+	{0x1F54B, 0x1F54E},
+	{0x1F550, 0x1F567},
+	{0x1F57A, 0x1F57A},
+	{0x1F595, 0x1F596},
+	{0x1F5A4, 0x1F5A4},
+	{0x1F5FB, 0x1F64F},
+	{0x1F680, 0x1F6C5},
+	{0x1F6CC, 0x1F6CC},
+	{0x1F6D0, 0x1F6D2},
+	{0x1F6EB, 0x1F6EC},
+	{0x1F6F4, 0x1F6FA},
+	{0x1F7E0, 0x1F7EB},
+	{0x1F90D, 0x1F971},
+	{0x1F973, 0x1F976},
+	{0x1F97A, 0x1F9A2},
+	{0x1F9A5, 0x1F9AA},
+	{0x1F9AE, 0x1F9CA},
+	{0x1F9CD, 0x1F9FF},
+	{0x1FA70, 0x1FA73},
+	{0x1FA78, 0x1FA7A},
+	{0x1FA80, 0x1FA82},
+	{0x1FA90, 0x1FA95},
+	{0x20000, 0x2FFFD},
+	{0x30000, 0x3FFFD},
+}
+
+// runeWidth is the number of terminal cells a rune paints: two for an East
+// Asian wide or fullwidth rune, zero for a combining mark, one otherwise.
+func runeWidth(r rune) int {
+	if r == 0 || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
+		return 0
+	}
+	if r < wideRanges[0][0] {
+		return 1
+	}
+	lo, hi := 0, len(wideRanges)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		switch {
+		case r < wideRanges[mid][0]:
+			hi = mid
+		case r > wideRanges[mid][1]:
+			lo = mid + 1
+		default:
+			return 2
+		}
+	}
+	return 1
+}
+
 // railKind is the row type the sidebar paints: a workspace header, a window
 // header, or a pane.
 type railKind int
@@ -376,9 +460,6 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		return
 	}
 	w := snap.Rail
-	if w > snap.Cols {
-		w = snap.Cols
-	}
 	rows := snap.Rows - 1
 	items := railItems(snap)
 	for y := 0; y < rows && y < len(items); y++ {
@@ -405,9 +486,16 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 			text = "  " + g + " " + text
 		}
 		line := []rune(text)
-		if len(line) > w {
-			line = line[:w]
+		cut, cells := 0, 0
+		for cut < len(line) {
+			rw := runeWidth(line[cut])
+			if cells+rw > w {
+				break
+			}
+			cells += rw
+			cut++
 		}
+		line = line[:cut]
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
 		buf.WriteString(style)
 		for i, r := range line {
@@ -424,7 +512,7 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 			}
 			buf.WriteRune(r)
 		}
-		if pad := w - len(line); pad > 0 {
+		if pad := w - cells; pad > 0 {
 			buf.WriteString(strings.Repeat(" ", pad))
 		}
 		buf.WriteString("\x1b[0m")
@@ -605,9 +693,16 @@ func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, scroll string) {
 	}
 	width := snap.Cols
 	runes := []rune(line)
-	if len(runes) > width {
-		runes = runes[:width]
+	cut, cells := 0, 0
+	for cut < len(runes) {
+		rw := runeWidth(runes[cut])
+		if cells+rw > width {
+			break
+		}
+		cells += rw
+		cut++
 	}
+	runes = runes[:cut]
 	if hlEnd > len(runes) {
 		hlEnd = len(runes)
 	}
@@ -621,7 +716,7 @@ func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, scroll string) {
 		buf.WriteString("\x1b[0m\x1b[7m")
 	}
 	buf.WriteString(string(runes[hlEnd:]))
-	if pad := width - len(runes); pad > 0 {
+	if pad := width - cells; pad > 0 {
 		buf.WriteString(strings.Repeat(" ", pad))
 	}
 	buf.WriteString("\x1b[0m")

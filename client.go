@@ -281,9 +281,12 @@ func (t *tui) apply(m Msg) {
 	switch m.Type {
 	case "snapshot":
 		t.snap = m.Snap
-		if m.Snap.Rail > 0 {
+		switch {
+		case m.Snap.RailWant > 0:
+			t.railWant = m.Snap.RailWant
+		case m.Snap.Rail > 0:
 			t.railWant = m.Snap.Rail
-		} else if t.railWant <= 0 {
+		case t.railWant <= 0:
 			t.railWant = defaultRail
 		}
 		if t.scroll != "" {
@@ -1544,7 +1547,7 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 		t.railPress = false
 		return true
 	}
-	if ev.btn&3 == 0 && ev.btn&32 == 0 {
+	if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 {
 		t.railPress = true
 		if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: id})

@@ -94,12 +94,14 @@ type Snapshot struct {
 	Panes        []PaneInfo `json:"panes"`
 	// All lists every pane in the session; Panes is the active window only.
 	All []AllPane `json:"all,omitempty"`
-	// Rail is the effective sidebar width the server used. Zero hides it.
-	Rail  int    `json:"rail"`
-	Focus string `json:"focus"`
-	Cols  int    `json:"cols"`
-	Rows  int    `json:"rows"`
-	Root  *Node  `json:"root"`
+	// Rail is the effective sidebar width the server used. RailWant is the
+	// requested width before the screen clamp; zero hides the rail.
+	Rail     int    `json:"rail"`
+	RailWant int    `json:"railWant"`
+	Focus    string `json:"focus"`
+	Cols     int    `json:"cols"`
+	Rows     int    `json:"rows"`
+	Root     *Node  `json:"root"`
 }
 
 const maxFrame = 16 << 20
