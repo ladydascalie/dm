@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	histMax  = 512 << 10
+	// histRows is how many rows of scrollback the tall terminal keeps.
 	histRows = 2000
 
 	// escTimeout bounds how long a lone escape or a partial escape sequence
@@ -54,7 +54,13 @@ type tui struct {
 	sel      int
 	menu     *menu
 
+	// hist is each pane's replay ring. It is not filled as output arrives:
+	// the first scrollback entry asks the server for one replay and caches it
+	// here. histMeta records the rect a ring was asked for and whether it has
+	// landed, so a second entry asks for nothing and a ring wrapped for an old
+	// layout is never shown.
 	hist     map[string][]byte
+	histMeta map[string]histCache
 	scroll   string // pane id shown from scrollback
 	offset   int
 	maxOff   int
@@ -142,6 +148,14 @@ const (
 	frameOpen  = "\x1b[?2026h"
 	frameClose = "\x1b[?2026l"
 )
+
+// histCache is one pane's replay bookkeeping: the rect the ring was asked for
+// and whether the reply has landed. The ring itself lives in tui.hist, which
+// applyReplay owns.
+type histCache struct {
+	at  Rect
+	got bool
+}
 
 // panePaint is one pane's content for one frame: the terminal to read, the
 // first row to show from it and the selection to mark.
@@ -357,6 +371,11 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 }
 
 func (t *tui) apply(m Msg) {
+	// The history cache is filled on demand, and a replay pushed by a layout
+	// change can arrive before the first request.
+	if t.hist == nil {
+		t.hist = map[string][]byte{}
+	}
 	switch m.Type {
 	case "snapshot":
 		t.snap = m.Snap
@@ -402,6 +421,25 @@ func (t *tui) apply(m Msg) {
 				delete(t.vts, id)
 			}
 		}
+		// A pane that is gone, or whose id changed, takes its ring with it.
+		for id := range t.histMeta {
+			if !keep[id] {
+				delete(t.hist, id)
+				delete(t.histMeta, id)
+			}
+		}
+		// A ring wrapped for the old rect would not line up with the pane.
+		for _, p := range m.Snap.Panes {
+			c, ok := t.histMeta[p.ID]
+			if !ok || c.at == p.Rect {
+				continue
+			}
+			delete(t.hist, p.ID)
+			delete(t.histMeta, p.ID)
+			if t.scroll == p.ID && t.scrollVT == nil {
+				t.exitScroll()
+			}
+		}
 		if t.selText != nil {
 			p := t.paneByID(t.selText.pane)
 			if p == nil || p.Rect.W != t.selText.w || p.Rect.H != t.selText.h {
@@ -423,11 +461,6 @@ func (t *tui) apply(m Msg) {
 	case "bytes":
 		if vt := t.vts[m.Target]; vt != nil {
 			_, _ = vt.Write(m.Data)
-			h := append(t.hist[m.Target], m.Data...)
-			if len(h) > histMax {
-				h = h[len(h)-histMax:]
-			}
-			t.hist[m.Target] = h
 			t.dirty = true
 		}
 	case "close":
@@ -438,6 +471,12 @@ func (t *tui) apply(m Msg) {
 		if !m.OK {
 			t.notify(m.Error)
 		}
+	}
+	// A ring that just landed belongs to the scrollback wait it answers, if
+	// there is one. The replay case itself only stores the ring.
+	if m.Type == "replay" {
+		t.noteHist(m.Target)
+		t.histArrived(m.Target)
 	}
 }
 
@@ -926,6 +965,10 @@ func (t *tui) scrollBy(n int) {
 		t.exitScroll()
 		return
 	}
+	if t.scrollVT == nil {
+		// The ring is still on its way; the wheel waits for it.
+		return
+	}
 	t.offset += n
 	if t.offset <= 0 {
 		t.exitScroll()
@@ -947,22 +990,106 @@ func (t *tui) exitScroll() {
 	t.dirty = true
 }
 
-// startScroll builds a tall terminal from the pane's byte history. The live
-// screen keeps updating; the tall one is a frozen snapshot until the user
-// returns to the bottom.
+// startScroll puts a pane in scrollback. The client keeps no history until the
+// operator asks for it, so the first entry requests one replay and shows the
+// pane's live screen until the ring lands. A second entry asks for nothing.
 func (t *tui) startScroll(p *PaneInfo) {
 	if p.Alt {
 		t.notify("app is on the alternate screen; use its own scroll")
 		return
 	}
+	t.mode = "scroll"
+	t.scroll = p.ID
+	t.scrollVT = nil
+	t.offset = 0
+	t.maxOff = 0
+	t.armed = false
+	t.dirty = true
+	if m, ok := t.histMeta[p.ID]; ok {
+		if m.got && m.at == p.Rect {
+			t.buildScroll(p)
+		}
+		return
+	}
+	t.requestHistory(p)
+}
+
+// requestHistory asks the server for one pane's replay ring. histMeta is the
+// cache key: it goes in before the request, so nothing asks twice.
+func (t *tui) requestHistory(p *PaneInfo) {
+	if t.hist == nil {
+		t.hist = map[string][]byte{}
+	}
+	if t.histMeta == nil {
+		t.histMeta = map[string]histCache{}
+	}
+	t.histMeta[p.ID] = histCache{at: p.Rect}
+	if t.conn != nil {
+		_ = t.conn.send(Msg{Type: "req", Action: "replay", Target: p.ID})
+	}
+}
+
+// buildScroll builds the tall terminal a scrollback pane is shown from, over
+// the ring the server sent for the pane's current rect. The live screen keeps
+// updating behind it; the tall one is a frozen snapshot.
+func (t *tui) buildScroll(p *PaneInfo) {
 	vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H+histRows))
 	_, _ = vt.Write(t.hist[p.ID])
 	t.scrollVT = vt
-	t.scroll = p.ID
-	t.offset = 0
 	_, t.maxOff = scrollStart(vt, p.Rect.H, 0)
-	t.mode = "scroll"
-	t.armed = false
+}
+
+// noteHist records a ring that just landed. A ring wrapped for a rect the pane
+// no longer has is dropped, and so is one for a pane that is gone.
+func (t *tui) noteHist(id string) {
+	if t.histMeta == nil {
+		t.histMeta = map[string]histCache{}
+	}
+	p := t.paneByID(id)
+	if p == nil {
+		delete(t.hist, id)
+		delete(t.histMeta, id)
+		return
+	}
+	if m, ok := t.histMeta[id]; ok && m.at != p.Rect {
+		delete(t.hist, id)
+		delete(t.histMeta, id)
+		return
+	}
+	t.histMeta[id] = histCache{at: p.Rect, got: true}
+}
+
+// histArrived fills the scrollback of a pane that was waiting for its ring.
+func (t *tui) histArrived(id string) {
+	if t.scroll != id || t.scrollVT != nil {
+		return
+	}
+	if m, ok := t.histMeta[id]; !ok || !m.got {
+		return
+	}
+	if p := t.paneByID(id); p != nil {
+		t.buildScroll(p)
+	}
+	t.scrollTop()
+}
+
+// scrollTop puts scrollback one row above the live screen. A pane whose ring
+// is still on its way waits: histArrived calls this again when it lands.
+func (t *tui) scrollTop() {
+	if t.scroll == "" {
+		return
+	}
+	if t.scrollVT == nil {
+		t.dirty = true
+		return
+	}
+	if t.maxOff == 0 {
+		t.exitScroll()
+		t.notify("no scrollback yet")
+		return
+	}
+	t.offset = 1
+	t.dirty = true
 }
 
 func (t *tui) startScrollOnFocus() {
@@ -979,13 +1106,10 @@ func (t *tui) startScrollOnFocus() {
 		return
 	}
 	t.startScroll(p)
-	if t.maxOff == 0 {
-		t.exitScroll()
-		t.notify("no scrollback yet")
+	if t.scroll != p.ID {
 		return
 	}
-	t.offset = 1
-	t.dirty = true
+	t.scrollTop()
 }
 
 // focusForClick is the pane a left press must focus, or "" when focus is
