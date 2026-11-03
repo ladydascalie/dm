@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
@@ -32,7 +34,7 @@ type paneProc struct {
 
 	mu   sync.Mutex
 	vt   vt10x.Terminal
-	ring []byte
+	ring *scrollRing
 	st   Status
 	subs map[*subConn]bool
 	dead bool
@@ -63,7 +65,53 @@ func (s *subConn) send(m Msg) error {
 	return writeMsg(s.c, m)
 }
 
+// ringMax is the scrollback a pane keeps: a fixed 512 KiB, allocated once.
 const ringMax = 512 << 10
+
+// scrollRing is the pane's history: a circular buffer over one fixed array.
+// Writing wraps in place, so a burst never grows the daemon's heap and no
+// trim leaves a larger backing array behind.
+//
+// Locking is the caller's: paneProc.mu guards the ring.
+type scrollRing struct {
+	buf [ringMax]byte
+	n   int // bytes held, at most ringMax
+	w   int // next byte to overwrite
+}
+
+// Write appends b, dropping the oldest bytes once the ring is full.
+func (r *scrollRing) Write(b []byte) {
+	if len(b) >= ringMax {
+		copy(r.buf[:], b[len(b)-ringMax:])
+		r.n, r.w = ringMax, 0
+		return
+	}
+	n := copy(r.buf[r.w:], b)
+	r.w = (r.w + n) % ringMax
+	if rest := b[n:]; len(rest) > 0 {
+		n = copy(r.buf[r.w:], rest)
+		r.w = (r.w + n) % ringMax
+	}
+	if r.n += len(b); r.n > ringMax {
+		r.n = ringMax
+	}
+}
+
+// Len is the number of bytes held.
+func (r *scrollRing) Len() int { return r.n }
+
+// Bytes copies the ring out, oldest first. The reply owns the copy; the ring
+// stays fixed.
+func (r *scrollRing) Bytes() []byte {
+	out := make([]byte, 0, r.n)
+	start := (r.w - r.n + ringMax) % ringMax
+	end := start + r.n
+	if end <= ringMax {
+		return append(out, r.buf[start:end]...)
+	}
+	out = append(out, r.buf[start:]...)
+	return append(out, r.buf[:end-ringMax]...)
+}
 
 func runPane(args []string) error {
 	fs := flag.NewFlagSet("__pane", flag.ContinueOnError)
@@ -89,10 +137,16 @@ func runPane(args []string) error {
 		*cwd, _ = os.Getwd()
 	}
 
+	// A pane holds one screen, one 512 KiB ring and a shell's output. 32 MiB
+	// is plenty and makes the GC return a burst's pages instead of keeping
+	// them. GOGC stays at its default: lowering it raised the idle figure.
+	debug.SetMemoryLimit(32 << 20)
+
 	p := &paneProc{
 		id: *id, session: *session, sock: paneSock(*session, *id),
 		shell: *shell, cwd: *cwd,
 		vt:   vt10x.New(vt10x.WithSize(*cols, *rows)),
+		ring: &scrollRing{},
 		subs: map[*subConn]bool{},
 		st:   Status{State: "unknown"},
 	}
@@ -116,6 +170,11 @@ func runPane(args []string) error {
 	}
 	_ = os.Chmod(p.sock, 0o600)
 	writePID(p.sock + ".pid")
+	own, err := os.Stat(p.sock)
+	if err != nil {
+		return err
+	}
+	go p.reapOrphans(own)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM)
@@ -143,6 +202,42 @@ func runPane(args []string) error {
 	}
 }
 
+// sockEvery is how often a pane checks that its socket still names this
+// listener. The server removes a pane's socket when it drops the pane; a
+// daemon that outlives that is unreachable and its shell would leak.
+const sockEvery = 5 * time.Second
+
+// reapOrphans stops the daemon when its socket path is gone or names another
+// file. A stat error other than ENOENT is transient and only retried: an
+// intact path with no client attached is the normal state while the server
+// restarts, and the pane must survive it.
+func (p *paneProc) reapOrphans(own os.FileInfo) {
+	for {
+		time.Sleep(sockEvery)
+		info, err := os.Stat(p.sock)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				p.reap("socket removed")
+			}
+			continue
+		}
+		if !os.SameFile(own, info) {
+			p.reap("socket replaced")
+		}
+	}
+}
+
+// reap kills the shell's process group and exits. The shell is a session
+// leader, so its process group id is its pid, and the group takes any child
+// with it.
+func (p *paneProc) reap(reason string) {
+	log.Printf("pane %s: %s, stopping", p.id, reason)
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	}
+	os.Exit(0)
+}
+
 func (p *paneProc) readLoop() {
 	buf := make([]byte, 32<<10)
 	var clean bytes.Buffer
@@ -163,10 +258,7 @@ func (p *paneProc) readLoop() {
 			if len(b) > 0 {
 				p.mu.Lock()
 				_, _ = p.vt.Write(b)
-				p.ring = append(p.ring, b...)
-				if len(p.ring) > ringMax {
-					p.ring = p.ring[len(p.ring)-ringMax:]
-				}
+				p.ring.Write(b)
 				p.broadcastLocked(Msg{Type: "bytes", Data: b})
 				if m := p.vt.Mode(); m != p.mode {
 					p.mode = m
@@ -289,7 +381,7 @@ func (p *paneProc) serve(c net.Conn) {
 			_ = sc.send(Msg{Type: "screen", Data: data, Res: modeRes(alt, mouse)})
 		case "replay":
 			p.mu.Lock()
-			data := append([]byte(nil), p.ring...)
+			data := p.ring.Bytes()
 			st := p.st
 			dead := p.dead
 			title := p.vt.Title()
