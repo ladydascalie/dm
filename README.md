@@ -359,9 +359,10 @@ Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
 `focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
 `next-window`, `prev-window`, `select-window`, `new-workspace`,
 `next-workspace`, `prev-workspace`, `rename-window`, `rename-workspace`,
-`toggle-fold`, `list`, `ping`, and the five box actions `msg-post`,
-`msg-list`, `msg-wait`, `msg-clear` and `msg-schema` below. `toggle-fold`
-takes a window id as `target` and replies with the new `unfolded` state.
+`toggle-fold`, `list`, `ping`, and the six box actions `msg-post`,
+`msg-list`, `msg-wait`, `msg-clear`, `msg-watchers` and `msg-schema` below.
+`toggle-fold` takes a window id as `target` and replies with the new `unfolded`
+state.
 
 `history` takes `target` and an integer `lines` and replies with
 `{"lines": ["..."]}`: up to `lines` text rows immediately above the live
@@ -468,7 +469,7 @@ It has no `state.json` field and no save, so a restart begins empty and the
 reads rebuild it. The server drops a watch when its pane leaves the tree, and
 drops an unparked watch after 10 minutes without a fresh read. A parked watch
 never ages out. A watch that appears, advances its cursor, changes its parked
-state or drops pushes `{"type":"watch"}` to every client.
+state or drops pushes `{"type":"watch"}` to every attached client.
 
 A pane P received entry E when a watch for P holds `cursor >= E.seq` and its
 filter matches `E.key`. The server stores no delivery state, so that comparison
