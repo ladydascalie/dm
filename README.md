@@ -121,6 +121,21 @@ pane as one chunk and never reads a byte inside it as a dm key: an embedded
 ctrl+b does not arm the prefix, and newlines do not submit. A paste also closes
 an open menu, picker or scrollback first.
 
+Small actions answer with a toast, not a suffix on the status bar. The client
+keeps up to three, each with the time it was raised, and draws them bottom
+right just above the bar, newest at the bottom: one row of bright text inside a
+dim border, as wide as the longest text plus its two border cells, clamped to
+the screen. A repeat of the newest text within one second is the same toast,
+and every toast expires after three seconds. Copying raises one, as does a
+failed request, an unknown key, an empty scrollback and a pane exit.
+
+System notifications are for the events worth interrupting for; a later unit
+adds them. A pane that enters `blocked`, `done` or `error`, or that exits,
+reaches the desktop through `notify-send` when the pane is not the focused pane
+of an attached client, because the operator is not looking at it. A focused
+pane with a client attached stays quiet, `DM_NOTIFY=0` turns notifications off,
+and a host without `notify-send` gets none.
+
 ## RPC
 
 Every client speaks newline-free, length-prefixed JSON over the session socket

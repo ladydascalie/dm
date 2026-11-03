@@ -425,7 +425,7 @@ func menuPad(s string, w int, fill rune) string {
 }
 
 // drawBar paints the one-line status bar at the bottom.
-func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, toast, scroll string) {
+func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, scroll string) {
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
 	buf.WriteString("\x1b[0m\x1b[7m")
 	line := fmt.Sprintf(" %s | %s | win %d/%d %s | ", snap.Session, snap.Workspace,
@@ -454,9 +454,6 @@ func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, toast, scroll string
 	if scroll != "" {
 		line += scroll + " "
 	}
-	if toast != "" {
-		line += "! " + toast + " "
-	}
 	width := snap.Cols
 	runes := []rune(line)
 	if len(runes) > width {
@@ -479,6 +476,36 @@ func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, toast, scroll string
 		buf.WriteString(strings.Repeat(" ", pad))
 	}
 	buf.WriteString("\x1b[0m")
+}
+
+// drawToasts paints the toast stack in the bottom-right corner, just above the
+// status bar: newest at the bottom, each toast one row inside a dim border. The
+// box is as wide as the longest text plus its two border cells, clamped to the
+// screen; a longer text is truncated to fit. Only rows above the bar are used,
+// so the bar and the pointer gestures over the panes are untouched.
+func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
+	if snap == nil || len(toasts) == 0 || snap.Cols < 3 || snap.Rows < 2 {
+		return
+	}
+	longest := 0
+	for _, x := range toasts {
+		if n := len([]rune(x.text)); n > longest {
+			longest = n
+		}
+	}
+	w := longest + 2
+	if w > snap.Cols {
+		w = snap.Cols
+	}
+	inner := w - 2
+	for i, x := range toasts {
+		row := snap.Rows - 1 - (len(toasts) - 1 - i)
+		if row < 1 {
+			continue
+		}
+		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m│\x1b[97m%s\x1b[0m\x1b[90m│\x1b[0m",
+			row, snap.Cols-w+1, menuPad(x.text, inner, ' '))
+	}
 }
 
 var keymap = [][2]string{

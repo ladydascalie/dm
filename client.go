@@ -24,6 +24,13 @@ const (
 	// escTimeout bounds how long a lone escape or a partial escape sequence
 	// waits for the rest of its bytes.
 	escTimeout = 40 * time.Millisecond
+
+	// toastMax is how many toasts the stack holds, toastLifetime how long each
+	// one lives, and toastDedupe how close a repeat must be to join the last
+	// toast instead of raising a new one.
+	toastMax      = 3
+	toastLifetime = 3 * time.Second
+	toastDedupe   = time.Second
 )
 
 type tui struct {
@@ -34,8 +41,7 @@ type tui struct {
 	snap    *Snapshot
 	vts     map[string]vt10x.Terminal
 	armed   bool
-	toast   string
-	toastAt time.Time
+	toasts  []toast // oldest first, newest last
 	dirty   bool
 
 	mode     string // "" or "sessions" or "scroll" or "menu"
@@ -72,6 +78,50 @@ type tui struct {
 	dragStart  int
 	dragSpace  int
 	dragAt     time.Time
+}
+
+// toast is one short message for the operator. Its time is when it was raised,
+// so the stack can expire it.
+type toast struct {
+	text string
+	at   time.Time
+}
+
+// notify raises a toast. A repeat of the newest text inside toastDedupe is the
+// same toast, not a second one. The stack keeps the last toastMax.
+func (t *tui) notify(text string) {
+	if text == "" {
+		return
+	}
+	now := time.Now()
+	if n := len(t.toasts); n > 0 {
+		if last := t.toasts[n-1]; last.text == text && now.Sub(last.at) < toastDedupe {
+			return
+		}
+	}
+	t.toasts = append(t.toasts, toast{text: text, at: now})
+	if len(t.toasts) > toastMax {
+		t.toasts = t.toasts[len(t.toasts)-toastMax:]
+	}
+	t.dirty = true
+}
+
+// expireToasts drops the toasts past toastLifetime.
+func (t *tui) expireToasts(now time.Time) {
+	if len(t.toasts) == 0 {
+		return
+	}
+	kept := t.toasts[:0]
+	for _, x := range t.toasts {
+		if now.Sub(x.at) < toastLifetime {
+			kept = append(kept, x)
+		}
+	}
+	if len(kept) == len(t.toasts) {
+		return
+	}
+	t.toasts = kept
+	t.dirty = true
 }
 
 // runClient owns the terminal. A session switch returns to this loop with a new
@@ -183,10 +233,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			}
 		case <-ticker.C:
 			now := time.Now()
-			if t.toast != "" && now.Sub(t.toastAt) > 3*time.Second {
-				t.toast = ""
-				t.dirty = true
-			}
+			t.expireToasts(now)
 			if t.armed && now.Sub(t.armAt) > 3*time.Second {
 				t.armed = false
 				t.inbuf = nil
@@ -290,14 +337,10 @@ func (t *tui) apply(m Msg) {
 	case "close":
 		t.quit = true
 	case "exit":
-		t.toast = "pane " + m.Target + " exited"
-		t.toastAt = time.Now()
-		t.dirty = true
+		t.notify("pane " + m.Target + " exited")
 	case "resp":
 		if !m.OK {
-			t.toast = m.Error
-			t.toastAt = time.Now()
-			t.dirty = true
+			t.notify(m.Error)
 		}
 	}
 }
@@ -811,9 +854,7 @@ func (t *tui) exitScroll() {
 // returns to the bottom.
 func (t *tui) startScroll(p *PaneInfo) {
 	if p.Alt {
-		t.toast = "app is on the alternate screen; use its own scroll"
-		t.toastAt = time.Now()
-		t.dirty = true
+		t.notify("app is on the alternate screen; use its own scroll")
 		return
 	}
 	vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H+histRows))
@@ -836,16 +877,13 @@ func (t *tui) startScrollOnFocus() {
 	}
 	if p.Alt {
 		t.disarm()
-		t.toast = "app is on the alternate screen; use its own scroll"
-		t.toastAt = time.Now()
-		t.dirty = true
+		t.notify("app is on the alternate screen; use its own scroll")
 		return
 	}
 	t.startScroll(p)
 	if t.maxOff == 0 {
 		t.exitScroll()
-		t.toast = "no scrollback yet"
-		t.toastAt = time.Now()
+		t.notify("no scrollback yet")
 		return
 	}
 	t.offset = 1
@@ -1041,8 +1079,7 @@ func (t *tui) copySelection() {
 	}
 	text := extractSelection(vt, p.Rect.W, s.anchor, s.focus)
 	os.Stdout.WriteString(osc52(text))
-	t.toast = fmt.Sprintf("copied %d chars", len(text))
-	t.toastAt = time.Now()
+	t.notify(fmt.Sprintf("copied %d chars", len(text)))
 }
 
 // osc52 is the clipboard sequence for text. Under tmux it must ride the
@@ -1362,14 +1399,12 @@ func (t *tui) pickSession() {
 func (t *tui) openPicker() {
 	sessions, err := listSessionInfo()
 	if err != nil {
-		t.toast = err.Error()
-		t.toastAt = time.Now()
+		t.notify(err.Error())
 		t.disarm()
 		return
 	}
 	if len(sessions) == 0 {
-		t.toast = "no sessions"
-		t.toastAt = time.Now()
+		t.notify("no sessions")
 		t.disarm()
 		return
 	}
@@ -1447,8 +1482,7 @@ func (t *tui) key(b byte) {
 			t.action("select-window", func(m *Msg) { m.Index = idx })
 			return
 		}
-		t.toast = fmt.Sprintf("no binding for %q", string(b))
-		t.toastAt = time.Now()
+		t.notify(fmt.Sprintf("no binding for %q", string(b)))
 		t.disarm()
 	}
 }
@@ -1456,7 +1490,7 @@ func (t *tui) key(b byte) {
 func (t *tui) arm() {
 	t.armed = true
 	t.armAt = time.Now()
-	t.toast = ""
+	t.toasts = nil
 	t.dirty = true
 }
 
@@ -1506,7 +1540,8 @@ func (t *tui) draw() {
 	if t.scroll != "" {
 		scrollInfo = fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)
 	}
-	drawBar(&b, win, t.armed, t.toast, scrollInfo)
+	drawBar(&b, win, t.armed, scrollInfo)
+	drawToasts(&b, win, t.toasts)
 	if t.armed {
 		drawHelp(&b, win.Cols, win.Rows)
 	}

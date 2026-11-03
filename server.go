@@ -295,8 +295,13 @@ func (s *server) watchPane(id string) {
 				s.mu.Unlock()
 			case "status":
 				if m.St != nil {
+					from := pc.st.State
 					pc.st = *m.St
+					to, message := pc.st.State, pc.st.Message
 					s.pushSnapshot()
+					if notifyStateChange(from, to) {
+						s.notifyPaneState(id, to, message)
+					}
 				}
 			case "mode":
 				var mi struct {
@@ -367,6 +372,18 @@ func (s *server) snapshotLocked() *Snapshot {
 func (s *server) paneExited(id string) {
 	s.mu.Lock()
 	pc := s.panes[id]
+	// An exit interrupts the operator unless a client is attached and the pane
+	// is the focus it is looking at. The title is built before the pane leaves
+	// the state, because its recorded name goes with it.
+	notifyExit := !s.operatorSeesLocked(id)
+	exitTitle := ""
+	if notifyExit {
+		exitTitle = s.notifyTitleLocked(id, "exited")
+	}
+	exitBody := ""
+	if pc != nil {
+		exitBody = pc.st.Message
+	}
 	delete(s.panes, id)
 	delete(s.st.Panes, id)
 
@@ -410,6 +427,9 @@ func (s *server) paneExited(id string) {
 	}
 	if s.countPanes() == 0 {
 		s.mu.Unlock()
+		if found {
+			systemNotify(exitTitle, exitBody)
+		}
 		if pc != nil {
 			_ = pc.c.Close()
 		}
@@ -417,6 +437,9 @@ func (s *server) paneExited(id string) {
 		return
 	}
 	s.mu.Unlock()
+	if found {
+		systemNotify(exitTitle, exitBody)
+	}
 
 	if pc != nil {
 		_ = pc.c.Close()
