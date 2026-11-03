@@ -109,9 +109,11 @@ func readFrame(c net.Conn, wait time.Duration) (Msg, error) {
 
 // TestBroadcastWhileClientStalled proves the write left the caller's goroutine:
 // a broadcast to a stalled client returns at once and the queue stays bounded.
+// An overflowed client then owes a picture, not a backlog: it refuses output,
+// still takes every other frame, and resyncs from a snapshot once it drains.
 func TestBroadcastWhileClientStalled(t *testing.T) {
 	s, a, b := queueServer(t, "stall")
-	cl, _ := stalledClient(t, s)
+	cl, cli := stalledClient(t, s)
 	data := make([]byte, 8<<10)
 
 	start := time.Now()
@@ -137,8 +139,48 @@ func TestBroadcastWhileClientStalled(t *testing.T) {
 	if !stale {
 		t.Fatal("an overflowed client was not marked stale")
 	}
-	if queued := cl.queuedFrames(); queued == 0 {
-		t.Fatal("queue is empty, the stalled client got its writes somewhere")
+
+	// Hold the queue still: the counts below belong to enqueueLocked, not to
+	// the writer popping a frame. An overflowed queue may be empty, because
+	// the writer already handed the last frame to the socket, so nothing here
+	// counts frames as a proof of the backlog.
+	cl.pause()
+	q0, f0 := cl.queuedBytes(), cl.queuedFrames()
+
+	// A stale client owes a picture, so output does not queue again.
+	cl.deliver(Msg{Type: "bytes", Target: a, Data: data})
+	if q, f := cl.queuedBytes(), cl.queuedFrames(); q != q0 || f != f0 {
+		t.Fatalf("a bytes frame queued for a stale client: %d frames / %d bytes, was %d / %d", f, q, f0, q0)
+	}
+	// Any other frame still queues: only output is replaced by the resync.
+	cl.deliver(Msg{Type: "resp", ID: 7, OK: true})
+	q1, f1 := cl.queuedBytes(), cl.queuedFrames()
+	if f1 != f0+1 || q1 <= q0 {
+		t.Fatalf("a resp frame did not queue for a stale client: %d frames / %d bytes, was %d / %d", f1, q1, f0, q0)
+	}
+	if q1 > outboundBytes {
+		t.Fatalf("queued %d bytes, bound is %d", q1, outboundBytes)
+	}
+	cl.resume()
+
+	// The stale client owes a picture, not a backlog: once it drains, the
+	// writer resyncs from the server's snapshot.
+	var snap Msg
+	for i := 0; ; i++ {
+		m, err := readFrame(cli, 5*time.Second)
+		if err != nil {
+			t.Fatalf("no resync snapshot after %d frames: %v", i, err)
+		}
+		if m.Type == "snapshot" {
+			snap = m
+			break
+		}
+		if i > 4 {
+			t.Fatalf("frame %d is %q, want the resync snapshot", i, m.Type)
+		}
+	}
+	if snap.Snap == nil || snap.Snap.Focus != a {
+		t.Fatalf("resync snapshot %+v", snap.Snap)
 	}
 }
 
