@@ -110,20 +110,47 @@ type branchEntry struct {
 	loading bool
 }
 
-// gitInfo is the pair the rail shows for a working directory: the branch and,
-// for a linked worktree, its own folder name.
+// gitInfo is what the rail shows for a working directory: the branch, for a
+// linked worktree its own folder name, and the uncommitted change counts.
 type gitInfo struct {
 	branch   string
 	worktree string
+	inRepo   bool
+	dirty    bool
+	added    int
+	deleted  int
+}
+
+// gitOutput runs one git command against cwd with the one second timeout the
+// rail can afford.
+func gitOutput(cwd string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...).Output()
+}
+
+// parseNumstat sums a git diff --numstat report. A binary file prints a dash
+// instead of a count; that column adds nothing.
+func parseNumstat(out []byte) (added, deleted int) {
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		if n, err := strconv.Atoi(f[0]); err == nil {
+			added += n
+		}
+		if n, err := strconv.Atoi(f[1]); err == nil {
+			deleted += n
+		}
+	}
+	return added, deleted
 }
 
 // detectGit is a variable so tests can stub git.
 var detectGit = func(cwd string) gitInfo {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse",
-		"--abbrev-ref", "HEAD", "--show-toplevel", "--git-dir",
-		"--git-common-dir").Output()
+	out, err := gitOutput(cwd, "rev-parse", "--abbrev-ref", "HEAD",
+		"--show-toplevel", "--git-dir", "--git-common-dir")
 	if err != nil {
 		return gitInfo{}
 	}
@@ -131,7 +158,12 @@ var detectGit = func(cwd string) gitInfo {
 	if len(lines) < 4 {
 		return gitInfo{}
 	}
-	info := gitInfo{branch: lines[0]}
+	// A detached HEAD prints the literal HEAD. Leave the branch empty so the
+	// worktree folder, or the window name, labels the rail line.
+	info := gitInfo{inRepo: true}
+	if b := lines[0]; b != "HEAD" {
+		info.branch = b
+	}
 	root := filepath.Clean(lines[1])
 	gd, cd := lines[2], lines[3]
 	if !filepath.IsAbs(gd) {
@@ -144,6 +176,14 @@ var detectGit = func(cwd string) gitInfo {
 	// directory, while the common dir stays in the main checkout.
 	if filepath.Clean(gd) != filepath.Clean(cd) {
 		info.worktree = filepath.Base(root)
+	}
+	// Tracked changes only: an untracked file is not a change the rail counts.
+	if st, err := gitOutput(cwd, "status", "--porcelain=v1", "-z",
+		"--untracked-files=no"); err == nil {
+		info.dirty = strings.Trim(string(st), "\x00") != ""
+	}
+	if ns, err := gitOutput(cwd, "diff", "--numstat", "HEAD"); err == nil {
+		info.added, info.deleted = parseNumstat(ns)
 	}
 	return info
 }
@@ -593,6 +633,10 @@ func (s *server) allPanesLocked() []AllPane {
 					gi := s.gitFor(ps.Cwd)
 					info.Branch = gi.branch
 					info.Worktree = gi.worktree
+					info.InRepo = gi.inRepo
+					info.Dirty = gi.dirty
+					info.Added = gi.added
+					info.Deleted = gi.deleted
 				}
 				if pc := s.panes[id]; pc != nil {
 					info.Status = pc.st.State

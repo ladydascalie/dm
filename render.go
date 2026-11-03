@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -426,71 +428,149 @@ func runeWidth(r rune) int {
 	return 1
 }
 
-// railKind is the row type the sidebar paints: a workspace header, a window
-// header, or a pane.
+// railKind is the row type the sidebar paints: a workspace row, a window line,
+// that window's dim second line, a pane, or the gap between workspace blocks.
 type railKind int
 
 const (
 	railWorkspace railKind = iota
 	railWindow
+	railWindowNote
 	railPane
+	railGap
 )
 
 // railItem is one sidebar row. It exists so drawing and hit-testing share the
 // same grouping.
 type railItem struct {
-	kind     railKind
-	text     string
-	branch   string
-	worktree string
-	pane     string
-	window   string
-	status   string
-	agent    bool
-	folded   bool
-	focus    bool
-	active   bool
+	kind      railKind
+	text      string
+	workspace string
+	branch    string
+	worktree  string
+	message   string
+	pane      string
+	window    string
+	status    string
+	count     int
+	added     int
+	deleted   int
+	accent    rgb
+	agent     bool
+	dirty     bool
+	inRepo    bool
+	folded    bool
+	focus     bool
+	active    bool
 }
 
 // railItems flattens a snapshot into sidebar rows in the server's order: a
-// workspace header, a window header per window, then its panes when the window
-// is unfolded. The thin rail always lists panes, because that is all it can
-// show. A pane row labels itself with its recorded name, then the app= it last
-// reported, then the pane id.
+// workspace row, a window line per window, that window's note line when it has
+// a message and is unfolded, then its pane rows when it is unfolded. A gap row
+// separates workspace blocks. The thin rail keeps its glyph column: one blank
+// row per header, no note lines, no gaps, and panes whatever the fold.
 func railItems(snap *Snapshot) []railItem {
 	if snap == nil {
 		return nil
 	}
-	// The workspace branch comes from its focused pane, else the first pane
-	// that reported one, so a workspace header names the repo it is working in.
-	branch := map[string]string{}
-	for _, p := range snap.All {
-		if p.Branch == "" {
-			continue
+	compact := railCompact(snap.Rail)
+	panes := map[string]int{}
+	focus := map[string]int{}
+	withBranch := map[string]int{}
+	for i, p := range snap.All {
+		panes[p.Workspace]++
+		if p.Focus {
+			focus[p.Window] = i
 		}
-		if _, ok := branch[p.Workspace]; !ok || p.Focus {
-			branch[p.Workspace] = p.Branch
+		if p.Branch != "" {
+			if _, ok := withBranch[p.Window]; !ok {
+				withBranch[p.Window] = i
+			}
 		}
 	}
-	compact := railCompact(snap.Rail)
+	// The window line takes its git state from the focused pane, else from the
+	// first pane in that window that carries a branch.
+	source := func(window string) (AllPane, bool) {
+		if i, ok := focus[window]; ok && snap.All[i].Branch != "" {
+			return snap.All[i], true
+		}
+		if i, ok := withBranch[window]; ok {
+			return snap.All[i], true
+		}
+		if i, ok := focus[window]; ok {
+			return snap.All[i], true
+		}
+		return AllPane{}, false
+	}
+	// A workspace keeps its preferred hue when it is free. When two live
+	// workspaces hash alike, the later one takes the next free slot, so no two
+	// workspaces in a session ever share an accent.
+	used := map[rgb]bool{}
+	accent := func(id string) rgb {
+		pref := railAccent(id)
+		start := 0
+		for i, a := range railAccents {
+			if a == pref {
+				start = i
+				break
+			}
+		}
+		for i := 0; i < len(railAccents); i++ {
+			a := railAccents[(start+i)%len(railAccents)]
+			if !used[a] {
+				used[a] = true
+				return a
+			}
+		}
+		return pref
+	}
 	var out []railItem
 	ws, win := "", ""
 	for _, p := range snap.All {
 		if p.Workspace != ws {
-			ws = p.Workspace
-			win = ""
+			if ws != "" && !compact {
+				out = append(out, railItem{kind: railGap})
+			}
+			ws, win = p.Workspace, ""
+			name := p.WorkspaceName
+			if name == "" {
+				name = p.Workspace
+			}
 			out = append(out, railItem{
-				kind: railWorkspace,
-				text: p.WorkspaceName, branch: branch[p.Workspace],
+				kind: railWorkspace, text: name, workspace: p.Workspace,
+				count: panes[p.Workspace], accent: accent(p.Workspace),
 				active: p.WorkspaceActive,
 			})
 		}
 		if p.Window != win {
 			win = p.Window
-			out = append(out, railItem{
-				kind: railWindow, text: p.WindowName,
-				window: p.Window, folded: !p.WindowUnfolded,
-			})
+			item := railItem{
+				kind: railWindow, text: p.WindowName, window: p.Window,
+				folded: !p.WindowUnfolded,
+			}
+			if !compact {
+				if src, ok := source(p.Window); ok {
+					item.branch = src.Branch
+					item.worktree = src.Worktree
+					item.inRepo = src.InRepo
+					item.dirty = src.Dirty
+					item.added = src.Added
+					item.deleted = src.Deleted
+					item.message = src.Message
+				}
+				switch {
+				case item.branch != "":
+					item.text = item.branch
+				case item.worktree != "":
+					item.text = item.worktree
+				}
+			}
+			out = append(out, item)
+			if !compact && item.message != "" && p.WindowUnfolded {
+				out = append(out, railItem{
+					kind: railWindowNote, text: item.message, window: p.Window,
+				})
+			}
 		}
 		if !compact && !p.WindowUnfolded {
 			continue
@@ -502,16 +582,9 @@ func railItems(snap *Snapshot) []railItem {
 		if label == "" {
 			label = p.ID
 		}
-		// A linked worktree is shown only when an agent lives there, so a
-		// shell in another checkout does not clutter the rail.
-		worktree := ""
-		if p.Agent {
-			worktree = p.Worktree
-		}
 		out = append(out, railItem{
 			kind: railPane, text: label, pane: p.ID,
-			status: p.Status, agent: p.Agent, worktree: worktree,
-			focus: p.Focus,
+			status: p.Status, agent: p.Agent, focus: p.Focus,
 		})
 	}
 	return out
@@ -555,7 +628,37 @@ var (
 	railDim      = rgb{143, 147, 168} // #8f93a8
 	railHeader   = rgb{166, 169, 189} // #a6a9bd
 	railWindowFg = rgb{149, 153, 174} // #9599ae
+	railDiffAdd  = rgb{120, 220, 130} // #78dc82 diff stats, added lines
+	railDiffDel  = rgb{255, 125, 125} // #ff7d7d diff stats, deleted lines
+	railWorking  = rgb{245, 190, 80}  // #f5be50 working amber, dirty dot
 )
+
+// railAccents are the six workspace hues, in a fixed order. Each one is
+// readable on both rail backgrounds, so a workspace header keeps its identity
+// without losing contrast.
+var railAccents = []rgb{
+	{187, 154, 247}, // #bb9af7 violet
+	{110, 220, 235}, // #6edceb cyan
+	{240, 140, 215}, // #f08cd7 magenta
+	{126, 169, 255}, // #7ea9ff blue
+	{240, 160, 90},  // #f0a05a orange
+	{140, 215, 155}, // #8cd79b green
+}
+
+// railAccent returns the hue a workspace keeps for its whole life. FNV-1a is
+// the seed; the mix step matters because its low bits repeat for ids of equal
+// length, and a workspace id is short.
+func railAccent(workspace string) rgb {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(workspace))
+	x := h.Sum32()
+	x ^= x >> 16
+	x *= 0x7feb352d
+	x ^= x >> 15
+	x *= 0x846ca68b
+	x ^= x >> 16
+	return railAccents[x%uint32(len(railAccents))]
+}
 
 // Nerd Font icons. The font check runs once; DM_NERD=1 or 0 overrides it.
 var (
@@ -577,43 +680,45 @@ func nerdFonts() bool {
 	return nerdOn
 }
 
-// railGlyph is the state mark for a pane row and its colour. Every state gets a
-// distinct icon or, without Nerd Fonts, a distinct Unicode glyph and colour.
-// The question mark marks an agent whose state has not arrived; drawRail leaves
-// the cell blank for a shell, which reports no state.
+// railGlyph is the state mark for a pane row and its colour: amber working,
+// teal-blue idle, red blocked, green done, pink-red error, dim grey unknown.
+// Every state gets a distinct icon or, without Nerd Fonts, a distinct Unicode
+// glyph. The question mark marks an agent whose state has not arrived; drawRail
+// leaves the cell blank for a shell, which reports no state.
 func railGlyph(status string, nerd bool) (glyph string, colour rgb) {
 	switch status {
 	case "working":
+		glyph, colour = "●", railWorking
 		if nerd {
-			return "\uf013", rgb{224, 169, 76}
+			glyph = "\uf013"
 		}
-		return "●", rgb{224, 169, 76}
 	case "idle":
+		glyph, colour = "○", rgb{120, 200, 225}
 		if nerd {
-			return "\uf111", rgb{159, 176, 207}
+			glyph = "\uf111"
 		}
-		return "○", rgb{159, 176, 207}
 	case "blocked":
+		glyph, colour = "▲", rgb{255, 110, 110}
 		if nerd {
-			return "\uf071", rgb{224, 112, 90}
+			glyph = "\uf071"
 		}
-		return "▲", rgb{224, 112, 90}
 	case "done":
+		glyph, colour = "✓", rgb{110, 225, 145}
 		if nerd {
-			return "\uf00c", rgb{95, 168, 135}
+			glyph = "\uf00c"
 		}
-		return "✓", rgb{95, 168, 135}
 	case "error":
+		glyph, colour = "✕", rgb{255, 130, 160}
 		if nerd {
-			return "\uf057", rgb{228, 167, 158}
+			glyph = "\uf057"
 		}
-		return "✕", rgb{228, 167, 158}
 	default:
+		glyph, colour = "?", railDim
 		if nerd {
-			return "\uf128", railDim
+			glyph = "\uf128"
 		}
-		return "?", railDim
 	}
+	return glyph, colour
 }
 
 // railMark is the two-cell prefix of a pane row: an agent icon, a shell icon,
@@ -636,9 +741,114 @@ func railMark(agent, nerd bool) string {
 // drawRail paints the sidebar above the status bar. The rail paints its own
 // background so contrast does not depend on the terminal theme. Rows past the
 // screen are clipped, and every row is written into at most Rail columns.
-// railPaneAt returns the pane whose row is under x,y, or "" for a header, an
-// empty row, or a point outside the rail. One-based screen coordinates are the
-// caller's; x and y are zero-based here.
+// railSeg is one run of a rail row: its text, its colour, and its own weight.
+// drawRail composes a row from a left run and a right-aligned run.
+type railSeg struct {
+	text   string
+	colour rgb
+	bold   bool
+}
+
+// runeCells is the cell width of a run of text.
+func runeCells(s string) int {
+	n := 0
+	for _, r := range s {
+		n += runeWidth(r)
+	}
+	return n
+}
+
+// segCells is the cell width of a segment run.
+func segCells(segs []railSeg) int {
+	n := 0
+	for _, seg := range segs {
+		n += runeCells(seg.text)
+	}
+	return n
+}
+
+// clipSegs keeps the first budget cells of a segment run.
+func clipSegs(segs []railSeg, budget int) []railSeg {
+	var out []railSeg
+	for _, seg := range segs {
+		if budget <= 0 {
+			break
+		}
+		var keep []rune
+		for _, r := range seg.text {
+			rw := runeWidth(r)
+			if rw > budget {
+				budget = 0
+				break
+			}
+			keep = append(keep, r)
+			budget -= rw
+		}
+		if len(keep) > 0 {
+			seg.text = string(keep)
+			out = append(out, seg)
+		}
+	}
+	return out
+}
+
+// elideSegs cuts a segment run to a cell budget and ends it with an ellipsis,
+// so a long label shrinks before the right-aligned stats lose a cell.
+func elideSegs(segs []railSeg, budget int) []railSeg {
+	if budget <= 0 {
+		return nil
+	}
+	if budget == 1 {
+		return []railSeg{{text: "…", colour: railDim}}
+	}
+	out := clipSegs(segs, budget-1)
+	return append(out, railSeg{text: "…", colour: railDim})
+}
+
+// writeRailSeg paints one run of a row on its background.
+func writeRailSeg(buf *bytes.Buffer, seg railSeg, bg rgb, bold bool) {
+	if seg.text == "" {
+		return
+	}
+	buf.WriteString("\x1b[0m" + bg.bg())
+	if bold || seg.bold {
+		buf.WriteString("\x1b[1m")
+	}
+	buf.WriteString(seg.colour.fg())
+	buf.WriteString(seg.text)
+}
+
+// railStats is the right-aligned git tail of a window line: an amber dot when
+// the tree is dirty, then the added and deleted line counts, or "clean".
+func railStats(it railItem) []railSeg {
+	if !it.inRepo {
+		return nil
+	}
+	var segs []railSeg
+	if it.dirty {
+		segs = append(segs, railSeg{text: "●", colour: railWorking})
+	}
+	if it.added > 0 {
+		segs = append(segs, railSeg{text: "+" + strconv.Itoa(it.added), colour: railDiffAdd})
+	}
+	if it.deleted > 0 {
+		segs = append(segs, railSeg{text: "-" + strconv.Itoa(it.deleted), colour: railDiffDel})
+	}
+	if len(segs) == 0 {
+		return []railSeg{{text: "clean", colour: railDim}}
+	}
+	out := make([]railSeg, 0, len(segs)*2)
+	for i, seg := range segs {
+		if i > 0 {
+			out = append(out, railSeg{text: " ", colour: railDim})
+		}
+		out = append(out, seg)
+	}
+	return out
+}
+
+// railPaneAt returns the pane whose row is under x,y, or "" for any other row,
+// an empty row, or a point outside the rail.
 func railPaneAt(snap *Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
@@ -653,7 +863,8 @@ func railPaneAt(snap *Snapshot, x, y int) string {
 	return items[y].pane
 }
 
-// railWindowAt returns the window whose row is under x,y, for a fold click.
+// railWindowAt returns the window whose row is under x,y, for a fold click. A
+// window line and its note line both fold the window.
 func railWindowAt(snap *Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
@@ -662,12 +873,20 @@ func railWindowAt(snap *Snapshot, x, y int) string {
 		return ""
 	}
 	items := railItems(snap)
-	if y >= len(items) || items[y].kind != railWindow {
+	if y >= len(items) {
+		return ""
+	}
+	if k := items[y].kind; k != railWindow && k != railWindowNote {
 		return ""
 	}
 	return items[y].window
 }
 
+// drawRail paints the sidebar above the status bar. The rail paints its own
+// background so contrast does not depend on the terminal theme. Rows past the
+// screen are clipped, and every row is written into at most Rail columns. A
+// left run is elided with an ellipsis before the right-aligned stats give up a
+// cell, so the stats survive a narrow rail.
 func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 2 {
 		return
@@ -679,41 +898,27 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	compact := railCompact(snap.Rail)
 	for y := 0; y < rows; y++ {
 		bg := railBG
-		style := "\x1b[0m" + bg.bg() + railText.fg()
-		glyphColour := railDim
-		text := ""
-		kind := railWorkspace
-		agent := false
-		wtAt := -1
+		base := railText
+		bold := false
+		var left, right []railSeg
 		if y < len(items) {
 			it := items[y]
-			kind, agent = it.kind, it.agent
 			switch it.kind {
 			case railWorkspace:
-				glyphColour = railHeader
-				if it.active {
-					style = "\x1b[0m" + bg.bg() + "\x1b[1m" + railText.fg()
-					glyphColour = railText
-				} else {
-					style = "\x1b[0m" + bg.bg() + railHeader.fg()
-				}
 				if !compact {
-					if nerd {
-						text = "\uf07b " + it.text
-					} else {
-						text = it.text
+					name := railText
+					if !it.active {
+						name = railHeader
 					}
-					if it.branch != "" {
-						if nerd {
-							text += "  \uf126 " + it.branch
-						} else {
-							text += " (" + it.branch + ")"
-						}
+					left = []railSeg{
+						{text: "▌", colour: it.accent},
+						{text: " ", colour: name},
+						{text: it.text, colour: name, bold: true},
 					}
+					right = []railSeg{{text: strconv.Itoa(it.count), colour: railDim}}
 				}
 			case railWindow:
-				style = "\x1b[0m" + bg.bg() + railWindowFg.fg()
-				glyphColour = railWindowFg
+				base = railWindowFg
 				if !compact {
 					caret := "▾"
 					if it.folded {
@@ -725,16 +930,29 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 							caret = "\uf0da"
 						}
 					}
-					text = "  " + caret + " " + it.text
+					left = []railSeg{
+						{text: "  ", colour: base},
+						{text: caret, colour: base},
+						{text: " ", colour: base},
+						{text: it.text, colour: base},
+					}
+					right = railStats(it)
+				}
+			case railWindowNote:
+				if !compact {
+					base = railDim
+					left = []railSeg{
+						{text: "    ", colour: base},
+						{text: it.text, colour: base},
+					}
 				}
 			case railPane:
 				if it.focus {
-					bg = railFocusBG
-					style = "\x1b[0m" + bg.bg() + "\x1b[1m" + railText.fg()
+					bg, base, bold = railFocusBG, railText, true
 				} else if it.agent {
-					style = "\x1b[0m" + bg.bg() + railText.fg()
+					base = railText
 				} else {
-					style = "\x1b[0m" + bg.bg() + railDim.fg()
+					base = railDim
 				}
 				g, colour := railGlyph(it.status, nerd)
 				// A shell has no state to report, so the fallback mark would be a
@@ -742,69 +960,51 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 				if !it.agent && (it.status == "" || it.status == "unknown") {
 					g = " "
 				}
-				glyphColour = colour
 				mark := railMark(it.agent, nerd)
 				if compact {
-					text = mark + g
+					left = []railSeg{
+						{text: mark, colour: colour},
+						{text: g, colour: colour},
+					}
 				} else {
-					text = "    " + mark + g + " " + it.text
-					if it.worktree != "" {
-						wtAt = len([]rune(text)) + 2
-						text += "  " + it.worktree
+					left = []railSeg{
+						{text: "      ", colour: base},
+						{text: mark, colour: colour},
+						{text: g, colour: colour},
+						{text: " " + it.text, colour: base},
 					}
 				}
+			case railGap:
+				// The rail background and nothing else.
 			}
 		}
-		line := []rune(text)
-		cut, cells := 0, 0
-		for cut < len(line) {
-			rw := runeWidth(line[cut])
-			if cells+rw > w {
-				break
-			}
-			cells += rw
-			cut++
+		rightCells := segCells(right)
+		if rightCells > w {
+			// A tail that does not fit goes whole: half a stats pair lies.
+			right, rightCells = nil, 0
 		}
-		line = line[:cut]
+		budget := w - rightCells
+		if rightCells > 0 && budget > 0 {
+			budget--
+		}
+		leftCells := segCells(left)
+		if leftCells > budget {
+			left = elideSegs(left, budget)
+			leftCells = segCells(left)
+		}
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
-		buf.WriteString(style)
-		for i, r := range line {
-			if kind == railPane && wtAt >= 0 && i == wtAt {
-				buf.WriteString("\x1b[0m" + bg.bg() + railDim.fg())
-				buf.WriteString(string(line[i:]))
-				break
-			}
-			if railIcon(kind, agent, nerd, compact, i) {
-				buf.WriteString("\x1b[0m" + bg.bg() + glyphColour.fg())
-				buf.WriteRune(r)
-				buf.WriteString("\x1b[0m" + style)
-				continue
-			}
-			buf.WriteRune(r)
+		buf.WriteString("\x1b[0m" + bg.bg())
+		for _, seg := range left {
+			writeRailSeg(buf, seg, bg, bold)
 		}
-		if pad := w - cells; pad > 0 {
+		if pad := w - leftCells - rightCells; pad > 0 {
 			buf.WriteString(strings.Repeat(" ", pad))
+		}
+		for _, seg := range right {
+			writeRailSeg(buf, seg, bg, bold)
 		}
 		buf.WriteString("\x1b[0m")
 	}
-}
-
-// railIcon reports whether the rune at index i in a row is an icon that takes
-// its own colour: the workspace folder, the window mark, the pane marker and
-// the state glyph.
-func railIcon(kind railKind, agent, nerd, compact bool, i int) bool {
-	switch kind {
-	case railWorkspace:
-		return nerd && i == 0
-	case railWindow:
-		return i == 2
-	case railPane:
-		if compact {
-			return i == 2 || i == 0
-		}
-		return i == 4 || i == 6
-	}
-	return false
 }
 
 // contentRows returns the first row and the row after the last that hold any
