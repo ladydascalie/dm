@@ -439,14 +439,15 @@ The box is bounded at 1000 entries and 256 KiB. Past either bound the oldest
 entries go. The log lives in `state.json`, so a restart keeps every entry, its
 order and its `seq`.
 
-Five actions. Each takes its request in the `res` field of the envelope.
+Six actions. Each takes its request in the `res` field of the envelope.
 
 | action | request | reply |
 | --- | --- | --- |
 | `msg-post` | `key`, `state`, `msg`, `from` | `{"entry":{...}}` |
-| `msg-list` | `key` or `keyPrefix`, `afterSeq`, `limit` | `{"entries":[...],"trimmed":false}`, newest first |
-| `msg-wait` | `key` or `keyPrefix`, `state`, `afterSeq`, `timeoutMs` | `{"entry":{...},"trimmed":false}` |
+| `msg-list` | `key` or `keyPrefix`, `afterSeq`, `limit`, `from` | `{"entries":[...],"trimmed":false}`, newest first |
+| `msg-wait` | `key` or `keyPrefix`, `state`, `afterSeq`, `timeoutMs`, `from` | `{"entry":{...},"trimmed":false}` |
 | `msg-clear` | `key` | `{"cleared":N}` |
+| `msg-watchers` | none | `{"watchers":[...]}` |
 | `msg-schema` | none | `{"schema":{...}}` |
 
 `state` is required on post and optional on wait, where an empty state asks for
@@ -458,6 +459,23 @@ field, an unknown action, an unknown state or a `from` outside the tree fails
 the request, so nothing is silently ignored. `msg-schema` serves these shapes as
 JSON Schema, built from the Go types and the one state enum.
 
+On both reads `from` is the reading pane. An empty `from` records no watch, and
+a `from` outside the tree fails the request.
+
+Every list from a pane and every wait from a pane leaves a watch: the pane, its
+filter and the highest seq it served. The registry lives in server memory only.
+It has no `state.json` field and no save, so a restart begins empty and the
+reads rebuild it. The server drops a watch when its pane leaves the tree, and
+drops an unparked watch after 10 minutes without a fresh read. A parked watch
+never ages out. A watch that appears, advances its cursor, changes its parked
+state or drops pushes `{"type":"watch"}` to every client.
+
+A pane P received entry E when a watch for P holds `cursor >= E.seq` and its
+filter matches `E.key`. The server stores no delivery state, so that comparison
+is the whole test. A watch is a read left behind, not a pending message. An ack
+is still a post: a reader that wants to record handling posts, or reads again to
+advance its cursor.
+
 The CLI:
 
 ```sh
@@ -465,16 +483,22 @@ dm msg post --state blocked --key lane/a --msg "ready for review"
 dm msg list [--key lane/a | --prefix lane/] [--after SEQ] [--limit 20] [--json]
 dm msg wait [--key lane/a | --prefix lane/] [--state done] [--after SEQ] [--timeout 5m]
 dm msg clear [--key lane/a]
+dm msg watchers [--json]
 dm msg schema
 ```
 
 `post` prints the stored entry as one row. `list` prints newest first as
 `SEQ KEY STATE FROM MSG` and cuts only the message to the terminal width;
 `--json` prints the reply unchanged. `wait` prints the entry it found, or the
-reply on `--json`. `clear` prints the count. `schema` prints the schema, so
-`dm msg schema | jq .actions` reads. The wait timeout defaults to 5 minutes and
-takes any duration up to one hour. `--after` carries the cursor. Leave it off
-to read the status board; `--after 0` starts at the first entry.
+reply on `--json`. `clear` prints the count. `watchers` prints one row per
+watch as `PANE FILTER CURSOR WAIT`: the filter is the key or the prefix with a
+trailing star, and the wait mark is `wait` while a wait is parked and `-`
+otherwise; `--json` prints the reply unchanged. `schema` prints the schema, so
+`dm msg schema | jq .actions` reads. `list` and `wait` send `from` for you when
+they run inside a pane, so a read in a pane records a watch. A read from outside
+a pane sends no `from` and records nothing. The wait timeout defaults to 5
+minutes and takes any duration up to one hour. `--after` carries the cursor.
+Leave it off to read the status board; `--after 0` starts at the first entry.
 
 Without `afterSeq` a wait matches the newest entry under its topic, not any
 entry. It returns at once
@@ -566,10 +590,19 @@ Conventions the box does not enforce, and the ones to keep:
 `SEQ STATE KEY FROM MSG`, with the state in the colour the rail gives that
 status. `j`, `k` and the arrows scroll one row and the wheel scrolls three;
 `g` and `G` jump to the newest and the oldest row. The box grows with the log
-up to 22 rows and then scrolls, and its title names the rows in view. A post or
-a clear anywhere in the session refreshes an open view, so it follows a lane
-without a keypress. `esc`, `q` or the prefix key closes it. The view is
-read-only: it posts nothing and clears nothing.
+up to 22 rows and then scrolls, and its title names the rows in view. The title
+also counts the parked watches as `N watching` and the entries that arrived
+above a scrolled-back window as `+N`, and omits each part at zero. At 60 columns
+or wider each entry row starts with a two-cell count of the watches that were
+served that entry; a narrower view drops the marker whole, so the message keeps
+its cells. `w` swaps the entry list for the watcher page: one row per watch as
+`PANE FILTER @CURSOR`, with a `wait` mark while a wait is parked. A window the
+reader scrolled back stays on its top entry as new entries arrive, so the text
+does not slide. A post or a clear anywhere in the session refreshes an open
+view, and a change in the watch set pushes `{"type":"watch"}`, which asks for
+the list again at most once per 100 ms. The view follows a lane without a
+keypress. `esc`, `q` or the prefix key closes it. It posts nothing and clears
+nothing.
 
 ## Durability
 
