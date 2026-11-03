@@ -1534,14 +1534,24 @@ func barFitPinned(segs []barSeg, cols int) []barSeg {
 
 // barSegments returns the status bar as spans in paint order: the left block,
 // then the pinned right block. It sizes the left block against the room the
-// pinned block leaves, so the line never runs past snap.Cols cells and the
-// pinned block is never dropped to make room for the left one.
+// pinned block leaves, minus one gutter cell, so the blocks never touch and the
+// line never runs past snap.Cols cells. The pinned block is never dropped to
+// make room for the left one.
 func barSegments(snap *Snapshot, armed bool, info string) []barSeg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}
 	right := barFitPinned(barPinned(armed, info), snap.Cols)
-	left := barLeftFor(snap).fit(snap.Cols - barCells(right))
+	budget := snap.Cols - barCells(right)
+	if len(right) > 0 {
+		// Keep one gutter cell between the blocks. drawBar spends it as part of
+		// the pad, so the pinned block still ends on the last column.
+		budget--
+	}
+	if budget < 0 {
+		budget = 0
+	}
+	left := barLeftFor(snap).fit(budget)
 	return append(left, right...)
 }
 

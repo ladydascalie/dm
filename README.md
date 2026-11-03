@@ -190,9 +190,11 @@ padding on the ground, 65-80 the pinned scroll info.
 The pinned right block holds `PREFIX ` while `armed` is set, then the
 transient info text when there is one: `SCROLL <pane> +<offset>/<max>` while
 scrolling, or `drag to resize` while the pointer rests on a divider. It is
-anchored to the last column. When it cannot fit, its leftmost segment goes
-whole, `PREFIX ` first and then the info, and the survivor is clipped at its
-right with `…`. The left block is dropped entirely before a pinned segment is.
+anchored to the last column, and one cell of ground always separates it from the
+left block, even when the left block would otherwise fill the row. When the
+pinned block cannot fit, its leftmost segment goes whole, `PREFIX ` first and
+then the info, and the survivor is clipped at its right with `…`. The left block
+is dropped entirely before a pinned segment is.
 The bar never paints past the column count, and it pads the rest of its row on
 the ground, so no cell of the previous frame shows through.
 

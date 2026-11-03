@@ -2236,7 +2236,8 @@ func TestBarSegmentOrder(t *testing.T) {
 	}
 
 	// One gutter cell between segments, and only between them: no group starts
-	// or ends with one, and none sits inside the focus chip.
+	// or ends with one, and none sits inside the focus chip. The gutter is a
+	// single cell of the bar ground, so a colour slip shows here.
 	gutters := 0
 	for k, seg := range segs {
 		if seg.pin {
@@ -2244,6 +2245,9 @@ func TestBarSegmentOrder(t *testing.T) {
 		}
 		if seg.text == " " {
 			gutters++
+			if seg.bg != barGutter || seg.bg != railBG {
+				t.Fatalf("gutter %d bg = %v, want the bar ground %v", k, seg.bg, barGutter)
+			}
 			continue
 		}
 		if seg.text == "" {
@@ -2400,6 +2404,104 @@ func TestBarPinned(t *testing.T) {
 		if seg.pin && seg.text == "PREFIX " {
 			t.Fatalf("unarmed bar painted PREFIX: %q", barTexts(segs))
 		}
+	}
+}
+
+// TestBarPinnedGutter leaves room for the ground cell between the blocks, even
+// when the left block would otherwise fill the row exactly.
+func TestBarPinnedGutter(t *testing.T) {
+	cases := []struct {
+		cols  int
+		armed bool
+		info  string
+	}{
+		{34, true, ""},                  // the exact fit the review found
+		{34, true, "12 rows above"},     // the right block takes most of it
+		{50, true, "12 rows above"},     // long names fill the rest
+		{40, false, "SCROLL w1p2 +1/9"}, // info alone pins the right block
+		{20, true, "12 rows above"},     // info alone: no PREFIX, no left room
+	}
+	for _, c := range cases {
+		segs := barSegments(barTestSnap(c.cols), c.armed, c.info)
+		leftCells, rightCells, pinned := 0, 0, false
+		for _, seg := range segs {
+			if seg.pin {
+				pinned = true
+				rightCells += runeCells(seg.text)
+				continue
+			}
+			leftCells += runeCells(seg.text)
+		}
+		if !pinned {
+			t.Fatalf("cols %d: no pinned block", c.cols)
+		}
+		if got := barCells(segs); got > c.cols {
+			t.Fatalf("cols %d: spans paint %d cells", c.cols, got)
+		}
+		if leftCells == 0 {
+			continue // nothing to separate from
+		}
+		if leftCells+rightCells > c.cols-1 {
+			t.Fatalf("cols %d: left %d + pinned %d leaves no gutter cell",
+				c.cols, leftCells, rightCells)
+		}
+	}
+}
+
+// TestBarPinnedAnchored pins the paint: the right block ends on the last
+// column, and one ground cell separates it from the left block.
+func TestBarPinnedAnchored(t *testing.T) {
+	info := "SCROLL w1p2 +1/9"
+	for _, cols := range []int{60, 50, 34} {
+		snap := barTestSnap(cols)
+		segs := barSegments(snap, true, info)
+		var pinnedText, leftText string
+		for _, seg := range segs {
+			if seg.pin {
+				pinnedText += seg.text
+				continue
+			}
+			leftText += seg.text
+		}
+		if pinnedText != "PREFIX "+info {
+			t.Fatalf("cols %d: pinned spans = %q", cols, pinnedText)
+		}
+		start := cols - runeCells(pinnedText)
+
+		var b bytes.Buffer
+		drawBar(&b, snap, true, info)
+		vt := vt10x.New(vt10x.WithSize(cols, snap.Rows))
+		if _, err := vt.Write(b.Bytes()); err != nil {
+			t.Fatalf("cols %d: draw bar: %v", cols, err)
+		}
+		vt.Lock()
+		// One cell is one rune here: the pin test data carries no wide rune in
+		// the pinned block, so the columns line up with the cells.
+		want := []rune(pinnedText)
+		for i, r := range want {
+			if x := start + i; x >= cols {
+				vt.Unlock()
+				t.Fatalf("cols %d: pinned block starts at %d and runs past the row", cols, start)
+			} else if cell := vt.Cell(x, snap.Rows-1); cell.Char != r {
+				vt.Unlock()
+				t.Fatalf("cols %d: cell %d = %q, want %q from the pinned block",
+					cols, x, cell.Char, r)
+			}
+		}
+		ground := vt10x.Color(barGutter.r<<16 | barGutter.g<<8 | barGutter.b)
+		if start > 0 {
+			cell := vt.Cell(start-1, snap.Rows-1)
+			if cell.Char != ' ' || cell.BG != ground {
+				vt.Unlock()
+				t.Fatalf("cols %d: cell before the pinned block = %q bg %v, want a ground gutter",
+					cols, cell.Char, cell.BG)
+			}
+		}
+		if leftText == "" {
+			vt.Unlock()
+			t.Fatalf("cols %d: pinned only, want a left block", cols)
+		}
+		vt.Unlock()
 	}
 }
 
