@@ -342,8 +342,9 @@ Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
 `focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
 `next-window`, `prev-window`, `select-window`, `new-workspace`,
 `next-workspace`, `prev-workspace`, `rename-window`, `toggle-fold`, `list`,
-`ping`. `toggle-fold` takes a window id as `target` and replies with the new
-`unfolded` state.
+`ping`, and the five box actions `msg-post`, `msg-list`, `msg-wait`,
+`msg-clear` and `msg-schema` below. `toggle-fold` takes a window id as
+`target` and replies with the new `unfolded` state.
 
 `history` takes `target` and an integer `lines` and replies with
 `{"lines": ["..."]}`: up to `lines` text rows immediately above the live
@@ -391,6 +392,100 @@ dm split p1 --dir down
 dm write-to p2 --msg "$PWD/dm __probe --hold 5s" --enter
 dm status
 ```
+
+## Message box
+
+One session has one message box: an append-only log that any pane can post
+into and any caller can wait on. It is where a lane reports `blocked` and a
+driver waits for `done`, with no screen polling.
+
+An entry is
+`{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green"}`.
+Every field is always present.
+
+- `seq` starts at 1, only grows, and never repeats. A clear does not reset it.
+- `at` is the post time, truncated to the second, in UTC.
+- `from` is the posting pane's id. It is set when the poster runs in a pane of
+  the target session, may be empty, and must name a pane in the session tree.
+- `key` groups entries and may be empty. The cap is 128 bytes. An empty key
+  on list, wait and clear means the whole log.
+- `state` is one of five. `note` carries no progress meaning, `working` means
+  the work is running, `blocked` means it waits on someone else, `done` means it
+  finished well, and `error` means it finished badly. `clear` is an OSC 7501
+  pane status, not a box state, and post rejects it.
+- `msg` is the text. The cap is 2000 bytes.
+
+Key and message must be valid UTF-8 with no control characters, because an
+entry prints on one row.
+
+The box is bounded at 1000 entries and 256 KiB. Past either bound the oldest
+entries go. The log lives in `state.json`, so a restart keeps every entry, its
+order and its `seq`.
+
+Five actions. Each takes its request in the `res` field of the envelope.
+
+| action | request | reply |
+| --- | --- | --- |
+| `msg-post` | `key`, `state`, `msg`, `from` | `{"entry":{...}}` |
+| `msg-list` | `key`, `limit` | `{"entries":[...]}`, newest first |
+| `msg-wait` | `key`, `state`, `timeoutMs` | `{"entry":{...}}` |
+| `msg-clear` | `key` | `{"cleared":N}` |
+| `msg-schema` | none | `{"schema":{...}}` |
+
+`state` is required on post and wait, and `timeoutMs` on wait. `limit` clamps
+to the box, and zero or less means the whole box. `timeoutMs` runs from 1 to
+3600000. An unknown field, an unknown action, an unknown state or a `from`
+outside the tree fails the request, so nothing is silently ignored.
+`msg-schema` serves these shapes as JSON Schema, built from the Go types and
+the one state enum.
+
+The CLI:
+
+```sh
+dm msg post --state blocked --key lane/a --msg "ready for review"
+dm msg list [--key lane/a] [--limit 20] [--json]
+dm msg wait --key lane/a --state done [--timeout 5m]
+dm msg clear [--key lane/a]
+dm msg schema
+```
+
+`post` prints the stored entry as one row. `list` prints newest first as
+`SEQ KEY STATE FROM MSG` and cuts only the message to the terminal width;
+`--json` prints the reply unchanged. `clear` prints the count. `schema` prints
+the schema, so `dm msg schema | jq .actions` reads. The wait timeout defaults
+to 5 minutes and takes any duration up to one hour.
+
+A wait matches the newest entry for its key, not any entry. It returns at once
+when that entry already carries the wanted state. Otherwise it parks until a
+post changes the newest entry for the key, until a clear exposes an older one,
+or until the timeout. Only the newest entry counts, so a newer `blocked`
+outranks an older `done` on the same key. A timeout replies with
+`box: wait timed out` plus the newest entry it saw, and exits 1.
+
+A lane and a driver, in one session:
+
+```sh
+# in the lane's shell, a pane of the session
+dm msg post --key lane/a --state blocked --msg "ready for review"
+
+# in the driver: parks until the lane reports done
+dm msg wait --key lane/a --state done --timeout 10m
+
+# in the lane's shell, after the gate
+dm msg post --key lane/a --state done --msg "gate green"
+```
+
+The wait returns the done entry:
+
+```
+$ dm msg wait --key lane/a --state done --timeout 10m
+2 lane/a done w2p1 gate green
+```
+
+The box is not a queue. Nothing is consumed: a list, a wait and a repeat of
+either read the same entries, and every reader sees the whole log for its
+key. A clear is the only thing that removes entries, apart from the caps
+dropping the oldest at the bound, and a clear never resets `seq`.
 
 ## Durability
 
