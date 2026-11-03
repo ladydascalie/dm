@@ -2,39 +2,72 @@ package main
 
 // The message box as a floating pane. The view is read-only: it lists the
 // session's entries newest first, one row each, and follows the log while it is
-// open through the server's box push. Keys scroll it; esc closes it.
+// open through the server's box push. It also keeps the presence list, so a
+// reader can see who is parked on which filter and how far each has read. Keys
+// scroll it and toggle the watcher page; esc closes it.
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/hinshun/vt10x"
 )
 
-// The columns of one row, in order: seq, state, key, from, msg. The first four
-// keep a fixed width, so a column reads down the list.
+// The columns of one entry row, in order: receipt, seq, state, key, from, msg.
+// The fixed widths let a column read down the list.
 const (
 	boxSeqW   = 4
 	boxStateW = 7
 	boxKeyW   = 14
 	boxFromW  = 6
+	// boxReceiptW is the receipt marker: a two-cell count and the space that
+	// separates it from the seq column.
+	boxReceiptW = 3
 )
 
-// boxView is the open message-box float: the entries the server sent, the row
-// of the newest one shown at the top, and the float that draws them.
+// The columns of one watcher row, in order: pane, filter, cursor. The wait
+// mark follows the cursor.
+const (
+	boxPaneW   = 8
+	boxFilterW = 16
+)
+
+const (
+	// boxWatchInterval is the shortest gap between watcher requests. A burst
+	// of watch pushes asks the server once.
+	boxWatchInterval = 100 * time.Millisecond
+
+	// boxReceiptMinW is the narrowest rect that carries the receipt marker.
+	// Below it the marker is dropped whole, so the message keeps its cells.
+	boxReceiptMinW = 60
+)
+
+// boxView is the open message-box float: the entries the server sent, the rows
+// of the newest one shown at the top, the watchers the server last reported,
+// and the float that draws them.
 type boxView struct {
 	entries []entry
 	off     int
-	float   *FloatingPane
+	// new counts the entries that arrived above a scrolled-back window. It is
+	// zero while the window follows the newest entry.
+	new int
+
+	watchers []watch
+	// page is true while the float shows the watcher list instead of the log.
+	page bool
+	// watchAt is when the view last asked for the watcher list, and watchWant
+	// marks a push whose ask the interval held back.
+	watchAt   time.Time
+	watchWant bool
+
+	float *FloatingPane
 	// snap sizes the float: the view fits the log until it reaches its cap,
 	// so a short log reads in a short box and a long one fills the screen.
 	snap *Snapshot
 }
-
-// boxHint names the keys the view takes, in its bottom border.
-const boxHint = " j/k scroll  esc close "
 
 // newBoxView opens the float on a screen. The log stays empty until the reply
 // lands.
@@ -99,12 +132,39 @@ func (b *boxView) sync(snap *Snapshot) {
 	b.paint()
 }
 
-// set replaces the log after a list reply or a box push.
+// set replaces the log after a list reply or a box push. A scrolled-back
+// window keeps its top entry by seq, so new entries do not slide the text
+// under the reader. A window at the top follows the newest entry.
 func (b *boxView) set(entries []entry) {
+	top := 0
+	if b.off > 0 && b.off < len(b.entries) {
+		top = b.entries[b.off].Seq
+	}
 	b.entries = entries
 	b.float.Rect = boxViewRect(b.snap, len(entries))
+	if top != 0 {
+		if i := boxSeqIndex(entries, top); i >= 0 {
+			// The entries between the old top and the new one arrived above
+			// the window; the rest of the log did not move.
+			b.new += i - b.off
+			if b.new < 0 {
+				b.new = 0
+			}
+			b.off = i
+		}
+	}
 	b.clamp()
 	b.paint()
+}
+
+// boxSeqIndex finds an entry by seq in the newest-first log.
+func boxSeqIndex(entries []entry, seq int) int {
+	for i, e := range entries {
+		if e.Seq == seq {
+			return i
+		}
+	}
+	return -1
 }
 
 // scroll moves the window by n rows, positive toward older entries.
@@ -115,7 +175,8 @@ func (b *boxView) scroll(n int) {
 }
 
 // clamp keeps the window on the log: the offset never passes the oldest row
-// that still fills the pane, and a log that shrank goes back to the top.
+// that still fills the pane, a log that shrank goes back to the top, and the
+// arrival count clears once the reader is at the top.
 func (b *boxView) clamp() {
 	max := len(b.entries) - b.float.Rect.H
 	if max < 0 {
@@ -127,61 +188,190 @@ func (b *boxView) clamp() {
 	if b.off < 0 {
 		b.off = 0
 	}
+	if b.off == 0 {
+		b.new = 0
+	}
 }
 
-// paint rewrites the float's terminal from the entries. Every row is placed
-// absolutely, so a view that scrolled paints its new window whole.
+// togglePage swaps the float between the entry list and the watcher page.
+func (b *boxView) togglePage() {
+	b.page = !b.page
+	b.paint()
+}
+
+// paint rewrites the float's terminal from the entries or the watcher list.
+// Every row is placed absolutely, so a view that scrolled paints its new
+// window whole.
 func (b *boxView) paint() {
 	r := b.float.Rect
 	b.float.Title = b.title()
-	b.float.Hint = boxHint
+	b.float.Hint = b.hint()
 	if r.W < 1 || r.H < 1 {
 		b.float.VT = vt10x.New(vt10x.WithSize(1, 1))
 		return
 	}
 	vt := vt10x.New(vt10x.WithSize(r.W, r.H))
 	var buf bytes.Buffer
+	if b.page {
+		b.paintWatchers(&buf, r)
+	} else {
+		b.paintEntries(&buf, r)
+	}
+	_, _ = vt.Write(buf.Bytes())
+	b.float.VT = vt
+}
+
+// paintEntries draws the window of the log. A wide enough rect carries the
+// receipt count in every row.
+func (b *boxView) paintEntries(buf *bytes.Buffer, r Rect) {
 	if len(b.entries) == 0 {
-		buf.WriteString("\x1b[0m\x1b[90m no entries yet")
+		boxPaintNote(buf, 1, "no entries yet", r.W)
+		return
 	}
 	for row := 0; row < r.H; row++ {
 		i := b.off + row
 		if i >= len(b.entries) {
 			break
 		}
-		fmt.Fprintf(&buf, "\x1b[%d;1H", row+1)
-		boxPaintRow(&buf, b.entries[i], r.W)
+		fmt.Fprintf(buf, "\x1b[%d;1H", row+1)
+		receipt := -1
+		if r.W >= boxReceiptMinW {
+			receipt = b.received(b.entries[i])
+		}
+		boxPaintRow(buf, b.entries[i], r.W, receipt)
 	}
-	_, _ = vt.Write(buf.Bytes())
-	b.float.VT = vt
 }
 
-// title is the count in the top border, and the visible rows when the log is
-// longer than the box.
+// paintWatchers draws the watcher page in the server's order, clipped to the
+// rect and to its rows.
+func (b *boxView) paintWatchers(buf *bytes.Buffer, r Rect) {
+	if len(b.watchers) == 0 {
+		boxPaintNote(buf, 1, "no watchers yet", r.W)
+		return
+	}
+	for row := 0; row < r.H && row < len(b.watchers); row++ {
+		fmt.Fprintf(buf, "\x1b[%d;1H", row+1)
+		boxPaintWatch(buf, b.watchers[row], r.W)
+	}
+}
+
+// boxPaintNote writes a dim placeholder line at an absolute row.
+func boxPaintNote(buf *bytes.Buffer, row int, text string, w int) {
+	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m\x1b[90m %s", row, clipCells(text, w-1))
+}
+
+// title is the count in the top border, the visible rows when the log is
+// longer than the box, the parked watches, and the entries that arrived above
+// a scrolled-back window. The last two are omitted when they are zero.
 func (b *boxView) title() string {
 	n := len(b.entries)
+	var head string
 	switch n {
 	case 0:
-		return " box  empty "
+		head = "box  empty"
 	case 1:
-		return " box  1 entry "
+		head = "box  1 entry"
+	default:
+		rows := b.float.Rect.H
+		if n <= rows {
+			head = fmt.Sprintf("box  %d entries", n)
+		} else {
+			last := b.off + rows
+			if last > n {
+				last = n
+			}
+			head = fmt.Sprintf("box  %d entries  %d-%d", n, b.off+1, last)
+		}
 	}
-	rows := b.float.Rect.H
-	if n <= rows {
-		return fmt.Sprintf(" box  %d entries ", n)
+	parts := []string{head}
+	if parked := b.parked(); parked > 0 {
+		parts = append(parts, fmt.Sprintf("%d watching", parked))
 	}
-	last := b.off + rows
-	if last > n {
-		last = n
+	if b.new > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", b.new))
 	}
-	return fmt.Sprintf(" box  %d entries  %d-%d ", n, b.off+1, last)
+	return " " + strings.Join(parts, "  ") + " "
+}
+
+// hint names the keys the view takes, in its bottom border.
+func (b *boxView) hint() string {
+	if b.page {
+		return " j/k scroll  w log  esc close "
+	}
+	return " j/k scroll  w watchers  esc close "
+}
+
+// parked counts the watches whose wait is outstanding.
+func (b *boxView) parked() int {
+	n := 0
+	for _, w := range b.watchers {
+		if w.Parked {
+			n++
+		}
+	}
+	return n
+}
+
+// received counts the watches a filter and a cursor say were served this
+// entry: the filter matches its key and the cursor is at or past its seq.
+func (b *boxView) received(e entry) int {
+	n := 0
+	for _, w := range b.watchers {
+		if watchMatches(w, e.Key) && w.Cursor >= e.Seq {
+			n++
+		}
+	}
+	return n
+}
+
+// watchMatches reports whether a watch's filter covers a key. Filter is an
+// exact key or a branch. A watch with neither read the whole log, so it covers
+// every key.
+func watchMatches(w watch, key string) bool {
+	switch {
+	case w.Key != "":
+		return w.Key == key
+	case w.KeyPrefix != "":
+		return strings.HasPrefix(key, w.KeyPrefix)
+	}
+	return true
+}
+
+// watchFilter is a watch's filter as the page prints it: the key, or the
+// branch with a trailing star.
+func watchFilter(w watch) string {
+	if w.Key != "" {
+		return w.Key
+	}
+	if w.KeyPrefix != "" {
+		return w.KeyPrefix + "*"
+	}
+	return ""
+}
+
+// boxPaintWatch writes one watcher row into buf, dim text. The row is clipped
+// to width cells.
+func boxPaintWatch(buf *bytes.Buffer, w watch, width int) {
+	pane := boxPad(clipCells(w.Pane, boxPaneW), boxPaneW)
+	filter := boxPad(clipCells(watchFilter(w), boxFilterW), boxFilterW)
+	row := fmt.Sprintf("%s %s @%d", pane, filter, w.Cursor)
+	if w.Parked {
+		row += " wait"
+	}
+	buf.WriteString("\x1b[0m\x1b[90m")
+	buf.WriteString(clipCells(row, width))
 }
 
 // boxPaintRow writes one entry into buf, dim text with the state word in the
-// colour the rail gives that state. The row is clipped to w cells.
-func boxPaintRow(buf *bytes.Buffer, e entry, w int) {
-	row := boxRowText(e, w)
+// colour the rail gives that state. A receipt of zero or more prefixes a
+// two-cell count; a negative receipt drops the marker. The row is clipped to
+// w cells.
+func boxPaintRow(buf *bytes.Buffer, e entry, w int, receipt int) {
+	row := boxRowText(e, w, receipt)
 	start := boxSeqW + 1
+	if receipt >= 0 {
+		start += boxReceiptW
+	}
 	state := string(e.State)
 	if start+len(state) > runeCells(row) {
 		buf.WriteString(row)
@@ -197,10 +387,17 @@ func boxPaintRow(buf *bytes.Buffer, e entry, w int) {
 
 // boxRowText is the plain text of one entry row, columns padded and the whole
 // clipped to w cells.
-func boxRowText(e entry, w int) string {
+func boxRowText(e entry, w int, receipt int) string {
 	key := boxPad(clipCells(e.Key, boxKeyW), boxKeyW)
 	from := boxPad(clipCells(e.From, boxFromW), boxFromW)
-	return clipCells(fmt.Sprintf("%*d %s %s %s %s", boxSeqW, e.Seq,
+	mark := ""
+	if receipt >= 0 {
+		if receipt > 99 {
+			receipt = 99
+		}
+		mark = fmt.Sprintf("%2d ", receipt)
+	}
+	return clipCells(mark+fmt.Sprintf("%*d %s %s %s %s", boxSeqW, e.Seq,
 		boxPad(string(e.State), boxStateW), key, from, e.Msg), w)
 }
 
@@ -216,7 +413,8 @@ func boxStateColour(st boxState) rgb {
 }
 
 // openBoxView opens the message box as a floating pane, or closes it when it is
-// already up. The view asks for the whole log; the reply fills it.
+// already up. The view asks for the whole log and the watcher list; the replies
+// fill it.
 func openBoxView(t *tui) {
 	if t.snap == nil {
 		t.disarm()
@@ -231,6 +429,7 @@ func openBoxView(t *tui) {
 	t.mode = "box"
 	t.armed = false
 	t.boxRequest()
+	t.boxWatchers(time.Now())
 	t.dirty = true
 }
 
@@ -260,6 +459,32 @@ func (t *tui) boxRequest() {
 		Res: json.RawMessage(`{"key":"","limit":0}`)})
 }
 
+// boxWatchers asks the server for the watcher list, unless it asked within the
+// last boxWatchInterval. A held-back ask stays marked and the ticker flushes it.
+// The view is not a watcher: the request carries no from.
+func (t *tui) boxWatchers(now time.Time) {
+	b := t.box
+	if b == nil || t.conn == nil {
+		return
+	}
+	if !b.watchAt.IsZero() && now.Sub(b.watchAt) < boxWatchInterval {
+		b.watchWant = true
+		return
+	}
+	b.watchAt = now
+	b.watchWant = false
+	_ = t.conn.send(Msg{Type: "req", Action: "msg-watchers",
+		Res: json.RawMessage(`{}`)})
+}
+
+// flushBoxWatchers sends a watcher ask that the interval held back.
+func (t *tui) flushBoxWatchers(now time.Time) {
+	if t.box == nil || !t.box.watchWant {
+		return
+	}
+	t.boxWatchers(now)
+}
+
 // takeBoxList fills the view from a msg-list reply. A closed view, a malformed
 // reply and an error reply leave the picture alone; an error becomes a toast.
 func (t *tui) takeBoxList(m Msg) {
@@ -276,6 +501,28 @@ func (t *tui) takeBoxList(m Msg) {
 		return
 	}
 	t.box.set(rep.Entries)
+	t.dirty = true
+}
+
+// takeBoxWatchers fills the watcher page from a msg-watchers reply. Replies
+// arrive in request order on the one connection, so the newest reply is the
+// newest state. A closed view, a malformed reply and an error reply leave the
+// page alone; an error becomes a toast.
+func (t *tui) takeBoxWatchers(m Msg) {
+	if t.box == nil {
+		return
+	}
+	if !m.OK {
+		t.notify(m.Error)
+		return
+	}
+	var rep watchersReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		t.notify("box: " + err.Error())
+		return
+	}
+	t.box.watchers = rep.Watchers
+	t.box.paint()
 	t.dirty = true
 }
 
@@ -341,6 +588,8 @@ func (t *tui) boxKey() bool {
 		t.box.scroll(-len(t.box.entries))
 	case 'G':
 		t.box.scroll(len(t.box.entries))
+	case 'w':
+		t.box.togglePage()
 	case 'q', 'm', 0x02, 0x03:
 		closeBoxView(t)
 		return true
