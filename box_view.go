@@ -56,8 +56,10 @@ type boxView struct {
 	new int
 
 	watchers []watch
-	// page is true while the float shows the watcher list instead of the log.
+	// page is true while the float shows the watcher list instead of the log,
+	// and pOff is the first watch row in view.
 	page bool
+	pOff int
 	// watchAt is when the view last asked for the watcher list, and watchWant
 	// marks a push whose ask the interval held back.
 	watchAt   time.Time
@@ -79,8 +81,9 @@ func newBoxView(snap *Snapshot) *boxView {
 
 // boxViewRect is where the float sits: centred over the pane area, one cell
 // clear of the rail, at most 96 columns and 22 rows. The height follows n, the
-// number of entries, so a short log reads in a short box and a log longer than
-// the cap scrolls.
+// larger of the entry count and the watch count, so a short list reads in a
+// short box and a list longer than the cap scrolls. A parked watch exists
+// before the first entry, so the watcher page sizes itself from n too.
 func boxViewRect(snap *Snapshot, n int) Rect {
 	left := snap.Rail
 	if left < 0 {
@@ -123,13 +126,23 @@ func boxViewRect(snap *Snapshot, n int) Rect {
 // sync fits the float to the screen after a snapshot or a rail change.
 func (b *boxView) sync(snap *Snapshot) {
 	b.snap = snap
-	r := boxViewRect(snap, len(b.entries))
+	r := boxViewRect(snap, b.rows())
 	if r == b.float.Rect {
 		return
 	}
 	b.float.Rect = r
 	b.clamp()
+	b.pageClamp()
 	b.paint()
+}
+
+// rows is the number of rows the float fits: the larger list wins, so the
+// watcher page is usable before the first entry lands.
+func (b *boxView) rows() int {
+	if len(b.watchers) > len(b.entries) {
+		return len(b.watchers)
+	}
+	return len(b.entries)
 }
 
 // set replaces the log after a list reply or a box push. A scrolled-back
@@ -141,7 +154,7 @@ func (b *boxView) set(entries []entry) {
 		top = b.entries[b.off].Seq
 	}
 	b.entries = entries
-	b.float.Rect = boxViewRect(b.snap, len(entries))
+	b.float.Rect = boxViewRect(b.snap, b.rows())
 	if top != 0 {
 		if i := boxSeqIndex(entries, top); i >= 0 {
 			// The entries between the old top and the new one arrived above
@@ -154,6 +167,17 @@ func (b *boxView) set(entries []entry) {
 		}
 	}
 	b.clamp()
+	b.pageClamp()
+	b.paint()
+}
+
+// setWatchers replaces the watcher page after a msg-watchers reply. The float
+// holds the page whole while the page is longer than the log.
+func (b *boxView) setWatchers(watchers []watch) {
+	b.watchers = watchers
+	b.float.Rect = boxViewRect(b.snap, b.rows())
+	b.clamp()
+	b.pageClamp()
 	b.paint()
 }
 
@@ -167,11 +191,39 @@ func boxSeqIndex(entries []entry, seq int) int {
 	return -1
 }
 
-// scroll moves the window by n rows, positive toward older entries.
+// scroll moves the window by n rows, positive toward older rows. The page and
+// the log keep their own offsets, so a toggle leaves each where it was.
 func (b *boxView) scroll(n int) {
-	b.off += n
-	b.clamp()
+	if b.page {
+		b.pOff += n
+		b.pageClamp()
+	} else {
+		b.off += n
+		b.clamp()
+	}
 	b.paint()
+}
+
+// pageClamp keeps the watcher page on its list.
+func (b *boxView) pageClamp() {
+	max := len(b.watchers) - b.float.Rect.H
+	if max < 0 {
+		max = 0
+	}
+	if b.pOff > max {
+		b.pOff = max
+	}
+	if b.pOff < 0 {
+		b.pOff = 0
+	}
+}
+
+// listLen is the number of rows in the list the float shows.
+func (b *boxView) listLen() int {
+	if b.page {
+		return len(b.watchers)
+	}
+	return len(b.entries)
 }
 
 // clamp keeps the window on the log: the offset never passes the oldest row
@@ -249,9 +301,13 @@ func (b *boxView) paintWatchers(buf *bytes.Buffer, r Rect) {
 		boxPaintNote(buf, 1, "no watchers yet", r.W)
 		return
 	}
-	for row := 0; row < r.H && row < len(b.watchers); row++ {
+	for row := 0; row < r.H; row++ {
+		i := b.pOff + row
+		if i >= len(b.watchers) {
+			break
+		}
 		fmt.Fprintf(buf, "\x1b[%d;1H", row+1)
-		boxPaintWatch(buf, b.watchers[row], r.W)
+		boxPaintWatch(buf, b.watchers[i], r.W)
 	}
 }
 
@@ -521,8 +577,7 @@ func (t *tui) takeBoxWatchers(m Msg) {
 		t.notify("box: " + err.Error())
 		return
 	}
-	t.box.watchers = rep.Watchers
-	t.box.paint()
+	t.box.setWatchers(rep.Watchers)
 	t.dirty = true
 }
 
@@ -585,9 +640,9 @@ func (t *tui) boxKey() bool {
 	case 'j':
 		t.box.scroll(1)
 	case 'g':
-		t.box.scroll(-len(t.box.entries))
+		t.box.scroll(-t.box.listLen())
 	case 'G':
-		t.box.scroll(len(t.box.entries))
+		t.box.scroll(t.box.listLen())
 	case 'w':
 		t.box.togglePage()
 	case 'q', 'm', 0x02, 0x03:
