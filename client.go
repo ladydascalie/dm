@@ -49,10 +49,12 @@ type tui struct {
 	// out is the frame sink: os.Stdout in a session, a buffer in a test.
 	out io.Writer
 
-	mode     string // "" or "sessions" or "scroll" or "menu"
+	mode     string // "" or "sessions" or "scroll" or "menu" or "rename"
 	sessions []SessionInfo
 	sel      int
 	menu     *menu
+	// renameDraft is the text the rename prompt holds while mode is "rename".
+	renameDraft string
 
 	// hist is each pane's replay ring. It is not filled as output arrives:
 	// the first scrollback entry asks the server for one replay and caches it
@@ -137,6 +139,7 @@ type lastFrame struct {
 	help   paint
 	sess   paint
 	menu   paint
+	rename paint
 
 	divRect Rect   // divider zone the last frame painted
 	cur     string // cursor block the last frame wrote
@@ -546,6 +549,7 @@ func (t *tui) openMenu(p *PaneInfo, x, y int) {
 		{"Scrollback", "[", func() { t.startScroll(p) }},
 		{"New window", "c", func() { t.action("new-window", nil) }},
 		{"New workspace", "t", func() { t.action("new-workspace", nil) }},
+		{"Rename workspace", "r", func() { t.closeMenu(); t.openRenamePrompt() }},
 		{"Switch session", "s", func() { t.openPicker() }},
 		{"Detach", "d", func() { t.quit = true }},
 	}
@@ -721,13 +725,20 @@ func (t *tui) staleInput() {
 }
 
 // forwardPaste sends a bracketed paste to the focused pane as one keys message.
-// A paste closes any open menu, picker or scrollback first and disarms the
-// prefix: its bytes are text for the pane, never dm commands.
+// A paste closes any open menu, picker, prompt or scrollback first and disarms
+// the prefix: its bytes are text for the pane, never dm commands. A paste into
+// the rename prompt closes it and the bytes go nowhere: a workspace label is
+// typed, not dropped in.
 func (t *tui) forwardPaste(seq []byte) {
 	t.pasteDeadline = time.Time{}
 	t.pending = false
 	t.disarm()
 	switch t.mode {
+	case "rename":
+		// A pasted block is not a workspace name: close the prompt and drop
+		// its bytes rather than feed them to the draft or the pane.
+		t.closeRename()
+		return
 	case "menu":
 		t.closeMenu()
 	case "sessions":
@@ -773,10 +784,18 @@ func (t *tui) processInput() {
 		t.pasteDeadline = time.Time{}
 		if ev, n, ok := parseMouse(t.inbuf); ok {
 			t.inbuf = t.inbuf[n:]
-			t.handleMouse(ev)
+			// The rename prompt owns the keyboard, not the pointer: a stray
+			// click must not move the draft or the focus out from under it.
+			if t.mode != "rename" {
+				t.handleMouse(ev)
+			}
 			continue
 		} else if n == 0 {
 			return // partial sequence, wait for the rest
+		}
+		if t.mode == "rename" {
+			t.renameKey()
+			continue
 		}
 		if t.mode == "sessions" {
 			if !t.pickerKey() {
@@ -1691,6 +1710,87 @@ func (t *tui) closePicker() {
 	t.dirty = true
 }
 
+// openRenamePrompt takes over input for the active workspace's label. The
+// draft starts as the current name: the snapshot names no workspace itself, so
+// the name comes from the rail entries. A workspace the snapshot does not list
+// opens an empty draft; the prompt still opens.
+func (t *tui) openRenamePrompt() {
+	if t.snap == nil {
+		t.disarm()
+		return
+	}
+	t.renameDraft = ""
+	for _, p := range t.snap.All {
+		if p.Workspace == t.snap.Workspace {
+			t.renameDraft = p.WorkspaceName
+			break
+		}
+	}
+	t.mode = "rename"
+	t.armed = false
+	t.pending = false
+	t.dirty = true
+}
+
+// closeRename drops the prompt and its draft, whatever it held.
+func (t *tui) closeRename() {
+	t.mode = ""
+	t.renameDraft = ""
+	t.inbuf = nil
+	t.pending = false
+	t.dirty = true
+}
+
+// submitRename sends the trimmed draft to the server and closes the prompt. An
+// empty result cancels: a workspace label is never blank. The prompt closes
+// first, so a refusal toast lands on the live picture.
+func (t *tui) submitRename() {
+	if t.snap == nil {
+		t.closeRename()
+		return
+	}
+	name := strings.TrimSpace(t.renameDraft)
+	target := t.snap.Workspace
+	t.closeRename()
+	if name == "" {
+		return
+	}
+	if t.conn != nil {
+		_ = t.conn.send(Msg{Type: "req", Action: "rename-workspace", Target: target, Name: name})
+	}
+}
+
+// renameKey consumes one key while the rename prompt is open. No byte leaves
+// the client: every key edits or ends the draft. Esc cancels at once, so the
+// prompt never waits for the rest of an escape sequence.
+func (t *tui) renameKey() {
+	if len(t.inbuf) == 0 {
+		return
+	}
+	b := t.inbuf[0]
+	t.inbuf = t.inbuf[1:]
+	t.pending = false
+	switch {
+	case b == 0x1b:
+		// A lone esc cancels. An arrow key cancels too: its remaining bytes
+		// are dropped rather than typed into the draft.
+		t.closeRename()
+	case b == '\r' || b == '\n':
+		t.submitRename()
+	case b == 0x7f || b == 0x08:
+		if r := []rune(t.renameDraft); len(r) > 0 {
+			t.renameDraft = string(r[:len(r)-1])
+		}
+		t.dirty = true
+	case b == 0x15:
+		t.renameDraft = ""
+		t.dirty = true
+	case b >= 0x20 && b <= 0x7e:
+		t.renameDraft += string(rune(b))
+		t.dirty = true
+	}
+}
+
 func (t *tui) key(b byte) {
 	switch b {
 	case 0x02:
@@ -1735,6 +1835,8 @@ func (t *tui) key(b byte) {
 	case 's':
 		t.openPicker()
 	case 'r':
+		t.openRenamePrompt()
+	case 'b':
 		t.toggleRail()
 	case '?':
 		t.disarm()
@@ -1858,7 +1960,7 @@ func (t *tui) draw() {
 
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
-	var box, grip, div, rail, bar, toasts, pal, help, sess, menu bytes.Buffer
+	var box, grip, div, rail, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range win.Panes {
 		drawPaneBox(&box, p.Rect, p.ID == win.Focus)
 	}
@@ -1879,6 +1981,9 @@ func (t *tui) draw() {
 	}
 	if t.mode == "menu" && t.menu != nil {
 		drawMenu(&menu, t.menu)
+	}
+	if t.mode == "rename" {
+		drawRename(&rename, win, win.Workspace, t.renameDraft)
 	}
 
 	// A picture that is not stable repaints whole and may clear: a size, a
@@ -1917,6 +2022,7 @@ func (t *tui) draw() {
 		{p: &t.last.help, buf: &help, overlay: true},
 		{p: &t.last.sess, buf: &sess, overlay: true},
 		{p: &t.last.menu, buf: &menu, overlay: true},
+		{p: &t.last.rename, buf: &rename, overlay: true},
 	}
 	// An overlay paints on top of everything, so the rows it leaves need the
 	// whole picture back: the panes under it and the bands around it. Without a
