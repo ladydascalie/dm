@@ -18,7 +18,10 @@ func boxServer(t *testing.T) *server {
 	t.Setenv("DM_STATE", t.TempDir())
 	st := newState("boxstore")
 	rootPane(st)
-	return railServer(st)
+	s := railServer(st)
+	// The registry is built with the server, never loaded from state.
+	s.watches = map[boxWatchKey]watch{}
+	return s
 }
 
 // boxConn is a client whose replies land on a pipe the test reads.
@@ -536,5 +539,360 @@ func TestBoxLoadDropsBadEntryAndKeepsSeq(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "dropped 1 invalid entries") {
 		t.Fatalf("log does not count the drop: %q", buf.String())
+	}
+}
+
+// boxPane is the first pane in the test server's tree, the id a read names.
+func boxPane(t *testing.T, s *server) string {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.st.win().Focus
+	if id == "" {
+		t.Fatal("the session has no pane")
+	}
+	return id
+}
+
+// boxAttach puts a client on the server's push list and returns its pipe, so a
+// test reads the frames a broadcast sends.
+func boxAttach(t *testing.T, s *server) (*client, net.Conn) {
+	t.Helper()
+	cl, conn := boxConn(t)
+	s.mu.Lock()
+	s.clients[cl] = true
+	s.mu.Unlock()
+	t.Cleanup(func() {
+		s.mu.Lock()
+		delete(s.clients, cl)
+		s.mu.Unlock()
+		cl.shutdown()
+	})
+	return cl, conn
+}
+
+// boxWatcherList asks the server for its live watches.
+func boxWatcherList(t *testing.T, s *server, cl *client, conn net.Conn) []watch {
+	t.Helper()
+	m := boxCall(t, s, cl, conn, "msg-watchers", `{}`)
+	if !m.OK {
+		t.Fatalf("watchers: %s", m.Error)
+	}
+	if !strings.Contains(string(m.Res), `"watchers":[`) {
+		t.Fatalf("watchers reply = %s, want the frozen wrapper", m.Res)
+	}
+	var rep watchersReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		t.Fatalf("watchers reply: %v", err)
+	}
+	return rep.Watchers
+}
+
+// boxAwaitWatchers polls the watcher list until done holds, so a parked wait or
+// a finished post has time to settle on the server.
+func boxAwaitWatchers(t *testing.T, s *server, cl *client, conn net.Conn, why string, done func([]watch) bool) []watch {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		ws := boxWatcherList(t, s, cl, conn)
+		if done(ws) {
+			return ws
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: watchers = %+v", why, ws)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// boxPark starts a msg-wait on its own connection and returns the reader for
+// the reply, so the test can keep asking the server questions meanwhile.
+func boxPark(t *testing.T, s *server, res string) func(t *testing.T) Msg {
+	t.Helper()
+	cl, conn := boxConn(t)
+	go s.handleReq(cl, Msg{Type: "req", Action: "msg-wait", Res: json.RawMessage(res)})
+	return func(t *testing.T) Msg {
+		t.Helper()
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		m, err := readMsg(conn)
+		if err != nil {
+			t.Fatalf("wait reply: %v", err)
+		}
+		return m
+	}
+}
+
+// boxPushIs reads pushes until one carries the wanted type. A post pushes its
+// own box frame, so a test that only cares about watches skips over it.
+func boxPushIs(t *testing.T, conn net.Conn, want, why string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: no %s push arrived", why, want)
+		}
+		if m := boxNextPush(t, conn); m.Type == want {
+			return
+		}
+	}
+}
+
+// boxNextPush reads one frame the server pushed to an attached client.
+func boxNextPush(t *testing.T, conn net.Conn) Msg {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	m, err := readMsg(conn)
+	if err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	return m
+}
+
+// boxNoPush fails when a frame arrives within the quiet window.
+func boxNoPush(t *testing.T, conn net.Conn, why string) {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Millisecond))
+	m, err := readMsg(conn)
+	if err == nil {
+		t.Fatalf("%s: pushed %q", why, m.Type)
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+}
+
+// TestBoxWatchParkedWaitAppears: a wait that names its pane is a watch the
+// server lists, parked at cursor 0, before any post exists.
+func TestBoxWatchParkedWaitAppears(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	pane := boxPane(t, s)
+
+	boxPark(t, s, `{"key":"lane/a","from":"`+pane+`","timeoutMs":5000}`)
+	ws := boxAwaitWatchers(t, s, cl, conn, "the parked wait never appeared", func(ws []watch) bool {
+		return len(ws) == 1 && ws[0].Parked
+	})
+	s.mu.Lock()
+	posts := len(s.st.Box)
+	s.mu.Unlock()
+	if posts != 0 {
+		t.Fatalf("the box holds %d entries, want none", posts)
+	}
+	w := ws[0]
+	if w.Pane != pane || w.Key != "lane/a" || w.KeyPrefix != "" || w.Cursor != 0 {
+		t.Fatalf("watch = %+v, want a parked lane/a watch on %s at cursor 0", w, pane)
+	}
+	if w.At.Location() != time.UTC || !w.At.Equal(w.At.Truncate(time.Second)) {
+		t.Fatalf("at = %v, want a whole second in UTC", w.At)
+	}
+}
+
+// TestBoxWatchServedWaitAdvancesAndUnparks: the post that serves a parked wait
+// leaves the watch at the seq it served and no longer parked.
+func TestBoxWatchServedWaitAdvancesAndUnparks(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	pane := boxPane(t, s)
+
+	reply := boxPark(t, s, `{"key":"lane/a","from":"`+pane+`","timeoutMs":5000}`)
+	boxAwaitWatchers(t, s, cl, conn, "the wait never parked", func(ws []watch) bool {
+		return len(ws) == 1 && ws[0].Parked
+	})
+
+	post := boxPost(t, s, cl, conn, "lane/a", "done", "gate green")
+	m := reply(t)
+	if !m.OK {
+		t.Fatalf("wait: %s", m.Error)
+	}
+	var rep waitReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil || rep.Entry.Seq != post.Seq {
+		t.Fatalf("wait reply = %s (%v), want seq %d", m.Res, err, post.Seq)
+	}
+
+	ws := boxAwaitWatchers(t, s, cl, conn, "the served watch never settled", func(ws []watch) bool {
+		return len(ws) == 1 && !ws[0].Parked && ws[0].Cursor == post.Seq
+	})
+	if ws[0].Key != "lane/a" || ws[0].Pane != pane {
+		t.Fatalf("watch = %+v, want the lane/a watch on %s", ws[0], pane)
+	}
+}
+
+// TestBoxWatchListAdvances: a list that names its pane roots a watch at the
+// highest seq it served, and a later read never lowers it.
+func TestBoxWatchListAdvances(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	pane := boxPane(t, s)
+	boxPost(t, s, cl, conn, "lane/a", "note", "one")
+	boxPost(t, s, cl, conn, "lane/b", "note", "two")
+	third := boxPost(t, s, cl, conn, "lane/a", "note", "three")
+
+	for _, c := range []struct {
+		res  string
+		want int
+	}{
+		{`{"keyPrefix":"lane/","from":"` + pane + `"}`, third.Seq},
+		{`{"keyPrefix":"lane/","afterSeq":2,"from":"` + pane + `"}`, third.Seq},
+		{`{"keyPrefix":"lane/","afterSeq":3,"from":"` + pane + `"}`, third.Seq},
+	} {
+		if m := boxCall(t, s, cl, conn, "msg-list", c.res); !m.OK {
+			t.Fatalf("list %s: %s", c.res, m.Error)
+		}
+		ws := boxAwaitWatchers(t, s, cl, conn, "cursor after "+c.res, func(ws []watch) bool {
+			return len(ws) == 1 && ws[0].Cursor == c.want
+		})
+		if ws[0].Parked {
+			t.Fatalf("list %s left the watch parked", c.res)
+		}
+	}
+
+	// Two filters on one pane are two watches.
+	boxCall(t, s, cl, conn, "msg-list", `{"key":"lane/a","from":"`+pane+`"}`)
+	ws := boxWatcherList(t, s, cl, conn)
+	if len(ws) != 2 {
+		t.Fatalf("watches = %+v, want one per filter", ws)
+	}
+}
+
+// TestBoxWatchClosedPaneDrops: a watch whose pane left the tree is dropped
+// before the next watcher reply.
+func TestBoxWatchClosedPaneDrops(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	pane := boxPane(t, s)
+
+	boxCall(t, s, cl, conn, "msg-list", `{"from":"`+pane+`"}`)
+	if ws := boxWatcherList(t, s, cl, conn); len(ws) != 1 {
+		t.Fatalf("watches = %+v, want the one the list left", ws)
+	}
+
+	s.mu.Lock()
+	w := s.st.win()
+	w.Root = &Node{Pane: w.newPaneID()}
+	w.Focus = w.Root.Pane
+	s.mu.Unlock()
+
+	if ws := boxWatcherList(t, s, cl, conn); len(ws) != 0 {
+		t.Fatalf("watches = %+v, want none after the pane left", ws)
+	}
+}
+
+// TestBoxWatchStaleUnparkedDrops: an unparked watch older than the ttl goes,
+// and a parked one of the same age stays.
+func TestBoxWatchStaleUnparkedDrops(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	pane := boxPane(t, s)
+	boxPost(t, s, cl, conn, "lane/a", "note", "one")
+	boxCall(t, s, cl, conn, "msg-list", `{"key":"lane/a","from":"`+pane+`"}`)
+
+	stale := time.Now().UTC().Truncate(time.Second).Add(-11 * time.Minute)
+	s.mu.Lock()
+	for k, w := range s.watches {
+		w.At = stale
+		s.watches[k] = w
+	}
+	s.mu.Unlock()
+	if ws := boxWatcherList(t, s, cl, conn); len(ws) != 0 {
+		t.Fatalf("watches = %+v, want the stale one dropped", ws)
+	}
+
+	s.mu.Lock()
+	s.watches[boxWatchKeyOf(pane, "lane/b", "")] = watch{
+		Pane: pane, Key: "lane/b", Cursor: 1, Parked: true, At: stale}
+	s.mu.Unlock()
+	ws := boxWatcherList(t, s, cl, conn)
+	if len(ws) != 1 || !ws[0].Parked {
+		t.Fatalf("watches = %+v, want the parked one kept whatever its age", ws)
+	}
+}
+
+// TestBoxWatchersOrder: the reply is sorted by pane, key and keyPrefix.
+func TestBoxWatchersOrder(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	at := time.Now().UTC().Truncate(time.Second)
+	s.mu.Lock()
+	w := s.st.win()
+	first, second := w.Focus, w.newPaneID()
+	w.Root = &Node{Dir: "right", Kids: []*Node{{Pane: first}, {Pane: second}},
+		Sizes: []float64{0.5, 0.5}}
+	s.watches[boxWatchKeyOf(second, "lane/b", "")] = watch{Pane: second, Key: "lane/b", Cursor: 2, At: at}
+	s.watches[boxWatchKeyOf(first, "lane/b", "")] = watch{Pane: first, Key: "lane/b", Cursor: 3, At: at}
+	s.watches[boxWatchKeyOf(first, "", "lane/")] = watch{Pane: first, KeyPrefix: "lane/", Cursor: 1, At: at}
+	s.watches[boxWatchKeyOf(first, "lane/a", "")] = watch{Pane: first, Key: "lane/a", Cursor: 4, At: at}
+	s.mu.Unlock()
+
+	ws := boxWatcherList(t, s, cl, conn)
+	want := []struct{ pane, key, prefix string }{
+		{first, "", "lane/"},
+		{first, "lane/a", ""},
+		{first, "lane/b", ""},
+		{second, "lane/b", ""},
+	}
+	if len(ws) != len(want) {
+		t.Fatalf("watches = %+v, want %d", ws, len(want))
+	}
+	for i, w := range want {
+		if ws[i].Pane != w.pane || ws[i].Key != w.key || ws[i].KeyPrefix != w.prefix {
+			t.Fatalf("watch %d = %+v, want %s/%s/%s", i, ws[i], w.pane, w.key, w.prefix)
+		}
+	}
+}
+
+// TestBoxWatchPush: one watch push on appear, advance, park, unpark and drop,
+// and none on a read that changes nothing.
+func TestBoxWatchPush(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	pane := boxPane(t, s)
+	_, wconn := boxAttach(t, s)
+
+	// A read that appears pushes once.
+	boxCall(t, s, cl, conn, "msg-list", `{"from":"`+pane+`"}`)
+	boxPushIs(t, wconn, "watch", "the appear")
+	// A read that serves nothing new changes nothing and pushes nothing.
+	boxCall(t, s, cl, conn, "msg-list", `{"from":"`+pane+`"}`)
+	boxNoPush(t, wconn, "a repeat list")
+
+	// Parking pushes, and the post that serves it pushes once. The post pushes
+	// its own box frame first, which boxPushIs skips.
+	reply := boxPark(t, s, `{"key":"lane/a","from":"`+pane+`","timeoutMs":5000}`)
+	boxPushIs(t, wconn, "watch", "the park")
+	boxPost(t, s, cl, conn, "lane/a", "done", "gate green")
+	if m := reply(t); !m.OK {
+		t.Fatalf("wait: %s", m.Error)
+	}
+	boxPushIs(t, wconn, "watch", "the unpark")
+
+	// The drop of a stale watch pushes once.
+	s.mu.Lock()
+	for k, w := range s.watches {
+		w.At = time.Now().UTC().Add(-11 * time.Minute)
+		s.watches[k] = w
+	}
+	s.mu.Unlock()
+	boxWatcherList(t, s, cl, conn)
+	boxPushIs(t, wconn, "watch", "the drop")
+	boxNoPush(t, wconn, "the settled list")
+}
+
+// TestBoxWatchNoPaneFails: a read that names a pane outside the tree fails in
+// post's wording and records nothing.
+func TestBoxWatchNoPaneFails(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxConn(t)
+	for _, c := range []struct{ action, res string }{
+		{"msg-list", `{"from":"w9p9"}`},
+		{"msg-wait", `{"from":"w9p9","timeoutMs":1000}`},
+	} {
+		m := boxCall(t, s, cl, conn, c.action, c.res)
+		if m.OK {
+			t.Fatalf("%s from a missing pane was accepted", c.action)
+		}
+		if want := `box: no pane "w9p9"`; m.Error != want {
+			t.Fatalf("%s error = %q, want %q", c.action, m.Error, want)
+		}
+	}
+	if ws := boxWatcherList(t, s, cl, conn); len(ws) != 0 {
+		t.Fatalf("watches = %+v, want none", ws)
 	}
 }

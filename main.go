@@ -36,6 +36,7 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm msg list [--key K | --prefix P] [--after SEQ] [--limit N] [--json]
   dm msg wait [--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]
   dm msg clear [--key K]
+  dm msg watchers [--json]
   dm msg schema
 
 Actions are the same everywhere:
@@ -395,7 +396,7 @@ func printRPC(name string, req Msg) error {
 // action: the shapes come from box.go, so the CLI carries no wire of its own.
 func runBox(c *cmdFlags) error {
 	if len(c.args) == 0 {
-		return fmt.Errorf("msg needs a verb: post, list, wait, clear or schema")
+		return fmt.Errorf("msg needs a verb: post, list, wait, clear, watchers or schema")
 	}
 	switch c.args[0] {
 	case "post":
@@ -406,10 +407,12 @@ func runBox(c *cmdFlags) error {
 		return boxWaitVerb(c)
 	case "clear":
 		return boxClearVerb(c)
+	case "watchers":
+		return boxWatchersVerb(c)
 	case "schema":
 		return boxSchemaVerb(c)
 	}
-	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, clear or schema", c.args[0])
+	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, clear, watchers or schema", c.args[0])
 }
 
 // boxPostVerb posts one entry and prints it as the server stored it.
@@ -442,7 +445,7 @@ func boxPostVerb(c *cmdFlags) error {
 // reported on stderr.
 func boxListVerb(c *cmdFlags) error {
 	raw, err := json.Marshal(listReq{Key: c.key, KeyPrefix: c.keyPrefix,
-		Limit: c.limit, AfterSeq: c.boxCursor()})
+		Limit: c.limit, AfterSeq: c.boxCursor(), From: boxFrom(c.session)})
 	if err != nil {
 		return err
 	}
@@ -485,7 +488,7 @@ func boxWaitVerb(c *cmdFlags) error {
 	}
 	raw, err := json.Marshal(waitReq{Key: c.key, KeyPrefix: c.keyPrefix,
 		State: st, TimeoutMs: int(c.timeout / time.Millisecond),
-		AfterSeq: c.boxCursor()})
+		AfterSeq: c.boxCursor(), From: boxFrom(c.session)})
 	if err != nil {
 		return err
 	}
@@ -541,6 +544,62 @@ func boxClearVerb(c *cmdFlags) error {
 	}
 	fmt.Println(rep.Cleared)
 	return nil
+}
+
+// boxWatchersVerb prints the live watches as PANE FILTER CURSOR WAIT. FILTER is
+// the key, or the branch prefix with a trailing star. WAIT is "wait" while a
+// msg-wait is parked on the filter, and "-" otherwise.
+func boxWatchersVerb(c *cmdFlags) error {
+	m, err := rpc(c.session, Msg{Action: "msg-watchers"})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
+	var rep watchersReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	boxPrintWatchers(rep.Watchers)
+	return nil
+}
+
+// boxPrintWatchers writes one row per watch, each column padded to the widest
+// row. The filter is what the reader asked for: a key, or a prefix and a star.
+func boxPrintWatchers(ws []watch) {
+	if len(ws) == 0 {
+		return
+	}
+	paneW, filterW, cursorW := 0, 0, 1
+	filters := make([]string, len(ws))
+	for i, w := range ws {
+		filters[i] = boxFilter(w)
+		paneW = max(paneW, boxCells(w.Pane))
+		filterW = max(filterW, boxCells(filters[i]))
+		cursorW = max(cursorW, len(strconv.Itoa(w.Cursor)))
+	}
+	for i, w := range ws {
+		wait := "-"
+		if w.Parked {
+			wait = "wait"
+		}
+		line := fmt.Sprintf("%s %s %*d %s", boxPad(w.Pane, paneW),
+			boxPad(filters[i], filterW), cursorW, w.Cursor, wait)
+		fmt.Println(strings.TrimRight(line, " "))
+	}
+}
+
+// boxFilter is one watch's filter as a reader names it.
+func boxFilter(w watch) string {
+	if w.KeyPrefix != "" {
+		return w.KeyPrefix + "*"
+	}
+	return w.Key
 }
 
 // boxSchemaVerb prints the schema the running server serves, so the CLI holds
