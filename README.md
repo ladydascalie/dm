@@ -107,6 +107,14 @@ programs; for streamed output it is exact.
 Mouse reporting means normal drag no longer selects text. Hold Shift while
 dragging to use the terminal's own selection.
 
+dm selects instead. A left drag inside a pane highlights the row-major range
+in reverse video, clamped to the pane it started in, and the release copies it
+with OSC 52, so the text lands on the terminal's clipboard and a `copied N
+chars` toast confirms it. A press and release in the same cell is a click and
+still reaches the app that claims the mouse; dm only takes the drag. Trailing
+spaces go and lines join with a newline. An app's own drag selection loses to
+dm's while dm owns the gesture, which is why Shift exists.
+
 dm enables bracketed paste (2004) on attach and disables it again on detach, so
 ctrl+shift+v inserts newlines literally. The client sends a paste to the focused
 pane as one chunk and never reads a byte inside it as a dm key: an embedded

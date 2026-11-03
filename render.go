@@ -90,14 +90,23 @@ func normCell(g vt10x.Glyph) vt10x.Glyph {
 	return g
 }
 
+// selRange is a row-major cell range inside one pane's content: lo and hi are
+// cell offsets from the pane's top-left, lo <= hi.
+type selRange struct{ lo, hi int }
+
+func (s *selRange) has(off int) bool {
+	return s != nil && off >= s.lo && off <= s.hi
+}
+
 // drawPane paints one pane's cells inside r.
 func drawPane(buf *bytes.Buffer, vt vt10x.View, r Rect) {
-	drawPaneFrom(buf, vt, r, 0)
+	drawPaneFrom(buf, vt, r, 0, nil)
 }
 
 // drawPaneFrom paints rows [row0, row0+r.H) of vt into r. row0 > 0 shows
-// scrollback kept in a taller terminal.
-func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int) {
+// scrollback kept in a taller terminal. Cells inside sel get reverse video on
+// top of the pane's own colours.
+func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel *selRange) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -122,8 +131,59 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int) {
 			} else {
 				buf.WriteRune(g.Char)
 			}
+			if sel.has(y*r.W + x) {
+				// A full SGR follows, so the next cell drops the reverse.
+				buf.WriteString("\x1b[7m")
+				cur = nil
+			}
 		}
 	}
+}
+
+// selOrder returns the two cells in row-major order.
+func selOrder(a, b cell) (cell, cell) {
+	if a.y > b.y || (a.y == b.y && a.x > b.x) {
+		return b, a
+	}
+	return a, b
+}
+
+// extractSelection reads the selected cells from vt row by row. Trailing spaces
+// go, lines join with a newline, and no newline follows the last line.
+func extractSelection(vt vt10x.View, w int, a, b cell) string {
+	if vt == nil || w < 1 {
+		return ""
+	}
+	start, end := selOrder(a, b)
+	cols, rows := vt.Size()
+	vt.Lock()
+	defer vt.Unlock()
+	lines := make([]string, 0, end.y-start.y+1)
+	for y := start.y; y <= end.y; y++ {
+		x0, x1 := 0, w-1
+		if y == start.y {
+			x0 = start.x
+		}
+		if y == end.y {
+			x1 = end.x
+		}
+		var line strings.Builder
+		for x := x0; x <= x1; x++ {
+			var g vt10x.Glyph
+			if x >= 0 && x < cols && y >= 0 && y < rows {
+				g = normCell(vt.Cell(x, y))
+			} else {
+				g = normCell(g)
+			}
+			if g.Char < 0x20 {
+				line.WriteByte(' ')
+			} else {
+				line.WriteRune(g.Char)
+			}
+		}
+		lines = append(lines, strings.TrimRight(line.String(), " "))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // screenBytes serialises the VT's visible screen as ANSI that a fresh terminal

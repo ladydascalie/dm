@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
@@ -55,6 +56,9 @@ type tui struct {
 
 	pasteDeadline time.Time // set while a paste start marker is still arriving
 	pasteOff      bool      // one pass with paste detection off
+
+	selText *selection // text selected with the mouse, nil when none
+	press   *heldPress // left press waiting for a drag or a click
 
 	dragging   bool
 	dragFirst  string
@@ -251,6 +255,12 @@ func (t *tui) apply(m Msg) {
 			if !keep[id] {
 				delete(t.vts, id)
 			}
+		}
+		if t.selText != nil && !keep[t.selText.pane] {
+			t.selText = nil
+		}
+		if t.press != nil && !keep[t.press.pane] {
+			t.press = nil
 		}
 		t.dirty = true
 	case "screen":
@@ -868,6 +878,143 @@ func (t *tui) paneAt(x, y int) *PaneInfo {
 	return nil
 }
 
+// cell is a pane content coordinate: column and row counted from the pane's
+// rect top-left.
+type cell struct{ x, y int }
+
+// selection is the text dm selected with the mouse. Both cells lie inside the
+// content rect of the pane the drag started in.
+type selection struct {
+	pane   string
+	anchor cell
+	focus  cell
+}
+
+// heldPress is a left press on a pane that has not been forwarded yet. A drag
+// turns it into a selection, a release in the same cell forwards a click.
+type heldPress struct {
+	pane  string
+	mouse bool
+	raws  [][]byte
+}
+
+// cellAt maps a screen point to a cell inside p's content rect.
+func cellAt(p *PaneInfo, x, y int) (cell, bool) {
+	r := p.Rect
+	if x < r.X || y < r.Y || x >= r.X+r.W || y >= r.Y+r.H {
+		return cell{}, false
+	}
+	return cell{x: x - r.X, y: y - r.Y}, true
+}
+
+// selFocus moves the selection's focus to the point, clamped to the content
+// rect of the pane the drag started in.
+func (t *tui) selFocus(x, y int) {
+	if t.selText == nil {
+		return
+	}
+	p := t.paneByID(t.selText.pane)
+	if p == nil || p.Rect.W < 1 || p.Rect.H < 1 {
+		return
+	}
+	c := cell{x: x - p.Rect.X, y: y - p.Rect.Y}
+	if c.x < 0 {
+		c.x = 0
+	}
+	if c.y < 0 {
+		c.y = 0
+	}
+	if c.x >= p.Rect.W {
+		c.x = p.Rect.W - 1
+	}
+	if c.y >= p.Rect.H {
+		c.y = p.Rect.H - 1
+	}
+	if c != t.selText.focus {
+		t.selText.focus = c
+		t.dirty = true
+	}
+}
+
+// rangeIn returns the selection as a row-major cell range for a pane w wide.
+func (s *selection) rangeIn(w int) *selRange {
+	if s == nil || w < 1 {
+		return nil
+	}
+	lo := s.anchor.y*w + s.anchor.x
+	hi := s.focus.y*w + s.focus.x
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return &selRange{lo: lo, hi: hi}
+}
+
+func (t *tui) clearSelection() {
+	if t.selText != nil {
+		t.selText = nil
+		t.dirty = true
+	}
+}
+
+// finishPress ends a held left press. A release in another cell copies the
+// selection; the same cell is a click, forwarded to an app that claims the
+// mouse.
+func (t *tui) finishPress(x, y int, raw []byte) {
+	pr := t.press
+	t.press = nil
+	if pr == nil {
+		return
+	}
+	t.selFocus(x, y)
+	if t.selText != nil && t.selText.pane == pr.pane && t.selText.focus != t.selText.anchor {
+		t.copySelection()
+		return
+	}
+	t.selText = nil
+	t.dirty = true
+	if !pr.mouse || t.conn == nil {
+		return
+	}
+	var keys []byte
+	for _, r := range pr.raws {
+		keys = append(keys, r...)
+	}
+	keys = append(keys, raw...)
+	if len(keys) > 0 {
+		_ = t.conn.send(Msg{Type: "keys", Keys: keys})
+	}
+}
+
+// copySelection reads the selected text out of the pane's VT and sends it to
+// the terminal's clipboard.
+func (t *tui) copySelection() {
+	s := t.selText
+	t.selText = nil
+	t.dirty = true
+	if s == nil {
+		return
+	}
+	p := t.paneByID(s.pane)
+	vt := t.vts[s.pane]
+	if p == nil || vt == nil {
+		return
+	}
+	text := extractSelection(vt, p.Rect.W, s.anchor, s.focus)
+	os.Stdout.WriteString(osc52(text))
+	t.toast = fmt.Sprintf("copied %d chars", len(text))
+	t.toastAt = time.Now()
+}
+
+// osc52 is the clipboard sequence for text. Under tmux it must ride the
+// passthrough DCS with doubled escapes, or tmux swallows it.
+func osc52(text string) string {
+	seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\x1b\\"
+	if os.Getenv("TMUX") != "" {
+		return "\x1bPtmux;" + strings.ReplaceAll(seq, "\x1b", "\x1b\x1b") + "\x1b\\"
+	}
+	return seq
+}
+
 func (t *tui) handleMouse(ev mouseEvent) {
 	if t.snap == nil {
 		return
@@ -929,6 +1076,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			p = t.paneByID(t.snap.Focus)
 		}
 		if p != nil {
+			t.clearSelection()
 			t.openMenu(p, x, y)
 		}
 		return
@@ -949,9 +1097,25 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		t.dragTo(x, y, false)
 		return
 	}
+	// A held left press is a selection drag until the button comes up.
+	if t.press != nil {
+		if ev.release && ev.btn&3 == 0 {
+			t.finishPress(x, y, ev.raw)
+			return
+		}
+		if ev.btn&32 != 0 && ev.btn&3 == 0 {
+			t.press.raws = append(t.press.raws, ev.raw)
+			t.selFocus(x, y)
+			return
+		}
+		t.press = nil
+		t.selText = nil
+		t.dirty = true
+	}
 	// A divider belongs to the mux, unless its app claims the mouse.
 	if left {
 		if ds, ok := dragPress(t.snap, x, y); ok {
+			t.clearSelection()
 			t.startDrag(ds)
 			return
 		}
@@ -960,10 +1124,25 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	if p == nil {
 		return
 	}
-	// A left press focuses the pane even when the app owns the mouse. The
-	// mux's focus is not the app's business; tmux does the same.
-	if focus := focusForClick(p, t.snap.Focus, ev); focus != "" && t.conn != nil {
-		_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: focus})
+	if left {
+		// A press on a pane starts a selection. The press is held: a drag
+		// copies on release, a release in the same cell forwards a click.
+		t.clearSelection()
+		if focus := focusForClick(p, t.snap.Focus, ev); focus != "" && t.conn != nil {
+			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: focus})
+		}
+		if c, ok := cellAt(p, x, y); ok {
+			t.press = &heldPress{pane: p.ID, mouse: p.Mouse,
+				raws: [][]byte{ev.raw}}
+			t.selText = &selection{pane: p.ID, anchor: c, focus: c}
+			t.dirty = true
+			return
+		}
+		// A press on the frame is not a selection: the app gets it as before.
+		if p.Mouse && t.conn != nil {
+			_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
+		}
+		return
 	}
 	if p.Mouse {
 		// The pane daemon owns the mode; the client's VT may have missed the
@@ -971,9 +1150,6 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		if t.conn != nil {
 			_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
 		}
-		return
-	}
-	if left {
 		return
 	}
 	if ev.btn&64 == 0 {
@@ -1268,9 +1444,13 @@ func (t *tui) draw() {
 	for _, p := range win.Panes {
 		if p.ID == t.scroll && t.scrollVT != nil {
 			start, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
-			drawPaneFrom(&b, t.scrollVT, p.Rect, start)
+			drawPaneFrom(&b, t.scrollVT, p.Rect, start, nil)
 		} else if vt := t.vts[p.ID]; vt != nil {
-			drawPane(&b, vt, p.Rect)
+			var sr *selRange
+			if t.selText != nil && t.selText.pane == p.ID {
+				sr = t.selText.rangeIn(p.Rect.W)
+			}
+			drawPaneFrom(&b, vt, p.Rect, 0, sr)
 		}
 		drawPaneBox(&b, p.Rect, p.ID == win.Focus)
 	}
