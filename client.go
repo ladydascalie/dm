@@ -744,6 +744,22 @@ func focusForClick(p *PaneInfo, cur string, ev mouseEvent) string {
 	return p.ID
 }
 
+// paneAtBox returns the pane whose whole box contains the point, border
+// included. A click on a pane's frame belongs to that pane.
+func (t *tui) paneAtBox(x, y int) *PaneInfo {
+	if t.snap == nil {
+		return nil
+	}
+	for i := range t.snap.Panes {
+		r := t.snap.Panes[i].Rect
+		b := Rect{X: r.X - 1, Y: r.Y - 1, W: r.W + 2, H: r.H + 2}
+		if x >= b.X && x < b.X+b.W && y >= b.Y && y < b.Y+b.H {
+			return &t.snap.Panes[i]
+		}
+	}
+	return nil
+}
+
 func (t *tui) paneAt(x, y int) *PaneInfo {
 	if t.snap == nil {
 		return nil
@@ -779,30 +795,41 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			}
 			return
 		}
-		switch ev.btn & 3 {
-		case 0: // left: press or release activates
+		if ev.btn&3 == 0 && !ev.release {
+			// Left press: a row runs, an outside point closes the menu and
+			// keeps going, so one click both dismisses and focuses.
 			if row >= 0 {
 				t.menuPick(row)
-			} else if !inside {
-				t.closeMenu()
+				return
 			}
-		case 2: // right: release picks, press elsewhere dismisses
-			if ev.release {
+			if inside {
+				return
+			}
+			t.closeMenu()
+		} else {
+			switch ev.btn & 3 {
+			case 0:
 				if row >= 0 {
 					t.menuPick(row)
+				}
+			case 2: // right: release picks, press elsewhere dismisses
+				if ev.release {
+					if row >= 0 {
+						t.menuPick(row)
+					} else if !inside {
+						t.closeMenu()
+					}
 				} else if !inside {
 					t.closeMenu()
 				}
-			} else if !inside {
-				t.closeMenu()
 			}
+			return
 		}
-		return
 	}
 	// Right press is the mux's context menu, even over an app that owns the
 	// mouse. It is a window-manager gesture, not the app's.
 	if ev.btn&3 == 2 && ev.btn&32 == 0 && !ev.release {
-		p := t.paneAt(x, y)
+		p := t.paneAtBox(x, y)
 		if p == nil {
 			p = t.paneByID(t.snap.Focus)
 		}
@@ -834,19 +861,21 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			return
 		}
 	}
-	p := t.paneAt(x, y)
+	p := t.paneAtBox(x, y)
 	if p == nil {
 		return
 	}
 	// A left press focuses the pane even when the app owns the mouse. The
 	// mux's focus is not the app's business; tmux does the same.
-	if focus := focusForClick(p, t.snap.Focus, ev); focus != "" {
+	if focus := focusForClick(p, t.snap.Focus, ev); focus != "" && t.conn != nil {
 		_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: focus})
 	}
 	if p.Mouse {
 		// The pane daemon owns the mode; the client's VT may have missed the
 		// enable sequence if it scrolled out of the replay ring.
-		_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
+		if t.conn != nil {
+			_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
+		}
 		return
 	}
 	if left {

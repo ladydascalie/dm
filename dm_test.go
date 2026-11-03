@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -575,6 +576,58 @@ func TestRightPressOpensMenuOverMousePane(t *testing.T) {
 	tui.handleMouse(mouseEvent{btn: 0, x: tui.menu.x + 2, y: tui.menu.y + 1 + 1})
 	if !done || tui.mode != "" || tui.menu != nil {
 		t.Fatalf("left pick: done=%v mode=%q", done, tui.mode)
+	}
+}
+
+func TestPaneAtBoxIncludesBorder(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	b := tui.paneByID("b").Rect
+	if got := tui.paneAtBox(b.X, b.Y); got == nil || got.ID != "b" {
+		t.Fatalf("top-left border did not hit b: %+v", got)
+	}
+	if got := tui.paneAtBox(b.X-1, b.Y-1); got == nil || got.ID != "b" {
+		t.Fatalf("outer corner did not hit b: %+v", got)
+	}
+	if got := tui.paneAtBox(b.X+b.W, b.Y+b.H); got == nil || got.ID != "b" {
+		t.Fatalf("bottom-right border did not hit b: %+v", got)
+	}
+	// The pad between a and b belongs to neither box.
+	padX := b.X - 2
+	if got := tui.paneAtBox(padX, b.Y+1); got != nil {
+		t.Fatalf("pad hit pane %q", got.ID)
+	}
+}
+
+func TestMenuOutsideClickFocusesPane(t *testing.T) {
+	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5}}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
+	tui.openMenu(tui.paneByID("b"), 10, 5)
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	tui.conn = &conn{Conn: a}
+	got := make(chan Msg, 1)
+	go func() {
+		if m, err := readMsg(b); err == nil {
+			got <- m
+		}
+	}()
+	// One left click on pane a, outside the menu, dismisses the menu and
+	// focuses a in the same event.
+	tui.handleMouse(mouseEvent{btn: 0, x: 5, y: 5})
+	select {
+	case m := <-got:
+		if m.Action != "focus" || m.Target != "a" {
+			t.Fatalf("outside click sent %+v", m)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("outside click sent no focus")
+	}
+	if tui.menu != nil || tui.mode != "" {
+		t.Fatalf("menu stayed open: %+v %q", tui.menu, tui.mode)
 	}
 }
 
