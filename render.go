@@ -282,6 +282,155 @@ func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
 	}
 }
 
+// railKind is the row type the sidebar paints: a workspace header, a window
+// header, or a pane.
+type railKind int
+
+const (
+	railWorkspace railKind = iota
+	railWindow
+	railPane
+)
+
+// railItem is one sidebar row. It exists so drawing and hit-testing share the
+// same grouping.
+type railItem struct {
+	kind   railKind
+	text   string
+	pane   string
+	status string
+	focus  bool
+	active bool
+}
+
+// railItems flattens a snapshot into sidebar rows in the server's order: a
+// workspace header when the workspace changes, a window header when the window
+// changes, then one row per pane. A pane row shows its recorded name, or the
+// pane id when it has none.
+func railItems(snap *Snapshot) []railItem {
+	if snap == nil {
+		return nil
+	}
+	var out []railItem
+	ws, win := "", ""
+	for _, p := range snap.All {
+		if p.Workspace != ws {
+			ws = p.Workspace
+			win = ""
+			out = append(out, railItem{kind: railWorkspace,
+				text: p.WorkspaceName, active: p.WorkspaceActive})
+		}
+		if p.Window != win {
+			win = p.Window
+			out = append(out, railItem{kind: railWindow, text: p.WindowName})
+		}
+		label := p.Name
+		if label == "" {
+			label = p.ID
+		}
+		out = append(out, railItem{kind: railPane, text: label, pane: p.ID,
+			status: p.Status, focus: p.Focus})
+	}
+	return out
+}
+
+// railGlyph is the state mark for a pane row and its SGR foreground colour.
+// Every state gets a distinct colour; an empty or unrecognised state is the
+// unknown mark.
+func railGlyph(status string) (glyph, colour string) {
+	switch status {
+	case "working":
+		return "●", "33"
+	case "idle":
+		return "○", "36"
+	case "blocked":
+		return "▲", "31"
+	case "done":
+		return "✓", "32"
+	default:
+		return "?", "90"
+	}
+}
+
+// railPaneAt returns the pane whose row is under x,y, or "" for a header, an
+// empty row, or a point outside the rail. One-based screen coordinates are the
+// caller's; x and y are zero-based here.
+func railPaneAt(snap *Snapshot, x, y int) string {
+	if snap == nil || snap.Rail <= 0 {
+		return ""
+	}
+	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-1 {
+		return ""
+	}
+	items := railItems(snap)
+	if y >= len(items) || items[y].kind != railPane {
+		return ""
+	}
+	return items[y].pane
+}
+
+// drawRail paints the sidebar above the status bar. Rows past the screen are
+// clipped, and every row is written into at most Rail columns.
+func drawRail(buf *bytes.Buffer, snap *Snapshot) {
+	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 2 {
+		return
+	}
+	w := snap.Rail
+	if w > snap.Cols {
+		w = snap.Cols
+	}
+	rows := snap.Rows - 1
+	items := railItems(snap)
+	for y := 0; y < rows && y < len(items); y++ {
+		it := items[y]
+		style := "\x1b[0m\x1b[37m"
+		text := it.text
+		switch it.kind {
+		case railWorkspace:
+			if it.active {
+				style = "\x1b[0m\x1b[1;97m"
+			} else {
+				style = "\x1b[0m\x1b[90m"
+			}
+		case railWindow:
+			style = "\x1b[0m\x1b[90m"
+			text = "  " + text
+		case railPane:
+			if it.focus {
+				style = "\x1b[0m\x1b[44m\x1b[1;97m"
+			} else {
+				style = "\x1b[0m\x1b[37m"
+			}
+			g, _ := railGlyph(it.status)
+			text = "  " + g + " " + text
+		}
+		line := []rune(text)
+		if len(line) > w {
+			line = line[:w]
+		}
+		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
+		buf.WriteString(style)
+		for i, r := range line {
+			if it.kind == railPane && i == 2 {
+				_, colour := railGlyph(it.status)
+				buf.WriteString("\x1b[0m\x1b[" + colour + "m")
+				if it.focus {
+					buf.WriteString("\x1b[44m")
+				}
+				buf.WriteRune(r)
+				buf.WriteString("\x1b[0m")
+				buf.WriteString(style)
+				continue
+			}
+			buf.WriteRune(r)
+		}
+		if pad := w - len(line); pad > 0 {
+			buf.WriteString(strings.Repeat(" ", pad))
+		}
+		buf.WriteString("\x1b[0m")
+	}
+}
+
 // contentRows returns the first row and the row after the last that hold any
 // glyph, using the cursor when the screen is blank below the output.
 func contentRows(v vt10x.View) (top, bottom int) {
@@ -522,6 +671,7 @@ var keymap = [][2]string{
 	{"t", "new workspace"},
 	{")", "next workspace"},
 	{"s", "switch session"},
+	{"r", "toggle rail"},
 	{"d / q", "detach"},
 	{"ctrl+b", "send prefix"},
 }

@@ -62,6 +62,7 @@ bottom right. The box clears after 3 seconds of no input.
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
 | `)` | next workspace |
+| `r` | toggle the sidebar |
 | `d` / `q` | detach |
 
 Drag a divider with the left mouse button to resize the split. The client
@@ -69,6 +70,18 @@ sends `resize-split` with the two panes beside the divider and the ratio, at
 most every 30 ms plus a final call on release. Both sides keep at least three
 cells. A divider is ignored when any pane in that split's subtree claimed the
 mouse, because the app owns the whole area.
+
+## Sidebar
+
+The left columns of the screen show a sidebar when the session asks for one:
+every workspace, then every window in it, then one row per pane, in the
+server's own order. A pane row shows its recorded name, or the pane id when it
+has none, and a state glyph in a colour per state. A pane counts as an agent
+when it has a recorded name or has reported a status other than empty or
+`unknown`; the rest are shells. The focused pane's row is highlighted, and a
+left click on a pane row focuses that pane. `prefix r` hides the sidebar and
+`prefix r` again restores the last width, 26 columns when none was ever
+chosen.
 
 In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel

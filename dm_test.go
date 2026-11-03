@@ -765,6 +765,237 @@ func TestSetRailAction(t *testing.T) {
 	}
 }
 
+// railTestSnapshot is a two-pane session with a rail. Panes start after the
+// rail, and All carries the same two panes in server order.
+func railTestSnapshot(rail int) *Snapshot {
+	root := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}}}
+	snap := &Snapshot{Session: "x", Workspace: "main", Windows: []string{"one"},
+		Cols: 100, Rows: 10, Rail: rail, Root: root, Focus: "w1p1"}
+	rects := map[string]Rect{}
+	layout(root, paneAreaFor(snap.Cols, snap.Rows, rail), rects)
+	snap.Panes = []PaneInfo{
+		{ID: "w1p1", Rect: rects["w1p1"], Status: "working"},
+		{ID: "w1p2", Rect: rects["w1p2"], Status: "idle"},
+	}
+	snap.All = []AllPane{
+		{ID: "w1p1", Name: "alpha", Status: "working", Agent: true,
+			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
+			Focus: true, WorkspaceActive: true, WindowActive: true},
+		{ID: "w1p2", Status: "idle", Agent: true,
+			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
+			WorkspaceActive: true, WindowActive: true},
+	}
+	return snap
+}
+
+// railOnePane is a single pane with a rail, for glyph and width tests.
+func railOnePane(status, name string, rail, cols, rows int) *Snapshot {
+	root := &Node{Pane: "w1p1"}
+	snap := &Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
+	rects := map[string]Rect{}
+	layout(root, paneAreaFor(cols, rows, rail), rects)
+	snap.Panes = []PaneInfo{{ID: "w1p1", Rect: rects["w1p1"], Status: status}}
+	snap.All = []AllPane{{ID: "w1p1", Name: name, Status: status,
+		Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
+		Focus: true, WorkspaceActive: true, WindowActive: true}}
+	return snap
+}
+
+func TestRailItemsGrouping(t *testing.T) {
+	snap := &Snapshot{All: []AllPane{
+		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
+			Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, Focus: true},
+		{ID: "w1p2", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one"},
+		{ID: "w1p3", Workspace: "s1", WorkspaceName: "main", Window: "w2", WindowName: "two"},
+		{ID: "w2p1", Workspace: "s2", WorkspaceName: "work", Window: "w3", WindowName: "three"},
+	}}
+	items := railItems(snap)
+	wantKinds := []railKind{railWorkspace, railWindow, railPane, railPane,
+		railWindow, railPane, railWorkspace, railWindow, railPane}
+	wantText := []string{"main", "one", "alpha", "w1p2", "two", "w1p3",
+		"work", "three", "w2p1"}
+	if len(items) != len(wantKinds) {
+		t.Fatalf("rail has %d rows, want %d: %+v", len(items), len(wantKinds), items)
+	}
+	for i, want := range wantKinds {
+		if items[i].kind != want || items[i].text != wantText[i] {
+			t.Fatalf("row %d = kind %d %q, want kind %d %q", i,
+				items[i].kind, items[i].text, want, wantText[i])
+		}
+	}
+	if !items[0].active || items[6].active {
+		t.Fatalf("workspace headers active = %v, %v", items[0].active, items[6].active)
+	}
+	if !items[2].focus || items[3].focus {
+		t.Fatalf("pane rows focus = %v, %v", items[2].focus, items[3].focus)
+	}
+}
+
+func TestRailGlyphPerState(t *testing.T) {
+	cases := []struct{ status, glyph, colour string }{
+		{"working", "●", "33"},
+		{"idle", "○", "36"},
+		{"blocked", "▲", "31"},
+		{"done", "✓", "32"},
+		{"unknown", "?", "90"},
+		{"", "?", "90"},
+	}
+	seen := map[string]string{}
+	for _, c := range cases {
+		g, colour := railGlyph(c.status)
+		if g != c.glyph || colour != c.colour {
+			t.Fatalf("railGlyph(%q) = %q/%q, want %q/%q", c.status, g, colour, c.glyph, c.colour)
+		}
+		if prev, ok := seen[colour]; ok && prev != c.glyph {
+			t.Fatalf("colour %q doubles for %q and %q", colour, prev, c.glyph)
+		}
+		seen[colour] = c.glyph
+
+		var b bytes.Buffer
+		drawRail(&b, railOnePane(c.status, "", 12, 40, 6))
+		out := b.String()
+		if !strings.Contains(out, c.glyph) || !strings.Contains(out, "\x1b["+c.colour+"m") {
+			t.Fatalf("status %q not drawn as %q in colour %q: %q", c.status, c.glyph, c.colour, out)
+		}
+	}
+}
+
+func TestRailHit(t *testing.T) {
+	snap := railTestSnapshot(10)
+	// Rows: workspace, window, w1p1, w1p2.
+	cases := []struct {
+		x, y int
+		want string
+	}{
+		{5, 2, "w1p1"},
+		{5, 3, "w1p2"},
+		{5, 0, ""},  // workspace header
+		{5, 1, ""},  // window header
+		{5, 4, ""},  // past the last row
+		{5, 9, ""},  // status bar
+		{10, 2, ""}, // pane area
+		{-1, 2, ""}, // left of the screen
+	}
+	for _, c := range cases {
+		if got := railPaneAt(snap, c.x, c.y); got != c.want {
+			t.Fatalf("railPaneAt(%d,%d) = %q, want %q", c.x, c.y, got, c.want)
+		}
+	}
+	// The last row above the bar can be a pane row.
+	small := railTestSnapshot(10)
+	small.Rows = 4
+	small.All = []AllPane{
+		{ID: "w1p1", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one"},
+		{ID: "w1p2", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one"},
+	}
+	if got := railPaneAt(small, 5, 2); got != "w1p1" {
+		t.Fatalf("last pane row = %q", got)
+	}
+}
+
+func TestRailClickFocusesPane(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.snap = railTestSnapshot(10)
+	// Left press on w1p2's row focuses w1p2, not the focused w1p1. The row is
+	// zero-based y=3, so the one-based mouse row is 4.
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
+	if m := nextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
+		t.Fatalf("rail click sent %+v, want focus w1p2", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 4})
+	// A header row does nothing.
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	select {
+	case m := <-got:
+		t.Fatalf("header click sent %+v", m)
+	case <-time.After(50 * time.Millisecond):
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	// A pane click still focuses the pane under the pointer, not a rail row.
+	p := tui.paneByID("w1p2")
+	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1})
+	if m := nextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
+		t.Fatalf("pane click sent %+v, want focus w1p2", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 1, y: p.Rect.Y + 1})
+	// A right press in the rail must not open a pane menu.
+	tui.handleMouse(mouseEvent{btn: 2, x: 3, y: 4})
+	if tui.mode != "" || tui.menu != nil {
+		t.Fatalf("rail right press opened %q %+v", tui.mode, tui.menu)
+	}
+}
+
+func TestRailToggle(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	// A client that has only seen a hidden rail asks for the default.
+	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
+	tui.key('r')
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 26 {
+		t.Fatalf("toggle from hidden sent %+v, want set-rail 26", m)
+	}
+	// A shown rail toggles off.
+	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 30, Cols: 100, Rows: 30}})
+	tui.key('r')
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
+		t.Fatalf("toggle from shown sent %+v, want set-rail 0", m)
+	}
+	// Hiding keeps the last width, and showing restores it.
+	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
+	tui.key('r')
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
+		t.Fatalf("toggle after hide sent %+v, want set-rail 30", m)
+	}
+	found := false
+	for _, kv := range keymap {
+		if kv[0] == "r" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("keymap has no r binding")
+	}
+}
+
+func TestRailNeverWritesPastWidth(t *testing.T) {
+	snap := railOnePane("working", strings.Repeat("long-name-", 8), 6, 20, 6)
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	vt := vt10x.New(vt10x.WithSize(20, 6))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw rail: %v", err)
+	}
+	vt.Lock()
+	defer vt.Unlock()
+	for y := 0; y < 6; y++ {
+		for x := 6; x < 20; x++ {
+			if g := vt.Cell(x, y); g.Char != 0 && g.Char != ' ' {
+				t.Fatalf("rail wrote %q at %d,%d, past width 6", g.Char, x, y)
+			}
+		}
+	}
+	if g := vt.Cell(0, 0); g.Char == 0 {
+		t.Fatal("rail drew nothing")
+	}
+}
+
+func TestRailDragUsesOffset(t *testing.T) {
+	root := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 20, Root: root}
+	area := paneAreaFor(100, 30, 20)
+	boxes := childBoxRects(root, area)
+	pad := padRect(root, boxes, 0)
+	ds, ok := dragPress(snap, pad.X, pad.Y+1)
+	if !ok || ds.first != "a" || ds.second != "b" || ds.rect != area {
+		t.Fatalf("rail-aware divider press = %+v ok=%v, want rect %+v", ds, ok, area)
+	}
+	// The rail-zero pad position is inside pane a once the rail is counted.
+	if _, ok := dragPress(snap, 49, pad.Y+1); ok {
+		t.Fatal("drag started at the rail-zero pad, offset was dropped")
+	}
+}
+
 func TestDrawPaneBox(t *testing.T) {
 	var b bytes.Buffer
 	drawPaneBox(&b, Rect{X: 10, Y: 5, W: 20, H: 8}, true)
