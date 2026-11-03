@@ -1948,28 +1948,45 @@ func (t *tui) key(b byte) {
 // toggleRail cycles the rail: expanded, thin, hidden. A hidden rail comes back
 // at the last expanded width, or the default when none was seen.
 func (t *tui) toggleRail() {
+	want := t.railToggleWidth(true)
+	t.action("set-rail", func(m *Msg) { m.Index = want })
+}
+
+// toggleRailControl is a click on the rail's bottom row: full <-> thin. Hiding
+// stays on `prefix r`, so a thin rail expands here instead of going hidden.
+func (t *tui) toggleRailControl() {
+	want := t.railToggleWidth(false)
+	t.action("set-rail", func(m *Msg) { m.Index = want })
+}
+
+// railToggleWidth is the width a rail toggle asks for. The key and the bottom
+// control both take their width from here, so the two routes cannot drift. A
+// hidden or thin rail comes back at the last expanded width, or the default
+// when none was seen. hide lets `prefix r` reach the hidden state; the control
+// passes false and expands instead.
+func (t *tui) railToggleWidth(hide bool) int {
 	rail := 0
 	if t.snap != nil {
 		rail = t.snap.Rail
 	}
-	want := 0
 	switch {
-	case rail <= 0:
-		want = t.railWant
-		if want <= 0 {
-			want = defaultRail
-		}
 	case rail <= collapsedRail:
-		want = 0
+		if hide && rail > 0 {
+			return 0
+		}
+		if t.railWant > 0 {
+			return t.railWant
+		}
+		return defaultRail
 	default:
-		want = collapsedRail
+		return collapsedRail
 	}
-	t.action("set-rail", func(m *Msg) { m.Index = want })
 }
 
-// railClick consumes a mouse event over the sidebar. A left press on a pane row
-// focuses that pane. Every other rail event is swallowed so it never reaches a
-// pane, and a drag that began in the rail stays swallowed outside it.
+// railClick consumes a mouse event over the sidebar. A left press on the bottom
+// control row toggles the rail full <-> thin. A left press on a pane row focuses
+// that pane. Every other rail event is swallowed so it never reaches a pane,
+// and a drag that began in the rail stays swallowed outside it.
 func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	if t.snap == nil || t.snap.Rail <= 0 {
 		return false
@@ -1994,7 +2011,13 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	}
 	if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 {
 		t.railPress = true
-		if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
+		if railControlAt(t.snap, x, y) {
+			// The bottom row is the control: it toggles the rail and
+			// never focuses a pane or folds a window.
+			if t.conn != nil {
+				t.toggleRailControl()
+			}
+		} else if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: id})
 		} else if id := railWindowAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "req", Action: "toggle-fold", Target: id})
