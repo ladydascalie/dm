@@ -752,15 +752,36 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	}
 	x, y := ev.x-1, ev.y-1
 	if t.mode == "menu" {
-		left := ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release
-		if left && t.menu != nil {
-			if i := t.menu.itemAt(x, y); i >= 0 {
-				t.menuPick(i)
-			} else {
+		if t.menu == nil {
+			t.closeMenu()
+			return
+		}
+		m := t.menu
+		inside := x >= m.x && x < m.x+m.w && y >= m.y && y < m.y+len(m.items)+2
+		row := m.itemAt(x, y)
+		motion := ev.btn&32 != 0
+		switch ev.btn & 3 {
+		case 0: // left: press or release activates
+			if row >= 0 {
+				t.menuPick(row)
+			} else if !inside {
 				t.closeMenu()
 			}
-		} else if ev.btn&3 == 2 && ev.btn&32 == 0 && !ev.release {
-			t.closeMenu()
+		case 2: // right: drag to highlight, release to pick
+			if motion {
+				if row >= 0 {
+					m.sel = row
+					t.dirty = true
+				}
+			} else if ev.release {
+				if row >= 0 {
+					t.menuPick(row)
+				} else if !inside {
+					t.closeMenu()
+				}
+			} else if !inside {
+				t.closeMenu()
+			}
 		}
 		return
 	}

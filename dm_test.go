@@ -558,12 +558,48 @@ func TestRightPressOpensMenuOverMousePane(t *testing.T) {
 	if tui.mode != "menu" || tui.menu == nil || tui.menu.pane != "b" {
 		t.Fatalf("right press: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
+	// The release of the opening right press sits on the border and must not
+	// dismiss the menu.
+	tui.handleMouse(mouseEvent{btn: 2, release: true, x: tui.menu.x + 1, y: tui.menu.y + 1})
+	if tui.mode != "menu" {
+		t.Fatal("right release on the border closed the menu")
+	}
+	// A click on the title or border is a near miss, not a dismissal.
+	tui.handleMouse(mouseEvent{btn: 0, x: tui.menu.x + 2, y: tui.menu.y + 1})
+	if tui.mode != "menu" {
+		t.Fatal("click on the title closed the menu")
+	}
 	// A left press on a menu row runs that item and closes the menu.
 	done := false
 	tui.menu.items[0].run = func() { done = true }
 	tui.handleMouse(mouseEvent{btn: 0, x: tui.menu.x + 2, y: tui.menu.y + 1 + 1})
 	if !done || tui.mode != "" || tui.menu != nil {
-		t.Fatalf("menu pick: done=%v mode=%q", done, tui.mode)
+		t.Fatalf("left pick: done=%v mode=%q", done, tui.mode)
+	}
+}
+
+func TestMenuRightDragPicks(t *testing.T) {
+	row := &Node{Pane: "a"}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui.openMenu(tui.paneByID("a"), 10, 5)
+	done := -1
+	tui.menu.items[1].run = func() { done = 1 }
+	// Move with the right button held: the row under the pointer lights up.
+	tui.handleMouse(mouseEvent{btn: 34, x: 14, y: tui.menu.y + 2 + 1})
+	if tui.menu.sel != 1 {
+		t.Fatalf("right drag did not highlight row 1: %+v", tui.menu)
+	}
+	// Release over the row runs it.
+	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 14, y: tui.menu.y + 2 + 1})
+	if done != 1 || tui.menu != nil {
+		t.Fatalf("right drag did not pick: done=%d menu=%+v", done, tui.menu)
+	}
+
+	// A click outside dismisses.
+	tui.openMenu(tui.paneByID("a"), 10, 5)
+	tui.handleMouse(mouseEvent{btn: 0, x: 1, y: 1})
+	if tui.menu != nil || tui.mode != "" {
+		t.Fatalf("outside click did not close: %+v", tui.menu)
 	}
 }
 
