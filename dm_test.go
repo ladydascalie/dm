@@ -2138,13 +2138,13 @@ func TestRailToggle(t *testing.T) {
 	tui, got := clientTUI(t, nil)
 	// A client that has only seen a hidden rail asks for the default.
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
-	tui.key('r')
+	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != defaultRail {
 		t.Fatalf("toggle from hidden sent %+v, want set-rail %d", m, defaultRail)
 	}
 	// A full rail collapses to the thin width, not to hidden.
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 30, RailWant: 30, Cols: 100, Rows: 30}})
-	tui.key('r')
+	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != collapsedRail {
 		t.Fatalf("toggle from full sent %+v, want set-rail %d", m, collapsedRail)
 	}
@@ -2153,12 +2153,12 @@ func TestRailToggle(t *testing.T) {
 		Rail:     collapsedRail,
 		RailWant: collapsedRail, Cols: 100, Rows: 30,
 	}})
-	tui.key('r')
+	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
 		t.Fatalf("toggle from thin sent %+v, want set-rail 0", m)
 	}
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
-	tui.key('r')
+	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("toggle after hide sent %+v, want set-rail 30", m)
 	}
@@ -2167,14 +2167,14 @@ func TestRailToggle(t *testing.T) {
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
 		Rail: effectiveRail(80, 30), RailWant: 30, Cols: 80, Rows: 30,
 	}})
-	tui.key('r')
+	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != collapsedRail {
 		t.Fatalf("narrow collapse sent %+v, want set-rail %d", m, collapsedRail)
 	}
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
 		Rail: 0, RailWant: 0, Cols: 80, Rows: 30,
 	}})
-	tui.key('r')
+	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("narrow toggle on sent %+v, want set-rail 30", m)
 	}

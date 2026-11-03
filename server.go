@@ -1547,6 +1547,12 @@ func (s *server) handleReq(cl *client, m Msg) {
 		}
 		s.reply(cl, m, schemaReply{Schema: schema()}, nil)
 
+	case "rename-workspace":
+		name := strings.TrimSpace(m.Name)
+		err := s.mutation(func() error { return s.renameWorkspace(m.Target, name) })
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"workspace": m.Target, "name": name}, err)
+
 	default:
 		s.reply(cl, m, nil, fmt.Errorf("unknown action %q", m.Action))
 	}
@@ -1910,13 +1916,14 @@ func (s *server) afterMutation() {
 }
 
 type paneListInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name,omitempty"`
-	App       string `json:"app,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Message   string `json:"message,omitempty"`
-	Workspace string `json:"workspace"`
-	Window    string `json:"window"`
+	ID            string `json:"id"`
+	Name          string `json:"name,omitempty"`
+	App           string `json:"app,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Message       string `json:"message,omitempty"`
+	Workspace     string `json:"workspace"`
+	WorkspaceName string `json:"workspaceName"`
+	Window        string `json:"window"`
 }
 
 // paneList reports every pane in the session, including inactive workspaces
@@ -1928,7 +1935,7 @@ func (s *server) paneList() []paneListInfo {
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
 			for _, id := range allPanes(w.Root) {
-				info := paneListInfo{ID: id, Workspace: ws.ID, Window: w.ID}
+				info := paneListInfo{ID: id, Workspace: ws.ID, WorkspaceName: ws.Name, Window: w.ID}
 				if ps := s.st.Panes[id]; ps != nil {
 					info.Name = ps.Name
 					info.App = ps.App
@@ -2014,6 +2021,23 @@ func (s *server) focusWorkspace(id string) error {
 	for i, ws := range s.st.Workspaces {
 		if ws.ID == id {
 			s.st.Active = i
+			return nil
+		}
+	}
+	return fmt.Errorf("no workspace %q", id)
+}
+
+// renameWorkspace sets the workspace name and nothing else: the id, the active
+// index, the windows and the panes stay. A background workspace is fair game.
+func (s *server) renameWorkspace(id, name string) error {
+	if name == "" {
+		return fmt.Errorf("name required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		if ws.ID == id {
+			ws.Name = name
 			return nil
 		}
 	}
