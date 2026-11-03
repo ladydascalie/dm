@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -446,6 +447,7 @@ type railItem struct {
 	kind      railKind
 	text      string
 	workspace string
+	folder    string
 	branch    string
 	worktree  string
 	message   string
@@ -476,9 +478,13 @@ func railItems(snap *Snapshot) []railItem {
 	compact := railCompact(snap.Rail)
 	panes := map[string]int{}
 	focus := map[string]int{}
+	first := map[string]int{}
 	withBranch := map[string]int{}
 	for i, p := range snap.All {
 		panes[p.Workspace]++
+		if _, ok := first[p.Window]; !ok {
+			first[p.Window] = i
+		}
 		if p.Focus {
 			focus[p.Window] = i
 		}
@@ -488,8 +494,9 @@ func railItems(snap *Snapshot) []railItem {
 			}
 		}
 	}
-	// The window line takes its git state from the focused pane, else from the
-	// first pane in that window that carries a branch.
+	// The window line takes its folder and git state from one pane: the
+	// focused pane, else the first pane in that window that carries a branch,
+	// else the window's first pane.
 	source := func(window string) (AllPane, bool) {
 		if i, ok := focus[window]; ok && snap.All[i].Branch != "" {
 			return snap.All[i], true
@@ -498,6 +505,9 @@ func railItems(snap *Snapshot) []railItem {
 			return snap.All[i], true
 		}
 		if i, ok := focus[window]; ok {
+			return snap.All[i], true
+		}
+		if i, ok := first[window]; ok {
 			return snap.All[i], true
 		}
 		return AllPane{}, false
@@ -550,6 +560,7 @@ func railItems(snap *Snapshot) []railItem {
 			}
 			if !compact {
 				if src, ok := source(p.Window); ok {
+					item.folder = railFolder(src.Cwd, src.Root)
 					item.branch = src.Branch
 					item.worktree = src.Worktree
 					item.inRepo = src.InRepo
@@ -557,12 +568,6 @@ func railItems(snap *Snapshot) []railItem {
 					item.added = src.Added
 					item.deleted = src.Deleted
 					item.message = src.Message
-				}
-				switch {
-				case item.branch != "":
-					item.text = item.branch
-				case item.worktree != "":
-					item.text = item.worktree
 				}
 			}
 			out = append(out, item)
@@ -588,6 +593,28 @@ func railItems(snap *Snapshot) []railItem {
 		})
 	}
 	return out
+}
+
+// railFolder is the folder a window line shows for a pane: its path below the
+// repository root, the folder's own name when the pane sits at the root, and
+// the folder name alone outside git, so every pane still names a folder.
+func railFolder(cwd, root string) string {
+	if cwd == "" {
+		return ""
+	}
+	cwd = filepath.Clean(cwd)
+	if root == "" {
+		return folderName(cwd)
+	}
+	root = filepath.Clean(root)
+	if cwd == root {
+		return folderName(root)
+	}
+	rel, err := filepath.Rel(root, cwd)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return folderName(cwd)
+	}
+	return filepath.ToSlash(rel)
 }
 
 // rgb is an explicit colour. The rail never uses palette slots: a theme may
@@ -900,7 +927,7 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		bg := railBG
 		base := railText
 		bold := false
-		var left, right []railSeg
+		var left, right, tail []railSeg
 		if y < len(items) {
 			it := items[y]
 			switch it.kind {
@@ -930,11 +957,25 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 							caret = "\uf0da"
 						}
 					}
+					// The folder names the window. A window whose panes
+					// reported no directory falls back to the window name.
+					label := it.folder
+					if label == "" {
+						label = it.text
+					}
 					left = []railSeg{
 						{text: "  ", colour: base},
 						{text: caret, colour: base},
 						{text: " ", colour: base},
-						{text: it.text, colour: base},
+						{text: label, colour: base},
+					}
+					// The branch trails the folder in dim grey, and only when
+					// it says something the label does not.
+					if it.branch != "" && it.branch != label {
+						tail = []railSeg{
+							{text: "  ", colour: railDim},
+							{text: it.branch, colour: railDim},
+						}
 					}
 					right = railStats(it)
 				}
@@ -987,7 +1028,15 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		if rightCells > 0 && budget > 0 {
 			budget--
 		}
-		leftCells := segCells(left)
+		// The folder outranks the branch: a window line gives up the branch
+		// tail whole, and only then elides the folder.
+		tailCells := segCells(tail)
+		leftCells := segCells(left) + tailCells
+		if tailCells > 0 && leftCells > budget {
+			tail, tailCells = nil, 0
+			leftCells = segCells(left)
+		}
+		left = append(left, tail...)
 		if leftCells > budget {
 			left = elideSegs(left, budget)
 			leftCells = segCells(left)

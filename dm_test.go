@@ -691,8 +691,8 @@ func TestRailBranch(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	items := railItems(s.snapshotLocked())
-	if len(items) < 2 || items[1].branch != "dm-rail" || items[1].text != "dm-rail" {
-		t.Fatalf("window line = %+v, want branch dm-rail", items)
+	if len(items) < 2 || items[1].branch != "dm-rail" || items[1].folder != "dm" {
+		t.Fatalf("window line = %+v, want folder dm and branch dm-rail", items)
 	}
 }
 
@@ -1472,13 +1472,18 @@ func TestRailFold(t *testing.T) {
 
 // TestRailBranchLabel gives the window line the branch of its focused pane.
 func TestRailBranchLabel(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
 	snap := railTestSnapshot(20)
 	snap.All[0].Branch = "dm-rail"
 	snap.All[1].Branch = "other"
 	items := railItems(snap)
-	if items[1].branch != "dm-rail" || items[1].text != "dm-rail" {
-		t.Fatalf("window line = %q/%q, want the focused pane's dm-rail",
-			items[1].branch, items[1].text)
+	if items[1].branch != "dm-rail" {
+		t.Fatalf("window line branch = %q, want the focused pane's dm-rail",
+			items[1].branch)
+	}
+	// The branch trails the label on the drawn row.
+	if line := railRows(t, snap)[1]; !strings.Contains(line, "one  dm-rail") {
+		t.Fatalf("window line = %q, want the name then the branch", line)
 	}
 	// Without a focused pane in the window, the first pane with a branch wins.
 	snap.All[0].Focus = false
@@ -1493,44 +1498,57 @@ func TestRailBranchLabel(t *testing.T) {
 	}
 }
 
-// TestRailWindowWorktree labels the window line with the branch first: the
-// branch names the work, and the linked worktree folder only stands in when no
-// branch exists.
+// TestRailWindowWorktree draws a linked worktree's own folder first and its
+// branch after it in dim grey. The worktree field still rides the row.
 func TestRailWindowWorktree(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railOnePane("working", "pi", defaultRail, 60, 6)
 	snap.All[0].Agent = true
-	snap.All[0].Worktree = "dm-rail-w1"
-	snap.All[0].Branch = "dm-rail"
+	snap.All[0].Worktree = "lenient-w1"
+	snap.All[0].Branch = "lazy-branch"
+	snap.All[0].Cwd = "/work/lenient-w1"
+	snap.All[0].Root = "/work/lenient-w1"
+	snap.All[0].InRepo = true
 	items := railItems(snap)
-	if len(items) != 3 || items[1].branch != "dm-rail" || items[1].text != "dm-rail" {
-		t.Fatalf("window line = %+v, want the branch label", items)
+	if len(items) != 3 || items[1].folder != "lenient-w1" ||
+		items[1].branch != "lazy-branch" {
+		t.Fatalf("window line = %+v, want the folder and the branch", items)
 	}
-	if items[1].worktree != "dm-rail-w1" {
+	if items[1].worktree != "lenient-w1" {
 		t.Fatalf("window line lost the worktree: %+v", items[1])
 	}
 	var b bytes.Buffer
 	drawRail(&b, snap)
 	out := b.String()
-	if !strings.Contains(out, "dm-rail") || strings.Contains(out, "dm-rail-w1") {
-		t.Fatalf("window line = %q, want the branch and not the folder", out)
+	if !strings.Contains(out, railWindowFg.fg()+"lenient-w1") {
+		t.Fatalf("folder is not in the window colour: %q", out)
+	}
+	if !strings.Contains(out, railDim.fg()+"lazy-branch") {
+		t.Fatalf("branch is not in the dim colour: %q", out)
+	}
+	line := railRows(t, snap)[1]
+	if !strings.HasPrefix(line, "  ▾ lenient-w1  lazy-branch") {
+		t.Fatalf("window line = %q, want the folder then the branch", line)
+	}
+	if strings.Contains(line, "one") {
+		t.Fatalf("window line fell back to the window name: %q", line)
 	}
 
-	// The folder stands in without a branch, then the window name.
+	// Without a branch the folder stands alone.
 	snap.All[0].Branch = ""
-	if items := railItems(snap); items[1].text != "dm-rail-w1" {
-		t.Fatalf("window line without a branch = %q", items[1].text)
-	}
-	snap.All[0].Worktree = ""
-	if items := railItems(snap); items[1].text != "one" {
-		t.Fatalf("window line without git = %q", items[1].text)
+	line = railRows(t, snap)[1]
+	if strings.Contains(line, "lazy-branch") || !strings.Contains(line, "lenient-w1") {
+		t.Fatalf("window line without a branch = %q", line)
 	}
 
-	// The line belongs to the window, so a shell still names its worktree.
-	snap = railOnePane("unknown", "", defaultRail, 60, 6)
-	snap.All[0].Worktree = "dm-rail-w1"
-	if items := railItems(snap); items[1].text != "dm-rail-w1" {
-		t.Fatalf("shell window line = %q", items[1].text)
+	// A window whose panes report no directory falls back to its name.
+	snap.All[0].Cwd, snap.All[0].Root = "", ""
+	if items := railItems(snap); items[1].folder != "" {
+		t.Fatalf("window without a cwd = %+v, want no folder", items[1])
+	}
+	line = railRows(t, snap)[1]
+	if !strings.Contains(line, "one") || strings.Contains(line, "lenient-w1") {
+		t.Fatalf("window line without a folder = %q, want the window name", line)
 	}
 }
 
@@ -1640,25 +1658,53 @@ func TestRailWindowStats(t *testing.T) {
 	}
 }
 
-// TestRailWindowStatsTruncate keeps a long branch label inside the rail and
-// never drops the right-aligned stats.
-func TestRailWindowStatsTruncate(t *testing.T) {
+// TestRailWindowFolderTruncate gives the folder priority over the branch: a
+// long branch goes first and leaves the whole folder, and only a folder that
+// cannot fit on its own is cut with an ellipsis. The stats survive both.
+func TestRailWindowFolderTruncate(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
+	// The folder fits alone at 34 columns; the branch does not fit beside it.
 	snap := railTree(defaultRail)
+	snap.All[0].Cwd = "/work/dm/long-folder-name"
+	snap.All[0].Root = "/work/dm"
 	snap.All[0].Worktree = ""
-	snap.All[0].Branch = strings.Repeat("verylongbranch-", 6)
+	snap.All[0].Branch = strings.Repeat("verylongbranch-", 2)
+	line := railRows(t, snap)[1]
+	if !strings.Contains(line, "long-folder-name") || strings.Contains(line, "…") {
+		t.Fatalf("folder was cut before the branch dropped: %q", line)
+	}
+	if strings.Contains(line, "verylongbranch") {
+		t.Fatalf("branch survived without room: %q", line)
+	}
+	if !strings.Contains(line, "● +12 -4") {
+		t.Fatalf("stats dropped at %d cols: %q", defaultRail, line)
+	}
+	if n := runeCells(line); n != snap.Rail {
+		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
+	}
+
+	// A folder wider than the rail is cut and ends with an ellipsis, and the
+	// rail never writes past its width.
+	snap.All[0].Cwd = "/work/dm/" + strings.Repeat("deep-folder-", 4)
+	snap.All[0].Root = "/work/dm"
+	line = railRows(t, snap)[1]
+	if !strings.Contains(line, "…") {
+		t.Fatalf("long folder was not elided: %q", line)
+	}
+	if !strings.HasPrefix(line, "  ▾ deep-folder-") {
+		t.Fatalf("folder lost its head or indent: %q", line)
+	}
+	if strings.Contains(line, "verylongbranch") {
+		t.Fatalf("branch survived the elision: %q", line)
+	}
+	if !strings.Contains(line, "● +12 -4") {
+		t.Fatalf("stats dropped at %d cols: %q", defaultRail, line)
+	}
+	if n := runeCells(line); n != snap.Rail {
+		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
+	}
 	var b bytes.Buffer
 	drawRail(&b, snap)
-	out := b.String()
-	if !strings.Contains(out, "…") {
-		t.Fatalf("long label was not elided: %q", out)
-	}
-	if !strings.Contains(out, "verylongbranch") {
-		t.Fatalf("label lost its head: %q", out)
-	}
-	if !strings.Contains(out, "+12") || !strings.Contains(out, "-4") {
-		t.Fatalf("stats dropped at %d cols: %q", defaultRail, out)
-	}
 	vt := vt10x.New(vt10x.WithSize(100, 12))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw truncated rail: %v", err)
@@ -1673,6 +1719,164 @@ func TestRailWindowStatsTruncate(t *testing.T) {
 		}
 	}
 	vt.Unlock()
+}
+
+// TestRailWindowFolderLine draws the default 34 column window line with a
+// folder, a branch and the stats all on it.
+func TestRailWindowFolderLine(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	if defaultRail != 34 {
+		t.Fatalf("default rail = %d, want 34", defaultRail)
+	}
+	snap := railTree(defaultRail)
+	snap.All[0].Cwd, snap.All[0].Root = "/work/dm/rail", "/work/dm"
+	snap.All[0].Worktree = ""
+	snap.All[0].Branch = "dm-rail"
+	line := railRows(t, snap)[1]
+	if want := "  ▾ rail  dm-rail"; !strings.HasPrefix(line, want) {
+		t.Fatalf("window line = %q, want it to start with %q", line, want)
+	}
+	if want := "● +12 -4"; !strings.HasSuffix(line, want) {
+		t.Fatalf("window line = %q, want it to end with %q", line, want)
+	}
+	if n := runeCells(line); n != snap.Rail {
+		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
+	}
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, railWindowFg.fg()+"rail") {
+		t.Fatalf("folder is not in the window colour: %q", out)
+	}
+	if !strings.Contains(out, railDim.fg()+"dm-rail") {
+		t.Fatalf("branch is not in the dim colour: %q", out)
+	}
+}
+
+// TestRailWindowBranchEqualsFolder draws the branch once when it equals the
+// folder: the folder is the label, so a dim second copy would repeat it.
+func TestRailWindowBranchEqualsFolder(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	// One window, so the colour check below sees this line and no other.
+	snap := railOnePane("working", "pi", defaultRail, 60, 6)
+	snap.All[0].Cwd, snap.All[0].Root = "/work/main", "/work"
+	snap.All[0].Branch = "main"
+	snap.All[0].InRepo = true
+	snap.All[0].Dirty, snap.All[0].Added = true, 3
+	line := railRows(t, snap)[1]
+	if want := "  ▾ main"; !strings.HasPrefix(line, want) {
+		t.Fatalf("window line = %q, want it to start with %q", line, want)
+	}
+	if want := "● +3"; !strings.HasSuffix(line, want) {
+		t.Fatalf("window line = %q, want it to end with %q", line, want)
+	}
+	if n := strings.Count(line, "main"); n != 1 {
+		t.Fatalf("window line draws the folder %d times: %q", n, line)
+	}
+	if n := runeCells(line); n != snap.Rail {
+		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
+	}
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, railWindowFg.fg()+"main") {
+		t.Fatalf("folder is not in the window colour: %q", out)
+	}
+	if strings.Contains(out, railDim.fg()+"main") {
+		t.Fatalf("equal branch is still drawn in the dim colour: %q", out)
+	}
+}
+
+// TestRailWindowFolderNested draws a folder below the repository root: the
+// relative path keeps its forward slash on the 34 column line.
+func TestRailWindowFolderNested(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].Cwd, snap.All[0].Root = "/work/dm/a/b", "/work/dm"
+	snap.All[0].Worktree = ""
+	snap.All[0].Branch = "lean-branch"
+	if items := railItems(snap); items[1].folder != "a/b" {
+		t.Fatalf("window folder = %q, want a/b", items[1].folder)
+	}
+	line := railRows(t, snap)[1]
+	if want := "  ▾ a/b  lean-branch"; !strings.HasPrefix(line, want) {
+		t.Fatalf("window line = %q, want it to start with %q", line, want)
+	}
+	if want := "● +12 -4"; !strings.HasSuffix(line, want) {
+		t.Fatalf("window line = %q, want it to end with %q", line, want)
+	}
+	if strings.Contains(line, `\`) {
+		t.Fatalf("nested folder used a backslash: %q", line)
+	}
+	if n := runeCells(line); n != snap.Rail {
+		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
+	}
+}
+
+// TestRailWindowFolderFocus takes the window folder from the focused pane, the
+// pane the git state comes from, then from the window's first pane.
+func TestRailWindowFolderFocus(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTestSnapshot(defaultRail)
+	snap.All[0].Cwd, snap.All[0].Root = "/work/dm/one", "/work/dm"
+	snap.All[1].Cwd, snap.All[1].Root = "/work/dm/two", "/work/dm"
+	if items := railItems(snap); items[1].folder != "one" {
+		t.Fatalf("window folder = %q, want the focused pane's one", items[1].folder)
+	}
+	// The second pane focused: the folder follows it and the line redraws.
+	snap.All[0].Focus, snap.All[1].Focus = false, true
+	if items := railItems(snap); items[1].folder != "two" {
+		t.Fatalf("window folder after refocus = %q, want two", items[1].folder)
+	}
+	if line := railRows(t, snap)[1]; !strings.Contains(line, "two") {
+		t.Fatalf("window line = %q, want the focused pane's folder", line)
+	}
+	// No pane focused: the window's first pane names the folder.
+	snap.All[1].Focus = false
+	if items := railItems(snap); items[1].folder != "one" {
+		t.Fatalf("window folder without focus = %q, want the first pane's one", items[1].folder)
+	}
+}
+
+// TestRailFolder gives the window line a folder for every pane: the path below
+// the repository root, the root's own name at the top, the folder name outside
+// git, and nothing for a pane with no directory.
+func TestRailFolder(t *testing.T) {
+	cases := []struct{ cwd, root, want string }{
+		{"", "/work/dm", ""},
+		{"/work/dm", "/work/dm", "dm"},
+		{"/work/dm/rail", "/work/dm", "rail"},
+		{"/work/dm/a/b", "/work/dm", "a/b"},
+		// A sibling that shares a prefix with the root is not below it.
+		{"/work/dm-other", "/work/dm", "dm-other"},
+		{"/work/elsewhere", "/work/dm", "elsewhere"},
+		{"/work/scratch", "", "scratch"},
+	}
+	for _, c := range cases {
+		if got := railFolder(c.cwd, c.root); got != c.want {
+			t.Fatalf("railFolder(%q, %q) = %q, want %q", c.cwd, c.root, got, c.want)
+		}
+	}
+
+	// A pane outside git still shows its folder, and no stats ride along.
+	t.Setenv("DM_NERD", "0")
+	snap := railTree(defaultRail)
+	snap.All[0].Cwd, snap.All[0].Root = "/home/op/scratch", ""
+	snap.All[0].InRepo = false
+	snap.All[0].Branch = ""
+	snap.All[0].Worktree = ""
+	if items := railItems(snap); items[1].folder != "scratch" {
+		t.Fatalf("non-repo folder = %q, want scratch", items[1].folder)
+	}
+	line := railRows(t, snap)[1]
+	if !strings.HasPrefix(line, "  ▾ scratch") {
+		t.Fatalf("non-repo window line = %q, want the folder", line)
+	}
+	for _, absent := range []string{"clean", "+", "●"} {
+		if strings.Contains(line, absent) {
+			t.Fatalf("non-repo window line shows %q: %q", absent, line)
+		}
+	}
 }
 
 // TestRailTreeHit folds a window from its line and from its note line, and
@@ -1865,23 +2069,28 @@ func TestRailNoStatsOutsideRepo(t *testing.T) {
 	}
 }
 
-// TestRailStatsWholeAtClamp draws a long branch with the fullest pair at the
-// 26 column clamp: the label elides and the pair survives whole.
+// TestRailStatsWholeAtClamp draws a long folder with the fullest pair at the
+// 26 column clamp: the folder elides and the pair survives whole.
 func TestRailStatsWholeAtClamp(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railTree(effectiveRail(80, defaultRail))
 	if snap.Rail != 26 {
 		t.Fatalf("clamp width = %d, want 26", snap.Rail)
 	}
+	snap.All[0].Cwd = "/work/" + strings.Repeat("a-folder-that-runs-long-", 3)
+	snap.All[0].Root = "/work"
 	snap.All[0].Worktree = ""
-	snap.All[0].Branch = strings.Repeat("a-branch-that-runs-long-", 3)
+	snap.All[0].Branch = "a-branch-that-runs-long-too"
 	snap.All[0].Dirty, snap.All[0].Added, snap.All[0].Deleted = true, 5000, 3000
 	line := railRows(t, snap)[1]
 	if !strings.Contains(line, "● +5000 -3000") {
 		t.Fatalf("pair at the clamp = %q", line)
 	}
 	if !strings.Contains(line, "…") {
-		t.Fatalf("long branch was not elided: %q", line)
+		t.Fatalf("long folder was not elided: %q", line)
+	}
+	if strings.Contains(line, "a-branch") {
+		t.Fatalf("branch survived at the clamp: %q", line)
 	}
 	if n := runeCells(line); n > snap.Rail {
 		t.Fatalf("window line %q is %d cells, want <= %d", line, n, snap.Rail)

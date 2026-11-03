@@ -28,6 +28,7 @@ func TestGitStateReachesAll(t *testing.T) {
 		if cwd == "/work/dm" {
 			return gitInfo{
 				branch: "dm-git", worktree: "dm-git-w1",
+				root:  "/work/dm",
 				dirty: true, added: 7, deleted: 3,
 			}
 		}
@@ -42,6 +43,7 @@ func TestGitStateReachesAll(t *testing.T) {
 		if len(snap.All) == 1 && snap.All[0].Added == 7 {
 			got := snap.All[0]
 			if got.Branch != "dm-git" || got.Worktree != "dm-git-w1" ||
+				got.Cwd != "/work/dm" || got.Root != "/work/dm" ||
 				!got.Dirty || got.Deleted != 3 {
 				t.Fatalf("All pane git state = %+v", got)
 			}
@@ -85,21 +87,40 @@ func TestParseNumstat(t *testing.T) {
 	}
 }
 
-// gitRun runs one git command in dir, with a repo config isolated from the
-// operator's own.
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(),
+// gitEnv is the environment the helpers run git with: the operator's own git
+// config stays out of the test.
+func gitEnv() []string {
+	return append(os.Environ(),
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=dm", "GIT_AUTHOR_EMAIL=dm@example.com",
 		"GIT_COMMITTER_NAME=dm", "GIT_COMMITTER_EMAIL=dm@example.com",
 	)
+}
+
+// gitRun runs one git command in dir, with a repo config isolated from the
+// operator's own.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
+}
+
+// gitTop asks git for the toplevel of dir, so a test compares detectGit's root
+// with the folder git itself reports.
+func gitTop(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
+	cmd.Env = gitEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --show-toplevel in %s: %v", dir, err)
+	}
+	return filepath.Clean(strings.TrimSpace(string(out)))
 }
 
 // newGitRepo makes a temporary repo with one commit on main and one file.
@@ -125,8 +146,18 @@ func TestDetectGitReal(t *testing.T) {
 	}
 	repo := newGitRepo(t)
 	if got := detectGit(repo); !got.inRepo || got.branch != "main" ||
-		got.worktree != "" || got.dirty || got.added != 0 || got.deleted != 0 {
+		got.worktree != "" || got.root != gitTop(t, repo) ||
+		got.dirty || got.added != 0 || got.deleted != 0 {
 		t.Fatalf("clean repo = %+v, want main, in repo, clean and zero counts", got)
+	}
+
+	// A subdirectory reports the repository toplevel, not its own path.
+	sub := filepath.Join(repo, "deep")
+	if err := os.MkdirAll(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if got := detectGit(sub); got.root != gitTop(t, repo) || got.branch != "main" {
+		t.Fatalf("subdirectory = %+v, want main and the repo toplevel %q", got, gitTop(t, repo))
 	}
 
 	// One more line on a tracked file is a dirty tree with an added count.
@@ -148,19 +179,22 @@ func TestDetectGitReal(t *testing.T) {
 	gitRun(t, repo, "worktree", "add", "-q", "-b", "lane", wt)
 	got = detectGit(wt)
 	if !got.inRepo || got.branch != "lane" || got.worktree != "lane-wt" ||
+		filepath.Base(got.root) != "lane-wt" ||
 		got.dirty || got.added != 0 || got.deleted != 0 {
-		t.Fatalf("linked worktree = %+v, want lane in lane-wt, clean", got)
+		t.Fatalf("linked worktree = %+v, want lane in lane-wt, clean, rooted at the worktree", got)
 	}
 
 	// A detached checkout has no branch, so the folder names the line.
 	gitRun(t, wt, "checkout", "-q", "--detach")
 	got = detectGit(wt)
-	if got.branch != "" || got.worktree != "lane-wt" {
-		t.Fatalf("detached worktree = %+v, want no branch and the folder", got)
+	if got.branch != "" || got.worktree != "lane-wt" ||
+		filepath.Base(got.root) != "lane-wt" {
+		t.Fatalf("detached worktree = %+v, want no branch, the folder and its root", got)
 	}
 
-	// A plain directory is outside git and returns the zero value.
-	if got := detectGit(t.TempDir()); got != (gitInfo{}) {
-		t.Fatalf("plain directory = %+v, want zero", got)
+	// A plain directory is outside git and returns the zero value, so it
+	// reports no root.
+	if got := detectGit(t.TempDir()); got != (gitInfo{}) || got.root != "" {
+		t.Fatalf("plain directory = %+v, want zero and no root", got)
 	}
 }
