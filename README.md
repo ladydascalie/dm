@@ -4,8 +4,8 @@ A small, durable terminal multiplexer. One static Go binary that carries the
 server, the pane harness, the TUI client and the CLI.
 
 Prototype status: M1 works end to end. Splits, windows, workspaces, OSC 7501
-agent status, durable sessions and a JSON RPC are implemented. Mouse support,
-scrollback search, session switching inside the TUI and layout resizing are not.
+agent status, durable sessions and a JSON RPC are implemented. Scrollback search
+is not implemented.
 
 ## Identifiers
 
