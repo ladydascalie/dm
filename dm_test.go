@@ -578,6 +578,27 @@ func TestRightPressOpensMenuOverMousePane(t *testing.T) {
 	}
 }
 
+func TestMenuHoverHighlights(t *testing.T) {
+	row := &Node{Pane: "a"}
+	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui.openMenu(tui.paneByID("a"), 10, 5)
+	// Bare motion (no button held) is SGR button 35.
+	tui.handleMouse(mouseEvent{btn: 35, x: 14, y: tui.menu.y + 2 + 1})
+	if tui.menu == nil || tui.menu.sel != 1 {
+		t.Fatalf("hover did not highlight row 1: %+v", tui.menu)
+	}
+	if tui.mode != "menu" {
+		t.Fatalf("hover closed the menu: %q", tui.mode)
+	}
+	// A bare click does not activate a row it merely hovers.
+	ran := false
+	tui.menu.items[1].run = func() { ran = true }
+	tui.handleMouse(mouseEvent{btn: 35, x: 14, y: tui.menu.y + 2 + 1})
+	if ran {
+		t.Fatal("bare motion ran an item")
+	}
+}
+
 func TestMenuRightDragPicks(t *testing.T) {
 	row := &Node{Pane: "a"}
 	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}

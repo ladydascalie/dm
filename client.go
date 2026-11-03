@@ -37,6 +37,7 @@ type tui struct {
 	sessions []SessionInfo
 	sel      int
 	menu     *menu
+	hover    bool
 
 	hist     map[string][]byte
 	scroll   string // pane id shown from scrollback
@@ -83,7 +84,7 @@ func runClient(name string) error {
 	var out bytes.Buffer
 	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1006h")
 	os.Stdout.Write(out.Bytes())
-	defer os.Stdout.WriteString("\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
+	defer os.Stdout.WriteString("\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
 
 	for {
 		next, err := runSession(fd, name, keys, winch)
@@ -359,6 +360,12 @@ func (t *tui) openMenu(p *PaneInfo, x, y int) {
 	y = clampInt(y, 0, t.snap.Rows-h)
 	t.menu = &menu{x: x, y: y, w: w, title: title, pane: p.ID, items: items}
 	t.mode = "menu"
+	// All-motion tracking is on only while the menu is open, so hovering an
+	// item highlights it without flooding every pane for the whole session.
+	if t.conn != nil {
+		os.Stdout.WriteString("\x1b[?1003h")
+		t.hover = true
+	}
 	t.armed = false
 	t.dirty = true
 }
@@ -377,6 +384,10 @@ func clampInt(v, lo, hi int) int {
 }
 
 func (t *tui) closeMenu() {
+	if t.hover {
+		os.Stdout.WriteString("\x1b[?1003l")
+		t.hover = false
+	}
 	t.menu = nil
 	t.mode = ""
 	t.inbuf = nil
@@ -760,6 +771,14 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		inside := x >= m.x && x < m.x+m.w && y >= m.y && y < m.y+len(m.items)+2
 		row := m.itemAt(x, y)
 		motion := ev.btn&32 != 0
+		if motion {
+			// Hover or drag: light up the row under the pointer.
+			if row >= 0 && row != m.sel {
+				m.sel = row
+				t.dirty = true
+			}
+			return
+		}
 		switch ev.btn & 3 {
 		case 0: // left: press or release activates
 			if row >= 0 {
@@ -767,13 +786,8 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			} else if !inside {
 				t.closeMenu()
 			}
-		case 2: // right: drag to highlight, release to pick
-			if motion {
-				if row >= 0 {
-					m.sel = row
-					t.dirty = true
-				}
-			} else if ev.release {
+		case 2: // right: release picks, press elsewhere dismisses
+			if ev.release {
 				if row >= 0 {
 					t.menuPick(row)
 				} else if !inside {

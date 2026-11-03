@@ -83,9 +83,9 @@ two boxes resizes that split.
 
 Right click opens the pane menu, even over a program that owns the mouse: it is
 a window-manager gesture, not the app's. Move with `j`/`k` or the arrows,
-`enter` or a digit to run, `esc` or `q` to close. With the mouse, a left click
-on a row runs it, and a right press, drag and release runs the row under the
-release. The release of the press that opened the menu, and clicks on the title
+`enter` or a digit to run, `esc` or `q` to close. With the mouse, hovering highlights the row under the pointer, a left click on a
+row runs it, and a right press, drag and release runs the row under the release.
+Hover motion is enabled only while the menu is open. The release of the press that opened the menu, and clicks on the title
 or border, do not dismiss it; a click outside does. The menu
 offers split right/down/left/up, focus, close pane, scrollback, new window, new
 workspace, switch session and detach. If the program in that pane enabled mouse reporting
