@@ -234,13 +234,15 @@ func (t *tui) apply(m Msg) {
 			}
 		}
 		t.dirty = true
-	case "replay":
+	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
-			vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
-			_, _ = vt.Write(m.Data)
-			t.vts[m.Target] = vt
-			t.hist[m.Target] = append([]byte(nil), m.Data...)
+			applyScreen(t.vts, m.Target, p.Rect, m.Data)
 		}
+		t.dirty = true
+	case "replay":
+		// The ring is history. It never touches the live VT: the screen above
+		// is the picture, and replaying raw bytes would double-apply them.
+		applyReplay(t.hist, m.Target, m.Data)
 		t.dirty = true
 	case "bytes":
 		if vt := t.vts[m.Target]; vt != nil {
@@ -265,6 +267,23 @@ func (t *tui) apply(m Msg) {
 			t.dirty = true
 		}
 	}
+}
+
+// applyScreen replaces a pane's live VT with a fresh one built from the pane
+// daemon's snapshot. The daemon serialised it at the pane's rect, so the size
+// matches what the layout will paint.
+func applyScreen(vts map[string]vt10x.Terminal, id string, r Rect, data []byte) {
+	if r.W < 1 || r.H < 1 {
+		return
+	}
+	vt := vt10x.New(vt10x.WithSize(r.W, r.H))
+	_, _ = vt.Write(data)
+	vts[id] = vt
+}
+
+// applyReplay replaces a pane's history ring only.
+func applyReplay(hist map[string][]byte, id string, data []byte) {
+	hist[id] = append([]byte(nil), data...)
 }
 
 func (t *tui) paneByID(id string) *PaneInfo {

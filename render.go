@@ -76,6 +76,20 @@ func colorSGR(c vt10x.Color, bg bool) string {
 	}
 }
 
+// normCell maps a stored glyph onto the cell drawPane would paint: a zero or
+// control character becomes a space, and a fully zero cell becomes a default
+// blank. The VT allocates fresh rows as zero glyphs, so this is the only way to
+// read them as the terminal shows them.
+func normCell(g vt10x.Glyph) vt10x.Glyph {
+	if g.Char == 0 {
+		g.Char = ' '
+	}
+	if g.FG == 0 && g.BG == 0 && g.Mode == 0 && g.Char == ' ' {
+		g.FG, g.BG = vt10x.DefaultFG, vt10x.DefaultBG
+	}
+	return g
+}
+
 // drawPane paints one pane's cells inside r.
 func drawPane(buf *bytes.Buffer, vt vt10x.View, r Rect) {
 	drawPaneFrom(buf, vt, r, 0)
@@ -96,13 +110,9 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int) {
 		for x := 0; x < r.W; x++ {
 			var g vt10x.Glyph
 			if x < cols && row0+y < rows {
-				g = vt.Cell(x, row0+y)
-			}
-			if g.Char == 0 {
-				g.Char = ' '
-			}
-			if g.FG == 0 && g.BG == 0 && g.Mode == 0 && g.Char == ' ' {
-				g.FG, g.BG = vt10x.DefaultFG, vt10x.DefaultBG
+				g = normCell(vt.Cell(x, row0+y))
+			} else {
+				g = normCell(g)
 			}
 			buf.WriteString(sgr(g, cur))
 			gg := g
@@ -114,6 +124,70 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int) {
 			}
 		}
 	}
+}
+
+// screenBytes serialises the VT's visible screen as ANSI that a fresh terminal
+// of the same size reproduces exactly: same cells, cursor, visibility, buffer,
+// wrap and mouse modes. The pane daemon owns the truth; a client that starts
+// from fresh state gets the picture here and takes the ring separately as
+// history. A fresh VT starts on the primary screen, so only entering the
+// alternate screen needs an escape; the alternate-screen buffer is cleared and
+// painted like the primary one.
+func screenBytes(vt vt10x.View) []byte {
+	var b bytes.Buffer
+	cols, rows := vt.Size()
+	vt.Lock()
+	defer vt.Unlock()
+	m := vt.Mode()
+	if m&vt10x.ModeAltScreen != 0 {
+		b.WriteString("\x1b[?1049h")
+	}
+	// Autowrap off while painting: writing a full row must not wrap into the
+	// next one. The pane's own mode is restored at the end.
+	b.WriteString("\x1b[?7l\x1b[0m\x1b[2J")
+	for y := 0; y < rows; y++ {
+		fmt.Fprintf(&b, "\x1b[%d;1H", y+1)
+		var cur *vt10x.Glyph
+		for x := 0; x < cols; x++ {
+			g := normCell(vt.Cell(x, y))
+			b.WriteString(sgr(g, cur))
+			gg := g
+			cur = &gg
+			if g.Char < 0x20 {
+				b.WriteByte(' ')
+			} else {
+				b.WriteRune(g.Char)
+			}
+		}
+	}
+	c := vt.Cursor()
+	fmt.Fprintf(&b, "\x1b[%d;%dH", c.Y+1, c.X+1)
+	if vt.CursorVisible() {
+		b.WriteString("\x1b[?25h")
+	} else {
+		b.WriteString("\x1b[?25l")
+	}
+	if m&vt10x.ModeWrap != 0 {
+		b.WriteString("\x1b[?7h")
+	} else {
+		b.WriteString("\x1b[?7l")
+	}
+	mouse := []struct {
+		flag vt10x.ModeFlag
+		seq  string
+	}{
+		{vt10x.ModeMouseX10, "\x1b[?9h"},
+		{vt10x.ModeMouseButton, "\x1b[?1000h"},
+		{vt10x.ModeMouseMotion, "\x1b[?1002h"},
+		{vt10x.ModeMouseMany, "\x1b[?1003h"},
+		{vt10x.ModeMouseSgr, "\x1b[?1006h"},
+	}
+	for _, mm := range mouse {
+		if m&mm.flag != 0 {
+			b.WriteString(mm.seq)
+		}
+	}
+	return b.Bytes()
 }
 
 func drawDividers(buf *bytes.Buffer, n *Node, r Rect) {
