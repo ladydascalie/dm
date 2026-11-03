@@ -6,9 +6,10 @@ import (
 	"strings"
 )
 
-// dashRows flattens a session into palette entries: the target id first, then
-// a label the eye can read. The first space-separated word is the id, because
-// television's output template takes field zero.
+// dashRows flattens a session into palette entries, one per pane. The target
+// id leads, because television's output template takes the first field, then
+// the pane's label and where it lives. A workspace or a window row would only
+// repeat the row of the pane it holds, so the palette lists panes alone.
 func dashRows(session string) ([]string, error) {
 	m, err := rpc(session, Msg{Action: "list"})
 	if err != nil {
@@ -28,45 +29,21 @@ func dashRows(session string) ([]string, error) {
 		return nil, fmt.Errorf("no snapshot")
 	}
 
-	var wss []wsInfo
-	if wm, err := rpc(session, Msg{Action: "list-workspaces"}); err == nil && wm.OK {
-		_ = json.Unmarshal(wm.Res, &wss)
-	}
-
-	byWS := map[string][]AllPane{}
-	byWin := map[string][]AllPane{}
-	for _, p := range snap.All {
-		byWS[p.Workspace] = append(byWS[p.Workspace], p)
-		byWin[p.Window] = append(byWin[p.Window], p)
-	}
-
 	var rows []string
-	for _, ws := range wss {
+	for _, p := range snap.All {
 		mark := " "
-		if ws.Active {
+		if p.Focus {
 			mark = ">"
 		}
-		rows = append(rows, ws.ID+" "+mark+" "+ws.Name)
-		for _, w := range ws.Windows {
-			wmark := " "
-			if w.Active {
-				wmark = ">"
-			}
-			rows = append(rows, w.ID+"   "+wmark+" "+w.Name)
-			for _, p := range byWS[ws.ID] {
-				if p.Window != w.ID {
-					continue
-				}
-				rows = append(rows, p.ID+"     "+paneLabel(p))
-			}
-		}
+		rows = append(rows, p.ID+" "+mark+" "+paneLabel(p))
 	}
 	return rows, nil
 }
 
 // paneLabel names a pane for the palette: its name when it has one, then its
-// live state, branch and worktree, the way the rail labels it. The id already
-// leads the row, so the label never repeats it.
+// live state, branch and worktree. The id already leads the row, so the label
+// never repeats it, and the row ends with the workspace and window it lives
+// in.
 func paneLabel(p AllPane) string {
 	name := p.Name
 	if name == "" {
@@ -91,6 +68,9 @@ func paneLabel(p AllPane) string {
 	if p.Worktree != "" {
 		name += "  " + p.Worktree
 	}
+	if p.WorkspaceName != "" {
+		name += "  " + p.WorkspaceName + " > " + p.WindowName
+	}
 	return name
 }
 
@@ -106,36 +86,9 @@ func dash(session string) error {
 	return nil
 }
 
-// peek prints the screen the palette row would land on. A window or workspace
-// row borrows its first pane, so every row has a preview.
+// peek prints the screen of one pane, for the palette preview.
 func peek(session, target string, lines int) error {
-	pane := target
-	if !strings.Contains(target, "p") {
-		m, err := rpc(session, Msg{Action: "list"})
-		if err != nil {
-			return err
-		}
-		if !m.OK {
-			return fmt.Errorf("%s", m.Error)
-		}
-		var res struct {
-			Snapshot *Snapshot `json:"snapshot"`
-		}
-		if err := json.Unmarshal(m.Res, &res); err != nil {
-			return err
-		}
-		pane = ""
-		for _, p := range res.Snapshot.All {
-			if p.Window == target || p.Workspace == target {
-				pane = p.ID
-				break
-			}
-		}
-		if pane == "" {
-			return fmt.Errorf("no pane in %s", target)
-		}
-	}
-	m, err := rpc(session, Msg{Action: "read", Target: pane})
+	m, err := rpc(session, Msg{Action: "read", Target: target})
 	if err != nil {
 		return err
 	}

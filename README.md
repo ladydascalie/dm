@@ -76,8 +76,10 @@ app's PTY covers only its content rect, so the border press is not its event.
 
 `prefix a` floats a quick switcher over the panes. It is television, run on its
 own PTY, so the list is fuzzy matched: type an id or a name, then enter to land
-there. Rows are workspaces, their windows, then their panes, each row leading
-with its id (`s1`, `w2`, `w2p3`), so an id can be typed directly. The preview
+there. One row per pane, leading with its id (`w2p3`), so an id can be typed
+directly, and ending with the workspace and window it lives in. A workspace or
+window row would only repeat the pane it holds, so the palette lists panes
+alone. The preview
 pane shows the live screen the row would land on. Press the prefix key again to
 close it and change nothing. `esc` also closes it, but television 0.15.9 prints
 the highlighted entry when it quits, so a bare `esc` lands on that row. `dm dash` prints the same rows outside the TUI, and `dm peek <id>`
