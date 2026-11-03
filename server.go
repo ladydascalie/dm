@@ -64,6 +64,14 @@ func (c *client) deliver(m Msg) {
 	_ = writeMsg(c.c, m)
 }
 
+// pause stops pane output from being written to the socket while the client is
+// being caught up. It takes c.mu, like deliver, so the flag has one owner.
+func (c *client) pause() {
+	c.mu.Lock()
+	c.paused = true
+	c.mu.Unlock()
+}
+
 func (c *client) resume() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -605,15 +613,22 @@ func (s *server) attach(cl *client, m Msg) {
 		s.cols, s.rows = m.Cols, m.Rows
 	}
 	cl.cols, cl.rows = s.cols, s.rows
-	cl.paused = true
 	s.mu.Unlock()
+	cl.pause()
 	s.syncSizes()
 	s.mu.Lock()
 	snap := s.snapshotLocked()
 	ids := allPanes(s.st.win().Root)
 	s.mu.Unlock()
 	_ = cl.send(Msg{Type: "snapshot", Snap: snap})
-	s.sendScreens(ids, func(m Msg) { _ = cl.send(m) })
+	if s.sendScreens(ids, func(m Msg) { _ = cl.send(m) }) {
+		// The pane's alt or mouse mode changed since the snapshot was built.
+		// Send a fresh one so the client's pane info is not one event stale.
+		s.mu.Lock()
+		snap = s.snapshotLocked()
+		s.mu.Unlock()
+		_ = cl.send(Msg{Type: "snapshot", Snap: snap})
+	}
 	for _, id := range ids {
 		rp := readPaneReplay(s.st.Name, id)
 		if !rp.ok {
@@ -663,7 +678,7 @@ func readPaneScreen(session, id string) paneScreen {
 
 // sendScreens asks each pane for its visible screen and hands it to send. It
 // runs after a resize so the pane serialises at its new size.
-func (s *server) sendScreens(ids []string, send func(Msg)) {
+func (s *server) sendScreens(ids []string, send func(Msg)) (changed bool) {
 	for _, id := range ids {
 		ps := readPaneScreen(s.st.Name, id)
 		if !ps.ok {
@@ -671,11 +686,15 @@ func (s *server) sendScreens(ids []string, send func(Msg)) {
 		}
 		s.mu.Lock()
 		if pc := s.panes[id]; pc != nil {
+			if pc.alt != ps.alt || pc.mouse != ps.mouse {
+				changed = true
+			}
 			pc.alt, pc.mouse = ps.alt, ps.mouse
 		}
 		s.mu.Unlock()
 		send(Msg{Type: "screen", Target: id, Data: ps.data})
 	}
+	return changed
 }
 
 func (s *server) broadcastScreens(ids []string) {
