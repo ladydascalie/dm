@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"os"
 	"os/exec"
@@ -555,7 +556,36 @@ var (
 	railDim      = rgb{143, 147, 168} // #8f93a8
 	railHeader   = rgb{166, 169, 189} // #a6a9bd
 	railWindowFg = rgb{149, 153, 174} // #9599ae
+	railDiffAdd  = rgb{120, 220, 130} // #78dc82 diff stats, added lines
+	railDiffDel  = rgb{255, 125, 125} // #ff7d7d diff stats, deleted lines
 )
+
+// railAccents are the six workspace hues, in a fixed order. Each one is
+// readable on both rail backgrounds, so a workspace header keeps its identity
+// without losing contrast.
+var railAccents = []rgb{
+	{187, 154, 247}, // #bb9af7 violet
+	{110, 220, 235}, // #6edceb cyan
+	{240, 140, 215}, // #f08cd7 magenta
+	{126, 169, 255}, // #7ea9ff blue
+	{240, 160, 90},  // #f0a05a orange
+	{140, 215, 155}, // #8cd79b green
+}
+
+// railAccent returns the hue a workspace keeps for its whole life. FNV-1a is
+// the seed; the mix step matters because its low bits repeat for ids of equal
+// length, and a workspace id is short.
+func railAccent(workspace string) rgb {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(workspace))
+	x := h.Sum32()
+	x ^= x >> 16
+	x *= 0x7feb352d
+	x ^= x >> 15
+	x *= 0x846ca68b
+	x ^= x >> 16
+	return railAccents[x%uint32(len(railAccents))]
+}
 
 // Nerd Font icons. The font check runs once; DM_NERD=1 or 0 overrides it.
 var (
@@ -577,43 +607,45 @@ func nerdFonts() bool {
 	return nerdOn
 }
 
-// railGlyph is the state mark for a pane row and its colour. Every state gets a
-// distinct icon or, without Nerd Fonts, a distinct Unicode glyph and colour.
-// The question mark marks an agent whose state has not arrived; drawRail leaves
-// the cell blank for a shell, which reports no state.
+// railGlyph is the state mark for a pane row and its colour: amber working,
+// teal-blue idle, red blocked, green done, pink-red error, dim grey unknown.
+// Every state gets a distinct icon or, without Nerd Fonts, a distinct Unicode
+// glyph. The question mark marks an agent whose state has not arrived; drawRail
+// leaves the cell blank for a shell, which reports no state.
 func railGlyph(status string, nerd bool) (glyph string, colour rgb) {
 	switch status {
 	case "working":
+		glyph, colour = "●", rgb{245, 190, 80}
 		if nerd {
-			return "\uf013", rgb{224, 169, 76}
+			glyph = "\uf013"
 		}
-		return "●", rgb{224, 169, 76}
 	case "idle":
+		glyph, colour = "○", rgb{120, 200, 225}
 		if nerd {
-			return "\uf111", rgb{159, 176, 207}
+			glyph = "\uf111"
 		}
-		return "○", rgb{159, 176, 207}
 	case "blocked":
+		glyph, colour = "▲", rgb{255, 110, 110}
 		if nerd {
-			return "\uf071", rgb{224, 112, 90}
+			glyph = "\uf071"
 		}
-		return "▲", rgb{224, 112, 90}
 	case "done":
+		glyph, colour = "✓", rgb{110, 225, 145}
 		if nerd {
-			return "\uf00c", rgb{95, 168, 135}
+			glyph = "\uf00c"
 		}
-		return "✓", rgb{95, 168, 135}
 	case "error":
+		glyph, colour = "✕", rgb{255, 130, 160}
 		if nerd {
-			return "\uf057", rgb{228, 167, 158}
+			glyph = "\uf057"
 		}
-		return "✕", rgb{228, 167, 158}
 	default:
+		glyph, colour = "?", railDim
 		if nerd {
-			return "\uf128", railDim
+			glyph = "\uf128"
 		}
-		return "?", railDim
 	}
+	return glyph, colour
 }
 
 // railMark is the two-cell prefix of a pane row: an agent icon, a shell icon,

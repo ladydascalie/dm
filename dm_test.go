@@ -1097,11 +1097,11 @@ func TestRailGlyphPerState(t *testing.T) {
 		glyph  string
 		colour rgb
 	}{
-		{"working", "●", rgb{224, 169, 76}},
-		{"idle", "○", rgb{159, 176, 207}},
-		{"blocked", "▲", rgb{224, 112, 90}},
-		{"done", "✓", rgb{95, 168, 135}},
-		{"error", "✕", rgb{228, 167, 158}},
+		{"working", "●", rgb{245, 190, 80}},
+		{"idle", "○", rgb{120, 200, 225}},
+		{"blocked", "▲", rgb{255, 110, 110}},
+		{"done", "✓", rgb{110, 225, 145}},
+		{"error", "✕", rgb{255, 130, 160}},
 		{"unknown", "?", railDim},
 		{"", "?", railDim},
 	}
@@ -1132,11 +1132,21 @@ func TestRailContrast(t *testing.T) {
 		"dim":     railDim,
 		"header":  railHeader,
 		"window":  railWindowFg,
-		"working": {224, 169, 76},
-		"idle":    {159, 176, 207},
-		"blocked": {224, 112, 90},
-		"done":    {95, 168, 135},
-		"error":   {228, 167, 158},
+		"diffAdd": railDiffAdd,
+		"diffDel": railDiffDel,
+	}
+	for i, accent := range railAccents {
+		foregrounds[fmt.Sprintf("accent %d", i)] = accent
+	}
+	for _, status := range []string{
+		"working", "idle", "blocked", "done", "error", "unknown", "",
+	} {
+		fallback, colour := railGlyph(status, false)
+		_, nerdColour := railGlyph(status, true)
+		if fallback == "" || nerdColour != colour {
+			t.Fatalf("state %q differs between glyph forms", status)
+		}
+		foregrounds["state "+status] = colour
 	}
 	for name, fg := range foregrounds {
 		for bgName, bg := range map[string]rgb{"rail": railBG, "focus": railFocusBG} {
@@ -1147,6 +1157,32 @@ func TestRailContrast(t *testing.T) {
 	}
 	if r := contrast(railText, railBG); r < 7 {
 		t.Fatalf("body text on rail = %.2f:1, want >= 7:1", r)
+	}
+}
+
+// TestRailAccent holds a workspace to one hue for its whole life and keeps the
+// six accents distinct, so two workspaces never share a colour by accident.
+func TestRailAccent(t *testing.T) {
+	for _, ws := range []string{"main", "work", "dm-git-w1", ""} {
+		first, second := railAccent(ws), railAccent(ws)
+		if first != second {
+			t.Fatalf("railAccent(%q) = %v then %v", ws, first, second)
+		}
+	}
+	if len(railAccents) != 6 {
+		t.Fatalf("railAccents has %d hues, want 6", len(railAccents))
+	}
+	seen := map[rgb]bool{}
+	for _, accent := range railAccents {
+		if seen[accent] {
+			t.Fatalf("accent %v repeats in railAccents", accent)
+		}
+		seen[accent] = true
+	}
+	for _, ws := range []string{"main", "work", "scratch", "s1", "s2", "ws1", "ws6"} {
+		if got := railAccent(ws); !seen[got] {
+			t.Fatalf("railAccent(%q) = %v, which is not in railAccents", ws, got)
+		}
 	}
 }
 
