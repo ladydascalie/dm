@@ -352,3 +352,125 @@ func TestBoxCLIWaitBlocks(t *testing.T) {
 		t.Fatal("blocked wait never returned")
 	}
 }
+
+// boxRows splits printed output into rows of fields.
+func boxRows(out string) [][]string {
+	var rows [][]string
+	for _, line := range boxLines(out) {
+		rows = append(rows, strings.Fields(line))
+	}
+	return rows
+}
+
+// boxAwaitWatcherRows polls dm msg watchers until done holds, because a read
+// from another process reaches the server a moment after it starts.
+func boxAwaitWatcherRows(t *testing.T, h *harness, session, why string, done func([][]string) bool) [][]string {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		rows := boxRows(boxRun(t, h, h.env, "msg", "watchers", "-s", session))
+		if done(rows) {
+			return rows
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: dm msg watchers printed %v", why, rows)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestBoxCLIWatchers drives the presence verb through the binary: a wait run
+// inside one pane shows as parked, the post that serves it clears the mark, and
+// a read from the other pane leaves a second row.
+func TestBoxCLIWatchers(t *testing.T) {
+	h := newHarness(t)
+	s := "boxwatch"
+	h.run("new", "-s", s)
+	panes := h.panes(s)
+	if len(panes) != 1 {
+		t.Fatalf("a new session has %d panes, want 1", len(panes))
+	}
+	root := panes[0]
+	second := h.split(s, root, "right")
+	inRoot := boxEnv(h.env, "DM_SESSION="+s, "DM_PANE="+root)
+	inSecond := boxEnv(h.env, "DM_SESSION="+s, "DM_PANE="+second)
+
+	// The wait parks inside the root pane, with no entry in the box yet.
+	type result struct {
+		out string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := boxTry(t, h, inRoot, "msg", "wait", "--key", "lane/a",
+			"--state", "done", "--timeout", "20s", "-s", s)
+		done <- result{out, err}
+	}()
+
+	rows := boxAwaitWatcherRows(t, h, s, "the parked wait", func(rows [][]string) bool {
+		return len(rows) == 1 && len(rows[0]) == 4 && rows[0][3] == "wait"
+	})
+	for i, want := range []string{root, "lane/a", "0", "wait"} {
+		if rows[0][i] != want {
+			t.Fatalf("parked row = %v, want %v", rows[0], []string{root, "lane/a", "0", "wait"})
+		}
+	}
+
+	// The post that serves the wait leaves it unparked at the seq it served.
+	boxRun(t, h, inSecond, "msg", "post", "--state", "done", "--key", "lane/a",
+		"--msg", "gate green", "-s", s)
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("the parked wait: %v\n%s", r.err, r.out)
+		}
+		if !strings.Contains(r.out, "gate green") {
+			t.Fatalf("wait printed %q", r.out)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the parked wait never returned")
+	}
+
+	// A list from the other pane leaves its own watch, so two rows print.
+	boxRun(t, h, inSecond, "msg", "list", "--key", "lane/a", "-s", s)
+	rows = boxAwaitWatcherRows(t, h, s, "the second watch", func(rows [][]string) bool {
+		return len(rows) == 2
+	})
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if len(row) != 4 {
+			t.Fatalf("row %v has %d columns, want 4", row, len(row))
+		}
+		seen[row[0]] = true
+		if row[1] != "lane/a" || row[2] != "1" || row[3] != "-" {
+			t.Fatalf("row %v, want lane/a at cursor 1 and no wait", row)
+		}
+	}
+	if !seen[root] || !seen[second] {
+		t.Fatalf("rows name %v, want both %s and %s", seen, root, second)
+	}
+
+	// --json prints the reply unchanged.
+	var rep watchersReply
+	if err := json.Unmarshal([]byte(boxRun(t, h, h.env, "msg", "watchers", "--json", "-s", s)), &rep); err != nil {
+		t.Fatalf("watchers --json is not the reply: %v", err)
+	}
+	if len(rep.Watchers) != 2 {
+		t.Fatalf("watchers --json = %+v, want two", rep.Watchers)
+	}
+
+	// A branch read prints its filter with a trailing star.
+	boxRun(t, h, inRoot, "msg", "list", "--prefix", "lane/", "-s", s)
+	rows = boxAwaitWatcherRows(t, h, s, "the prefix watch", func(rows [][]string) bool {
+		return len(rows) == 3
+	})
+	found := false
+	for _, row := range rows {
+		if row[1] == "lane/*" && row[2] == "1" && row[3] == "-" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no lane/* row in %v", rows)
+	}
+}

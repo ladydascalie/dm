@@ -263,6 +263,11 @@ type server struct {
 	// boxWaiters holds the msg-wait calls blocked right now. Post and clear
 	// wake every one; a waiter re-checks under s.mu, so the wakeup is a hint.
 	boxWaiters map[*boxWaiter]bool
+
+	// watches is the presence registry: the live reads, keyed by pane and
+	// filter. It is memory only. A restart forgets it and the next reads
+	// rebuild it, so it never reaches state.json.
+	watches map[boxWatchKey]watch
 }
 
 // branchTTL is how long a detected git label stays fresh. A stale entry is
@@ -459,7 +464,7 @@ func runServer(args []string) error {
 
 	s := &server{st: st, panes: map[string]*paneConn{}, clients: map[*client]bool{},
 		cols: st.Cols, rows: st.Rows, adopt: adopt,
-		branches: map[string]*branchEntry{}}
+		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]watch{}}
 	if s.cols < 20 {
 		s.cols = 80
 	}
@@ -1528,7 +1533,11 @@ func (s *server) handleReq(cl *client, m Msg) {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		entries, trimmed := s.boxList(req.(*listReq))
+		entries, trimmed, err := s.boxList(req.(*listReq))
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
 		s.reply(cl, m, listReply{Entries: entries, Trimmed: trimmed}, nil)
 
 	case "msg-clear":
@@ -1547,6 +1556,13 @@ func (s *server) handleReq(cl *client, m Msg) {
 		}
 		e, trimmed, err := s.boxWait(cl, req.(*waitReq))
 		s.reply(cl, m, waitReply{Entry: e, Trimmed: trimmed}, err)
+
+	case "msg-watchers":
+		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, watchersReply{Watchers: s.boxWatchers()}, nil)
 
 	case "msg-schema":
 		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
@@ -1596,18 +1612,27 @@ func (s *server) boxPost(req *postReq) (entry, error) {
 
 // boxList returns the entries newest first that pass the request's topic and
 // cursor, capped at the clamped limit. Trimmed reports a cursor that names a
-// row the box has already dropped.
-func (s *server) boxList(req *listReq) ([]entry, bool) {
+// row the box has already dropped. A read that names its pane leaves a watch
+// rooted at the highest seq it served.
+func (s *server) boxList(req *listReq) ([]entry, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.boxReadLocked(req.From); err != nil {
+		return nil, false, err
+	}
 	out := make([]entry, 0, req.Limit)
+	highest := 0
 	for i := len(s.st.Box) - 1; i >= 0 && len(out) < req.Limit; i-- {
 		if !boxMatch(s.st.Box[i], req.Key, req.KeyPrefix, req.AfterSeq) {
 			continue
 		}
 		out = append(out, s.st.Box[i])
+		highest = max(highest, s.st.Box[i].Seq)
 	}
-	return out, s.boxTrimmedLocked(req.AfterSeq)
+	if req.From != "" {
+		s.boxSetWatchLocked(boxWatchKeyOf(req.From, req.Key, req.KeyPrefix), highest, false)
+	}
+	return out, s.boxTrimmedLocked(req.AfterSeq), nil
 }
 
 // boxTrimmedLocked reports whether the cursor sits behind the oldest row the
@@ -1687,6 +1712,91 @@ func (s *server) boxWakeLocked() {
 	}
 }
 
+// boxWatchKey is the identity of one watch: the reader pane and its filter.
+// The filter is an exact key or a branch prefix, never both, so the three
+// fields name one watch.
+type boxWatchKey struct {
+	pane      string
+	key       string
+	keyPrefix string
+}
+
+// boxWatchTTL is how long an unparked watch survives without a fresh read. A
+// parked watch is a live wait, so it never ages out.
+const boxWatchTTL = 10 * time.Minute
+
+// boxWatchKeyOf is the registry key a read leaves behind.
+func boxWatchKeyOf(from, key, prefix string) boxWatchKey {
+	return boxWatchKey{pane: from, key: key, keyPrefix: prefix}
+}
+
+// boxReadLocked prepares a read: it drops the expired watches, then checks the
+// reader pane against the session tree. A read without a pane records nothing
+// and passes. The caller holds s.mu.
+func (s *server) boxReadLocked(from string) error {
+	s.boxExpireLocked(time.Now())
+	if from != "" && !s.paneInTreeLocked(from) {
+		return fmt.Errorf("box: no pane %q", from)
+	}
+	return nil
+}
+
+// boxExpireLocked drops the watches whose pane left the tree and the unparked
+// watches older than boxWatchTTL. A parked watch stays whatever its age. One
+// push covers the drop, because a watcher page asks for the whole list again.
+// The caller holds s.mu.
+func (s *server) boxExpireLocked(now time.Time) {
+	dropped := false
+	for k, w := range s.watches {
+		if !s.paneInTreeLocked(k.pane) || (!w.Parked && now.Sub(w.At) > boxWatchTTL) {
+			delete(s.watches, k)
+			dropped = true
+		}
+	}
+	if dropped {
+		s.broadcastLocked(Msg{Type: "watch"})
+	}
+}
+
+// boxSetWatchLocked records one read. The cursor only grows, parked follows the
+// caller and at is now in UTC to the second. It pushes when the watch appears,
+// advances or changes its parked state, which are the changes the page shows.
+// The caller holds s.mu.
+func (s *server) boxSetWatchLocked(k boxWatchKey, cursor int, parked bool) {
+	old, existed := s.watches[k]
+	w := watch{
+		Pane: k.pane, Key: k.key, KeyPrefix: k.keyPrefix,
+		Cursor: max(old.Cursor, cursor), Parked: parked,
+		At: time.Now().UTC().Truncate(time.Second),
+	}
+	s.watches[k] = w
+	if !existed || w.Cursor != old.Cursor || w.Parked != old.Parked {
+		s.broadcastLocked(Msg{Type: "watch"})
+	}
+}
+
+// boxWatchers returns every live watch, sorted by pane, key and keyPrefix. The
+// reply is a whole-list read, so it drops the expired watches first.
+func (s *server) boxWatchers() []watch {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.boxExpireLocked(time.Now())
+	out := make([]watch, 0, len(s.watches))
+	for _, w := range s.watches {
+		out = append(out, w)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Pane != out[j].Pane {
+			return out[i].Pane < out[j].Pane
+		}
+		if out[i].Key != out[j].Key {
+			return out[i].Key < out[j].Key
+		}
+		return out[i].KeyPrefix < out[j].KeyPrefix
+	})
+	return out
+}
+
 // boxNewestLocked returns the newest entry under the topic filter: the whole
 // log when both fields are empty. The caller holds s.mu.
 func (s *server) boxNewestLocked(key, prefix string) (entry, bool) {
@@ -1732,13 +1842,42 @@ func (s *server) boxFindLocked(req *waitReq) (entry, bool, bool) {
 // whether the cursor named a dropped row. On timeout it returns the error
 // "box: wait timed out" plus the newest entry it saw. A disconnected client
 // releases the waiter instead of holding it to the timeout.
+//
+// A wait that names its pane is a watch: it registers parked before the first
+// check, so it shows up before any post, advances to the entry it serves, and
+// unparks on return, timeout or a gone client.
 func (s *server) boxWait(cl *client, req *waitReq) (entry, bool, error) {
 	deadline := time.Now().Add(time.Duration(req.TimeoutMs) * time.Millisecond)
 	w := &boxWaiter{wake: make(chan struct{}, 1)}
+	k := boxWatchKeyOf(req.From, req.Key, req.KeyPrefix)
+
+	s.mu.Lock()
+	if err := s.boxReadLocked(req.From); err != nil {
+		s.mu.Unlock()
+		return entry{}, false, err
+	}
+	if req.From != "" {
+		s.boxSetWatchLocked(k, 0, true)
+	}
+	s.mu.Unlock()
+
+	// unpark clears the parked mark of the watch this wait left behind.
+	unpark := func() {
+		if req.From == "" {
+			return
+		}
+		s.mu.Lock()
+		s.boxSetWatchLocked(k, 0, false)
+		s.mu.Unlock()
+	}
+
 	for {
 		s.mu.Lock()
 		e, ok, trimmed := s.boxFindLocked(req)
 		if ok {
+			if req.From != "" {
+				s.boxSetWatchLocked(k, e.Seq, false)
+			}
 			s.mu.Unlock()
 			return e, trimmed, nil
 		}
@@ -1749,6 +1888,7 @@ func (s *server) boxWait(cl *client, req *waitReq) (entry, bool, error) {
 		wait := time.Until(deadline)
 		if wait <= 0 {
 			s.boxUnwatch(w)
+			unpark()
 			return last, trimmed, fmt.Errorf("box: wait timed out")
 		}
 		if wait > boxPollWait {
@@ -1762,6 +1902,7 @@ func (s *server) boxWait(cl *client, req *waitReq) (entry, bool, error) {
 		}
 		s.boxUnwatch(w)
 		if connGone(cl.c) {
+			unpark()
 			return entry{}, trimmed, fmt.Errorf("box: client gone")
 		}
 	}
