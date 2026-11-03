@@ -45,7 +45,7 @@ dm kill -s work         # stop the server; panes keep running
 ```
 
 Keys inside the TUI. `ctrl+b` arms the prefix and shows the action box,
-bottom right. The box clears after 3 seconds of no input.
+bottom right. It stays until an action runs or `esc` dismisses it.
 
 | key | action |
 | --- | --- |
@@ -62,26 +62,49 @@ bottom right. The box clears after 3 seconds of no input.
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
 | `)` | next workspace |
-| `r` | toggle the sidebar |
+| `r` | cycle the sidebar: full, thin, hidden |
 | `d` / `q` | detach |
 
 Drag a divider with the left mouse button to resize the split. The client
 sends `resize-split` with the two panes beside the divider and the ratio, at
 most every 30 ms plus a final call on release. Both sides keep at least three
-cells. A divider is ignored when any pane in that split's subtree claimed the
-mouse, because the app owns the whole area.
+cells. A divider always belongs to dm, even when a pane claims the mouse: the
+app's PTY covers only its content rect, so the border press is not its event.
 
 ## Sidebar
 
-The left columns of the screen show a sidebar when the session asks for one:
-every workspace, then every window in it, then one row per pane, in the
-server's own order. A pane row shows its recorded name, or the pane id when it
-has none, and a state glyph in a colour per state. A pane counts as an agent
-when it has a recorded name or has reported a status other than empty or
-`unknown`; the rest are shells. The focused pane's row is highlighted, and a
-left click on a pane row focuses that pane. `prefix r` hides the sidebar and
-`prefix r` again restores the last width, 26 columns when none was ever
-chosen.
+The left columns of the screen show a sidebar when the session asks for one.
+A workspace header carries a folder, its name, and the git branch of its
+focused pane when that pane is in a repository. Each window follows with a
+fold caret and its name. A new window is named after the folder it starts in,
+and it starts in the folder of the pane it was created from; `rename-window`
+overrides the name. A window whose label is still the old positional number is
+renamed from its pane's folder when the session loads. Pane rows are folded
+away by default; click a window row to unfold or fold it, and the fold is
+stored in the state file. An unfolded
+pane row labels itself with its recorded name, then the `app=` it last
+reported, then the pane id, with a state glyph in a colour per state beside
+the label. An agent pane in a linked git worktree also shows that worktree's
+folder name after its label, dimmed, so dungeon lanes in
+`repo.worktrees/<encounter>-<minion>` are told apart; shells and the main
+checkout carry none. A pane counts as an agent when it has a recorded name
+or has spoken the status protocol at least once; the rest are shells. An agent
+row leads with a rocket icon (or a `▎` bar without Nerd Fonts), a shell row with
+a terminal icon, and a dim shell row otherwise leaves those two cells blank, so
+the state glyph keeps its column. The report is sticky: `state=clear` does not
+demote an agent, and both the mark and the last `app=` are stored in the state
+file. The focused pane's row is highlighted, and a left click on a pane row
+focuses that pane.
+
+The rail paints its own dark background and uses explicit RGB colours, not
+palette slots, so every label and glyph reaches WCAG AA contrast on both the
+rail and the focused row. Icons use Nerd Font code points when `fc-list` finds a
+Nerd font; `DM_NERD=1` forces them and `DM_NERD=0` falls back to the Unicode
+glyphs. `prefix r` cycles the sidebar through three states: full, thin, and
+hidden. The thin rail is four columns: the agent bar, one state glyph per pane,
+and no names. It always lists panes, folded or not, because the glyph column is
+the whole fleet at a glance. A hidden or thin sidebar remembers the last full width, 26
+columns when none was ever chosen.
 
 In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel
@@ -89,17 +112,28 @@ enters scrollback directly.
 
 ## Scrollback and mouse
 
-Mouse reporting is always on, there is no setting (SGR 1000 + 1002 + 1006,
-disabled again on detach). Left click focuses the pane under the pointer, the
-wheel scrolls the pane under the pointer, and dragging the one-cell pad between
-two boxes resizes that split.
+Mouse reporting is always on, there is no setting (SGR 1000 + 1002 + 1003 +
+1006, disabled again on detach). Left click focuses the pane under the pointer,
+the wheel scrolls the pane under the pointer, and dragging the divider between
+two boxes resizes that split. Panes are boxed with no gap cell: neighbouring
+boxes touch, so the divider is two adjacent border cells and the visual space
+is one cell on each axis. Both sides of a drag keep at least three content
+cells.
+
+Every divider carries a dim grip dot pair at its midpoint, so the handle is
+visible before the pointer arrives. Hovering repaints the whole divider with
+heavy line glyphs and shows `drag to resize` in the status bar. The hover and the press resolve through the
+same `padHit` zone, so what lights up is exactly what will drag. No-button
+motion is the mux's own: dm uses it for that hover and does not forward it to
+pane apps, which asked for button motion only.
 
 Right click opens the pane menu, even over a program that owns the mouse: it is
 a window-manager gesture, not the app's. Move with `j`/`k` or the arrows,
-`enter` or a digit to run, `esc` or `q` to close. With the mouse, hovering highlights the row under the pointer, a left click on a
-row runs it, and a right press, drag and release runs the row under the release.
-Hover motion is enabled only while the menu is open. The release of the press that opened the menu, and clicks on the title
-or border, do not dismiss it; a click outside does. The menu
+`enter` or a digit to run, `esc` or `q` to close. With the mouse, hovering
+highlights the row under the pointer, a left click on a row runs it, and a
+right press, drag and release runs the row under the release. The release of
+the press that opened the menu, and clicks on the title or border, do not
+dismiss it; a click outside does. The menu
 offers split right/down/left/up, focus, close pane, scrollback, new window, new
 workspace, switch session and detach. If the program in that pane enabled mouse reporting
 itself, the event is forwarded to it instead. That is how `pi`, `htop` and
@@ -167,7 +201,9 @@ dm status
 Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
 `focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
 `next-window`, `prev-window`, `select-window`, `new-workspace`,
-`next-workspace`, `prev-workspace`, `rename-window`, `list`, `ping`.
+`next-workspace`, `prev-workspace`, `rename-window`, `toggle-fold`, `list`,
+`ping`. `toggle-fold` takes a window id as `target` and replies with the new
+`unfolded` state.
 
 `history` takes `target` and an integer `lines` and replies with
 `{"lines": ["..."]}`: up to `lines` text rows immediately above the live
@@ -193,7 +229,9 @@ ESC ] 7501 ; state=working:app=pi:msg=<base64> ESC \
 ```
 
 - `state=` is `idle`, `working`, `blocked`, `done`, `error` or `clear`.
-- `app=` and `kind=` are optional and only used for display.
+- `app=` is optional and display only: `dm` keeps the last value per pane and
+  uses it as a rail label when the pane has no recorded name. `kind=` is
+  optional and unused.
 - `msg=` is optional base64 UTF-8; `dm` decodes it for `dm status` and the bar.
 - `state=clear` removes the record, shown as `unknown`.
 - Both `BEL` and `ST` terminate the sequence.
@@ -227,6 +265,13 @@ survives the server. The server, on start, reads `state.json` and **adopts** the
 still-running pane daemons instead of respawning them.
 
 - Kill the client: nothing is lost, reattach.
+- More than one client may attach. They share one layout: the largest attached
+  terminal sets the size, and when it detaches the next largest takes over, so
+  a small client cannot shrink everyone. A smaller client shows the layout
+  clipped to its own screen.
+- A pane exports `DM_SESSION` to its shell. `dm` refuses to attach that same
+  session from inside one of its own panes, because the mirror is useless and
+  competes for the shared size. Use `-s` for another session.
 - Kill the server (`kill -9`, crash, logout): panes keep running, including
   their shells. The next CLI call or attach restarts the server and reconnects
   the same pane processes. Content and status are still there.

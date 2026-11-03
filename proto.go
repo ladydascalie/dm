@@ -46,6 +46,9 @@ type Msg struct {
 type Status struct {
 	State   string `json:"state"`
 	Message string `json:"message,omitempty"`
+	// App is the reporting program from app= in the wire format. It is display
+	// only: the rail uses it as a label when the pane has no recorded name.
+	App string `json:"app,omitempty"`
 }
 
 type Rect struct {
@@ -72,11 +75,18 @@ type PaneInfo struct {
 // whole fleet. Panes stays the active window; All is everything, grouped by
 // workspace then window in tree order.
 type AllPane struct {
-	ID              string `json:"id"`
-	Name            string `json:"name,omitempty"`
-	Status          string `json:"status,omitempty"`
-	Message         string `json:"message,omitempty"`
-	Agent           bool   `json:"agent"`
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	Status  string `json:"status,omitempty"`
+	Message string `json:"message,omitempty"`
+	Agent   bool   `json:"agent"`
+	App     string `json:"app,omitempty"`
+	Branch  string `json:"branch,omitempty"`
+	// Worktree is the linked worktree's folder name; empty for the main
+	// checkout or a directory outside git.
+	Worktree string `json:"worktree,omitempty"`
+	// WindowUnfolded is the rail fold state of the pane's window.
+	WindowUnfolded  bool   `json:"windowUnfolded,omitempty"`
 	Workspace       string `json:"workspace"`
 	WorkspaceName   string `json:"workspaceName"`
 	Window          string `json:"window"`

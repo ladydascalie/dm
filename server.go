@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -92,6 +93,123 @@ type server struct {
 	ln      net.Listener
 	ending  bool            // session is shutting down; accept errors are expected
 	adopt   map[string]bool // panes loaded from disk: a fresh spawn is a restart
+
+	// Git branch labels for the rail, one entry per working directory. The
+	// check runs off s.mu and the result arrives with a later snapshot.
+	branchMu sync.Mutex
+	branches map[string]*branchEntry
+}
+
+// branchTTL is how long a detected git label stays fresh. A stale entry is
+// served while a background check runs, so a snapshot never waits on git.
+const branchTTL = 10 * time.Second
+
+type branchEntry struct {
+	info    gitInfo
+	at      time.Time
+	loading bool
+}
+
+// gitInfo is the pair the rail shows for a working directory: the branch and,
+// for a linked worktree, its own folder name.
+type gitInfo struct {
+	branch   string
+	worktree string
+}
+
+// detectGit is a variable so tests can stub git.
+var detectGit = func(cwd string) gitInfo {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse",
+		"--abbrev-ref", "HEAD", "--show-toplevel", "--git-dir",
+		"--git-common-dir").Output()
+	if err != nil {
+		return gitInfo{}
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) < 4 {
+		return gitInfo{}
+	}
+	info := gitInfo{branch: lines[0]}
+	root := filepath.Clean(lines[1])
+	gd, cd := lines[2], lines[3]
+	if !filepath.IsAbs(gd) {
+		gd = filepath.Join(cwd, gd)
+	}
+	if !filepath.IsAbs(cd) {
+		cd = filepath.Join(cwd, cd)
+	}
+	// A linked worktree has its own git dir under the main repo's worktrees
+	// directory, while the common dir stays in the main checkout.
+	if filepath.Clean(gd) != filepath.Clean(cd) {
+		info.worktree = filepath.Base(root)
+	}
+	return info
+}
+
+// gitFor returns the cached git labels for a working directory and starts a
+// background check when the entry is missing or stale. It never runs git on
+// the caller's goroutine, because snapshots hold s.mu.
+func (s *server) gitFor(cwd string) gitInfo {
+	if cwd == "" {
+		return gitInfo{}
+	}
+	now := time.Now()
+	s.branchMu.Lock()
+	if s.branches == nil {
+		s.branches = map[string]*branchEntry{}
+	}
+	e := s.branches[cwd]
+	if e == nil {
+		s.branches[cwd] = &branchEntry{at: now, loading: true}
+		s.branchMu.Unlock()
+		go s.loadGit(cwd)
+		return gitInfo{}
+	}
+	info := e.info
+	load := now.Sub(e.at) > branchTTL && !e.loading
+	if load {
+		e.loading = true
+	}
+	s.branchMu.Unlock()
+	if load {
+		go s.loadGit(cwd)
+	}
+	return info
+}
+
+func (s *server) loadGit(cwd string) {
+	info := detectGit(cwd)
+	s.branchMu.Lock()
+	e := s.branches[cwd]
+	if e == nil {
+		e = &branchEntry{}
+		s.branches[cwd] = e
+	}
+	changed := e.info != info
+	e.info, e.at, e.loading = info, time.Now(), false
+	s.branchMu.Unlock()
+	if changed {
+		s.pushSnapshot()
+	}
+}
+
+// toggleFold flips a window's rail fold state and persists it.
+func (s *server) toggleFold(id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, w := range ws.Windows {
+			if w.ID != id {
+				continue
+			}
+			w.Unfolded = !w.Unfolded
+			_ = s.st.save()
+			return w.Unfolded, nil
+		}
+	}
+	return false, fmt.Errorf("no window %q", id)
 }
 
 func runServer(args []string) error {
@@ -130,7 +248,8 @@ func runServer(args []string) error {
 	}
 
 	s := &server{st: st, panes: map[string]*paneConn{}, clients: map[*client]bool{},
-		cols: st.Cols, rows: st.Rows, adopt: adopt}
+		cols: st.Cols, rows: st.Rows, adopt: adopt,
+		branches: map[string]*branchEntry{}}
 	if s.cols < 20 {
 		s.cols = 80
 	}
@@ -298,6 +417,7 @@ func (s *server) watchPane(id string) {
 					from := pc.st.State
 					pc.st = *m.St
 					to, message := pc.st.State, pc.st.Message
+					s.noteStatus(id, *m.St)
 					s.pushSnapshot()
 					if notifyStateChange(from, to) {
 						s.notifyPaneState(id, to, message)
@@ -326,6 +446,30 @@ func (s *server) broadcastLocked(m Msg) {
 	for c := range s.clients {
 		c.deliver(m)
 	}
+}
+
+// fitToClientsLocked takes the shared session size from the largest attached
+// client. Every client draws the same layout, but a small one, such as a dm
+// nested in one of this session's own panes, must not shrink the display of
+// the others. The caller holds s.mu and reports whether the size changed.
+func (s *server) fitToClientsLocked() bool {
+	cols, rows := 0, 0
+	for cl := range s.clients {
+		if cl.cols > cols {
+			cols = cl.cols
+		}
+		if cl.rows > rows {
+			rows = cl.rows
+		}
+	}
+	if cols < 20 || rows < 5 {
+		return false
+	}
+	if cols == s.cols && rows == s.rows {
+		return false
+	}
+	s.cols, s.rows = cols, rows
+	return true
 }
 
 // requestedRailLocked is the stored width, floored at zero, before the screen
@@ -400,10 +544,34 @@ func (s *server) snapshotLocked() *Snapshot {
 	return snap
 }
 
+// noteStatus persists the agent mark and the reporting app. Both keep the
+// sidebar calling a pane an agent after state=clear, and both survive a server
+// or pane restart because they live in the state file.
+func (s *server) noteStatus(id string, st Status) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ps := s.st.Panes[id]
+	if ps == nil {
+		return
+	}
+	changed := false
+	if !ps.Reported {
+		ps.Reported = true
+		changed = true
+	}
+	if st.App != "" && ps.App != st.App {
+		ps.App = st.App
+		changed = true
+	}
+	if changed {
+		_ = s.st.save()
+	}
+}
+
 // allPanesLocked lists every pane in the session in workspace, window, tree
-// order. A pane is an agent when it has a recorded name or has reported a
-// status other than empty or unknown; otherwise it is a shell. The caller holds
-// s.mu.
+// order. A pane is an agent when it has a recorded name, reported the status
+// protocol at least once, or has a status other than empty or unknown;
+// otherwise it is a shell. The caller holds s.mu.
 func (s *server) allPanesLocked() []AllPane {
 	out := make([]AllPane, 0, len(s.st.Panes))
 	for i, ws := range s.st.Workspaces {
@@ -417,14 +585,20 @@ func (s *server) allPanesLocked() []AllPane {
 					WorkspaceActive: wsActive, WindowActive: winActive,
 					Focus: winActive && id == w.Focus,
 				}
-				if ps := s.st.Panes[id]; ps != nil {
+				info.WindowUnfolded = w.Unfolded
+				ps := s.st.Panes[id]
+				if ps != nil {
 					info.Name = ps.Name
+					info.App = ps.App
+					gi := s.gitFor(ps.Cwd)
+					info.Branch = gi.branch
+					info.Worktree = gi.worktree
 				}
 				if pc := s.panes[id]; pc != nil {
 					info.Status = pc.st.State
 					info.Message = pc.st.Message
 				}
-				info.Agent = info.Name != "" ||
+				info.Agent = info.Name != "" || (ps != nil && ps.Reported) ||
 					(info.Status != "" && info.Status != "unknown")
 				out = append(out, info)
 			}
@@ -658,7 +832,12 @@ func (s *server) serve(c net.Conn) {
 		if registered {
 			s.mu.Lock()
 			delete(s.clients, cl)
+			resized := s.fitToClientsLocked()
 			s.mu.Unlock()
+			if resized {
+				s.syncSizes()
+				s.pushSnapshot()
+			}
 		}
 		c.Close()
 	}()
@@ -684,10 +863,10 @@ func (s *server) serve(c net.Conn) {
 			}
 		case "resize":
 			s.mu.Lock()
-			cl.cols, cl.rows = m.Cols, m.Rows
 			if m.Cols > 20 && m.Rows > 5 {
-				s.cols, s.rows = m.Cols, m.Rows
+				cl.cols, cl.rows = m.Cols, m.Rows
 			}
+			s.fitToClientsLocked()
 			s.mu.Unlock()
 			s.syncSizes()
 			s.pushSnapshot()
@@ -700,9 +879,9 @@ func (s *server) serve(c net.Conn) {
 func (s *server) attach(cl *client, m Msg) {
 	s.mu.Lock()
 	if m.Cols > 20 && m.Rows > 5 {
-		s.cols, s.rows = m.Cols, m.Rows
+		cl.cols, cl.rows = m.Cols, m.Rows
 	}
-	cl.cols, cl.rows = s.cols, s.rows
+	s.fitToClientsLocked()
 	s.mu.Unlock()
 	cl.pause()
 	s.syncSizes()
@@ -1038,6 +1217,13 @@ func (s *server) handleReq(cl *client, m Msg) {
 		}
 		s.reply(cl, m, res, nil)
 
+	case "toggle-fold":
+		unfolded, err := s.toggleFold(m.Target)
+		if err == nil {
+			s.pushSnapshot()
+		}
+		s.reply(cl, m, map[string]any{"window": m.Target, "unfolded": unfolded}, err)
+
 	case "set-pane-name":
 		err := s.mutation(func() error {
 			ps := s.st.Panes[m.Target]
@@ -1249,6 +1435,7 @@ func (s *server) afterMutation() {
 type paneListInfo struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
+	App       string `json:"app,omitempty"`
 	Status    string `json:"status,omitempty"`
 	Message   string `json:"message,omitempty"`
 	Workspace string `json:"workspace"`
@@ -1267,6 +1454,7 @@ func (s *server) paneList() []paneListInfo {
 				info := paneListInfo{ID: id, Workspace: ws.ID, Window: w.ID}
 				if ps := s.st.Panes[id]; ps != nil {
 					info.Name = ps.Name
+					info.App = ps.App
 				}
 				if pc := s.panes[id]; pc != nil {
 					info.Status = pc.st.State
@@ -1481,7 +1669,6 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 			if !horizontal {
 				space = r.H
 			}
-			space--
 			// A pane box is border + content + border, so the smallest
 			// content a drag may leave is 3 cells, a 5-cell box.
 			const minBox = 5
@@ -1558,15 +1745,24 @@ func (s *server) cyclePane(step int) error {
 
 func (s *server) closePane(target string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	win := s.st.win()
 	if target == "" {
 		target = win.Focus
 	}
 	ids := allPanes(win.Root)
 	if len(ids) <= 1 {
-		return fmt.Errorf("cannot close the last pane")
+		// Closing the last pane empties the window. Let the pane's exit drive
+		// the normal path, which drops the window and ends the session when
+		// nothing is left, exactly like a shell exiting.
+		pc := s.panes[target]
+		s.mu.Unlock()
+		if pc == nil {
+			return fmt.Errorf("no pane %q", target)
+		}
+		_ = pc.send(Msg{Action: "kill"})
+		return nil
 	}
+	defer s.mu.Unlock()
 	at := 0
 	for i, id := range ids {
 		if id == target {
@@ -1596,19 +1792,53 @@ func (s *server) closePane(target string) error {
 	return nil
 }
 
+// windowCwdLocked is the starting directory of a workspace's active pane, or
+// the server's own directory when the workspace has none. The caller holds
+// s.mu.
+func (s *server) windowCwdLocked(ws *Workspace) string {
+	if ws != nil && len(ws.Windows) > 0 {
+		if ps := s.st.Panes[ws.Windows[ws.Active].Focus]; ps != nil {
+			return ps.Cwd
+		}
+	}
+	cwd, _ := os.Getwd()
+	return cwd
+}
+
 func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, string, error) {
 	s.mu.Lock()
 	ws := s.st.ws()
+	src := ""
 	if wsID != "" {
 		ws = nil
 		for _, cand := range s.st.Workspaces {
 			if cand.ID == wsID {
 				ws = cand
+				break
+			}
+			for _, w := range cand.Windows {
+				if findLeaf(w.Root, wsID) {
+					ws, src = cand, wsID
+					break
+				}
+			}
+			if ws != nil {
+				break
 			}
 		}
 		if ws == nil {
 			s.mu.Unlock()
-			return "", "", fmt.Errorf("no workspace %q", wsID)
+			return "", "", fmt.Errorf("no workspace or pane %q", wsID)
+		}
+	}
+	// The new pane opens where the source pane is, or where the active pane of
+	// the target workspace is, so the window's folder name and its shell agree.
+	if cwd == "" {
+		if ps := s.st.Panes[src]; src != "" && ps != nil {
+			cwd = ps.Cwd
+		}
+		if cwd == "" {
+			cwd = s.windowCwdLocked(ws)
 		}
 	}
 	wid := s.st.newWindowID()
@@ -1617,7 +1847,10 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 	w.Root = &Node{Pane: id}
 	w.Focus = id
 	if label == "" {
-		label = strconv.Itoa(len(ws.Windows) + 1)
+		label = folderName(cwd)
+		if label == "" {
+			label = strconv.Itoa(len(ws.Windows) + 1)
+		}
 		w.Name = label
 	}
 	ws.Windows = append(ws.Windows, w)
@@ -1669,8 +1902,14 @@ func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string,
 	if name == "" {
 		name = "ws" + strconv.Itoa(len(s.st.Workspaces)+1)
 	}
+	if cwd == "" {
+		cwd = s.windowCwdLocked(s.st.ws())
+	}
 	if tabLabel == "" {
-		tabLabel = "1"
+		tabLabel = folderName(cwd)
+		if tabLabel == "" {
+			tabLabel = "1"
+		}
 	}
 	wsid := s.st.newWorkspaceID()
 	wid := s.st.newWindowID()

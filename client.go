@@ -48,7 +48,6 @@ type tui struct {
 	sessions []SessionInfo
 	sel      int
 	menu     *menu
-	hover    bool
 
 	hist     map[string][]byte
 	scroll   string // pane id shown from scrollback
@@ -59,7 +58,6 @@ type tui struct {
 	quit     bool
 	switchTo string
 
-	armAt   time.Time
 	escAt   time.Time
 	inbuf   []byte
 	pending bool
@@ -78,6 +76,14 @@ type tui struct {
 	dragStart  int
 	dragSpace  int
 	dragAt     time.Time
+
+	// padZone is the divider under the pointer and padAxis its orientation.
+	// A zero zone draws no hover affordance. mouseX/mouseY remember the last
+	// pointer cell, so a snapshot can re-resolve the hover.
+	padZone Rect
+	padAxis string
+	mouseX  int
+	mouseY  int
 
 	// railWant is the last non-zero rail width seen, so the toggle can restore
 	// it. railPress marks a press that began in the rail, whose events belong
@@ -133,6 +139,11 @@ func (t *tui) expireToasts(now time.Time) {
 // runClient owns the terminal. A session switch returns to this loop with a new
 // name, so raw mode and the stdin reader survive it.
 func runClient(name string) error {
+	// A pane exports its own session name. Attaching that same session from a
+	// pane makes a mirror that can also fight over the shared screen size.
+	if in := os.Getenv("DM_SESSION"); in != "" && in == name {
+		return fmt.Errorf("already inside session %q; attach to another session with -s", name)
+	}
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
 		return fmt.Errorf("dm needs a terminal; use dm exec or dm read otherwise")
@@ -150,7 +161,7 @@ func runClient(name string) error {
 	defer signal.Stop(winch)
 
 	var out bytes.Buffer
-	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?2004h")
+	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h")
 	os.Stdout.Write(out.Bytes())
 	defer os.Stdout.WriteString("\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
 
@@ -187,8 +198,10 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 	}
 	defer c.Close()
 
-	t := &tui{session: name, conn: c, vts: map[string]vt10x.Terminal{},
-		hist: map[string][]byte{}}
+	t := &tui{
+		session: name, conn: c, vts: map[string]vt10x.Terminal{},
+		hist: map[string][]byte{},
+	}
 	t.cols, t.rows, _ = term.GetSize(fd)
 
 	done := make(chan struct{})
@@ -240,11 +253,6 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		case <-ticker.C:
 			now := time.Now()
 			t.expireToasts(now)
-			if t.armed && now.Sub(t.armAt) > 3*time.Second {
-				t.armed = false
-				t.inbuf = nil
-				t.dirty = true
-			}
 			t.expirePaste(now)
 			if t.armed && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
 				t.pending = false
@@ -281,10 +289,13 @@ func (t *tui) apply(m Msg) {
 	switch m.Type {
 	case "snapshot":
 		t.snap = m.Snap
+		t.updatePadHover(t.mouseX, t.mouseY)
+		// railWant remembers the last expanded width only, so a collapse or a
+		// hide does not replace it with the thin width or zero.
 		switch {
-		case m.Snap.RailWant > 0:
+		case m.Snap.RailWant > collapsedRail:
 			t.railWant = m.Snap.RailWant
-		case m.Snap.Rail > 0:
+		case m.Snap.Rail > collapsedRail:
 			t.railWant = m.Snap.Rail
 		case t.railWant <= 0:
 			t.railWant = defaultRail
@@ -437,12 +448,6 @@ func (t *tui) openMenu(p *PaneInfo, x, y int) {
 	y = clampInt(y, 0, t.snap.Rows-h)
 	t.menu = &menu{x: x, y: y, w: w, title: title, pane: p.ID, items: items}
 	t.mode = "menu"
-	// All-motion tracking is on only while the menu is open, so hovering an
-	// item highlights it without flooding every pane for the whole session.
-	if t.conn != nil {
-		os.Stdout.WriteString("\x1b[?1003h")
-		t.hover = true
-	}
 	t.armed = false
 	t.dirty = true
 }
@@ -461,10 +466,6 @@ func clampInt(v, lo, hi int) int {
 }
 
 func (t *tui) closeMenu() {
-	if t.hover {
-		os.Stdout.WriteString("\x1b[?1003l")
-		t.hover = false
-	}
 	t.menu = nil
 	t.mode = ""
 	t.inbuf = nil
@@ -1119,6 +1120,8 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		t.swallowRelease = false
 	}
 	x, y := ev.x-1, ev.y-1
+	t.mouseX, t.mouseY = x, y
+	t.updatePadHover(x, y)
 	if t.mode == "menu" {
 		if t.menu == nil {
 			t.closeMenu()
@@ -1195,6 +1198,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		if ev.release {
 			t.dragTo(x, y, true)
 			t.dragging = false
+			t.updatePadHover(x, y)
 			t.dirty = true
 			return
 		}
@@ -1239,10 +1243,14 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: focus})
 		}
 		if c, ok := cellAt(p, x, y); ok {
-			t.press = &heldPress{pane: p.ID, mouse: p.Mouse,
-				raws: [][]byte{ev.raw}}
-			t.selText = &selection{pane: p.ID, anchor: c, focus: c,
-				w: p.Rect.W, h: p.Rect.H}
+			t.press = &heldPress{
+				pane: p.ID, mouse: p.Mouse,
+				raws: [][]byte{ev.raw},
+			}
+			t.selText = &selection{
+				pane: p.ID, anchor: c, focus: c,
+				w: p.Rect.W, h: p.Rect.H,
+			}
 			t.dirty = true
 			return
 		}
@@ -1250,6 +1258,11 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		if p.Mouse && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
 		}
+		return
+	}
+	if ev.btn&32 != 0 && ev.btn&3 == 3 {
+		// Pointer motion with no button: dm uses it for hover affordances and
+		// keeps it from apps that asked only for button motion.
 		return
 	}
 	if p.Mouse {
@@ -1279,45 +1292,61 @@ type dragStart struct {
 	second string
 	axis   string
 	rect   Rect
+	zone   Rect
 }
 
 // dragPress decides whether a left press at x,y starts a divider drag. The
 // split's own rect is used for the ratio, so nested splits keep their full
-// span. A pane that claimed the mouse anywhere in the split's subtree owns the
-// divider too, so no drag starts.
+// span. The divider always belongs to dm, even when a pane in the subtree
+// claims the mouse: the app's PTY covers its content, not the border cells.
 func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
 	if snap == nil || snap.Root == nil {
 		return dragStart{}, false
 	}
-	n, first, second, axis, r, ok := padHit(snap.Root,
+	_, first, second, axis, r, zone, ok := padHit(snap.Root,
 		paneAreaFor(snap.Cols, snap.Rows, snap.Rail), x, y)
 	if !ok {
 		return dragStart{}, false
 	}
-	if splitClaimsMouse(snap, n) {
-		return dragStart{}, false
-	}
-	return dragStart{first: first, second: second, axis: axis, rect: r}, true
+	return dragStart{
+		first: first, second: second, axis: axis, rect: r,
+		zone: zone,
+	}, true
 }
 
-// splitClaimsMouse reports whether any pane in the split's subtree wants mouse
-// events.
-func splitClaimsMouse(snap *Snapshot, n *Node) bool {
-	if snap == nil || n == nil {
-		return false
+// barInfo is the transient right side of the status bar: a scroll position, or
+// the divider hint while the pointer rests on one.
+func (t *tui) barInfo() string {
+	if t.scroll != "" {
+		return fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)
 	}
-	for _, id := range allPanes(n) {
-		for i := range snap.Panes {
-			if snap.Panes[i].ID == id && snap.Panes[i].Mouse {
-				return true
-			}
+	if t.padZone != (Rect{}) {
+		return "drag to resize"
+	}
+	return ""
+}
+
+// updatePadHover tracks the divider under the pointer so the frame can show a
+// grab affordance. It uses the same padHit path as the press, so hover and
+// drag agree on the hit area.
+func (t *tui) updatePadHover(x, y int) {
+	var zone Rect
+	axis := ""
+	if t.snap != nil && !t.dragging && t.mode == "" {
+		if ds, ok := dragPress(t.snap, x, y); ok {
+			zone, axis = ds.zone, ds.axis
 		}
 	}
-	return false
+	if zone == t.padZone && axis == t.padAxis {
+		return
+	}
+	t.padZone, t.padAxis = zone, axis
+	t.dirty = true
 }
 
 func (t *tui) startDrag(d dragStart) {
 	t.dragging = true
+	t.padZone = Rect{}
 	t.dragFirst = d.first
 	t.dragSecond = d.second
 	t.dragAxis = d.axis
@@ -1327,7 +1356,7 @@ func (t *tui) startDrag(d dragStart) {
 		t.dragStart = d.rect.Y
 		space = d.rect.H
 	}
-	t.dragSpace = space - 1
+	t.dragSpace = space
 	t.dragAt = time.Time{}
 	t.dirty = true
 }
@@ -1335,7 +1364,8 @@ func (t *tui) startDrag(d dragStart) {
 // dragTo sends the split ratio the pointer asks for. Unless forced, it sends
 // at most once every 30 ms; release forces the final position through.
 func (t *tui) dragTo(x, y int, force bool) {
-	if t.dragSpace < 6 {
+	// Two boxes of at least five cells need ten.
+	if t.dragSpace < 10 {
 		return
 	}
 	pos := x
@@ -1343,19 +1373,21 @@ func (t *tui) dragTo(x, y int, force bool) {
 		pos = y
 	}
 	off := pos - t.dragStart
-	if off < 3 {
-		off = 3
+	if off < 5 {
+		off = 5
 	}
-	if off > t.dragSpace-3 {
-		off = t.dragSpace - 3
+	if off > t.dragSpace-5 {
+		off = t.dragSpace - 5
 	}
 	if !force && !t.dragAt.IsZero() && time.Since(t.dragAt) < 30*time.Millisecond {
 		return
 	}
 	t.dragAt = time.Now()
 	ratio := float64(off) / float64(t.dragSpace)
-	_ = t.conn.send(Msg{Type: "req", Action: "resize-split",
-		Target: t.dragFirst, Other: t.dragSecond, Ratio: ratio})
+	_ = t.conn.send(Msg{
+		Type: "req", Action: "resize-split",
+		Target: t.dragFirst, Other: t.dragSecond, Ratio: ratio,
+	})
 }
 
 type mouseEvent struct {
@@ -1512,15 +1544,24 @@ func (t *tui) key(b byte) {
 	}
 }
 
-// toggleRail hides the rail when it is showing and restores the last requested
-// width when it is hidden. With no remembered width it asks for the default.
+// toggleRail cycles the rail: expanded, thin, hidden. A hidden rail comes back
+// at the last expanded width, or the default when none was seen.
 func (t *tui) toggleRail() {
-	want := t.railWant
-	if want <= 0 {
-		want = defaultRail
+	rail := 0
+	if t.snap != nil {
+		rail = t.snap.Rail
 	}
-	if t.snap != nil && t.snap.Rail > 0 {
+	want := 0
+	switch {
+	case rail <= 0:
+		want = t.railWant
+		if want <= 0 {
+			want = defaultRail
+		}
+	case rail <= collapsedRail:
 		want = 0
+	default:
+		want = collapsedRail
 	}
 	t.action("set-rail", func(m *Msg) { m.Index = want })
 }
@@ -1554,14 +1595,17 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 		t.railPress = true
 		if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: id})
+		} else if id := railWindowAt(t.snap, x, y); id != "" && t.conn != nil {
+			_ = t.conn.send(Msg{Type: "req", Action: "toggle-fold", Target: id})
 		}
 	}
 	return true
 }
 
+// arm shows the action box. It stays up until an action runs or esc
+// dismisses it; it never expires on a timer.
 func (t *tui) arm() {
 	t.armed = true
-	t.armAt = time.Now()
 	t.toasts = nil
 	t.dirty = true
 }
@@ -1608,12 +1652,10 @@ func (t *tui) draw() {
 		}
 		drawPaneBox(&b, p.Rect, p.ID == win.Focus)
 	}
+	drawGrips(&b, win)
+	drawDivider(&b, t.padZone, t.padAxis)
 	drawRail(&b, win)
-	scrollInfo := ""
-	if t.scroll != "" {
-		scrollInfo = fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)
-	}
-	drawBar(&b, win, t.armed, scrollInfo)
+	drawBar(&b, win, t.armed, t.barInfo())
 	drawToasts(&b, win, t.toasts)
 	if t.armed {
 		drawHelp(&b, win.Cols, win.Rows)

@@ -74,8 +74,8 @@ func TestLayout(t *testing.T) {
 			}
 		}
 	}
-	// Two outer borders, the border/pad/border gap, and two inner borders.
-	if rects["a"].W+rects["b"].W+5 != 100 {
+	// Each box carries its two borders; adjacent borders form the divider.
+	if rects["a"].W+rects["b"].W+4 != 100 {
 		t.Fatalf("widths do not tile: %+v", rects)
 	}
 	if got := neighbor(rects, "a", "right"); got != "b" {
@@ -149,9 +149,6 @@ func TestBoxTiling(t *testing.T) {
 					}
 					used += b.H
 				}
-				if i > 0 {
-					used++ // the pad before this box
-				}
 				walk(n.Kids[i], b)
 			}
 			want := a.W
@@ -178,17 +175,54 @@ func TestBoxTiling(t *testing.T) {
 	}
 }
 
+// TestDividerIsAdjacent pins the pane spacing: boxes touch, so the divider is
+// the two adjacent border cells and there is no empty gap cell.
+func TestDividerIsAdjacent(t *testing.T) {
+	area := Rect{0, 0, 80, 24}
+	row := &Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+	}
+	boxes := childBoxRects(row, area)
+	if boxes[1].X != boxes[0].X+boxes[0].W {
+		t.Fatalf("row boxes are not adjacent: %v", boxes)
+	}
+	if p := padRect(row, boxes, 0); p.X != boxes[0].X+boxes[0].W-1 || p.W != 2 {
+		t.Fatalf("row divider = %v, want the two border cells", p)
+	}
+
+	col := &Node{
+		Dir: "col", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+	}
+	boxes = childBoxRects(col, area)
+	if boxes[1].Y != boxes[0].Y+boxes[0].H {
+		t.Fatalf("column boxes are not adjacent: %v", boxes)
+	}
+	if p := padRect(col, boxes, 0); p.Y != boxes[0].Y+boxes[0].H-1 || p.H != 2 {
+		t.Fatalf("column divider = %v, want the two border cells", p)
+	}
+
+	// The content rects lose only their own borders, so an 80-wide area gives
+	// two 38-cell interiors around four border cells.
+	rects := map[string]Rect{}
+	layout(row, area, rects)
+	if rects["a"].W != 38 || rects["b"].W != 38 {
+		t.Fatalf("interiors = %v, want 38 each", rects)
+	}
+}
+
 func TestPadHitFindsThePair(t *testing.T) {
 	a, b, c := "a", "b", "c"
 	flat := &Node{Dir: "row", Kids: []*Node{{Pane: a}, {Pane: b}}, Sizes: []float64{0.5, 0.5}}
 	area := Rect{0, 0, 80, 24}
 	boxes := childBoxRects(flat, area)
 	pad := padRect(flat, boxes, 0)
-	split, first, second, axis, sr, ok := padHit(flat, area, pad.X, pad.Y+3)
+	split, first, second, axis, sr, _, ok := padHit(flat, area, pad.X, pad.Y+3)
 	if !ok || split != flat || first != a || second != b || axis != "row" || sr != area {
 		t.Fatalf("pad hit = %v %q %q %q %v %v", split, first, second, axis, sr, ok)
 	}
-	if _, _, _, _, _, ok := padHit(flat, area, boxes[0].X+1, boxes[0].Y+1); ok {
+	if _, _, _, _, _, _, ok := padHit(flat, area, boxes[0].X+1, boxes[0].Y+1); ok {
 		t.Fatal("a pane interior hit the pad")
 	}
 
@@ -197,13 +231,13 @@ func TestPadHitFindsThePair(t *testing.T) {
 	nested := &Node{Dir: "row", Kids: []*Node{{Pane: a}, inner}, Sizes: []float64{0.6, 0.4}}
 	nb := childBoxRects(nested, area)
 	np := padRect(nested, nb, 0)
-	_, first, second, axis, _, ok = padHit(nested, area, np.X, np.Y+3)
+	_, first, second, axis, _, _, ok = padHit(nested, area, np.X, np.Y+3)
 	if !ok || axis != "row" || first != a || (second != b && second != c) {
 		t.Fatalf("nested pad hit = %q %q %q %v", first, second, axis, ok)
 	}
 	ib := childBoxRects(inner, nb[1])
 	ipad := padRect(inner, ib, 0)
-	_, first, second, _, _, ok = padHit(nested, area, ipad.X, ipad.Y+3)
+	_, first, second, _, _, _, ok = padHit(nested, area, ipad.X, ipad.Y+3)
 	if !ok || first != b || second != c {
 		t.Fatalf("inner pad hit = %q %q %v", first, second, ok)
 	}
@@ -302,7 +336,7 @@ func frame(t *testing.T, payload string) []byte {
 func TestParseStatusWireFormat(t *testing.T) {
 	msg := base64.StdEncoding.EncodeToString([]byte("needs review"))
 	st := parseStatus("state=blocked:app=pi:kind=confirm:msg=" + msg)
-	if st.State != "blocked" || st.Message != "needs review" {
+	if st.State != "blocked" || st.Message != "needs review" || st.App != "pi" {
 		t.Fatalf("pairs parsed as %+v", st)
 	}
 	if st := parseStatus("state=working"); st.State != "working" || st.Message != "" {
@@ -547,8 +581,10 @@ func TestPaneAreaInset(t *testing.T) {
 // railServer is an in-process server with no panes and no clients. Layout and
 // snapshots do not need a spawned process.
 func railServer(st *State) *server {
-	return &server{st: st, panes: map[string]*paneConn{},
-		clients: map[*client]bool{}, cols: st.Cols, rows: st.Rows}
+	return &server{
+		st: st, panes: map[string]*paneConn{},
+		clients: map[*client]bool{}, cols: st.Cols, rows: st.Rows,
+	}
 }
 
 // rootPane gives a state a single focused pane in its first window.
@@ -588,6 +624,15 @@ func TestRailGeometry(t *testing.T) {
 		t.Fatalf("hidden rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
 	}
 
+	// The thin rail keeps a fixed width and the glyph column.
+	if rail := s.setRail(collapsedRail); rail != collapsedRail {
+		t.Fatalf("set-rail %d effective = %d", collapsedRail, rail)
+	}
+	snap = s.snapshotLocked()
+	if snap.Rail != collapsedRail || snap.Panes[0].Rect.X-1 != collapsedRail {
+		t.Fatalf("thin rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
+	}
+
 	// A width over the clamp uses the clamp: a third of 120 is 40, the cap 30.
 	s.cols = 120
 	if rail := s.setRail(50); rail != 30 {
@@ -610,6 +655,118 @@ func TestRailGeometry(t *testing.T) {
 	}
 }
 
+// TestRailBranch runs the branch check off the snapshot path and labels the
+// workspace with the focused pane's branch.
+func TestRailBranch(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	old := detectGit
+	detectGit = func(cwd string) gitInfo {
+		if cwd == "/work/dm" {
+			return gitInfo{branch: "dm-rail"}
+		}
+		return gitInfo{}
+	}
+	defer func() { detectGit = old }()
+
+	st := newState("branch")
+	id := rootPane(st)
+	st.Panes[id].Cwd = "/work/dm"
+	s := railServer(st)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		snap := s.snapshotLocked()
+		if len(snap.All) == 1 && snap.All[0].Branch == "dm-rail" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("branch never reached the snapshot: %+v", snap.All)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	items := railItems(s.snapshotLocked())
+	if items[0].branch != "dm-rail" {
+		t.Fatalf("workspace branch = %q, want dm-rail", items[0].branch)
+	}
+}
+
+// TestToggleFold drives the fold action through a live session.
+func TestToggleFold(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "fold")
+	unfolded := func() bool {
+		tree := h.rpc("fold", map[string]any{"action": "list"})
+		snap := tree["snapshot"].(map[string]any)
+		all := snap["all"].([]any)
+		return all[0].(map[string]any)["windowUnfolded"] == true
+	}
+	if unfolded() {
+		t.Fatal("a new window starts unfolded, want folded")
+	}
+	if res := h.rpc("fold", map[string]any{"action": "toggle-fold", "target": "w1"}); res["unfolded"] != true {
+		t.Fatalf("toggle-fold = %v, want unfolded", res["unfolded"])
+	}
+	if !unfolded() {
+		t.Fatal("snapshot does not show the window unfolded")
+	}
+	st := h.sessionState("fold")
+	if !st.Workspaces[0].Windows[0].Unfolded {
+		t.Fatal("fold state not persisted")
+	}
+	if res := h.rpc("fold", map[string]any{"action": "toggle-fold", "target": "w1"}); res["unfolded"] != false {
+		t.Fatalf("second toggle-fold = %v, want folded", res["unfolded"])
+	}
+}
+
+// TestSessionSizeIsLargestClient keeps a small client, such as a dm nested in
+// one of the session's own panes, from shrinking every other display.
+// TestSameSessionAttachRefused stops a dm nested in a pane from attaching the
+// session it already lives in.
+func TestSameSessionAttachRefused(t *testing.T) {
+	t.Setenv("DM_SESSION", "main")
+	if err := runClient("main"); err == nil || !strings.Contains(err.Error(), "already inside") {
+		t.Fatalf("same-session attach = %v, want refusal", err)
+	}
+	t.Setenv("DM_SESSION", "work")
+	err := runClient("main")
+	if err == nil || strings.Contains(err.Error(), "already inside") {
+		t.Fatalf("other-session attach = %v, want the terminal check", err)
+	}
+}
+
+func TestSessionSizeIsLargestClient(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := newState("sizes")
+	s := railServer(st)
+	big := &client{cols: 133, rows: 43}
+	small := &client{cols: 77, rows: 7}
+
+	s.mu.Lock()
+	s.clients[big] = true
+	if !s.fitToClientsLocked() || s.cols != 133 || s.rows != 43 {
+		t.Fatalf("big client size = %dx%d", s.cols, s.rows)
+	}
+	s.clients[small] = true
+	if s.fitToClientsLocked() {
+		t.Fatal("a small client shrank the session")
+	}
+	s.mu.Unlock()
+	if s.cols != 133 || s.rows != 43 {
+		t.Fatalf("size after small attach = %dx%d", s.cols, s.rows)
+	}
+
+	// When the big client leaves, the remaining one owns the size.
+	s.mu.Lock()
+	delete(s.clients, big)
+	if !s.fitToClientsLocked() {
+		t.Fatal("size did not follow the remaining client")
+	}
+	s.mu.Unlock()
+	if s.cols != 77 || s.rows != 7 {
+		t.Fatalf("size after big detach = %dx%d", s.cols, s.rows)
+	}
+}
+
 func TestRailState(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
 	st := newState("rr")
@@ -629,7 +786,8 @@ func TestRailState(t *testing.T) {
 
 	// A state written before the rail existed asks for the default and is
 	// saved with it.
-	old := &State{Name: "old", Cols: 80, Rows: 24,
+	old := &State{
+		Name: "old", Cols: 80, Rows: 24,
 		Panes:      map[string]*PaneState{},
 		Workspaces: []*Workspace{{ID: "s1", Name: "main"}},
 		IDVersion:  2,
@@ -674,13 +832,17 @@ func TestRailAllPanes(t *testing.T) {
 	st.Workspaces = []*Workspace{
 		{ID: "s1", Name: "main", Active: 0, Windows: []*Window{{
 			ID: "w1", Name: "one", Focus: "w1p1",
-			Root: &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
-				Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}}},
+			Root: &Node{
+				Dir: "row", Sizes: []float64{0.5, 0.5},
+				Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}},
+			},
 		}}},
 		{ID: "s2", Name: "work", Active: 0, Windows: []*Window{{
 			ID: "w2", Name: "two", Focus: "w2p1",
-			Root: &Node{Dir: "col", Sizes: []float64{0.5, 0.5},
-				Kids: []*Node{{Pane: "w2p1"}, {Pane: "w2p2"}}},
+			Root: &Node{
+				Dir: "col", Sizes: []float64{0.5, 0.5},
+				Kids: []*Node{{Pane: "w2p1"}, {Pane: "w2p2"}},
+			},
 		}}},
 	}
 	st.Active = 0
@@ -691,6 +853,7 @@ func TestRailAllPanes(t *testing.T) {
 		"w2p2": {},
 	}
 	s := railServer(st)
+	st.Panes["w1p2"].App = "pi"
 	s.panes["w1p2"] = &paneConn{st: Status{State: "working", Message: "working hard"}}
 	s.panes["w2p1"] = &paneConn{st: Status{State: "unknown", Message: "unreported"}}
 
@@ -718,7 +881,8 @@ func TestRailAllPanes(t *testing.T) {
 	}
 	byStatus := snap.All[1]
 	if !byStatus.Agent || byStatus.Status != "working" ||
-		byStatus.Message != "working hard" || byStatus.Name != "" {
+		byStatus.Message != "working hard" || byStatus.Name != "" ||
+		byStatus.App != "pi" {
 		t.Fatalf("working pane row = %+v", byStatus)
 	}
 	unknown := snap.All[2]
@@ -825,10 +989,14 @@ func TestRailReflow(t *testing.T) {
 // railTestSnapshot is a two-pane session with a rail. Panes start after the
 // rail, and All carries the same two panes in server order.
 func railTestSnapshot(rail int) *Snapshot {
-	root := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}}}
-	snap := &Snapshot{Session: "x", Workspace: "main", Windows: []string{"one"},
-		Cols: 100, Rows: 10, Rail: rail, Root: root, Focus: "w1p1"}
+	root := &Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}},
+	}
+	snap := &Snapshot{
+		Session: "x", Workspace: "main", Windows: []string{"one"},
+		Cols: 100, Rows: 10, Rail: rail, Root: root, Focus: "w1p1",
+	}
 	rects := map[string]Rect{}
 	layout(root, paneAreaFor(snap.Cols, snap.Rows, rail), rects)
 	snap.Panes = []PaneInfo{
@@ -836,12 +1004,16 @@ func railTestSnapshot(rail int) *Snapshot {
 		{ID: "w1p2", Rect: rects["w1p2"], Status: "idle"},
 	}
 	snap.All = []AllPane{
-		{ID: "w1p1", Name: "alpha", Status: "working", Agent: true,
+		{
+			ID: "w1p1", Name: "alpha", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-			Focus: true, WorkspaceActive: true, WindowActive: true},
-		{ID: "w1p2", Status: "idle", Agent: true,
+			Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+		},
+		{
+			ID: "w1p2", Status: "idle", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-			WorkspaceActive: true, WindowActive: true},
+			WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+		},
 	}
 	return snap
 }
@@ -853,25 +1025,51 @@ func railOnePane(status, name string, rail, cols, rows int) *Snapshot {
 	rects := map[string]Rect{}
 	layout(root, paneAreaFor(cols, rows, rail), rects)
 	snap.Panes = []PaneInfo{{ID: "w1p1", Rect: rects["w1p1"], Status: status}}
-	snap.All = []AllPane{{ID: "w1p1", Name: name, Status: status,
+	snap.All = []AllPane{{
+		ID: "w1p1", Name: name, Status: status,
 		Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-		Focus: true, WorkspaceActive: true, WindowActive: true}}
+		Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+	}}
+	return snap
+}
+
+// agentRail is railOnePane with the pane marked as an agent, so its row draws
+// a state glyph.
+func agentRail(status string) *Snapshot {
+	snap := railOnePane(status, "", 12, 40, 6)
+	snap.All[0].Agent = true
 	return snap
 }
 
 func TestRailItemsGrouping(t *testing.T) {
 	snap := &Snapshot{All: []AllPane{
-		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
-			Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, Focus: true},
-		{ID: "w1p2", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one"},
-		{ID: "w1p3", Workspace: "s1", WorkspaceName: "main", Window: "w2", WindowName: "two"},
-		{ID: "w2p1", Workspace: "s2", WorkspaceName: "work", Window: "w3", WindowName: "three"},
+		{
+			ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
+			Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true,
+			Focus: true, WindowUnfolded: true,
+		},
+		{
+			ID: "w1p2", Workspace: "s1", WorkspaceName: "main", Window: "w1",
+			WindowName: "one", WindowUnfolded: true,
+		},
+		{
+			ID: "w1p3", Workspace: "s1", WorkspaceName: "main", Window: "w2",
+			WindowName: "two", WindowUnfolded: true,
+		},
+		{
+			ID: "w2p1", App: "pi", Agent: true, Workspace: "s2", WorkspaceName: "work",
+			Window: "w3", WindowName: "three", WindowUnfolded: true,
+		},
 	}}
 	items := railItems(snap)
-	wantKinds := []railKind{railWorkspace, railWindow, railPane, railPane,
-		railWindow, railPane, railWorkspace, railWindow, railPane}
-	wantText := []string{"main", "one", "alpha", "w1p2", "two", "w1p3",
-		"work", "three", "w2p1"}
+	wantKinds := []railKind{
+		railWorkspace, railWindow, railPane, railPane,
+		railWindow, railPane, railWorkspace, railWindow, railPane,
+	}
+	wantText := []string{
+		"main", "one", "alpha", "w1p2", "two", "w1p3",
+		"work", "three", "pi",
+	}
 	if len(items) != len(wantKinds) {
 		t.Fatalf("rail has %d rows, want %d: %+v", len(items), len(wantKinds), items)
 	}
@@ -884,37 +1082,194 @@ func TestRailItemsGrouping(t *testing.T) {
 	if !items[0].active || items[6].active {
 		t.Fatalf("workspace headers active = %v, %v", items[0].active, items[6].active)
 	}
+	if items[8].agent != true || items[2].agent {
+		t.Fatalf("pane rows agent = %v, %v", items[2].agent, items[8].agent)
+	}
 	if !items[2].focus || items[3].focus {
 		t.Fatalf("pane rows focus = %v, %v", items[2].focus, items[3].focus)
 	}
 }
 
 func TestRailGlyphPerState(t *testing.T) {
-	cases := []struct{ status, glyph, colour string }{
-		{"working", "●", "33"},
-		{"idle", "○", "36"},
-		{"blocked", "▲", "31"},
-		{"done", "✓", "32"},
-		{"unknown", "?", "90"},
-		{"", "?", "90"},
+	t.Setenv("DM_NERD", "0")
+	cases := []struct {
+		status string
+		glyph  string
+		colour rgb
+	}{
+		{"working", "●", rgb{224, 169, 76}},
+		{"idle", "○", rgb{159, 176, 207}},
+		{"blocked", "▲", rgb{224, 112, 90}},
+		{"done", "✓", rgb{95, 168, 135}},
+		{"error", "✕", rgb{228, 167, 158}},
+		{"unknown", "?", railDim},
+		{"", "?", railDim},
 	}
-	seen := map[string]string{}
+	seen := map[rgb]string{}
 	for _, c := range cases {
-		g, colour := railGlyph(c.status)
+		g, colour := railGlyph(c.status, false)
 		if g != c.glyph || colour != c.colour {
-			t.Fatalf("railGlyph(%q) = %q/%q, want %q/%q", c.status, g, colour, c.glyph, c.colour)
+			t.Fatalf("railGlyph(%q) = %q/%v, want %q/%v", c.status, g, colour, c.glyph, c.colour)
 		}
 		if prev, ok := seen[colour]; ok && prev != c.glyph {
-			t.Fatalf("colour %q doubles for %q and %q", colour, prev, c.glyph)
+			t.Fatalf("colour %v doubles for %q and %q", colour, prev, c.glyph)
 		}
 		seen[colour] = c.glyph
 
 		var b bytes.Buffer
-		drawRail(&b, railOnePane(c.status, "", 12, 40, 6))
+		drawRail(&b, agentRail(c.status))
 		out := b.String()
-		if !strings.Contains(out, c.glyph) || !strings.Contains(out, "\x1b["+c.colour+"m") {
-			t.Fatalf("status %q not drawn as %q in colour %q: %q", c.status, c.glyph, c.colour, out)
+		if !strings.Contains(out, c.glyph) || !strings.Contains(out, colour.fg()) {
+			t.Fatalf("status %q not drawn as %q in %q: %q", c.status, c.glyph, colour.fg(), out)
 		}
+	}
+}
+
+// TestRailContrast holds the rail to WCAG AA on both backgrounds it paints.
+func TestRailContrast(t *testing.T) {
+	foregrounds := map[string]rgb{
+		"text":    railText,
+		"dim":     railDim,
+		"header":  railHeader,
+		"window":  railWindowFg,
+		"working": {224, 169, 76},
+		"idle":    {159, 176, 207},
+		"blocked": {224, 112, 90},
+		"done":    {95, 168, 135},
+		"error":   {228, 167, 158},
+	}
+	for name, fg := range foregrounds {
+		for bgName, bg := range map[string]rgb{"rail": railBG, "focus": railFocusBG} {
+			if r := contrast(fg, bg); r < 4.5 {
+				t.Fatalf("%s on %s = %.2f:1, want >= 4.5:1", name, bgName, r)
+			}
+		}
+	}
+	if r := contrast(railText, railBG); r < 7 {
+		t.Fatalf("body text on rail = %.2f:1, want >= 7:1", r)
+	}
+}
+
+// TestRailNerdIcons draws with Nerd Font icons: a robot for agents, a terminal
+// for shells, and an icon for every state.
+func TestRailNerdIcons(t *testing.T) {
+	t.Setenv("DM_NERD", "1")
+	agent := railOnePane("working", "pi", 12, 40, 6)
+	agent.All[0].Agent = true
+	var b bytes.Buffer
+	drawRail(&b, agent)
+	out := b.String()
+	for _, want := range []string{"\uf07b", "\uf0d7", "\uf135", "\uf013", "pi"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("nerd rail missing %q: %q", want, out)
+		}
+	}
+	if strings.Contains(out, "\u258e") {
+		t.Fatalf("nerd rail drew the fallback bar: %q", out)
+	}
+	// The full rail nests: folder at 0, caret at 2, pane mark at 4, glyph at 6.
+	vt := vt10x.New(vt10x.WithSize(40, 6))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw nerd rail: %v", err)
+	}
+	vt.Lock()
+	folder, caret := vt.Cell(0, 0).Char, vt.Cell(2, 1).Char
+	mark, glyph := vt.Cell(4, 2).Char, vt.Cell(6, 2).Char
+	vt.Unlock()
+	if folder != '\uf07b' || caret != '\uf0d7' || mark != '\uf135' || glyph != '\uf013' {
+		t.Fatalf("nerd columns = %q %q %q %q, want folder caret robot gear",
+			folder, caret, mark, glyph)
+	}
+
+	shell := railOnePane("unknown", "", 12, 40, 6)
+	b.Reset()
+	drawRail(&b, shell)
+	out = b.String()
+	if !strings.Contains(out, "\uf120") {
+		t.Fatalf("nerd shell row = %q, want the terminal icon", out)
+	}
+	if strings.Contains(out, "\uf128") {
+		t.Fatalf("nerd shell row drew an unknown-state icon: %q", out)
+	}
+}
+
+// TestRailShellHasNoStateGlyph keeps the state column blank for a pane that is
+// not an agent: it has no status to report, so the question mark would ask
+// about nothing.
+func TestRailShellHasNoStateGlyph(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	for _, status := range []string{"", "unknown"} {
+		var b bytes.Buffer
+		drawRail(&b, railOnePane(status, "w1p1", 12, 40, 6))
+		vt := vt10x.New(vt10x.WithSize(40, 6))
+		if _, err := vt.Write(b.Bytes()); err != nil {
+			t.Fatalf("draw shell rail: %v", err)
+		}
+		vt.Lock()
+		glyph, text := vt.Cell(6, 2).Char, vt.Cell(8, 2).Char
+		vt.Unlock()
+		if glyph != ' ' || text != 'w' {
+			t.Fatalf("shell row status %q = %q at 6, %q at 8: want a blank cell", status, glyph, text)
+		}
+	}
+
+	// An agent that has not reported yet still asks with the question mark.
+	var b bytes.Buffer
+	drawRail(&b, agentRail(""))
+	vt := vt10x.New(vt10x.WithSize(40, 6))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw agent rail: %v", err)
+	}
+	vt.Lock()
+	glyph := vt.Cell(6, 2).Char
+	vt.Unlock()
+	if glyph != '?' {
+		t.Fatalf("agent row without a status = %q at 6, want ?", glyph)
+	}
+}
+
+// TestRailAgentMarker separates agents from shells. An agent gets a bar in the
+// two cells a shell leaves blank, and its app= stands in for a missing name.
+func TestRailAgentMarker(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	agent := railOnePane("unknown", "", 12, 40, 6)
+	agent.All[0].Agent = true
+	agent.All[0].App = "pi"
+	var b bytes.Buffer
+	drawRail(&b, agent)
+	out := b.String()
+	if !strings.Contains(out, "\u258e") {
+		t.Fatalf("agent row has no marker: %q", out)
+	}
+	if !strings.Contains(out, "pi") {
+		t.Fatalf("agent row does not show the app: %q", out)
+	}
+
+	shell := railOnePane("unknown", "", 12, 40, 6)
+	b.Reset()
+	drawRail(&b, shell)
+	out = b.String()
+	if strings.Contains(out, "\u258e") {
+		t.Fatalf("shell row has the agent marker: %q", out)
+	}
+	if !strings.Contains(out, "w1p1") {
+		t.Fatalf("shell row does not fall back to the pane id: %q", out)
+	}
+
+	// The thin rail keeps the marker and the glyph in their columns.
+	thin := railOnePane("working", "alpha", collapsedRail, 40, 6)
+	thin.All[0].Agent = true
+	b.Reset()
+	drawRail(&b, thin)
+	vt := vt10x.New(vt10x.WithSize(40, 6))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw thin agent rail: %v", err)
+	}
+	vt.Lock()
+	bar, glyph := vt.Cell(0, 2).Char, vt.Cell(2, 2).Char
+	vt.Unlock()
+	if bar != '\u258e' || glyph != '●' {
+		t.Fatalf("thin agent row = %q at 0, %q at 2", bar, glyph)
 	}
 }
 
@@ -943,8 +1298,14 @@ func TestRailHit(t *testing.T) {
 	small := railTestSnapshot(10)
 	small.Rows = 4
 	small.All = []AllPane{
-		{ID: "w1p1", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one"},
-		{ID: "w1p2", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one"},
+		{
+			ID: "w1p1", Workspace: "s1", WorkspaceName: "main", Window: "w1",
+			WindowName: "one", WindowUnfolded: true,
+		},
+		{
+			ID: "w1p2", Workspace: "s1", WorkspaceName: "main", Window: "w1",
+			WindowName: "one", WindowUnfolded: true,
+		},
 	}
 	if got := railPaneAt(small, 5, 2); got != "w1p1" {
 		t.Fatalf("last pane row = %q", got)
@@ -961,11 +1322,16 @@ func TestRailClickFocusesPane(t *testing.T) {
 		t.Fatalf("rail click sent %+v, want focus w1p2", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 4})
-	// A header row does nothing.
+	// A window row toggles its fold; a workspace row does nothing.
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
+	if m := nextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
+		t.Fatalf("window click sent %+v, want toggle-fold w1", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 2})
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
 	select {
 	case m := <-got:
-		t.Fatalf("header click sent %+v", m)
+		t.Fatalf("workspace header click sent %+v", m)
 	case <-time.After(50 * time.Millisecond):
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
@@ -990,6 +1356,95 @@ func TestRailClickFocusesPane(t *testing.T) {
 	}
 }
 
+// TestRailFold keeps panes folded by default and unfolds on the window row.
+func TestRailFold(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railTestSnapshot(20)
+	for i := range snap.All {
+		snap.All[i].WindowUnfolded = false
+	}
+	items := railItems(snap)
+	if len(items) != 2 || items[0].kind != railWorkspace || items[1].kind != railWindow {
+		t.Fatalf("folded rail rows = %+v, want workspace and window", items)
+	}
+	if !items[1].folded || items[1].window != "w1" {
+		t.Fatalf("folded window row = %+v", items[1])
+	}
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	if strings.Contains(b.String(), "alpha") {
+		t.Fatalf("folded rail drew a pane: %q", b.String())
+	}
+	if got := railWindowAt(snap, 3, 1); got != "w1" {
+		t.Fatalf("window row hit = %q, want w1", got)
+	}
+	if got := railPaneAt(snap, 3, 1); got != "" {
+		t.Fatalf("window row is a pane hit: %q", got)
+	}
+
+	// The thin rail is a glyph column, so it lists panes regardless of the fold.
+	snap.Rail = collapsedRail
+	items = railItems(snap)
+	if len(items) != 4 {
+		t.Fatalf("thin rail rows = %d, want 4: %+v", len(items), items)
+	}
+}
+
+// TestRailBranchLabel shows the workspace branch from its focused pane.
+// TestRailWorktreeSuffix shows a linked worktree after an agent's pane label,
+// dimmed, and never for a shell.
+func TestRailWorktreeSuffix(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railOnePane("working", "pi", 26, 60, 6)
+	snap.All[0].Agent = true
+	snap.All[0].Worktree = "dm-rail-w1"
+	items := railItems(snap)
+	if len(items) != 3 || items[2].worktree != "dm-rail-w1" {
+		t.Fatalf("pane worktree = %+v", items)
+	}
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, "dm-rail-w1") {
+		t.Fatalf("worktree not drawn: %q", out)
+	}
+	if !strings.Contains(out, railDim.fg()) {
+		t.Fatalf("worktree is not dim: %q", out)
+	}
+	// The thin rail has no room for it.
+	snap.Rail = collapsedRail
+	if items := railItems(snap); items[len(items)-1].worktree != "dm-rail-w1" {
+		t.Fatalf("thin rail dropped the worktree: %+v", items)
+	}
+
+	// A shell in a worktree stays plain.
+	snap = railOnePane("unknown", "", 26, 60, 6)
+	snap.All[0].Worktree = "dm-rail-w1"
+	if items := railItems(snap); items[2].worktree != "" {
+		t.Fatalf("shell row carries a worktree: %+v", items)
+	}
+}
+
+func TestRailBranchLabel(t *testing.T) {
+	snap := railTestSnapshot(20)
+	snap.All[0].Branch = "dm-rail"
+	snap.All[1].Branch = "other"
+	items := railItems(snap)
+	if items[0].branch != "dm-rail" {
+		t.Fatalf("workspace branch = %q, want the focused pane's dm-rail", items[0].branch)
+	}
+	snap.All[0].Focus = false
+	items = railItems(snap)
+	if items[0].branch != "dm-rail" {
+		t.Fatalf("workspace branch without focus = %q", items[0].branch)
+	}
+	snap.All[1].Focus = true
+	items = railItems(snap)
+	if items[0].branch != "other" {
+		t.Fatalf("workspace branch with w1p2 focused = %q", items[0].branch)
+	}
+}
+
 func TestRailToggle(t *testing.T) {
 	tui, got := clientTUI(t, nil)
 	// A client that has only seen a hidden rail asks for the default.
@@ -998,13 +1453,21 @@ func TestRailToggle(t *testing.T) {
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 26 {
 		t.Fatalf("toggle from hidden sent %+v, want set-rail 26", m)
 	}
-	// A shown rail toggles off.
-	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 30, Cols: 100, Rows: 30}})
+	// A full rail collapses to the thin width, not to hidden.
+	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 30, RailWant: 30, Cols: 100, Rows: 30}})
+	tui.key('r')
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != collapsedRail {
+		t.Fatalf("toggle from full sent %+v, want set-rail %d", m, collapsedRail)
+	}
+	// The thin rail hides, and the full width is still remembered.
+	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
+		Rail:     collapsedRail,
+		RailWant: collapsedRail, Cols: 100, Rows: 30,
+	}})
 	tui.key('r')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
-		t.Fatalf("toggle from shown sent %+v, want set-rail 0", m)
+		t.Fatalf("toggle from thin sent %+v, want set-rail 0", m)
 	}
-	// Hiding keeps the last width, and showing restores it.
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
 	tui.key('r')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
@@ -1013,13 +1476,15 @@ func TestRailToggle(t *testing.T) {
 	// A narrow terminal clamps the effective rail but the requested width
 	// survives, so hiding and showing restores the request, not the clamp.
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
-		Rail: effectiveRail(80, 26), RailWant: 30, Cols: 80, Rows: 30}})
+		Rail: effectiveRail(80, 30), RailWant: 30, Cols: 80, Rows: 30,
+	}})
 	tui.key('r')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
-		t.Fatalf("narrow toggle off sent %+v, want set-rail 0", m)
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != collapsedRail {
+		t.Fatalf("narrow collapse sent %+v, want set-rail %d", m, collapsedRail)
 	}
 	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
-		Rail: 0, RailWant: 30, Cols: 80, Rows: 30}})
+		Rail: 0, RailWant: 0, Cols: 80, Rows: 30,
+	}})
 	tui.key('r')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("narrow toggle on sent %+v, want set-rail 30", m)
@@ -1035,7 +1500,49 @@ func TestRailToggle(t *testing.T) {
 	}
 }
 
+// TestRailCollapsed draws and hits the thin rail. It shows one state glyph per
+// pane and no names, inside the fixed collapsed width.
+func TestRailCollapsed(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railOnePane("working", "alpha", collapsedRail, 40, 6)
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	out := b.String()
+	if !strings.Contains(out, "●") {
+		t.Fatalf("thin rail has no state glyph: %q", out)
+	}
+	for _, name := range []string{"main", "one", "alpha"} {
+		if strings.Contains(out, name) {
+			t.Fatalf("thin rail shows %q: %q", name, out)
+		}
+	}
+	vt := vt10x.New(vt10x.WithSize(40, 6))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw thin rail: %v", err)
+	}
+	vt.Lock()
+	glyphX := -1
+	for x := 0; x < 40; x++ {
+		g := vt.Cell(x, 2)
+		if g.Char == '●' {
+			glyphX = x
+		}
+	}
+	vt.Unlock()
+	if glyphX != 2 {
+		t.Fatalf("state glyph at x=%d, want 2", glyphX)
+	}
+	if got := railPaneAt(snap, 2, 2); got != "w1p1" {
+		t.Fatalf("thin rail hit = %q, want w1p1", got)
+	}
+	// Past the fixed width is pane area, not rail.
+	if got := railPaneAt(snap, collapsedRail, 2); got != "" {
+		t.Fatalf("hit past collapsed width = %q", got)
+	}
+}
+
 func TestRailNeverWritesPastWidth(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
 	if runeWidth('A') != 1 || runeWidth('日') != 2 || runeWidth('\u0301') != 0 {
 		t.Fatalf("rune widths: A=%d 日=%d combining=%d",
 			runeWidth('A'), runeWidth('日'), runeWidth('\u0301'))
@@ -1085,8 +1592,10 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 		Cols:      20,
 		Rows:      5,
 		Focus:     "w1p1",
-		Panes: []PaneInfo{{ID: "w1p1", Name: strings.Repeat("日本語", 4),
-			Status: "working"}},
+		Panes: []PaneInfo{{
+			ID: "w1p1", Name: strings.Repeat("日本語", 4),
+			Status: "working",
+		}},
 	}
 	var b bytes.Buffer
 	drawBar(&b, snap, false, "")
@@ -1115,9 +1624,132 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 	}
 }
 
+// TestDividerHover shows the grab affordance under the pointer and clears it
+// when the pointer leaves. Hover and press use the same padHit area.
+// TestPadHitCrossesChildBorders pins the nested case: a full-width horizontal
+// divider is grabbable even when the pointer sits over the vertical divider of
+// the split below it.
+func TestPadHitCrossesChildBorders(t *testing.T) {
+	inner := &Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "b"}, {Pane: "c"}},
+	}
+	root := &Node{
+		Dir: "col", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, inner},
+	}
+	area := Rect{0, 0, 80, 24}
+	boxes := childBoxRects(root, area)
+	pad := padRect(root, boxes, 0)
+	ib := childBoxRects(inner, boxes[1])
+	ipad := padRect(inner, ib, 0)
+
+	for _, x := range []int{ipad.X, ipad.X + 1} {
+		split, first, second, axis, _, zone, ok := padHit(root, area, x, pad.Y+1)
+		if !ok || split != root || first != "a" || (second != "b" && second != "c") ||
+			axis != "col" || zone != pad {
+			t.Fatalf("pad hit at x=%d = %v %q %q %q %v %v, want a + b/c on the root",
+				x, split, first, second, axis, zone, ok)
+		}
+	}
+
+	// The same cell starts a vertical drag over the root split's full width.
+	snap := &Snapshot{Cols: 80, Rows: 25, Root: root}
+	ds, ok := dragPress(snap, ipad.X, pad.Y+1)
+	if !ok || ds.first != "a" || (ds.second != "b" && ds.second != "c") ||
+		ds.axis != "col" || ds.rect != area || ds.zone != pad {
+		t.Fatalf("drag press over a nested border = %+v ok=%v", ds, ok)
+	}
+}
+
+// TestDividerGripsAlwaysVisible keeps a handle on every divider even before the
+// pointer arrives, so the affordance does not depend on hover working.
+func TestDividerGripsAlwaysVisible(t *testing.T) {
+	inner := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "b"}, {Pane: "c"}}}
+	root := &Node{Dir: "col", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, inner}}
+	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 26, Root: root}
+	var buf bytes.Buffer
+	drawGrips(&buf, snap)
+	vt := vt10x.New(vt10x.WithSize(100, 30))
+	if _, err := vt.Write(buf.Bytes()); err != nil {
+		t.Fatalf("draw grips: %v", err)
+	}
+	vt.Lock()
+	defer vt.Unlock()
+	// Horizontal divider midpoint: both cells.
+	for _, y := range []int{13, 14} {
+		if g := vt.Cell(63, y); g.Char != '•' {
+			t.Fatalf("horizontal grip at 63,%d = %q", y, g.Char)
+		}
+	}
+	// Vertical divider midpoint: both cells.
+	for _, x := range []int{62, 63} {
+		if g := vt.Cell(x, 21); g.Char != '•' {
+			t.Fatalf("vertical grip at %d,21 = %q", x, g.Char)
+		}
+	}
+	if n := strings.Count(buf.String(), "•"); n != 4 {
+		t.Fatalf("grips = %d, want 4", n)
+	}
+}
+
+func TestDividerHover(t *testing.T) {
+	row := &Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+	}
+	snap := testSnapshot(row, 100, 30, nil)
+	snap.Focus = "a"
+	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
+	boxes := childBoxRects(row, paneArea(100, 30))
+	zone := padRect(row, boxes, 0)
+	// SGR button 35 is pointer motion with no button.
+	tui.handleMouse(mouseEvent{btn: 35, x: zone.X + 1, y: zone.Y + 2})
+	if tui.padZone != zone || tui.padAxis != "row" {
+		t.Fatalf("hover zone = %v/%q, want %v/row", tui.padZone, tui.padAxis, zone)
+	}
+	if got := tui.barInfo(); got != "drag to resize" {
+		t.Fatalf("hover hint = %q", got)
+	}
+	var b bytes.Buffer
+	drawDivider(&b, tui.padZone, tui.padAxis)
+	out := b.String()
+	if !strings.Contains(out, "┃") || !strings.Contains(out, "\x1b[1;96m") {
+		t.Fatalf("divider not highlighted: %q", out)
+	}
+	// The press lands on the same zone.
+	if ds, ok := dragPress(snap, zone.X+1, zone.Y+2); !ok || ds.zone != zone {
+		t.Fatalf("press zone = %v ok=%v, want %v", ds.zone, ok, zone)
+	}
+	// Leaving the divider clears it.
+	tui.handleMouse(mouseEvent{btn: 35, x: 10, y: 10})
+	if tui.padZone != (Rect{}) {
+		t.Fatalf("hover survived leaving the divider: %v", tui.padZone)
+	}
+	if got := tui.barInfo(); got != "" {
+		t.Fatalf("stale hover hint = %q", got)
+	}
+}
+
+// TestHoverMotionNotForwarded keeps no-button motion from reaching a pane that
+// asked only for button motion.
+func TestHoverMotionNotForwarded(t *testing.T) {
+	tui, got := clientTUI(t, map[string]bool{"a": true})
+	p := tui.paneByID("a")
+	tui.handleMouse(mouseEvent{
+		btn: 35, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<35;2;2M"),
+	})
+	noMsg(t, got)
+}
+
 func TestRailDragUsesOffset(t *testing.T) {
-	root := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	root := &Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+	}
 	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 20, Root: root}
 	area := paneAreaFor(100, 30, 20)
 	boxes := childBoxRects(root, area)
@@ -1152,8 +1784,10 @@ func TestDrawPaneBox(t *testing.T) {
 }
 
 func TestMenuClampsAndHits(t *testing.T) {
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
+	row := &Node{
+		Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5},
+	}
 	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
 	p := tui.paneByID("b")
 	tui.openMenu(p, 98, 28)
@@ -1176,8 +1810,10 @@ func TestMenuClampsAndHits(t *testing.T) {
 }
 
 func TestRightPressOpensMenuOverMousePane(t *testing.T) {
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
+	row := &Node{
+		Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5},
+	}
 	snap := testSnapshot(row, 100, 30, map[string]bool{"b": true})
 	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
 	// A right press on pane b, whose app owns the mouse, still opens the menu.
@@ -1206,8 +1842,10 @@ func TestRightPressOpensMenuOverMousePane(t *testing.T) {
 }
 
 func TestPaneAtBoxIncludesBorder(t *testing.T) {
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
+	row := &Node{
+		Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5},
+	}
 	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
 	b := tui.paneByID("b").Rect
 	if got := tui.paneAtBox(b.X, b.Y); got == nil || got.ID != "b" {
@@ -1219,16 +1857,21 @@ func TestPaneAtBoxIncludesBorder(t *testing.T) {
 	if got := tui.paneAtBox(b.X+b.W, b.Y+b.H); got == nil || got.ID != "b" {
 		t.Fatalf("bottom-right border did not hit b: %+v", got)
 	}
-	// The pad between a and b belongs to neither box.
-	padX := b.X - 2
-	if got := tui.paneAtBox(padX, b.Y+1); got != nil {
-		t.Fatalf("pad hit pane %q", got.ID)
+	// Adjacent boxes share the divider: a's right border and b's left border
+	// are adjacent cells, and each belongs to its own pane.
+	if got := tui.paneAtBox(b.X-1, b.Y+1); got == nil || got.ID != "b" {
+		t.Fatalf("left border did not hit b: %+v", got)
+	}
+	if got := tui.paneAtBox(b.X-2, b.Y+1); got == nil || got.ID != "a" {
+		t.Fatalf("a's right border did not hit a: %+v", got)
 	}
 }
 
 func TestMenuOutsideClickFocusesPane(t *testing.T) {
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
+	row := &Node{
+		Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5},
+	}
 	tui := &tui{snap: testSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
 	tui.openMenu(tui.paneByID("b"), 10, 5)
 	a, b := net.Pipe()
@@ -1281,8 +1924,10 @@ func TestMenuHoverHighlights(t *testing.T) {
 // A wheel event is not a left press: it must not start a selection, a divider
 // drag or a menu item.
 func TestWheelIsNotAPress(t *testing.T) {
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
+	row := &Node{
+		Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5},
+	}
 	tui := &tui{snap: testSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
 	tui.handleMouse(mouseEvent{btn: 64, x: 5, y: 5})
 	if tui.press != nil || tui.dragging {
@@ -1634,10 +2279,14 @@ func TestClickForwardsToMouseApp(t *testing.T) {
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
 	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello")
-	press := mouseEvent{btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 1,
-		raw: []byte("\x1b[<0;2;2M")}
-	release := mouseEvent{btn: 0, release: true, x: p.Rect.X + 2, y: p.Rect.Y + 1,
-		raw: []byte("\x1b[<0;2;2m")}
+	press := mouseEvent{
+		btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;2;2M"),
+	}
+	release := mouseEvent{
+		btn: 0, release: true, x: p.Rect.X + 2, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;2;2m"),
+	}
 	tui.handleMouse(press)
 	noMsg(t, got)
 	if tui.press == nil {
@@ -1673,10 +2322,14 @@ func TestRightPressCancelsHeldClick(t *testing.T) {
 		t.Fatal("the held press survived the right press")
 	}
 	// Pick a menu row with the left button, then release the left button.
-	tui.handleMouse(mouseEvent{btn: 0, x: tui.menu.x + 2, y: tui.menu.y + 2,
-		raw: []byte("\x1b[<0;4;4M")})
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: x, y: y,
-		raw: []byte("\x1b[<0;3;3m")})
+	tui.handleMouse(mouseEvent{
+		btn: 0, x: tui.menu.x + 2, y: tui.menu.y + 2,
+		raw: []byte("\x1b[<0;4;4M"),
+	})
+	tui.handleMouse(mouseEvent{
+		btn: 0, release: true, x: x, y: y,
+		raw: []byte("\x1b[<0;3;3m"),
+	})
 	deadline := time.After(100 * time.Millisecond)
 	for {
 		select {
@@ -1695,10 +2348,14 @@ func TestRightPressCancelsHeldClick(t *testing.T) {
 func TestSelectionClearsOnResize(t *testing.T) {
 	tui, _ := clientTUI(t, nil)
 	p := tui.paneByID("a")
-	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
-		raw: []byte("\x1b[<0;1;1M")})
-	tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + 4, y: p.Rect.Y + 1,
-		raw: []byte("\x1b[<32;4;1M")})
+	tui.handleMouse(mouseEvent{
+		btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;1;1M"),
+	})
+	tui.handleMouse(mouseEvent{
+		btn: 32, x: p.Rect.X + 4, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<32;4;1M"),
+	})
 	if tui.selText == nil || !tui.selText.moved {
 		t.Fatal("drag did not select")
 	}
@@ -1725,12 +2382,18 @@ func TestClickJitterStaysAClick(t *testing.T) {
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
 	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello")
-	press := mouseEvent{btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 2,
-		raw: []byte("\x1b[<0;3;3M")}
-	release := mouseEvent{btn: 0, release: true, x: p.Rect.X + 3, y: p.Rect.Y + 2,
-		raw: []byte("\x1b[<0;4;3m")}
-	motion := mouseEvent{btn: 32, x: p.Rect.X + 3, y: p.Rect.Y + 2,
-		raw: []byte("\x1b[<32;4;3M")}
+	press := mouseEvent{
+		btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 2,
+		raw: []byte("\x1b[<0;3;3M"),
+	}
+	release := mouseEvent{
+		btn: 0, release: true, x: p.Rect.X + 3, y: p.Rect.Y + 2,
+		raw: []byte("\x1b[<0;4;3m"),
+	}
+	motion := mouseEvent{
+		btn: 32, x: p.Rect.X + 3, y: p.Rect.Y + 2,
+		raw: []byte("\x1b[<32;4;3M"),
+	}
 	tui.handleMouse(press)
 	tui.handleMouse(motion)
 	tui.handleMouse(release)
@@ -1754,12 +2417,18 @@ func TestTwoCellDragSelects(t *testing.T) {
 	p := tui.paneByID("a")
 	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello world")
 	oscOut := captureStdout(t, func() {
-		tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<0;1;1M")})
-		tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + 3, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<32;3;1M")})
-		tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 3, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<0;3;1m")})
+		tui.handleMouse(mouseEvent{
+			btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;1;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 32, x: p.Rect.X + 3, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<32;3;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 0, release: true, x: p.Rect.X + 3, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;3;1m"),
+		})
 	})
 	noMsg(t, got)
 	if len(tui.toasts) != 1 || tui.toasts[0].text != "copied 3 chars" {
@@ -1777,12 +2446,18 @@ func TestDragCopiesSelection(t *testing.T) {
 	p := tui.paneByID("a")
 	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello world\r\nsecond line")
 	oscOut := captureStdout(t, func() {
-		tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<0;1;1M")})
-		tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + 5, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<32;5;1M")})
-		tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 5, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<0;5;1m")})
+		tui.handleMouse(mouseEvent{
+			btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;1;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 32, x: p.Rect.X + 5, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<32;5;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 0, release: true, x: p.Rect.X + 5, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;5;1m"),
+		})
 	})
 	noMsg(t, got)
 	if tui.selText != nil || tui.press != nil {
@@ -1801,10 +2476,14 @@ func TestDragCopiesSelection(t *testing.T) {
 func TestSelectionClampsToStartingPane(t *testing.T) {
 	tui, _ := clientTUI(t, nil)
 	p := tui.paneByID("a")
-	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
-		raw: []byte("\x1b[<0;1;1M")})
-	tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + p.Rect.W + 40,
-		y: p.Rect.Y + p.Rect.H + 40, raw: []byte("\x1b[<32;99;99M")})
+	tui.handleMouse(mouseEvent{
+		btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+		raw: []byte("\x1b[<0;1;1M"),
+	})
+	tui.handleMouse(mouseEvent{
+		btn: 32, x: p.Rect.X + p.Rect.W + 40,
+		y: p.Rect.Y + p.Rect.H + 40, raw: []byte("\x1b[<32;99;99M"),
+	})
 	want := cell{x: p.Rect.W - 1, y: p.Rect.H - 1}
 	if tui.selText == nil || tui.selText.focus != want {
 		t.Fatalf("focus = %+v, want %+v", tui.selText, want)
@@ -1916,13 +2595,13 @@ func TestSplitRatio(t *testing.T) {
 	splitLeaf(root, "a", "right", "b", 0.25)
 	rects := map[string]Rect{}
 	layout(root, Rect{0, 0, 100, 10}, rects)
-	if got := rects["a"].W; got < 21 || got > 23 {
-		t.Fatalf("existing pane width = %d, want about 22", got)
+	if got := rects["a"].W; got < 22 || got > 24 {
+		t.Fatalf("existing pane width = %d, want about 23", got)
 	}
 	if got := rects["b"].W; got < 72 || got > 74 {
 		t.Fatalf("new pane width = %d, want about 73", got)
 	}
-	if rects["a"].W+rects["b"].W+5 != 100 {
+	if rects["a"].W+rects["b"].W+4 != 100 {
 		t.Fatalf("sizes do not tile: %+v", rects)
 	}
 }
@@ -2154,6 +2833,101 @@ func TestSplitStatusAndRPC(t *testing.T) {
 	}
 }
 
+// A pane that spoke the status protocol stays an agent after state=clear. The
+// mark persists, so a restart cannot demote it back to a shell either.
+func TestAgentStaysAfterClear(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "sticky")
+	pane := h.focus("sticky")
+
+	agent := func() bool {
+		tree := h.rpc("sticky", map[string]any{"action": "list"})
+		snap := tree["snapshot"].(map[string]any)
+		all, _ := snap["all"].([]any)
+		if len(all) == 0 {
+			t.Fatalf("snapshot has no all rows: %v", snap)
+		}
+		return all[0].(map[string]any)["agent"] == true
+	}
+	waitAgent := func(label string, want bool) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			if agent() == want {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: agent != %v", label, want)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	waitAgent("fresh shell", false)
+
+	h.run("write-to", pane, "-s", "sticky", "--msg",
+		`printf '\033]7501;state=working:app=pi\007'`, "--enter")
+	waitAgent("reported working", true)
+	app := func() string {
+		tree := h.rpc("sticky", map[string]any{"action": "list"})
+		snap := tree["snapshot"].(map[string]any)
+		all := snap["all"].([]any)
+		s, _ := all[0].(map[string]any)["app"].(string)
+		return s
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for app() != "pi" {
+		if time.Now().After(deadline) {
+			t.Fatalf("app never recorded")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	h.run("write-to", pane, "-s", "sticky", "--msg",
+		`printf '\033]7501;state=clear\007'`, "--enter")
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		out := h.run("status", pane, "-s", "sticky")
+		if strings.Contains(out, "unknown") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("clear never arrived: %q", out)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	waitAgent("after clear", true)
+
+	if got := app(); got != "pi" {
+		t.Fatalf("app after clear = %q, want pi", got)
+	}
+	ps := h.sessionState("sticky").Panes[pane]
+	if ps == nil || !ps.Reported || ps.App != "pi" {
+		t.Fatalf("agent mark not persisted: %+v", ps)
+	}
+}
+
+// TestCloseLastPaneDropsWindow closes a window's only pane. The window goes
+// away and the session falls back to its other workspace instead of refusing.
+func TestCloseLastPaneDropsWindow(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "last")
+	h.run("exec", `{"action":"new-workspace","name":"two"}`, "-s", "last")
+	h.run("exec", `{"action":"close-pane"}`, "-s", "last")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		tree := h.rpc("last", map[string]any{"action": "list"})
+		snap := tree["snapshot"].(map[string]any)
+		panes := snap["panes"].([]any)
+		if snap["workspace"] == "main" && len(panes) == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("close of the last pane left %v panes in %v", len(panes), snap["workspace"])
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // A shell that exits must take its split with it and leave focus on a live
 // pane. Leaving a dead rect behind makes the whole client unusable.
 func TestPaneExitPrunesSplit(t *testing.T) {
@@ -2213,6 +2987,97 @@ func (h *harness) waitPanes(session string, n int) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	h.t.Fatalf("session %s never reached %d panes", session, n)
+}
+
+// TestWindowAutoName labels a window after the folder it was created in.
+func TestWindowAutoName(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "auto")
+	cwd, _ := os.Getwd()
+	want := folderName(cwd)
+	windows := func() []any {
+		tree := h.rpc("auto", map[string]any{"action": "list"})
+		snap := tree["snapshot"].(map[string]any)
+		return snap["windows"].([]any)
+	}
+	if got := windows(); len(got) != 1 || got[0] != want {
+		t.Fatalf("initial windows = %v, want [%q]", got, want)
+	}
+
+	sub := filepath.Join(t.TempDir(), "proj-x")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res := h.rpc("auto", map[string]any{"action": "new-window", "cwd": sub})
+	if got := windows(); len(got) != 2 || got[1] != "proj-x" {
+		t.Fatalf("new window name = %v, want proj-x", got)
+	}
+	ps := h.sessionState("auto").Panes[res["pane"].(string)]
+	if ps == nil || ps.Cwd != sub {
+		t.Fatalf("new window pane cwd = %+v, want %q", ps, sub)
+	}
+
+	// An explicit name still wins.
+	h.rpc("auto", map[string]any{"action": "new-window", "name": "tests", "cwd": sub})
+	if got := windows(); got[len(got)-1] != "tests" {
+		t.Fatalf("explicit window name = %v", got)
+	}
+
+	// The TUI sends the focused pane as the target; the new window still lands
+	// in that pane's folder and takes its name.
+	pane := h.focus("auto")
+	h.rpc("auto", map[string]any{"action": "new-window", "target": pane})
+	if got := windows(); got[len(got)-1] != "proj-x" {
+		t.Fatalf("new window from pane %s = %v, want proj-x", pane, got)
+	}
+
+	// A new workspace's first window takes the folder name too.
+	h.rpc("auto", map[string]any{"action": "new-workspace", "name": "other", "cwd": sub})
+	if got := windows(); len(got) != 1 || got[0] != "proj-x" {
+		t.Fatalf("new workspace window = %v, want proj-x", got)
+	}
+}
+
+func TestFolderName(t *testing.T) {
+	cases := map[string]string{"/": "root", "/a/b/": "b", "/home/b": "b", "": "", ".": "root"}
+	for dir, want := range cases {
+		if got := folderName(dir); got != want {
+			t.Fatalf("folderName(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
+// TestWindowNameMigration renames the old positional window labels on load.
+func TestWindowNameMigration(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := newState("mig")
+	w := st.Workspaces[0].Windows[0]
+	w.Name = "1"
+	w.Focus = "w1p1"
+	st.Panes["w1p1"] = &PaneState{Cwd: "/code/dm"}
+	if err := st.save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadState("mig")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name := got.Workspaces[0].Windows[0].Name; name != "dm" {
+		t.Fatalf("migrated window name = %q, want dm", name)
+	}
+
+	// A name that is not positional survives the load.
+	got.Workspaces[0].Windows[0].Name = "tests"
+	if err := got.save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := loadState("mig")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name := again.Workspaces[0].Windows[0].Name; name != "tests" {
+		t.Fatalf("named window = %q, want tests", name)
+	}
 }
 
 func TestWindowsAndWorkspaces(t *testing.T) {
@@ -2275,8 +3140,10 @@ func TestPaneHistory(t *testing.T) {
 
 	// A pane in a background workspace keeps its own PTY size. The tall replay
 	// must use that, not the inactive window's layout rect.
-	bgRes := h.rpc("hist", map[string]any{"action": "new-workspace", "name": "bg",
-		"window": "t", "cwd": "/tmp", "nofocus": true})
+	bgRes := h.rpc("hist", map[string]any{
+		"action": "new-workspace", "name": "bg",
+		"window": "t", "cwd": "/tmp", "nofocus": true,
+	})
 	bg, _ := bgRes["pane"].(string)
 	if bg == "" {
 		t.Fatalf("background pane: %v", bgRes)
@@ -2380,8 +3247,10 @@ func testSnapshot(root *Node, cols, rows int, mouse map[string]bool) *Snapshot {
 // DragPress is the press decision: dividers start a drag, panes and splits
 // whose subtree claimed the mouse do not. handleMouse must call it.
 func TestDragPress(t *testing.T) {
-	row := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
-		Sizes: []float64{0.5, 0.5}}
+	row := &Node{
+		Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Sizes: []float64{0.5, 0.5},
+	}
 	snap := testSnapshot(row, 100, 30, nil)
 	ds, ok := dragPress(snap, 49, 5)
 	if !ok || ds.first != "a" || ds.second != "b" || ds.axis != "row" ||
@@ -2399,9 +3268,9 @@ func TestDragPress(t *testing.T) {
 		t.Fatal("handleMouse did not start a drag on a divider")
 	}
 	// startDrag must take its origin and cell space from the pressed rect.
-	if tui.dragStart != ds.rect.X || tui.dragSpace != ds.rect.W-1 {
+	if tui.dragStart != ds.rect.X || tui.dragSpace != ds.rect.W {
 		t.Fatalf("startDrag stored start=%d space=%d, want %d/%d",
-			tui.dragStart, tui.dragSpace, ds.rect.X, ds.rect.W-1)
+			tui.dragStart, tui.dragSpace, ds.rect.X, ds.rect.W)
 	}
 
 	// Same-axis nesting: the outer hit carries the owning split's full rect,
@@ -2419,22 +3288,23 @@ func TestDragPress(t *testing.T) {
 	}
 	tui.snap = snap
 	tui.startDrag(ds)
-	if tui.dragStart != want.X || tui.dragSpace != want.W-1 {
+	if tui.dragStart != want.X || tui.dragSpace != want.W {
 		t.Fatalf("same-axis startDrag stored start=%d space=%d, want %d/%d",
-			tui.dragStart, tui.dragSpace, want.X, want.W-1)
+			tui.dragStart, tui.dragSpace, want.X, want.W)
 	}
 
-	// Any mouse-claiming pane in the owning split's subtree owns the divider.
+	// A divider still belongs to dm when a pane in the split's subtree claims
+	// the mouse: the app's PTY covers its content, not the border cells.
 	nested := &Node{Dir: "row", Kids: []*Node{
 		{Pane: "a"},
 		{Dir: "row", Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
 	}}
 	snap = testSnapshot(nested, 100, 30, map[string]bool{"c": true})
-	if _, ok := dragPress(snap, 49, 5); ok {
-		t.Fatal("drag started although the split's subtree claimed the mouse")
+	if ds, ok := dragPress(snap, 49, 5); !ok || ds.first != "a" {
+		t.Fatalf("claimed-mouse divider press = %+v ok=%v", ds, ok)
 	}
-	if _, ok := dragPress(snap, 74, 5); ok {
-		t.Fatal("inner drag started although its subtree claimed the mouse")
+	if ds, ok := dragPress(snap, 74, 5); !ok {
+		t.Fatalf("claimed-mouse inner divider press = %+v ok=%v", ds, ok)
 	}
 }
 
@@ -2548,12 +3418,12 @@ func TestResizeSplit(t *testing.T) {
 	if got[q1].W != 3 {
 		t.Fatalf("outer minimum with same-axis nesting = %v, want 3", got)
 	}
-	if got[q2].W+got[q3].W+3 != cols-8 {
+	if got[q2].W+got[q3].W != cols-9 {
 		t.Fatalf("outer right side width: %v", got)
 	}
 	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":1}`, "-s", "rs2")
 	got = h.rects("rs2")
-	if got[q1].W != cols-8 {
+	if got[q1].W != cols-7 {
 		t.Fatalf("outer maximum with same-axis nesting: %v", got)
 	}
 }

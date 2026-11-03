@@ -250,6 +250,8 @@ func parseStatus(s string) Status {
 			switch k {
 			case "state":
 				st.State = v
+			case "app":
+				st.App = v
 			case "msg":
 				if b, err := base64.StdEncoding.DecodeString(v); err == nil {
 					st.Message = string(b)

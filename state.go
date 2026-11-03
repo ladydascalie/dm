@@ -23,6 +23,9 @@ type Window struct {
 	Root     *Node  `json:"root"`
 	Focus    string `json:"focus"`
 	NextPane int    `json:"nextPane,omitempty"`
+	// Unfolded shows the window's pane rows in the rail. It is inverted so the
+	// zero value, which older state files carry, means the default: folded.
+	Unfolded bool `json:"unfolded,omitempty"`
 }
 
 type Workspace struct {
@@ -41,6 +44,12 @@ type PaneState struct {
 	// Name is the agent name recorded inside the mux. Agents survives a
 	// restarted client because this is persisted, not held in memory.
 	Name string `json:"name,omitempty"`
+	// Reported records that the pane spoke the status protocol at least once.
+	// It keeps the sidebar calling the pane an agent after state=clear.
+	Reported bool `json:"reported,omitempty"`
+	// App is the last app= a status report named. It survives state=clear so
+	// the rail can keep labelling a pi pane pi.
+	App string `json:"app,omitempty"`
 }
 
 type State struct {
@@ -81,7 +90,40 @@ func paneSock(name, id string) string {
 }
 func statePath(name string) string { return filepath.Join(sessionDir(name), "state.json") }
 
+// numericName reports whether a window label is a plain number, the old
+// positional default.
+func numericName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, c := range name {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// folderName is the default window label for a directory: its last path
+// element, with the filesystem root spelled out.
+func folderName(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	dir = filepath.Clean(dir)
+	base := filepath.Base(dir)
+	if base == "/" || base == "." || base == string(filepath.Separator) {
+		return "root"
+	}
+	return base
+}
+
 func newState(name string) *State {
+	cwd, _ := os.Getwd()
+	defWin := folderName(cwd)
+	if defWin == "" {
+		defWin = "1"
+	}
 	st := &State{
 		Name:          name,
 		Cols:          80,
@@ -97,7 +139,7 @@ func newState(name string) *State {
 			Name: "main",
 			Windows: []*Window{{
 				ID:   "w1",
-				Name: "1",
+				Name: defWin,
 			}},
 		}},
 	}
@@ -142,6 +184,23 @@ func loadState(name string) (*State, error) {
 		st.migrateIDs()
 		st.IDVersion = 2
 		changed = true
+	}
+	// Windows used to be named by position. Rename the unchanged numeric ones
+	// after the folder they start in, which is what a new window gets now.
+	for _, ws := range st.Workspaces {
+		for _, w := range ws.Windows {
+			if !numericName(w.Name) {
+				continue
+			}
+			ps := st.Panes[w.Focus]
+			if ps == nil {
+				continue
+			}
+			if name := folderName(ps.Cwd); name != "" && name != w.Name {
+				w.Name = name
+				changed = true
+			}
+		}
 	}
 	if changed {
 		_ = st.save()
@@ -321,8 +380,10 @@ func pruneLeaf(root *Node, target string) (*Node, bool) {
 // childRects returns the rectangle of each child of n inside r. Each split
 // burns one cell between neighbours for its divider, so no two children share
 // a cell. A leaf has no children and returns nil.
-// childBoxRects divides a split's area into its children's boxes. One pad cell
-// separates adjacent boxes; the boxes themselves carry the border.
+// childBoxRects divides a split's area into its children's boxes. The boxes
+// are adjacent, so the two borders between neighbours form the divider; there
+// is no empty cell. This keeps the visual gap between panes to one cell in
+// both axes, the way a conventional multiplexer spaces them.
 func childBoxRects(n *Node, r Rect) []Rect {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
 		return nil
@@ -333,7 +394,6 @@ func childBoxRects(n *Node, r Rect) []Rect {
 	if !horizontal {
 		space = r.H
 	}
-	space -= k - 1
 	if space < k {
 		space = k
 	}
@@ -346,18 +406,19 @@ func childBoxRects(n *Node, r Rect) []Rect {
 		} else {
 			rects[i] = Rect{X: r.X, Y: r.Y + off, W: r.W, H: sizes[i]}
 		}
-		off += sizes[i] + 1
+		off += sizes[i]
 	}
 	return rects
 }
 
-// padRect is the empty cell between child i's box and child i+1's box.
+// padRect is the divider between child i's box and child i+1's box: the two
+// adjacent border cells, one from each box.
 func padRect(n *Node, boxes []Rect, i int) Rect {
 	b := boxes[i]
 	if n.Dir == "row" {
-		return Rect{X: b.X + b.W, Y: b.Y, W: 1, H: b.H}
+		return Rect{X: b.X + b.W - 1, Y: b.Y, W: 2, H: b.H}
 	}
-	return Rect{X: b.X, Y: b.Y + b.H, W: b.W, H: 1}
+	return Rect{X: b.X, Y: b.Y + b.H - 1, W: b.W, H: 2}
 }
 
 // layout assigns a rectangle to every pane. Each split burns one column or row
@@ -429,6 +490,14 @@ func lowestCommonAncestor(a, b []*Node) *Node {
 
 // defaultRail is the width a session asks for when it has none yet.
 const defaultRail = 26
+
+// collapsedRail is the width of the thin rail: two leading spaces, the state
+// glyph, and one trailing space. The glyph keeps the column it has in the
+// expanded rail, so collapsing does not move the mark.
+const collapsedRail = 4
+
+// railCompact reports whether a rail width is the thin, glyph-only form.
+func railCompact(rail int) bool { return rail > 0 && rail <= collapsedRail }
 
 // maxRail is the widest rail cols allows: a third of the screen, capped at 30.
 func maxRail(cols int) int {
@@ -554,6 +623,7 @@ func neighbor(rects map[string]Rect, target, dir string) string {
 		return ""
 	}
 	best, bestScore := "", 1<<30
+	var bestRect Rect
 	for id, r := range rects {
 		if id == target {
 			continue
@@ -578,9 +648,26 @@ func neighbor(rects map[string]Rect, target, dir string) string {
 			continue
 		}
 		val := primary*10000 + perpendicular(from, r, dir)
-		if val < bestScore {
-			best, bestScore = id, val
+		if val < bestScore || (val == bestScore && tieLess(r, bestRect, dir)) {
+			best, bestScore, bestRect = id, val, r
 		}
 	}
 	return best
+}
+
+// tieLess breaks a neighbour tie between panes equidistant from the target.
+// It picks the upper pane for a sideways move and the leftmost for a vertical
+// one, so a target spanning a whole column or row resolves the same way every
+// time instead of following map order.
+func tieLess(a, b Rect, dir string) bool {
+	if dir == "left" || dir == "right" {
+		if a.Y != b.Y {
+			return a.Y < b.Y
+		}
+		return a.X < b.X
+	}
+	if a.X != b.X {
+		return a.X < b.X
+	}
+	return a.Y < b.Y
 }

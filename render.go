@@ -3,7 +3,11 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"os"
+	"os/exec"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/hinshun/vt10x"
@@ -283,6 +287,62 @@ func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
 	}
 }
 
+// drawGrips marks every divider at its midpoint, so a handle is visible before
+// the pointer finds it. The hover paints over the whole divider.
+func drawGrips(buf *bytes.Buffer, snap *Snapshot) {
+	if snap == nil || snap.Root == nil || snap.Rail < 0 {
+		return
+	}
+	buf.WriteString("\x1b[0m\x1b[90m")
+	var walk func(n *Node, a Rect)
+	walk = func(n *Node, a Rect) {
+		if n == nil || n.Pane != "" {
+			return
+		}
+		boxes := childBoxRects(n, a)
+		for i := 0; i+1 < len(boxes); i++ {
+			p := padRect(n, boxes, i)
+			if n.Dir == "row" {
+				y := p.Y + p.H/2
+				fmt.Fprintf(buf, "\x1b[%d;%dH•", y+1, p.X+1)
+				if p.W > 1 {
+					fmt.Fprintf(buf, "\x1b[%d;%dH•", y+1, p.X+2)
+				}
+			} else {
+				x := p.X + p.W/2
+				fmt.Fprintf(buf, "\x1b[%d;%dH•", p.Y+1, x+1)
+				if p.H > 1 {
+					fmt.Fprintf(buf, "\x1b[%d;%dH•", p.Y+2, x+1)
+				}
+			}
+		}
+		for i, b := range boxes {
+			walk(n.Kids[i], b)
+		}
+	}
+	walk(snap.Root, paneAreaFor(snap.Cols, snap.Rows, snap.Rail))
+	buf.WriteString("\x1b[0m")
+}
+
+// drawDivider paints the hovered divider: heavy line glyphs over both border
+// cells, so the grab target is visible before the press.
+func drawDivider(buf *bytes.Buffer, z Rect, axis string) {
+	if z.W <= 0 || z.H <= 0 {
+		return
+	}
+	glyph := "┃"
+	if axis == "col" {
+		glyph = "━"
+	}
+	buf.WriteString("\x1b[0m\x1b[1;96m")
+	line := strings.Repeat(glyph, z.W)
+	for y := z.Y; y < z.Y+z.H; y++ {
+		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, z.X+1)
+		buf.WriteString(line)
+	}
+	buf.WriteString("\x1b[0m")
+}
+
 // wideRanges are the East Asian Wide and Fullwidth code point ranges. They are
 // sorted and non-overlapping, so runeWidth can binary-search them.
 var wideRanges = [][2]rune{
@@ -379,63 +439,203 @@ const (
 // railItem is one sidebar row. It exists so drawing and hit-testing share the
 // same grouping.
 type railItem struct {
-	kind   railKind
-	text   string
-	pane   string
-	status string
-	focus  bool
-	active bool
+	kind     railKind
+	text     string
+	branch   string
+	worktree string
+	pane     string
+	window   string
+	status   string
+	agent    bool
+	folded   bool
+	focus    bool
+	active   bool
 }
 
 // railItems flattens a snapshot into sidebar rows in the server's order: a
-// workspace header when the workspace changes, a window header when the window
-// changes, then one row per pane. A pane row shows its recorded name, or the
-// pane id when it has none.
+// workspace header, a window header per window, then its panes when the window
+// is unfolded. The thin rail always lists panes, because that is all it can
+// show. A pane row labels itself with its recorded name, then the app= it last
+// reported, then the pane id.
 func railItems(snap *Snapshot) []railItem {
 	if snap == nil {
 		return nil
 	}
+	// The workspace branch comes from its focused pane, else the first pane
+	// that reported one, so a workspace header names the repo it is working in.
+	branch := map[string]string{}
+	for _, p := range snap.All {
+		if p.Branch == "" {
+			continue
+		}
+		if _, ok := branch[p.Workspace]; !ok || p.Focus {
+			branch[p.Workspace] = p.Branch
+		}
+	}
+	compact := railCompact(snap.Rail)
 	var out []railItem
 	ws, win := "", ""
 	for _, p := range snap.All {
 		if p.Workspace != ws {
 			ws = p.Workspace
 			win = ""
-			out = append(out, railItem{kind: railWorkspace,
-				text: p.WorkspaceName, active: p.WorkspaceActive})
+			out = append(out, railItem{
+				kind: railWorkspace,
+				text: p.WorkspaceName, branch: branch[p.Workspace],
+				active: p.WorkspaceActive,
+			})
 		}
 		if p.Window != win {
 			win = p.Window
-			out = append(out, railItem{kind: railWindow, text: p.WindowName})
+			out = append(out, railItem{
+				kind: railWindow, text: p.WindowName,
+				window: p.Window, folded: !p.WindowUnfolded,
+			})
+		}
+		if !compact && !p.WindowUnfolded {
+			continue
 		}
 		label := p.Name
 		if label == "" {
+			label = p.App
+		}
+		if label == "" {
 			label = p.ID
 		}
-		out = append(out, railItem{kind: railPane, text: label, pane: p.ID,
-			status: p.Status, focus: p.Focus})
+		// A linked worktree is shown only when an agent lives there, so a
+		// shell in another checkout does not clutter the rail.
+		worktree := ""
+		if p.Agent {
+			worktree = p.Worktree
+		}
+		out = append(out, railItem{
+			kind: railPane, text: label, pane: p.ID,
+			status: p.Status, agent: p.Agent, worktree: worktree,
+			focus: p.Focus,
+		})
 	}
 	return out
 }
 
-// railGlyph is the state mark for a pane row and its SGR foreground colour.
-// Every state gets a distinct colour; an empty or unrecognised state is the
-// unknown mark.
-func railGlyph(status string) (glyph, colour string) {
+// rgb is an explicit colour. The rail never uses palette slots: a theme may
+// map a slot to a colour that fails contrast on its own background, and the
+// rail must pass WCAG AA on every theme.
+type rgb struct{ r, g, b int }
+
+func (c rgb) fg() string { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c.r, c.g, c.b) }
+func (c rgb) bg() string { return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.r, c.g, c.b) }
+
+// lum is the WCAG relative luminance.
+func (c rgb) lum() float64 {
+	lin := func(v int) float64 {
+		f := float64(v) / 255
+		if f <= 0.04045 {
+			return f / 12.92
+		}
+		return math.Pow((f+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(c.r) + 0.7152*lin(c.g) + 0.0722*lin(c.b)
+}
+
+// contrast is the WCAG contrast ratio, 1:1 to 21:1.
+func contrast(a, b rgb) float64 {
+	la, lb := a.lum(), b.lum()
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// The rail palette. Every foreground is at least 4.5:1 against both the rail
+// background and the focused row background; TestRailContrast guards it.
+var (
+	railBG       = rgb{31, 30, 39}    // #1f1e27
+	railFocusBG  = rgb{39, 38, 51}    // #272633
+	railText     = rgb{233, 234, 241} // #e9eaf1
+	railDim      = rgb{143, 147, 168} // #8f93a8
+	railHeader   = rgb{166, 169, 189} // #a6a9bd
+	railWindowFg = rgb{149, 153, 174} // #9599ae
+)
+
+// Nerd Font icons. The font check runs once; DM_NERD=1 or 0 overrides it.
+var (
+	nerdOnce sync.Once
+	nerdOn   bool
+)
+
+func nerdFonts() bool {
+	switch os.Getenv("DM_NERD") {
+	case "1":
+		return true
+	case "0":
+		return false
+	}
+	nerdOnce.Do(func() {
+		out, err := exec.Command("fc-list", ":family").Output()
+		nerdOn = err == nil && strings.Contains(strings.ToLower(string(out)), "nerd")
+	})
+	return nerdOn
+}
+
+// railGlyph is the state mark for a pane row and its colour. Every state gets a
+// distinct icon or, without Nerd Fonts, a distinct Unicode glyph and colour.
+// The question mark marks an agent whose state has not arrived; drawRail leaves
+// the cell blank for a shell, which reports no state.
+func railGlyph(status string, nerd bool) (glyph string, colour rgb) {
 	switch status {
 	case "working":
-		return "●", "33"
+		if nerd {
+			return "\uf013", rgb{224, 169, 76}
+		}
+		return "●", rgb{224, 169, 76}
 	case "idle":
-		return "○", "36"
+		if nerd {
+			return "\uf111", rgb{159, 176, 207}
+		}
+		return "○", rgb{159, 176, 207}
 	case "blocked":
-		return "▲", "31"
+		if nerd {
+			return "\uf071", rgb{224, 112, 90}
+		}
+		return "▲", rgb{224, 112, 90}
 	case "done":
-		return "✓", "32"
+		if nerd {
+			return "\uf00c", rgb{95, 168, 135}
+		}
+		return "✓", rgb{95, 168, 135}
+	case "error":
+		if nerd {
+			return "\uf057", rgb{228, 167, 158}
+		}
+		return "✕", rgb{228, 167, 158}
 	default:
-		return "?", "90"
+		if nerd {
+			return "\uf128", railDim
+		}
+		return "?", railDim
 	}
 }
 
+// railMark is the two-cell prefix of a pane row: an agent icon, a shell icon,
+// or the fallback agent bar. The status glyph lands in column 3 either way.
+// Every icon here is from the Font Awesome 4 range that even old Nerd Font
+// patches carry; newer code points such as the FA5 robot render as tofu.
+func railMark(agent, nerd bool) string {
+	switch {
+	case agent && nerd:
+		return "\uf135 "
+	case agent:
+		return "\u258e "
+	case nerd:
+		return "\uf120 "
+	default:
+		return "  "
+	}
+}
+
+// drawRail paints the sidebar above the status bar. The rail paints its own
+// background so contrast does not depend on the terminal theme. Rows past the
+// screen are clipped, and every row is written into at most Rail columns.
 // railPaneAt returns the pane whose row is under x,y, or "" for a header, an
 // empty row, or a point outside the rail. One-based screen coordinates are the
 // caller's; x and y are zero-based here.
@@ -453,8 +653,21 @@ func railPaneAt(snap *Snapshot, x, y int) string {
 	return items[y].pane
 }
 
-// drawRail paints the sidebar above the status bar. Rows past the screen are
-// clipped, and every row is written into at most Rail columns.
+// railWindowAt returns the window whose row is under x,y, for a fold click.
+func railWindowAt(snap *Snapshot, x, y int) string {
+	if snap == nil || snap.Rail <= 0 {
+		return ""
+	}
+	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-1 {
+		return ""
+	}
+	items := railItems(snap)
+	if y >= len(items) || items[y].kind != railWindow {
+		return ""
+	}
+	return items[y].window
+}
+
 func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 2 {
 		return
@@ -462,28 +675,85 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	w := snap.Rail
 	rows := snap.Rows - 1
 	items := railItems(snap)
-	for y := 0; y < rows && y < len(items); y++ {
-		it := items[y]
-		style := "\x1b[0m\x1b[37m"
-		text := it.text
-		switch it.kind {
-		case railWorkspace:
-			if it.active {
-				style = "\x1b[0m\x1b[1;97m"
-			} else {
-				style = "\x1b[0m\x1b[90m"
+	nerd := nerdFonts()
+	compact := railCompact(snap.Rail)
+	for y := 0; y < rows; y++ {
+		bg := railBG
+		style := "\x1b[0m" + bg.bg() + railText.fg()
+		glyphColour := railDim
+		text := ""
+		kind := railWorkspace
+		agent := false
+		wtAt := -1
+		if y < len(items) {
+			it := items[y]
+			kind, agent = it.kind, it.agent
+			switch it.kind {
+			case railWorkspace:
+				glyphColour = railHeader
+				if it.active {
+					style = "\x1b[0m" + bg.bg() + "\x1b[1m" + railText.fg()
+					glyphColour = railText
+				} else {
+					style = "\x1b[0m" + bg.bg() + railHeader.fg()
+				}
+				if !compact {
+					if nerd {
+						text = "\uf07b " + it.text
+					} else {
+						text = it.text
+					}
+					if it.branch != "" {
+						if nerd {
+							text += "  \uf126 " + it.branch
+						} else {
+							text += " (" + it.branch + ")"
+						}
+					}
+				}
+			case railWindow:
+				style = "\x1b[0m" + bg.bg() + railWindowFg.fg()
+				glyphColour = railWindowFg
+				if !compact {
+					caret := "▾"
+					if it.folded {
+						caret = "▸"
+					}
+					if nerd {
+						caret = "\uf0d7"
+						if it.folded {
+							caret = "\uf0da"
+						}
+					}
+					text = "  " + caret + " " + it.text
+				}
+			case railPane:
+				if it.focus {
+					bg = railFocusBG
+					style = "\x1b[0m" + bg.bg() + "\x1b[1m" + railText.fg()
+				} else if it.agent {
+					style = "\x1b[0m" + bg.bg() + railText.fg()
+				} else {
+					style = "\x1b[0m" + bg.bg() + railDim.fg()
+				}
+				g, colour := railGlyph(it.status, nerd)
+				// A shell has no state to report, so the fallback mark would be a
+				// question about nothing. Leave the cell blank instead.
+				if !it.agent && (it.status == "" || it.status == "unknown") {
+					g = " "
+				}
+				glyphColour = colour
+				mark := railMark(it.agent, nerd)
+				if compact {
+					text = mark + g
+				} else {
+					text = "    " + mark + g + " " + it.text
+					if it.worktree != "" {
+						wtAt = len([]rune(text)) + 2
+						text += "  " + it.worktree
+					}
+				}
 			}
-		case railWindow:
-			style = "\x1b[0m\x1b[90m"
-			text = "  " + text
-		case railPane:
-			if it.focus {
-				style = "\x1b[0m\x1b[44m\x1b[1;97m"
-			} else {
-				style = "\x1b[0m\x1b[37m"
-			}
-			g, _ := railGlyph(it.status)
-			text = "  " + g + " " + text
 		}
 		line := []rune(text)
 		cut, cells := 0, 0
@@ -499,15 +769,15 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
 		buf.WriteString(style)
 		for i, r := range line {
-			if it.kind == railPane && i == 2 {
-				_, colour := railGlyph(it.status)
-				buf.WriteString("\x1b[0m\x1b[" + colour + "m")
-				if it.focus {
-					buf.WriteString("\x1b[44m")
-				}
+			if kind == railPane && wtAt >= 0 && i == wtAt {
+				buf.WriteString("\x1b[0m" + bg.bg() + railDim.fg())
+				buf.WriteString(string(line[i:]))
+				break
+			}
+			if railIcon(kind, agent, nerd, compact, i) {
+				buf.WriteString("\x1b[0m" + bg.bg() + glyphColour.fg())
 				buf.WriteRune(r)
-				buf.WriteString("\x1b[0m")
-				buf.WriteString(style)
+				buf.WriteString("\x1b[0m" + style)
 				continue
 			}
 			buf.WriteRune(r)
@@ -517,6 +787,24 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		}
 		buf.WriteString("\x1b[0m")
 	}
+}
+
+// railIcon reports whether the rune at index i in a row is an icon that takes
+// its own colour: the workspace folder, the window mark, the pane marker and
+// the state glyph.
+func railIcon(kind railKind, agent, nerd, compact bool, i int) bool {
+	switch kind {
+	case railWorkspace:
+		return nerd && i == 0
+	case railWindow:
+		return i == 2
+	case railPane:
+		if compact {
+			return i == 2 || i == 0
+		}
+		return i == 4 || i == 6
+	}
+	return false
 }
 
 // contentRows returns the first row and the row after the last that hold any
@@ -574,11 +862,11 @@ func scrollStart(v vt10x.View, rectH, offset int) (start, max int) {
 	return start, max
 }
 
-// padHit reports the pad cell under x,y: the owning split, the panes on each
-// side of the pad, the axis and the split's area. Coordinates are zero-based.
-func padHit(n *Node, area Rect, x, y int) (split *Node, first, second, axis string, sr Rect, ok bool) {
+// padHit reports the divider under x,y: the owning split, the panes on each
+// side, the axis, the split's rect and the two-cell divider rect.
+func padHit(n *Node, area Rect, x, y int) (split *Node, first, second, axis string, sr, pr Rect, ok bool) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
-		return nil, "", "", "", Rect{}, false
+		return nil, "", "", "", Rect{}, Rect{}, false
 	}
 	boxes := childBoxRects(n, area)
 	horizontal := n.Dir == "row"
@@ -586,24 +874,25 @@ func padHit(n *Node, area Rect, x, y int) (split *Node, first, second, axis stri
 		if i < len(boxes)-1 {
 			p := padRect(n, boxes, i)
 			if x >= p.X && x < p.X+p.W && y >= p.Y && y < p.Y+p.H {
+				// Probe one cell inside each box, next to the shared border.
 				if horizontal {
-					first = leafAt(n.Kids[i], boxes[i], p.X-2, y)
-					second = leafAt(n.Kids[i+1], boxes[i+1], p.X+2, y)
+					first = leafNear(n.Kids[i], boxes[i], boxes[i].X+boxes[i].W-2, y)
+					second = leafNear(n.Kids[i+1], boxes[i+1], boxes[i+1].X+1, y)
 				} else {
-					first = leafAt(n.Kids[i], boxes[i], x, p.Y-2)
-					second = leafAt(n.Kids[i+1], boxes[i+1], x, p.Y+2)
+					first = leafNear(n.Kids[i], boxes[i], x, boxes[i].Y+boxes[i].H-2)
+					second = leafNear(n.Kids[i+1], boxes[i+1], x, boxes[i+1].Y+1)
 				}
 				if first == "" || second == "" {
-					return nil, "", "", "", Rect{}, false
+					return nil, "", "", "", Rect{}, Rect{}, false
 				}
-				return n, first, second, n.Dir, area, true
+				return n, first, second, n.Dir, area, p, true
 			}
 		}
-		if sn, f, sec, ax, sr, hit := padHit(n.Kids[i], boxes[i], x, y); hit {
-			return sn, f, sec, ax, sr, hit
+		if sn, f, sec, ax, sr, pr, hit := padHit(n.Kids[i], boxes[i], x, y); hit {
+			return sn, f, sec, ax, sr, pr, hit
 		}
 	}
-	return nil, "", "", "", Rect{}, false
+	return nil, "", "", "", Rect{}, Rect{}, false
 }
 
 // leafAt returns the leaf pane whose content rect contains x,y.
@@ -623,6 +912,30 @@ func leafAt(n *Node, area Rect, x, y int) string {
 			if id := leafAt(n.Kids[i], b, x, y); id != "" {
 				return id
 			}
+		}
+	}
+	return ""
+}
+
+// leafNear returns the leaf at x,y, or the nearest leaf when the point lands
+// on a border inside the subtree. A divider spans the whole split, so its
+// pointer can sit exactly over a border of the child's own split; probing the
+// exact cell would then find no pane and the divider would be dead.
+func leafNear(n *Node, area Rect, x, y int) string {
+	offsets := [][2]int{
+		{0, 0},
+		{-1, 0},
+		{1, 0},
+		{0, -1},
+		{0, 1},
+		{-2, 0},
+		{2, 0},
+		{0, -2},
+		{0, 2},
+	}
+	for _, d := range offsets {
+		if id := leafAt(n, area, x+d[0], y+d[1]); id != "" {
+			return id
 		}
 	}
 	return ""
@@ -766,7 +1079,7 @@ var keymap = [][2]string{
 	{"t", "new workspace"},
 	{")", "next workspace"},
 	{"s", "switch session"},
-	{"r", "toggle rail"},
+	{"r", "cycle rail: full, thin, hidden"},
 	{"d / q", "detach"},
 	{"ctrl+b", "send prefix"},
 }
