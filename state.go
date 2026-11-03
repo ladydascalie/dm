@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -70,6 +71,13 @@ type State struct {
 	// from a state written before the rail existed.
 	Rail    int  `json:"rail,omitempty"`
 	RailSet bool `json:"railSet,omitempty"`
+
+	// Box is the session's message box: an append-only log any pane can post
+	// into. BoxSeq is the last seq handed out. It never resets, so a clear
+	// leaves a gap instead of reusing a number. A state file written before the
+	// box existed loads with both zero, an empty box.
+	Box    []entry `json:"box,omitempty"`
+	BoxSeq int     `json:"boxSeq,omitempty"`
 }
 
 func stateDir() string {
@@ -174,6 +182,15 @@ func loadState(name string) (*State, error) {
 		st.Panes = map[string]*PaneState{}
 	}
 	st.Name = name
+	if n := st.dropBadBoxEntries(); n > 0 {
+		log.Printf("box: dropped %d invalid entries on load", n)
+	}
+	st.trimBox()
+	for _, e := range st.Box {
+		if e.Seq > st.BoxSeq {
+			st.BoxSeq = e.Seq
+		}
+	}
 	changed := false
 	if !st.RailSet {
 		st.Rail = defaultRail
@@ -206,6 +223,53 @@ func loadState(name string) (*State, error) {
 		_ = st.save()
 	}
 	return st, nil
+}
+
+// dropBadBoxEntries removes entries that fail the box contract and reports how
+// many went, so loadState can name them in one log line. A hand-edited or
+// truncated state file costs its bad entries, not the whole box.
+func (st *State) dropBadBoxEntries() int {
+	if len(st.Box) == 0 {
+		return 0
+	}
+	kept := st.Box[:0]
+	for _, e := range st.Box {
+		if e.validate() == nil {
+			kept = append(kept, e)
+		}
+	}
+	bad := len(st.Box) - len(kept)
+	if bad > 0 {
+		for i := len(kept); i < len(st.Box); i++ {
+			st.Box[i] = entry{}
+		}
+	}
+	st.Box = kept
+	return bad
+}
+
+// trimBox drops the oldest entries until the log is inside both caps. The byte
+// measure is the compact JSON of the entries, so the cap bounds the log itself;
+// the state file's indentation is the file's, not the box's.
+func (st *State) trimBox() {
+	box := st.Box
+	if len(box) > boxMaxEntries {
+		box = box[len(box)-boxMaxEntries:]
+	}
+	for len(box) > 0 {
+		b, err := json.Marshal(box)
+		if err != nil || len(b) <= boxMaxBytes {
+			break
+		}
+		box = box[1:]
+	}
+	if len(box) != len(st.Box) {
+		box = append([]entry(nil), box...)
+	}
+	if len(box) == 0 {
+		box = nil
+	}
+	st.Box = box
 }
 
 func (st *State) ws() *Workspace {

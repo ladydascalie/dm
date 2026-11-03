@@ -1498,9 +1498,122 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.afterMutation()
 		s.reply(cl, m, nil, err)
 
+	case "msg-post":
+		req, err := parseBoxReq(m.Action, m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		e, err := s.boxPost(req.(*postReq))
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, postReply{Entry: e}, nil)
+
+	case "msg-list":
+		req, err := parseBoxReq(m.Action, m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, listReply{Entries: s.boxList(req.(*listReq))}, nil)
+
+	case "msg-clear":
+		req, err := parseBoxReq(m.Action, m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, clearReply{Cleared: s.boxClear(req.(*clearReq))}, nil)
+
+	case "msg-schema":
+		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, schemaReply{Schema: schema()}, nil)
+
 	default:
 		s.reply(cl, m, nil, fmt.Errorf("unknown action %q", m.Action))
 	}
+}
+
+// boxPost appends the request as one entry, trims the log and saves state under
+// one lock. The server owns seq and at: the request carries neither, and the
+// strict decoder rejects the fields if a caller tries to send them.
+func (s *server) boxPost(req *postReq) (entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if req.From != "" && !s.paneInTreeLocked(req.From) {
+		return entry{}, fmt.Errorf("box: no pane %q", req.From)
+	}
+	s.st.BoxSeq++
+	e := entry{
+		Seq:   s.st.BoxSeq,
+		At:    time.Now().UTC().Truncate(time.Second),
+		From:  req.From,
+		Key:   req.Key,
+		State: req.State,
+		Msg:   req.Msg,
+	}
+	s.st.Box = append(s.st.Box, e)
+	s.st.trimBox()
+	_ = s.st.save()
+	return e, nil
+}
+
+// boxList returns the entries newest first, for one key when the request names
+// one, capped at the clamped limit.
+func (s *server) boxList(req *listReq) []entry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]entry, 0, req.Limit)
+	for i := len(s.st.Box) - 1; i >= 0 && len(out) < req.Limit; i-- {
+		if req.Key != "" && s.st.Box[i].Key != req.Key {
+			continue
+		}
+		out = append(out, s.st.Box[i])
+	}
+	return out
+}
+
+// boxClear removes every entry for the key, or the whole log when the key is
+// empty, and reports how many went. BoxSeq is untouched, so the next post
+// continues the sequence instead of reusing a number.
+func (s *server) boxClear(req *clearReq) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]entry, 0, len(s.st.Box))
+	for _, e := range s.st.Box {
+		if req.Key == "" || e.Key == req.Key {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	cleared := len(s.st.Box) - len(kept)
+	if cleared == 0 {
+		return 0
+	}
+	if len(kept) == 0 {
+		kept = nil
+	}
+	s.st.Box = kept
+	_ = s.st.save()
+	return cleared
+}
+
+// paneInTreeLocked reports whether id is a pane in this session's layout, in
+// any window rather than only the active one. The caller holds s.mu.
+func (s *server) paneInTreeLocked(id string) bool {
+	for _, ws := range s.st.Workspaces {
+		for _, w := range ws.Windows {
+			if findLeaf(w.Root, id) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *server) statuses() map[string]Status {
@@ -1602,14 +1715,7 @@ func historyRow(v vt10x.View, y, cols int) string {
 func (s *server) writeTo(id, text string, enter bool) error {
 	s.mu.Lock()
 	pc := s.panes[id]
-	known := false
-	for _, ws := range s.st.Workspaces {
-		for _, w := range ws.Windows {
-			if findLeaf(w.Root, id) {
-				known = true
-			}
-		}
-	}
+	known := s.paneInTreeLocked(id)
 	s.mu.Unlock()
 	if !known {
 		return fmt.Errorf("no pane %q", id)
