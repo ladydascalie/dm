@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -116,6 +117,11 @@ func runPane(args []string) error {
 	}
 	_ = os.Chmod(p.sock, 0o600)
 	writePID(p.sock + ".pid")
+	own, err := os.Stat(p.sock)
+	if err != nil {
+		return err
+	}
+	go p.reapOrphans(own)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM)
@@ -141,6 +147,42 @@ func runPane(args []string) error {
 		}
 		go p.serve(c)
 	}
+}
+
+// sockEvery is how often a pane checks that its socket still names this
+// listener. The server removes a pane's socket when it drops the pane; a
+// daemon that outlives that is unreachable and its shell would leak.
+const sockEvery = 5 * time.Second
+
+// reapOrphans stops the daemon when its socket path is gone or names another
+// file. A stat error other than ENOENT is transient and only retried: an
+// intact path with no client attached is the normal state while the server
+// restarts, and the pane must survive it.
+func (p *paneProc) reapOrphans(own os.FileInfo) {
+	for {
+		time.Sleep(sockEvery)
+		info, err := os.Stat(p.sock)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				p.reap("socket removed")
+			}
+			continue
+		}
+		if !os.SameFile(own, info) {
+			p.reap("socket replaced")
+		}
+	}
+}
+
+// reap kills the shell's process group and exits. The shell is a session
+// leader, so its process group id is its pid, and the group takes any child
+// with it.
+func (p *paneProc) reap(reason string) {
+	log.Printf("pane %s: %s, stopping", p.id, reason)
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	}
+	os.Exit(0)
 }
 
 func (p *paneProc) readLoop() {
