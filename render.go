@@ -507,13 +507,20 @@ type railItem struct {
 // railItems flattens a snapshot into sidebar rows in the server's order: a
 // workspace row, a window line per window, that window's note line when it has
 // a message and is unfolded, then its pane rows when it is unfolded. A gap row
-// separates workspace blocks. The thin rail keeps its glyph column: one blank
-// row per header, no note lines, no gaps, and panes whatever the fold.
+// separates workspace blocks. The thin rail is a glyph column: one pane row
+// per pane, in snapshot order, whatever the fold. It has no workspace row, no
+// window row, no note row and no gap row.
 func railItems(snap *Snapshot) []railItem {
 	if snap == nil {
 		return nil
 	}
-	compact := railCompact(snap.Rail)
+	if railCompact(snap.Rail) {
+		out := make([]railItem, 0, len(snap.All))
+		for _, p := range snap.All {
+			out = append(out, railPaneRow(p))
+		}
+		return out
+	}
 	panes := map[string]int{}
 	focus := map[string]int{}
 	first := map[string]int{}
@@ -576,7 +583,7 @@ func railItems(snap *Snapshot) []railItem {
 	ws, win := "", ""
 	for _, p := range snap.All {
 		if p.Workspace != ws {
-			if ws != "" && !compact {
+			if ws != "" {
 				out = append(out, railItem{kind: railGap})
 			}
 			ws, win = p.Workspace, ""
@@ -596,41 +603,45 @@ func railItems(snap *Snapshot) []railItem {
 				kind: railWindow, text: p.WindowName, window: p.Window,
 				folded: !p.WindowUnfolded,
 			}
-			if !compact {
-				if src, ok := source(p.Window); ok {
-					item.folder = railFolder(src.Cwd, src.Root)
-					item.branch = src.Branch
-					item.worktree = src.Worktree
-					item.inRepo = src.InRepo
-					item.dirty = src.Dirty
-					item.added = src.Added
-					item.deleted = src.Deleted
-					item.message = src.Message
-				}
+			if src, ok := source(p.Window); ok {
+				item.folder = railFolder(src.Cwd, src.Root)
+				item.branch = src.Branch
+				item.worktree = src.Worktree
+				item.inRepo = src.InRepo
+				item.dirty = src.Dirty
+				item.added = src.Added
+				item.deleted = src.Deleted
+				item.message = src.Message
 			}
 			out = append(out, item)
-			if !compact && item.message != "" && p.WindowUnfolded {
+			if item.message != "" && p.WindowUnfolded {
 				out = append(out, railItem{
 					kind: railWindowNote, text: item.message, window: p.Window,
 				})
 			}
 		}
-		if !compact && !p.WindowUnfolded {
+		if !p.WindowUnfolded {
 			continue
 		}
-		label := p.Name
-		if label == "" {
-			label = p.App
-		}
-		if label == "" {
-			label = p.ID
-		}
-		out = append(out, railItem{
-			kind: railPane, text: label, pane: p.ID,
-			status: p.Status, agent: p.Agent, focus: p.Focus,
-		})
+		out = append(out, railPaneRow(p))
 	}
 	return out
+}
+
+// railPaneRow is the pane row both rails draw. The label falls back from the
+// pane name to its app to its id.
+func railPaneRow(p AllPane) railItem {
+	label := p.Name
+	if label == "" {
+		label = p.App
+	}
+	if label == "" {
+		label = p.ID
+	}
+	return railItem{
+		kind: railPane, text: label, pane: p.ID,
+		status: p.Status, agent: p.Agent, focus: p.Focus,
+	}
 }
 
 // railFolder is the folder a window line shows for a pane: its path below the
@@ -935,12 +946,16 @@ func railPaneAt(snap *Snapshot, x, y int) string {
 }
 
 // railWindowAt returns the window whose row is under x,y, for a fold click. A
-// window line and its note line both fold the window.
+// window line and its note line both fold the window. The thin rail has no
+// window row, so it never answers.
 func railWindowAt(snap *Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
 	}
 	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-1 {
+		return ""
+	}
+	if railCompact(snap.Rail) {
 		return ""
 	}
 	items := railItems(snap)
@@ -976,60 +991,54 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 			it := items[y]
 			switch it.kind {
 			case railWorkspace:
-				if !compact {
-					name := railText
-					if !it.active {
-						name = railHeader
-					}
-					left = []railSeg{
-						{text: "▌", colour: it.accent},
-						{text: " ", colour: name},
-						{text: it.text, colour: name, bold: true},
-					}
-					right = []railSeg{{text: strconv.Itoa(it.count), colour: railDim}}
+				name := railText
+				if !it.active {
+					name = railHeader
 				}
+				left = []railSeg{
+					{text: "▌", colour: it.accent},
+					{text: " ", colour: name},
+					{text: it.text, colour: name, bold: true},
+				}
+				right = []railSeg{{text: strconv.Itoa(it.count), colour: railDim}}
 			case railWindow:
 				base = railWindowFg
-				if !compact {
-					caret := "▾"
-					if it.folded {
-						caret = "▸"
-					}
-					if nerd {
-						caret = "\uf0d7"
-						if it.folded {
-							caret = "\uf0da"
-						}
-					}
-					// The folder names the window. A window whose panes
-					// reported no directory falls back to the window name.
-					label := it.folder
-					if label == "" {
-						label = it.text
-					}
-					left = []railSeg{
-						{text: "  ", colour: base},
-						{text: caret, colour: base},
-						{text: " ", colour: base},
-						{text: label, colour: base},
-					}
-					// The branch trails the folder in dim grey, and only when
-					// it says something the label does not.
-					if it.branch != "" && it.branch != label {
-						tail = []railSeg{
-							{text: "  ", colour: railDim},
-							{text: it.branch, colour: railDim},
-						}
-					}
-					right = railStats(it)
+				caret := "▾"
+				if it.folded {
+					caret = "▸"
 				}
-			case railWindowNote:
-				if !compact {
-					base = railDim
-					left = []railSeg{
-						{text: "    ", colour: base},
-						{text: it.text, colour: base},
+				if nerd {
+					caret = "\uf0d7"
+					if it.folded {
+						caret = "\uf0da"
 					}
+				}
+				// The folder names the window. A window whose panes
+				// reported no directory falls back to the window name.
+				label := it.folder
+				if label == "" {
+					label = it.text
+				}
+				left = []railSeg{
+					{text: "  ", colour: base},
+					{text: caret, colour: base},
+					{text: " ", colour: base},
+					{text: label, colour: base},
+				}
+				// The branch trails the folder in dim grey, and only when
+				// it says something the label does not.
+				if it.branch != "" && it.branch != label {
+					tail = []railSeg{
+						{text: "  ", colour: railDim},
+						{text: it.branch, colour: railDim},
+					}
+				}
+				right = railStats(it)
+			case railWindowNote:
+				base = railDim
+				left = []railSeg{
+					{text: "    ", colour: base},
+					{text: it.text, colour: base},
 				}
 			case railPane:
 				if it.focus {
