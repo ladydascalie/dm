@@ -95,6 +95,3 @@ type (
 	railSeg = seg
 	barSeg  = seg
 )
-
-// barCells is the old name for a bar run's width. dm_test.go still spells it.
-func barCells(runs []seg) int { return segCells(runs) }
