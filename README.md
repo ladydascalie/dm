@@ -525,9 +525,9 @@ and `drawPaneBox`. The shared primitives are in `text.go`, `seg.go` and
 builds a box: it clips the interior and writes the title and hint rows.
 `drawPaneBox` in `render.go` paints the border.
 
-The diff decides what is written. Only changed bands and rows are written.
-`paintPanel` holds no state and keeps no buffer between frames. A new overlay
-is a painter plus a band entry.
+On a stable frame, the diff decides what is written. A layout change writes
+every band and row. `paintPanel` holds no state and keeps no buffer between
+frames. A new overlay is a painter plus a band entry.
 
 `damage_test.go` keeps a refactor honest: it pins the steady frame, the one-row
 repaint and the band cursor moves.
