@@ -57,7 +57,7 @@ var configTestDefaultActions = map[string][]string{
 	"help": {
 		"up", "up-arrow", "down", "down-arrow", "page-up",
 		"page-down", "top", "bottom", "close", "close-esc",
-		"close-question",
+		"close-question", "search", "next-match", "prev-match",
 	},
 }
 
@@ -311,14 +311,14 @@ func TestConfigMissingDefaultWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat %q: %v", path, err)
 	}
-	if got := info.Mode().Perm(); got != 0600 {
+	if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("file mode = %v, want 0600", got)
 	}
 	dirInfo, err := os.Stat(filepath.Dir(path))
 	if err != nil {
 		t.Fatalf("stat dir: %v", err)
 	}
-	if got := dirInfo.Mode().Perm(); got != 0700 {
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
 		t.Errorf("dir mode = %v, want 0700", got)
 	}
 	data, err := os.ReadFile(path)
@@ -339,7 +339,7 @@ func TestConfigMissingDefaultWrites(t *testing.T) {
 func TestConfigLoadPathMalformed(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.kdl")
-	if err := os.WriteFile(path, []byte(`bogus "x"`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`bogus "x"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadPath(path)
@@ -407,10 +407,10 @@ keymap "main" {
 func writeTheme(t *testing.T, dir, name, src string) string {
 	t.Helper()
 	path := filepath.Join(dir, "themes", name+".kdl")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
@@ -480,7 +480,7 @@ func TestConfigThemeLoad(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.kdl")
 	src := "theme \"night\"\nkeymap \"main\" {\n\t\"split-right\" \"S\"\n}\n"
-	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeTheme(t, dir, "night", `palette { "rail-bg" "#010203" }
@@ -507,7 +507,7 @@ func TestConfigThemeMissingFallsBack(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.kdl")
 	src := "theme \"night\"\nkeymap \"main\" {\n\t\"split-right\" \"S\"\n}\n"
-	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadPath(path)
@@ -531,7 +531,7 @@ func TestConfigThemeMalformedFallsBack(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.kdl")
 	src := "theme \"night\"\nkeymap \"main\" {\n\t\"split-right\" \"S\"\n}\n"
-	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeTheme(t, dir, "night", "palette {\n\t\"rail-bg\" \"#12345\"\n}")
@@ -556,11 +556,11 @@ func TestConfigThemeDefaultPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	cfgDir := filepath.Join(dir, "dm")
-	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(cfgDir, "config.kdl")
-	if err := os.WriteFile(path, []byte("theme \"night\"\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("theme \"night\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeTheme(t, cfgDir, "night", `accents { "accent-2" "#0a0b0c" }`)

@@ -27,10 +27,14 @@ const (
 // keymapView is the open keymap float: the rows built when it opened, the
 // first row in view, and the float that draws them.
 type keymapView struct {
-	rows  []string
-	off   int
-	float *FloatingPane
-	snap  *Snapshot
+	rows      []string
+	off       int
+	query     string
+	matches   []int
+	match     int
+	searching bool
+	float     *FloatingPane
+	snap      *Snapshot
 }
 
 // newKeymapView opens the float on a screen. The rows are built once, so a
@@ -141,13 +145,100 @@ func (k *keymapView) clamp() {
 	}
 }
 
+// startSearch begins a new query. The old query and its matches go.
+func (k *keymapView) startSearch() {
+	k.searching = true
+	k.setQuery("")
+}
+
+// cancelSearch drops the query and its highlight.
+func (k *keymapView) cancelSearch() {
+	k.searching = false
+	k.setQuery("")
+}
+
+// acceptSearch keeps the query and its highlight and returns to normal keys.
+func (k *keymapView) acceptSearch() {
+	k.searching = false
+	k.paint()
+}
+
+// appendQuery adds one printable byte to the query.
+func (k *keymapView) appendQuery(s string) {
+	k.setQuery(k.query + s)
+}
+
+// backspaceQuery removes the last byte of the query.
+func (k *keymapView) backspaceQuery() {
+	if k.query == "" {
+		return
+	}
+	k.setQuery(k.query[:len(k.query)-1])
+}
+
+// setQuery replaces the query, recomputes the matching binding rows and puts
+// the first match in view. An empty query clears the highlight.
+func (k *keymapView) setQuery(q string) {
+	k.query = strings.ToLower(q)
+	k.matches = k.matches[:0]
+	if k.query != "" {
+		for i, row := range k.rows {
+			if keymapHeader(row) || strings.TrimSpace(row) == "" {
+				continue
+			}
+			if strings.Contains(strings.ToLower(row), k.query) {
+				k.matches = append(k.matches, i)
+			}
+		}
+	}
+	k.match = 0
+	k.jumpToMatch()
+	k.paint()
+}
+
+// jumpToMatch centres the current match in the window.
+func (k *keymapView) jumpToMatch() {
+	if len(k.matches) == 0 {
+		return
+	}
+	k.off = k.matches[k.match] - k.float.Rect.H/2
+	k.clamp()
+}
+
+// nextMatch moves to the next or previous matching row and centres it.
+func (k *keymapView) nextMatch(dir int) {
+	if len(k.matches) == 0 {
+		return
+	}
+	k.match = (k.match + dir + len(k.matches)) % len(k.matches)
+	k.jumpToMatch()
+	k.paint()
+}
+
+// title is the float's top border: keymaps, plus the live query.
+func (k *keymapView) title() string {
+	if k.query == "" {
+		return " keymaps "
+	}
+	return " keymaps  /" + k.query + " "
+}
+
+// hint is the float's bottom border: the normal keys, or the search keys
+// while the query is typed.
+func (k *keymapView) hint() string {
+	if k.searching {
+		return " enter keep  esc cancel "
+	}
+	return " j/k scroll  g/G ends  / search  esc close "
+}
+
 // paint rewrites the float's terminal from the rows. Every row is placed
 // absolutely, so a view that scrolled paints its new window whole. A mode
 // header is bright; a binding row is dim.
 func (k *keymapView) paint() {
 	r := k.float.Rect
-	k.float.Title = " keymaps "
-	k.float.Hint = " j/k scroll  g/G ends  esc close "
+	k.float.Title = k.title()
+	k.float.Hint = k.hint()
 	if r.W < 1 || r.H < 1 {
 		k.float.VT = vt10x.New(vt10x.WithSize(1, 1))
 		return
@@ -162,6 +253,9 @@ func (k *keymapView) paint() {
 		style := "\x1b[0m\x1b[90m"
 		if keymapHeader(k.rows[i]) {
 			style = "\x1b[0m\x1b[97m"
+		}
+		if !keymapHeader(k.rows[i]) && k.query != "" && strings.Contains(strings.ToLower(k.rows[i]), k.query) {
+			style = "\x1b[0m\x1b[30;107m"
 		}
 		fmt.Fprintf(&buf, "\x1b[%d;1H%s%s", row+1, style, clipCells(k.rows[i], r.W))
 	}
@@ -216,6 +310,9 @@ func (t *tui) keymapKey() bool {
 	if len(t.inbuf) == 0 {
 		return true
 	}
+	if t.keys.searching {
+		return t.keymapSearchKey()
+	}
 	cfg := t.km()
 	if p := cfg.PrefixBytes(); len(p) > 0 && bytes.HasPrefix(t.inbuf, p) {
 		// The prefix key closes the view.
@@ -260,11 +357,55 @@ func (t *tui) keymapKey() bool {
 		t.keys.scroll(-len(t.keys.rows))
 	case "bottom":
 		t.keys.scroll(len(t.keys.rows))
+	case "search":
+		t.keys.startSearch()
+	case "next-match":
+		t.keys.nextMatch(1)
+	case "prev-match":
+		t.keys.nextMatch(-1)
 	default:
 		// Every close action, and any action the view does not scroll with,
 		// closes it.
 		closeKeymapView(t)
 		return true
+	}
+	t.dirty = true
+	return true
+}
+
+// keymapSearchKey consumes one byte of the query. Enter keeps the query, esc
+// clears it, backspace edits and ctrl+u clears. Printable bytes append. Every
+// other control key is swallowed: nothing reaches a pane while the query is
+// typed.
+func (t *tui) keymapSearchKey() bool {
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	b := t.inbuf[0]
+	switch {
+	case b == 0x1b:
+		t.keys.cancelSearch()
+		t.inbuf = nil
+		t.pending = false
+	case b == '\r' || b == '\n':
+		t.keys.acceptSearch()
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	case b == 0x7f || b == 0x08:
+		t.keys.backspaceQuery()
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	case b == 0x15:
+		t.keys.setQuery("")
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	case b >= 0x20 && b < 0x7f:
+		t.keys.appendQuery(string(b))
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	default:
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
 	}
 	t.dirty = true
 	return true

@@ -758,6 +758,9 @@ keymap "box" {
 }
 
 keymap "help" {
+    "search" "/"
+    "next-match" "n"
+    "prev-match" "N"
     "up" "k"
     "up-arrow" "up"
     "down" "j"
@@ -862,8 +865,8 @@ func LoadPath(path string) (*Config, error) {
 // with 0700 and the file with 0600.
 func writeDefaultConfig(path string) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(defaultConfigKDL), 0600)
+	return os.WriteFile(path, []byte(defaultConfigKDL), 0o600)
 }

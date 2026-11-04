@@ -200,6 +200,61 @@ func TestKeymapViewScrollsAndClamps(t *testing.T) {
 	}
 }
 
+// TestKeymapSearch: a query matches binding rows only, scrolls the first
+// match into view, and next/prev move between matches.
+func TestKeymapSearch(t *testing.T) {
+	snap := &Snapshot{Cols: 120, Rows: 40, Rail: 30}
+	k := newKeymapView(snap, LoadDefault())
+	k.startSearch()
+	k.appendQuery("split")
+	if k.query != "split" || len(k.matches) < 2 {
+		t.Fatalf("query %q matches %v, want at least two split rows", k.query, k.matches)
+	}
+	first := k.matches[0]
+	if first < k.off || first >= k.off+k.float.Rect.H {
+		t.Fatalf("first match %d is outside the window starting at %d", first, k.off)
+	}
+	k.nextMatch(1)
+	if k.match != 1 {
+		t.Fatalf("next match = %d, want 1", k.match)
+	}
+	k.cancelSearch()
+	if k.query != "" || len(k.matches) != 0 {
+		t.Fatalf("cancel left query %q matches %v", k.query, k.matches)
+	}
+}
+
+// TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n
+// moves to the next match, and esc clears it.
+func TestKeymapSearchInput(t *testing.T) {
+	tui := &tui{snap: testSnapshot(&Node{Pane: "a"}, 100, 30, nil), keymap: LoadDefault()}
+	tui.runAction("help")
+	feed(tui, "/")
+	if tui.keys == nil || !tui.keys.searching {
+		t.Fatal("slash did not start a search")
+	}
+	for _, b := range []byte("split") {
+		feed(tui, string(b))
+	}
+	if tui.keys.query != "split" {
+		t.Fatalf("query = %q, want split", tui.keys.query)
+	}
+	feed(tui, "\r")
+	if tui.keys.searching || tui.keys.query != "split" {
+		t.Fatalf("enter left searching=%v query=%q", tui.keys.searching, tui.keys.query)
+	}
+	feed(tui, "n")
+	if tui.keys.match != 1 {
+		t.Fatalf("n left match %d, want 1", tui.keys.match)
+	}
+	feed(tui, "/")
+	feed(tui, "x")
+	feed(tui, "\x1b")
+	if tui.keys.searching || tui.keys.query != "" {
+		t.Fatalf("esc left searching=%v query=%q", tui.keys.searching, tui.keys.query)
+	}
+}
+
 // TestHelpKeyFallback: a config without a help mode still scrolls and closes
 // with the built-in help bindings.
 func TestHelpKeyFallback(t *testing.T) {
