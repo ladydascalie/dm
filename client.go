@@ -57,13 +57,15 @@ type tui struct {
 	// underline it. It is nil when no link is hovered.
 	hover *linkHover
 	// box is the message-box float, nil when closed.
-	box   *boxView
+	box *boxView
+	// keys is the keymap view float, nil when closed.
+	keys  *keymapView
 	dirty bool
 
 	// out is the frame sink: os.Stdout in a session, a buffer in a test.
 	out io.Writer
 
-	mode     string // "" or "sessions" or "scroll" or "menu" or "rename"
+	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help"
 	sessions []SessionInfo
 	sel      int
 	menu     *menu
@@ -417,25 +419,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			t.flushBoxWatchers(now)
 			t.expireArmed(now)
 			t.expirePrefix(now)
-			if t.mode != "" && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
-				t.pending = false
-				// The lone esc was consumed by the mode's key handler but left
-				// in the buffer. Drop it with the mode, so the next keypress
-				// does not forward a stray escape to a pane.
-				t.inbuf = t.inbuf[:0]
-				switch t.mode {
-				case "menu":
-					t.closeMenu()
-				case "sessions":
-					t.closePicker()
-				case "scroll":
-					t.exitScroll()
-				case "box":
-					closeBoxView(t)
-				case "rename":
-					t.closeRename()
-				}
-			}
+			t.expireMode(now)
 			if t.dirty && now.Sub(lastDraw) > 15*time.Millisecond {
 				t.draw()
 				lastDraw = now
@@ -534,6 +518,10 @@ func (t *tui) apply(m Msg) {
 		}
 		if t.box != nil {
 			t.box.sync(m.Snap)
+			t.dirty = true
+		}
+		if t.keys != nil {
+			t.keys.sync(m.Snap)
 			t.dirty = true
 		}
 		t.dirty = true
@@ -937,6 +925,41 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
+		if t.mode == "help" {
+			// While the view is up every key belongs to it: nothing reaches a
+			// pane. A lone esc is the close key, so it skips the paste marker
+			// check: a bare esc is not the start of one. A mouse event scrolls
+			// and a paste is swallowed whole.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.keymapKey() {
+					return
+				}
+				continue
+			}
+			if ev, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				t.keymapWheel(ev)
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if seq, n, started := t.takePaste(); started {
+				if n == 0 {
+					if t.pasteDeadline.IsZero() {
+						t.pasteDeadline = time.Now()
+					}
+					return
+				}
+				// A pasted block is text for nobody: the view is read-only.
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				_ = seq
+				continue
+			}
+			if !t.keymapKey() {
+				return
+			}
+			continue
+		}
 		if t.mode == "box" {
 			// While the view is up every key belongs to it: nothing reaches a
 			// pane. A lone esc is the close key, so it skips the paste marker
@@ -1148,6 +1171,34 @@ func (t *tui) expireArmed(now time.Time) bool {
 	t.pending = false
 	t.inbuf = t.inbuf[:0]
 	t.disarm()
+	return true
+}
+
+// expireMode closes an overlay whose lone esc never finished arriving. A bare
+// esc is the close key in every overlay, so a stalled one means close.
+func (t *tui) expireMode(now time.Time) bool {
+	if t.mode == "" || !t.pending || now.Sub(t.escAt) <= escTimeout {
+		return false
+	}
+	t.pending = false
+	// The lone esc was consumed by the mode's key handler but left in the
+	// buffer. Drop it with the mode, so the next keypress does not forward a
+	// stray escape to a pane.
+	t.inbuf = t.inbuf[:0]
+	switch t.mode {
+	case "menu":
+		t.closeMenu()
+	case "sessions":
+		t.closePicker()
+	case "scroll":
+		t.exitScroll()
+	case "box":
+		closeBoxView(t)
+	case "help":
+		closeKeymapView(t)
+	case "rename":
+		t.closeRename()
+	}
 	return true
 }
 
@@ -2492,6 +2543,9 @@ func (t *tui) runAction(name string) {
 		t.toggleRail()
 	case "message-box":
 		openBoxView(t)
+	case "help":
+		openKeymapView(t)
+		t.disarm()
 	case "detach", "detach-alt":
 		t.quit = true
 	case "dismiss", "dismiss-esc":

@@ -117,6 +117,67 @@ func (c *Config) Key(modeName, action string) string {
 	return key
 }
 
+// HasMode reports whether the config carries a keymap mode. A config that
+// predates a mode does not, so a caller can fall back to the built-in one.
+func (c *Config) HasMode(name string) bool {
+	if c == nil {
+		return false
+	}
+	_, ok := c.modes[name]
+	return ok
+}
+
+// KeymapMode is one keymap as the keymap view lists it: the mode's name and its
+// bindings.
+type KeymapMode struct {
+	Name    string
+	Actions []KeymapAction
+}
+
+// KeymapAction is one binding in a mode: the action it names and the key it
+// runs on, as the config displays the key.
+type KeymapAction struct {
+	Action string
+	Key    string
+}
+
+// keymapOrder is the order the keymap view lists modes in. A mode outside the
+// list is not shown.
+var keymapOrder = []string{
+	"main", "menu", "picker", "switcher", "scroll", "rename", "box", "help",
+}
+
+// Keymaps returns every mode the config carries, in the fixed order the keymap
+// view needs. A mode missing from the config is left out. Actions follow the
+// order the mode declares them in and each action appears once: a key with two
+// terminal encodings is one action.
+func (c *Config) Keymaps() []KeymapMode {
+	if c == nil {
+		return nil
+	}
+	var out []KeymapMode
+	for _, name := range keymapOrder {
+		m, ok := c.modes[name]
+		if !ok {
+			continue
+		}
+		km := KeymapMode{Name: name}
+		seen := make(map[string]bool, len(m.bindings))
+		for _, b := range m.bindings {
+			if seen[b.action] {
+				continue
+			}
+			seen[b.action] = true
+			km.Actions = append(km.Actions, KeymapAction{
+				Action: b.action,
+				Key:    c.Key(name, b.action),
+			})
+		}
+		out = append(out, km)
+	}
+	return out
+}
+
 // helpRow is one row of the help overlay. actions lists the actions the row
 // groups; label is the action text.
 type helpRow struct {
@@ -588,7 +649,7 @@ keymap "main" {
     "window-8" "8"
     "window-9" "9"
     "window-10" "0"
-    "dismiss" "?"
+    "help" "?"
     "dismiss-esc" "esc"
     "focus-up-arrow" "up"
     "focus-down-arrow" "down"
@@ -692,6 +753,20 @@ keymap "box" {
     "close-prefix" "ctrl+b"
     "close-ctrl-c" "ctrl+c"
     "close-esc" "esc"
+}
+
+keymap "help" {
+    "up" "k"
+    "up-arrow" "up"
+    "down" "j"
+    "down-arrow" "down"
+    "page-up" "pgup"
+    "page-down" "pgdn"
+    "top" "g"
+    "bottom" "G"
+    "close" "q"
+    "close-esc" "esc"
+    "close-question" "?"
 }
 `
 
