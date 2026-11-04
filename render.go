@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode"
 
 	"github.com/hinshun/vt10x"
 )
@@ -386,89 +385,6 @@ func drawDivider(buf *bytes.Buffer, z Rect, axis string) {
 		buf.WriteString(line)
 	}
 	buf.WriteString("\x1b[0m")
-}
-
-// wideRanges are the East Asian Wide and Fullwidth code point ranges. They are
-// sorted and non-overlapping, so runeWidth can binary-search them.
-var wideRanges = [][2]rune{
-	{0x1100, 0x115F},
-	{0x2E80, 0x303E},
-	{0x3041, 0x33FF},
-	{0x3400, 0x4DBF},
-	{0x4E00, 0x9FFF},
-	{0xA000, 0xA4CF},
-	{0xA960, 0xA97F},
-	{0xAC00, 0xD7A3},
-	{0xF900, 0xFAFF},
-	{0xFE10, 0xFE19},
-	{0xFE30, 0xFE6F},
-	{0xFF00, 0xFF60},
-	{0xFFE0, 0xFFE6},
-	{0x1B000, 0x1B2FF},
-	{0x1F004, 0x1F004},
-	{0x1F0CF, 0x1F0CF},
-	{0x1F18E, 0x1F18E},
-	{0x1F191, 0x1F19A},
-	{0x1F200, 0x1F320},
-	{0x1F32D, 0x1F335},
-	{0x1F337, 0x1F37C},
-	{0x1F37E, 0x1F393},
-	{0x1F3A0, 0x1F3CA},
-	{0x1F3CF, 0x1F3D3},
-	{0x1F3E0, 0x1F3F0},
-	{0x1F3F4, 0x1F3F4},
-	{0x1F3F8, 0x1F43E},
-	{0x1F440, 0x1F440},
-	{0x1F442, 0x1F4FC},
-	{0x1F4FF, 0x1F53D},
-	{0x1F54B, 0x1F54E},
-	{0x1F550, 0x1F567},
-	{0x1F57A, 0x1F57A},
-	{0x1F595, 0x1F596},
-	{0x1F5A4, 0x1F5A4},
-	{0x1F5FB, 0x1F64F},
-	{0x1F680, 0x1F6C5},
-	{0x1F6CC, 0x1F6CC},
-	{0x1F6D0, 0x1F6D2},
-	{0x1F6EB, 0x1F6EC},
-	{0x1F6F4, 0x1F6FA},
-	{0x1F7E0, 0x1F7EB},
-	{0x1F90D, 0x1F971},
-	{0x1F973, 0x1F976},
-	{0x1F97A, 0x1F9A2},
-	{0x1F9A5, 0x1F9AA},
-	{0x1F9AE, 0x1F9CA},
-	{0x1F9CD, 0x1F9FF},
-	{0x1FA70, 0x1FA73},
-	{0x1FA78, 0x1FA7A},
-	{0x1FA80, 0x1FA82},
-	{0x1FA90, 0x1FA95},
-	{0x20000, 0x2FFFD},
-	{0x30000, 0x3FFFD},
-}
-
-// runeWidth is the number of terminal cells a rune paints: two for an East
-// Asian wide or fullwidth rune, zero for a combining mark, one otherwise.
-func runeWidth(r rune) int {
-	if r == 0 || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Me, r) {
-		return 0
-	}
-	if r < wideRanges[0][0] {
-		return 1
-	}
-	lo, hi := 0, len(wideRanges)
-	for lo < hi {
-		mid := (lo + hi) / 2
-		switch {
-		case r < wideRanges[mid][0]:
-			hi = mid
-		case r > wideRanges[mid][1]:
-			lo = mid + 1
-		default:
-			return 2
-		}
-	}
-	return 1
 }
 
 // railKind is the row type the sidebar paints: a workspace row, a window line,
@@ -883,20 +799,11 @@ type railSeg struct {
 	bold   bool
 }
 
-// runeCells is the cell width of a run of text.
-func runeCells(s string) int {
-	n := 0
-	for _, r := range s {
-		n += runeWidth(r)
-	}
-	return n
-}
-
 // segCells is the cell width of a segment run.
 func segCells(segs []railSeg) int {
 	n := 0
 	for _, seg := range segs {
-		n += runeCells(seg.text)
+		n += cells(seg.text)
 	}
 	return n
 }
@@ -908,19 +815,17 @@ func clipSegs(segs []railSeg, budget int) []railSeg {
 		if budget <= 0 {
 			break
 		}
-		var keep []rune
-		for _, r := range seg.text {
-			rw := runeWidth(r)
-			if rw > budget {
-				budget = 0
-				break
-			}
-			keep = append(keep, r)
-			budget -= rw
-		}
-		if len(keep) > 0 {
-			seg.text = string(keep)
+		text := clip(seg.text, budget)
+		if text != "" {
+			budget -= cells(text)
+			seg.text = text
 			out = append(out, seg)
+			continue
+		}
+		if seg.text != "" {
+			// The run starts on a glyph the budget cannot hold, so no later
+			// span can be painted in order either.
+			break
 		}
 	}
 	return out
@@ -932,11 +837,8 @@ func elideSegs(segs []railSeg, budget int) []railSeg {
 	if budget <= 0 {
 		return nil
 	}
-	if budget == 1 {
-		return []railSeg{{text: "…", colour: railDim}}
-	}
 	out := clipSegs(segs, budget-1)
-	return append(out, railSeg{text: "…", colour: railDim})
+	return append(out, railSeg{text: ellipsis, colour: railDim})
 }
 
 // writeRailSeg paints one run of a row on its background.
@@ -1210,8 +1112,8 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		for _, seg := range tail {
 			writeRailSeg(buf, seg, bg, bold)
 		}
-		if pad := w - leftCells - rightCells; pad > 0 {
-			buf.WriteString(strings.Repeat(" ", pad))
+		if n := w - leftCells - rightCells; n > 0 {
+			buf.WriteString(strings.Repeat(" ", n))
 		}
 		for _, seg := range right {
 			writeRailSeg(buf, seg, bg, bold)
@@ -1390,17 +1292,14 @@ func glyphRune(s string) rune {
 	return ' '
 }
 
-// menuPad truncates or pads s to exactly w runes.
+// menuPad cuts or fills s to exactly w cells. It is the fill policy of the
+// menu: a title row continues with the border rune, an item row with spaces.
 func menuPad(s string, w int, fill rune) string {
-	r := []rune(s)
-	if len(r) > w {
-		r = r[:w]
+	s = clip(s, w)
+	if n := w - cells(s); n > 0 {
+		s += strings.Repeat(string(fill), n)
 	}
-	out := string(r)
-	if n := w - len(r); n > 0 {
-		out += strings.Repeat(string(fill), n)
-	}
-	return out
+	return s
 }
 
 // drawBar paints the one-line status bar on the last row. It paints the
@@ -1416,8 +1315,8 @@ func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, info string) {
 	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
 	writeBarSegs(buf, left)
-	if pad := snap.Cols - barCells(segs); pad > 0 {
-		buf.WriteString("\x1b[0m" + barGutter.bg() + strings.Repeat(" ", pad))
+	if n := snap.Cols - barCells(segs); n > 0 {
+		buf.WriteString("\x1b[0m" + barGutter.bg() + strings.Repeat(" ", n))
 	}
 	writeBarSegs(buf, pinned)
 	buf.WriteString("\x1b[0m")
@@ -1463,58 +1362,9 @@ type barSeg struct {
 func barCells(segs []barSeg) int {
 	n := 0
 	for _, seg := range segs {
-		n += runeCells(seg.text)
+		n += cells(seg.text)
 	}
 	return n
-}
-
-// barClipText keeps the longest prefix of s that fits budget cells. A wide rune
-// that would straddle the limit is dropped, never half painted.
-func barClipText(s string, budget int) string {
-	if budget <= 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range s {
-		w := runeWidth(r)
-		if w > budget {
-			break
-		}
-		b.WriteRune(r)
-		budget -= w
-	}
-	return b.String()
-}
-
-// barElideText shrinks s to budget cells and ends it with an ellipsis.
-func barElideText(s string, budget int) string {
-	if budget <= 0 {
-		return ""
-	}
-	if budget == 1 {
-		return "…"
-	}
-	return barClipText(s, budget-1) + "…"
-}
-
-// barClipSegs keeps the first budget cells of a span run, whole runes only.
-func barClipSegs(segs []barSeg, budget int) []barSeg {
-	var out []barSeg
-	for _, seg := range segs {
-		if budget <= 0 {
-			break
-		}
-		text := barClipText(seg.text, budget)
-		if text == "" {
-			// The run ended on a wide rune the budget cannot hold, so no later
-			// span can be painted in order either.
-			break
-		}
-		budget -= runeCells(text)
-		seg.text = text
-		out = append(out, seg)
-	}
-	return out
 }
 
 // barJoin lays groups left to right with one background gutter cell between
@@ -1702,11 +1552,11 @@ func (l *barLeft) fit(budget int) []barSeg {
 		if *name == "" {
 			continue
 		}
-		avail := budget - (barCells(cur()) - runeCells(*name))
+		avail := budget - (barCells(cur()) - cells(*name))
 		if avail < 1 {
 			avail = 1
 		}
-		*name = barElideText(*name, avail)
+		*name = elide(*name, avail)
 		if segs := cur(); barCells(segs) <= budget {
 			return segs
 		}
@@ -1722,8 +1572,24 @@ func (l *barLeft) fit(budget int) []barSeg {
 		return segs
 	}
 
-	// 6. Only the glyph and the id are left; a line too narrow for that is cut.
-	return barClipSegs(cur(), budget)
+	// 6. Only the glyph and the id are left; a line too narrow for that is cut
+	// span by span. The first span the room cannot hold ends the line, so no
+	// later span paints out of order.
+	var out []barSeg
+	room := budget
+	for _, seg := range cur() {
+		if room <= 0 {
+			break
+		}
+		text := clip(seg.text, room)
+		if text == "" {
+			break
+		}
+		room -= cells(text)
+		seg.text = text
+		out = append(out, seg)
+	}
+	return out
 }
 
 // barPinned is the right block: the prefix flag while armed, then the scroll
@@ -1750,7 +1616,7 @@ func barFitPinned(segs []barSeg, cols int) []barSeg {
 		if len(segs) == 0 {
 			break
 		}
-		segs[0].text = barElideText(segs[0].text, cols)
+		segs[0].text = elide(segs[0].text, cols)
 		break
 	}
 	return segs
@@ -1824,16 +1690,9 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 	if y < 0 {
 		y = 0
 	}
-	pad := func(text string) string {
-		r := []rune(text)
-		if len(r) > w-2 {
-			r = r[:w-2]
-		}
-		return string(r) + strings.Repeat(" ", w-2-len(r))
-	}
 	buf.WriteString("\x1b[0m\x1b[90m")
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+1, x+1,
-		glyphBorderTopLeft, pad(glyphBorderHorizontal+" switch session "), glyphBorderTopRight)
+		glyphBorderTopLeft, pad(glyphBorderHorizontal+" switch session ", w-2), glyphBorderTopRight)
 	for i, s := range sessions {
 		mark := " "
 		if i == sel {
@@ -1851,14 +1710,14 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		if i == sel {
 			colour = "\x1b[97m"
 		}
-		line := fmt.Sprintf("%s %-18s %-4s %-3s", mark, s.Name, state, now)
+		line := fmt.Sprintf("%s %s %-4s %-3s", mark, pad(s.Name, 18), state, now)
 		fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s\x1b[90m%s", y+2+i, x+1,
-			glyphBorderVertical, colour, pad(line), glyphBorderVertical)
+			glyphBorderVertical, colour, pad(line, w-2), glyphBorderVertical)
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+2+len(sessions), x+1,
 		glyphBorderTeeLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderTeeRight)
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+3+len(sessions), x+1,
-		glyphBorderVertical, pad(" j/k move  enter switch  esc cancel"), glyphBorderVertical)
+		glyphBorderVertical, pad(" j/k move  enter switch  esc cancel", w-2), glyphBorderVertical)
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+4+len(sessions), x+1,
 		glyphBorderBottomLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderBottomRight)
 	buf.WriteString("\x1b[0m")
@@ -1874,14 +1733,23 @@ func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string) {
 		return
 	}
 	const caret = "▏"
-	labelRoom := snap.Cols - runeCells(caret)
+	labelRoom := snap.Cols - cells(caret)
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
 	segs := clipSegs([]railSeg{{text: " rename workspace " + id + ": ", colour: railDim}}, labelRoom)
-	draftRoom := snap.Cols - runeCells(caret) - segCells(segs)
+	draftRoom := snap.Cols - cells(caret) - segCells(segs)
+	// The draft loses its head, so a long name still shows its end and the
+	// caret stays on screen.
+	if cells(draft) > draftRoom {
+		if draftRoom > 1 {
+			draft = ellipsis + clipTail(draft, draftRoom-1)
+		} else {
+			draft = ""
+		}
+	}
 	segs = append(segs,
-		railSeg{text: elideRename(draft, draftRoom), colour: railText},
+		railSeg{text: draft, colour: railText},
 		railSeg{text: caret, colour: barAccent},
 	)
 	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m", snap.Rows-1)
@@ -1890,38 +1758,11 @@ func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string) {
 		buf.WriteString(seg.colour.fg())
 		buf.WriteString(seg.text)
 	}
-	if pad := snap.Cols - segCells(segs); pad > 0 {
+	if n := snap.Cols - segCells(segs); n > 0 {
 		buf.WriteString(railBG.bg())
-		buf.WriteString(strings.Repeat(" ", pad))
+		buf.WriteString(strings.Repeat(" ", n))
 	}
 	buf.WriteString("\x1b[0m")
-}
-
-// elideRename keeps the last budget cells of s and marks a cut head with an
-// ellipsis. It never splits a wide rune.
-func elideRename(s string, budget int) string {
-	if budget <= 0 {
-		return ""
-	}
-	if runeCells(s) <= budget {
-		return s
-	}
-	room := budget - 1 // the ellipsis takes one cell
-	if room <= 0 {
-		return ""
-	}
-	r := []rune(s)
-	used := 0
-	i := len(r)
-	for i > 0 {
-		w := runeWidth(r[i-1])
-		if used+w > room {
-			break
-		}
-		used += w
-		i--
-	}
-	return "…" + string(r[i:])
 }
 
 func maxInt(a, b int) int {
@@ -2035,8 +1876,8 @@ func newHelpColumn(categories [][]displayRow) helpColumn {
 	keyW, actionW := 0, 0
 	for _, r := range rows {
 		if r.header == "" {
-			keyW = maxInt(keyW, runeCells(r.key))
-			actionW = maxInt(actionW, runeCells(r.action))
+			keyW = maxInt(keyW, cells(r.key))
+			actionW = maxInt(actionW, cells(r.action))
 		}
 	}
 	if keyW < 1 {
@@ -2212,7 +2053,7 @@ func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
 				if color == "" {
 					color = "\x1b[1m"
 				}
-				header := helpBoxPad(helpBoxElide(r.header, col.width()), col.width())
+				header := pad(elide(r.header, col.width()), col.width())
 				fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m%s%s\x1b[0m", y+1, x+1, color, header)
 				continue
 			}
@@ -2224,7 +2065,7 @@ func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
 				fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 				helpBoxKey(buf, r.key, color, col.keyW)
 				buf.WriteString("  \x1b[90m")
-				buf.WriteString(helpBoxPad(helpBoxElide(r.action, col.actionW), col.actionW))
+				buf.WriteString(pad(elide(r.action, col.actionW), col.actionW))
 				buf.WriteString("\x1b[0m")
 				continue
 			}
@@ -2245,7 +2086,7 @@ func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
 // and the " / " separator plain, so a literal slash reads as a key and a slash
 // between keys reads as a separator. It pads the result to budget cells.
 func helpBoxKey(buf *bytes.Buffer, key, color string, budget int) {
-	key = helpBoxElide(key, budget)
+	key = elide(key, budget)
 	parts := strings.Split(key, " / ")
 	used := 0
 	for i, part := range parts {
@@ -2256,33 +2097,10 @@ func helpBoxKey(buf *bytes.Buffer, key, color string, budget int) {
 		buf.WriteString(color)
 		buf.WriteString("\x1b[1m")
 		buf.WriteString(part)
-		used += runeCells(part)
+		used += cells(part)
 	}
 	buf.WriteString("\x1b[0m")
-	if pad := budget - used; pad > 0 {
-		buf.WriteString(strings.Repeat(" ", pad))
+	if n := budget - used; n > 0 {
+		buf.WriteString(strings.Repeat(" ", n))
 	}
-}
-
-// helpBoxElide keeps s inside a cell budget and marks a cut with an ellipsis. A
-// rune is kept whole, so a double cell rune never splits.
-func helpBoxElide(s string, budget int) string {
-	if budget <= 0 {
-		return ""
-	}
-	if runeCells(s) <= budget {
-		return s
-	}
-	if budget == 1 {
-		return "\u2026"
-	}
-	return clipCells(s, budget-1) + "\u2026"
-}
-
-// helpBoxPad fills s to a cell budget with spaces. It never cuts.
-func helpBoxPad(s string, budget int) string {
-	if pad := budget - runeCells(s); pad > 0 {
-		return s + strings.Repeat(" ", pad)
-	}
-	return s
 }

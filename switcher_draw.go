@@ -123,25 +123,6 @@ func clampRect(r Rect, cols, rows int) Rect {
 	return r
 }
 
-// clipCells keeps the first n cells of s, so a run never writes past its
-// budget.
-func clipCells(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	var b strings.Builder
-	used := 0
-	for _, r := range s {
-		w := runeWidth(r)
-		if used+w > n {
-			break
-		}
-		b.WriteRune(r)
-		used += w
-	}
-	return b.String()
-}
-
 // drawSwitcher writes the whole float into buf and returns the cell the query
 // cursor belongs on. The cell is zero based and always inside s.rect. Every row
 // the float owns is painted, blanks included, and every row starts with an
@@ -185,15 +166,15 @@ func paintSwitcherQuery(buf *bytes.Buffer, s *switcher, l switcherLayout) (cx, c
 		buf.WriteString("\x1b[0m" + railBG.bg())
 	} else {
 		prompt := "> "
-		q := clipCells(string(s.query), w-len(prompt))
+		q := clip(string(s.query), w-len(prompt))
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 		buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + prompt)
 		if q != "" {
 			buf.WriteString("\x1b[0m" + railBG.bg() + railText.fg() + q)
 		}
-		used := len(prompt) + runeCells(q)
-		if pad := w - used; pad > 0 {
-			buf.WriteString(strings.Repeat(" ", pad))
+		used := len(prompt) + cells(q)
+		if n := w - used; n > 0 {
+			buf.WriteString(strings.Repeat(" ", n))
 		}
 		buf.WriteString("\x1b[0m")
 		cx = x + used
@@ -259,8 +240,8 @@ func paintRailRow(buf *bytes.Buffer, left, tail, right []railSeg, x, y, w int, b
 	for _, seg := range tail {
 		writeRailSeg(buf, seg, bg, bold)
 	}
-	if pad := w - segCells(left) - segCells(tail) - segCells(right); pad > 0 {
-		buf.WriteString(strings.Repeat(" ", pad))
+	if n := w - segCells(left) - segCells(tail) - segCells(right); n > 0 {
+		buf.WriteString(strings.Repeat(" ", n))
 	}
 	for _, seg := range right {
 		writeRailSeg(buf, seg, bg, bold)
@@ -334,10 +315,10 @@ func paintSwitcherPreview(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.T
 	for i := 0; i < h; i++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", start+i+1, band.X+1)
 		buf.WriteString("\x1b[0m" + railBG.bg() + railText.fg())
-		text := clipCells(lines[i], band.W)
+		text := clip(lines[i], band.W)
 		buf.WriteString(text)
-		if pad := band.W - runeCells(text); pad > 0 {
-			buf.WriteString(strings.Repeat(" ", pad))
+		if n := band.W - cells(text); n > 0 {
+			buf.WriteString(strings.Repeat(" ", n))
 		}
 		buf.WriteString("\x1b[0m")
 	}

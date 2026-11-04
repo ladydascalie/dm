@@ -45,7 +45,7 @@ func paintBorderText(buf *bytes.Buffer, r Rect, y int, text, style string) {
 	if text == "" || r.W < 3 || y < 0 {
 		return
 	}
-	text = clipCells(text, r.W-2)
+	text = clip(text, r.W-2)
 	if text == "" {
 		return
 	}
