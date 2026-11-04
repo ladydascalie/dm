@@ -72,6 +72,10 @@ func TestReapOrphans(t *testing.T) {
 
 	orphanShell := shellPID(t, h, "reap", orphan)
 	keepShell := shellPID(t, h, "reap", keep)
+	// keep answered the pid probe, so its daemon is listening and its own
+	// reaper timer is running. Its first pass lands within sockEvery of this
+	// moment; the check below waits for that pass, not just the orphan's.
+	keepUp := time.Now()
 	orphanDaemon := panePID(t, h, "reap", orphan)
 	keepDaemon := panePID(t, h, "reap", keep)
 	if orphanDaemon == keepDaemon || orphanShell == keepShell {
@@ -102,9 +106,11 @@ func TestReapOrphans(t *testing.T) {
 		t.Fatalf("pane log does not name the reason: %s", b)
 	}
 
-	// The orphan's death proves a reaper pass ran. The intact pane needs one
-	// look after that pass: a surviving daemon cannot be un-survived by
-	// waiting longer, so the rest of the window proves nothing.
+	// The orphan's death only proves the orphan's reaper pass ran. Each pane
+	// runs its own timer, so wait for keep's first pass too, then look once.
+	if wait := time.Until(keepUp.Add(sockEvery + 300*time.Millisecond)); wait > 0 {
+		time.Sleep(wait)
+	}
 	if gone(keepDaemon) || gone(keepShell) {
 		t.Fatalf("live pane reaped with the orphan after %s: daemon %d alive=%v, shell %d alive=%v",
 			time.Since(start).Round(time.Millisecond), keepDaemon, !gone(keepDaemon),
