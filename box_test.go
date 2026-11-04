@@ -560,3 +560,130 @@ func TestMessageBoxWatchersRequest(t *testing.T) {
 		t.Fatal("msg-watchers accepted a field, want an error")
 	}
 }
+
+// TestMessageBoxSubFields proves the sub request takes the read fields without
+// a timeout: one topic, an optional state and pane, and a cursor that may be 0.
+func TestMessageBoxSubFields(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		ok   bool
+	}{
+		{"no fields", `{}`, true},
+		{"cursor only", `{"afterSeq":0}`, true},
+		{"cursor and state", `{"afterSeq":3,"state":"done"}`, true},
+		{"empty state", `{"state":""}`, true},
+		{"unknown state", `{"state":"clear"}`, false},
+		{"negative cursor", `{"afterSeq":-1}`, false},
+		{"branch and exact topic", `{"key":"a","keyPrefix":"b"}`, false},
+		{"bad from", `{"from":"lane"}`, false},
+		{"pane from", `{"from":"w3p1"}`, true},
+	}
+	for _, c := range cases {
+		_, err := parseBoxReq("msg-sub", json.RawMessage(c.raw))
+		if c.ok && err != nil {
+			t.Fatalf("%s rejected: %v", c.name, err)
+		}
+		if !c.ok && err == nil {
+			t.Fatalf("%s accepted, want an error", c.name)
+		}
+	}
+
+	// A subscription has no timeout: it runs until its connection goes.
+	if _, err := parseBoxReq("msg-sub", json.RawMessage(`{"timeoutMs":1000}`)); err == nil {
+		t.Fatal("msg-sub accepted timeoutMs")
+	}
+	// The cursor stays a pointer, so 0 is a cursor and absent is not one.
+	got, err := parseBoxReq("msg-sub", json.RawMessage(`{"afterSeq":7,"from":"w1p2"}`))
+	if err != nil {
+		t.Fatalf("sub rejected: %v", err)
+	}
+	req, ok := got.(*subReq)
+	if !ok {
+		t.Fatalf("sub decoded to %T", got)
+	}
+	if req.AfterSeq == nil || *req.AfterSeq != 7 || req.From != "w1p2" {
+		t.Fatalf("sub = %+v, want the cursor 7 from w1p2", req)
+	}
+	absent, err := parseBoxReq("msg-sub", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("empty sub rejected: %v", err)
+	}
+	if req := absent.(*subReq); req.AfterSeq != nil {
+		t.Fatalf("empty sub carries a cursor %d, want none", *req.AfterSeq)
+	}
+}
+
+// TestMessageBoxGoldenSubFrame pins the frame JSON the stream sends, field
+// order included.
+func TestMessageBoxGoldenSubFrame(t *testing.T) {
+	e := entry{
+		Seq:   7,
+		At:    time.Date(2026, time.November, 3, 14, 40, 12, 0, time.UTC),
+		From:  "w3p1",
+		Key:   "lane/a",
+		State: stateDone,
+		Msg:   "gate green",
+	}
+	want := `{"entry":{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green"},"trimmed":true}`
+	b, err := json.Marshal(subFrame{Entry: e, Trimmed: true})
+	if err != nil {
+		t.Fatalf("marshal sub frame: %v", err)
+	}
+	if string(b) != want {
+		t.Fatalf("sub frame json =\n %s\nwant\n %s", b, want)
+	}
+	var back subFrame
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatalf("decode sub frame: %v", err)
+	}
+	if back.Entry != e || !back.Trimmed {
+		t.Fatalf("sub frame round trip = %+v", back)
+	}
+}
+
+// TestMessageBoxSchemaSub proves the published schema carries the action, the
+// request fields with an optional state, and the frame shape.
+func TestMessageBoxSchemaSub(t *testing.T) {
+	doc := readBoxSchema(t)
+	sub, ok := doc.Actions["msg-sub"]
+	if !ok {
+		t.Fatal("schema has no msg-sub action")
+	}
+
+	req := sub.Request
+	for name, want := range map[string]string{
+		"from": "string", "key": "string", "keyPrefix": "string", "afterSeq": "integer",
+	} {
+		if got := req.Properties[name].Type; got != want {
+			t.Fatalf("sub %s type = %q, want %q", name, got, want)
+		}
+	}
+	if got := req.Properties["state"].Enum; !sameStrings(got, stateNames()) {
+		t.Fatalf("sub state enum = %v, want %v", got, stateNames())
+	}
+	if got := req.Required; len(got) != 0 {
+		t.Fatalf("sub required = %v, want none", got)
+	}
+	if _, ok := req.Properties["timeoutMs"]; ok {
+		t.Fatal("sub request schema carries a timeout")
+	}
+
+	reply := sub.Reply
+	if want := []string{"entry", "trimmed"}; !sameStrings(reply.Required, want) {
+		t.Fatalf("sub frame required = %v, want %v", reply.Required, want)
+	}
+	if got := reply.Properties["trimmed"].Type; got != "boolean" {
+		t.Fatalf("sub trimmed type = %q, want boolean", got)
+	}
+	e := reply.Properties["entry"]
+	if e.Type != "object" {
+		t.Fatalf("sub entry type = %q", e.Type)
+	}
+	if want := []string{"seq", "at", "from", "key", "state", "msg"}; !sameStrings(e.Required, want) {
+		t.Fatalf("sub entry required = %v, want %v", e.Required, want)
+	}
+	if got := e.Properties["state"].Enum; !sameStrings(got, stateNames()) {
+		t.Fatalf("sub entry state enum = %v, want %v", got, stateNames())
+	}
+}

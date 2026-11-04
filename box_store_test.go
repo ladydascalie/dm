@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -894,5 +895,291 @@ func TestBoxWatchNoPaneFails(t *testing.T) {
 	}
 	if ws := boxWatcherList(t, s, cl, conn); len(ws) != 0 {
 		t.Fatalf("watches = %+v, want none", ws)
+	}
+}
+
+// boxSubStart runs one msg-sub handler in its own goroutine, the way the read
+// loop runs it, and returns a channel closed when the handler returns.
+func boxSubStart(t *testing.T, s *server, cl *client, res string) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.handleReq(cl, Msg{Type: "req", Action: "msg-sub", Res: json.RawMessage(res)})
+	}()
+	return done
+}
+
+// boxSubFrame reads one stream frame and fails on any other frame.
+func boxSubFrame(t *testing.T, conn net.Conn) subFrame {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	m, err := readMsg(conn)
+	if err != nil {
+		t.Fatalf("sub frame: %v", err)
+	}
+	if m.Type != "msg" {
+		t.Fatalf("sub frame type = %q, want msg", m.Type)
+	}
+	if m.OK || m.Error != "" {
+		t.Fatalf("sub frame = %+v, want a plain stream frame", m)
+	}
+	var f subFrame
+	if err := json.Unmarshal(m.Res, &f); err != nil {
+		t.Fatalf("sub frame %s: %v", m.Res, err)
+	}
+	return f
+}
+
+// boxSubQuiet fails when a stream frame arrives inside the quiet window, and
+// leaves the connection usable for the next read.
+func boxSubQuiet(t *testing.T, conn net.Conn, why string) {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(80 * time.Millisecond))
+	m, err := readMsg(conn)
+	_ = conn.SetReadDeadline(time.Time{})
+	if err == nil {
+		t.Fatalf("%s: the stream sent %q", why, m.Type)
+	}
+}
+
+// boxAwaitWatch polls the watch registry until done holds for k, so a stream
+// that runs in its own goroutine has time to settle.
+func boxAwaitWatch(t *testing.T, s *server, k boxWatchKey, why string, done func(watch) bool) watch {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		w, ok := s.watches[k]
+		s.mu.Unlock()
+		if ok && done(w) {
+			return w
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: watch = %+v (listed %v)", why, w, ok)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// boxUnixConn is a client on a real unix socket with the test holding the other
+// end, so connGone sees a hangup the way it does in a live session.
+func boxUnixConn(t *testing.T) (*client, net.Conn) {
+	t.Helper()
+	sock := filepath.Join(t.TempDir(), "sub.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	type accepted struct {
+		c   net.Conn
+		err error
+	}
+	got := make(chan accepted, 1)
+	go func() {
+		c, err := ln.Accept()
+		got <- accepted{c, err}
+	}()
+	peer, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	a := <-got
+	if a.err != nil {
+		t.Fatalf("accept: %v", a.err)
+	}
+	t.Cleanup(func() {
+		_ = peer.Close()
+		_ = a.c.Close()
+	})
+	return &client{c: a.c, cols: 80, rows: 24}, peer
+}
+
+// TestBoxSubBlocksAndStreams: the handler parks on an empty box, then streams
+// the two entries that land, in order, and parks again.
+func TestBoxSubBlocksAndStreams(t *testing.T) {
+	s := boxServer(t)
+	sub, conn := boxUnixConn(t)
+	done := boxSubStart(t, s, sub, `{"keyPrefix":"lane/","afterSeq":0}`)
+	awaitWaiters(t, s, 1)
+	select {
+	case <-done:
+		t.Fatal("the stream returned before any entry")
+	default:
+	}
+
+	poster, pconn := boxConn(t)
+	first := boxPost(t, s, poster, pconn, "lane/a", "note", "one")
+	second := boxPost(t, s, poster, pconn, "lane/b", "done", "two")
+
+	got := boxSubFrame(t, conn)
+	if got.Entry.Seq != first.Seq || got.Entry.Msg != "one" || got.Trimmed {
+		t.Fatalf("first frame = %+v, want seq %d untrimmed", got, first.Seq)
+	}
+	got = boxSubFrame(t, conn)
+	if got.Entry.Seq != second.Seq || got.Entry.Msg != "two" || got.Trimmed {
+		t.Fatalf("second frame = %+v, want seq %d untrimmed", got, second.Seq)
+	}
+	// The stream stays open: it is one parked handler, not two replies.
+	awaitWaiters(t, s, 1)
+	select {
+	case <-done:
+		t.Fatal("the stream returned after two entries")
+	default:
+	}
+}
+
+// TestBoxSubStateFilterAdvancesCursor: a state filter ships only the matching
+// entry, and the cursor still walks over the one it skipped.
+func TestBoxSubStateFilterAdvancesCursor(t *testing.T) {
+	s := boxServer(t)
+	pane := boxPane(t, s)
+	sub, conn := boxUnixConn(t)
+	k := boxWatchKeyOf(pane, "lane/a", "")
+	boxSubStart(t, s, sub, `{"key":"lane/a","state":"done","from":"`+pane+`"}`)
+	boxAwaitWatch(t, s, k, "the stream never parked", func(w watch) bool {
+		return w.Parked && w.Cursor == 0
+	})
+
+	poster, pconn := boxConn(t)
+	note := boxPost(t, s, poster, pconn, "lane/a", "note", "progress")
+	boxSubQuiet(t, conn, "a note entry reached a done subscriber")
+	boxAwaitWatch(t, s, k, "the skipped entry never moved the cursor", func(w watch) bool {
+		return w.Parked && w.Cursor == note.Seq
+	})
+
+	gate := boxPost(t, s, poster, pconn, "lane/a", "done", "gate green")
+	got := boxSubFrame(t, conn)
+	if got.Entry.Seq != gate.Seq || got.Entry.State != stateDone {
+		t.Fatalf("frame = %+v, want the done entry %d", got, gate.Seq)
+	}
+	boxAwaitWatch(t, s, k, "the served entry never moved the cursor", func(w watch) bool {
+		return w.Parked && w.Cursor == gate.Seq
+	})
+}
+
+// TestBoxSubGapTrimsOnce: a cursor behind the oldest kept entry starts there and
+// says so on the first frame only.
+func TestBoxSubGapTrimsOnce(t *testing.T) {
+	s := boxServer(t)
+	poster, pconn := boxConn(t)
+	boxPost(t, s, poster, pconn, "lane/a", "note", "one")
+	boxPost(t, s, poster, pconn, "lane/a", "note", "two")
+	if m := boxCall(t, s, poster, pconn, "msg-clear", `{}`); !m.OK {
+		t.Fatalf("clear: %s", m.Error)
+	}
+	third := boxPost(t, s, poster, pconn, "lane/a", "note", "three")
+
+	sub, conn := boxUnixConn(t)
+	boxSubStart(t, s, sub, `{"key":"lane/a","afterSeq":0}`)
+	got := boxSubFrame(t, conn)
+	if !got.Trimmed || got.Entry.Seq != third.Seq {
+		t.Fatalf("first frame = %+v, want the gap reported on seq %d", got, third.Seq)
+	}
+
+	fourth := boxPost(t, s, poster, pconn, "lane/a", "note", "four")
+	got = boxSubFrame(t, conn)
+	if got.Trimmed || got.Entry.Seq != fourth.Seq {
+		t.Fatalf("later frame = %+v, want seq %d with no gap", got, fourth.Seq)
+	}
+}
+
+// TestBoxSubEmptyLogNoGap: a cursor on an empty log has no gap, so the first
+// entry that arrives later carries trimmed false.
+func TestBoxSubEmptyLogNoGap(t *testing.T) {
+	s := boxServer(t)
+	sub, conn := boxUnixConn(t)
+	boxSubStart(t, s, sub, `{"key":"lane/a","afterSeq":0}`)
+	awaitWaiters(t, s, 1)
+
+	poster, pconn := boxConn(t)
+	first := boxPost(t, s, poster, pconn, "lane/a", "note", "one")
+	got := boxSubFrame(t, conn)
+	if got.Trimmed || got.Entry.Seq != first.Seq {
+		t.Fatalf("frame = %+v, want seq %d untrimmed", got, first.Seq)
+	}
+}
+
+// TestBoxSubWatchParkedForLife: the watch is parked from the first frame to the
+// last and its cursor follows the stream.
+func TestBoxSubWatchParkedForLife(t *testing.T) {
+	s := boxServer(t)
+	pane := boxPane(t, s)
+	poster, pconn := boxConn(t)
+	first := boxPost(t, s, poster, pconn, "lane/a", "note", "one")
+
+	sub, conn := boxUnixConn(t)
+	k := boxWatchKeyOf(pane, "", "lane/")
+	boxSubStart(t, s, sub, `{"keyPrefix":"lane/","from":"`+pane+`"}`)
+
+	if got := boxSubFrame(t, conn); got.Entry.Seq != first.Seq {
+		t.Fatalf("frame = %+v, want seq %d", got, first.Seq)
+	}
+	w := boxAwaitWatch(t, s, k, "the streaming watch never advanced", func(w watch) bool {
+		return w.Parked && w.Cursor == first.Seq
+	})
+	if w.Pane != pane || w.KeyPrefix != "lane/" {
+		t.Fatalf("watch = %+v, want the lane/ branch on %s", w, pane)
+	}
+
+	second := boxPost(t, s, poster, pconn, "lane/b", "done", "two")
+	if got := boxSubFrame(t, conn); got.Entry.Seq != second.Seq {
+		t.Fatalf("frame = %+v, want seq %d", got, second.Seq)
+	}
+	boxAwaitWatch(t, s, k, "the watch never reached the second entry", func(w watch) bool {
+		return w.Parked && w.Cursor == second.Seq
+	})
+}
+
+// TestBoxSubDisconnectUnparksAndStops: the handler notices a gone connection
+// through boxPollWait, unparks its watch and returns.
+func TestBoxSubDisconnectUnparksAndStops(t *testing.T) {
+	s := boxServer(t)
+	pane := boxPane(t, s)
+	sub, peer := boxUnixConn(t)
+	k := boxWatchKeyOf(pane, "lane/a", "")
+	done := boxSubStart(t, s, sub, `{"key":"lane/a","from":"`+pane+`"}`)
+	boxAwaitWatch(t, s, k, "the stream never parked", func(w watch) bool { return w.Parked })
+
+	if err := peer.Close(); err != nil {
+		t.Fatalf("close the subscriber: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the stream outlived its connection")
+	}
+	boxAwaitWatch(t, s, k, "the watch stayed parked after the disconnect", func(w watch) bool {
+		return !w.Parked
+	})
+	awaitWaiters(t, s, 0)
+}
+
+// TestBoxSubBadRequestRepliesWithError: a refused stream answers with a resp
+// carrying the error and sends no frame. A from outside the tree records no
+// watch.
+func TestBoxSubBadRequestRepliesWithError(t *testing.T) {
+	s := boxServer(t)
+	cl, conn := boxUnixConn(t)
+	cases := []struct{ res, want string }{
+		{`{"key":"a","keyPrefix":"b"}`, "exclusive"},
+		{`{"afterSeq":-1}`, "afterSeq"},
+		{`{"state":"clear"}`, "clear"},
+		{`{"from":"lane"}`, "not a pane id"},
+		{`{"from":"w9p9"}`, `box: no pane "w9p9"`},
+	}
+	for _, c := range cases {
+		m := boxCall(t, s, cl, conn, "msg-sub", c.res)
+		if m.OK {
+			t.Fatalf("%s accepted", c.res)
+		}
+		if !strings.Contains(m.Error, c.want) {
+			t.Fatalf("%s error = %q, want %q", c.res, m.Error, c.want)
+		}
+		boxSubQuiet(t, conn, "a refused stream "+c.res)
+	}
+	if ws := boxWatcherList(t, s, cl, conn); len(ws) != 0 {
+		t.Fatalf("watches = %+v, want none after the refused streams", ws)
 	}
 }
