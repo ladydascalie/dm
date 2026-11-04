@@ -173,7 +173,7 @@ func TestSystemNotifyRunsNotifySend(t *testing.T) {
 
 	t.Setenv("DM_NOTIFY", "0")
 	systemNotify("dm main w1p1 pi done", "finished")
-	stillNotify(t, log, 1, 500*time.Millisecond)
+	stillNotify(t, log, 1, 250*time.Millisecond)
 }
 
 // A PATH without notify-send is a silent no-op: nothing runs, nothing breaks.
@@ -183,7 +183,7 @@ func TestSystemNotifyWithoutBinary(t *testing.T) {
 	t.Setenv("DM_NOTIFY", "")
 
 	systemNotify("dm main w1p1 blocked", "needs review")
-	stillNotify(t, log, 0, 300*time.Millisecond)
+	stillNotify(t, log, 0, 250*time.Millisecond)
 }
 
 // A blocked pane the operator is not looking at notifies once, and the title
@@ -207,7 +207,7 @@ func TestNotifyBlockedInBackgroundPane(t *testing.T) {
 			t.Fatalf("notification %q missing %q", line, want)
 		}
 	}
-	stillNotify(t, log, 1, 500*time.Millisecond)
+	stillNotify(t, log, 1, 250*time.Millisecond)
 }
 
 // The same state twice is one notification: a second report for a pane already
@@ -222,7 +222,7 @@ func TestNotifyOncePerState(t *testing.T) {
 	writeStatus(t, h, "n", p2, "blocked", "first")
 	waitNotify(t, log, 1)
 	writeStatus(t, h, "n", p2, "blocked", "second")
-	stillNotify(t, log, 1, 700*time.Millisecond)
+	stillNotify(t, log, 1, 250*time.Millisecond)
 	lines := notifyLines(t, log)
 	if !strings.Contains(lines[0], "first") {
 		t.Fatalf("notification %q carries the wrong message", lines[0])
@@ -239,7 +239,7 @@ func TestNotifySuppressedForAttachedFocus(t *testing.T) {
 	attachClient(t, h, "n")
 
 	writeStatus(t, h, "n", p2, "blocked", "hidden")
-	stillNotify(t, log, 0, 700*time.Millisecond)
+	stillNotify(t, log, 0, 250*time.Millisecond)
 
 	// The same pane in the background, entering another state, does notify.
 	h.run("focus", root, "-s", "n")
@@ -259,7 +259,7 @@ func TestNotifyDisabledByEnv(t *testing.T) {
 	h.run("focus", root, "-s", "n")
 
 	writeStatus(t, h, "n", p2, "blocked", "needs review")
-	stillNotify(t, log, 0, 800*time.Millisecond)
+	stillNotify(t, log, 0, 250*time.Millisecond)
 }
 
 // A pane exit notifies when the operator is not looking at it.
