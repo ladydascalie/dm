@@ -27,7 +27,7 @@ func boxEntries() []entry {
 func boxScreen(t *testing.T, b *boxView, cols, rows int) vt10x.Terminal {
 	t.Helper()
 	var buf bytes.Buffer
-	b.float.Draw(&buf)
+	b.float.Draw(&buf, nil)
 	screen := vt10x.New(vt10x.WithSize(cols, rows))
 	if _, err := screen.Write(buf.Bytes()); err != nil {
 		t.Fatalf("replay the box: %v", err)
@@ -230,8 +230,10 @@ func TestBoxPostPushesAndEchoes(t *testing.T) {
 		cl.shutdown()
 	})
 
-	s.handleReq(cl, Msg{Type: "req", Action: "msg-post",
-		Res: json.RawMessage(`{"key":"lane/a","state":"done","msg":"gate green"}`)})
+	s.handleReq(cl, Msg{
+		Type: "req", Action: "msg-post",
+		Res: json.RawMessage(`{"key":"lane/a","state":"done","msg":"gate green"}`),
+	})
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	push, err := readMsg(conn)
 	if err != nil {

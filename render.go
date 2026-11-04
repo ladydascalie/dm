@@ -108,13 +108,13 @@ func (s *selRange) has(off int) bool {
 
 // drawPane paints one pane's cells inside r.
 func drawPane(buf *bytes.Buffer, vt vt10x.View, r Rect) {
-	drawPaneFrom(buf, vt, r, 0, nil)
+	drawPaneFrom(buf, vt, r, 0, nil, nil)
 }
 
 // drawPaneFrom paints rows [row0, row0+r.H) of vt into r. row0 > 0 shows
 // scrollback kept in a taller terminal. Cells inside sel get reverse video on
-// top of the pane's own colours.
-func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel *selRange) {
+// top of the pane's own colours; cells inside hover get an underline.
+func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel, hover *selRange) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -131,7 +131,11 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel *selRa
 			} else {
 				g = normCell(g)
 			}
+			hovered := hover.has(y*r.W + x)
 			selected := sel.has(y*r.W + x)
+			if hovered {
+				g.Mode |= attrUnderline
+			}
 			buf.WriteString(sgr(g, cur))
 			if selected {
 				buf.WriteString("\x1b[7m")
@@ -152,8 +156,8 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel *selRa
 
 // drawPaneRow paints one row of a pane's content: the same bytes a full pane
 // paint writes for that row.
-func drawPaneRow(buf *bytes.Buffer, vt vt10x.View, r Rect, row, row0 int, sel *selRange) {
-	drawPaneFrom(buf, vt, Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W))
+func drawPaneRow(buf *bytes.Buffer, vt vt10x.View, r Rect, row, row0 int, sel, hover *selRange) {
+	drawPaneFrom(buf, vt, Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W), selRow(hover, row, r.W))
 }
 
 // selRow moves a pane-wide cell range onto one row, nil when the row holds

@@ -8,7 +8,10 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,6 +50,9 @@ type tui struct {
 	toasts  []toast // oldest first, newest last
 	// floats are arbitrary floating panes rendered over the main layout.
 	floats []*FloatingPane
+	// hover is the URL under the pointer while ctrl is held, so the frame can
+	// underline it. It is nil when no link is hovered.
+	hover *linkHover
 	// box is the message-box float, nil when closed.
 	box   *boxView
 	dirty bool
@@ -174,14 +180,25 @@ type histCache struct {
 	got bool
 }
 
+// linkHover is the URL under a ctrl-held pointer: the pane or float that owns
+// it and its cell range in that pane's screen-local cells. w is the width the
+// range was measured against, so a resized pane drops the range rather than
+// underlining the wrong cells. A nil hover draws nothing.
+type linkHover struct {
+	pane   string
+	w      int
+	region selRange
+}
+
 // panePaint is one pane's content for one frame: the terminal to read, the
-// first row to show from it and the selection to mark.
+// first row to show from it, the selection to mark and the hover to underline.
 type panePaint struct {
-	id   string
-	rect Rect
-	vt   vt10x.View
-	row0 int
-	sel  *selRange
+	id    string
+	rect  Rect
+	vt    vt10x.View
+	row0  int
+	sel   *selRange
+	hover *selRange
 }
 
 // toast is one short message for the operator. Its time is when it was raised,
@@ -1590,6 +1607,195 @@ func osc52(text string) string {
 	return seq
 }
 
+// urlPattern matches an http or https URL on one row. It stops at whitespace
+// or a character that commonly delimits a URL in prose.
+var urlPattern = regexp.MustCompile(`https?://[^\s"'<>()\[\]{}]+`)
+
+// openURL launches the system's default browser for url. It returns an error
+// when no opener is available; the caller reports it as a toast.
+func openURL(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
+}
+
+// rowText reads one row of vt as text. Trailing blanks go. It takes the vt
+// lock, so the caller must not hold it.
+func rowText(vt vt10x.View, w, row int) string {
+	if vt == nil || w < 1 {
+		return ""
+	}
+	cols, rows := vt.Size()
+	vt.Lock()
+	defer vt.Unlock()
+	if row < 0 || row >= rows {
+		return ""
+	}
+	var b strings.Builder
+	for x := 0; x < w && x < cols; x++ {
+		g := normCell(vt.Cell(x, row))
+		if g.Char < 0x20 {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(g.Char)
+		}
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
+// urlAtRow returns the URL in row of vt whose cell range covers x. The row is
+// read as text and matched against urlPattern. Cells are treated one per rune,
+// which holds for the ASCII URLs this matches.
+func urlAtRow(vt vt10x.View, w, row, x int) string {
+	text := rowText(vt, w, row)
+	for _, loc := range urlPattern.FindAllStringIndex(text, -1) {
+		start := len([]rune(text[:loc[0]]))
+		end := start + len([]rune(text[loc[0]:loc[1]])) - 1
+		if x >= start && x <= end {
+			return strings.TrimRight(text[loc[0]:loc[1]], ".,;:!?")
+		}
+	}
+	return ""
+}
+
+// urlMatchAtRow returns the URL in row of vt whose cell range covers x and the
+// cell range itself. The row is read as text and matched against urlPattern.
+// Cells are treated one per rune, which holds for the ASCII URLs this matches.
+func urlMatchAtRow(vt vt10x.View, w, row, x int) (string, *selRange) {
+	text := rowText(vt, w, row)
+	for _, loc := range urlPattern.FindAllStringIndex(text, -1) {
+		start := len([]rune(text[:loc[0]]))
+		url := strings.TrimRight(text[loc[0]:loc[1]], ".,;:!?")
+		end := start + len([]rune(url)) - 1
+		if x >= start && x <= end {
+			return url, &selRange{lo: start, hi: end}
+		}
+	}
+	return "", nil
+}
+
+// paneHoverAt resolves the point in pane p to the URL range under it, or nil.
+// The range is row-major in the pane's screen-local cells. The live VT is read,
+// or the scrollback view when the pane is scrolled.
+func (t *tui) paneHoverAt(p *PaneInfo, x, y int) *linkHover {
+	if p == nil {
+		return nil
+	}
+	c, ok := cellAt(p, x, y)
+	if !ok {
+		return nil
+	}
+	vt := t.vts[p.ID]
+	row := c.y
+	if t.scroll == p.ID && t.scrollVT != nil {
+		vt = t.scrollVT
+		row0, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
+		row = row0 + c.y
+	}
+	if vt == nil {
+		return nil
+	}
+	_, rng := urlMatchAtRow(vt, p.Rect.W, row, c.x)
+	if rng == nil {
+		return nil
+	}
+	return &linkHover{
+		pane: p.ID, w: p.Rect.W,
+		region: selRange{lo: c.y*p.Rect.W + rng.lo, hi: c.y*p.Rect.W + rng.hi},
+	}
+}
+
+// boxHoverAt resolves the point to the URL range under it in the message box
+// float, or nil. The float's VT is the box's interior, so the row is local.
+func (t *tui) boxHoverAt(x, y int) *linkHover {
+	b := t.box
+	if b == nil || b.float == nil || b.float.VT == nil {
+		return nil
+	}
+	r := b.float.Rect
+	if x < r.X || x >= r.X+r.W || y < r.Y || y >= r.Y+r.H {
+		return nil
+	}
+	cx, cy := x-r.X, y-r.Y
+	_, rng := urlMatchAtRow(b.float.VT, r.W, cy, cx)
+	if rng == nil {
+		return nil
+	}
+	return &linkHover{
+		pane: "box", w: r.W,
+		region: selRange{lo: cy*r.W + rng.lo, hi: cy*r.W + rng.hi},
+	}
+}
+
+// updateLinkHover tracks the URL under the pointer while ctrl is held, so the
+// frame can underline it. A pointer off every URL, or a released ctrl, clears
+// it. The terminal reports modifiers with mouse events only, so a stationary
+// pointer keeps its underline until the next event moves it.
+func (t *tui) updateLinkHover(x, y int, ctrl bool) {
+	var h *linkHover
+	if ctrl {
+		switch t.mode {
+		case "box":
+			h = t.boxHoverAt(x, y)
+		case "":
+			if p := t.paneAtBox(x, y); p != nil {
+				h = t.paneHoverAt(p, x, y)
+			}
+		}
+	}
+	if h == nil && t.hover == nil {
+		return
+	}
+	if h != nil && t.hover != nil && *h == *t.hover {
+		return
+	}
+	t.hover = h
+	t.dirty = true
+}
+
+// hoverFor returns the hover range for the pane or float of id and width w, or
+// nil when the hover belongs elsewhere or was measured against another width.
+func (t *tui) hoverFor(id string, w int) *selRange {
+	h := t.hover
+	if h == nil || h.pane != id || h.w != w {
+		return nil
+	}
+	r := h.region
+	return &r
+}
+
+// urlAt returns the URL under the point in pane p, or "" when none. The live VT
+// is read, or the scrollback view when the pane is scrolled. A URL is a run of
+// non-space characters starting with http:// or https://; the click must land
+// inside that run.
+func (t *tui) urlAt(p *PaneInfo, x, y int) string {
+	if p == nil {
+		return ""
+	}
+	c, ok := cellAt(p, x, y)
+	if !ok {
+		return ""
+	}
+	vt := t.vts[p.ID]
+	row := c.y
+	if t.scroll == p.ID && t.scrollVT != nil {
+		vt = t.scrollVT
+		row0, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
+		row = row0 + c.y
+	}
+	if vt == nil {
+		return ""
+	}
+	return urlAtRow(vt, p.Rect.W, row, c.x)
+}
+
 func (t *tui) handleMouse(ev mouseEvent) {
 	if t.sw != nil {
 		return // the float owns the pointer while it is open
@@ -1607,6 +1813,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	}
 	x, y := ev.x-1, ev.y-1
 	t.mouseX, t.mouseY = x, y
+	t.updateLinkHover(x, y, ev.btn&16 != 0)
 	t.updatePadHover(x, y)
 	if t.mode == "menu" {
 		if t.menu == nil {
@@ -1665,6 +1872,24 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	// in the rail keeps owning its drag and release, so nothing leaks to a pane.
 	if t.press == nil && !t.dragging && t.railClick(ev, x, y) {
 		return
+	}
+	// Ctrl+click on a URL opens it. The click is consumed and its release is
+	// swallowed, so the app never sees a press without its release. A ctrl+click
+	// elsewhere falls through to the usual press.
+	if ev.btn&16 != 0 && ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release {
+		if p := t.paneAtBox(x, y); p != nil {
+			if _, ok := cellAt(p, x, y); ok {
+				if u := t.urlAt(p, x, y); u != "" {
+					if err := openURL(u); err != nil {
+						t.notify("open: " + err.Error())
+					} else {
+						t.notify("opened " + u)
+					}
+					t.swallowRelease = true
+					return
+				}
+			}
+		}
 	}
 	// Right press is the mux's context menu, even over an app that owns the
 	// mouse. It is a window-manager gesture, not the app's.
@@ -2270,7 +2495,7 @@ func (t *tui) draw() {
 	var floatBufs []bytes.Buffer
 	for _, f := range t.floats {
 		var fb bytes.Buffer
-		f.Draw(&fb)
+		f.Draw(&fb, t.hoverFor(f.ID, f.Rect.W))
 		floatBufs = append(floatBufs, fb)
 	}
 	dirty := map[int]bool{}
@@ -2356,7 +2581,7 @@ func (t *tui) draw() {
 			if y < pp.rect.Y || y >= pp.rect.Y+pp.rect.H {
 				continue
 			}
-			drawPaneRow(&body, pp.vt, pp.rect, y-pp.rect.Y, pp.row0, pp.sel)
+			drawPaneRow(&body, pp.vt, pp.rect, y-pp.rect.Y, pp.row0, pp.sel, pp.hover)
 		}
 	}
 	if padFreed {
@@ -2439,6 +2664,7 @@ func (t *tui) panePaints(win *Snapshot) []panePaint {
 	out := make([]panePaint, 0, len(win.Panes))
 	for _, p := range win.Panes {
 		pp := panePaint{id: p.ID, rect: p.Rect}
+		pp.hover = t.hoverFor(p.ID, p.Rect.W)
 		if p.ID == t.scroll && t.scrollVT != nil {
 			pp.vt = t.scrollVT
 			pp.row0, _ = scrollStart(t.scrollVT, p.Rect.H, t.offset)
@@ -2476,8 +2702,11 @@ func paneRowSigs(pp panePaint) []uint64 {
 			h = mix(h, uint64(g.FG))
 			h = mix(h, uint64(g.BG))
 			h = mix(h, uint64(g.Mode))
-			if pp.sel.has(row*pp.rect.W + x) {
+			if pp.sel.has(row*pp.rect.W+x) || pp.hover.has(row*pp.rect.W+x) {
 				h = mix(h, 1)
+				if pp.hover.has(row*pp.rect.W + x) {
+					h = mix(h, 2)
+				}
 			}
 		}
 		out[row] = h

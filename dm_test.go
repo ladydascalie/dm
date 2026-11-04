@@ -2494,15 +2494,23 @@ func TestBarElide(t *testing.T) {
 		want string
 		text []string
 	}{
-		{80, "full", []string{"dev", " ", "workspace-a", " ", "1 api-server",
+		{80, "full", []string{
+			"dev", " ", "workspace-a", " ", "1 api-server",
 			" ", "▸ ", "2 web", " ", "3 docs", " ", glyph, " w1p2", " shell",
-			" idle"}},
-		{50, "names", []string{"dev", " ", "workspace-a", " ", "1", " ", "▸ ",
-			"2", " ", "3", " ", glyph, " w1p2", " shell", " idle"}},
-		{34, "workspace", []string{"dev", " ", "workspa…", " ", "▸ ", "2", " ",
-			glyph, " w1p2", " shell", " idle"}},
-		{20, "status", []string{"…", " ", "…", " ", "▸ ", "2", " ", glyph,
-			" w1p2", " shell"}},
+			" idle",
+		}},
+		{50, "names", []string{
+			"dev", " ", "workspace-a", " ", "1", " ", "▸ ",
+			"2", " ", "3", " ", glyph, " w1p2", " shell", " idle",
+		}},
+		{34, "workspace", []string{
+			"dev", " ", "workspa…", " ", "▸ ", "2", " ",
+			glyph, " w1p2", " shell", " idle",
+		}},
+		{20, "status", []string{
+			"…", " ", "…", " ", "▸ ", "2", " ", glyph,
+			" w1p2", " shell",
+		}},
 		{40, "chips", nil},
 		{30, "workspace", nil},
 		{26, "session", nil},
@@ -2717,8 +2725,10 @@ func TestBarPinnedAnchored(t *testing.T) {
 // TestBarWideRunes keeps wide runes whole and inside the column count.
 func TestBarWideRunes(t *testing.T) {
 	glyph, _ := railGlyph("working", nerdFonts())
-	sources := []string{"日本語セッション", "作業ディレクトリ", "▸ ", "1 一二三",
-		"2 四五六", " w1p1", " 日本語", " working", glyph}
+	sources := []string{
+		"日本語セッション", "作業ディレクトリ", "▸ ", "1 一二三",
+		"2 四五六", " w1p1", " 日本語", " working", glyph,
+	}
 	snap := &Snapshot{
 		Session:      "日本語セッション",
 		Workspace:    "作業ディレクトリ",
@@ -2860,10 +2870,14 @@ func TestPadHitCrossesChildBorders(t *testing.T) {
 // TestDividerGripsAlwaysVisible keeps a handle on every divider even before the
 // pointer arrives, so the affordance does not depend on hover working.
 func TestDividerGripsAlwaysVisible(t *testing.T) {
-	inner := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*Node{{Pane: "b"}, {Pane: "c"}}}
-	root := &Node{Dir: "col", Sizes: []float64{0.5, 0.5},
-		Kids: []*Node{{Pane: "a"}, inner}}
+	inner := &Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "b"}, {Pane: "c"}},
+	}
+	root := &Node{
+		Dir: "col", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, inner},
+	}
 	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 26, Root: root}
 	var buf bytes.Buffer
 	drawGrips(&buf, snap)
@@ -3718,7 +3732,7 @@ func TestSelectionHighlight(t *testing.T) {
 		t.Fatalf("unselected paint has reverse video: %q", plain.String())
 	}
 	marked := &bytes.Buffer{}
-	drawPaneFrom(marked, vt, Rect{0, 0, 10, 2}, 0, &selRange{lo: 1, hi: 3})
+	drawPaneFrom(marked, vt, Rect{0, 0, 10, 2}, 0, &selRange{lo: 1, hi: 3}, nil)
 	rev := reversedCells(marked.String())
 	for ch, want := range map[rune]bool{'a': false, 'b': true, 'c': true, 'd': true, 'e': false, 'g': false} {
 		if rev[ch] != want {

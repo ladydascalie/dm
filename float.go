@@ -24,8 +24,8 @@ type FloatingPane struct {
 }
 
 // Draw writes the pane's content and border into buf.
-func (f *FloatingPane) Draw(buf *bytes.Buffer) {
-	drawPaneFrom(buf, f.VT, f.Rect, 0, nil)
+func (f *FloatingPane) Draw(buf *bytes.Buffer, hover *selRange) {
+	drawPaneFrom(buf, f.VT, f.Rect, 0, nil, hover)
 	drawPaneBox(buf, f.Rect, f.Active)
 	paintBorderText(buf, f.Rect, f.Rect.Y-1, f.Title, "\x1b[97m")
 	paintBorderText(buf, f.Rect, f.Rect.Y+f.Rect.H, f.Hint, "\x1b[90m")

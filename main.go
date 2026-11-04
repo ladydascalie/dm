@@ -6,9 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -21,6 +23,7 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm new [-s name]             start a session without attaching
   dm ls                        list sessions and whether they are live
   dm kill [-s name]            stop a session's server (panes survive)
+  dm purge [--dry-run]         remove dead sessions whose panes are gone
   dm exec '<json>' [-s name]   send an action as JSON
   dm write-to <pane> --msg T   type text into a pane (--enter to accept)
   dm read <pane> [--lines N]   print a pane's screen
@@ -89,6 +92,7 @@ type cmdFlags struct {
 	limit      int
 	after      int
 	timeout    time.Duration
+	dry        bool
 	args       []string
 }
 
@@ -112,6 +116,7 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.IntVar(&c.limit, "limit", 0, "list rows, 0 for the whole box")
 	c.fs.IntVar(&c.after, "after", -1, "box seq cursor: entries after this one")
 	c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, "wait timeout")
+	c.fs.BoolVar(&c.dry, "dry-run", false, "print what would be removed")
 	_ = c.fs.Parse(reorder(args))
 	c.args = c.fs.Args()
 }
@@ -204,6 +209,11 @@ func runCLI(argv []string) error {
 			name = c.args[0]
 		}
 		return killSession(name)
+
+	case "purge":
+		c := newFlags("purge")
+		c.parse(argv[1:])
+		return runPurge(c)
 
 	case "exec":
 		c := newFlags("exec")
@@ -829,4 +839,77 @@ func boxElide(s string, w int) string {
 		return s
 	}
 	return barElideText(s, w)
+}
+
+// runPurge removes dead sessions whose server and panes are gone. A session
+// that still answers on its socket, or whose server or a pane process is
+// alive, is left alone and reported.
+func runPurge(c *cmdFlags) error {
+	sessions, err := listSessionInfo()
+	if err != nil {
+		return err
+	}
+	purged := 0
+	for _, s := range sessions {
+		if s.Live {
+			continue
+		}
+		dir := sessionDir(s.Name)
+		if pidAlive(filepath.Join(dir, "server.pid")) {
+			fmt.Printf("skip %s: server pid alive\n", s.Name)
+			continue
+		}
+		if pidAliveAny(filepath.Join(dir, "panes")) {
+			fmt.Printf("skip %s: live panes\n", s.Name)
+			continue
+		}
+		if c.dry {
+			fmt.Printf("would purge %s\n", s.Name)
+			purged++
+			continue
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Printf("error purging %s: %v\n", s.Name, err)
+			continue
+		}
+		fmt.Printf("purged %s\n", s.Name)
+		purged++
+	}
+	if purged == 0 {
+		fmt.Println("nothing to purge")
+	}
+	return nil
+}
+
+// pidAlive reports whether a pid file names a running process. A missing or
+// malformed file is not alive.
+func pidAlive(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return false
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return p.Signal(syscall.Signal(0)) == nil
+}
+
+// pidAliveAny reports whether any pane pid file under dir names a running
+// process.
+func pidAliveAny(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sock.pid") && pidAlive(filepath.Join(dir, e.Name())) {
+			return true
+		}
+	}
+	return false
 }

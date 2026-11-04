@@ -511,8 +511,10 @@ func (t *tui) boxRequest() {
 	if t.conn == nil {
 		return
 	}
-	_ = t.conn.send(Msg{Type: "req", Action: "msg-list",
-		Res: json.RawMessage(`{"key":"","limit":0}`)})
+	_ = t.conn.send(Msg{
+		Type: "req", Action: "msg-list",
+		Res: json.RawMessage(`{"key":"","limit":0}`),
+	})
 }
 
 // boxWatchers asks the server for the watcher list, unless it asked within the
@@ -529,8 +531,10 @@ func (t *tui) boxWatchers(now time.Time) {
 	}
 	b.watchAt = now
 	b.watchWant = false
-	_ = t.conn.send(Msg{Type: "req", Action: "msg-watchers",
-		Res: json.RawMessage(`{}`)})
+	_ = t.conn.send(Msg{
+		Type: "req", Action: "msg-watchers",
+		Res: json.RawMessage(`{}`),
+	})
 }
 
 // flushBoxWatchers sends a watcher ask that the interval held back.
@@ -584,7 +588,27 @@ func (t *tui) takeBoxWatchers(m Msg) {
 // boxWheel scrolls the view from the wheel. A notch up goes toward older
 // entries, the way it goes back in scrollback.
 func (t *tui) boxWheel(ev mouseEvent) {
-	if t.box == nil || ev.btn&64 == 0 || ev.release {
+	if t.box == nil {
+		return
+	}
+	t.updateLinkHover(ev.x-1, ev.y-1, ev.btn&16 != 0)
+	// Ctrl+click on a URL in the float opens it. The click is consumed; a
+	// ctrl+click elsewhere does nothing.
+	if ev.btn&16 != 0 && ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release {
+		r := t.box.float.Rect
+		x, y := ev.x-1, ev.y-1
+		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
+			if u := urlAtRow(t.box.float.VT, r.W, y-r.Y, x-r.X); u != "" {
+				if err := openURL(u); err != nil {
+					t.notify("open: " + err.Error())
+				} else {
+					t.notify("opened " + u)
+				}
+				return
+			}
+		}
+	}
+	if ev.btn&64 == 0 || ev.release {
 		return
 	}
 	step := -3

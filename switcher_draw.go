@@ -320,7 +320,7 @@ func paintSwitcherPreview(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.T
 		start := band.Y + band.H - h
 		paintBlankRows(buf, band, band.Y, start)
 		if h > 0 {
-			drawPaneFrom(buf, vt, Rect{X: band.X, Y: start, W: band.W, H: h}, row0, nil)
+			drawPaneFrom(buf, vt, Rect{X: band.X, Y: start, W: band.W, H: h}, row0, nil, nil)
 		}
 		return
 	}

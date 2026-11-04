@@ -20,7 +20,7 @@ func TestFloatingPaneDraw(t *testing.T) {
 		Active: true,
 	}
 	var buf bytes.Buffer
-	fp.Draw(&buf)
+	fp.Draw(&buf, nil)
 	out := buf.String()
 	if !strings.Contains(out, "Hello, Float!") {
 		t.Fatalf("missing text in output: %q", out)
