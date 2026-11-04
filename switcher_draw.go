@@ -210,7 +210,7 @@ func paintSwitcherQuery(buf *bytes.Buffer, s *switcher, l switcherLayout) (cx, c
 	// the rule keeps the split visible and the preview band stays blank.
 	if l.preview {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.ruleX+1)
-		buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + "│")
+		buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + glyphBorderVertical)
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.prevX+1)
 		buf.WriteString("\x1b[0m" + railBG.bg() + strings.Repeat(" ", l.prevW) + "\x1b[0m")
 	}
@@ -240,7 +240,7 @@ func paintSwitcherBands(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.Ter
 		paintRailRow(buf, left, tail, right, l.inner.X, y, l.listW, bg, bold)
 		if l.preview {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.ruleX+1)
-			buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + "│" + "\x1b[0m")
+			buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + glyphBorderVertical + "\x1b[0m")
 		}
 	}
 	if l.preview {

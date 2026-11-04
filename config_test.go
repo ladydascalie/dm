@@ -396,3 +396,176 @@ keymap "main" {
 		t.Errorf("row 1 = %#v, want ctrl+a / send prefix", rows[1])
 	}
 }
+
+// writeTheme puts a theme file in dir/themes and returns its path.
+func writeTheme(t *testing.T, dir, name, src string) string {
+	t.Helper()
+	path := filepath.Join(dir, "themes", name+".kdl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestConfigThemeSelection proves a top-level theme node names the theme and
+// that parseConfig alone keeps the built-in theme.
+func TestConfigThemeSelection(t *testing.T) {
+	cfg, err := parseConfig(`theme "night"`)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if cfg.themeName != "night" {
+		t.Fatalf("themeName = %q, want night", cfg.themeName)
+	}
+	if !reflect.DeepEqual(cfg.Theme(), DefaultTheme()) {
+		t.Fatal("parseConfig did not leave the built-in theme")
+	}
+	if !reflect.DeepEqual(LoadDefault().Theme(), DefaultTheme()) {
+		t.Fatal("LoadDefault did not leave the built-in theme")
+	}
+}
+
+// TestConfigThemeDuplicate proves a second theme node fails with its line.
+func TestConfigThemeDuplicate(t *testing.T) {
+	_, err := parseConfig("theme \"night\"\ntheme \"day\"")
+	if err == nil {
+		t.Fatal("parseConfig accepted two theme nodes")
+	}
+	if !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "duplicate theme node") {
+		t.Fatalf("error = %q, want a duplicate on line 2", err)
+	}
+}
+
+// TestConfigThemeUnsafeNames proves a theme name outside [A-Za-z0-9_-]+ fails
+// with its line, so it can never leave the themes directory.
+func TestConfigThemeUnsafeNames(t *testing.T) {
+	for _, name := range []string{"", "a/b", "../x", "..", "a.b", "a b", "/abs", `a\b`, "nihgt!"} {
+		src := "theme " + strconvQuote(name)
+		_, err := parseConfig(src)
+		if err == nil {
+			t.Fatalf("parseConfig accepted theme name %q", name)
+		}
+		if !strings.Contains(err.Error(), "line 1") {
+			t.Fatalf("name %q: error = %q, want line 1", name, err)
+		}
+	}
+	for _, name := range []string{"night", "Day_2", "a-b", "A9"} {
+		cfg, err := parseConfig("theme " + strconvQuote(name))
+		if err != nil {
+			t.Fatalf("parseConfig rejected theme name %q: %v", name, err)
+		}
+		if cfg.themeName != name {
+			t.Fatalf("themeName = %q, want %q", cfg.themeName, name)
+		}
+	}
+}
+
+// strconvQuote quotes a name for a KDL string.
+func strconvQuote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
+}
+
+// TestConfigThemeLoad proves LoadPath resolves <dir of config>/themes/<name>.kdl
+// after parsing the keymap.
+func TestConfigThemeLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.kdl")
+	src := "theme \"night\"\nkeymap \"main\" {\n\t\"split-right\" \"S\"\n}\n"
+	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeTheme(t, dir, "night", `palette { "rail-bg" "#010203" }
+glyphs { "grip" "@" }`)
+
+	cfg, err := LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "split-right"); got != "S" {
+		t.Fatalf("theme selection dropped the keymap: split-right = %q", got)
+	}
+	want := DefaultTheme()
+	want.Palette.RailBG = rgb{1, 2, 3}
+	want.Glyphs.Grip = "@"
+	if !reflect.DeepEqual(cfg.Theme(), want) {
+		t.Fatalf("theme = %+v, want %+v", cfg.Theme(), want)
+	}
+}
+
+// TestConfigThemeMissingFallsBack proves a named theme with no file returns the
+// keymap with the built-in theme and the error.
+func TestConfigThemeMissingFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.kdl")
+	src := "theme \"night\"\nkeymap \"main\" {\n\t\"split-right\" \"S\"\n}\n"
+	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadPath(path)
+	if err == nil {
+		t.Fatal("LoadPath accepted a missing theme file")
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("error = %v, want a missing-file error", err)
+	}
+	if got := cfg.Key("main", "split-right"); got != "S" {
+		t.Fatalf("missing theme dropped the keymap: split-right = %q", got)
+	}
+	if !reflect.DeepEqual(cfg.Theme(), DefaultTheme()) {
+		t.Fatal("missing theme did not fall back to the built-in theme")
+	}
+}
+
+// TestConfigThemeMalformedFallsBack proves a malformed theme file returns the
+// keymap with the built-in theme and an error that names the line.
+func TestConfigThemeMalformedFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.kdl")
+	src := "theme \"night\"\nkeymap \"main\" {\n\t\"split-right\" \"S\"\n}\n"
+	if err := os.WriteFile(path, []byte(src), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeTheme(t, dir, "night", "palette {\n\t\"rail-bg\" \"#12345\"\n}")
+	cfg, err := LoadPath(path)
+	if err == nil {
+		t.Fatal("LoadPath accepted a malformed theme file")
+	}
+	if !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("error = %q, want line 2", err)
+	}
+	if got := cfg.Key("main", "split-right"); got != "S" {
+		t.Fatalf("malformed theme dropped the keymap: split-right = %q", got)
+	}
+	if !reflect.DeepEqual(cfg.Theme(), DefaultTheme()) {
+		t.Fatal("malformed theme did not fall back to the built-in theme")
+	}
+}
+
+// TestConfigThemeDefaultPath proves LoadDefaultPath resolves the theme next to
+// the default config file.
+func TestConfigThemeDefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "dm")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cfgDir, "config.kdl")
+	if err := os.WriteFile(path, []byte("theme \"night\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeTheme(t, cfgDir, "night", `accents { "accent-2" "#0a0b0c" }`)
+
+	cfg, err := LoadDefaultPath(false)
+	if err != nil {
+		t.Fatalf("LoadDefaultPath: %v", err)
+	}
+	want := DefaultTheme()
+	want.Accents[1] = rgb{10, 11, 12}
+	if !reflect.DeepEqual(cfg.Theme(), want) {
+		t.Fatalf("theme = %+v, want %+v", cfg.Theme(), want)
+	}
+}

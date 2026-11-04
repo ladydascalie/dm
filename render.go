@@ -318,17 +318,17 @@ func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
 	put := func(x, y int, s string) {
 		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
 	}
-	put(x0, y0, "┌")
-	put(x1, y0, "┐")
-	put(x0, y1, "└")
-	put(x1, y1, "┘")
+	put(x0, y0, glyphBorderTopLeft)
+	put(x1, y0, glyphBorderTopRight)
+	put(x0, y1, glyphBorderBottomLeft)
+	put(x1, y1, glyphBorderBottomRight)
 	for x := x0 + 1; x < x1; x++ {
-		put(x, y0, "─")
-		put(x, y1, "─")
+		put(x, y0, glyphBorderHorizontal)
+		put(x, y1, glyphBorderHorizontal)
 	}
 	for y := y0 + 1; y < y1; y++ {
-		put(x0, y, "│")
-		put(x1, y, "│")
+		put(x0, y, glyphBorderVertical)
+		put(x1, y, glyphBorderVertical)
 	}
 }
 
@@ -349,15 +349,15 @@ func drawGrips(buf *bytes.Buffer, snap *Snapshot) {
 			p := padRect(n, boxes, i)
 			if n.Dir == "row" {
 				y := p.Y + p.H/2
-				fmt.Fprintf(buf, "\x1b[%d;%dH•", y+1, p.X+1)
+				fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+1, glyphGrip)
 				if p.W > 1 {
-					fmt.Fprintf(buf, "\x1b[%d;%dH•", y+1, p.X+2)
+					fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+2, glyphGrip)
 				}
 			} else {
 				x := p.X + p.W/2
-				fmt.Fprintf(buf, "\x1b[%d;%dH•", p.Y+1, x+1)
+				fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+1, x+1, glyphGrip)
 				if p.H > 1 {
-					fmt.Fprintf(buf, "\x1b[%d;%dH•", p.Y+2, x+1)
+					fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+2, x+1, glyphGrip)
 				}
 			}
 		}
@@ -375,9 +375,9 @@ func drawDivider(buf *bytes.Buffer, z Rect, axis string) {
 	if z.W <= 0 || z.H <= 0 {
 		return
 	}
-	glyph := "┃"
+	glyph := glyphDividerCol
 	if axis == "col" {
-		glyph = "━"
+		glyph = glyphDividerRow
 	}
 	buf.WriteString("\x1b[0m\x1b[1;96m")
 	line := strings.Repeat(glyph, z.W)
@@ -720,6 +720,72 @@ var railAccents = []rgb{
 	{140, 215, 155}, // #8cd79b green
 }
 
+// The structural glyphs. applyTheme replaces them with the loaded theme's
+// glyphs; the defaults are the built-in theme's values.
+var (
+	glyphGrip              = "•"
+	glyphDividerRow        = "━"
+	glyphDividerCol        = "┃"
+	glyphBorderTopLeft     = "┌"
+	glyphBorderTopRight    = "┐"
+	glyphBorderBottomLeft  = "└"
+	glyphBorderBottomRight = "┘"
+	glyphBorderHorizontal  = "─"
+	glyphBorderVertical    = "│"
+	glyphBorderTeeLeft     = "├"
+	glyphBorderTeeRight    = "┤"
+	glyphFoldOpen          = "▾"
+	glyphFoldClosed        = "▸"
+	glyphNerdFoldOpen      = "\uf0d7"
+	glyphNerdFoldClosed    = "\uf0da"
+	glyphActiveMark        = "▸"
+	glyphWorkspaceBar      = "▌"
+	glyphDirty             = "●"
+)
+
+// stateStyles is the per-state mark set. applyTheme replaces it with the loaded
+// theme's states.
+var stateStyles = DefaultTheme().States
+
+// applyTheme installs a theme into the renderer's globals. It is idempotent:
+// calling it with DefaultTheme restores the built-in values.
+func applyTheme(t Theme) {
+	railBG = t.Palette.RailBG
+	railFocusBG = t.Palette.RailFocusBG
+	railText = t.Palette.RailText
+	railDim = t.Palette.RailDim
+	railHeader = t.Palette.RailHeader
+	railWindowFg = t.Palette.RailWindow
+	railDiffAdd = t.Palette.RailDiffAdd
+	railDiffDel = t.Palette.RailDiffDel
+	railWorking = t.Palette.RailWorking
+	barAccent = t.Palette.BarAccent
+	barGutter = railBG
+	railAccents = []rgb{
+		t.Accents[0], t.Accents[1], t.Accents[2],
+		t.Accents[3], t.Accents[4], t.Accents[5],
+	}
+	glyphGrip = t.Glyphs.Grip
+	glyphDividerRow = t.Glyphs.DividerRow
+	glyphDividerCol = t.Glyphs.DividerCol
+	glyphBorderTopLeft = t.Glyphs.BorderTopLeft
+	glyphBorderTopRight = t.Glyphs.BorderTopRight
+	glyphBorderBottomLeft = t.Glyphs.BorderBottomLeft
+	glyphBorderBottomRight = t.Glyphs.BorderBottomRight
+	glyphBorderHorizontal = t.Glyphs.BorderHorizontal
+	glyphBorderVertical = t.Glyphs.BorderVertical
+	glyphBorderTeeLeft = t.Glyphs.BorderTeeLeft
+	glyphBorderTeeRight = t.Glyphs.BorderTeeRight
+	glyphFoldOpen = t.Glyphs.FoldOpen
+	glyphFoldClosed = t.Glyphs.FoldClosed
+	glyphNerdFoldOpen = t.Glyphs.NerdFoldOpen
+	glyphNerdFoldClosed = t.Glyphs.NerdFoldClosed
+	glyphActiveMark = t.Glyphs.ActiveMark
+	glyphWorkspaceBar = t.Glyphs.WorkspaceBar
+	glyphDirty = t.Glyphs.Dirty
+	stateStyles = t.States
+}
+
 // railAccent returns the hue a workspace keeps for its whole life. FNV-1a is
 // the seed; the mix step matters because its low bits repeat for ids of equal
 // length, and a workspace id is short.
@@ -755,45 +821,31 @@ func nerdFonts() bool {
 	return nerdOn
 }
 
+// stateStyle returns the mark for a status. A status the theme does not name
+// falls back to the unknown style.
+func stateStyle(status string) StateStyle {
+	if s, ok := stateStyles[status]; ok {
+		return s
+	}
+	if s, ok := stateStyles["unknown"]; ok {
+		return s
+	}
+	return DefaultTheme().States["unknown"]
+}
+
 // railGlyph is the state mark for a pane row and its colour: amber working,
 // teal-blue idle, red blocked, green done, pink-red error, dim grey unknown.
 // Every state gets a distinct icon or, without Nerd Fonts, a distinct Unicode
 // glyph. The question mark marks an agent whose state has not arrived; drawRail
-// leaves the cell blank for a shell, which reports no state.
+// leaves the cell blank for a shell, which reports no state. A theme's glyph
+// replaces both forms; an empty NerdGlyph keeps the Unicode glyph.
 func railGlyph(status string, nerd bool) (glyph string, colour rgb) {
-	switch status {
-	case "working":
-		glyph, colour = "●", railWorking
-		if nerd {
-			glyph = "\uf013"
-		}
-	case "idle":
-		glyph, colour = "○", rgb{120, 200, 225}
-		if nerd {
-			glyph = "\uf111"
-		}
-	case "blocked":
-		glyph, colour = "▲", rgb{255, 110, 110}
-		if nerd {
-			glyph = "\uf071"
-		}
-	case "done":
-		glyph, colour = "✓", rgb{110, 225, 145}
-		if nerd {
-			glyph = "\uf00c"
-		}
-	case "error":
-		glyph, colour = "✕", rgb{255, 130, 160}
-		if nerd {
-			glyph = "\uf057"
-		}
-	default:
-		glyph, colour = "?", railDim
-		if nerd {
-			glyph = "\uf128"
-		}
+	style := stateStyle(status)
+	glyph = style.Glyph
+	if nerd && style.NerdGlyph != "" {
+		glyph = style.NerdGlyph
 	}
-	return glyph, colour
+	return glyph, style.Colour
 }
 
 // railMark is the two-cell prefix of a pane row: an agent icon, a shell icon,
@@ -897,7 +949,7 @@ func railStats(it railItem) []railSeg {
 	}
 	var segs []railSeg
 	if it.dirty {
-		segs = append(segs, railSeg{text: "●", colour: railWorking})
+		segs = append(segs, railSeg{text: glyphDirty, colour: railWorking})
 	}
 	if it.added > 0 {
 		segs = append(segs, railSeg{text: "+" + strconv.Itoa(it.added), colour: railDiffAdd})
@@ -930,7 +982,7 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSe
 				name = railHeader
 			}
 			left = []railSeg{
-				{text: "\u258c", colour: it.accent},
+				{text: glyphWorkspaceBar, colour: it.accent},
 				{text: " ", colour: name},
 				{text: it.text, colour: name, bold: true},
 			}
@@ -939,14 +991,14 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSe
 	case railWindow:
 		base := railWindowFg
 		if !compact {
-			caret := "\u25be"
+			caret := glyphFoldOpen
 			if it.folded {
-				caret = "\u25b8"
+				caret = glyphFoldClosed
 			}
 			if nerd {
-				caret = "\uf0d7"
+				caret = glyphNerdFoldOpen
 				if it.folded {
-					caret = "\uf0da"
+					caret = glyphNerdFoldClosed
 				}
 			}
 			// The folder names the window. A window whose panes reported no
@@ -1249,18 +1301,30 @@ func drawMenu(buf *bytes.Buffer, m *menu) {
 		return
 	}
 	inner := m.w - 2
-	title := menuPad("─ "+m.title+" ", inner, '─')
-	fmt.Fprintf(buf, "\x1b[0m\x1b[90m\x1b[%d;%dH┌%s┐", m.y+1, m.x+1, title)
+	title := menuPad(glyphBorderHorizontal+" "+m.title+" ", inner, glyphRune(glyphBorderHorizontal))
+	fmt.Fprintf(buf, "\x1b[0m\x1b[90m\x1b[%d;%dH%s%s%s", m.y+1, m.x+1,
+		glyphBorderTopLeft, title, glyphBorderTopRight)
 	for i, it := range m.items {
 		line := menuPad(fmt.Sprintf(" %-22s %-4s", it.label, it.key), inner, ' ')
 		colour := "\x1b[0m\x1b[90m"
 		if i == m.sel {
 			colour = "\x1b[0m\x1b[30;46m"
 		}
-		fmt.Fprintf(buf, "\x1b[%d;%dH│%s%s\x1b[0m\x1b[90m│", m.y+2+i, m.x+1, colour, line)
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s\x1b[0m\x1b[90m%s", m.y+2+i, m.x+1,
+			glyphBorderVertical, colour, line, glyphBorderVertical)
 	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH└%s┘", m.y+len(m.items)+2, m.x+1, strings.Repeat("─", inner))
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", m.y+len(m.items)+2, m.x+1,
+		glyphBorderBottomLeft, strings.Repeat(glyphBorderHorizontal, inner), glyphBorderBottomRight)
 	buf.WriteString("\x1b[0m")
+}
+
+// glyphRune is the first rune of a glyph, for the padding helpers that take a
+// rune.
+func glyphRune(s string) rune {
+	for _, r := range s {
+		return r
+	}
+	return ' '
 }
 
 // menuPad truncates or pads s to exactly w runes.
@@ -1461,7 +1525,8 @@ func barFocus(snap *Snapshot) *barFocusChip {
 			break
 		}
 	}
-	glyph, colour := "▶", railDim
+	shell := stateStyle("shell")
+	glyph, colour := shell.Glyph, shell.Colour
 	if agent {
 		glyph, colour = railGlyph(status, nerdFonts())
 	}
@@ -1506,7 +1571,7 @@ func (l *barLeft) groups() [][]barSeg {
 				text += " " + w.name
 			}
 			out = append(out, []barSeg{
-				{text: "▸ ", fg: barAccent, bg: railFocusBG},
+				{text: glyphActiveMark + " ", fg: barAccent, bg: railFocusBG},
 				{text: text, fg: railText, bg: railFocusBG, bold: true},
 			})
 			continue
@@ -1676,8 +1741,8 @@ func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
 		if row < 1 {
 			continue
 		}
-		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m│\x1b[97m%s\x1b[0m\x1b[90m│\x1b[0m",
-			row, snap.Cols-w+1, menuPad(x.text, inner, ' '))
+		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m%s\x1b[97m%s\x1b[0m\x1b[90m%s\x1b[0m",
+			row, snap.Cols-w+1, glyphBorderVertical, menuPad(x.text, inner, ' '), glyphBorderVertical)
 	}
 }
 
@@ -1704,7 +1769,8 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		return string(r) + strings.Repeat(" ", w-2-len(r))
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
-	fmt.Fprintf(buf, "\x1b[%d;%dH┌%s┐", y+1, x+1, pad("─ switch session "))
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+1, x+1,
+		glyphBorderTopLeft, pad(glyphBorderHorizontal+" switch session "), glyphBorderTopRight)
 	for i, s := range sessions {
 		mark := " "
 		if i == sel {
@@ -1723,12 +1789,15 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 			colour = "\x1b[97m"
 		}
 		line := fmt.Sprintf("%s %-18s %-4s %-3s", mark, s.Name, state, now)
-		fmt.Fprintf(buf, "\x1b[%d;%dH│%s%s\x1b[90m│", y+2+i, x+1, colour, pad(line))
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s\x1b[90m%s", y+2+i, x+1,
+			glyphBorderVertical, colour, pad(line), glyphBorderVertical)
 	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH├%s┤", y+2+len(sessions), x+1, strings.Repeat("─", w-2))
-	fmt.Fprintf(buf, "\x1b[%d;%dH│%s│", y+3+len(sessions), x+1,
-		pad(" j/k move  enter switch  esc cancel"))
-	fmt.Fprintf(buf, "\x1b[%d;%dH└%s┘", y+4+len(sessions), x+1, strings.Repeat("─", w-2))
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+2+len(sessions), x+1,
+		glyphBorderTeeLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderTeeRight)
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+3+len(sessions), x+1,
+		glyphBorderVertical, pad(" j/k move  enter switch  esc cancel"), glyphBorderVertical)
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+4+len(sessions), x+1,
+		glyphBorderBottomLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderBottomRight)
 	buf.WriteString("\x1b[0m")
 }
 
@@ -1813,11 +1882,15 @@ func drawHelp(buf *bytes.Buffer, cols, rows int, keys [][2]string) {
 		y = 0
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
-	fmt.Fprintf(buf, "\x1b[%d;%dH┌%s┐", y+1, x+1, strings.Repeat("─", width-2))
-	fmt.Fprintf(buf, "\x1b[%d;%dH│\x1b[97m %-*s\x1b[90m│", y+2, x+1, width-3, "prefix")
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+1, x+1,
+		glyphBorderTopLeft, strings.Repeat(glyphBorderHorizontal, width-2), glyphBorderTopRight)
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s\x1b[97m %-*s\x1b[90m%s", y+2, x+1,
+		glyphBorderVertical, width-3, "prefix", glyphBorderVertical)
 	for i, kv := range keys {
-		fmt.Fprintf(buf, "\x1b[%d;%dH│ %-8s %-*s│", y+3+i, x+1, kv[0], width-11, kv[1])
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s %-8s %-*s%s", y+3+i, x+1,
+			glyphBorderVertical, kv[0], width-11, kv[1], glyphBorderVertical)
 	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH└%s┘", y+height, x+1, strings.Repeat("─", width-2))
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+height, x+1,
+		glyphBorderBottomLeft, strings.Repeat(glyphBorderHorizontal, width-2), glyphBorderBottomRight)
 	buf.WriteString("\x1b[0m")
 }
