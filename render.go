@@ -1681,27 +1681,6 @@ func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
 	}
 }
 
-var keymap = [][2]string{
-	{"|", "split right"},
-	{"-", "split down"},
-	{"< / ^", "split left / up"},
-	{"[", "scrollback"},
-	{"h j k l", "focus pane"},
-	{"n / p", "next/prev pane"},
-	{"x", "close pane"},
-	{"c", "new window"},
-	{"w / W", "next/prev win"},
-	{"0-9", "select window"},
-	{"t", "new workspace"},
-	{")", "next workspace"},
-	{"s", "switch session"},
-	{"r", "rename workspace"},
-	{"m", "message box"},
-	{"b", "cycle rail: full, thin, hidden"},
-	{"d / q", "detach"},
-	{"ctrl+b", "send prefix"},
-}
-
 // drawSessions paints the centred session picker.
 func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel int, current string) {
 	w := 46
@@ -1820,10 +1799,11 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// drawHelp paints the bottom-right action preview.
-func drawHelp(buf *bytes.Buffer, cols, rows int) {
+// drawHelp paints the bottom-right action preview from the configured keymap
+// rows. The first row is the prefix header.
+func drawHelp(buf *bytes.Buffer, cols, rows int, keys [][2]string) {
 	width := 28
-	height := len(keymap) + 2
+	height := len(keys) + 2
 	x := cols - width - 2
 	y := rows - height - 2
 	if x < 0 {
@@ -1835,7 +1815,7 @@ func drawHelp(buf *bytes.Buffer, cols, rows int) {
 	buf.WriteString("\x1b[0m\x1b[90m")
 	fmt.Fprintf(buf, "\x1b[%d;%dH┌%s┐", y+1, x+1, strings.Repeat("─", width-2))
 	fmt.Fprintf(buf, "\x1b[%d;%dH│\x1b[97m %-*s\x1b[90m│", y+2, x+1, width-3, "prefix")
-	for i, kv := range keymap {
+	for i, kv := range keys {
 		fmt.Fprintf(buf, "\x1b[%d;%dH│ %-8s %-*s│", y+3+i, x+1, kv[0], width-11, kv[1])
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH└%s┘", y+height, x+1, strings.Repeat("─", width-2))

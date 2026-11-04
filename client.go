@@ -42,12 +42,15 @@ const (
 type tui struct {
 	session string
 	conn    *conn
-	cols    int
-	rows    int
-	snap    *Snapshot
-	vts     map[string]vt10x.Terminal
-	armed   bool
-	toasts  []toast // oldest first, newest last
+	// keymap is the loaded keybindings. A nil keymap means the built-in
+	// defaults, so a test TUI runs without a config file.
+	keymap *Config
+	cols   int
+	rows   int
+	snap   *Snapshot
+	vts    map[string]vt10x.Terminal
+	armed  bool
+	toasts []toast // oldest first, newest last
 	// floats are arbitrary floating panes rendered over the main layout.
 	floats []*FloatingPane
 	// hover is the URL under the pointer while ctrl is held, so the frame can
@@ -136,6 +139,26 @@ type tui struct {
 	rowsig map[string][]uint64
 	laysig string
 	last   lastFrame
+}
+
+// builtinKeymap parses the default keymap once. Every TUI without a loaded
+// config shares it.
+var (
+	builtinOnce sync.Once
+	builtinCfg  *Config
+)
+
+func builtinKeymap() *Config {
+	builtinOnce.Do(func() { builtinCfg = LoadDefault() })
+	return builtinCfg
+}
+
+// km returns the client's keymap, or the built-in defaults when it has none.
+func (t *tui) km() *Config {
+	if t.keymap != nil {
+		return t.keymap
+	}
+	return builtinKeymap()
 }
 
 // paint is the bytes one band of the screen painted last frame and, for an
@@ -328,6 +351,14 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		session: name, conn: c, vts: map[string]vt10x.Terminal{},
 		hist: map[string][]byte{},
 	}
+	// The keymap is loaded once for the whole session. A missing file is
+	// written with the defaults first; a load error is toasted and the
+	// built-in defaults carry the session.
+	cfg, err := LoadDefaultPath(true)
+	t.keymap = cfg
+	if err != nil {
+		t.notify(err.Error())
+	}
 	t.cols, t.rows, _ = term.GetSize(fd)
 	defer closeSwitcher(t)
 
@@ -383,11 +414,8 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			t.expirePaste(now)
 			t.expireSwitcher(now)
 			t.flushBoxWatchers(now)
-			if t.armed && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
-				t.pending = false
-				t.inbuf = t.inbuf[:0]
-				t.disarm()
-			}
+			t.expireArmed(now)
+			t.expirePrefix(now)
 			if t.mode != "" && t.pending && now.Sub(t.escAt) > 40*time.Millisecond {
 				t.pending = false
 				// The lone esc was consumed by the mode's key handler but left
@@ -403,6 +431,8 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 					t.exitScroll()
 				case "box":
 					closeBoxView(t)
+				case "rename":
+					t.closeRename()
 				}
 			}
 			if t.dirty && now.Sub(lastDraw) > 15*time.Millisecond {
@@ -607,9 +637,10 @@ type menu struct {
 }
 
 type menuItem struct {
-	label string
-	key   string
-	run   func()
+	label  string
+	key    string
+	action string
+	run    func()
 }
 
 // openMenu builds the pane menu at a zero-based terminal point, clamped to the
@@ -623,18 +654,41 @@ func (t *tui) openMenu(p *PaneInfo, x, y int) {
 		title += " " + p.Name
 	}
 	items := []menuItem{
-		{"Split right", "|", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "right" }) }},
-		{"Split down", "-", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "down" }) }},
-		{"Split left", "<", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "left" }) }},
-		{"Split up", "^", func() { t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "up" }) }},
-		{"Focus", "", func() { t.actionOn(p.ID, "focus", nil) }},
-		{"Close pane", "x", func() { t.actionOn(p.ID, "close-pane", nil) }},
-		{"Scrollback", "[", func() { t.startScroll(p) }},
-		{"New window", "c", func() { t.action("new-window", nil) }},
-		{"New workspace", "t", func() { t.action("new-workspace", nil) }},
-		{"Rename workspace", "r", func() { t.closeMenu(); t.openRenamePrompt() }},
-		{"Switch session", "s", func() { t.openPicker() }},
-		{"Detach", "d", func() { t.quit = true }},
+		{label: "Split right", action: "split-right", run: func() {
+			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "right" })
+		}},
+		{label: "Split down", action: "split-down", run: func() {
+			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "down" })
+		}},
+		{label: "Split left", action: "split-left", run: func() {
+			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "left" })
+		}},
+		{label: "Split up", action: "split-up", run: func() {
+			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "up" })
+		}},
+		{label: "Focus", run: func() { t.actionOn(p.ID, "focus", nil) }},
+		{label: "Close pane", action: "close-pane", run: func() {
+			t.actionOn(p.ID, "close-pane", nil)
+		}},
+		{label: "Scrollback", action: "scrollback", run: func() { t.startScroll(p) }},
+		{label: "New window", action: "new-window", run: func() { t.action("new-window", nil) }},
+		{label: "New workspace", action: "new-workspace", run: func() {
+			t.action("new-workspace", nil)
+		}},
+		{label: "Rename workspace", action: "rename-workspace", run: func() {
+			t.closeMenu()
+			t.openRenamePrompt()
+		}},
+		{label: "Switch session", action: "picker", run: func() { t.openPicker() }},
+		{label: "Detach", action: "detach", run: func() { t.quit = true }},
+	}
+	// Each row's key label is the hint the configured main keymap gives it. An
+	// unbound action shows no key.
+	km := t.km()
+	for i := range items {
+		if items[i].action != "" {
+			items[i].key = km.Key("main", items[i].action)
+		}
 	}
 	w := 34
 	if w > t.snap.Cols-2 {
@@ -669,8 +723,9 @@ func (t *tui) closeMenu() {
 	t.dirty = true
 }
 
-// menuKey consumes one key while the menu is open. It returns false when it
-// needs more bytes for an escape sequence.
+// menuKey consumes one key while the menu is open. The menu's own bindings are
+// the menu mode's; its item keys are only hints. It returns false when it needs
+// more bytes for an escape sequence.
 func (t *tui) menuKey() bool {
 	if t.menu == nil {
 		t.closeMenu()
@@ -679,48 +734,55 @@ func (t *tui) menuKey() bool {
 	if len(t.inbuf) == 0 {
 		return true
 	}
-	b := t.inbuf[0]
-	if b == 0x1b {
-		if len(t.inbuf) < 3 {
-			if !t.pending {
-				t.pending = true
-				t.escAt = time.Now()
-			}
-			return false
+	action, n, state := t.km().Match("menu", t.inbuf)
+	switch state {
+	case Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
 		}
-		seq := string(t.inbuf[:3])
-		t.inbuf = t.inbuf[3:]
-		switch seq {
-		case "\x1b[A":
-			t.menuMove(-1)
-		case "\x1b[B":
-			t.menuMove(1)
-		default:
-			t.closeMenu()
-		}
+		return false
+	case Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+	default:
+		// An unbound key closes the menu, as it always has.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		t.closeMenu()
 		return true
 	}
-	t.inbuf = t.inbuf[1:]
-	t.pending = false
-	switch b {
-	case 'j':
+	switch action {
+	case "down", "down-arrow":
 		t.menuMove(1)
-	case 'k':
+	case "up", "up-arrow":
 		t.menuMove(-1)
-	case '\r', '\n':
+	case "pick":
 		t.menuPick(t.menu.sel)
-	case 'q', 0x1b:
+	case "close", "close-esc":
 		t.closeMenu()
 	default:
-		if b >= '1' && b <= '9' {
-			if i := int(b - '1'); i < len(t.menu.items) {
-				t.menuPick(i)
-				return true
-			}
+		if i, ok := pickIndex(action); ok && i < len(t.menu.items) {
+			t.menuPick(i)
+			return true
 		}
 		t.closeMenu()
 	}
 	return true
+}
+
+// pickIndex reads a "pick-<n>" action's zero-based row. It reports false for
+// any other action.
+func pickIndex(action string) (int, bool) {
+	rest := strings.TrimPrefix(action, "pick-")
+	if rest == action || rest == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n - 1, true
 }
 
 func (t *tui) menuMove(step int) {
@@ -934,7 +996,9 @@ func (t *tui) processInput() {
 			return // partial sequence, wait for the rest
 		}
 		if t.mode == "rename" {
-			t.renameKey()
+			if !t.renameKey() {
+				return
+			}
 			continue
 		}
 		if t.mode == "sessions" {
@@ -956,16 +1020,21 @@ func (t *tui) processInput() {
 			continue
 		}
 		if !t.armed {
+			prefix := t.km().PrefixBytes()
 			pi := -1
 			if !t.pasteOff {
 				pi = bytes.Index(t.inbuf, pasteStart)
 			}
-			ci := bytes.IndexByte(t.inbuf, 0x02)
+			ci := -1
+			if len(prefix) > 0 {
+				ci = bytes.Index(t.inbuf, prefix)
+			}
 			if ci >= 0 && (pi < 0 || ci < pi) {
+				// The prefix arms. Bytes before it belong to the pane.
 				if ci > 0 {
 					_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf[:ci]})
 				}
-				t.inbuf = t.inbuf[ci+1:]
+				t.inbuf = append([]byte(nil), t.inbuf[ci+len(prefix):]...)
 				t.arm()
 				continue
 			}
@@ -976,152 +1045,224 @@ func (t *tui) processInput() {
 				t.inbuf = append([]byte(nil), t.inbuf[pi:]...)
 				continue
 			}
-			_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf})
-			t.inbuf = nil
-			return
-		}
-		b := t.inbuf[0]
-		if b == 0x1b {
-			if len(t.inbuf) < 3 {
+			if pi < 0 && partialPrefix(t.inbuf, prefix) {
+				// The buffer ends with the head of the prefix key. Wait for the
+				// rest; the ticker forwards the bytes if they stall.
 				if !t.pending {
 					t.pending = true
 					t.escAt = time.Now()
 				}
 				return
 			}
-			seq := string(t.inbuf[:3])
-			t.inbuf = t.inbuf[3:]
-			switch seq {
-			case "\x1b[A":
-				t.action("focus-dir", func(m *Msg) { m.Dir = "up" })
-			case "\x1b[B":
-				t.action("focus-dir", func(m *Msg) { m.Dir = "down" })
-			case "\x1b[C":
-				t.action("focus-dir", func(m *Msg) { m.Dir = "right" })
-			case "\x1b[D":
-				t.action("focus-dir", func(m *Msg) { m.Dir = "left" })
-			default:
-				t.disarm()
-			}
-			continue
+			_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf})
+			t.inbuf = nil
+			return
 		}
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		t.key(b)
+		if !t.armedKey() {
+			return
+		}
 	}
+}
+
+// partialPrefix reports whether buf ends with the head of the prefix key, so the
+// prefix is still arriving. A one-byte prefix has no head and never waits.
+func partialPrefix(buf, prefix []byte) bool {
+	for k := 1; k < len(prefix) && k <= len(buf); k++ {
+		if bytes.HasSuffix(buf, prefix[:k]) {
+			return true
+		}
+	}
+	return false
+}
+
+// armedKey consumes the head of the input buffer as one main-mode binding. A
+// partial sequence waits for the rest of its bytes. An unbound key notifies and
+// disarms. It returns false when it needs more bytes.
+func (t *tui) armedKey() bool {
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	action, n, state := t.km().Match("main", t.inbuf)
+	if state == Match && escapeRun(t.inbuf) > n {
+		// The match covered only the first byte of an escape sequence. The
+		// sequence as a whole has no binding, so it is one unknown key: the
+		// rest of an F1 or a Home must not reach a pane.
+		state = NoMatch
+	}
+	switch state {
+	case Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	case Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+		t.runAction(action)
+		return true
+	}
+	b := t.inbuf[0]
+	// An unbound escape sequence is one key too: its tail is not input.
+	t.inbuf = append([]byte(nil), t.inbuf[escapeRun(t.inbuf):]...)
+	t.pending = false
+	t.notify(fmt.Sprintf("no binding for %q", string(b)))
+	t.disarm()
+	return true
+}
+
+// escapeRun returns how many leading bytes belong to one escape sequence. A
+// sequence that has not finished yet runs to the end of the buffer.
+func escapeRun(buf []byte) int {
+	if len(buf) == 0 {
+		return 0
+	}
+	if buf[0] != 0x1b {
+		return 1
+	}
+	i := 1
+	if i < len(buf) && (buf[i] == '[' || buf[i] == 'O') {
+		i++
+		for i < len(buf) {
+			c := buf[i]
+			i++
+			if c >= 0x40 && c <= 0x7e {
+				break
+			}
+		}
+	}
+	return i
+}
+
+// expireArmed resolves an armed sequence that never finished arriving. A lone
+// esc is the dismiss key, so a stalled sequence dismisses.
+func (t *tui) expireArmed(now time.Time) bool {
+	if !t.armed || !t.pending || now.Sub(t.escAt) <= escTimeout {
+		return false
+	}
+	t.pending = false
+	t.inbuf = t.inbuf[:0]
+	t.disarm()
+	return true
+}
+
+// expirePrefix sends a prefix key that never finished arriving to the pane as
+// plain input.
+func (t *tui) expirePrefix(now time.Time) bool {
+	if t.armed || t.mode != "" || t.sw != nil || !t.pending || now.Sub(t.escAt) <= escTimeout {
+		return false
+	}
+	t.pending = false
+	if len(t.inbuf) > 0 && t.conn != nil {
+		_ = t.conn.send(Msg{Type: "keys", Keys: append([]byte(nil), t.inbuf...)})
+	}
+	t.inbuf = t.inbuf[:0]
+	return true
 }
 
 // pickerKey consumes one key while the session picker is open. It returns false
 // when it needs more bytes for an escape sequence.
 func (t *tui) pickerKey() bool {
-	b := t.inbuf[0]
-	if b == 0x1b {
-		if len(t.inbuf) < 3 {
-			if !t.pending {
-				t.pending = true
-				t.escAt = time.Now()
-			}
-			return false
-		}
-		seq := string(t.inbuf[:3])
-		t.inbuf = t.inbuf[3:]
-		switch seq {
-		case "\x1b[A":
-			t.moveSel(-1)
-		case "\x1b[B":
-			t.moveSel(1)
-		case "\x1b[C", "\x1b[D":
-			t.closePicker()
-		default:
-			t.closePicker()
-		}
+	if len(t.inbuf) == 0 {
 		return true
 	}
-	t.inbuf = t.inbuf[1:]
-	t.pending = false
-	switch b {
-	case '\r', '\n':
-		t.pickSession()
-	case 'j':
-		t.moveSel(1)
-	case 'k':
-		t.moveSel(-1)
-	case 'q', 's':
-		t.closePicker()
+	action, n, state := t.km().Match("picker", t.inbuf)
+	switch state {
+	case Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	case Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
 	default:
-		if b >= '1' && b <= '9' {
-			if i := int(b - '1'); i < len(t.sessions) {
-				t.sel = i
-				t.pickSession()
-				return true
-			}
+		// An unbound key closes the picker.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		t.closePicker()
+		return true
+	}
+	switch action {
+	case "down", "down-arrow":
+		t.moveSel(1)
+	case "up", "up-arrow":
+		t.moveSel(-1)
+	case "pick":
+		t.pickSession()
+	default:
+		if i, ok := pickIndex(action); ok && i < len(t.sessions) {
+			t.sel = i
+			t.pickSession()
+			return true
 		}
 		t.closePicker()
 	}
 	return true
 }
 
-// switcherKey consumes one key while the native switcher is open. It follows
-// pickerKey's shape: it returns false when it needs more bytes for an escape
-// sequence. Nothing it handles reaches a pane.
+// switcherKey consumes one key while the native switcher is open. Its own
+// bindings are the switcher mode's; a printable key that matches none of them
+// is text for the query. It returns false when it needs more bytes for an
+// escape sequence.
 func (t *tui) switcherKey() bool {
-	b := t.inbuf[0]
-	if b == 0x1b {
-		if len(t.inbuf) < 3 {
-			if !t.pending {
-				t.pending = true
-				t.escAt = time.Now()
-			}
-			return false
-		}
-		seq := string(t.inbuf[:3])
-		t.inbuf = t.inbuf[3:]
-		switch seq {
-		case "\x1b[A":
-			t.sw.move(-1)
-			t.dirty = true
-		case "\x1b[B":
-			t.sw.move(1)
-			t.dirty = true
-		case "\x1b[C", "\x1b[D", "\x1b[Z":
-			// Left, right and shift-tab have no meaning in a list.
-		default:
-			closeSwitcher(t)
-		}
+	if len(t.inbuf) == 0 {
 		return true
 	}
-	t.inbuf = t.inbuf[1:]
-	t.pending = false
-	switch b {
-	case 0x02: // the prefix key, pressed again
+	if p := t.km().PrefixBytes(); len(p) > 0 && bytes.HasPrefix(t.inbuf, p) {
+		// The prefix key pressed again closes the float.
+		t.inbuf = append([]byte(nil), t.inbuf[len(p):]...)
+		t.pending = false
 		closeSwitcher(t)
-	case '\r', '\n':
-		t.pickSwitcher()
-	case 0x03: // ctrl+c
-		closeSwitcher(t)
-	case 0x15: // ctrl+u
-		t.sw.clearQuery()
-		t.dirty = true
-	case 0x7f, 0x08: // backspace
-		t.sw.backspace()
-		t.dirty = true
-	case 0x0e: // ctrl+n, down
-		t.sw.move(1)
-		t.dirty = true
-	case 0x10: // ctrl+p, up
-		t.sw.move(-1)
-		t.dirty = true
-	case 'j':
-		t.sw.move(1)
-		t.dirty = true
-	case 'k':
-		t.sw.move(-1)
-		t.dirty = true
+		return true
+	}
+	action, n, state := t.km().Match("switcher", t.inbuf)
+	if state == Match && escapeRun(t.inbuf) > n {
+		// The match covered only the head of an escape sequence. The sequence
+		// as a whole is unbound, and an unbound escape is not text.
+		state = NoMatch
+	}
+	switch state {
+	case Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	case Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
 	default:
-		if b >= 0x20 && b < 0x7f {
+		b := t.inbuf[0]
+		n := escapeRun(t.inbuf)
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+		// An escape sequence with no binding is not text: left, right and
+		// shift-tab have no meaning in a list, and neither does F1.
+		if n == 1 && b >= 0x20 && b < 0x7f {
 			t.sw.appendText(rune(b))
 			t.dirty = true
 		}
+		return true
+	}
+	switch action {
+	case "close", "close-ctrl-c", "close-esc":
+		closeSwitcher(t)
+	case "pick":
+		t.pickSwitcher()
+	case "clear-query":
+		t.sw.clearQuery()
+		t.dirty = true
+	case "backspace":
+		t.sw.backspace()
+		t.dirty = true
+	case "down", "down-arrow", "down-ctrl-n":
+		t.sw.move(1)
+		t.dirty = true
+	case "up", "up-arrow", "up-ctrl-p":
+		t.sw.move(-1)
+		t.dirty = true
 	}
 	return true
 }
@@ -1198,48 +1339,38 @@ func previewLines(m Msg) []string {
 // scrollKey consumes one key in scrollback mode. It returns false when it
 // needs more bytes for an escape sequence.
 func (t *tui) scrollKey() bool {
-	b := t.inbuf[0]
-	if b == 0x1b {
-		if len(t.inbuf) < 3 {
-			if !t.pending {
-				t.pending = true
-				t.escAt = time.Now()
-			}
-			return false
-		}
-		seq := string(t.inbuf[:3])
-		t.inbuf = t.inbuf[3:]
-		switch seq {
-		case "\x1b[A":
-			t.scrollBy(1)
-		case "\x1b[B":
-			t.scrollBy(-1)
-		case "\x1b[5", "\x1b[6":
-			// PgUp/PgDn arrive as ESC [ 5 ~ / ESC [ 6 ~: keep the fourth byte.
-			if len(t.inbuf) > 0 && t.inbuf[0] == '~' {
-				t.inbuf = t.inbuf[1:]
-			}
-			if seq == "\x1b[5" {
-				t.scrollBy(t.panHeight())
-			} else {
-				t.scrollBy(-t.panHeight())
-			}
-		default:
-			t.exitScroll()
-		}
+	if len(t.inbuf) == 0 {
 		return true
 	}
-	t.inbuf = t.inbuf[1:]
-	t.pending = false
-	switch b {
-	case 'k':
-		t.scrollBy(1)
-	case 'j':
-		t.scrollBy(-1)
-	case 'g':
-		t.scrollBy(t.maxOff)
-	case 'G', 'q', '[', 0x1b:
+	action, n, state := t.km().Match("scroll", t.inbuf)
+	switch state {
+	case Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	case Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+	default:
+		// An unbound key leaves scrollback.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
 		t.exitScroll()
+		return true
+	}
+	switch action {
+	case "up", "up-arrow":
+		t.scrollBy(1)
+	case "down", "down-arrow":
+		t.scrollBy(-1)
+	case "page-up":
+		t.scrollBy(t.panHeight())
+	case "page-down":
+		t.scrollBy(-t.panHeight())
+	case "top":
+		t.scrollBy(t.maxOff)
 	default:
 		t.exitScroll()
 	}
@@ -2248,100 +2379,134 @@ func (t *tui) submitRename() {
 
 // renameKey consumes one key while the rename prompt is open. No byte leaves
 // the client: every key edits or ends the draft. Esc cancels at once, so the
-// prompt never waits for the rest of an escape sequence.
-func (t *tui) renameKey() {
+// prompt never waits for the rest of an escape sequence. It returns false when
+// it needs more bytes for an escape sequence.
+func (t *tui) renameKey() bool {
 	if len(t.inbuf) == 0 {
-		return
+		return true
+	}
+	action, n, state := t.km().Match("rename", t.inbuf)
+	if state == Partial {
+		if t.inbuf[0] == 0x1b {
+			// A lone esc cancels. An arrow key cancels too: its remaining bytes
+			// are dropped rather than typed into the draft.
+			t.inbuf = t.inbuf[1:]
+			t.pending = false
+			t.closeRename()
+			return true
+		}
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	}
+	if state == Match {
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+		switch action {
+		case "cancel":
+			t.closeRename()
+		case "submit":
+			t.submitRename()
+		case "backspace":
+			if r := []rune(t.renameDraft); len(r) > 0 {
+				t.renameDraft = string(r[:len(r)-1])
+			}
+			t.dirty = true
+		case "clear":
+			t.renameDraft = ""
+			t.dirty = true
+		default:
+			// The arrows cancel as they always have.
+			t.closeRename()
+		}
+		return true
 	}
 	b := t.inbuf[0]
 	t.inbuf = t.inbuf[1:]
 	t.pending = false
-	switch {
-	case b == 0x1b:
-		// A lone esc cancels. An arrow key cancels too: its remaining bytes
-		// are dropped rather than typed into the draft.
-		t.closeRename()
-	case b == '\r' || b == '\n':
-		t.submitRename()
-	case b == 0x7f || b == 0x08:
-		if r := []rune(t.renameDraft); len(r) > 0 {
-			t.renameDraft = string(r[:len(r)-1])
-		}
-		t.dirty = true
-	case b == 0x15:
-		t.renameDraft = ""
-		t.dirty = true
-	case b >= 0x20 && b <= 0x7e:
+	if b >= 0x20 && b <= 0x7e {
 		t.renameDraft += string(rune(b))
 		t.dirty = true
 	}
+	return true
 }
 
+// key runs one single-byte key through the main keymap. Tests call it directly;
+// processInput goes through armedKey, which also handles longer sequences.
 func (t *tui) key(b byte) {
-	switch b {
-	case 0x02:
-		_ = t.conn.send(Msg{Type: "keys", Keys: []byte{0x02}})
-		t.disarm()
-	case '|':
+	t.inbuf = append(t.inbuf, b)
+	t.pending = false
+	t.armedKey()
+}
+
+// runAction runs one action from the main keymap.
+func (t *tui) runAction(name string) {
+	switch name {
+	case "split-right":
 		t.action("split", func(m *Msg) { m.Dir = "right" })
-	case '-', '_':
+	case "split-down", "split-down-alt":
 		t.action("split", func(m *Msg) { m.Dir = "down" })
-	case '<':
+	case "split-left":
 		t.action("split", func(m *Msg) { m.Dir = "left" })
-	case '[':
-		t.startScrollOnFocus()
-	case '^':
+	case "split-up":
 		t.action("split", func(m *Msg) { m.Dir = "up" })
-	case 'h':
+	case "scrollback":
+		t.startScrollOnFocus()
+	case "focus-left", "focus-left-arrow":
 		t.action("focus-dir", func(m *Msg) { m.Dir = "left" })
-	case 'j':
+	case "focus-down", "focus-down-arrow":
 		t.action("focus-dir", func(m *Msg) { m.Dir = "down" })
-	case 'k':
+	case "focus-up", "focus-up-arrow":
 		t.action("focus-dir", func(m *Msg) { m.Dir = "up" })
-	case 'l':
+	case "focus-right", "focus-right-arrow":
 		t.action("focus-dir", func(m *Msg) { m.Dir = "right" })
-	case 'n':
+	case "next-pane":
 		t.action("next-pane", nil)
-	case 'p':
+	case "prev-pane":
 		t.action("prev-pane", nil)
-	case 'x':
+	case "close-pane":
 		t.action("close-pane", nil)
-	case 'c':
+	case "new-window":
 		t.action("new-window", nil)
-	case 'w':
+	case "next-window":
 		t.action("next-window", nil)
-	case 'W':
+	case "prev-window":
 		t.action("prev-window", nil)
-	case 't':
+	case "new-workspace":
 		t.action("new-workspace", nil)
-	case ')':
+	case "next-workspace":
 		t.action("next-workspace", nil)
-	case 'a':
+	case "switcher":
 		openSwitcher(t)
-	case 's':
+	case "picker":
 		t.openPicker()
-	case 'r':
+	case "rename-workspace":
 		t.openRenamePrompt()
-	case 'b':
+	case "toggle-rail":
 		t.toggleRail()
-	case 'm':
+	case "message-box":
 		openBoxView(t)
-	case '?':
-		t.disarm()
-	case 'd', 'q':
+	case "detach", "detach-alt":
 		t.quit = true
-	case 0x1b:
+	case "dismiss", "dismiss-esc":
+		t.disarm()
+	case "send-prefix":
+		if p := t.km().PrefixBytes(); len(p) > 0 && t.conn != nil {
+			_ = t.conn.send(Msg{Type: "keys", Keys: append([]byte(nil), p...)})
+		}
 		t.disarm()
 	default:
-		if b >= '0' && b <= '9' {
-			idx := int(b - '1')
-			if b == '0' {
-				idx = 9
+		if strings.HasPrefix(name, "window-") {
+			if n, err := strconv.Atoi(strings.TrimPrefix(name, "window-")); err == nil &&
+				n >= 1 && n <= 10 {
+				i := n - 1
+				t.action("select-window", func(m *Msg) { m.Index = i })
+				return
 			}
-			t.action("select-window", func(m *Msg) { m.Index = idx })
-			return
 		}
-		t.notify(fmt.Sprintf("no binding for %q", string(b)))
+		t.notify(fmt.Sprintf("no binding for %q", name))
 		t.disarm()
 	}
 }
@@ -2408,6 +2573,9 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 // dismisses it; it never expires on a timer.
 func (t *tui) arm() {
 	t.armed = true
+	// A prefix that arrived in pieces waited with pending set. The arm starts a
+	// fresh sequence, so that wait is over.
+	t.pending = false
 	t.toasts = nil
 	t.dirty = true
 }
@@ -2462,7 +2630,7 @@ func (t *tui) draw() {
 		t.askPreview()
 	}
 	if t.armed {
-		drawHelp(&help, win.Cols, win.Rows)
+		drawHelp(&help, win.Cols, win.Rows, t.km().HelpRows())
 	}
 	if t.mode == "sessions" {
 		drawSessions(&sess, win.Cols, win.Rows, t.sessions, t.sel, t.session)
