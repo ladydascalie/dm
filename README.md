@@ -221,13 +221,13 @@ per window, the focus chip, then the pinned right block.
   The focused pane is the entry in the window's pane list whose id is the focus.
 
 Colours are explicit RGB, never palette slots, so a theme cannot map them onto a
-background they fail on: railBG (#1f1e27) for the ground and the gutter,
-railFocusBG (#272633) for the active window chip and the focus chip, railText
+background they fail on: railBG (#14131a) for the ground and the gutter,
+railFocusBG (#1f1e27) for the active window chip and the focus chip, railText
 (#e9eaf1), railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb) for the
 active mark, and the state colours of the rail glyph table. Every footer
 foreground reaches WCAG AA, 4.5:1 or better, on both grounds it is painted on:
-railDim on railFocusBG is the tightest at 4.89:1, and the barAccent mark reaches
-7.49:1 on the focus fill it sits on, 8.30:1 on the ground.
+railDim on railFocusBG is the tightest at 5.42:1, and the barAccent mark reaches
+8.30:1 on the focus fill it sits on, 9.29:1 on the ground.
 
 At 80 columns, with the session `pi-footer-2026`, the workspace `main`, three
 windows and the second one active, a blocked focus pane `w1p2` named `shell`,

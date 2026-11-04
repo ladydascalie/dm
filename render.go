@@ -691,8 +691,8 @@ func contrast(a, b rgb) float64 {
 // The rail palette. Every foreground is at least 4.5:1 against both the rail
 // background and the focused row background; TestRailContrast guards it.
 var (
-	railBG       = rgb{31, 30, 39}    // #1f1e27
-	railFocusBG  = rgb{39, 38, 51}    // #272633
+	railBG       = rgb{20, 19, 26}    // #14131a
+	railFocusBG  = rgb{31, 30, 39}    // #1f1e27
 	railText     = rgb{233, 234, 241} // #e9eaf1
 	railDim      = rgb{143, 147, 168} // #8f93a8
 	railHeader   = rgb{166, 169, 189} // #a6a9bd
