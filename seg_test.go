@@ -70,6 +70,42 @@ func TestSegClip(t *testing.T) {
 	}
 }
 
+// TestSegEmptyFirstRun pins a run set whose first run is empty: clip skips the
+// empty head and keeps the runs after it, join keeps the head in place and still
+// lays the gap between groups, and write paints nothing for the empty run.
+func TestSegEmptyFirstRun(t *testing.T) {
+	runs := []seg{{}, {text: "abc", fg: railText}}
+	if n := segCells(runs); n != 3 {
+		t.Fatalf("segCells = %d, want 3", n)
+	}
+
+	// The empty head spends no budget and does not end the set.
+	if got := clipSegs(runs, 2); strings.Join(segTexts(got), "|") != "ab" {
+		t.Fatalf("clipSegs = %q, want %q", segTexts(got), "ab")
+	}
+	if got := clipSegs(runs, 3); len(got) != 1 || got[0].text != "abc" {
+		t.Fatalf("clipSegs at full budget = %q, want the text run alone", segTexts(got))
+	}
+
+	// join leaves the empty head where the caller put it and still gaps groups.
+	gap := seg{text: " ", fg: railDim, bg: railBG}
+	joined := join([][]seg{{{}, {text: "a", fg: railText}}, {{text: "b", fg: railText}}}, gap)
+	if want := "|a| |b"; strings.Join(segTexts(joined), "|") != want {
+		t.Fatalf("join = %q, want %q", segTexts(joined), want)
+	}
+
+	// write paints nothing for the empty run and leaves the next run alone.
+	var buf bytes.Buffer
+	write(&buf, joined[0])
+	if buf.Len() != 0 {
+		t.Fatalf("empty run wrote %q", buf.String())
+	}
+	write(&buf, joined[1])
+	if want := "\x1b[0m" + (rgb{}).bg() + railText.fg() + "a"; buf.String() != want {
+		t.Fatalf("run after the empty head = %q, want %q", buf.String(), want)
+	}
+}
+
 // TestSegElide ends a cut run set with the ellipsis in the dim colour, and
 // leaves a set that fits alone.
 func TestSegElide(t *testing.T) {
