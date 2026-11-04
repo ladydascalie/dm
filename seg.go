@@ -87,14 +87,3 @@ func write(buf *bytes.Buffer, s seg) {
 	buf.WriteString(s.fg.fg())
 	buf.WriteString(s.text)
 }
-
-// railSeg and barSeg are the names the rail and the bar gave this run before it
-// was one type. The switcher's rail rows (switcher_draw.go), rail_test.go and
-// dm_test.go still spell them; each name goes when its caller does.
-type (
-	railSeg = seg
-	barSeg  = seg
-)
-
-// barCells is the old name for a bar run's width. dm_test.go still spells it.
-func barCells(runs []seg) int { return segCells(runs) }
