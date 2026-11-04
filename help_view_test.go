@@ -120,38 +120,47 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 	return b.String()
 }
 
-// TestHelpBoxSizesToWidestRowAt100x30 proves the box holds every default row
+// TestHelpBoxSizesToWidestRowAt100x30 proves the box holds the default layout
 // whole, that both border rows own a row, and that the frame carries its title
 // and hint.
 func TestHelpBoxSizesToWidestRowAt100x30(t *testing.T) {
 	keys := LoadDefault().HelpRows()
-	keyW, actionW := helpBoxWidths(keys)
+	g, ok := helpBoxGeometry(100, 30, keys)
+	if !ok {
+		t.Fatal("helpBoxGeometry returned false")
+	}
 	p := helpBoxParse(t, helpBoxDraw(t, 100, 30, keys))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
-	if want := keyW + 2 + actionW + 2; x1-x0+1 != want {
-		t.Fatalf("box width = %d, want %d (keyW %d, actionW %d)", x1-x0+1, want, keyW, actionW)
+	if want := g.inner + 2; x1-x0+1 != want {
+		t.Fatalf("box width = %d, want %d", x1-x0+1, want)
 	}
 	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 29 {
 		t.Fatalf("box %d,%d..%d,%d is not inside 100x30", x0, y0, x1, y1)
 	}
-	if want := len(keys) + 2; y1-y0+1 != want {
-		t.Fatalf("box height = %d, want %d for %d rows", y1-y0+1, want, len(keys))
-	}
-	if y1 != y0+len(keys)+1 {
-		t.Fatalf("bottom border row %d, want %d on its own row", y1, y0+len(keys)+1)
+	if want := g.h + 2; y1-y0+1 != want {
+		t.Fatalf("box height = %d, want %d", y1-y0+1, want)
 	}
 
-	// Every content row writes exactly the same columns and carries the full
-	// label pair, so the widest row sits inside the box and nothing is cut.
-	for i, kv := range keys {
-		row := y0 + 1 + i
-		want := helpBoxPad(kv[0], keyW) + "  " + helpBoxPad(kv[1], actionW)
-		if got := helpBoxRowText(p, row, x0+1, x1-1); got != want {
-			t.Fatalf("row %d = %q, want %q", i, got, want)
-		}
-		if strings.Contains(helpBoxRowText(p, row, x0+1, x1-1), "\u2026") {
-			t.Fatalf("row %d was cut: %q", i, helpBoxRowText(p, row, x0+1, x1-1))
+	var all strings.Builder
+	for row := y0 + 1; row <= y1-1; row++ {
+		all.WriteString(helpBoxRowText(p, row, x0+1, x1-1))
+		all.WriteString("\n")
+	}
+	for _, cat := range categorizeHelp(keys) {
+		for _, r := range cat {
+			if r.header != "" {
+				if !strings.Contains(all.String(), r.header) {
+					t.Errorf("missing header %q", r.header)
+				}
+				continue
+			}
+			if !strings.Contains(all.String(), r.key) {
+				t.Errorf("missing key %q", r.key)
+			}
+			if !strings.Contains(all.String(), r.action) {
+				t.Errorf("missing action %q", r.action)
+			}
 		}
 	}
 
@@ -168,6 +177,7 @@ func TestHelpBoxSizesToWidestRowAt100x30(t *testing.T) {
 func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 	for _, c := range []struct{ cols, rows int }{{40, 15}, {26, 12}} {
 		keys := LoadDefault().HelpRows()
+		rows := categorizeHelpRows(keys)
 		p := helpBoxParse(t, helpBoxDraw(t, c.cols, c.rows, keys))
 		x0, y0, x1, y1 := helpBoxBounds(t, p)
 		if x0 < 0 || y0 < 0 || x1 > c.cols-1 || y1 > c.rows-1 {
@@ -189,7 +199,7 @@ func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 				t.Fatalf("%dx%d: box paints row %d, which belongs to the toast row or the bar", c.cols, c.rows, cell[0])
 			}
 		}
-		if y1-y0+1 >= len(keys)+2 {
+		if y1-y0+1 >= len(rows)+2 {
 			t.Fatalf("%dx%d: box height %d, want trailing rows dropped", c.cols, c.rows, y1-y0+1)
 		}
 	}
@@ -199,6 +209,7 @@ func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 // alone, with no action label bleeding in.
 func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 	keys := LoadDefault().HelpRows()
+	rows := categorizeHelpRows(keys)
 	keyW, actionW := helpBoxWidths(keys)
 	p := helpBoxParse(t, helpBoxDraw(t, 26, 12, keys))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
@@ -209,8 +220,13 @@ func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 	if x1-x0+1 >= keyW+2+actionW+2 {
 		t.Fatalf("box width %d still holds the action column", x1-x0+1)
 	}
-	for i, kv := range keys[:y1-y0-1] {
-		want := helpBoxPad(helpBoxElide(kv[0], x1-x0-1), x1-x0-1)
+	for i, r := range rows[:y1-y0-1] {
+		var want string
+		if r.header != "" {
+			want = helpBoxPad(helpBoxElide(r.header, x1-x0-1), x1-x0-1)
+		} else {
+			want = helpBoxPad(helpBoxElide(r.key, x1-x0-1), x1-x0-1)
+		}
 		if got := helpBoxRowText(p, y0+1+i, x0+1, x1-1); got != want {
 			t.Fatalf("row %d = %q, want the key column alone %q", i, got, want)
 		}

@@ -1930,8 +1930,8 @@ func maxInt(a, b int) int {
 // rows. The box sizes to its widest row and is painted by the floating pane
 // primitive, so the top border carries the word prefix and the bottom border
 // names the key that closes it. The box stays clear of the rail, the toast row
-// and the status bar: it gives up the action column, then its trailing rows,
-// before it paints over any of them.
+// and the status bar: it gives up columns, then its trailing rows, before it
+// paints over any of them.
 func drawHelp(buf *bytes.Buffer, cols, rows int, keys [][2]string) {
 	g, ok := helpBoxGeometry(cols, rows, keys)
 	if !ok {
@@ -1948,15 +1948,175 @@ func drawHelp(buf *bytes.Buffer, cols, rows int, keys [][2]string) {
 	f.Draw(buf, nil)
 }
 
+// displayRow is one row of the help box: a category header or a key-action pair.
+type displayRow struct {
+	header string
+	key    string
+	action string
+	color  string
+}
+
+// categorizeHelp groups the flat key list into categories, each with its own
+// header and rows.
+func categorizeHelp(keys [][2]string) [][]displayRow {
+	var categories [][]displayRow
+	var current []displayRow
+	lastCat := ""
+	for _, kv := range keys {
+		cat := helpCategory(kv[1])
+		if cat != lastCat {
+			if len(current) > 0 {
+				categories = append(categories, current)
+			}
+			current = []displayRow{{header: cat, color: helpCategoryColors[cat]}}
+			lastCat = cat
+		}
+		current = append(current, displayRow{key: kv[0], action: kv[1], color: helpCategoryColors[cat]})
+	}
+	if len(current) > 0 {
+		categories = append(categories, current)
+	}
+	return categories
+}
+
+// categorizeHelpRows flattens the categories into a single row list.
+func categorizeHelpRows(keys [][2]string) []displayRow {
+	cats := categorizeHelp(keys)
+	var rows []displayRow
+	for _, cat := range cats {
+		rows = append(rows, cat...)
+	}
+	return rows
+}
+
+// helpCategory returns the category name for an action label.
+func helpCategory(action string) string {
+	switch {
+	case strings.Contains(action, "split"):
+		return "Layout"
+	case strings.Contains(action, "pane") || strings.Contains(action, "scrollback"):
+		return "Pane"
+	case strings.Contains(action, "window") || strings.Contains(action, "win"):
+		return "Window"
+	case strings.Contains(action, "workspace") || strings.Contains(action, "session"):
+		return "Session"
+	default:
+		return "Utility"
+	}
+}
+
+var helpCategoryColors = map[string]string{
+	"Layout":  "\x1b[96m", // cyan
+	"Pane":    "\x1b[92m", // green
+	"Window":  "\x1b[95m", // magenta
+	"Session": "\x1b[93m", // yellow
+	"Utility": "\x1b[94m", // blue
+}
+
+// helpColumn is one column of the help box: the key and action budgets and the
+// rows it lists.
+type helpColumn struct {
+	keyW    int
+	actionW int
+	rows    []displayRow
+}
+
+// newHelpColumn sizes a column to its categories, flattened into rows.
+func newHelpColumn(categories [][]displayRow) helpColumn {
+	var rows []displayRow
+	for _, cat := range categories {
+		rows = append(rows, cat...)
+	}
+	keyW, actionW := 0, 0
+	for _, r := range rows {
+		if r.header == "" {
+			keyW = maxInt(keyW, runeCells(r.key))
+			actionW = maxInt(actionW, runeCells(r.action))
+		}
+	}
+	if keyW < 1 {
+		keyW = 1
+	}
+	return helpColumn{keyW: keyW, actionW: actionW, rows: rows}
+}
+
+// width is the cells the column paints.
+func (c helpColumn) width() int {
+	if c.actionW > 0 {
+		return c.keyW + 2 + c.actionW
+	}
+	return c.keyW
+}
+
 // helpBoxLayout is the box drawHelp paints: the content origin and width, the
-// number of rows that fit, and the cell budget of each column.
+// number of rows that fit, and the columns it draws.
 type helpBoxLayout struct {
 	x, y    int
 	inner   int
 	h       int
-	keyW    int
-	actionW int
-	keys    [][2]string
+	columns []helpColumn
+}
+
+// layoutHelpColumns picks the number of columns and the split of categories
+// into them. It prefers more columns when they fit, and balances the heights.
+func layoutHelpColumns(categories [][]displayRow, avail int) []helpColumn {
+	n := len(categories)
+	if n == 0 {
+		return nil
+	}
+	maxCols := 4
+	if n < maxCols {
+		maxCols = n
+	}
+	for nCols := maxCols; nCols >= 1; nCols-- {
+		cols := bestColumnSplit(categories, nCols, avail)
+		if cols != nil {
+			return cols
+		}
+	}
+	return nil
+}
+
+// bestColumnSplit finds the split of categories into nCols columns that fits
+// in avail cells and has the smallest maximum height. Ties go to the narrowest
+// box.
+func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColumn {
+	n := len(categories)
+	var best []helpColumn
+	bestHeight := int(^uint(0) >> 1)
+	bestWidth := 0
+
+	var visit func(start, remaining int, current []helpColumn)
+	visit = func(start, remaining int, current []helpColumn) {
+		if remaining == 1 {
+			all := make([]helpColumn, len(current)+1)
+			copy(all, current)
+			all[len(current)] = newHelpColumn(categories[start:])
+			w := 0
+			h := 0
+			for i, c := range all {
+				if i > 0 {
+					w += 3
+				}
+				w += c.width()
+				h = maxInt(h, len(c.rows))
+			}
+			if w <= avail {
+				if h < bestHeight || (h == bestHeight && w < bestWidth) {
+					bestHeight = h
+					bestWidth = w
+					best = all
+				}
+			}
+			return
+		}
+		for i := start; i <= n-remaining; i++ {
+			c := newHelpColumn(categories[start : i+1])
+			visit(i+1, remaining-1, append(current, c))
+		}
+	}
+	visit(0, nCols, nil)
+	return best
 }
 
 // helpBoxGeometry sizes the box to its widest row and clamps it into the cells
@@ -1968,35 +2128,33 @@ func helpBoxGeometry(cols, rows int, keys [][2]string) (helpBoxLayout, bool) {
 	if cols < 3 || rows < 5 || len(keys) == 0 {
 		return g, false
 	}
-	keyW, actionW := 0, 0
-	for _, kv := range keys {
-		keyW = maxInt(keyW, runeCells(kv[0]))
-		actionW = maxInt(actionW, runeCells(kv[1]))
-	}
-	if keyW < 1 {
-		keyW = 1
-	}
-	// The rail owns columns 0..rail-1 and effectiveRail clamps a width to
-	// maxRail(cols), so starting right of maxRail clears any rail width.
+	categories := categorizeHelp(keys)
 	left := maxRail(cols) + 1
 	avail := cols - left
 	if avail < 3 {
 		return g, false
 	}
-	inner, action := 0, 0
-	// The action column needs eight cells to be worth a column; below that the
-	// key column alone makes the better picture.
-	if avail >= keyW+12 {
-		action = actionW
-		if room := avail - keyW - 4; action > room {
-			action = room
+	helpCols := layoutHelpColumns(categories, avail-2)
+	if helpCols == nil {
+		// A narrow screen keeps the key column alone.
+		col := newHelpColumn(categories)
+		col.actionW = 0
+		if room := avail - 2; col.keyW > room {
+			col.keyW = room
 		}
-		inner = keyW + 2 + action
-	} else {
-		inner = keyW
-		if room := avail - 2; inner > room {
-			inner = room
+		if col.keyW < 1 {
+			return g, false
 		}
+		helpCols = []helpColumn{col}
+	}
+	inner := 0
+	h := 0
+	for i, c := range helpCols {
+		if i > 0 {
+			inner += 3
+		}
+		inner += c.width()
+		h = maxInt(h, len(c.rows))
 	}
 	if inner < 1 || inner+2 > avail {
 		return g, false
@@ -2006,9 +2164,6 @@ func helpBoxGeometry(cols, rows int, keys [][2]string) (helpBoxLayout, bool) {
 	if x < left {
 		x = left
 	}
-	// Both border rows own a row: the top one above the content, the bottom
-	// one below it and above the toast row.
-	h := len(keys)
 	if h > rows-4 {
 		h = rows - 4
 	}
@@ -2022,25 +2177,85 @@ func helpBoxGeometry(cols, rows int, keys [][2]string) (helpBoxLayout, bool) {
 	if y+h > rows-3 {
 		return g, false
 	}
-	return helpBoxLayout{x: x, y: y, inner: inner, h: h, keyW: keyW, actionW: action, keys: keys[:h]}, true
+	return helpBoxLayout{x: x, y: y, inner: inner, h: h, columns: helpCols}, true
 }
 
 // helpBoxRows paints every content row of the box. Each row starts with an
-// absolute cursor move and writes exactly inner.W cells, so it neither keeps a
-// glyph the frame before left nor paints past the border. The key column is
-// bright, the action column dim, and a clipped label ends in an ellipsis.
+// absolute cursor move and writes exactly its column's cells, so it neither
+// keeps a glyph the frame before left nor paints past the border. A header is
+// a coloured line, a key is bright and an action label is dim. Columns are
+// separated by a dim vertical bar.
 func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
-	for i, kv := range g.keys {
-		y := inner.Y + i
-		if g.actionW > 0 {
-			key := helpBoxPad(kv[0], g.keyW)
-			action := helpBoxPad(helpBoxElide(kv[1], g.actionW), g.actionW)
-			fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[97m%s  \x1b[90m%s\x1b[0m",
-				y+1, inner.X+1, key, action)
-			continue
+	xOff := 0
+	for ci, col := range g.columns {
+		if ci > 0 {
+			for i := 0; i < g.h; i++ {
+				y := inner.Y + i
+				fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m \u2502 \x1b[0m", y+1, inner.X+xOff+1)
+			}
+			xOff += 3
 		}
-		key := helpBoxPad(helpBoxElide(kv[0], inner.W), inner.W)
-		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[97m%s\x1b[0m", y+1, inner.X+1, key)
+		maxRows := g.h
+		if len(col.rows) < maxRows {
+			maxRows = len(col.rows)
+		}
+		for i, r := range col.rows[:maxRows] {
+			y := inner.Y + i
+			x := inner.X + xOff
+			if r.header != "" {
+				color := r.color
+				if color == "" {
+					color = "\x1b[1m"
+				}
+				header := helpBoxPad(helpBoxElide(r.header, col.width()), col.width())
+				fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m%s%s\x1b[0m", y+1, x+1, color, header)
+				continue
+			}
+			color := r.color
+			if color == "" {
+				color = "\x1b[97m"
+			}
+			if col.actionW > 0 {
+				fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
+				helpBoxKey(buf, r.key, color, col.keyW)
+				buf.WriteString("  \x1b[90m")
+				buf.WriteString(helpBoxPad(helpBoxElide(r.action, col.actionW), col.actionW))
+				buf.WriteString("\x1b[0m")
+				continue
+			}
+			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
+			helpBoxKey(buf, r.key, color, col.width())
+			buf.WriteString("\x1b[0m")
+		}
+		for i := maxRows; i < g.h; i++ {
+			y := inner.Y + i
+			x := inner.X + xOff
+			fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m%s\x1b[0m", y+1, x+1, strings.Repeat(" ", col.width()))
+		}
+		xOff += col.width()
+	}
+}
+
+// helpBoxKey paints a key label with each alternative in the category colour
+// and the " / " separator plain, so a literal slash reads as a key and a slash
+// between keys reads as a separator. It pads the result to budget cells.
+func helpBoxKey(buf *bytes.Buffer, key, color string, budget int) {
+	key = helpBoxElide(key, budget)
+	parts := strings.Split(key, " / ")
+	used := 0
+	for i, part := range parts {
+		if i > 0 {
+			buf.WriteString("\x1b[0m / ")
+			used += 3
+		}
+		buf.WriteString(color)
+		buf.WriteString("\x1b[1m")
+		buf.WriteString(part)
+		used += runeCells(part)
+	}
+	buf.WriteString("\x1b[0m")
+	if pad := budget - used; pad > 0 {
+		buf.WriteString(strings.Repeat(" ", pad))
 	}
 }
 
