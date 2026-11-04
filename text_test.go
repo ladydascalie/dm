@@ -117,3 +117,35 @@ func TestTextClipTailKeepsTheEnd(t *testing.T) {
 		}
 	}
 }
+
+// The five shims text.go used to carry are gone. These pin what each one did
+// under the name that replaced it.
+func TestTextCoversTheOldNames(t *testing.T) {
+	// runeWidth: one rune at a time, wide and combining.
+	if cells("A") != 1 || cells("日") != 2 || cells("\u0301") != 0 {
+		t.Errorf("cells of one rune = %d, %d, %d, want 1, 2, 0",
+			cells("A"), cells("日"), cells("\u0301"))
+	}
+	// runeCells: a run of text.
+	if got := cells("ab日"); got != 4 {
+		t.Errorf("cells(%q) = %d, want 4", "ab日", got)
+	}
+	// boxCells: a box row.
+	if got := cells("│ key │"); got != 7 {
+		t.Errorf("cells(%q) = %d, want 7", "│ key │", got)
+	}
+	// helpBoxElide: cut and mark, or the ellipsis alone.
+	if got := elide("label", 4); got != "lab…" {
+		t.Errorf("elide(%q, 4) = %q, want %q", "label", got, "lab…")
+	}
+	if got := elide("label", 1); got != "…" {
+		t.Errorf("elide(%q, 1) = %q, want the ellipsis alone", "label", got)
+	}
+	// helpBoxPad: fill never cuts, a long string clips to the budget.
+	if got := pad("ab", 4); got != "ab  " {
+		t.Errorf("pad(%q, 4) = %q, want %q", "ab", got, "ab  ")
+	}
+	if got := pad("abc", 2); got != "ab" {
+		t.Errorf("pad(%q, 2) = %q, want %q", "abc", got, "ab")
+	}
+}

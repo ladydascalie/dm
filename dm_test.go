@@ -1714,7 +1714,7 @@ func TestRailWindowFolderTruncate(t *testing.T) {
 	if !strings.Contains(line, "● +12 -4") {
 		t.Fatalf("stats dropped at %d cols: %q", defaultRail, line)
 	}
-	if n := runeCells(line); n != snap.Rail {
+	if n := cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 
@@ -1735,7 +1735,7 @@ func TestRailWindowFolderTruncate(t *testing.T) {
 	if !strings.Contains(line, "● +12 -4") {
 		t.Fatalf("stats dropped at %d cols: %q", defaultRail, line)
 	}
-	if n := runeCells(line); n != snap.Rail {
+	if n := cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
@@ -1774,7 +1774,7 @@ func TestRailWindowFolderLine(t *testing.T) {
 	if want := "● +12 -4"; !strings.HasSuffix(line, want) {
 		t.Fatalf("window line = %q, want it to end with %q", line, want)
 	}
-	if n := runeCells(line); n != snap.Rail {
+	if n := cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
@@ -1808,7 +1808,7 @@ func TestRailWindowBranchEqualsFolder(t *testing.T) {
 	if n := strings.Count(line, "main"); n != 1 {
 		t.Fatalf("window line draws the folder %d times: %q", n, line)
 	}
-	if n := runeCells(line); n != snap.Rail {
+	if n := cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
@@ -1843,7 +1843,7 @@ func TestRailWindowFolderNested(t *testing.T) {
 	if strings.Contains(line, `\`) {
 		t.Fatalf("nested folder used a backslash: %q", line)
 	}
-	if n := runeCells(line); n != snap.Rail {
+	if n := cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 }
@@ -2127,7 +2127,7 @@ func TestRailStatsWholeAtClamp(t *testing.T) {
 	if strings.Contains(line, "a-branch") {
 		t.Fatalf("branch survived at the clamp: %q", line)
 	}
-	if n := runeCells(line); n > snap.Rail {
+	if n := cells(line); n > snap.Rail {
 		t.Fatalf("window line %q is %d cells, want <= %d", line, n, snap.Rail)
 	}
 }
@@ -2157,7 +2157,7 @@ func TestRailNoteElision(t *testing.T) {
 	if !strings.Contains(note, "…") {
 		t.Fatalf("note line was not elided: %q", note)
 	}
-	if n := runeCells(note); n > snap.Rail {
+	if n := cells(note); n > snap.Rail {
 		t.Fatalf("note line %q is %d cells, want <= %d", note, n, snap.Rail)
 	}
 	if !strings.HasPrefix(note, "    a very") {
@@ -2266,9 +2266,9 @@ func TestRailCollapsed(t *testing.T) {
 
 func TestRailNeverWritesPastWidth(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	if runeWidth('A') != 1 || runeWidth('日') != 2 || runeWidth('\u0301') != 0 {
-		t.Fatalf("rune widths: A=%d 日=%d combining=%d",
-			runeWidth('A'), runeWidth('日'), runeWidth('\u0301'))
+	if cells("A") != 1 || cells("日") != 2 || cells("\u0301") != 0 {
+		t.Fatalf("cell widths: A=%d 日=%d combining=%d",
+			cells("A"), cells("日"), cells("\u0301"))
 	}
 	cases := []struct {
 		name  string
@@ -2678,10 +2678,10 @@ func TestBarPinnedGutter(t *testing.T) {
 		for _, seg := range segs {
 			if seg.pin {
 				pinned = true
-				rightCells += runeCells(seg.text)
+				rightCells += cells(seg.text)
 				continue
 			}
-			leftCells += runeCells(seg.text)
+			leftCells += cells(seg.text)
 		}
 		if !pinned {
 			t.Fatalf("cols %d: no pinned block", c.cols)
@@ -2717,7 +2717,7 @@ func TestBarPinnedAnchored(t *testing.T) {
 		if pinnedText != "PREFIX "+info {
 			t.Fatalf("cols %d: pinned spans = %q", cols, pinnedText)
 		}
-		start := cols - runeCells(pinnedText)
+		start := cols - cells(pinnedText)
 
 		var b bytes.Buffer
 		drawBar(&b, snap, true, info)
