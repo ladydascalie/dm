@@ -65,6 +65,7 @@ bottom right. It stays until an action runs or `esc` dismisses it.
 | `s` | switch session (picker: j/k, enter, esc) |
 | `a` | quick switch palette: panes, windows, workspaces |
 | `m` | message box: the session's log as a floating pane |
+| `?` | all keymaps, in a floating pane |
 | `)` | next workspace |
 | `r` | rename the active workspace |
 | `b` | cycle the sidebar: full, thin, hidden |
@@ -110,12 +111,19 @@ One mode is one keymap.
 - `scroll` is scrollback.
 - `rename` is the rename prompt.
 - `box` is the message box.
+- `help` is the keymap view.
+
+The prefix then `?` opens the keymap view. It lists every mode the config
+defines, in the order above, with each action and its key. `j`/`k` and
+`PgUp`/`PgDn` scroll, `g` and `G` jump to the ends, and `esc` or `q` closes.
+The prefix key and `?` close it too. A config written before this mode falls
+back to the built-in help bindings, so the view always scrolls and closes.
 
 A key is one key. Arrows and `PgUp`/`PgDn` are named sequences: `up`, `down`,
 `left`, `right`, `pgup`, `pgdn`. The switcher and the rename prompt keep every
-printable key as text, and bind only their control keys. The help overlay and
-the right-click menu take their key labels from the config, so a remap shows
-there too.
+printable key as text, and bind only their control keys. The keymap view, the
+armed help preview and the right-click menu take their keys from the config, so
+a remap shows there too.
 
 ## Themes
 
