@@ -131,11 +131,11 @@ func TestRailRowSegments(t *testing.T) {
 	ws := railRowFind(t, items, railWorkspace, "main")
 	left, right, tail := railRow(ws, defaultRail, false, false)
 	wantLeft := []railSeg{
-		{text: "\u258c", colour: ws.accent},
-		{text: " ", colour: railText},
-		{text: "main", colour: railText, bold: true},
+		{text: "\u258c", fg: ws.accent},
+		{text: " ", fg: railText},
+		{text: "main", fg: railText, bold: true},
 	}
-	wantRight := []railSeg{{text: "2", colour: railDim}}
+	wantRight := []railSeg{{text: "2", fg: railDim}}
 	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) || tail != nil {
 		t.Fatalf("workspace row = %+v / %+v / %+v, want %+v / %+v / nil",
 			left, right, tail, wantLeft, wantRight)
@@ -146,21 +146,21 @@ func TestRailRowSegments(t *testing.T) {
 	win := railRowFind(t, items, railWindow, "one")
 	left, right, tail = railRow(win, defaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "  ", colour: railWindowFg},
-		{text: "\u25be", colour: railWindowFg},
-		{text: " ", colour: railWindowFg},
-		{text: "rail", colour: railWindowFg},
+		{text: "  ", fg: railWindowFg},
+		{text: "\u25be", fg: railWindowFg},
+		{text: " ", fg: railWindowFg},
+		{text: "rail", fg: railWindowFg},
 	}
 	wantTail := []railSeg{
-		{text: "  ", colour: railDim},
-		{text: "dm-rail", colour: railDim},
+		{text: "  ", fg: railDim},
+		{text: "dm-rail", fg: railDim},
 	}
 	wantRight = []railSeg{
-		{text: "\u25cf", colour: railWorking},
-		{text: " ", colour: railDim},
-		{text: "+12", colour: railDiffAdd},
-		{text: " ", colour: railDim},
-		{text: "-4", colour: railDiffDel},
+		{text: "\u25cf", fg: railWorking},
+		{text: " ", fg: railDim},
+		{text: "+12", fg: railDiffAdd},
+		{text: " ", fg: railDim},
+		{text: "-4", fg: railDiffDel},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) ||
 		!reflect.DeepEqual(tail, wantTail) {
@@ -173,10 +173,10 @@ func TestRailRowSegments(t *testing.T) {
 	folded := railRowFind(t, items, railWindow, "two")
 	left, right, tail = railRow(folded, defaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "  ", colour: railWindowFg},
-		{text: "\u25b8", colour: railWindowFg},
-		{text: " ", colour: railWindowFg},
-		{text: "other", colour: railWindowFg},
+		{text: "  ", fg: railWindowFg},
+		{text: "\u25b8", fg: railWindowFg},
+		{text: " ", fg: railWindowFg},
+		{text: "other", fg: railWindowFg},
 	}
 	if folded.folded != true {
 		t.Fatalf("window two is not folded: %+v", folded)
@@ -190,8 +190,8 @@ func TestRailRowSegments(t *testing.T) {
 	note := railRowFind(t, items, railWindowNote, "working hard")
 	left, right, tail = railRow(note, defaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "    ", colour: railDim},
-		{text: "working hard", colour: railDim},
+		{text: "    ", fg: railDim},
+		{text: "working hard", fg: railDim},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
 		t.Fatalf("note line = %+v / %+v / %+v, want %+v / nil / nil",
@@ -205,10 +205,10 @@ func TestRailRowSegments(t *testing.T) {
 	pane := railRowFind(t, items, railPane, "pi")
 	left, right, tail = railRow(pane, defaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "      ", colour: railText},
-		{text: mark, colour: glyphColour},
-		{text: "\u25cf", colour: glyphColour},
-		{text: " pi", colour: railText},
+		{text: "      ", fg: railText},
+		{text: mark, fg: glyphColour},
+		{text: "\u25cf", fg: glyphColour},
+		{text: " pi", fg: railText},
 	}
 	if !pane.focus {
 		t.Fatalf("pane pi is not focused: %+v", pane)
@@ -221,8 +221,8 @@ func TestRailRowSegments(t *testing.T) {
 	// The thin rail keeps the marker and the glyph and drops the indents.
 	left, right, tail = railRow(pane, collapsedRail, true, false)
 	wantLeft = []railSeg{
-		{text: mark, colour: glyphColour},
-		{text: "\u25cf", colour: glyphColour},
+		{text: mark, fg: glyphColour},
+		{text: "\u25cf", fg: glyphColour},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
 		t.Fatalf("thin pane row = %+v / %+v / %+v, want %+v / nil / nil",
@@ -274,11 +274,11 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	items := railItems(snap)
 	win := railRowFind(t, items, railWindow, "one")
 	full := []railSeg{
-		{text: "\u25cf", colour: railWorking},
-		{text: " ", colour: railDim},
-		{text: "+12", colour: railDiffAdd},
-		{text: " ", colour: railDim},
-		{text: "-4", colour: railDiffDel},
+		{text: "\u25cf", fg: railWorking},
+		{text: " ", fg: railDim},
+		{text: "+12", fg: railDiffAdd},
+		{text: " ", fg: railDim},
+		{text: "-4", fg: railDiffDel},
 	}
 
 	// At the default width the branch fits beside the folder and the pair.

@@ -792,93 +792,41 @@ func railMark(agent, nerd bool) string {
 	}
 }
 
-// railSeg is one run of a rail row: its text, its colour, and its own weight.
-type railSeg struct {
-	text   string
-	colour rgb
-	bold   bool
-}
-
-// segCells is the cell width of a segment run.
-func segCells(segs []railSeg) int {
-	n := 0
-	for _, seg := range segs {
-		n += cells(seg.text)
-	}
-	return n
-}
-
-// clipSegs keeps the first budget cells of a segment run.
-func clipSegs(segs []railSeg, budget int) []railSeg {
-	var out []railSeg
-	for _, seg := range segs {
-		if budget <= 0 {
-			break
-		}
-		text := clip(seg.text, budget)
-		if text != "" {
-			budget -= cells(text)
-			seg.text = text
-			out = append(out, seg)
-			continue
-		}
-		if seg.text != "" {
-			// The run starts on a glyph the budget cannot hold, so no later
-			// span can be painted in order either.
-			break
-		}
-	}
-	return out
-}
-
-// elideSegs cuts a segment run to a cell budget and ends it with an ellipsis,
-// so a long label shrinks before the right-aligned stats lose a cell.
-func elideSegs(segs []railSeg, budget int) []railSeg {
-	if budget <= 0 {
-		return nil
-	}
-	out := clipSegs(segs, budget-1)
-	return append(out, railSeg{text: ellipsis, colour: railDim})
-}
-
-// writeRailSeg paints one run of a row on its background.
-func writeRailSeg(buf *bytes.Buffer, seg railSeg, bg rgb, bold bool) {
-	if seg.text == "" {
-		return
-	}
-	buf.WriteString("\x1b[0m" + bg.bg())
-	if bold || seg.bold {
-		buf.WriteString("\x1b[1m")
-	}
-	buf.WriteString(seg.colour.fg())
-	buf.WriteString(seg.text)
+// writeRailSeg paints one run on the rail's row ground. The rail carries one
+// background and one weight per row, so they arrive from the caller and ride
+// the run only for the length of this write. The switcher's rail rows call it
+// too.
+func writeRailSeg(buf *bytes.Buffer, s seg, ground rgb, bold bool) {
+	s.bg = ground
+	s.bold = s.bold || bold
+	write(buf, s)
 }
 
 // railStats is the right-aligned git tail of a window line: an amber dot when
 // the tree is dirty, then the added and deleted line counts, or "clean".
-func railStats(it railItem) []railSeg {
+func railStats(it railItem) []seg {
 	if !it.inRepo {
 		return nil
 	}
-	var segs []railSeg
+	var segs []seg
 	if it.dirty {
-		segs = append(segs, railSeg{text: glyphDirty, colour: railWorking})
+		segs = append(segs, seg{text: glyphDirty, fg: railWorking})
 	}
 	if it.added > 0 {
-		segs = append(segs, railSeg{text: "+" + strconv.Itoa(it.added), colour: railDiffAdd})
+		segs = append(segs, seg{text: "+" + strconv.Itoa(it.added), fg: railDiffAdd})
 	}
 	if it.deleted > 0 {
-		segs = append(segs, railSeg{text: "-" + strconv.Itoa(it.deleted), colour: railDiffDel})
+		segs = append(segs, seg{text: "-" + strconv.Itoa(it.deleted), fg: railDiffDel})
 	}
 	if len(segs) == 0 {
-		return []railSeg{{text: "clean", colour: railDim}}
+		return []seg{{text: "clean", fg: railDim}}
 	}
-	out := make([]railSeg, 0, len(segs)*2)
-	for i, seg := range segs {
+	out := make([]seg, 0, len(segs)*2)
+	for i, s := range segs {
 		if i > 0 {
-			out = append(out, railSeg{text: " ", colour: railDim})
+			out = append(out, seg{text: " ", fg: railDim})
 		}
-		out = append(out, seg)
+		out = append(out, s)
 	}
 	return out
 }
@@ -886,7 +834,7 @@ func railStats(it railItem) []railSeg {
 // railRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and nerd are the rail's own switches.
-func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSeg) {
+func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
 	switch it.kind {
 	case railWorkspace:
 		if !compact {
@@ -894,12 +842,12 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSe
 			if !it.active {
 				name = railHeader
 			}
-			left = []railSeg{
-				{text: glyphWorkspaceBar, colour: it.accent},
-				{text: " ", colour: name},
-				{text: it.text, colour: name, bold: true},
+			left = []seg{
+				{text: glyphWorkspaceBar, fg: it.accent},
+				{text: " ", fg: name},
+				{text: it.text, fg: name, bold: true},
 			}
-			right = []railSeg{{text: strconv.Itoa(it.count), colour: railDim}}
+			right = []seg{{text: strconv.Itoa(it.count), fg: railDim}}
 		}
 	case railWindow:
 		base := railWindowFg
@@ -920,18 +868,18 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSe
 			if label == "" {
 				label = it.text
 			}
-			left = []railSeg{
-				{text: "  ", colour: base},
-				{text: caret, colour: base},
-				{text: " ", colour: base},
-				{text: label, colour: base},
+			left = []seg{
+				{text: "  ", fg: base},
+				{text: caret, fg: base},
+				{text: " ", fg: base},
+				{text: label, fg: base},
 			}
 			// The branch trails the folder in dim grey, and only when it says
 			// something the label does not.
 			if it.branch != "" && it.branch != label {
-				tail = []railSeg{
-					{text: "  ", colour: railDim},
-					{text: it.branch, colour: railDim},
+				tail = []seg{
+					{text: "  ", fg: railDim},
+					{text: it.branch, fg: railDim},
 				}
 			}
 			right = railStats(it)
@@ -939,9 +887,9 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSe
 	case railWindowNote:
 		if !compact {
 			base := railDim
-			left = []railSeg{
-				{text: "    ", colour: base},
-				{text: it.text, colour: base},
+			left = []seg{
+				{text: "    ", fg: base},
+				{text: it.text, fg: base},
 			}
 		}
 	case railPane:
@@ -957,16 +905,16 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []railSe
 		}
 		mark := railMark(it.agent, nerd)
 		if compact {
-			left = []railSeg{
-				{text: mark, colour: colour},
-				{text: g, colour: colour},
+			left = []seg{
+				{text: mark, fg: colour},
+				{text: g, fg: colour},
 			}
 		} else {
-			left = []railSeg{
-				{text: "      ", colour: base},
-				{text: mark, colour: colour},
-				{text: g, colour: colour},
-				{text: " " + it.text, colour: base},
+			left = []seg{
+				{text: "      ", fg: base},
+				{text: mark, fg: colour},
+				{text: g, fg: colour},
+				{text: " " + it.text, fg: base},
 			}
 		}
 	case railGap:
@@ -1047,24 +995,24 @@ func railControlAt(snap *Snapshot, x, y int) bool {
 // A rail wider than the thin one names the move and collapses. The thin rail
 // shows the expand caret in the state glyph's column and leaves the rest
 // blank, so a narrow rail loses no pane row to a label.
-func railControlSegs(compact, nerd bool) []railSeg {
+func railControlSegs(compact, nerd bool) []seg {
 	if compact {
 		caret := "▶"
 		if nerd {
 			caret = "\uf0da"
 		}
-		return []railSeg{
-			{text: "  ", colour: railDim},
-			{text: caret, colour: railDim},
+		return []seg{
+			{text: "  ", fg: railDim},
+			{text: caret, fg: railDim},
 		}
 	}
 	mark := "◀ "
 	if nerd {
 		mark = "\uf0d9 "
 	}
-	return []railSeg{
-		{text: mark, colour: railDim},
-		{text: "collapse", colour: railDim},
+	return []seg{
+		{text: mark, fg: railDim},
+		{text: "collapse", fg: railDim},
 	}
 }
 
@@ -1087,7 +1035,7 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	controlAt := snap.Rows - 2
 	gripAt := controlAt / 2
 	for y := 0; y < rows; y++ {
-		var left, right, tail []railSeg
+		var left, right, tail []seg
 		bg, bold := railBG, false
 		if y == controlAt {
 			left = railControlSegs(compact, nerd)
@@ -1314,70 +1262,27 @@ func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, info string) {
 	segs := barSegments(snap, armed, info)
 	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
-	writeBarSegs(buf, left)
-	if n := snap.Cols - barCells(segs); n > 0 {
+	for _, s := range left {
+		write(buf, s)
+	}
+	if n := snap.Cols - segCells(segs); n > 0 {
 		buf.WriteString("\x1b[0m" + barGutter.bg() + strings.Repeat(" ", n))
 	}
-	writeBarSegs(buf, pinned)
+	for _, s := range pinned {
+		write(buf, s)
+	}
 	buf.WriteString("\x1b[0m")
 }
 
 // barSplitPinned splits a span run at its first pinned span: the left block,
 // then the right block that is anchored to the last column.
-func barSplitPinned(segs []barSeg) (left, pinned []barSeg) {
+func barSplitPinned(segs []seg) (left, pinned []seg) {
 	for i, seg := range segs {
 		if seg.pin {
 			return segs[:i], segs[i:]
 		}
 	}
 	return segs, nil
-}
-
-// writeBarSegs paints spans left to right, each one reset before its colours.
-func writeBarSegs(buf *bytes.Buffer, segs []barSeg) {
-	for _, seg := range segs {
-		if seg.text == "" {
-			continue
-		}
-		buf.WriteString("\x1b[0m" + seg.bg.bg() + seg.fg.fg())
-		if seg.bold {
-			buf.WriteString("\x1b[1m")
-		}
-		buf.WriteString(seg.text)
-	}
-}
-
-// barSeg is one painted span of the status bar. A pinned segment belongs to
-// the right block, which sits flush against the last column; the rest form the
-// left block, in paint order.
-type barSeg struct {
-	text string
-	fg   rgb
-	bg   rgb
-	bold bool
-	pin  bool
-}
-
-// barCells is the painted cell width of a span run.
-func barCells(segs []barSeg) int {
-	n := 0
-	for _, seg := range segs {
-		n += cells(seg.text)
-	}
-	return n
-}
-
-// barJoin lays groups left to right with one background gutter cell between
-// them, so neighbouring chips never touch.
-func barJoin(groups [][]barSeg) []barSeg {
-	var out []barSeg
-	for i, group := range groups {
-		if i > 0 {
-			out = append(out, barSeg{text: " ", fg: railDim, bg: railBG})
-		}
-		out = append(out, group...)
-	}
-	return out
 }
 
 // barWindow is one window chip of the left block: its index in the window
@@ -1467,13 +1372,13 @@ func barLeftFor(snap *Snapshot) *barLeft {
 
 // groups builds the left block spans as they currently stand: session,
 // workspace, one chip per window, then the focus chip.
-func (l *barLeft) groups() [][]barSeg {
-	var out [][]barSeg
+func (l *barLeft) groups() [][]seg {
+	var out [][]seg
 	if l.session != "" {
-		out = append(out, []barSeg{{text: l.session, fg: railText, bg: railBG}})
+		out = append(out, []seg{{text: l.session, fg: railText, bg: railBG}})
 	}
 	if l.workspace != "" {
-		out = append(out, []barSeg{{text: l.workspace, fg: railHeader, bg: railBG}})
+		out = append(out, []seg{{text: l.workspace, fg: railHeader, bg: railBG}})
 	}
 	for _, w := range l.windows {
 		if w.active {
@@ -1483,7 +1388,7 @@ func (l *barLeft) groups() [][]barSeg {
 			if l.winNames && w.name != "" {
 				text += " " + w.name
 			}
-			out = append(out, []barSeg{
+			out = append(out, []seg{
 				{text: glyphActiveMark + " ", fg: barAccent, bg: railFocusBG},
 				{text: text, fg: railText, bg: railFocusBG, bold: true},
 			})
@@ -1493,18 +1398,18 @@ func (l *barLeft) groups() [][]barSeg {
 		if l.winNames && w.name != "" {
 			text += " " + w.name
 		}
-		out = append(out, []barSeg{{text: text, fg: railDim, bg: railBG}})
+		out = append(out, []seg{{text: text, fg: railDim, bg: railBG}})
 	}
 	if l.focus != nil {
-		chip := []barSeg{
+		chip := []seg{
 			{text: l.focus.glyph, fg: l.focus.colour, bg: railFocusBG},
 			{text: " " + l.focus.id, fg: railText, bg: railFocusBG, bold: true},
 		}
 		if l.showName && l.focus.name != "" {
-			chip = append(chip, barSeg{text: " " + l.focus.name, fg: railDim, bg: railFocusBG})
+			chip = append(chip, seg{text: " " + l.focus.name, fg: railDim, bg: railFocusBG})
 		}
 		if l.showStat && l.focus.status != "" {
-			chip = append(chip, barSeg{text: " " + l.focus.status, fg: railDim, bg: railFocusBG})
+			chip = append(chip, seg{text: " " + l.focus.status, fg: railDim, bg: railFocusBG})
 		}
 		out = append(out, chip)
 	}
@@ -1515,18 +1420,19 @@ func (l *barLeft) groups() [][]barSeg {
 // window names, then trailing window chips, then the workspace name, then the
 // session name, then the focus chip's status word and name. The focus chip
 // keeps its glyph and id last, and the result never exceeds the budget.
-func (l *barLeft) fit(budget int) []barSeg {
+func (l *barLeft) fit(budget int) []seg {
 	if budget <= 0 {
 		return nil
 	}
-	cur := func() []barSeg { return barJoin(l.groups()) }
-	if segs := cur(); barCells(segs) <= budget {
+	gap := seg{text: " ", fg: railDim, bg: railBG}
+	cur := func() []seg { return join(l.groups(), gap) }
+	if segs := cur(); segCells(segs) <= budget {
 		return segs
 	}
 
 	// 1. Window chips lose their name and keep the number.
 	l.winNames = false
-	if segs := cur(); barCells(segs) <= budget {
+	if segs := cur(); segCells(segs) <= budget {
 		return segs
 	}
 
@@ -1540,7 +1446,7 @@ func (l *barLeft) fit(budget int) []barSeg {
 			break
 		}
 		l.windows = append(l.windows[:i], l.windows[i+1:]...)
-		if segs := cur(); barCells(segs) <= budget {
+		if segs := cur(); segCells(segs) <= budget {
 			return segs
 		}
 	}
@@ -1552,63 +1458,49 @@ func (l *barLeft) fit(budget int) []barSeg {
 		if *name == "" {
 			continue
 		}
-		avail := budget - (barCells(cur()) - cells(*name))
+		avail := budget - (segCells(cur()) - cells(*name))
 		if avail < 1 {
 			avail = 1
 		}
 		*name = elide(*name, avail)
-		if segs := cur(); barCells(segs) <= budget {
+		if segs := cur(); segCells(segs) <= budget {
 			return segs
 		}
 	}
 
 	// 5. The focus chip drops its status word, then its name.
 	l.showStat = false
-	if segs := cur(); barCells(segs) <= budget {
+	if segs := cur(); segCells(segs) <= budget {
 		return segs
 	}
 	l.showName = false
-	if segs := cur(); barCells(segs) <= budget {
+	if segs := cur(); segCells(segs) <= budget {
 		return segs
 	}
 
 	// 6. Only the glyph and the id are left; a line too narrow for that is cut
-	// span by span. The first span the room cannot hold ends the line, so no
-	// later span paints out of order.
-	var out []barSeg
-	room := budget
-	for _, seg := range cur() {
-		if room <= 0 {
-			break
-		}
-		text := clip(seg.text, room)
-		if text == "" {
-			break
-		}
-		room -= cells(text)
-		seg.text = text
-		out = append(out, seg)
-	}
-	return out
+	// run by run. The first run the room cannot hold ends the line, so no later
+	// run paints out of order.
+	return clipSegs(cur(), budget)
 }
 
 // barPinned is the right block: the prefix flag while armed, then the scroll
 // info. Both are anchored to the last column, so both are pinned.
-func barPinned(armed bool, info string) []barSeg {
-	var out []barSeg
+func barPinned(armed bool, info string) []seg {
+	var out []seg
 	if armed {
-		out = append(out, barSeg{text: "PREFIX ", fg: railText, bg: railBG, bold: true, pin: true})
+		out = append(out, seg{text: "PREFIX ", fg: railText, bg: railBG, bold: true, pin: true})
 	}
 	if info != "" {
-		out = append(out, barSeg{text: info, fg: railDim, bg: railBG, pin: true})
+		out = append(out, seg{text: info, fg: railDim, bg: railBG, pin: true})
 	}
 	return out
 }
 
 // barFitPinned fits the right block to cols cells on its own. A pinned segment
 // goes whole, leftmost first, and the survivor is clipped with an ellipsis.
-func barFitPinned(segs []barSeg, cols int) []barSeg {
-	for barCells(segs) > cols {
+func barFitPinned(segs []seg, cols int) []seg {
+	for segCells(segs) > cols {
 		if len(segs) > 1 {
 			segs = segs[1:]
 			continue
@@ -1627,12 +1519,12 @@ func barFitPinned(segs []barSeg, cols int) []barSeg {
 // pinned block leaves, minus one gutter cell, so the blocks never touch and the
 // line never runs past snap.Cols cells. The pinned block is never dropped to
 // make room for the left one.
-func barSegments(snap *Snapshot, armed bool, info string) []barSeg {
+func barSegments(snap *Snapshot, armed bool, info string) []seg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}
 	right := barFitPinned(barPinned(armed, info), snap.Cols)
-	budget := snap.Cols - barCells(right)
+	budget := snap.Cols - segCells(right)
 	if len(right) > 0 {
 		// Keep one gutter cell between the blocks. drawBar spends it as part of
 		// the pad, so the pinned block still ends on the last column.
@@ -1737,7 +1629,7 @@ func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string) {
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
-	segs := clipSegs([]railSeg{{text: " rename workspace " + id + ": ", colour: railDim}}, labelRoom)
+	segs := clipSegs([]seg{{text: " rename workspace " + id + ": ", fg: railDim}}, labelRoom)
 	draftRoom := snap.Cols - cells(caret) - segCells(segs)
 	// The draft loses its head, so a long name still shows its end and the
 	// caret stays on screen.
@@ -1749,13 +1641,13 @@ func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string) {
 		}
 	}
 	segs = append(segs,
-		railSeg{text: draft, colour: railText},
-		railSeg{text: caret, colour: barAccent},
+		seg{text: draft, fg: railText},
+		seg{text: caret, fg: barAccent},
 	)
 	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m", snap.Rows-1)
 	buf.WriteString(railBG.bg())
 	for _, seg := range segs {
-		buf.WriteString(seg.colour.fg())
+		buf.WriteString(seg.fg.fg())
 		buf.WriteString(seg.text)
 	}
 	if n := snap.Cols - segCells(segs); n > 0 {
