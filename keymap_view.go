@@ -171,7 +171,7 @@ func (k *keymapView) paint() {
 
 // keymapHeader reports whether a row is a header rather than a binding.
 func keymapHeader(row string) bool {
-	return strings.HasPrefix(row, " prefix ") || strings.HasPrefix(row, " [")
+	return strings.HasPrefix(row, " prefix ") || (strings.HasPrefix(row, " [") && strings.HasSuffix(row, "]"))
 }
 
 // openKeymapView opens the keymap view as a floating pane, or closes it when it

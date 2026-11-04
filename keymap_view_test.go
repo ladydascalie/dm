@@ -143,6 +143,11 @@ func TestKeymapViewPaints(t *testing.T) {
 	if !keymapRowsContain(rows, "split right") {
 		t.Fatalf("rows miss a main binding: %v", rows)
 	}
+	for _, row := range k.rows {
+		if strings.Contains(row, "scrollback") && keymapHeader(row) {
+			t.Fatalf("scrollback row looks like a header: %q", row)
+		}
+	}
 	hint := boxScreenRow(screen, r.Y+r.H, r.X+2, r.W-2)
 	if !strings.Contains(hint, "j/k scroll") || !strings.Contains(hint, "esc close") {
 		t.Fatalf("hint = %q, want the scroll and close keys", hint)
