@@ -2445,6 +2445,22 @@ func (t *tui) key(b byte) {
 	t.armedKey()
 }
 
+// reload re-reads the default config file and its named theme. On a read, parse
+// or theme error it returns the error and leaves the running keymap and theme
+// untouched. On success it swaps both in place, marks the frame dirty and
+// toasts.
+func (t *tui) reload() error {
+	cfg, err := LoadDefaultPath(false)
+	if err != nil {
+		return err
+	}
+	t.keymap = cfg
+	applyTheme(cfg.Theme())
+	t.dirty = true
+	t.notify("config reloaded")
+	return nil
+}
+
 // runAction runs one action from the main keymap.
 func (t *tui) runAction(name string) {
 	switch name {
@@ -2499,6 +2515,11 @@ func (t *tui) runAction(name string) {
 	case "send-prefix":
 		if p := t.km().PrefixBytes(); len(p) > 0 && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "keys", Keys: append([]byte(nil), p...)})
+		}
+		t.disarm()
+	case "reload":
+		if err := t.reload(); err != nil {
+			t.notify(err.Error())
 		}
 		t.disarm()
 	default:
