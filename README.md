@@ -212,6 +212,9 @@ states {
 }
 ```
 
+Pasting that block paints the Unicode glyphs even with Nerd Fonts on: naming a
+glyph replaces its Nerd Font form too.
+
 A colour is `#rrggbb`. A glyph is one cell wide. A minimal theme names a few
 keys and inherits the rest:
 
@@ -307,18 +310,17 @@ created after a `cd` belongs where the shell went.
 
 A long label is cut with `…` so the right-aligned stats fit, and the branch is
 dropped first. When even that cannot, the rail draws no tail at all, never half
-a pair. The rail paints its
-own dark background
-and uses explicit RGB colours, not palette slots, so every label, glyph and
-stat reaches WCAG AA contrast on both the rail and the focused row. Icons use
-Nerd Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces
-them and `DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns
-by default, at most a third of the screen and never wider than 46 columns;
-`set-rail` changes it. `prefix b` cycles the sidebar through three states:
-full, thin, and hidden. The thin rail is four columns: the agent bar, one
-state glyph per pane, and no names. It always lists panes, folded or not, and
-leaves a blank row where a workspace or window line would sit. A hidden or
-thin sidebar remembers the last full width.
+a pair. The rail paints its own dark background. The built-in theme uses
+explicit RGB colours, not palette slots, and every label, glyph and stat of it
+reaches WCAG AA contrast on both the rail and the focused row. Icons use Nerd
+Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces them and
+`DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns by default,
+at most a third of the screen and never wider than 46 columns; `set-rail`
+changes it. `prefix b` cycles the sidebar through three states: full, thin, and
+hidden. The thin rail is four columns: the agent bar, one state glyph per pane,
+and no names. It always lists panes, folded or not, and leaves a blank row where
+a workspace or window line would sit. A hidden or thin sidebar remembers the
+last full width.
 
 In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel
@@ -343,16 +345,16 @@ per window, the focus chip, then the pinned right block.
   shell reports no state at all, so it shows `▶` in railDim instead of a glyph.
   The focused pane is the entry in the window's pane list whose id is the focus.
 
-Colours are explicit RGB, never terminal palette slots, so the built-in theme
+Colours are explicit RGB, never terminal palette slots. The built-in theme
 paints them only on grounds it checks: railBG (#14131a) for the ground and the
 gutter, railFocusBG (#1f1e27) for the active window chip and the focus chip,
-railText (#e9eaf1), railHeader (#a6a9bd), railDim (#8f93a8), barAccent
-(#7ac0eb) for the active mark, and the state colours of the rail glyph table.
-A user theme names its own RGB, so it chooses its own grounds and answers for
-its own contrast. Every footer foreground of the built-in theme reaches WCAG
-AA, 4.5:1 or better, on both grounds it is painted on: railDim on railFocusBG
-is the tightest at 5.42:1, and the barAccent mark reaches 8.30:1 on the focus
-fill it sits on, 9.29:1 on the ground.
+railText (#e9eaf1), railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb)
+for the active mark, and the state colours of the `states` block in Themes. A
+user theme names its own RGB, so it chooses its own grounds and answers for its
+own contrast. Every footer foreground of the built-in theme reaches WCAG AA,
+4.5:1 or better, on both grounds it is painted on: railDim on railFocusBG is the
+tightest at 5.42:1, and the barAccent mark reaches 8.30:1 on the focus fill it
+sits on, 9.29:1 on the ground.
 
 At 80 columns, with the session `pi-footer-2026`, the workspace `main`, three
 windows and the second one active, a blocked focus pane `w1p2` named `shell`,
