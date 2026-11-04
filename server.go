@@ -1229,23 +1229,32 @@ func readPaneReplay(session, id string) paneReplay {
 		return rp
 	}
 	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if err := writeMsg(c, Msg{Type: "req", Action: "replay", ID: 1}); err != nil {
 		return rp
 	}
-	m, err := readMsg(c)
-	if err != nil {
+	// A pane broadcasts bytes, status and cwd while the request is in flight.
+	// The replay reply is the only frame this call wants: taking the first
+	// frame made a busy pane's ring a fragment.
+	for {
+		m, err := readMsg(c)
+		if err != nil {
+			return rp
+		}
+		if m.Type != "replay" {
+			continue
+		}
+		if m.St != nil {
+			rp.st = *m.St
+		}
+		var extra struct {
+			Alt   bool `json:"alt"`
+			Mouse bool `json:"mouse"`
+		}
+		_ = json.Unmarshal(m.Res, &extra)
+		rp.data, rp.alt, rp.mouse, rp.ok = m.Data, extra.Alt, extra.Mouse, true
 		return rp
 	}
-	if m.St != nil {
-		rp.st = *m.St
-	}
-	var extra struct {
-		Alt   bool `json:"alt"`
-		Mouse bool `json:"mouse"`
-	}
-	_ = json.Unmarshal(m.Res, &extra)
-	rp.data, rp.alt, rp.mouse, rp.ok = m.Data, extra.Alt, extra.Mouse, true
-	return rp
 }
 
 func paneRequest(session, id string, m Msg) (Msg, error) {
@@ -2133,17 +2142,18 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	if rp.alt {
 		return nil, fmt.Errorf("pane %q is on the alternate screen", id)
 	}
-	vt := vt10x.New(vt10x.WithSize(r.W, r.H+2000))
-	if _, err := vt.Write(rp.data); err != nil {
-		return nil, err
-	}
-	top, bottom := contentRows(vt)
-	if bottom == 0 {
+	rows := replayRows(rp.data, r.W, r.H, n+r.H)
+	if len(rows) == 0 {
 		return []string{}, nil
 	}
-	end := bottom - r.H
+	end := len(rows) - r.H
 	if end < 0 {
 		end = 0
+	}
+	// Leading blank rows are not reachable, like the client's scrollStart.
+	top := 0
+	for top < end && blankGlyphRow(rows[top]) {
+		top++
 	}
 	start := end - n
 	if start < top {
@@ -2154,7 +2164,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	}
 	out := make([]string, 0, end-start)
 	for y := start; y < end; y++ {
-		out = append(out, historyRow(vt, y, r.W))
+		out = append(out, plainRow(rows[y]))
 	}
 	return out, nil
 }

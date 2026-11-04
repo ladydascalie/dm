@@ -123,12 +123,14 @@ func (c *cmdFlags) parse(args []string) {
 
 // reorder moves flags before positionals, so -s may follow a pane id.
 func reorder(args []string) []string {
-	withValue := map[string]bool{"-s": true, "--s": true, "-msg": true, "--msg": true,
+	withValue := map[string]bool{
+		"-s": true, "--s": true, "-msg": true, "--msg": true,
 		"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
 		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true,
 		"-key": true, "--key": true, "-state": true, "--state": true,
 		"-prefix": true, "--prefix": true, "-after": true, "--after": true,
-		"-limit": true, "--limit": true, "-timeout": true, "--timeout": true}
+		"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
+	}
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -274,7 +276,22 @@ func runCLI(argv []string) error {
 		if len(c.args) < 1 {
 			return fmt.Errorf("split needs a pane id")
 		}
-		return printRPC(c.session, Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+		if c.jsonOut {
+			return printRPC(c.session, Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+		}
+		m, err := rpc(c.session, Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+		if err != nil {
+			return err
+		}
+		if !m.OK {
+			return fmt.Errorf("%s", m.Error)
+		}
+		var res struct {
+			Pane string `json:"pane"`
+		}
+		_ = json.Unmarshal(m.Res, &res)
+		fmt.Println(res.Pane)
+		return nil
 
 	case "focus":
 		c := newFlags("focus")
@@ -458,8 +475,10 @@ func boxPostVerb(c *cmdFlags) error {
 // With --after the rows are what the cursor has not seen, and a dropped gap is
 // reported on stderr.
 func boxListVerb(c *cmdFlags) error {
-	raw, err := json.Marshal(listReq{Key: c.key, KeyPrefix: c.keyPrefix,
-		Limit: c.limit, AfterSeq: c.boxCursor(), From: boxFrom(c.session)})
+	raw, err := json.Marshal(listReq{
+		Key: c.key, KeyPrefix: c.keyPrefix,
+		Limit: c.limit, AfterSeq: c.boxCursor(), From: boxFrom(c.session),
+	})
 	if err != nil {
 		return err
 	}
@@ -500,9 +519,11 @@ func boxWaitVerb(c *cmdFlags) error {
 		}
 		st = parsed
 	}
-	raw, err := json.Marshal(waitReq{Key: c.key, KeyPrefix: c.keyPrefix,
+	raw, err := json.Marshal(waitReq{
+		Key: c.key, KeyPrefix: c.keyPrefix,
 		State: st, TimeoutMs: int(c.timeout / time.Millisecond),
-		AfterSeq: c.boxCursor(), From: boxFrom(c.session)})
+		AfterSeq: c.boxCursor(), From: boxFrom(c.session),
+	})
 	if err != nil {
 		return err
 	}
@@ -556,8 +577,10 @@ func boxSubVerb(c *cmdFlags) error {
 	}
 	// From travels the way list and wait send it, so a sub inside a pane of
 	// the target session is a watcher of the filter it names.
-	req := subReq{From: boxFrom(c.session), Key: c.key, KeyPrefix: c.keyPrefix,
-		State: st, AfterSeq: c.boxCursor()}
+	req := subReq{
+		From: boxFrom(c.session), Key: c.key, KeyPrefix: c.keyPrefix,
+		State: st, AfterSeq: c.boxCursor(),
+	}
 	backoff := boxSubMin
 	for {
 		live, err := boxSubStream(c.session, &req, c.jsonOut)

@@ -551,6 +551,10 @@ func (t *tui) apply(m Msg) {
 			_, _ = vt.Write(m.Data)
 			t.dirty = true
 		}
+		// New output moves the ring. A cached replay would be stale, so drop
+		// it: the next scrollback entry asks for a fresh snapshot.
+		delete(t.hist, m.Target)
+		delete(t.histMeta, m.Target)
 	case "close":
 		t.quit = true
 	case "exit":
@@ -1457,10 +1461,9 @@ func (t *tui) requestHistory(p *PaneInfo) {
 // the ring the server sent for the pane's current rect. The live screen keeps
 // updating behind it; the tall one is a frozen snapshot.
 func (t *tui) buildScroll(p *PaneInfo) {
-	vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H+histRows))
-	_, _ = vt.Write(t.hist[p.ID])
-	t.scrollVT = vt
-	_, t.maxOff = scrollStart(vt, p.Rect.H, 0)
+	rows := replayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
+	t.scrollVT = buildTall(rows, p.Rect.W)
+	_, t.maxOff = scrollStart(t.scrollVT, p.Rect.H, 0)
 }
 
 // noteHist records a ring that just landed. A ring wrapped for a rect the pane

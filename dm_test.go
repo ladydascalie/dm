@@ -4563,11 +4563,13 @@ func TestPaneHistory(t *testing.T) {
 	root = h.focus("histg")
 	rows := h.rects("histg")[root].H
 	// sh -c keeps the shell prompt out of the picture until the sleep ends.
+	// One line short of a full screen: the final newline scrolls twice, so the
+	// blank row printed after TOP is the row immediately above the live screen.
 	cmd := fmt.Sprintf(`sh -c "printf '\033[H\033[2J'; echo TOP; echo; `+
 		`for i in \$(seq 1 %d); do echo TAIL-\$(printf %%03d \$i); done; `+
-		`printf '\033[%d;1H'; sleep 15"`, rows, rows+2)
+		`printf '\033[%d;1H'; sleep 15"`, rows-1, rows+2)
 	h.run("write-to", root, "-s", "histg", "--msg", cmd, "--enter")
-	h.waitFor("histg", root, fmt.Sprintf("TAIL-%03d", rows))
+	h.waitFor("histg", root, fmt.Sprintf("TAIL-%03d", rows-1))
 	time.Sleep(200 * time.Millisecond)
 	if got := h.history("histg", root, 1); len(got) != 1 || got[0] != "" {
 		t.Fatalf("blank row above the live screen not returned: %q", got)
