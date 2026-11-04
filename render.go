@@ -1209,13 +1209,16 @@ func leafNear(n *Node, area Rect, x, y int) string {
 }
 
 // drawMenu paints the right-click menu over the panes. The panel owns the border
-// and the title row; the menu owns its item rows and the selection highlight.
+// and the interior clip; the menu owns its title row, its item rows and the
+// selection highlight. The title row stays here because its look is the menu's:
+// dim, with the label between the border rune and a border-rune fill, where the
+// panel's label style is bright.
 func drawMenu(buf *bytes.Buffer, m *menu) {
 	if m == nil || m.w < 8 {
 		return
 	}
 	inner := Rect{X: m.x + 1, Y: m.y + 1, W: m.w - 2, H: len(m.items)}
-	paintPanel(buf, inner, " "+m.title+" ", "", false, func(b *bytes.Buffer, r Rect) {
+	paintPanel(buf, inner, "", "", false, func(b *bytes.Buffer, r Rect) {
 		for i, it := range m.items {
 			line := pad(" "+grow(it.label, 22)+" "+grow(it.key, 4), r.W)
 			colour := "\x1b[0m\x1b[90m"
@@ -1225,7 +1228,21 @@ func drawMenu(buf *bytes.Buffer, m *menu) {
 			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", r.Y+i+1, r.X+1, colour, line)
 		}
 	})
+	fmt.Fprintf(buf, "\x1b[0m\x1b[90m\x1b[%d;%dH%s%s%s", m.y+1, m.x+1,
+		glyphBorderTopLeft, titleRow(glyphBorderHorizontal+" "+m.title+" ", inner.W, glyphBorderHorizontal), glyphBorderTopRight)
 	buf.WriteString("\x1b[0m")
+}
+
+// titleRow pads s to w cells and fills the rest with fill. A row wider than w is
+// clipped first, so a label never eats a corner. It is the fill policy of a
+// title row whose look differs from the panel's: the menu continues with the
+// border rune, the session picker with spaces.
+func titleRow(s string, w int, fill string) string {
+	s = clip(s, w)
+	if n := w - cells(s); n > 0 {
+		s += strings.Repeat(fill, n)
+	}
+	return s
 }
 
 // grow pads s on the right to n cells and never cuts it, the column pad of a
@@ -1554,9 +1571,11 @@ func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
 	}
 }
 
-// drawSessions paints the centred session picker. The panel owns the border, the
-// title and the interior clip; the picker owns its rows, the selection highlight,
-// the tee row that crosses the border and the key hint under it.
+// drawSessions paints the centred session picker. The panel owns the border and
+// the interior clip; the picker owns its title row, its rows, the selection
+// highlight, the tee row that crosses the border and the key hint under it. The
+// title row stays here because its look is the picker's: dim, and its trailing
+// cells are spaces rather than the border rune.
 func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel int, current string) {
 	w := 46
 	if w > cols-2 {
@@ -1572,7 +1591,7 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		y = 0
 	}
 	inner := Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 2}
-	paintPanel(buf, inner, " switch session ", "", false, func(b *bytes.Buffer, r Rect) {
+	paintPanel(buf, inner, "", "", false, func(b *bytes.Buffer, r Rect) {
 		for i, s := range sessions {
 			mark := " "
 			if i == sel {
@@ -1596,6 +1615,8 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		hint := pad(" j/k move  enter switch  esc cancel", r.W)
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s", r.Y+len(sessions)+2, r.X+1, hint)
 	})
+	fmt.Fprintf(buf, "\x1b[0m\x1b[90m\x1b[%d;%dH%s%s%s", y+1, x+1,
+		glyphBorderTopLeft, titleRow(glyphBorderHorizontal+" switch session ", inner.W, " "), glyphBorderTopRight)
 	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m%s%s%s", y+len(sessions)+2, x+1,
 		glyphBorderTeeLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderTeeRight)
 	buf.WriteString("\x1b[0m")

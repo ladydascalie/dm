@@ -123,6 +123,34 @@ func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 	}
 }
 
+// TestPanelTruncatesTitleAtThreeWide pins what a three-wide interior does with a
+// title longer than its one cell. The base float painter cut the title to fit,
+// so the panel keeps that behaviour as intended: the title is truncated to the
+// single cell between the border runes, never dropped and never over a corner.
+// Dropping it instead would move bytes for every three-wide float with a title.
+func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
+	r := Rect{X: 4, Y: 3, W: 3, H: 2}
+	var b bytes.Buffer
+	paintPanel(&b, r, "title", "", false, nil)
+	screen := panelFilled(t, 20, 10, b.Bytes())
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─t─┐"; got != want {
+		t.Fatalf("title row = %q, want the title cut to its one cell %q", got, want)
+	}
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "└───┘"; got != want {
+		t.Fatalf("bottom row = %q, want the plain border %q", got, want)
+	}
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 20; x++ {
+			in := x >= r.X-1 && x <= r.X+r.W && y >= r.Y-1 && y <= r.Y+r.H
+			if !in {
+				if got := panelChar(screen, x, y); got != 'X' {
+					t.Fatalf("cell %d,%d outside the box = %q", x, y, got)
+				}
+			}
+		}
+	}
+}
+
 // TestPanelClipsInterior runs an interior painter that writes past its rect on
 // every side. The panel keeps the border, the cells beside it, and the moves the
 // painter aimed outside the box.
