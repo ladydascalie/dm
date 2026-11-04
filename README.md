@@ -117,6 +117,129 @@ printable key as text, and bind only their control keys. The help overlay and
 the right-click menu take their key labels from the config, so a remap shows
 there too.
 
+## Themes
+
+A theme sets the RGB palette and the glyphs dm paints. `config.kdl` selects one
+with a top-level node:
+
+```kdl
+theme "night"
+```
+
+dm reads that theme from `$XDG_CONFIG_HOME/dm/themes/night.kdl`, or
+`$HOME/.config/dm/themes/night.kdl` when `XDG_CONFIG_HOME` is unset. That is the
+`themes/` directory beside `config.kdl`. At most one `theme` node, and its name
+is letters, digits, `_` and `-`. No node selects the built-in theme.
+
+Every block and every key is optional. An omitted key keeps the built-in
+default, so a theme file names only what it changes. These fail the load, and
+the error names the line: an unknown or duplicate block or key, a colour that
+is not `#rrggbb`, and a glyph wider than one cell.
+
+The whole shape, at the built-in values:
+
+```kdl
+palette {
+    "rail-bg"       "#14131a"
+    "rail-focus-bg" "#1f1e27"
+    "rail-text"     "#e9eaf1"
+    "rail-dim"      "#8f93a8"
+    "rail-header"   "#a6a9bd"
+    "rail-window"   "#9599ae"
+    "rail-diff-add" "#78dc82"
+    "rail-diff-del" "#ff7d7d"
+    "rail-working"  "#f5be50"
+    "bar-accent"    "#7ac0eb"
+}
+
+accents {
+    "accent-1" "#bb9af7"
+    "accent-2" "#6edceb"
+    "accent-3" "#f08cd7"
+    "accent-4" "#7ea9ff"
+    "accent-5" "#f0a05a"
+    "accent-6" "#8cd79b"
+}
+
+glyphs {
+    "grip"                "•"
+    "divider-row"         "━"
+    "divider-col"         "┃"
+    "border-top-left"     "┌"
+    "border-top-right"    "┐"
+    "border-bottom-left"  "└"
+    "border-bottom-right" "┘"
+    "border-horizontal"   "─"
+    "border-vertical"     "│"
+    "border-tee-left"     "├"
+    "border-tee-right"    "┤"
+    "fold-open"           "▾"
+    "fold-closed"         "▸"
+    "active-mark"         "▸"
+    "workspace-bar"       "▌"
+    "dirty"               "●"
+}
+
+states {
+    "working" {
+        "glyph"  "●"
+        "colour" "#f5be50"
+    }
+    "idle" {
+        "glyph"  "○"
+        "colour" "#78c8e1"
+    }
+    "blocked" {
+        "glyph"  "▲"
+        "colour" "#ff6e6e"
+    }
+    "done" {
+        "glyph"  "✓"
+        "colour" "#6ee191"
+    }
+    "error" {
+        "glyph"  "✕"
+        "colour" "#ff82a0"
+    }
+    "unknown" {
+        "glyph"  "?"
+        "colour" "#8f93a8"
+    }
+    "shell" {
+        "glyph"  "▶"
+        "colour" "#8f93a8"
+    }
+}
+```
+
+A colour is `#rrggbb`. A glyph is one cell wide. A minimal theme names a few
+keys and inherits the rest:
+
+```kdl
+palette {
+    "rail-bg" "#101014"
+}
+
+glyphs {
+    "grip" "+"
+}
+
+states {
+    "working" {
+        "glyph"  "◐"
+        "colour" "#ffcc66"
+    }
+}
+```
+
+Where an item has a Nerd Font icon, an explicit theme glyph wins over it. A
+theme's state glyph replaces both the Unicode and the Nerd form. Role icons,
+the agent bar, robot and terminal marks, stay compiled in and are not themeable.
+
+A missing or malformed theme file toasts the error, and dm runs on the built-in
+theme. The built-in theme reaches WCAG AA on every ground it paints. dm does
+not check a user theme: its contrast is the author's.
+
 ## Palette
 
 `prefix a` floats a quick switcher over the panes. It is native: no child
@@ -220,14 +343,16 @@ per window, the focus chip, then the pinned right block.
   shell reports no state at all, so it shows `▶` in railDim instead of a glyph.
   The focused pane is the entry in the window's pane list whose id is the focus.
 
-Colours are explicit RGB, never palette slots, so a theme cannot map them onto a
-background they fail on: railBG (#14131a) for the ground and the gutter,
-railFocusBG (#1f1e27) for the active window chip and the focus chip, railText
-(#e9eaf1), railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb) for the
-active mark, and the state colours of the rail glyph table. Every footer
-foreground reaches WCAG AA, 4.5:1 or better, on both grounds it is painted on:
-railDim on railFocusBG is the tightest at 5.42:1, and the barAccent mark reaches
-8.30:1 on the focus fill it sits on, 9.29:1 on the ground.
+Colours are explicit RGB, never terminal palette slots, so the built-in theme
+paints them only on grounds it checks: railBG (#14131a) for the ground and the
+gutter, railFocusBG (#1f1e27) for the active window chip and the focus chip,
+railText (#e9eaf1), railHeader (#a6a9bd), railDim (#8f93a8), barAccent
+(#7ac0eb) for the active mark, and the state colours of the rail glyph table.
+A user theme names its own RGB, so it chooses its own grounds and answers for
+its own contrast. Every footer foreground of the built-in theme reaches WCAG
+AA, 4.5:1 or better, on both grounds it is painted on: railDim on railFocusBG
+is the tightest at 5.42:1, and the barAccent mark reaches 8.30:1 on the focus
+fill it sits on, 9.29:1 on the ground.
 
 At 80 columns, with the session `pi-footer-2026`, the workspace `main`, three
 windows and the second one active, a blocked focus pane `w1p2` named `shell`,
