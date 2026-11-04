@@ -47,7 +47,9 @@ dm kill -s work         # stop the server; panes keep running
 ```
 
 Keys inside the TUI. `ctrl+b` arms the prefix and shows the action box,
-bottom right. It stays until an action runs or `esc` dismisses it.
+bottom right. It stays until an action runs or `esc` dismisses it. The box
+sizes to its widest row. Its top border carries `prefix`, its bottom border
+names `esc`, and a narrow screen drops the action column before it cuts a key.
 
 | key | action |
 | --- | --- |
