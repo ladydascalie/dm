@@ -19,12 +19,14 @@ import (
 // the app never scrolls it and a final clear wipes most rows. That is why a
 // scrollback built from raw bytes showed fragments.
 //
-// vt10x has no scroll hook, so a scroll is noticed by comparing row 0 before
-// and after each line. When row 0 moved, the screen scrolled and the old row 0
-// belongs in the history. A clear sequence (2J or 3J) wipes the whole screen,
-// so every row on it goes to history first. Nothing is captured while the
-// alternate screen is active: those rows are the program's screen, not the
-// shell's history.
+// vt10x has no scroll hook, so replayRows counts scrolls itself. A wrapped
+// line is noticed by comparing row 0 of the text before and after it. A line
+// feed is counted from the cursor: parked on the bottom row, it scrolls the
+// screen and row 0 leaves. Comparing glyphs alone misses that scroll when the
+// output repeats one line, because the screen refills with equal rows. A clear
+// sequence (2J or 3J) wipes the whole screen, so every row on it goes to
+// history first. Nothing is captured while the alternate screen is active:
+// those rows are the program's screen, not the shell's history.
 func replayRows(ring []byte, w, h, keep int) [][]vt10x.Glyph {
 	if w < 1 || h < 1 {
 		return nil
@@ -39,11 +41,12 @@ func replayRows(ring []byte, w, h, keep int) [][]vt10x.Glyph {
 	}
 	for len(ring) > 0 {
 		i := bytes.IndexByte(ring, '\n')
+		line := i >= 0
 		var piece []byte
-		if i < 0 {
-			piece, ring = ring, nil
+		if line {
+			piece, ring = ring[:i], ring[i+1:]
 		} else {
-			piece, ring = ring[:i+1], ring[i+1:]
+			piece, ring = ring, nil
 		}
 		alt := vt.Mode()&vt10x.ModeAltScreen != 0
 		clears := bytes.Contains(piece, []byte("\x1b[2J")) || bytes.Contains(piece, []byte("\x1b[3J"))
@@ -61,12 +64,25 @@ func replayRows(ring []byte, w, h, keep int) [][]vt10x.Glyph {
 		}
 		_, _ = vt.Write(piece)
 		if alt || vt.Mode()&vt10x.ModeAltScreen != 0 {
+			if line {
+				_, _ = vt.Write([]byte("\n"))
+			}
 			continue
 		}
 		// A change to row 0 while the cursor sat below it is a scroll: text
 		// was written at row 0 when the cursor was there, which is not history.
 		if !clears && row > 0 && !sameGlyphs(top, glyphRow(vt, 0, w)) {
 			add(top)
+		}
+		if line {
+			// A line feed on the bottom row scrolls the screen: the cursor
+			// stays there and the old row 0 leaves. Repeated output fills the
+			// screen with equal rows, so the glyph comparison cannot see this
+			// scroll; the cursor can.
+			if !clears && vt.Cursor().Y >= h-1 {
+				add(glyphRow(vt, 0, w))
+			}
+			_, _ = vt.Write([]byte("\n"))
 		}
 	}
 	for y := 0; y < h; y++ {
