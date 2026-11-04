@@ -21,7 +21,7 @@ var configTestDefaultActions = map[string][]string{
 		"toggle-rail", "message-box", "detach", "detach-alt",
 		"window-1", "window-2", "window-3", "window-4", "window-5",
 		"window-6", "window-7", "window-8", "window-9", "window-10",
-		"dismiss", "dismiss-esc", "focus-up-arrow", "focus-down-arrow",
+		"help", "dismiss-esc", "focus-up-arrow", "focus-down-arrow",
 		"focus-left-arrow", "focus-right-arrow",
 	},
 	"menu": {
@@ -53,6 +53,11 @@ var configTestDefaultActions = map[string][]string{
 		"up", "up-arrow", "down", "down-arrow", "page-up",
 		"page-down", "top", "bottom", "toggle-page", "close",
 		"close-m", "close-prefix", "close-ctrl-c", "close-esc",
+	},
+	"help": {
+		"up", "up-arrow", "down", "down-arrow", "page-up",
+		"page-down", "top", "bottom", "close", "close-esc",
+		"close-question",
 	},
 }
 

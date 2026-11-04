@@ -5389,3 +5389,45 @@ func TestKeymapDispatchSwitcherLeftRightAreNoOps(t *testing.T) {
 	}
 	noMsg(t, got)
 }
+
+// TestHelpOpensAndCloses: the help action adds the keymap float and the help
+// mode, and esc takes both down again. A second press toggles it closed.
+func TestHelpOpensAndCloses(t *testing.T) {
+	tui, _ := clientTUI(t, nil)
+	tui.runAction("help")
+	if tui.keys == nil {
+		t.Fatal("the help action did not open the keymap view")
+	}
+	if tui.mode != "help" {
+		t.Fatalf("mode = %q, want help", tui.mode)
+	}
+	if len(tui.floats) != 1 || tui.floats[0] != tui.keys.float {
+		t.Fatalf("floats = %+v, want the keymap float", tui.floats)
+	}
+	if tui.armed {
+		t.Fatal("the help action left the client armed")
+	}
+	// A lone esc is the close key. It waits as the head of an escape sequence,
+	// then closes once its deadline passes.
+	feed(tui, "\x1b")
+	if tui.keys == nil || !tui.pending {
+		t.Fatalf("a lone esc did not wait: keys=%v pending=%v", tui.keys, tui.pending)
+	}
+	if !tui.expireMode(tui.escAt.Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the stalled escape did not close the view")
+	}
+	if tui.keys != nil || tui.mode != "" || len(tui.floats) != 0 || len(tui.inbuf) != 0 {
+		t.Fatalf("esc did not close the view: keys=%v mode=%q floats=%d inbuf=%q",
+			tui.keys, tui.mode, len(tui.floats), tui.inbuf)
+	}
+
+	// The default ? opens the view, and ? closes it again.
+	feed(tui, "\x02?")
+	if tui.keys == nil || tui.mode != "help" {
+		t.Fatalf("prefix ? did not open the view: keys=%v mode=%q", tui.keys, tui.mode)
+	}
+	feed(tui, "?")
+	if tui.keys != nil || tui.mode != "" {
+		t.Fatalf("? did not close the view: keys=%v mode=%q", tui.keys, tui.mode)
+	}
+}
