@@ -119,7 +119,7 @@ One mode is one keymap.
 The prefix then `?` opens the keymap view. It lists every mode the config
 defines, in the order above, with each action and its key. `j`/`k` and
 `PgUp`/`PgDn` scroll, `g` and `G` jump to the ends, and `esc` or `q` closes.
-`/` searches the rows: type to match a key or action, `n` and `N` move between matches, `enter` keeps the query and `esc` clears it. The prefix key and `?` close it too. A config written before this mode falls
+`/` searches the rows: type to match a key or action, `n` and `N` move between matches, `enter` keeps the query and `esc` while typing clears it. The active match is yellow and the others are white. The prefix key and `?` close it too. A config written before this mode falls
 back to the built-in help bindings, so the view always scrolls and closes.
 
 A key is one key. Arrows and `PgUp`/`PgDn` are named sequences: `up`, `down`,

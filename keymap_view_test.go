@@ -210,6 +210,13 @@ func TestKeymapSearch(t *testing.T) {
 	if k.query != "split" || len(k.matches) < 2 {
 		t.Fatalf("query %q matches %v, want at least two split rows", k.query, k.matches)
 	}
+	k.acceptSearch()
+	if got := k.title(); !strings.Contains(got, "1/") {
+		t.Fatalf("title = %q, want the match position", got)
+	}
+	if got := k.hint(); !strings.Contains(got, "n/N") {
+		t.Fatalf("hint = %q, want the next/prev keys", got)
+	}
 	first := k.matches[0]
 	if first < k.off || first >= k.off+k.float.Rect.H {
 		t.Fatalf("first match %d is outside the window starting at %d", first, k.off)
@@ -217,6 +224,17 @@ func TestKeymapSearch(t *testing.T) {
 	k.nextMatch(1)
 	if k.match != 1 {
 		t.Fatalf("next match = %d, want 1", k.match)
+	}
+	active := k.matches[k.match]
+	other := k.matches[0]
+	if k.style(active) == k.style(other) {
+		t.Fatalf("active and other match share style %q", k.style(active))
+	}
+	if k.style(active) != "\x1b[0m\x1b[30;103m" {
+		t.Fatalf("active style = %q, want the yellow match", k.style(active))
+	}
+	if k.style(other) != "\x1b[0m\x1b[30;107m" {
+		t.Fatalf("other match style = %q, want the white match", k.style(other))
 	}
 	k.cancelSearch()
 	if k.query != "" || len(k.matches) != 0 {
@@ -233,6 +251,9 @@ func TestKeymapSearchInput(t *testing.T) {
 	if tui.keys == nil || !tui.keys.searching {
 		t.Fatal("slash did not start a search")
 	}
+	if got := tui.keys.hint(); !strings.Contains(got, "enter keep") {
+		t.Fatalf("search hint = %q, want enter keep", got)
+	}
 	for _, b := range []byte("split") {
 		feed(tui, string(b))
 	}
@@ -242,6 +263,9 @@ func TestKeymapSearchInput(t *testing.T) {
 	feed(tui, "\r")
 	if tui.keys.searching || tui.keys.query != "split" {
 		t.Fatalf("enter left searching=%v query=%q", tui.keys.searching, tui.keys.query)
+	}
+	if got := tui.keys.hint(); !strings.Contains(got, "n/N") {
+		t.Fatalf("match hint = %q, want n/N", got)
 	}
 	feed(tui, "n")
 	if tui.keys.match != 1 {

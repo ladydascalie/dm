@@ -215,21 +215,51 @@ func (k *keymapView) nextMatch(dir int) {
 	k.paint()
 }
 
-// title is the float's top border: keymaps, plus the live query.
+// title is the float's top border: keymaps, plus the live query and the
+// position of the active match.
 func (k *keymapView) title() string {
 	if k.query == "" {
 		return " keymaps "
 	}
-	return " keymaps  /" + k.query + " "
+	pos := "0/0"
+	if len(k.matches) > 0 {
+		pos = fmt.Sprintf("%d/%d", k.match+1, len(k.matches))
+	}
+	return " keymaps  /" + k.query + "  " + pos + " "
 }
 
-// hint is the float's bottom border: the normal keys, or the search keys
-// while the query is typed.
+// hint is the float's bottom border: the normal keys, the search keys while
+// the query is typed, or the match keys after enter keeps it.
 func (k *keymapView) hint() string {
-	if k.searching {
-		return " enter keep  esc cancel "
+	switch {
+	case k.searching:
+		return " enter keep  esc clear "
+	case k.query != "":
+		return " n/N next  / edit  esc close "
+	default:
+		return " j/k scroll  g/G ends  / search  esc close "
 	}
-	return " j/k scroll  g/G ends  / search  esc close "
+}
+
+// style is the SGR a row paints in. A mode header is bright white, the active
+// match is black on yellow, every other match is black on white, and a normal
+// binding is dim.
+func (k *keymapView) style(i int) string {
+	switch {
+	case keymapHeader(k.rows[i]):
+		return "\x1b[0m\x1b[97m"
+	case k.activeMatch(i):
+		return "\x1b[0m\x1b[30;103m"
+	case k.query != "" && strings.Contains(strings.ToLower(k.rows[i]), k.query):
+		return "\x1b[0m\x1b[30;107m"
+	default:
+		return "\x1b[0m\x1b[90m"
+	}
+}
+
+// activeMatch reports whether row i is the match n/N last moved to.
+func (k *keymapView) activeMatch(i int) bool {
+	return len(k.matches) > 0 && k.matches[k.match] == i
 }
 
 // paint rewrites the float's terminal from the rows. Every row is placed
@@ -250,13 +280,7 @@ func (k *keymapView) paint() {
 		if i >= len(k.rows) {
 			break
 		}
-		style := "\x1b[0m\x1b[90m"
-		if keymapHeader(k.rows[i]) {
-			style = "\x1b[0m\x1b[97m"
-		}
-		if !keymapHeader(k.rows[i]) && k.query != "" && strings.Contains(strings.ToLower(k.rows[i]), k.query) {
-			style = "\x1b[0m\x1b[30;107m"
-		}
+		style := k.style(i)
 		fmt.Fprintf(&buf, "\x1b[%d;1H%s%s", row+1, style, clipCells(k.rows[i], r.W))
 	}
 	_, _ = vt.Write(buf.Bytes())
