@@ -359,8 +359,9 @@ Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
 `focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
 `next-window`, `prev-window`, `select-window`, `new-workspace`,
 `next-workspace`, `prev-workspace`, `rename-window`, `rename-workspace`,
-`toggle-fold`, `list`, `ping`, and the six box actions `msg-post`,
-`msg-list`, `msg-wait`, `msg-clear`, `msg-watchers` and `msg-schema` below.
+`toggle-fold`, `list`, `ping`, and the seven box actions `msg-post`,
+`msg-list`, `msg-wait`, `msg-sub`, `msg-clear`, `msg-watchers` and
+`msg-schema` below.
 `toggle-fold` takes a window id as `target` and replies with the new `unfolded`
 state.
 
@@ -440,13 +441,14 @@ The box is bounded at 1000 entries and 256 KiB. Past either bound the oldest
 entries go. The log lives in `state.json`, so a restart keeps every entry, its
 order and its `seq`.
 
-Six actions. Each takes its request in the `res` field of the envelope.
+Seven actions. Each takes its request in the `res` field of the envelope.
 
 | action | request | reply |
 | --- | --- | --- |
 | `msg-post` | `key`, `state`, `msg`, `from` | `{"entry":{...}}` |
 | `msg-list` | `key` or `keyPrefix`, `afterSeq`, `limit`, `from` | `{"entries":[...],"trimmed":false}`, newest first |
 | `msg-wait` | `key` or `keyPrefix`, `state`, `afterSeq`, `timeoutMs`, `from` | `{"entry":{...},"trimmed":false}` |
+| `msg-sub` | `key` or `keyPrefix`, `state`, `afterSeq`, `from` | one `{"entry":{...},"trimmed":false}` frame per matching entry, until the connection ends |
 | `msg-clear` | `key` | `{"cleared":N}` |
 | `msg-watchers` | none | `{"watchers":[...]}` |
 | `msg-schema` | none | `{"schema":{...}}` |
@@ -459,6 +461,11 @@ or less means the whole box. `timeoutMs` runs from 1 to 3600000. `key` and
 field, an unknown action, an unknown state or a `from` outside the tree fails
 the request, so nothing is silently ignored. `msg-schema` serves these shapes as
 JSON Schema, built from the Go types and the one state enum.
+
+A `msg-sub` reply is a stream. The server sends one frame per matching entry
+and no completion reply, so the connection stays open until either side drops
+it. A parse error or a bad `from` still arrives as a normal reply with an
+error.
 
 On both reads `from` is the reading pane. An empty `from` records no watch, and
 a `from` outside the tree fails the request.
@@ -483,6 +490,7 @@ The CLI:
 dm msg post --state blocked --key lane/a --msg "ready for review"
 dm msg list [--key lane/a | --prefix lane/] [--after SEQ] [--limit 20] [--json]
 dm msg wait [--key lane/a | --prefix lane/] [--state done] [--after SEQ] [--timeout 5m]
+dm msg sub [--key K | --prefix P] [--state S] [--after N] [--json]
 dm msg clear [--key lane/a]
 dm msg watchers [--json]
 dm msg schema
@@ -491,14 +499,18 @@ dm msg schema
 `post` prints the stored entry as one row. `list` prints newest first as
 `SEQ KEY STATE FROM MSG` and cuts only the message to the terminal width;
 `--json` prints the reply unchanged. `wait` prints the entry it found, or the
-reply on `--json`. `clear` prints the count. `watchers` prints one row per
-watch as `PANE FILTER CURSOR WAIT`: the filter is the key or the prefix with a
-trailing star, and the wait mark is `wait` while a wait is parked and `-`
-otherwise; `--json` prints the reply unchanged. `schema` prints the schema, so
-`dm msg schema | jq .actions` reads. `list` and `wait` send `from` for you when
-they run inside a pane, so a read in a pane records a watch. A read from outside
-a pane sends no `from` and records nothing. The wait timeout defaults to 5
-minutes and takes any duration up to one hour. `--after` carries the cursor.
+reply on `--json`. `sub` prints each frame as one row. With `--json` each frame
+prints as its own JSON object on one line, so the output is NDJSON and an agent
+spawns the sub once and reads lines. A server restart does not end the sub: it
+redials with backoff and resumes at the last printed entry. A refused request
+prints the error and exits non-zero. `clear` prints the count. `watchers` prints
+one row per watch as `PANE FILTER CURSOR WAIT`: the filter is the key or the
+prefix with a trailing star, and the wait mark is `wait` while a wait is parked
+and `-` otherwise; `--json` prints the reply unchanged. `schema` prints the
+schema, so `dm msg schema | jq .actions` reads. `list` and `wait` send `from`
+for you when they run inside a pane, so a read in a pane records a watch. A
+read from outside a pane sends no `from` and records nothing. The wait timeout
+defaults to 5 minutes and takes any duration up to one hour. `--after` carries the cursor.
 Leave it off to read the status board; `--after 0` starts at the first entry.
 
 Without `afterSeq` a wait matches the newest entry under its topic, not any
@@ -597,13 +609,23 @@ above a scrolled-back window as `+N`, and omits each part at zero. At 60 columns
 or wider each entry row starts with a two-cell count of the watches that were
 served that entry; a narrower view drops the marker whole, so the message keeps
 its cells. `w` swaps the entry list for the watcher page: one row per watch as
-`PANE FILTER @CURSOR`, with a `wait` mark while a wait is parked. A window the
-reader scrolled back stays on its top entry as new entries arrive, so the text
-does not slide. A post or a clear anywhere in the session refreshes an open
-view, and a change in the watch set pushes `{"type":"watch"}`, which asks for
-the list again at most once per 100 ms. The view follows a lane without a
-keypress. `esc`, `q` or the prefix key closes it. It posts nothing and clears
-nothing.
+`PANE FILTER @CURSOR`, with a `wait` mark while a wait is parked. A live `sub`
+shows as parked too. A window the reader scrolled back stays on its top entry
+as new entries arrive, so the text does not slide. A post or a clear anywhere
+in the session refreshes an open view, and a change in the watch set pushes
+`{"type":"watch"}`, which asks for the list again at most once per 100 ms. The
+view follows a lane without a keypress. `esc`, `q` or the prefix key closes it.
+It posts nothing and clears nothing.
+
+## Subscriptions
+
+A subscription is a stream, not a poll. `msg-sub` holds one connection open and
+the server pushes each matching entry as a frame. The watch is parked for its
+life, so a view shows a live sub as a reader that waits. The cursor advances
+over every entry it scans, including the ones its state filter skips. A gap in
+the log is reported once, on the first frame of the stream. A slow reader can
+miss frames: a frame that cannot enter the client's queue ends the connection
+instead of blocking the server. Reconnecting resumes at the last printed entry.
 
 ## Durability
 
