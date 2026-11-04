@@ -716,8 +716,8 @@ func boxPrintWatchers(ws []watch) {
 	filters := make([]string, len(ws))
 	for i, w := range ws {
 		filters[i] = boxFilter(w)
-		paneW = max(paneW, boxCells(w.Pane))
-		filterW = max(filterW, boxCells(filters[i]))
+		paneW = max(paneW, cells(w.Pane))
+		filterW = max(filterW, cells(filters[i]))
 		cursorW = max(cursorW, len(strconv.Itoa(w.Cursor)))
 	}
 	for i, w := range ws {
@@ -725,8 +725,8 @@ func boxPrintWatchers(ws []watch) {
 		if w.Parked {
 			wait = "wait"
 		}
-		line := fmt.Sprintf("%s %s %*d %s", boxPad(w.Pane, paneW),
-			boxPad(filters[i], filterW), cursorW, w.Cursor, wait)
+		line := fmt.Sprintf("%s %s %*d %s", pad(w.Pane, paneW),
+			pad(filters[i], filterW), cursorW, w.Cursor, wait)
 		fmt.Println(strings.TrimRight(line, " "))
 	}
 }
@@ -817,9 +817,9 @@ func boxPrint(entries []entry, width int) {
 	seqW, keyW, stateW, fromW := 1, 0, 0, 0
 	for _, e := range entries {
 		seqW = max(seqW, len(strconv.Itoa(e.Seq)))
-		keyW = max(keyW, boxCells(e.Key))
-		stateW = max(stateW, boxCells(string(e.State)))
-		fromW = max(fromW, boxCells(e.From))
+		keyW = max(keyW, cells(e.Key))
+		stateW = max(stateW, cells(string(e.State)))
+		fromW = max(fromW, cells(e.From))
 	}
 	msgW := -1 // no limit
 	if width > 0 {
@@ -828,40 +828,12 @@ func boxPrint(entries []entry, width int) {
 	for _, e := range entries {
 		msg := e.Msg
 		if msgW >= 0 {
-			msg = boxElide(msg, msgW)
+			msg = elide(msg, msgW)
 		}
 		line := fmt.Sprintf("%*d %s %s %s %s", seqW, e.Seq,
-			boxPad(e.Key, keyW), boxPad(string(e.State), stateW), boxPad(e.From, fromW), msg)
+			pad(e.Key, keyW), pad(string(e.State), stateW), pad(e.From, fromW), msg)
 		fmt.Println(strings.TrimRight(line, " "))
 	}
-}
-
-// boxCells is how many terminal cells a string takes.
-func boxCells(s string) int {
-	n := 0
-	for _, r := range s {
-		n += runeWidth(r)
-	}
-	return n
-}
-
-// boxPad fills s on the right to w cells.
-func boxPad(s string, w int) string {
-	if n := boxCells(s); n < w {
-		return s + strings.Repeat(" ", w-n)
-	}
-	return s
-}
-
-// boxElide shrinks s to w cells and ends it with an ellipsis.
-func boxElide(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	if boxCells(s) <= w {
-		return s
-	}
-	return barElideText(s, w)
 }
 
 // runPurge removes dead sessions whose server and panes are gone. A session
