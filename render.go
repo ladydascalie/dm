@@ -1183,6 +1183,7 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
 	// in rows 0..Rows-3 and clip there. Nothing overwrites the control row.
 	controlAt := snap.Rows - 2
+	gripAt := controlAt / 2
 	for y := 0; y < rows; y++ {
 		var left, right, tail []railSeg
 		bg, bold := railBG, false
@@ -1214,6 +1215,10 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		}
 		for _, seg := range right {
 			writeRailSeg(buf, seg, bg, bold)
+		}
+		if y < controlAt && y == gripAt {
+			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, w)
+			buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + glyphGrip)
 		}
 		buf.WriteString("\x1b[0m")
 	}

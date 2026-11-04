@@ -2810,11 +2810,9 @@ func (t *tui) draw() {
 		drawPaneBox(&box, p.Rect, p.ID == win.Focus)
 	}
 	drawGrips(&grip, win)
-	// The rail grip shares the padZone hint but is not a split divider, so it
-	// paints no heavy line of its own.
-	if t.padAxis != railPadAxis {
-		drawDivider(&div, t.padZone, t.padAxis)
-	}
+	// The rail grip paints the same heavy line as a split divider, over the
+	// strip its grab zone covers.
+	drawDivider(&div, t.padZone, t.padAxis)
 	drawRail(&rail, win)
 	drawBar(&bar, win, t.armed, t.barInfo())
 	drawToasts(&toasts, win, t.toasts)
@@ -2870,8 +2868,8 @@ func (t *tui) draw() {
 	bands := []band{
 		{p: &t.last.box, buf: &box, force: padFreed},
 		{p: &t.last.grip, buf: &grip, force: padFreed},
-		{p: &t.last.div, buf: &div},
 		{p: &t.last.rail, buf: &rail},
+		{p: &t.last.div, buf: &div},
 		{p: &t.last.bar, buf: &bar},
 		{p: &t.last.toasts, buf: &toasts, overlay: true},
 		{p: &t.last.pal, buf: &pal, overlay: true},
