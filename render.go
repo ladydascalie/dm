@@ -1869,28 +1869,142 @@ func maxInt(a, b int) int {
 }
 
 // drawHelp paints the bottom-right action preview from the configured keymap
-// rows. The first row is the prefix header.
+// rows. The box sizes to its widest row and is painted by the floating pane
+// primitive, so the top border carries the word prefix and the bottom border
+// names the key that closes it. The box stays clear of the rail, the toast row
+// and the status bar: it gives up the action column, then its trailing rows,
+// before it paints over any of them.
 func drawHelp(buf *bytes.Buffer, cols, rows int, keys [][2]string) {
-	width := 28
-	height := len(keys) + 2
+	g, ok := helpBoxGeometry(cols, rows, keys)
+	if !ok {
+		return
+	}
+	f := &FloatingPane{
+		Rect:  Rect{X: g.x, Y: g.y, W: g.inner, H: g.h},
+		Title: "prefix",
+		Hint:  "esc",
+		Paint: func(b *bytes.Buffer, inner Rect) {
+			helpBoxRows(b, inner, g)
+		},
+	}
+	f.Draw(buf, nil)
+}
+
+// helpBoxLayout is the box drawHelp paints: the content origin and width, the
+// number of rows that fit, and the cell budget of each column.
+type helpBoxLayout struct {
+	x, y    int
+	inner   int
+	h       int
+	keyW    int
+	actionW int
+	keys    [][2]string
+}
+
+// helpBoxGeometry sizes the box to its widest row and clamps it into the cells
+// no other band owns. The fit is X-1 >= rail, X+width-1 <= cols-1, Y-1 >= 0 and
+// Y+h <= rows-3, so both borders own a row and the toast row and the bar stay
+// clear. It reports false when the screen cannot hold even a key column.
+func helpBoxGeometry(cols, rows int, keys [][2]string) (helpBoxLayout, bool) {
+	var g helpBoxLayout
+	if cols < 3 || rows < 5 || len(keys) == 0 {
+		return g, false
+	}
+	keyW, actionW := 0, 0
+	for _, kv := range keys {
+		keyW = maxInt(keyW, runeCells(kv[0]))
+		actionW = maxInt(actionW, runeCells(kv[1]))
+	}
+	if keyW < 1 {
+		keyW = 1
+	}
+	// The rail owns columns 0..rail-1 and effectiveRail clamps a width to
+	// maxRail(cols), so starting right of maxRail clears any rail width.
+	left := maxRail(cols) + 1
+	avail := cols - left
+	if avail < 3 {
+		return g, false
+	}
+	inner, action := 0, 0
+	// The action column needs eight cells to be worth a column; below that the
+	// key column alone makes the better picture.
+	if avail >= keyW+12 {
+		action = actionW
+		if room := avail - keyW - 4; action > room {
+			action = room
+		}
+		inner = keyW + 2 + action
+	} else {
+		inner = keyW
+		if room := avail - 2; inner > room {
+			inner = room
+		}
+	}
+	if inner < 1 || inner+2 > avail {
+		return g, false
+	}
+	width := inner + 2
 	x := cols - width - 2
-	y := rows - height - 2
-	if x < 0 {
-		x = 0
+	if x < left {
+		x = left
 	}
-	if y < 0 {
-		y = 0
+	// Both border rows own a row: the top one above the content, the bottom
+	// one below it and above the toast row.
+	h := len(keys)
+	if h > rows-4 {
+		h = rows - 4
 	}
-	buf.WriteString("\x1b[0m\x1b[90m")
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+1, x+1,
-		glyphBorderTopLeft, strings.Repeat(glyphBorderHorizontal, width-2), glyphBorderTopRight)
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s\x1b[97m %-*s\x1b[90m%s", y+2, x+1,
-		glyphBorderVertical, width-3, "prefix", glyphBorderVertical)
-	for i, kv := range keys {
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s %-8s %-*s%s", y+3+i, x+1,
-			glyphBorderVertical, kv[0], width-11, kv[1], glyphBorderVertical)
+	if h < 1 {
+		return g, false
 	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+height, x+1,
-		glyphBorderBottomLeft, strings.Repeat(glyphBorderHorizontal, width-2), glyphBorderBottomRight)
-	buf.WriteString("\x1b[0m")
+	y := rows - (h + 2) - 2
+	if y < 1 {
+		y = 1
+	}
+	if y+h > rows-3 {
+		return g, false
+	}
+	return helpBoxLayout{x: x, y: y, inner: inner, h: h, keyW: keyW, actionW: action, keys: keys[:h]}, true
+}
+
+// helpBoxRows paints every content row of the box. Each row starts with an
+// absolute cursor move and writes exactly inner.W cells, so it neither keeps a
+// glyph the frame before left nor paints past the border. The key column is
+// bright, the action column dim, and a clipped label ends in an ellipsis.
+func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
+	for i, kv := range g.keys {
+		y := inner.Y + i
+		if g.actionW > 0 {
+			key := helpBoxPad(kv[0], g.keyW)
+			action := helpBoxPad(helpBoxElide(kv[1], g.actionW), g.actionW)
+			fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[97m%s  \x1b[90m%s\x1b[0m",
+				y+1, inner.X+1, key, action)
+			continue
+		}
+		key := helpBoxPad(helpBoxElide(kv[0], inner.W), inner.W)
+		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[97m%s\x1b[0m", y+1, inner.X+1, key)
+	}
+}
+
+// helpBoxElide keeps s inside a cell budget and marks a cut with an ellipsis. A
+// rune is kept whole, so a double cell rune never splits.
+func helpBoxElide(s string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	if runeCells(s) <= budget {
+		return s
+	}
+	if budget == 1 {
+		return "\u2026"
+	}
+	return clipCells(s, budget-1) + "\u2026"
+}
+
+// helpBoxPad fills s to a cell budget with spaces. It never cuts.
+func helpBoxPad(s string, budget int) string {
+	if pad := budget - runeCells(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
 }
