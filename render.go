@@ -1218,7 +1218,7 @@ func drawMenu(buf *bytes.Buffer, m *menu) {
 	fmt.Fprintf(buf, "\x1b[0m\x1b[90m\x1b[%d;%dH%s%s%s", m.y+1, m.x+1,
 		glyphBorderTopLeft, title, glyphBorderTopRight)
 	for i, it := range m.items {
-		line := menuPad(fmt.Sprintf(" %-22s %-4s", it.label, it.key), inner, ' ')
+		line := menuPad(" "+pad(it.label, 22)+" "+pad(it.key, 4), inner, ' ')
 		colour := "\x1b[0m\x1b[90m"
 		if i == m.sel {
 			colour = "\x1b[0m\x1b[30;46m"
@@ -1548,7 +1548,7 @@ func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
 	}
 	longest := 0
 	for _, x := range toasts {
-		if n := len([]rune(x.text)); n > longest {
+		if n := cells(x.text); n > longest {
 			longest = n
 		}
 	}
@@ -1602,7 +1602,7 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		if i == sel {
 			colour = "\x1b[97m"
 		}
-		line := fmt.Sprintf("%s %s %-4s %-3s", mark, pad(s.Name, 18), state, now)
+		line := fmt.Sprintf("%s %s %s %s", mark, pad(s.Name, 18), pad(state, 4), pad(now, 3))
 		fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s\x1b[90m%s", y+2+i, x+1,
 			glyphBorderVertical, colour, pad(line, w-2), glyphBorderVertical)
 	}

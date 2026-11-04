@@ -19,8 +19,8 @@ func helpBoxDraw(t *testing.T, cols, rows int, keys [][2]string) string {
 // helpBoxWidths is the widest key and action label in cells.
 func helpBoxWidths(keys [][2]string) (keyW, actionW int) {
 	for _, kv := range keys {
-		keyW = maxInt(keyW, runeCells(kv[0]))
-		actionW = maxInt(actionW, runeCells(kv[1]))
+		keyW = maxInt(keyW, cells(kv[0]))
+		actionW = maxInt(actionW, cells(kv[1]))
 	}
 	return keyW, actionW
 }
@@ -34,7 +34,7 @@ type helpBoxPainted struct {
 }
 
 // helpBoxParse replays the band: a move sets the cursor, an SGR changes
-// nothing, and a rune takes one cell of the width runeWidth gives it. It fails
+// nothing, and a rune takes the cells cells gives it. It fails
 // on anything else, so a relative move or an unknown escape cannot slip by.
 func helpBoxParse(t *testing.T, s string) helpBoxPainted {
 	t.Helper()
@@ -79,7 +79,7 @@ func helpBoxParse(t *testing.T, s string) helpBoxPainted {
 		if col+1 > p.maxCol {
 			p.maxCol = col + 1
 		}
-		col += runeWidth(r)
+		col += cells(string(r))
 	}
 	return p
 }
@@ -223,9 +223,9 @@ func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 	for i, r := range rows[:y1-y0-1] {
 		var want string
 		if r.header != "" {
-			want = helpBoxPad(helpBoxElide(r.header, x1-x0-1), x1-x0-1)
+			want = pad(elide(r.header, x1-x0-1), x1-x0-1)
 		} else {
-			want = helpBoxPad(helpBoxElide(r.key, x1-x0-1), x1-x0-1)
+			want = pad(elide(r.key, x1-x0-1), x1-x0-1)
 		}
 		if got := helpBoxRowText(p, y0+1+i, x0+1, x1-1); got != want {
 			t.Fatalf("row %d = %q, want the key column alone %q", i, got, want)
@@ -248,7 +248,7 @@ func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 	found := false
 	for row := y0 + 1; row <= y1-1; row++ {
 		got := strings.TrimRight(helpBoxRowText(p, row, x0+1, x1-1), " ")
-		if runeCells(got) > x1-x0-1 {
+		if cells(got) > x1-x0-1 {
 			t.Fatalf("row %d = %q, wider than the %d cell interior", row, got, x1-x0-1)
 		}
 		if strings.HasSuffix(got, "\u2026") {
