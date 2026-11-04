@@ -34,5 +34,5 @@ func (f *FloatingPane) Draw(buf *bytes.Buffer, hover *selRange) {
 	if f.Paint != nil {
 		paint = f.Paint
 	}
-	paintPanel(buf, f.Rect, f.Title, f.Hint, f.Active, paint)
+	paintPanel(buf, f.Rect, panelTitle{text: f.Title, style: panelTitleStyle}, f.Hint, f.Active, paint)
 }

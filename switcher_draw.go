@@ -136,7 +136,7 @@ func drawSwitcher(buf *bytes.Buffer, s *switcher, snap *Snapshot, vts map[string
 	if l.r.W < 3 || l.r.H < 3 {
 		return l.r.X, l.r.Y
 	}
-	paintPanel(buf, l.inner, "", "", true, func(b *bytes.Buffer, _ Rect) {
+	paintPanel(buf, l.inner, panelTitle{}, "", true, func(b *bytes.Buffer, _ Rect) {
 		cx, cy = paintSwitcherQuery(b, s, l)
 		paintSwitcherBands(b, s, vts, l)
 	})

@@ -72,7 +72,7 @@ func panelScreen(t *testing.T, cols, rows int, draw func(*bytes.Buffer)) vt10x.T
 func TestPanelWithoutTitle(t *testing.T) {
 	r := Rect{X: 3, Y: 2, W: 6, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, r, "", "", true, func(w *bytes.Buffer, inner Rect) {
+		paintPanel(b, r, panelTitle{}, "", true, func(w *bytes.Buffer, inner Rect) {
 			fmt.Fprintf(w, "\x1b[%d;%dHAB", inner.Y+1, inner.X+1)
 		})
 	})
@@ -98,7 +98,7 @@ func TestPanelWithoutTitle(t *testing.T) {
 func TestPanelTitleAndHint(t *testing.T) {
 	r := Rect{X: 3, Y: 2, W: 8, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, r, "title", "hint", false, nil)
+		paintPanel(b, r, panelTitle{text: "title", style: panelTitleStyle}, "hint", false, nil)
 	})
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─title──┐"; got != want {
 		t.Fatalf("title row = %q, want %q", got, want)
@@ -113,7 +113,7 @@ func TestPanelTitleAndHint(t *testing.T) {
 func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 	r := Rect{X: 3, Y: 2, W: 2, H: 2}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, r, "title", "hint", true, nil)
+		paintPanel(b, r, panelTitle{text: "title", style: panelTitleStyle}, "hint", true, nil)
 	})
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌──┐"; got != want {
 		t.Fatalf("top row = %q, want the plain border %q", got, want)
@@ -131,7 +131,7 @@ func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 	r := Rect{X: 4, Y: 3, W: 3, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, r, "title", "", false, nil)
+	paintPanel(&b, r, panelTitle{text: "title", style: panelTitleStyle}, "", false, nil)
 	screen := panelFilled(t, 20, 10, b.Bytes())
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─t─┐"; got != want {
 		t.Fatalf("title row = %q, want the title cut to its one cell %q", got, want)
@@ -151,13 +151,46 @@ func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 	}
 }
 
+// TestPanelFillTitleRowWritesOnce paints the menu look: a dim row continued
+// with the border rune. The whole row is one write, corners included, and the
+// box pass leaves it alone, so its cells and its bytes are the caller's.
+func TestPanelFillTitleRowWritesOnce(t *testing.T) {
+	r := Rect{X: 4, Y: 3, W: 10, H: 2}
+	var b bytes.Buffer
+	paintPanel(&b, r, panelTitle{
+		text:  " title ",
+		style: "\x1b[0m\x1b[90m",
+		fill:  glyphBorderHorizontal,
+	}, "", false, nil)
+	out := b.String()
+	if want := "\x1b[0m\x1b[90m\x1b[3;4H┌ title ───┐"; !strings.HasPrefix(out, want) {
+		t.Fatalf("band starts %q, want the row in one write %q", out, want)
+	}
+	if n := strings.Count(out, "\x1b[3;"); n != 1 {
+		t.Fatalf("the top row takes %d moves, want the row in one write", n)
+	}
+	if n := strings.Count(out, "┌ title ───┐"); n != 1 {
+		t.Fatalf("the row appears %d times, want 1", n)
+	}
+	if n := strings.Count(out, " title "); n != 1 {
+		t.Fatalf("label appears %d times in the band, want 1", n)
+	}
+	screen := panelFilled(t, 20, 10, b.Bytes())
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌ title ───┐"; got != want {
+		t.Fatalf("title row = %q, want %q", got, want)
+	}
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "└──────────┘"; got != want {
+		t.Fatalf("bottom row = %q, want %q", got, want)
+	}
+}
+
 // TestPanelClipsInterior runs an interior painter that writes past its rect on
 // every side. The panel keeps the border, the cells beside it, and the moves the
 // painter aimed outside the box.
 func TestPanelClipsInterior(t *testing.T) {
 	r := Rect{X: 4, Y: 3, W: 4, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, r, "T", "", true, func(w *bytes.Buffer, inner Rect) {
+	paintPanel(&b, r, panelTitle{text: "T", style: panelTitleStyle}, "", true, func(w *bytes.Buffer, inner Rect) {
 		// Past the right edge, the row would run over the border.
 		fmt.Fprintf(w, "\x1b[%d;%dHABCDEFG", inner.Y+1, inner.X+1)
 		// Above, below and left of the box.

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -12,6 +13,21 @@ const (
 	panelTitleStyle = "\x1b[97m"
 	panelHintStyle  = "\x1b[90m"
 )
+
+// panelTitle is a panel's top border row. text is the row's label and fill is
+// the glyph the row continues with after it, so a caller whose title row is not
+// plain border asks for the whole row in one write. A fill row has its corners
+// written by the panel and is left out of the box pass, so no cell of it lands
+// twice. When fill is empty the top row stays plain border and text is a label
+// painted over it, one cell clear of the left corner, which is the old float
+// look down to the byte. style is written before the row's first glyph: for a
+// fill row it is the whole row's style, reset included; for a label it is the
+// label's colour alone.
+type panelTitle struct {
+	text  string
+	style string
+	fill  string
+}
 
 // paintPanel paints one bordered box and nothing outside it. rect is the
 // interior: the border sits one cell around it, the title on the row above and
@@ -23,18 +39,38 @@ const (
 // The painter holds no state and keeps no buffer between frames: the clip needs
 // to see a whole run before it can cut it, so it collects the inside in a
 // scratch buffer and throws it away. Only buf reaches the frame.
-func paintPanel(buf *bytes.Buffer, rect Rect, title, hint string, active bool, paint func(*bytes.Buffer, Rect)) {
+func paintPanel(buf *bytes.Buffer, rect Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, Rect)) {
 	if rect.W <= 0 || rect.H <= 0 || rect.X < 1 || rect.Y < 1 {
 		return
+	}
+	titled := title.fill != ""
+	if titled {
+		paintTitleRow(buf, rect, title)
 	}
 	if paint != nil {
 		var inside bytes.Buffer
 		paint(&inside, rect)
 		panelClip(buf, rect, inside.Bytes())
 	}
-	drawPaneBox(buf, rect, active)
-	paintBorderText(buf, rect, rect.Y-1, title, panelTitleStyle)
+	if titled {
+		drawPaneBoxRows(buf, rect, active, true)
+	} else {
+		drawPaneBox(buf, rect, active)
+		paintBorderText(buf, rect, rect.Y-1, title.text, title.style)
+	}
 	paintBorderText(buf, rect, rect.Y+rect.H, hint, panelHintStyle)
+}
+
+// paintTitleRow writes the top border row as one run: the left corner, the
+// label clipped to the interior and filled to its width, the right corner. It
+// writes both corners, so the box pass leaves this row alone.
+func paintTitleRow(buf *bytes.Buffer, rect Rect, t panelTitle) {
+	row := clip(t.text, rect.W)
+	if n := rect.W - cells(row); n > 0 {
+		row += strings.Repeat(t.fill, n)
+	}
+	fmt.Fprintf(buf, "%s\x1b[%d;%dH%s%s%s", t.style, rect.Y, rect.X,
+		glyphBorderTopLeft, row, glyphBorderTopRight)
 }
 
 // paintBorderText writes a label into row y of the border around r, one cell
