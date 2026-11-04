@@ -5241,6 +5241,101 @@ keymap "main" {
 	noMsg(t, got)
 }
 
+// TestReloadActionReadsConfigAndTheme: the reload action re-reads the default
+// config path and its named theme. A changed keymap and theme replace the
+// running ones and a toast confirms the reload.
+func TestReloadActionReadsConfigAndTheme(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "dm")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	applyTestTheme(t, DefaultTheme())
+	tui := &tui{keymap: LoadDefault()}
+
+	path := filepath.Join(cfgDir, "config.kdl")
+	if err := os.WriteFile(path, []byte(`theme "night"
+keymap "main" {
+    "split-right" "S"
+    "reload" "ctrl+r"
+}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeTheme(t, cfgDir, "night", `palette { "rail-bg" "#010203" }`)
+
+	feed(tui, "\x02\x12")
+	if tui.armed {
+		t.Fatal("reload left the client armed")
+	}
+	if got := tui.keymap.Key("main", "split-right"); got != "S" {
+		t.Fatalf("split-right key = %q, want S after reload", got)
+	}
+	if got := tui.keymap.Theme().Palette.RailBG; got != (rgb{1, 2, 3}) {
+		t.Fatalf("keymap theme rail-bg = %v, want 1 2 3", got)
+	}
+	if railBG != (rgb{1, 2, 3}) {
+		t.Fatalf("applied theme rail-bg = %v, want 1 2 3", railBG)
+	}
+	if !tui.dirty {
+		t.Fatal("reload did not mark the frame dirty")
+	}
+	if n := len(tui.toasts); n == 0 || tui.toasts[n-1].text != "config reloaded" {
+		t.Fatalf("reload toasts = %+v, want a config reloaded toast", tui.toasts)
+	}
+}
+
+// TestReloadActionKeepsSettingsOnBadConfig: a malformed reload leaves the
+// running keymap and theme in place and toasts the error.
+func TestReloadActionKeepsSettingsOnBadConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "dm")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cfgDir, "config.kdl")
+	if err := os.WriteFile(path, []byte(`theme "old"
+keymap "main" {
+    "split-right" "S"
+    "reload" "ctrl+r"
+}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeTheme(t, cfgDir, "old", `palette { "rail-bg" "#040506" }`)
+	oldCfg, err := LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	applyTestTheme(t, oldCfg.Theme())
+	tui := &tui{keymap: oldCfg}
+
+	if err := os.WriteFile(path, []byte(`bogus "x"`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	feed(tui, "\x02\x12")
+	if tui.armed {
+		t.Fatal("failed reload left the client armed")
+	}
+	if tui.keymap != oldCfg {
+		t.Fatal("failed reload replaced the running keymap")
+	}
+	if got := tui.keymap.Key("main", "split-right"); got != "S" {
+		t.Fatalf("split-right key = %q, want S after a failed reload", got)
+	}
+	if got := tui.keymap.Theme().Palette.RailBG; got != (rgb{4, 5, 6}) {
+		t.Fatalf("keymap theme rail-bg = %v, want 4 5 6", got)
+	}
+	if railBG != (rgb{4, 5, 6}) {
+		t.Fatalf("applied theme rail-bg = %v, want 4 5 6", railBG)
+	}
+	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "unknown node") {
+		t.Fatalf("failed reload toasts = %+v, want the parse error", tui.toasts)
+	}
+}
+
 // TestKeymapDispatchPartialEscapeInMenu: a menu arrow split across two reads
 // waits for its remaining bytes and then moves the selection.
 func TestKeymapDispatchPartialEscapeInMenu(t *testing.T) {

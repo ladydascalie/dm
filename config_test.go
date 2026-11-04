@@ -13,7 +13,7 @@ import (
 // each mode. The default keymap must bind all of them.
 var configTestDefaultActions = map[string][]string{
 	"main": {
-		"send-prefix", "split-right", "split-down", "split-down-alt",
+		"send-prefix", "reload", "split-right", "split-down", "split-down-alt",
 		"split-left", "split-up", "scrollback", "focus-left", "focus-down",
 		"focus-up", "focus-right", "next-pane", "prev-pane", "close-pane",
 		"new-window", "next-window", "prev-window", "new-workspace",
@@ -371,6 +371,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"b", "cycle rail: full, thin, hidden"},
 		{"d / q", "detach"},
 		{"ctrl+b", "send prefix"},
+		{"ctrl+r", "reload config"},
 	}
 	if got := LoadDefault().HelpRows(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("HelpRows() = %#v, want %#v", got, want)

@@ -144,6 +144,7 @@ var helpRows = []helpRow{
 	{[]string{"toggle-rail"}, "cycle rail: full, thin, hidden"},
 	{[]string{"detach", "detach-alt"}, "detach"},
 	{[]string{"send-prefix"}, "send prefix"},
+	{[]string{"reload"}, "reload config"},
 }
 
 // HelpRows returns the help overlay's display rows: key label and action text,
@@ -553,6 +554,7 @@ prefix "ctrl+b"
 
 keymap "main" {
     "send-prefix" "prefix"
+    "reload" "ctrl+r"
     "split-right" "|"
     "split-down" "-"
     "split-down-alt" "_"
