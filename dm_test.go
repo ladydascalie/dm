@@ -5262,3 +5262,33 @@ func TestKeymapDispatchPartialEscapeInMenu(t *testing.T) {
 		t.Fatalf("the arrow did not move: %+v pending=%v", tui.menu, tui.pending)
 	}
 }
+
+// TestKeymapDispatchSwitcherLeftRightAreNoOps: left, right and shift-tab have no
+// meaning in the switcher list. They neither close it nor type into the query,
+// and an unbound escape sequence is not text either.
+func TestKeymapDispatchSwitcherLeftRightAreNoOps(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	if tui.sw == nil {
+		t.Fatal("the switcher did not open")
+	}
+	for _, seq := range []string{"\x1b[D", "\x1b[C", "\x1b[Z", "\x1bOP"} {
+		feed(tui, seq)
+		if tui.sw == nil {
+			t.Fatalf("%q closed the switcher", seq)
+		}
+		if q := tui.sw.q(); q != "" {
+			t.Fatalf("%q typed %q into the query", seq, q)
+		}
+	}
+	// Plain text still reaches the query, and the arrows still move.
+	feed(tui, "beta")
+	if q := tui.sw.q(); q != "beta" {
+		t.Fatalf("query = %q, want beta", q)
+	}
+	feed(tui, "\x1b[A")
+	if tui.sw == nil {
+		t.Fatal("the up arrow closed the switcher")
+	}
+	noMsg(t, got)
+}

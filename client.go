@@ -1218,6 +1218,11 @@ func (t *tui) switcherKey() bool {
 		return true
 	}
 	action, n, state := t.km().Match("switcher", t.inbuf)
+	if state == Match && escapeRun(t.inbuf) > n {
+		// The match covered only the head of an escape sequence. The sequence
+		// as a whole is unbound, and an unbound escape is not text.
+		state = NoMatch
+	}
 	switch state {
 	case Partial:
 		if !t.pending {
@@ -1230,19 +1235,20 @@ func (t *tui) switcherKey() bool {
 		t.pending = false
 	default:
 		b := t.inbuf[0]
-		t.inbuf = t.inbuf[1:]
+		n := escapeRun(t.inbuf)
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
-		if b >= 0x20 && b < 0x7f {
+		// An escape sequence with no binding is not text: left, right and
+		// shift-tab have no meaning in a list, and neither does F1.
+		if n == 1 && b >= 0x20 && b < 0x7f {
 			t.sw.appendText(rune(b))
 			t.dirty = true
 		}
 		return true
 	}
 	switch action {
-	case "close", "close-ctrl-c", "close-esc", "close-left", "close-right":
+	case "close", "close-ctrl-c", "close-esc":
 		closeSwitcher(t)
-	case "close-shift-tab":
-		// Shift-tab has no meaning in a list.
 	case "pick":
 		t.pickSwitcher()
 	case "clear-query":
