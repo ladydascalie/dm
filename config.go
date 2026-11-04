@@ -39,6 +39,17 @@ type Config struct {
 	prefixName  string
 	prefixBytes []byte
 	modes       map[string]*mode
+	themeName   string
+	theme       Theme
+}
+
+// Theme returns the resolved theme. It is never the zero Theme: a Config
+// without a loaded theme reports the built-in one.
+func (c *Config) Theme() Theme {
+	if c == nil || c.theme.States == nil {
+		return DefaultTheme()
+	}
+	return c.theme
 }
 
 // PrefixBytes returns the bytes the prefix key sends.
@@ -433,6 +444,19 @@ func parseKeymaps(toks []token, cfg *Config) error {
 				return fmt.Errorf("line %d: malformed prefix node", t.line)
 			}
 			i += 2
+		case "theme":
+			if i+1 >= len(toks) || toks[i+1].kind != tokString {
+				return fmt.Errorf("line %d: expected quoted theme name after theme", t.line)
+			}
+			if cfg.themeName != "" {
+				return fmt.Errorf("line %d: duplicate theme node", t.line)
+			}
+			name := toks[i+1].value
+			if err := checkThemeName(name); err != nil {
+				return fmt.Errorf("line %d: %w", toks[i+1].line, err)
+			}
+			cfg.themeName = name
+			i += 2
 		case "keymap":
 			i++
 			if i >= len(toks) || toks[i].kind != tokString {
@@ -512,6 +536,7 @@ func parseConfig(src string) (*Config, error) {
 		prefixName:  prefixName,
 		prefixBytes: prefixBytes,
 		modes:       make(map[string]*mode),
+		theme:       DefaultTheme(),
 	}
 	if err := parseKeymaps(toks, cfg); err != nil {
 		return nil, err
@@ -724,11 +749,18 @@ func LoadDefaultPath(write bool) (*Config, error) {
 	if err != nil {
 		return LoadDefault(), err
 	}
+	theme, err := loadThemeFile(filepath.Dir(path), cfg.themeName)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.theme = theme
 	return cfg, nil
 }
 
 // LoadPath loads an explicit path. It never writes. A missing file returns the
-// built-in defaults. A parse failure returns the defaults and the error.
+// built-in defaults. A parse failure returns the defaults and the error. A
+// theme read or parse failure returns the parsed keymap with the built-in
+// theme and the error.
 func LoadPath(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -741,6 +773,11 @@ func LoadPath(path string) (*Config, error) {
 	if err != nil {
 		return LoadDefault(), err
 	}
+	theme, err := loadThemeFile(filepath.Dir(path), cfg.themeName)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.theme = theme
 	return cfg, nil
 }
 
