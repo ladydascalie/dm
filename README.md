@@ -81,6 +81,42 @@ most every 30 ms plus a final call on release. Both sides keep at least three
 cells. A divider always belongs to dm, even when a pane claims the mouse: the
 app's PTY covers only its content rect, so the border press is not its event.
 
+## Keybindings
+
+The key table above is the default. dm reads the keymap from
+`$HOME/.config/dm/config.kdl`, or `$XDG_CONFIG_HOME/dm/config.kdl` when
+`XDG_CONFIG_HOME` is set. On first run dm writes that file with the current
+table, then you edit it.
+
+```kdl
+prefix "ctrl+a"
+
+keymap "main" {
+    "split-right" "S"
+    "detach" "D"
+}
+```
+
+The file is the whole table, not a patch. An action the file leaves out is
+unbound. The prefix line sets the prefix key. Each keymap block maps actions to
+keys.
+
+One mode is one keymap.
+
+- `main` is the table the prefix key opens.
+- `menu` is the right-click menu.
+- `picker` is the session picker.
+- `switcher` is the quick switch palette.
+- `scroll` is scrollback.
+- `rename` is the rename prompt.
+- `box` is the message box.
+
+A key is one key. Arrows and `PgUp`/`PgDn` are named sequences: `up`, `down`,
+`left`, `right`, `pgup`, `pgdn`. The switcher and the rename prompt keep every
+printable key as text, and bind only their control keys. The help overlay and
+the right-click menu take their key labels from the config, so a remap shows
+there too.
+
 ## Palette
 
 `prefix a` floats a quick switcher over the panes. It is native: no child
