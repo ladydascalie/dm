@@ -293,25 +293,48 @@ func TestDrawPaneColors(t *testing.T) {
 }
 
 func TestDrawSessionsWidth(t *testing.T) {
-	var buf bytes.Buffer
+	const cols, rows = 100, 30
 	sessions := []SessionInfo{{Name: "alpha", Live: true}, {Name: "beta"}}
-	drawSessions(&buf, 100, 30, sessions, 1, "alpha")
+	var buf bytes.Buffer
+	drawSessions(&buf, cols, rows, sessions, 1, "alpha")
+	screen := panelFilled(t, cols, rows, buf.Bytes())
 
-	pos := regexp.MustCompile(`\x1b\[[0-9]+;[0-9]+H`)
-	sgr := regexp.MustCompile(`\x1b\[[0-9;]*m`)
-	raw := buf.String()
-	locs := pos.FindAllStringIndex(raw, -1)
-	widths := map[int]bool{}
-	for i, loc := range locs {
-		end := len(raw)
-		if i+1 < len(locs) {
-			end = locs[i+1][0]
-		}
-		row := sgr.ReplaceAllString(raw[loc[1]:end], "")
-		widths[len([]rune(row))] = true
+	// The picker is 46 wide and centred: its top row, one row per session, the
+	// tee row, the key hint and its bottom row.
+	w := 46
+	x := (cols - w) / 2
+	y := (rows - (len(sessions) + 5)) / 2
+	edges := []struct {
+		row         int
+		left, right rune
+	}{
+		{y, []rune(glyphBorderTopLeft)[0], []rune(glyphBorderTopRight)[0]},
+		{y + 1, []rune(glyphBorderVertical)[0], []rune(glyphBorderVertical)[0]},
+		{y + 2, []rune(glyphBorderVertical)[0], []rune(glyphBorderVertical)[0]},
+		{y + 3, []rune(glyphBorderTeeLeft)[0], []rune(glyphBorderTeeRight)[0]},
+		{y + 4, []rune(glyphBorderVertical)[0], []rune(glyphBorderVertical)[0]},
+		{y + 5, []rune(glyphBorderBottomLeft)[0], []rune(glyphBorderBottomRight)[0]},
 	}
-	if len(widths) != 1 {
-		t.Fatalf("box rows have different widths: %v", widths)
+	for _, e := range edges {
+		if got := panelChar(screen, x, e.row); got != e.left {
+			t.Fatalf("row %d starts with %q, want %q", e.row, got, e.left)
+		}
+		if got := panelChar(screen, x+w-1, e.row); got != e.right {
+			t.Fatalf("row %d ends with %q, want %q", e.row, got, e.right)
+		}
+	}
+	// Every cell of every box row is painted and no cell beside the box is.
+	for row := 0; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			got := panelChar(screen, col, row)
+			in := row >= y && row <= y+5 && col >= x && col < x+w
+			if in && got == 'X' {
+				t.Fatalf("row %d leaves cell %d of the box unpainted", row, col)
+			}
+			if !in && got != 'X' {
+				t.Fatalf("row %d paints cell %d outside the box: %q", row, col, got)
+			}
+		}
 	}
 }
 
@@ -2347,7 +2370,7 @@ func barTestSnap(cols int) *Snapshot {
 }
 
 // barTexts is the text of each span, in paint order.
-func barTexts(segs []barSeg) []string {
+func barTexts(segs []seg) []string {
 	out := make([]string, 0, len(segs))
 	for _, seg := range segs {
 		out = append(out, seg.text)
@@ -2356,7 +2379,7 @@ func barTexts(segs []barSeg) []string {
 }
 
 // barElideStage names the rung of the elision ladder barTestSnap has reached.
-func barElideStage(segs []barSeg) string {
+func barElideStage(segs []seg) string {
 	var text strings.Builder
 	chips := 0
 	for _, seg := range segs {
@@ -2591,7 +2614,7 @@ func TestBarPinned(t *testing.T) {
 	info := "12 rows above, 4 hidden"
 
 	segs := barSegments(snap, true, info)
-	var pinned []barSeg
+	var pinned []seg
 	for _, seg := range segs {
 		if seg.pin {
 			pinned = append(pinned, seg)

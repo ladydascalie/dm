@@ -304,6 +304,13 @@ func screenBytes(vt vt10x.View) []byte {
 // drawPaneBox draws the border of one pane. The active pane is bright cyan;
 // the rest are dim, so the active one reads at a glance.
 func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
+	drawPaneBoxRows(buf, content, active, false)
+}
+
+// drawPaneBoxRows draws the border of one pane. skipTop leaves the top row
+// alone, for a caller that writes it itself as one row, so no cell of it lands
+// twice.
+func drawPaneBoxRows(buf *bytes.Buffer, content Rect, active bool, skipTop bool) {
 	x0, y0 := content.X-1, content.Y-1
 	x1, y1 := content.X+content.W, content.Y+content.H
 	if content.W <= 0 || content.H <= 0 || x0 < 0 || y0 < 0 {
@@ -317,12 +324,16 @@ func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
 	put := func(x, y int, s string) {
 		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
 	}
-	put(x0, y0, glyphBorderTopLeft)
-	put(x1, y0, glyphBorderTopRight)
+	if !skipTop {
+		put(x0, y0, glyphBorderTopLeft)
+		put(x1, y0, glyphBorderTopRight)
+	}
 	put(x0, y1, glyphBorderBottomLeft)
 	put(x1, y1, glyphBorderBottomRight)
 	for x := x0 + 1; x < x1; x++ {
-		put(x, y0, glyphBorderHorizontal)
+		if !skipTop {
+			put(x, y0, glyphBorderHorizontal)
+		}
 		put(x, y1, glyphBorderHorizontal)
 	}
 	for y := y0 + 1; y < y1; y++ {
@@ -1208,46 +1219,31 @@ func leafNear(n *Node, area Rect, x, y int) string {
 	return ""
 }
 
-// drawMenu paints the right-click menu over the panes.
+// drawMenu paints the right-click menu over the panes. The panel owns the border,
+// the title row and the interior clip; the menu owns its item rows and the
+// selection highlight. The title row is a fill row: dim, with the label between
+// the border rune and a border-rune fill, where the panel's label style is
+// bright, so the row is one write and its cells are the menu's.
 func drawMenu(buf *bytes.Buffer, m *menu) {
 	if m == nil || m.w < 8 {
 		return
 	}
-	inner := m.w - 2
-	title := menuPad(glyphBorderHorizontal+" "+m.title+" ", inner, glyphRune(glyphBorderHorizontal))
-	fmt.Fprintf(buf, "\x1b[0m\x1b[90m\x1b[%d;%dH%s%s%s", m.y+1, m.x+1,
-		glyphBorderTopLeft, title, glyphBorderTopRight)
-	for i, it := range m.items {
-		line := menuPad(" "+pad(it.label, 22)+" "+pad(it.key, 4), inner, ' ')
-		colour := "\x1b[0m\x1b[90m"
-		if i == m.sel {
-			colour = "\x1b[0m\x1b[30;46m"
+	inner := Rect{X: m.x + 1, Y: m.y + 1, W: m.w - 2, H: len(m.items)}
+	paintPanel(buf, inner, panelTitle{
+		text:  glyphBorderHorizontal + " " + m.title + " ",
+		style: "\x1b[0m\x1b[90m",
+		fill:  glyphBorderHorizontal,
+	}, "", false, func(b *bytes.Buffer, r Rect) {
+		for i, it := range m.items {
+			line := pad(" "+pad(it.label, 22)+" "+pad(it.key, 4), r.W)
+			colour := "\x1b[0m\x1b[90m"
+			if i == m.sel {
+				colour = "\x1b[0m\x1b[30;46m"
+			}
+			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", r.Y+i+1, r.X+1, colour, line)
 		}
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s\x1b[0m\x1b[90m%s", m.y+2+i, m.x+1,
-			glyphBorderVertical, colour, line, glyphBorderVertical)
-	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", m.y+len(m.items)+2, m.x+1,
-		glyphBorderBottomLeft, strings.Repeat(glyphBorderHorizontal, inner), glyphBorderBottomRight)
+	})
 	buf.WriteString("\x1b[0m")
-}
-
-// glyphRune is the first rune of a glyph, for the padding helpers that take a
-// rune.
-func glyphRune(s string) rune {
-	for _, r := range s {
-		return r
-	}
-	return ' '
-}
-
-// menuPad cuts or fills s to exactly w cells. It is the fill policy of the
-// menu: a title row continues with the border rune, an item row with spaces.
-func menuPad(s string, w int, fill rune) string {
-	s = clip(s, w)
-	if n := w - cells(s); n > 0 {
-		s += strings.Repeat(string(fill), n)
-	}
-	return s
 }
 
 // drawBar paints the one-line status bar on the last row. It paints the
@@ -1563,11 +1559,15 @@ func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
 			continue
 		}
 		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m%s\x1b[97m%s\x1b[0m\x1b[90m%s\x1b[0m",
-			row, snap.Cols-w+1, glyphBorderVertical, menuPad(x.text, inner, ' '), glyphBorderVertical)
+			row, snap.Cols-w+1, glyphBorderVertical, pad(x.text, inner), glyphBorderVertical)
 	}
 }
 
-// drawSessions paints the centred session picker.
+// drawSessions paints the centred session picker. The panel owns the border, the
+// title row and the interior clip; the picker owns its rows, the selection
+// highlight, the tee row that crosses the border and the key hint under it. The
+// title row is a fill row: dim, and its trailing cells are spaces rather than
+// the border rune, so the row is one write and its cells are the picker's.
 func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel int, current string) {
 	w := 46
 	if w > cols-2 {
@@ -1582,36 +1582,37 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 	if y < 0 {
 		y = 0
 	}
-	buf.WriteString("\x1b[0m\x1b[90m")
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+1, x+1,
-		glyphBorderTopLeft, pad(glyphBorderHorizontal+" switch session ", w-2), glyphBorderTopRight)
-	for i, s := range sessions {
-		mark := " "
-		if i == sel {
-			mark = ">"
+	inner := Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 2}
+	paintPanel(buf, inner, panelTitle{
+		text:  glyphBorderHorizontal + " switch session ",
+		style: "\x1b[0m\x1b[90m",
+		fill:  " ",
+	}, "", false, func(b *bytes.Buffer, r Rect) {
+		for i, s := range sessions {
+			mark := " "
+			if i == sel {
+				mark = ">"
+			}
+			state := "dead"
+			if s.Live {
+				state = "live"
+			}
+			now := ""
+			if s.Name == current {
+				now = "now"
+			}
+			colour := "\x1b[0m\x1b[90m"
+			if i == sel {
+				colour = "\x1b[0m\x1b[97m"
+			}
+			line := pad(mark+" "+pad(s.Name, 18)+" "+pad(state, 4)+" "+pad(now, 3), r.W)
+			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", r.Y+i+1, r.X+1, colour, line)
 		}
-		state := "dead"
-		if s.Live {
-			state = "live"
-		}
-		now := ""
-		if s.Name == current {
-			now = "now"
-		}
-		colour := "\x1b[90m"
-		if i == sel {
-			colour = "\x1b[97m"
-		}
-		line := fmt.Sprintf("%s %s %s %s", mark, pad(s.Name, 18), pad(state, 4), pad(now, 3))
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s\x1b[90m%s", y+2+i, x+1,
-			glyphBorderVertical, colour, pad(line, w-2), glyphBorderVertical)
-	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+2+len(sessions), x+1,
+		hint := pad(" j/k move  enter switch  esc cancel", r.W)
+		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s", r.Y+len(sessions)+2, r.X+1, hint)
+	})
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+len(sessions)+2, x+1,
 		glyphBorderTeeLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderTeeRight)
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+3+len(sessions), x+1,
-		glyphBorderVertical, pad(" j/k move  enter switch  esc cancel", w-2), glyphBorderVertical)
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+4+len(sessions), x+1,
-		glyphBorderBottomLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderBottomRight)
 	buf.WriteString("\x1b[0m")
 }
 

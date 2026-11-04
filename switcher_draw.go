@@ -136,14 +136,18 @@ func drawSwitcher(buf *bytes.Buffer, s *switcher, snap *Snapshot, vts map[string
 	if l.r.W < 3 || l.r.H < 3 {
 		return l.r.X, l.r.Y
 	}
-	drawPaneBox(buf, l.inner, true)
+	paintPanel(buf, l.inner, panelTitle{}, "", true, func(b *bytes.Buffer, _ Rect) {
+		cx, cy = paintSwitcherQuery(b, s, l)
+		paintSwitcherBands(b, s, vts, l)
+	})
+	// The title wears the rail ground, which the panel's label style cannot
+	// express, so the switcher paints it on the border row itself.
 	paintSwitcherTitle(buf, l)
-	cx, cy = paintSwitcherQuery(buf, s, l)
-	paintSwitcherBands(buf, s, vts, l)
 	return cx, cy
 }
 
-// paintSwitcherTitle names the float on its top border row.
+// paintSwitcherTitle names the float on its top border row, on the rail ground
+// and in the rail text colour.
 func paintSwitcherTitle(buf *bytes.Buffer, l switcherLayout) {
 	title := " switch "
 	if l.r.W-3 < len(title) {
@@ -210,7 +214,7 @@ func paintSwitcherBands(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.Ter
 	for i := 0; i < l.bandH; i++ {
 		y := l.bandY + i
 		idx := s.top + i
-		var left, right, tail []railSeg
+		var left, right, tail []seg
 		bg, bold := railBG, false
 		if idx >= 0 && idx < len(s.rows) {
 			left, right, tail = railRow(s.tree[s.rows[idx]], l.listW, false, nerd)
@@ -231,7 +235,7 @@ func paintSwitcherBands(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.Ter
 
 // paintRailRow paints one composed rail row on its background, filling the whole
 // width so no cell of the previous frame shows through.
-func paintRailRow(buf *bytes.Buffer, left, tail, right []railSeg, x, y, w int, bg rgb, bold bool) {
+func paintRailRow(buf *bytes.Buffer, left, tail, right []seg, x, y, w int, bg rgb, bold bool) {
 	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 	buf.WriteString("\x1b[0m" + bg.bg())
 	for _, seg := range left {
