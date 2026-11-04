@@ -4,8 +4,8 @@ A small, durable terminal multiplexer. One static Go binary that carries the
 server, the pane harness, the TUI client and the CLI.
 
 Prototype status: M1 works end to end. Splits, windows, workspaces, OSC 7501
-agent status, durable sessions and a JSON RPC are implemented. Mouse support,
-scrollback search, session switching inside the TUI and layout resizing are not.
+agent status, durable sessions and a JSON RPC are implemented. Scrollback search
+is not implemented.
 
 ## Identifiers
 
@@ -333,9 +333,16 @@ Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces them and
 at most a third of the screen and never wider than 46 columns; `set-rail`
 changes it. `prefix b` cycles the sidebar through three states: full, thin, and
 hidden. The thin rail is four columns: the agent bar, one state glyph per pane,
-and no names. It always lists panes, folded or not, and leaves a blank row where
-a workspace or window line would sit. A hidden or thin sidebar remembers the
-last full width.
+and no names. It always lists panes, folded or not, and packs one row per pane,
+with no header, note or gap row. A hidden or thin sidebar remembers the last
+full width.
+
+The rail's last column is a grab strip: drag it to resize the rail from four
+columns up to a third of the screen, capped at 46. A drag to the left collapses
+the rail to its thin form; hiding stays on `prefix b`. The rail's bottom row is
+a control: it shows a collapse mark on a full rail and an expand mark on the
+thin one. A click toggles full and thin, and expanding restores the last full
+width.
 
 In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
 jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel

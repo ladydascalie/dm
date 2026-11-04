@@ -84,6 +84,10 @@ func TestRailRowComposesPaint(t *testing.T) {
 			items := railItems(snap)
 			compact := railCompact(w)
 			for y, line := range painted {
+				if y == snap.Rows-2 {
+					// The control row is not a railRow item; control_test.go owns it.
+					continue
+				}
 				if y >= len(items) {
 					if line != "" {
 						t.Fatalf("nerd=%v w=%d row %d past the last item = %q, want blank",
@@ -305,6 +309,10 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	// whole, it never writes past the rail, and it composes what the rail
 	// paints.
 	for w := 1; w <= 40; w++ {
+		if railCompact(w) {
+			// The thin rail lists panes only; there is no window row to elide.
+			continue
+		}
 		snap := railRowSnap(w)
 		it := railRowFind(t, railItems(snap), railWindow, "one")
 		left, right, tail = railRow(it, w, railCompact(w), false)

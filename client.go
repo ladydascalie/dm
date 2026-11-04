@@ -120,9 +120,14 @@ type tui struct {
 
 	// railWant is the last non-zero rail width seen, so the toggle can restore
 	// it. railPress marks a press that began in the rail, whose events belong
-	// to no pane.
-	railWant  int
-	railPress bool
+	// to no pane. railDragging marks a drag of the rail grip, with its own
+	// clock and its own last width, so the rail never borrows the split drag's
+	// state.
+	railWant     int
+	railPress    bool
+	railDragging bool
+	railDragAt   time.Time
+	railWidth    int
 
 	// sw is the floating native switcher, nil when closed. swX and swY are
 	// the query cursor cell its last paint asked for, swAt and swPane are the
@@ -2053,6 +2058,32 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			return
 		}
 	}
+	// The rail grip is the rail's last column. A drag of it adjusts the rail
+	// width and swallows every event, motion and release alike, so nothing
+	// reaches a pane even when the pointer leaves the rail.
+	if t.railDragging {
+		if ev.release {
+			t.railDragTo(x, true)
+			t.railDragging = false
+			t.updatePadHover(x, y)
+			t.dirty = true
+			return
+		}
+		if ev.btn&32 == 0 {
+			t.railDragging = false
+			t.dirty = true
+			return
+		}
+		t.railDragTo(x, false)
+		return
+	}
+	// A left press on the grip starts that drag and sends nothing, so a stray
+	// click on the last column does nothing.
+	if t.press == nil && !t.dragging && ev.btn&3 == 0 && ev.btn&32 == 0 &&
+		ev.btn&64 == 0 && !ev.release && railGripAt(t.snap, x, y) {
+		t.startRailDrag()
+		return
+	}
 	// The rail owns every event inside its columns. A left press on a pane row
 	// focuses that pane; headers and empty space do nothing. A press that began
 	// in the rail keeps owning its drag and release, so nothing leaks to a pane.
@@ -2183,6 +2214,19 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	}
 }
 
+// railPadAxis is the padAxis of a hover over the rail grip. It marks the zone
+// as the rail's own, so the frame shows the hint without a split divider.
+const railPadAxis = "rail"
+
+// railGripAt reports whether x,y is the rail's grab strip: its last column,
+// above the row the rail keeps free for its bottom control.
+func railGripAt(snap *Snapshot, x, y int) bool {
+	if snap == nil || snap.Rail <= 0 {
+		return false
+	}
+	return x == snap.Rail-1 && y >= 0 && y < snap.Rows-2
+}
+
 // dragStart is the split a mouse press resolved to.
 type dragStart struct {
 	first  string
@@ -2229,9 +2273,12 @@ func (t *tui) barInfo() string {
 func (t *tui) updatePadHover(x, y int) {
 	var zone Rect
 	axis := ""
-	if t.snap != nil && !t.dragging && t.mode == "" {
+	if t.snap != nil && !t.dragging && !t.railDragging && t.mode == "" {
 		if ds, ok := dragPress(t.snap, x, y); ok {
 			zone, axis = ds.zone, ds.axis
+		} else if railGripAt(t.snap, x, y) {
+			// The grip is a grab strip too: same hint, no divider painted.
+			zone, axis = Rect{t.snap.Rail - 1, 0, 1, t.snap.Rows - 2}, railPadAxis
 		}
 	}
 	if zone == t.padZone && axis == t.padAxis {
@@ -2285,6 +2332,46 @@ func (t *tui) dragTo(x, y int, force bool) {
 		Type: "req", Action: "resize-split",
 		Target: t.dragFirst, Other: t.dragSecond, Ratio: ratio,
 	})
+}
+
+// startRailDrag begins a drag of the rail grip. It sends nothing: a click that
+// never moves must not resize the rail.
+func (t *tui) startRailDrag() {
+	t.railDragging = true
+	t.railDragAt = time.Time{}
+	if t.snap != nil {
+		t.railWidth = t.snap.Rail
+	}
+	t.padZone = Rect{}
+	t.padAxis = ""
+	t.dirty = true
+}
+
+// railDragTo sends the rail width the pointer asks for. The thin rail is the
+// narrowest a drag goes: hiding is the toggle's job, not a drag's. A width the
+// drag already asked for is not sent again, so a press that never moved sends
+// nothing. Unless forced, it sends at most once every 30 ms; a release forces
+// the final width through.
+func (t *tui) railDragTo(x int, force bool) {
+	if t.snap == nil || t.conn == nil {
+		return
+	}
+	w := x + 1
+	if w < collapsedRail {
+		w = collapsedRail
+	}
+	if m := maxRail(t.snap.Cols); w > m {
+		w = m
+	}
+	if w == t.railWidth {
+		return
+	}
+	if !force && !t.railDragAt.IsZero() && time.Since(t.railDragAt) < 30*time.Millisecond {
+		return
+	}
+	t.railDragAt = time.Now()
+	t.railWidth = w
+	_ = t.conn.send(Msg{Type: "req", Action: "set-rail", Index: w})
 }
 
 type mouseEvent struct {
@@ -2593,28 +2680,45 @@ func (t *tui) runAction(name string) {
 // toggleRail cycles the rail: expanded, thin, hidden. A hidden rail comes back
 // at the last expanded width, or the default when none was seen.
 func (t *tui) toggleRail() {
+	want := t.railToggleWidth(true)
+	t.action("set-rail", func(m *Msg) { m.Index = want })
+}
+
+// toggleRailControl is a click on the rail's bottom row: full <-> thin. Hiding
+// stays on `prefix b`, so a thin rail expands here instead of going hidden.
+func (t *tui) toggleRailControl() {
+	want := t.railToggleWidth(false)
+	t.action("set-rail", func(m *Msg) { m.Index = want })
+}
+
+// railToggleWidth is the width a rail toggle asks for. The key and the bottom
+// control both take their width from here, so the two routes cannot drift. A
+// hidden or thin rail comes back at the last expanded width, or the default
+// when none was seen. hide lets `prefix b` reach the hidden state; the control
+// passes false and expands instead.
+func (t *tui) railToggleWidth(hide bool) int {
 	rail := 0
 	if t.snap != nil {
 		rail = t.snap.Rail
 	}
-	want := 0
 	switch {
-	case rail <= 0:
-		want = t.railWant
-		if want <= 0 {
-			want = defaultRail
-		}
 	case rail <= collapsedRail:
-		want = 0
+		if hide && rail > 0 {
+			return 0
+		}
+		if t.railWant > 0 {
+			return t.railWant
+		}
+		return defaultRail
 	default:
-		want = collapsedRail
+		return collapsedRail
 	}
-	t.action("set-rail", func(m *Msg) { m.Index = want })
 }
 
-// railClick consumes a mouse event over the sidebar. A left press on a pane row
-// focuses that pane. Every other rail event is swallowed so it never reaches a
-// pane, and a drag that began in the rail stays swallowed outside it.
+// railClick consumes a mouse event over the sidebar. A left press on the bottom
+// control row toggles the rail full <-> thin. A left press on a pane row focuses
+// that pane. Every other rail event is swallowed so it never reaches a pane,
+// and a drag that began in the rail stays swallowed outside it.
 func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	if t.snap == nil || t.snap.Rail <= 0 {
 		return false
@@ -2639,7 +2743,13 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	}
 	if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 {
 		t.railPress = true
-		if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
+		if railControlAt(t.snap, x, y) {
+			// The bottom row is the control: it toggles the rail and
+			// never focuses a pane or folds a window.
+			if t.conn != nil {
+				t.toggleRailControl()
+			}
+		} else if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: id})
 		} else if id := railWindowAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.send(Msg{Type: "req", Action: "toggle-fold", Target: id})
@@ -2700,7 +2810,11 @@ func (t *tui) draw() {
 		drawPaneBox(&box, p.Rect, p.ID == win.Focus)
 	}
 	drawGrips(&grip, win)
-	drawDivider(&div, t.padZone, t.padAxis)
+	// The rail grip shares the padZone hint but is not a split divider, so it
+	// paints no heavy line of its own.
+	if t.padAxis != railPadAxis {
+		drawDivider(&div, t.padZone, t.padAxis)
+	}
 	drawRail(&rail, win)
 	drawBar(&bar, win, t.armed, t.barInfo())
 	drawToasts(&toasts, win, t.toasts)
