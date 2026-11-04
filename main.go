@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -35,6 +36,7 @@ const usage = `dm - durable terminal multiplexer (prototype)
   dm msg post --state S [--key K] [--msg T]
   dm msg list [--key K | --prefix P] [--after SEQ] [--limit N] [--json]
   dm msg wait [--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]
+  dm msg sub [--key K | --prefix P] [--state S] [--after SEQ] [--json]
   dm msg clear [--key K]
   dm msg watchers [--json]
   dm msg schema
@@ -396,7 +398,7 @@ func printRPC(name string, req Msg) error {
 // action: the shapes come from box.go, so the CLI carries no wire of its own.
 func runBox(c *cmdFlags) error {
 	if len(c.args) == 0 {
-		return fmt.Errorf("msg needs a verb: post, list, wait, clear, watchers or schema")
+		return fmt.Errorf("msg needs a verb: post, list, wait, sub, clear, watchers or schema")
 	}
 	switch c.args[0] {
 	case "post":
@@ -405,6 +407,8 @@ func runBox(c *cmdFlags) error {
 		return boxListVerb(c)
 	case "wait":
 		return boxWaitVerb(c)
+	case "sub":
+		return boxSubVerb(c)
 	case "clear":
 		return boxClearVerb(c)
 	case "watchers":
@@ -412,7 +416,7 @@ func runBox(c *cmdFlags) error {
 	case "schema":
 		return boxSchemaVerb(c)
 	}
-	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, clear, watchers or schema", c.args[0])
+	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, sub, clear, watchers or schema", c.args[0])
 }
 
 // boxPostVerb posts one entry and prints it as the server stored it.
@@ -512,6 +516,106 @@ func boxWaitVerb(c *cmdFlags) error {
 		fmt.Fprintln(os.Stderr, "dm: entries between the cursor and the oldest kept row are gone")
 	}
 	return nil
+}
+
+// The redial delays of a subscription whose connection went: 100 ms, doubling
+// to a 2 s cap.
+const (
+	boxSubMin = 100 * time.Millisecond
+	boxSubMax = 2 * time.Second
+)
+
+// errBoxSubEnded reports a subscription connection that went away. The verb
+// answers it with a redial, not an exit, so a server restart is invisible.
+var errBoxSubEnded = errors.New("box: sub connection ended")
+
+// boxSubVerb streams entries until the process is killed. Each entry prints as
+// one row, or as its own JSON object on one line under --json, so a reader can
+// parse NDJSON. The cursor follows every printed seq; when the connection ends
+// the verb redials with backoff and resends that cursor, so no entry is lost
+// across a restart. A resp with an Error is not retried: it prints and exits
+// nonzero, because a refused request will be refused again.
+func boxSubVerb(c *cmdFlags) error {
+	var st boxState
+	if c.state != "" {
+		parsed, err := parseState(c.state)
+		if err != nil {
+			return err
+		}
+		st = parsed
+	}
+	// From travels the way list and wait send it, so a sub inside a pane of
+	// the target session is a watcher of the filter it names.
+	req := subReq{From: boxFrom(c.session), Key: c.key, KeyPrefix: c.keyPrefix,
+		State: st, AfterSeq: c.boxCursor()}
+	backoff := boxSubMin
+	for {
+		live, err := boxSubStream(c.session, &req, c.jsonOut)
+		if !errors.Is(err, errBoxSubEnded) {
+			return err
+		}
+		if live {
+			backoff = boxSubMin
+		}
+		time.Sleep(backoff)
+		backoff = min(2*backoff, boxSubMax)
+	}
+}
+
+// boxSubStream holds one subscription open: it dials, sends the one request and
+// reads frames until the connection ends. It reports whether the connection was
+// established, so a caller can tell a refusal to dial from a stream that ran
+// and then went. A frame advances the request's cursor as it is printed, so the
+// same request resumes the stream after a redial.
+func boxSubStream(session string, req *subReq, jsonOut bool) (bool, error) {
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return false, err
+	}
+	c, err := dialServer(session)
+	if err != nil {
+		return false, errBoxSubEnded
+	}
+	defer c.Close()
+	if err := c.send(Msg{Type: "req", Action: "msg-sub", ID: 1, Res: raw}); err != nil {
+		return true, errBoxSubEnded
+	}
+	for {
+		m, err := readMsg(c.Conn)
+		if err != nil {
+			return true, errBoxSubEnded
+		}
+		// A stream has no completion reply: a resp is either the refusal that
+		// ends the process or, if it somehow carries OK, nothing to print.
+		if m.Type == "resp" {
+			if !m.OK {
+				return true, fmt.Errorf("%s", m.Error)
+			}
+			continue
+		}
+		var frame subFrame
+		if err := json.Unmarshal(m.Res, &frame); err != nil {
+			return true, errBoxSubEnded
+		}
+		e := frame.Entry
+		if jsonOut {
+			b, err := json.Marshal(e)
+			if err != nil {
+				return true, err
+			}
+			fmt.Println(string(b))
+		} else {
+			boxPrint([]entry{e}, 0)
+		}
+		seq := e.Seq
+		req.AfterSeq = &seq
+		// The server sets trimmed on the first frame of a stream whose cursor
+		// sat behind the oldest kept row and clears it after, so this is one
+		// note per gap, not one per entry.
+		if frame.Trimmed {
+			fmt.Fprintln(os.Stderr, "dm: entries between the cursor and the oldest kept row are gone")
+		}
+	}
 }
 
 // boxCursor turns the -after flag into the request cursor. A negative flag is

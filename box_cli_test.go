@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"net"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -472,5 +478,263 @@ func TestBoxCLIWatchers(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no lane/* row in %v", rows)
+	}
+}
+
+// boxErrBuffer collects a child's stderr under a mutex, so a test can read it
+// while the child still runs.
+type boxErrBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (e *boxErrBuffer) Write(p []byte) (int, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.b.Write(p)
+}
+
+func (e *boxErrBuffer) String() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.b.String()
+}
+
+// boxSubProcess is a running dm msg sub. Its stdout lines arrive on a channel
+// because a pipe carries no read deadline: every read is bounded by a select
+// on that channel instead, and the process is killed in cleanup.
+type boxSubProcess struct {
+	t    *testing.T
+	cmd  *exec.Cmd
+	news chan string
+	done chan error
+	errs *boxErrBuffer
+}
+
+// boxSubExec runs dm msg sub and returns the handle that reads its lines.
+func boxSubExec(t *testing.T, h *harness, env []string, args ...string) *boxSubProcess {
+	t.Helper()
+	p := &boxSubProcess{t: t, cmd: exec.Command(h.bin, args...), errs: &boxErrBuffer{},
+		news: make(chan string, 64), done: make(chan error, 1)}
+	p.cmd.Env = env
+	p.cmd.Stderr = p.errs
+	out, err := p.cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("sub stdout: %v", err)
+	}
+	if err := p.cmd.Start(); err != nil {
+		t.Fatalf("start dm %s: %v", strings.Join(args, " "), err)
+	}
+	go func() {
+		sc := bufio.NewScanner(out)
+		for sc.Scan() {
+			p.news <- sc.Text()
+		}
+		close(p.news)
+		p.done <- p.cmd.Wait()
+	}()
+	t.Cleanup(p.stop)
+	return p
+}
+
+// stop kills the subscription and waits for it, so a test leaves no process
+// behind and no goroutine writing to its buffers.
+func (p *boxSubProcess) stop() {
+	_ = p.cmd.Process.Kill()
+	select {
+	case <-p.done:
+	case <-time.After(10 * time.Second):
+	}
+}
+
+// next returns the next line the sub prints, and fails when none arrives
+// inside the wait, because a read that can block forever proves nothing.
+func (p *boxSubProcess) next(wait time.Duration) string {
+	p.t.Helper()
+	select {
+	case line, ok := <-p.news:
+		if !ok {
+			p.t.Fatalf("the sub exited before printing a line\nstderr:\n%s", p.errs.String())
+		}
+		return line
+	case <-time.After(wait):
+		p.t.Fatalf("the sub printed no line within %s\nstderr:\n%s", wait, p.errs.String())
+	}
+	return ""
+}
+
+// quiet fails when the sub prints a line inside the wait.
+func (p *boxSubProcess) quiet(wait time.Duration, why string) {
+	p.t.Helper()
+	select {
+	case line, ok := <-p.news:
+		if !ok {
+			p.t.Fatalf("%s: the sub exited\nstderr:\n%s", why, p.errs.String())
+		}
+		p.t.Fatalf("%s: the sub printed %q", why, line)
+	case <-time.After(wait):
+	}
+}
+
+// errText returns what the sub wrote to stderr so far.
+func (p *boxSubProcess) errText() string { return p.errs.String() }
+
+// boxSubErrWait polls the sub's stderr until done holds, with a deadline.
+func boxSubErrWait(t *testing.T, p *boxSubProcess, why string, done func(string) bool) string {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got := p.errText()
+		if done(got) {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: stderr is %q", why, got)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// boxKillServer SIGKILLs the session's server and waits until its socket
+// refuses, so the next dial starts a fresh one instead of meeting the dead. It
+// returns the pid it killed.
+func boxKillServer(t *testing.T, h *harness, session string) int {
+	t.Helper()
+	dir := filepath.Join(h.stateDir(), "sessions", session)
+	pid := readPID(t, filepath.Join(dir, "server.pid"))
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatalf("kill server %d: %v", pid, err)
+	}
+	sock := filepath.Join(dir, "server.sock")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		c, err := net.DialTimeout("unix", sock, 200*time.Millisecond)
+		if err != nil {
+			return pid
+		}
+		c.Close()
+		if time.Now().After(deadline) {
+			t.Fatalf("server socket %s still answers after the kill", sock)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestBoxCLISub proves the subscription streams through the binary and survives
+// a server restart: the entry posted to the new server prints on the same
+// process, after the cursor the first entry left.
+func TestBoxCLISub(t *testing.T) {
+	h := newHarness(t)
+	s := "boxsub"
+	h.run("new", "-s", s)
+	sub := boxSubExec(t, h, h.env, "msg", "sub", "--key", "lane/a", "-s", s)
+
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "done", "--msg", "gate green", "-s", s)
+	seq, key, state, msg := boxFields(t, sub.next(20*time.Second))
+	if seq != "1" || key != "lane/a" || state != "done" || msg != "gate green" {
+		t.Fatalf("first row = %s %s %s %q, want 1 lane/a done \"gate green\"", seq, key, state, msg)
+	}
+
+	// Kill the server. The post below starts a new one, and the sub resumes at
+	// the cursor the first row left, so the new entry prints on the same
+	// process.
+	old := boxKillServer(t, h, s)
+	h.run("new", "-s", s)
+	pidPath := filepath.Join(h.stateDir(), "sessions", s, "server.pid")
+	if got := readPID(t, pidPath); got == old {
+		t.Fatalf("server pid is still %d, so the server did not restart", got)
+	}
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "done", "--msg", "gate again", "-s", s)
+	seq, key, state, msg = boxFields(t, sub.next(20*time.Second))
+	if seq != "2" || key != "lane/a" || state != "done" || msg != "gate again" {
+		t.Fatalf("row after the restart = %s %s %s %q, want 2 lane/a done \"gate again\"", seq, key, state, msg)
+	}
+}
+
+// TestBoxCLISubJSON proves --json prints the entry object alone, one per line,
+// so a reader can parse NDJSON.
+func TestBoxCLISubJSON(t *testing.T) {
+	h := newHarness(t)
+	s := "boxsubjson"
+	h.run("new", "-s", s)
+	sub := boxSubExec(t, h, h.env, "msg", "sub", "--key", "lane/a", "--json", "-s", s)
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "working", "--msg", "two lines", "-s", s)
+
+	line := sub.next(20 * time.Second)
+	var got entry
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("sub --json line is not one entry: %v\n%s", err, line)
+	}
+	if got.Seq != 1 || got.Key != "lane/a" || got.State != stateWorking || got.Msg != "two lines" {
+		t.Fatalf("sub --json entry = %+v", got)
+	}
+	// The frame's trimmed flag does not ride along: the line is the entry.
+	var fields map[string]any
+	if err := json.Unmarshal([]byte(line), &fields); err != nil {
+		t.Fatalf("sub --json line is not an object: %v", err)
+	}
+	if _, ok := fields["trimmed"]; ok {
+		t.Fatalf("sub --json line carries the frame: %s", line)
+	}
+}
+
+// TestBoxCLISubStateFilter proves a state filter skips a row: the note prints
+// nothing and the done entry is the first and only line.
+func TestBoxCLISubStateFilter(t *testing.T) {
+	h := newHarness(t)
+	s := "boxsubstate"
+	h.run("new", "-s", s)
+	sub := boxSubExec(t, h, h.env, "msg", "sub", "--key", "lane/a", "--state", "done", "-s", s)
+
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "note", "--msg", "passing by", "-s", s)
+	sub.quiet(500*time.Millisecond, "a note under --state done")
+
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "done", "--msg", "gate green", "-s", s)
+	seq, _, state, msg := boxFields(t, sub.next(20*time.Second))
+	if seq != "2" || state != "done" || msg != "gate green" {
+		t.Fatalf("filtered row = %s %s %q, want the done entry at seq 2", seq, state, msg)
+	}
+}
+
+// TestBoxCLISubBadRequest proves a refused subscription exits nonzero with the
+// server's own words, rather than redialling a request that stays refused.
+func TestBoxCLISubBadRequest(t *testing.T) {
+	h := newHarness(t)
+	s := "boxsubbad"
+	h.run("new", "-s", s)
+	out, err := boxTry(t, h, h.env, "msg", "sub", "--key", "lane/a", "--prefix", "lane/", "-s", s)
+	if err == nil {
+		t.Fatalf("sub with an exact key and a branch exited zero:\n%s", out)
+	}
+	if !strings.Contains(out, "exclusive") {
+		t.Fatalf("sub bad request output = %q, want the server's exclusivity error", out)
+	}
+}
+
+// TestBoxCLISubGapNote proves a cursor behind the oldest kept row prints the
+// gap note once, on the first frame, and not again for the entries after it.
+func TestBoxCLISubGapNote(t *testing.T) {
+	h := newHarness(t)
+	s := "boxsubgap"
+	h.run("new", "-s", s)
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "note", "--msg", "dropped", "-s", s)
+	boxRun(t, h, h.env, "msg", "clear", "--key", "lane/a", "-s", s)
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "done", "--msg", "kept", "-s", s)
+
+	sub := boxSubExec(t, h, h.env, "msg", "sub", "--key", "lane/a", "--after", "0", "-s", s)
+	if seq, _, _, _ := boxFields(t, sub.next(20*time.Second)); seq != "2" {
+		t.Fatalf("row after the gap = %s, want the kept entry at seq 2", seq)
+	}
+	const note = "dm: entries between the cursor and the oldest kept row are gone"
+	boxSubErrWait(t, sub, "the gap note", func(got string) bool {
+		return strings.Contains(got, note)
+	})
+
+	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "done", "--msg", "next", "-s", s)
+	if seq, _, _, _ := boxFields(t, sub.next(20*time.Second)); seq != "3" {
+		t.Fatalf("row after the gap = %s, want seq 3", seq)
+	}
+	if got := strings.Count(sub.errText(), note); got != 1 {
+		t.Fatalf("the gap note printed %d times, want once:\n%s", got, sub.errText())
 	}
 }
