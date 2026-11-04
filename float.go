@@ -20,12 +20,20 @@ type FloatingPane struct {
 	// which keys it takes.
 	Title string
 	Hint  string
+	// Paint, when set, writes the float's content itself and Draw skips the
+	// VT path. It receives the content Rect, so a float with no terminal can
+	// still paint rows inside the box.
+	Paint func(buf *bytes.Buffer, inner Rect)
 	last  paint
 }
 
 // Draw writes the pane's content and border into buf.
 func (f *FloatingPane) Draw(buf *bytes.Buffer, hover *selRange) {
-	drawPaneFrom(buf, f.VT, f.Rect, 0, nil, hover)
+	if f.Paint != nil {
+		f.Paint(buf, f.Rect)
+	} else {
+		drawPaneFrom(buf, f.VT, f.Rect, 0, nil, hover)
+	}
 	drawPaneBox(buf, f.Rect, f.Active)
 	paintBorderText(buf, f.Rect, f.Rect.Y-1, f.Title, "\x1b[97m")
 	paintBorderText(buf, f.Rect, f.Rect.Y+f.Rect.H, f.Hint, "\x1b[90m")
