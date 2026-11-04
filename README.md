@@ -511,6 +511,23 @@ of an attached client, because the operator is not looking at it. A focused
 pane with a client attached stays quiet, `DM_NOTIFY=0` turns notifications off,
 and a host without `notify-send` gets none.
 
+## Rendering
+
+A frame is a set of painters. Each painter writes cells into the caller's buffer
+at a rect. The client diffs each band's bytes and each pane row's fingerprint.
+Only what moved reaches the terminal.
+
+Three modules own the primitives. `text.go` measures and cuts: cell width,
+clipping and elision. `seg.go` is a styled run: text, foreground, background,
+weight. `panel.go` paints a bordered box: border, title row, hint row, and an
+interior clip.
+
+The diff sets the rule. A widget owns no state and no buffer. A new overlay is a
+painter plus a band entry, not a model.
+
+`damage_test.go` keeps a refactor honest: it pins the steady frame, the one-row
+repaint and the band cursor moves.
+
 ## Performance
 
 A frame paints only the rows that changed. Each pane row is fingerprinted, so
