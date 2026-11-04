@@ -356,6 +356,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 	// built-in defaults carry the session.
 	cfg, err := LoadDefaultPath(true)
 	t.keymap = cfg
+	applyTheme(cfg.Theme())
 	if err != nil {
 		t.notify(err.Error())
 	}
