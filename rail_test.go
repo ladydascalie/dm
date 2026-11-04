@@ -83,22 +83,34 @@ func TestRailRowComposesPaint(t *testing.T) {
 			painted := railRows(t, snap)
 			items := railItems(snap)
 			compact := railCompact(w)
+			gripAt := (snap.Rows - 2) / 2
 			for y, line := range painted {
 				if y == snap.Rows-2 {
 					// The control row is not a railRow item; control_test.go owns it.
 					continue
 				}
 				if y >= len(items) {
-					if line != "" {
-						t.Fatalf("nerd=%v w=%d row %d past the last item = %q, want blank",
-							nerd, w, y, line)
+					want := ""
+					if y == gripAt {
+						want = strings.Repeat(" ", w-1) + glyphGrip
+					}
+					if line != want {
+						t.Fatalf("nerd=%v w=%d row %d past the last item = %q, want %q",
+							nerd, w, y, line, want)
 					}
 					continue
 				}
 				left, right, tail := railRow(items[y], w, compact, nerd)
-				if got := railRowComposed(left, tail, right, w); got != line {
+				want := railRowComposed(left, tail, right, w)
+				if y == gripAt {
+					if pad := w - 1 - runeCells(want); pad > 0 {
+						want += strings.Repeat(" ", pad)
+					}
+					want += glyphGrip
+				}
+				if want != line {
 					t.Fatalf("nerd=%v w=%d row %d kind %d composes %q, rail paints %q",
-						nerd, w, y, items[y].kind, got, line)
+						nerd, w, y, items[y].kind, want, line)
 				}
 				if n := segCells(left) + segCells(tail) + segCells(right); n > w {
 					t.Fatalf("nerd=%v w=%d row %d is %d cells, want <= %d",

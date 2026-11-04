@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hinshun/vt10x"
 )
 
 // gripTUI is a client whose rail is 20 wide on a 100 column screen, so the
@@ -48,6 +51,25 @@ func TestRailGripHit(t *testing.T) {
 	snap.Rail = 0
 	if railGripAt(snap, -1, 3) {
 		t.Fatal("hidden rail has a grip")
+	}
+}
+
+// TestRailGripMark draws the grip: one dim mark at the midpoint of the strip.
+func TestRailGripMark(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railRowSnap(20)
+	var b bytes.Buffer
+	drawRail(&b, snap)
+	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw rail: %v", err)
+	}
+	vt.Lock()
+	defer vt.Unlock()
+	strip := snap.Rail - 1
+	mid := (snap.Rows - 2) / 2
+	if g := vt.Cell(strip, mid); g.Char != []rune(glyphGrip)[0] {
+		t.Fatalf("grip mark = %q at %d,%d, want %q", g.Char, strip, mid, glyphGrip)
 	}
 }
 
@@ -143,7 +165,7 @@ func TestRailGripSwallows(t *testing.T) {
 	}
 }
 
-// TestRailGripHover shows the resize hint over the grip and paints no divider.
+// TestRailGripHover shows the resize hint over the grip and paints the strip.
 func TestRailGripHover(t *testing.T) {
 	f := newFrameTUI(t, 100, 30, 20)
 	f.tui.handleMouse(mouseEvent{btn: 35, x: 20, y: 5})
@@ -153,11 +175,18 @@ func TestRailGripHover(t *testing.T) {
 	if got := f.tui.barInfo(); got != "drag to resize" {
 		t.Fatalf("grip hover hint = %q", got)
 	}
-	if frame := f.frame(); strings.Contains(frame, "┃") || strings.Contains(frame, "━") {
-		t.Fatalf("rail hover painted a divider: %q", frame)
+	frame := f.frame()
+	if !strings.Contains(frame, "┃") {
+		t.Fatalf("rail hover did not paint the grip strip: %q", frame)
+	}
+	if strings.Contains(frame, "━") {
+		t.Fatalf("rail hover painted a horizontal divider: %q", frame)
 	}
 	// Leaving the grip clears the hint.
 	f.tui.handleMouse(mouseEvent{btn: 35, x: 3, y: 5})
+	if frame := f.frame(); strings.Contains(frame, "┃") {
+		t.Fatalf("grip strip survived leaving the grip: %q", frame)
+	}
 	if f.tui.padZone != (Rect{}) || f.tui.barInfo() != "" {
 		t.Fatalf("grip hover survived: %v %q", f.tui.padZone, f.tui.barInfo())
 	}

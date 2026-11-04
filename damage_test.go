@@ -181,7 +181,7 @@ func TestFrameRailOnly(t *testing.T) {
 		t.Fatalf("a rail label change repainted the pane: %q", got)
 	}
 	for _, a := range frameAddrs(got) {
-		if a[1] != 1 {
+		if a[1] > f.snap.Rail {
 			t.Fatalf("rail frame wrote column %d: %v", a[1], frameAddrs(got))
 		}
 		if a[0] > f.snap.Rows-1 {
