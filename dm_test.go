@@ -2178,9 +2178,12 @@ func TestRailToggle(t *testing.T) {
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("narrow toggle on sent %+v, want set-rail 30", m)
 	}
+	if got := LoadDefault().Key("main", "rename-workspace"); got != "r" {
+		t.Fatalf("rename-workspace key = %q, want r", got)
+	}
 	found := false
-	for _, kv := range keymap {
-		if kv[0] == "r" {
+	for _, kv := range LoadDefault().HelpRows() {
+		if kv[0] == "r" && kv[1] == "rename workspace" {
 			found = true
 		}
 	}
@@ -4954,5 +4957,193 @@ func TestClientScreenThenReplay(t *testing.T) {
 	}
 	if string(hist["p1"]) != "MORE-HISTORY" {
 		t.Fatalf("history = %q", hist["p1"])
+	}
+}
+
+// keymapTestLoad parses a keymap from text for a test TUI.
+func keymapTestLoad(t *testing.T, src string) *Config {
+	t.Helper()
+	cfg, err := parseConfig(src)
+	if err != nil {
+		t.Fatalf("parse test keymap: %v", err)
+	}
+	return cfg
+}
+
+// TestKeymapDispatchRemapsPrefixSplitAndDetach: a custom keymap moves the
+// prefix, the split key and the detach key. The configured keys drive the
+// actions and the old keys do not.
+func TestKeymapDispatchRemapsPrefixSplitAndDetach(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.keymap = keymapTestLoad(t, `
+prefix "ctrl+a"
+
+keymap "main" {
+    "send-prefix" "prefix"
+    "split-right" "S"
+    "detach" "X"
+}
+`)
+	// The configured prefix arms, and the configured split key splits right.
+	feed(tui, "\x01")
+	if !tui.armed {
+		t.Fatal("the configured prefix did not arm")
+	}
+	noMsg(t, got)
+	feed(tui, "S")
+	m := nextMsg(t, got)
+	if m.Action != "split" || m.Dir != "right" {
+		t.Fatalf("the configured split key sent %+v", m)
+	}
+	if tui.armed {
+		t.Fatal("the split action left the client armed")
+	}
+
+	// The old prefix byte is plain input now.
+	feed(tui, "\x02")
+	m = nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x02" {
+		t.Fatalf("the old prefix byte sent %+v", m)
+	}
+	if tui.armed {
+		t.Fatal("the old prefix byte armed the client")
+	}
+
+	// The old split key is unbound: it notifies and disarms.
+	tui.arm()
+	feed(tui, "|")
+	if tui.armed {
+		t.Fatal("the old split key stayed armed")
+	}
+	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "no binding") {
+		t.Fatalf("the old split key raised %+v", tui.toasts)
+	}
+	noMsg(t, got)
+
+	// The configured detach key quits.
+	feed(tui, "\x01X")
+	if !tui.quit {
+		t.Fatal("the configured detach key did not quit")
+	}
+}
+
+// TestKeymapDispatchMenuLabels: each menu row shows the configured main key for
+// its action, or nothing when the action is unbound. The menu's own keys come
+// from the menu mode.
+func TestKeymapDispatchMenuLabels(t *testing.T) {
+	tui := &tui{snap: testSnapshot(&Node{Pane: "a"}, 100, 30, nil)}
+	tui.keymap = keymapTestLoad(t, `
+prefix "ctrl+b"
+
+keymap "main" {
+    "split-right" "S"
+    "close-pane" "Q"
+    "detach" "Z"
+}
+
+keymap "menu" {
+    "down" "J"
+}
+`)
+	tui.openMenu(tui.paneByID("a"), 5, 3)
+	if tui.menu == nil {
+		t.Fatal("menu did not open")
+	}
+	want := map[string]string{
+		"Split right":      "S",
+		"Close pane":       "Q",
+		"Detach":           "Z",
+		"Split down":       "",
+		"Split left":       "",
+		"Split up":         "",
+		"Focus":            "",
+		"Scrollback":       "",
+		"New window":       "",
+		"New workspace":    "",
+		"Rename workspace": "",
+		"Switch session":   "",
+	}
+	for _, it := range tui.menu.items {
+		key, ok := want[it.label]
+		if !ok {
+			t.Fatalf("unexpected menu row %q", it.label)
+		}
+		if it.key != key {
+			t.Fatalf("%s key = %q, want %q", it.label, it.key, key)
+		}
+	}
+	// The item keys are hints. The row walk is the menu mode's own binding.
+	tui.inbuf = []byte("J")
+	if !tui.menuKey() || tui.menu.sel != 1 {
+		t.Fatalf("J did not move the selection: %+v", tui.menu)
+	}
+	// A main-mode key is not a menu key: an unbound one closes the menu.
+	tui.inbuf = []byte("S")
+	tui.menuKey()
+	if tui.menu != nil {
+		t.Fatal("an unbound menu key kept the menu open")
+	}
+}
+
+// TestKeymapDispatchUnboundNotifiesAndDisarms: a key with no binding raises the
+// notify toast and leaves the armed state.
+func TestKeymapDispatchUnboundNotifiesAndDisarms(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	feed(tui, "\x02")
+	if !tui.armed {
+		t.Fatal("the prefix did not arm")
+	}
+	feed(tui, "\x01")
+	if tui.armed {
+		t.Fatal("an unbound key kept the client armed")
+	}
+	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "no binding for") {
+		t.Fatalf("an unbound key raised %+v", tui.toasts)
+	}
+	noMsg(t, got)
+}
+
+// TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses: a partial sequence
+// waits for its remaining bytes, a stalled esc resolves to dismiss, and a
+// complete arrow still runs its action.
+func TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	feed(tui, "\x02")
+	if !tui.armed {
+		t.Fatal("the prefix did not arm")
+	}
+	start := time.Now()
+	feed(tui, "\x1b")
+	if !tui.armed {
+		t.Fatal("the escape disarmed instead of waiting")
+	}
+	noMsg(t, got)
+	// The escape is held as a possible paste start first. Once that deadline
+	// passes it takes the normal path and waits as the head of an arrow.
+	if !tui.expirePaste(start.Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the escape was not released from the paste check")
+	}
+	if !tui.pending || !tui.armed {
+		t.Fatalf("a lone escape did not wait: pending=%v armed=%v", tui.pending, tui.armed)
+	}
+	if tui.expireArmed(tui.escAt) {
+		t.Fatal("the escape expired before its deadline")
+	}
+	if !tui.expireArmed(tui.escAt.Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the escape did not expire")
+	}
+	if tui.armed || len(tui.inbuf) != 0 {
+		t.Fatalf("stalled escape left state: armed=%v inbuf=%q", tui.armed, tui.inbuf)
+	}
+
+	// A complete sequence runs its action.
+	feed(tui, "\x02")
+	feed(tui, "\x1b[A")
+	m := nextMsg(t, got)
+	if m.Action != "focus-dir" || m.Dir != "up" {
+		t.Fatalf("the arrow sent %+v", m)
+	}
+	if tui.armed {
+		t.Fatal("the arrow left the client armed")
 	}
 }

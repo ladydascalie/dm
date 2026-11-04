@@ -623,53 +623,50 @@ func (t *tui) boxWheel(ev mouseEvent) {
 // to the view: nothing reaches a pane. It returns false when it needs more bytes
 // for an escape sequence.
 func (t *tui) boxKey() bool {
-	b := t.inbuf[0]
-	if b == 0x1b {
-		if len(t.inbuf) < 3 {
-			if !t.pending {
-				t.pending = true
-				t.escAt = time.Now()
-			}
-			return false
-		}
-		seq := string(t.inbuf[:3])
-		t.inbuf = t.inbuf[3:]
-		switch seq {
-		case "\x1b[A":
-			t.box.scroll(-1)
-		case "\x1b[B":
-			t.box.scroll(1)
-		case "\x1b[5", "\x1b[6":
-			// PgUp/PgDn arrive as ESC [ 5 ~ / ESC [ 6 ~: keep the fourth byte.
-			if len(t.inbuf) > 0 && t.inbuf[0] == '~' {
-				t.inbuf = t.inbuf[1:]
-			}
-			if seq == "\x1b[5" {
-				t.box.scroll(-t.box.float.Rect.H)
-			} else {
-				t.box.scroll(t.box.float.Rect.H)
-			}
-		default:
-			closeBoxView(t)
-			return true
-		}
-		t.dirty = true
+	if len(t.inbuf) == 0 {
 		return true
 	}
-	t.inbuf = t.inbuf[1:]
-	t.pending = false
-	switch b {
-	case 'k':
+	if p := t.km().PrefixBytes(); len(p) > 0 && bytes.HasPrefix(t.inbuf, p) {
+		// The prefix key closes the view.
+		t.inbuf = append([]byte(nil), t.inbuf[len(p):]...)
+		t.pending = false
+		closeBoxView(t)
+		return true
+	}
+	action, n, state := t.km().Match("box", t.inbuf)
+	switch state {
+	case Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	case Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+	default:
+		// An unbound key closes the view.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		closeBoxView(t)
+		return true
+	}
+	switch action {
+	case "up", "up-arrow":
 		t.box.scroll(-1)
-	case 'j':
+	case "down", "down-arrow":
 		t.box.scroll(1)
-	case 'g':
+	case "page-up":
+		t.box.scroll(-t.box.float.Rect.H)
+	case "page-down":
+		t.box.scroll(t.box.float.Rect.H)
+	case "top":
 		t.box.scroll(-t.box.listLen())
-	case 'G':
+	case "bottom":
 		t.box.scroll(t.box.listLen())
-	case 'w':
+	case "toggle-page":
 		t.box.togglePage()
-	case 'q', 'm', 0x02, 0x03:
+	default:
 		closeBoxView(t)
 		return true
 	}
