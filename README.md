@@ -68,6 +68,7 @@ bottom right. It stays until an action runs or `esc` dismisses it.
 | `)` | next workspace |
 | `r` | rename the active workspace |
 | `b` | cycle the sidebar: full, thin, hidden |
+| `ctrl+r` | reload config.kdl and its theme |
 | `d` / `q` | detach |
 
 `prefix r` opens the rename prompt as a line above the status bar. It starts
@@ -99,7 +100,9 @@ keymap "main" {
 
 The file is the whole table, not a patch. An action the file leaves out is
 unbound. The prefix line sets the prefix key. Each keymap block maps actions to
-keys.
+keys. `prefix ctrl+r` reloads `config.kdl` and its theme without restarting the
+session. A broken config or theme file leaves the running settings in place and
+toasts the error.
 
 One mode is one keymap.
 
@@ -129,7 +132,9 @@ theme "night"
 dm reads that theme from `$XDG_CONFIG_HOME/dm/themes/night.kdl`, or
 `$HOME/.config/dm/themes/night.kdl` when `XDG_CONFIG_HOME` is unset. That is the
 `themes/` directory beside `config.kdl`. At most one `theme` node, and its name
-is letters, digits, `_` and `-`. No node selects the built-in theme.
+is letters, digits, `_` and `-`. No node selects the built-in theme. A theme edit
+is picked up by the reload key, so a theme change does not need a quit and
+reattach.
 
 Every block and every key is optional. An omitted key keeps the built-in
 default, so a theme file names only what it changes. These fail the load, and
