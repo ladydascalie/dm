@@ -5020,6 +5020,16 @@ keymap "main" {
 	}
 	noMsg(t, got)
 
+	// The old detach key is unbound: it notifies and does not quit.
+	tui.arm()
+	feed(tui, "d")
+	if tui.quit {
+		t.Fatal("the old detach key still quit")
+	}
+	if tui.armed {
+		t.Fatal("the old detach key stayed armed")
+	}
+
 	// The configured detach key quits.
 	feed(tui, "\x01X")
 	if !tui.quit {
@@ -5145,5 +5155,110 @@ func TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses(t *testing.T) {
 	}
 	if tui.armed {
 		t.Fatal("the arrow left the client armed")
+	}
+}
+
+// TestKeymapDispatchUnboundEscapeKeepsItsTail: an unbound escape sequence is one
+// key. It disarms and notifies, and none of its bytes reach the pane.
+func TestKeymapDispatchUnboundEscapeKeepsItsTail(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	for _, seq := range []string{"\x1bOP", "\x1b[1;5A", "\x1b[H"} {
+		tui.arm()
+		feed(tui, seq)
+		if tui.armed {
+			t.Fatalf("%q left the client armed", seq)
+		}
+		if len(tui.inbuf) != 0 {
+			t.Fatalf("%q left %q in the buffer", seq, tui.inbuf)
+		}
+		noMsg(t, got)
+	}
+	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "no binding for") {
+		t.Fatalf("the escape tail raised %+v", tui.toasts)
+	}
+}
+
+// TestKeymapDispatchSplitPrefixStaysArmed: a multi-byte prefix that arrives in
+// two reads arms and stays armed past the esc deadline.
+func TestKeymapDispatchSplitPrefixStaysArmed(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.keymap = keymapTestLoad(t, `
+prefix "up"
+
+keymap "main" {
+    "split-right" "|"
+}
+`)
+	// The head waits as a possible prefix, then the rest completes it.
+	start := time.Now()
+	feed(tui, "\x1b")
+	tui.expirePaste(start.Add(escTimeout + time.Millisecond))
+	if !tui.pending || tui.armed {
+		t.Fatalf("prefix head: pending=%v armed=%v", tui.pending, tui.armed)
+	}
+	feed(tui, "[A")
+	if !tui.armed || tui.pending {
+		t.Fatalf("split prefix: armed=%v pending=%v", tui.armed, tui.pending)
+	}
+	if tui.expireArmed(tui.escAt.Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the armed sequence expired with the old prefix head")
+	}
+	if !tui.armed {
+		t.Fatal("the client disarmed itself")
+	}
+	feed(tui, "|")
+	m := nextMsg(t, got)
+	if m.Action != "split" || m.Dir != "right" {
+		t.Fatalf("the split key sent %+v", m)
+	}
+}
+
+// TestKeymapDispatchSendPrefixSendsConfiguredBytes: the armed send-prefix action
+// sends the configured prefix bytes, not a literal ctrl+b.
+func TestKeymapDispatchSendPrefixSendsConfiguredBytes(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.keymap = keymapTestLoad(t, `
+prefix "ctrl+a"
+
+keymap "main" {
+    "send-prefix" "prefix"
+}
+`)
+	feed(tui, "\x01")
+	if !tui.armed {
+		t.Fatal("the configured prefix did not arm")
+	}
+	feed(tui, "\x01")
+	m := nextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x01" {
+		t.Fatalf("send-prefix sent %+v (%q)", m, m.Keys)
+	}
+	if tui.armed {
+		t.Fatal("send-prefix left the client armed")
+	}
+	noMsg(t, got)
+}
+
+// TestKeymapDispatchPartialEscapeInMenu: a menu arrow split across two reads
+// waits for its remaining bytes and then moves the selection.
+func TestKeymapDispatchPartialEscapeInMenu(t *testing.T) {
+	tui := &tui{snap: testSnapshot(&Node{Pane: "a"}, 100, 30, nil), keymap: LoadDefault()}
+	tui.openMenu(tui.paneByID("a"), 5, 3)
+	if tui.menu == nil {
+		t.Fatal("menu did not open")
+	}
+	tui.inbuf = []byte("\x1b")
+	if tui.menuKey() {
+		t.Fatal("a lone escape did not wait")
+	}
+	if !tui.pending || tui.menu == nil {
+		t.Fatalf("partial escape: pending=%v menu=%+v", tui.pending, tui.menu)
+	}
+	tui.inbuf = append(tui.inbuf, '[', 'B')
+	if !tui.menuKey() {
+		t.Fatal("the completed arrow still waited")
+	}
+	if tui.menu == nil || tui.menu.sel != 1 || tui.pending {
+		t.Fatalf("the arrow did not move: %+v pending=%v", tui.menu, tui.pending)
 	}
 }

@@ -1083,6 +1083,12 @@ func (t *tui) armedKey() bool {
 		return true
 	}
 	action, n, state := t.km().Match("main", t.inbuf)
+	if state == Match && escapeRun(t.inbuf) > n {
+		// The match covered only the first byte of an escape sequence. The
+		// sequence as a whole has no binding, so it is one unknown key: the
+		// rest of an F1 or a Home must not reach a pane.
+		state = NoMatch
+	}
 	switch state {
 	case Partial:
 		if !t.pending {
@@ -1097,11 +1103,35 @@ func (t *tui) armedKey() bool {
 		return true
 	}
 	b := t.inbuf[0]
-	t.inbuf = t.inbuf[1:]
+	// An unbound escape sequence is one key too: its tail is not input.
+	t.inbuf = append([]byte(nil), t.inbuf[escapeRun(t.inbuf):]...)
 	t.pending = false
 	t.notify(fmt.Sprintf("no binding for %q", string(b)))
 	t.disarm()
 	return true
+}
+
+// escapeRun returns how many leading bytes belong to one escape sequence. A
+// sequence that has not finished yet runs to the end of the buffer.
+func escapeRun(buf []byte) int {
+	if len(buf) == 0 {
+		return 0
+	}
+	if buf[0] != 0x1b {
+		return 1
+	}
+	i := 1
+	if i < len(buf) && (buf[i] == '[' || buf[i] == 'O') {
+		i++
+		for i < len(buf) {
+			c := buf[i]
+			i++
+			if c >= 0x40 && c <= 0x7e {
+				break
+			}
+		}
+	}
+	return i
 }
 
 // expireArmed resolves an armed sequence that never finished arriving. A lone
@@ -2537,6 +2567,9 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 // dismisses it; it never expires on a timer.
 func (t *tui) arm() {
 	t.armed = true
+	// A prefix that arrived in pieces waited with pending set. The arm starts a
+	// fresh sequence, so that wait is over.
+	t.pending = false
 	t.toasts = nil
 	t.dirty = true
 }
