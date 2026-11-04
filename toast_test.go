@@ -185,3 +185,41 @@ func TestCopySelectionRaisesToast(t *testing.T) {
 		t.Fatalf("toasts = %q, want one copied 5 chars", got)
 	}
 }
+
+// A toast with wide runes or a joined glyph sizes its box in cells, so the
+// interior is exactly the text and no glyph is dropped or doubled.
+func TestDrawToastsSizesByCells(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"wide runes", "日日"},
+		{"joined family", "edit " + family + " now"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			snap := &Snapshot{Cols: 40, Rows: 8}
+			tui := &tui{}
+			tui.notify(c.text)
+			var b bytes.Buffer
+			drawToasts(&b, snap, tui.toasts)
+			out := b.String()
+			row, col := toastRow(t, out, c.text)
+			if row != snap.Rows-1 {
+				t.Fatalf("row = %d, want %d", row, snap.Rows-1)
+			}
+			// The cursor sits on the left border, so the box is Cols-col+1
+			// cells wide: the text's cells plus its two border cells.
+			if w, want := snap.Cols-col+1, cells(c.text)+2; w != want {
+				t.Fatalf("box width = %d, want %d for %d cells of text",
+					w, want, cells(c.text))
+			}
+			// The interior is the text alone: bright text, then the right
+			// border, with no padding and no dropped glyph.
+			want := "\x1b[97m" + c.text + "\x1b[0m\x1b[90m" + glyphBorderVertical
+			if !strings.Contains(out, want) {
+				t.Fatalf("interior is not the whole text %q: %q", c.text, out)
+			}
+		})
+	}
+}

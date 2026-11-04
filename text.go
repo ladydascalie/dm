@@ -71,25 +71,3 @@ func clipTail(s string, budget int) string {
 	}
 	return s[at:]
 }
-
-// The names below belong to helpers this module replaced. theme.go and the
-// tests still call them, and each one is a line over cells, clip and elide.
-func runeWidth(r rune) int {
-	return cells(string(r))
-}
-
-func runeCells(s string) int {
-	return cells(s)
-}
-
-func boxCells(s string) int {
-	return cells(s)
-}
-
-func helpBoxElide(s string, budget int) string {
-	return elide(s, budget)
-}
-
-func helpBoxPad(s string, budget int) string {
-	return pad(s, budget)
-}

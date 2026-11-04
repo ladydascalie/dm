@@ -103,7 +103,7 @@ func TestRailRowComposesPaint(t *testing.T) {
 				left, right, tail := railRow(items[y], w, compact, nerd)
 				want := railRowComposed(left, tail, right, w)
 				if y == gripAt {
-					if pad := w - 1 - runeCells(want); pad > 0 {
+					if pad := w - 1 - cells(want); pad > 0 {
 						want += strings.Repeat(" ", pad)
 					}
 					want += glyphGrip
