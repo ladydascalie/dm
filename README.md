@@ -134,7 +134,7 @@ is letters, digits, `_` and `-`. No node selects the built-in theme.
 Every block and every key is optional. An omitted key keeps the built-in
 default, so a theme file names only what it changes. These fail the load, and
 the error names the line: an unknown or duplicate block or key, a colour that
-is not `#rrggbb`, and a glyph wider than one cell.
+is not `#rrggbb`, and a glyph that is not one rune of one cell.
 
 The whole shape, at the built-in values:
 
