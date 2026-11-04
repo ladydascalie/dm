@@ -72,12 +72,38 @@ func TestThemeDefaults(t *testing.T) {
 		"idle":    {Glyph: "○", NerdGlyph: "\uf111", Colour: rgb{120, 200, 225}},
 		"blocked": {Glyph: "▲", NerdGlyph: "\uf071", Colour: rgb{255, 110, 110}},
 		"done":    {Glyph: "✓", NerdGlyph: "\uf00c", Colour: rgb{110, 225, 145}},
-		"error":   {Glyph: "✕", NerdGlyph: "\uf128", Colour: rgb{255, 130, 160}},
+		"error":   {Glyph: "✕", NerdGlyph: "\uf057", Colour: rgb{255, 130, 160}},
 		"unknown": {Glyph: "?", NerdGlyph: "\uf128", Colour: rgb{143, 147, 168}},
 		"shell":   {Glyph: "▶", Colour: rgb{143, 147, 168}},
 	}
 	if !reflect.DeepEqual(th.States, wantStates) {
 		t.Fatalf("default states = %+v, want %+v", th.States, wantStates)
+	}
+}
+
+// TestThemeDefaultNerdGlyphs pins every built-in Nerd Font glyph and keeps the
+// error and unknown marks distinct, so Nerd Font users keep a readable error.
+func TestThemeDefaultNerdGlyphs(t *testing.T) {
+	applyTestTheme(t, DefaultTheme())
+	want := map[string]string{
+		"working": "\uf013",
+		"idle":    "\uf111",
+		"blocked": "\uf071",
+		"done":    "\uf00c",
+		"error":   "\uf057",
+		"unknown": "\uf128",
+	}
+	for name, glyph := range want {
+		if got := DefaultTheme().States[name].NerdGlyph; got != glyph {
+			t.Fatalf("state %q NerdGlyph = %q, want %q", name, got, glyph)
+		}
+		if got, _ := railGlyph(name, true); got != glyph {
+			t.Fatalf("railGlyph(%q, nerd) = %q, want %q", name, got, glyph)
+		}
+	}
+	if DefaultTheme().States["error"].NerdGlyph == DefaultTheme().States["unknown"].NerdGlyph {
+		t.Fatalf("error and unknown share the Nerd glyph %q",
+			DefaultTheme().States["error"].NerdGlyph)
 	}
 }
 

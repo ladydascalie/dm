@@ -106,7 +106,7 @@ func DefaultTheme() Theme {
 			"idle":    {Glyph: "○", NerdGlyph: "\uf111", Colour: rgb{120, 200, 225}}, // #78c8e1
 			"blocked": {Glyph: "▲", NerdGlyph: "\uf071", Colour: rgb{255, 110, 110}}, // #ff6e6e
 			"done":    {Glyph: "✓", NerdGlyph: "\uf00c", Colour: rgb{110, 225, 145}}, // #6ee191
-			"error":   {Glyph: "✕", NerdGlyph: "\uf128", Colour: rgb{255, 130, 160}}, // #ff82a0
+			"error":   {Glyph: "✕", NerdGlyph: "\uf057", Colour: rgb{255, 130, 160}}, // #ff82a0
 			"unknown": {Glyph: "?", NerdGlyph: "\uf128", Colour: rgb{143, 147, 168}}, // #8f93a8
 			"shell":   {Glyph: "▶", Colour: rgb{143, 147, 168}},                      // #8f93a8, no Nerd form
 		},
