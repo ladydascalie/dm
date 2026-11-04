@@ -156,7 +156,7 @@ func TestSwitcherDrawQueryRow(t *testing.T) {
 	if !strings.HasPrefix(line, "> ap") {
 		t.Fatalf("query row = %q, want the > ap prefix", line)
 	}
-	if want := r.X + 1 + 2 + runeCells("ap"); cx != want {
+	if want := r.X + 1 + 2 + cells("ap"); cx != want {
 		t.Fatalf("cursor col %d, want %d one past the query", cx, want)
 	}
 	// A query wider than the band is clipped and the cursor is clamped inside.

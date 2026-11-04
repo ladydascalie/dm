@@ -413,7 +413,7 @@ func validateThemeGlyph(s string) error {
 	if len(r) != 1 {
 		return fmt.Errorf("glyph %q must be exactly one rune", s)
 	}
-	if runeWidth(r[0]) != 1 {
+	if cells(s) != 1 {
 		return fmt.Errorf("glyph %q must be one cell wide", s)
 	}
 	return nil

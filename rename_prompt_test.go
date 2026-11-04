@@ -270,7 +270,7 @@ func TestRenamePromptDrawFitsRow(t *testing.T) {
 			t.Fatalf("%d cols: row is not on railBG: %q", cols, out)
 		}
 		vis := renamePromptVisible(out)
-		if n := runeCells(vis); n > cols {
+		if n := cells(vis); n > cols {
 			t.Fatalf("%d cols: painted %d cells: %q", cols, n, vis)
 		}
 		if !strings.HasSuffix(vis, "▏") && cols > 1 {
@@ -296,7 +296,7 @@ func TestRenamePromptDrawFitsRow(t *testing.T) {
 	// A wide rune is cut whole, never half painted.
 	var wb bytes.Buffer
 	drawRename(&wb, snap, "s1", wide)
-	if n := runeCells(renamePromptVisible(wb.String())); n > snap.Cols {
+	if n := cells(renamePromptVisible(wb.String())); n > snap.Cols {
 		t.Fatalf("wide draft painted %d cells, want <= %d", n, snap.Cols)
 	}
 }

@@ -511,18 +511,35 @@ of an attached client, because the operator is not looking at it. A focused
 pane with a client attached stays quiet, `DM_NOTIFY=0` turns notifications off,
 and a host without `notify-send` gets none.
 
+## Rendering
+
+A frame is an ordered stack of painters. Each painter writes into the caller's
+buffer. A box painter paints around its content: `paintPanel` clips the
+interior to a rect and paints the border one cell around it; `drawPaneBox`
+paints the border around content.
+
+`render.go` owns the pane painters: `drawPane`, `drawPaneFrom`, `drawPaneRow`
+and `drawPaneBox`. The shared primitives are in `text.go`, `seg.go` and
+`panel.go`. `text.go` measures and cuts: cell width, clipping and elision.
+`seg.go` is a styled run: text, foreground, background, weight. `panel.go`
+builds a box: it clips the interior and writes the title and hint rows.
+`drawPaneBox` in `render.go` paints the border.
+
+On a stable frame, the diff decides what is written. A layout change writes
+every band and row. `paintPanel` holds no state and keeps no buffer between
+frames. A new overlay is a painter plus a band entry.
+
+`damage_test.go` keeps a refactor honest: it pins the steady frame, the one-row
+repaint and the band cursor moves.
+
 ## Performance
 
-A frame paints only the rows that changed. Each pane row is fingerprinted, so
-a row is written again only when its glyphs or colours move; the sidebar, the
-status bar and each overlay are compared as whole bands and written only when
-their bytes differ. The client no longer clears the screen and repaints every
-cell on every frame: a steady frame writes nothing. Every written frame is
-wrapped in a synchronized update (`ESC [ ? 2026 h` to `ESC [ ? 2026 l`), so the
-terminal applies it in one go. A frame that clears is a full repaint, and it
-happens only when the picture is not stable: a resize, a pane added, closed or
-moved, a focus change, or entering and leaving scrollback, the menu, the picker
-or the palette.
+The client no longer clears the screen and repaints every cell on every frame: a
+steady frame writes nothing. Every written frame is wrapped in a synchronized
+update (`ESC [ ? 2026 h` to `ESC [ ? 2026 l`), so the terminal applies it in one
+go. A frame that clears is a full repaint, and it happens only when the picture
+is not stable: a resize, a pane added, closed or moved, a focus change, or
+entering and leaving scrollback, the menu, the picker or the palette.
 
 ## RPC
 

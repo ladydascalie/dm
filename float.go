@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/hinshun/vt10x"
 )
@@ -29,25 +28,11 @@ type FloatingPane struct {
 
 // Draw writes the pane's content and border into buf.
 func (f *FloatingPane) Draw(buf *bytes.Buffer, hover *selRange) {
+	paint := func(b *bytes.Buffer, inner Rect) {
+		drawPaneFrom(b, f.VT, f.Rect, 0, nil, hover)
+	}
 	if f.Paint != nil {
-		f.Paint(buf, f.Rect)
-	} else {
-		drawPaneFrom(buf, f.VT, f.Rect, 0, nil, hover)
+		paint = f.Paint
 	}
-	drawPaneBox(buf, f.Rect, f.Active)
-	paintBorderText(buf, f.Rect, f.Rect.Y-1, f.Title, "\x1b[97m")
-	paintBorderText(buf, f.Rect, f.Rect.Y+f.Rect.H, f.Hint, "\x1b[90m")
-}
-
-// paintBorderText writes text into row y of the box around r, one cell clear of
-// the left corner and clipped to the interior so a label never eats a corner.
-func paintBorderText(buf *bytes.Buffer, r Rect, y int, text, style string) {
-	if text == "" || r.W < 3 || y < 0 {
-		return
-	}
-	text = clipCells(text, r.W-2)
-	if text == "" {
-		return
-	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m%s%s\x1b[0m", y+1, r.X+2, style, text)
+	paintPanel(buf, f.Rect, panelTitle{text: f.Title, style: panelTitleStyle}, f.Hint, f.Active, paint)
 }
