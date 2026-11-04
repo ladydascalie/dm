@@ -499,8 +499,8 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	for _, seg := range left {
 		if seg.text == "W" {
 			found = true
-			if seg.colour != (rgb{1, 2, 3}) {
-				t.Fatalf("themed glyph colour = %v, want 1,2,3", seg.colour)
+			if seg.fg != (rgb{1, 2, 3}) {
+				t.Fatalf("themed glyph colour = %v, want 1,2,3", seg.fg)
 			}
 		}
 		if seg.text == "●" {
