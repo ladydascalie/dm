@@ -514,9 +514,9 @@ and a host without `notify-send` gets none.
 ## Rendering
 
 A frame is an ordered stack of painters. Each painter writes into the caller's
-buffer. A painter either paints inside a rect or a whole region by absolute
-move. The client diffs each band's bytes and each pane row's fingerprint. Only
-what moved reaches the terminal.
+buffer. A box painter paints around its content: `paintPanel` clips the
+interior to a rect and paints the border one cell around it; `drawPaneBox`
+paints the border around content.
 
 `render.go` owns the pane painters: `drawPane`, `drawPaneFrom`, `drawPaneRow`
 and `drawPaneBox`. The shared primitives are in `text.go`, `seg.go` and
@@ -525,9 +525,9 @@ and `drawPaneBox`. The shared primitives are in `text.go`, `seg.go` and
 builds a box: it clips the interior and writes the title and hint rows.
 `drawPaneBox` in `render.go` paints the border.
 
-The diff decides what reaches the terminal. `paintPanel` holds no state and
-keeps no buffer between frames. A new overlay is a painter plus a band entry,
-not a model.
+The diff decides what is written. Only changed bands and rows are written.
+`paintPanel` holds no state and keeps no buffer between frames. A new overlay
+is a painter plus a band entry.
 
 `damage_test.go` keeps a refactor honest: it pins the steady frame, the one-row
 repaint and the band cursor moves.
