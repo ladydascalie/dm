@@ -1,4 +1,4 @@
-package main
+package osc
 
 import (
 	"bytes"
@@ -9,32 +9,32 @@ import (
 	"strings"
 )
 
-// oscFilter strips OSC 7501 status reports out of the PTY stream and passes
+// Filter strips OSC 7501 status reports out of the PTY stream and passes
 // everything else through untouched. Partial sequences are held between reads.
-// query is called when an application asks whether the terminal supports
+// Query is called when an application asks whether the terminal supports
 // program status; the pane answers by writing the reply back into the PTY.
-type oscFilter struct {
+type Filter struct {
 	buf    []byte
-	status func(wire.Status)
-	query  func()
-	reply  func(string)
-	cursor func() (row, col int)
-	fg, bg string
+	Status func(wire.Status)
+	Query  func()
+	Reply  func(string)
+	Cursor func() (row, col int)
+	FG, BG string
 }
 
 // Terminal queries an application makes at startup and then waits on. termenv
 // waits five seconds for the OSC 11 reply, so an unanswered query is a five
 // second stall in every TUI it fronts.
 const (
-	termFG   = "theme.RGB:ffff/ffff/ffff"
-	termBG   = "theme.RGB:0000/0000/0000"
+	TermFG   = "theme.RGB:ffff/ffff/ffff"
+	TermBG   = "theme.RGB:0000/0000/0000"
 	replyDA1 = "\x1b[?1;2c"
 	replyDA2 = "\x1b[>0;10;1c"
 )
 
 var oscPrefix = []byte("\x1b]7501;")
 
-func (f *oscFilter) feed(p []byte, out *bytes.Buffer) {
+func (f *Filter) Feed(p []byte, out *bytes.Buffer) {
 	f.buf = append(f.buf, p...)
 	for len(f.buf) > 0 {
 		i := bytes.IndexByte(f.buf, 0x1b)
@@ -91,21 +91,21 @@ func (f *oscFilter) feed(p []byte, out *bytes.Buffer) {
 // handleOSC answers terminal colour and identity queries and consumes the
 // 7501 status protocol. It reports whether the sequence was handled; an
 // unhandled sequence is passed to the VT untouched.
-func (f *oscFilter) handleOSC(seq []byte) bool {
+func (f *Filter) handleOSC(seq []byte) bool {
 	body := seq[2:]
 	body = bytes.TrimSuffix(body, []byte("\x1b\\"))
 	body = bytes.TrimSuffix(body, []byte{0x07})
 	text := string(body)
 	if strings.HasPrefix(text, "10;?") {
-		f.send("\x1b]10;" + f.fg + "\x1b\\")
+		f.send("\x1b]10;" + f.FG + "\x1b\\")
 		return true
 	}
 	if strings.HasPrefix(text, "11;?") {
-		f.send("\x1b]11;" + f.bg + "\x1b\\")
+		f.send("\x1b]11;" + f.BG + "\x1b\\")
 		return true
 	}
 	if strings.HasPrefix(text, "12;?") {
-		f.send("\x1b]12;" + f.fg + "\x1b\\")
+		f.send("\x1b]12;" + f.FG + "\x1b\\")
 		return true
 	}
 	if strings.HasPrefix(text, "4;") && strings.HasSuffix(text, ";?") {
@@ -123,11 +123,11 @@ func (f *oscFilter) handleOSC(seq []byte) bool {
 		payload = bytes.TrimSuffix(payload, []byte{0x07})
 		payloadText := strings.TrimSpace(string(payload))
 		if strings.HasPrefix(payloadText, "?") {
-			if f.query != nil {
-				f.query()
+			if f.Query != nil {
+				f.Query()
 			}
-		} else if f.status != nil {
-			f.status(parseStatus(payloadText))
+		} else if f.Status != nil {
+			f.Status(ParseStatus(payloadText))
 		}
 		return true
 	}
@@ -135,11 +135,11 @@ func (f *oscFilter) handleOSC(seq []byte) bool {
 }
 
 // handleCSI answers the identity and cursor queries a terminal is expected to.
-func (f *oscFilter) handleCSI(seq []byte) bool {
+func (f *Filter) handleCSI(seq []byte) bool {
 	switch string(seq) {
 	case "\x1b[6n":
-		if f.cursor != nil {
-			row, col := f.cursor()
+		if f.Cursor != nil {
+			row, col := f.Cursor()
 			f.send(fmt.Sprintf("\x1b[%d;%dR", row+1, col+1))
 		}
 		return true
@@ -156,9 +156,9 @@ func (f *oscFilter) handleCSI(seq []byte) bool {
 	return false
 }
 
-func (f *oscFilter) send(s string) {
-	if f.reply != nil {
-		f.reply(s)
+func (f *Filter) send(s string) {
+	if f.Reply != nil {
+		f.Reply(s)
 	}
 }
 
@@ -231,9 +231,9 @@ func csiEnd(b []byte) (int, bool) {
 	return 0, false
 }
 
-// parseStatus accepts the OSC 7501 wire format, `state=working:app=pi:msg=<b64>`,
+// ParseStatus accepts the OSC 7501 wire format, `state=working:app=pi:msg=<b64>`,
 // plus the JSON and bare-state forms dm accepted before.
-func parseStatus(s string) wire.Status {
+func ParseStatus(s string) wire.Status {
 	s = strings.TrimSpace(s)
 	var st wire.Status
 	if strings.HasPrefix(s, "{") && json.Unmarshal([]byte(s), &st) == nil {
