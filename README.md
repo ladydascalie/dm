@@ -60,6 +60,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `h j k l` or arrows | focus pane left / down / up / right |
 | `n` / `p` | next / previous pane |
 | `x` | close pane |
+| `z` | zoom pane |
 | `c` | new window |
 | `w` / `W` | next / previous window |
 | `0-9` | select window |
@@ -78,6 +79,16 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 from the workspace's current name, so typing appends to it. Backspace deletes
 one character and `ctrl+u` clears the line. `enter` commits, `esc` cancels, and
 an empty name cancels too. The right-click menu offers the same row.
+
+`prefix z` zooms the focused pane. The zoomed pane fills the window's pane
+area, and the rail and the status bar stay in place. The program inside
+reflows to that size. `prefix z` again restores the splits. The zoom clears
+when the focus, the window or the workspace changes, and dm does not persist
+it.
+
+The binding is new. An existing `~/.config/dm/config.kdl` does not gain it:
+add `"zoom-pane" "z"` to the `main` keymap, or delete the file and let dm
+write the default one again. Without the line `prefix z` toasts `no binding`.
 
 Drag a divider with the left mouse button to resize the split. The client
 sends `resize-split` with the two panes beside the divider and the ratio, at
