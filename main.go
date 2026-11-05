@@ -185,6 +185,17 @@ func runCLI(argv []string) error {
 		c.parse(argv[1:])
 		return runPurge(c)
 
+	case "man":
+		fs := flag.NewFlagSet("man", flag.ExitOnError)
+		out := fs.String("o", "", "write the page to this path")
+		_ = fs.Parse(argv[1:])
+		page := manPage()
+		if *out == "" {
+			fmt.Print(page)
+			return nil
+		}
+		return os.WriteFile(*out, []byte(page), 0o644)
+
 	case "exec":
 		c := newFlags("exec")
 		c.parse(argv[1:])
