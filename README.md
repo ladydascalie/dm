@@ -118,6 +118,22 @@ keys. `prefix ctrl+r` reloads `config.kdl` and its theme without restarting the
 session. A broken config or theme file leaves the running settings in place and
 toasts the error.
 
+A binding line in the main keymap may carry a help tag:
+
+```kdl
+keymap "main" {
+    "zoom-pane" "z" help "Layout"
+}
+```
+
+The tag moves that row to the named section of the armed help box. An
+untagged row keeps the built-in section. The five built-in names are
+Layout, Pane, Window, Session and Utility, and any other name is a custom
+section.
+
+An old config without tags renders the same help box. The tag moves a row the
+help box already lists. It does not add a row.
+
 One mode is one keymap.
 
 - `main` is the table the prefix key opens.
@@ -138,7 +154,7 @@ back to the built-in help bindings, so the view always scrolls and closes.
 A key is one key. Arrows and `PgUp`/`PgDn` are named sequences: `up`, `down`,
 `left`, `right`, `pgup`, `pgdn`. The switcher and the rename prompt keep every
 printable key as text, and bind only their control keys. The keymap view, the
-armed help preview and the right-click menu take their keys from the config, so
+armed help box and the right-click menu take their keys from the config, so
 a remap shows there too.
 
 ## Themes

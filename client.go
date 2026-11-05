@@ -2870,7 +2870,7 @@ func (t *tui) draw() {
 		t.askPreview()
 	}
 	if t.armed {
-		drawHelp(&help, win.Cols, win.Rows, t.km().HelpRows())
+		drawHelp(&help, win.Cols, win.Rows, t.km().HelpEntries())
 	}
 	if t.mode == "sessions" {
 		drawSessions(&sess, win.Cols, win.Rows, t.sessions, t.sel, t.session)
