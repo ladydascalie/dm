@@ -273,6 +273,10 @@ type server struct {
 	// filter. It is memory only. A restart forgets it and the next reads
 	// rebuild it, so it never reaches state.json.
 	watches map[boxWatchKey]watch
+
+	// zoom is the zoomed pane id, empty when no pane is zoomed. Memory only:
+	// a restart shows the splits, so it never reaches state.json.
+	zoom string
 }
 
 // branchTTL is how long a detected git label stays fresh. A stale entry is
@@ -728,10 +732,35 @@ func (s *server) setRail(requested int) int {
 	return rail
 }
 
+// paneRectsLocked is the active window's layout with the zoom applied: the
+// zoomed pane takes the box a single unsplit pane gets, and every sibling keeps
+// its layout rectangle. A zoom that no longer names a pane of the window is
+// dropped here, so a dead or switched-away pane cannot hold it. The caller
+// holds s.mu.
+func (s *server) paneRectsLocked() map[string]Rect {
+	win := s.st.win()
+	area := paneAreaFor(s.cols, s.rows, s.railLocked())
+	rects := map[string]Rect{}
+	layout(win.Root, area, rects)
+	if _, ok := rects[s.zoom]; !ok {
+		s.zoom = ""
+		return rects
+	}
+	rects[s.zoom] = insetBox(area)
+	return rects
+}
+
+// clearZoom drops the zoom. It is one view of one focus, so a focus or layout
+// change ends it.
+func (s *server) clearZoom() {
+	s.mu.Lock()
+	s.zoom = ""
+	s.mu.Unlock()
+}
+
 func (s *server) snapshotLocked() *Snapshot {
 	win := s.st.win()
-	rects := map[string]Rect{}
-	layout(win.Root, paneAreaFor(s.cols, s.rows, s.railLocked()), rects)
+	rects := s.paneRectsLocked()
 	snap := &Snapshot{
 		Session:      s.st.Name,
 		Workspace:    s.st.ws().Name,
@@ -742,6 +771,7 @@ func (s *server) snapshotLocked() *Snapshot {
 		Rows:         s.rows,
 		Rail:         s.railLocked(),
 		RailWant:     s.requestedRailLocked(),
+		Zoom:         s.zoom,
 		Root:         win.Root,
 	}
 	for _, w := range s.st.ws().Windows {
@@ -1028,9 +1058,7 @@ func (s *server) pushSnapshot() {
 // syncSizes pushes each active-window pane's rectangle into its PTY and VT.
 func (s *server) syncSizes() {
 	s.mu.Lock()
-	win := s.st.win()
-	rects := map[string]Rect{}
-	layout(win.Root, paneAreaFor(s.cols, s.rows, s.railLocked()), rects)
+	rects := s.paneRectsLocked()
 	s.st.Cols, s.st.Rows = s.cols, s.rows
 	var calls []func()
 	for id, r := range rects {
@@ -1381,6 +1409,28 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.afterMutation()
 		s.reply(cl, m, map[string]any{"pane": id}, err)
 
+	case "zoom-pane":
+		// The target is the focus of the active window. One pane already fills
+		// the area, so the action is a no-op there.
+		s.mu.Lock()
+		win := s.st.win()
+		if len(allPanes(win.Root)) < 2 {
+			s.mu.Unlock()
+			s.reply(cl, m, map[string]any{"zoom": ""}, nil)
+			return
+		}
+		if s.zoom == win.Focus {
+			s.zoom = ""
+		} else {
+			s.zoom = win.Focus
+		}
+		zoom := s.zoom
+		s.mu.Unlock()
+		// resync, not afterMutation: afterMutation would clear the zoom it is
+		// being asked to apply.
+		s.resync()
+		s.reply(cl, m, map[string]any{"zoom": zoom}, nil)
+
 	case "set-rail":
 		rail := s.setRail(m.Index)
 		s.syncSizes()
@@ -1390,6 +1440,7 @@ func (s *server) handleReq(cl *client, m Msg) {
 	case "resize-split":
 		err := s.mutation(func() error { return s.resizeSplit(m.Target, m.Other, m.Ratio) })
 		if err == nil {
+			s.clearZoom()
 			s.syncSizes()
 			s.pushSnapshot()
 		}
@@ -2218,8 +2269,17 @@ func (s *server) mutation(fn func() error) error {
 	return s.st.save()
 }
 
-// afterMutation resizes panes, broadcasts the new layout and re-sends replays.
+// afterMutation clears the zoom, then resizes panes, broadcasts the new layout
+// and re-sends replays. A focus, split, close, window or workspace change is a
+// new layout, so the zoom ends here once for all of them.
 func (s *server) afterMutation() {
+	s.clearZoom()
+	s.resync()
+}
+
+// resync resizes panes, broadcasts the new layout and re-sends the screens and
+// replays. A client rebuilds its VT when the layout changes.
+func (s *server) resync() {
 	s.syncSizes()
 	s.mu.Lock()
 	snap := s.snapshotLocked()
