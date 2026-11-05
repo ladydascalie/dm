@@ -18,7 +18,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dm/internal/cells"
 	"dm/internal/paths"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -1680,7 +1682,7 @@ func TestRailWindowStats(t *testing.T) {
 
 // TestRailWindowFolderTruncate gives the folder priority over the branch: a
 // long branch goes first and leaves the whole folder, and only a folder that
-// cannot fit on its own is cut with an ellipsis. The stats survive both.
+// cannot fit on its own is cut with an cells.Ellipsis. The stats survive both.
 func TestRailWindowFolderTruncate(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	// The folder fits alone at 34 columns; the branch does not fit beside it.
@@ -1699,11 +1701,11 @@ func TestRailWindowFolderTruncate(t *testing.T) {
 	if !strings.Contains(line, "● +12 -4") {
 		t.Fatalf("stats dropped at %d cols: %q", defaultRail, line)
 	}
-	if n := cells(line); n != snap.Rail {
+	if n := cells.Cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 
-	// A folder wider than the rail is cut and ends with an ellipsis, and the
+	// A folder wider than the rail is cut and ends with an cells.Ellipsis, and the
 	// rail never writes past its width.
 	snap.All[0].Cwd = "/work/dm/" + strings.Repeat("deep-folder-", 4)
 	snap.All[0].Root = "/work/dm"
@@ -1720,7 +1722,7 @@ func TestRailWindowFolderTruncate(t *testing.T) {
 	if !strings.Contains(line, "● +12 -4") {
 		t.Fatalf("stats dropped at %d cols: %q", defaultRail, line)
 	}
-	if n := cells(line); n != snap.Rail {
+	if n := cells.Cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
@@ -1759,7 +1761,7 @@ func TestRailWindowFolderLine(t *testing.T) {
 	if want := "● +12 -4"; !strings.HasSuffix(line, want) {
 		t.Fatalf("window line = %q, want it to end with %q", line, want)
 	}
-	if n := cells(line); n != snap.Rail {
+	if n := cells.Cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
@@ -1793,7 +1795,7 @@ func TestRailWindowBranchEqualsFolder(t *testing.T) {
 	if n := strings.Count(line, "main"); n != 1 {
 		t.Fatalf("window line draws the folder %d times: %q", n, line)
 	}
-	if n := cells(line); n != snap.Rail {
+	if n := cells.Cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
@@ -1828,7 +1830,7 @@ func TestRailWindowFolderNested(t *testing.T) {
 	if strings.Contains(line, `\`) {
 		t.Fatalf("nested folder used a backslash: %q", line)
 	}
-	if n := cells(line); n != snap.Rail {
+	if n := cells.Cells(line); n != snap.Rail {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 }
@@ -2112,7 +2114,7 @@ func TestRailStatsWholeAtClamp(t *testing.T) {
 	if strings.Contains(line, "a-branch") {
 		t.Fatalf("branch survived at the clamp: %q", line)
 	}
-	if n := cells(line); n > snap.Rail {
+	if n := cells.Cells(line); n > snap.Rail {
 		t.Fatalf("window line %q is %d cells, want <= %d", line, n, snap.Rail)
 	}
 }
@@ -2133,7 +2135,7 @@ func TestRailStatsDropWhole(t *testing.T) {
 	}
 }
 
-// TestRailNoteElision cuts the message with an ellipsis inside the rail.
+// TestRailNoteElision cuts the message with an cells.Ellipsis inside the rail.
 func TestRailNoteElision(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railTree(defaultRail)
@@ -2142,7 +2144,7 @@ func TestRailNoteElision(t *testing.T) {
 	if !strings.Contains(note, "…") {
 		t.Fatalf("note line was not elided: %q", note)
 	}
-	if n := cells(note); n > snap.Rail {
+	if n := cells.Cells(note); n > snap.Rail {
 		t.Fatalf("note line %q is %d cells, want <= %d", note, n, snap.Rail)
 	}
 	if !strings.HasPrefix(note, "    a very") {
@@ -2251,9 +2253,9 @@ func TestRailCollapsed(t *testing.T) {
 
 func TestRailNeverWritesPastWidth(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	if cells("A") != 1 || cells("日") != 2 || cells("\u0301") != 0 {
+	if cells.Cells("A") != 1 || cells.Cells("日") != 2 || cells.Cells("\u0301") != 0 {
 		t.Fatalf("cell widths: A=%d 日=%d combining=%d",
-			cells("A"), cells("日"), cells("\u0301"))
+			cells.Cells("A"), cells.Cells("日"), cells.Cells("\u0301"))
 	}
 	cases := []struct {
 		name  string
@@ -2561,12 +2563,12 @@ func TestBarElide(t *testing.T) {
 		if cols >= 30 && !strings.Contains(text, "2") {
 			t.Fatalf("cols %d: active chip dropped: %q", cols, text)
 		}
-		// Only the shrinking rungs end a name with an ellipsis; a dropped
+		// Only the shrinking rungs end a name with an cells.Ellipsis; a dropped
 		// chip or window name leaves no mark.
 		switch barElideStage(segs) {
 		case "workspace", "session", "status", "name":
 			if !strings.Contains(text, "…") {
-				t.Fatalf("cols %d: elided line has no ellipsis: %q", cols, text)
+				t.Fatalf("cols %d: elided line has no cells.Ellipsis: %q", cols, text)
 			}
 		}
 	}
@@ -2627,7 +2629,7 @@ func TestBarPinned(t *testing.T) {
 		t.Fatalf("20 cols: PREFIX survived: %q", segs[0].text)
 	}
 	if !strings.HasSuffix(segs[0].text, "…") {
-		t.Fatalf("20 cols: clipped info has no ellipsis: %q", segs[0].text)
+		t.Fatalf("20 cols: clipped info has no cells.Ellipsis: %q", segs[0].text)
 	}
 	if got := segCells(segs); got != 20 {
 		t.Fatalf("20 cols: spans paint %d cells, want 20", got)
@@ -2663,10 +2665,10 @@ func TestBarPinnedGutter(t *testing.T) {
 		for _, seg := range segs {
 			if seg.pin {
 				pinned = true
-				rightCells += cells(seg.text)
+				rightCells += cells.Cells(seg.text)
 				continue
 			}
-			leftCells += cells(seg.text)
+			leftCells += cells.Cells(seg.text)
 		}
 		if !pinned {
 			t.Fatalf("cols %d: no pinned block", c.cols)
@@ -2702,7 +2704,7 @@ func TestBarPinnedAnchored(t *testing.T) {
 		if pinnedText != "PREFIX "+info {
 			t.Fatalf("cols %d: pinned spans = %q", cols, pinnedText)
 		}
-		start := cols - cells(pinnedText)
+		start := cols - cells.Cells(pinnedText)
 
 		var b bytes.Buffer
 		drawBar(&b, DefaultTheme(), snap, true, info)

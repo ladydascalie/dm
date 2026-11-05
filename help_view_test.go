@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	"dm/internal/cells"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -21,8 +22,8 @@ func helpBoxDraw(t *testing.T, cols, rows int, keys []HelpEntry) string {
 // helpBoxWidths is the widest key and action label in cells.
 func helpBoxWidths(keys []HelpEntry) (keyW, actionW int) {
 	for _, e := range keys {
-		keyW = maxInt(keyW, cells(e.Key))
-		actionW = maxInt(actionW, cells(e.Action))
+		keyW = maxInt(keyW, cells.Cells(e.Key))
+		actionW = maxInt(actionW, cells.Cells(e.Action))
 	}
 	return keyW, actionW
 }
@@ -81,7 +82,7 @@ func helpBoxParse(t *testing.T, s string) helpBoxPainted {
 		if col+1 > p.maxCol {
 			p.maxCol = col + 1
 		}
-		col += cells(string(r))
+		col += cells.Cells(string(r))
 	}
 	return p
 }
@@ -225,9 +226,9 @@ func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 	for i, r := range rows[:y1-y0-1] {
 		var want string
 		if r.header != "" {
-			want = pad(elide(r.header, x1-x0-1), x1-x0-1)
+			want = cells.Pad(cells.Elide(r.header, x1-x0-1), x1-x0-1)
 		} else {
-			want = pad(elide(r.key, x1-x0-1), x1-x0-1)
+			want = cells.Pad(cells.Elide(r.key, x1-x0-1), x1-x0-1)
 		}
 		if got := helpBoxRowText(p, y0+1+i, x0+1, x1-1); got != want {
 			t.Fatalf("row %d = %q, want the key column alone %q", i, got, want)
@@ -250,7 +251,7 @@ func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 	found := false
 	for row := y0 + 1; row <= y1-1; row++ {
 		got := strings.TrimRight(helpBoxRowText(p, row, x0+1, x1-1), " ")
-		if cells(got) > x1-x0-1 {
+		if cells.Cells(got) > x1-x0-1 {
 			t.Fatalf("row %d = %q, wider than the %d cell interior", row, got, x1-x0-1)
 		}
 		if strings.HasSuffix(got, "\u2026") {
@@ -258,7 +259,7 @@ func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("a clipped key label carries no ellipsis")
+		t.Fatal("a clipped key label carries no cells.Ellipsis")
 	}
 }
 

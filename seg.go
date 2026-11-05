@@ -1,6 +1,9 @@
 package main
 
-import "bytes"
+import (
+	"bytes"
+	"dm/internal/cells"
+)
 
 // seg is one styled run of text: what it paints, the colours it paints with,
 // and its own weight. The ground rides on the run, so one row can mix
@@ -20,7 +23,7 @@ type seg struct {
 func segCells(runs []seg) int {
 	n := 0
 	for _, s := range runs {
-		n += cells(s.text)
+		n += cells.Cells(s.text)
 	}
 	return n
 }
@@ -34,28 +37,28 @@ func clipSegs(runs []seg, budget int) []seg {
 		if budget <= 0 {
 			break
 		}
-		text := clip(s.text, budget)
+		text := cells.Clip(s.text, budget)
 		if text == "" {
 			if s.text != "" {
 				break
 			}
 			continue
 		}
-		budget -= cells(text)
+		budget -= cells.Cells(text)
 		s.text = text
 		out = append(out, s)
 	}
 	return out
 }
 
-// elideSegs cuts a run set to a cell budget and ends it with an ellipsis, so a
+// elideSegs cuts a run set to a cell budget and ends it with an cells.Ellipsis, so a
 // long label shrinks before the right-aligned runs beside it lose a cell.
 func elideSegs(th Theme, runs []seg, budget int) []seg {
 	if budget <= 0 {
 		return nil
 	}
 	out := clipSegs(runs, budget-1)
-	return append(out, seg{text: ellipsis, fg: th.Palette.RailDim})
+	return append(out, seg{text: cells.Ellipsis, fg: th.Palette.RailDim})
 }
 
 // join lays groups left to right with one gap run between them, so

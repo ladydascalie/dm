@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"fmt"
 	"strings"
 
@@ -171,13 +172,13 @@ func paintSwitcherQuery(buf *bytes.Buffer, th Theme, s *switcher, l switcherLayo
 		buf.WriteString("\x1b[0m" + ground.bg())
 	} else {
 		prompt := "> "
-		q := clip(string(s.query), w-len(prompt))
+		q := cells.Clip(string(s.query), w-len(prompt))
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 		buf.WriteString("\x1b[0m" + ground.bg() + dim.fg() + prompt)
 		if q != "" {
 			buf.WriteString("\x1b[0m" + ground.bg() + text.fg() + q)
 		}
-		used := len(prompt) + cells(q)
+		used := len(prompt) + cells.Cells(q)
 		if n := w - used; n > 0 {
 			buf.WriteString(strings.Repeat(" ", n))
 		}
@@ -321,9 +322,9 @@ func paintSwitcherPreview(buf *bytes.Buffer, th Theme, s *switcher, vts map[stri
 	for i := 0; i < h; i++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", start+i+1, band.X+1)
 		buf.WriteString("\x1b[0m" + th.Palette.RailBG.bg() + th.Palette.RailText.fg())
-		text := clip(lines[i], band.W)
+		text := cells.Clip(lines[i], band.W)
 		buf.WriteString(text)
-		if n := band.W - cells(text); n > 0 {
+		if n := band.W - cells.Cells(text); n > 0 {
 			buf.WriteString(strings.Repeat(" ", n))
 		}
 		buf.WriteString("\x1b[0m")

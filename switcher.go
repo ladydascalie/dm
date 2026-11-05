@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/cells"
 	"strings"
 	"unicode/utf8"
 )
@@ -538,11 +539,11 @@ func closeSwitcher(t *tui) {
 // A workspace is sN, a window is wN, a pane is wNpM.
 func (t *tui) dispatchPick(target string) {
 	switch {
-	case strings.HasPrefix(target, "s") && allDigits(target[1:]):
+	case strings.HasPrefix(target, "s") && cells.AllDigits(target[1:]):
 		t.action("focus-workspace", func(m *Msg) { m.Target = target })
 	case strings.HasPrefix(target, "w") && strings.Contains(target, "p"):
 		t.action("focus", func(m *Msg) { m.Target = target })
-	case strings.HasPrefix(target, "w") && allDigits(target[1:]):
+	case strings.HasPrefix(target, "w") && cells.AllDigits(target[1:]):
 		t.action("focus-window", func(m *Msg) { m.Target = target })
 	default:
 		t.notify("switcher: no target " + target)

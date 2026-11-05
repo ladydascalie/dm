@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -441,7 +442,7 @@ func paneIDShape(s string) bool {
 	if !ok || len(win) < 2 || win[0] != 'w' || pane == "" {
 		return false
 	}
-	return allDigits(win[1:]) && allDigits(pane)
+	return cells.AllDigits(win[1:]) && cells.AllDigits(pane)
 }
 
 // clampLimit holds a list limit inside the log: zero or less means the whole

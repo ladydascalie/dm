@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"fmt"
 	"strconv"
 	"strings"
@@ -23,7 +24,7 @@ func drawMenu(buf *bytes.Buffer, th Theme, m *menu) {
 		fill:  th.Glyphs.BorderHorizontal,
 	}, "", false, func(b *bytes.Buffer, r Rect) {
 		for i, it := range m.items {
-			line := pad(" "+pad(it.label, 22)+" "+pad(it.key, 4), r.W)
+			line := cells.Pad(" "+cells.Pad(it.label, 22)+" "+cells.Pad(it.key, 4), r.W)
 			colour := "\x1b[0m\x1b[90m"
 			if i == m.sel {
 				colour = "\x1b[0m\x1b[30;46m"
@@ -244,17 +245,17 @@ func (l *barLeft) fit(th Theme, budget int) []seg {
 	}
 
 	// 3. The workspace name, then 4. the session name, shrink to a trailing
-	// ellipsis. A name that cannot shrink leaves its ellipsis alone; later
+	// cells.Ellipsis. A name that cannot shrink leaves its cells.Ellipsis alone; later
 	// steps make the room.
 	for _, name := range []*string{&l.workspace, &l.session} {
 		if *name == "" {
 			continue
 		}
-		avail := budget - (segCells(cur()) - cells(*name))
+		avail := budget - (segCells(cur()) - cells.Cells(*name))
 		if avail < 1 {
 			avail = 1
 		}
-		*name = elide(*name, avail)
+		*name = cells.Elide(*name, avail)
 		if segs := cur(); segCells(segs) <= budget {
 			return segs
 		}
@@ -296,7 +297,7 @@ func barPinned(th Theme, armed bool, info string) []seg {
 }
 
 // barFitPinned fits the right block to cols cells on its own. A pinned segment
-// goes whole, leftmost first, and the survivor is clipped with an ellipsis.
+// goes whole, leftmost first, and the survivor is clipped with an cells.Ellipsis.
 func barFitPinned(segs []seg, cols int) []seg {
 	for segCells(segs) > cols {
 		if len(segs) > 1 {
@@ -306,7 +307,7 @@ func barFitPinned(segs []seg, cols int) []seg {
 		if len(segs) == 0 {
 			break
 		}
-		segs[0].text = elide(segs[0].text, cols)
+		segs[0].text = cells.Elide(segs[0].text, cols)
 		break
 	}
 	return segs

@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -313,7 +314,7 @@ func (b *boxView) paintWatchers(buf *bytes.Buffer, r Rect, th Theme) {
 
 // boxPaintNote writes a dim placeholder line at an absolute row.
 func boxPaintNote(buf *bytes.Buffer, row int, text string, w int) {
-	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m\x1b[90m %s", row, clip(text, w-1))
+	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m\x1b[90m %s", row, cells.Clip(text, w-1))
 }
 
 // title is the count in the top border, the visible rows when the log is
@@ -408,14 +409,14 @@ func watchFilter(w watch) string {
 // boxPaintWatch writes one watcher row into buf, dim text. The row is clipped
 // to width cells.
 func boxPaintWatch(buf *bytes.Buffer, w watch, width int) {
-	pane := pad(clip(w.Pane, boxPaneW), boxPaneW)
-	filter := pad(clip(watchFilter(w), boxFilterW), boxFilterW)
+	pane := cells.Pad(cells.Clip(w.Pane, boxPaneW), boxPaneW)
+	filter := cells.Pad(cells.Clip(watchFilter(w), boxFilterW), boxFilterW)
 	row := fmt.Sprintf("%s %s @%d", pane, filter, w.Cursor)
 	if w.Parked {
 		row += " wait"
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
-	buf.WriteString(clip(row, width))
+	buf.WriteString(cells.Clip(row, width))
 }
 
 // boxPaintRow writes one entry into buf, dim text with the state word in the
@@ -429,7 +430,7 @@ func boxPaintRow(buf *bytes.Buffer, th Theme, e entry, w int, receipt int) {
 		start += boxReceiptW
 	}
 	state := string(e.State)
-	if start+len(state) > cells(row) {
+	if start+len(state) > cells.Cells(row) {
 		buf.WriteString(row)
 		return
 	}
@@ -444,8 +445,8 @@ func boxPaintRow(buf *bytes.Buffer, th Theme, e entry, w int, receipt int) {
 // boxRowText is the plain text of one entry row, columns padded and the whole
 // clipped to w cells.
 func boxRowText(e entry, w int, receipt int) string {
-	key := pad(clip(e.Key, boxKeyW), boxKeyW)
-	from := pad(clip(e.From, boxFromW), boxFromW)
+	key := cells.Pad(cells.Clip(e.Key, boxKeyW), boxKeyW)
+	from := cells.Pad(cells.Clip(e.From, boxFromW), boxFromW)
 	mark := ""
 	if receipt >= 0 {
 		if receipt > 99 {
@@ -453,8 +454,8 @@ func boxRowText(e entry, w int, receipt int) string {
 		}
 		mark = fmt.Sprintf("%2d ", receipt)
 	}
-	return clip(mark+fmt.Sprintf("%*d %s %s %s %s", boxSeqW, e.Seq,
-		pad(string(e.State), boxStateW), key, from, e.Msg), w)
+	return cells.Clip(mark+fmt.Sprintf("%*d %s %s %s %s", boxSeqW, e.Seq,
+		cells.Pad(string(e.State), boxStateW), key, from, e.Msg), w)
 }
 
 // boxStateColour is the state's hue. It is the rail's status colour, so a lane
