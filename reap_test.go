@@ -63,7 +63,7 @@ func panePID(t *testing.T, h *harness, session, pane string) int {
 
 // TestReapOrphans unlinks one pane's socket. That daemon can never be reached
 // again, so it and its shell must go, while the pane whose socket is intact
-// stays up for the whole window: an unattached path is the normal state.
+// outlives the reaper pass: an unattached path is the normal state.
 func TestReapOrphans(t *testing.T) {
 	h := newHarness(t)
 	h.run("new", "-s", "reap")
@@ -72,6 +72,10 @@ func TestReapOrphans(t *testing.T) {
 
 	orphanShell := shellPID(t, h, "reap", orphan)
 	keepShell := shellPID(t, h, "reap", keep)
+	// keep answered the pid probe, so its daemon is listening and its own
+	// reaper timer is running. Its first pass lands within sockEvery of this
+	// moment; the check below waits for that pass, not just the orphan's.
+	keepUp := time.Now()
 	orphanDaemon := panePID(t, h, "reap", orphan)
 	keepDaemon := panePID(t, h, "reap", keep)
 	if orphanDaemon == keepDaemon || orphanShell == keepShell {
@@ -102,17 +106,13 @@ func TestReapOrphans(t *testing.T) {
 		t.Fatalf("pane log does not name the reason: %s", b)
 	}
 
-	// The intact pane must hold until the same deadline, and still answer
-	// afterwards, so the reaper did not touch a live daemon.
-	for time.Now().Before(deadline) {
-		if gone(keepDaemon) || gone(keepShell) {
-			t.Fatalf("live pane reaped early: daemon %d alive=%v, shell %d alive=%v",
-				keepDaemon, !gone(keepDaemon), keepShell, !gone(keepShell))
-		}
-		time.Sleep(100 * time.Millisecond)
+	// The orphan's death only proves the orphan's reaper pass ran. Each pane
+	// runs its own timer, so wait for keep's first pass too, then look once.
+	if wait := time.Until(keepUp.Add(sockEvery + 300*time.Millisecond)); wait > 0 {
+		time.Sleep(wait)
 	}
 	if gone(keepDaemon) || gone(keepShell) {
-		t.Fatalf("live pane reaped after %s: daemon %d alive=%v, shell %d alive=%v",
+		t.Fatalf("live pane reaped with the orphan after %s: daemon %d alive=%v, shell %d alive=%v",
 			time.Since(start).Round(time.Millisecond), keepDaemon, !gone(keepDaemon),
 			keepShell, !gone(keepShell))
 	}

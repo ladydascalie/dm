@@ -2201,10 +2201,16 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	if end < 0 {
 		end = 0
 	}
-	// Leading blank rows are not reachable, like the client's scrollStart.
+	// Leading blank rows are not reachable, like the client's scrollStart. A
+	// history that holds nothing but blanks keeps them: those rows sit
+	// directly above the live screen and are a real window, not padding above
+	// the oldest content.
 	top := 0
 	for top < end && blankGlyphRow(rows[top]) {
 		top++
+	}
+	if top == end {
+		top = 0
 	}
 	start := end - n
 	if start < top {
