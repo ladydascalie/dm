@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/transport"
 	"dm/internal/wire"
 	"encoding/json"
 	"fmt"
@@ -12,7 +13,7 @@ import (
 // a window row would only repeat the row of the pane it holds, so dash lists
 // panes alone.
 func dashRows(session string) ([]string, error) {
-	m, err := rpc(session, wire.Msg{Action: "list"})
+	m, err := transport.RPC(session, wire.Msg{Action: "list"})
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +90,7 @@ func dash(session string) error {
 
 // peek prints the screen a palette row shows.
 func peek(session, target string, lines int) error {
-	m, err := rpc(session, wire.Msg{Action: "read", Target: target})
+	m, err := transport.RPC(session, wire.Msg{Action: "read", Target: target})
 	if err != nil {
 		return err
 	}

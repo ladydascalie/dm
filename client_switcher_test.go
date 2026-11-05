@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/transport"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -38,7 +39,7 @@ func switcherTUI(t *testing.T) (*tui, chan wire.Msg) {
 	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: &bytes.Buffer{}}
 	a, b := net.Pipe()
 	t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
-	tui.conn = &conn{Conn: a}
+	tui.conn = &transport.Conn{Conn: a}
 	got := make(chan wire.Msg, 32)
 	go func() {
 		defer close(got)

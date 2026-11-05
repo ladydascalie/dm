@@ -1,4 +1,6 @@
-package main
+// Package transport is the client side of the session socket: it dials the
+// daemon, spawns it when it is missing, and speaks the wire envelope.
+package transport
 
 import (
 	"errors"
@@ -10,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,9 +20,31 @@ import (
 	"dm/internal/wire"
 )
 
-// ensureServer returns a live connection to the session server, starting it if
-// needed. The returned bool reports whether a new daemon was spawned.
-func ensureServer(name string) (net.Conn, error) {
+// Conn wraps the server socket with a write mutex.
+type Conn struct {
+	net.Conn
+	mu sync.Mutex
+}
+
+// Send writes one message under the write mutex.
+func (c *Conn) Send(m wire.Msg) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return wire.WriteMsg(c.Conn, m)
+}
+
+// Dial returns a live connection to the session server, starting it if needed.
+func Dial(name string) (*Conn, error) {
+	nc, err := Ensure(name)
+	if err != nil {
+		return nil, err
+	}
+	return &Conn{Conn: nc}, nil
+}
+
+// Ensure returns a live connection to the session server, starting it if
+// needed.
+func Ensure(name string) (net.Conn, error) {
 	sock := paths.ServerSock(name)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
 		return c, nil
@@ -53,8 +78,9 @@ func ensureServer(name string) (net.Conn, error) {
 	return nil, fmt.Errorf("server for %q did not start", name)
 }
 
-func rpc(name string, m wire.Msg) (wire.Msg, error) {
-	c, err := ensureServer(name)
+// RPC sends one request and returns the first response.
+func RPC(name string, m wire.Msg) (wire.Msg, error) {
+	c, err := Ensure(name)
 	if err != nil {
 		return wire.Msg{}, err
 	}
@@ -76,12 +102,14 @@ func rpc(name string, m wire.Msg) (wire.Msg, error) {
 	}
 }
 
+// SessionInfo is one session on disk and whether its daemon answers.
 type SessionInfo struct {
 	Name string `json:"name"`
 	Live bool   `json:"live"`
 }
 
-func listSessionInfo() ([]SessionInfo, error) {
+// ListSessions returns every session on disk, sorted by name.
+func ListSessions() ([]SessionInfo, error) {
 	entries, err := os.ReadDir(filepath.Join(paths.StateDir(), "sessions"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -106,8 +134,9 @@ func listSessionInfo() ([]SessionInfo, error) {
 	return out, nil
 }
 
-func killSession(name string) error {
-	c, err := ensureServer(name)
+// KillSession stops the daemon for a session and removes its socket.
+func KillSession(name string) error {
+	c, err := Ensure(name)
 	if err != nil {
 		return err
 	}

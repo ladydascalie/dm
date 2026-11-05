@@ -519,7 +519,7 @@ func (t *tui) boxRequest() {
 	if t.conn == nil {
 		return
 	}
-	_ = t.conn.send(wire.Msg{
+	_ = t.conn.Send(wire.Msg{
 		Type: "req", Action: "msg-list",
 		Res: json.RawMessage(`{"key":"","limit":0}`),
 	})
@@ -539,7 +539,7 @@ func (t *tui) boxWatchers(now time.Time) {
 	}
 	b.watchAt = now
 	b.watchWant = false
-	_ = t.conn.send(wire.Msg{
+	_ = t.conn.Send(wire.Msg{
 		Type: "req", Action: "msg-watchers",
 		Res: json.RawMessage(`{}`),
 	})
