@@ -71,10 +71,13 @@ type tui struct {
 	menu     *menu
 	// renameDraft is the text the rename prompt holds while mode is "rename".
 	renameDraft string
-	// renameID is the active workspace's id while the prompt is open. The
-	// server looks a workspace up by id, so the request carries this, not the
+	// renameID is the id of the workspace or window the prompt renames. The
+	// server looks the target up by id, so the request carries this, not the
 	// draft.
 	renameID string
+	// renameKind is "workspace" or "window" while the prompt is open. It picks
+	// the action the prompt sends and the label it paints.
+	renameKind string
 
 	// hist is each pane's replay ring. It is not filled as output arrives:
 	// the first scrollback entry asks the server for one replay and caches it
@@ -2522,15 +2525,32 @@ func (t *tui) openRenamePrompt() {
 		t.disarm()
 		return
 	}
-	t.renameDraft = ""
-	t.renameID = ""
+	id, current := "", ""
 	for _, p := range t.snap.All {
 		if p.WorkspaceName == t.snap.Workspace {
-			t.renameDraft = p.WorkspaceName
-			t.renameID = p.Workspace
+			id, current = p.Workspace, p.WorkspaceName
 			break
 		}
 	}
+	if id == "" {
+		// A snapshot whose Workspace field carries the id still resolves it.
+		for _, p := range t.snap.All {
+			if p.Workspace == t.snap.Workspace {
+				id, current = p.Workspace, p.WorkspaceName
+				break
+			}
+		}
+	}
+	t.openRenamePromptFor("workspace", id, current)
+}
+
+// openRenamePromptFor takes over input for the named workspace or window. The
+// kind picks the action the prompt sends and the label it paints; the draft
+// starts as the current name.
+func (t *tui) openRenamePromptFor(kind, id, current string) {
+	t.renameKind = kind
+	t.renameID = id
+	t.renameDraft = current
 	t.mode = "rename"
 	t.armed = false
 	t.pending = false
@@ -2542,6 +2562,7 @@ func (t *tui) closeRename() {
 	t.mode = ""
 	t.renameDraft = ""
 	t.renameID = ""
+	t.renameKind = ""
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
@@ -2557,12 +2578,16 @@ func (t *tui) submitRename() {
 	}
 	name := strings.TrimSpace(t.renameDraft)
 	target := t.renameID
+	action := "rename-workspace"
+	if t.renameKind == "window" {
+		action = "rename-window"
+	}
 	t.closeRename()
 	if name == "" {
 		return
 	}
 	if t.conn != nil {
-		_ = t.conn.send(Msg{Type: "req", Action: "rename-workspace", Target: target, Name: name})
+		_ = t.conn.send(Msg{Type: "req", Action: action, Target: target, Name: name})
 	}
 }
 
@@ -2905,7 +2930,7 @@ func (t *tui) draw() {
 		drawMenu(&menu, t.menu)
 	}
 	if t.mode == "rename" {
-		drawRename(&rename, win, win.Workspace, t.renameDraft)
+		drawRename(&rename, win, t.renameID, t.renameDraft, t.renameKind)
 	}
 
 	// A picture that is not stable repaints whole and may clear: a size, a

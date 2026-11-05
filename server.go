@@ -1574,13 +1574,7 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.reply(cl, m, nil, err)
 
 	case "rename-window":
-		err := s.mutation(func() error {
-			if m.Name == "" {
-				return fmt.Errorf("name required")
-			}
-			s.st.win().Name = m.Name
-			return nil
-		})
+		err := s.mutation(func() error { return s.renameWindow(m.Target, m.Name) })
 		s.afterMutation()
 		s.reply(cl, m, nil, err)
 
@@ -2443,6 +2437,26 @@ func (s *server) renameWorkspace(id, name string) error {
 		}
 	}
 	return fmt.Errorf("no workspace %q", id)
+}
+
+// renameWindow sets the named window's name and nothing else: the id, the
+// active window, the focus and the panes stay. A background window is fair
+// game.
+func (s *server) renameWindow(id, name string) error {
+	if name == "" {
+		return fmt.Errorf("name required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, w := range ws.Windows {
+			if w.ID == id {
+				w.Name = name
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("no window %q", id)
 }
 
 func (s *server) closeWorkspace(id string) error {
