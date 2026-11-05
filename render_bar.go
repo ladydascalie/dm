@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // drawMenu paints the right-click menu over the panes. The panel owns the border,
@@ -42,7 +43,7 @@ func drawMenu(buf *bytes.Buffer, th Theme, m *menu) {
 // pinned block is anchored to the last column and the gutter fills the gap, so
 // the whole row is written and no cell of the previous frame shows through.
 // drawBar writes at most snap.Cols cells and never touches another row.
-func drawBar(buf *bytes.Buffer, th Theme, snap *Snapshot, armed bool, info string) {
+func drawBar(buf *bytes.Buffer, th Theme, snap *wire.Snapshot, armed bool, info string) {
 	if snap == nil || snap.Rows < 1 || snap.Cols < 1 {
 		return
 	}
@@ -108,8 +109,8 @@ type barLeft struct {
 // barFocus builds the focus chip from the focused pane. An agent reports a
 // state, so it takes that state's glyph and colour; a shell gets the prompt
 // marker in dim text. A pane the snapshot does not list gets no chip.
-func barFocus(th Theme, snap *Snapshot) *barFocusChip {
-	var p PaneInfo
+func barFocus(th Theme, snap *wire.Snapshot) *barFocusChip {
+	var p wire.PaneInfo
 	found := false
 	for _, cand := range snap.Panes {
 		if cand.ID == snap.Focus {
@@ -145,7 +146,7 @@ func barFocus(th Theme, snap *Snapshot) *barFocusChip {
 }
 
 // barLeftFor reads the left block from a snapshot in its full, unelided form.
-func barLeftFor(th Theme, snap *Snapshot) *barLeft {
+func barLeftFor(th Theme, snap *wire.Snapshot) *barLeft {
 	l := &barLeft{
 		session:   snap.Session,
 		workspace: snap.Workspace,
@@ -320,7 +321,7 @@ func barFitPinned(segs []seg, cols int) []seg {
 // pinned block leaves, minus one gutter cell, so the blocks never touch and the
 // line never runs past snap.Cols cells. The pinned block is never dropped to
 // make room for the left one.
-func barSegments(th Theme, snap *Snapshot, armed bool, info string) []seg {
+func barSegments(th Theme, snap *wire.Snapshot, armed bool, info string) []seg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}

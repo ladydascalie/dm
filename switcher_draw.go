@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -62,7 +63,7 @@ type switcherLayout struct {
 
 // switcherLayoutOf measures the float. A switcher opened without a rect takes
 // paletteRect, and the rect is clamped to the screen so no row writes off it.
-func switcherLayoutOf(s *switcher, snap *Snapshot) switcherLayout {
+func switcherLayoutOf(s *switcher, snap *wire.Snapshot) switcherLayout {
 	r := s.rect
 	if r.W <= 0 || r.H <= 0 {
 		r = paletteRect(snap.Cols, snap.Rows)
@@ -131,7 +132,7 @@ func clampRect(r layout.Rect, cols, rows int) layout.Rect {
 // the float owns is painted, blanks included, and every row starts with an
 // absolute cursor move so bandRows can address it. Nothing is written outside
 // the rect and the screen is never cleared.
-func drawSwitcher(buf *bytes.Buffer, th Theme, s *switcher, snap *Snapshot, vts map[string]vt10x.Terminal) (cx, cy int) {
+func drawSwitcher(buf *bytes.Buffer, th Theme, s *switcher, snap *wire.Snapshot, vts map[string]vt10x.Terminal) (cx, cy int) {
 	if buf == nil || s == nil || snap == nil || snap.Cols < 1 || snap.Rows < 1 {
 		return 0, 0
 	}

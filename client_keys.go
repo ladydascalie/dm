@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/wire"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,7 +29,7 @@ type menuItem struct {
 
 // paneMenuItems is the item list for a pane menu: the actions that act on one
 // pane. withFocus puts Focus first, as a sidebar pane row does.
-func (t *tui) paneMenuItems(p *PaneInfo, withFocus bool) []menuItem {
+func (t *tui) paneMenuItems(p *wire.PaneInfo, withFocus bool) []menuItem {
 	items := make([]menuItem, 0, 8)
 	if withFocus {
 		items = append(items, menuItem{label: "Focus", action: "focus", run: func() {
@@ -43,7 +44,7 @@ func (t *tui) paneMenuItems(p *PaneInfo, withFocus bool) []menuItem {
 	} {
 		split := split
 		items = append(items, menuItem{label: split.label, action: split.action, run: func() {
-			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = split.dir })
+			t.actionOn(p.ID, "split", func(m *wire.Msg) { m.Dir = split.dir })
 		}})
 	}
 	return append(items,
@@ -63,7 +64,7 @@ func (t *tui) paneMenuItems(p *PaneInfo, withFocus bool) []menuItem {
 func (t *tui) windowMenuItems(it railItem) []menuItem {
 	return []menuItem{
 		{label: "New window", action: "new-window", run: func() {
-			t.actionOn(it.workspace, "new-window", func(m *Msg) { m.Cwd = it.cwd })
+			t.actionOn(it.workspace, "new-window", func(m *wire.Msg) { m.Cwd = it.cwd })
 		}},
 		{label: "Rename window", action: "rename-window", run: func() {
 			t.openRenamePromptFor("window", it.window, it.windowName)
@@ -137,7 +138,7 @@ func (t *tui) openMenuAt(title string, items []menuItem, x, y int) {
 
 // openMenu builds the on-screen pane menu at a zero-based terminal point and
 // takes over input.
-func (t *tui) openMenu(p *PaneInfo, x, y int) {
+func (t *tui) openMenu(p *wire.PaneInfo, x, y int) {
 	if t.snap == nil {
 		return
 	}
@@ -170,7 +171,7 @@ func (t *tui) openRailMenu(it railItem, x, y int) {
 		if p == nil {
 			// A thin rail lists every pane in the snapshot's All set. A pane
 			// row the Pane set has dropped still gets its menu.
-			p = &PaneInfo{ID: it.pane}
+			p = &wire.PaneInfo{ID: it.pane}
 		}
 		title = "pane " + it.text
 		items = t.paneMenuItems(p, true)
@@ -530,23 +531,23 @@ func (t *tui) reload() error {
 func (t *tui) runAction(name string) {
 	switch name {
 	case "split-right":
-		t.action("split", func(m *Msg) { m.Dir = "right" })
+		t.action("split", func(m *wire.Msg) { m.Dir = "right" })
 	case "split-down", "split-down-alt":
-		t.action("split", func(m *Msg) { m.Dir = "down" })
+		t.action("split", func(m *wire.Msg) { m.Dir = "down" })
 	case "split-left":
-		t.action("split", func(m *Msg) { m.Dir = "left" })
+		t.action("split", func(m *wire.Msg) { m.Dir = "left" })
 	case "split-up":
-		t.action("split", func(m *Msg) { m.Dir = "up" })
+		t.action("split", func(m *wire.Msg) { m.Dir = "up" })
 	case "scrollback":
 		t.startScrollOnFocus()
 	case "focus-left", "focus-left-arrow":
-		t.action("focus-dir", func(m *Msg) { m.Dir = "left" })
+		t.action("focus-dir", func(m *wire.Msg) { m.Dir = "left" })
 	case "focus-down", "focus-down-arrow":
-		t.action("focus-dir", func(m *Msg) { m.Dir = "down" })
+		t.action("focus-dir", func(m *wire.Msg) { m.Dir = "down" })
 	case "focus-up", "focus-up-arrow":
-		t.action("focus-dir", func(m *Msg) { m.Dir = "up" })
+		t.action("focus-dir", func(m *wire.Msg) { m.Dir = "up" })
 	case "focus-right", "focus-right-arrow":
-		t.action("focus-dir", func(m *Msg) { m.Dir = "right" })
+		t.action("focus-dir", func(m *wire.Msg) { m.Dir = "right" })
 	case "next-pane":
 		t.action("next-pane", nil)
 	case "prev-pane":
@@ -596,7 +597,7 @@ func (t *tui) runAction(name string) {
 		t.disarm()
 	case "send-prefix":
 		if p := t.km().PrefixBytes(); len(p) > 0 && t.conn != nil {
-			_ = t.conn.send(Msg{Type: "keys", Keys: append([]byte(nil), p...)})
+			_ = t.conn.send(wire.Msg{Type: "keys", Keys: append([]byte(nil), p...)})
 		}
 		t.disarm()
 	case "reload":
@@ -609,7 +610,7 @@ func (t *tui) runAction(name string) {
 			if n, err := strconv.Atoi(strings.TrimPrefix(name, "window-")); err == nil &&
 				n >= 1 && n <= 10 {
 				i := n - 1
-				t.action("select-window", func(m *Msg) { m.Index = i })
+				t.action("select-window", func(m *wire.Msg) { m.Index = i })
 				return
 			}
 		}
@@ -634,7 +635,7 @@ func (t *tui) disarm() {
 	t.dirty = true
 }
 
-func (t *tui) action(name string, fill func(*Msg)) {
+func (t *tui) action(name string, fill func(*wire.Msg)) {
 	target := ""
 	if t.snap != nil {
 		target = t.snap.Focus
@@ -642,8 +643,8 @@ func (t *tui) action(name string, fill func(*Msg)) {
 	t.actionOn(target, name, fill)
 }
 
-func (t *tui) actionOn(target, name string, fill func(*Msg)) {
-	m := Msg{Type: "req", Action: name, Target: target}
+func (t *tui) actionOn(target, name string, fill func(*wire.Msg)) {
+	m := wire.Msg{Type: "req", Action: name, Target: target}
 	if fill != nil {
 		fill(&m)
 	}

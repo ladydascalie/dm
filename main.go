@@ -16,6 +16,7 @@ import (
 	"dm/internal/box"
 	"dm/internal/cells"
 	"dm/internal/paths"
+	"dm/internal/wire"
 
 	"golang.org/x/term"
 )
@@ -136,7 +137,7 @@ func runCLI(argv []string) error {
 	case "new":
 		c := newFlags("new")
 		c.parse(argv[1:])
-		m, err := rpc(c.session, Msg{Action: "ping"})
+		m, err := rpc(c.session, wire.Msg{Action: "ping"})
 		if err != nil {
 			return err
 		}
@@ -221,7 +222,7 @@ func runCLI(argv []string) error {
 		if raw == "" {
 			return fmt.Errorf("exec needs a JSON action")
 		}
-		var req Msg
+		var req wire.Msg
 		if err := json.Unmarshal([]byte(raw), &req); err != nil {
 			return fmt.Errorf("bad action JSON: %w", err)
 		}
@@ -233,7 +234,7 @@ func runCLI(argv []string) error {
 		if len(c.args) < 1 {
 			return fmt.Errorf("write-to needs a pane id")
 		}
-		return printRPC(c.session, Msg{Action: "write-to", Target: c.args[0], Msg: c.msg, Enter: c.enter})
+		return printRPC(c.session, wire.Msg{Action: "write-to", Target: c.args[0], Msg: c.msg, Enter: c.enter})
 
 	case "read":
 		c := newFlags("read")
@@ -245,7 +246,7 @@ func runCLI(argv []string) error {
 		if c.scrollback >= 0 {
 			action = "history"
 		}
-		m, err := rpc(c.session, Msg{Action: action, Target: c.args[0], Count: c.scrollback})
+		m, err := rpc(c.session, wire.Msg{Action: action, Target: c.args[0], Count: c.scrollback})
 		if err != nil {
 			return err
 		}
@@ -253,8 +254,8 @@ func runCLI(argv []string) error {
 			return fmt.Errorf("%s", m.Error)
 		}
 		var res struct {
-			Lines  []string `json:"lines"`
-			Status Status   `json:"status"`
+			Lines  []string    `json:"lines"`
+			Status wire.Status `json:"status"`
 		}
 		_ = json.Unmarshal(m.Res, &res)
 		lines := res.Lines
@@ -271,9 +272,9 @@ func runCLI(argv []string) error {
 			return fmt.Errorf("split needs a pane id")
 		}
 		if c.jsonOut {
-			return printRPC(c.session, Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+			return printRPC(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir})
 		}
-		m, err := rpc(c.session, Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+		m, err := rpc(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir})
 		if err != nil {
 			return err
 		}
@@ -293,7 +294,7 @@ func runCLI(argv []string) error {
 		if len(c.args) < 1 {
 			return fmt.Errorf("focus needs a pane id")
 		}
-		return printRPC(c.session, Msg{Action: "focus", Target: c.args[0]})
+		return printRPC(c.session, wire.Msg{Action: "focus", Target: c.args[0]})
 
 	case "rename-workspace":
 		c := newFlags("rename-workspace")
@@ -301,12 +302,12 @@ func runCLI(argv []string) error {
 		if len(c.args) < 2 {
 			return fmt.Errorf("rename-workspace needs a workspace id and a name")
 		}
-		return printRPC(c.session, Msg{Action: "rename-workspace", Target: c.args[0], Name: c.args[1]})
+		return printRPC(c.session, wire.Msg{Action: "rename-workspace", Target: c.args[0], Name: c.args[1]})
 
 	case "next-pane", "prev-pane", "new-window", "next-window", "prev-window":
 		c := newFlags(argv[0])
 		c.parse(argv[1:])
-		return printRPC(c.session, Msg{Action: argv[0]})
+		return printRPC(c.session, wire.Msg{Action: argv[0]})
 
 	case "status":
 		c := newFlags("status")
@@ -316,14 +317,14 @@ func runCLI(argv []string) error {
 			target = c.args[0]
 		}
 		if target == "" {
-			m, err := rpc(c.session, Msg{Action: "status"})
+			m, err := rpc(c.session, wire.Msg{Action: "status"})
 			if err != nil {
 				return err
 			}
 			if !m.OK {
 				return fmt.Errorf("%s", m.Error)
 			}
-			var st map[string]Status
+			var st map[string]wire.Status
 			_ = json.Unmarshal(m.Res, &st)
 			ids := make([]string, 0, len(st))
 			for id := range st {
@@ -336,14 +337,14 @@ func runCLI(argv []string) error {
 			}
 			return nil
 		}
-		m, err := rpc(c.session, Msg{Action: "status", Target: target})
+		m, err := rpc(c.session, wire.Msg{Action: "status", Target: target})
 		if err != nil {
 			return err
 		}
 		if !m.OK {
 			return fmt.Errorf("%s", m.Error)
 		}
-		var st Status
+		var st wire.Status
 		_ = json.Unmarshal(m.Res, &st)
 		fmt.Printf("%s\t%s\t%s\n", target, st.State, st.Message)
 		return nil
@@ -369,7 +370,7 @@ func runCLI(argv []string) error {
 	case "list":
 		c := newFlags("list")
 		c.parse(argv[1:])
-		m, err := rpc(c.session, Msg{Action: "list"})
+		m, err := rpc(c.session, wire.Msg{Action: "list"})
 		if err != nil {
 			return err
 		}
@@ -398,7 +399,7 @@ func runCLI(argv []string) error {
 	}
 }
 
-func printRPC(name string, req Msg) error {
+func printRPC(name string, req wire.Msg) error {
 	m, err := rpc(name, req)
 	if err != nil {
 		return err
@@ -450,7 +451,7 @@ func boxPostVerb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
-	m, err := rpc(c.session, Msg{Action: "msg-post", Res: raw})
+	m, err := rpc(c.session, wire.Msg{Action: "msg-post", Res: raw})
 	if err != nil {
 		return err
 	}
@@ -476,7 +477,7 @@ func boxListVerb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
-	m, err := rpc(c.session, Msg{Action: "msg-list", Res: raw})
+	m, err := rpc(c.session, wire.Msg{Action: "msg-list", Res: raw})
 	if err != nil {
 		return err
 	}
@@ -521,7 +522,7 @@ func boxWaitVerb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
-	m, err := rpcWithin(c.session, Msg{Action: "msg-wait", Res: raw}, c.timeout+time.Minute)
+	m, err := rpcWithin(c.session, wire.Msg{Action: "msg-wait", Res: raw}, c.timeout+time.Minute)
 	if err != nil {
 		return err
 	}
@@ -604,11 +605,11 @@ func boxSubStream(session string, req *box.SubReq, jsonOut bool) (bool, error) {
 		return false, errBoxSubEnded
 	}
 	defer c.Close()
-	if err := c.send(Msg{Type: "req", Action: "msg-sub", ID: 1, Res: raw}); err != nil {
+	if err := c.send(wire.Msg{Type: "req", Action: "msg-sub", ID: 1, Res: raw}); err != nil {
 		return true, errBoxSubEnded
 	}
 	for {
-		m, err := readMsg(c.Conn)
+		m, err := wire.ReadMsg(c.Conn)
 		if err != nil {
 			return true, errBoxSubEnded
 		}
@@ -662,7 +663,7 @@ func boxClearVerb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
-	m, err := rpc(c.session, Msg{Action: "msg-clear", Res: raw})
+	m, err := rpc(c.session, wire.Msg{Action: "msg-clear", Res: raw})
 	if err != nil {
 		return err
 	}
@@ -681,7 +682,7 @@ func boxClearVerb(c *cmdFlags) error {
 // the key, or the branch prefix with a trailing star. WAIT is "wait" while a
 // msg-wait is parked on the filter, and "-" otherwise.
 func boxWatchersVerb(c *cmdFlags) error {
-	m, err := rpc(c.session, Msg{Action: "msg-watchers"})
+	m, err := rpc(c.session, wire.Msg{Action: "msg-watchers"})
 	if err != nil {
 		return err
 	}
@@ -736,7 +737,7 @@ func boxFilter(w box.Watch) string {
 // boxSchemaVerb prints the schema the running server serves, so the CLI holds
 // no copy of the wire.
 func boxSchemaVerb(c *cmdFlags) error {
-	m, err := rpc(c.session, Msg{Action: "msg-schema"})
+	m, err := rpc(c.session, wire.Msg{Action: "msg-schema"})
 	if err != nil {
 		return err
 	}
@@ -757,22 +758,22 @@ func boxSchemaVerb(c *cmdFlags) error {
 
 // rpcWithin is rpc with a read deadline the caller sets, because a blocking
 // wait replies long after the ten seconds rpc allows.
-func rpcWithin(name string, req Msg, wait time.Duration) (Msg, error) {
+func rpcWithin(name string, req wire.Msg, wait time.Duration) (wire.Msg, error) {
 	c, err := ensureServer(name)
 	if err != nil {
-		return Msg{}, err
+		return wire.Msg{}, err
 	}
 	defer c.Close()
 	req.Type = "req"
 	req.ID = 1
-	if err := writeMsg(c, req); err != nil {
-		return Msg{}, err
+	if err := wire.WriteMsg(c, req); err != nil {
+		return wire.Msg{}, err
 	}
 	_ = c.SetReadDeadline(time.Now().Add(wait))
 	for {
-		got, err := readMsg(c)
+		got, err := wire.ReadMsg(c)
 		if err != nil {
-			return Msg{}, err
+			return wire.Msg{}, err
 		}
 		if got.Type == "resp" {
 			return got, nil

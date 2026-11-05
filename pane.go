@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"dm/internal/paths"
+	"dm/internal/wire"
+
 	"github.com/creack/pty"
 	"github.com/hinshun/vt10x"
 )
@@ -36,7 +38,7 @@ type paneProc struct {
 	mu   sync.Mutex
 	vt   vt10x.Terminal
 	ring *scrollRing
-	st   Status
+	st   wire.Status
 	subs map[*subConn]bool
 	dead bool
 	mode vt10x.ModeFlag
@@ -60,10 +62,10 @@ type subConn struct {
 	mu sync.Mutex
 }
 
-func (s *subConn) send(m Msg) error {
+func (s *subConn) send(m wire.Msg) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return writeMsg(s.c, m)
+	return wire.WriteMsg(s.c, m)
 }
 
 // ringMax is the scrollback a pane keeps: a fixed 512 KiB, allocated once.
@@ -149,7 +151,7 @@ func runPane(args []string) error {
 		vt:   vt10x.New(vt10x.WithSize(*cols, *rows)),
 		ring: &scrollRing{},
 		subs: map[*subConn]bool{},
-		st:   Status{State: "unknown"},
+		st:   wire.Status{State: "unknown"},
 	}
 
 	cmd := exec.Command(p.shell, "-l")
@@ -261,11 +263,11 @@ func (p *paneProc) readLoop() {
 				p.mu.Lock()
 				_, _ = p.vt.Write(b)
 				p.ring.Write(b)
-				p.broadcastLocked(Msg{Type: "bytes", Data: b})
+				p.broadcastLocked(wire.Msg{Type: "bytes", Data: b})
 				if m := p.vt.Mode(); m != p.mode {
 					p.mode = m
 					alt, mouse := modeInfo(m)
-					p.broadcastLocked(Msg{Type: "mode", Res: modeRes(alt, mouse)})
+					p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse)})
 				}
 				p.mu.Unlock()
 			}
@@ -273,14 +275,14 @@ func (p *paneProc) readLoop() {
 		if err != nil {
 			p.mu.Lock()
 			p.dead = true
-			p.broadcastLocked(Msg{Type: "exit"})
+			p.broadcastLocked(wire.Msg{Type: "exit"})
 			p.mu.Unlock()
 			return
 		}
 	}
 }
 
-func (p *paneProc) broadcastLocked(m Msg) {
+func (p *paneProc) broadcastLocked(m wire.Msg) {
 	for sc := range p.subs {
 		_ = sc.send(m)
 	}
@@ -340,20 +342,20 @@ func (p *paneProc) watchCwd() {
 		p.mu.Lock()
 		if dir != p.cwd {
 			p.cwd = dir
-			p.broadcastLocked(Msg{Type: "cwd", Cwd: dir})
+			p.broadcastLocked(wire.Msg{Type: "cwd", Cwd: dir})
 		}
 		p.mu.Unlock()
 	}
 }
 
-func (p *paneProc) setStatus(st Status) {
+func (p *paneProc) setStatus(st wire.Status) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.st == st {
 		return
 	}
 	p.st = st
-	p.broadcastLocked(Msg{Type: "status", St: &st})
+	p.broadcastLocked(wire.Msg{Type: "status", St: &st})
 }
 
 func (p *paneProc) shutdown() {
@@ -378,7 +380,7 @@ func (p *paneProc) serve(c net.Conn) {
 	}()
 
 	for {
-		m, err := readMsg(c)
+		m, err := wire.ReadMsg(c)
 		if err != nil {
 			return
 		}
@@ -410,14 +412,14 @@ func (p *paneProc) serve(c net.Conn) {
 			dead := p.dead
 			p.mu.Unlock()
 			lines := splitLines(text)
-			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, St: &st, Lines: lines,
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, St: &st, Lines: lines,
 				Res: jsonRaw(map[string]any{"title": title, "dead": dead})})
 		case "screen":
 			p.mu.Lock()
 			data := screenBytes(p.vt)
 			alt, mouse := modeInfo(p.vt.Mode())
 			p.mu.Unlock()
-			_ = sc.send(Msg{Type: "screen", Data: data, Res: modeRes(alt, mouse)})
+			_ = sc.send(wire.Msg{Type: "screen", Data: data, Res: modeRes(alt, mouse)})
 		case "replay":
 			p.mu.Lock()
 			data := p.ring.Bytes()
@@ -426,22 +428,22 @@ func (p *paneProc) serve(c net.Conn) {
 			title := p.vt.Title()
 			alt, mouse := modeInfo(p.vt.Mode())
 			p.mu.Unlock()
-			_ = sc.send(Msg{Type: "replay", Data: data, St: &st,
+			_ = sc.send(wire.Msg{Type: "replay", Data: data, St: &st,
 				Res: jsonRaw(map[string]any{"title": title, "dead": dead, "alt": alt, "mouse": mouse})})
 		case "status":
 			p.mu.Lock()
 			st := p.st
 			p.mu.Unlock()
-			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, St: &st})
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, St: &st})
 		case "cwd":
 			p.mu.Lock()
 			dir := p.cwd
 			p.mu.Unlock()
-			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true, Cwd: dir})
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, Cwd: dir})
 		case "ping":
-			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true})
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "kill":
-			_ = sc.send(Msg{Type: "resp", ID: m.ID, OK: true})
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 			p.shutdown()
 			go func() {
 				time.Sleep(50 * time.Millisecond)

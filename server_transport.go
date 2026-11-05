@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 // ensureServer returns a live connection to the session server, starting it if
@@ -52,22 +53,22 @@ func ensureServer(name string) (net.Conn, error) {
 	return nil, fmt.Errorf("server for %q did not start", name)
 }
 
-func rpc(name string, m Msg) (Msg, error) {
+func rpc(name string, m wire.Msg) (wire.Msg, error) {
 	c, err := ensureServer(name)
 	if err != nil {
-		return Msg{}, err
+		return wire.Msg{}, err
 	}
 	defer c.Close()
 	m.Type = "req"
 	m.ID = 1
-	if err := writeMsg(c, m); err != nil {
-		return Msg{}, err
+	if err := wire.WriteMsg(c, m); err != nil {
+		return wire.Msg{}, err
 	}
 	_ = c.SetReadDeadline(time.Now().Add(10 * time.Second))
 	for {
-		got, err := readMsg(c)
+		got, err := wire.ReadMsg(c)
 		if err != nil {
-			return Msg{}, err
+			return wire.Msg{}, err
 		}
 		if got.Type == "resp" {
 			return got, nil

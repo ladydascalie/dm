@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"dm/internal/cells"
+	"dm/internal/wire"
 	"regexp"
 	"strconv"
 	"strings"
@@ -98,7 +99,7 @@ func toastRow(t *testing.T, out, text string) (row, col int) {
 
 // The stack draws both texts, newest nearest the bar.
 func TestDrawToastsStack(t *testing.T) {
-	snap := &Snapshot{Cols: 40, Rows: 12}
+	snap := &wire.Snapshot{Cols: 40, Rows: 12}
 	tui := &tui{}
 	tui.notify("older")
 	tui.notify("newest")
@@ -118,7 +119,7 @@ func TestDrawToastsStack(t *testing.T) {
 // A text wider than the screen is clamped and truncated, not wrapped.
 func TestDrawToastsClampsToScreen(t *testing.T) {
 	cols := 12
-	snap := &Snapshot{Cols: cols, Rows: 6}
+	snap := &wire.Snapshot{Cols: cols, Rows: 6}
 	tui := &tui{}
 	tui.notify("a toast much longer than the screen")
 	var b bytes.Buffer
@@ -139,10 +140,10 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 
 // The bar keeps its content and no longer carries the toast suffix.
 func TestBarDropsToastSuffix(t *testing.T) {
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session: "main", Workspace: "main", Windows: []string{"1"}, Focus: "w1p1",
 		Cols: 60, Rows: 24,
-		Panes: []PaneInfo{{ID: "w1p1", Status: "working"}},
+		Panes: []wire.PaneInfo{{ID: "w1p1", Status: "working"}},
 	}
 	info := "SCROLL w1p1 +1/9"
 	glyph, _ := railGlyph(DefaultTheme(), "working", nerdFonts())
@@ -199,7 +200,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			snap := &Snapshot{Cols: 40, Rows: 8}
+			snap := &wire.Snapshot{Cols: 40, Rows: 8}
 			tui := &tui{}
 			tui.notify(c.text)
 			var b bytes.Buffer

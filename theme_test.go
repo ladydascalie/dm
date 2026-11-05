@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -386,7 +387,7 @@ states {
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 	}
 	var grips bytes.Buffer
-	drawGrips(&grips, th, &Snapshot{Cols: 40, Rows: 10, Root: root})
+	drawGrips(&grips, th, &wire.Snapshot{Cols: 40, Rows: 10, Root: root})
 	if !strings.Contains(grips.String(), "@") || strings.Contains(grips.String(), "•") {
 		t.Fatalf("grips = %q, want the themed @ only", grips.String())
 	}
@@ -428,7 +429,7 @@ func TestThemeDrawGrips(t *testing.T) {
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 	}
-	snap := &Snapshot{Cols: 40, Rows: 10, Rail: 0, Root: root}
+	snap := &wire.Snapshot{Cols: 40, Rows: 10, Rail: 0, Root: root}
 	var buf bytes.Buffer
 	drawGrips(&buf, th, snap)
 	out := buf.String()

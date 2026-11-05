@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 // The queue tests use net.Pipe for the client socket. A write on a pipe blocks
@@ -38,20 +39,20 @@ func screenPane(t *testing.T, session, id string) {
 			go func(c net.Conn) {
 				defer c.Close()
 				for {
-					m, err := readMsg(c)
+					m, err := wire.ReadMsg(c)
 					if err != nil {
 						return
 					}
 					switch m.Action {
 					case "screen":
-						_ = writeMsg(c, Msg{Type: "screen", ID: m.ID,
+						_ = wire.WriteMsg(c, wire.Msg{Type: "screen", ID: m.ID,
 							Target: id, Data: []byte("screen " + id)})
 					case "replay":
-						st := Status{State: "idle"}
-						_ = writeMsg(c, Msg{Type: "replay", ID: m.ID,
+						st := wire.Status{State: "idle"}
+						_ = wire.WriteMsg(c, wire.Msg{Type: "replay", ID: m.ID,
 							Target: id, Data: []byte("replay " + id), St: &st})
 					default:
-						_ = writeMsg(c, Msg{Type: "resp", ID: m.ID, OK: true})
+						_ = wire.WriteMsg(c, wire.Msg{Type: "resp", ID: m.ID, OK: true})
 					}
 				}
 			}(c)
@@ -105,9 +106,9 @@ func stalledClient(t *testing.T, s *server) (*client, net.Conn) {
 }
 
 // readFrame reads one frame, or reports why it could not.
-func readFrame(c net.Conn, wait time.Duration) (Msg, error) {
+func readFrame(c net.Conn, wait time.Duration) (wire.Msg, error) {
 	_ = c.SetReadDeadline(time.Now().Add(wait))
-	return readMsg(c)
+	return wire.ReadMsg(c)
 }
 
 // TestBroadcastWhileClientStalled proves the write left the caller's goroutine:
@@ -126,7 +127,7 @@ func TestBroadcastWhileClientStalled(t *testing.T) {
 			id = b
 		}
 		s.mu.Lock()
-		s.broadcastLocked(Msg{Type: "bytes", Target: id, Data: data})
+		s.broadcastLocked(wire.Msg{Type: "bytes", Target: id, Data: data})
 		s.mu.Unlock()
 		if q := cl.queuedBytes(); q > outboundBytes {
 			t.Fatalf("queued %d bytes, bound is %d", q, outboundBytes)
@@ -151,12 +152,12 @@ func TestBroadcastWhileClientStalled(t *testing.T) {
 	q0, f0 := cl.queuedBytes(), cl.queuedFrames()
 
 	// A stale client owes a picture, so output does not queue again.
-	cl.deliver(Msg{Type: "bytes", Target: a, Data: data})
+	cl.deliver(wire.Msg{Type: "bytes", Target: a, Data: data})
 	if q, f := cl.queuedBytes(), cl.queuedFrames(); q != q0 || f != f0 {
 		t.Fatalf("a bytes frame queued for a stale client: %d frames / %d bytes, was %d / %d", f, q, f0, q0)
 	}
 	// Any other frame still queues: only output is replaced by the resync.
-	cl.deliver(Msg{Type: "resp", ID: 7, OK: true})
+	cl.deliver(wire.Msg{Type: "resp", ID: 7, OK: true})
 	q1, f1 := cl.queuedBytes(), cl.queuedFrames()
 	if f1 != f0+1 || q1 <= q0 {
 		t.Fatalf("a resp frame did not queue for a stale client: %d frames / %d bytes, was %d / %d", f1, q1, f0, q0)
@@ -168,7 +169,7 @@ func TestBroadcastWhileClientStalled(t *testing.T) {
 
 	// The stale client owes a picture, not a backlog: once it drains, the
 	// writer resyncs from the server's snapshot.
-	var snap Msg
+	var snap wire.Msg
 	for i := 0; ; i++ {
 		m, err := readFrame(cli, 5*time.Second)
 		if err != nil {
@@ -199,7 +200,7 @@ func TestStalledClientResyncsFromScreens(t *testing.T) {
 		if i%2 == 1 {
 			id = b
 		}
-		cl.deliver(Msg{Type: "bytes", Target: id, Data: data})
+		cl.deliver(wire.Msg{Type: "bytes", Target: id, Data: data})
 	}
 	if q := cl.queuedBytes(); q > outboundBytes {
 		t.Fatalf("queued %d bytes, bound is %d", q, outboundBytes)
@@ -207,7 +208,7 @@ func TestStalledClientResyncsFromScreens(t *testing.T) {
 
 	// Drain until the resync snapshot. Everything before it is the one frame
 	// the writer already had in flight.
-	var snap Msg
+	var snap wire.Msg
 	for i := 0; ; i++ {
 		m, err := readFrame(cli, 5*time.Second)
 		if err != nil {
@@ -257,13 +258,13 @@ func TestMutationRepliesWhileClientStalled(t *testing.T) {
 	// already behind and the reply has to share the bound with the backlog.
 	data := make([]byte, 8<<10)
 	for i := 0; i < 300; i++ {
-		cl.deliver(Msg{Type: "bytes", Target: a, Data: data})
+		cl.deliver(wire.Msg{Type: "bytes", Target: a, Data: data})
 	}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		s.handleReq(cl, Msg{Type: "req", Action: "focus", Target: b, ID: 5})
+		s.handleReq(cl, wire.Msg{Type: "req", Action: "focus", Target: b, ID: 5})
 	}()
 	select {
 	case <-done:
@@ -271,7 +272,7 @@ func TestMutationRepliesWhileClientStalled(t *testing.T) {
 		t.Fatal("handleReq blocked on a stalled client")
 	}
 
-	var reply *Msg
+	var reply *wire.Msg
 	for i := 0; i < 64; i++ {
 		m, err := readFrame(cli, 2*time.Second)
 		if err != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/wire"
 	"fmt"
 	"net"
 	"runtime"
@@ -115,17 +116,17 @@ func TestReplayAfterWrap(t *testing.T) {
 		vt:   vt10x.New(vt10x.WithSize(80, 24)),
 		ring: r,
 		subs: map[*subConn]bool{},
-		st:   Status{State: "unknown"},
+		st:   wire.Status{State: "unknown"},
 	}
 	serve, cli := net.Pipe()
 	defer cli.Close()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(10 * time.Second))
-	if err := writeMsg(cli, Msg{Type: "req", Action: "replay"}); err != nil {
+	if err := wire.WriteMsg(cli, wire.Msg{Type: "req", Action: "replay"}); err != nil {
 		t.Fatalf("send replay request: %v", err)
 	}
-	reply, err := readMsg(cli)
+	reply, err := wire.ReadMsg(cli)
 	if err != nil {
 		t.Fatalf("read replay reply: %v", err)
 	}
@@ -153,7 +154,7 @@ func TestPaneHeapAfterBurst(t *testing.T) {
 		id:   "w1p1",
 		vt:   vt10x.New(vt10x.WithSize(80, 24)),
 		ring: &scrollRing{},
-		st:   Status{State: "unknown"},
+		st:   wire.Status{State: "unknown"},
 	}
 	writeChunks(burst, func(b []byte) {
 		_, _ = p.vt.Write(b)

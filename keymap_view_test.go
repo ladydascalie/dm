@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -129,7 +130,7 @@ keymap "scroll" {
 // TestKeymapViewPaints: the float carries the title, a mode header, a key and
 // action row, and the key hint.
 func TestKeymapViewPaints(t *testing.T) {
-	snap := &Snapshot{Cols: 120, Rows: 40, Rail: 30}
+	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
 	k := newKeymapView(snap, LoadDefault())
 	screen := keymapScreen(t, k, snap.Cols, snap.Rows)
 	r := k.float.Rect
@@ -167,7 +168,7 @@ func TestKeymapViewPaints(t *testing.T) {
 // TestKeymapViewScrollsAndClamps: the window stops at the first row and at the
 // last row that still fills the rect, and the paint follows the offset.
 func TestKeymapViewScrollsAndClamps(t *testing.T) {
-	snap := &Snapshot{Cols: 100, Rows: 14, Rail: 0}
+	snap := &wire.Snapshot{Cols: 100, Rows: 14, Rail: 0}
 	k := newKeymapView(snap, LoadDefault())
 	h := k.float.Rect.H
 	max := len(k.rows) - h
@@ -194,7 +195,7 @@ func TestKeymapViewScrollsAndClamps(t *testing.T) {
 
 	// A snapshot that changes the screen keeps the window on the rows.
 	k.scroll(1000)
-	smaller := &Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	smaller := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
 	k.sync(smaller)
 	if k.off > len(k.rows)-k.float.Rect.H {
 		t.Fatalf("sync left the window past the last row: off=%d rows=%d h=%d",
@@ -205,7 +206,7 @@ func TestKeymapViewScrollsAndClamps(t *testing.T) {
 // TestKeymapSearch: a query matches binding rows only, scrolls the first
 // match into view, and next/prev move between matches.
 func TestKeymapSearch(t *testing.T) {
-	snap := &Snapshot{Cols: 120, Rows: 40, Rail: 30}
+	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
 	k := newKeymapView(snap, LoadDefault())
 	k.startSearch()
 	k.appendQuery("split")

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -15,7 +16,7 @@ import (
 // the test drives by hand.
 type frameTUI struct {
 	tui  *tui
-	snap *Snapshot
+	snap *wire.Snapshot
 	out  *bytes.Buffer
 }
 
@@ -24,11 +25,11 @@ type frameTUI struct {
 func newFrameTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 	t.Helper()
 	root := &layout.Node{Pane: "w1p1"}
-	snap := &Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
+	snap := &wire.Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), rects)
-	snap.Panes = []PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
-	snap.All = []AllPane{{
+	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
+	snap.All = []wire.AllPane{{
 		ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 		Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
 		WindowActive: true, WindowUnfolded: true,
@@ -51,7 +52,7 @@ func (f *frameTUI) frame() string {
 
 // relayout recomputes the pane rects after a size change, the way the server
 // does not: a test owns both halves of the picture.
-func relayout(snap *Snapshot) {
+func relayout(snap *wire.Snapshot) {
 	rects := map[string]layout.Rect{}
 	layout.Layout(snap.Root, layout.PaneAreaFor(snap.Cols, snap.Rows, snap.Rail), rects)
 	for i := range snap.Panes {
@@ -455,11 +456,11 @@ func TestOracleResize(t *testing.T) {
 
 func TestOracleDividerHover(t *testing.T) {
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
-	snap := &Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneAreaFor(100, 20, 0), rects)
-	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
-	snap.All = []AllPane{
+	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
+	snap.All = []wire.AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
 		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
 	}
@@ -555,11 +556,11 @@ func TestOracleModes(t *testing.T) {
 
 func TestOracleOverlayOverGap(t *testing.T) {
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
-	snap := &Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneAreaFor(100, 20, 0), rects)
-	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
-	snap.All = []AllPane{
+	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
+	snap.All = []wire.AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
 		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
 	}
@@ -643,13 +644,13 @@ func TestOracleResizeLive(t *testing.T) {
 	checkFrame(t, live, f.tui, "rail-hidden", []byte(raw))
 }
 
-func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *Snapshot) {
+func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *wire.Snapshot) {
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
-	snap := &Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "a"}
+	snap := &wire.Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), rects)
-	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
-	snap.All = []AllPane{
+	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
+	snap.All = []wire.AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
 		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
 	}
@@ -791,7 +792,7 @@ func TestOracleSplit(t *testing.T) {
 	checkFrame(t, live, f.tui, "first", []byte(raw))
 
 	f.snap.Root = &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "w1p1"}, {Pane: "w1p2"}}}
-	f.snap.Panes = []PaneInfo{{ID: "w1p1"}, {ID: "w1p2"}}
+	f.snap.Panes = []wire.PaneInfo{{ID: "w1p1"}, {ID: "w1p2"}}
 	relayout(f.snap)
 	for _, p := range f.snap.Panes {
 		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))

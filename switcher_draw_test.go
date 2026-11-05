@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -22,14 +23,14 @@ var switcherSizes = [][2]int{
 }
 
 // switcherAt opens the switcher over the fixture on a cols by rows screen.
-func switcherAt(cols, rows int) (*switcher, *Snapshot) {
+func switcherAt(cols, rows int) (*switcher, *wire.Snapshot) {
 	snap := switcherSnap()
 	snap.Cols, snap.Rows = cols, rows
 	return newSwitcher(paletteRect(cols, rows), snap), snap
 }
 
 // drawFloat draws the switcher and replays its bytes into a fresh screen.
-func drawFloat(t *testing.T, s *switcher, snap *Snapshot, vts map[string]vt10x.Terminal) (string, int, int, vt10x.Terminal) {
+func drawFloat(t *testing.T, s *switcher, snap *wire.Snapshot, vts map[string]vt10x.Terminal) (string, int, int, vt10x.Terminal) {
 	t.Helper()
 	var b bytes.Buffer
 	cx, cy := drawSwitcher(&b, DefaultTheme(), s, snap, vts)

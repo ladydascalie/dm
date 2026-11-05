@@ -21,13 +21,14 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
 
 func TestOSCFilter(t *testing.T) {
-	var got []Status
-	f := &oscFilter{status: func(s Status) { got = append(got, s) }}
+	var got []wire.Status
+	f := &oscFilter{status: func(s wire.Status) { got = append(got, s) }}
 	var out bytes.Buffer
 
 	f.feed([]byte("hello \x1b]7501;{\"state\":\"work"), &out)
@@ -343,11 +344,11 @@ func TestDrawSessionsWidth(t *testing.T) {
 
 // A pane daemon outlives the server, so the read reply must keep its shape.
 func TestReadReplyStaysBackwardCompatible(t *testing.T) {
-	old, err := readMsg(bytes.NewReader(frame(t, `{"type":"resp","lines":["a","b"]}`)))
+	old, err := wire.ReadMsg(bytes.NewReader(frame(t, `{"type":"resp","lines":["a","b"]}`)))
 	if err != nil || len(old.Lines) != 2 || old.Lines[1] != "b" {
 		t.Fatalf("old read reply: %+v %v", old, err)
 	}
-	req, err := readMsg(bytes.NewReader(frame(t, `{"type":"req","action":"history","count":7}`)))
+	req, err := wire.ReadMsg(bytes.NewReader(frame(t, `{"type":"req","action":"history","count":7}`)))
 	if err != nil || req.Count != 7 || req.Lines != nil {
 		t.Fatalf("history request: %+v %v", req, err)
 	}
@@ -418,7 +419,7 @@ func TestTerminalQueriesAnswered(t *testing.T) {
 func TestOSC7501QueryReply(t *testing.T) {
 	queries := 0
 	f := &oscFilter{
-		status: func(Status) { t.Fatal("query must not become a status") },
+		status: func(wire.Status) { t.Fatal("query must not become a status") },
 		query:  func() { queries++ },
 	}
 	var out bytes.Buffer
@@ -515,7 +516,7 @@ func TestIDsAreAddressable(t *testing.T) {
 }
 
 func TestFocusForClick(t *testing.T) {
-	p := &PaneInfo{ID: "w1p2", Mouse: true}
+	p := &wire.PaneInfo{ID: "w1p2", Mouse: true}
 	if got := focusForClick(p, "w1p1", mouseEvent{btn: 0}); got != "w1p2" {
 		t.Fatalf("left press on a mouse-claiming pane = %q", got)
 	}
@@ -797,8 +798,8 @@ func TestRailAllPanes(t *testing.T) {
 	}
 	s := railServer(st)
 	st.Panes["w1p2"].App = "pi"
-	s.panes["w1p2"] = &paneConn{st: Status{State: "working", Message: "working hard"}}
-	s.panes["w2p1"] = &paneConn{st: Status{State: "unknown", Message: "unreported"}}
+	s.panes["w1p2"] = &paneConn{st: wire.Status{State: "working", Message: "working hard"}}
+	s.panes["w2p1"] = &paneConn{st: wire.Status{State: "unknown", Message: "unreported"}}
 
 	snap := s.snapshotLocked()
 	if len(snap.Panes) != 2 {
@@ -843,7 +844,7 @@ func TestRailAllPanes(t *testing.T) {
 // paneMsg is one message a pane's socket received, tagged with the pane.
 type paneMsg struct {
 	id string
-	m  Msg
+	m  wire.Msg
 }
 
 // zoomFixture is an in-process server whose active window is one row split,
@@ -876,7 +877,7 @@ func newZoomFixture(t *testing.T) *zoomFixture {
 		f.s.panes[id] = &paneConn{id: id, c: srv}
 		go func(id string, c net.Conn) {
 			for {
-				m, err := readMsg(c)
+				m, err := wire.ReadMsg(c)
 				if err != nil {
 					return
 				}
@@ -892,8 +893,8 @@ func newZoomFixture(t *testing.T) *zoomFixture {
 }
 
 // drain returns the messages each pane received, once the channel goes quiet.
-func (f *zoomFixture) drain() map[string][]Msg {
-	out := map[string][]Msg{}
+func (f *zoomFixture) drain() map[string][]wire.Msg {
+	out := map[string][]wire.Msg{}
 	for {
 		select {
 		case got := <-f.inbox:
@@ -1009,22 +1010,22 @@ func TestZoomStalePaneNotSent(t *testing.T) {
 
 // railTestSnapshot is a two-pane session with a rail. Panes start after the
 // rail, and All carries the same two panes in server order.
-func railTestSnapshot(rail int) *Snapshot {
+func railTestSnapshot(rail int) *wire.Snapshot {
 	root := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "w1p1"}, {Pane: "w1p2"}},
 	}
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session: "x", Workspace: "main", Windows: []string{"one"},
 		Cols: 100, Rows: 10, Rail: rail, Root: root, Focus: "w1p1",
 	}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneAreaFor(snap.Cols, snap.Rows, rail), rects)
-	snap.Panes = []PaneInfo{
+	snap.Panes = []wire.PaneInfo{
 		{ID: "w1p1", Rect: rects["w1p1"], Status: "working"},
 		{ID: "w1p2", Rect: rects["w1p2"], Status: "idle"},
 	}
-	snap.All = []AllPane{
+	snap.All = []wire.AllPane{
 		{
 			ID: "w1p1", Name: "alpha", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
@@ -1040,13 +1041,13 @@ func railTestSnapshot(rail int) *Snapshot {
 }
 
 // railOnePane is a single pane with a rail, for glyph and width tests.
-func railOnePane(status, name string, rail, cols, rows int) *Snapshot {
+func railOnePane(status, name string, rail, cols, rows int) *wire.Snapshot {
 	root := &layout.Node{Pane: "w1p1"}
-	snap := &Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
+	snap := &wire.Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), rects)
-	snap.Panes = []PaneInfo{{ID: "w1p1", Rect: rects["w1p1"], Status: status}}
-	snap.All = []AllPane{{
+	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Rect: rects["w1p1"], Status: status}}
+	snap.All = []wire.AllPane{{
 		ID: "w1p1", Name: name, Status: status,
 		Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
 		Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
@@ -1056,14 +1057,14 @@ func railOnePane(status, name string, rail, cols, rows int) *Snapshot {
 
 // agentRail is railOnePane with the pane marked as an agent, so its row draws
 // a state glyph.
-func agentRail(status string) *Snapshot {
+func agentRail(status string) *wire.Snapshot {
 	snap := railOnePane(status, "", 12, 40, 6)
 	snap.All[0].Agent = true
 	return snap
 }
 
 func TestRailItemsGrouping(t *testing.T) {
-	snap := &Snapshot{All: []AllPane{
+	snap := &wire.Snapshot{All: []wire.AllPane{
 		{
 			ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true,
@@ -1392,7 +1393,7 @@ func TestRailHit(t *testing.T) {
 	// takes Rows-2, so the item rows stop at Rows-3.
 	small := railTestSnapshot(10)
 	small.Rows = 5
-	small.All = []AllPane{
+	small.All = []wire.AllPane{
 		{
 			ID: "w1p1", Workspace: "s1", WorkspaceName: "main", Window: "w1",
 			WindowName: "one", WindowUnfolded: true,
@@ -1577,13 +1578,13 @@ func TestRailWindowWorktree(t *testing.T) {
 
 // railTree is two workspaces, each with one unfolded window. The first is a
 // dirty linked worktree with stats and a message; the second is clean.
-func railTree(rail int) *Snapshot {
-	snap := &Snapshot{
+func railTree(rail int) *wire.Snapshot {
+	snap := &wire.Snapshot{
 		Cols: 100, Rows: 12, Rail: rail,
 		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
 	}
-	snap.Panes = []PaneInfo{{ID: "w1p1", Status: "working"}}
-	snap.All = []AllPane{
+	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Status: "working"}}
+	snap.All = []wire.AllPane{
 		{
 			ID: "w1p1", Name: "pi", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
@@ -1600,7 +1601,7 @@ func railTree(rail int) *Snapshot {
 }
 
 // railRows draws a rail and returns the text of each row inside the rail width.
-func railRows(t *testing.T, snap *Snapshot) []string {
+func railRows(t *testing.T, snap *wire.Snapshot) []string {
 	t.Helper()
 	var b bytes.Buffer
 	drawRail(&b, DefaultTheme(), snap)
@@ -2035,9 +2036,9 @@ func TestRailAccentDistinct(t *testing.T) {
 		t.Fatalf("fixture ids do not collide: %v %v %v %v",
 			railAccentSlot("s2"), railAccentSlot("s3"), railAccentSlot("s4"), railAccentSlot("s5"))
 	}
-	snap := &Snapshot{Cols: 100, Rows: 20, Rail: layout.DefaultRail}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: layout.DefaultRail}
 	for _, id := range ids {
-		snap.All = append(snap.All, AllPane{
+		snap.All = append(snap.All, wire.AllPane{
 			ID: id + "p1", Workspace: id, WorkspaceName: id,
 			Window: id + "w1", WindowName: "one", WindowUnfolded: true,
 		})
@@ -2156,19 +2157,19 @@ func TestRailNoteElision(t *testing.T) {
 func TestRailToggle(t *testing.T) {
 	tui, got := clientTUI(t, nil)
 	// A client that has only seen a hidden rail asks for the default.
-	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{Rail: 0, Cols: 100, Rows: 30}})
 	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.DefaultRail {
 		t.Fatalf("toggle from hidden sent %+v, want set-rail %d", m, layout.DefaultRail)
 	}
 	// A full rail collapses to the thin width, not to hidden.
-	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 30, RailWant: 30, Cols: 100, Rows: 30}})
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{Rail: 30, RailWant: 30, Cols: 100, Rows: 30}})
 	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
 		t.Fatalf("toggle from full sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 	// The thin rail hides, and the full width is still remembered.
-	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{
 		Rail:     layout.CollapsedRail,
 		RailWant: layout.CollapsedRail, Cols: 100, Rows: 30,
 	}})
@@ -2176,21 +2177,21 @@ func TestRailToggle(t *testing.T) {
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
 		t.Fatalf("toggle from thin sent %+v, want set-rail 0", m)
 	}
-	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{Rail: 0, Cols: 100, Rows: 30}})
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{Rail: 0, Cols: 100, Rows: 30}})
 	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("toggle after hide sent %+v, want set-rail 30", m)
 	}
 	// A narrow terminal clamps the effective rail but the requested width
 	// survives, so hiding and showing restores the request, not the clamp.
-	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{
 		Rail: layout.EffectiveRail(80, 30), RailWant: 30, Cols: 80, Rows: 30,
 	}})
 	tui.key('b')
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
 		t.Fatalf("narrow collapse sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
-	tui.apply(Msg{Type: "snapshot", Snap: &Snapshot{
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{
 		Rail: 0, RailWant: 0, Cols: 80, Rows: 30,
 	}})
 	tui.key('b')
@@ -2296,14 +2297,14 @@ func TestRailNeverWritesPastWidth(t *testing.T) {
 }
 
 func TestBarNeverWritesPastWidth(t *testing.T) {
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session:   strings.Repeat("日本語", 10),
 		Workspace: strings.Repeat("作業", 6),
 		Windows:   []string{"一"},
 		Cols:      20,
 		Rows:      5,
 		Focus:     "w1p1",
-		Panes: []PaneInfo{{
+		Panes: []wire.PaneInfo{{
 			ID: "w1p1", Name: strings.Repeat("日本語", 4),
 			Status: "working",
 		}},
@@ -2337,18 +2338,18 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 
 // barTestSnap is the footer snapshot the segment tests share: a middle active
 // window and an agent in focus, so every elision step has room to show.
-func barTestSnap(cols int) *Snapshot {
-	return &Snapshot{
+func barTestSnap(cols int) *wire.Snapshot {
+	return &wire.Snapshot{
 		Session:      "dev",
 		Workspace:    "workspace-a",
 		Windows:      []string{"api-server", "web", "docs"},
 		ActiveWindow: 1,
 		Focus:        "w1p2",
-		Panes: []PaneInfo{
+		Panes: []wire.PaneInfo{
 			{ID: "w1p1", Name: "bash"},
 			{ID: "w1p2", Name: "shell", Status: "idle"},
 		},
-		All: []AllPane{
+		All: []wire.AllPane{
 			{ID: "w1p1", Agent: false},
 			{ID: "w1p2", Agent: true, Status: "idle"},
 		},
@@ -2588,14 +2589,14 @@ func TestBarElide(t *testing.T) {
 // TestBarPinned keeps the pinned block whole while the left block gives way:
 // both segments survive at 34 columns, and info survives alone at 20.
 func TestBarPinned(t *testing.T) {
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session:      "long-session-name",
 		Workspace:    "a-very-long-workspace-name",
 		Windows:      []string{"a-very-long-window-name-one", "two"},
 		ActiveWindow: 0,
 		Focus:        "w1p1",
-		Panes:        []PaneInfo{{ID: "w1p1", Name: "a-long-pane-name", Status: "working"}},
-		All:          []AllPane{{ID: "w1p1", Agent: true}},
+		Panes:        []wire.PaneInfo{{ID: "w1p1", Name: "a-long-pane-name", Status: "working"}},
+		All:          []wire.AllPane{{ID: "w1p1", Agent: true}},
 		Cols:         34,
 		Rows:         24,
 	}
@@ -2751,14 +2752,14 @@ func TestBarWideRunes(t *testing.T) {
 		"日本語セッション", "作業ディレクトリ", "▸ ", "1 一二三",
 		"2 四五六", " w1p1", " 日本語", " working", glyph,
 	}
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session:      "日本語セッション",
 		Workspace:    "作業ディレクトリ",
 		Windows:      []string{"一二三", "四五六"},
 		ActiveWindow: 0,
 		Focus:        "w1p1",
-		Panes:        []PaneInfo{{ID: "w1p1", Name: "日本語", Status: "working"}},
-		All:          []AllPane{{ID: "w1p1", Agent: true}},
+		Panes:        []wire.PaneInfo{{ID: "w1p1", Name: "日本語", Status: "working"}},
+		All:          []wire.AllPane{{ID: "w1p1", Agent: true}},
 		Rows:         24,
 	}
 	for _, cols := range []int{80, 41, 40, 21, 8, 3, 1} {
@@ -2795,11 +2796,11 @@ func TestBarWideRunes(t *testing.T) {
 // its state glyph and colour on the focus fill, a shell shows the prompt marker.
 func TestBarFocusChip(t *testing.T) {
 	nerd := nerdFonts()
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session: "s",
 		Focus:   "w1p1",
-		Panes:   []PaneInfo{{ID: "w1p1", Name: "agent", Status: "blocked"}},
-		All:     []AllPane{{ID: "w1p1", Agent: true, Status: "blocked"}},
+		Panes:   []wire.PaneInfo{{ID: "w1p1", Name: "agent", Status: "blocked"}},
+		All:     []wire.AllPane{{ID: "w1p1", Agent: true, Status: "blocked"}},
 		Cols:    80,
 		Rows:    24,
 	}
@@ -2837,8 +2838,8 @@ func TestBarFocusChip(t *testing.T) {
 
 	// A shell reports no state: it gets the prompt marker in dim text, and its
 	// empty status reads as unknown.
-	snap.Panes[0] = PaneInfo{ID: "w1p1", Name: "bash"}
-	snap.All[0] = AllPane{ID: "w1p1", Agent: false}
+	snap.Panes[0] = wire.PaneInfo{ID: "w1p1", Name: "bash"}
+	snap.All[0] = wire.AllPane{ID: "w1p1", Agent: false}
 	segs = barSegments(DefaultTheme(), snap, false, "")
 	if len(segs) < 4 {
 		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
@@ -2881,7 +2882,7 @@ func TestPadHitCrossesChildBorders(t *testing.T) {
 	}
 
 	// The same cell starts a vertical drag over the root split's full width.
-	snap := &Snapshot{Cols: 80, Rows: 25, Root: root}
+	snap := &wire.Snapshot{Cols: 80, Rows: 25, Root: root}
 	ds, ok := dragPress(snap, ipad.X, pad.Y+1)
 	if !ok || ds.first != "a" || (ds.second != "b" && ds.second != "c") ||
 		ds.axis != "col" || ds.rect != area || ds.zone != pad {
@@ -2900,7 +2901,7 @@ func TestDividerGripsAlwaysVisible(t *testing.T) {
 		Dir: "col", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, inner},
 	}
-	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 26, Root: root}
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 26, Root: root}
 	var buf bytes.Buffer
 	drawGrips(&buf, DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(100, 30))
@@ -2981,7 +2982,7 @@ func TestRailDragUsesOffset(t *testing.T) {
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 	}
-	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 20, Root: root}
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 20, Root: root}
 	area := layout.PaneAreaFor(100, 30, 20)
 	boxes := layout.ChildBoxRects(root, area)
 	pad := layout.PadRect(root, boxes, 0)
@@ -3109,9 +3110,9 @@ func TestMenuOutsideClickFocusesPane(t *testing.T) {
 	defer a.Close()
 	defer b.Close()
 	tui.conn = &conn{Conn: a}
-	got := make(chan Msg, 1)
+	got := make(chan wire.Msg, 1)
 	go func() {
-		if m, err := readMsg(b); err == nil {
+		if m, err := wire.ReadMsg(b); err == nil {
 			got <- m
 		}
 	}()
@@ -3232,7 +3233,7 @@ func TestMenuKeyboard(t *testing.T) {
 
 // clientTUI builds a client with a real snapshot and a conn over net.Pipe, and
 // a reader that collects every message the client sends.
-func clientTUI(t *testing.T, mouse map[string]bool) (*tui, chan Msg) {
+func clientTUI(t *testing.T, mouse map[string]bool) (*tui, chan wire.Msg) {
 	t.Helper()
 	row := &layout.Node{Pane: "a"}
 	snap := testSnapshot(row, 100, 30, mouse)
@@ -3244,10 +3245,10 @@ func clientTUI(t *testing.T, mouse map[string]bool) (*tui, chan Msg) {
 		b.Close()
 	})
 	tui.conn = &conn{Conn: a}
-	got := make(chan Msg, 16)
+	got := make(chan wire.Msg, 16)
 	go func() {
 		for {
-			m, err := readMsg(b)
+			m, err := wire.ReadMsg(b)
 			if err != nil {
 				close(got)
 				return
@@ -3258,12 +3259,12 @@ func clientTUI(t *testing.T, mouse map[string]bool) (*tui, chan Msg) {
 	return tui, got
 }
 
-func pasteTUI(t *testing.T) (*tui, chan Msg) {
+func pasteTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	return clientTUI(t, nil)
 }
 
-func nextMsg(t *testing.T, got chan Msg) Msg {
+func nextMsg(t *testing.T, got chan wire.Msg) wire.Msg {
 	t.Helper()
 	select {
 	case m, ok := <-got:
@@ -3274,10 +3275,10 @@ func nextMsg(t *testing.T, got chan Msg) Msg {
 	case <-time.After(time.Second):
 		t.Fatal("no message")
 	}
-	return Msg{}
+	return wire.Msg{}
 }
 
-func noMsg(t *testing.T, got chan Msg) {
+func noMsg(t *testing.T, got chan wire.Msg) {
 	t.Helper()
 	select {
 	case m := <-got:
@@ -3594,14 +3595,14 @@ func TestSelectionClearsOnResize(t *testing.T) {
 	row := &layout.Node{Pane: "a"}
 	same := testSnapshot(row, 100, 30, nil)
 	same.Focus = "a"
-	tui.apply(Msg{Type: "snapshot", Snap: same})
+	tui.apply(wire.Msg{Type: "snapshot", Snap: same})
 	if tui.selText == nil {
 		t.Fatal("an unchanged snapshot dropped the selection")
 	}
 	// A resized pane drops it.
 	resized := testSnapshot(row, 90, 30, nil)
 	resized.Focus = "a"
-	tui.apply(Msg{Type: "snapshot", Snap: resized})
+	tui.apply(wire.Msg{Type: "snapshot", Snap: resized})
 	if tui.selText != nil || tui.press != nil {
 		t.Fatal("selection survived the resize")
 	}
@@ -3810,11 +3811,11 @@ func TestDrawMenu(t *testing.T) {
 // TestBarPadsToWidth paints the whole last row on the bar ground, so no cell of
 // the previous frame survives and the row reaches its final column.
 func TestBarPadsToWidth(t *testing.T) {
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session: "dev", Workspace: "work", Windows: []string{"one", "two"},
 		ActiveWindow: 0, Focus: "w1p1",
-		Panes: []PaneInfo{{ID: "w1p1", Name: "bash"}},
-		All:   []AllPane{{ID: "w1p1", Agent: false}},
+		Panes: []wire.PaneInfo{{ID: "w1p1", Name: "bash"}},
+		All:   []wire.AllPane{{ID: "w1p1", Agent: false}},
 		Cols:  60, Rows: 6,
 	}
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
@@ -3993,12 +3994,12 @@ func TestWindowNameMigration(t *testing.T) {
 	}
 }
 
-func testSnapshot(root *layout.Node, cols, rows int, mouse map[string]bool) *Snapshot {
-	snap := &Snapshot{Root: root, Cols: cols, Rows: rows}
+func testSnapshot(root *layout.Node, cols, rows int, mouse map[string]bool) *wire.Snapshot {
+	snap := &wire.Snapshot{Root: root, Cols: cols, Rows: rows}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneArea(cols, rows), rects)
 	for _, id := range layout.AllPanes(root) {
-		snap.Panes = append(snap.Panes, PaneInfo{ID: id, Rect: rects[id], Mouse: mouse[id]})
+		snap.Panes = append(snap.Panes, wire.PaneInfo{ID: id, Rect: rects[id], Mouse: mouse[id]})
 	}
 	return snap
 }
@@ -4660,7 +4661,7 @@ func TestHelpOpensAndCloses(t *testing.T) {
 // carrying a mark, so a frame's bytes say which panes it painted.
 type zoomFrameTUI struct {
 	tui  *tui
-	snap *Snapshot
+	snap *wire.Snapshot
 	out  *bytes.Buffer
 }
 
@@ -4811,7 +4812,7 @@ func TestZoomHitsFollowTheZoomedPane(t *testing.T) {
 	x, y := a.X+2, a.Y+2
 	f.zoom("b")
 	for _, box := range []bool{true, false} {
-		var got *PaneInfo
+		var got *wire.PaneInfo
 		if box {
 			got = f.tui.paneAtBox(x, y)
 		} else {

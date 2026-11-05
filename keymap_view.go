@@ -13,6 +13,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -37,12 +38,12 @@ type keymapView struct {
 	match     int
 	searching bool
 	float     *FloatingPane
-	snap      *Snapshot
+	snap      *wire.Snapshot
 }
 
 // newKeymapView opens the float on a screen. The rows are built once, so a
 // scroll never re-reads the config.
-func newKeymapView(snap *Snapshot, cfg *Config) *keymapView {
+func newKeymapView(snap *wire.Snapshot, cfg *Config) *keymapView {
 	k := &keymapView{float: &FloatingPane{ID: keymapViewID, Active: true}, snap: snap}
 	k.rows = keymapRows(cfg)
 	k.sync(snap)
@@ -81,7 +82,7 @@ func keymapRows(cfg *Config) []string {
 // clear of the rail, at most 96 columns and rows-6. The height follows n, the
 // row count, so a short list reads in a short box. A list longer than the cap
 // scrolls.
-func keymapViewRect(snap *Snapshot, n int) layout.Rect {
+func keymapViewRect(snap *wire.Snapshot, n int) layout.Rect {
 	left := snap.Rail
 	if left < 0 {
 		left = 0
@@ -119,7 +120,7 @@ func keymapViewRect(snap *Snapshot, n int) layout.Rect {
 
 // sync fits the float to the screen after a snapshot or a rail change and
 // repaints the window.
-func (k *keymapView) sync(snap *Snapshot) {
+func (k *keymapView) sync(snap *wire.Snapshot) {
 	k.snap = snap
 	k.float.Rect = keymapViewRect(snap, len(k.rows))
 	k.clamp()

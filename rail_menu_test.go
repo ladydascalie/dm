@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/wire"
 	"strings"
 	"testing"
 )
@@ -8,7 +9,7 @@ import (
 // railMenuTUI is a client on the railRowSnap rail with a live conn. The rail
 // rows are: 0 workspace main, 1 window one, 2 its note, 3 pane pi, 4 window
 // two, 5 gap, 6 workspace work, 7 window three. Row 8 is the control.
-func railMenuTUI(t *testing.T) (*tui, chan Msg) {
+func railMenuTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	tui, got := clientTUI(t, nil)
 	tui.snap = railRowSnap(20)

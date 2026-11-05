@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 // fitToClientsLocked takes the shared session size from the largest attached
@@ -92,10 +93,10 @@ func (s *server) clearZoom() {
 	s.mu.Unlock()
 }
 
-func (s *server) snapshotLocked() *Snapshot {
+func (s *server) snapshotLocked() *wire.Snapshot {
 	win := s.st.win()
 	rects := s.paneRectsLocked()
-	snap := &Snapshot{
+	snap := &wire.Snapshot{
 		Session:      s.st.Name,
 		Workspace:    s.st.ws().Name,
 		Windows:      []string{},
@@ -113,7 +114,7 @@ func (s *server) snapshotLocked() *Snapshot {
 	}
 	for _, id := range layout.AllPanes(win.Root) {
 		pc := s.panes[id]
-		info := PaneInfo{ID: id, Rect: rects[id]}
+		info := wire.PaneInfo{ID: id, Rect: rects[id]}
 		if pc != nil {
 			info.Status = pc.st.State
 			info.Message = pc.st.Message
@@ -136,7 +137,7 @@ func (s *server) snapshotLocked() *Snapshot {
 // noteStatus persists the agent mark and the reporting app. Both keep the
 // sidebar calling a pane an agent after state=clear, and both survive a server
 // or pane restart because they live in the state file.
-func (s *server) noteStatus(id string, st Status) {
+func (s *server) noteStatus(id string, st wire.Status) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ps := s.st.Panes[id]
@@ -161,14 +162,14 @@ func (s *server) noteStatus(id string, st Status) {
 // order. A pane is an agent when it has a recorded name, reported the status
 // protocol at least once, or has a status other than empty or unknown;
 // otherwise it is a shell. The caller holds s.mu.
-func (s *server) allPanesLocked() []AllPane {
-	out := make([]AllPane, 0, len(s.st.Panes))
+func (s *server) allPanesLocked() []wire.AllPane {
+	out := make([]wire.AllPane, 0, len(s.st.Panes))
 	for i, ws := range s.st.Workspaces {
 		wsActive := i == s.st.Active
 		for j, w := range ws.Windows {
 			winActive := wsActive && j == ws.Active
 			for _, id := range layout.AllPanes(w.Root) {
-				info := AllPane{
+				info := wire.AllPane{
 					ID: id, Workspace: ws.ID, WorkspaceName: ws.Name,
 					Window: w.ID, WindowName: w.Name,
 					WorkspaceActive: wsActive, WindowActive: winActive,
@@ -287,8 +288,8 @@ func (s *server) paneExited(id string) {
 	s.syncSizes()
 	s.mu.Lock()
 	_ = s.st.save()
-	s.broadcastLocked(Msg{Type: "exit", Target: id})
-	s.broadcastLocked(Msg{Type: "snapshot", Snap: s.snapshotLocked()})
+	s.broadcastLocked(wire.Msg{Type: "exit", Target: id})
+	s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: s.snapshotLocked()})
 	ids := layout.AllPanes(s.st.win().Root)
 	s.mu.Unlock()
 
@@ -302,7 +303,7 @@ func (s *server) paneExited(id string) {
 		if pc := s.panes[pid]; pc != nil {
 			pc.alt, pc.mouse = rp.alt, rp.mouse
 		}
-		s.broadcastLocked(Msg{Type: "replay", Target: pid, Data: rp.data, St: &rp.st})
+		s.broadcastLocked(wire.Msg{Type: "replay", Target: pid, Data: rp.data, St: &rp.st})
 		s.mu.Unlock()
 	}
 }
@@ -364,7 +365,7 @@ func (s *server) endSession() {
 	for c := range s.clients {
 		clients = append(clients, c)
 	}
-	s.broadcastLocked(Msg{Type: "close"})
+	s.broadcastLocked(wire.Msg{Type: "close"})
 	s.mu.Unlock()
 
 	// Remove the session before closing the listener: accepting goroutine wakes
@@ -385,7 +386,7 @@ func (s *server) endSession() {
 func (s *server) pushSnapshot() {
 	s.mu.Lock()
 	snap := s.snapshotLocked()
-	s.broadcastLocked(Msg{Type: "snapshot", Snap: snap})
+	s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 	s.mu.Unlock()
 }
 
@@ -407,7 +408,7 @@ func (s *server) syncSizes() {
 		ps.Cols, ps.Rows = r.W, r.H
 		calls = append(calls, func() {
 			if pc != nil {
-				_ = pc.send(Msg{Action: "resize", Cols: r.W, Rows: r.H})
+				_ = pc.send(wire.Msg{Action: "resize", Cols: r.W, Rows: r.H})
 			}
 		})
 	}
@@ -437,7 +438,7 @@ func (s *server) serve(c net.Conn) {
 	}()
 
 	for {
-		m, err := readMsg(c)
+		m, err := wire.ReadMsg(c)
 		if err != nil {
 			return
 		}
@@ -453,7 +454,7 @@ func (s *server) serve(c net.Conn) {
 			pc := s.panes[s.st.win().Focus]
 			s.mu.Unlock()
 			if pc != nil {
-				_ = pc.send(Msg{Action: "write", Keys: m.Keys})
+				_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
 			}
 		case "resize":
 			s.mu.Lock()
@@ -470,7 +471,7 @@ func (s *server) serve(c net.Conn) {
 	}
 }
 
-func (s *server) attach(cl *client, m Msg) {
+func (s *server) attach(cl *client, m wire.Msg) {
 	s.mu.Lock()
 	if m.Cols > 20 && m.Rows > 5 {
 		cl.cols, cl.rows = m.Cols, m.Rows
@@ -486,14 +487,14 @@ func (s *server) attach(cl *client, m Msg) {
 	snap := s.snapshotLocked()
 	ids := layout.AllPanes(s.st.win().Root)
 	s.mu.Unlock()
-	cl.deliver(Msg{Type: "snapshot", Snap: snap})
-	if s.sendScreens(ids, func(m Msg) { cl.deliver(m) }) {
+	cl.deliver(wire.Msg{Type: "snapshot", Snap: snap})
+	if s.sendScreens(ids, func(m wire.Msg) { cl.deliver(m) }) {
 		// The pane's alt or mouse mode changed since the snapshot was built.
 		// Send a fresh one so the client's pane info is not one event stale.
 		s.mu.Lock()
 		snap = s.snapshotLocked()
 		s.mu.Unlock()
-		cl.deliver(Msg{Type: "snapshot", Snap: snap})
+		cl.deliver(wire.Msg{Type: "snapshot", Snap: snap})
 	}
 	// History is not pushed at attach: the ring is 512 KiB per pane, and a
 	// nested client would carry it through the outer pty. The client asks for
@@ -519,10 +520,10 @@ func readPaneScreen(session, id string) paneScreen {
 		return ps
 	}
 	defer c.Close()
-	if err := writeMsg(c, Msg{Type: "req", Action: "screen", ID: 1}); err != nil {
+	if err := wire.WriteMsg(c, wire.Msg{Type: "req", Action: "screen", ID: 1}); err != nil {
 		return ps
 	}
-	m, err := readMsg(c)
+	m, err := wire.ReadMsg(c)
 	if err != nil || m.Type != "screen" {
 		return ps
 	}
@@ -537,7 +538,7 @@ func readPaneScreen(session, id string) paneScreen {
 
 // sendScreens asks each pane for its visible screen and hands it to send. It
 // runs after a resize so the pane serialises at its new size.
-func (s *server) sendScreens(ids []string, send func(Msg)) (changed bool) {
+func (s *server) sendScreens(ids []string, send func(wire.Msg)) (changed bool) {
 	for _, id := range ids {
 		ps := readPaneScreen(s.st.Name, id)
 		if !ps.ok {
@@ -551,13 +552,13 @@ func (s *server) sendScreens(ids []string, send func(Msg)) (changed bool) {
 			pc.alt, pc.mouse = ps.alt, ps.mouse
 		}
 		s.mu.Unlock()
-		send(Msg{Type: "screen", Target: id, Data: ps.data})
+		send(wire.Msg{Type: "screen", Target: id, Data: ps.data})
 	}
 	return changed
 }
 
 func (s *server) broadcastScreens(ids []string) {
-	s.sendScreens(ids, func(m Msg) {
+	s.sendScreens(ids, func(m wire.Msg) {
 		s.mu.Lock()
 		s.broadcastLocked(m)
 		s.mu.Unlock()
@@ -572,13 +573,13 @@ func (s *server) resyncClient(cl *client) {
 	snap := s.snapshotLocked()
 	ids := layout.AllPanes(s.st.win().Root)
 	s.mu.Unlock()
-	cl.deliver(Msg{Type: "snapshot", Snap: snap})
-	s.sendScreens(ids, func(m Msg) { cl.deliver(m) })
+	cl.deliver(wire.Msg{Type: "snapshot", Snap: snap})
+	s.sendScreens(ids, func(m wire.Msg) { cl.deliver(m) })
 }
 
 type paneReplay struct {
 	data  []byte
-	st    Status
+	st    wire.Status
 	alt   bool
 	mouse bool
 	ok    bool
@@ -592,14 +593,14 @@ func readPaneReplay(session, id string) paneReplay {
 	}
 	defer c.Close()
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if err := writeMsg(c, Msg{Type: "req", Action: "replay", ID: 1}); err != nil {
+	if err := wire.WriteMsg(c, wire.Msg{Type: "req", Action: "replay", ID: 1}); err != nil {
 		return rp
 	}
 	// A pane broadcasts bytes, status and cwd while the request is in flight.
 	// The replay reply is the only frame this call wants: taking the first
 	// frame made a busy pane's ring a fragment.
 	for {
-		m, err := readMsg(c)
+		m, err := wire.ReadMsg(c)
 		if err != nil {
 			return rp
 		}
@@ -619,20 +620,20 @@ func readPaneReplay(session, id string) paneReplay {
 	}
 }
 
-func paneRequest(session, id string, m Msg) (Msg, error) {
-	var out Msg
+func paneRequest(session, id string, m wire.Msg) (wire.Msg, error) {
+	var out wire.Msg
 	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
 	if err != nil {
 		return out, err
 	}
 	defer c.Close()
 	m.ID = 1
-	if err := writeMsg(c, m); err != nil {
+	if err := wire.WriteMsg(c, m); err != nil {
 		return out, err
 	}
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	for {
-		got, err := readMsg(c)
+		got, err := wire.ReadMsg(c)
 		if err != nil {
 			return out, err
 		}
@@ -642,10 +643,10 @@ func paneRequest(session, id string, m Msg) (Msg, error) {
 	}
 }
 
-func (s *server) reply(cl *client, m Msg, res any, err error) {
+func (s *server) reply(cl *client, m wire.Msg, res any, err error) {
 	// The action rides back, so a client can tell the replies it asked for
 	// apart from each other. ID stays the request tag it already was.
-	out := Msg{Type: "resp", Action: m.Action, ID: m.ID, Res: jsonRaw(res)}
+	out := wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, Res: jsonRaw(res)}
 	if err != nil {
 		out.Error = err.Error()
 	} else {

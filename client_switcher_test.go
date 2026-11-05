@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -16,14 +17,14 @@ import (
 // and every request it sends lands on the returned channel. The snapshot has one
 // workspace and one window over two panes, so the switcher's tree has rows to
 // narrow and a pane to preview.
-func switcherTUI(t *testing.T) (*tui, chan Msg) {
+func switcherTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	root := &layout.Node{Pane: "w1p1"}
-	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 34, Root: root, Focus: "w1p1"}
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 34, Root: root, Focus: "w1p1"}
 	rects := map[string]layout.Rect{}
 	layout.Layout(root, layout.PaneAreaFor(100, 30, 34), rects)
-	snap.Panes = []PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
-	snap.All = []AllPane{
+	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
+	snap.All = []wire.AllPane{
 		{
 			ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
@@ -38,11 +39,11 @@ func switcherTUI(t *testing.T) (*tui, chan Msg) {
 	a, b := net.Pipe()
 	t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 	tui.conn = &conn{Conn: a}
-	got := make(chan Msg, 32)
+	got := make(chan wire.Msg, 32)
 	go func() {
 		defer close(got)
 		for {
-			m, err := readMsg(b)
+			m, err := wire.ReadMsg(b)
 			if err != nil {
 				return
 			}
@@ -164,7 +165,7 @@ func TestSwitcherPreviewReplies(t *testing.T) {
 	feed(tui, "beta")
 	tui.draw()
 
-	var read Msg
+	var read wire.Msg
 	select {
 	case m := <-got:
 		if m.Type != "req" || m.Action != "read" || m.Target != "w1p2" {
@@ -184,17 +185,17 @@ func TestSwitcherPreviewReplies(t *testing.T) {
 
 	// A reply with another id is stale and stays out of the band. A failure
 	// with a stale id stays silent too.
-	tui.apply(Msg{Type: "resp", ID: read.ID + 1, OK: true, Res: json.RawMessage(`{"lines":["stale"]}`)})
+	tui.apply(wire.Msg{Type: "resp", ID: read.ID + 1, OK: true, Res: json.RawMessage(`{"lines":["stale"]}`)})
 	if len(tui.sw.lines) != 0 {
 		t.Fatalf("a stale reply filled the preview: %q", tui.sw.lines)
 	}
-	tui.apply(Msg{Type: "resp", ID: read.ID + 2, Error: "gone"})
+	tui.apply(wire.Msg{Type: "resp", ID: read.ID + 2, Error: "gone"})
 	if len(tui.toasts) != 0 {
 		t.Fatalf("a stale preview failure raised a toast: %+v", tui.toasts)
 	}
 
 	// The reply to the request fills the band.
-	tui.apply(Msg{Type: "resp", ID: read.ID, OK: true, Res: json.RawMessage(`{"lines":["live"]}`)})
+	tui.apply(wire.Msg{Type: "resp", ID: read.ID, OK: true, Res: json.RawMessage(`{"lines":["live"]}`)})
 	if got := tui.sw.lines; len(got) != 1 || got[0] != "live" {
 		t.Fatalf("the current reply filled %q, want [live]", got)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/wire"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 // program status; the pane answers by writing the reply back into the PTY.
 type oscFilter struct {
 	buf    []byte
-	status func(Status)
+	status func(wire.Status)
 	query  func()
 	reply  func(string)
 	cursor func() (row, col int)
@@ -232,9 +233,9 @@ func csiEnd(b []byte) (int, bool) {
 
 // parseStatus accepts the OSC 7501 wire format, `state=working:app=pi:msg=<b64>`,
 // plus the JSON and bare-state forms dm accepted before.
-func parseStatus(s string) Status {
+func parseStatus(s string) wire.Status {
 	s = strings.TrimSpace(s)
-	var st Status
+	var st wire.Status
 	if strings.HasPrefix(s, "{") && json.Unmarshal([]byte(s), &st) == nil {
 		if st.State == "" {
 			st.State = "unknown"
@@ -267,5 +268,5 @@ func parseStatus(s string) Status {
 	if s == "" {
 		s = "unknown"
 	}
-	return Status{State: s}
+	return wire.Status{State: s}
 }

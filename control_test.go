@@ -7,14 +7,15 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
 
 // ctlPane is one pane row of a control snapshot: a named agent pane in one
 // window of one workspace, so both rail forms list it.
-func ctlPane(id string) AllPane {
-	return AllPane{
+func ctlPane(id string) wire.AllPane {
+	return wire.AllPane{
 		ID: id, Name: id, Status: "working", Agent: true,
 		Workspace: "s1", WorkspaceName: "main",
 		Window: "w1", WindowName: "one",
@@ -26,12 +27,12 @@ func ctlPane(id string) AllPane {
 // exactly Rows-2 item rows: one row per pane on the thin rail, and a workspace
 // row and a window row in front of the panes on a wider one. The item list
 // therefore ends on the row above the control.
-func ctlSnapshot(rail int) *Snapshot {
+func ctlSnapshot(rail int) *wire.Snapshot {
 	n := 8
 	if !layout.RailCompact(rail) {
 		n = 6
 	}
-	snap := &Snapshot{Session: "x", Cols: 40, Rows: 10, Rail: rail}
+	snap := &wire.Snapshot{Session: "x", Cols: 40, Rows: 10, Rail: rail}
 	for i := 0; i < n; i++ {
 		snap.All = append(snap.All, ctlPane(fmt.Sprintf("p%d", i+1)))
 	}
@@ -40,7 +41,7 @@ func ctlSnapshot(rail int) *Snapshot {
 }
 
 // ctlScreen draws the rail and returns the screen it wrote.
-func ctlScreen(t *testing.T, snap *Snapshot) vt10x.Terminal {
+func ctlScreen(t *testing.T, snap *wire.Snapshot) vt10x.Terminal {
 	t.Helper()
 	var b bytes.Buffer
 	drawRail(&b, DefaultTheme(), snap)
@@ -79,7 +80,7 @@ func ctlRow(t *testing.T, vt vt10x.Terminal, y, cells int) string {
 func ctlBlank(g vt10x.Glyph) bool { return g.Char == 0 || g.Char == ' ' }
 
 // ctlTUI is a client on a 40x10 screen with the rail at the given width.
-func ctlTUI(t *testing.T, rail int) (*tui, chan Msg) {
+func ctlTUI(t *testing.T, rail int) (*tui, chan wire.Msg) {
 	t.Helper()
 	tui, got := clientTUI(t, nil)
 	tui.snap = ctlSnapshot(rail)

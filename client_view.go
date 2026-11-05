@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -231,7 +232,7 @@ func (t *tui) writeFrame(b []byte) {
 // layoutSig is the shape of the picture. When it changes the cells cannot be
 // diffed against the last frame: the size, the layout, a pane, the scrollback,
 // the mode or the palette moved, so the next frame repaints whole.
-func (t *tui) layoutSig(win *Snapshot) string {
+func (t *tui) layoutSig(win *wire.Snapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%dx%d r%d z=%s", win.Cols, win.Rows, win.Rail, win.Zoom)
 	for _, p := range win.Panes {
@@ -248,7 +249,7 @@ func (t *tui) layoutSig(win *Snapshot) string {
 }
 
 // panePaints is the content each pane shows this frame.
-func (t *tui) panePaints(win *Snapshot) []panePaint {
+func (t *tui) panePaints(win *wire.Snapshot) []panePaint {
 	panes := visiblePanes(win)
 	out := make([]panePaint, 0, len(panes))
 	for _, p := range panes {

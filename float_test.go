@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -34,7 +35,7 @@ func TestFloatingPaneDraw(t *testing.T) {
 
 func TestFloatingPaneInBands(t *testing.T) {
 	tui := &tui{
-		snap:   &Snapshot{Cols: 80, Rows: 24},
+		snap:   &wire.Snapshot{Cols: 80, Rows: 24},
 		vts:    map[string]vt10x.Terminal{},
 		floats: []*FloatingPane{},
 	}

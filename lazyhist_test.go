@@ -11,6 +11,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 // ringSize is what the fake panes report as history. It stands in for the
@@ -48,23 +49,23 @@ func ringPane(t *testing.T, session, id string) {
 			go func(c net.Conn) {
 				defer c.Close()
 				for {
-					m, err := readMsg(c)
+					m, err := wire.ReadMsg(c)
 					if err != nil {
 						return
 					}
 					switch m.Action {
 					case "screen":
-						_ = writeMsg(c, Msg{Type: "screen", ID: m.ID, Target: id,
+						_ = wire.WriteMsg(c, wire.Msg{Type: "screen", ID: m.ID, Target: id,
 							Data: []byte("\x1b[Hscreen " + id), Res: jsonRaw(struct {
 								Alt   bool `json:"alt"`
 								Mouse bool `json:"mouse"`
 							}{Alt: true, Mouse: true})})
 					case "replay":
-						st := Status{State: "idle", Message: "ring"}
-						_ = writeMsg(c, Msg{Type: "replay", ID: m.ID, Target: id,
+						st := wire.Status{State: "idle", Message: "ring"}
+						_ = wire.WriteMsg(c, wire.Msg{Type: "replay", ID: m.ID, Target: id,
 							Data: ringFor(id), St: &st})
 					default:
-						_ = writeMsg(c, Msg{Type: "resp", ID: m.ID, OK: true})
+						_ = wire.WriteMsg(c, wire.Msg{Type: "resp", ID: m.ID, OK: true})
 					}
 				}
 			}(c)
@@ -107,11 +108,11 @@ func adoptPanes(t *testing.T, s *server, ids []string) {
 	for _, id := range ids {
 		srv, cli := net.Pipe()
 		s.mu.Lock()
-		s.panes[id] = &paneConn{id: id, c: srv, st: Status{State: "unknown"}}
+		s.panes[id] = &paneConn{id: id, c: srv, st: wire.Status{State: "unknown"}}
 		s.mu.Unlock()
 		go func(c net.Conn) {
 			for {
-				if _, err := readMsg(c); err != nil {
+				if _, err := wire.ReadMsg(c); err != nil {
 					return
 				}
 			}
@@ -123,13 +124,13 @@ func adoptPanes(t *testing.T, s *server, ids []string) {
 	}
 }
 
-// wire counts the bytes a client socket receives.
-type wire struct {
+// countingConn counts the bytes a client socket receives.
+type countingConn struct {
 	net.Conn
 	read int
 }
 
-func (w *wire) Read(p []byte) (int, error) {
+func (w *countingConn) Read(p []byte) (int, error) {
 	n, err := w.Conn.Read(p)
 	w.read += n
 	return n, err
@@ -137,7 +138,7 @@ func (w *wire) Read(p []byte) (int, error) {
 
 // dialTestServer starts the server's connection handler on a real unix socket and
 // returns a client socket that counts what it reads.
-func dialTestServer(t *testing.T, s *server) *wire {
+func dialTestServer(t *testing.T, s *server) *countingConn {
 	t.Helper()
 	sock := paths.ServerSock(s.st.Name)
 	_ = os.Remove(sock)
@@ -160,11 +161,11 @@ func dialTestServer(t *testing.T, s *server) *wire {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = raw.Close() })
-	return &wire{Conn: raw}
+	return &countingConn{Conn: raw}
 }
 
 // readUntil reads frames until match says yes, and fails on the deadline.
-func readUntil(t *testing.T, c net.Conn, wait time.Duration, match func(Msg) bool) (Msg, int) {
+func readUntil(t *testing.T, c net.Conn, wait time.Duration, match func(wire.Msg) bool) (wire.Msg, int) {
 	t.Helper()
 	n := 0
 	for {
@@ -184,13 +185,13 @@ func readUntil(t *testing.T, c net.Conn, wait time.Duration, match func(Msg) boo
 func TestAttachDoesNotPushHistory(t *testing.T) {
 	s, ids := histServer(t, "lazy", 4)
 	cl := dialTestServer(t, s)
-	if err := writeMsg(cl, Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
+	if err := wire.WriteMsg(cl, wire.Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Collect the attach burst. Nothing is read after it, so the window is
 	// long enough for a pushed replay to have arrived.
-	var frames []Msg
+	var frames []wire.Msg
 	screens := map[string]bool{}
 	deadline := time.Now().Add(750 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -247,7 +248,7 @@ func TestAttachDoesNotPushHistory(t *testing.T) {
 func TestReplayRequestReturnsTheRing(t *testing.T) {
 	s, ids := histServer(t, "ask", 3)
 	cl := dialTestServer(t, s)
-	if err := writeMsg(cl, Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
+	if err := wire.WriteMsg(cl, wire.Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 	// Let the attach burst land first, so the assertions below see only the
@@ -259,10 +260,10 @@ func TestReplayRequestReturnsTheRing(t *testing.T) {
 	}
 
 	want := ids[1]
-	if err := writeMsg(cl, Msg{Type: "req", Action: "replay", Target: want, ID: 9}); err != nil {
+	if err := wire.WriteMsg(cl, wire.Msg{Type: "req", Action: "replay", Target: want, ID: 9}); err != nil {
 		t.Fatal(err)
 	}
-	replay, before := readUntil(t, cl, 5*time.Second, func(m Msg) bool {
+	replay, before := readUntil(t, cl, 5*time.Second, func(m wire.Msg) bool {
 		return m.Type == "replay"
 	})
 	if before != 1 {
@@ -278,7 +279,7 @@ func TestReplayRequestReturnsTheRing(t *testing.T) {
 		t.Fatalf("replay status = %+v, want the pane's own status", replay.St)
 	}
 
-	resp, _ := readUntil(t, cl, 5*time.Second, func(m Msg) bool {
+	resp, _ := readUntil(t, cl, 5*time.Second, func(m wire.Msg) bool {
 		return m.Type == "resp" && m.ID == 9
 	})
 	if !resp.OK {
@@ -291,7 +292,7 @@ func TestReplayRequestReturnsTheRing(t *testing.T) {
 func TestReplayRequestForMissingPaneFails(t *testing.T) {
 	s, ids := histServer(t, "miss", 2)
 	cl := dialTestServer(t, s)
-	if err := writeMsg(cl, Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
+	if err := wire.WriteMsg(cl, wire.Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < len(ids)+2; i++ {
@@ -300,10 +301,10 @@ func TestReplayRequestForMissingPaneFails(t *testing.T) {
 		}
 	}
 
-	if err := writeMsg(cl, Msg{Type: "req", Action: "replay", Target: "nope", ID: 11}); err != nil {
+	if err := wire.WriteMsg(cl, wire.Msg{Type: "req", Action: "replay", Target: "nope", ID: 11}); err != nil {
 		t.Fatal(err)
 	}
-	resp, _ := readUntil(t, cl, 5*time.Second, func(m Msg) bool {
+	resp, _ := readUntil(t, cl, 5*time.Second, func(m wire.Msg) bool {
 		return m.Type == "replay" || (m.Type == "resp" && m.ID == 11)
 	})
 	if resp.Type == "replay" {
@@ -314,10 +315,10 @@ func TestReplayRequestForMissingPaneFails(t *testing.T) {
 	}
 
 	// The connection survived: a ping still answers.
-	if err := writeMsg(cl, Msg{Type: "req", Action: "ping", ID: 12}); err != nil {
+	if err := wire.WriteMsg(cl, wire.Msg{Type: "req", Action: "ping", ID: 12}); err != nil {
 		t.Fatal(err)
 	}
-	pong, _ := readUntil(t, cl, 5*time.Second, func(m Msg) bool {
+	pong, _ := readUntil(t, cl, 5*time.Second, func(m wire.Msg) bool {
 		return m.Type == "resp" && m.ID == 12
 	})
 	if !pong.OK {

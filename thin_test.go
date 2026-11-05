@@ -6,14 +6,15 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
 
 // thinPane is one pane row of a thin-rail snapshot: a pane in a window in a
 // workspace, with the state its glyph reports.
-func thinPane(id, ws, win, status string, focus bool) AllPane {
-	return AllPane{
+func thinPane(id, ws, win, status string, focus bool) wire.AllPane {
+	return wire.AllPane{
 		ID: id, Status: status, Focus: focus,
 		Workspace: ws, Window: win, WorkspaceActive: ws == "s1",
 		WindowActive: win == "w1", WindowUnfolded: true,
@@ -21,14 +22,14 @@ func thinPane(id, ws, win, status string, focus bool) AllPane {
 }
 
 // thinSnapshot is a thin rail on a 40x6 screen holding panes.
-func thinSnapshot(panes []AllPane) *Snapshot {
-	return &Snapshot{
+func thinSnapshot(panes []wire.AllPane) *wire.Snapshot {
+	return &wire.Snapshot{
 		Session: "x", Cols: 40, Rows: 6, Rail: layout.CollapsedRail, All: panes,
 	}
 }
 
 // thinScreen draws the rail and returns the screen it wrote.
-func thinScreen(t *testing.T, snap *Snapshot) vt10x.Terminal {
+func thinScreen(t *testing.T, snap *wire.Snapshot) vt10x.Terminal {
 	t.Helper()
 	var b bytes.Buffer
 	drawRail(&b, DefaultTheme(), snap)
@@ -46,7 +47,7 @@ func thinBlank(g vt10x.Glyph) bool { return g.Char == 0 || g.Char == ' ' }
 // workspace row, no window row and no blank row between them.
 func TestThinRailPaneRowsOnly(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := thinSnapshot([]AllPane{
+	snap := thinSnapshot([]wire.AllPane{
 		thinPane("w1p1", "s1", "w1", "working", true),
 		thinPane("w1p2", "s1", "w1", "idle", false),
 		thinPane("w2p1", "s2", "w2", "blocked", false),
@@ -107,7 +108,7 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 // folded and an unfolded window draw the same rows.
 func TestThinRailFoldState(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	panes := []AllPane{
+	panes := []wire.AllPane{
 		thinPane("w1p1", "s1", "w1", "working", true),
 		thinPane("w1p2", "s1", "w1", "idle", false),
 		thinPane("w2p1", "s2", "w2", "blocked", false),
@@ -115,7 +116,7 @@ func TestThinRailFoldState(t *testing.T) {
 	open := thinSnapshot(panes)
 	// Fold a copy: folding the shared slice would fold the open snapshot too,
 	// and the comparison below would only be comparing a snapshot to itself.
-	frozen := append([]AllPane(nil), panes...)
+	frozen := append([]wire.AllPane(nil), panes...)
 	for i := range frozen {
 		frozen[i].WindowUnfolded = false
 		frozen[i].Message = "a note no thin row can show"
@@ -171,7 +172,7 @@ func TestThinRailGlyphColumn(t *testing.T) {
 	shell := thinPane("w1p1", "s1", "w1", "", false)
 	agent := thinPane("w1p2", "s1", "w1", "", false)
 	agent.Agent = true
-	snap := thinSnapshot([]AllPane{shell, agent})
+	snap := thinSnapshot([]wire.AllPane{shell, agent})
 	vt := thinScreen(t, snap)
 	vt.Lock()
 	defer vt.Unlock()
@@ -196,7 +197,7 @@ func TestThinRailGlyphColumn(t *testing.T) {
 // glyph rows reads as the focused one.
 func TestThinRailFocusBackground(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := thinSnapshot([]AllPane{
+	snap := thinSnapshot([]wire.AllPane{
 		thinPane("w1p1", "s1", "w1", "working", false),
 		thinPane("w1p2", "s1", "w1", "idle", true),
 		thinPane("w2p1", "s2", "w2", "blocked", false),
@@ -230,7 +231,7 @@ func TestThinRailFocusBackground(t *testing.T) {
 // at the last row above the bar, and no row writes past the rail width.
 func TestThinRailClips(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	var panes []AllPane
+	var panes []wire.AllPane
 	for i := 0; i < 8; i++ {
 		ws, win := "s1", "w1"
 		if i >= 4 {

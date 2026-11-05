@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/wire"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,7 +12,7 @@ import (
 // a window row would only repeat the row of the pane it holds, so dash lists
 // panes alone.
 func dashRows(session string) ([]string, error) {
-	m, err := rpc(session, Msg{Action: "list"})
+	m, err := rpc(session, wire.Msg{Action: "list"})
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +20,7 @@ func dashRows(session string) ([]string, error) {
 		return nil, fmt.Errorf("%s", m.Error)
 	}
 	var res struct {
-		Snapshot *Snapshot `json:"snapshot"`
+		Snapshot *wire.Snapshot `json:"snapshot"`
 	}
 	if err := json.Unmarshal(m.Res, &res); err != nil {
 		return nil, err
@@ -44,7 +45,7 @@ func dashRows(session string) ([]string, error) {
 // live state, branch and worktree. The id already leads the row, so the label
 // never repeats it, and the row ends with the workspace and window it lives
 // in.
-func paneLabel(p AllPane) string {
+func paneLabel(p wire.AllPane) string {
 	name := p.Name
 	if name == "" {
 		name = p.App
@@ -88,7 +89,7 @@ func dash(session string) error {
 
 // peek prints the screen a palette row shows.
 func peek(session, target string, lines int) error {
-	m, err := rpc(session, Msg{Action: "read", Target: target})
+	m, err := rpc(session, wire.Msg{Action: "read", Target: target})
 	if err != nil {
 		return err
 	}
