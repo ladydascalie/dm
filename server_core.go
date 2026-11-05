@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"dm/internal/paths"
 )
 
 type paneConn struct {
@@ -280,10 +282,10 @@ func runServer(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(sessionDir(*name), "panes"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(paths.SessionDir(*name), "panes"), 0o700); err != nil {
 		return err
 	}
-	lockPath := filepath.Join(sessionDir(*name), "server.lock")
+	lockPath := filepath.Join(paths.SessionDir(*name), "server.lock")
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
@@ -355,7 +357,7 @@ func runServer(args []string) error {
 		return err
 	}
 
-	sock := serverSock(*name)
+	sock := paths.ServerSock(*name)
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -363,7 +365,7 @@ func runServer(args []string) error {
 	}
 	s.ln = ln
 	_ = os.Chmod(sock, 0o600)
-	writePID(filepath.Join(sessionDir(*name), "server.pid"))
+	writePID(filepath.Join(paths.SessionDir(*name), "server.pid"))
 
 	log.Printf("session %q listening on %s", *name, sock)
 	for {
@@ -400,7 +402,7 @@ func (s *server) addPaneStateAt(id, cwd, shell string) {
 
 // ensurePane dials the pane's socket and adopts it, or spawns a fresh daemon.
 func (s *server) ensurePane(id string) error {
-	sock := paneSock(s.st.Name, id)
+	sock := paths.PaneSock(s.st.Name, id)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
 		pc := &paneConn{id: id, c: c, st: Status{State: "unknown"}}
 		s.mu.Lock()
@@ -430,7 +432,7 @@ func (s *server) ensurePane(id string) error {
 		"--cwd", ps.Cwd, "--shell", ps.Shell,
 		"--cols", strconv.Itoa(ps.Cols), "--rows", strconv.Itoa(ps.Rows))
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	logPath := filepath.Join(sessionDir(s.st.Name), "panes", id+".log")
+	logPath := filepath.Join(paths.SessionDir(s.st.Name), "panes", id+".log")
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err

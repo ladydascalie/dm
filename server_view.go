@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"dm/internal/paths"
 )
 
 // fitToClientsLocked takes the shared session size from the largest attached
@@ -277,7 +279,7 @@ func (s *server) paneExited(id string) {
 	if pc != nil {
 		_ = pc.c.Close()
 	}
-	old := paneSock(s.st.Name, id)
+	old := paths.PaneSock(s.st.Name, id)
 	_ = os.Remove(old)
 	_ = os.Remove(old + ".pid")
 
@@ -367,9 +369,9 @@ func (s *server) endSession() {
 	// Remove the session before closing the listener: accepting goroutine wakes
 	// on the closed listener and may exit the process immediately.
 	name := s.st.Name
-	_ = os.Remove(serverSock(name))
-	_ = os.Remove(filepath.Join(sessionDir(name), "server.pid"))
-	_ = os.RemoveAll(sessionDir(name))
+	_ = os.Remove(paths.ServerSock(name))
+	_ = os.Remove(filepath.Join(paths.SessionDir(name), "server.pid"))
+	_ = os.RemoveAll(paths.SessionDir(name))
 	for _, c := range clients {
 		_ = c.c.Close()
 	}
@@ -511,7 +513,7 @@ type paneScreen struct {
 
 func readPaneScreen(session, id string) paneScreen {
 	var ps paneScreen
-	c, err := net.DialTimeout("unix", paneSock(session, id), time.Second)
+	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
 	if err != nil {
 		return ps
 	}
@@ -583,7 +585,7 @@ type paneReplay struct {
 
 func readPaneReplay(session, id string) paneReplay {
 	var rp paneReplay
-	c, err := net.DialTimeout("unix", paneSock(session, id), time.Second)
+	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
 	if err != nil {
 		return rp
 	}
@@ -618,7 +620,7 @@ func readPaneReplay(session, id string) paneReplay {
 
 func paneRequest(session, id string, m Msg) (Msg, error) {
 	var out Msg
-	c, err := net.DialTimeout("unix", paneSock(session, id), time.Second)
+	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
 	if err != nil {
 		return out, err
 	}

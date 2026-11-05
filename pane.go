@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/paths"
 	"github.com/creack/pty"
 	"github.com/hinshun/vt10x"
 )
@@ -143,7 +144,7 @@ func runPane(args []string) error {
 	debug.SetMemoryLimit(32 << 20)
 
 	p := &paneProc{
-		id: *id, session: *session, sock: paneSock(*session, *id),
+		id: *id, session: *session, sock: paths.PaneSock(*session, *id),
 		shell: *shell, cwd: *cwd,
 		vt:   vt10x.New(vt10x.WithSize(*cols, *rows)),
 		ring: &scrollRing{},
@@ -160,7 +161,7 @@ func runPane(args []string) error {
 	}
 	p.ptmx, p.cmd = ptmx, cmd
 
-	if err := os.MkdirAll(sessionDir(*session)+"/panes", 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDir(*session)+"/panes", 0o700); err != nil {
 		return err
 	}
 	_ = os.Remove(p.sock)

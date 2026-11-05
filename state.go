@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"log"
 	"os"
-	"path/filepath"
 	"strconv"
+
+	"dm/internal/paths"
 )
 
 // Node is a pane leaf or a split. Dir "row" means children side by side.
@@ -80,24 +81,6 @@ type State struct {
 	BoxSeq int     `json:"boxSeq,omitempty"`
 }
 
-func stateDir() string {
-	if v := os.Getenv("DM_STATE"); v != "" {
-		return v
-	}
-	if v := os.Getenv("XDG_STATE_HOME"); v != "" {
-		return filepath.Join(v, "dm")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "state", "dm")
-}
-
-func sessionDir(name string) string { return filepath.Join(stateDir(), "sessions", name) }
-func serverSock(name string) string { return filepath.Join(sessionDir(name), "server.sock") }
-func paneSock(name, id string) string {
-	return filepath.Join(sessionDir(name), "panes", id+".sock")
-}
-func statePath(name string) string { return filepath.Join(sessionDir(name), "state.json") }
-
 // numericName reports whether a window label is a plain number, the old
 // positional default.
 func numericName(name string) bool {
@@ -112,23 +95,9 @@ func numericName(name string) bool {
 	return true
 }
 
-// folderName is the default window label for a directory: its last path
-// element, with the filesystem root spelled out.
-func folderName(dir string) string {
-	if dir == "" {
-		return ""
-	}
-	dir = filepath.Clean(dir)
-	base := filepath.Base(dir)
-	if base == "/" || base == "." || base == string(filepath.Separator) {
-		return "root"
-	}
-	return base
-}
-
 func newState(name string) *State {
 	cwd, _ := os.Getwd()
-	defWin := folderName(cwd)
+	defWin := paths.FolderName(cwd)
 	if defWin == "" {
 		defWin = "1"
 	}
@@ -155,22 +124,22 @@ func newState(name string) *State {
 }
 
 func (st *State) save() error {
-	if err := os.MkdirAll(sessionDir(st.Name), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDir(st.Name), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := statePath(st.Name) + ".tmp"
+	tmp := paths.StatePath(st.Name) + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, statePath(st.Name))
+	return os.Rename(tmp, paths.StatePath(st.Name))
 }
 
 func loadState(name string) (*State, error) {
-	b, err := os.ReadFile(statePath(name))
+	b, err := os.ReadFile(paths.StatePath(name))
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +182,7 @@ func loadState(name string) (*State, error) {
 			if ps == nil {
 				continue
 			}
-			if name := folderName(ps.Cwd); name != "" && name != w.Name {
+			if name := paths.FolderName(ps.Cwd); name != "" && name != w.Name {
 				w.Name = name
 				changed = true
 			}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"dm/internal/paths"
 )
 
 // The queue tests use net.Pipe for the client socket. A write on a pipe blocks
@@ -16,7 +18,7 @@ import (
 // server's resync path runs without a real pane daemon.
 func screenPane(t *testing.T, session, id string) {
 	t.Helper()
-	sock := paneSock(session, id)
+	sock := paths.PaneSock(session, id)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +71,7 @@ func queueServer(t *testing.T, name string) (*server, string, string) {
 	w.Focus = a
 	st.Panes[a] = &PaneState{}
 	st.Panes[b] = &PaneState{}
-	if err := os.MkdirAll(sessionDir(name), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	screenPane(t, name, a)

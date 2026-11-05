@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dm/internal/paths"
 )
 
 // ringSize is what the fake panes report as history. It stands in for the
@@ -26,7 +28,7 @@ func ringFor(id string) []byte {
 // be checked without a replay frame.
 func ringPane(t *testing.T, session, id string) {
 	t.Helper()
-	sock := paneSock(session, id)
+	sock := paths.PaneSock(session, id)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +88,7 @@ func histServer(t *testing.T, name string, panes int) (*server, []string) {
 	}
 	w.Root = &Node{Dir: "row", Kids: kids}
 	w.Focus = ids[0]
-	if err := os.MkdirAll(sessionDir(name), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range ids {
@@ -136,7 +138,7 @@ func (w *wire) Read(p []byte) (int, error) {
 // returns a client socket that counts what it reads.
 func dialTestServer(t *testing.T, s *server) *wire {
 	t.Helper()
-	sock := serverSock(s.st.Name)
+	sock := paths.ServerSock(s.st.Name)
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
