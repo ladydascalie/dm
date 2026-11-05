@@ -81,10 +81,10 @@ func TestRenamePromptOpensOnPrefixR(t *testing.T) {
 	noMsg(t, got)
 }
 
-// The right-click menu offers the same prompt and closes itself first.
+// The workspace row's menu offers the same prompt and closes itself first.
 func TestRenamePromptMenuRow(t *testing.T) {
 	tr, got := renamePromptTUI(t)
-	tr.openMenu(tr.paneByID("a"), 10, 10)
+	tr.openRailMenu(railItem{kind: railWorkspace, text: "main", workspace: "s1"}, 10, 10)
 	found := false
 	for _, it := range tr.menu.items {
 		if it.label != "Rename workspace" {

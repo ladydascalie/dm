@@ -86,11 +86,11 @@ func TestRailMenuWorkspaceRow(t *testing.T) {
 	if tui.mode != "menu" || tui.menu == nil {
 		t.Fatalf("right press on the workspace row: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
-	if tui.menu.title != "main" {
-		t.Fatalf("title = %q, want main", tui.menu.title)
+	if tui.menu.title != "workspace main" {
+		t.Fatalf("title = %q, want workspace main", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu,
-		"Rename workspace", "Close workspace", "New window", "New workspace")
+		"New window", "Rename workspace", "Close workspace")
 	noMsg(t, got)
 	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 3, y: 1})
 	if tui.mode != "menu" {
@@ -108,8 +108,11 @@ func TestRailMenuWindowRow(t *testing.T) {
 		if tui.mode != "menu" || tui.menu == nil {
 			t.Fatalf("row %d: mode=%q menu=%+v", row, tui.mode, tui.menu)
 		}
+		if tui.menu.title != "window one" {
+			t.Fatalf("row %d: title = %q, want window one", row, tui.menu.title)
+		}
 		railWantLabels(t, tui.menu,
-			"Rename window", "Close window", "New window", "Fold/unfold")
+			"New window", "Rename window", "Close window", "Fold/unfold")
 		noMsg(t, got)
 	}
 }
@@ -121,11 +124,12 @@ func TestRailMenuPaneRow(t *testing.T) {
 	if tui.mode != "menu" || tui.menu == nil {
 		t.Fatalf("right press on the pane row: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
-	if tui.menu.title != "pi" {
-		t.Fatalf("title = %q, want pi", tui.menu.title)
+	if tui.menu.title != "pane pi" {
+		t.Fatalf("title = %q, want pane pi", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu,
-		"Focus", "Rename window", "Close window", "Fold/unfold")
+		"Focus", "Split right", "Split down", "Split left", "Split up",
+		"Zoom", "Close pane", "Scrollback")
 	noMsg(t, got)
 }
 
@@ -141,7 +145,6 @@ func TestRailMenuRenameTargetsRow(t *testing.T) {
 		{0, "workspace", "s1", "main"},
 		{1, "window", "w1", "one"},
 		{2, "window", "w1", "one"},
-		{3, "window", "w1", "one"},
 	}
 	for _, c := range cases {
 		tui, _ := railMenuTUI(t)
@@ -169,7 +172,7 @@ func TestRailMenuCloseTargetsRow(t *testing.T) {
 		{0, "close-workspace", "s1"},
 		{1, "close-window", "w1"},
 		{2, "close-window", "w1"},
-		{3, "close-window", "w1"},
+		{3, "close-pane", "w1p1"},
 	}
 	for _, c := range cases {
 		tui, got := railMenuTUI(t)
@@ -182,10 +185,10 @@ func TestRailMenuCloseTargetsRow(t *testing.T) {
 	}
 }
 
-// TestRailMenuFoldTargetsWindow picks Fold/unfold on a window row and a pane
+// TestRailMenuFoldTargetsWindow picks Fold/unfold on a window row and its note
 // row and holds the request to the row's window.
 func TestRailMenuFoldTargetsWindow(t *testing.T) {
-	for _, row := range []int{1, 2, 3} {
+	for _, row := range []int{1, 2} {
 		tui, got := railMenuTUI(t)
 		railRightPress(tui, row)
 		railMenuPick(t, tui, "Fold")
@@ -250,10 +253,11 @@ func TestRailMenuNewWindowOutsideGit(t *testing.T) {
 	}
 }
 
-// TestRailMenuNewWorkspace picks New workspace on a workspace row.
+// TestRailMenuNewWorkspace picks New workspace in the session menu, where the
+// rail keeps it now.
 func TestRailMenuNewWorkspace(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	railRightPress(tui, 0)
+	railRightPress(tui, tui.snap.Rows-2)
 	railMenuPick(t, tui, "New workspace")
 	m := nextMsg(t, got)
 	if m.Type != "req" || m.Action != "new-workspace" {
@@ -261,16 +265,25 @@ func TestRailMenuNewWorkspace(t *testing.T) {
 	}
 }
 
-// TestRailMenuControlRowOpensNothing holds the control row clear of the menu:
-// a right press there opens nothing and sends nothing.
-func TestRailMenuControlRowOpensNothing(t *testing.T) {
+// TestRailMenuControlRowOpensSessionMenu holds the control row to the session
+// menu: a right press there opens it, sends nothing, and its release is
+// swallowed.
+func TestRailMenuControlRowOpensSessionMenu(t *testing.T) {
 	tui, got := railMenuTUI(t)
+	tui.snap.Session = "dev"
 	railRightPress(tui, tui.snap.Rows-2)
-	if tui.mode != "" || tui.menu != nil {
+	if tui.mode != "menu" || tui.menu == nil {
 		t.Fatalf("right press on the control row: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
+	if tui.menu.title != "session dev" {
+		t.Fatalf("title = %q, want session dev", tui.menu.title)
+	}
+	railWantLabels(t, tui.menu, "New workspace", "Switch session", "Detach")
 	noMsg(t, got)
 	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 3, y: tui.snap.Rows - 1})
+	if tui.mode != "menu" {
+		t.Fatal("the release of the opening press closed the session menu")
+	}
 	noMsg(t, got)
 }
 
@@ -301,16 +314,17 @@ func TestRailMenuKeyHints(t *testing.T) {
 		want map[string]string
 	}{
 		{0, map[string]string{
-			"Rename workspace": "r", "Close workspace": "",
-			"New window": "c", "New workspace": "t",
+			"New window": "c", "Rename workspace": "r",
+			"Close workspace": "",
 		}},
 		{1, map[string]string{
-			"Rename window": "", "Close window": "X",
-			"New window": "c", "Fold/unfold": "",
+			"New window": "c", "Rename window": "",
+			"Close window": "X", "Fold/unfold": "",
 		}},
 		{3, map[string]string{
-			"Focus": "", "Rename window": "", "Close window": "X",
-			"Fold/unfold": "",
+			"Focus": "", "Split right": "|", "Split down": "-",
+			"Split left": "<", "Split up": "^", "Zoom": "z",
+			"Close pane": "x", "Scrollback": "[",
 		}},
 	}
 	for _, c := range cases {
