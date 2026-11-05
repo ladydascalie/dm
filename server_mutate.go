@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	"dm/internal/layout"
 	"dm/internal/paths"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -34,7 +36,7 @@ func (s *server) toggleFold(id string) (bool, error) {
 func (s *server) paneInTreeLocked(id string) bool {
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
-			if findLeaf(w.Root, id) {
+			if layout.FindLeaf(w.Root, id) {
 				return true
 			}
 		}
@@ -90,7 +92,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	if ps == nil || ps.Cols <= 0 || ps.Rows <= 0 {
 		return nil, fmt.Errorf("no pane %q", id)
 	}
-	r := Rect{W: ps.Cols, H: ps.Rows}
+	r := layout.Rect{W: ps.Cols, H: ps.Rows}
 	rp := readPaneReplay(s.st.Name, id)
 	if !rp.ok {
 		return nil, fmt.Errorf("no pane %q", id)
@@ -199,7 +201,7 @@ func (s *server) resync() {
 	// Clients rebuild their VT after a layout change; send the screen, then
 	// replay the rings as history.
 	s.mu.Lock()
-	ids := allPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.win().Root)
 	s.mu.Unlock()
 	s.broadcastScreens(ids)
 	for _, id := range ids {
@@ -235,7 +237,7 @@ func (s *server) paneList() []paneListInfo {
 	var out []paneListInfo
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
-			for _, id := range allPanes(w.Root) {
+			for _, id := range layout.AllPanes(w.Root) {
 				info := paneListInfo{ID: id, Workspace: ws.ID, WorkspaceName: ws.Name, Window: w.ID}
 				if ps := s.st.Panes[id]; ps != nil {
 					info.Name = ps.Name
@@ -287,7 +289,7 @@ func (s *server) findPane(id string) (*Workspace, *Window, bool) {
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
-			if findLeaf(w.Root, id) {
+			if layout.FindLeaf(w.Root, id) {
 				return ws, w, true
 			}
 		}
@@ -305,8 +307,8 @@ func (s *server) focusWindow(id string) error {
 			}
 			s.st.Active = i
 			ws.Active = j
-			if !findLeaf(w.Root, w.Focus) {
-				if ids := allPanes(w.Root); len(ids) > 0 {
+			if !layout.FindLeaf(w.Root, w.Focus) {
+				if ids := layout.AllPanes(w.Root); len(ids) > 0 {
 					w.Focus = ids[0]
 				}
 			}
@@ -372,7 +374,7 @@ func (s *server) removeWorkspaceLocked(idx int) {
 	ws := s.st.Workspaces[idx]
 	var ids []string
 	for _, w := range ws.Windows {
-		ids = append(ids, allPanes(w.Root)...)
+		ids = append(ids, layout.AllPanes(w.Root)...)
 	}
 	s.st.Workspaces = append(s.st.Workspaces[:idx], s.st.Workspaces[idx+1:]...)
 	if s.st.Active >= len(s.st.Workspaces) {
@@ -438,7 +440,7 @@ func (s *server) closeWindow(id string) error {
 		return nil
 	}
 	win := ws.Windows[idx]
-	ids := allPanes(win.Root)
+	ids := layout.AllPanes(win.Root)
 	ws.Windows = append(ws.Windows[:idx], ws.Windows[idx+1:]...)
 	switch {
 	case idx < ws.Active:
@@ -464,7 +466,7 @@ func (s *server) closeWindow(id string) error {
 func (s *server) activeIDs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return allPanes(s.st.win().Root)
+	return layout.AllPanes(s.st.win().Root)
 }
 
 func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (string, error) {
@@ -486,7 +488,7 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 	var ws *Workspace
 	for _, cand := range s.st.Workspaces {
 		for _, w := range cand.Windows {
-			if findLeaf(w.Root, target) {
+			if layout.FindLeaf(w.Root, target) {
 				ws, win = cand, w
 			}
 		}
@@ -496,7 +498,7 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 		return "", fmt.Errorf("no pane %q", target)
 	}
 	id := win.newPaneID()
-	splitLeaf(win.Root, target, dir, id, ratio)
+	layout.SplitLeaf(win.Root, target, dir, id, ratio)
 	s.addPaneStateAt(id, cwd, "")
 	if !noFocus {
 		for i, cand := range s.st.Workspaces {
@@ -533,20 +535,20 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
 		for _, win := range ws.Windows {
-			if !findLeaf(win.Root, first) || !findLeaf(win.Root, second) {
+			if !layout.FindLeaf(win.Root, first) || !layout.FindLeaf(win.Root, second) {
 				continue
 			}
-			pa := ancestorPath(win.Root, first, nil)
-			pb := ancestorPath(win.Root, second, nil)
-			split := lowestCommonAncestor(pa, pb)
+			pa := layout.AncestorPath(win.Root, first, nil)
+			pb := layout.AncestorPath(win.Root, second, nil)
+			split := layout.LowestCommonAncestor(pa, pb)
 			if split == nil || split.Pane != "" {
 				return fmt.Errorf("panes %q and %q share no split", first, second)
 			}
 			if len(split.Kids) != 2 {
 				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
 			}
-			r, ok := nodeRect(win.Root, split,
-				paneAreaFor(s.cols, s.rows, s.railLocked()))
+			r, ok := layout.NodeRect(win.Root, split,
+				layout.PaneAreaFor(s.cols, s.rows, s.railLocked()))
 			if !ok {
 				return fmt.Errorf("no rect for split of %q", first)
 			}
@@ -586,7 +588,7 @@ func (s *server) setFocus(id string) error {
 	defer s.mu.Unlock()
 	for i, ws := range s.st.Workspaces {
 		for j, w := range ws.Windows {
-			if findLeaf(w.Root, id) {
+			if layout.FindLeaf(w.Root, id) {
 				s.st.Active = i
 				ws.Active = j
 				w.Focus = id
@@ -601,9 +603,9 @@ func (s *server) focusDir(dir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	win := s.st.win()
-	rects := map[string]Rect{}
-	layout(win.Root, paneAreaFor(s.cols, s.rows, s.railLocked()), rects)
-	n := neighbor(rects, win.Focus, dir)
+	rects := map[string]layout.Rect{}
+	layout.Layout(win.Root, layout.PaneAreaFor(s.cols, s.rows, s.railLocked()), rects)
+	n := layout.Neighbor(rects, win.Focus, dir)
 	if n == "" {
 		return fmt.Errorf("no pane %s of %s", dir, win.Focus)
 	}
@@ -615,7 +617,7 @@ func (s *server) cyclePane(step int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	win := s.st.win()
-	ids := allPanes(win.Root)
+	ids := layout.AllPanes(win.Root)
 	if len(ids) == 0 {
 		return fmt.Errorf("no panes")
 	}
@@ -635,7 +637,7 @@ func (s *server) closePane(target string) error {
 	if target == "" {
 		target = win.Focus
 	}
-	ids := allPanes(win.Root)
+	ids := layout.AllPanes(win.Root)
 	if len(ids) <= 1 {
 		// Closing the last pane empties the window. Let the pane's exit drive
 		// the normal path, which drops the window and ends the session when
@@ -655,13 +657,13 @@ func (s *server) closePane(target string) error {
 			at = i
 		}
 	}
-	root, ok := pruneLeaf(win.Root, target)
+	root, ok := layout.PruneLeaf(win.Root, target)
 	if !ok {
 		return fmt.Errorf("no pane %q", target)
 	}
 	win.Root = root
 	if win.Focus == target {
-		rest := allPanes(root)
+		rest := layout.AllPanes(root)
 		if len(rest) > 0 {
 			if at >= len(rest) {
 				at = len(rest) - 1
@@ -776,7 +778,7 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 				break
 			}
 			for _, w := range cand.Windows {
-				if findLeaf(w.Root, wsID) {
+				if layout.FindLeaf(w.Root, wsID) {
 					ws, src = cand, wsID
 					break
 				}
@@ -803,7 +805,7 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 	wid := s.st.newWindowID()
 	w := &Window{ID: wid, Name: label}
 	id := w.newPaneID()
-	w.Root = &Node{Pane: id}
+	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
 	if label == "" {
 		label = paths.FolderName(cwd)
@@ -879,7 +881,7 @@ func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string,
 	wid := s.st.newWindowID()
 	win := &Window{ID: wid, Name: tabLabel}
 	id := win.newPaneID()
-	win.Root = &Node{Pane: id}
+	win.Root = &layout.Node{Pane: id}
 	win.Focus = id
 	ws := &Workspace{ID: wsid, Name: name, Windows: []*Window{win}}
 	s.st.Workspaces = append(s.st.Workspaces, ws)

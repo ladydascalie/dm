@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"dm/internal/layout"
 )
 
 // Msg is the single envelope for every dm socket, in both directions.
@@ -51,19 +53,15 @@ type Status struct {
 	App string `json:"app,omitempty"`
 }
 
-type Rect struct {
-	X, Y, W, H int
-}
-
 type PaneInfo struct {
-	ID      string `json:"id"`
-	Status  string `json:"status,omitempty"`
-	Message string `json:"message,omitempty"`
-	Title   string `json:"title,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Rect    Rect   `json:"rect"`
-	Dead    bool   `json:"dead,omitempty"`
-	Restart bool   `json:"restart,omitempty"`
+	ID      string      `json:"id"`
+	Status  string      `json:"status,omitempty"`
+	Message string      `json:"message,omitempty"`
+	Title   string      `json:"title,omitempty"`
+	Name    string      `json:"name,omitempty"`
+	Rect    layout.Rect `json:"rect"`
+	Dead    bool        `json:"dead,omitempty"`
+	Restart bool        `json:"restart,omitempty"`
 	// Alt is true when the pane's program is on the alternate screen, so the
 	// terminal has no scrollback for it and the wheel belongs to the program.
 	Alt bool `json:"alt,omitempty"`
@@ -123,10 +121,10 @@ type Snapshot struct {
 	Focus    string `json:"focus"`
 	// Zoom is the zoomed pane id, empty when no pane is zoomed. Panes still
 	// carry their layout rectangles: the rail and the switcher read them.
-	Zoom string `json:"zoom,omitempty"`
-	Cols int    `json:"cols"`
-	Rows int    `json:"rows"`
-	Root *Node  `json:"root"`
+	Zoom string       `json:"zoom,omitempty"`
+	Cols int          `json:"cols"`
+	Rows int          `json:"rows"`
+	Root *layout.Node `json:"root"`
 }
 
 const maxFrame = 16 << 20

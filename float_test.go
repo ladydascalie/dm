@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -15,7 +17,7 @@ func TestFloatingPaneDraw(t *testing.T) {
 	}
 	fp := &FloatingPane{
 		ID:     "float1",
-		Rect:   Rect{X: 2, Y: 2, W: 20, H: 5},
+		Rect:   layout.Rect{X: 2, Y: 2, W: 20, H: 5},
 		VT:     vt,
 		Active: true,
 	}
@@ -38,7 +40,7 @@ func TestFloatingPaneInBands(t *testing.T) {
 	}
 	fp := &FloatingPane{
 		ID:     "float1",
-		Rect:   Rect{X: 10, Y: 5, W: 20, H: 5},
+		Rect:   layout.Rect{X: 10, Y: 5, W: 20, H: 5},
 		VT:     vt10x.New(vt10x.WithSize(20, 5)),
 		Active: true,
 	}
@@ -55,14 +57,14 @@ func TestFloatingPaneInBands(t *testing.T) {
 // TestHelpBoxFloatPaint proves a float with Paint set and no terminal paints
 // its content, its border, its title and its hint.
 func TestHelpBoxFloatPaint(t *testing.T) {
-	want := Rect{X: 3, Y: 2, W: 10, H: 2}
+	want := layout.Rect{X: 3, Y: 2, W: 10, H: 2}
 	calls := 0
 	fp := &FloatingPane{
 		ID:    "help",
 		Rect:  want,
 		Title: "prefix",
 		Hint:  "esc",
-		Paint: func(buf *bytes.Buffer, inner Rect) {
+		Paint: func(buf *bytes.Buffer, inner layout.Rect) {
 			calls++
 			if inner != want {
 				t.Fatalf("Paint got %+v, want %+v", inner, want)
@@ -92,7 +94,7 @@ func TestHelpBoxFloatVTPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	fp := &FloatingPane{
-		Rect: Rect{X: 1, Y: 1, W: 8, H: 2},
+		Rect: layout.Rect{X: 1, Y: 1, W: 8, H: 2},
 		VT:   vt,
 	}
 	var buf bytes.Buffer

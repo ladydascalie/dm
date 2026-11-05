@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"fmt"
 	"strings"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -40,7 +42,7 @@ type panelTitle struct {
 // The painter holds no state and keeps no buffer between frames: the clip needs
 // to see a whole run before it can cut it, so it collects the inside in a
 // scratch buffer and throws it away. Only buf reaches the frame.
-func paintPanel(buf *bytes.Buffer, th Theme, rect Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, Rect)) {
+func paintPanel(buf *bytes.Buffer, th Theme, rect layout.Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, layout.Rect)) {
 	if rect.W <= 0 || rect.H <= 0 || rect.X < 1 || rect.Y < 1 {
 		return
 	}
@@ -65,7 +67,7 @@ func paintPanel(buf *bytes.Buffer, th Theme, rect Rect, title panelTitle, hint s
 // paintTitleRow writes the top border row as one run: the left corner, the
 // label clipped to the interior and filled to its width, the right corner. It
 // writes both corners, so the box pass leaves this row alone.
-func paintTitleRow(buf *bytes.Buffer, th Theme, rect Rect, t panelTitle) {
+func paintTitleRow(buf *bytes.Buffer, th Theme, rect layout.Rect, t panelTitle) {
 	row := cells.Clip(t.text, rect.W)
 	if n := rect.W - cells.Cells(row); n > 0 {
 		row += strings.Repeat(t.fill, n)
@@ -77,7 +79,7 @@ func paintTitleRow(buf *bytes.Buffer, th Theme, rect Rect, t panelTitle) {
 // paintBorderText writes a label into row y of the border around r, one cell
 // clear of the left corner and clipped to the interior, so a label never eats a
 // corner and a box too narrow for it drops it.
-func paintBorderText(buf *bytes.Buffer, r Rect, y int, text, style string) {
+func paintBorderText(buf *bytes.Buffer, r layout.Rect, y int, text, style string) {
 	if text == "" || r.W < 3 || y < 0 {
 		return
 	}
@@ -92,7 +94,7 @@ func paintBorderText(buf *bytes.Buffer, r Rect, y int, text, style string) {
 // inside rect. Text placed outside the rect is dropped, text that runs past the
 // right edge is cut at the edge, and a move that lands outside the rect is
 // dropped with the text that follows it.
-func panelClip(buf *bytes.Buffer, rect Rect, in []byte) {
+func panelClip(buf *bytes.Buffer, rect layout.Rect, in []byte) {
 	c := panelClipWriter{buf: buf, rect: rect, row: -1, col: -1}
 	for len(in) > 0 {
 		if in[0] == 0x1b {
@@ -115,7 +117,7 @@ func panelClip(buf *bytes.Buffer, rect Rect, in []byte) {
 // that writes text before any move writes outside the box, so it paints nothing.
 type panelClipWriter struct {
 	buf  *bytes.Buffer
-	rect Rect
+	rect layout.Rect
 	row  int
 	col  int
 }

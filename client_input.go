@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -693,7 +695,7 @@ func (s *Snapshot) zoomedHit(x, y int) *PaneInfo {
 	if p == nil {
 		return nil
 	}
-	a := paneAreaFor(s.Cols, s.Rows, s.Rail)
+	a := layout.PaneAreaFor(s.Cols, s.Rows, s.Rail)
 	if x < a.X || y < a.Y || x >= a.X+a.W || y >= a.Y+a.H {
 		return nil
 	}
@@ -724,7 +726,7 @@ func (t *tui) paneAtBox(x, y int) *PaneInfo {
 	}
 	for i := range t.snap.Panes {
 		r := t.snap.Panes[i].Rect
-		b := Rect{X: r.X - 1, Y: r.Y - 1, W: r.W + 2, H: r.H + 2}
+		b := layout.Rect{X: r.X - 1, Y: r.Y - 1, W: r.W + 2, H: r.H + 2}
 		if x >= b.X && x < b.X+b.W && y >= b.Y && y < b.Y+b.H {
 			return &t.snap.Panes[i]
 		}
@@ -1352,8 +1354,8 @@ type dragStart struct {
 	first  string
 	second string
 	axis   string
-	rect   Rect
-	zone   Rect
+	rect   layout.Rect
+	zone   layout.Rect
 }
 
 // dragPress decides whether a left press at x,y starts a divider drag. The
@@ -1365,7 +1367,7 @@ func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
 		return dragStart{}, false
 	}
 	_, first, second, axis, r, zone, ok := padHit(snap.Root,
-		paneAreaFor(snap.Cols, snap.Rows, snap.Rail), x, y)
+		layout.PaneAreaFor(snap.Cols, snap.Rows, snap.Rail), x, y)
 	if !ok {
 		return dragStart{}, false
 	}
@@ -1381,7 +1383,7 @@ func (t *tui) barInfo() string {
 	if t.scroll != "" {
 		return fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)
 	}
-	if t.padZone != (Rect{}) {
+	if t.padZone != (layout.Rect{}) {
 		return "drag to resize"
 	}
 	return ""
@@ -1391,14 +1393,14 @@ func (t *tui) barInfo() string {
 // grab affordance. It uses the same padHit path as the press, so hover and
 // drag agree on the hit area.
 func (t *tui) updatePadHover(x, y int) {
-	var zone Rect
+	var zone layout.Rect
 	axis := ""
 	if t.snap != nil && !t.dragging && !t.railDragging && t.mode == "" {
 		if ds, ok := dragPress(t.snap, x, y); ok {
 			zone, axis = ds.zone, ds.axis
 		} else if railGripAt(t.snap, x, y) {
 			// The grip is a grab strip too: same hint, no divider painted.
-			zone, axis = Rect{t.snap.Rail - 1, 0, 1, t.snap.Rows - 2}, railPadAxis
+			zone, axis = layout.Rect{X: t.snap.Rail - 1, Y: 0, W: 1, H: t.snap.Rows - 2}, railPadAxis
 		}
 	}
 	if zone == t.padZone && axis == t.padAxis {
@@ -1410,7 +1412,7 @@ func (t *tui) updatePadHover(x, y int) {
 
 func (t *tui) startDrag(d dragStart) {
 	t.dragging = true
-	t.padZone = Rect{}
+	t.padZone = layout.Rect{}
 	t.dragFirst = d.first
 	t.dragSecond = d.second
 	t.dragAxis = d.axis
@@ -1462,7 +1464,7 @@ func (t *tui) startRailDrag() {
 	if t.snap != nil {
 		t.railWidth = t.snap.Rail
 	}
-	t.padZone = Rect{}
+	t.padZone = layout.Rect{}
 	t.padAxis = ""
 	t.dirty = true
 }
@@ -1477,10 +1479,10 @@ func (t *tui) railDragTo(x int, force bool) {
 		return
 	}
 	w := x + 1
-	if w < collapsedRail {
-		w = collapsedRail
+	if w < layout.CollapsedRail {
+		w = layout.CollapsedRail
 	}
-	if m := maxRail(t.snap.Cols); w > m {
+	if m := layout.MaxRail(t.snap.Cols); w > m {
 		w = m
 	}
 	if w == t.railWidth {
@@ -1742,16 +1744,16 @@ func (t *tui) railToggleWidth(hide bool) int {
 		rail = t.snap.Rail
 	}
 	switch {
-	case rail <= collapsedRail:
+	case rail <= layout.CollapsedRail:
 		if hide && rail > 0 {
 			return 0
 		}
 		if t.railWant > 0 {
 			return t.railWant
 		}
-		return defaultRail
+		return layout.DefaultRail
 	default:
-		return collapsedRail
+		return layout.CollapsedRail
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/layout"
 	"dm/internal/paths"
 )
 
@@ -324,7 +325,7 @@ func runServer(args []string) error {
 	win := st.win()
 	if win.Root == nil {
 		id := win.newPaneID()
-		win.Root = &Node{Pane: id}
+		win.Root = &layout.Node{Pane: id}
 		win.Focus = id
 		s.addPaneState(id)
 	}
@@ -333,7 +334,7 @@ func runServer(args []string) error {
 	var ids []string
 	for _, ws := range st.Workspaces {
 		for _, w := range ws.Windows {
-			ids = append(ids, allPanes(w.Root)...)
+			ids = append(ids, layout.AllPanes(w.Root)...)
 		}
 	}
 	for _, id := range ids {

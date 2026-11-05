@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"dm/internal/layout"
+)
 
 // menuHintTUI is a client with a live conn and an open pane menu on pane a.
 func menuHintTUI(t *testing.T) (*tui, chan Msg) {
@@ -105,7 +109,7 @@ func TestMenuHintUnboundCloses(t *testing.T) {
 // and the next row's hint still dispatches.
 func TestMenuHintSkipsBadLabel(t *testing.T) {
 	picked := false
-	tui := &tui{snap: testSnapshot(&Node{Pane: "a"}, 100, 30, nil)}
+	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
 	tui.menu = &menu{x: 1, y: 1, w: 20, title: "t", items: []menuItem{
 		{label: "Bad", key: "bogus"},
 		{label: "Good", key: ""},

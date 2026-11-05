@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -70,9 +72,9 @@ func panelScreen(t *testing.T, cols, rows int, draw func(*bytes.Buffer)) vt10x.T
 // TestPanelWithoutTitle paints a box that carries no label: the whole top and
 // bottom rows are border, and the interior painter's text sits inside.
 func TestPanelWithoutTitle(t *testing.T) {
-	r := Rect{X: 3, Y: 2, W: 6, H: 3}
+	r := layout.Rect{X: 3, Y: 2, W: 6, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, DefaultTheme(), r, panelTitle{}, "", true, func(w *bytes.Buffer, inner Rect) {
+		paintPanel(b, DefaultTheme(), r, panelTitle{}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
 			fmt.Fprintf(w, "\x1b[%d;%dHAB", inner.Y+1, inner.X+1)
 		})
 	})
@@ -96,7 +98,7 @@ func TestPanelWithoutTitle(t *testing.T) {
 // TestPanelTitleAndHint paints both labels on the border rows, one cell clear of
 // each corner, so neither label eats a corner.
 func TestPanelTitleAndHint(t *testing.T) {
-	r := Rect{X: 3, Y: 2, W: 8, H: 3}
+	r := layout.Rect{X: 3, Y: 2, W: 8, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
 		paintPanel(b, DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "hint", false, nil)
 	})
@@ -111,7 +113,7 @@ func TestPanelTitleAndHint(t *testing.T) {
 // TestPanelDropsTitleWhenNarrow drops a label that cannot fit between the
 // corners, rather than letting it cover one.
 func TestPanelDropsTitleWhenNarrow(t *testing.T) {
-	r := Rect{X: 3, Y: 2, W: 2, H: 2}
+	r := layout.Rect{X: 3, Y: 2, W: 2, H: 2}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
 		paintPanel(b, DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "hint", true, nil)
 	})
@@ -129,7 +131,7 @@ func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 // single cell between the border runes, never dropped and never over a corner.
 // Dropping it instead would move bytes for every three-wide float with a title.
 func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
-	r := Rect{X: 4, Y: 3, W: 3, H: 2}
+	r := layout.Rect{X: 4, Y: 3, W: 3, H: 2}
 	var b bytes.Buffer
 	paintPanel(&b, DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "", false, nil)
 	screen := panelFilled(t, 20, 10, b.Bytes())
@@ -155,7 +157,7 @@ func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 // with the border rune. The whole row is one write, corners included, and the
 // box pass leaves it alone, so its cells and its bytes are the caller's.
 func TestPanelFillTitleRowWritesOnce(t *testing.T) {
-	r := Rect{X: 4, Y: 3, W: 10, H: 2}
+	r := layout.Rect{X: 4, Y: 3, W: 10, H: 2}
 	var b bytes.Buffer
 	paintPanel(&b, DefaultTheme(), r, panelTitle{
 		text:  " title ",
@@ -188,9 +190,9 @@ func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 // every side. The panel keeps the border, the cells beside it, and the moves the
 // painter aimed outside the box.
 func TestPanelClipsInterior(t *testing.T) {
-	r := Rect{X: 4, Y: 3, W: 4, H: 2}
+	r := layout.Rect{X: 4, Y: 3, W: 4, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, DefaultTheme(), r, panelTitle{text: "T", style: panelTitleStyle}, "", true, func(w *bytes.Buffer, inner Rect) {
+	paintPanel(&b, DefaultTheme(), r, panelTitle{text: "T", style: panelTitleStyle}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
 		// Past the right edge, the row would run over the border.
 		fmt.Fprintf(w, "\x1b[%d;%dHABCDEFG", inner.Y+1, inner.X+1)
 		// Above, below and left of the box.

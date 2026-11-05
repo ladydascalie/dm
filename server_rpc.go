@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"dm/internal/box"
+	"dm/internal/layout"
 )
 
 func (s *server) handleReq(cl *client, m Msg) {
@@ -102,7 +103,7 @@ func (s *server) handleReq(cl *client, m Msg) {
 		// the area, so the action is a no-op there.
 		s.mu.Lock()
 		win := s.st.win()
-		if len(allPanes(win.Root)) < 2 {
+		if len(layout.AllPanes(win.Root)) < 2 {
 			s.mu.Unlock()
 			s.reply(cl, m, map[string]any{"zoom": ""}, nil)
 			return

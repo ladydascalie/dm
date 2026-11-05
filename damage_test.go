@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -21,10 +23,10 @@ type frameTUI struct {
 // hidden, so a frame's only cursor moves are the content rows.
 func newFrameTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 	t.Helper()
-	root := &Node{Pane: "w1p1"}
+	root := &layout.Node{Pane: "w1p1"}
 	snap := &Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
-	rects := map[string]Rect{}
-	layout(root, paneAreaFor(cols, rows, rail), rects)
+	rects := map[string]layout.Rect{}
+	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), rects)
 	snap.Panes = []PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
 	snap.All = []AllPane{{
 		ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
@@ -50,8 +52,8 @@ func (f *frameTUI) frame() string {
 // relayout recomputes the pane rects after a size change, the way the server
 // does not: a test owns both halves of the picture.
 func relayout(snap *Snapshot) {
-	rects := map[string]Rect{}
-	layout(snap.Root, paneAreaFor(snap.Cols, snap.Rows, snap.Rail), rects)
+	rects := map[string]layout.Rect{}
+	layout.Layout(snap.Root, layout.PaneAreaFor(snap.Cols, snap.Rows, snap.Rail), rects)
 	for i := range snap.Panes {
 		snap.Panes[i].Rect = rects[snap.Panes[i].ID]
 	}
@@ -452,10 +454,10 @@ func TestOracleResize(t *testing.T) {
 }
 
 func TestOracleDividerHover(t *testing.T) {
-	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
-	rects := map[string]Rect{}
-	layout(root, paneAreaFor(100, 20, 0), rects)
+	rects := map[string]layout.Rect{}
+	layout.Layout(root, layout.PaneAreaFor(100, 20, 0), rects)
 	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
@@ -476,11 +478,11 @@ func TestOracleDividerHover(t *testing.T) {
 		checkFrame(t, live, tr, label, out.Bytes())
 	}
 	step("first")
-	boxes := childBoxRects(root, paneAreaFor(100, 20, 0))
-	zone := padRect(root, boxes, 0)
+	boxes := layout.ChildBoxRects(root, layout.PaneAreaFor(100, 20, 0))
+	zone := layout.PadRect(root, boxes, 0)
 	tr.padZone, tr.padAxis = zone, root.Dir
 	step("hover")
-	tr.padZone = Rect{}
+	tr.padZone = layout.Rect{}
 	step("unhover")
 	tr.vts["a"].Write([]byte("\x1b[5;1Hchange-a"))
 	step("row-a")
@@ -552,10 +554,10 @@ func TestOracleModes(t *testing.T) {
 }
 
 func TestOracleOverlayOverGap(t *testing.T) {
-	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
-	rects := map[string]Rect{}
-	layout(root, paneAreaFor(100, 20, 0), rects)
+	rects := map[string]layout.Rect{}
+	layout.Layout(root, layout.PaneAreaFor(100, 20, 0), rects)
 	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
@@ -576,14 +578,14 @@ func TestOracleOverlayOverGap(t *testing.T) {
 		checkFrame(t, live, tr, label, out.Bytes())
 	}
 	step("first")
-	boxes := childBoxRects(root, paneAreaFor(100, 20, 0))
-	tr.padZone, tr.padAxis = padRect(root, boxes, 0), root.Dir
+	boxes := layout.ChildBoxRects(root, layout.PaneAreaFor(100, 20, 0))
+	tr.padZone, tr.padAxis = layout.PadRect(root, boxes, 0), root.Dir
 	step("hover")
 	tr.toasts = []toast{{text: "divider-hover-toast"}}
 	step("toast-over-divider")
 	tr.toasts = nil
 	step("toast-gone")
-	tr.padZone = Rect{}
+	tr.padZone = layout.Rect{}
 	step("unhover")
 }
 
@@ -622,7 +624,7 @@ func TestOracleResizeLive(t *testing.T) {
 	checkFrame(t, live, f.tui, "first", []byte(raw))
 
 	f.snap.Cols, f.snap.Rows = 120, 24
-	f.snap.Rail = effectiveRail(120, f.snap.Rail)
+	f.snap.Rail = layout.EffectiveRail(120, f.snap.Rail)
 	relayout(f.snap)
 	p := f.snap.Panes[0]
 	f.tui.vts[p.ID].Resize(p.Rect.W, p.Rect.H)
@@ -642,10 +644,10 @@ func TestOracleResizeLive(t *testing.T) {
 }
 
 func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *Snapshot) {
-	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "a"}
-	rects := map[string]Rect{}
-	layout(root, paneAreaFor(cols, rows, rail), rects)
+	rects := map[string]layout.Rect{}
+	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), rects)
 	snap.Panes = []PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
@@ -675,10 +677,10 @@ func TestOracleDividerOverToast(t *testing.T) {
 	step("first")
 	tr.toasts = []toast{{text: "a toast that spans the divider pad"}}
 	step("toast")
-	boxes := childBoxRects(snap.Root, paneAreaFor(100, 20, 0))
-	tr.padZone, tr.padAxis = padRect(snap.Root, boxes, 0), snap.Root.Dir
+	boxes := layout.ChildBoxRects(snap.Root, layout.PaneAreaFor(100, 20, 0))
+	tr.padZone, tr.padAxis = layout.PadRect(snap.Root, boxes, 0), snap.Root.Dir
 	step("hover-over-toast")
-	tr.padZone = Rect{}
+	tr.padZone = layout.Rect{}
 	step("unhover")
 }
 
@@ -774,8 +776,8 @@ func TestOracleDefaultRailDividerOverToast(t *testing.T) {
 	step("first")
 	tr.toasts = []toast{{text: "saved"}}
 	step("toast")
-	boxes := childBoxRects(snap.Root, paneAreaFor(120, 30, 34))
-	tr.padZone, tr.padAxis = padRect(snap.Root, boxes, 0), snap.Root.Dir
+	boxes := layout.ChildBoxRects(snap.Root, layout.PaneAreaFor(120, 30, 34))
+	tr.padZone, tr.padAxis = layout.PadRect(snap.Root, boxes, 0), snap.Root.Dir
 	step("hover")
 }
 
@@ -788,7 +790,7 @@ func TestOracleSplit(t *testing.T) {
 	live.Write([]byte(raw))
 	checkFrame(t, live, f.tui, "first", []byte(raw))
 
-	f.snap.Root = &Node{Dir: "row", Kids: []*Node{{Pane: "w1p1"}, {Pane: "w1p2"}}}
+	f.snap.Root = &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "w1p1"}, {Pane: "w1p2"}}}
 	f.snap.Panes = []PaneInfo{{ID: "w1p1"}, {ID: "w1p2"}}
 	relayout(f.snap)
 	for _, p := range f.snap.Panes {
@@ -912,8 +914,8 @@ func TestBandsUseAbsoluteCursorMoves(t *testing.T) {
 	tr, out, snap := twoPaneTUI(100, 24, 0)
 	out.Reset()
 	tr.draw()
-	boxes := childBoxRects(snap.Root, paneAreaFor(100, 24, 0))
-	tr.padZone, tr.padAxis = padRect(snap.Root, boxes, 0), snap.Root.Dir
+	boxes := layout.ChildBoxRects(snap.Root, layout.PaneAreaFor(100, 24, 0))
+	tr.padZone, tr.padAxis = layout.PadRect(snap.Root, boxes, 0), snap.Root.Dir
 	out.Reset()
 	tr.draw()
 	if got := relMoves(out.Bytes()); len(got) > 0 {

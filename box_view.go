@@ -15,6 +15,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/layout"
 
 	"github.com/hinshun/vt10x"
 )
@@ -87,7 +88,7 @@ func newBoxView(snap *Snapshot, th Theme) *boxView {
 // larger of the entry count and the watch count, so a short list reads in a
 // short box and a list longer than the cap scrolls. A parked watch exists
 // before the first entry, so the watcher page sizes itself from n too.
-func boxViewRect(snap *Snapshot, n int) Rect {
+func boxViewRect(snap *Snapshot, n int) layout.Rect {
 	left := snap.Rail
 	if left < 0 {
 		left = 0
@@ -123,7 +124,7 @@ func boxViewRect(snap *Snapshot, n int) Rect {
 	if y < 1 {
 		y = 1
 	}
-	return clampRect(Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
+	return clampRect(layout.Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
 }
 
 // sync fits the float to the screen after a snapshot or a rail change.
@@ -278,7 +279,7 @@ func (b *boxView) paint(th Theme) {
 
 // paintEntries draws the window of the log. A wide enough rect carries the
 // receipt count in every row.
-func (b *boxView) paintEntries(buf *bytes.Buffer, r Rect, th Theme) {
+func (b *boxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th Theme) {
 	if len(b.entries) == 0 {
 		boxPaintNote(buf, 1, "no entries yet", r.W)
 		return
@@ -299,7 +300,7 @@ func (b *boxView) paintEntries(buf *bytes.Buffer, r Rect, th Theme) {
 
 // paintWatchers draws the watcher page in the server's order, clipped to the
 // rect and to its rows.
-func (b *boxView) paintWatchers(buf *bytes.Buffer, r Rect, th Theme) {
+func (b *boxView) paintWatchers(buf *bytes.Buffer, r layout.Rect, th Theme) {
 	if len(b.watchers) == 0 {
 		boxPaintNote(buf, 1, "no watchers yet", r.W)
 		return

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"dm/internal/layout"
 	"dm/internal/paths"
 )
 
@@ -38,7 +39,7 @@ func (s *server) fitToClientsLocked() bool {
 // clamp. The caller holds s.mu.
 func (s *server) requestedRailLocked() int {
 	if !s.st.RailSet {
-		return defaultRail
+		return layout.DefaultRail
 	}
 	if s.st.Rail < 0 {
 		return 0
@@ -49,7 +50,7 @@ func (s *server) requestedRailLocked() int {
 // railLocked is the effective sidebar width for the current screen. The caller
 // holds s.mu.
 func (s *server) railLocked() int {
-	return effectiveRail(s.cols, s.requestedRailLocked())
+	return layout.EffectiveRail(s.cols, s.requestedRailLocked())
 }
 
 // setRail records the requested width and returns the effective one. A
@@ -70,16 +71,16 @@ func (s *server) setRail(requested int) int {
 // its layout rectangle. A zoom that no longer names a pane of the window is
 // dropped here, so a dead or switched-away pane cannot hold it. The caller
 // holds s.mu.
-func (s *server) paneRectsLocked() map[string]Rect {
+func (s *server) paneRectsLocked() map[string]layout.Rect {
 	win := s.st.win()
-	area := paneAreaFor(s.cols, s.rows, s.railLocked())
-	rects := map[string]Rect{}
-	layout(win.Root, area, rects)
+	area := layout.PaneAreaFor(s.cols, s.rows, s.railLocked())
+	rects := map[string]layout.Rect{}
+	layout.Layout(win.Root, area, rects)
 	if _, ok := rects[s.zoom]; !ok {
 		s.zoom = ""
 		return rects
 	}
-	rects[s.zoom] = insetBox(area)
+	rects[s.zoom] = layout.InsetBox(area)
 	return rects
 }
 
@@ -110,7 +111,7 @@ func (s *server) snapshotLocked() *Snapshot {
 	for _, w := range s.st.ws().Windows {
 		snap.Windows = append(snap.Windows, w.Name)
 	}
-	for _, id := range allPanes(win.Root) {
+	for _, id := range layout.AllPanes(win.Root) {
 		pc := s.panes[id]
 		info := PaneInfo{ID: id, Rect: rects[id]}
 		if pc != nil {
@@ -166,7 +167,7 @@ func (s *server) allPanesLocked() []AllPane {
 		wsActive := i == s.st.Active
 		for j, w := range ws.Windows {
 			winActive := wsActive && j == ws.Active
-			for _, id := range allPanes(w.Root) {
+			for _, id := range layout.AllPanes(w.Root) {
 				info := AllPane{
 					ID: id, Workspace: ws.ID, WorkspaceName: ws.Name,
 					Window: w.ID, WindowName: w.Name,
@@ -225,21 +226,21 @@ func (s *server) paneExited(id string) {
 	found, emptyWindow := false, false
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
-			if !findLeaf(w.Root, id) {
+			if !layout.FindLeaf(w.Root, id) {
 				continue
 			}
 			found = true
-			ids := allPanes(w.Root)
+			ids := layout.AllPanes(w.Root)
 			at := 0
 			for i, pid := range ids {
 				if pid == id {
 					at = i
 				}
 			}
-			if root, ok := pruneLeaf(w.Root, id); ok {
+			if root, ok := layout.PruneLeaf(w.Root, id); ok {
 				w.Root = root
 			}
-			rest := allPanes(w.Root)
+			rest := layout.AllPanes(w.Root)
 			if len(rest) > 0 {
 				if w.Focus == id {
 					if at >= len(rest) {
@@ -288,7 +289,7 @@ func (s *server) paneExited(id string) {
 	_ = s.st.save()
 	s.broadcastLocked(Msg{Type: "exit", Target: id})
 	s.broadcastLocked(Msg{Type: "snapshot", Snap: s.snapshotLocked()})
-	ids := allPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.win().Root)
 	s.mu.Unlock()
 
 	s.broadcastScreens(ids)
@@ -317,7 +318,7 @@ func (s *server) dropEmptyWindows() {
 	for _, ws := range s.st.Workspaces {
 		var wins []*Window
 		for _, w := range ws.Windows {
-			if w.Root != nil && len(allPanes(w.Root)) > 0 {
+			if w.Root != nil && len(layout.AllPanes(w.Root)) > 0 {
 				wins = append(wins, w)
 			}
 		}
@@ -348,7 +349,7 @@ func (s *server) countPanes() int {
 	n := 0
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
-			n += len(allPanes(w.Root))
+			n += len(layout.AllPanes(w.Root))
 		}
 	}
 	return n
@@ -483,7 +484,7 @@ func (s *server) attach(cl *client, m Msg) {
 	s.syncSizes()
 	s.mu.Lock()
 	snap := s.snapshotLocked()
-	ids := allPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.win().Root)
 	s.mu.Unlock()
 	cl.deliver(Msg{Type: "snapshot", Snap: snap})
 	if s.sendScreens(ids, func(m Msg) { cl.deliver(m) }) {
@@ -569,7 +570,7 @@ func (s *server) broadcastScreens(ids []string) {
 func (s *server) resyncClient(cl *client) {
 	s.mu.Lock()
 	snap := s.snapshotLocked()
-	ids := allPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.win().Root)
 	s.mu.Unlock()
 	cl.deliver(Msg{Type: "snapshot", Snap: snap})
 	s.sendScreens(ids, func(m Msg) { cl.deliver(m) })

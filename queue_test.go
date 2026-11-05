@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/layout"
 	"dm/internal/paths"
 )
 
@@ -67,7 +68,7 @@ func queueServer(t *testing.T, name string) (*server, string, string) {
 	w := st.win()
 	a := w.newPaneID()
 	b := w.newPaneID()
-	w.Root = &Node{Dir: "row", Kids: []*Node{{Pane: a}, {Pane: b}}}
+	w.Root = &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: a}, {Pane: b}}}
 	w.Focus = a
 	st.Panes[a] = &PaneState{}
 	st.Panes[b] = &PaneState{}

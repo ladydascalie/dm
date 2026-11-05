@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -99,14 +101,14 @@ func (s *selRange) has(off int) bool {
 }
 
 // drawPane paints one pane's cells inside r.
-func drawPane(buf *bytes.Buffer, vt vt10x.View, r Rect) {
+func drawPane(buf *bytes.Buffer, vt vt10x.View, r layout.Rect) {
 	drawPaneFrom(buf, vt, r, 0, nil, nil)
 }
 
 // drawPaneFrom paints rows [row0, row0+r.H) of vt into r. row0 > 0 shows
 // scrollback kept in a taller terminal. Cells inside sel get reverse video on
 // top of the pane's own colours; cells inside hover get an underline.
-func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel, hover *selRange) {
+func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r layout.Rect, row0 int, sel, hover *selRange) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -148,8 +150,8 @@ func drawPaneFrom(buf *bytes.Buffer, vt vt10x.View, r Rect, row0 int, sel, hover
 
 // drawPaneRow paints one row of a pane's content: the same bytes a full pane
 // paint writes for that row.
-func drawPaneRow(buf *bytes.Buffer, vt vt10x.View, r Rect, row, row0 int, sel, hover *selRange) {
-	drawPaneFrom(buf, vt, Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W), selRow(hover, row, r.W))
+func drawPaneRow(buf *bytes.Buffer, vt vt10x.View, r layout.Rect, row, row0 int, sel, hover *selRange) {
+	drawPaneFrom(buf, vt, layout.Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W), selRow(hover, row, r.W))
 }
 
 // selRow moves a pane-wide cell range onto one row, nil when the row holds
@@ -173,7 +175,7 @@ func selRow(s *selRange, row, w int) *selRange {
 
 // blankRect paints default blanks over a rectangle, so a band that left the
 // screen does not keep its glyphs.
-func blankRect(buf *bytes.Buffer, r Rect) {
+func blankRect(buf *bytes.Buffer, r layout.Rect) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -296,14 +298,14 @@ func screenBytes(vt vt10x.View) []byte {
 
 // drawPaneBox draws the border of one pane. The active pane is bright cyan;
 // the rest are dim, so the active one reads at a glance.
-func drawPaneBox(buf *bytes.Buffer, th Theme, content Rect, active bool) {
+func drawPaneBox(buf *bytes.Buffer, th Theme, content layout.Rect, active bool) {
 	drawPaneBoxRows(buf, th, content, active, false)
 }
 
 // drawPaneBoxRows draws the border of one pane. skipTop leaves the top row
 // alone, for a caller that writes it itself as one row, so no cell of it lands
 // twice.
-func drawPaneBoxRows(buf *bytes.Buffer, th Theme, content Rect, active bool, skipTop bool) {
+func drawPaneBoxRows(buf *bytes.Buffer, th Theme, content layout.Rect, active bool, skipTop bool) {
 	g := th.Glyphs
 	x0, y0 := content.X-1, content.Y-1
 	x1, y1 := content.X+content.W, content.Y+content.H
@@ -344,14 +346,14 @@ func drawGrips(buf *bytes.Buffer, th Theme, snap *Snapshot) {
 		return
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
-	var walk func(n *Node, a Rect)
-	walk = func(n *Node, a Rect) {
+	var walk func(n *layout.Node, a layout.Rect)
+	walk = func(n *layout.Node, a layout.Rect) {
 		if n == nil || n.Pane != "" {
 			return
 		}
-		boxes := childBoxRects(n, a)
+		boxes := layout.ChildBoxRects(n, a)
 		for i := 0; i+1 < len(boxes); i++ {
-			p := padRect(n, boxes, i)
+			p := layout.PadRect(n, boxes, i)
 			if n.Dir == "row" {
 				y := p.Y + p.H/2
 				fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+1, th.Glyphs.Grip)
@@ -370,13 +372,13 @@ func drawGrips(buf *bytes.Buffer, th Theme, snap *Snapshot) {
 			walk(n.Kids[i], b)
 		}
 	}
-	walk(snap.Root, paneAreaFor(snap.Cols, snap.Rows, snap.Rail))
+	walk(snap.Root, layout.PaneAreaFor(snap.Cols, snap.Rows, snap.Rail))
 	buf.WriteString("\x1b[0m")
 }
 
 // drawDivider paints the hovered divider: heavy line glyphs over both border
 // cells, so the grab target is visible before the press.
-func drawDivider(buf *bytes.Buffer, th Theme, z Rect, axis string) {
+func drawDivider(buf *bytes.Buffer, th Theme, z layout.Rect, axis string) {
 	if z.W <= 0 || z.H <= 0 {
 		return
 	}
@@ -450,15 +452,15 @@ func scrollStart(v vt10x.View, rectH, offset int) (start, max int) {
 
 // padHit reports the divider under x,y: the owning split, the panes on each
 // side, the axis, the split's rect and the two-cell divider rect.
-func padHit(n *Node, area Rect, x, y int) (split *Node, first, second, axis string, sr, pr Rect, ok bool) {
+func padHit(n *layout.Node, area layout.Rect, x, y int) (split *layout.Node, first, second, axis string, sr, pr layout.Rect, ok bool) {
 	if n == nil || n.Pane != "" || len(n.Kids) == 0 {
-		return nil, "", "", "", Rect{}, Rect{}, false
+		return nil, "", "", "", layout.Rect{}, layout.Rect{}, false
 	}
-	boxes := childBoxRects(n, area)
+	boxes := layout.ChildBoxRects(n, area)
 	horizontal := n.Dir == "row"
 	for i := range n.Kids {
 		if i < len(boxes)-1 {
-			p := padRect(n, boxes, i)
+			p := layout.PadRect(n, boxes, i)
 			if x >= p.X && x < p.X+p.W && y >= p.Y && y < p.Y+p.H {
 				// Probe one cell inside each box, next to the shared border.
 				if horizontal {
@@ -469,7 +471,7 @@ func padHit(n *Node, area Rect, x, y int) (split *Node, first, second, axis stri
 					second = leafNear(n.Kids[i+1], boxes[i+1], x, boxes[i+1].Y+1)
 				}
 				if first == "" || second == "" {
-					return nil, "", "", "", Rect{}, Rect{}, false
+					return nil, "", "", "", layout.Rect{}, layout.Rect{}, false
 				}
 				return n, first, second, n.Dir, area, p, true
 			}
@@ -478,22 +480,22 @@ func padHit(n *Node, area Rect, x, y int) (split *Node, first, second, axis stri
 			return sn, f, sec, ax, sr, pr, hit
 		}
 	}
-	return nil, "", "", "", Rect{}, Rect{}, false
+	return nil, "", "", "", layout.Rect{}, layout.Rect{}, false
 }
 
 // leafAt returns the leaf pane whose content rect contains x,y.
-func leafAt(n *Node, area Rect, x, y int) string {
+func leafAt(n *layout.Node, area layout.Rect, x, y int) string {
 	if n == nil {
 		return ""
 	}
 	if n.Pane != "" {
-		r := insetBox(area)
+		r := layout.InsetBox(area)
 		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
 			return n.Pane
 		}
 		return ""
 	}
-	for i, b := range childBoxRects(n, area) {
+	for i, b := range layout.ChildBoxRects(n, area) {
 		if x >= b.X && x < b.X+b.W && y >= b.Y && y < b.Y+b.H {
 			if id := leafAt(n.Kids[i], b, x, y); id != "" {
 				return id
@@ -507,7 +509,7 @@ func leafAt(n *Node, area Rect, x, y int) string {
 // on a border inside the subtree. A divider spans the whole split, so its
 // pointer can sit exactly over a border of the child's own split; probing the
 // exact cell would then find no pane and the divider would be dead.
-func leafNear(n *Node, area Rect, x, y int) string {
+func leafNear(n *layout.Node, area layout.Rect, x, y int) string {
 	offsets := [][2]int{
 		{0, 0},
 		{-1, 0},

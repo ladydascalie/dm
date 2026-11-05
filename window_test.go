@@ -4,6 +4,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"dm/internal/layout"
 )
 
 // windowServer is an in-process server with no clients. closeWindow only needs
@@ -19,7 +21,7 @@ func windowServer(t *testing.T) (*server, *State) {
 func addWindow(st *State, name string) (*Window, string) {
 	w := &Window{ID: st.newWindowID(), Name: name}
 	id := w.newPaneID()
-	w.Root = &Node{Pane: id}
+	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
 	st.Panes[id] = &PaneState{}
 	st.ws().Windows = append(st.ws().Windows, w)
@@ -31,7 +33,7 @@ func addWorkspace(st *State, name string) (*Workspace, *Window, string) {
 	ws := &Workspace{ID: st.newWorkspaceID(), Name: name}
 	w := &Window{ID: st.newWindowID(), Name: name}
 	id := w.newPaneID()
-	w.Root = &Node{Pane: id}
+	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
 	ws.Windows = []*Window{w}
 	st.Panes[id] = &PaneState{}

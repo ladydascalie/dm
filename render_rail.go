@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"dm/internal/layout"
 	"dm/internal/paths"
 )
 
@@ -64,7 +65,7 @@ func railItems(snap *Snapshot) []railItem {
 	if snap == nil {
 		return nil
 	}
-	if railCompact(snap.Rail) {
+	if layout.RailCompact(snap.Rail) {
 		out := make([]railItem, 0, len(snap.All))
 		for _, p := range snap.All {
 			out = append(out, railPaneRow(p))
@@ -500,7 +501,7 @@ func railWindowAt(snap *Snapshot, x, y int) string {
 	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
 		return ""
 	}
-	if railCompact(snap.Rail) {
+	if layout.RailCompact(snap.Rail) {
 		return ""
 	}
 	items := railItems(snap)
@@ -579,7 +580,7 @@ func drawRail(buf *bytes.Buffer, th Theme, snap *Snapshot) {
 	rows := snap.Rows - 1
 	items := railItems(snap)
 	nerd := nerdFonts()
-	compact := railCompact(snap.Rail)
+	compact := layout.RailCompact(snap.Rail)
 	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
 	// in rows 0..Rows-3 and clip there. Nothing overwrites the control row.
 	controlAt := snap.Rows - 2

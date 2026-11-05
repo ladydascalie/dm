@@ -3,6 +3,8 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"dm/internal/layout"
 )
 
 // switcherSnap is a session for the switcher: two workspaces, three windows and
@@ -12,8 +14,8 @@ import (
 // subfolder, so a query can match a window without matching one of its panes.
 func switcherSnap() *Snapshot {
 	snap := &Snapshot{
-		Cols: 100, Rows: 20, Rail: defaultRail,
-		Root: &Node{Pane: "w1p1"}, Focus: "w1p1",
+		Cols: 100, Rows: 20, Rail: layout.DefaultRail,
+		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
 	}
 	snap.Panes = []PaneInfo{{ID: "w1p1", Status: "working"}}
 	snap.All = []AllPane{
@@ -104,7 +106,7 @@ func switcherType(s *switcher, q string) {
 // pane of a folded window listed.
 func TestSwitcherTree(t *testing.T) {
 	snap := switcherSnap()
-	s := newSwitcher(Rect{X: 10, Y: 4, W: 80, H: 24}, snap)
+	s := newSwitcher(layout.Rect{X: 10, Y: 4, W: 80, H: 24}, snap)
 	if s.rect.W != 80 || s.rect.H != 24 {
 		t.Fatalf("rect = %+v, want the one it opened with", s.rect)
 	}
@@ -201,7 +203,7 @@ func TestSwitcherFilter(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		s := newSwitcher(Rect{W: 80, H: 24}, switcherSnap())
+		s := newSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
 		switcherType(s, c.query)
 		if got := switcherRowNames(s); !reflect.DeepEqual(got, c.want) {
 			t.Fatalf("query %q keeps %v, want %v", c.query, got, c.want)
@@ -216,7 +218,7 @@ func TestSwitcherFilter(t *testing.T) {
 // TestSwitcherBackspace drops rows with the query and gets them back when the
 // query shrinks to nothing.
 func TestSwitcherBackspace(t *testing.T) {
-	s := newSwitcher(Rect{W: 80, H: 24}, switcherSnap())
+	s := newSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
 	all := switcherRowNames(s)
 	switcherType(s, "s2")
 	if got := switcherRowNames(s); !reflect.DeepEqual(got, []string{"ws s2", "win w3", "pane w3p1"}) {
@@ -247,7 +249,7 @@ func TestSwitcherBackspace(t *testing.T) {
 
 // TestSwitcherMove walks the selection and never lands on a gap.
 func TestSwitcherMove(t *testing.T) {
-	s := newSwitcher(Rect{W: 80, H: 24}, switcherSnap())
+	s := newSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
 	var walked []string
 	for i := 0; i < len(s.rows)+2; i++ {
 		it, ok := s.selected()
@@ -291,7 +293,7 @@ func TestSwitcherMove(t *testing.T) {
 // back when that row is gone.
 func TestSwitcherSync(t *testing.T) {
 	snap := switcherSnap()
-	s := newSwitcher(Rect{W: 80, H: 24}, snap)
+	s := newSwitcher(layout.Rect{W: 80, H: 24}, snap)
 	switcherType(s, "footer")
 	if it, _ := s.selected(); it.pane != "w2p1" {
 		t.Fatalf("query footer selects %+v, want w2p1", it)
@@ -328,7 +330,7 @@ func TestSwitcherSync(t *testing.T) {
 // TestSwitcherPreview takes only the reply to the newest request and asks again
 // when the selection moves to another pane.
 func TestSwitcherPreview(t *testing.T) {
-	s := newSwitcher(Rect{W: 80, H: 24}, switcherSnap())
+	s := newSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
 	if !s.previewDue() {
 		t.Fatal("the preview is not due before anything was asked for")
 	}
@@ -376,7 +378,7 @@ func TestSwitcherPreview(t *testing.T) {
 
 // TestSwitcherTarget maps a row to the id a pick dispatches.
 func TestSwitcherTarget(t *testing.T) {
-	s := newSwitcher(Rect{W: 80, H: 24}, switcherSnap())
+	s := newSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
 	if got := s.target(); got != "w1p1" {
 		t.Fatalf("target on the first pane row = %q, want w1p1", got)
 	}
