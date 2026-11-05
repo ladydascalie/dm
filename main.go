@@ -16,38 +16,6 @@ import (
 	"golang.org/x/term"
 )
 
-const usage = `dm - durable terminal multiplexer (prototype)
-
-  dm [-s name]                 attach to a session, creating it if needed
-  dm attach [-s name]          same
-  dm new [-s name]             start a session without attaching
-  dm ls                        list sessions and whether they are live
-  dm kill [-s name]            stop a session's server (panes survive)
-  dm purge [--dry-run]         remove dead sessions whose panes are gone
-  dm exec '<json>' [-s name]   send an action as JSON
-  dm write-to <pane> --msg T   type text into a pane (--enter to accept)
-  dm read <pane> [--lines N]   print a pane's screen
-  dm read <pane> --scrollback N  print N rows above the screen
-  dm split <pane> --dir D      split a pane: left right up down
-  dm focus <pane>              focus a pane
-  dm rename-workspace <ws> <name>  rename a workspace
-  dm next-pane | dm prev-pane
-  dm status [pane]             show OSC 7501 agent status
-  dm list                      print the pane tree as JSON
-  dm dash [-s name]            print the palette rows
-  dm peek <id> [--lines N]     print the screen a palette row lands on
-  dm msg post --state S [--key K] [--msg T]
-  dm msg list [--key K | --prefix P] [--after SEQ] [--limit N] [--json]
-  dm msg wait [--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]
-  dm msg sub [--key K | --prefix P] [--state S] [--after SEQ] [--json]
-  dm msg clear [--key K]
-  dm msg watchers [--json]
-  dm msg schema
-
-Actions are the same everywhere:
-  {"action":"write-to","target":"p1","msg":"ls","enter":true}
-`
-
 func main() {
 	args := os.Args[1:]
 	if len(args) > 0 {
@@ -62,7 +30,7 @@ func main() {
 			exit(runProbe(args[1:]))
 			return
 		case "-h", "--help", "help":
-			fmt.Print(usage)
+			fmt.Print(usageText())
 			return
 		}
 	}
