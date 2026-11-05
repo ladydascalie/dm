@@ -29,7 +29,7 @@ func switcherAt(cols, rows int) (*switcher, *Snapshot) {
 func drawFloat(t *testing.T, s *switcher, snap *Snapshot, vts map[string]vt10x.Terminal) (string, int, int, vt10x.Terminal) {
 	t.Helper()
 	var b bytes.Buffer
-	cx, cy := drawSwitcher(&b, s, snap, vts)
+	cx, cy := drawSwitcher(&b, DefaultTheme(), s, snap, vts)
 	screen := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := screen.Write(b.Bytes()); err != nil {
 		t.Fatalf("replay the float: %v", err)
@@ -77,7 +77,7 @@ func switcherFocusRows(out string) []int {
 		if k+1 < len(idx) {
 			end = idx[k+1][0]
 		}
-		if strings.Contains(out[m[0]:end], railFocusBG.bg()) {
+		if strings.Contains(out[m[0]:end], DefaultTheme().Palette.RailFocusBG.bg()) {
 			y, _ := strconv.Atoi(out[m[2]:m[3]])
 			rows = append(rows, y-1)
 		}
@@ -236,7 +236,7 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	}
 	screen := vt10x.New(vt10x.WithSize(cols, rows))
 	var b bytes.Buffer
-	drawSwitcher(&b, s, snap, nil)
+	drawSwitcher(&b, DefaultTheme(), s, snap, nil)
 	if _, err := screen.Write(b.Bytes()); err != nil {
 		t.Fatalf("replay the first frame: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	}
 	b.Reset()
 	s.setPreview(2, "w1p1")
-	drawSwitcher(&b, s, snap, nil)
+	drawSwitcher(&b, DefaultTheme(), s, snap, nil)
 	if _, err := screen.Write(b.Bytes()); err != nil {
 		t.Fatalf("replay the second frame: %v", err)
 	}

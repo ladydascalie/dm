@@ -59,7 +59,7 @@ func TestRailGripMark(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railRowSnap(20)
 	var b bytes.Buffer
-	drawRail(&b, snap)
+	drawRail(&b, DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw rail: %v", err)
@@ -68,8 +68,8 @@ func TestRailGripMark(t *testing.T) {
 	defer vt.Unlock()
 	strip := snap.Rail - 1
 	mid := (snap.Rows - 2) / 2
-	if g := vt.Cell(strip, mid); g.Char != []rune(glyphGrip)[0] {
-		t.Fatalf("grip mark = %q at %d,%d, want %q", g.Char, strip, mid, glyphGrip)
+	if g := vt.Cell(strip, mid); g.Char != []rune(DefaultTheme().Glyphs.Grip)[0] {
+		t.Fatalf("grip mark = %q at %d,%d, want %q", g.Char, strip, mid, DefaultTheme().Glyphs.Grip)
 	}
 }
 

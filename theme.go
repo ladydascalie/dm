@@ -6,13 +6,16 @@ import (
 	"path/filepath"
 )
 
+// accentSlots is the number of workspace accent slots.
+const accentSlots = 6
+
 // Theme is everything the renderer can restyle: the rail and bar palette, the
 // six workspace accents, the structural glyphs, and the per-state marks. A
 // theme file overrides one theme's defaults; a key it omits keeps the built-in
 // value.
 type Theme struct {
 	Palette Palette
-	Accents [6]rgb
+	Accents [accentSlots]rgb
 	Glyphs  Glyphs
 	States  map[string]StateStyle
 }
@@ -454,4 +457,13 @@ func checkThemeName(name string) error {
 		}
 	}
 	return nil
+}
+
+// theme is the client's theme. A client with no config file has none, and gets
+// the built-in theme.
+func (t *tui) theme() Theme {
+	if t == nil || t.th == nil {
+		return DefaultTheme()
+	}
+	return *t.th
 }

@@ -27,12 +27,12 @@ type FloatingPane struct {
 }
 
 // Draw writes the pane's content and border into buf.
-func (f *FloatingPane) Draw(buf *bytes.Buffer, hover *selRange) {
+func (f *FloatingPane) Draw(buf *bytes.Buffer, th Theme, hover *selRange) {
 	paint := func(b *bytes.Buffer, inner Rect) {
 		drawPaneFrom(b, f.VT, f.Rect, 0, nil, hover)
 	}
 	if f.Paint != nil {
 		paint = f.Paint
 	}
-	paintPanel(buf, f.Rect, panelTitle{text: f.Title, style: panelTitleStyle}, f.Hint, f.Active, paint)
+	paintPanel(buf, th, f.Rect, panelTitle{text: f.Title, style: panelTitleStyle}, f.Hint, f.Active, paint)
 }

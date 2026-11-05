@@ -45,6 +45,9 @@ type tui struct {
 	// keymap is the loaded keybindings. A nil keymap means the built-in
 	// defaults, so a test TUI runs without a config file.
 	keymap *Config
+	// th is the loaded theme. A nil theme means the built-in theme, so a test
+	// TUI runs without a config file.
+	th     *Theme
 	cols   int
 	rows   int
 	snap   *Snapshot
@@ -370,7 +373,8 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 	// built-in defaults carry the session.
 	cfg, err := LoadDefaultPath(true)
 	t.keymap = cfg
-	applyTheme(cfg.Theme())
+	th := cfg.Theme()
+	t.th = &th
 	if err != nil {
 		t.notify(err.Error())
 	}
@@ -529,7 +533,7 @@ func (t *tui) apply(m Msg) {
 			t.sw.sync(m.Snap)
 		}
 		if t.box != nil {
-			t.box.sync(m.Snap)
+			t.box.sync(m.Snap, t.theme())
 			t.dirty = true
 		}
 		if t.keys != nil {
@@ -2842,7 +2846,8 @@ func (t *tui) reload() error {
 		return err
 	}
 	t.keymap = cfg
-	applyTheme(cfg.Theme())
+	th := cfg.Theme()
+	t.th = &th
 	t.dirty = true
 	t.notify("config reloaded")
 	return nil
@@ -3094,32 +3099,33 @@ func (t *tui) draw() {
 
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
+	th := t.theme()
 	var box, grip, div, rail, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range visiblePanes(win) {
-		drawPaneBox(&box, p.Rect, p.ID == win.Focus)
+		drawPaneBox(&box, th, p.Rect, p.ID == win.Focus)
 	}
-	drawGrips(&grip, win)
+	drawGrips(&grip, th, win)
 	// The rail grip paints the same heavy line as a split divider, over the
 	// strip its grab zone covers.
-	drawDivider(&div, t.padZone, t.padAxis)
-	drawRail(&rail, win)
-	drawBar(&bar, win, t.armed, t.barInfo())
-	drawToasts(&toasts, win, t.toasts)
+	drawDivider(&div, th, t.padZone, t.padAxis)
+	drawRail(&rail, th, win)
+	drawBar(&bar, th, win, t.armed, t.barInfo())
+	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
-		t.swX, t.swY = drawSwitcher(&pal, t.sw, win, t.vts)
+		t.swX, t.swY = drawSwitcher(&pal, th, t.sw, win, t.vts)
 		t.askPreview()
 	}
 	if t.armed {
-		drawHelp(&help, win.Cols, win.Rows, t.km().HelpEntries())
+		drawHelp(&help, th, win.Cols, win.Rows, t.km().HelpEntries())
 	}
 	if t.mode == "sessions" {
-		drawSessions(&sess, win.Cols, win.Rows, t.sessions, t.sel, t.session)
+		drawSessions(&sess, th, win.Cols, win.Rows, t.sessions, t.sel, t.session)
 	}
 	if t.mode == "menu" && t.menu != nil {
-		drawMenu(&menu, t.menu)
+		drawMenu(&menu, th, t.menu)
 	}
 	if t.mode == "rename" {
-		drawRename(&rename, win, t.renameID, t.renameDraft, t.renameKind)
+		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.renameKind)
 	}
 
 	// A picture that is not stable repaints whole and may clear: a size, a
@@ -3143,7 +3149,7 @@ func (t *tui) draw() {
 	var floatBufs []bytes.Buffer
 	for _, f := range t.floats {
 		var fb bytes.Buffer
-		f.Draw(&fb, t.hoverFor(f.ID, f.Rect.W))
+		f.Draw(&fb, th, t.hoverFor(f.ID, f.Rect.W))
 		floatBufs = append(floatBufs, fb)
 	}
 	dirty := map[int]bool{}

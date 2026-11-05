@@ -50,12 +50,12 @@ func clipSegs(runs []seg, budget int) []seg {
 
 // elideSegs cuts a run set to a cell budget and ends it with an ellipsis, so a
 // long label shrinks before the right-aligned runs beside it lose a cell.
-func elideSegs(runs []seg, budget int) []seg {
+func elideSegs(th Theme, runs []seg, budget int) []seg {
 	if budget <= 0 {
 		return nil
 	}
 	out := clipSegs(runs, budget-1)
-	return append(out, seg{text: ellipsis, fg: railDim})
+	return append(out, seg{text: ellipsis, fg: th.Palette.RailDim})
 }
 
 // join lays groups left to right with one gap run between them, so

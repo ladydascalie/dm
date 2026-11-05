@@ -102,7 +102,7 @@ func TestDrawToastsStack(t *testing.T) {
 	tui.notify("older")
 	tui.notify("newest")
 	var b bytes.Buffer
-	drawToasts(&b, snap, tui.toasts)
+	drawToasts(&b, DefaultTheme(), snap, tui.toasts)
 	out := b.String()
 	oldRow, _ := toastRow(t, out, "older")
 	newRow, _ := toastRow(t, out, "newest")
@@ -121,7 +121,7 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 	tui := &tui{}
 	tui.notify("a toast much longer than the screen")
 	var b bytes.Buffer
-	drawToasts(&b, snap, tui.toasts)
+	drawToasts(&b, DefaultTheme(), snap, tui.toasts)
 	out := b.String()
 	row, col := toastRow(t, out, "a toast mu")
 	if row != snap.Rows-1 {
@@ -144,16 +144,16 @@ func TestBarDropsToastSuffix(t *testing.T) {
 		Panes: []PaneInfo{{ID: "w1p1", Status: "working"}},
 	}
 	info := "SCROLL w1p1 +1/9"
-	glyph, _ := railGlyph("working", nerdFonts())
+	glyph, _ := railGlyph(DefaultTheme(), "working", nerdFonts())
 	want := []string{"main", " ", "main", " ", "▸ ", "1 1", " ", glyph,
 		" w1p1", " working", info}
-	got := barTexts(barSegments(snap, false, info))
+	got := barTexts(barSegments(DefaultTheme(), snap, false, info))
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("bar spans = %q, want %q", got, want)
 	}
 
 	var b bytes.Buffer
-	drawBar(&b, snap, false, info)
+	drawBar(&b, DefaultTheme(), snap, false, info)
 	out := b.String()
 	if !strings.Contains(out, info) {
 		t.Fatalf("bar lost its scroll segment: %q", out)
@@ -202,7 +202,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 			tui := &tui{}
 			tui.notify(c.text)
 			var b bytes.Buffer
-			drawToasts(&b, snap, tui.toasts)
+			drawToasts(&b, DefaultTheme(), snap, tui.toasts)
 			out := b.String()
 			row, col := toastRow(t, out, c.text)
 			if row != snap.Rows-1 {
@@ -216,7 +216,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 			}
 			// The interior is the text alone: bright text, then the right
 			// border, with no padding and no dropped glyph.
-			want := "\x1b[97m" + c.text + "\x1b[0m\x1b[90m" + glyphBorderVertical
+			want := "\x1b[97m" + c.text + "\x1b[0m\x1b[90m" + DefaultTheme().Glyphs.BorderVertical
 			if !strings.Contains(out, want) {
 				t.Fatalf("interior is not the whole text %q: %q", c.text, out)
 			}
