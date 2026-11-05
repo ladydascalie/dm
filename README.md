@@ -36,6 +36,13 @@ State written before this scheme is migrated once, in tree order, on load.
 go build -o dm .
 ```
 
+## Docs
+
+The command table in `clidoc.go` is the source. `dm man` renders it as a man
+page and `dm llms` renders it as a one-pass teaching document. The committed
+files `docs/dm.1` and `docs/llms.txt` are snapshots, and the gate fails when
+one is stale.
+
 ## Use
 
 ```sh
@@ -44,6 +51,8 @@ dm attach -s work       # resume a session (durable, see below)
 dm ls                   # sessions and whether their server is live
 dm new -s work          # start a session without attaching
 dm kill -s work         # stop the server; panes keep running
+dm man                  # the man page, docs/dm.1
+dm llms                 # the one-pass teaching document, docs/llms.txt
 ```
 
 Keys inside the TUI. `ctrl+b` arms the prefix and shows the action box,
@@ -60,6 +69,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `h j k l` or arrows | focus pane left / down / up / right |
 | `n` / `p` | next / previous pane |
 | `x` | close pane |
+| `X` | close window |
 | `z` | zoom pane |
 | `c` | new window |
 | `w` / `W` | next / previous window |
@@ -339,6 +349,11 @@ row otherwise leaves those two cells blank, so the state glyph keeps its
 column. The report is sticky: `state=clear` does not demote an agent, and both
 the mark and the last `app=` are stored in the state file. The focused pane's
 row is highlighted, and a left click on a pane row focuses that pane.
+
+Left click focuses a pane or folds a window. Right click opens the row menu for
+the row under the pointer: rename, close, new, fold and focus, as the row
+allows. The menu takes its keys from the main keymap. The bottom row toggles
+the rail between full and thin.
 
 A new window is named after the folder it starts in, and it starts in the
 folder of the pane it was created from; `rename-window` overrides the name. A
