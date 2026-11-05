@@ -2673,6 +2673,8 @@ func (t *tui) runAction(name string) {
 		t.action("prev-pane", nil)
 	case "close-pane":
 		t.action("close-pane", nil)
+	case "close-window":
+		t.action("close-window", nil)
 	case "zoom-pane":
 		t.action("zoom-pane", nil)
 	case "new-window":

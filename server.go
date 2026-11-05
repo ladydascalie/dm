@@ -1470,6 +1470,11 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.afterMutation()
 		s.reply(cl, m, nil, err)
 
+	case "close-window":
+		err := s.mutation(func() error { return s.closeWindow(m.Target) })
+		s.afterMutation()
+		s.reply(cl, m, nil, err)
+
 	case "new-window":
 		var wid, pid string
 		err := s.mutation(func() error {
@@ -2464,6 +2469,52 @@ func (s *server) closeWorkspace(id string) error {
 	s.st.Workspaces = append(s.st.Workspaces[:idx], s.st.Workspaces[idx+1:]...)
 	if s.st.Active >= len(s.st.Workspaces) {
 		s.st.Active = len(s.st.Workspaces) - 1
+	}
+	for _, pid := range ids {
+		if pc := s.panes[pid]; pc != nil {
+			_ = pc.send(Msg{Action: "kill"})
+			_ = pc.c.Close()
+			delete(s.panes, pid)
+		}
+		delete(s.st.Panes, pid)
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// closeWindow removes a window and kills its panes. It refuses the last window
+// in a workspace, so a close never empties a workspace. The workspace stays
+// active and its active index stays on a real window.
+func (s *server) closeWindow(id string) error {
+	s.mu.Lock()
+	var ws *Workspace
+	idx := -1
+	for _, w := range s.st.Workspaces {
+		for i, win := range w.Windows {
+			if win.ID == id {
+				ws, idx = w, i
+			}
+		}
+	}
+	if idx < 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("no window %q", id)
+	}
+	if len(ws.Windows) == 1 {
+		s.mu.Unlock()
+		return fmt.Errorf("cannot close the last window")
+	}
+	win := ws.Windows[idx]
+	ids := allPanes(win.Root)
+	ws.Windows = append(ws.Windows[:idx], ws.Windows[idx+1:]...)
+	switch {
+	case idx < ws.Active:
+		ws.Active--
+	case idx == ws.Active:
+		ws.Active = len(ws.Windows) - 1
+	}
+	if ws.Active >= len(ws.Windows) {
+		ws.Active = len(ws.Windows) - 1
 	}
 	for _, pid := range ids {
 		if pc := s.panes[pid]; pc != nil {
