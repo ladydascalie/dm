@@ -41,6 +41,7 @@ const (
 	groupSession = "session"
 	groupPane    = "pane"
 	groupBox     = "box"
+	groupDocs    = "docs"
 )
 
 // cliCommands is the whole CLI, in the order the usage text prints it.
@@ -304,6 +305,15 @@ var cliCommands = []cliCommand{
 		summary: "print the box schema the server serves",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		group:   groupBox,
+	},
+
+	// Documentation.
+	{
+		name:    "man",
+		args:    "[-o path]",
+		summary: "print the man page, or write it to a file",
+		flags:   []cliFlag{{"o", "path", "write the page to this path"}},
+		group:   groupDocs,
 	},
 }
 
