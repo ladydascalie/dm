@@ -121,9 +121,12 @@ type Snapshot struct {
 	Rail     int    `json:"rail"`
 	RailWant int    `json:"railWant"`
 	Focus    string `json:"focus"`
-	Cols     int    `json:"cols"`
-	Rows     int    `json:"rows"`
-	Root     *Node  `json:"root"`
+	// Zoom is the zoomed pane id, empty when no pane is zoomed. Panes still
+	// carry their layout rectangles: the rail and the switcher read them.
+	Zoom string `json:"zoom,omitempty"`
+	Cols int    `json:"cols"`
+	Rows int    `json:"rows"`
+	Root *Node  `json:"root"`
 }
 
 const maxFrame = 16 << 20
