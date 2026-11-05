@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -181,7 +182,7 @@ func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, draft stri
 // names the key that closes it. The box stays clear of the rail, the toast row
 // and the status bar: it gives up columns, then its trailing rows, before it
 // paints over any of them.
-func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, keys []HelpEntry) {
+func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, keys []keymap.HelpEntry) {
 	g, ok := helpBoxGeometry(cols, rows, keys)
 	if !ok {
 		return
@@ -210,7 +211,7 @@ type displayRow struct {
 // otherwise. Sections appear in first-appearance order, so a row tagged into an
 // earlier section joins it instead of opening a second header. A row keeps the
 // table order inside its section.
-func categorizeHelp(keys []HelpEntry) [][]displayRow {
+func categorizeHelp(keys []keymap.HelpEntry) [][]displayRow {
 	var categories [][]displayRow
 	index := make(map[string]int, len(keys))
 	for _, e := range keys {
@@ -230,7 +231,7 @@ func categorizeHelp(keys []HelpEntry) [][]displayRow {
 }
 
 // categorizeHelpRows flattens the categories into a single row list.
-func categorizeHelpRows(keys []HelpEntry) []displayRow {
+func categorizeHelpRows(keys []keymap.HelpEntry) []displayRow {
 	cats := categorizeHelp(keys)
 	var rows []displayRow
 	for _, cat := range cats {
@@ -382,7 +383,7 @@ func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColu
 // no other band owns. The fit is X-1 >= rail, X+width-1 <= cols-1, Y-1 >= 0 and
 // Y+h <= rows-3, so both borders own a row and the toast row and the bar stay
 // clear. It reports false when the screen cannot hold even a key column.
-func helpBoxGeometry(cols, rows int, keys []HelpEntry) (helpBoxLayout, bool) {
+func helpBoxGeometry(cols, rows int, keys []keymap.HelpEntry) (helpBoxLayout, bool) {
 	var g helpBoxLayout
 	if cols < 3 || rows < 5 || len(keys) == 0 {
 		return g, false

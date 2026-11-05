@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dm/internal/keymap"
 )
 
 // TestManPageNamesEveryCommand proves the page carries a row for every command
@@ -28,7 +30,7 @@ func TestManPageKeys(t *testing.T) {
 	if !strings.Contains(page, "close window") {
 		t.Error("man page has no close-window row")
 	}
-	for _, e := range LoadDefault().HelpEntries() {
+	for _, e := range keymap.LoadDefault().HelpEntries() {
 		if !strings.Contains(page, roffBold(e.Key)) {
 			t.Errorf("man page does not name key %q", e.Key)
 		}

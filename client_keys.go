@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/keymap"
 	"dm/internal/wire"
 	"fmt"
 	"strconv"
@@ -226,13 +227,13 @@ func (t *tui) menuKey() bool {
 	}
 	action, n, state := t.km().Match("menu", t.inbuf)
 	switch state {
-	case Partial:
+	case keymap.Partial:
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	case Match:
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
@@ -292,7 +293,7 @@ func (t *tui) menuHint() (item, n int, partial bool) {
 		if it.key == "" {
 			continue
 		}
-		s, err := keySequences(it.key, prefix)
+		s, err := keymap.KeySequences(it.key, prefix)
 		if err != nil {
 			continue
 		}
@@ -374,13 +375,13 @@ func (t *tui) pickerKey() bool {
 	}
 	action, n, state := t.km().Match("picker", t.inbuf)
 	switch state {
-	case Partial:
+	case keymap.Partial:
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	case Match:
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
@@ -424,19 +425,19 @@ func (t *tui) switcherKey() bool {
 		return true
 	}
 	action, n, state := t.km().Match("switcher", t.inbuf)
-	if state == Match && escapeRun(t.inbuf) > n {
+	if state == keymap.Match && escapeRun(t.inbuf) > n {
 		// The match covered only the head of an escape sequence. The sequence
 		// as a whole is unbound, and an unbound escape is not text.
-		state = NoMatch
+		state = keymap.NoMatch
 	}
 	switch state {
-	case Partial:
+	case keymap.Partial:
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	case Match:
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
@@ -515,7 +516,7 @@ func (t *tui) key(b byte) {
 // untouched. On success it swaps both in place, marks the frame dirty and
 // toasts.
 func (t *tui) reload() error {
-	cfg, err := LoadDefaultPath(false)
+	cfg, err := keymap.LoadDefaultPath(false)
 	if err != nil {
 		return err
 	}

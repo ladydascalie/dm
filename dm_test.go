@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/paths"
 	"dm/internal/theme"
@@ -2200,11 +2201,11 @@ func TestRailToggle(t *testing.T) {
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("narrow toggle on sent %+v, want set-rail 30", m)
 	}
-	if got := LoadDefault().Key("main", "rename-workspace"); got != "r" {
+	if got := keymap.LoadDefault().Key("main", "rename-workspace"); got != "r" {
 		t.Fatalf("rename-workspace key = %q, want r", got)
 	}
 	found := false
-	for _, kv := range LoadDefault().HelpRows() {
+	for _, kv := range keymap.LoadDefault().HelpRows() {
 		if kv[0] == "r" && kv[1] == "rename workspace" {
 			found = true
 		}
@@ -4193,9 +4194,9 @@ func TestClientScreenThenReplay(t *testing.T) {
 }
 
 // keymapTestLoad parses a keymap from text for a test TUI.
-func keymapTestLoad(t *testing.T, src string) *Config {
+func keymapTestLoad(t *testing.T, src string) *keymap.Config {
 	t.Helper()
-	cfg, err := parseConfig(src)
+	cfg, err := keymap.ParseConfig(src)
 	if err != nil {
 		t.Fatalf("parse test keymap: %v", err)
 	}
@@ -4469,6 +4470,19 @@ keymap "main" {
 	noMsg(t, got)
 }
 
+// writeTheme puts a theme file in dir/themes and returns its path.
+func writeTheme(t *testing.T, dir, name, src string) string {
+	t.Helper()
+	path := filepath.Join(dir, "themes", name+".kdl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // TestReloadActionReadsConfigAndTheme: the reload action re-reads the default
 // config path and its named theme. A changed keymap and theme replace the
 // running ones and a toast confirms the reload.
@@ -4479,7 +4493,7 @@ func TestReloadActionReadsConfigAndTheme(t *testing.T) {
 	if err := os.MkdirAll(cfgDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	tui := &tui{keymap: LoadDefault()}
+	tui := &tui{keymap: keymap.LoadDefault()}
 
 	path := filepath.Join(cfgDir, "config.kdl")
 	if err := os.WriteFile(path, []byte(`theme "night"
@@ -4532,7 +4546,7 @@ keymap "main" {
 		t.Fatal(err)
 	}
 	writeTheme(t, cfgDir, "old", `palette { "rail-bg" "#040506" }`)
-	oldCfg, err := LoadPath(path)
+	oldCfg, err := keymap.LoadPath(path)
 	if err != nil {
 		t.Fatalf("LoadPath: %v", err)
 	}
@@ -4566,7 +4580,7 @@ keymap "main" {
 // TestKeymapDispatchPartialEscapeInMenu: a menu arrow split across two reads
 // waits for its remaining bytes and then moves the selection.
 func TestKeymapDispatchPartialEscapeInMenu(t *testing.T) {
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: LoadDefault()}
+	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
 	tui.openMenu(tui.paneByID("a"), 5, 3)
 	if tui.menu == nil {
 		t.Fatal("menu did not open")

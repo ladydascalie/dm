@@ -15,6 +15,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -641,13 +642,13 @@ func (t *tui) boxKey() bool {
 	}
 	action, n, state := t.km().Match("box", t.inbuf)
 	switch state {
-	case Partial:
+	case keymap.Partial:
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	case Match:
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:

@@ -1,4 +1,4 @@
-package main
+package keymap
 
 import (
 	"dm/internal/theme"
@@ -10,7 +10,7 @@ import (
 // LoadDefault returns the built-in default keymap without touching disk. It
 // panics when the built-in text is malformed, which is a programming error.
 func LoadDefault() *Config {
-	cfg, err := parseConfig(defaultConfigKDL)
+	cfg, err := ParseConfig(defaultConfigKDL)
 	if err != nil {
 		panic("dm: default keymap is malformed: " + err.Error())
 	}
@@ -57,7 +57,7 @@ func LoadDefaultPath(write bool) (*Config, error) {
 		}
 		return cfg, nil
 	}
-	cfg, err := parseConfig(string(data))
+	cfg, err := ParseConfig(string(data))
 	if err != nil {
 		return LoadDefault(), err
 	}
@@ -82,7 +82,7 @@ func LoadPath(path string) (*Config, error) {
 		}
 		return LoadDefault(), err
 	}
-	cfg, err := parseConfig(string(data))
+	cfg, err := ParseConfig(string(data))
 	if err != nil {
 		return LoadDefault(), err
 	}
