@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/paths"
 )
 
@@ -268,7 +269,7 @@ type server struct {
 	// watches is the presence registry: the live reads, keyed by pane and
 	// filter. It is memory only. A restart forgets it and the next reads
 	// rebuild it, so it never reaches state.json.
-	watches map[boxWatchKey]watch
+	watches map[boxWatchKey]box.Watch
 
 	// zoom is the zoomed pane id, empty when no pane is zoomed. Memory only:
 	// a restart shows the splits, so it never reaches state.json.
@@ -312,7 +313,7 @@ func runServer(args []string) error {
 
 	s := &server{st: st, panes: map[string]*paneConn{}, clients: map[*client]bool{},
 		cols: st.Cols, rows: st.Rows, adopt: adopt,
-		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]watch{}}
+		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{}}
 	if s.cols < 20 {
 		s.cols = 80
 	}

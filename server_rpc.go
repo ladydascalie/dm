@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"dm/internal/box"
 )
 
 func (s *server) handleReq(cl *client, m Msg) {
@@ -265,73 +267,73 @@ func (s *server) handleReq(cl *client, m Msg) {
 		s.reply(cl, m, nil, err)
 
 	case "msg-post":
-		req, err := parseBoxReq(m.Action, m.Res)
+		req, err := box.ParseReq(m.Action, m.Res)
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		e, err := s.boxPost(req.(*postReq))
+		e, err := s.boxPost(req.(*box.PostReq))
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		s.reply(cl, m, postReply{Entry: e}, nil)
+		s.reply(cl, m, box.PostReply{Entry: e}, nil)
 
 	case "msg-list":
-		req, err := parseBoxReq(m.Action, m.Res)
+		req, err := box.ParseReq(m.Action, m.Res)
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		entries, trimmed, err := s.boxList(req.(*listReq))
+		entries, trimmed, err := s.boxList(req.(*box.ListReq))
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		s.reply(cl, m, listReply{Entries: entries, Trimmed: trimmed}, nil)
+		s.reply(cl, m, box.ListReply{Entries: entries, Trimmed: trimmed}, nil)
 
 	case "msg-clear":
-		req, err := parseBoxReq(m.Action, m.Res)
+		req, err := box.ParseReq(m.Action, m.Res)
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		s.reply(cl, m, clearReply{Cleared: s.boxClear(req.(*clearReq))}, nil)
+		s.reply(cl, m, box.ClearReply{Cleared: s.boxClear(req.(*box.ClearReq))}, nil)
 
 	case "msg-wait":
-		req, err := parseBoxReq(m.Action, m.Res)
+		req, err := box.ParseReq(m.Action, m.Res)
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		e, trimmed, err := s.boxWait(cl, req.(*waitReq))
-		s.reply(cl, m, waitReply{Entry: e, Trimmed: trimmed}, err)
+		e, trimmed, err := s.boxWait(cl, req.(*box.WaitReq))
+		s.reply(cl, m, box.WaitReply{Entry: e, Trimmed: trimmed}, err)
 
 	case "msg-sub":
-		req, err := parseBoxReq(m.Action, m.Res)
+		req, err := box.ParseReq(m.Action, m.Res)
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
 		// A stream has no completion reply. A bad request answered above; a
 		// stream that ends because its connection went answers nothing.
-		if err := s.boxSub(cl, req.(*subReq)); err != nil && !errors.Is(err, errBoxGone) {
+		if err := s.boxSub(cl, req.(*box.SubReq)); err != nil && !errors.Is(err, errBoxGone) {
 			s.reply(cl, m, nil, err)
 		}
 
 	case "msg-watchers":
-		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
+		if _, err := box.ParseReq(m.Action, m.Res); err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		s.reply(cl, m, watchersReply{Watchers: s.boxWatchers()}, nil)
+		s.reply(cl, m, box.WatchersReply{Watchers: s.boxWatchers()}, nil)
 
 	case "msg-schema":
-		if _, err := parseBoxReq(m.Action, m.Res); err != nil {
+		if _, err := box.ParseReq(m.Action, m.Res); err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		s.reply(cl, m, schemaReply{Schema: schema()}, nil)
+		s.reply(cl, m, box.SchemaReply{Schema: box.Schema()}, nil)
 
 	case "rename-workspace":
 		name := strings.TrimSpace(m.Name)

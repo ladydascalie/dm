@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"dm/internal/box"
 )
 
 // boxSession is a session server on a real unix socket, with one pane in the
@@ -93,22 +95,22 @@ func awaitWaiters(t *testing.T, s *server, want int) {
 }
 
 // postEntry posts one entry and returns it.
-func postEntry(t *testing.T, p *boxPeer, key, state string) entry {
+func postEntry(t *testing.T, p *boxPeer, key, state string) box.Entry {
 	t.Helper()
 	m := p.call("msg-post", `{"key":"`+key+`","state":"`+state+`"}`)
 	if !m.OK {
 		t.Fatalf("post %s %s: %s", key, state, m.Error)
 	}
-	var rep postReply
+	var rep box.PostReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.Fatalf("post reply: %v", err)
 	}
 	return rep.Entry
 }
 
-func waitReplyOf(t *testing.T, m Msg) entry {
+func waitReplyOf(t *testing.T, m Msg) box.Entry {
 	t.Helper()
-	var rep waitReply
+	var rep box.WaitReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.Fatalf("wait reply: %v", err)
 	}
@@ -128,7 +130,7 @@ func TestBoxWaitForDone(t *testing.T) {
 	done := postEntry(t, lane, "lane/a", "done")
 
 	got := waitReplyOf(t, driver.recv("msg-wait"))
-	if got.Seq != done.Seq || got.State != stateDone || got.Key != "lane/a" {
+	if got.Seq != done.Seq || got.State != box.StateDone || got.Key != "lane/a" {
 		t.Fatalf("wait returned %+v, want the done entry %d (blocked was %d)", got, done.Seq, blocked.Seq)
 	}
 	awaitWaiters(t, s, 0)
@@ -175,7 +177,7 @@ func TestBoxWaitTimeout(t *testing.T) {
 		t.Fatalf("wait gave up after %v, before its deadline", took)
 	}
 	got := waitReplyOf(t, m)
-	if got.Seq != last.Seq || got.State != stateBlocked {
+	if got.Seq != last.Seq || got.State != box.StateBlocked {
 		t.Fatalf("timeout carried %+v, want the newest entry %d", got, last.Seq)
 	}
 	awaitWaiters(t, s, 0)
@@ -248,7 +250,7 @@ func TestBoxWaitShellInPane(t *testing.T) {
 	}
 
 	got := waitReplyOf(t, driver.recv("msg-wait"))
-	if got.State != stateDone || got.From != pane || got.Msg != "gate green" || got.Key != "lane/a" {
+	if got.State != box.StateDone || got.From != pane || got.Msg != "gate green" || got.Key != "lane/a" {
 		t.Fatalf("driver got %+v, want done from %s", got, pane)
 	}
 	awaitWaiters(t, s, 0)

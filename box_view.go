@@ -8,11 +8,13 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"dm/internal/box"
+	"dm/internal/cells"
 
 	"github.com/hinshun/vt10x"
 )
@@ -50,13 +52,13 @@ const (
 // of the newest one shown at the top, the watchers the server last reported,
 // and the float that draws them.
 type boxView struct {
-	entries []entry
+	entries []box.Entry
 	off     int
 	// new counts the entries that arrived above a scrolled-back window. It is
 	// zero while the window follows the newest entry.
 	new int
 
-	watchers []watch
+	watchers []box.Watch
 	// page is true while the float shows the watcher list instead of the log,
 	// and pOff is the first watch row in view.
 	page bool
@@ -149,7 +151,7 @@ func (b *boxView) rows() int {
 // set replaces the log after a list reply or a box push. A scrolled-back
 // window keeps its top entry by seq, so new entries do not slide the text
 // under the reader. A window at the top follows the newest entry.
-func (b *boxView) set(entries []entry, th Theme) {
+func (b *boxView) set(entries []box.Entry, th Theme) {
 	top := 0
 	if b.off > 0 && b.off < len(b.entries) {
 		top = b.entries[b.off].Seq
@@ -174,7 +176,7 @@ func (b *boxView) set(entries []entry, th Theme) {
 
 // setWatchers replaces the watcher page after a msg-watchers reply. The float
 // holds the page whole while the page is longer than the log.
-func (b *boxView) setWatchers(watchers []watch, th Theme) {
+func (b *boxView) setWatchers(watchers []box.Watch, th Theme) {
 	b.watchers = watchers
 	b.float.Rect = boxViewRect(b.snap, b.rows())
 	b.clamp()
@@ -183,7 +185,7 @@ func (b *boxView) setWatchers(watchers []watch, th Theme) {
 }
 
 // boxSeqIndex finds an entry by seq in the newest-first log.
-func boxSeqIndex(entries []entry, seq int) int {
+func boxSeqIndex(entries []box.Entry, seq int) int {
 	for i, e := range entries {
 		if e.Seq == seq {
 			return i
@@ -371,7 +373,7 @@ func (b *boxView) parked() int {
 
 // received counts the watches a filter and a cursor say were served this
 // entry: the filter matches its key and the cursor is at or past its seq.
-func (b *boxView) received(e entry) int {
+func (b *boxView) received(e box.Entry) int {
 	n := 0
 	for _, w := range b.watchers {
 		if watchMatches(w, e.Key) && w.Cursor >= e.Seq {
@@ -384,7 +386,7 @@ func (b *boxView) received(e entry) int {
 // watchMatches reports whether a watch's filter covers a key. Filter is an
 // exact key or a branch. A watch with neither read the whole log, so it covers
 // every key.
-func watchMatches(w watch, key string) bool {
+func watchMatches(w box.Watch, key string) bool {
 	switch {
 	case w.Key != "":
 		return w.Key == key
@@ -396,7 +398,7 @@ func watchMatches(w watch, key string) bool {
 
 // watchFilter is a watch's filter as the page prints it: the key, or the
 // branch with a trailing star.
-func watchFilter(w watch) string {
+func watchFilter(w box.Watch) string {
 	if w.Key != "" {
 		return w.Key
 	}
@@ -408,7 +410,7 @@ func watchFilter(w watch) string {
 
 // boxPaintWatch writes one watcher row into buf, dim text. The row is clipped
 // to width cells.
-func boxPaintWatch(buf *bytes.Buffer, w watch, width int) {
+func boxPaintWatch(buf *bytes.Buffer, w box.Watch, width int) {
 	pane := cells.Pad(cells.Clip(w.Pane, boxPaneW), boxPaneW)
 	filter := cells.Pad(cells.Clip(watchFilter(w), boxFilterW), boxFilterW)
 	row := fmt.Sprintf("%s %s @%d", pane, filter, w.Cursor)
@@ -423,7 +425,7 @@ func boxPaintWatch(buf *bytes.Buffer, w watch, width int) {
 // colour the rail gives that state. A receipt of zero or more prefixes a
 // two-cell count; a negative receipt drops the marker. The row is clipped to
 // w cells.
-func boxPaintRow(buf *bytes.Buffer, th Theme, e entry, w int, receipt int) {
+func boxPaintRow(buf *bytes.Buffer, th Theme, e box.Entry, w int, receipt int) {
 	row := boxRowText(e, w, receipt)
 	start := boxSeqW + 1
 	if receipt >= 0 {
@@ -444,7 +446,7 @@ func boxPaintRow(buf *bytes.Buffer, th Theme, e entry, w int, receipt int) {
 
 // boxRowText is the plain text of one entry row, columns padded and the whole
 // clipped to w cells.
-func boxRowText(e entry, w int, receipt int) string {
+func boxRowText(e box.Entry, w int, receipt int) string {
 	key := cells.Pad(cells.Clip(e.Key, boxKeyW), boxKeyW)
 	from := cells.Pad(cells.Clip(e.From, boxFromW), boxFromW)
 	mark := ""
@@ -461,8 +463,8 @@ func boxRowText(e entry, w int, receipt int) string {
 // boxStateColour is the state's hue. It is the rail's status colour, so a lane
 // reads the same in the box as on the rail. note carries no progress meaning,
 // so it is dim text.
-func boxStateColour(th Theme, st boxState) rgb {
-	if st == stateNote {
+func boxStateColour(th Theme, st box.State) rgb {
+	if st == box.StateNote {
 		return th.Palette.RailDim
 	}
 	_, colour := railGlyph(th, string(st), false)
@@ -556,7 +558,7 @@ func (t *tui) takeBoxList(m Msg) {
 		t.notify(m.Error)
 		return
 	}
-	var rep listReply
+	var rep box.ListReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.notify("box: " + err.Error())
 		return
@@ -577,7 +579,7 @@ func (t *tui) takeBoxWatchers(m Msg) {
 		t.notify(m.Error)
 		return
 	}
-	var rep watchersReply
+	var rep box.WatchersReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.notify("box: " + err.Error())
 		return
