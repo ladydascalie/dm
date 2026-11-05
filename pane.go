@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/osc"
 	"dm/internal/paths"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -246,19 +247,19 @@ func (p *paneProc) reap(reason string) {
 func (p *paneProc) readLoop() {
 	buf := make([]byte, 32<<10)
 	var clean bytes.Buffer
-	filter := &oscFilter{
-		status: p.setStatus,
-		query:  p.replyQuery,
-		reply:  p.replyTerminal,
-		cursor: p.cursorPos,
-		fg:     termFG,
-		bg:     termBG,
+	filter := &osc.Filter{
+		Status: p.setStatus,
+		Query:  p.replyQuery,
+		Reply:  p.replyTerminal,
+		Cursor: p.cursorPos,
+		FG:     osc.TermFG,
+		BG:     osc.TermBG,
 	}
 	for {
 		n, err := p.ptmx.Read(buf)
 		if n > 0 {
 			clean.Reset()
-			filter.feed(buf[:n], &clean)
+			filter.Feed(buf[:n], &clean)
 			b := append([]byte(nil), clean.Bytes()...)
 			if len(b) > 0 {
 				p.mu.Lock()
