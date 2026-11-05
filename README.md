@@ -126,9 +126,10 @@ keymap "main" {
 }
 ```
 
-The tag moves that row to the named section of the armed help box. An untagged
-row keeps the built-in section. The five built-in names are Layout, Pane, Window,
-Session and Utility, and any other name is a custom section.
+The tag moves that row to the named section of the armed help box. An
+untagged row keeps the built-in section. The five built-in names are
+Layout, Pane, Window, Session and Utility, and any other name is a custom
+section.
 
 The tag is optional. An old config without tags renders the same help box. The
 tag moves a row the help box already lists. It does not add a row.
