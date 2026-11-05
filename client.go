@@ -1608,11 +1608,55 @@ func focusForClick(p *PaneInfo, cur string, ev mouseEvent) string {
 	return p.ID
 }
 
+// zoomedPane returns the pane the snapshot marks as zoomed, or nil.
+func (s *Snapshot) zoomedPane() *PaneInfo {
+	if s == nil || s.Zoom == "" {
+		return nil
+	}
+	for i := range s.Panes {
+		if s.Panes[i].ID == s.Zoom {
+			return &s.Panes[i]
+		}
+	}
+	return nil
+}
+
+// zoomedHit returns the zoomed pane when the point lies in the pane area, the
+// box that pane fills while zoomed. Every hit test while zoomed goes through
+// it, so a click on a hidden sibling's old rectangle lands on the zoomed pane.
+func (s *Snapshot) zoomedHit(x, y int) *PaneInfo {
+	p := s.zoomedPane()
+	if p == nil {
+		return nil
+	}
+	a := paneAreaFor(s.Cols, s.Rows, s.Rail)
+	if x < a.X || y < a.Y || x >= a.X+a.W || y >= a.Y+a.H {
+		return nil
+	}
+	return p
+}
+
+// visiblePanes is the panes a frame draws: all of them, or only the zoomed one
+// while a zoom is set. The snapshot keeps every rect, so the rail, the switcher
+// and the pane list keep their geometry.
+func visiblePanes(win *Snapshot) []PaneInfo {
+	if win == nil {
+		return nil
+	}
+	if z := win.zoomedPane(); z != nil {
+		return []PaneInfo{*z}
+	}
+	return win.Panes
+}
+
 // paneAtBox returns the pane whose whole box contains the point, border
 // included. A click on a pane's frame belongs to that pane.
 func (t *tui) paneAtBox(x, y int) *PaneInfo {
 	if t.snap == nil {
 		return nil
+	}
+	if p := t.snap.zoomedHit(x, y); p != nil {
+		return p
 	}
 	for i := range t.snap.Panes {
 		r := t.snap.Panes[i].Rect
@@ -1627,6 +1671,9 @@ func (t *tui) paneAtBox(x, y int) *PaneInfo {
 func (t *tui) paneAt(x, y int) *PaneInfo {
 	if t.snap == nil {
 		return nil
+	}
+	if p := t.snap.zoomedHit(x, y); p != nil {
+		return p
 	}
 	for i := range t.snap.Panes {
 		r := t.snap.Panes[i].Rect
@@ -2241,7 +2288,7 @@ type dragStart struct {
 // span. The divider always belongs to dm, even when a pane in the subtree
 // claims the mouse: the app's PTY covers its content, not the border cells.
 func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
-	if snap == nil || snap.Root == nil {
+	if snap == nil || snap.Root == nil || snap.Zoom != "" {
 		return dragStart{}, false
 	}
 	_, first, second, axis, r, zone, ok := padHit(snap.Root,
@@ -2626,6 +2673,8 @@ func (t *tui) runAction(name string) {
 		t.action("prev-pane", nil)
 	case "close-pane":
 		t.action("close-pane", nil)
+	case "zoom-pane":
+		t.action("zoom-pane", nil)
 	case "new-window":
 		t.action("new-window", nil)
 	case "next-window":
@@ -2806,7 +2855,7 @@ func (t *tui) draw() {
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
 	var box, grip, div, rail, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
-	for _, p := range win.Panes {
+	for _, p := range visiblePanes(win) {
 		drawPaneBox(&box, p.Rect, p.ID == win.Focus)
 	}
 	drawGrips(&grip, win)
@@ -3004,7 +3053,7 @@ func (t *tui) writeFrame(b []byte) {
 // the mode or the palette moved, so the next frame repaints whole.
 func (t *tui) layoutSig(win *Snapshot) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%dx%d r%d", win.Cols, win.Rows, win.Rail)
+	fmt.Fprintf(&b, "%dx%d r%d z=%s", win.Cols, win.Rows, win.Rail, win.Zoom)
 	for _, p := range win.Panes {
 		fmt.Fprintf(&b, " %s:%d,%d,%d,%d", p.ID, p.Rect.X, p.Rect.Y, p.Rect.W, p.Rect.H)
 	}
@@ -3020,8 +3069,9 @@ func (t *tui) layoutSig(win *Snapshot) string {
 
 // panePaints is the content each pane shows this frame.
 func (t *tui) panePaints(win *Snapshot) []panePaint {
-	out := make([]panePaint, 0, len(win.Panes))
-	for _, p := range win.Panes {
+	panes := visiblePanes(win)
+	out := make([]panePaint, 0, len(panes))
+	for _, p := range panes {
 		pp := panePaint{id: p.ID, rect: p.Rect}
 		pp.hover = t.hoverFor(p.ID, p.Rect.W)
 		if p.ID == t.scroll && t.scrollVT != nil {

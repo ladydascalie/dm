@@ -194,6 +194,7 @@ var helpRows = []helpRow{
 	{[]string{"focus-left", "focus-down", "focus-up", "focus-right"}, "focus pane"},
 	{[]string{"next-pane", "prev-pane"}, "next/prev pane"},
 	{[]string{"close-pane"}, "close pane"},
+	{[]string{"zoom-pane"}, "zoom pane"},
 	{[]string{"new-window"}, "new window"},
 	{[]string{"next-window", "prev-window"}, "next/prev win"},
 	{[]string{"window-1", "window-2", "window-3", "window-4", "window-5", "window-6", "window-7", "window-8", "window-9", "window-10"}, "select window"},
@@ -629,6 +630,7 @@ keymap "main" {
     "next-pane" "n"
     "prev-pane" "p"
     "close-pane" "x"
+    "zoom-pane" "z"
     "new-window" "c"
     "next-window" "w"
     "prev-window" "W"
