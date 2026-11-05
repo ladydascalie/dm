@@ -17,6 +17,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/layout"
+	"dm/internal/notify"
 	"dm/internal/paths"
 	"dm/internal/wire"
 )
@@ -488,7 +489,7 @@ func (s *server) watchPane(id string) {
 					to, message := pc.st.State, pc.st.Message
 					s.noteStatus(id, *m.St)
 					s.pushSnapshot()
-					if notifyStateChange(from, to) {
+					if notify.StateChange(from, to) {
 						s.notifyPaneState(id, to, message)
 					}
 				}

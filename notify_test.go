@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dm/internal/notify"
 )
 
 // fakeNotify puts a notify-send on a fresh directory and returns that directory
@@ -81,8 +83,8 @@ func TestNotifyStateChange(t *testing.T) {
 		{"blocked", "working", false},
 		{"idle", "clear", false},
 	} {
-		if got := notifyStateChange(c.from, c.to); got != c.want {
-			t.Fatalf("notifyStateChange(%q, %q) = %v, want %v", c.from, c.to, got, c.want)
+		if got := notify.StateChange(c.from, c.to); got != c.want {
+			t.Fatalf("notify.StateChange(%q, %q) = %v, want %v", c.from, c.to, got, c.want)
 		}
 	}
 }
@@ -94,7 +96,7 @@ func TestSystemNotifyRunsNotifySend(t *testing.T) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 
-	systemNotify("dm main w1p1 pi blocked", "needs review")
+	notify.SystemNotify("dm main w1p1 pi blocked", "needs review")
 	lines := waitNotify(t, log, 1)
 	line := lines[0]
 	for _, want := range []string{"-a dm", "-t 10000", "-u normal",
@@ -105,7 +107,7 @@ func TestSystemNotifyRunsNotifySend(t *testing.T) {
 	}
 
 	t.Setenv("DM_NOTIFY", "0")
-	systemNotify("dm main w1p1 pi done", "finished")
+	notify.SystemNotify("dm main w1p1 pi done", "finished")
 	stillNotify(t, log, 1, 400*time.Millisecond)
 }
 
@@ -115,6 +117,6 @@ func TestSystemNotifyWithoutBinary(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // a PATH that does not hold the fake
 	t.Setenv("DM_NOTIFY", "")
 
-	systemNotify("dm main w1p1 blocked", "needs review")
+	notify.SystemNotify("dm main w1p1 blocked", "needs review")
 	stillNotify(t, log, 0, 400*time.Millisecond)
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/notify"
 	"dm/internal/paths"
 	"dm/internal/wire"
 )
@@ -265,7 +266,7 @@ func (s *server) paneExited(id string) {
 	if s.countPanes() == 0 {
 		s.mu.Unlock()
 		if found {
-			systemNotify(exitTitle, exitBody)
+			notify.SystemNotify(exitTitle, exitBody)
 		}
 		if pc != nil {
 			_ = pc.c.Close()
@@ -275,7 +276,7 @@ func (s *server) paneExited(id string) {
 	}
 	s.mu.Unlock()
 	if found {
-		systemNotify(exitTitle, exitBody)
+		notify.SystemNotify(exitTitle, exitBody)
 	}
 
 	if pc != nil {
