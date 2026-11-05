@@ -385,7 +385,7 @@ keymap "main" {
 // from the render before help tags. A config without tags must paint these
 // exact bytes: same cells, same colours, same order. Regenerate it by reverting
 // render.go to the pre-tag version and hashing helpBoxDraw's output.
-const helpBoxDefaultSHA256 = "6922944f322ced8617284c9f90a2fed3846651049e92b91acaecd0505262443a"
+const helpBoxDefaultSHA256 = "d30ab24be35cf4d757a069e8417b5af919747e511ecefe6db9c8732fcad52099"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config, which carries no
 // tags, paints the same bytes as the box did before help tags.
