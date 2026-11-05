@@ -2674,7 +2674,17 @@ func (t *tui) runAction(name string) {
 	case "close-pane":
 		t.action("close-pane", nil)
 	case "close-window":
-		t.action("close-window", nil)
+		pane := ""
+		if t.snap != nil {
+			pane = t.snap.Focus
+		}
+		wid := t.windowForPane(pane)
+		if wid == "" {
+			t.notify("no window for " + pane)
+			t.disarm()
+			return
+		}
+		t.actionOn(wid, "close-window", nil)
 	case "zoom-pane":
 		t.action("zoom-pane", nil)
 	case "new-window":
@@ -2831,6 +2841,20 @@ func (t *tui) action(name string, fill func(*Msg)) {
 		target = t.snap.Focus
 	}
 	t.actionOn(target, name, fill)
+}
+
+// windowForPane resolves a pane id to its window id from the snapshot. An
+// unknown pane returns "".
+func (t *tui) windowForPane(pane string) string {
+	if t.snap == nil {
+		return ""
+	}
+	for _, p := range t.snap.All {
+		if p.ID == pane {
+			return p.Window
+		}
+	}
+	return ""
 }
 
 func (t *tui) actionOn(target, name string, fill func(*Msg)) {
