@@ -1,4 +1,4 @@
-package main
+package panel
 
 import (
 	"bytes"
@@ -9,16 +9,10 @@ import (
 	"testing"
 
 	"dm/internal/layout"
-	"dm/internal/segment"
 	"dm/internal/theme"
 
 	"github.com/hinshun/vt10x"
 )
-
-// railSeg is the name the rail gave a styled run before seg.go made the rail and
-// the bar one type. No production file names it now. rail_test.go still spells it,
-// so the alias lives here; the one edit it needs is railSeg -> segment.Seg.
-type railSeg = segment.Seg
 
 // panelChar is one cell of a replayed screen; 0 means nothing was painted there.
 func panelChar(screen vt10x.Terminal, x, y int) rune {
@@ -75,7 +69,7 @@ func panelScreen(t *testing.T, cols, rows int, draw func(*bytes.Buffer)) vt10x.T
 func TestPanelWithoutTitle(t *testing.T) {
 	r := layout.Rect{X: 3, Y: 2, W: 6, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, theme.DefaultTheme(), r, panelTitle{}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
 			fmt.Fprintf(w, "\x1b[%d;%dHAB", inner.Y+1, inner.X+1)
 		})
 	})
@@ -101,7 +95,7 @@ func TestPanelWithoutTitle(t *testing.T) {
 func TestPanelTitleAndHint(t *testing.T) {
 	r := layout.Rect{X: 3, Y: 2, W: 8, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, theme.DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "hint", false, nil)
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "hint", false, nil)
 	})
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─title──┐"; got != want {
 		t.Fatalf("title row = %q, want %q", got, want)
@@ -116,7 +110,7 @@ func TestPanelTitleAndHint(t *testing.T) {
 func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 	r := layout.Rect{X: 3, Y: 2, W: 2, H: 2}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, theme.DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "hint", true, nil)
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "hint", true, nil)
 	})
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌──┐"; got != want {
 		t.Fatalf("top row = %q, want the plain border %q", got, want)
@@ -134,7 +128,7 @@ func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 	r := layout.Rect{X: 4, Y: 3, W: 3, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, theme.DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "", false, nil)
+	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "", false, nil)
 	screen := panelFilled(t, 20, 10, b.Bytes())
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─t─┐"; got != want {
 		t.Fatalf("title row = %q, want the title cut to its one cell %q", got, want)
@@ -160,10 +154,10 @@ func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 	r := layout.Rect{X: 4, Y: 3, W: 10, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, theme.DefaultTheme(), r, panelTitle{
-		text:  " title ",
-		style: "\x1b[0m\x1b[90m",
-		fill:  theme.DefaultTheme().Glyphs.BorderHorizontal,
+	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{
+		Text:  " title ",
+		Style: "\x1b[0m\x1b[90m",
+		Fill:  theme.DefaultTheme().Glyphs.BorderHorizontal,
 	}, "", false, nil)
 	out := b.String()
 	if want := "\x1b[0m\x1b[90m\x1b[3;4H┌ title ───┐"; !strings.HasPrefix(out, want) {
@@ -193,7 +187,7 @@ func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 func TestPanelClipsInterior(t *testing.T) {
 	r := layout.Rect{X: 4, Y: 3, W: 4, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, theme.DefaultTheme(), r, panelTitle{text: "T", style: panelTitleStyle}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
+	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{Text: "T", Style: PanelTitleStyle}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
 		// Past the right edge, the row would run over the border.
 		fmt.Fprintf(w, "\x1b[%d;%dHABCDEFG", inner.Y+1, inner.X+1)
 		// Above, below and left of the box.

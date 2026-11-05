@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -37,7 +38,7 @@ func (t *tui) draw() {
 	th := t.theme()
 	var box, grip, div, rail, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range visiblePanes(win) {
-		drawPaneBox(&box, th, p.Rect, p.ID == win.Focus)
+		panel.DrawPaneBox(&box, th, p.Rect, p.ID == win.Focus)
 	}
 	drawGrips(&grip, th, win)
 	// The rail grip paints the same heavy line as a split divider, over the
