@@ -418,6 +418,7 @@ type railItem struct {
 	text       string
 	workspace  string
 	folder     string
+	cwd        string
 	branch     string
 	worktree   string
 	message    string
@@ -539,6 +540,7 @@ func railItems(snap *Snapshot) []railItem {
 			}
 			if src, ok := source(p.Window); ok {
 				item.folder = railFolder(src.Cwd, src.Root)
+				item.cwd = src.Cwd
 				item.branch = src.Branch
 				item.worktree = src.Worktree
 				item.inRepo = src.InRepo
@@ -552,7 +554,7 @@ func railItems(snap *Snapshot) []railItem {
 				out = append(out, railItem{
 					kind: railWindowNote, text: item.message, window: p.Window,
 					windowName: p.WindowName, workspace: p.Workspace,
-					folder: item.folder,
+					folder: item.folder, cwd: item.cwd,
 				})
 			}
 		}

@@ -208,16 +208,16 @@ func TestRailMenuFocusTargetsPane(t *testing.T) {
 }
 
 // TestRailMenuNewWindowTargetsRow picks New window on a workspace row and a
-// window row. The window row carries its folder as cwd; the workspace row
-// carries none.
+// window row. The window row carries the source pane's real cwd; the workspace
+// row carries none, so the server inherits from the active pane.
 func TestRailMenuNewWindowTargetsRow(t *testing.T) {
 	cases := []struct {
 		row int
 		cwd string
 	}{
 		{0, ""},
-		{1, "rail"},
-		{2, "rail"},
+		{1, "/work/dm/rail"},
+		{2, "/work/dm/rail"},
 	}
 	for _, c := range cases {
 		tui, got := railMenuTUI(t)
@@ -227,6 +227,26 @@ func TestRailMenuNewWindowTargetsRow(t *testing.T) {
 		if m.Type != "req" || m.Action != "new-window" || m.Target != "s1" || m.Cwd != c.cwd {
 			t.Fatalf("row %d: sent %+v, want new-window s1 cwd %q", c.row, m, c.cwd)
 		}
+	}
+}
+
+// TestRailMenuNewWindowOutsideGit holds the cwd to the real path when the
+// window row's label is only a base name. The label is not a path.
+func TestRailMenuNewWindowOutsideGit(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	snap := railRowSnap(20)
+	snap.All[0].Root = ""
+	snap.All[0].Cwd = "/tmp/scratch"
+	tui.snap = snap
+	it, ok := railItemAt(snap, 2, 1)
+	if !ok || it.folder != "scratch" {
+		t.Fatalf("window row = %+v, %v, want the display label scratch", it, ok)
+	}
+	railRightPress(tui, 1)
+	railMenuPick(t, tui, "New window")
+	m := nextMsg(t, got)
+	if m.Type != "req" || m.Action != "new-window" || m.Target != "s1" || m.Cwd != "/tmp/scratch" {
+		t.Fatalf("sent %+v, want new-window s1 cwd /tmp/scratch", m)
 	}
 }
 

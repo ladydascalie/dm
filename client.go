@@ -742,7 +742,7 @@ func (t *tui) openRailMenu(it railItem, x, y int) {
 				t.actionOn(it.window, "close-window", nil)
 			}},
 			{label: "New window", action: "new-window", run: func() {
-				t.actionOn(it.workspace, "new-window", func(m *Msg) { m.Cwd = it.folder })
+				t.actionOn(it.workspace, "new-window", func(m *Msg) { m.Cwd = it.cwd })
 			}},
 			{label: "Fold/unfold", action: "toggle-fold", run: func() {
 				t.actionOn(it.window, "toggle-fold", nil)
