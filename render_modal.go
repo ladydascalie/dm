@@ -11,6 +11,7 @@ import (
 	"dm/internal/panel"
 	"dm/internal/segment"
 	"dm/internal/theme"
+	"dm/internal/transport"
 	"dm/internal/wire"
 )
 
@@ -19,7 +20,7 @@ import (
 // highlight, the tee row that crosses the border and the key hint under it. The
 // title row is a fill row: dim, and its trailing cells are spaces rather than
 // the border rune, so the row is one write and its cells are the picker's.
-func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []SessionInfo, sel int, current string) {
+func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []transport.SessionInfo, sel int, current string) {
 	g := th.Glyphs
 	w := 46
 	if w > cols-2 {

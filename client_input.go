@@ -15,6 +15,7 @@ import (
 
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -96,7 +97,7 @@ func (t *tui) forwardPaste(seq []byte) {
 	default:
 		t.mode = ""
 	}
-	_ = t.conn.send(wire.Msg{Type: "keys", Keys: seq})
+	_ = t.conn.Send(wire.Msg{Type: "keys", Keys: seq})
 }
 
 func (t *tui) processInput() {
@@ -270,7 +271,7 @@ func (t *tui) processInput() {
 			if ci >= 0 && (pi < 0 || ci < pi) {
 				// The prefix arms. Bytes before it belong to the pane.
 				if ci > 0 {
-					_ = t.conn.send(wire.Msg{Type: "keys", Keys: t.inbuf[:ci]})
+					_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:ci]})
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[ci+len(prefix):]...)
 				t.arm()
@@ -279,7 +280,7 @@ func (t *tui) processInput() {
 			if pi > 0 {
 				// Plain bytes before a paste are keys; the paste itself is
 				// handled at the head of the buffer on the next pass.
-				_ = t.conn.send(wire.Msg{Type: "keys", Keys: t.inbuf[:pi]})
+				_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:pi]})
 				t.inbuf = append([]byte(nil), t.inbuf[pi:]...)
 				continue
 			}
@@ -292,7 +293,7 @@ func (t *tui) processInput() {
 				}
 				return
 			}
-			_ = t.conn.send(wire.Msg{Type: "keys", Keys: t.inbuf})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf})
 			t.inbuf = nil
 			return
 		}
@@ -420,7 +421,7 @@ func (t *tui) expirePrefix(now time.Time) bool {
 	}
 	t.pending = false
 	if len(t.inbuf) > 0 && t.conn != nil {
-		_ = t.conn.send(wire.Msg{Type: "keys", Keys: append([]byte(nil), t.inbuf...)})
+		_ = t.conn.Send(wire.Msg{Type: "keys", Keys: append([]byte(nil), t.inbuf...)})
 	}
 	t.inbuf = t.inbuf[:0]
 	return true
@@ -447,7 +448,7 @@ func (t *tui) askPreview() {
 	t.swAt = time.Now()
 	t.swPane = it.pane
 	t.sw.setPreview(t.swID, it.pane)
-	_ = t.conn.send(wire.Msg{Type: "req", Action: "read", Target: it.pane, ID: t.swID})
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "read", Target: it.pane, ID: t.swID})
 }
 
 // previewLines pulls the lines out of a read reply. The reply carries them in
@@ -579,7 +580,7 @@ func (t *tui) requestHistory(p *wire.PaneInfo) {
 	}
 	t.histMeta[p.ID] = histCache{at: p.Rect}
 	if t.conn != nil {
-		_ = t.conn.send(wire.Msg{Type: "req", Action: "replay", Target: p.ID})
+		_ = t.conn.Send(wire.Msg{Type: "req", Action: "replay", Target: p.ID})
 	}
 }
 
@@ -881,7 +882,7 @@ func (t *tui) finishPress(x, y int, raw []byte) {
 	}
 	keys = append(keys, raw...)
 	if len(keys) > 0 {
-		_ = t.conn.send(wire.Msg{Type: "keys", Keys: keys})
+		_ = t.conn.Send(wire.Msg{Type: "keys", Keys: keys})
 	}
 }
 
@@ -1293,7 +1294,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		// copies on release, a release in the same cell forwards a click.
 		t.clearSelection()
 		if focus := focusForClick(p, t.snap.Focus, ev); focus != "" && t.conn != nil {
-			_ = t.conn.send(wire.Msg{Type: "req", Action: "focus", Target: focus})
+			_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: focus})
 		}
 		if c, ok := cellAt(p, x, y); ok {
 			t.press = &heldPress{
@@ -1309,7 +1310,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		}
 		// A press on the frame is not a selection: the app gets it as before.
 		if p.Mouse && t.conn != nil {
-			_ = t.conn.send(wire.Msg{Type: "keys", Keys: ev.raw})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: ev.raw})
 		}
 		return
 	}
@@ -1322,7 +1323,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		// The pane daemon owns the mode; the client's VT may have missed the
 		// enable sequence if it scrolled out of the replay ring.
 		if t.conn != nil {
-			_ = t.conn.send(wire.Msg{Type: "keys", Keys: ev.raw})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: ev.raw})
 		}
 		return
 	}
@@ -1453,7 +1454,7 @@ func (t *tui) dragTo(x, y int, force bool) {
 	}
 	t.dragAt = time.Now()
 	ratio := float64(off) / float64(t.dragSpace)
-	_ = t.conn.send(wire.Msg{
+	_ = t.conn.Send(wire.Msg{
 		Type: "req", Action: "resize-split",
 		Target: t.dragFirst, Other: t.dragSecond, Ratio: ratio,
 	})
@@ -1496,7 +1497,7 @@ func (t *tui) railDragTo(x int, force bool) {
 	}
 	t.railDragAt = time.Now()
 	t.railWidth = w
-	_ = t.conn.send(wire.Msg{Type: "req", Action: "set-rail", Index: w})
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "set-rail", Index: w})
 }
 
 type mouseEvent struct {
@@ -1561,7 +1562,7 @@ func (t *tui) pickSession() {
 }
 
 func (t *tui) openPicker() {
-	sessions, err := listSessionInfo()
+	sessions, err := transport.ListSessions()
 	if err != nil {
 		t.notify(err.Error())
 		t.disarm()
@@ -1662,7 +1663,7 @@ func (t *tui) submitRename() {
 		return
 	}
 	if t.conn != nil {
-		_ = t.conn.send(wire.Msg{Type: "req", Action: action, Target: target, Name: name})
+		_ = t.conn.Send(wire.Msg{Type: "req", Action: action, Target: target, Name: name})
 	}
 }
 
@@ -1807,9 +1808,9 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 				t.toggleRailControl()
 			}
 		} else if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
-			_ = t.conn.send(wire.Msg{Type: "req", Action: "focus", Target: id})
+			_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
 		} else if id := railWindowAt(t.snap, x, y); id != "" && t.conn != nil {
-			_ = t.conn.send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
+			_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
 		}
 	}
 	return true

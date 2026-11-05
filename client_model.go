@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/transport"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -39,7 +39,7 @@ const (
 
 type tui struct {
 	session string
-	conn    *conn
+	conn    *transport.Conn
 	// keymap is the loaded keybindings. A nil keymap means the built-in
 	// defaults, so a test TUI runs without a config file.
 	keymap *keymap.Config
@@ -67,7 +67,7 @@ type tui struct {
 	out io.Writer
 
 	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help"
-	sessions []SessionInfo
+	sessions []transport.SessionInfo
 	sel      int
 	menu     *menu
 	// menuPress is set when a right press opens a menu. The release of that
@@ -359,7 +359,7 @@ func stdinReader(keys chan<- []byte) {
 }
 
 func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal) (string, error) {
-	c, err := dialServer(name)
+	c, err := transport.Dial(name)
 	if err != nil {
 		return "", err
 	}
@@ -400,7 +400,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		}
 	}()
 
-	if err := t.conn.send(wire.Msg{Type: "attach", Cols: t.cols, Rows: t.rows}); err != nil {
+	if err := t.conn.Send(wire.Msg{Type: "attach", Cols: t.cols, Rows: t.rows}); err != nil {
 		return "", err
 	}
 
@@ -425,7 +425,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			cols, rows, err := term.GetSize(fd)
 			if err == nil && (cols != t.cols || rows != t.rows) {
 				t.cols, t.rows = cols, rows
-				_ = t.conn.send(wire.Msg{Type: "resize", Cols: cols, Rows: rows})
+				_ = t.conn.Send(wire.Msg{Type: "resize", Cols: cols, Rows: rows})
 				t.dirty = true
 			}
 		case <-ticker.C:
@@ -633,24 +633,4 @@ func (t *tui) paneByID(id string) *wire.PaneInfo {
 		}
 	}
 	return nil
-}
-
-// conn wraps the server socket with a write mutex.
-type conn struct {
-	net.Conn
-	mu sync.Mutex
-}
-
-func dialServer(name string) (*conn, error) {
-	nc, err := ensureServer(name)
-	if err != nil {
-		return nil, err
-	}
-	return &conn{Conn: nc}, nil
-}
-
-func (c *conn) send(m wire.Msg) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return wire.WriteMsg(c.Conn, m)
 }

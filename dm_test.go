@@ -24,6 +24,7 @@ import (
 	"dm/internal/paths"
 	"dm/internal/segment"
 	"dm/internal/theme"
+	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -272,7 +273,7 @@ func TestDrawPaneColors(t *testing.T) {
 
 func TestDrawSessionsWidth(t *testing.T) {
 	const cols, rows = 100, 30
-	sessions := []SessionInfo{{Name: "alpha", Live: true}, {Name: "beta"}}
+	sessions := []transport.SessionInfo{{Name: "alpha", Live: true}, {Name: "beta"}}
 	var buf bytes.Buffer
 	drawSessions(&buf, theme.DefaultTheme(), cols, rows, sessions, 1, "alpha")
 	screen := panelFilled(t, cols, rows, buf.Bytes())
@@ -3017,7 +3018,7 @@ func TestMenuOutsideClickFocusesPane(t *testing.T) {
 	a, b := net.Pipe()
 	defer a.Close()
 	defer b.Close()
-	tui.conn = &conn{Conn: a}
+	tui.conn = &transport.Conn{Conn: a}
 	got := make(chan wire.Msg, 1)
 	go func() {
 		if m, err := wire.ReadMsg(b); err == nil {
@@ -3152,7 +3153,7 @@ func clientTUI(t *testing.T, mouse map[string]bool) (*tui, chan wire.Msg) {
 		a.Close()
 		b.Close()
 	})
-	tui.conn = &conn{Conn: a}
+	tui.conn = &transport.Conn{Conn: a}
 	got := make(chan wire.Msg, 16)
 	go func() {
 		for {

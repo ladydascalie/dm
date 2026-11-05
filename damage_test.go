@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -534,13 +535,13 @@ func TestOracleModes(t *testing.T) {
 	step("first")
 	f.snap.All[0].Name = "alpha-renamed"
 	f.tui.mode = "sessions"
-	f.tui.sessions = []SessionInfo{{Name: "main", Live: true}, {Name: "two"}, {Name: "three", Live: true}}
+	f.tui.sessions = []transport.SessionInfo{{Name: "main", Live: true}, {Name: "two"}, {Name: "three", Live: true}}
 	f.tui.sel = 1
 	f.tui.session = "main"
 	step("picker")
 	f.tui.sel = 2
 	step("picker-move")
-	f.tui.sessions = append(f.tui.sessions, SessionInfo{Name: "four", Live: true})
+	f.tui.sessions = append(f.tui.sessions, transport.SessionInfo{Name: "four", Live: true})
 	step("picker-grow")
 	f.tui.mode = ""
 	step("picker-close")
@@ -894,7 +895,7 @@ func TestBandsUseAbsoluteCursorMoves(t *testing.T) {
 		{"sessions", func() {
 			f.tui.menu = nil
 			f.tui.mode = "sessions"
-			f.tui.sessions = []SessionInfo{{Name: "main", Live: true}}
+			f.tui.sessions = []transport.SessionInfo{{Name: "main", Live: true}}
 		}},
 		{"rail", func() {
 			f.tui.mode = ""

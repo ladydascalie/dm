@@ -17,6 +17,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/pane"
 	"dm/internal/paths"
+	"dm/internal/transport"
 	"dm/internal/wire"
 
 	"golang.org/x/term"
@@ -138,7 +139,7 @@ func runCLI(argv []string) error {
 	case "new":
 		c := newFlags("new")
 		c.parse(argv[1:])
-		m, err := rpc(c.session, wire.Msg{Action: "ping"})
+		m, err := transport.RPC(c.session, wire.Msg{Action: "ping"})
 		if err != nil {
 			return err
 		}
@@ -152,13 +153,13 @@ func runCLI(argv []string) error {
 	case "ls", "list-sessions":
 		c := newFlags("ls")
 		c.parse(argv[1:])
-		sessions, err := listSessionInfo()
+		sessions, err := transport.ListSessions()
 		if err != nil {
 			return err
 		}
 		if c.jsonOut {
 			if sessions == nil {
-				sessions = []SessionInfo{}
+				sessions = []transport.SessionInfo{}
 			}
 			b, _ := json.Marshal(sessions)
 			fmt.Println(string(b))
@@ -184,7 +185,7 @@ func runCLI(argv []string) error {
 		if len(c.args) > 0 {
 			name = c.args[0]
 		}
-		return killSession(name)
+		return transport.KillSession(name)
 
 	case "purge":
 		c := newFlags("purge")
@@ -247,7 +248,7 @@ func runCLI(argv []string) error {
 		if c.scrollback >= 0 {
 			action = "history"
 		}
-		m, err := rpc(c.session, wire.Msg{Action: action, Target: c.args[0], Count: c.scrollback})
+		m, err := transport.RPC(c.session, wire.Msg{Action: action, Target: c.args[0], Count: c.scrollback})
 		if err != nil {
 			return err
 		}
@@ -275,7 +276,7 @@ func runCLI(argv []string) error {
 		if c.jsonOut {
 			return printRPC(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir})
 		}
-		m, err := rpc(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+		m, err := transport.RPC(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir})
 		if err != nil {
 			return err
 		}
@@ -318,7 +319,7 @@ func runCLI(argv []string) error {
 			target = c.args[0]
 		}
 		if target == "" {
-			m, err := rpc(c.session, wire.Msg{Action: "status"})
+			m, err := transport.RPC(c.session, wire.Msg{Action: "status"})
 			if err != nil {
 				return err
 			}
@@ -338,7 +339,7 @@ func runCLI(argv []string) error {
 			}
 			return nil
 		}
-		m, err := rpc(c.session, wire.Msg{Action: "status", Target: target})
+		m, err := transport.RPC(c.session, wire.Msg{Action: "status", Target: target})
 		if err != nil {
 			return err
 		}
@@ -371,7 +372,7 @@ func runCLI(argv []string) error {
 	case "list":
 		c := newFlags("list")
 		c.parse(argv[1:])
-		m, err := rpc(c.session, wire.Msg{Action: "list"})
+		m, err := transport.RPC(c.session, wire.Msg{Action: "list"})
 		if err != nil {
 			return err
 		}
@@ -401,7 +402,7 @@ func runCLI(argv []string) error {
 }
 
 func printRPC(name string, req wire.Msg) error {
-	m, err := rpc(name, req)
+	m, err := transport.RPC(name, req)
 	if err != nil {
 		return err
 	}
@@ -452,7 +453,7 @@ func boxPostVerb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
-	m, err := rpc(c.session, wire.Msg{Action: "msg-post", Res: raw})
+	m, err := transport.RPC(c.session, wire.Msg{Action: "msg-post", Res: raw})
 	if err != nil {
 		return err
 	}
@@ -478,7 +479,7 @@ func boxListVerb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
-	m, err := rpc(c.session, wire.Msg{Action: "msg-list", Res: raw})
+	m, err := transport.RPC(c.session, wire.Msg{Action: "msg-list", Res: raw})
 	if err != nil {
 		return err
 	}
@@ -601,12 +602,12 @@ func boxSubStream(session string, req *box.SubReq, jsonOut bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	c, err := dialServer(session)
+	c, err := transport.Dial(session)
 	if err != nil {
 		return false, errBoxSubEnded
 	}
 	defer c.Close()
-	if err := c.send(wire.Msg{Type: "req", Action: "msg-sub", ID: 1, Res: raw}); err != nil {
+	if err := c.Send(wire.Msg{Type: "req", Action: "msg-sub", ID: 1, Res: raw}); err != nil {
 		return true, errBoxSubEnded
 	}
 	for {
@@ -664,7 +665,7 @@ func boxClearVerb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
-	m, err := rpc(c.session, wire.Msg{Action: "msg-clear", Res: raw})
+	m, err := transport.RPC(c.session, wire.Msg{Action: "msg-clear", Res: raw})
 	if err != nil {
 		return err
 	}
@@ -683,7 +684,7 @@ func boxClearVerb(c *cmdFlags) error {
 // the key, or the branch prefix with a trailing star. WAIT is "wait" while a
 // msg-wait is parked on the filter, and "-" otherwise.
 func boxWatchersVerb(c *cmdFlags) error {
-	m, err := rpc(c.session, wire.Msg{Action: "msg-watchers"})
+	m, err := transport.RPC(c.session, wire.Msg{Action: "msg-watchers"})
 	if err != nil {
 		return err
 	}
@@ -738,7 +739,7 @@ func boxFilter(w box.Watch) string {
 // boxSchemaVerb prints the schema the running server serves, so the CLI holds
 // no copy of the wire.
 func boxSchemaVerb(c *cmdFlags) error {
-	m, err := rpc(c.session, wire.Msg{Action: "msg-schema"})
+	m, err := transport.RPC(c.session, wire.Msg{Action: "msg-schema"})
 	if err != nil {
 		return err
 	}
@@ -760,7 +761,7 @@ func boxSchemaVerb(c *cmdFlags) error {
 // rpcWithin is rpc with a read deadline the caller sets, because a blocking
 // wait replies long after the ten seconds rpc allows.
 func rpcWithin(name string, req wire.Msg, wait time.Duration) (wire.Msg, error) {
-	c, err := ensureServer(name)
+	c, err := transport.Ensure(name)
 	if err != nil {
 		return wire.Msg{}, err
 	}
@@ -836,7 +837,7 @@ func boxPrint(entries []box.Entry, width int) {
 // that still answers on its socket, or whose server or a pane process is
 // alive, is left alone and reported.
 func runPurge(c *cmdFlags) error {
-	sessions, err := listSessionInfo()
+	sessions, err := transport.ListSessions()
 	if err != nil {
 		return err
 	}

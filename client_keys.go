@@ -598,7 +598,7 @@ func (t *tui) runAction(name string) {
 		t.disarm()
 	case "send-prefix":
 		if p := t.km().PrefixBytes(); len(p) > 0 && t.conn != nil {
-			_ = t.conn.send(wire.Msg{Type: "keys", Keys: append([]byte(nil), p...)})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: append([]byte(nil), p...)})
 		}
 		t.disarm()
 	case "reload":
@@ -649,6 +649,6 @@ func (t *tui) actionOn(target, name string, fill func(*wire.Msg)) {
 	if fill != nil {
 		fill(&m)
 	}
-	_ = t.conn.send(m)
+	_ = t.conn.Send(m)
 	t.disarm()
 }
