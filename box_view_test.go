@@ -8,17 +8,19 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/box"
+
 	"github.com/hinshun/vt10x"
 )
 
 // boxEntries is a log with one of four states, so a row test covers the column
 // layout and the state colours.
-func boxEntries() []entry {
-	return []entry{
-		{Seq: 9, Key: "lane/a", State: stateDone, From: "w3p1", Msg: "gate green"},
-		{Seq: 8, Key: "lane/a", State: stateWorking, From: "w3p1", Msg: "running tests"},
-		{Seq: 7, Key: "lane/b", State: stateBlocked, From: "w2p2", Msg: "waiting on review"},
-		{Seq: 6, Key: "lane/c", State: stateError, From: "w1p1", Msg: "build failed"},
+func boxEntries() []box.Entry {
+	return []box.Entry{
+		{Seq: 9, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "gate green"},
+		{Seq: 8, Key: "lane/a", State: box.StateWorking, From: "w3p1", Msg: "running tests"},
+		{Seq: 7, Key: "lane/b", State: box.StateBlocked, From: "w2p2", Msg: "waiting on review"},
+		{Seq: 6, Key: "lane/c", State: box.StateError, From: "w1p1", Msg: "build failed"},
 	}
 }
 
@@ -89,7 +91,7 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 
 	// The state word carries the rail's colour for that state. vt10x stores a
 	// true colour as r<<16|g<<8|b.
-	want := boxStateColour(DefaultTheme(), stateDone)
+	want := boxStateColour(DefaultTheme(), box.StateDone)
 	screen.Lock()
 	got := screen.Cell(r.X+boxReceiptW+boxSeqW+1, r.Y).FG
 	screen.Unlock()
@@ -103,9 +105,9 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 func TestBoxViewScrollClamps(t *testing.T) {
 	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 0}
 	b := newBoxView(snap, DefaultTheme())
-	entries := make([]entry, 0, 40)
+	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
-		entries = append(entries, entry{Seq: i + 1, State: stateNote, Msg: "note"})
+		entries = append(entries, box.Entry{Seq: i + 1, State: box.StateNote, Msg: "note"})
 	}
 	b.set(entries, DefaultTheme())
 	max := len(entries) - b.float.Rect.H
@@ -137,9 +139,9 @@ func TestBoxViewFitsLog(t *testing.T) {
 	if got, want := b.float.Rect.H, len(boxEntries()); got != want {
 		t.Fatalf("height = %d, want the log length %d", got, want)
 	}
-	entries := make([]entry, 60)
+	entries := make([]box.Entry, 60)
 	for i := range entries {
-		entries[i] = entry{Seq: i + 1, State: stateNote, Msg: "note"}
+		entries[i] = box.Entry{Seq: i + 1, State: box.StateNote, Msg: "note"}
 	}
 	b.set(entries, DefaultTheme())
 	if b.float.Rect.H != 22 {
@@ -163,7 +165,7 @@ func TestBoxPrefixOpensView(t *testing.T) {
 	if m.Type != "req" || m.Action != "msg-list" {
 		t.Fatalf("open request = %+v, want a msg-list request", m)
 	}
-	var req listReq
+	var req box.ListReq
 	if err := json.Unmarshal(m.Res, &req); err != nil {
 		t.Fatalf("list request: %v", err)
 	}
@@ -180,7 +182,7 @@ func TestBoxPrefixOpensView(t *testing.T) {
 func TestBoxListReplyFillsView(t *testing.T) {
 	tui, _ := switcherTUI(t)
 	feed(tui, "\x02m")
-	res, err := json.Marshal(listReply{Entries: boxEntries()})
+	res, err := json.Marshal(box.ListReply{Entries: boxEntries()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,9 +259,9 @@ func TestBoxPostPushesAndEchoes(t *testing.T) {
 // boxWatches is a presence list in the server's order: pane, then key, then
 // branch. The first watch is parked, so the title and the page have a wait to
 // show, and the second trails one seq behind the newest entry.
-func boxWatches() []watch {
+func boxWatches() []box.Watch {
 	at := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
-	return []watch{
+	return []box.Watch{
 		{Pane: "w1p1", Key: "lane/a", Cursor: 9, Parked: true, At: at},
 		{Pane: "w1p2", KeyPrefix: "lane/", Cursor: 8, At: at},
 	}
@@ -278,7 +280,7 @@ func TestBoxViewRequestsWatchers(t *testing.T) {
 	if ask.Action != "msg-watchers" {
 		t.Fatalf("open asked for %q, want msg-watchers", ask.Action)
 	}
-	var req watchersReq
+	var req box.WatchersReq
 	if err := json.Unmarshal(ask.Res, &req); err != nil {
 		t.Fatalf("watchers request: %v", err)
 	}
@@ -323,7 +325,7 @@ func TestBoxViewWatcherPage(t *testing.T) {
 	feed(tui, "\x02m")
 	nextBoxMsg(t, got) // msg-list
 	nextBoxMsg(t, got) // msg-watchers
-	list, err := json.Marshal(listReply{Entries: boxEntries()})
+	list, err := json.Marshal(box.ListReply{Entries: boxEntries()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +336,7 @@ func TestBoxViewWatcherPage(t *testing.T) {
 	if m := nextBoxMsg(t, got); m.Action != "msg-watchers" {
 		t.Fatalf("push asked for %q, want msg-watchers", m.Action)
 	}
-	res, err := json.Marshal(watchersReply{Watchers: boxWatches()})
+	res, err := json.Marshal(box.WatchersReply{Watchers: boxWatches()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,8 +397,8 @@ func TestBoxViewTitleWatching(t *testing.T) {
 // receiptWatches is boxWatches plus a watch on another key with a high cursor.
 // It matches neither lane/a entry, so the receipt count proves the filter is
 // part of the rule and not just the cursor.
-func receiptWatches() []watch {
-	return append(boxWatches(), watch{Pane: "w1p3", Key: "lane/b", Cursor: 9})
+func receiptWatches() []box.Watch {
+	return append(boxWatches(), box.Watch{Pane: "w1p3", Key: "lane/b", Cursor: 9})
 }
 
 // TestBoxViewReceipt: a wide view prefixes each row with the number of watches
@@ -470,9 +472,9 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 // newest entry and the count clears.
 func TestBoxViewAnchor(t *testing.T) {
 	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
-	entries := make([]entry, 40)
+	entries := make([]box.Entry, 40)
 	for i := range entries {
-		entries[i] = entry{Seq: 40 - i, State: stateNote, Msg: "note"}
+		entries[i] = box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"}
 	}
 	b.set(entries, DefaultTheme())
 	b.scroll(5, DefaultTheme())
@@ -483,14 +485,14 @@ func TestBoxViewAnchor(t *testing.T) {
 
 	// Two pushes, one entry each: the count must add up, not restart from the
 	// current index.
-	b.set(append([]entry{{Seq: 41, State: stateNote, Msg: "note"}}, entries...), DefaultTheme())
+	b.set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), DefaultTheme())
 	if got := b.entries[b.off].Seq; got != top {
 		t.Fatalf("top seq = %d after one entry, want %d", got, top)
 	}
 	if b.new != 1 {
 		t.Fatalf("new = %d after one entry, want 1", b.new)
 	}
-	b.set(append([]entry{{Seq: 42, State: stateNote, Msg: "note"}}, b.entries...), DefaultTheme())
+	b.set(append([]box.Entry{{Seq: 42, State: box.StateNote, Msg: "note"}}, b.entries...), DefaultTheme())
 	if got := b.entries[b.off].Seq; got != top {
 		t.Fatalf("top seq = %d after two entries, want %d", got, top)
 	}
@@ -502,7 +504,7 @@ func TestBoxViewAnchor(t *testing.T) {
 	}
 
 	b.scroll(-b.off, DefaultTheme())
-	b.set(append([]entry{{Seq: 44, State: stateNote, Msg: "note"}}, b.entries...), DefaultTheme())
+	b.set(append([]box.Entry{{Seq: 44, State: box.StateNote, Msg: "note"}}, b.entries...), DefaultTheme())
 	if b.off != 0 || b.new != 0 || strings.Contains(b.title(), "+") {
 		t.Fatalf("off = %d, new = %d, title = %q, want the newest entry", b.off, b.new, b.title())
 	}
@@ -512,7 +514,7 @@ func TestBoxViewAnchor(t *testing.T) {
 // before the first entry. The float sizes from the watches, so the page shows
 // every watch, and the page has its own offset.
 func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
-	few := append(boxWatches(), watch{Pane: "w1p3", Key: "lane/b", Cursor: 4})
+	few := append(boxWatches(), box.Watch{Pane: "w1p3", Key: "lane/b", Cursor: 4})
 	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
 	b.setWatchers(few, DefaultTheme())
 	if got, want := b.float.Rect.H, len(few); got != want {
@@ -536,9 +538,9 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 
 	// More watches than the cap: the page scrolls on its own offset and the
 	// log stays at the top.
-	many := make([]watch, 25)
+	many := make([]box.Watch, 25)
 	for i := range many {
-		many[i] = watch{Pane: fmt.Sprintf("p%02d", i+1), Key: "lane/a", Cursor: i}
+		many[i] = box.Watch{Pane: fmt.Sprintf("p%02d", i+1), Key: "lane/a", Cursor: i}
 	}
 	b = newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
 	b.set(boxEntries(), DefaultTheme())

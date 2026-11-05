@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"dm/internal/box"
 	"dm/internal/paths"
 )
 
@@ -77,8 +78,8 @@ type State struct {
 	// into. BoxSeq is the last seq handed out. It never resets, so a clear
 	// leaves a gap instead of reusing a number. A state file written before the
 	// box existed loads with both zero, an empty box.
-	Box    []entry `json:"box,omitempty"`
-	BoxSeq int     `json:"boxSeq,omitempty"`
+	Box    []box.Entry `json:"box,omitempty"`
+	BoxSeq int         `json:"boxSeq,omitempty"`
 }
 
 // numericName reports whether a window label is a plain number, the old
@@ -203,14 +204,14 @@ func (st *State) dropBadBoxEntries() int {
 	}
 	kept := st.Box[:0]
 	for _, e := range st.Box {
-		if e.validate() == nil {
+		if e.Validate() == nil {
 			kept = append(kept, e)
 		}
 	}
 	bad := len(st.Box) - len(kept)
 	if bad > 0 {
 		for i := len(kept); i < len(st.Box); i++ {
-			st.Box[i] = entry{}
+			st.Box[i] = box.Entry{}
 		}
 	}
 	st.Box = kept
@@ -221,24 +222,24 @@ func (st *State) dropBadBoxEntries() int {
 // measure is the compact JSON of the entries, so the cap bounds the log itself;
 // the state file's indentation is the file's, not the box's.
 func (st *State) trimBox() {
-	box := st.Box
-	if len(box) > boxMaxEntries {
-		box = box[len(box)-boxMaxEntries:]
+	kept := st.Box
+	if len(kept) > box.MaxEntries {
+		kept = kept[len(kept)-box.MaxEntries:]
 	}
-	for len(box) > 0 {
-		b, err := json.Marshal(box)
-		if err != nil || len(b) <= boxMaxBytes {
+	for len(kept) > 0 {
+		b, err := json.Marshal(kept)
+		if err != nil || len(b) <= box.MaxBytes {
 			break
 		}
-		box = box[1:]
+		kept = kept[1:]
 	}
-	if len(box) != len(st.Box) {
-		box = append([]entry(nil), box...)
+	if len(kept) != len(st.Box) {
+		kept = append([]box.Entry(nil), kept...)
 	}
-	if len(box) == 0 {
-		box = nil
+	if len(kept) == 0 {
+		kept = nil
 	}
-	st.Box = box
+	st.Box = kept
 }
 
 func (st *State) ws() *Workspace {

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/cells"
 	"dm/internal/paths"
 
@@ -441,11 +442,11 @@ func runBox(c *cmdFlags) error {
 
 // boxPostVerb posts one entry and prints it as the server stored it.
 func boxPostVerb(c *cmdFlags) error {
-	st, err := parseState(c.state)
+	st, err := box.ParseState(c.state)
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(postReq{Key: c.key, State: st, Msg: c.msg, From: boxFrom(c.session)})
+	raw, err := json.Marshal(box.PostReq{Key: c.key, State: st, Msg: c.msg, From: boxFrom(c.session)})
 	if err != nil {
 		return err
 	}
@@ -456,11 +457,11 @@ func boxPostVerb(c *cmdFlags) error {
 	if !m.OK {
 		return fmt.Errorf("%s", m.Error)
 	}
-	var rep postReply
+	var rep box.PostReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		return err
 	}
-	boxPrint([]entry{rep.Entry}, 0)
+	boxPrint([]box.Entry{rep.Entry}, 0)
 	return nil
 }
 
@@ -468,7 +469,7 @@ func boxPostVerb(c *cmdFlags) error {
 // With --after the rows are what the cursor has not seen, and a dropped gap is
 // reported on stderr.
 func boxListVerb(c *cmdFlags) error {
-	raw, err := json.Marshal(listReq{
+	raw, err := json.Marshal(box.ListReq{
 		Key: c.key, KeyPrefix: c.keyPrefix,
 		Limit: c.limit, AfterSeq: c.boxCursor(), From: boxFrom(c.session),
 	})
@@ -486,7 +487,7 @@ func boxListVerb(c *cmdFlags) error {
 		fmt.Println(string(m.Res))
 		return nil
 	}
-	var rep listReply
+	var rep box.ListReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		return err
 	}
@@ -504,15 +505,15 @@ func boxListVerb(c *cmdFlags) error {
 // ends, so it needs a deadline of its own: the one rpc sets is ten seconds,
 // and a wait may run for an hour.
 func boxWaitVerb(c *cmdFlags) error {
-	var st boxState
+	var st box.State
 	if c.state != "" {
-		parsed, err := parseState(c.state)
+		parsed, err := box.ParseState(c.state)
 		if err != nil {
 			return err
 		}
 		st = parsed
 	}
-	raw, err := json.Marshal(waitReq{
+	raw, err := json.Marshal(box.WaitReq{
 		Key: c.key, KeyPrefix: c.keyPrefix,
 		State: st, TimeoutMs: int(c.timeout / time.Millisecond),
 		AfterSeq: c.boxCursor(), From: boxFrom(c.session),
@@ -531,11 +532,11 @@ func boxWaitVerb(c *cmdFlags) error {
 		fmt.Println(string(m.Res))
 		return nil
 	}
-	var rep waitReply
+	var rep box.WaitReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		return err
 	}
-	boxPrint([]entry{rep.Entry}, 0)
+	boxPrint([]box.Entry{rep.Entry}, 0)
 	if rep.Trimmed {
 		fmt.Fprintln(os.Stderr, "dm: entries between the cursor and the oldest kept row are gone")
 	}
@@ -560,9 +561,9 @@ var errBoxSubEnded = errors.New("box: sub connection ended")
 // across a restart. A resp with an Error is not retried: it prints and exits
 // nonzero, because a refused request will be refused again.
 func boxSubVerb(c *cmdFlags) error {
-	var st boxState
+	var st box.State
 	if c.state != "" {
-		parsed, err := parseState(c.state)
+		parsed, err := box.ParseState(c.state)
 		if err != nil {
 			return err
 		}
@@ -570,7 +571,7 @@ func boxSubVerb(c *cmdFlags) error {
 	}
 	// From travels the way list and wait send it, so a sub inside a pane of
 	// the target session is a watcher of the filter it names.
-	req := subReq{
+	req := box.SubReq{
 		From: boxFrom(c.session), Key: c.key, KeyPrefix: c.keyPrefix,
 		State: st, AfterSeq: c.boxCursor(),
 	}
@@ -593,7 +594,7 @@ func boxSubVerb(c *cmdFlags) error {
 // established, so a caller can tell a refusal to dial from a stream that ran
 // and then went. A frame advances the request's cursor as it is printed, so the
 // same request resumes the stream after a redial.
-func boxSubStream(session string, req *subReq, jsonOut bool) (bool, error) {
+func boxSubStream(session string, req *box.SubReq, jsonOut bool) (bool, error) {
 	raw, err := json.Marshal(req)
 	if err != nil {
 		return false, err
@@ -619,7 +620,7 @@ func boxSubStream(session string, req *subReq, jsonOut bool) (bool, error) {
 			}
 			continue
 		}
-		var frame subFrame
+		var frame box.SubFrame
 		if err := json.Unmarshal(m.Res, &frame); err != nil {
 			return true, errBoxSubEnded
 		}
@@ -631,7 +632,7 @@ func boxSubStream(session string, req *subReq, jsonOut bool) (bool, error) {
 			}
 			fmt.Println(string(b))
 		} else {
-			boxPrint([]entry{e}, 0)
+			boxPrint([]box.Entry{e}, 0)
 		}
 		seq := e.Seq
 		req.AfterSeq = &seq
@@ -657,7 +658,7 @@ func (c *cmdFlags) boxCursor() *int {
 // boxClearVerb clears one key, or the whole box when no key is given, and
 // prints how many entries went.
 func boxClearVerb(c *cmdFlags) error {
-	raw, err := json.Marshal(clearReq{Key: c.key})
+	raw, err := json.Marshal(box.ClearReq{Key: c.key})
 	if err != nil {
 		return err
 	}
@@ -668,7 +669,7 @@ func boxClearVerb(c *cmdFlags) error {
 	if !m.OK {
 		return fmt.Errorf("%s", m.Error)
 	}
-	var rep clearReply
+	var rep box.ClearReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		return err
 	}
@@ -691,7 +692,7 @@ func boxWatchersVerb(c *cmdFlags) error {
 		fmt.Println(string(m.Res))
 		return nil
 	}
-	var rep watchersReply
+	var rep box.WatchersReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		return err
 	}
@@ -701,7 +702,7 @@ func boxWatchersVerb(c *cmdFlags) error {
 
 // boxPrintWatchers writes one row per watch, each column padded to the widest
 // row. The filter is what the reader asked for: a key, or a prefix and a star.
-func boxPrintWatchers(ws []watch) {
+func boxPrintWatchers(ws []box.Watch) {
 	if len(ws) == 0 {
 		return
 	}
@@ -725,7 +726,7 @@ func boxPrintWatchers(ws []watch) {
 }
 
 // boxFilter is one watch's filter as a reader names it.
-func boxFilter(w watch) string {
+func boxFilter(w box.Watch) string {
 	if w.KeyPrefix != "" {
 		return w.KeyPrefix + "*"
 	}
@@ -742,7 +743,7 @@ func boxSchemaVerb(c *cmdFlags) error {
 	if !m.OK {
 		return fmt.Errorf("%s", m.Error)
 	}
-	var rep schemaReply
+	var rep box.SchemaReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		return err
 	}
@@ -803,7 +804,7 @@ func boxTermWidth() int {
 
 // boxPrint writes entries one per row as SEQ KEY STATE FROM MSG. A width above
 // zero cuts the message to fit, with an cells.Ellipsis where it was cut.
-func boxPrint(entries []entry, width int) {
+func boxPrint(entries []box.Entry, width int) {
 	if len(entries) == 0 {
 		return
 	}

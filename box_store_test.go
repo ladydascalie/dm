@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/paths"
 )
 
@@ -23,7 +24,7 @@ func boxServer(t *testing.T) *server {
 	rootPane(st)
 	s := railServer(st)
 	// The registry is built with the server, never loaded from state.
-	s.watches = map[boxWatchKey]watch{}
+	s.watches = map[boxWatchKey]box.Watch{}
 	return s
 }
 
@@ -51,14 +52,14 @@ func boxCall(t *testing.T, s *server, cl *client, conn net.Conn, action, res str
 }
 
 // boxPost posts one entry and returns it, failing the test on any error.
-func boxPost(t *testing.T, s *server, cl *client, conn net.Conn, key, state, msg string) entry {
+func boxPost(t *testing.T, s *server, cl *client, conn net.Conn, key, state, msg string) box.Entry {
 	t.Helper()
 	res := `{"key":"` + key + `","state":"` + state + `","msg":"` + msg + `"}`
 	m := boxCall(t, s, cl, conn, "msg-post", res)
 	if !m.OK {
 		t.Fatalf("post %s: %s", res, m.Error)
 	}
-	var rep postReply
+	var rep box.PostReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.Fatalf("post reply: %v", err)
 	}
@@ -82,7 +83,7 @@ func TestBoxSeqStartsAtOneAndNeverRepeats(t *testing.T) {
 	if !m.OK {
 		t.Fatalf("clear: %s", m.Error)
 	}
-	var cleared clearReply
+	var cleared box.ClearReply
 	if err := json.Unmarshal(m.Res, &cleared); err != nil || cleared.Cleared != 1 {
 		t.Fatalf("clear reply = %s (%v)", m.Res, err)
 	}
@@ -108,7 +109,7 @@ func TestBoxSeqStartsAtOneAndNeverRepeats(t *testing.T) {
 func TestBoxRestartKeepsEveryEntryInOrder(t *testing.T) {
 	s := boxServer(t)
 	cl, conn := boxConn(t)
-	posted := []entry{
+	posted := []box.Entry{
 		boxPost(t, s, cl, conn, "lane/a", "working", "first"),
 		boxPost(t, s, cl, conn, "lane/b", "blocked", "second"),
 		boxPost(t, s, cl, conn, "lane/a", "done", "third"),
@@ -139,28 +140,28 @@ func TestBoxEntryCapDropsOldest(t *testing.T) {
 
 	at := time.Now().UTC().Truncate(time.Second)
 	s.mu.Lock()
-	for i := 1; i <= boxMaxEntries; i++ {
-		s.st.Box = append(s.st.Box, entry{Seq: i, At: at, Key: "lane/a", State: stateNote, Msg: "filler"})
+	for i := 1; i <= box.MaxEntries; i++ {
+		s.st.Box = append(s.st.Box, box.Entry{Seq: i, At: at, Key: "lane/a", State: box.StateNote, Msg: "filler"})
 	}
-	s.st.BoxSeq = boxMaxEntries
+	s.st.BoxSeq = box.MaxEntries
 	s.mu.Unlock()
 
 	newest := boxPost(t, s, cl, conn, "lane/b", "done", "newest")
-	if newest.Seq != boxMaxEntries+1 {
-		t.Fatalf("seq after a full box = %d, want %d", newest.Seq, boxMaxEntries+1)
+	if newest.Seq != box.MaxEntries+1 {
+		t.Fatalf("seq after a full box = %d, want %d", newest.Seq, box.MaxEntries+1)
 	}
 	s.mu.Lock()
-	box := append([]entry(nil), s.st.Box...)
+	kept := append([]box.Entry(nil), s.st.Box...)
 	s.mu.Unlock()
-	if len(box) != boxMaxEntries {
-		t.Fatalf("box holds %d entries, want %d", len(box), boxMaxEntries)
+	if len(kept) != box.MaxEntries {
+		t.Fatalf("box holds %d entries, want %d", len(kept), box.MaxEntries)
 	}
-	if box[0].Seq != 2 || box[len(box)-1].Seq != newest.Seq {
-		t.Fatalf("box keeps seq %d to %d, want 2 to %d", box[0].Seq, box[len(box)-1].Seq, newest.Seq)
+	if kept[0].Seq != 2 || kept[len(kept)-1].Seq != newest.Seq {
+		t.Fatalf("box keeps seq %d to %d, want 2 to %d", kept[0].Seq, kept[len(kept)-1].Seq, newest.Seq)
 	}
-	for i := 1; i < len(box); i++ {
-		if box[i].Seq != box[i-1].Seq+1 {
-			t.Fatalf("box order breaks at %d: %d then %d", i, box[i-1].Seq, box[i].Seq)
+	for i := 1; i < len(kept); i++ {
+		if kept[i].Seq != kept[i-1].Seq+1 {
+			t.Fatalf("box order breaks at %d: %d then %d", i, kept[i-1].Seq, kept[i].Seq)
 		}
 	}
 }
@@ -170,12 +171,12 @@ func TestBoxByteCapDropsOldest(t *testing.T) {
 	cl, conn := boxConn(t)
 
 	at := time.Now().UTC().Truncate(time.Second)
-	big := strings.Repeat("x", boxMaxMsg)
+	big := strings.Repeat("x", box.MaxMsg)
 	s.mu.Lock()
 	seq := 0
-	for boxJSONBytes(s.st.Box) < boxMaxBytes {
+	for boxJSONBytes(s.st.Box) < box.MaxBytes {
 		seq++
-		s.st.Box = append(s.st.Box, entry{Seq: seq, At: at, Key: "lane/a", State: stateNote, Msg: big})
+		s.st.Box = append(s.st.Box, box.Entry{Seq: seq, At: at, Key: "lane/a", State: box.StateNote, Msg: big})
 	}
 	s.st.BoxSeq = seq
 	oldest := s.st.Box[0].Seq
@@ -183,23 +184,23 @@ func TestBoxByteCapDropsOldest(t *testing.T) {
 
 	newest := boxPost(t, s, cl, conn, "lane/b", "done", big)
 	s.mu.Lock()
-	box := append([]entry(nil), s.st.Box...)
-	size := boxJSONBytes(box)
+	kept := append([]box.Entry(nil), s.st.Box...)
+	size := boxJSONBytes(kept)
 	s.mu.Unlock()
-	if size > boxMaxBytes {
-		t.Fatalf("box is %d bytes, cap is %d", size, boxMaxBytes)
+	if size > box.MaxBytes {
+		t.Fatalf("box is %d bytes, cap is %d", size, box.MaxBytes)
 	}
-	if box[0].Seq <= oldest {
-		t.Fatalf("oldest kept seq = %d, want past %d", box[0].Seq, oldest)
+	if kept[0].Seq <= oldest {
+		t.Fatalf("oldest kept seq = %d, want past %d", kept[0].Seq, oldest)
 	}
-	if box[len(box)-1].Seq != newest.Seq {
-		t.Fatalf("newest kept seq = %d, want %d", box[len(box)-1].Seq, newest.Seq)
+	if kept[len(kept)-1].Seq != newest.Seq {
+		t.Fatalf("newest kept seq = %d, want %d", kept[len(kept)-1].Seq, newest.Seq)
 	}
 }
 
 // boxJSONBytes is the JSON size of a box, the measure trimBox uses.
-func boxJSONBytes(box []entry) int {
-	b, err := json.Marshal(box)
+func boxJSONBytes(kept []box.Entry) int {
+	b, err := json.Marshal(kept)
 	if err != nil {
 		return 0
 	}
@@ -219,7 +220,7 @@ func TestBoxClearCounts(t *testing.T) {
 		if !m.OK {
 			t.Fatalf("clear %s: %s", res, m.Error)
 		}
-		var rep clearReply
+		var rep box.ClearReply
 		if err := json.Unmarshal(m.Res, &rep); err != nil {
 			t.Fatalf("clear reply: %v", err)
 		}
@@ -250,19 +251,19 @@ func TestBoxListNewestFirstAndFiltered(t *testing.T) {
 	boxPost(t, s, cl, conn, "lane/a", "done", "three")
 	boxPost(t, s, cl, conn, "lane/b", "blocked", "fourth")
 
-	list := func(res string) listReply {
+	list := func(res string) box.ListReply {
 		t.Helper()
 		m := boxCall(t, s, cl, conn, "msg-list", res)
 		if !m.OK {
 			t.Fatalf("list %s: %s", res, m.Error)
 		}
-		var rep listReply
+		var rep box.ListReply
 		if err := json.Unmarshal(m.Res, &rep); err != nil {
 			t.Fatalf("list reply: %v", err)
 		}
 		return rep
 	}
-	seqs := func(es []entry) []int {
+	seqs := func(es []box.Entry) []int {
 		out := make([]int, len(es))
 		for i, e := range es {
 			out[i] = e.Seq
@@ -313,13 +314,13 @@ func TestBoxPubSubRead(t *testing.T) {
 	boxPost(t, s, cl, conn, "msg/broadcast", "working", "backend started")
 	boxPost(t, s, cl, conn, "msg/frontend", "done", "frontend green")
 
-	wait := func(res string) waitReply {
+	wait := func(res string) box.WaitReply {
 		t.Helper()
 		m := boxCall(t, s, cl, conn, "msg-wait", res)
 		if !m.OK {
 			t.Fatalf("wait %s: %s", res, m.Error)
 		}
-		var rep waitReply
+		var rep box.WaitReply
 		if err := json.Unmarshal(m.Res, &rep); err != nil {
 			t.Fatalf("wait reply: %v", err)
 		}
@@ -347,10 +348,10 @@ func TestBoxPubSubRead(t *testing.T) {
 		t.Fatalf("exact read = %+v, want seq 2", got.Entry)
 	}
 	// A parked cursor read wakes on the next post and returns it.
-	done := make(chan waitReply, 1)
+	done := make(chan box.WaitReply, 1)
 	go func() {
 		m := boxCall(t, s, cl, conn, "msg-wait", `{"keyPrefix":"msg/","afterSeq":3,"timeoutMs":2000}`)
-		var rep waitReply
+		var rep box.WaitReply
 		_ = json.Unmarshal(m.Res, &rep)
 		done <- rep
 	}()
@@ -380,7 +381,7 @@ func TestBoxTrimmedCursor(t *testing.T) {
 	boxPost(t, s, cl, conn, "msg/a", "note", "three")
 
 	m = boxCall(t, s, cl, conn, "msg-list", `{"afterSeq":0}`)
-	var list listReply
+	var list box.ListReply
 	if err := json.Unmarshal(m.Res, &list); err != nil {
 		t.Fatalf("list reply: %v", err)
 	}
@@ -397,7 +398,7 @@ func TestBoxTrimmedCursor(t *testing.T) {
 	}
 	// A stream wait reports the same gap with the entry it returns.
 	m = boxCall(t, s, cl, conn, "msg-wait", `{"afterSeq":0,"timeoutMs":1000}`)
-	var wait waitReply
+	var wait box.WaitReply
 	if err := json.Unmarshal(m.Res, &wait); err != nil {
 		t.Fatalf("wait reply: %v", err)
 	}
@@ -447,7 +448,7 @@ func TestBoxPostFromPane(t *testing.T) {
 	if !m.OK {
 		t.Fatalf("post from a pane in the tree: %s", m.Error)
 	}
-	var rep postReply
+	var rep box.PostReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.Fatalf("post reply: %v", err)
 	}
@@ -468,7 +469,7 @@ func TestBoxSchemaActionAnswers(t *testing.T) {
 	if !m.OK {
 		t.Fatalf("schema: %s", m.Error)
 	}
-	var rep schemaReply
+	var rep box.SchemaReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.Fatalf("schema reply: %v", err)
 	}
@@ -476,16 +477,16 @@ func TestBoxSchemaActionAnswers(t *testing.T) {
 	if !ok {
 		t.Fatalf("schema has no actions: %s", m.Res)
 	}
-	if len(actions) != len(boxWire) {
-		t.Fatalf("schema has %d actions, want %d", len(actions), len(boxWire))
+	if len(actions) != len(box.Wire) {
+		t.Fatalf("schema has %d actions, want %d", len(actions), len(box.Wire))
 	}
-	for _, action := range actionNames() {
+	for _, action := range box.ActionNames() {
 		if _, ok := actions[action]; !ok {
 			t.Fatalf("schema has no action %q", action)
 		}
 	}
 	// The frozen enum reaches the wire.
-	for _, name := range stateNames() {
+	for _, name := range box.StateNames() {
 		if !strings.Contains(string(m.Res), `"`+name+`"`) {
 			t.Fatalf("schema does not carry state %q", name)
 		}
@@ -513,11 +514,11 @@ func TestBoxStateFileWithoutBoxLoadsEmpty(t *testing.T) {
 func TestBoxLoadDropsBadEntryAndKeepsSeq(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
 	st := newState("badbox")
-	good := entry{Seq: 1, At: time.Now().UTC().Truncate(time.Second), Key: "lane/a", State: stateDone, Msg: "ok"}
+	good := box.Entry{Seq: 1, At: time.Now().UTC().Truncate(time.Second), Key: "lane/a", State: box.StateDone, Msg: "ok"}
 	bad := good
 	bad.Seq = 2
 	bad.State = "clear"
-	st.Box = []entry{good, bad}
+	st.Box = []box.Entry{good, bad}
 	st.BoxSeq = 2
 	if err := st.save(); err != nil {
 		t.Fatalf("save state: %v", err)
@@ -575,7 +576,7 @@ func boxAttach(t *testing.T, s *server) (*client, net.Conn) {
 }
 
 // boxWatcherList asks the server for its live watches.
-func boxWatcherList(t *testing.T, s *server, cl *client, conn net.Conn) []watch {
+func boxWatcherList(t *testing.T, s *server, cl *client, conn net.Conn) []box.Watch {
 	t.Helper()
 	m := boxCall(t, s, cl, conn, "msg-watchers", `{}`)
 	if !m.OK {
@@ -584,7 +585,7 @@ func boxWatcherList(t *testing.T, s *server, cl *client, conn net.Conn) []watch 
 	if !strings.Contains(string(m.Res), `"watchers":[`) {
 		t.Fatalf("watchers reply = %s, want the frozen wrapper", m.Res)
 	}
-	var rep watchersReply
+	var rep box.WatchersReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {
 		t.Fatalf("watchers reply: %v", err)
 	}
@@ -593,7 +594,7 @@ func boxWatcherList(t *testing.T, s *server, cl *client, conn net.Conn) []watch 
 
 // boxAwaitWatchers polls the watcher list until done holds, so a parked wait or
 // a finished post has time to settle on the server.
-func boxAwaitWatchers(t *testing.T, s *server, cl *client, conn net.Conn, why string, done func([]watch) bool) []watch {
+func boxAwaitWatchers(t *testing.T, s *server, cl *client, conn net.Conn, why string, done func([]box.Watch) bool) []box.Watch {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -670,7 +671,7 @@ func TestBoxWatchParkedWaitAppears(t *testing.T) {
 	pane := boxPane(t, s)
 
 	boxPark(t, s, `{"key":"lane/a","from":"`+pane+`","timeoutMs":5000}`)
-	ws := boxAwaitWatchers(t, s, cl, conn, "the parked wait never appeared", func(ws []watch) bool {
+	ws := boxAwaitWatchers(t, s, cl, conn, "the parked wait never appeared", func(ws []box.Watch) bool {
 		return len(ws) == 1 && ws[0].Parked
 	})
 	s.mu.Lock()
@@ -696,7 +697,7 @@ func TestBoxWatchServedWaitAdvancesAndUnparks(t *testing.T) {
 	pane := boxPane(t, s)
 
 	reply := boxPark(t, s, `{"key":"lane/a","from":"`+pane+`","timeoutMs":5000}`)
-	boxAwaitWatchers(t, s, cl, conn, "the wait never parked", func(ws []watch) bool {
+	boxAwaitWatchers(t, s, cl, conn, "the wait never parked", func(ws []box.Watch) bool {
 		return len(ws) == 1 && ws[0].Parked
 	})
 
@@ -705,12 +706,12 @@ func TestBoxWatchServedWaitAdvancesAndUnparks(t *testing.T) {
 	if !m.OK {
 		t.Fatalf("wait: %s", m.Error)
 	}
-	var rep waitReply
+	var rep box.WaitReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil || rep.Entry.Seq != post.Seq {
 		t.Fatalf("wait reply = %s (%v), want seq %d", m.Res, err, post.Seq)
 	}
 
-	ws := boxAwaitWatchers(t, s, cl, conn, "the served watch never settled", func(ws []watch) bool {
+	ws := boxAwaitWatchers(t, s, cl, conn, "the served watch never settled", func(ws []box.Watch) bool {
 		return len(ws) == 1 && !ws[0].Parked && ws[0].Cursor == post.Seq
 	})
 	if ws[0].Key != "lane/a" || ws[0].Pane != pane {
@@ -739,7 +740,7 @@ func TestBoxWatchListAdvances(t *testing.T) {
 		if m := boxCall(t, s, cl, conn, "msg-list", c.res); !m.OK {
 			t.Fatalf("list %s: %s", c.res, m.Error)
 		}
-		ws := boxAwaitWatchers(t, s, cl, conn, "cursor after "+c.res, func(ws []watch) bool {
+		ws := boxAwaitWatchers(t, s, cl, conn, "cursor after "+c.res, func(ws []box.Watch) bool {
 			return len(ws) == 1 && ws[0].Cursor == c.want
 		})
 		if ws[0].Parked {
@@ -799,7 +800,7 @@ func TestBoxWatchStaleUnparkedDrops(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	s.watches[boxWatchKeyOf(pane, "lane/b", "")] = watch{
+	s.watches[boxWatchKeyOf(pane, "lane/b", "")] = box.Watch{
 		Pane: pane, Key: "lane/b", Cursor: 1, Parked: true, At: stale}
 	s.mu.Unlock()
 	ws := boxWatcherList(t, s, cl, conn)
@@ -818,10 +819,10 @@ func TestBoxWatchersOrder(t *testing.T) {
 	first, second := w.Focus, w.newPaneID()
 	w.Root = &Node{Dir: "right", Kids: []*Node{{Pane: first}, {Pane: second}},
 		Sizes: []float64{0.5, 0.5}}
-	s.watches[boxWatchKeyOf(second, "lane/b", "")] = watch{Pane: second, Key: "lane/b", Cursor: 2, At: at}
-	s.watches[boxWatchKeyOf(first, "lane/b", "")] = watch{Pane: first, Key: "lane/b", Cursor: 3, At: at}
-	s.watches[boxWatchKeyOf(first, "", "lane/")] = watch{Pane: first, KeyPrefix: "lane/", Cursor: 1, At: at}
-	s.watches[boxWatchKeyOf(first, "lane/a", "")] = watch{Pane: first, Key: "lane/a", Cursor: 4, At: at}
+	s.watches[boxWatchKeyOf(second, "lane/b", "")] = box.Watch{Pane: second, Key: "lane/b", Cursor: 2, At: at}
+	s.watches[boxWatchKeyOf(first, "lane/b", "")] = box.Watch{Pane: first, Key: "lane/b", Cursor: 3, At: at}
+	s.watches[boxWatchKeyOf(first, "", "lane/")] = box.Watch{Pane: first, KeyPrefix: "lane/", Cursor: 1, At: at}
+	s.watches[boxWatchKeyOf(first, "lane/a", "")] = box.Watch{Pane: first, Key: "lane/a", Cursor: 4, At: at}
 	s.mu.Unlock()
 
 	ws := boxWatcherList(t, s, cl, conn)
@@ -913,7 +914,7 @@ func boxSubStart(t *testing.T, s *server, cl *client, res string) <-chan struct{
 }
 
 // boxSubFrame reads one stream frame and fails on any other frame.
-func boxSubFrame(t *testing.T, conn net.Conn) subFrame {
+func boxSubFrame(t *testing.T, conn net.Conn) box.SubFrame {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	m, err := readMsg(conn)
@@ -926,7 +927,7 @@ func boxSubFrame(t *testing.T, conn net.Conn) subFrame {
 	if m.OK || m.Error != "" {
 		t.Fatalf("sub frame = %+v, want a plain stream frame", m)
 	}
-	var f subFrame
+	var f box.SubFrame
 	if err := json.Unmarshal(m.Res, &f); err != nil {
 		t.Fatalf("sub frame %s: %v", m.Res, err)
 	}
@@ -947,7 +948,7 @@ func boxSubQuiet(t *testing.T, conn net.Conn, why string) {
 
 // boxAwaitWatch polls the watch registry until done holds for k, so a stream
 // that runs in its own goroutine has time to settle.
-func boxAwaitWatch(t *testing.T, s *server, k boxWatchKey, why string, done func(watch) bool) watch {
+func boxAwaitWatch(t *testing.T, s *server, k boxWatchKey, why string, done func(box.Watch) bool) box.Watch {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -1040,23 +1041,23 @@ func TestBoxSubStateFilterAdvancesCursor(t *testing.T) {
 	sub, conn := boxUnixConn(t)
 	k := boxWatchKeyOf(pane, "lane/a", "")
 	boxSubStart(t, s, sub, `{"key":"lane/a","state":"done","from":"`+pane+`"}`)
-	boxAwaitWatch(t, s, k, "the stream never parked", func(w watch) bool {
+	boxAwaitWatch(t, s, k, "the stream never parked", func(w box.Watch) bool {
 		return w.Parked && w.Cursor == 0
 	})
 
 	poster, pconn := boxConn(t)
 	note := boxPost(t, s, poster, pconn, "lane/a", "note", "progress")
 	boxSubQuiet(t, conn, "a note entry reached a done subscriber")
-	boxAwaitWatch(t, s, k, "the skipped entry never moved the cursor", func(w watch) bool {
+	boxAwaitWatch(t, s, k, "the skipped entry never moved the cursor", func(w box.Watch) bool {
 		return w.Parked && w.Cursor == note.Seq
 	})
 
 	gate := boxPost(t, s, poster, pconn, "lane/a", "done", "gate green")
 	got := boxSubFrame(t, conn)
-	if got.Entry.Seq != gate.Seq || got.Entry.State != stateDone {
+	if got.Entry.Seq != gate.Seq || got.Entry.State != box.StateDone {
 		t.Fatalf("frame = %+v, want the done entry %d", got, gate.Seq)
 	}
-	boxAwaitWatch(t, s, k, "the served entry never moved the cursor", func(w watch) bool {
+	boxAwaitWatch(t, s, k, "the served entry never moved the cursor", func(w box.Watch) bool {
 		return w.Parked && w.Cursor == gate.Seq
 	})
 }
@@ -1118,7 +1119,7 @@ func TestBoxSubWatchParkedForLife(t *testing.T) {
 	if got := boxSubFrame(t, conn); got.Entry.Seq != first.Seq {
 		t.Fatalf("frame = %+v, want seq %d", got, first.Seq)
 	}
-	w := boxAwaitWatch(t, s, k, "the streaming watch never advanced", func(w watch) bool {
+	w := boxAwaitWatch(t, s, k, "the streaming watch never advanced", func(w box.Watch) bool {
 		return w.Parked && w.Cursor == first.Seq
 	})
 	if w.Pane != pane || w.KeyPrefix != "lane/" {
@@ -1129,7 +1130,7 @@ func TestBoxSubWatchParkedForLife(t *testing.T) {
 	if got := boxSubFrame(t, conn); got.Entry.Seq != second.Seq {
 		t.Fatalf("frame = %+v, want seq %d", got, second.Seq)
 	}
-	boxAwaitWatch(t, s, k, "the watch never reached the second entry", func(w watch) bool {
+	boxAwaitWatch(t, s, k, "the watch never reached the second entry", func(w box.Watch) bool {
 		return w.Parked && w.Cursor == second.Seq
 	})
 }
@@ -1142,7 +1143,7 @@ func TestBoxSubDisconnectUnparksAndStops(t *testing.T) {
 	sub, peer := boxUnixConn(t)
 	k := boxWatchKeyOf(pane, "lane/a", "")
 	done := boxSubStart(t, s, sub, `{"key":"lane/a","from":"`+pane+`"}`)
-	boxAwaitWatch(t, s, k, "the stream never parked", func(w watch) bool { return w.Parked })
+	boxAwaitWatch(t, s, k, "the stream never parked", func(w box.Watch) bool { return w.Parked })
 
 	if err := peer.Close(); err != nil {
 		t.Fatalf("close the subscriber: %v", err)
@@ -1152,7 +1153,7 @@ func TestBoxSubDisconnectUnparksAndStops(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the stream outlived its connection")
 	}
-	boxAwaitWatch(t, s, k, "the watch stayed parked after the disconnect", func(w watch) bool {
+	boxAwaitWatch(t, s, k, "the watch stayed parked after the disconnect", func(w box.Watch) bool {
 		return !w.Parked
 	})
 	awaitWaiters(t, s, 0)
