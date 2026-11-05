@@ -5518,8 +5518,8 @@ keymap "menu" {
 	if !tui.menuKey() || tui.menu.sel != 1 {
 		t.Fatalf("J did not move the selection: %+v", tui.menu)
 	}
-	// A main-mode key is not a menu key: an unbound one closes the menu.
-	tui.inbuf = []byte("S")
+	// A key that is neither a menu binding nor a hint closes the menu.
+	tui.inbuf = []byte("y")
 	tui.menuKey()
 	if tui.menu != nil {
 		t.Fatal("an unbound menu key kept the menu open")
