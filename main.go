@@ -196,6 +196,17 @@ func runCLI(argv []string) error {
 		}
 		return os.WriteFile(*out, []byte(page), 0o644)
 
+	case "llms":
+		fs := flag.NewFlagSet("llms", flag.ExitOnError)
+		out := fs.String("o", "", "write the document to this path")
+		_ = fs.Parse(argv[1:])
+		doc := llmsText()
+		if *out == "" {
+			fmt.Print(doc)
+			return nil
+		}
+		return os.WriteFile(*out, []byte(doc), 0o644)
+
 	case "exec":
 		c := newFlags("exec")
 		c.parse(argv[1:])
