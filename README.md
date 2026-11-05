@@ -118,6 +118,21 @@ keys. `prefix ctrl+r` reloads `config.kdl` and its theme without restarting the
 session. A broken config or theme file leaves the running settings in place and
 toasts the error.
 
+A binding line may carry an optional help tag:
+
+```kdl
+keymap "main" {
+    "zoom-pane" "z" help "Pane"
+}
+```
+
+The tag moves that row to the named section of the armed help box. An untagged
+row keeps the built-in section. The five built-in names are Layout, Pane, Window,
+Session and Utility, and any other name is a custom section.
+
+The tag is optional. An old config without tags renders the same help box. The
+tag moves a row the help box already lists. It does not add a row.
+
 One mode is one keymap.
 
 - `main` is the table the prefix key opens.
