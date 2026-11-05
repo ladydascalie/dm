@@ -343,9 +343,10 @@ func drawPaneBoxRows(buf *bytes.Buffer, content Rect, active bool, skipTop bool)
 }
 
 // drawGrips marks every divider at its midpoint, so a handle is visible before
-// the pointer finds it. The hover paints over the whole divider.
+// the pointer finds it. The hover paints over the whole divider. A zoomed pane
+// covers every divider, so a grip would be a lie over a hidden split.
 func drawGrips(buf *bytes.Buffer, snap *Snapshot) {
-	if snap == nil || snap.Root == nil || snap.Rail < 0 {
+	if snap == nil || snap.Root == nil || snap.Rail < 0 || snap.Zoom != "" {
 		return
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
@@ -1290,7 +1291,8 @@ type barWindow struct {
 }
 
 // barFocusChip is the focus chip of the left block: a state mark, the pane id,
-// and the pane name and status word while they survive elision.
+// and the pane name and status word while they survive elision. The zoom mark
+// sits after the id, so the chip names the zoomed state.
 type barFocusChip struct {
 	glyph  string
 	colour rgb
@@ -1309,6 +1311,7 @@ type barLeft struct {
 	winNames  bool
 	showName  bool
 	showStat  bool
+	showZoom  bool
 }
 
 // barFocus builds the focus chip from the focused pane. An agent reports a
@@ -1358,6 +1361,7 @@ func barLeftFor(snap *Snapshot) *barLeft {
 		winNames:  true,
 		showName:  true,
 		showStat:  true,
+		showZoom:  snap.Zoom != "",
 	}
 	for i, name := range snap.Windows {
 		l.windows = append(l.windows, barWindow{num: i + 1, name: name, active: i == snap.ActiveWindow})
@@ -1400,6 +1404,9 @@ func (l *barLeft) groups() [][]seg {
 		chip := []seg{
 			{text: l.focus.glyph, fg: l.focus.colour, bg: railFocusBG},
 			{text: " " + l.focus.id, fg: railText, bg: railFocusBG, bold: true},
+		}
+		if l.showZoom {
+			chip = append(chip, seg{text: " Z", fg: barAccent, bg: railFocusBG, bold: true})
 		}
 		if l.showName && l.focus.name != "" {
 			chip = append(chip, seg{text: " " + l.focus.name, fg: railDim, bg: railFocusBG})
@@ -1464,8 +1471,13 @@ func (l *barLeft) fit(budget int) []seg {
 		}
 	}
 
-	// 5. The focus chip drops its status word, then its name.
+	// 5. The focus chip drops its status word, then the zoom mark, then its
+	// name. The glyph and the id are last, and the clip below cuts them.
 	l.showStat = false
+	if segs := cur(); segCells(segs) <= budget {
+		return segs
+	}
+	l.showZoom = false
 	if segs := cur(); segCells(segs) <= budget {
 		return segs
 	}

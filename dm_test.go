@@ -1021,6 +1021,403 @@ func TestRailReflow(t *testing.T) {
 	}
 }
 
+// paneMsg is one message a pane's socket received, tagged with the pane.
+type paneMsg struct {
+	id string
+	m  Msg
+}
+
+// zoomFixture is an in-process server whose active window is one row split,
+// both panes wired to pipes, so a test reads the resize messages syncSizes
+// sends. The right pane is focused.
+type zoomFixture struct {
+	s     *server
+	left  string
+	right string
+	inbox chan paneMsg
+}
+
+func newZoomFixture(t *testing.T) *zoomFixture {
+	t.Helper()
+	t.Setenv("DM_STATE", t.TempDir())
+	st := newState("zoom")
+	w := st.win()
+	left := rootPane(st)
+	right := w.newPaneID()
+	st.Panes[right] = &PaneState{}
+	w.Root = &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: left}, {Pane: right}}}
+	w.Focus = right
+
+	f := &zoomFixture{s: railServer(st), left: left, right: right,
+		inbox: make(chan paneMsg, 64)}
+	for _, id := range []string{left, right} {
+		srv, cli := net.Pipe()
+		t.Cleanup(func() { srv.Close(); cli.Close() })
+		f.s.panes[id] = &paneConn{id: id, c: srv}
+		go func(id string, c net.Conn) {
+			for {
+				m, err := readMsg(c)
+				if err != nil {
+					return
+				}
+				f.inbox <- paneMsg{id: id, m: m}
+			}
+		}(id, cli)
+	}
+	// Settle the split sizes, so a later syncSizes reports only what the test
+	// asked for.
+	f.s.syncSizes()
+	f.drain()
+	return f
+}
+
+// drain returns the messages each pane received, once the channel goes quiet.
+func (f *zoomFixture) drain() map[string][]Msg {
+	out := map[string][]Msg{}
+	for {
+		select {
+		case got := <-f.inbox:
+			out[got.id] = append(out[got.id], got.m)
+		case <-time.After(200 * time.Millisecond):
+			return out
+		}
+	}
+}
+
+// zoom reads the session's zoomed pane id, empty when nothing is zoomed.
+func (h *harness) zoom(session string) string {
+	h.t.Helper()
+	tree := h.rpc(session, map[string]any{"action": "list"})
+	zoom, _ := tree["snapshot"].(map[string]any)["zoom"].(string)
+	return zoom
+}
+
+// toggleZoom runs the zoom-pane action and returns the pane id left zoomed.
+func (h *harness) toggleZoom(session string) string {
+	h.t.Helper()
+	res := h.rpc(session, map[string]any{"action": "zoom-pane"})
+	zoom, _ := res["zoom"].(string)
+	return zoom
+}
+
+// paneAreaOf is the session's pane area: the box a single unsplit pane fills.
+func (h *harness) paneAreaOf(session string) Rect {
+	h.t.Helper()
+	tree := h.rpc(session, map[string]any{"action": "list"})
+	snap := tree["snapshot"].(map[string]any)
+	num := func(k string) int { return int(snap[k].(float64)) }
+	return paneAreaFor(num("cols"), num("rows"), num("rail"))
+}
+
+// TestZoomSplitWindow pins the snapshot: the zoomed pane fills the pane area,
+// every sibling keeps its layout rect, and Zoom names the pane.
+func TestZoomSplitWindow(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zwin")
+	left := h.focus("zwin")
+	right := h.split("zwin", left, "right")
+	before := h.rects("zwin")
+	if got := h.zoom("zwin"); got != "" {
+		t.Fatalf("a new split starts zoomed on %q", got)
+	}
+
+	if got := h.toggleZoom("zwin"); got != right {
+		t.Fatalf("zoom-pane = %q, want the focused pane %q", got, right)
+	}
+	after := h.rects("zwin")
+	area := h.paneAreaOf("zwin")
+	if want := insetBox(area); after[right] != want {
+		t.Fatalf("zoomed rect %+v, want the single-pane box %+v of %+v", after[right], want, area)
+	}
+	if after[left] != before[left] {
+		t.Fatalf("sibling rect moved: %+v, want %+v", after[left], before[left])
+	}
+	if after[right] == before[right] {
+		t.Fatalf("zoom left the rect at %+v", after[right])
+	}
+	if got := h.zoom("zwin"); got != right {
+		t.Fatalf("snapshot zoom = %q, want %q", got, right)
+	}
+}
+
+// TestZoomSinglePaneNoop pins the one-pane guard: the action replies ok, sets
+// no zoom, and leaves the rect alone.
+func TestZoomSinglePaneNoop(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zsolo")
+	pane := h.focus("zsolo")
+	before := h.rects("zsolo")
+	if got := h.toggleZoom("zsolo"); got != "" {
+		t.Fatalf("zoom-pane on one pane = %q, want no zoom", got)
+	}
+	if after := h.rects("zsolo"); after[pane] != before[pane] {
+		t.Fatalf("rect = %+v, want %+v", after[pane], before[pane])
+	}
+}
+
+// TestZoomSyncSizes pins the PTY side: the zoomed pane is resized to the single
+// pane box, and a hidden sibling's PTY stays at its split rect.
+func TestZoomSyncSizes(t *testing.T) {
+	f := newZoomFixture(t)
+	f.s.mu.Lock()
+	area := paneAreaFor(f.s.cols, f.s.rows, f.s.railLocked())
+	normal := f.s.paneRectsLocked()
+	f.s.zoom = f.right
+	f.s.mu.Unlock()
+	want := insetBox(area)
+	if normal[f.right] == want {
+		t.Fatalf("the split rect %+v already fills %+v", normal[f.right], want)
+	}
+
+	f.s.syncSizes()
+	got := f.drain()
+	if len(got[f.left]) != 0 {
+		t.Fatalf("hidden sibling got %v, want no resize", got[f.left])
+	}
+	if len(got[f.right]) != 1 {
+		t.Fatalf("zoomed pane got %d messages, want one resize: %v", len(got[f.right]), got[f.right])
+	}
+	if m := got[f.right][0]; m.Action != "resize" || m.Cols != want.W || m.Rows != want.H {
+		t.Fatalf("zoomed pane resize = %+v, want %dx%d", m, want.W, want.H)
+	}
+}
+
+// TestZoomToggleRestores pins the toggle: a second zoom-pane clears the zoom
+// and the split rects come back.
+func TestZoomToggleRestores(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "ztoggle")
+	left := h.focus("ztoggle")
+	right := h.split("ztoggle", left, "right")
+	before := h.rects("ztoggle")
+
+	if got := h.toggleZoom("ztoggle"); got != right {
+		t.Fatalf("zoom-pane = %q, want %q", got, right)
+	}
+	if got := h.toggleZoom("ztoggle"); got != "" {
+		t.Fatalf("second zoom-pane = %q, want no zoom", got)
+	}
+	after := h.rects("ztoggle")
+	if after[left] != before[left] || after[right] != before[right] {
+		t.Fatalf("rects after the toggle = %v, want %v", after, before)
+	}
+	if got := h.zoom("ztoggle"); got != "" {
+		t.Fatalf("snapshot zoom = %q after the toggle off", got)
+	}
+}
+
+// TestZoomClearsOnFocusChange pins the focus guard: a focus move ends the zoom
+// and the split rects return.
+func TestZoomClearsOnFocusChange(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zfocus")
+	left := h.focus("zfocus")
+	right := h.split("zfocus", left, "right")
+	before := h.rects("zfocus")
+
+	if got := h.toggleZoom("zfocus"); got != right {
+		t.Fatalf("zoom-pane = %q, want %q", got, right)
+	}
+	h.rpc("zfocus", map[string]any{"action": "focus", "target": left})
+	if got := h.zoom("zfocus"); got != "" {
+		t.Fatalf("zoom survived a focus change: %q", got)
+	}
+	if got := h.rects("zfocus"); got[right] != before[right] || got[left] != before[left] {
+		t.Fatalf("rects after the focus change = %v, want %v", got, before)
+	}
+}
+
+// TestZoomClearsOnSplit pins the split guard: the new pane is visible, so the
+// zoom ends and the split pane stops filling the area.
+func TestZoomClearsOnSplit(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zsplit")
+	left := h.focus("zsplit")
+	right := h.split("zsplit", left, "right")
+
+	if got := h.toggleZoom("zsplit"); got != right {
+		t.Fatalf("zoom-pane = %q, want %q", got, right)
+	}
+	h.split("zsplit", right, "down")
+	if got := h.zoom("zsplit"); got != "" {
+		t.Fatalf("zoom survived a split: %q", got)
+	}
+	if got, want := h.rects("zsplit")[right], insetBox(h.paneAreaOf("zsplit")); got == want {
+		t.Fatalf("pane %q still fills the area %+v after the split", right, want)
+	}
+}
+
+// TestZoomClearsOnClosePane pins the close guard: closing a sibling ends the
+// zoom, so the zoomed pane returns to its split rect.
+func TestZoomClearsOnClosePane(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zclose")
+	a := h.focus("zclose")
+	b := h.split("zclose", a, "right")
+	c := h.split("zclose", b, "down")
+
+	if got := h.toggleZoom("zclose"); got != c {
+		t.Fatalf("zoom-pane = %q, want %q", got, c)
+	}
+	h.rpc("zclose", map[string]any{"action": "close-pane", "target": a})
+	if got := h.zoom("zclose"); got != "" {
+		t.Fatalf("zoom survived a close: %q", got)
+	}
+	if got, want := h.rects("zclose")[c], insetBox(h.paneAreaOf("zclose")); got == want {
+		t.Fatalf("pane %q still fills the area %+v after the close", c, want)
+	}
+}
+
+// TestZoomClearsOnResizeSplit pins the resize-split guard: the drag is a layout
+// change, so the zoom ends even though the handler skips afterMutation.
+func TestZoomClearsOnResizeSplit(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zdrag")
+	left := h.focus("zdrag")
+	right := h.split("zdrag", left, "right")
+
+	if got := h.toggleZoom("zdrag"); got != right {
+		t.Fatalf("zoom-pane = %q, want %q", got, right)
+	}
+	h.rpc("zdrag", map[string]any{"action": "resize-split",
+		"target": left, "other": right, "ratio": 0.3})
+	if got := h.zoom("zdrag"); got != "" {
+		t.Fatalf("zoom survived resize-split: %q", got)
+	}
+	if got, want := h.rects("zdrag")[right], insetBox(h.paneAreaOf("zdrag")); got == want {
+		t.Fatalf("pane %q still fills the area %+v after the drag", right, want)
+	}
+}
+
+// TestZoomKeepsOnSetRail pins the rail exception: a rail width change keeps the
+// zoom and the zoomed pane takes the new area.
+func TestZoomKeepsOnSetRail(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zrail")
+	left := h.focus("zrail")
+	right := h.split("zrail", left, "right")
+
+	if got := h.toggleZoom("zrail"); got != right {
+		t.Fatalf("zoom-pane = %q, want %q", got, right)
+	}
+	h.rpc("zrail", map[string]any{"action": "set-rail", "index": 0})
+	if got := h.zoom("zrail"); got != right {
+		t.Fatalf("set-rail cleared the zoom: %q", got)
+	}
+	want := insetBox(h.paneAreaOf("zrail"))
+	if got := h.rects("zrail")[right]; got != want {
+		t.Fatalf("zoomed rect %+v after the rail change, want %+v", got, want)
+	}
+	if want.X != 1 {
+		t.Fatalf("hidden rail box starts at %d, want 1", want.X)
+	}
+}
+
+// TestZoomKeepsOnTerminalResize pins the resize exception: a bigger client
+// resizes the session, keeps the zoom, and the zoomed pane takes the new area.
+func TestZoomKeepsOnTerminalResize(t *testing.T) {
+	f := newZoomFixture(t)
+	f.s.mu.Lock()
+	f.s.zoom = f.right
+	f.s.mu.Unlock()
+	f.s.syncSizes()
+	f.drain()
+
+	// The resize case in serve: the largest client sets the size, then the
+	// panes are resynced.
+	f.s.mu.Lock()
+	f.s.clients[&client{cols: 140, rows: 44}] = true
+	grew := f.s.fitToClientsLocked()
+	f.s.mu.Unlock()
+	if !grew {
+		t.Fatal("the session did not take the client size")
+	}
+	f.s.syncSizes()
+	got := f.drain()
+
+	f.s.mu.Lock()
+	snap := f.s.snapshotLocked()
+	f.s.mu.Unlock()
+	if snap.Zoom != f.right {
+		t.Fatalf("a terminal resize cleared the zoom: %q", snap.Zoom)
+	}
+	want := insetBox(paneAreaFor(140, 44, effectiveRail(140, defaultRail)))
+	var rect Rect
+	for _, p := range snap.Panes {
+		if p.ID == f.right {
+			rect = p.Rect
+		}
+	}
+	if rect != want {
+		t.Fatalf("zoomed rect %+v, want %+v", rect, want)
+	}
+	if len(got[f.right]) != 1 ||
+		got[f.right][0].Cols != want.W || got[f.right][0].Rows != want.H {
+		t.Fatalf("zoomed pane resize = %v, want one to %dx%d", got[f.right], want.W, want.H)
+	}
+}
+
+// TestZoomStalePaneNotSent pins the validation: a zoom that names a pane of
+// another window is dropped, so the snapshot and the PTYs stay unzoomed.
+func TestZoomStalePaneNotSent(t *testing.T) {
+	f := newZoomFixture(t)
+	f.s.st.Workspaces[0].Windows = append(f.s.st.Workspaces[0].Windows,
+		&Window{ID: "w2", Name: "two", Root: &Node{Pane: "w2p1"}})
+	f.s.st.Panes["w2p1"] = &PaneState{}
+
+	f.s.mu.Lock()
+	f.s.zoom = "w2p1"
+	snap := f.s.snapshotLocked()
+	held := f.s.zoom
+	area := paneAreaFor(f.s.cols, f.s.rows, f.s.railLocked())
+	f.s.mu.Unlock()
+	if snap.Zoom != "" {
+		t.Fatalf("snapshot sent a zoom outside the active window: %q", snap.Zoom)
+	}
+	if held != "" {
+		t.Fatalf("stale zoom %q held after the snapshot", held)
+	}
+	for _, p := range snap.Panes {
+		if p.ID == f.right && p.Rect == insetBox(area) {
+			t.Fatalf("pane %q fills the area %+v", f.right, area)
+		}
+	}
+
+	f.s.syncSizes()
+	if got := f.drain(); len(got[f.left])+len(got[f.right]) != 0 {
+		t.Fatalf("a stale zoom resized the active window: %v", got)
+	}
+}
+
+// TestZoomClearsOnPaneExit pins the death guard: when the zoomed pane's daemon
+// dies, the pane leaves the layout and the zoom goes with it.
+func TestZoomClearsOnPaneExit(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "zdead")
+	left := h.focus("zdead")
+	right := h.split("zdead", left, "right")
+
+	if got := h.toggleZoom("zdead"); got != right {
+		t.Fatalf("zoom-pane = %q, want %q", got, right)
+	}
+	pid := readPID(t, filepath.Join(h.stateDir(), "sessions", "zdead", "panes", right+".sock.pid"))
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		zoom := h.zoom("zdead")
+		if zoom == "" && len(h.panes("zdead")) == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("zoom %q survived the exit of pane %q", zoom, right)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // railTestSnapshot is a two-pane session with a rail. Panes start after the
 // rail, and All carries the same two panes in server order.
 func railTestSnapshot(rail int) *Snapshot {
@@ -5460,5 +5857,337 @@ func TestHelpOpensAndCloses(t *testing.T) {
 	feed(tui, "?")
 	if tui.keys != nil || tui.mode != "" {
 		t.Fatalf("? did not close the view: keys=%v mode=%q", tui.keys, tui.mode)
+	}
+}
+
+// zoomFrameTUI is a tui over a row split with a rail, each pane's screen
+// carrying a mark, so a frame's bytes say which panes it painted.
+type zoomFrameTUI struct {
+	tui  *tui
+	snap *Snapshot
+	out  *bytes.Buffer
+}
+
+func newZoomFrameTUI(t *testing.T) *zoomFrameTUI {
+	t.Helper()
+	const cols, rows, rail = 100, 20, 20
+	root := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	snap := testSnapshot(root, cols, rows, nil)
+	snap.Rail = rail
+	snap.Focus = "b"
+	snap.Session = "one"
+	snap.Workspace = "s1"
+	snap.Windows = []string{"main"}
+	for i := range snap.Panes {
+		snap.Panes[i].Name = snap.Panes[i].ID + "-name"
+	}
+	relayout(snap)
+	out := &bytes.Buffer{}
+	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	for _, p := range snap.Panes {
+		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		tui.vts[p.ID] = vt
+		vt.Write([]byte("\x1b[?25l\x1b[1;1H" + strings.ToUpper(p.ID) + "-MARK"))
+	}
+	return &zoomFrameTUI{tui: tui, snap: snap, out: out}
+}
+
+// frame draws one frame and returns its bytes.
+func (f *zoomFrameTUI) frame() string {
+	f.out.Reset()
+	f.tui.draw()
+	return f.out.String()
+}
+
+// zoom sets or clears the snapshot's zoom the way the server does: the zoomed
+// pane takes the single-pane box and its siblings keep their layout rects.
+func (f *zoomFrameTUI) zoom(id string) {
+	f.snap.Zoom = id
+	relayout(f.snap)
+	if id != "" {
+		area := paneAreaFor(f.snap.Cols, f.snap.Rows, f.snap.Rail)
+		for i := range f.snap.Panes {
+			if f.snap.Panes[i].ID == id {
+				f.snap.Panes[i].Rect = insetBox(area)
+			}
+		}
+	}
+}
+
+// screenGlyphs counts one glyph as a terminal ends up.
+func screenGlyphs(vt vt10x.Terminal, ch rune) int {
+	cols, rows := vt.Size()
+	return screenGlyphsIn(vt, ch, Rect{0, 0, cols, rows})
+}
+
+// screenCorners counts the box corners on a screen, so a frame that paints one
+// box and a frame that paints two are told apart.
+func screenCorners(vt vt10x.Terminal) int {
+	n := 0
+	for _, ch := range []rune{'┌', '┐', '└', '┘'} {
+		n += screenGlyphs(vt, ch)
+	}
+	return n
+}
+
+// screenGlyphsIn counts one glyph inside a rectangle as the terminal ends up.
+func screenGlyphsIn(vt vt10x.Terminal, ch rune, r Rect) int {
+	vt.Lock()
+	defer vt.Unlock()
+	n := 0
+	for y := r.Y; y < r.Y+r.H; y++ {
+		for x := r.X; x < r.X+r.W; x++ {
+			if vt.Cell(x, y).Char == ch {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// TestZoomFrameFilter pins the draw filter: the zoomed frame paints the zoomed
+// pane alone, with no sibling box and no grip, and clearing the zoom brings the
+// unzoomed picture back byte for byte.
+func TestZoomFrameFilter(t *testing.T) {
+	f := newZoomFrameTUI(t)
+	first := f.frame()
+	if !strings.Contains(first, "A-MARK") || !strings.Contains(first, "B-MARK") {
+		t.Fatalf("the split frame painted one pane: %q", first)
+	}
+	area := paneAreaFor(f.snap.Cols, f.snap.Rows, f.snap.Rail)
+	scr := vt10x.New(vt10x.WithSize(f.snap.Cols, f.snap.Rows))
+	if _, err := scr.Write([]byte(first)); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	if got := screenCorners(scr); got != 8 {
+		t.Fatalf("split screen carries %d box corners, want two boxes' 8", got)
+	}
+	if got := screenGlyphsIn(scr, '•', area); got != 2 {
+		t.Fatalf("split screen carries %d grips in the pane area, want 2", got)
+	}
+
+	f.zoom("b")
+	zoomed := f.frame()
+	if strings.Contains(zoomed, "A-MARK") {
+		t.Fatalf("the zoomed frame painted the hidden sibling: %q", zoomed)
+	}
+	if !strings.Contains(zoomed, "B-MARK") {
+		t.Fatalf("the zoomed frame dropped the zoomed pane: %q", zoomed)
+	}
+	if _, err := scr.Write([]byte(zoomed)); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	if got := screenCorners(scr); got != 4 {
+		t.Fatalf("zoomed screen carries %d box corners, want the zoomed pane's 4", got)
+	}
+	if got := screenGlyphsIn(scr, '•', area); got != 0 {
+		t.Fatalf("zoomed screen carries %d grips in the pane area, want none", got)
+	}
+	// The hidden sibling's own sides run down the zoomed pane's middle. Its
+	// top and bottom rows land under the zoomed box's borders, so the sides are
+	// the cells that tell a filtered frame from an unfiltered one.
+	inside := insetBox(area)
+	inside.X, inside.Y = inside.X+1, inside.Y+1
+	inside.W, inside.H = inside.W-2, inside.H-2
+	if got := screenGlyphsIn(scr, '│', inside); got != 0 {
+		t.Fatalf("zoomed screen carries %d sibling borders inside the pane, want none", got)
+	}
+	scr.Lock()
+	corner := scr.Cell(area.X, area.Y).Char
+	scr.Unlock()
+	if corner != '┌' {
+		t.Fatalf("zoomed box corner = %q, want it at the pane area %d,%d", corner, area.X, area.Y)
+	}
+
+	f.zoom("")
+	if back := f.frame(); back != first {
+		t.Fatalf("the unzoomed frame came back changed:\n got %q\nwant %q", back, first)
+	}
+}
+
+// TestZoomHitsFollowTheZoomedPane pins the hit filter: a point in a hidden
+// sibling's old rectangle lands on the zoomed pane, and a point outside the
+// pane area keeps its present answer.
+func TestZoomHitsFollowTheZoomedPane(t *testing.T) {
+	f := newZoomFrameTUI(t)
+	a := f.tui.paneByID("a").Rect
+	x, y := a.X+2, a.Y+2
+	f.zoom("b")
+	for _, box := range []bool{true, false} {
+		var got *PaneInfo
+		if box {
+			got = f.tui.paneAtBox(x, y)
+		} else {
+			got = f.tui.paneAt(x, y)
+		}
+		if got == nil || got.ID != "b" {
+			t.Fatalf("box=%v: a hidden sibling's cell hit %+v, want the zoomed b", box, got)
+		}
+	}
+	// The rail column and the bar row are outside the pane area.
+	if got := f.tui.paneAtBox(1, 1); got != nil {
+		t.Fatalf("a rail cell hit %+v while zoomed", got)
+	}
+	if got := f.tui.paneAt(f.snap.Cols-1, f.snap.Rows-1); got != nil {
+		t.Fatalf("a bar cell hit %+v while zoomed", got)
+	}
+	// Unzoomed, the same point is the sibling's again.
+	f.zoom("")
+	if got := f.tui.paneAtBox(x, y); got == nil || got.ID != "a" {
+		t.Fatalf("unzoomed cell hit %+v, want a", got)
+	}
+}
+
+// TestZoomDragPressGuard pins the divider guard: the same cell starts a drag
+// while unzoomed and cannot start one while zoomed.
+func TestZoomDragPressGuard(t *testing.T) {
+	f := newZoomFrameTUI(t)
+	root := f.snap.Root
+	boxes := childBoxRects(root, paneAreaFor(f.snap.Cols, f.snap.Rows, f.snap.Rail))
+	pad := padRect(root, boxes, 0)
+	x, y := pad.X, pad.Y+2
+	if ds, ok := dragPress(f.snap, x, y); !ok || ds.first != "a" || ds.second != "b" {
+		t.Fatalf("the split divider took no press: %+v ok=%v", ds, ok)
+	}
+
+	f.zoom("b")
+	if ds, ok := dragPress(f.snap, x, y); ok {
+		t.Fatalf("a zoomed frame started a drag: %+v", ds)
+	}
+	tui := &tui{snap: f.snap, vts: map[string]vt10x.Terminal{}}
+	tui.handleMouse(mouseEvent{btn: 0, x: x, y: y})
+	if tui.dragging {
+		t.Fatal("a press on a hidden split's divider started a drag")
+	}
+	// The hover goes through the same guard, so it has nothing to show.
+	tui.updatePadHover(x, y)
+	if tui.padZone != (Rect{}) || tui.barInfo() != "" {
+		t.Fatalf("a zoomed frame showed a divider: %v %q", tui.padZone, tui.barInfo())
+	}
+}
+
+// TestZoomLayoutSig pins the repaint trigger: the signature differs when only
+// the zoom differs, even with every rectangle the same.
+func TestZoomLayoutSig(t *testing.T) {
+	f := newZoomFrameTUI(t)
+	plain := f.tui.layoutSig(f.snap)
+	if f.snap.Zoom != "" {
+		t.Fatalf("the fixture starts zoomed on %q", f.snap.Zoom)
+	}
+	f.snap.Zoom = "b"
+	if got := f.tui.layoutSig(f.snap); got == plain {
+		t.Fatalf("the signature ignored the zoom: %q", got)
+	}
+	f.snap.Zoom = ""
+	if got := f.tui.layoutSig(f.snap); got != plain {
+		t.Fatalf("clearing the zoom left the signature at %q, want %q", got, plain)
+	}
+}
+
+// TestZoomBarMark pins the focus chip: the chip carries a Z in its own spans
+// while zoomed, and the elision ladder drops it with the status word and the
+// name.
+func TestZoomBarMark(t *testing.T) {
+	f := newZoomFrameTUI(t)
+	chipTexts := func(l *barLeft) []string {
+		var out []string
+		for _, g := range l.groups() {
+			if len(g) > 0 && g[0].bg == railFocusBG {
+				for _, s := range g {
+					out = append(out, s.text)
+				}
+			}
+		}
+		return out
+	}
+	has := func(texts []string, want string) bool {
+		for _, s := range texts {
+			if s == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	plain := chipTexts(barLeftFor(f.snap))
+	if has(plain, " Z") {
+		t.Fatalf("an unzoomed chip carries the mark: %q", plain)
+	}
+	f.snap.Zoom = "b"
+	zoomed := chipTexts(barLeftFor(f.snap))
+	if !has(zoomed, " Z") {
+		t.Fatalf("the zoomed chip carries no mark: %q", zoomed)
+	}
+	// The mark is a span of the chip, not a block of its own, and it sits
+	// between the id and the name.
+	id := -1
+	for i, s := range zoomed {
+		if s == " b" {
+			id = i
+		}
+	}
+	if id < 0 || id+1 >= len(zoomed) || zoomed[id+1] != " Z" {
+		t.Fatalf("the mark is not the span after the id: %q", zoomed)
+	}
+
+	// Walk the ladder. The status word goes first, then the mark, then the
+	// name; the mark never shows without the id.
+	l := barLeftFor(f.snap)
+	full := segCells(join(l.groups(), seg{text: " "}))
+	sawNameWithoutMark := false
+	for budget := 1; budget <= full; budget++ {
+		segs := barLeftFor(f.snap).fit(budget)
+		var got []string
+		for _, s := range segs {
+			if s.bg == railFocusBG {
+				got = append(got, s.text)
+			}
+		}
+		mark := has(got, " Z")
+		if has(got, " unknown") && !mark {
+			t.Fatalf("budget %d kept the status word and dropped the mark: %q", budget, got)
+		}
+		if mark && !has(got, " b") {
+			t.Fatalf("budget %d kept the mark and dropped the id: %q", budget, got)
+		}
+		if has(got, " b-name") && !mark {
+			sawNameWithoutMark = true
+		}
+	}
+	if !sawNameWithoutMark {
+		t.Fatal("no budget dropped the mark while the name survived")
+	}
+}
+
+// TestZoomExecReachesTheHandler pins the action name: the keymap action sends
+// the server's own action, and dm exec reaches the same handler on focus.
+func TestZoomExecReachesTheHandler(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.armed = true
+	tui.runAction("zoom-pane")
+	select {
+	case m := <-got:
+		if m.Type != "req" || m.Action != "zoom-pane" {
+			t.Fatalf("the action sent %+v, want a req for zoom-pane", m)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the zoom-pane action sent nothing")
+	}
+	if tui.armed {
+		t.Fatal("the zoom-pane action left the client armed")
+	}
+
+	h := newHarness(t)
+	h.run("new", "-s", "zx")
+	left := h.focus("zx")
+	right := h.split("zx", left, "right")
+	h.run("exec", `{"action":"zoom-pane"}`, "-s", "zx")
+	if z := h.zoom("zx"); z != right {
+		t.Fatalf("dm exec zoom-pane zoomed %q, want the focused %q", z, right)
+	}
+	h.run("exec", `{"action":"zoom-pane"}`, "-s", "zx")
+	if z := h.zoom("zx"); z != "" {
+		t.Fatalf("a second dm exec zoom-pane left %q zoomed", z)
 	}
 }
