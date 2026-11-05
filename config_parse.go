@@ -1,51 +1,55 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"dm/internal/kdl"
+)
 
 // parseKeymaps walks the top-level tokens and fills cfg.modes. It rejects
 // unknown nodes, duplicate actions in one mode, empty keys and malformed
 // blocks. Multiple keymap nodes for one mode merge.
-func parseKeymaps(toks []token, cfg *Config) error {
+func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 	i := 0
 	for i < len(toks) {
 		t := toks[i]
-		if t.kind == tokEOF {
+		if t.Kind == kdl.EOF {
 			return nil
 		}
-		if t.kind != tokIdent {
-			return fmt.Errorf("line %d: expected node name, got %q", t.line, t.value)
+		if t.Kind != kdl.Ident {
+			return fmt.Errorf("line %d: expected node name, got %q", t.Line, t.Value)
 		}
-		switch t.value {
+		switch t.Value {
 		case "prefix":
-			if i+1 >= len(toks) || toks[i+1].kind != tokString {
-				return fmt.Errorf("line %d: malformed prefix node", t.line)
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: malformed prefix node", t.Line)
 			}
 			i += 2
 		case "theme":
-			if i+1 >= len(toks) || toks[i+1].kind != tokString {
-				return fmt.Errorf("line %d: expected quoted theme name after theme", t.line)
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
 			}
 			if cfg.themeName != "" {
-				return fmt.Errorf("line %d: duplicate theme node", t.line)
+				return fmt.Errorf("line %d: duplicate theme node", t.Line)
 			}
-			name := toks[i+1].value
+			name := toks[i+1].Value
 			if err := checkThemeName(name); err != nil {
-				return fmt.Errorf("line %d: %w", toks[i+1].line, err)
+				return fmt.Errorf("line %d: %w", toks[i+1].Line, err)
 			}
 			cfg.themeName = name
 			i += 2
 		case "keymap":
 			i++
-			if i >= len(toks) || toks[i].kind != tokString {
-				return fmt.Errorf("line %d: expected quoted mode name after keymap", toks[i-1].line)
+			if i >= len(toks) || toks[i].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected quoted mode name after keymap", toks[i-1].Line)
 			}
-			modeName := toks[i].value
+			modeName := toks[i].Value
 			if modeName == "" {
-				return fmt.Errorf("line %d: empty keymap mode", toks[i].line)
+				return fmt.Errorf("line %d: empty keymap mode", toks[i].Line)
 			}
 			i++
-			if i >= len(toks) || toks[i].kind != tokLBrace {
-				return fmt.Errorf("line %d: expected '{' after keymap %q", toks[i-1].line, modeName)
+			if i >= len(toks) || toks[i].Kind != kdl.LBrace {
+				return fmt.Errorf("line %d: expected '{' after keymap %q", toks[i-1].Line, modeName)
 			}
 			i++
 			m, ok := cfg.modes[modeName]
@@ -65,37 +69,37 @@ func parseKeymaps(toks []token, cfg *Config) error {
 			}
 			for {
 				if i >= len(toks) {
-					return fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].line)
+					return fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].Line)
 				}
-				if toks[i].kind == tokRBrace {
+				if toks[i].Kind == kdl.RBrace {
 					i++
 					break
 				}
-				if toks[i].kind != tokString {
-					return fmt.Errorf("line %d: expected quoted action, got %q", toks[i].line, toks[i].value)
+				if toks[i].Kind != kdl.String {
+					return fmt.Errorf("line %d: expected quoted action, got %q", toks[i].Line, toks[i].Value)
 				}
-				action := toks[i].value
-				actionLine := toks[i].line
+				action := toks[i].Value
+				actionLine := toks[i].Line
 				i++
-				if i >= len(toks) || toks[i].kind != tokString {
+				if i >= len(toks) || toks[i].Kind != kdl.String {
 					return fmt.Errorf("line %d: expected quoted key after action %q", actionLine, action)
 				}
-				key := toks[i].value
-				keyLine := toks[i].line
+				key := toks[i].Value
+				keyLine := toks[i].Line
 				i++
 				section := ""
-				if i < len(toks) && toks[i].line == keyLine && toks[i].kind != tokRBrace && toks[i].kind != tokEOF {
+				if i < len(toks) && toks[i].Line == keyLine && toks[i].Kind != kdl.RBrace && toks[i].Kind != kdl.EOF {
 					tag := toks[i]
-					if tag.kind != tokIdent || tag.value != "help" {
-						return fmt.Errorf("line %d: expected help, got %q", tag.line, tag.value)
+					if tag.Kind != kdl.Ident || tag.Value != "help" {
+						return fmt.Errorf("line %d: expected help, got %q", tag.Line, tag.Value)
 					}
 					i++
-					if i >= len(toks) || toks[i].kind != tokString {
-						return fmt.Errorf("line %d: expected quoted section after help", tag.line)
+					if i >= len(toks) || toks[i].Kind != kdl.String {
+						return fmt.Errorf("line %d: expected quoted section after help", tag.Line)
 					}
-					section = toks[i].value
+					section = toks[i].Value
 					if section == "" {
-						return fmt.Errorf("line %d: empty help section", toks[i].line)
+						return fmt.Errorf("line %d: empty help section", toks[i].Line)
 					}
 					i++
 				}
@@ -125,16 +129,67 @@ func parseKeymaps(toks []token, cfg *Config) error {
 				}
 			}
 		default:
-			return fmt.Errorf("line %d: unknown node %q", t.line, t.value)
+			return fmt.Errorf("line %d: unknown node %q", t.Line, t.Value)
 		}
 	}
 	return nil
 }
 
+// findPrefix scans the top-level tokens for the prefix node. It returns the
+// default ctrl+b when no prefix node is present. It rejects a duplicate prefix
+// node and a prefix key that is not one sequence.
+func findPrefix(toks []kdl.Token) (string, []byte, error) {
+	depth := 0
+	found := false
+	name := ""
+	var keyBytes []byte
+	for i := 0; i < len(toks); i++ {
+		t := toks[i]
+		switch t.Kind {
+		case kdl.LBrace:
+			depth++
+		case kdl.RBrace:
+			depth--
+		case kdl.Ident:
+			if depth != 0 || t.Value != "prefix" {
+				continue
+			}
+			if found {
+				return "", nil, fmt.Errorf("line %d: duplicate prefix node", t.Line)
+			}
+			found = true
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return "", nil, fmt.Errorf("line %d: expected quoted key after prefix", t.Line)
+			}
+			name = toks[i+1].Value
+			if name == "" {
+				return "", nil, fmt.Errorf("line %d: empty prefix key", toks[i+1].Line)
+			}
+			seqs, err := keySequences(name, nil)
+			if err != nil {
+				return "", nil, fmt.Errorf("line %d: prefix: %w", toks[i+1].Line, err)
+			}
+			if len(seqs) != 1 {
+				return "", nil, fmt.Errorf("line %d: prefix key must be one sequence", toks[i+1].Line)
+			}
+			keyBytes = seqs[0]
+			i++
+		}
+	}
+	if !found {
+		seqs, err := keySequences("ctrl+b", nil)
+		if err != nil {
+			return "", nil, err
+		}
+		return "ctrl+b", seqs[0], nil
+	}
+	return name, keyBytes, nil
+}
+
 // parseConfig parses the frozen KDL keymap shape. It returns a clear error with
 // the line when the text is malformed.
 func parseConfig(src string) (*Config, error) {
-	toks, err := scanKDL(src)
+	toks, err := kdl.Scan(src)
 	if err != nil {
 		return nil, err
 	}

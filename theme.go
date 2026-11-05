@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"dm/internal/kdl"
 )
 
 // accentSlots is the number of workspace accent slots.
@@ -130,28 +132,28 @@ var themeBlocks = map[string]bool{
 // error that names the line.
 func parseTheme(src string) (Theme, error) {
 	t := DefaultTheme()
-	toks, err := scanKDL(src)
+	toks, err := kdl.Scan(src)
 	if err != nil {
 		return t, err
 	}
 	seen := map[string]bool{}
 	i := 0
-	for i < len(toks) && toks[i].kind != tokEOF {
+	for i < len(toks) && toks[i].Kind != kdl.EOF {
 		tok := toks[i]
-		if tok.kind != tokIdent {
-			return t, fmt.Errorf("line %d: expected block name, got %q", tok.line, tok.value)
+		if tok.Kind != kdl.Ident {
+			return t, fmt.Errorf("line %d: expected block name, got %q", tok.Line, tok.Value)
 		}
-		block := tok.value
+		block := tok.Value
 		if !themeBlocks[block] {
-			return t, fmt.Errorf("line %d: unknown block %q", tok.line, block)
+			return t, fmt.Errorf("line %d: unknown block %q", tok.Line, block)
 		}
 		if seen[block] {
-			return t, fmt.Errorf("line %d: duplicate block %q", tok.line, block)
+			return t, fmt.Errorf("line %d: duplicate block %q", tok.Line, block)
 		}
 		seen[block] = true
 		i++
-		if i >= len(toks) || toks[i].kind != tokLBrace {
-			return t, fmt.Errorf("line %d: expected '{' after %q", tok.line, block)
+		if i >= len(toks) || toks[i].Kind != kdl.LBrace {
+			return t, fmt.Errorf("line %d: expected '{' after %q", tok.Line, block)
 		}
 		i++
 		if block == "states" {
@@ -168,28 +170,28 @@ func parseTheme(src string) (Theme, error) {
 
 // parseThemePairs walks one flat block's quoted key and value pairs up to its
 // closing brace and applies each pair to t.
-func parseThemePairs(toks []token, i int, block string, t *Theme) (int, error) {
+func parseThemePairs(toks []kdl.Token, i int, block string, t *Theme) (int, error) {
 	keys := map[string]bool{}
 	for {
-		if i >= len(toks) || toks[i].kind == tokEOF {
-			return i, fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].line)
+		if i >= len(toks) || toks[i].Kind == kdl.EOF {
+			return i, fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].Line)
 		}
-		if toks[i].kind == tokRBrace {
+		if toks[i].Kind == kdl.RBrace {
 			return i + 1, nil
 		}
-		if toks[i].kind != tokString {
-			return i, fmt.Errorf("line %d: expected quoted key in %q block", toks[i].line, block)
+		if toks[i].Kind != kdl.String {
+			return i, fmt.Errorf("line %d: expected quoted key in %q block", toks[i].Line, block)
 		}
-		key, keyLine := toks[i].value, toks[i].line
+		key, keyLine := toks[i].Value, toks[i].Line
 		i++
-		if i >= len(toks) || toks[i].kind != tokString {
+		if i >= len(toks) || toks[i].Kind != kdl.String {
 			line := keyLine
 			if i < len(toks) {
-				line = toks[i].line
+				line = toks[i].Line
 			}
 			return i, fmt.Errorf("line %d: expected quoted value after %q", line, key)
 		}
-		val, valLine := toks[i].value, toks[i].line
+		val, valLine := toks[i].Value, toks[i].Line
 		i++
 		if keys[key] {
 			return i, fmt.Errorf("line %d: duplicate key %q in %q block", keyLine, key, block)
@@ -226,19 +228,19 @@ func parseThemePairs(toks []token, i int, block string, t *Theme) (int, error) {
 // parseThemeStates walks the states block's nested state blocks. A state's
 // glyph and colour are each optional; an omitted one keeps the built-in value.
 // A theme glyph replaces both the Unicode and the Nerd Font form.
-func parseThemeStates(toks []token, i int, t *Theme) (int, error) {
+func parseThemeStates(toks []kdl.Token, i int, t *Theme) (int, error) {
 	seen := map[string]bool{}
 	for {
-		if i >= len(toks) || toks[i].kind == tokEOF {
-			return i, fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].line)
+		if i >= len(toks) || toks[i].Kind == kdl.EOF {
+			return i, fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].Line)
 		}
-		if toks[i].kind == tokRBrace {
+		if toks[i].Kind == kdl.RBrace {
 			return i + 1, nil
 		}
-		if toks[i].kind != tokString {
-			return i, fmt.Errorf("line %d: expected quoted state name", toks[i].line)
+		if toks[i].Kind != kdl.String {
+			return i, fmt.Errorf("line %d: expected quoted state name", toks[i].Line)
 		}
-		name, nameLine := toks[i].value, toks[i].line
+		name, nameLine := toks[i].Value, toks[i].Line
 		if seen[name] {
 			return i, fmt.Errorf("line %d: duplicate state %q", nameLine, name)
 		}
@@ -248,32 +250,32 @@ func parseThemeStates(toks []token, i int, t *Theme) (int, error) {
 			return i, fmt.Errorf("line %d: unknown state %q", nameLine, name)
 		}
 		i++
-		if i >= len(toks) || toks[i].kind != tokLBrace {
+		if i >= len(toks) || toks[i].Kind != kdl.LBrace {
 			return i, fmt.Errorf("line %d: expected '{' after state %q", nameLine, name)
 		}
 		i++
 		keys := map[string]bool{}
 		for {
-			if i >= len(toks) || toks[i].kind == tokEOF {
-				return i, fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].line)
+			if i >= len(toks) || toks[i].Kind == kdl.EOF {
+				return i, fmt.Errorf("line %d: unexpected end of file, expected '}'", toks[len(toks)-1].Line)
 			}
-			if toks[i].kind == tokRBrace {
+			if toks[i].Kind == kdl.RBrace {
 				i++
 				break
 			}
-			if toks[i].kind != tokString {
-				return i, fmt.Errorf("line %d: expected quoted key in state %q", toks[i].line, name)
+			if toks[i].Kind != kdl.String {
+				return i, fmt.Errorf("line %d: expected quoted key in state %q", toks[i].Line, name)
 			}
-			key, keyLine := toks[i].value, toks[i].line
+			key, keyLine := toks[i].Value, toks[i].Line
 			i++
-			if i >= len(toks) || toks[i].kind != tokString {
+			if i >= len(toks) || toks[i].Kind != kdl.String {
 				line := keyLine
 				if i < len(toks) {
-					line = toks[i].line
+					line = toks[i].Line
 				}
 				return i, fmt.Errorf("line %d: expected quoted value after %q", line, key)
 			}
-			val, valLine := toks[i].value, toks[i].line
+			val, valLine := toks[i].Value, toks[i].Line
 			i++
 			if keys[key] {
 				return i, fmt.Errorf("line %d: duplicate key %q in state %q", keyLine, key, name)
