@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/wire"
 
@@ -43,7 +44,7 @@ type keymapView struct {
 
 // newKeymapView opens the float on a screen. The rows are built once, so a
 // scroll never re-reads the config.
-func newKeymapView(snap *wire.Snapshot, cfg *Config) *keymapView {
+func newKeymapView(snap *wire.Snapshot, cfg *keymap.Config) *keymapView {
 	k := &keymapView{float: &FloatingPane{ID: keymapViewID, Active: true}, snap: snap}
 	k.rows = keymapRows(cfg)
 	k.sync(snap)
@@ -54,7 +55,7 @@ func newKeymapView(snap *wire.Snapshot, cfg *Config) *keymapView {
 // header and one "key  label" row per action, a blank between modes. The action
 // row carries the key the config displays, padded to the widest key, and the
 // action name with its hyphens turned into spaces.
-func keymapRows(cfg *Config) []string {
+func keymapRows(cfg *keymap.Config) []string {
 	modes := cfg.Keymaps()
 	w := 0
 	for _, m := range modes {
@@ -356,13 +357,13 @@ func (t *tui) keymapKey() bool {
 	}
 	action, n, state := cfg.Match("help", t.inbuf)
 	switch state {
-	case Partial:
+	case keymap.Partial:
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	case Match:
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:

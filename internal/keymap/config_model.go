@@ -1,4 +1,6 @@
-package main
+// Package keymap holds the keymap config model, the KDL loader and the help
+// table.
+package keymap
 
 import (
 	"bytes"
@@ -222,6 +224,17 @@ var helpRows = []helpRow{
 	{[]string{"reload"}, "reload config"},
 }
 
+// HelpActions returns the action names the help row with the given label
+// groups. It returns nil when no row carries the label.
+func HelpActions(label string) []string {
+	for _, r := range helpRows {
+		if r.label == label {
+			return r.actions
+		}
+	}
+	return nil
+}
+
 // HelpEntry is one row of the help overlay: the key label, the action text and
 // the section the row belongs to. Section is empty when no bound action in the
 // row carries a help tag.
@@ -289,11 +302,11 @@ func (c *Config) HelpRows() [][2]string {
 	return rows
 }
 
-// keySequences turns a key name into one or more byte sequences. A name maps to
+// KeySequences turns a key name into one or more byte sequences. A name maps to
 // more than one sequence when the key has two terminal encodings: enter is CR
 // and LF, backspace is DEL and BS. "prefix" resolves to prefixBytes. A nil
 // prefixBytes rejects "prefix", so the prefix key cannot refer to itself.
-func keySequences(name string, prefixBytes []byte) ([][]byte, error) {
+func KeySequences(name string, prefixBytes []byte) ([][]byte, error) {
 	if name == "" {
 		return nil, fmt.Errorf("empty key")
 	}

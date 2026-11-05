@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"dm/internal/keymap"
 )
 
 // manPage renders the man page from cliCommands, the same table the usage text
@@ -152,7 +154,7 @@ func manPage() string {
 
 	b.WriteString(".SH KEYS\n")
 	b.WriteString("The default keymap. A key label is the key pressed after the prefix key.\n")
-	for _, e := range LoadDefault().HelpEntries() {
+	for _, e := range keymap.LoadDefault().HelpEntries() {
 		b.WriteString(".TP\n")
 		b.WriteString(roffBold(e.Key) + "\n")
 		action := e.Action

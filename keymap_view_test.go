@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -85,7 +86,7 @@ keymap "scroll" {
 		t.Fatalf("modes = %v, want %s", names, want)
 	}
 
-	wantMain := []KeymapAction{
+	wantMain := []keymap.KeymapAction{
 		{Action: "split-right", Key: "|"},
 		{Action: "split-down", Key: "-"},
 		{Action: "send-prefix", Key: "ctrl+a"},
@@ -132,7 +133,7 @@ keymap "scroll" {
 // action row, and the key hint.
 func TestKeymapViewPaints(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
-	k := newKeymapView(snap, LoadDefault())
+	k := newKeymapView(snap, keymap.LoadDefault())
 	screen := keymapScreen(t, k, snap.Cols, snap.Rows)
 	r := k.float.Rect
 
@@ -170,7 +171,7 @@ func TestKeymapViewPaints(t *testing.T) {
 // last row that still fills the rect, and the paint follows the offset.
 func TestKeymapViewScrollsAndClamps(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 14, Rail: 0}
-	k := newKeymapView(snap, LoadDefault())
+	k := newKeymapView(snap, keymap.LoadDefault())
 	h := k.float.Rect.H
 	max := len(k.rows) - h
 	if max < 1 {
@@ -208,7 +209,7 @@ func TestKeymapViewScrollsAndClamps(t *testing.T) {
 // match into view, and next/prev move between matches.
 func TestKeymapSearch(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
-	k := newKeymapView(snap, LoadDefault())
+	k := newKeymapView(snap, keymap.LoadDefault())
 	k.startSearch()
 	k.appendQuery("split")
 	if k.query != "split" || len(k.matches) < 2 {
@@ -249,7 +250,7 @@ func TestKeymapSearch(t *testing.T) {
 // TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n
 // moves to the next match, and esc clears it.
 func TestKeymapSearchInput(t *testing.T) {
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: LoadDefault()}
+	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
 	tui.runAction("help")
 	feed(tui, "/")
 	if tui.keys == nil || !tui.keys.searching {

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/wire"
 
@@ -319,20 +320,20 @@ func (t *tui) armedKey() bool {
 		return true
 	}
 	action, n, state := t.km().Match("main", t.inbuf)
-	if state == Match && escapeRun(t.inbuf) > n {
+	if state == keymap.Match && escapeRun(t.inbuf) > n {
 		// The match covered only the first byte of an escape sequence. The
 		// sequence as a whole has no binding, so it is one unknown key: the
 		// rest of an F1 or a Home must not reach a pane.
-		state = NoMatch
+		state = keymap.NoMatch
 	}
 	switch state {
-	case Partial:
+	case keymap.Partial:
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	case Match:
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 		t.runAction(action)
@@ -472,13 +473,13 @@ func (t *tui) scrollKey() bool {
 	}
 	action, n, state := t.km().Match("scroll", t.inbuf)
 	switch state {
-	case Partial:
+	case keymap.Partial:
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	case Match:
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
@@ -1673,7 +1674,7 @@ func (t *tui) renameKey() bool {
 		return true
 	}
 	action, n, state := t.km().Match("rename", t.inbuf)
-	if state == Partial {
+	if state == keymap.Partial {
 		if t.inbuf[0] == 0x1b {
 			// A lone esc cancels. An arrow key cancels too: its remaining bytes
 			// are dropped rather than typed into the draft.
@@ -1688,7 +1689,7 @@ func (t *tui) renameKey() bool {
 		}
 		return false
 	}
-	if state == Match {
+	if state == keymap.Match {
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 		switch action {

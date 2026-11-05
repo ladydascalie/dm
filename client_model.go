@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -40,7 +41,7 @@ type tui struct {
 	conn    *conn
 	// keymap is the loaded keybindings. A nil keymap means the built-in
 	// defaults, so a test TUI runs without a config file.
-	keymap *Config
+	keymap *keymap.Config
 	// th is the loaded theme. A nil theme means the built-in theme, so a test
 	// TUI runs without a config file.
 	th     *theme.Theme
@@ -158,16 +159,16 @@ type tui struct {
 // config shares it.
 var (
 	builtinOnce sync.Once
-	builtinCfg  *Config
+	builtinCfg  *keymap.Config
 )
 
-func builtinKeymap() *Config {
-	builtinOnce.Do(func() { builtinCfg = LoadDefault() })
+func builtinKeymap() *keymap.Config {
+	builtinOnce.Do(func() { builtinCfg = keymap.LoadDefault() })
 	return builtinCfg
 }
 
 // km returns the client's keymap, or the built-in defaults when it has none.
-func (t *tui) km() *Config {
+func (t *tui) km() *keymap.Config {
 	if t.keymap != nil {
 		return t.keymap
 	}
@@ -352,7 +353,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 	// The keymap is loaded once for the whole session. A missing file is
 	// written with the defaults first; a load error is toasted and the
 	// built-in defaults carry the session.
-	cfg, err := LoadDefaultPath(true)
+	cfg, err := keymap.LoadDefaultPath(true)
 	t.keymap = cfg
 	th := cfg.Theme()
 	t.th = &th

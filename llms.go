@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"dm/internal/keymap"
 )
 
 // llmsText renders llms.txt: the whole dm surface as one dense markdown page an
@@ -22,13 +24,9 @@ type llmsKeyRow struct {
 // LoadDefault().HelpEntries(); the action names come from the help table, so a
 // reader can see both the label and the action the key runs.
 func llmsKeys() []llmsKeyRow {
-	byLabel := make(map[string][]string, len(helpRows))
-	for _, r := range helpRows {
-		byLabel[r.label] = r.actions
-	}
 	var rows []llmsKeyRow
-	for _, e := range LoadDefault().HelpEntries() {
-		actions := byLabel[e.Action]
+	for _, e := range keymap.LoadDefault().HelpEntries() {
+		actions := keymap.HelpActions(e.Action)
 		llms := make([]string, 0, len(actions))
 		for _, a := range actions {
 			llms = append(llms, a)

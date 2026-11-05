@@ -1,4 +1,4 @@
-package main
+package keymap
 
 import (
 	"fmt"
@@ -117,7 +117,7 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 					m.unbound[action] = true
 					continue
 				}
-				seqs, err := keySequences(key, cfg.prefixBytes)
+				seqs, err := KeySequences(key, cfg.prefixBytes)
 				if err != nil {
 					return fmt.Errorf("line %d: key %q: %w", keyLine, key, err)
 				}
@@ -166,7 +166,7 @@ func findPrefix(toks []kdl.Token) (string, []byte, error) {
 			if name == "" {
 				return "", nil, fmt.Errorf("line %d: empty prefix key", toks[i+1].Line)
 			}
-			seqs, err := keySequences(name, nil)
+			seqs, err := KeySequences(name, nil)
 			if err != nil {
 				return "", nil, fmt.Errorf("line %d: prefix: %w", toks[i+1].Line, err)
 			}
@@ -178,7 +178,7 @@ func findPrefix(toks []kdl.Token) (string, []byte, error) {
 		}
 	}
 	if !found {
-		seqs, err := keySequences("ctrl+b", nil)
+		seqs, err := KeySequences("ctrl+b", nil)
 		if err != nil {
 			return "", nil, err
 		}
@@ -208,6 +208,12 @@ func parseConfig(src string) (*Config, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// ParseConfig parses the frozen KDL keymap shape. It returns a clear error with
+// the line when the text is malformed.
+func ParseConfig(src string) (*Config, error) {
+	return parseConfig(src)
 }
 
 // defaultConfigKDL is the default keymap text. The default file writes this
@@ -427,7 +433,7 @@ func mergeDefaults(cfg *Config) {
 				continue
 			}
 			key := defMode.actions[b.action]
-			seqs, err := keySequences(key, cfg.prefixBytes)
+			seqs, err := KeySequences(key, cfg.prefixBytes)
 			if err != nil {
 				continue
 			}

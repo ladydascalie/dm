@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dm/internal/keymap"
 )
 
 // TestLLMSTextNamesEveryCommand proves the command table carries a row for
@@ -35,7 +37,7 @@ func TestLLMSTextKeys(t *testing.T) {
 	if !strings.Contains(doc, "close-window") {
 		t.Error("llms.txt has no close-window row")
 	}
-	for _, e := range LoadDefault().HelpEntries() {
+	for _, e := range keymap.LoadDefault().HelpEntries() {
 		if !strings.Contains(doc, "`"+e.Key+"`") {
 			t.Errorf("llms.txt does not name key %q", e.Key)
 		}
