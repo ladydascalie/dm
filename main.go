@@ -15,6 +15,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/clidoc"
 	"dm/internal/pane"
 	"dm/internal/paths"
 	"dm/internal/transport"
@@ -37,7 +38,7 @@ func main() {
 			exit(runProbe(args[1:]))
 			return
 		case "-h", "--help", "help":
-			fmt.Print(usageText())
+			fmt.Print(clidoc.UsageText())
 			return
 		}
 	}
@@ -196,7 +197,7 @@ func runCLI(argv []string) error {
 		fs := flag.NewFlagSet("man", flag.ExitOnError)
 		out := fs.String("o", "", "write the page to this path")
 		_ = fs.Parse(argv[1:])
-		page := manPage()
+		page := clidoc.ManPage()
 		if *out == "" {
 			fmt.Print(page)
 			return nil
@@ -207,7 +208,7 @@ func runCLI(argv []string) error {
 		fs := flag.NewFlagSet("llms", flag.ExitOnError)
 		out := fs.String("o", "", "write the document to this path")
 		_ = fs.Parse(argv[1:])
-		doc := llmsText()
+		doc := clidoc.LLMsText()
 		if *out == "" {
 			fmt.Print(doc)
 			return nil
