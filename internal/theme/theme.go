@@ -1,7 +1,10 @@
-package main
+// Package theme holds the palette, glyphs, state styles and the theme file
+// parser.
+package theme
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -12,21 +15,53 @@ import (
 // accentSlots is the number of workspace accent slots.
 const accentSlots = 6
 
+// RGB is an explicit colour. The rail never uses palette slots: a theme may
+// map a slot to a colour that fails contrast on its own background, and the
+// rail must pass WCAG AA on every theme.
+type RGB struct{ R, G, B int }
+
+// FG is the 24-bit foreground escape for the colour.
+func (c RGB) FG() string { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c.R, c.G, c.B) }
+
+// BG is the 24-bit background escape for the colour.
+func (c RGB) BG() string { return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.R, c.G, c.B) }
+
+// Lum is the WCAG relative luminance.
+func (c RGB) Lum() float64 {
+	lin := func(v int) float64 {
+		f := float64(v) / 255
+		if f <= 0.04045 {
+			return f / 12.92
+		}
+		return math.Pow((f+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
+}
+
+// Contrast is the WCAG contrast ratio, 1:1 to 21:1.
+func Contrast(a, b RGB) float64 {
+	la, lb := a.Lum(), b.Lum()
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
 // Theme is everything the renderer can restyle: the rail and bar palette, the
 // six workspace accents, the structural glyphs, and the per-state marks. A
 // theme file overrides one theme's defaults; a key it omits keeps the built-in
 // value.
 type Theme struct {
 	Palette Palette
-	Accents [accentSlots]rgb
+	Accents [accentSlots]RGB
 	Glyphs  Glyphs
 	States  map[string]StateStyle
 }
 
 // Palette is the rail and status bar RGB set.
 type Palette struct {
-	RailBG, RailFocusBG, RailText, RailDim, RailHeader, RailWindow rgb
-	RailDiffAdd, RailDiffDel, RailWorking, BarAccent               rgb
+	RailBG, RailFocusBG, RailText, RailDim, RailHeader, RailWindow RGB
+	RailDiffAdd, RailDiffDel, RailWorking, BarAccent               RGB
 }
 
 // Glyphs are the structural decorators: the drag grip, the divider hover
@@ -59,7 +94,7 @@ type Glyphs struct {
 type StateStyle struct {
 	Glyph     string
 	NerdGlyph string
-	Colour    rgb
+	Colour    RGB
 }
 
 // DefaultTheme returns the built-in theme. Its palette and state colours pass
@@ -68,18 +103,18 @@ type StateStyle struct {
 func DefaultTheme() Theme {
 	return Theme{
 		Palette: Palette{
-			RailBG:      rgb{20, 19, 26},    // #14131a
-			RailFocusBG: rgb{31, 30, 39},    // #1f1e27
-			RailText:    rgb{233, 234, 241}, // #e9eaf1
-			RailDim:     rgb{143, 147, 168}, // #8f93a8
-			RailHeader:  rgb{166, 169, 189}, // #a6a9bd
-			RailWindow:  rgb{149, 153, 174}, // #9599ae
-			RailDiffAdd: rgb{120, 220, 130}, // #78dc82
-			RailDiffDel: rgb{255, 125, 125}, // #ff7d7d
-			RailWorking: rgb{245, 190, 80},  // #f5be50
-			BarAccent:   rgb{122, 192, 235}, // #7ac0eb
+			RailBG:      RGB{20, 19, 26},    // #14131a
+			RailFocusBG: RGB{31, 30, 39},    // #1f1e27
+			RailText:    RGB{233, 234, 241}, // #e9eaf1
+			RailDim:     RGB{143, 147, 168}, // #8f93a8
+			RailHeader:  RGB{166, 169, 189}, // #a6a9bd
+			RailWindow:  RGB{149, 153, 174}, // #9599ae
+			RailDiffAdd: RGB{120, 220, 130}, // #78dc82
+			RailDiffDel: RGB{255, 125, 125}, // #ff7d7d
+			RailWorking: RGB{245, 190, 80},  // #f5be50
+			BarAccent:   RGB{122, 192, 235}, // #7ac0eb
 		},
-		Accents: [6]rgb{
+		Accents: [6]RGB{
 			{187, 154, 247}, // #bb9af7 violet
 			{110, 220, 235}, // #6edceb cyan
 			{240, 140, 215}, // #f08cd7 magenta
@@ -108,13 +143,13 @@ func DefaultTheme() Theme {
 			Dirty:             "●",
 		},
 		States: map[string]StateStyle{
-			"working": {Glyph: "●", NerdGlyph: "\uf013", Colour: rgb{245, 190, 80}},  // #f5be50
-			"idle":    {Glyph: "○", NerdGlyph: "\uf111", Colour: rgb{120, 200, 225}}, // #78c8e1
-			"blocked": {Glyph: "▲", NerdGlyph: "\uf071", Colour: rgb{255, 110, 110}}, // #ff6e6e
-			"done":    {Glyph: "✓", NerdGlyph: "\uf00c", Colour: rgb{110, 225, 145}}, // #6ee191
-			"error":   {Glyph: "✕", NerdGlyph: "\uf057", Colour: rgb{255, 130, 160}}, // #ff82a0
-			"unknown": {Glyph: "?", NerdGlyph: "\uf128", Colour: rgb{143, 147, 168}}, // #8f93a8
-			"shell":   {Glyph: "▶", Colour: rgb{143, 147, 168}},                      // #8f93a8, no Nerd form
+			"working": {Glyph: "●", NerdGlyph: "\uf013", Colour: RGB{245, 190, 80}},  // #f5be50
+			"idle":    {Glyph: "○", NerdGlyph: "\uf111", Colour: RGB{120, 200, 225}}, // #78c8e1
+			"blocked": {Glyph: "▲", NerdGlyph: "\uf071", Colour: RGB{255, 110, 110}}, // #ff6e6e
+			"done":    {Glyph: "✓", NerdGlyph: "\uf00c", Colour: RGB{110, 225, 145}}, // #6ee191
+			"error":   {Glyph: "✕", NerdGlyph: "\uf057", Colour: RGB{255, 130, 160}}, // #ff82a0
+			"unknown": {Glyph: "?", NerdGlyph: "\uf128", Colour: RGB{143, 147, 168}}, // #8f93a8
+			"shell":   {Glyph: "▶", Colour: RGB{143, 147, 168}},                      // #8f93a8, no Nerd form
 		},
 	}
 }
@@ -304,7 +339,7 @@ func parseThemeStates(toks []kdl.Token, i int, t *Theme) (int, error) {
 }
 
 // set assigns a palette key. It reports false for an unknown key.
-func (p *Palette) set(key string, c rgb) bool {
+func (p *Palette) set(key string, c RGB) bool {
 	switch key {
 	case "rail-bg":
 		p.RailBG = c
@@ -333,7 +368,7 @@ func (p *Palette) set(key string, c rgb) bool {
 }
 
 // setAccent assigns one "accent-N" key. It reports false for an unknown key.
-func setAccent(a *[6]rgb, key string, c rgb) bool {
+func setAccent(a *[6]RGB, key string, c RGB) bool {
 	for n := 1; n <= len(a); n++ {
 		if key == fmt.Sprintf("accent-%d", n) {
 			a[n-1] = c
@@ -389,9 +424,9 @@ func (g *Glyphs) set(key, val string) bool {
 }
 
 // parseThemeColour reads a #rrggbb colour.
-func parseThemeColour(s string) (rgb, error) {
+func parseThemeColour(s string) (RGB, error) {
 	if len(s) != 7 || s[0] != '#' {
-		return rgb{}, fmt.Errorf("colour %q is not #rrggbb", s)
+		return RGB{}, fmt.Errorf("colour %q is not #rrggbb", s)
 	}
 	v := 0
 	for i := 1; i < len(s); i++ {
@@ -405,11 +440,11 @@ func parseThemeColour(s string) (rgb, error) {
 		case c >= 'A' && c <= 'F':
 			d = int(c-'A') + 10
 		default:
-			return rgb{}, fmt.Errorf("colour %q is not #rrggbb", s)
+			return RGB{}, fmt.Errorf("colour %q is not #rrggbb", s)
 		}
 		v = v*16 + d
 	}
-	return rgb{(v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff}, nil
+	return RGB{(v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff}, nil
 }
 
 // validateThemeGlyph holds a glyph to exactly one rune of cell width one, so it
@@ -425,9 +460,9 @@ func validateThemeGlyph(s string) error {
 	return nil
 }
 
-// loadThemeFile reads <dir>/themes/<name>.kdl. An empty name keeps the built-in
+// LoadThemeFile reads <dir>/themes/<name>.kdl. An empty name keeps the built-in
 // theme. A read or parse failure returns the built-in theme and the error.
-func loadThemeFile(dir, name string) (Theme, error) {
+func LoadThemeFile(dir, name string) (Theme, error) {
 	if name == "" {
 		return DefaultTheme(), nil
 	}
@@ -443,9 +478,9 @@ func loadThemeFile(dir, name string) (Theme, error) {
 	return t, nil
 }
 
-// checkThemeName holds a theme name to [A-Za-z0-9_-]+, so it can never leave
+// CheckThemeName holds a theme name to [A-Za-z0-9_-]+, so it can never leave
 // the themes directory.
-func checkThemeName(name string) error {
+func CheckThemeName(name string) error {
 	if name == "" {
 		return fmt.Errorf("empty theme name")
 	}
@@ -460,13 +495,4 @@ func checkThemeName(name string) error {
 		}
 	}
 	return nil
-}
-
-// theme is the client's theme. A client with no config file has none, and gets
-// the built-in theme.
-func (t *tui) theme() Theme {
-	if t == nil || t.th == nil {
-		return DefaultTheme()
-	}
-	return *t.th
 }

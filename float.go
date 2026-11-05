@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"dm/internal/layout"
+	"dm/internal/theme"
 
 	"github.com/hinshun/vt10x"
 )
@@ -29,7 +30,7 @@ type FloatingPane struct {
 }
 
 // Draw writes the pane's content and border into buf.
-func (f *FloatingPane) Draw(buf *bytes.Buffer, th Theme, hover *selRange) {
+func (f *FloatingPane) Draw(buf *bytes.Buffer, th theme.Theme, hover *selRange) {
 	paint := func(b *bytes.Buffer, inner layout.Rect) {
 		drawPaneFrom(b, f.VT, f.Rect, 0, nil, hover)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/theme"
 	"fmt"
 	"strings"
 )
@@ -41,14 +42,14 @@ type Config struct {
 	prefixBytes []byte
 	modes       map[string]*mode
 	themeName   string
-	theme       Theme
+	theme       theme.Theme
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
 // without a loaded theme reports the built-in one.
-func (c *Config) Theme() Theme {
+func (c *Config) Theme() theme.Theme {
 	if c == nil || c.theme.States == nil {
-		return DefaultTheme()
+		return theme.DefaultTheme()
 	}
 	return c.theme
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"hash/fnv"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/theme"
 	"dm/internal/wire"
 )
 
@@ -113,10 +113,11 @@ func railItems(snap *wire.Snapshot) []railItem {
 	// workspaces hash alike, the later one takes the next free slot, so no two
 	// workspaces in a session ever share an accent.
 	used := map[int]bool{}
+	slots := len(theme.DefaultTheme().Accents)
 	accent := func(id string) int {
 		pref := railAccentSlot(id)
-		for i := 0; i < accentSlots; i++ {
-			slot := (pref + i) % accentSlots
+		for i := 0; i < slots; i++ {
+			slot := (pref + i) % slots
 			if !used[slot] {
 				used[slot] = true
 				return slot
@@ -216,35 +217,6 @@ func railFolder(cwd, root string) string {
 	return filepath.ToSlash(rel)
 }
 
-// rgb is an explicit colour. The rail never uses palette slots: a theme may
-// map a slot to a colour that fails contrast on its own background, and the
-// rail must pass WCAG AA on every theme.
-type rgb struct{ r, g, b int }
-
-func (c rgb) fg() string { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c.r, c.g, c.b) }
-func (c rgb) bg() string { return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.r, c.g, c.b) }
-
-// lum is the WCAG relative luminance.
-func (c rgb) lum() float64 {
-	lin := func(v int) float64 {
-		f := float64(v) / 255
-		if f <= 0.04045 {
-			return f / 12.92
-		}
-		return math.Pow((f+0.055)/1.055, 2.4)
-	}
-	return 0.2126*lin(c.r) + 0.7152*lin(c.g) + 0.0722*lin(c.b)
-}
-
-// contrast is the WCAG contrast ratio, 1:1 to 21:1.
-func contrast(a, b rgb) float64 {
-	la, lb := a.lum(), b.lum()
-	if la < lb {
-		la, lb = lb, la
-	}
-	return (la + 0.05) / (lb + 0.05)
-}
-
 // railAccentSlot returns the accent slot a workspace prefers. FNV-1a is the
 // seed; the mix step matters because its low bits repeat for ids of equal
 // length, and a workspace id is short.
@@ -257,7 +229,7 @@ func railAccentSlot(workspace string) int {
 	x ^= x >> 15
 	x *= 0x846ca68b
 	x ^= x >> 16
-	return int(x % accentSlots)
+	return int(x % uint32(len(theme.DefaultTheme().Accents)))
 }
 
 // Nerd Font icons. The font check runs once; DM_NERD=1 or 0 overrides it.
@@ -282,14 +254,14 @@ func nerdFonts() bool {
 
 // stateStyle returns the mark for a status. A status the theme does not name
 // falls back to the unknown style.
-func stateStyle(th Theme, status string) StateStyle {
+func stateStyle(th theme.Theme, status string) theme.StateStyle {
 	if s, ok := th.States[status]; ok {
 		return s
 	}
 	if s, ok := th.States["unknown"]; ok {
 		return s
 	}
-	return DefaultTheme().States["unknown"]
+	return theme.DefaultTheme().States["unknown"]
 }
 
 // railGlyph is the state mark for a pane row and its colour: amber working,
@@ -298,7 +270,7 @@ func stateStyle(th Theme, status string) StateStyle {
 // glyph. The question mark marks an agent whose state has not arrived; drawRail
 // leaves the cell blank for a shell, which reports no state. A theme's glyph
 // replaces both forms; an empty NerdGlyph keeps the Unicode glyph.
-func railGlyph(th Theme, status string, nerd bool) (glyph string, colour rgb) {
+func railGlyph(th theme.Theme, status string, nerd bool) (glyph string, colour theme.RGB) {
 	style := stateStyle(th, status)
 	glyph = style.Glyph
 	if nerd && style.NerdGlyph != "" {
@@ -328,7 +300,7 @@ func railMark(agent, nerd bool) string {
 // background and one weight per row, so they arrive from the caller and ride
 // the run only for the length of this write. The switcher's rail rows call it
 // too.
-func writeRailSeg(buf *bytes.Buffer, s seg, ground rgb, bold bool) {
+func writeRailSeg(buf *bytes.Buffer, s seg, ground theme.RGB, bold bool) {
 	s.bg = ground
 	s.bold = s.bold || bold
 	write(buf, s)
@@ -336,7 +308,7 @@ func writeRailSeg(buf *bytes.Buffer, s seg, ground rgb, bold bool) {
 
 // railStats is the right-aligned git tail of a window line: an amber dot when
 // the tree is dirty, then the added and deleted line counts, or "clean".
-func railStats(th Theme, it railItem) []seg {
+func railStats(th theme.Theme, it railItem) []seg {
 	if !it.inRepo {
 		return nil
 	}
@@ -367,7 +339,7 @@ func railStats(th Theme, it railItem) []seg {
 // railRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and nerd are the rail's own switches.
-func railRow(th Theme, it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
+func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
 	p, g := th.Palette, th.Glyphs
 	switch it.kind {
 	case railWorkspace:
@@ -546,7 +518,7 @@ func railControlAt(snap *wire.Snapshot, x, y int) bool {
 // A rail wider than the thin one names the move and collapses. The thin rail
 // shows the expand caret in the state glyph's column and leaves the rest
 // blank, so a narrow rail loses no pane row to a label.
-func railControlSegs(th Theme, compact, nerd bool) []seg {
+func railControlSegs(th theme.Theme, compact, nerd bool) []seg {
 	if compact {
 		caret := "▶"
 		if nerd {
@@ -572,7 +544,7 @@ func railControlSegs(th Theme, compact, nerd bool) []seg {
 // screen are clipped, and every row is written into at most Rail columns. A
 // left run is elided with an ellipsis before the right-aligned stats give up a
 // cell, so the stats survive a narrow rail.
-func drawRail(buf *bytes.Buffer, th Theme, snap *wire.Snapshot) {
+func drawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
@@ -605,7 +577,7 @@ func drawRail(buf *bytes.Buffer, th Theme, snap *wire.Snapshot) {
 		leftCells := segCells(left) + segCells(tail)
 		rightCells := segCells(right)
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
-		buf.WriteString("\x1b[0m" + bg.bg())
+		buf.WriteString("\x1b[0m" + bg.BG())
 		for _, seg := range left {
 			writeRailSeg(buf, seg, bg, bold)
 		}
@@ -620,7 +592,7 @@ func drawRail(buf *bytes.Buffer, th Theme, snap *wire.Snapshot) {
 		}
 		if y < controlAt && y == gripAt {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, w)
-			buf.WriteString("\x1b[0m" + p.RailBG.bg() + p.RailDim.fg() + th.Glyphs.Grip)
+			buf.WriteString("\x1b[0m" + p.RailBG.BG() + p.RailDim.FG() + th.Glyphs.Grip)
 		}
 		buf.WriteString("\x1b[0m")
 	}

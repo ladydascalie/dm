@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"dm/internal/kdl"
+	"dm/internal/theme"
 )
 
 // parseKeymaps walks the top-level tokens and fills cfg.modes. It rejects
@@ -33,7 +34,7 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 				return fmt.Errorf("line %d: duplicate theme node", t.Line)
 			}
 			name := toks[i+1].Value
-			if err := checkThemeName(name); err != nil {
+			if err := theme.CheckThemeName(name); err != nil {
 				return fmt.Errorf("line %d: %w", toks[i+1].Line, err)
 			}
 			cfg.themeName = name
@@ -201,7 +202,7 @@ func parseConfig(src string) (*Config, error) {
 		prefixName:  prefixName,
 		prefixBytes: prefixBytes,
 		modes:       make(map[string]*mode),
-		theme:       DefaultTheme(),
+		theme:       theme.DefaultTheme(),
 	}
 	if err := parseKeymaps(toks, cfg); err != nil {
 		return nil, err

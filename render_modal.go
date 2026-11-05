@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/theme"
 	"dm/internal/wire"
 )
 
@@ -15,7 +16,7 @@ import (
 // highlight, the tee row that crosses the border and the key hint under it. The
 // title row is a fill row: dim, and its trailing cells are spaces rather than
 // the border rune, so the row is one write and its cells are the picker's.
-func drawSessions(buf *bytes.Buffer, th Theme, cols, rows int, sessions []SessionInfo, sel int, current string) {
+func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []SessionInfo, sel int, current string) {
 	g := th.Glyphs
 	w := 46
 	if w > cols-2 {
@@ -113,7 +114,7 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 // long name still shows its end and the caret stays on screen. The kind is
 // optional: a call without it renames a workspace, as the frozen prompt test
 // expects. A screen too small to hold the box paints nothing.
-func drawRename(buf *bytes.Buffer, th Theme, snap *wire.Snapshot, id, draft string, kind ...string) {
+func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, kind ...string) {
 	if snap == nil {
 		return
 	}
@@ -141,7 +142,7 @@ func drawRename(buf *bytes.Buffer, th Theme, snap *wire.Snapshot, id, draft stri
 // the caret on the rail ground, padded to the full inner width so the row owns
 // every cell inside the box. The draft keeps its tail and drops its head when
 // it runs out of room, and a wide rune is cut whole.
-func renameInputRow(buf *bytes.Buffer, th Theme, r layout.Rect, draft string) {
+func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, draft string) {
 	p := th.Palette
 	const caret = "▏"
 	labelRoom := r.W - cells.Cells(caret)
@@ -162,13 +163,13 @@ func renameInputRow(buf *bytes.Buffer, th Theme, r layout.Rect, draft string) {
 		seg{text: caret, fg: p.BarAccent},
 	)
 	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m", r.Y+1, r.X+1)
-	buf.WriteString(p.RailBG.bg())
+	buf.WriteString(p.RailBG.BG())
 	for _, seg := range segs {
-		buf.WriteString(seg.fg.fg())
+		buf.WriteString(seg.fg.FG())
 		buf.WriteString(seg.text)
 	}
 	if n := r.W - segCells(segs); n > 0 {
-		buf.WriteString(p.RailBG.bg())
+		buf.WriteString(p.RailBG.BG())
 		buf.WriteString(strings.Repeat(" ", n))
 	}
 	buf.WriteString("\x1b[0m")
@@ -180,7 +181,7 @@ func renameInputRow(buf *bytes.Buffer, th Theme, r layout.Rect, draft string) {
 // names the key that closes it. The box stays clear of the rail, the toast row
 // and the status bar: it gives up columns, then its trailing rows, before it
 // paints over any of them.
-func drawHelp(buf *bytes.Buffer, th Theme, cols, rows int, keys []HelpEntry) {
+func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, keys []HelpEntry) {
 	g, ok := helpBoxGeometry(cols, rows, keys)
 	if !ok {
 		return

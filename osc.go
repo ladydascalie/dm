@@ -26,8 +26,8 @@ type oscFilter struct {
 // waits five seconds for the OSC 11 reply, so an unanswered query is a five
 // second stall in every TUI it fronts.
 const (
-	termFG   = "rgb:ffff/ffff/ffff"
-	termBG   = "rgb:0000/0000/0000"
+	termFG   = "theme.RGB:ffff/ffff/ffff"
+	termBG   = "theme.RGB:0000/0000/0000"
 	replyDA1 = "\x1b[?1;2c"
 	replyDA2 = "\x1b[>0;10;1c"
 )
@@ -199,7 +199,7 @@ func xtermColor(n int) string {
 		v := 8 + (n-232)*10
 		r, g, b = v, v, v
 	}
-	return fmt.Sprintf("rgb:%02x%02x/%02x%02x/%02x%02x", r, r, g, g, b, b)
+	return fmt.Sprintf("theme.RGB:%02x%02x/%02x%02x/%02x%02x", r, r, g, g, b, b)
 }
 
 // oscEnd returns the byte length of the sequence starting at ESC ] and whether

@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/theme"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -42,7 +43,7 @@ type panelTitle struct {
 // The painter holds no state and keeps no buffer between frames: the clip needs
 // to see a whole run before it can cut it, so it collects the inside in a
 // scratch buffer and throws it away. Only buf reaches the frame.
-func paintPanel(buf *bytes.Buffer, th Theme, rect layout.Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, layout.Rect)) {
+func paintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, layout.Rect)) {
 	if rect.W <= 0 || rect.H <= 0 || rect.X < 1 || rect.Y < 1 {
 		return
 	}
@@ -67,7 +68,7 @@ func paintPanel(buf *bytes.Buffer, th Theme, rect layout.Rect, title panelTitle,
 // paintTitleRow writes the top border row as one run: the left corner, the
 // label clipped to the interior and filled to its width, the right corner. It
 // writes both corners, so the box pass leaves this row alone.
-func paintTitleRow(buf *bytes.Buffer, th Theme, rect layout.Rect, t panelTitle) {
+func paintTitleRow(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, t panelTitle) {
 	row := cells.Clip(t.text, rect.W)
 	if n := rect.W - cells.Cells(row); n > 0 {
 		row += strings.Repeat(t.fill, n)

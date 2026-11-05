@@ -11,13 +11,14 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/theme"
 )
 
 // helpBoxDraw paints the help box for a screen and returns its bytes.
 func helpBoxDraw(t *testing.T, cols, rows int, keys []HelpEntry) string {
 	t.Helper()
 	var buf bytes.Buffer
-	drawHelp(&buf, DefaultTheme(), cols, rows, keys)
+	drawHelp(&buf, theme.DefaultTheme(), cols, rows, keys)
 	return buf.String()
 }
 
