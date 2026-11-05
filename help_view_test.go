@@ -14,7 +14,7 @@ import (
 func helpBoxDraw(t *testing.T, cols, rows int, keys []HelpEntry) string {
 	t.Helper()
 	var buf bytes.Buffer
-	drawHelp(&buf, cols, rows, keys)
+	drawHelp(&buf, DefaultTheme(), cols, rows, keys)
 	return buf.String()
 }
 

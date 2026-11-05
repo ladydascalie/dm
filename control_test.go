@@ -41,7 +41,7 @@ func ctlSnapshot(rail int) *Snapshot {
 func ctlScreen(t *testing.T, snap *Snapshot) vt10x.Terminal {
 	t.Helper()
 	var b bytes.Buffer
-	drawRail(&b, snap)
+	drawRail(&b, DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw rail: %v", err)
@@ -100,8 +100,8 @@ func TestRailControlRow(t *testing.T) {
 		{20, "◀ collapse", false, true},
 		{40, "◀ collapse", false, true},
 	}
-	dim := vt10x.Color(railDim.r<<16 | railDim.g<<8 | railDim.b)
-	ground := vt10x.Color(railBG.r<<16 | railBG.g<<8 | railBG.b)
+	dim := vt10x.Color(DefaultTheme().Palette.RailDim.r<<16 | DefaultTheme().Palette.RailDim.g<<8 | DefaultTheme().Palette.RailDim.b)
+	ground := vt10x.Color(DefaultTheme().Palette.RailBG.r<<16 | DefaultTheme().Palette.RailBG.g<<8 | DefaultTheme().Palette.RailBG.b)
 	for _, c := range cases {
 		snap := ctlSnapshot(c.rail)
 		vt := ctlScreen(t, snap)
@@ -301,7 +301,7 @@ func TestRailControlHidden(t *testing.T) {
 		t.Fatalf("row %d is not pane area for a hidden rail: %+v", row, area)
 	}
 	var b bytes.Buffer
-	drawRail(&b, snap)
+	drawRail(&b, DefaultTheme(), snap)
 	if b.Len() != 0 {
 		t.Fatalf("hidden rail drew %d bytes", b.Len())
 	}

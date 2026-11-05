@@ -9,14 +9,6 @@ import (
 	"github.com/hinshun/vt10x"
 )
 
-// applyTestTheme installs a theme for one test and restores the built-in theme
-// afterwards, so no test leaves the renderer's globals changed.
-func applyTestTheme(t *testing.T, th Theme) {
-	t.Helper()
-	applyTheme(th)
-	t.Cleanup(func() { applyTheme(DefaultTheme()) })
-}
-
 // TestThemeDefaults pins the built-in theme: the palette, the six accents, every
 // structural glyph, both Nerd fold forms, and every state style.
 func TestThemeDefaults(t *testing.T) {
@@ -84,7 +76,6 @@ func TestThemeDefaults(t *testing.T) {
 // TestThemeDefaultNerdGlyphs pins every built-in Nerd Font glyph and keeps the
 // error and unknown marks distinct, so Nerd Font users keep a readable error.
 func TestThemeDefaultNerdGlyphs(t *testing.T) {
-	applyTestTheme(t, DefaultTheme())
 	want := map[string]string{
 		"working": "\uf013",
 		"idle":    "\uf111",
@@ -97,8 +88,8 @@ func TestThemeDefaultNerdGlyphs(t *testing.T) {
 		if got := DefaultTheme().States[name].NerdGlyph; got != glyph {
 			t.Fatalf("state %q NerdGlyph = %q, want %q", name, got, glyph)
 		}
-		if got, _ := railGlyph(name, true); got != glyph {
-			t.Fatalf("railGlyph(%q, nerd) = %q, want %q", name, got, glyph)
+		if got, _ := railGlyph(DefaultTheme(), name, true); got != glyph {
+			t.Fatalf("railGlyph(DefaultTheme(), %q, nerd) = %q, want %q", name, got, glyph)
 		}
 	}
 	if DefaultTheme().States["error"].NerdGlyph == DefaultTheme().States["unknown"].NerdGlyph {
@@ -193,8 +184,7 @@ func TestThemeStates(t *testing.T) {
 	if idle.Glyph != "○" || idle.NerdGlyph != "\uf111" {
 		t.Fatalf("idle glyph = %q/%q, want the built-in pair", idle.Glyph, idle.NerdGlyph)
 	}
-	applyTestTheme(t, th)
-	if got, _ := railGlyph("working", true); got != "W" {
+	if got, _ := railGlyph(th, "working", true); got != "W" {
 		t.Fatalf("railGlyph(working, nerd) = %q, want W", got)
 	}
 }
@@ -340,9 +330,10 @@ func TestThemeErrors(t *testing.T) {
 	}
 }
 
-// TestThemeApply proves applyTheme installs every part of a theme, that it is
-// idempotent, and that a second call with the default restores the built-ins.
-func TestThemeApply(t *testing.T) {
+// TestThemeReachesPainters proves a theme value reaches the painters: the
+// palette, the accents, the glyphs and the states all paint from the value the
+// caller passes, and no call changes the built-in theme.
+func TestThemeReachesPainters(t *testing.T) {
 	th, err := parseTheme(`palette {
 	"rail-bg"       "#010203"
 	"rail-focus-bg" "#040506"
@@ -366,75 +357,64 @@ states {
 	if err != nil {
 		t.Fatalf("parseTheme: %v", err)
 	}
-	applyTestTheme(t, th)
-	assertApplied := func() {
-		t.Helper()
-		if railBG != (rgb{1, 2, 3}) || railFocusBG != (rgb{4, 5, 6}) || barAccent != (rgb{7, 8, 9}) {
-			t.Fatalf("palette not applied: bg=%v focus=%v accent=%v", railBG, railFocusBG, barAccent)
-		}
-		if barGutter != railBG {
-			t.Fatalf("barGutter = %v, want railBG %v", barGutter, railBG)
-		}
-		if len(railAccents) != 6 || railAccents[0] != (rgb{16, 17, 18}) || railAccents[5] != (rgb{19, 20, 21}) {
-			t.Fatalf("accents not applied: %v", railAccents)
-		}
-		if glyphGrip != "@" || glyphDirty != "o" || glyphFoldOpen != "+" || glyphNerdFoldOpen != "+" {
-			t.Fatalf("glyphs not applied: %q %q %q %q", glyphGrip, glyphDirty, glyphFoldOpen, glyphNerdFoldOpen)
-		}
-		if glyph("working") != "W" {
-			t.Fatalf("state glyph = %q, want W", glyph("working"))
+	// The palette reaches the rail ground and the bar accent.
+	var rail bytes.Buffer
+	drawRail(&rail, th, agentRail("working"))
+	if !strings.Contains(rail.String(), (rgb{1, 2, 3}).bg()) {
+		t.Fatalf("rail does not paint the themed ground: %q", rail.String())
+	}
+	accent := false
+	for _, span := range barSegments(th, barTestSnap(80), false, "") {
+		if span.fg == (rgb{7, 8, 9}) {
+			accent = true
 		}
 	}
-	assertApplied()
-	applyTheme(th)
-	assertApplied()
+	if !accent {
+		t.Fatal("bar does not paint the themed accent")
+	}
 
-	applyTheme(DefaultTheme())
-	def := DefaultTheme()
-	if railBG != def.Palette.RailBG || railFocusBG != def.Palette.RailFocusBG ||
-		railText != def.Palette.RailText || railDim != def.Palette.RailDim ||
-		railHeader != def.Palette.RailHeader || railWindowFg != def.Palette.RailWindow ||
-		railDiffAdd != def.Palette.RailDiffAdd || railDiffDel != def.Palette.RailDiffDel ||
-		railWorking != def.Palette.RailWorking || barAccent != def.Palette.BarAccent {
-		t.Fatal("default palette did not restore")
+	// The accents keep their slots.
+	if th.Accents[0] != (rgb{16, 17, 18}) || th.Accents[5] != (rgb{19, 20, 21}) {
+		t.Fatalf("accents = %v, want 16,17,18 and 19,20,21", th.Accents)
 	}
-	if barGutter != railBG {
-		t.Fatalf("barGutter = %v, want railBG %v", barGutter, railBG)
+
+	// The glyphs reach the grips and the dirty dot.
+	root := &Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
 	}
-	if !reflect.DeepEqual(railAccents, def.Accents[:]) {
-		t.Fatalf("accents = %v, want %v", railAccents, def.Accents)
+	var grips bytes.Buffer
+	drawGrips(&grips, th, &Snapshot{Cols: 40, Rows: 10, Root: root})
+	if !strings.Contains(grips.String(), "@") || strings.Contains(grips.String(), "•") {
+		t.Fatalf("grips = %q, want the themed @ only", grips.String())
 	}
-	restored := Glyphs{
-		Grip:              glyphGrip,
-		DividerRow:        glyphDividerRow,
-		DividerCol:        glyphDividerCol,
-		BorderTopLeft:     glyphBorderTopLeft,
-		BorderTopRight:    glyphBorderTopRight,
-		BorderBottomLeft:  glyphBorderBottomLeft,
-		BorderBottomRight: glyphBorderBottomRight,
-		BorderHorizontal:  glyphBorderHorizontal,
-		BorderVertical:    glyphBorderVertical,
-		BorderTeeLeft:     glyphBorderTeeLeft,
-		BorderTeeRight:    glyphBorderTeeRight,
-		FoldOpen:          glyphFoldOpen,
-		FoldClosed:        glyphFoldClosed,
-		NerdFoldOpen:      glyphNerdFoldOpen,
-		NerdFoldClosed:    glyphNerdFoldClosed,
-		ActiveMark:        glyphActiveMark,
-		WorkspaceBar:      glyphWorkspaceBar,
-		Dirty:             glyphDirty,
+	if segs := railStats(th, railItem{kind: railWindow, inRepo: true, dirty: true}); len(segs) == 0 || segs[0].text != "o" {
+		t.Fatalf("dirty dot = %+v, want the themed o", segs)
 	}
-	if restored != def.Glyphs {
-		t.Fatalf("glyphs = %+v, want %+v", restored, def.Glyphs)
+
+	// The states reach the glyph and the colour.
+	if g, colour := railGlyph(th, "working", false); g != "W" || colour != (rgb{22, 23, 24}) {
+		t.Fatalf("working = %q/%v, want W/22,23,24", g, colour)
 	}
-	if !reflect.DeepEqual(stateStyles, def.States) {
-		t.Fatalf("states = %+v, want %+v", stateStyles, def.States)
+
+	// Nothing was installed: the built-in theme still paints its own values.
+	if g, _ := railGlyph(DefaultTheme(), "working", false); g != "●" {
+		t.Fatalf("built-in working = %q, want the built-in glyph", g)
 	}
 }
 
-// glyph reads the Unicode state glyph from the installed state styles.
-func glyph(status string) string {
-	return stateStyle(status).Glyph
+// TestTuiTheme proves a client with no loaded theme runs the built-in one, and a
+// loaded theme is the one its painters see.
+func TestTuiTheme(t *testing.T) {
+	if got := (&tui{}).theme(); !reflect.DeepEqual(got, DefaultTheme()) {
+		t.Fatalf("nil theme = %+v, want the built-in theme", got)
+	}
+	th := DefaultTheme()
+	th.Palette.RailBG = rgb{9, 9, 9}
+	c := &tui{th: &th}
+	if got := c.theme().Palette.RailBG; got != (rgb{9, 9, 9}) {
+		t.Fatalf("loaded theme ground = %v, want 9,9,9", got)
+	}
 }
 
 // TestThemeDrawGrips proves drawGrips paints the themed grip, not the built-in
@@ -442,15 +422,13 @@ func glyph(status string) string {
 func TestThemeDrawGrips(t *testing.T) {
 	th := DefaultTheme()
 	th.Glyphs.Grip = "@"
-	applyTestTheme(t, th)
-
 	root := &Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
 	}
 	snap := &Snapshot{Cols: 40, Rows: 10, Rail: 0, Root: root}
 	var buf bytes.Buffer
-	drawGrips(&buf, snap)
+	drawGrips(&buf, th, snap)
 	out := buf.String()
 	if !strings.Contains(out, "@") {
 		t.Fatalf("themed grip not drawn: %q", out)
@@ -490,11 +468,9 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTheme: %v", err)
 	}
-	applyTestTheme(t, th)
-
 	items := railItems(agentRail("working"))
 	pane := railRowFind(t, items, railPane, "w1p1")
-	left, _, _ := railRow(pane, defaultRail, false, false)
+	left, _, _ := railRow(th, pane, defaultRail, false, false)
 	found := false
 	for _, seg := range left {
 		if seg.text == "W" {
@@ -510,12 +486,12 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	if !found {
 		t.Fatalf("themed state glyph not composed: %+v", left)
 	}
-	if got, colour := railGlyph("working", true); got != "W" || colour != (rgb{1, 2, 3}) {
+	if got, colour := railGlyph(th, "working", true); got != "W" || colour != (rgb{1, 2, 3}) {
 		t.Fatalf("nerd glyph = %q/%v, want W/1,2,3", got, colour)
 	}
 
 	var b bytes.Buffer
-	drawRail(&b, agentRail("working"))
+	drawRail(&b, th, agentRail("working"))
 	if !strings.Contains(b.String(), "W") || !strings.Contains(b.String(), (rgb{1, 2, 3}).fg()) {
 		t.Fatalf("themed state glyph not drawn: %q", b.String())
 	}

@@ -20,7 +20,7 @@ func TestFloatingPaneDraw(t *testing.T) {
 		Active: true,
 	}
 	var buf bytes.Buffer
-	fp.Draw(&buf, nil)
+	fp.Draw(&buf, DefaultTheme(), nil)
 	out := buf.String()
 	if !strings.Contains(out, "Hello, Float!") {
 		t.Fatalf("missing text in output: %q", out)
@@ -71,7 +71,7 @@ func TestHelpBoxFloatPaint(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	fp.Draw(&buf, nil)
+	fp.Draw(&buf, DefaultTheme(), nil)
 	out := buf.String()
 
 	if calls != 1 {
@@ -96,7 +96,7 @@ func TestHelpBoxFloatVTPath(t *testing.T) {
 		VT:   vt,
 	}
 	var buf bytes.Buffer
-	fp.Draw(&buf, nil)
+	fp.Draw(&buf, DefaultTheme(), nil)
 	out := buf.String()
 	for _, s := range []string{"VT-CELLS", "┌", "└"} {
 		if !strings.Contains(out, s) {

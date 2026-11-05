@@ -29,7 +29,7 @@ func thinSnapshot(panes []AllPane) *Snapshot {
 func thinScreen(t *testing.T, snap *Snapshot) vt10x.Terminal {
 	t.Helper()
 	var b bytes.Buffer
-	drawRail(&b, snap)
+	drawRail(&b, DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw thin rail: %v", err)
@@ -189,7 +189,7 @@ func TestThinRailGlyphColumn(t *testing.T) {
 	}
 }
 
-// TestThinRailFocusBackground paints the focused pane row with railFocusBG and
+// TestThinRailFocusBackground paints the focused pane row with DefaultTheme().Palette.RailFocusBG and
 // leaves every other row on the rail background, so one row of a stack of
 // glyph rows reads as the focused one.
 func TestThinRailFocusBackground(t *testing.T) {
@@ -204,9 +204,9 @@ func TestThinRailFocusBackground(t *testing.T) {
 	vt.Lock()
 	defer vt.Unlock()
 	for y := 0; y < snap.Rows-1; y++ {
-		want := ground(railBG)
+		want := ground(DefaultTheme().Palette.RailBG)
 		if y == 1 {
-			want = ground(railFocusBG)
+			want = ground(DefaultTheme().Palette.RailFocusBG)
 		}
 		for x := 0; x < snap.Rail; x++ {
 			if g := vt.Cell(x, y); g.BG != want {

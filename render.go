@@ -303,14 +303,15 @@ func screenBytes(vt vt10x.View) []byte {
 
 // drawPaneBox draws the border of one pane. The active pane is bright cyan;
 // the rest are dim, so the active one reads at a glance.
-func drawPaneBox(buf *bytes.Buffer, content Rect, active bool) {
-	drawPaneBoxRows(buf, content, active, false)
+func drawPaneBox(buf *bytes.Buffer, th Theme, content Rect, active bool) {
+	drawPaneBoxRows(buf, th, content, active, false)
 }
 
 // drawPaneBoxRows draws the border of one pane. skipTop leaves the top row
 // alone, for a caller that writes it itself as one row, so no cell of it lands
 // twice.
-func drawPaneBoxRows(buf *bytes.Buffer, content Rect, active bool, skipTop bool) {
+func drawPaneBoxRows(buf *bytes.Buffer, th Theme, content Rect, active bool, skipTop bool) {
+	g := th.Glyphs
 	x0, y0 := content.X-1, content.Y-1
 	x1, y1 := content.X+content.W, content.Y+content.H
 	if content.W <= 0 || content.H <= 0 || x0 < 0 || y0 < 0 {
@@ -325,27 +326,27 @@ func drawPaneBoxRows(buf *bytes.Buffer, content Rect, active bool, skipTop bool)
 		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
 	}
 	if !skipTop {
-		put(x0, y0, glyphBorderTopLeft)
-		put(x1, y0, glyphBorderTopRight)
+		put(x0, y0, g.BorderTopLeft)
+		put(x1, y0, g.BorderTopRight)
 	}
-	put(x0, y1, glyphBorderBottomLeft)
-	put(x1, y1, glyphBorderBottomRight)
+	put(x0, y1, g.BorderBottomLeft)
+	put(x1, y1, g.BorderBottomRight)
 	for x := x0 + 1; x < x1; x++ {
 		if !skipTop {
-			put(x, y0, glyphBorderHorizontal)
+			put(x, y0, g.BorderHorizontal)
 		}
-		put(x, y1, glyphBorderHorizontal)
+		put(x, y1, g.BorderHorizontal)
 	}
 	for y := y0 + 1; y < y1; y++ {
-		put(x0, y, glyphBorderVertical)
-		put(x1, y, glyphBorderVertical)
+		put(x0, y, g.BorderVertical)
+		put(x1, y, g.BorderVertical)
 	}
 }
 
 // drawGrips marks every divider at its midpoint, so a handle is visible before
 // the pointer finds it. The hover paints over the whole divider. A zoomed pane
 // covers every divider, so a grip would be a lie over a hidden split.
-func drawGrips(buf *bytes.Buffer, snap *Snapshot) {
+func drawGrips(buf *bytes.Buffer, th Theme, snap *Snapshot) {
 	if snap == nil || snap.Root == nil || snap.Rail < 0 || snap.Zoom != "" {
 		return
 	}
@@ -360,15 +361,15 @@ func drawGrips(buf *bytes.Buffer, snap *Snapshot) {
 			p := padRect(n, boxes, i)
 			if n.Dir == "row" {
 				y := p.Y + p.H/2
-				fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+1, glyphGrip)
+				fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+1, th.Glyphs.Grip)
 				if p.W > 1 {
-					fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+2, glyphGrip)
+					fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+2, th.Glyphs.Grip)
 				}
 			} else {
 				x := p.X + p.W/2
-				fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+1, x+1, glyphGrip)
+				fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+1, x+1, th.Glyphs.Grip)
 				if p.H > 1 {
-					fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+2, x+1, glyphGrip)
+					fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+2, x+1, th.Glyphs.Grip)
 				}
 			}
 		}
@@ -382,13 +383,13 @@ func drawGrips(buf *bytes.Buffer, snap *Snapshot) {
 
 // drawDivider paints the hovered divider: heavy line glyphs over both border
 // cells, so the grab target is visible before the press.
-func drawDivider(buf *bytes.Buffer, z Rect, axis string) {
+func drawDivider(buf *bytes.Buffer, th Theme, z Rect, axis string) {
 	if z.W <= 0 || z.H <= 0 {
 		return
 	}
-	glyph := glyphDividerCol
+	glyph := th.Glyphs.DividerCol
 	if axis == "col" {
-		glyph = glyphDividerRow
+		glyph = th.Glyphs.DividerRow
 	}
 	buf.WriteString("\x1b[0m\x1b[1;96m")
 	line := strings.Repeat(glyph, z.W)
@@ -429,7 +430,7 @@ type railItem struct {
 	count      int
 	added      int
 	deleted    int
-	accent     rgb
+	accent     int // an accent slot, resolved against the theme by the painter
 	agent      bool
 	dirty      bool
 	inRepo     bool
@@ -491,24 +492,17 @@ func railItems(snap *Snapshot) []railItem {
 		}
 		return AllPane{}, false
 	}
-	// A workspace keeps its preferred hue when it is free. When two live
+	// A workspace keeps its preferred slot when it is free. When two live
 	// workspaces hash alike, the later one takes the next free slot, so no two
 	// workspaces in a session ever share an accent.
-	used := map[rgb]bool{}
-	accent := func(id string) rgb {
-		pref := railAccent(id)
-		start := 0
-		for i, a := range railAccents {
-			if a == pref {
-				start = i
-				break
-			}
-		}
-		for i := 0; i < len(railAccents); i++ {
-			a := railAccents[(start+i)%len(railAccents)]
-			if !used[a] {
-				used[a] = true
-				return a
+	used := map[int]bool{}
+	accent := func(id string) int {
+		pref := railAccentSlot(id)
+		for i := 0; i < accentSlots; i++ {
+			slot := (pref + i) % accentSlots
+			if !used[slot] {
+				used[slot] = true
+				return slot
 			}
 		}
 		return pref
@@ -634,108 +628,10 @@ func contrast(a, b rgb) float64 {
 	return (la + 0.05) / (lb + 0.05)
 }
 
-// The rail palette. Every foreground is at least 4.5:1 against both the rail
-// background and the focused row background; TestRailContrast guards it.
-var (
-	railBG       = rgb{20, 19, 26}    // #14131a
-	railFocusBG  = rgb{31, 30, 39}    // #1f1e27
-	railText     = rgb{233, 234, 241} // #e9eaf1
-	railDim      = rgb{143, 147, 168} // #8f93a8
-	railHeader   = rgb{166, 169, 189} // #a6a9bd
-	railWindowFg = rgb{149, 153, 174} // #9599ae
-	railDiffAdd  = rgb{120, 220, 130} // #78dc82 diff stats, added lines
-	railDiffDel  = rgb{255, 125, 125} // #ff7d7d diff stats, deleted lines
-	railWorking  = rgb{245, 190, 80}  // #f5be50 working amber, dirty dot
-
-	// The status bar reuses the rail's ground, focus fill, text and dim. It adds
-	// one accent for the active window mark and names the ground it paints
-	// between segments. There is no second background.
-	barAccent = rgb{122, 192, 235} // #7ac0eb cyan, active window mark
-	barGutter = railBG             // ground between segments
-)
-
-// railAccents are the six workspace hues, in a fixed order. Each one is
-// readable on both rail backgrounds, so a workspace header keeps its identity
-// without losing contrast.
-var railAccents = []rgb{
-	{187, 154, 247}, // #bb9af7 violet
-	{110, 220, 235}, // #6edceb cyan
-	{240, 140, 215}, // #f08cd7 magenta
-	{126, 169, 255}, // #7ea9ff blue
-	{240, 160, 90},  // #f0a05a orange
-	{140, 215, 155}, // #8cd79b green
-}
-
-// The structural glyphs. applyTheme replaces them with the loaded theme's
-// glyphs; the defaults are the built-in theme's values.
-var (
-	glyphGrip              = "•"
-	glyphDividerRow        = "━"
-	glyphDividerCol        = "┃"
-	glyphBorderTopLeft     = "┌"
-	glyphBorderTopRight    = "┐"
-	glyphBorderBottomLeft  = "└"
-	glyphBorderBottomRight = "┘"
-	glyphBorderHorizontal  = "─"
-	glyphBorderVertical    = "│"
-	glyphBorderTeeLeft     = "├"
-	glyphBorderTeeRight    = "┤"
-	glyphFoldOpen          = "▾"
-	glyphFoldClosed        = "▸"
-	glyphNerdFoldOpen      = "\uf0d7"
-	glyphNerdFoldClosed    = "\uf0da"
-	glyphActiveMark        = "▸"
-	glyphWorkspaceBar      = "▌"
-	glyphDirty             = "●"
-)
-
-// stateStyles is the per-state mark set. applyTheme replaces it with the loaded
-// theme's states.
-var stateStyles = DefaultTheme().States
-
-// applyTheme installs a theme into the renderer's globals. It is idempotent:
-// calling it with DefaultTheme restores the built-in values.
-func applyTheme(t Theme) {
-	railBG = t.Palette.RailBG
-	railFocusBG = t.Palette.RailFocusBG
-	railText = t.Palette.RailText
-	railDim = t.Palette.RailDim
-	railHeader = t.Palette.RailHeader
-	railWindowFg = t.Palette.RailWindow
-	railDiffAdd = t.Palette.RailDiffAdd
-	railDiffDel = t.Palette.RailDiffDel
-	railWorking = t.Palette.RailWorking
-	barAccent = t.Palette.BarAccent
-	barGutter = railBG
-	railAccents = []rgb{
-		t.Accents[0], t.Accents[1], t.Accents[2],
-		t.Accents[3], t.Accents[4], t.Accents[5],
-	}
-	glyphGrip = t.Glyphs.Grip
-	glyphDividerRow = t.Glyphs.DividerRow
-	glyphDividerCol = t.Glyphs.DividerCol
-	glyphBorderTopLeft = t.Glyphs.BorderTopLeft
-	glyphBorderTopRight = t.Glyphs.BorderTopRight
-	glyphBorderBottomLeft = t.Glyphs.BorderBottomLeft
-	glyphBorderBottomRight = t.Glyphs.BorderBottomRight
-	glyphBorderHorizontal = t.Glyphs.BorderHorizontal
-	glyphBorderVertical = t.Glyphs.BorderVertical
-	glyphBorderTeeLeft = t.Glyphs.BorderTeeLeft
-	glyphBorderTeeRight = t.Glyphs.BorderTeeRight
-	glyphFoldOpen = t.Glyphs.FoldOpen
-	glyphFoldClosed = t.Glyphs.FoldClosed
-	glyphNerdFoldOpen = t.Glyphs.NerdFoldOpen
-	glyphNerdFoldClosed = t.Glyphs.NerdFoldClosed
-	glyphActiveMark = t.Glyphs.ActiveMark
-	glyphWorkspaceBar = t.Glyphs.WorkspaceBar
-	glyphDirty = t.Glyphs.Dirty
-	stateStyles = t.States
-}
-
-// railAccent returns the hue a workspace keeps for its whole life. FNV-1a is
-// the seed; the mix step matters because its low bits repeat for ids of equal
+// railAccentSlot returns the accent slot a workspace prefers. FNV-1a is the
+// seed; the mix step matters because its low bits repeat for ids of equal
 // length, and a workspace id is short.
-func railAccent(workspace string) rgb {
+func railAccentSlot(workspace string) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(workspace))
 	x := h.Sum32()
@@ -744,7 +640,7 @@ func railAccent(workspace string) rgb {
 	x ^= x >> 15
 	x *= 0x846ca68b
 	x ^= x >> 16
-	return railAccents[x%uint32(len(railAccents))]
+	return int(x % accentSlots)
 }
 
 // Nerd Font icons. The font check runs once; DM_NERD=1 or 0 overrides it.
@@ -769,11 +665,11 @@ func nerdFonts() bool {
 
 // stateStyle returns the mark for a status. A status the theme does not name
 // falls back to the unknown style.
-func stateStyle(status string) StateStyle {
-	if s, ok := stateStyles[status]; ok {
+func stateStyle(th Theme, status string) StateStyle {
+	if s, ok := th.States[status]; ok {
 		return s
 	}
-	if s, ok := stateStyles["unknown"]; ok {
+	if s, ok := th.States["unknown"]; ok {
 		return s
 	}
 	return DefaultTheme().States["unknown"]
@@ -785,8 +681,8 @@ func stateStyle(status string) StateStyle {
 // glyph. The question mark marks an agent whose state has not arrived; drawRail
 // leaves the cell blank for a shell, which reports no state. A theme's glyph
 // replaces both forms; an empty NerdGlyph keeps the Unicode glyph.
-func railGlyph(status string, nerd bool) (glyph string, colour rgb) {
-	style := stateStyle(status)
+func railGlyph(th Theme, status string, nerd bool) (glyph string, colour rgb) {
+	style := stateStyle(th, status)
 	glyph = style.Glyph
 	if nerd && style.NerdGlyph != "" {
 		glyph = style.NerdGlyph
@@ -823,27 +719,28 @@ func writeRailSeg(buf *bytes.Buffer, s seg, ground rgb, bold bool) {
 
 // railStats is the right-aligned git tail of a window line: an amber dot when
 // the tree is dirty, then the added and deleted line counts, or "clean".
-func railStats(it railItem) []seg {
+func railStats(th Theme, it railItem) []seg {
 	if !it.inRepo {
 		return nil
 	}
+	p := th.Palette
 	var segs []seg
 	if it.dirty {
-		segs = append(segs, seg{text: glyphDirty, fg: railWorking})
+		segs = append(segs, seg{text: th.Glyphs.Dirty, fg: p.RailWorking})
 	}
 	if it.added > 0 {
-		segs = append(segs, seg{text: "+" + strconv.Itoa(it.added), fg: railDiffAdd})
+		segs = append(segs, seg{text: "+" + strconv.Itoa(it.added), fg: p.RailDiffAdd})
 	}
 	if it.deleted > 0 {
-		segs = append(segs, seg{text: "-" + strconv.Itoa(it.deleted), fg: railDiffDel})
+		segs = append(segs, seg{text: "-" + strconv.Itoa(it.deleted), fg: p.RailDiffDel})
 	}
 	if len(segs) == 0 {
-		return []seg{{text: "clean", fg: railDim}}
+		return []seg{{text: "clean", fg: p.RailDim}}
 	}
 	out := make([]seg, 0, len(segs)*2)
 	for i, s := range segs {
 		if i > 0 {
-			out = append(out, seg{text: " ", fg: railDim})
+			out = append(out, seg{text: " ", fg: p.RailDim})
 		}
 		out = append(out, s)
 	}
@@ -853,32 +750,33 @@ func railStats(it railItem) []seg {
 // railRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and nerd are the rail's own switches.
-func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
+func railRow(th Theme, it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
+	p, g := th.Palette, th.Glyphs
 	switch it.kind {
 	case railWorkspace:
 		if !compact {
-			name := railText
+			name := p.RailText
 			if !it.active {
-				name = railHeader
+				name = p.RailHeader
 			}
 			left = []seg{
-				{text: glyphWorkspaceBar, fg: it.accent},
+				{text: g.WorkspaceBar, fg: th.Accents[it.accent]},
 				{text: " ", fg: name},
 				{text: it.text, fg: name, bold: true},
 			}
-			right = []seg{{text: strconv.Itoa(it.count), fg: railDim}}
+			right = []seg{{text: strconv.Itoa(it.count), fg: p.RailDim}}
 		}
 	case railWindow:
-		base := railWindowFg
+		base := p.RailWindow
 		if !compact {
-			caret := glyphFoldOpen
+			caret := g.FoldOpen
 			if it.folded {
-				caret = glyphFoldClosed
+				caret = g.FoldClosed
 			}
 			if nerd {
-				caret = glyphNerdFoldOpen
+				caret = g.NerdFoldOpen
 				if it.folded {
-					caret = glyphNerdFoldClosed
+					caret = g.NerdFoldClosed
 				}
 			}
 			// The folder names the window. A window whose panes reported no
@@ -897,42 +795,42 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
 			// something the label does not.
 			if it.branch != "" && it.branch != label {
 				tail = []seg{
-					{text: "  ", fg: railDim},
-					{text: it.branch, fg: railDim},
+					{text: "  ", fg: p.RailDim},
+					{text: it.branch, fg: p.RailDim},
 				}
 			}
-			right = railStats(it)
+			right = railStats(th, it)
 		}
 	case railWindowNote:
 		if !compact {
-			base := railDim
+			base := p.RailDim
 			left = []seg{
 				{text: "    ", fg: base},
 				{text: it.text, fg: base},
 			}
 		}
 	case railPane:
-		base := railDim
+		base := p.RailDim
 		if it.focus || it.agent {
-			base = railText
+			base = p.RailText
 		}
-		g, colour := railGlyph(it.status, nerd)
+		mark, colour := railGlyph(th, it.status, nerd)
 		// A shell has no state to report, so the fallback mark would be a
 		// question about nothing. Leave the cell blank instead.
 		if !it.agent && (it.status == "" || it.status == "unknown") {
-			g = " "
+			mark = " "
 		}
-		mark := railMark(it.agent, nerd)
+		glyph := railMark(it.agent, nerd)
 		if compact {
 			left = []seg{
+				{text: glyph, fg: colour},
 				{text: mark, fg: colour},
-				{text: g, fg: colour},
 			}
 		} else {
 			left = []seg{
 				{text: "      ", fg: base},
+				{text: glyph, fg: colour},
 				{text: mark, fg: colour},
-				{text: g, fg: colour},
 				{text: " " + it.text, fg: base},
 			}
 		}
@@ -956,7 +854,7 @@ func railRow(it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
 		tail, leftCells = nil, segCells(left)
 	}
 	if leftCells > budget {
-		left = elideSegs(left, budget)
+		left = elideSegs(th, left, budget)
 	}
 	return left, right, tail
 }
@@ -1031,15 +929,15 @@ func railControlAt(snap *Snapshot, x, y int) bool {
 // A rail wider than the thin one names the move and collapses. The thin rail
 // shows the expand caret in the state glyph's column and leaves the rest
 // blank, so a narrow rail loses no pane row to a label.
-func railControlSegs(compact, nerd bool) []seg {
+func railControlSegs(th Theme, compact, nerd bool) []seg {
 	if compact {
 		caret := "▶"
 		if nerd {
 			caret = "\uf0da"
 		}
 		return []seg{
-			{text: "  ", fg: railDim},
-			{text: caret, fg: railDim},
+			{text: "  ", fg: th.Palette.RailDim},
+			{text: caret, fg: th.Palette.RailDim},
 		}
 	}
 	mark := "◀ "
@@ -1047,8 +945,8 @@ func railControlSegs(compact, nerd bool) []seg {
 		mark = "\uf0d9 "
 	}
 	return []seg{
-		{text: mark, fg: railDim},
-		{text: "collapse", fg: railDim},
+		{text: mark, fg: th.Palette.RailDim},
+		{text: "collapse", fg: th.Palette.RailDim},
 	}
 }
 
@@ -1057,10 +955,11 @@ func railControlSegs(compact, nerd bool) []seg {
 // screen are clipped, and every row is written into at most Rail columns. A
 // left run is elided with an ellipsis before the right-aligned stats give up a
 // cell, so the stats survive a narrow rail.
-func drawRail(buf *bytes.Buffer, snap *Snapshot) {
+func drawRail(buf *bytes.Buffer, th Theme, snap *Snapshot) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
+	p := th.Palette
 	w := snap.Rail
 	rows := snap.Rows - 1
 	items := railItems(snap)
@@ -1072,18 +971,18 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 	gripAt := controlAt / 2
 	for y := 0; y < rows; y++ {
 		var left, right, tail []seg
-		bg, bold := railBG, false
+		bg, bold := p.RailBG, false
 		if y == controlAt {
-			left = railControlSegs(compact, nerd)
+			left = railControlSegs(th, compact, nerd)
 			if segCells(left) > w {
-				left = elideSegs(left, w)
+				left = elideSegs(th, left, w)
 			}
 		} else if y < len(items) {
 			it := items[y]
-			left, right, tail = railRow(it, w, compact, nerd)
+			left, right, tail = railRow(th, it, w, compact, nerd)
 			// A focused pane row paints its own background and every run bold.
 			if it.kind == railPane && it.focus {
-				bg, bold = railFocusBG, true
+				bg, bold = p.RailFocusBG, true
 			}
 		}
 		leftCells := segCells(left) + segCells(tail)
@@ -1104,7 +1003,7 @@ func drawRail(buf *bytes.Buffer, snap *Snapshot) {
 		}
 		if y < controlAt && y == gripAt {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, w)
-			buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + glyphGrip)
+			buf.WriteString("\x1b[0m" + p.RailBG.bg() + p.RailDim.fg() + th.Glyphs.Grip)
 		}
 		buf.WriteString("\x1b[0m")
 	}
@@ -1249,15 +1148,15 @@ func leafNear(n *Node, area Rect, x, y int) string {
 // selection highlight. The title row is a fill row: dim, with the label between
 // the border rune and a border-rune fill, where the panel's label style is
 // bright, so the row is one write and its cells are the menu's.
-func drawMenu(buf *bytes.Buffer, m *menu) {
+func drawMenu(buf *bytes.Buffer, th Theme, m *menu) {
 	if m == nil || m.w < 8 {
 		return
 	}
 	inner := Rect{X: m.x + 1, Y: m.y + 1, W: m.w - 2, H: len(m.items)}
-	paintPanel(buf, inner, panelTitle{
-		text:  glyphBorderHorizontal + " " + m.title + " ",
+	paintPanel(buf, th, inner, panelTitle{
+		text:  th.Glyphs.BorderHorizontal + " " + m.title + " ",
 		style: "\x1b[0m\x1b[90m",
-		fill:  glyphBorderHorizontal,
+		fill:  th.Glyphs.BorderHorizontal,
 	}, "", false, func(b *bytes.Buffer, r Rect) {
 		for i, it := range m.items {
 			line := pad(" "+pad(it.label, 22)+" "+pad(it.key, 4), r.W)
@@ -1276,18 +1175,19 @@ func drawMenu(buf *bytes.Buffer, m *menu) {
 // pinned block is anchored to the last column and the gutter fills the gap, so
 // the whole row is written and no cell of the previous frame shows through.
 // drawBar writes at most snap.Cols cells and never touches another row.
-func drawBar(buf *bytes.Buffer, snap *Snapshot, armed bool, info string) {
+func drawBar(buf *bytes.Buffer, th Theme, snap *Snapshot, armed bool, info string) {
 	if snap == nil || snap.Rows < 1 || snap.Cols < 1 {
 		return
 	}
-	segs := barSegments(snap, armed, info)
+	segs := barSegments(th, snap, armed, info)
 	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
 	for _, s := range left {
 		write(buf, s)
 	}
 	if n := snap.Cols - segCells(segs); n > 0 {
-		buf.WriteString("\x1b[0m" + barGutter.bg() + strings.Repeat(" ", n))
+		// The bar's ground is the rail's: there is no second background.
+		buf.WriteString("\x1b[0m" + th.Palette.RailBG.bg() + strings.Repeat(" ", n))
 	}
 	for _, s := range pinned {
 		write(buf, s)
@@ -1341,7 +1241,7 @@ type barLeft struct {
 // barFocus builds the focus chip from the focused pane. An agent reports a
 // state, so it takes that state's glyph and colour; a shell gets the prompt
 // marker in dim text. A pane the snapshot does not list gets no chip.
-func barFocus(snap *Snapshot) *barFocusChip {
+func barFocus(th Theme, snap *Snapshot) *barFocusChip {
 	var p PaneInfo
 	found := false
 	for _, cand := range snap.Panes {
@@ -1366,10 +1266,10 @@ func barFocus(snap *Snapshot) *barFocusChip {
 			break
 		}
 	}
-	shell := stateStyle("shell")
+	shell := stateStyle(th, "shell")
 	glyph, colour := shell.Glyph, shell.Colour
 	if agent {
-		glyph, colour = railGlyph(status, nerdFonts())
+		glyph, colour = railGlyph(th, status, nerdFonts())
 	}
 	return &barFocusChip{
 		glyph: glyph, colour: colour,
@@ -1378,7 +1278,7 @@ func barFocus(snap *Snapshot) *barFocusChip {
 }
 
 // barLeftFor reads the left block from a snapshot in its full, unelided form.
-func barLeftFor(snap *Snapshot) *barLeft {
+func barLeftFor(th Theme, snap *Snapshot) *barLeft {
 	l := &barLeft{
 		session:   snap.Session,
 		workspace: snap.Workspace,
@@ -1390,19 +1290,20 @@ func barLeftFor(snap *Snapshot) *barLeft {
 	for i, name := range snap.Windows {
 		l.windows = append(l.windows, barWindow{num: i + 1, name: name, active: i == snap.ActiveWindow})
 	}
-	l.focus = barFocus(snap)
+	l.focus = barFocus(th, snap)
 	return l
 }
 
 // groups builds the left block spans as they currently stand: session,
 // workspace, one chip per window, then the focus chip.
-func (l *barLeft) groups() [][]seg {
+func (l *barLeft) groups(th Theme) [][]seg {
+	p, g := th.Palette, th.Glyphs
 	var out [][]seg
 	if l.session != "" {
-		out = append(out, []seg{{text: l.session, fg: railText, bg: railBG}})
+		out = append(out, []seg{{text: l.session, fg: p.RailText, bg: p.RailBG}})
 	}
 	if l.workspace != "" {
-		out = append(out, []seg{{text: l.workspace, fg: railHeader, bg: railBG}})
+		out = append(out, []seg{{text: l.workspace, fg: p.RailHeader, bg: p.RailBG}})
 	}
 	for _, w := range l.windows {
 		if w.active {
@@ -1413,8 +1314,8 @@ func (l *barLeft) groups() [][]seg {
 				text += " " + w.name
 			}
 			out = append(out, []seg{
-				{text: glyphActiveMark + " ", fg: barAccent, bg: railFocusBG},
-				{text: text, fg: railText, bg: railFocusBG, bold: true},
+				{text: g.ActiveMark + " ", fg: p.BarAccent, bg: p.RailFocusBG},
+				{text: text, fg: p.RailText, bg: p.RailFocusBG, bold: true},
 			})
 			continue
 		}
@@ -1422,21 +1323,21 @@ func (l *barLeft) groups() [][]seg {
 		if l.winNames && w.name != "" {
 			text += " " + w.name
 		}
-		out = append(out, []seg{{text: text, fg: railDim, bg: railBG}})
+		out = append(out, []seg{{text: text, fg: p.RailDim, bg: p.RailBG}})
 	}
 	if l.focus != nil {
 		chip := []seg{
-			{text: l.focus.glyph, fg: l.focus.colour, bg: railFocusBG},
-			{text: " " + l.focus.id, fg: railText, bg: railFocusBG, bold: true},
+			{text: l.focus.glyph, fg: l.focus.colour, bg: p.RailFocusBG},
+			{text: " " + l.focus.id, fg: p.RailText, bg: p.RailFocusBG, bold: true},
 		}
 		if l.showZoom {
-			chip = append(chip, seg{text: " Z", fg: barAccent, bg: railFocusBG, bold: true})
+			chip = append(chip, seg{text: " Z", fg: p.BarAccent, bg: p.RailFocusBG, bold: true})
 		}
 		if l.showName && l.focus.name != "" {
-			chip = append(chip, seg{text: " " + l.focus.name, fg: railDim, bg: railFocusBG})
+			chip = append(chip, seg{text: " " + l.focus.name, fg: p.RailDim, bg: p.RailFocusBG})
 		}
 		if l.showStat && l.focus.status != "" {
-			chip = append(chip, seg{text: " " + l.focus.status, fg: railDim, bg: railFocusBG})
+			chip = append(chip, seg{text: " " + l.focus.status, fg: p.RailDim, bg: p.RailFocusBG})
 		}
 		out = append(out, chip)
 	}
@@ -1447,12 +1348,12 @@ func (l *barLeft) groups() [][]seg {
 // window names, then trailing window chips, then the workspace name, then the
 // session name, then the focus chip's status word and name. The focus chip
 // keeps its glyph and id last, and the result never exceeds the budget.
-func (l *barLeft) fit(budget int) []seg {
+func (l *barLeft) fit(th Theme, budget int) []seg {
 	if budget <= 0 {
 		return nil
 	}
-	gap := seg{text: " ", fg: railDim, bg: railBG}
-	cur := func() []seg { return join(l.groups(), gap) }
+	gap := seg{text: " ", fg: th.Palette.RailDim, bg: th.Palette.RailBG}
+	cur := func() []seg { return join(l.groups(th), gap) }
 	if segs := cur(); segCells(segs) <= budget {
 		return segs
 	}
@@ -1518,13 +1419,14 @@ func (l *barLeft) fit(budget int) []seg {
 
 // barPinned is the right block: the prefix flag while armed, then the scroll
 // info. Both are anchored to the last column, so both are pinned.
-func barPinned(armed bool, info string) []seg {
+func barPinned(th Theme, armed bool, info string) []seg {
+	p := th.Palette
 	var out []seg
 	if armed {
-		out = append(out, seg{text: "PREFIX ", fg: railText, bg: railBG, bold: true, pin: true})
+		out = append(out, seg{text: "PREFIX ", fg: p.RailText, bg: p.RailBG, bold: true, pin: true})
 	}
 	if info != "" {
-		out = append(out, seg{text: info, fg: railDim, bg: railBG, pin: true})
+		out = append(out, seg{text: info, fg: p.RailDim, bg: p.RailBG, pin: true})
 	}
 	return out
 }
@@ -1551,11 +1453,11 @@ func barFitPinned(segs []seg, cols int) []seg {
 // pinned block leaves, minus one gutter cell, so the blocks never touch and the
 // line never runs past snap.Cols cells. The pinned block is never dropped to
 // make room for the left one.
-func barSegments(snap *Snapshot, armed bool, info string) []seg {
+func barSegments(th Theme, snap *Snapshot, armed bool, info string) []seg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}
-	right := barFitPinned(barPinned(armed, info), snap.Cols)
+	right := barFitPinned(barPinned(th, armed, info), snap.Cols)
 	budget := snap.Cols - segCells(right)
 	if len(right) > 0 {
 		// Keep one gutter cell between the blocks. drawBar spends it as part of
@@ -1565,7 +1467,7 @@ func barSegments(snap *Snapshot, armed bool, info string) []seg {
 	if budget < 0 {
 		budget = 0
 	}
-	left := barLeftFor(snap).fit(budget)
+	left := barLeftFor(th, snap).fit(th, budget)
 	return append(left, right...)
 }
 
@@ -1574,7 +1476,7 @@ func barSegments(snap *Snapshot, armed bool, info string) []seg {
 // box is as wide as the longest text plus its two border cells, clamped to the
 // screen; a longer text is truncated to fit. Only rows above the bar are used,
 // so the bar and the pointer gestures over the panes are untouched.
-func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
+func drawToasts(buf *bytes.Buffer, th Theme, snap *Snapshot, toasts []toast) {
 	if snap == nil || len(toasts) == 0 || snap.Cols < 3 || snap.Rows < 2 {
 		return
 	}
@@ -1595,7 +1497,7 @@ func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
 			continue
 		}
 		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m%s\x1b[97m%s\x1b[0m\x1b[90m%s\x1b[0m",
-			row, snap.Cols-w+1, glyphBorderVertical, pad(x.text, inner), glyphBorderVertical)
+			row, snap.Cols-w+1, th.Glyphs.BorderVertical, pad(x.text, inner), th.Glyphs.BorderVertical)
 	}
 }
 
@@ -1604,7 +1506,8 @@ func drawToasts(buf *bytes.Buffer, snap *Snapshot, toasts []toast) {
 // highlight, the tee row that crosses the border and the key hint under it. The
 // title row is a fill row: dim, and its trailing cells are spaces rather than
 // the border rune, so the row is one write and its cells are the picker's.
-func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel int, current string) {
+func drawSessions(buf *bytes.Buffer, th Theme, cols, rows int, sessions []SessionInfo, sel int, current string) {
+	g := th.Glyphs
 	w := 46
 	if w > cols-2 {
 		w = cols - 2
@@ -1619,8 +1522,8 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		y = 0
 	}
 	inner := Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 2}
-	paintPanel(buf, inner, panelTitle{
-		text:  glyphBorderHorizontal + " switch session ",
+	paintPanel(buf, th, inner, panelTitle{
+		text:  g.BorderHorizontal + " switch session ",
 		style: "\x1b[0m\x1b[90m",
 		fill:  " ",
 	}, "", false, func(b *bytes.Buffer, r Rect) {
@@ -1648,7 +1551,7 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s", r.Y+len(sessions)+2, r.X+1, hint)
 	})
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+len(sessions)+2, x+1,
-		glyphBorderTeeLeft, strings.Repeat(glyphBorderHorizontal, w-2), glyphBorderTeeRight)
+		g.BorderTeeLeft, strings.Repeat(g.BorderHorizontal, w-2), g.BorderTeeRight)
 	buf.WriteString("\x1b[0m")
 }
 
@@ -1701,7 +1604,7 @@ func renameBoxGeometry(cols, rows, rail int) (Rect, bool) {
 // long name still shows its end and the caret stays on screen. The kind is
 // optional: a call without it renames a workspace, as the frozen prompt test
 // expects. A screen too small to hold the box paints nothing.
-func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string, kind ...string) {
+func drawRename(buf *bytes.Buffer, th Theme, snap *Snapshot, id, draft string, kind ...string) {
 	if snap == nil {
 		return
 	}
@@ -1719,23 +1622,24 @@ func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string, kind ...str
 		Title: "rename " + k + " " + id,
 		Hint:  "enter  esc",
 		Paint: func(b *bytes.Buffer, r Rect) {
-			renameInputRow(b, r, draft)
+			renameInputRow(b, th, r, draft)
 		},
 	}
-	f.Draw(buf, nil)
+	f.Draw(buf, th, nil)
 }
 
 // renameInputRow paints the float's one input row: the dim label, the draft and
 // the caret on the rail ground, padded to the full inner width so the row owns
 // every cell inside the box. The draft keeps its tail and drops its head when
 // it runs out of room, and a wide rune is cut whole.
-func renameInputRow(buf *bytes.Buffer, r Rect, draft string) {
+func renameInputRow(buf *bytes.Buffer, th Theme, r Rect, draft string) {
+	p := th.Palette
 	const caret = "▏"
 	labelRoom := r.W - cells(caret)
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
-	segs := clipSegs([]seg{{text: " name: ", fg: railDim}}, labelRoom)
+	segs := clipSegs([]seg{{text: " name: ", fg: p.RailDim}}, labelRoom)
 	draftRoom := r.W - cells(caret) - segCells(segs)
 	if cells(draft) > draftRoom {
 		if draftRoom > 1 {
@@ -1745,17 +1649,17 @@ func renameInputRow(buf *bytes.Buffer, r Rect, draft string) {
 		}
 	}
 	segs = append(segs,
-		seg{text: draft, fg: railText},
-		seg{text: caret, fg: barAccent},
+		seg{text: draft, fg: p.RailText},
+		seg{text: caret, fg: p.BarAccent},
 	)
 	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m", r.Y+1, r.X+1)
-	buf.WriteString(railBG.bg())
+	buf.WriteString(p.RailBG.bg())
 	for _, seg := range segs {
 		buf.WriteString(seg.fg.fg())
 		buf.WriteString(seg.text)
 	}
 	if n := r.W - segCells(segs); n > 0 {
-		buf.WriteString(railBG.bg())
+		buf.WriteString(p.RailBG.bg())
 		buf.WriteString(strings.Repeat(" ", n))
 	}
 	buf.WriteString("\x1b[0m")
@@ -1774,7 +1678,7 @@ func maxInt(a, b int) int {
 // names the key that closes it. The box stays clear of the rail, the toast row
 // and the status bar: it gives up columns, then its trailing rows, before it
 // paints over any of them.
-func drawHelp(buf *bytes.Buffer, cols, rows int, keys []HelpEntry) {
+func drawHelp(buf *bytes.Buffer, th Theme, cols, rows int, keys []HelpEntry) {
 	g, ok := helpBoxGeometry(cols, rows, keys)
 	if !ok {
 		return
@@ -1787,7 +1691,7 @@ func drawHelp(buf *bytes.Buffer, cols, rows int, keys []HelpEntry) {
 			helpBoxRows(b, inner, g)
 		},
 	}
-	f.Draw(buf, nil)
+	f.Draw(buf, th, nil)
 }
 
 // displayRow is one row of the help box: a category header or a key-action pair.

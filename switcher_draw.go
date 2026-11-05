@@ -128,7 +128,7 @@ func clampRect(r Rect, cols, rows int) Rect {
 // the float owns is painted, blanks included, and every row starts with an
 // absolute cursor move so bandRows can address it. Nothing is written outside
 // the rect and the screen is never cleared.
-func drawSwitcher(buf *bytes.Buffer, s *switcher, snap *Snapshot, vts map[string]vt10x.Terminal) (cx, cy int) {
+func drawSwitcher(buf *bytes.Buffer, th Theme, s *switcher, snap *Snapshot, vts map[string]vt10x.Terminal) (cx, cy int) {
 	if buf == nil || s == nil || snap == nil || snap.Cols < 1 || snap.Rows < 1 {
 		return 0, 0
 	}
@@ -136,45 +136,46 @@ func drawSwitcher(buf *bytes.Buffer, s *switcher, snap *Snapshot, vts map[string
 	if l.r.W < 3 || l.r.H < 3 {
 		return l.r.X, l.r.Y
 	}
-	paintPanel(buf, l.inner, panelTitle{}, "", true, func(b *bytes.Buffer, _ Rect) {
-		cx, cy = paintSwitcherQuery(b, s, l)
-		paintSwitcherBands(b, s, vts, l)
+	paintPanel(buf, th, l.inner, panelTitle{}, "", true, func(b *bytes.Buffer, _ Rect) {
+		cx, cy = paintSwitcherQuery(b, th, s, l)
+		paintSwitcherBands(b, th, s, vts, l)
 	})
 	// The title wears the rail ground, which the panel's label style cannot
 	// express, so the switcher paints it on the border row itself.
-	paintSwitcherTitle(buf, l)
+	paintSwitcherTitle(buf, th, l)
 	return cx, cy
 }
 
 // paintSwitcherTitle names the float on its top border row, on the rail ground
 // and in the rail text colour.
-func paintSwitcherTitle(buf *bytes.Buffer, l switcherLayout) {
+func paintSwitcherTitle(buf *bytes.Buffer, th Theme, l switcherLayout) {
 	title := " switch "
 	if l.r.W-3 < len(title) {
 		return
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH", l.r.Y+1, l.r.X+3)
-	buf.WriteString("\x1b[0m" + railBG.bg() + railText.fg() + "\x1b[1m")
+	buf.WriteString("\x1b[0m" + th.Palette.RailBG.bg() + th.Palette.RailText.fg() + "\x1b[1m")
 	buf.WriteString(title)
 	buf.WriteString("\x1b[0m")
 }
 
 // paintSwitcherQuery paints the query row: "> " then the query, clipped to the
 // list band, and returns one past the query's last cell.
-func paintSwitcherQuery(buf *bytes.Buffer, s *switcher, l switcherLayout) (cx, cy int) {
+func paintSwitcherQuery(buf *bytes.Buffer, th Theme, s *switcher, l switcherLayout) (cx, cy int) {
+	ground, dim, text := th.Palette.RailBG, th.Palette.RailDim, th.Palette.RailText
 	x, y, w := l.inner.X, l.queryY, l.listW
 	cy = y
 	cx = x
 	if w <= 0 {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-		buf.WriteString("\x1b[0m" + railBG.bg())
+		buf.WriteString("\x1b[0m" + ground.bg())
 	} else {
 		prompt := "> "
 		q := clip(string(s.query), w-len(prompt))
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-		buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + prompt)
+		buf.WriteString("\x1b[0m" + ground.bg() + dim.fg() + prompt)
 		if q != "" {
-			buf.WriteString("\x1b[0m" + railBG.bg() + railText.fg() + q)
+			buf.WriteString("\x1b[0m" + ground.bg() + text.fg() + q)
 		}
 		used := len(prompt) + cells(q)
 		if n := w - used; n > 0 {
@@ -195,9 +196,9 @@ func paintSwitcherQuery(buf *bytes.Buffer, s *switcher, l switcherLayout) (cx, c
 	// the rule keeps the split visible and the preview band stays blank.
 	if l.preview {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.ruleX+1)
-		buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + glyphBorderVertical)
+		buf.WriteString("\x1b[0m" + ground.bg() + dim.fg() + th.Glyphs.BorderVertical)
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.prevX+1)
-		buf.WriteString("\x1b[0m" + railBG.bg() + strings.Repeat(" ", l.prevW) + "\x1b[0m")
+		buf.WriteString("\x1b[0m" + ground.bg() + strings.Repeat(" ", l.prevW) + "\x1b[0m")
 	}
 	return cx, cy
 }
@@ -205,31 +206,32 @@ func paintSwitcherQuery(buf *bytes.Buffer, s *switcher, l switcherLayout) (cx, c
 // paintSwitcherBands paints the rows under the query line: the rail tree on the
 // left and, when the float is wide enough, the selected pane's screen on the
 // right.
-func paintSwitcherBands(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.Terminal, l switcherLayout) {
+func paintSwitcherBands(buf *bytes.Buffer, th Theme, s *switcher, vts map[string]vt10x.Terminal, l switcherLayout) {
 	if l.bandH <= 0 {
 		return
 	}
+	p := th.Palette
 	scrollSwitcher(s, l.bandH)
 	nerd := nerdFonts()
 	for i := 0; i < l.bandH; i++ {
 		y := l.bandY + i
 		idx := s.top + i
 		var left, right, tail []seg
-		bg, bold := railBG, false
+		bg, bold := p.RailBG, false
 		if idx >= 0 && idx < len(s.rows) {
-			left, right, tail = railRow(s.tree[s.rows[idx]], l.listW, false, nerd)
+			left, right, tail = railRow(th, s.tree[s.rows[idx]], l.listW, false, nerd)
 			if idx == s.sel {
-				bg, bold = railFocusBG, true
+				bg, bold = p.RailFocusBG, true
 			}
 		}
 		paintRailRow(buf, left, tail, right, l.inner.X, y, l.listW, bg, bold)
 		if l.preview {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.ruleX+1)
-			buf.WriteString("\x1b[0m" + railBG.bg() + railDim.fg() + glyphBorderVertical + "\x1b[0m")
+			buf.WriteString("\x1b[0m" + p.RailBG.bg() + p.RailDim.fg() + th.Glyphs.BorderVertical + "\x1b[0m")
 		}
 	}
 	if l.preview {
-		paintSwitcherPreview(buf, s, vts, Rect{X: l.prevX, Y: l.bandY, W: l.prevW, H: l.bandH})
+		paintSwitcherPreview(buf, th, s, vts, Rect{X: l.prevX, Y: l.bandY, W: l.prevW, H: l.bandH})
 	}
 }
 
@@ -283,7 +285,7 @@ func scrollSwitcher(s *switcher, h int) {
 // paintSwitcherPreview paints the selected pane's screen into the band, bottom
 // aligned. A pane with a live terminal paints from it; otherwise the lines of
 // the model's read reply are used. No data at all leaves the band blank.
-func paintSwitcherPreview(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.Terminal, band Rect) {
+func paintSwitcherPreview(buf *bytes.Buffer, th Theme, s *switcher, vts map[string]vt10x.Terminal, band Rect) {
 	if band.W <= 0 || band.H <= 0 {
 		return
 	}
@@ -303,7 +305,7 @@ func paintSwitcherPreview(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.T
 			row0 = rows - band.H
 		}
 		start := band.Y + band.H - h
-		paintBlankRows(buf, band, band.Y, start)
+		paintBlankRows(buf, th, band, band.Y, start)
 		if h > 0 {
 			drawPaneFrom(buf, vt, Rect{X: band.X, Y: start, W: band.W, H: h}, row0, nil, nil)
 		}
@@ -315,10 +317,10 @@ func paintSwitcherPreview(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.T
 		h = band.H
 	}
 	start := band.Y + band.H - h
-	paintBlankRows(buf, band, band.Y, start)
+	paintBlankRows(buf, th, band, band.Y, start)
 	for i := 0; i < h; i++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", start+i+1, band.X+1)
-		buf.WriteString("\x1b[0m" + railBG.bg() + railText.fg())
+		buf.WriteString("\x1b[0m" + th.Palette.RailBG.bg() + th.Palette.RailText.fg())
 		text := clip(lines[i], band.W)
 		buf.WriteString(text)
 		if n := band.W - cells(text); n > 0 {
@@ -329,9 +331,9 @@ func paintSwitcherPreview(buf *bytes.Buffer, s *switcher, vts map[string]vt10x.T
 }
 
 // paintBlankRows paints the rows [from, to) of a band on the rail ground.
-func paintBlankRows(buf *bytes.Buffer, band Rect, from, to int) {
+func paintBlankRows(buf *bytes.Buffer, th Theme, band Rect, from, to int) {
 	for y := from; y < to; y++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, band.X+1)
-		buf.WriteString("\x1b[0m" + railBG.bg() + strings.Repeat(" ", band.W) + "\x1b[0m")
+		buf.WriteString("\x1b[0m" + th.Palette.RailBG.bg() + strings.Repeat(" ", band.W) + "\x1b[0m")
 	}
 }

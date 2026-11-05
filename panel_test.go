@@ -72,23 +72,23 @@ func panelScreen(t *testing.T, cols, rows int, draw func(*bytes.Buffer)) vt10x.T
 func TestPanelWithoutTitle(t *testing.T) {
 	r := Rect{X: 3, Y: 2, W: 6, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, r, panelTitle{}, "", true, func(w *bytes.Buffer, inner Rect) {
+		paintPanel(b, DefaultTheme(), r, panelTitle{}, "", true, func(w *bytes.Buffer, inner Rect) {
 			fmt.Fprintf(w, "\x1b[%d;%dHAB", inner.Y+1, inner.X+1)
 		})
 	})
-	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), glyphBorderTopLeft+strings.Repeat(glyphBorderHorizontal, r.W)+glyphBorderTopRight; got != want {
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), DefaultTheme().Glyphs.BorderTopLeft+strings.Repeat(DefaultTheme().Glyphs.BorderHorizontal, r.W)+DefaultTheme().Glyphs.BorderTopRight; got != want {
 		t.Fatalf("top row = %q, want %q", got, want)
 	}
-	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), glyphBorderBottomLeft+strings.Repeat(glyphBorderHorizontal, r.W)+glyphBorderBottomRight; got != want {
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), DefaultTheme().Glyphs.BorderBottomLeft+strings.Repeat(DefaultTheme().Glyphs.BorderHorizontal, r.W)+DefaultTheme().Glyphs.BorderBottomRight; got != want {
 		t.Fatalf("bottom row = %q, want %q", got, want)
 	}
 	if got := panelRow(screen, r.Y, r.X, r.W); got != "AB" {
 		t.Fatalf("first interior row = %q, want the painted text", got)
 	}
-	if got := panelChar(screen, r.X-1, r.Y); got != []rune(glyphBorderVertical)[0] {
+	if got := panelChar(screen, r.X-1, r.Y); got != []rune(DefaultTheme().Glyphs.BorderVertical)[0] {
 		t.Fatalf("left border = %q, want the vertical glyph", got)
 	}
-	if got := panelChar(screen, r.X+r.W, r.Y); got != []rune(glyphBorderVertical)[0] {
+	if got := panelChar(screen, r.X+r.W, r.Y); got != []rune(DefaultTheme().Glyphs.BorderVertical)[0] {
 		t.Fatalf("right border = %q, want the vertical glyph", got)
 	}
 }
@@ -98,7 +98,7 @@ func TestPanelWithoutTitle(t *testing.T) {
 func TestPanelTitleAndHint(t *testing.T) {
 	r := Rect{X: 3, Y: 2, W: 8, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, r, panelTitle{text: "title", style: panelTitleStyle}, "hint", false, nil)
+		paintPanel(b, DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "hint", false, nil)
 	})
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─title──┐"; got != want {
 		t.Fatalf("title row = %q, want %q", got, want)
@@ -113,7 +113,7 @@ func TestPanelTitleAndHint(t *testing.T) {
 func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 	r := Rect{X: 3, Y: 2, W: 2, H: 2}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		paintPanel(b, r, panelTitle{text: "title", style: panelTitleStyle}, "hint", true, nil)
+		paintPanel(b, DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "hint", true, nil)
 	})
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌──┐"; got != want {
 		t.Fatalf("top row = %q, want the plain border %q", got, want)
@@ -131,7 +131,7 @@ func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 	r := Rect{X: 4, Y: 3, W: 3, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, r, panelTitle{text: "title", style: panelTitleStyle}, "", false, nil)
+	paintPanel(&b, DefaultTheme(), r, panelTitle{text: "title", style: panelTitleStyle}, "", false, nil)
 	screen := panelFilled(t, 20, 10, b.Bytes())
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─t─┐"; got != want {
 		t.Fatalf("title row = %q, want the title cut to its one cell %q", got, want)
@@ -157,10 +157,10 @@ func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 	r := Rect{X: 4, Y: 3, W: 10, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, r, panelTitle{
+	paintPanel(&b, DefaultTheme(), r, panelTitle{
 		text:  " title ",
 		style: "\x1b[0m\x1b[90m",
-		fill:  glyphBorderHorizontal,
+		fill:  DefaultTheme().Glyphs.BorderHorizontal,
 	}, "", false, nil)
 	out := b.String()
 	if want := "\x1b[0m\x1b[90m\x1b[3;4H┌ title ───┐"; !strings.HasPrefix(out, want) {
@@ -190,7 +190,7 @@ func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 func TestPanelClipsInterior(t *testing.T) {
 	r := Rect{X: 4, Y: 3, W: 4, H: 2}
 	var b bytes.Buffer
-	paintPanel(&b, r, panelTitle{text: "T", style: panelTitleStyle}, "", true, func(w *bytes.Buffer, inner Rect) {
+	paintPanel(&b, DefaultTheme(), r, panelTitle{text: "T", style: panelTitleStyle}, "", true, func(w *bytes.Buffer, inner Rect) {
 		// Past the right edge, the row would run over the border.
 		fmt.Fprintf(w, "\x1b[%d;%dHABCDEFG", inner.Y+1, inner.X+1)
 		// Above, below and left of the box.

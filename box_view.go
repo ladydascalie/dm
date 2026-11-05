@@ -73,9 +73,9 @@ type boxView struct {
 
 // newBoxView opens the float on a screen. The log stays empty until the reply
 // lands.
-func newBoxView(snap *Snapshot) *boxView {
+func newBoxView(snap *Snapshot, th Theme) *boxView {
 	b := &boxView{float: &FloatingPane{ID: "box", Active: true}, snap: snap}
-	b.sync(snap)
+	b.sync(snap, th)
 	return b
 }
 
@@ -124,7 +124,7 @@ func boxViewRect(snap *Snapshot, n int) Rect {
 }
 
 // sync fits the float to the screen after a snapshot or a rail change.
-func (b *boxView) sync(snap *Snapshot) {
+func (b *boxView) sync(snap *Snapshot, th Theme) {
 	b.snap = snap
 	r := boxViewRect(snap, b.rows())
 	if r == b.float.Rect {
@@ -133,7 +133,7 @@ func (b *boxView) sync(snap *Snapshot) {
 	b.float.Rect = r
 	b.clamp()
 	b.pageClamp()
-	b.paint()
+	b.paint(th)
 }
 
 // rows is the number of rows the float fits: the larger list wins, so the
@@ -148,7 +148,7 @@ func (b *boxView) rows() int {
 // set replaces the log after a list reply or a box push. A scrolled-back
 // window keeps its top entry by seq, so new entries do not slide the text
 // under the reader. A window at the top follows the newest entry.
-func (b *boxView) set(entries []entry) {
+func (b *boxView) set(entries []entry, th Theme) {
 	top := 0
 	if b.off > 0 && b.off < len(b.entries) {
 		top = b.entries[b.off].Seq
@@ -168,17 +168,17 @@ func (b *boxView) set(entries []entry) {
 	}
 	b.clamp()
 	b.pageClamp()
-	b.paint()
+	b.paint(th)
 }
 
 // setWatchers replaces the watcher page after a msg-watchers reply. The float
 // holds the page whole while the page is longer than the log.
-func (b *boxView) setWatchers(watchers []watch) {
+func (b *boxView) setWatchers(watchers []watch, th Theme) {
 	b.watchers = watchers
 	b.float.Rect = boxViewRect(b.snap, b.rows())
 	b.clamp()
 	b.pageClamp()
-	b.paint()
+	b.paint(th)
 }
 
 // boxSeqIndex finds an entry by seq in the newest-first log.
@@ -193,7 +193,7 @@ func boxSeqIndex(entries []entry, seq int) int {
 
 // scroll moves the window by n rows, positive toward older rows. The page and
 // the log keep their own offsets, so a toggle leaves each where it was.
-func (b *boxView) scroll(n int) {
+func (b *boxView) scroll(n int, th Theme) {
 	if b.page {
 		b.pOff += n
 		b.pageClamp()
@@ -201,7 +201,7 @@ func (b *boxView) scroll(n int) {
 		b.off += n
 		b.clamp()
 	}
-	b.paint()
+	b.paint(th)
 }
 
 // pageClamp keeps the watcher page on its list.
@@ -246,15 +246,15 @@ func (b *boxView) clamp() {
 }
 
 // togglePage swaps the float between the entry list and the watcher page.
-func (b *boxView) togglePage() {
+func (b *boxView) togglePage(th Theme) {
 	b.page = !b.page
-	b.paint()
+	b.paint(th)
 }
 
 // paint rewrites the float's terminal from the entries or the watcher list.
 // Every row is placed absolutely, so a view that scrolled paints its new
 // window whole.
-func (b *boxView) paint() {
+func (b *boxView) paint(th Theme) {
 	r := b.float.Rect
 	b.float.Title = b.title()
 	b.float.Hint = b.hint()
@@ -265,9 +265,9 @@ func (b *boxView) paint() {
 	vt := vt10x.New(vt10x.WithSize(r.W, r.H))
 	var buf bytes.Buffer
 	if b.page {
-		b.paintWatchers(&buf, r)
+		b.paintWatchers(&buf, r, th)
 	} else {
-		b.paintEntries(&buf, r)
+		b.paintEntries(&buf, r, th)
 	}
 	_, _ = vt.Write(buf.Bytes())
 	b.float.VT = vt
@@ -275,7 +275,7 @@ func (b *boxView) paint() {
 
 // paintEntries draws the window of the log. A wide enough rect carries the
 // receipt count in every row.
-func (b *boxView) paintEntries(buf *bytes.Buffer, r Rect) {
+func (b *boxView) paintEntries(buf *bytes.Buffer, r Rect, th Theme) {
 	if len(b.entries) == 0 {
 		boxPaintNote(buf, 1, "no entries yet", r.W)
 		return
@@ -290,13 +290,13 @@ func (b *boxView) paintEntries(buf *bytes.Buffer, r Rect) {
 		if r.W >= boxReceiptMinW {
 			receipt = b.received(b.entries[i])
 		}
-		boxPaintRow(buf, b.entries[i], r.W, receipt)
+		boxPaintRow(buf, th, b.entries[i], r.W, receipt)
 	}
 }
 
 // paintWatchers draws the watcher page in the server's order, clipped to the
 // rect and to its rows.
-func (b *boxView) paintWatchers(buf *bytes.Buffer, r Rect) {
+func (b *boxView) paintWatchers(buf *bytes.Buffer, r Rect, th Theme) {
 	if len(b.watchers) == 0 {
 		boxPaintNote(buf, 1, "no watchers yet", r.W)
 		return
@@ -422,7 +422,7 @@ func boxPaintWatch(buf *bytes.Buffer, w watch, width int) {
 // colour the rail gives that state. A receipt of zero or more prefixes a
 // two-cell count; a negative receipt drops the marker. The row is clipped to
 // w cells.
-func boxPaintRow(buf *bytes.Buffer, e entry, w int, receipt int) {
+func boxPaintRow(buf *bytes.Buffer, th Theme, e entry, w int, receipt int) {
 	row := boxRowText(e, w, receipt)
 	start := boxSeqW + 1
 	if receipt >= 0 {
@@ -435,7 +435,7 @@ func boxPaintRow(buf *bytes.Buffer, e entry, w int, receipt int) {
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
 	buf.WriteString(row[:start])
-	buf.WriteString("\x1b[0m" + boxStateColour(e.State).fg())
+	buf.WriteString("\x1b[0m" + boxStateColour(th, e.State).fg())
 	buf.WriteString(state)
 	buf.WriteString("\x1b[0m\x1b[90m")
 	buf.WriteString(row[start+len(state):])
@@ -460,11 +460,11 @@ func boxRowText(e entry, w int, receipt int) string {
 // boxStateColour is the state's hue. It is the rail's status colour, so a lane
 // reads the same in the box as on the rail. note carries no progress meaning,
 // so it is dim text.
-func boxStateColour(st boxState) rgb {
+func boxStateColour(th Theme, st boxState) rgb {
 	if st == stateNote {
-		return railDim
+		return th.Palette.RailDim
 	}
-	_, colour := railGlyph(string(st), false)
+	_, colour := railGlyph(th, string(st), false)
 	return colour
 }
 
@@ -480,7 +480,7 @@ func openBoxView(t *tui) {
 		closeBoxView(t)
 		return
 	}
-	t.box = newBoxView(t.snap)
+	t.box = newBoxView(t.snap, t.theme())
 	t.AddFloatingPane(t.box.float)
 	t.mode = "box"
 	t.armed = false
@@ -560,7 +560,7 @@ func (t *tui) takeBoxList(m Msg) {
 		t.notify("box: " + err.Error())
 		return
 	}
-	t.box.set(rep.Entries)
+	t.box.set(rep.Entries, t.theme())
 	t.dirty = true
 }
 
@@ -581,7 +581,7 @@ func (t *tui) takeBoxWatchers(m Msg) {
 		t.notify("box: " + err.Error())
 		return
 	}
-	t.box.setWatchers(rep.Watchers)
+	t.box.setWatchers(rep.Watchers, t.theme())
 	t.dirty = true
 }
 
@@ -615,7 +615,7 @@ func (t *tui) boxWheel(ev mouseEvent) {
 	if ev.btn&1 == 0 {
 		step = 3
 	}
-	t.box.scroll(step)
+	t.box.scroll(step, t.theme())
 	t.dirty = true
 }
 
@@ -653,19 +653,19 @@ func (t *tui) boxKey() bool {
 	}
 	switch action {
 	case "up", "up-arrow":
-		t.box.scroll(-1)
+		t.box.scroll(-1, t.theme())
 	case "down", "down-arrow":
-		t.box.scroll(1)
+		t.box.scroll(1, t.theme())
 	case "page-up":
-		t.box.scroll(-t.box.float.Rect.H)
+		t.box.scroll(-t.box.float.Rect.H, t.theme())
 	case "page-down":
-		t.box.scroll(t.box.float.Rect.H)
+		t.box.scroll(t.box.float.Rect.H, t.theme())
 	case "top":
-		t.box.scroll(-t.box.listLen())
+		t.box.scroll(-t.box.listLen(), t.theme())
 	case "bottom":
-		t.box.scroll(t.box.listLen())
+		t.box.scroll(t.box.listLen(), t.theme())
 	case "toggle-page":
-		t.box.togglePage()
+		t.box.togglePage(t.theme())
 	default:
 		closeBoxView(t)
 		return true

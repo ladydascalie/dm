@@ -39,13 +39,13 @@ type panelTitle struct {
 // The painter holds no state and keeps no buffer between frames: the clip needs
 // to see a whole run before it can cut it, so it collects the inside in a
 // scratch buffer and throws it away. Only buf reaches the frame.
-func paintPanel(buf *bytes.Buffer, rect Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, Rect)) {
+func paintPanel(buf *bytes.Buffer, th Theme, rect Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, Rect)) {
 	if rect.W <= 0 || rect.H <= 0 || rect.X < 1 || rect.Y < 1 {
 		return
 	}
 	titled := title.fill != ""
 	if titled {
-		paintTitleRow(buf, rect, title)
+		paintTitleRow(buf, th, rect, title)
 	}
 	if paint != nil {
 		var inside bytes.Buffer
@@ -53,9 +53,9 @@ func paintPanel(buf *bytes.Buffer, rect Rect, title panelTitle, hint string, act
 		panelClip(buf, rect, inside.Bytes())
 	}
 	if titled {
-		drawPaneBoxRows(buf, rect, active, true)
+		drawPaneBoxRows(buf, th, rect, active, true)
 	} else {
-		drawPaneBox(buf, rect, active)
+		drawPaneBox(buf, th, rect, active)
 		paintBorderText(buf, rect, rect.Y-1, title.text, title.style)
 	}
 	paintBorderText(buf, rect, rect.Y+rect.H, hint, panelHintStyle)
@@ -64,13 +64,13 @@ func paintPanel(buf *bytes.Buffer, rect Rect, title panelTitle, hint string, act
 // paintTitleRow writes the top border row as one run: the left corner, the
 // label clipped to the interior and filled to its width, the right corner. It
 // writes both corners, so the box pass leaves this row alone.
-func paintTitleRow(buf *bytes.Buffer, rect Rect, t panelTitle) {
+func paintTitleRow(buf *bytes.Buffer, th Theme, rect Rect, t panelTitle) {
 	row := clip(t.text, rect.W)
 	if n := rect.W - cells(row); n > 0 {
 		row += strings.Repeat(t.fill, n)
 	}
 	fmt.Fprintf(buf, "%s\x1b[%d;%dH%s%s%s", t.style, rect.Y, rect.X,
-		glyphBorderTopLeft, row, glyphBorderTopRight)
+		th.Glyphs.BorderTopLeft, row, th.Glyphs.BorderTopRight)
 }
 
 // paintBorderText writes a label into row y of the border around r, one cell
