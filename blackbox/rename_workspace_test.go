@@ -1,4 +1,4 @@
-package main
+package blackbox
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 
 // renameWSShape renders the state fields a rename must never move: the ids,
 // the active indexes, the window names and focus, and the pane set.
-func renameWSShape(st *State) string {
+func renameWSShape(st *stateFile) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "active=%d nextWorkspace=%d nextWindow=%d", st.Active, st.NextWorkspace, st.NextWindow)
 	for _, ws := range st.Workspaces {
@@ -96,7 +96,7 @@ func TestRenameWorkspaceBackgroundWorkspace(t *testing.T) {
 	if after.Active != active || after.Workspaces[active].ID != "s1" {
 		t.Fatalf("active index moved: %d -> %d", active, after.Active)
 	}
-	var renamed *Workspace
+	var renamed *stateWorkspace
 	for _, ws := range after.Workspaces {
 		if ws.ID == bg {
 			renamed = ws
