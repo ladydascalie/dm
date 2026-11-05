@@ -428,6 +428,205 @@ func TestConfigCloseWindowBinding(t *testing.T) {
 	t.Fatalf("no close window help row: %#v", rows)
 }
 
+// writeConfigFile writes src to dir/config.kdl and returns the path.
+func writeConfigFile(t *testing.T, dir, src string) string {
+	t.Helper()
+	path := filepath.Join(dir, "config.kdl")
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestConfigMergeAddsMissingDefaults proves a file that names one action
+// inherits every default action it omits, including one from a mode it does not
+// create.
+func TestConfigMergeAddsMissingDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := LoadPath(writeConfigFile(t, dir, `keymap "main" {
+	"close-pane" "x"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "close-pane"); got != "x" {
+		t.Fatalf("Key(main, close-pane) = %q, want x", got)
+	}
+	if got := cfg.Key("main", "close-window"); got != "X" {
+		t.Fatalf("Key(main, close-window) = %q, want X from the defaults", got)
+	}
+	action, n, state := cfg.Match("main", []byte("X"))
+	if state != Match || action != "close-window" || n != 1 {
+		t.Fatalf("Match(main, X) = %q, %d, %v; want close-window, 1, Match", action, n, state)
+	}
+	if got := cfg.Key("main", "split-right"); got != "|" {
+		t.Fatalf("Key(main, split-right) = %q, want | from the defaults", got)
+	}
+	if got := cfg.Key("help", "close"); got != "q" {
+		t.Fatalf("Key(help, close) = %q, want q in the created mode", got)
+	}
+}
+
+// TestConfigMergeKeepsRemappedKey proves a file binding wins over the default
+// key for the same action and the default key no longer matches.
+func TestConfigMergeKeepsRemappedKey(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := LoadPath(writeConfigFile(t, dir, `keymap "main" {
+	"close-window" "Q"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "close-window"); got != "Q" {
+		t.Fatalf("Key(main, close-window) = %q, want Q", got)
+	}
+	if got := cfg.Key("main", "close-pane"); got != "x" {
+		t.Fatalf("Key(main, close-pane) = %q, want x from the defaults", got)
+	}
+	action, n, state := cfg.Match("main", []byte("Q"))
+	if state != Match || action != "close-window" || n != 1 {
+		t.Fatalf("Match(main, Q) = %q, %d, %v; want close-window, 1, Match", action, n, state)
+	}
+	action, n, state = cfg.Match("main", []byte("X"))
+	if state != NoMatch || action != "" || n != 0 {
+		t.Fatalf("Match(main, X) = %q, %d, %v; want empty, 0, NoMatch", action, n, state)
+	}
+}
+
+// TestConfigNoneUnbinds proves a "none" key records the action as unbound: no
+// binding, no help row, and the merge does not restore the default.
+func TestConfigNoneUnbinds(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := LoadPath(writeConfigFile(t, dir, `keymap "main" {
+	"close-pane" "x"
+	"close-window" "none"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "close-window"); got != "" {
+		t.Fatalf("Key(main, close-window) = %q, want empty", got)
+	}
+	if action, n, state := cfg.Match("main", []byte("X")); state != NoMatch || action != "" || n != 0 {
+		t.Fatalf("Match(main, X) = %q, %d, %v; want empty, 0, NoMatch", action, n, state)
+	}
+	rows := cfg.HelpEntries()
+	sawClosePane := false
+	for _, row := range rows {
+		if row.Action == "close window" {
+			t.Fatalf("HelpEntries() kept the close window row: %#v", rows)
+		}
+		if row.Action == "close pane" {
+			sawClosePane = true
+		}
+	}
+	if !sawClosePane {
+		t.Fatalf("HelpEntries() dropped the close pane row: %#v", rows)
+	}
+}
+
+// TestConfigNoneCountsAsDuplicate proves "none" still takes part in the
+// duplicate-action check in both directions.
+func TestConfigNoneCountsAsDuplicate(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "none then key",
+			src:  "keymap \"main\" {\n\t\"close-window\" \"none\"\n\t\"close-window\" \"Q\"\n}",
+		},
+		{
+			name: "key then none",
+			src:  "keymap \"main\" {\n\t\"close-window\" \"Q\"\n\t\"close-window\" \"none\"\n}",
+		},
+		{
+			name: "none twice",
+			src:  "keymap \"main\" {\n\t\"close-window\" \"none\"\n\t\"close-window\" \"none\"\n}",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parseConfig(c.src)
+			if err == nil {
+				t.Fatal("parseConfig accepted a duplicate action")
+			}
+			if !strings.Contains(err.Error(), "duplicate action") || !strings.Contains(err.Error(), "line 3") {
+				t.Fatalf("error = %q, want a duplicate action on line 3", err)
+			}
+		})
+	}
+}
+
+// TestConfigBadKeyError proves a key name that is not "none" keeps the old
+// unknown-key error text.
+func TestConfigBadKeyError(t *testing.T) {
+	_, err := parseConfig("keymap \"main\" {\n\t\"close-window\" \"bogus\"\n}")
+	if err == nil {
+		t.Fatal("parseConfig accepted a bad key")
+	}
+	want := `line 2: key "bogus": unknown key name "bogus"`
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err, want)
+	}
+}
+
+// TestConfigLoadPathMergesLikeDefaultPath proves both loaders merge the same
+// file to the same keymap.
+func TestConfigLoadPathMergesLikeDefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	src := "keymap \"main\" {\n\t\"close-window\" \"Q\"\n}\n"
+	cfgDir := filepath.Join(dir, "dm")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.kdl"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	explicitDir := filepath.Join(dir, "explicit")
+	if err := os.MkdirAll(explicitDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fromDefault, err := LoadDefaultPath(false)
+	if err != nil {
+		t.Fatalf("LoadDefaultPath: %v", err)
+	}
+	fromPath, err := LoadPath(writeConfigFile(t, explicitDir, src))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if !reflect.DeepEqual(fromPath, fromDefault) {
+		t.Fatalf("LoadPath and LoadDefaultPath merged differently:\nLoadPath: %#v\nLoadDefaultPath: %#v", fromPath, fromDefault)
+	}
+	for _, cfg := range []*Config{fromPath, fromDefault} {
+		if got := cfg.Key("main", "close-window"); got != "Q" {
+			t.Fatalf("Key(main, close-window) = %q, want Q", got)
+		}
+		if got := cfg.Key("main", "close-pane"); got != "x" {
+			t.Fatalf("Key(main, close-pane) = %q, want x from the defaults", got)
+		}
+	}
+}
+
+// TestConfigDefaultFileStaysDefault proves merging the default text into itself
+// adds nothing: the default keymap and help rows stay as they were.
+func TestConfigDefaultFileStaysDefault(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), defaultConfigKDL))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if !reflect.DeepEqual(cfg, LoadDefault()) {
+		t.Fatal("merging the default file changed the default keymap")
+	}
+	if got, want := cfg.HelpRows(), LoadDefault().HelpRows(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("HelpRows() = %#v, want %#v", got, want)
+	}
+}
+
 // TestConfigHelpTag proves a tagged binding carries its section in HelpEntries
 // and in the per-mode lookup, and an untagged binding carries none.
 func TestConfigHelpTag(t *testing.T) {

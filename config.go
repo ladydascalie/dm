@@ -27,11 +27,12 @@ type binding struct {
 	action string
 }
 
-// mode is one keymap: action to key name, key bytes to action, and the help
-// section tag per action.
+// mode is one keymap: action to key name, key bytes to action, the help
+// section tag per action, and the actions the file unbind with "none".
 type mode struct {
 	actions  map[string]string
 	sections map[string]string
+	unbound  map[string]bool
 	bindings []binding
 }
 
@@ -577,11 +578,18 @@ func parseKeymaps(toks []token, cfg *Config) error {
 			i++
 			m, ok := cfg.modes[modeName]
 			if !ok {
-				m = &mode{actions: make(map[string]string), sections: make(map[string]string)}
+				m = &mode{
+					actions:  make(map[string]string),
+					sections: make(map[string]string),
+					unbound:  make(map[string]bool),
+				}
 				cfg.modes[modeName] = m
 			}
 			if m.sections == nil {
 				m.sections = make(map[string]string)
+			}
+			if m.unbound == nil {
+				m.unbound = make(map[string]bool)
 			}
 			for {
 				if i >= len(toks) {
@@ -625,8 +633,12 @@ func parseKeymaps(toks []token, cfg *Config) error {
 				if action == "" {
 					continue
 				}
-				if _, exists := m.actions[action]; exists {
+				if _, exists := m.actions[action]; exists || m.unbound[action] {
 					return fmt.Errorf("line %d: duplicate action %q in mode %q", actionLine, action, modeName)
+				}
+				if key == "none" {
+					m.unbound[action] = true
+					continue
 				}
 				seqs, err := keySequences(key, cfg.prefixBytes)
 				if err != nil {
@@ -842,6 +854,66 @@ keymap "help" {
 }
 `
 
+// mergeDefaults fills cfg with every default binding cfg does not name. An
+// action the file binds keeps its key, including a remapped prefix. An action
+// the file lists as "none" stays unbound. A mode the file omits is created.
+// mergeDefaults reads the built-in keymap, so it runs once, after a successful
+// file parse.
+func mergeDefaults(cfg *Config) {
+	if cfg == nil {
+		return
+	}
+	if cfg.modes == nil {
+		cfg.modes = make(map[string]*mode)
+	}
+	defaults := LoadDefault()
+	for modeName, defMode := range defaults.modes {
+		m, ok := cfg.modes[modeName]
+		if !ok {
+			m = &mode{
+				actions:  make(map[string]string),
+				sections: make(map[string]string),
+				unbound:  make(map[string]bool),
+			}
+			cfg.modes[modeName] = m
+		}
+		if m.actions == nil {
+			m.actions = make(map[string]string)
+		}
+		if m.sections == nil {
+			m.sections = make(map[string]string)
+		}
+		if m.unbound == nil {
+			m.unbound = make(map[string]bool)
+		}
+		seen := make(map[string]bool, len(defMode.bindings))
+		for _, b := range defMode.bindings {
+			if seen[b.action] {
+				continue
+			}
+			seen[b.action] = true
+			if _, exists := m.actions[b.action]; exists {
+				continue
+			}
+			if m.unbound[b.action] {
+				continue
+			}
+			key := defMode.actions[b.action]
+			seqs, err := keySequences(key, cfg.prefixBytes)
+			if err != nil {
+				continue
+			}
+			m.actions[b.action] = key
+			if section, ok := defMode.sections[b.action]; ok {
+				m.sections[b.action] = section
+			}
+			for _, seq := range seqs {
+				m.bindings = append(m.bindings, binding{bytes: seq, action: b.action})
+			}
+		}
+	}
+}
+
 // LoadDefault returns the built-in default keymap without touching disk. It
 // panics when the built-in text is malformed, which is a programming error.
 func LoadDefault() *Config {
@@ -896,6 +968,7 @@ func LoadDefaultPath(write bool) (*Config, error) {
 	if err != nil {
 		return LoadDefault(), err
 	}
+	mergeDefaults(cfg)
 	theme, err := loadThemeFile(filepath.Dir(path), cfg.themeName)
 	if err != nil {
 		return cfg, err
@@ -920,6 +993,7 @@ func LoadPath(path string) (*Config, error) {
 	if err != nil {
 		return LoadDefault(), err
 	}
+	mergeDefaults(cfg)
 	theme, err := loadThemeFile(filepath.Dir(path), cfg.themeName)
 	if err != nil {
 		return cfg, err
