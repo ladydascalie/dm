@@ -1683,7 +1683,7 @@ func maxInt(a, b int) int {
 // names the key that closes it. The box stays clear of the rail, the toast row
 // and the status bar: it gives up columns, then its trailing rows, before it
 // paints over any of them.
-func drawHelp(buf *bytes.Buffer, cols, rows int, keys [][2]string) {
+func drawHelp(buf *bytes.Buffer, cols, rows int, keys []HelpEntry) {
 	g, ok := helpBoxGeometry(cols, rows, keys)
 	if !ok {
 		return
@@ -1707,31 +1707,32 @@ type displayRow struct {
 	color  string
 }
 
-// categorizeHelp groups the flat key list into categories, each with its own
-// header and rows.
-func categorizeHelp(keys [][2]string) [][]displayRow {
+// categorizeHelp groups the entries into sections, each with its own header and
+// rows. A row's section is its tag when it has one, and the heuristic category
+// otherwise. Sections appear in first-appearance order, so a row tagged into an
+// earlier section joins it instead of opening a second header. A row keeps the
+// table order inside its section.
+func categorizeHelp(keys []HelpEntry) [][]displayRow {
 	var categories [][]displayRow
-	var current []displayRow
-	lastCat := ""
-	for _, kv := range keys {
-		cat := helpCategory(kv[1])
-		if cat != lastCat {
-			if len(current) > 0 {
-				categories = append(categories, current)
-			}
-			current = []displayRow{{header: cat, color: helpCategoryColors[cat]}}
-			lastCat = cat
+	index := make(map[string]int, len(keys))
+	for _, e := range keys {
+		section := e.Section
+		if section == "" {
+			section = helpCategory(e.Action)
 		}
-		current = append(current, displayRow{key: kv[0], action: kv[1], color: helpCategoryColors[cat]})
-	}
-	if len(current) > 0 {
-		categories = append(categories, current)
+		i, ok := index[section]
+		if !ok {
+			i = len(categories)
+			index[section] = i
+			categories = append(categories, []displayRow{{header: section, color: helpSectionColor(section)}})
+		}
+		categories[i] = append(categories[i], displayRow{key: e.Key, action: e.Action, color: helpSectionColor(section)})
 	}
 	return categories
 }
 
 // categorizeHelpRows flattens the categories into a single row list.
-func categorizeHelpRows(keys [][2]string) []displayRow {
+func categorizeHelpRows(keys []HelpEntry) []displayRow {
 	cats := categorizeHelp(keys)
 	var rows []displayRow
 	for _, cat := range cats {
@@ -1762,6 +1763,15 @@ var helpCategoryColors = map[string]string{
 	"Window":  "\x1b[95m", // magenta
 	"Session": "\x1b[93m", // yellow
 	"Utility": "\x1b[94m", // blue
+}
+
+// helpSectionColor returns the colour a section paints. The five built-in names
+// keep their own colour; any other name takes the Utility colour.
+func helpSectionColor(section string) string {
+	if color, ok := helpCategoryColors[section]; ok {
+		return color
+	}
+	return helpCategoryColors["Utility"]
 }
 
 // helpColumn is one column of the help box: the key and action budgets and the
@@ -1874,7 +1884,7 @@ func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColu
 // no other band owns. The fit is X-1 >= rail, X+width-1 <= cols-1, Y-1 >= 0 and
 // Y+h <= rows-3, so both borders own a row and the toast row and the bar stay
 // clear. It reports false when the screen cannot hold even a key column.
-func helpBoxGeometry(cols, rows int, keys [][2]string) (helpBoxLayout, bool) {
+func helpBoxGeometry(cols, rows int, keys []HelpEntry) (helpBoxLayout, bool) {
 	var g helpBoxLayout
 	if cols < 3 || rows < 5 || len(keys) == 0 {
 		return g, false
