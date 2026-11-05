@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -23,10 +24,10 @@ func drawMenu(buf *bytes.Buffer, th theme.Theme, m *menu) {
 		return
 	}
 	inner := layout.Rect{X: m.x + 1, Y: m.y + 1, W: m.w - 2, H: len(m.items)}
-	paintPanel(buf, th, inner, panelTitle{
-		text:  th.Glyphs.BorderHorizontal + " " + m.title + " ",
-		style: "\x1b[0m\x1b[90m",
-		fill:  th.Glyphs.BorderHorizontal,
+	panel.PaintPanel(buf, th, inner, panel.PanelTitle{
+		Text:  th.Glyphs.BorderHorizontal + " " + m.title + " ",
+		Style: "\x1b[0m\x1b[90m",
+		Fill:  th.Glyphs.BorderHorizontal,
 	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
 		for i, it := range m.items {
 			line := cells.Pad(" "+cells.Pad(it.label, 22)+" "+cells.Pad(it.key, 4), r.W)

@@ -1,4 +1,6 @@
-package main
+// Package panel paints a bordered box: its border, its two border-row labels
+// and a clipped interior. It owns no state between frames.
+package panel
 
 import (
 	"bytes"
@@ -14,26 +16,26 @@ import (
 
 // The two border-row label styles: a title reads bright, a hint dim.
 const (
-	panelTitleStyle = "\x1b[97m"
-	panelHintStyle  = "\x1b[90m"
+	PanelTitleStyle = "\x1b[97m"
+	PanelHintStyle  = "\x1b[90m"
 )
 
-// panelTitle is a panel's top border row. text is the row's label and fill is
+// PanelTitle is a panel's top border row. Text is the row's label and Fill is
 // the glyph the row continues with after it, so a caller whose title row is not
 // plain border asks for the whole row in one write. A fill row has its corners
 // written by the panel and is left out of the box pass, so no cell of it lands
-// twice. When fill is empty the top row stays plain border and text is a label
+// twice. When Fill is empty the top row stays plain border and Text is a label
 // painted over it, one cell clear of the left corner, which is the old float
-// look down to the byte. style is written before the row's first glyph: for a
+// look down to the byte. Style is written before the row's first glyph: for a
 // fill row it is the whole row's style, reset included; for a label it is the
 // label's colour alone.
-type panelTitle struct {
-	text  string
-	style string
-	fill  string
+type PanelTitle struct {
+	Text  string
+	Style string
+	Fill  string
 }
 
-// paintPanel paints one bordered box and nothing outside it. rect is the
+// PaintPanel paints one bordered box and nothing outside it. rect is the
 // interior: the border sits one cell around it, the title on the row above and
 // the hint on the row below, both one cell clear of a corner and clipped to the
 // interior, so a label never eats a corner. paint, when set, writes the inside
@@ -43,11 +45,11 @@ type panelTitle struct {
 // The painter holds no state and keeps no buffer between frames: the clip needs
 // to see a whole run before it can cut it, so it collects the inside in a
 // scratch buffer and throws it away. Only buf reaches the frame.
-func paintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title panelTitle, hint string, active bool, paint func(*bytes.Buffer, layout.Rect)) {
+func PaintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title PanelTitle, hint string, active bool, paint func(*bytes.Buffer, layout.Rect)) {
 	if rect.W <= 0 || rect.H <= 0 || rect.X < 1 || rect.Y < 1 {
 		return
 	}
-	titled := title.fill != ""
+	titled := title.Fill != ""
 	if titled {
 		paintTitleRow(buf, th, rect, title)
 	}
@@ -57,23 +59,23 @@ func paintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title panel
 		panelClip(buf, rect, inside.Bytes())
 	}
 	if titled {
-		drawPaneBoxRows(buf, th, rect, active, true)
+		DrawPaneBoxRows(buf, th, rect, active, true)
 	} else {
-		drawPaneBox(buf, th, rect, active)
-		paintBorderText(buf, rect, rect.Y-1, title.text, title.style)
+		DrawPaneBox(buf, th, rect, active)
+		paintBorderText(buf, rect, rect.Y-1, title.Text, title.Style)
 	}
-	paintBorderText(buf, rect, rect.Y+rect.H, hint, panelHintStyle)
+	paintBorderText(buf, rect, rect.Y+rect.H, hint, PanelHintStyle)
 }
 
 // paintTitleRow writes the top border row as one run: the left corner, the
 // label clipped to the interior and filled to its width, the right corner. It
 // writes both corners, so the box pass leaves this row alone.
-func paintTitleRow(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, t panelTitle) {
-	row := cells.Clip(t.text, rect.W)
+func paintTitleRow(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, t PanelTitle) {
+	row := cells.Clip(t.Text, rect.W)
 	if n := rect.W - cells.Cells(row); n > 0 {
-		row += strings.Repeat(t.fill, n)
+		row += strings.Repeat(t.Fill, n)
 	}
-	fmt.Fprintf(buf, "%s\x1b[%d;%dH%s%s%s", t.style, rect.Y, rect.X,
+	fmt.Fprintf(buf, "%s\x1b[%d;%dH%s%s%s", t.Style, rect.Y, rect.X,
 		th.Glyphs.BorderTopLeft, row, th.Glyphs.BorderTopRight)
 }
 
@@ -224,4 +226,46 @@ func panelNumber(p []byte) int {
 		return 1
 	}
 	return n
+}
+
+// DrawPaneBox draws the border of one pane. The active pane is bright cyan;
+// the rest are dim, so the active one reads at a glance.
+func DrawPaneBox(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool) {
+	DrawPaneBoxRows(buf, th, content, active, false)
+}
+
+// DrawPaneBoxRows draws the border of one pane. skipTop leaves the top row
+// alone, for a caller that writes it itself as one row, so no cell of it lands
+// twice.
+func DrawPaneBoxRows(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool, skipTop bool) {
+	g := th.Glyphs
+	x0, y0 := content.X-1, content.Y-1
+	x1, y1 := content.X+content.W, content.Y+content.H
+	if content.W <= 0 || content.H <= 0 || x0 < 0 || y0 < 0 {
+		return
+	}
+	if active {
+		buf.WriteString("\x1b[0m\x1b[1;96m")
+	} else {
+		buf.WriteString("\x1b[0m\x1b[90m")
+	}
+	put := func(x, y int, s string) {
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
+	}
+	if !skipTop {
+		put(x0, y0, g.BorderTopLeft)
+		put(x1, y0, g.BorderTopRight)
+	}
+	put(x0, y1, g.BorderBottomLeft)
+	put(x1, y1, g.BorderBottomRight)
+	for x := x0 + 1; x < x1; x++ {
+		if !skipTop {
+			put(x, y0, g.BorderHorizontal)
+		}
+		put(x, y1, g.BorderHorizontal)
+	}
+	for y := y0 + 1; y < y1; y++ {
+		put(x0, y, g.BorderVertical)
+		put(x1, y, g.BorderVertical)
+	}
 }

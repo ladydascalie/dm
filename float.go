@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/theme"
 
 	"github.com/hinshun/vt10x"
@@ -37,5 +38,5 @@ func (f *FloatingPane) Draw(buf *bytes.Buffer, th theme.Theme, hover *selRange) 
 	if f.Paint != nil {
 		paint = f.Paint
 	}
-	paintPanel(buf, th, f.Rect, panelTitle{text: f.Title, style: panelTitleStyle}, f.Hint, f.Active, paint)
+	panel.PaintPanel(buf, th, f.Rect, panel.PanelTitle{Text: f.Title, Style: panel.PanelTitleStyle}, f.Hint, f.Active, paint)
 }

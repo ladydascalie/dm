@@ -298,48 +298,6 @@ func screenBytes(vt vt10x.View) []byte {
 	return b.Bytes()
 }
 
-// drawPaneBox draws the border of one pane. The active pane is bright cyan;
-// the rest are dim, so the active one reads at a glance.
-func drawPaneBox(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool) {
-	drawPaneBoxRows(buf, th, content, active, false)
-}
-
-// drawPaneBoxRows draws the border of one pane. skipTop leaves the top row
-// alone, for a caller that writes it itself as one row, so no cell of it lands
-// twice.
-func drawPaneBoxRows(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool, skipTop bool) {
-	g := th.Glyphs
-	x0, y0 := content.X-1, content.Y-1
-	x1, y1 := content.X+content.W, content.Y+content.H
-	if content.W <= 0 || content.H <= 0 || x0 < 0 || y0 < 0 {
-		return
-	}
-	if active {
-		buf.WriteString("\x1b[0m\x1b[1;96m")
-	} else {
-		buf.WriteString("\x1b[0m\x1b[90m")
-	}
-	put := func(x, y int, s string) {
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
-	}
-	if !skipTop {
-		put(x0, y0, g.BorderTopLeft)
-		put(x1, y0, g.BorderTopRight)
-	}
-	put(x0, y1, g.BorderBottomLeft)
-	put(x1, y1, g.BorderBottomRight)
-	for x := x0 + 1; x < x1; x++ {
-		if !skipTop {
-			put(x, y0, g.BorderHorizontal)
-		}
-		put(x, y1, g.BorderHorizontal)
-	}
-	for y := y0 + 1; y < y1; y++ {
-		put(x0, y, g.BorderVertical)
-		put(x1, y, g.BorderVertical)
-	}
-}
-
 // drawGrips marks every divider at its midpoint, so a handle is visible before
 // the pointer finds it. The hover paints over the whole divider. A zoomed pane
 // covers every divider, so a grip would be a lie over a hidden split.

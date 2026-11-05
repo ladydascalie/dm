@@ -21,6 +21,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/paths"
 	"dm/internal/segment"
 	"dm/internal/theme"
@@ -2154,7 +2155,7 @@ func TestRailNoteElision(t *testing.T) {
 		t.Fatalf("note line %q is %d cells, want <= %d", note, n, snap.Rail)
 	}
 	if !strings.HasPrefix(note, "    a very") {
-		t.Fatalf("note line lost its indent or text: %q", note)
+		t.Fatalf("note line lost its indent or Text: %q", note)
 	}
 }
 
@@ -3002,7 +3003,7 @@ func TestRailDragUsesOffset(t *testing.T) {
 
 func TestDrawPaneBox(t *testing.T) {
 	var b bytes.Buffer
-	drawPaneBox(&b, theme.DefaultTheme(), layout.Rect{X: 10, Y: 5, W: 20, H: 8}, true)
+	panel.DrawPaneBox(&b, theme.DefaultTheme(), layout.Rect{X: 10, Y: 5, W: 20, H: 8}, true)
 	out := b.String()
 	for _, want := range []string{"┌", "┐", "└", "┘", "│", "─", "\x1b[1;96m"} {
 		if !strings.Contains(out, want) {
@@ -3013,7 +3014,7 @@ func TestDrawPaneBox(t *testing.T) {
 		t.Fatalf("box corners are at the wrong cells: %q", out)
 	}
 	var dim bytes.Buffer
-	drawPaneBox(&dim, theme.DefaultTheme(), layout.Rect{X: 10, Y: 5, W: 20, H: 8}, false)
+	panel.DrawPaneBox(&dim, theme.DefaultTheme(), layout.Rect{X: 10, Y: 5, W: 20, H: 8}, false)
 	if strings.Contains(dim.String(), "\x1b[1;96m") || !strings.Contains(dim.String(), "\x1b[90m") {
 		t.Fatalf("inactive box is not dim: %q", dim.String())
 	}

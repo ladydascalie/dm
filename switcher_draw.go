@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -142,7 +143,7 @@ func drawSwitcher(buf *bytes.Buffer, th theme.Theme, s *switcher, snap *wire.Sna
 	if l.r.W < 3 || l.r.H < 3 {
 		return l.r.X, l.r.Y
 	}
-	paintPanel(buf, th, l.inner, panelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
+	panel.PaintPanel(buf, th, l.inner, panel.PanelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
 		cx, cy = paintSwitcherQuery(b, th, s, l)
 		paintSwitcherBands(b, th, s, vts, l)
 	})

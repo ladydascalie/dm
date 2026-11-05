@@ -8,6 +8,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -34,10 +35,10 @@ func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []
 		y = 0
 	}
 	inner := layout.Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 2}
-	paintPanel(buf, th, inner, panelTitle{
-		text:  g.BorderHorizontal + " switch session ",
-		style: "\x1b[0m\x1b[90m",
-		fill:  " ",
+	panel.PaintPanel(buf, th, inner, panel.PanelTitle{
+		Text:  g.BorderHorizontal + " switch session ",
+		Style: "\x1b[0m\x1b[90m",
+		Fill:  " ",
 	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
 		for i, s := range sessions {
 			mark := " "
