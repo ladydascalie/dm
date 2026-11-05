@@ -2532,6 +2532,15 @@ func (t *tui) openRenamePrompt() {
 			break
 		}
 	}
+	if id == "" {
+		// A snapshot whose Workspace field carries the id still resolves it.
+		for _, p := range t.snap.All {
+			if p.Workspace == t.snap.Workspace {
+				id, current = p.Workspace, p.WorkspaceName
+				break
+			}
+		}
+	}
 	t.openRenamePromptFor("workspace", id, current)
 }
 
@@ -2897,7 +2906,7 @@ func (t *tui) draw() {
 		drawMenu(&menu, t.menu)
 	}
 	if t.mode == "rename" {
-		drawRename(&rename, win, win.Workspace, t.renameDraft, t.renameKind)
+		drawRename(&rename, win, t.renameID, t.renameDraft, t.renameKind)
 	}
 
 	// A picture that is not stable repaints whole and may clear: a size, a

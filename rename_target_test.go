@@ -135,3 +135,30 @@ func TestRenameWindowRefusals(t *testing.T) {
 		t.Fatalf("refused rename changed the name: %q -> %q", before, w1.Name)
 	}
 }
+
+// The normal draw path paints the prompt with the id the prompt carries, not
+// the active workspace's name. A window prompt therefore names the window.
+func TestRenameWindowPromptPaintsWindowID(t *testing.T) {
+	f := newFrameTUI(t, 60, 12, 20)
+	f.snap.Workspace = "main"
+	f.snap.All = []AllPane{
+		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
+			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
+			WindowActive: true, WindowUnfolded: true},
+		{ID: "w2p1", Name: "beta", Workspace: "s1", WorkspaceName: "main",
+			Window: "w2", WindowName: "two", WorkspaceActive: true,
+			WindowUnfolded: true},
+	}
+	f.tui.openRenamePromptFor("window", "w2", "two")
+
+	vis := renamePromptVisible(f.frame())
+	if !strings.Contains(vis, " rename window w2: ") {
+		t.Fatalf("prompt row does not name the window id: %q", vis)
+	}
+	if strings.Contains(vis, " rename window main: ") {
+		t.Fatalf("prompt row names the active workspace: %q", vis)
+	}
+	if !strings.Contains(vis, "two") {
+		t.Fatalf("prompt row lost the draft: %q", vis)
+	}
+}
