@@ -22,6 +22,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/paths"
+	"dm/internal/rail"
 	"dm/internal/segment"
 	"dm/internal/session"
 	"dm/internal/theme"
@@ -565,8 +566,8 @@ func TestRailBranch(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	items := railItems(s.snapshotLocked())
-	if len(items) < 2 || items[1].branch != "dm-rail" || items[1].folder != "dm" {
+	items := rail.RailItems(s.snapshotLocked())
+	if len(items) < 2 || items[1].Branch != "dm-rail" || items[1].Folder != "dm" {
 		t.Fatalf("window line = %+v, want folder dm and branch dm-rail", items)
 	}
 }
@@ -992,12 +993,12 @@ func TestRailItemsGrouping(t *testing.T) {
 			Window: "w3", WindowName: "three", WindowUnfolded: true,
 		},
 	}}
-	items := railItems(snap)
-	wantKinds := []railKind{
-		railWorkspace, railWindow, railWindowNote, railPane, railPane,
-		railWindow, railPane,
-		railGap,
-		railWorkspace, railWindow, railPane,
+	items := rail.RailItems(snap)
+	wantKinds := []rail.RailKind{
+		rail.Workspace, rail.Window, rail.WindowNote, rail.Pane, rail.Pane,
+		rail.Window, rail.Pane,
+		rail.Gap,
+		rail.Workspace, rail.Window, rail.Pane,
 	}
 	wantText := []string{
 		"main", "one", "working hard", "alpha", "w1p2",
@@ -1009,40 +1010,40 @@ func TestRailItemsGrouping(t *testing.T) {
 		t.Fatalf("rail has %d rows, want %d: %+v", len(items), len(wantKinds), items)
 	}
 	for i, want := range wantKinds {
-		if items[i].kind != want || items[i].text != wantText[i] {
+		if items[i].Kind != want || items[i].Text != wantText[i] {
 			t.Fatalf("row %d = kind %d %q, want kind %d %q", i,
-				items[i].kind, items[i].text, want, wantText[i])
+				items[i].Kind, items[i].Text, want, wantText[i])
 		}
 	}
 	gaps := 0
 	for _, it := range items {
-		if it.kind == railGap {
+		if it.Kind == rail.Gap {
 			gaps++
 		}
 	}
-	if gaps != 1 || items[7].kind != railGap {
+	if gaps != 1 || items[7].Kind != rail.Gap {
 		t.Fatalf("rail has %d gaps, want one at row 7: %+v", gaps, items)
 	}
-	if items[0].count != 3 || items[8].count != 1 {
-		t.Fatalf("workspace pane counts = %d, %d, want 3, 1", items[0].count, items[8].count)
+	if items[0].Count != 3 || items[8].Count != 1 {
+		t.Fatalf("workspace pane counts = %d, %d, want 3, 1", items[0].Count, items[8].Count)
 	}
-	if items[0].workspace != "s1" || items[8].workspace != "s2" {
-		t.Fatalf("workspace ids = %q, %q", items[0].workspace, items[8].workspace)
+	if items[0].Workspace != "s1" || items[8].Workspace != "s2" {
+		t.Fatalf("workspace ids = %q, %q", items[0].Workspace, items[8].Workspace)
 	}
-	if !items[0].active || items[8].active {
-		t.Fatalf("workspace rows active = %v, %v", items[0].active, items[8].active)
+	if !items[0].Active || items[8].Active {
+		t.Fatalf("workspace rows active = %v, %v", items[0].Active, items[8].Active)
 	}
-	if !items[10].agent || items[3].agent {
-		t.Fatalf("pane rows agent = %v, %v", items[10].agent, items[3].agent)
+	if !items[10].Agent || items[3].Agent {
+		t.Fatalf("pane rows agent = %v, %v", items[10].Agent, items[3].Agent)
 	}
-	if !items[3].focus || items[4].focus {
-		t.Fatalf("pane rows focus = %v, %v", items[3].focus, items[4].focus)
+	if !items[3].Focus || items[4].Focus {
+		t.Fatalf("pane rows focus = %v, %v", items[3].Focus, items[4].Focus)
 	}
 	// A folded window drops its note line and its panes but keeps the window
 	// line, whose message still belongs to the window.
 	snap.All[0].WindowUnfolded = false
-	for _, it := range railItems(snap) {
-		if it.kind == railWindowNote {
+	for _, it := range rail.RailItems(snap) {
+		if it.Kind == rail.WindowNote {
 			t.Fatalf("folded rail drew a note line: %+v", it)
 		}
 	}
@@ -1065,9 +1066,9 @@ func TestRailGlyphPerState(t *testing.T) {
 	}
 	seen := map[theme.RGB]string{}
 	for _, c := range cases {
-		g, colour := railGlyph(theme.DefaultTheme(), c.status, false)
+		g, colour := rail.RailGlyph(theme.DefaultTheme(), c.status, false)
 		if g != c.glyph || colour != c.colour {
-			t.Fatalf("railGlyph(theme.DefaultTheme(), %q) = %q/%v, want %q/%v", c.status, g, colour, c.glyph, c.colour)
+			t.Fatalf("rail.RailGlyph(theme.DefaultTheme(), %q) = %q/%v, want %q/%v", c.status, g, colour, c.glyph, c.colour)
 		}
 		if prev, ok := seen[colour]; ok && prev != c.glyph {
 			t.Fatalf("colour %v doubles for %q and %q", colour, prev, c.glyph)
@@ -1075,7 +1076,7 @@ func TestRailGlyphPerState(t *testing.T) {
 		seen[colour] = c.glyph
 
 		var b bytes.Buffer
-		drawRail(&b, theme.DefaultTheme(), agentRail(c.status))
+		rail.DrawRail(&b, theme.DefaultTheme(), agentRail(c.status))
 		out := b.String()
 		if !strings.Contains(out, c.glyph) || !strings.Contains(out, colour.FG()) {
 			t.Fatalf("status %q not drawn as %q in %q: %q", c.status, c.glyph, colour.FG(), out)
@@ -1099,8 +1100,8 @@ func TestRailContrast(t *testing.T) {
 	for _, status := range []string{
 		"working", "idle", "blocked", "done", "error", "unknown", "",
 	} {
-		fallback, colour := railGlyph(theme.DefaultTheme(), status, false)
-		_, nerdColour := railGlyph(theme.DefaultTheme(), status, true)
+		fallback, colour := rail.RailGlyph(theme.DefaultTheme(), status, false)
+		_, nerdColour := rail.RailGlyph(theme.DefaultTheme(), status, true)
 		if fallback == "" || nerdColour != colour {
 			t.Fatalf("state %q differs between glyph forms", status)
 		}
@@ -1120,12 +1121,12 @@ func TestRailContrast(t *testing.T) {
 
 // TestRailAccent keeps the accent hash stable per id and inside the slot count.
 // The built-in palette's six hues are distinct, so two slots never paint the
-// same colour. Giving two live workspaces different slots is railItems' job.
+// same colour. Giving two live workspaces different slots is rail.RailItems' job.
 func TestRailAccent(t *testing.T) {
 	for _, ws := range []string{"main", "work", "dm-git-w1", ""} {
-		first, second := railAccentSlot(ws), railAccentSlot(ws)
+		first, second := rail.RailAccentSlot(ws), rail.RailAccentSlot(ws)
 		if first != second {
-			t.Fatalf("railAccentSlot(%q) = %d then %d", ws, first, second)
+			t.Fatalf("rail.RailAccentSlot(%q) = %d then %d", ws, first, second)
 		}
 	}
 	slots := len(theme.DefaultTheme().Accents)
@@ -1140,8 +1141,8 @@ func TestRailAccent(t *testing.T) {
 		seen[accent] = true
 	}
 	for _, ws := range []string{"main", "work", "scratch", "s1", "s2", "ws1", "ws6"} {
-		if slot := railAccentSlot(ws); slot < 0 || slot >= slots {
-			t.Fatalf("railAccentSlot(%q) = %d, want a slot in [0,%d)", ws, slot, slots)
+		if slot := rail.RailAccentSlot(ws); slot < 0 || slot >= slots {
+			t.Fatalf("rail.RailAccentSlot(%q) = %d, want a slot in [0,%d)", ws, slot, slots)
 		}
 	}
 }
@@ -1154,7 +1155,7 @@ func TestRailNerdIcons(t *testing.T) {
 	agent.All[0].Agent = true
 	agent.All[0].InRepo = true
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), agent)
+	rail.DrawRail(&b, theme.DefaultTheme(), agent)
 	out := b.String()
 	for _, want := range []string{"\uf07b", "\uf0d7", "\uf135", "\uf013", "pi", "clean"} {
 		if want == "\uf07b" {
@@ -1187,7 +1188,7 @@ func TestRailNerdIcons(t *testing.T) {
 
 	shell := railOnePane("unknown", "", 12, 40, 6)
 	b.Reset()
-	drawRail(&b, theme.DefaultTheme(), shell)
+	rail.DrawRail(&b, theme.DefaultTheme(), shell)
 	out = b.String()
 	if !strings.Contains(out, "\uf120") {
 		t.Fatalf("nerd shell row = %q, want the terminal icon", out)
@@ -1204,7 +1205,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	for _, status := range []string{"", "unknown"} {
 		var b bytes.Buffer
-		drawRail(&b, theme.DefaultTheme(), railOnePane(status, "w1p1", 12, 40, 6))
+		rail.DrawRail(&b, theme.DefaultTheme(), railOnePane(status, "w1p1", 12, 40, 6))
 		vt := vt10x.New(vt10x.WithSize(40, 6))
 		if _, err := vt.Write(b.Bytes()); err != nil {
 			t.Fatalf("draw shell rail: %v", err)
@@ -1220,7 +1221,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 
 	// An agent that has not reported yet still asks with the question mark.
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), agentRail(""))
+	rail.DrawRail(&b, theme.DefaultTheme(), agentRail(""))
 	vt := vt10x.New(vt10x.WithSize(40, 6))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw agent rail: %v", err)
@@ -1241,7 +1242,7 @@ func TestRailAgentMarker(t *testing.T) {
 	agent.All[0].Agent = true
 	agent.All[0].App = "pi"
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), agent)
+	rail.DrawRail(&b, theme.DefaultTheme(), agent)
 	out := b.String()
 	if !strings.Contains(out, "\u258e") {
 		t.Fatalf("agent row has no marker: %q", out)
@@ -1252,7 +1253,7 @@ func TestRailAgentMarker(t *testing.T) {
 
 	shell := railOnePane("unknown", "", 20, 40, 6)
 	b.Reset()
-	drawRail(&b, theme.DefaultTheme(), shell)
+	rail.DrawRail(&b, theme.DefaultTheme(), shell)
 	out = b.String()
 	if strings.Contains(out, "\u258e") {
 		t.Fatalf("shell row has the agent marker: %q", out)
@@ -1265,7 +1266,7 @@ func TestRailAgentMarker(t *testing.T) {
 	thin := railOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	thin.All[0].Agent = true
 	b.Reset()
-	drawRail(&b, theme.DefaultTheme(), thin)
+	rail.DrawRail(&b, theme.DefaultTheme(), thin)
 	vt := vt10x.New(vt10x.WithSize(40, 6))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw thin agent rail: %v", err)
@@ -1295,8 +1296,8 @@ func TestRailHit(t *testing.T) {
 		{-1, 2, ""}, // left of the screen
 	}
 	for _, c := range cases {
-		if got := railPaneAt(snap, c.x, c.y); got != c.want {
-			t.Fatalf("railPaneAt(%d,%d) = %q, want %q", c.x, c.y, got, c.want)
+		if got := rail.RailPaneAt(snap, c.x, c.y); got != c.want {
+			t.Fatalf("rail.RailPaneAt(%d,%d) = %q, want %q", c.x, c.y, got, c.want)
 		}
 	}
 	// The last item row above the control can be a pane row. The control
@@ -1313,7 +1314,7 @@ func TestRailHit(t *testing.T) {
 			WindowName: "one", WindowUnfolded: true,
 		},
 	}
-	if got := railPaneAt(small, 5, 2); got != "w1p1" {
+	if got := rail.RailPaneAt(small, 5, 2); got != "w1p1" {
 		t.Fatalf("last pane row = %q", got)
 	}
 }
@@ -1370,36 +1371,36 @@ func TestRailFold(t *testing.T) {
 	for i := range snap.All {
 		snap.All[i].WindowUnfolded = false
 	}
-	items := railItems(snap)
-	if len(items) != 2 || items[0].kind != railWorkspace || items[1].kind != railWindow {
+	items := rail.RailItems(snap)
+	if len(items) != 2 || items[0].Kind != rail.Workspace || items[1].Kind != rail.Window {
 		t.Fatalf("folded rail rows = %+v, want workspace and window", items)
 	}
-	if !items[1].folded || items[1].window != "w1" {
+	if !items[1].Folded || items[1].Window != "w1" {
 		t.Fatalf("folded window row = %+v", items[1])
 	}
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	if strings.Contains(b.String(), "alpha") {
 		t.Fatalf("folded rail drew a pane: %q", b.String())
 	}
-	if got := railWindowAt(snap, 3, 1); got != "w1" {
+	if got := rail.RailWindowAt(snap, 3, 1); got != "w1" {
 		t.Fatalf("window row hit = %q, want w1", got)
 	}
-	if got := railPaneAt(snap, 3, 1); got != "" {
+	if got := rail.RailPaneAt(snap, 3, 1); got != "" {
 		t.Fatalf("window row is a pane hit: %q", got)
 	}
 
 	// The thin rail is a glyph column, so it lists panes regardless of the fold
 	// and has no workspace or window row to unfold.
 	snap.Rail = layout.CollapsedRail
-	items = railItems(snap)
-	if len(items) != 2 || items[0].kind != railPane || items[1].kind != railPane {
+	items = rail.RailItems(snap)
+	if len(items) != 2 || items[0].Kind != rail.Pane || items[1].Kind != rail.Pane {
 		t.Fatalf("thin rail rows = %+v, want the two panes", items)
 	}
-	if items[0].pane != "w1p1" || items[1].pane != "w1p2" {
-		t.Fatalf("thin rail panes = %q, %q, want w1p1, w1p2", items[0].pane, items[1].pane)
+	if items[0].Pane != "w1p1" || items[1].Pane != "w1p2" {
+		t.Fatalf("thin rail panes = %q, %q, want w1p1, w1p2", items[0].Pane, items[1].Pane)
 	}
-	if got := railWindowAt(snap, 3, 0); got != "" {
+	if got := rail.RailWindowAt(snap, 3, 0); got != "" {
 		t.Fatalf("thin rail row folds a window: %q", got)
 	}
 }
@@ -1410,10 +1411,10 @@ func TestRailBranchLabel(t *testing.T) {
 	snap := railTestSnapshot(20)
 	snap.All[0].Branch = "dm-rail"
 	snap.All[1].Branch = "other"
-	items := railItems(snap)
-	if items[1].branch != "dm-rail" {
+	items := rail.RailItems(snap)
+	if items[1].Branch != "dm-rail" {
 		t.Fatalf("window line branch = %q, want the focused pane's dm-rail",
-			items[1].branch)
+			items[1].Branch)
 	}
 	// The branch trails the label on the drawn row.
 	if line := railRows(t, snap)[1]; !strings.Contains(line, "one  dm-rail") {
@@ -1421,14 +1422,14 @@ func TestRailBranchLabel(t *testing.T) {
 	}
 	// Without a focused pane in the window, the first pane with a branch wins.
 	snap.All[0].Focus = false
-	items = railItems(snap)
-	if items[1].branch != "dm-rail" {
-		t.Fatalf("window branch without focus = %q", items[1].branch)
+	items = rail.RailItems(snap)
+	if items[1].Branch != "dm-rail" {
+		t.Fatalf("window branch without focus = %q", items[1].Branch)
 	}
 	snap.All[1].Focus = true
-	items = railItems(snap)
-	if items[1].branch != "other" {
-		t.Fatalf("window branch with w1p2 focused = %q", items[1].branch)
+	items = rail.RailItems(snap)
+	if items[1].Branch != "other" {
+		t.Fatalf("window branch with w1p2 focused = %q", items[1].Branch)
 	}
 }
 
@@ -1443,16 +1444,16 @@ func TestRailWindowWorktree(t *testing.T) {
 	snap.All[0].Cwd = "/work/lenient-w1"
 	snap.All[0].Root = "/work/lenient-w1"
 	snap.All[0].InRepo = true
-	items := railItems(snap)
-	if len(items) != 3 || items[1].folder != "lenient-w1" ||
-		items[1].branch != "lazy-branch" {
+	items := rail.RailItems(snap)
+	if len(items) != 3 || items[1].Folder != "lenient-w1" ||
+		items[1].Branch != "lazy-branch" {
 		t.Fatalf("window line = %+v, want the folder and the branch", items)
 	}
-	if items[1].worktree != "lenient-w1" {
+	if items[1].Worktree != "lenient-w1" {
 		t.Fatalf("window line lost the worktree: %+v", items[1])
 	}
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	if !strings.Contains(out, theme.DefaultTheme().Palette.RailWindow.FG()+"lenient-w1") {
 		t.Fatalf("folder is not in the window colour: %q", out)
@@ -1477,7 +1478,7 @@ func TestRailWindowWorktree(t *testing.T) {
 
 	// A window whose panes report no directory falls back to its name.
 	snap.All[0].Cwd, snap.All[0].Root = "", ""
-	if items := railItems(snap); items[1].folder != "" {
+	if items := rail.RailItems(snap); items[1].Folder != "" {
 		t.Fatalf("window without a cwd = %+v, want no folder", items[1])
 	}
 	line = railRows(t, snap)[1]
@@ -1514,7 +1515,7 @@ func railTree(rail int) *wire.Snapshot {
 func railRows(t *testing.T, snap *wire.Snapshot) []string {
 	t.Helper()
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw rail: %v", err)
@@ -1574,7 +1575,7 @@ func TestRailWindowStats(t *testing.T) {
 	// The pair keeps its colours and ends flush at the right edge.
 	snap := railTree(layout.DefaultRail)
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	if !strings.Contains(out, theme.DefaultTheme().Palette.RailDiffAdd.FG()+"+12") ||
 		!strings.Contains(out, theme.DefaultTheme().Palette.RailDiffDel.FG()+"-4") {
@@ -1638,7 +1639,7 @@ func TestRailWindowFolderTruncate(t *testing.T) {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(100, 12))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw truncated rail: %v", err)
@@ -1677,7 +1678,7 @@ func TestRailWindowFolderLine(t *testing.T) {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	if !strings.Contains(out, theme.DefaultTheme().Palette.RailWindow.FG()+"rail") {
 		t.Fatalf("folder is not in the window colour: %q", out)
@@ -1711,7 +1712,7 @@ func TestRailWindowBranchEqualsFolder(t *testing.T) {
 		t.Fatalf("window line is %d cells, want %d", n, snap.Rail)
 	}
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	if !strings.Contains(out, theme.DefaultTheme().Palette.RailWindow.FG()+"main") {
 		t.Fatalf("folder is not in the window colour: %q", out)
@@ -1729,8 +1730,8 @@ func TestRailWindowFolderNested(t *testing.T) {
 	snap.All[0].Cwd, snap.All[0].Root = "/work/dm/a/b", "/work/dm"
 	snap.All[0].Worktree = ""
 	snap.All[0].Branch = "lean-branch"
-	if items := railItems(snap); items[1].folder != "a/b" {
-		t.Fatalf("window folder = %q, want a/b", items[1].folder)
+	if items := rail.RailItems(snap); items[1].Folder != "a/b" {
+		t.Fatalf("window folder = %q, want a/b", items[1].Folder)
 	}
 	line := railRows(t, snap)[1]
 	if want := "  ▾ a/b  lean-branch"; !strings.HasPrefix(line, want) {
@@ -1754,21 +1755,21 @@ func TestRailWindowFolderFocus(t *testing.T) {
 	snap := railTestSnapshot(layout.DefaultRail)
 	snap.All[0].Cwd, snap.All[0].Root = "/work/dm/one", "/work/dm"
 	snap.All[1].Cwd, snap.All[1].Root = "/work/dm/two", "/work/dm"
-	if items := railItems(snap); items[1].folder != "one" {
-		t.Fatalf("window folder = %q, want the focused pane's one", items[1].folder)
+	if items := rail.RailItems(snap); items[1].Folder != "one" {
+		t.Fatalf("window folder = %q, want the focused pane's one", items[1].Folder)
 	}
 	// The second pane focused: the folder follows it and the line redraws.
 	snap.All[0].Focus, snap.All[1].Focus = false, true
-	if items := railItems(snap); items[1].folder != "two" {
-		t.Fatalf("window folder after refocus = %q, want two", items[1].folder)
+	if items := rail.RailItems(snap); items[1].Folder != "two" {
+		t.Fatalf("window folder after refocus = %q, want two", items[1].Folder)
 	}
 	if line := railRows(t, snap)[1]; !strings.Contains(line, "two") {
 		t.Fatalf("window line = %q, want the focused pane's folder", line)
 	}
 	// No pane focused: the window's first pane names the folder.
 	snap.All[1].Focus = false
-	if items := railItems(snap); items[1].folder != "one" {
-		t.Fatalf("window folder without focus = %q, want the first pane's one", items[1].folder)
+	if items := rail.RailItems(snap); items[1].Folder != "one" {
+		t.Fatalf("window folder without focus = %q, want the first pane's one", items[1].Folder)
 	}
 }
 
@@ -1787,8 +1788,8 @@ func TestRailFolder(t *testing.T) {
 		{"/work/scratch", "", "scratch"},
 	}
 	for _, c := range cases {
-		if got := railFolder(c.cwd, c.root); got != c.want {
-			t.Fatalf("railFolder(%q, %q) = %q, want %q", c.cwd, c.root, got, c.want)
+		if got := rail.RailFolder(c.cwd, c.root); got != c.want {
+			t.Fatalf("rail.RailFolder(%q, %q) = %q, want %q", c.cwd, c.root, got, c.want)
 		}
 	}
 
@@ -1799,8 +1800,8 @@ func TestRailFolder(t *testing.T) {
 	snap.All[0].InRepo = false
 	snap.All[0].Branch = ""
 	snap.All[0].Worktree = ""
-	if items := railItems(snap); items[1].folder != "scratch" {
-		t.Fatalf("non-repo folder = %q, want scratch", items[1].folder)
+	if items := rail.RailItems(snap); items[1].Folder != "scratch" {
+		t.Fatalf("non-repo folder = %q, want scratch", items[1].Folder)
 	}
 	line := railRows(t, snap)[1]
 	if !strings.HasPrefix(line, "  ▾ scratch") {
@@ -1819,25 +1820,25 @@ func TestRailTreeHit(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railTree(30)
 	// Rows: 0 workspace, 1 window, 2 note, 3 pane, 4 gap, 5 workspace, 6 window.
-	if got := railWindowAt(snap, 3, 1); got != "w1" {
+	if got := rail.RailWindowAt(snap, 3, 1); got != "w1" {
 		t.Fatalf("window line hit = %q, want w1", got)
 	}
-	if got := railWindowAt(snap, 3, 2); got != "w1" {
+	if got := rail.RailWindowAt(snap, 3, 2); got != "w1" {
 		t.Fatalf("note line hit = %q, want w1", got)
 	}
-	if got := railWindowAt(snap, 3, 0); got != "" {
+	if got := rail.RailWindowAt(snap, 3, 0); got != "" {
 		t.Fatalf("workspace row folded %q", got)
 	}
-	if got := railWindowAt(snap, 3, 4); got != "" {
+	if got := rail.RailWindowAt(snap, 3, 4); got != "" {
 		t.Fatalf("gap row folded %q", got)
 	}
-	if got := railPaneAt(snap, 3, 1); got != "" {
+	if got := rail.RailPaneAt(snap, 3, 1); got != "" {
 		t.Fatalf("window line focused pane %q", got)
 	}
-	if got := railPaneAt(snap, 3, 2); got != "" {
+	if got := rail.RailPaneAt(snap, 3, 2); got != "" {
 		t.Fatalf("note line focused pane %q", got)
 	}
-	if got := railPaneAt(snap, 3, 3); got != "w1p1" {
+	if got := rail.RailPaneAt(snap, 3, 3); got != "w1p1" {
 		t.Fatalf("pane row hit = %q, want w1p1", got)
 	}
 
@@ -1868,16 +1869,16 @@ func TestRailWorkspaceAccent(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railTree(layout.DefaultRail)
 	want := map[string]theme.RGB{}
-	for _, it := range railItems(snap) {
-		if it.kind == railWorkspace {
-			want[it.workspace] = theme.DefaultTheme().Accents[it.accent]
+	for _, it := range rail.RailItems(snap) {
+		if it.Kind == rail.Workspace {
+			want[it.Workspace] = theme.DefaultTheme().Accents[it.Accent]
 		}
 	}
 	if len(want) != 2 || want["s1"] == want["s2"] {
 		t.Fatalf("workspace accents = %v, want two distinct hues", want)
 	}
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	for ws, accent := range want {
 		if !strings.Contains(out, accent.FG()+"▌") {
@@ -1942,9 +1943,9 @@ func TestAllPaneInRepo(t *testing.T) {
 // ids hash to the same preferred slot.
 func TestRailAccentDistinct(t *testing.T) {
 	ids := []string{"s2", "s3", "s4", "s5"}
-	if railAccentSlot("s3") != railAccentSlot("s4") || railAccentSlot("s2") != railAccentSlot("s5") {
+	if rail.RailAccentSlot("s3") != rail.RailAccentSlot("s4") || rail.RailAccentSlot("s2") != rail.RailAccentSlot("s5") {
 		t.Fatalf("fixture ids do not collide: %v %v %v %v",
-			railAccentSlot("s2"), railAccentSlot("s3"), railAccentSlot("s4"), railAccentSlot("s5"))
+			rail.RailAccentSlot("s2"), rail.RailAccentSlot("s3"), rail.RailAccentSlot("s4"), rail.RailAccentSlot("s5"))
 	}
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: layout.DefaultRail}
 	for _, id := range ids {
@@ -1955,22 +1956,22 @@ func TestRailAccentDistinct(t *testing.T) {
 	}
 	seen := map[theme.RGB]string{}
 	want := map[string]theme.RGB{}
-	for _, it := range railItems(snap) {
-		if it.kind != railWorkspace {
+	for _, it := range rail.RailItems(snap) {
+		if it.Kind != rail.Workspace {
 			continue
 		}
-		if prev, ok := seen[theme.DefaultTheme().Accents[it.accent]]; ok {
-			t.Fatalf("workspaces %q and %q share accent %v", prev, it.workspace, theme.DefaultTheme().Accents[it.accent])
+		if prev, ok := seen[theme.DefaultTheme().Accents[it.Accent]]; ok {
+			t.Fatalf("workspaces %q and %q share accent %v", prev, it.Workspace, theme.DefaultTheme().Accents[it.Accent])
 		}
-		seen[theme.DefaultTheme().Accents[it.accent]] = it.workspace
-		want[it.workspace] = theme.DefaultTheme().Accents[it.accent]
+		seen[theme.DefaultTheme().Accents[it.Accent]] = it.Workspace
+		want[it.Workspace] = theme.DefaultTheme().Accents[it.Accent]
 	}
 	if len(want) != len(ids) || len(seen) != len(ids) {
 		t.Fatalf("rail has %d workspace accents, want %d", len(seen), len(ids))
 	}
-	// drawRail paints the carried accent, not a fresh hash.
+	// rail.DrawRail paints the carried accent, not a fresh hash.
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	for ws, accent := range want {
 		if !strings.Contains(out, accent.FG()+"▌") {
@@ -2128,7 +2129,7 @@ func TestRailCollapsed(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	if !strings.Contains(out, "●") {
 		t.Fatalf("thin rail has no state glyph: %q", out)
@@ -2154,11 +2155,11 @@ func TestRailCollapsed(t *testing.T) {
 	if glyphX != 2 {
 		t.Fatalf("state glyph at x=%d, want 2", glyphX)
 	}
-	if got := railPaneAt(snap, 2, 0); got != "w1p1" {
+	if got := rail.RailPaneAt(snap, 2, 0); got != "w1p1" {
 		t.Fatalf("thin rail hit = %q, want w1p1", got)
 	}
 	// Past the fixed width is pane area, not rail.
-	if got := railPaneAt(snap, layout.CollapsedRail, 0); got != "" {
+	if got := rail.RailPaneAt(snap, layout.CollapsedRail, 0); got != "" {
 		t.Fatalf("hit past collapsed width = %q", got)
 	}
 }
@@ -2184,7 +2185,7 @@ func TestRailNeverWritesPastWidth(t *testing.T) {
 			snap.All[0].WorkspaceName = strings.Repeat("全角見出し", 6)
 		}
 		var b bytes.Buffer
-		drawRail(&b, theme.DefaultTheme(), snap)
+		rail.DrawRail(&b, theme.DefaultTheme(), snap)
 		vt := vt10x.New(vt10x.WithSize(20, 6))
 		if _, err := vt.Write(b.Bytes()); err != nil {
 			t.Fatalf("%s: draw rail: %v", c.name, err)
@@ -2315,7 +2316,7 @@ func barElideStage(segs []segment.Seg) string {
 // single gutter cell between segments, with the pinned right block last.
 func TestBarSegmentOrder(t *testing.T) {
 	snap := barTestSnap(80)
-	glyph, colour := railGlyph(theme.DefaultTheme(), "idle", nerdFonts())
+	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "idle", rail.NerdFonts())
 	segs := barSegments(theme.DefaultTheme(), snap, true, "READY")
 
 	// Groups, in paint order: session, workspace, one chip per window in index
@@ -2421,7 +2422,7 @@ func TestBarSegmentOrder(t *testing.T) {
 // TestBarElide walks the elision ladder: each width stops at the rung it needs
 // and never paints past the column count.
 func TestBarElide(t *testing.T) {
-	glyph, _ := railGlyph(theme.DefaultTheme(), "idle", nerdFonts())
+	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "idle", rail.NerdFonts())
 	cases := []struct {
 		cols int
 		want string
@@ -2657,7 +2658,7 @@ func TestBarPinnedAnchored(t *testing.T) {
 
 // TestBarWideRunes keeps wide runes whole and inside the column count.
 func TestBarWideRunes(t *testing.T) {
-	glyph, _ := railGlyph(theme.DefaultTheme(), "working", nerdFonts())
+	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", rail.NerdFonts())
 	sources := []string{
 		"日本語セッション", "作業ディレクトリ", "▸ ", "1 一二三",
 		"2 四五六", " w1p1", " 日本語", " working", glyph,
@@ -2705,7 +2706,7 @@ func TestBarWideRunes(t *testing.T) {
 // TestBarFocusChip reads the focus chip from the focused pane: an agent shows
 // its state glyph and colour on the focus fill, a shell shows the prompt marker.
 func TestBarFocusChip(t *testing.T) {
-	nerd := nerdFonts()
+	nerd := rail.NerdFonts()
 	snap := &wire.Snapshot{
 		Session: "s",
 		Focus:   "w1p1",
@@ -2714,7 +2715,7 @@ func TestBarFocusChip(t *testing.T) {
 		Cols:    80,
 		Rows:    24,
 	}
-	glyph, colour := railGlyph(theme.DefaultTheme(), "blocked", nerd)
+	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "blocked", nerd)
 	segs := barSegments(theme.DefaultTheme(), snap, false, "")
 	if len(segs) < 4 {
 		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
@@ -3788,8 +3789,8 @@ func TestBarContrast(t *testing.T) {
 	for _, status := range []string{
 		"working", "idle", "blocked", "done", "error", "unknown", "",
 	} {
-		fallback, colour := railGlyph(theme.DefaultTheme(), status, false)
-		_, nerdColour := railGlyph(theme.DefaultTheme(), status, true)
+		fallback, colour := rail.RailGlyph(theme.DefaultTheme(), status, false)
+		_, nerdColour := rail.RailGlyph(theme.DefaultTheme(), status, true)
 		if fallback == "" || nerdColour != colour {
 			t.Fatalf("state %q differs between glyph forms", status)
 		}

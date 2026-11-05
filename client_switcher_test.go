@@ -81,15 +81,15 @@ func TestSwitcherPrefixToggles(t *testing.T) {
 func TestSwitcherCtrlNPMoves(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
-	if it, ok := tui.sw.selected(); !ok || it.pane != "w1p1" {
+	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p1" {
 		t.Fatalf("empty query selects %+v, want the first pane w1p1", it)
 	}
 	feed(tui, "\x0e") // ctrl+n, down
-	if it, ok := tui.sw.selected(); !ok || it.pane != "w1p2" {
+	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p2" {
 		t.Fatalf("ctrl+n selects %+v, want the next pane w1p2", it)
 	}
 	feed(tui, "\x10") // ctrl+p, up
-	if it, ok := tui.sw.selected(); !ok || it.pane != "w1p1" {
+	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p1" {
 		t.Fatalf("ctrl+p selects %+v, want the pane above w1p1", it)
 	}
 	noMsg(t, got)
@@ -105,7 +105,7 @@ func TestSwitcherTypeAndEnter(t *testing.T) {
 	if n := len(tui.sw.rows); n >= full {
 		t.Fatalf("typing narrowed %d rows to %d", full, n)
 	}
-	if it, ok := tui.sw.selected(); !ok || it.pane != "w1p2" {
+	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p2" {
 		t.Fatalf("selected = %+v, want the beta pane", it)
 	}
 	feed(tui, "\r")

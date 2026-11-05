@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/rail"
 	"dm/internal/wire"
 	"strings"
 	"testing"
@@ -64,17 +65,17 @@ func railMenuPick(t *testing.T, tui *tui, prefix string) {
 // last item do not.
 func TestRailItemAt(t *testing.T) {
 	snap := railRowSnap(20)
-	if it, ok := railItemAt(snap, 2, 0); !ok || it.kind != railWorkspace {
+	if it, ok := rail.RailItemAt(snap, 2, 0); !ok || it.Kind != rail.Workspace {
 		t.Fatalf("row 0 = %+v, %v, want the workspace row", it, ok)
 	}
-	if it, ok := railItemAt(snap, 2, 7); !ok || it.kind != railWindow {
+	if it, ok := rail.RailItemAt(snap, 2, 7); !ok || it.Kind != rail.Window {
 		t.Fatalf("last item row = %+v, %v, want the window row", it, ok)
 	}
 	for _, c := range []struct{ x, y int }{
 		{-1, 0}, {20, 0}, {2, -1}, {2, snap.Rows - 2}, {2, snap.Rows - 1},
 	} {
-		if it, ok := railItemAt(snap, c.x, c.y); ok {
-			t.Fatalf("railItemAt(%d,%d) = %+v, want false", c.x, c.y, it)
+		if it, ok := rail.RailItemAt(snap, c.x, c.y); ok {
+			t.Fatalf("rail.RailItemAt(%d,%d) = %+v, want false", c.x, c.y, it)
 		}
 	}
 }
@@ -242,8 +243,8 @@ func TestRailMenuNewWindowOutsideGit(t *testing.T) {
 	snap.All[0].Root = ""
 	snap.All[0].Cwd = "/tmp/scratch"
 	tui.snap = snap
-	it, ok := railItemAt(snap, 2, 1)
-	if !ok || it.folder != "scratch" {
+	it, ok := rail.RailItemAt(snap, 2, 1)
+	if !ok || it.Folder != "scratch" {
 		t.Fatalf("window row = %+v, %v, want the display label scratch", it, ok)
 	}
 	railRightPress(tui, 1)

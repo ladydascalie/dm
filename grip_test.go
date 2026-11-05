@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -63,7 +64,7 @@ func TestRailGripMark(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railRowSnap(20)
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw rail: %v", err)

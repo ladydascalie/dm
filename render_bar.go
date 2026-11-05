@@ -9,6 +9,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/rail"
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -137,10 +138,10 @@ func barFocus(th theme.Theme, snap *wire.Snapshot) *barFocusChip {
 			break
 		}
 	}
-	shell := stateStyle(th, "shell")
+	shell := rail.StateStyle(th, "shell")
 	glyph, colour := shell.Glyph, shell.Colour
 	if agent {
-		glyph, colour = railGlyph(th, status, nerdFonts())
+		glyph, colour = rail.RailGlyph(th, status, rail.NerdFonts())
 	}
 	return &barFocusChip{
 		glyph: glyph, colour: colour,

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -45,7 +46,7 @@ func ctlSnapshot(rail int) *wire.Snapshot {
 func ctlScreen(t *testing.T, snap *wire.Snapshot) vt10x.Terminal {
 	t.Helper()
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw rail: %v", err)
@@ -115,7 +116,7 @@ func TestRailControlRow(t *testing.T) {
 		// the control.
 		seen := map[string]bool{}
 		for y := 0; y < row; y++ {
-			if id := railPaneAt(snap, 2, y); id != "" {
+			if id := rail.RailPaneAt(snap, 2, y); id != "" {
 				seen[id] = true
 			}
 		}
@@ -125,7 +126,7 @@ func TestRailControlRow(t *testing.T) {
 			}
 		}
 		last := snap.All[len(snap.All)-1]
-		if got := railPaneAt(snap, 2, row-1); got != last.ID {
+		if got := rail.RailPaneAt(snap, 2, row-1); got != last.ID {
 			t.Fatalf("rail %d: last item row = %q, want %q", c.rail, got, last.ID)
 		}
 		// The last item row is drawn, not merely listed. A rail too narrow
@@ -166,14 +167,14 @@ func TestRailControlRow(t *testing.T) {
 		}
 
 		// The row belongs to the control, never to an item.
-		if got := railPaneAt(snap, 2, row); got != "" {
-			t.Fatalf("rail %d: railPaneAt answered %q on the control row", c.rail, got)
+		if got := rail.RailPaneAt(snap, 2, row); got != "" {
+			t.Fatalf("rail %d: rail.RailPaneAt answered %q on the control row", c.rail, got)
 		}
-		if got := railWindowAt(snap, 2, row); got != "" {
-			t.Fatalf("rail %d: railWindowAt answered %q on the control row", c.rail, got)
+		if got := rail.RailWindowAt(snap, 2, row); got != "" {
+			t.Fatalf("rail %d: rail.RailWindowAt answered %q on the control row", c.rail, got)
 		}
 		for x := 0; x < c.rail; x++ {
-			if !railControlAt(snap, x, row) {
+			if !rail.RailControlAt(snap, x, row) {
 				t.Fatalf("rail %d: column %d of the control row is not a target", c.rail, x)
 			}
 		}
@@ -189,10 +190,10 @@ func TestRailControlOwnsItsRow(t *testing.T) {
 	row := snap.Rows - 2
 	vt := ctlScreen(t, snap)
 
-	if got := railPaneAt(snap, 2, row); got != "" {
-		t.Fatalf("railPaneAt(2,%d) = %q on the control row", row, got)
+	if got := rail.RailPaneAt(snap, 2, row); got != "" {
+		t.Fatalf("rail.RailPaneAt(2,%d) = %q on the control row", row, got)
 	}
-	if got := railPaneAt(snap, 2, row-1); got != "p8" {
+	if got := rail.RailPaneAt(snap, 2, row-1); got != "p8" {
 		t.Fatalf("last item row = %q, want p8", got)
 	}
 	if g := ctlCell(t, vt, 2, row); g.Char != '▶' {
@@ -203,10 +204,10 @@ func TestRailControlOwnsItsRow(t *testing.T) {
 	if railGripAt(snap, snap.Rail-1, row) {
 		t.Fatal("grip claimed the control row")
 	}
-	if !railControlAt(snap, snap.Rail-1, row) {
+	if !rail.RailControlAt(snap, snap.Rail-1, row) {
 		t.Fatal("control is missing the last column of its row")
 	}
-	if railControlAt(snap, snap.Rail, row) || railControlAt(snap, snap.Rail-1, row-1) {
+	if rail.RailControlAt(snap, snap.Rail, row) || rail.RailControlAt(snap, snap.Rail-1, row-1) {
 		t.Fatal("control answered outside its row")
 	}
 }
@@ -296,7 +297,7 @@ func TestRailControlHidden(t *testing.T) {
 	snap := ctlSnapshot(0)
 	row := snap.Rows - 2
 	for x := 0; x < snap.Cols; x++ {
-		if railControlAt(snap, x, row) {
+		if rail.RailControlAt(snap, x, row) {
 			t.Fatalf("hidden rail has a control at column %d", x)
 		}
 	}
@@ -305,7 +306,7 @@ func TestRailControlHidden(t *testing.T) {
 		t.Fatalf("row %d is not pane area for a hidden rail: %+v", row, area)
 	}
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	if b.Len() != 0 {
 		t.Fatalf("hidden rail drew %d bytes", b.Len())
 	}

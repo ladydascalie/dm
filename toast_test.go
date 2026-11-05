@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"dm/internal/cells"
+	"dm/internal/rail"
 	"dm/internal/theme"
 	"dm/internal/wire"
 	"regexp"
@@ -147,7 +148,7 @@ func TestBarDropsToastSuffix(t *testing.T) {
 		Panes: []wire.PaneInfo{{ID: "w1p1", Status: "working"}},
 	}
 	info := "SCROLL w1p1 +1/9"
-	glyph, _ := railGlyph(theme.DefaultTheme(), "working", nerdFonts())
+	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", rail.NerdFonts())
 	want := []string{"main", " ", "main", " ", "▸ ", "1 1", " ", glyph,
 		" w1p1", " working", info}
 	got := barTexts(barSegments(theme.DefaultTheme(), snap, false, info))

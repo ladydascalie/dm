@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -89,7 +90,7 @@ func TestRenamePromptOpensOnPrefixR(t *testing.T) {
 // The workspace row's menu offers the same prompt and closes itself first.
 func TestRenamePromptMenuRow(t *testing.T) {
 	tr, got := renamePromptTUI(t)
-	tr.openRailMenu(railItem{kind: railWorkspace, text: "main", workspace: "s1"}, 10, 10)
+	tr.openRailMenu(rail.RailItem{Kind: rail.Workspace, Text: "main", Workspace: "s1"}, 10, 10)
 	found := false
 	for _, it := range tr.menu.items {
 		if it.label != "Rename workspace" {

@@ -1,4 +1,4 @@
-package main
+package rail
 
 import (
 	"bytes"
@@ -12,6 +12,8 @@ import (
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
+
+	"github.com/hinshun/vt10x"
 )
 
 // railRowSnap is a rail with every row kind on it: a workspace header, an
@@ -63,19 +65,19 @@ func railRowComposed(left, tail, right []railSeg, w int) string {
 }
 
 // railRowFind returns the only row of a kind that carries text.
-func railRowFind(t *testing.T, items []railItem, kind railKind, text string) railItem {
+func railRowFind(t *testing.T, items []RailItem, kind RailKind, text string) RailItem {
 	t.Helper()
 	for _, it := range items {
-		if it.kind == kind && it.text == text {
+		if it.Kind == kind && it.Text == text {
 			return it
 		}
 	}
 	t.Fatalf("rail has no kind %d row %q: %+v", kind, text, items)
-	return railItem{}
+	return RailItem{}
 }
 
-// TestRailRowComposesPaint holds railRow to the rail: every row it composes is
-// the row drawRail paints, at the default width and at a narrow one, in both
+// TestRailRowComposesPaint holds RailRow to the rail: every row it composes is
+// the row DrawRail paints, at the default width and at a narrow one, in both
 // glyph forms. No row writes past the rail width.
 func TestRailRowComposesPaint(t *testing.T) {
 	for _, nerd := range []bool{false, true} {
@@ -87,12 +89,12 @@ func TestRailRowComposesPaint(t *testing.T) {
 		for _, w := range []int{layout.DefaultRail, 12} {
 			snap := railRowSnap(w)
 			painted := railRows(t, snap)
-			items := railItems(snap)
+			items := RailItems(snap)
 			compact := layout.RailCompact(w)
 			gripAt := (snap.Rows - 2) / 2
 			for y, line := range painted {
 				if y == snap.Rows-2 {
-					// The control row is not a railRow item; control_test.go owns it.
+					// The control row is not a RailRow item; control_test.go owns it.
 					continue
 				}
 				if y >= len(items) {
@@ -106,7 +108,7 @@ func TestRailRowComposesPaint(t *testing.T) {
 					}
 					continue
 				}
-				left, right, tail := railRow(theme.DefaultTheme(), items[y], w, compact, nerd)
+				left, right, tail := RailRow(theme.DefaultTheme(), items[y], w, compact, nerd)
 				want := railRowComposed(left, tail, right, w)
 				if y == gripAt {
 					if pad := w - 1 - cells.Cells(want); pad > 0 {
@@ -116,7 +118,7 @@ func TestRailRowComposesPaint(t *testing.T) {
 				}
 				if want != line {
 					t.Fatalf("nerd=%v w=%d row %d kind %d composes %q, rail paints %q",
-						nerd, w, y, items[y].kind, want, line)
+						nerd, w, y, items[y].Kind, want, line)
 				}
 				if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > w {
 					t.Fatalf("nerd=%v w=%d row %d is %d cells, want <= %d",
@@ -127,17 +129,17 @@ func TestRailRowComposesPaint(t *testing.T) {
 	}
 }
 
-// TestRailRowSegments pins the runs railRow composes for each row kind: their
+// TestRailRowSegments pins the runs RailRow composes for each row kind: their
 // text, colour and weight, and which run is the tail.
 func TestRailRowSegments(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railRowSnap(layout.DefaultRail)
-	items := railItems(snap)
+	items := RailItems(snap)
 
-	ws := railRowFind(t, items, railWorkspace, "main")
-	left, right, tail := railRow(theme.DefaultTheme(), ws, layout.DefaultRail, false, false)
+	ws := railRowFind(t, items, Workspace, "main")
+	left, right, tail := RailRow(theme.DefaultTheme(), ws, layout.DefaultRail, false, false)
 	wantLeft := []railSeg{
-		{Text: "\u258c", FG: theme.DefaultTheme().Accents[ws.accent]},
+		{Text: "\u258c", FG: theme.DefaultTheme().Accents[ws.Accent]},
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailText},
 		{Text: "main", FG: theme.DefaultTheme().Palette.RailText, Bold: true},
 	}
@@ -149,8 +151,8 @@ func TestRailRowSegments(t *testing.T) {
 
 	// An unfolded window line carries the caret, the folder, the branch tail
 	// and the stats.
-	win := railRowFind(t, items, railWindow, "one")
-	left, right, tail = railRow(theme.DefaultTheme(), win, layout.DefaultRail, false, false)
+	win := railRowFind(t, items, Window, "one")
+	left, right, tail = RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{Text: "  ", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: "\u25be", FG: theme.DefaultTheme().Palette.RailWindow},
@@ -176,15 +178,15 @@ func TestRailRowSegments(t *testing.T) {
 
 	// A folded window line flips the caret and keeps its folder. It has no
 	// branch and no stats outside a repo.
-	folded := railRowFind(t, items, railWindow, "two")
-	left, right, tail = railRow(theme.DefaultTheme(), folded, layout.DefaultRail, false, false)
+	folded := railRowFind(t, items, Window, "two")
+	left, right, tail = RailRow(theme.DefaultTheme(), folded, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{Text: "  ", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: "\u25b8", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: "other", FG: theme.DefaultTheme().Palette.RailWindow},
 	}
-	if folded.folded != true {
+	if folded.Folded != true {
 		t.Fatalf("window two is not folded: %+v", folded)
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
@@ -193,8 +195,8 @@ func TestRailRowSegments(t *testing.T) {
 	}
 
 	// The note line is one dim run under the window line.
-	note := railRowFind(t, items, railWindowNote, "working hard")
-	left, right, tail = railRow(theme.DefaultTheme(), note, layout.DefaultRail, false, false)
+	note := railRowFind(t, items, WindowNote, "working hard")
+	left, right, tail = RailRow(theme.DefaultTheme(), note, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{Text: "    ", FG: theme.DefaultTheme().Palette.RailDim},
 		{Text: "working hard", FG: theme.DefaultTheme().Palette.RailDim},
@@ -207,16 +209,16 @@ func TestRailRowSegments(t *testing.T) {
 	// A focused pane row puts its indents, marker, glyph and name on rail text,
 	// and carries no right-aligned run. The focus fill and the row's bold are
 	// the writer's, not the composition's.
-	mark, glyphColour := railMark(true, false), theme.DefaultTheme().Palette.RailWorking
-	pane := railRowFind(t, items, railPane, "pi")
-	left, right, tail = railRow(theme.DefaultTheme(), pane, layout.DefaultRail, false, false)
+	mark, glyphColour := RailMark(true, false), theme.DefaultTheme().Palette.RailWorking
+	pane := railRowFind(t, items, Pane, "pi")
+	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{Text: "      ", FG: theme.DefaultTheme().Palette.RailText},
 		{Text: mark, FG: glyphColour},
 		{Text: "\u25cf", FG: glyphColour},
 		{Text: " pi", FG: theme.DefaultTheme().Palette.RailText},
 	}
-	if !pane.focus {
+	if !pane.Focus {
 		t.Fatalf("pane pi is not focused: %+v", pane)
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
@@ -225,7 +227,7 @@ func TestRailRowSegments(t *testing.T) {
 	}
 
 	// The thin rail keeps the marker and the glyph and drops the indents.
-	left, right, tail = railRow(theme.DefaultTheme(), pane, layout.CollapsedRail, true, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.CollapsedRail, true, false)
 	wantLeft = []railSeg{
 		{Text: mark, FG: glyphColour},
 		{Text: "\u25cf", FG: glyphColour},
@@ -236,24 +238,24 @@ func TestRailRowSegments(t *testing.T) {
 	}
 
 	// A gap row composes nothing at all.
-	gap := railRowFind(t, items, railGap, "")
-	left, right, tail = railRow(theme.DefaultTheme(), gap, layout.DefaultRail, false, false)
+	gap := railRowFind(t, items, Gap, "")
+	left, right, tail = RailRow(theme.DefaultTheme(), gap, layout.DefaultRail, false, false)
 	if left != nil || right != nil || tail != nil {
 		t.Fatalf("gap row = %+v / %+v / %+v, want nothing", left, right, tail)
 	}
 
-	// The one thing railRow does not return is the row's own ground and weight:
+	// The one thing RailRow does not return is the row's own ground and weight:
 	// the focused pane row paints the focus fill bold, and every other row the
 	// rail fill plain.
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
 	focusRow := -1
 	for y := 0; y < snap.Rows-1; y++ {
 		want := theme.DefaultTheme().Palette.RailBG
 		if y < len(items) {
 			it := items[y]
-			if it.kind == railPane && it.focus {
+			if it.Kind == Pane && it.Focus {
 				focusRow, want = y, theme.DefaultTheme().Palette.RailFocusBG
 			}
 		}
@@ -277,8 +279,8 @@ func TestRailRowSegments(t *testing.T) {
 func TestRailRowElidesBeforeStats(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railRowSnap(12)
-	items := railItems(snap)
-	win := railRowFind(t, items, railWindow, "one")
+	items := RailItems(snap)
+	win := railRowFind(t, items, Window, "one")
 	full := []railSeg{
 		{Text: "\u25cf", FG: theme.DefaultTheme().Palette.RailWorking},
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
@@ -288,7 +290,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	}
 
 	// At the default width the branch fits beside the folder and the pair.
-	left, right, tail := railRow(theme.DefaultTheme(), win, layout.DefaultRail, false, false)
+	left, right, tail := RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, false)
 	if tail == nil {
 		t.Fatalf("branch dropped at %d columns: %+v", layout.DefaultRail, left)
 	}
@@ -297,7 +299,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	}
 
 	// Twenty columns: the branch goes whole and the folder stays intact.
-	left, right, tail = railRow(theme.DefaultTheme(), win, 20, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), win, 20, false, false)
 	if tail != nil {
 		t.Fatalf("branch survived at 20 columns: %+v", tail)
 	}
@@ -309,7 +311,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	}
 
 	// Twelve columns: the folder elides and the pair still keeps every cell.
-	left, right, tail = railRow(theme.DefaultTheme(), win, 12, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), win, 12, false, false)
 	if tail != nil {
 		t.Fatalf("branch survived at 12 columns: %+v", tail)
 	}
@@ -332,8 +334,8 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 			continue
 		}
 		snap := railRowSnap(w)
-		it := railRowFind(t, railItems(snap), railWindow, "one")
-		left, right, tail = railRow(theme.DefaultTheme(), it, w, layout.RailCompact(w), false)
+		it := railRowFind(t, RailItems(snap), Window, "one")
+		left, right, tail = RailRow(theme.DefaultTheme(), it, w, layout.RailCompact(w), false)
 		if right != nil && !reflect.DeepEqual(right, full) {
 			t.Fatalf("stats at %d columns = %+v, want the whole pair or none", w, right)
 		}
@@ -345,4 +347,35 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 			t.Fatalf("row at %d columns composes %q, rail paints %q", w, got, line)
 		}
 	}
+}
+
+// railSeg is the name the rail gave a styled run before seg.go made the rail
+// and the bar one type. The moved test still spells it.
+type railSeg = segment.Seg
+
+// railRows draws a rail and returns the text of each row inside the rail width.
+func railRows(t *testing.T, snap *wire.Snapshot) []string {
+	t.Helper()
+	var b bytes.Buffer
+	DrawRail(&b, theme.DefaultTheme(), snap)
+	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
+	if _, err := vt.Write(b.Bytes()); err != nil {
+		t.Fatalf("draw rail: %v", err)
+	}
+	out := make([]string, snap.Rows-1)
+	vt.Lock()
+	for y := range out {
+		var sb strings.Builder
+		for x := 0; x < snap.Rail; x++ {
+			g := vt.Cell(x, y)
+			if g.Char == 0 {
+				sb.WriteByte(' ')
+				continue
+			}
+			sb.WriteRune(g.Char)
+		}
+		out[y] = strings.TrimRight(sb.String(), " ")
+	}
+	vt.Unlock()
+	return out
 }
