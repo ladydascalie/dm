@@ -1,4 +1,4 @@
-package main
+package pane
 
 import (
 	"bytes"

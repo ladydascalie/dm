@@ -15,6 +15,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/pane"
 	"dm/internal/paths"
 	"dm/internal/wire"
 
@@ -29,7 +30,7 @@ func main() {
 			exit(runServer(args[1:]))
 			return
 		case "__pane":
-			exit(runPane(args[1:]))
+			exit(pane.Run(args[1:]))
 			return
 		case "__probe":
 			exit(runProbe(args[1:]))

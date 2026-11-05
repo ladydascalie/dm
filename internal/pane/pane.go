@@ -1,4 +1,4 @@
-package main
+package pane
 
 import (
 	"bytes"
@@ -118,7 +118,7 @@ func (r *scrollRing) Bytes() []byte {
 	return append(out, r.buf[:end-ringMax]...)
 }
 
-func runPane(args []string) error {
+func Run(args []string) error {
 	fs := flag.NewFlagSet("__pane", flag.ContinueOnError)
 	id := fs.String("id", "", "pane id")
 	session := fs.String("session", "", "session name")
@@ -473,10 +473,10 @@ func jsonRaw(v any) json.RawMessage {
 	return b
 }
 
-func writePID(path string) {
-	_ = os.WriteFile(path, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600)
-}
-
 func init() {
 	log.SetFlags(log.Ltime)
+}
+
+func writePID(path string) {
+	_ = os.WriteFile(path, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600)
 }
