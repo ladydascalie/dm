@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/session"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 // every field lands on the AllPane for the pane's working directory.
 func TestGitStateReachesAll(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("gitstate")
+	st := session.NewState("gitstate")
 	id := rootPane(st)
 	st.Panes[id].Cwd = "/work/dm"
 

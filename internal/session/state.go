@@ -1,4 +1,4 @@
-package main
+package session
 
 import (
 	"encoding/json"
@@ -87,7 +87,7 @@ func numericName(name string) bool {
 	return true
 }
 
-func newState(name string) *State {
+func NewState(name string) *State {
 	cwd, _ := os.Getwd()
 	defWin := paths.FolderName(cwd)
 	if defWin == "" {
@@ -115,7 +115,7 @@ func newState(name string) *State {
 	return st
 }
 
-func (st *State) save() error {
+func (st *State) Save() error {
 	if err := os.MkdirAll(paths.SessionDir(st.Name), 0o700); err != nil {
 		return err
 	}
@@ -130,7 +130,7 @@ func (st *State) save() error {
 	return os.Rename(tmp, paths.StatePath(st.Name))
 }
 
-func loadState(name string) (*State, error) {
+func LoadState(name string) (*State, error) {
 	b, err := os.ReadFile(paths.StatePath(name))
 	if err != nil {
 		return nil, err
@@ -146,7 +146,7 @@ func loadState(name string) (*State, error) {
 	if n := st.dropBadBoxEntries(); n > 0 {
 		log.Printf("box: dropped %d invalid entries on load", n)
 	}
-	st.trimBox()
+	st.TrimBox()
 	for _, e := range st.Box {
 		if e.Seq > st.BoxSeq {
 			st.BoxSeq = e.Seq
@@ -159,7 +159,7 @@ func loadState(name string) (*State, error) {
 		changed = true
 	}
 	if st.IDVersion < 2 {
-		st.migrateIDs()
+		st.MigrateIDs()
 		st.IDVersion = 2
 		changed = true
 	}
@@ -181,13 +181,13 @@ func loadState(name string) (*State, error) {
 		}
 	}
 	if changed {
-		_ = st.save()
+		_ = st.Save()
 	}
 	return st, nil
 }
 
 // dropBadBoxEntries removes entries that fail the box contract and reports how
-// many went, so loadState can name them in one log line. A hand-edited or
+// many went, so LoadState can name them in one log line. A hand-edited or
 // truncated state file costs its bad entries, not the whole box.
 func (st *State) dropBadBoxEntries() int {
 	if len(st.Box) == 0 {
@@ -209,10 +209,10 @@ func (st *State) dropBadBoxEntries() int {
 	return bad
 }
 
-// trimBox drops the oldest entries until the log is inside both caps. The byte
+// TrimBox drops the oldest entries until the log is inside both caps. The byte
 // measure is the compact JSON of the entries, so the cap bounds the log itself;
 // the state file's indentation is the file's, not the box's.
-func (st *State) trimBox() {
+func (st *State) TrimBox() {
 	kept := st.Box
 	if len(kept) > box.MaxEntries {
 		kept = kept[len(kept)-box.MaxEntries:]
@@ -233,15 +233,15 @@ func (st *State) trimBox() {
 	st.Box = kept
 }
 
-func (st *State) ws() *Workspace {
+func (st *State) ActiveWorkspace() *Workspace {
 	if st.Active < 0 || st.Active >= len(st.Workspaces) {
 		st.Active = 0
 	}
 	return st.Workspaces[st.Active]
 }
 
-func (st *State) win() *Window {
-	ws := st.ws()
+func (st *State) ActiveWindow() *Window {
+	ws := st.ActiveWorkspace()
 	if ws.Active < 0 || ws.Active >= len(ws.Windows) {
 		ws.Active = 0
 	}
@@ -252,24 +252,24 @@ func (st *State) win() *Window {
 // with M a per-window sequence that only grows. A workspace is s<N>. The id is
 // therefore readable and constructible (w1p1), stable while the object lives,
 // and never reused after a close because the counters only move forward.
-func (st *State) newWorkspaceID() string {
+func (st *State) NewWorkspaceID() string {
 	st.NextWorkspace++
 	return "s" + strconv.Itoa(st.NextWorkspace)
 }
 
-func (st *State) newWindowID() string {
+func (st *State) NewWindowID() string {
 	st.NextWindow++
 	return "w" + strconv.Itoa(st.NextWindow)
 }
 
-func (w *Window) newPaneID() string {
+func (w *Window) NewPaneID() string {
 	w.NextPane++
 	return w.ID + "p" + strconv.Itoa(w.NextPane)
 }
 
-// migrateIDs rewrites a state written before the addressable scheme. Panes are
+// MigrateIDs rewrites a state written before the addressable scheme. Panes are
 // numbered in tree order per window; every focus and PaneState key follows.
-func (st *State) migrateIDs() {
+func (st *State) MigrateIDs() {
 	remap := map[string]string{}
 	nws, nw := 0, 0
 	for _, ws := range st.Workspaces {

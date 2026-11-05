@@ -23,7 +23,7 @@ func (s *server) operatorSeesLocked(id string) bool {
 	if len(s.clients) == 0 || len(s.st.Workspaces) == 0 {
 		return false
 	}
-	return s.st.win().Focus == id
+	return s.st.ActiveWindow().Focus == id
 }
 
 // notifyPaneState raises a desktop notification for a state a pane entered,

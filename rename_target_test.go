@@ -111,7 +111,7 @@ func TestRenamePromptLabelsTheKind(t *testing.T) {
 // The server renames the named window and leaves the active window alone.
 func TestRenameWindowHonoursTarget(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	w2, _ := addWindow(st, "two")
 	ws.Active = 0
@@ -125,8 +125,8 @@ func TestRenameWindowHonoursTarget(t *testing.T) {
 	if w1.Name == "renamed" {
 		t.Fatalf("active window was renamed: %q", w1.Name)
 	}
-	if ws.Active != 0 || st.win().ID != w1.ID {
-		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.win().ID, w1.ID)
+	if ws.Active != 0 || st.ActiveWindow().ID != w1.ID {
+		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.ActiveWindow().ID, w1.ID)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestRenameWindowHonoursTarget(t *testing.T) {
 // nothing.
 func TestRenameWindowRefusals(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	before := w1.Name
 

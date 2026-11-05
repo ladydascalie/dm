@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/session"
 	"dm/internal/wire"
 )
 
@@ -17,7 +18,7 @@ func boxSession(t *testing.T) (*server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("DM_STATE", dir)
-	st := newState("boxwait")
+	st := session.NewState("boxwait")
 	rootPane(st)
 	s := railServer(st)
 	sock := filepath.Join(dir, "s.sock")
@@ -229,7 +230,7 @@ func TestBoxWaitDisconnectReleases(t *testing.T) {
 func TestBoxWaitShellInPane(t *testing.T) {
 	s, sock := boxSession(t)
 	s.mu.Lock()
-	pane := s.st.win().Focus
+	pane := s.st.ActiveWindow().Focus
 	s.mu.Unlock()
 	if pane == "" {
 		t.Fatal("the session has no pane")

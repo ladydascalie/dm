@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/wire"
 )
 
@@ -65,14 +66,14 @@ func screenPane(t *testing.T, session, id string) {
 func queueServer(t *testing.T, name string) (*server, string, string) {
 	t.Helper()
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState(name)
-	w := st.win()
-	a := w.newPaneID()
-	b := w.newPaneID()
+	st := session.NewState(name)
+	w := st.ActiveWindow()
+	a := w.NewPaneID()
+	b := w.NewPaneID()
 	w.Root = &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: a}, {Pane: b}}}
 	w.Focus = a
-	st.Panes[a] = &PaneState{}
-	st.Panes[b] = &PaneState{}
+	st.Panes[a] = &session.PaneState{}
+	st.Panes[b] = &session.PaneState{}
 	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
 		t.Fatal(err)
 	}

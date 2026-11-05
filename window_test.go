@@ -6,38 +6,39 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/session"
 	"dm/internal/wire"
 )
 
 // windowServer is an in-process server with no clients. closeWindow only needs
 // the state and the pane table.
-func windowServer(t *testing.T) (*server, *State) {
+func windowServer(t *testing.T) (*server, *session.State) {
 	t.Helper()
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("win")
+	st := session.NewState("win")
 	return railServer(st), st
 }
 
 // addWindow appends a window with one focused pane to the active workspace.
-func addWindow(st *State, name string) (*Window, string) {
-	w := &Window{ID: st.newWindowID(), Name: name}
-	id := w.newPaneID()
+func addWindow(st *session.State, name string) (*session.Window, string) {
+	w := &session.Window{ID: st.NewWindowID(), Name: name}
+	id := w.NewPaneID()
 	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
-	st.Panes[id] = &PaneState{}
-	st.ws().Windows = append(st.ws().Windows, w)
+	st.Panes[id] = &session.PaneState{}
+	st.ActiveWorkspace().Windows = append(st.ActiveWorkspace().Windows, w)
 	return w, id
 }
 
 // addWorkspace appends a workspace with one window and one focused pane.
-func addWorkspace(st *State, name string) (*Workspace, *Window, string) {
-	ws := &Workspace{ID: st.newWorkspaceID(), Name: name}
-	w := &Window{ID: st.newWindowID(), Name: name}
-	id := w.newPaneID()
+func addWorkspace(st *session.State, name string) (*session.Workspace, *session.Window, string) {
+	ws := &session.Workspace{ID: st.NewWorkspaceID(), Name: name}
+	w := &session.Window{ID: st.NewWindowID(), Name: name}
+	id := w.NewPaneID()
 	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
-	ws.Windows = []*Window{w}
-	st.Panes[id] = &PaneState{}
+	ws.Windows = []*session.Window{w}
+	st.Panes[id] = &session.PaneState{}
 	st.Workspaces = append(st.Workspaces, ws)
 	return ws, w, id
 }
@@ -88,7 +89,7 @@ func (p *paneProbe) waitKill(t *testing.T) []wire.Msg {
 
 func TestCloseWindowKillsPanesAndKeepsTheRest(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	p1 := rootPane(st)
 	w2, p2 := addWindow(st, "two")
@@ -127,14 +128,14 @@ func TestCloseWindowKillsPanesAndKeepsTheRest(t *testing.T) {
 	default:
 	}
 
-	if ws.Active != 0 || st.win().ID != w1.ID {
-		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.win().ID, w1.ID)
+	if ws.Active != 0 || st.ActiveWindow().ID != w1.ID {
+		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.ActiveWindow().ID, w1.ID)
 	}
 }
 
 func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	p1 := rootPane(st)
 	probe := probePane(t, s, p1)
@@ -149,8 +150,8 @@ func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
 	if len(ws.Windows) != 1 || ws.Windows[0].ID != w1.ID {
 		t.Fatalf("windows after refusal = %+v", ws.Windows)
 	}
-	if st.Active != 0 || st.win().ID != w1.ID {
-		t.Fatalf("active after refusal = %d %q, want 0 %q", st.Active, st.win().ID, w1.ID)
+	if st.Active != 0 || st.ActiveWindow().ID != w1.ID {
+		t.Fatalf("active after refusal = %d %q, want 0 %q", st.Active, st.ActiveWindow().ID, w1.ID)
 	}
 	if _, ok := st.Panes[p1]; !ok {
 		t.Fatalf("pane state %q dropped by a refused close", p1)
@@ -170,7 +171,7 @@ func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
 // workspace and its panes untouched.
 func TestCloseWindowLastWindowDropsBackgroundWorkspace(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	p1 := rootPane(st)
 	_, w2, p2 := addWorkspace(st, "two")
@@ -198,8 +199,8 @@ func TestCloseWindowLastWindowDropsBackgroundWorkspace(t *testing.T) {
 	if _, ok := s.panes[p1]; !ok {
 		t.Fatalf("active pane conn %q was killed with the other workspace", p1)
 	}
-	if st.Active != 0 || st.win().ID != w1.ID || len(ws.Windows) != 1 {
-		t.Fatalf("active = %d %q, want 0 %q with one window", st.Active, st.win().ID, w1.ID)
+	if st.Active != 0 || st.ActiveWindow().ID != w1.ID || len(ws.Windows) != 1 {
+		t.Fatalf("active = %d %q, want 0 %q with one window", st.Active, st.ActiveWindow().ID, w1.ID)
 	}
 
 	msgs := probe2.waitKill(t)
@@ -217,7 +218,7 @@ func TestCloseWindowLastWindowDropsBackgroundWorkspace(t *testing.T) {
 // workspace leaves the active index and its window on a real one.
 func TestCloseWindowLastWindowDropsActiveWorkspace(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	p1 := rootPane(st)
 	_, w2, p2 := addWorkspace(st, "two")
@@ -236,10 +237,10 @@ func TestCloseWindowLastWindowDropsActiveWorkspace(t *testing.T) {
 	if st.Active < 0 || st.Active >= len(st.Workspaces) {
 		t.Fatalf("active workspace = %d, want a real one", st.Active)
 	}
-	if len(st.ws().Windows) == 0 {
+	if len(st.ActiveWorkspace().Windows) == 0 {
 		t.Fatal("active workspace has no windows")
 	}
-	if got := st.win().ID; got != w1.ID {
+	if got := st.ActiveWindow().ID; got != w1.ID {
 		t.Fatalf("active window = %q, want %q", got, w1.ID)
 	}
 	if _, ok := st.Panes[p1]; !ok {
@@ -276,7 +277,7 @@ func TestCloseWindowUnknownID(t *testing.T) {
 
 func TestCloseWindowBackgroundKeepsActive(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	rootPane(st)
 	w2, _ := addWindow(st, "two")
@@ -286,8 +287,8 @@ func TestCloseWindowBackgroundKeepsActive(t *testing.T) {
 	if err := s.closeWindow(w2.ID); err != nil {
 		t.Fatalf("closeWindow(%q): %v", w2.ID, err)
 	}
-	if ws.Active != 1 || st.win().ID != w3.ID {
-		t.Fatalf("active window = %d %q, want 1 %q", ws.Active, st.win().ID, w3.ID)
+	if ws.Active != 1 || st.ActiveWindow().ID != w3.ID {
+		t.Fatalf("active window = %d %q, want 1 %q", ws.Active, st.ActiveWindow().ID, w3.ID)
 	}
 	if len(ws.Windows) != 2 || ws.Windows[0].ID != w1.ID || ws.Windows[1].ID != w3.ID {
 		t.Fatalf("windows after background close = %+v", ws.Windows)
@@ -296,7 +297,7 @@ func TestCloseWindowBackgroundKeepsActive(t *testing.T) {
 
 func TestCloseWindowBelowActiveDecrements(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	rootPane(st)
 	w2, _ := addWindow(st, "two")
@@ -306,8 +307,8 @@ func TestCloseWindowBelowActiveDecrements(t *testing.T) {
 	if err := s.closeWindow(w1.ID); err != nil {
 		t.Fatalf("closeWindow(%q): %v", w1.ID, err)
 	}
-	if ws.Active != 0 || st.win().ID != w2.ID {
-		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.win().ID, w2.ID)
+	if ws.Active != 0 || st.ActiveWindow().ID != w2.ID {
+		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.ActiveWindow().ID, w2.ID)
 	}
 	if len(ws.Windows) != 2 || ws.Windows[0].ID != w2.ID || ws.Windows[1].ID != w3.ID {
 		t.Fatalf("windows after close = %+v", ws.Windows)
@@ -316,7 +317,7 @@ func TestCloseWindowBelowActiveDecrements(t *testing.T) {
 
 func TestCloseWindowActiveClampsToLast(t *testing.T) {
 	s, st := windowServer(t)
-	ws := st.ws()
+	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
 	rootPane(st)
 	w2, _ := addWindow(st, "two")
@@ -325,8 +326,8 @@ func TestCloseWindowActiveClampsToLast(t *testing.T) {
 	if err := s.closeWindow(w1.ID); err != nil {
 		t.Fatalf("closeWindow(%q): %v", w1.ID, err)
 	}
-	if ws.Active != 0 || st.win().ID != w2.ID {
-		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.win().ID, w2.ID)
+	if ws.Active != 0 || st.ActiveWindow().ID != w2.ID {
+		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.ActiveWindow().ID, w2.ID)
 	}
 }
 
