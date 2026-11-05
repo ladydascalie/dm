@@ -1,10 +1,9 @@
-package main
+package panel
 
 import (
 	"bytes"
 
 	"dm/internal/layout"
-	"dm/internal/panel"
 	"dm/internal/theme"
 
 	"github.com/hinshun/vt10x"
@@ -23,20 +22,14 @@ type FloatingPane struct {
 	// which keys it takes.
 	Title string
 	Hint  string
-	// Paint, when set, writes the float's content itself and Draw skips the
-	// VT path. It receives the content Rect, so a float with no terminal can
-	// still paint rows inside the box.
+	// Paint, when set, writes the float's content itself. It receives the
+	// content Rect, so a float with no terminal can still paint rows inside
+	// the box. The caller owns the content: the panel never reads VT.
 	Paint func(buf *bytes.Buffer, inner layout.Rect)
-	last  paint
 }
 
-// Draw writes the pane's content and border into buf.
-func (f *FloatingPane) Draw(buf *bytes.Buffer, th theme.Theme, hover *selRange) {
-	paint := func(b *bytes.Buffer, inner layout.Rect) {
-		drawPaneFrom(b, f.VT, f.Rect, 0, nil, hover)
-	}
-	if f.Paint != nil {
-		paint = f.Paint
-	}
-	panel.PaintPanel(buf, th, f.Rect, panel.PanelTitle{Text: f.Title, Style: panel.PanelTitleStyle}, f.Hint, f.Active, paint)
+// Draw writes the pane's content and border into buf. The content comes from
+// Paint alone; a float with no Paint paints its border and nothing inside.
+func (f *FloatingPane) Draw(buf *bytes.Buffer, th theme.Theme) {
+	PaintPanel(buf, th, f.Rect, PanelTitle{Text: f.Title, Style: PanelTitleStyle}, f.Hint, f.Active, f.Paint)
 }

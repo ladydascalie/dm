@@ -31,7 +31,8 @@ func boxEntries() []box.Entry {
 func boxScreen(t *testing.T, b *boxView, cols, rows int) vt10x.Terminal {
 	t.Helper()
 	var buf bytes.Buffer
-	b.float.Draw(&buf, theme.DefaultTheme(), nil)
+	b.float.Paint = floatVTPaint(b.float.VT, nil)
+	b.float.Draw(&buf, theme.DefaultTheme())
 	screen := vt10x.New(vt10x.WithSize(cols, rows))
 	if _, err := screen.Write(buf.Bytes()); err != nil {
 		t.Fatalf("replay the box: %v", err)

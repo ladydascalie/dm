@@ -13,6 +13,7 @@ import (
 
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -52,7 +53,7 @@ type tui struct {
 	armed  bool
 	toasts []toast // oldest first, newest last
 	// floats are arbitrary floating panes rendered over the main layout.
-	floats []*FloatingPane
+	floats []*panel.FloatingPane
 	// hover is the URL under the pointer while ctrl is held, so the frame can
 	// underline it. It is nil when no link is hovered.
 	hover *linkHover
@@ -207,8 +208,26 @@ type lastFrame struct {
 	menu   paint
 	rename paint
 
+	// floats holds each float's last bytes, keyed by float ID. The widget
+	// keeps no frame state of its own.
+	floats map[string]*paint
+
 	divRect layout.Rect // divider zone the last frame painted
 	cur     string      // cursor block the last frame wrote
+}
+
+// floatPaint returns the last bytes of the float with this ID, creating the
+// entry on first sight.
+func (l *lastFrame) floatPaint(id string) *paint {
+	if l.floats == nil {
+		l.floats = make(map[string]*paint)
+	}
+	p := l.floats[id]
+	if p == nil {
+		p = &paint{}
+		l.floats[id] = p
+	}
+	return p
 }
 
 // histCache is one pane's replay bookkeeping: the rect the ring was asked for
