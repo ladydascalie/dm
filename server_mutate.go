@@ -10,6 +10,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -101,7 +102,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	if rp.alt {
 		return nil, fmt.Errorf("pane %q is on the alternate screen", id)
 	}
-	rows := replayRows(rp.data, r.W, r.H, n+r.H)
+	rows := vt.ReplayRows(rp.data, r.W, r.H, n+r.H)
 	if len(rows) == 0 {
 		return []string{}, nil
 	}
@@ -114,7 +115,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	// directly above the live screen and are a real window, not padding above
 	// the oldest content.
 	top := 0
-	for top < end && blankGlyphRow(rows[top]) {
+	for top < end && vt.BlankGlyphRow(rows[top]) {
 		top++
 	}
 	if top == end {
@@ -129,7 +130,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	}
 	out := make([]string, 0, end-start)
 	for y := start; y < end; y++ {
-		out = append(out, plainRow(rows[y]))
+		out = append(out, vt.PlainRow(rows[y]))
 	}
 	return out, nil
 }

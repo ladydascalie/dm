@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -303,9 +304,9 @@ func paneRowSigs(pp panePaint) []uint64 {
 		for x := 0; x < pp.rect.W; x++ {
 			var g vt10x.Glyph
 			if x < cols && pp.row0+row < rows {
-				g = normCell(pp.vt.Cell(x, pp.row0+row))
+				g = vt.NormCell(pp.vt.Cell(x, pp.row0+row))
 			} else {
-				g = normCell(g)
+				g = vt.NormCell(g)
 			}
 			h = mix(h, uint64(g.Char))
 			h = mix(h, uint64(g.FG))

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"dm/internal/paths"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/creack/pty"
@@ -416,7 +417,7 @@ func (p *paneProc) serve(c net.Conn) {
 				Res: jsonRaw(map[string]any{"title": title, "dead": dead})})
 		case "screen":
 			p.mu.Lock()
-			data := screenBytes(p.vt)
+			data := vt.ScreenBytes(p.vt)
 			alt, mouse := modeInfo(p.vt.Mode())
 			p.mu.Unlock()
 			_ = sc.send(wire.Msg{Type: "screen", Data: data, Res: modeRes(alt, mouse)})

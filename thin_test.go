@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -204,26 +205,26 @@ func TestThinRailFocusBackground(t *testing.T) {
 		thinPane("w2p1", "s2", "w2", "blocked", false),
 	})
 	ground := func(c theme.RGB) vt10x.Color { return vt10x.Color(c.R<<16 | c.G<<8 | c.B) }
-	vt := thinScreen(t, snap)
-	vt.Lock()
-	defer vt.Unlock()
+	screen := thinScreen(t, snap)
+	screen.Lock()
+	defer screen.Unlock()
 	for y := 0; y < snap.Rows-1; y++ {
 		want := ground(theme.DefaultTheme().Palette.RailBG)
 		if y == 1 {
 			want = ground(theme.DefaultTheme().Palette.RailFocusBG)
 		}
 		for x := 0; x < snap.Rail; x++ {
-			if g := vt.Cell(x, y); g.BG != want {
+			if g := screen.Cell(x, y); g.BG != want {
 				t.Fatalf("cell %d,%d bg = %v, want %v", x, y, g.BG, want)
 			}
 		}
 	}
 	// The focused row is the bold one, on its glyph cell.
-	focus := vt.Cell(2, 1)
-	if focus.Char != '○' || focus.Mode&attrBold == 0 {
+	focus := screen.Cell(2, 1)
+	if focus.Char != '○' || focus.Mode&vt.AttrBold == 0 {
 		t.Fatalf("focused glyph = %q mode %d, want a bold ○", focus.Char, focus.Mode)
 	}
-	if g := vt.Cell(2, 0); g.Mode&attrBold != 0 {
+	if g := screen.Cell(2, 0); g.Mode&vt.AttrBold != 0 {
 		t.Fatalf("unfocused glyph is bold: mode %d", g.Mode)
 	}
 }

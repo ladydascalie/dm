@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -370,7 +371,7 @@ func checkFrame(t *testing.T, live vt10x.Terminal, tr *tui, label string, raw []
 	cols, rows := live.Size()
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {
-			a, b := normCell(live.Cell(x, y)), normCell(ref.Cell(x, y))
+			a, b := vt.NormCell(live.Cell(x, y)), vt.NormCell(ref.Cell(x, y))
 			if a.Char != b.Char || a.FG != b.FG || a.BG != b.BG || a.Mode != b.Mode {
 				t.Fatalf("%s: cell %d,%d live=%q/%v/%v/%v ref=%q/%v/%v/%v byte=%q",
 					label, x, y, a.Char, a.FG, a.BG, a.Mode, b.Char, b.FG, b.BG, b.Mode, frameBytes(tr))

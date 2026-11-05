@@ -15,6 +15,7 @@ import (
 
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -586,8 +587,8 @@ func (t *tui) requestHistory(p *wire.PaneInfo) {
 // the ring the server sent for the pane's current rect. The live screen keeps
 // updating behind it; the tall one is a frozen snapshot.
 func (t *tui) buildScroll(p *wire.PaneInfo) {
-	rows := replayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
-	t.scrollVT = buildTall(rows, p.Rect.W)
+	rows := vt.ReplayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
+	t.scrollVT = vt.BuildTall(rows, p.Rect.W)
 	_, t.maxOff = scrollStart(t.scrollVT, p.Rect.H, 0)
 }
 
@@ -934,19 +935,19 @@ func openURL(url string) error {
 
 // rowText reads one row of vt as text. Trailing blanks go. It takes the vt
 // lock, so the caller must not hold it.
-func rowText(vt vt10x.View, w, row int) string {
-	if vt == nil || w < 1 {
+func rowText(v vt10x.View, w, row int) string {
+	if v == nil || w < 1 {
 		return ""
 	}
-	cols, rows := vt.Size()
-	vt.Lock()
-	defer vt.Unlock()
+	cols, rows := v.Size()
+	v.Lock()
+	defer v.Unlock()
 	if row < 0 || row >= rows {
 		return ""
 	}
 	var b strings.Builder
 	for x := 0; x < w && x < cols; x++ {
-		g := normCell(vt.Cell(x, row))
+		g := vt.NormCell(v.Cell(x, row))
 		if g.Char < 0x20 {
 			b.WriteByte(' ')
 		} else {
