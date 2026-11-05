@@ -27,9 +27,11 @@ type binding struct {
 	action string
 }
 
-// mode is one keymap: action to key name, and key bytes to action.
+// mode is one keymap: action to key name, key bytes to action, and the help
+// section tag per action.
 type mode struct {
 	actions  map[string]string
+	sections map[string]string
 	bindings []binding
 }
 
@@ -115,6 +117,16 @@ func (c *Config) Key(modeName, action string) string {
 		return c.prefixName
 	}
 	return key
+}
+
+// HelpSection returns the help section tag for action in mode. It returns ""
+// when the action is unbound or carries no tag.
+func (c *Config) HelpSection(modeName, action string) string {
+	m, ok := c.modes[modeName]
+	if !ok {
+		return ""
+	}
+	return m.sections[action]
 }
 
 // HasMode reports whether the config carries a keymap mode. A config that
@@ -209,16 +221,30 @@ var helpRows = []helpRow{
 	{[]string{"reload"}, "reload config"},
 }
 
-// HelpRows returns the help overlay's display rows: key label and action text,
-// in the current keymap table's order. A row is omitted when none of its
-// actions is bound.
-func (c *Config) HelpRows() [][2]string {
-	var rows [][2]string
+// HelpEntry is one row of the help overlay: the key label, the action text and
+// the section the row belongs to. Section is empty when no bound action in the
+// row carries a help tag.
+type HelpEntry struct {
+	Key     string
+	Action  string
+	Section string
+}
+
+// HelpEntries returns the help overlay's rows: key label, action text and
+// section, in the current keymap table's order. A row is omitted when none of
+// its actions is bound. Section comes from the first bound action in the row
+// that carries a help tag.
+func (c *Config) HelpEntries() []HelpEntry {
+	var entries []HelpEntry
 	for _, row := range helpRows {
 		keys := make([]string, 0, len(row.actions))
+		section := ""
 		for _, action := range row.actions {
 			if key := c.Key("main", action); key != "" {
 				keys = append(keys, key)
+				if section == "" {
+					section = c.HelpSection("main", action)
+				}
 			}
 		}
 		if len(keys) == 0 {
@@ -243,7 +269,21 @@ func (c *Config) HelpRows() [][2]string {
 				label = "0-9"
 			}
 		}
-		rows = append(rows, [2]string{label, row.label})
+		entries = append(entries, HelpEntry{Key: label, Action: row.label, Section: section})
+	}
+	return entries
+}
+
+// HelpRows returns the help overlay's display rows: key label and action text,
+// in the current keymap table's order. It is HelpEntries without the section.
+func (c *Config) HelpRows() [][2]string {
+	entries := c.HelpEntries()
+	if len(entries) == 0 {
+		return nil
+	}
+	rows := make([][2]string, len(entries))
+	for i, e := range entries {
+		rows[i] = [2]string{e.Key, e.Action}
 	}
 	return rows
 }
@@ -536,8 +576,11 @@ func parseKeymaps(toks []token, cfg *Config) error {
 			i++
 			m, ok := cfg.modes[modeName]
 			if !ok {
-				m = &mode{actions: make(map[string]string)}
+				m = &mode{actions: make(map[string]string), sections: make(map[string]string)}
 				cfg.modes[modeName] = m
+			}
+			if m.sections == nil {
+				m.sections = make(map[string]string)
 			}
 			for {
 				if i >= len(toks) {
@@ -559,6 +602,22 @@ func parseKeymaps(toks []token, cfg *Config) error {
 				key := toks[i].value
 				keyLine := toks[i].line
 				i++
+				section := ""
+				if i < len(toks) && toks[i].line == keyLine && toks[i].kind != tokRBrace && toks[i].kind != tokEOF {
+					tag := toks[i]
+					if tag.kind != tokIdent || tag.value != "help" {
+						return fmt.Errorf("line %d: expected help, got %q", tag.line, tag.value)
+					}
+					i++
+					if i >= len(toks) || toks[i].kind != tokString {
+						return fmt.Errorf("line %d: expected quoted section after help", tag.line)
+					}
+					section = toks[i].value
+					if section == "" {
+						return fmt.Errorf("line %d: empty help section", toks[i].line)
+					}
+					i++
+				}
 				if key == "" {
 					return fmt.Errorf("line %d: empty key for action %q", keyLine, action)
 				}
@@ -573,6 +632,9 @@ func parseKeymaps(toks []token, cfg *Config) error {
 					return fmt.Errorf("line %d: key %q: %w", keyLine, key, err)
 				}
 				m.actions[action] = key
+				if section != "" {
+					m.sections[action] = section
+				}
 				for _, seq := range seqs {
 					m.bindings = append(m.bindings, binding{bytes: seq, action: action})
 				}
@@ -611,6 +673,7 @@ func parseConfig(src string) (*Config, error) {
 // text, and LoadDefault parses it.
 const defaultConfigKDL = `// dm keybinding defaults.
 // Edit this file to remap keys. A missing file uses these defaults.
+// Add help "Section" after a key to move its row in the help box.
 
 prefix "ctrl+b"
 

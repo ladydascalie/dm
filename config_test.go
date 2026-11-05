@@ -404,6 +404,128 @@ keymap "main" {
 	}
 }
 
+// TestConfigHelpTag proves a tagged binding carries its section in HelpEntries
+// and in the per-mode lookup, and an untagged binding carries none.
+func TestConfigHelpTag(t *testing.T) {
+	src := `keymap "main" {
+	"split-right" "|" help "Pane"
+	"split-down" "-"
+}`
+	cfg, err := parseConfig(src)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if got := cfg.HelpSection("main", "split-right"); got != "Pane" {
+		t.Errorf("HelpSection(main, split-right) = %q, want Pane", got)
+	}
+	if got := cfg.HelpSection("main", "split-down"); got != "" {
+		t.Errorf("HelpSection(main, split-down) = %q, want empty", got)
+	}
+	entries := cfg.HelpEntries()
+	if len(entries) != 2 {
+		t.Fatalf("HelpEntries() = %#v, want 2 rows", entries)
+	}
+	if entries[0].Key != "|" || entries[0].Action != "split right" || entries[0].Section != "Pane" {
+		t.Errorf("entry 0 = %#v, want | / split right / Pane", entries[0])
+	}
+	if entries[1].Key != "-" || entries[1].Action != "split down" || entries[1].Section != "" {
+		t.Errorf("entry 1 = %#v, want - / split down / empty", entries[1])
+	}
+}
+
+// TestConfigHelpTagPerMode proves a tag in one mode does not reach another
+// mode's row.
+func TestConfigHelpTagPerMode(t *testing.T) {
+	src := `keymap "main" {
+	"split-right" "|"
+}
+keymap "scroll" {
+	"split-right" "|" help "Pane"
+}`
+	cfg, err := parseConfig(src)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if got := cfg.HelpSection("scroll", "split-right"); got != "Pane" {
+		t.Errorf("HelpSection(scroll, split-right) = %q, want Pane", got)
+	}
+	if got := cfg.HelpSection("main", "split-right"); got != "" {
+		t.Errorf("HelpSection(main, split-right) = %q, want empty", got)
+	}
+	entries := cfg.HelpEntries()
+	if len(entries) != 1 {
+		t.Fatalf("HelpEntries() = %#v, want 1 row", entries)
+	}
+	if entries[0].Section != "" {
+		t.Errorf("main row section = %q, want empty", entries[0].Section)
+	}
+}
+
+// TestConfigHelpTagMalformed proves each malformed tag fails with its line.
+func TestConfigHelpTagMalformed(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "no section",
+			src:  "keymap \"main\" {\n\t\"a\" \"x\" help\n}",
+			want: "line 2: expected quoted section after help",
+		},
+		{
+			name: "empty section",
+			src:  "keymap \"main\" {\n\t\"a\" \"x\" help \"\"\n}",
+			want: "line 2: empty help section",
+		},
+		{
+			name: "unknown third token",
+			src:  "keymap \"main\" {\n\t\"a\" \"x\" bogus \"Y\"\n}",
+			want: "line 2: expected help, got \"bogus\"",
+		},
+		{
+			name: "string third token",
+			src:  "keymap \"main\" {\n\t\"a\" \"x\" \"Y\"\n}",
+			want: "line 2: expected help, got \"Y\"",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parseConfig(c.src)
+			if err == nil {
+				t.Fatal("parseConfig accepted a malformed tag")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error = %q, want %q", err, c.want)
+			}
+		})
+	}
+}
+
+// TestConfigHelpEntriesDefault proves the default config has no tags and that
+// HelpRows is HelpEntries without the section.
+func TestConfigHelpEntriesDefault(t *testing.T) {
+	cfg := LoadDefault()
+	entries := cfg.HelpEntries()
+	if len(entries) == 0 {
+		t.Fatal("HelpEntries() returned no rows")
+	}
+	for _, e := range entries {
+		if e.Section != "" {
+			t.Errorf("default entry %#v carries a section", e)
+		}
+	}
+	rows := cfg.HelpRows()
+	if len(rows) != len(entries) {
+		t.Fatalf("HelpRows() has %d rows, HelpEntries() has %d", len(rows), len(entries))
+	}
+	for i := range rows {
+		if rows[i][0] != entries[i].Key || rows[i][1] != entries[i].Action {
+			t.Errorf("row %d = %#v, entry = %#v", i, rows[i], entries[i])
+		}
+	}
+}
+
 // writeTheme puts a theme file in dir/themes and returns its path.
 func writeTheme(t *testing.T, dir, name, src string) string {
 	t.Helper()
