@@ -14,6 +14,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -38,14 +39,14 @@ type keymapView struct {
 	matches   []int
 	match     int
 	searching bool
-	float     *FloatingPane
+	float     *panel.FloatingPane
 	snap      *wire.Snapshot
 }
 
 // newKeymapView opens the float on a screen. The rows are built once, so a
 // scroll never re-reads the config.
 func newKeymapView(snap *wire.Snapshot, cfg *keymap.Config) *keymapView {
-	k := &keymapView{float: &FloatingPane{ID: keymapViewID, Active: true}, snap: snap}
+	k := &keymapView{float: &panel.FloatingPane{ID: keymapViewID, Active: true}, snap: snap}
 	k.rows = keymapRows(cfg)
 	k.sync(snap)
 	return k

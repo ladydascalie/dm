@@ -17,6 +17,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/panel"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -72,7 +73,7 @@ type boxView struct {
 	watchAt   time.Time
 	watchWant bool
 
-	float *FloatingPane
+	float *panel.FloatingPane
 	// snap sizes the float: the view fits the log until it reaches its cap,
 	// so a short log reads in a short box and a long one fills the screen.
 	snap *wire.Snapshot
@@ -81,7 +82,7 @@ type boxView struct {
 // newBoxView opens the float on a screen. The log stays empty until the reply
 // lands.
 func newBoxView(snap *wire.Snapshot, th theme.Theme) *boxView {
-	b := &boxView{float: &FloatingPane{ID: "box", Active: true}, snap: snap}
+	b := &boxView{float: &panel.FloatingPane{ID: "box", Active: true}, snap: snap}
 	b.sync(snap, th)
 	return b
 }

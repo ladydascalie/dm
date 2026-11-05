@@ -83,10 +83,28 @@ func (t *tui) draw() {
 	}
 
 	var floatBufs []bytes.Buffer
+	floatPaints := make([]*paint, 0, len(t.floats))
 	for _, f := range t.floats {
+		if f.VT != nil {
+			f.Paint = floatVTPaint(f.VT, t.hoverFor(f.ID, f.Rect.W))
+		}
 		var fb bytes.Buffer
-		f.Draw(&fb, th, t.hoverFor(f.ID, f.Rect.W))
+		f.Draw(&fb, th)
 		floatBufs = append(floatBufs, fb)
+		floatPaints = append(floatPaints, t.last.floatPaint(f.ID))
+	}
+	// A float that left the stack drops its last bytes, so a float that comes
+	// back paints whole instead of matching a frame it never wrote.
+	if len(t.last.floats) > len(t.floats) {
+		live := make(map[string]bool, len(t.floats))
+		for _, f := range t.floats {
+			live[f.ID] = true
+		}
+		for id := range t.last.floats {
+			if !live[id] {
+				delete(t.last.floats, id)
+			}
+		}
 	}
 	dirty := map[int]bool{}
 	type band struct {
@@ -110,7 +128,7 @@ func (t *tui) draw() {
 		{p: &t.last.rename, buf: &rename, overlay: true},
 	}
 	for i := range t.floats {
-		bands = append(bands, band{p: &t.floats[i].last, buf: &floatBufs[i], overlay: true})
+		bands = append(bands, band{p: floatPaints[i], buf: &floatBufs[i], overlay: true})
 	}
 	// An overlay paints on top of everything, so the rows it leaves need the
 	// whole picture back: the panes under it and the bands around it. Without a

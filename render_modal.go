@@ -129,7 +129,7 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 	if !ok {
 		return
 	}
-	f := &FloatingPane{
+	f := &panel.FloatingPane{
 		ID:    "rename",
 		Rect:  inner,
 		Title: "rename " + k + " " + id,
@@ -138,7 +138,7 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 			renameInputRow(b, th, r, draft)
 		},
 	}
-	f.Draw(buf, th, nil)
+	f.Draw(buf, th)
 }
 
 // renameInputRow paints the float's one input row: the dim label, the draft and
@@ -189,7 +189,7 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, keys []keymap.H
 	if !ok {
 		return
 	}
-	f := &FloatingPane{
+	f := &panel.FloatingPane{
 		Rect:  layout.Rect{X: g.x, Y: g.y, W: g.inner, H: g.h},
 		Title: "prefix",
 		Hint:  "esc",
@@ -197,7 +197,7 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, keys []keymap.H
 			helpBoxRows(b, inner, g)
 		},
 	}
-	f.Draw(buf, th, nil)
+	f.Draw(buf, th)
 }
 
 // displayRow is one row of the help box: a category header or a key-action pair.
