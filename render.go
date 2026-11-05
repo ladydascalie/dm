@@ -414,26 +414,28 @@ const (
 // railItem is one sidebar row. It exists so drawing and hit-testing share the
 // same grouping.
 type railItem struct {
-	kind      railKind
-	text      string
-	workspace string
-	folder    string
-	branch    string
-	worktree  string
-	message   string
-	pane      string
-	window    string
-	status    string
-	count     int
-	added     int
-	deleted   int
-	accent    rgb
-	agent     bool
-	dirty     bool
-	inRepo    bool
-	folded    bool
-	focus     bool
-	active    bool
+	kind       railKind
+	text       string
+	workspace  string
+	folder     string
+	cwd        string
+	branch     string
+	worktree   string
+	message    string
+	pane       string
+	window     string
+	windowName string
+	status     string
+	count      int
+	added      int
+	deleted    int
+	accent     rgb
+	agent      bool
+	dirty      bool
+	inRepo     bool
+	folded     bool
+	focus      bool
+	active     bool
 }
 
 // railItems flattens a snapshot into sidebar rows in the server's order: a
@@ -533,10 +535,12 @@ func railItems(snap *Snapshot) []railItem {
 			win = p.Window
 			item := railItem{
 				kind: railWindow, text: p.WindowName, window: p.Window,
+				windowName: p.WindowName, workspace: p.Workspace,
 				folded: !p.WindowUnfolded,
 			}
 			if src, ok := source(p.Window); ok {
 				item.folder = railFolder(src.Cwd, src.Root)
+				item.cwd = src.Cwd
 				item.branch = src.Branch
 				item.worktree = src.Worktree
 				item.inRepo = src.InRepo
@@ -549,6 +553,8 @@ func railItems(snap *Snapshot) []railItem {
 			if item.message != "" && p.WindowUnfolded {
 				out = append(out, railItem{
 					kind: railWindowNote, text: item.message, window: p.Window,
+					windowName: p.WindowName, workspace: p.Workspace,
+					folder: item.folder, cwd: item.cwd,
 				})
 			}
 		}
@@ -572,6 +578,7 @@ func railPaneRow(p AllPane) railItem {
 	}
 	return railItem{
 		kind: railPane, text: label, pane: p.ID,
+		window: p.Window, windowName: p.WindowName, workspace: p.Workspace,
 		status: p.Status, agent: p.Agent, focus: p.Focus,
 	}
 }
@@ -991,6 +998,23 @@ func railWindowAt(snap *Snapshot, x, y int) string {
 		return ""
 	}
 	return items[y].window
+}
+
+// railItemAt returns the rail row under x,y. A point outside the rail, on the
+// bottom control row, or past the last item reports false. The gap row between
+// workspace blocks is a row, so it answers true.
+func railItemAt(snap *Snapshot, x, y int) (railItem, bool) {
+	if snap == nil || snap.Rail <= 0 {
+		return railItem{}, false
+	}
+	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+		return railItem{}, false
+	}
+	items := railItems(snap)
+	if y >= len(items) {
+		return railItem{}, false
+	}
+	return items[y], true
 }
 
 // railControlAt reports whether x,y is the rail's bottom control row, whose

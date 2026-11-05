@@ -69,6 +69,10 @@ type tui struct {
 	sessions []SessionInfo
 	sel      int
 	menu     *menu
+	// menuPress is set when a right press opens a menu. The release of that
+	// press belongs to nobody, so the menu swallows it instead of picking the
+	// row under the pointer.
+	menuPress bool
 	// renameDraft is the text the rename prompt holds while mode is "rename".
 	renameDraft string
 	// renameID is the id of the workspace or window the prompt renames. The
@@ -700,6 +704,86 @@ func (t *tui) openMenu(p *PaneInfo, x, y int) {
 	y = clampInt(y, 0, t.snap.Rows-h)
 	t.menu = &menu{x: x, y: y, w: w, title: title, pane: p.ID, items: items}
 	t.mode = "menu"
+	t.armed = false
+	t.dirty = true
+}
+
+// openRailMenu builds the sidebar menu for the row under a right press. The
+// items depend on the row kind, and every item carries the main keymap's hint
+// for its action. The menu is the pane menu's type, anchored at the click and
+// clamped to the screen.
+func (t *tui) openRailMenu(it railItem, x, y int) {
+	if t.snap == nil {
+		return
+	}
+	var items []menuItem
+	switch it.kind {
+	case railWorkspace:
+		items = []menuItem{
+			{label: "Rename workspace", action: "rename-workspace", run: func() {
+				t.openRenamePromptFor("workspace", it.workspace, it.text)
+			}},
+			{label: "Close workspace", action: "close-workspace", run: func() {
+				t.actionOn(it.workspace, "close-workspace", nil)
+			}},
+			{label: "New window", action: "new-window", run: func() {
+				t.actionOn(it.workspace, "new-window", nil)
+			}},
+			{label: "New workspace", action: "new-workspace", run: func() {
+				t.action("new-workspace", nil)
+			}},
+		}
+	case railWindow, railWindowNote:
+		items = []menuItem{
+			{label: "Rename window", action: "rename-window", run: func() {
+				t.openRenamePromptFor("window", it.window, it.windowName)
+			}},
+			{label: "Close window", action: "close-window", run: func() {
+				t.actionOn(it.window, "close-window", nil)
+			}},
+			{label: "New window", action: "new-window", run: func() {
+				t.actionOn(it.workspace, "new-window", func(m *Msg) { m.Cwd = it.cwd })
+			}},
+			{label: "Fold/unfold", action: "toggle-fold", run: func() {
+				t.actionOn(it.window, "toggle-fold", nil)
+			}},
+		}
+	case railPane:
+		items = []menuItem{
+			{label: "Focus", action: "focus", run: func() {
+				t.actionOn(it.pane, "focus", nil)
+			}},
+			{label: "Rename window", action: "rename-window", run: func() {
+				t.openRenamePromptFor("window", it.window, it.windowName)
+			}},
+			{label: "Close window", action: "close-window", run: func() {
+				t.actionOn(it.window, "close-window", nil)
+			}},
+			{label: "Fold/unfold", action: "toggle-fold", run: func() {
+				t.actionOn(it.window, "toggle-fold", nil)
+			}},
+		}
+	default:
+		return
+	}
+	// Each row's key label is the hint the configured main keymap gives it. An
+	// unbound action shows no key.
+	km := t.km()
+	for i := range items {
+		if items[i].action != "" {
+			items[i].key = km.Key("main", items[i].action)
+		}
+	}
+	w := 34
+	if w > t.snap.Cols-2 {
+		w = t.snap.Cols - 2
+	}
+	h := len(items) + 2
+	x = clampInt(x, 0, t.snap.Cols-w)
+	y = clampInt(y, 0, t.snap.Rows-h)
+	t.menu = &menu{x: x, y: y, w: w, title: it.text, items: items}
+	t.mode = "menu"
+	t.menuPress = true
 	t.armed = false
 	t.dirty = true
 }
@@ -2061,6 +2145,15 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			t.closeMenu()
 			return
 		}
+		if t.menuPress {
+			if ev.release {
+				t.menuPress = false
+				return
+			}
+			if ev.btn&32 == 0 {
+				t.menuPress = false
+			}
+		}
 		m := t.menu
 		inside := x >= m.x && x < m.x+m.w && y >= m.y && y < m.y+len(m.items)+2
 		row := m.itemAt(x, y)
@@ -2825,6 +2918,16 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	}
 	if ev.release {
 		t.railPress = false
+		return true
+	}
+	// A right press on a row opens the sidebar menu for that row. The press
+	// arms railPress and the menu swallows its release, so the pane menu
+	// never sees it.
+	if ev.btn&3 == 2 && ev.btn&32 == 0 && ev.btn&64 == 0 {
+		t.railPress = true
+		if it, ok := railItemAt(t.snap, x, y); ok {
+			t.openRailMenu(it, x, y)
+		}
 		return true
 	}
 	if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 {

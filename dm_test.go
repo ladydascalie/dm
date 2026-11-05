@@ -1847,11 +1847,12 @@ func TestRailClickFocusesPane(t *testing.T) {
 		t.Fatalf("pane click sent %+v, want focus w1p2", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 1, y: p.Rect.Y + 1})
-	// A right press in the rail must not open a pane menu.
+	// A right press in the rail opens the rail menu, not the pane menu.
 	tui.handleMouse(mouseEvent{btn: 2, x: 3, y: 4})
-	if tui.mode != "" || tui.menu != nil {
+	if tui.mode != "menu" || tui.menu == nil || tui.menu.pane != "" {
 		t.Fatalf("rail right press opened %q %+v", tui.mode, tui.menu)
 	}
+	tui.closeMenu()
 	// A wheel over a pane row must not focus it. SGR wheel-up is button 64.
 	tui.handleMouse(mouseEvent{btn: 64, x: 3, y: 4})
 	select {
