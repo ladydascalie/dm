@@ -1652,30 +1652,91 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 	buf.WriteString("\x1b[0m")
 }
 
-// drawRename paints the rename prompt as one full row above the status bar,
-// over the last pane row, on the rail ground. The label names the kind and the
-// id, and the caret is fixed: the draft takes what is left and loses its head
-// first, so a long name still shows its end and the caret stays on screen.
-// drawRename writes at most snap.Cols cells and touches one row. The kind is
+// renamePromptWidth is the inner width the rename float asks for. A narrower
+// pane area wins, so the box grows only as far as the cells allow.
+const renamePromptWidth = 40
+
+// renameBoxGeometry places the rename prompt's float over the pane area. The
+// interior is one input row; a border row sits above and below it. The box is
+// centred over the pane area and clamped clear of the rail, the toast row and
+// the status bar, so both borders own a row and no band under it is covered.
+// It reports false when the screen cannot hold the box.
+func renameBoxGeometry(cols, rows, rail int) (Rect, bool) {
+	if cols < 1 || rows < 5 {
+		return Rect{}, false
+	}
+	rail = effectiveRail(cols, rail)
+	avail := cols - rail - 2
+	if avail < 3 {
+		return Rect{}, false
+	}
+	w := renamePromptWidth
+	if w > avail {
+		w = avail
+	}
+	x := rail + (cols-rail-(w+2))/2
+	if x < rail {
+		x = rail
+	}
+	if x+w+2 > cols {
+		x = cols - w - 2
+	}
+	// The box is three rows: a top border, the input row and a bottom border.
+	// The toast row holds rows-2 and the bar rows-1, so the bottom border stops
+	// at rows-3.
+	top := (rows - 4) / 2
+	if top < 0 {
+		top = 0
+	}
+	if top > rows-5 {
+		top = rows - 5
+	}
+	return Rect{X: x + 1, Y: top + 1, W: w, H: 1}, true
+}
+
+// drawRename paints the rename prompt as a floating pane over the pane area.
+// The title names the kind and the id, the hint names the keys that submit and
+// cancel, and the one input row holds the label, the draft and the caret. The
+// caret is fixed: the draft takes what is left and loses its head first, so a
+// long name still shows its end and the caret stays on screen. The kind is
 // optional: a call without it renames a workspace, as the frozen prompt test
-// expects.
+// expects. A screen too small to hold the box paints nothing.
 func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string, kind ...string) {
-	if snap == nil || snap.Rows < 2 || snap.Cols < 1 {
+	if snap == nil {
 		return
 	}
 	k := "workspace"
 	if len(kind) > 0 && kind[0] != "" {
 		k = kind[0]
 	}
+	inner, ok := renameBoxGeometry(snap.Cols, snap.Rows, snap.Rail)
+	if !ok {
+		return
+	}
+	f := &FloatingPane{
+		ID:    "rename",
+		Rect:  inner,
+		Title: "rename " + k + " " + id,
+		Hint:  "enter  esc",
+		Paint: func(b *bytes.Buffer, r Rect) {
+			renameInputRow(b, r, draft)
+		},
+	}
+	f.Draw(buf, nil)
+}
+
+// renameInputRow paints the float's one input row: the dim label, the draft and
+// the caret on the rail ground, padded to the full inner width so the row owns
+// every cell inside the box. The draft keeps its tail and drops its head when
+// it runs out of room, and a wide rune is cut whole.
+func renameInputRow(buf *bytes.Buffer, r Rect, draft string) {
 	const caret = "▏"
-	labelRoom := snap.Cols - cells(caret)
+	labelRoom := r.W - cells(caret)
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
-	segs := clipSegs([]seg{{text: " rename " + k + " " + id + ": ", fg: railDim}}, labelRoom)
-	draftRoom := snap.Cols - cells(caret) - segCells(segs)
-	// The draft loses its head, so a long name still shows its end and the
-	// caret stays on screen.
+	segs := clipSegs([]seg{{text: " name: ", fg: railDim}}, labelRoom)
+	draftRoom := r.W - cells(caret) - segCells(segs)
 	if cells(draft) > draftRoom {
 		if draftRoom > 1 {
 			draft = ellipsis + clipTail(draft, draftRoom-1)
@@ -1687,13 +1748,13 @@ func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string, kind ...str
 		seg{text: draft, fg: railText},
 		seg{text: caret, fg: barAccent},
 	)
-	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m", snap.Rows-1)
+	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m", r.Y+1, r.X+1)
 	buf.WriteString(railBG.bg())
 	for _, seg := range segs {
 		buf.WriteString(seg.fg.fg())
 		buf.WriteString(seg.text)
 	}
-	if n := snap.Cols - segCells(segs); n > 0 {
+	if n := r.W - segCells(segs); n > 0 {
 		buf.WriteString(railBG.bg())
 		buf.WriteString(strings.Repeat(" ", n))
 	}

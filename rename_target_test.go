@@ -78,20 +78,29 @@ func TestRenameWorkspacePromptStillSendsWorkspace(t *testing.T) {
 	noMsg(t, got)
 }
 
-// The prompt row names the kind and the id it renames.
+// The float title names the kind and the id it renames, and its input row
+// names the draft.
 func TestRenamePromptLabelsTheKind(t *testing.T) {
 	snap := testSnapshot(&Node{Pane: "a"}, 60, 8, nil)
 
 	var wb bytes.Buffer
 	drawRename(&wb, snap, "w2", "two", "window")
-	if vis := renamePromptVisible(wb.String()); !strings.HasPrefix(vis, " rename window w2: ") {
-		t.Fatalf("window label = %q", vis)
+	win := renamePromptVisible(wb.String())
+	if !strings.Contains(win, "rename window w2") {
+		t.Fatalf("window title = %q", win)
+	}
+	if !strings.Contains(win, " name: two") {
+		t.Fatalf("window input row = %q", win)
 	}
 
 	var sb bytes.Buffer
 	drawRename(&sb, snap, "s1", "main", "workspace")
-	if vis := renamePromptVisible(sb.String()); !strings.HasPrefix(vis, " rename workspace s1: ") {
-		t.Fatalf("workspace label = %q", vis)
+	ws := renamePromptVisible(sb.String())
+	if !strings.Contains(ws, "rename workspace s1") {
+		t.Fatalf("workspace title = %q", ws)
+	}
+	if !strings.Contains(ws, " name: main") {
+		t.Fatalf("workspace input row = %q", ws)
 	}
 }
 
@@ -152,13 +161,37 @@ func TestRenameWindowPromptPaintsWindowID(t *testing.T) {
 	f.tui.openRenamePromptFor("window", "w2", "two")
 
 	vis := renamePromptVisible(f.frame())
-	if !strings.Contains(vis, " rename window w2: ") {
-		t.Fatalf("prompt row does not name the window id: %q", vis)
+	if !strings.Contains(vis, "rename window w2") {
+		t.Fatalf("prompt title does not name the window id: %q", vis)
 	}
-	if strings.Contains(vis, " rename window main: ") {
-		t.Fatalf("prompt row names the active workspace: %q", vis)
+	if strings.Contains(vis, "rename window main") {
+		t.Fatalf("prompt title names the active workspace: %q", vis)
 	}
-	if !strings.Contains(vis, "two") {
-		t.Fatalf("prompt row lost the draft: %q", vis)
+	if !strings.Contains(vis, " name: two") {
+		t.Fatalf("prompt input row lost the draft: %q", vis)
+	}
+}
+
+// The normal draw path paints a workspace prompt with the workspace id and its
+// current name.
+func TestRenameWorkspacePromptPaintsWorkspaceID(t *testing.T) {
+	f := newFrameTUI(t, 60, 12, 20)
+	f.snap.Workspace = "s1"
+	f.snap.All = []AllPane{
+		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
+			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
+			WindowActive: true, WindowUnfolded: true},
+	}
+	f.tui.openRenamePrompt()
+
+	vis := renamePromptVisible(f.frame())
+	if !strings.Contains(vis, "rename workspace s1") {
+		t.Fatalf("prompt title does not name the workspace id: %q", vis)
+	}
+	if strings.Contains(vis, "rename window") {
+		t.Fatalf("workspace prompt carries a window title: %q", vis)
+	}
+	if !strings.Contains(vis, " name: main") {
+		t.Fatalf("prompt input row lost the draft: %q", vis)
 	}
 }

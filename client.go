@@ -80,7 +80,7 @@ type tui struct {
 	// draft.
 	renameID string
 	// renameKind is "workspace" or "window" while the prompt is open. It picks
-	// the action the prompt sends and the label it paints.
+	// the action the prompt sends and the float title it paints.
 	renameKind string
 
 	// hist is each pane's replay ring. It is not filled as output arrives:

@@ -252,80 +252,174 @@ func TestRenamePromptShieldsPane(t *testing.T) {
 	noMsg(t, got)
 }
 
-// drawRename fills one row, never past Cols, cuts the head of a long draft and
-// keeps the caret. A wide rune is never split.
-func TestRenamePromptDrawFitsRow(t *testing.T) {
-	long := strings.Repeat("a very long workspace name ", 4)
-	wide := strings.Repeat("名前", 12)
-
-	for _, cols := range []int{80, 30, 20, 12, 1} {
-		snap := testSnapshot(&Node{Pane: "a"}, cols, 8, nil)
-		var b bytes.Buffer
-		drawRename(&b, snap, "s1", long)
-		out := b.String()
-		if want := fmt.Sprintf("\x1b[%d;1H", snap.Rows-1); !strings.Contains(out, want) {
-			t.Fatalf("%d cols: not on row %d: %q", cols, snap.Rows-2, out)
-		}
-		if !strings.Contains(out, railBG.bg()) {
-			t.Fatalf("%d cols: row is not on railBG: %q", cols, out)
-		}
-		vis := renamePromptVisible(out)
-		if n := cells(vis); n > cols {
-			t.Fatalf("%d cols: painted %d cells: %q", cols, n, vis)
-		}
-		if !strings.HasSuffix(vis, "▏") && cols > 1 {
-			t.Fatalf("%d cols: caret is not last: %q", cols, vis)
-		}
+// renameFloatPaint draws the prompt and parses its band into the cells it
+// paints, using the help box parser: a wide rune takes the cells cells gives
+// it, and any move but an absolute one fails the test.
+func renameFloatPaint(t *testing.T, snap *Snapshot, id, draft string, kind ...string) (Rect, helpBoxPainted) {
+	t.Helper()
+	box, ok := renameBoxGeometry(snap.Cols, snap.Rows, snap.Rail)
+	if !ok {
+		t.Fatalf("%dx%d: no box", snap.Cols, snap.Rows)
 	}
-
-	// A long draft on a narrow row drops its head and says so.
-	snap := testSnapshot(&Node{Pane: "a"}, 30, 8, nil)
 	var b bytes.Buffer
-	drawRename(&b, snap, "s1", long)
-	vis := renamePromptVisible(b.String())
-	if !strings.HasPrefix(vis, " rename workspace s1: ") {
-		t.Fatalf("label lost: %q", vis)
-	}
-	if !strings.Contains(vis, "…") {
-		t.Fatalf("head not elided: %q", vis)
-	}
-	if !strings.Contains(vis, "name ") {
-		t.Fatalf("tail of the draft lost: %q", vis)
-	}
+	drawRename(&b, snap, id, draft, kind...)
+	return box, helpBoxParse(t, b.String())
+}
 
-	// A wide rune is cut whole, never half painted.
-	var wb bytes.Buffer
-	drawRename(&wb, snap, "s1", wide)
-	if n := cells(renamePromptVisible(wb.String())); n > snap.Cols {
-		t.Fatalf("wide draft painted %d cells, want <= %d", n, snap.Cols)
+// renameFloatInside fails when the float painted a cell, or a wide rune's
+// second cell, outside the box: the two border rows and the input row between
+// them, one border column either side.
+func renameFloatInside(t *testing.T, box Rect, p helpBoxPainted) {
+	t.Helper()
+	for cell, runes := range p.writes {
+		y, x := cell[0], cell[1]
+		w := cells(string(runes[len(runes)-1]))
+		if y < box.Y-1 || y > box.Y+box.H || x < box.X-1 || x+w-1 > box.X+box.W {
+			t.Fatalf("cell %d,%d (%d cells) is outside the box %+v", x, y, w, box)
+		}
 	}
 }
 
-// The prompt is a paint band: a steady frame writes nothing, the row is
-// recorded, and closing the prompt repaints the row it covered.
+// renameFloatRow is one row of the float as the terminal ends up, trailing
+// blanks dropped.
+func renameFloatRow(p helpBoxPainted, y, x, w int) string {
+	return strings.TrimRight(helpBoxRowText(p, y, x, x+w-1), " ")
+}
+
+// The prompt is a float of three rows: the title names the kind and the id, the
+// input row names the draft and holds the caret, and nothing lands outside it.
+func TestRenamePromptDrawsTheBox(t *testing.T) {
+	snap := testSnapshot(&Node{Pane: "a"}, 80, 12, nil)
+	box, p := renameFloatPaint(t, snap, "s1", "main")
+	if box.H != 1 {
+		t.Fatalf("box height = %d, want one input row", box.H)
+	}
+	if box.Y+box.H > snap.Rows-3 {
+		t.Fatalf("box %+v touches the toast row or the bar on %d rows", box, snap.Rows)
+	}
+	if box.X-1 < effectiveRail(snap.Cols, snap.Rail) {
+		t.Fatalf("box %+v starts under the rail", box)
+	}
+	renameFloatInside(t, box, p)
+
+	if got := renameFloatRow(p, box.Y-1, box.X-1, box.W+2); !strings.Contains(got, "rename workspace s1") {
+		t.Fatalf("title row = %q, want the kind and the id", got)
+	}
+	if got := renameFloatRow(p, box.Y+box.H, box.X-1, box.W+2); !strings.Contains(got, "enter  esc") {
+		t.Fatalf("hint row = %q, want enter and esc", got)
+	}
+	row := renameFloatRow(p, box.Y, box.X, box.W)
+	if !strings.HasPrefix(row, " name: main") {
+		t.Fatalf("input row = %q, want the label and the draft", row)
+	}
+	if !strings.HasSuffix(row, "▏") {
+		t.Fatalf("input row = %q, want the caret last", row)
+	}
+	// The input row owns every cell inside the box, so no glyph of the frame
+	// before shows through.
+	for x := box.X; x < box.X+box.W; x++ {
+		if _, ok := p.writes[[2]int{box.Y, x}]; !ok {
+			t.Fatalf("input row leaves cell %d unpainted", x)
+		}
+	}
+}
+
+// A narrow box keeps every painted cell inside it, cuts a wide rune whole and
+// keeps the caret on screen.
+func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
+	wide := strings.Repeat("名前", 12)
+	for _, cols := range []int{80, 30, 20, 12} {
+		snap := testSnapshot(&Node{Pane: "a"}, cols, 8, nil)
+		box, p := renameFloatPaint(t, snap, "s1", wide)
+		renameFloatInside(t, box, p)
+		if got := renameFloatRow(p, box.Y, box.X, box.W); !strings.HasSuffix(got, "▏") {
+			t.Fatalf("%d cols: input row = %q, want the caret last", cols, got)
+		}
+	}
+}
+
+// A long draft drops its head and says so, so the end of the name stays
+// readable beside the caret.
+func TestRenamePromptElidesLongDraftHead(t *testing.T) {
+	long := strings.Repeat("a very long workspace name ", 4)
+	snap := testSnapshot(&Node{Pane: "a"}, 30, 8, nil)
+	box, p := renameFloatPaint(t, snap, "s1", long)
+	row := renameFloatRow(p, box.Y, box.X, box.W)
+	if !strings.HasPrefix(row, " name: ") {
+		t.Fatalf("label lost: %q", row)
+	}
+	if !strings.Contains(row, "…") {
+		t.Fatalf("head not elided: %q", row)
+	}
+	if !strings.Contains(row, "name ") {
+		t.Fatalf("tail of the draft lost: %q", row)
+	}
+	if !strings.HasSuffix(row, "▏") {
+		t.Fatalf("caret lost: %q", row)
+	}
+}
+
+// A screen too small to hold the box paints nothing.
+func TestRenamePromptDrawsNothingWhenTooSmall(t *testing.T) {
+	for _, c := range []struct{ cols, rows int }{{1, 8}, {20, 4}} {
+		snap := testSnapshot(&Node{Pane: "a"}, c.cols, c.rows, nil)
+		var b bytes.Buffer
+		drawRename(&b, snap, "s1", "main")
+		if b.Len() != 0 {
+			t.Fatalf("%dx%d: painted %q", c.cols, c.rows, b.String())
+		}
+	}
+}
+
+// The prompt is a paint band: a steady frame writes nothing, the band records
+// the float's rows, and closing the prompt repaints the rows it covered.
 func TestRenamePromptBandRepaints(t *testing.T) {
 	f := newFrameTUI(t, 60, 12, 20)
 	f.snap.Workspace = "s1"
 	f.tui.openRenamePrompt()
+	box, ok := renameBoxGeometry(f.snap.Cols, f.snap.Rows, f.snap.Rail)
+	if !ok {
+		t.Fatal("no box")
+	}
 
 	first := renamePromptVisible(f.frame())
-	if !strings.Contains(first, " rename workspace s1: ") || !strings.Contains(first, "main") {
-		t.Fatalf("prompt row not painted: %q", first)
+	for _, want := range []string{"rename workspace s1", " name: ", "main", "enter  esc"} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("prompt is missing %q: %q", want, first)
+		}
 	}
-	if rows := f.tui.last.rename.rows; len(rows) != 1 || rows[0] != f.snap.Rows-2 {
-		t.Fatalf("band rows = %v, want [%d]", rows, f.snap.Rows-2)
+	want := []int{box.Y - 1, box.Y, box.Y + box.H}
+	rows := f.tui.last.rename.rows
+	if len(rows) != len(want) {
+		t.Fatalf("band rows = %v, want %v", rows, want)
+	}
+	for i := range want {
+		if rows[i] != want[i] {
+			t.Fatalf("band rows = %v, want %v", rows, want)
+		}
 	}
 	if got := f.frame(); got != "" {
 		t.Fatalf("steady frame wrote %d bytes: %q", len(got), got)
 	}
 
+	// Leaving rename mode repaints whole by itself. Set the layout signature to
+	// the closed one, so this frame shows what the band's own recorded rows do.
 	f.tui.closeRename()
+	f.tui.laysig = f.tui.layoutSig(f.snap)
 	raw := f.frame()
+	if strings.Contains(raw, "\x1b[2J") {
+		t.Fatalf("the close frame cleared the screen: %q", raw)
+	}
 	if closed := renamePromptVisible(raw); strings.Contains(closed, "rename workspace") {
 		t.Fatalf("closed prompt still painted: %q", closed)
 	}
-	if want := fmt.Sprintf("\x1b[%d;", f.snap.Rows-1); !strings.Contains(raw, want) {
-		t.Fatalf("row %d was not repainted: %q", f.snap.Rows-2, raw)
+	for _, y := range want {
+		if move := fmt.Sprintf("\x1b[%d;", y+1); !strings.Contains(raw, move) {
+			t.Fatalf("row %d was not repainted: %q", y, raw)
+		}
+	}
+	if rows := f.tui.last.rename.rows; len(rows) != 0 {
+		t.Fatalf("closed band still records rows %v", rows)
 	}
 	if got := f.frame(); got != "" {
 		t.Fatalf("steady frame after close wrote %d bytes: %q", len(got), got)
