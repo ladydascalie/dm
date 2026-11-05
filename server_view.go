@@ -655,3 +655,8 @@ func (s *server) reply(cl *client, m wire.Msg, res any, err error) {
 	}
 	cl.deliver(out)
 }
+
+func jsonRaw(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
+}
