@@ -1,4 +1,4 @@
-package main
+package vt
 
 import (
 	"fmt"
@@ -21,7 +21,7 @@ func ringOf(prefix string, n int) []byte {
 func plainRows(rows [][]vt10x.Glyph) []string {
 	out := make([]string, len(rows))
 	for i, row := range rows {
-		out[i] = plainRow(row)
+		out[i] = PlainRow(row)
 	}
 	return out
 }
@@ -29,7 +29,7 @@ func plainRows(rows [][]vt10x.Glyph) []string {
 // TestReplayRowsStream pins the basic case: a stream longer than the screen
 // keeps every scrolled row and ends with the final screen, in order.
 func TestReplayRowsStream(t *testing.T) {
-	rows := replayRows(ringOf("LINE", 20), 20, 5, 0)
+	rows := ReplayRows(ringOf("LINE", 20), 20, 5, 0)
 	got := plainRows(rows)
 	// The trailing newline scrolls one more row, so the final screen is the
 	// last four lines and a blank bottom row: 16 history rows plus 5 screen rows.
@@ -46,7 +46,7 @@ func TestReplayRowsStream(t *testing.T) {
 
 // TestReplayRowsNoScroll keeps the final screen when the output never scrolled.
 func TestReplayRowsNoScroll(t *testing.T) {
-	rows := replayRows(ringOf("LINE", 3), 20, 5, 0)
+	rows := ReplayRows(ringOf("LINE", 3), 20, 5, 0)
 	got := plainRows(rows)
 	if len(got) != 5 {
 		t.Fatalf("replay kept %d rows, want 5", len(got))
@@ -58,7 +58,7 @@ func TestReplayRowsNoScroll(t *testing.T) {
 
 // TestReplayRowsKeep bounds the result to its most recent rows.
 func TestReplayRowsKeep(t *testing.T) {
-	rows := replayRows(ringOf("LINE", 20), 20, 2, 3)
+	rows := ReplayRows(ringOf("LINE", 20), 20, 2, 3)
 	got := plainRows(rows)
 	if len(got) != 3 {
 		t.Fatalf("replay kept %d rows, want 3:\n%q", len(got), got)
@@ -72,7 +72,7 @@ func TestReplayRowsKeep(t *testing.T) {
 // program's screen, not the shell's history.
 func TestReplayRowsAltScreen(t *testing.T) {
 	ring := []byte("PRIMARY-1\r\n\x1b[?1049hALT-1\r\nALT-2\r\n\x1b[?1049lPRIMARY-2\r\n")
-	rows := replayRows(ring, 20, 3, 0)
+	rows := ReplayRows(ring, 20, 3, 0)
 	got := plainRows(rows)
 	for _, row := range got {
 		if strings.Contains(row, "ALT-") {
@@ -87,7 +87,7 @@ func TestReplayRowsAltScreen(t *testing.T) {
 // TestReplayRowsClear captures the screen before a clear wipes it.
 func TestReplayRowsClear(t *testing.T) {
 	ring := []byte("A\r\nB\r\n\x1b[2J\x1b[HC\r\n")
-	rows := replayRows(ring, 20, 3, 0)
+	rows := ReplayRows(ring, 20, 3, 0)
 	got := plainRows(rows)
 	joined := strings.Join(got, "\n")
 	if !strings.Contains(joined, "A") || !strings.Contains(joined, "B") {
@@ -100,12 +100,12 @@ func TestReplayRowsClear(t *testing.T) {
 
 // TestReplayRowsEmptyScreen answers a blank final screen without history.
 func TestReplayRowsEmptyScreen(t *testing.T) {
-	rows := replayRows(nil, 20, 4, 0)
+	rows := ReplayRows(nil, 20, 4, 0)
 	if len(rows) != 4 {
 		t.Fatalf("replay kept %d rows, want 4", len(rows))
 	}
 	for i, row := range rows {
-		if got := plainRow(row); got != "" {
+		if got := PlainRow(row); got != "" {
 			t.Fatalf("row %d = %q, want blank", i, got)
 		}
 	}

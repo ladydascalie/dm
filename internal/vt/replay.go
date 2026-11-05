@@ -1,4 +1,4 @@
-package main
+package vt
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"github.com/hinshun/vt10x"
 )
 
-// replayRows replays a pane's raw output ring through a terminal the size of
+// ReplayRows replays a pane's raw output ring through a terminal the size of
 // the pane's screen. It returns the rows the screen showed, oldest first: the
 // rows that scrolled off the top, then the final screen's rows. keep bounds the
 // result to its most recent rows; 0 keeps every row.
@@ -19,7 +19,7 @@ import (
 // the app never scrolls it and a final clear wipes most rows. That is why a
 // scrollback built from raw bytes showed fragments.
 //
-// vt10x has no scroll hook, so replayRows counts scrolls itself. A wrapped
+// vt10x has no scroll hook, so ReplayRows counts scrolls itself. A wrapped
 // line is noticed by comparing row 0 of the text before and after it. A line
 // feed is counted from the cursor: parked on the bottom row, it scrolls the
 // screen and row 0 leaves. Comparing glyphs alone misses that scroll when the
@@ -27,7 +27,7 @@ import (
 // sequence (2J or 3J) wipes the whole screen, so every row on it goes to
 // history first. Nothing is captured while the alternate screen is active:
 // those rows are the program's screen, not the shell's history.
-func replayRows(ring []byte, w, h, keep int) [][]vt10x.Glyph {
+func ReplayRows(ring []byte, w, h, keep int) [][]vt10x.Glyph {
 	if w < 1 || h < 1 {
 		return nil
 	}
@@ -91,10 +91,10 @@ func replayRows(ring []byte, w, h, keep int) [][]vt10x.Glyph {
 	return rows
 }
 
-// blankGlyphRow reports whether a row holds no text. Colour alone does not
+// BlankGlyphRow reports whether a row holds no text. Colour alone does not
 // make a row non-blank: a history window skips leading rows whose glyphs are
 // all spaces, as contentRows does.
-func blankGlyphRow(row []vt10x.Glyph) bool {
+func BlankGlyphRow(row []vt10x.Glyph) bool {
 	for _, g := range row {
 		if g.Char != ' ' {
 			return false
@@ -116,7 +116,7 @@ func glyphRow(v vt10x.View, y, w int) []vt10x.Glyph {
 		if x < cols {
 			g = v.Cell(x, y)
 		}
-		row[x] = normCell(g)
+		row[x] = NormCell(g)
 	}
 	return row
 }
@@ -135,8 +135,8 @@ func sameGlyphs(a, b []vt10x.Glyph) bool {
 	return true
 }
 
-// plainRow renders one glyph row as text, trailing blanks trimmed.
-func plainRow(row []vt10x.Glyph) string {
+// PlainRow renders one glyph row as text, trailing blanks trimmed.
+func PlainRow(row []vt10x.Glyph) string {
 	var b strings.Builder
 	for _, g := range row {
 		if g.Char < 0x20 {
@@ -160,7 +160,7 @@ func rowANSI(row []vt10x.Glyph) string {
 	}
 	for i := 0; i <= last; i++ {
 		g := row[i]
-		b.WriteString(sgr(g, cur))
+		b.WriteString(SGR(g, cur))
 		gg := g
 		cur = &gg
 		if g.Char < 0x20 {
@@ -175,11 +175,11 @@ func rowANSI(row []vt10x.Glyph) string {
 	return b.String()
 }
 
-// buildTall paints rows into a terminal as tall as the row count. Each row is
+// BuildTall paints rows into a terminal as tall as the row count. Each row is
 // placed on its own line, so the last row sits at the bottom. The cursor is
 // parked on the last row: scrollStart reads it to extend the reachable bottom,
 // and the tall picture's bottom is its last row even when that row is blank.
-func buildTall(rows [][]vt10x.Glyph, w int) vt10x.Terminal {
+func BuildTall(rows [][]vt10x.Glyph, w int) vt10x.Terminal {
 	if w < 1 {
 		w = 1
 	}

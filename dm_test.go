@@ -25,6 +25,7 @@ import (
 	"dm/internal/paths"
 	"dm/internal/segment"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -4088,8 +4089,8 @@ func compareScreens(t *testing.T, want, got vt10x.View) {
 	defer got.Unlock()
 	for y := 0; y < wr; y++ {
 		for x := 0; x < wc; x++ {
-			a := normCell(want.Cell(x, y))
-			b := normCell(got.Cell(x, y))
+			a := vt.NormCell(want.Cell(x, y))
+			b := vt.NormCell(got.Cell(x, y))
 			if a.Char != b.Char || a.FG != b.FG || a.BG != b.BG {
 				t.Fatalf("cell %d,%d = {%q %v %v}, want {%q %v %v}",
 					x, y, b.Char, b.FG, b.BG, a.Char, a.FG, a.BG)
@@ -4135,7 +4136,7 @@ func TestScreenSnapshotRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := vt10x.New(vt10x.WithSize(24, 6))
-	if _, err := dst.Write(screenBytes(src)); err != nil {
+	if _, err := dst.Write(vt.ScreenBytes(src)); err != nil {
 		t.Fatal(err)
 	}
 	compareScreens(t, src, dst)
@@ -4146,7 +4147,7 @@ func TestScreenSnapshotRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	plainDst := vt10x.New(vt10x.WithSize(20, 3))
-	if _, err := plainDst.Write(screenBytes(plain)); err != nil {
+	if _, err := plainDst.Write(vt.ScreenBytes(plain)); err != nil {
 		t.Fatal(err)
 	}
 	compareScreens(t, plain, plainDst)
@@ -4158,7 +4159,7 @@ func TestClientScreenThenReplay(t *testing.T) {
 	if _, err := src.Write([]byte("\x1b[33mLIVE-SCREEN\x1b[0m\x1b[2;4H")); err != nil {
 		t.Fatal(err)
 	}
-	data := screenBytes(src)
+	data := vt.ScreenBytes(src)
 
 	vts := map[string]vt10x.Terminal{"p1": vt10x.New(vt10x.WithSize(12, 3))}
 	_, _ = vts["p1"].Write([]byte("OLD CONTENT"))
