@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,7 +11,7 @@ import (
 )
 
 // helpBoxDraw paints the help box for a screen and returns its bytes.
-func helpBoxDraw(t *testing.T, cols, rows int, keys [][2]string) string {
+func helpBoxDraw(t *testing.T, cols, rows int, keys []HelpEntry) string {
 	t.Helper()
 	var buf bytes.Buffer
 	drawHelp(&buf, cols, rows, keys)
@@ -17,10 +19,10 @@ func helpBoxDraw(t *testing.T, cols, rows int, keys [][2]string) string {
 }
 
 // helpBoxWidths is the widest key and action label in cells.
-func helpBoxWidths(keys [][2]string) (keyW, actionW int) {
-	for _, kv := range keys {
-		keyW = maxInt(keyW, cells(kv[0]))
-		actionW = maxInt(actionW, cells(kv[1]))
+func helpBoxWidths(keys []HelpEntry) (keyW, actionW int) {
+	for _, e := range keys {
+		keyW = maxInt(keyW, cells(e.Key))
+		actionW = maxInt(actionW, cells(e.Action))
 	}
 	return keyW, actionW
 }
@@ -124,7 +126,7 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 // whole, that both border rows own a row, and that the frame carries its title
 // and hint.
 func TestHelpBoxSizesToWidestRowAt100x30(t *testing.T) {
-	keys := LoadDefault().HelpRows()
+	keys := LoadDefault().HelpEntries()
 	g, ok := helpBoxGeometry(100, 30, keys)
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
@@ -176,7 +178,7 @@ func TestHelpBoxSizesToWidestRowAt100x30(t *testing.T) {
 // off the rail, the toast row and the bar, and inside the screen.
 func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 	for _, c := range []struct{ cols, rows int }{{40, 15}, {26, 12}} {
-		keys := LoadDefault().HelpRows()
+		keys := LoadDefault().HelpEntries()
 		rows := categorizeHelpRows(keys)
 		p := helpBoxParse(t, helpBoxDraw(t, c.cols, c.rows, keys))
 		x0, y0, x1, y1 := helpBoxBounds(t, p)
@@ -208,7 +210,7 @@ func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 // TestHelpBoxNarrowDropsActionColumn proves a narrow box shows the key column
 // alone, with no action label bleeding in.
 func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
-	keys := LoadDefault().HelpRows()
+	keys := LoadDefault().HelpEntries()
 	rows := categorizeHelpRows(keys)
 	keyW, actionW := helpBoxWidths(keys)
 	p := helpBoxParse(t, helpBoxDraw(t, 26, 12, keys))
@@ -236,7 +238,7 @@ func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 // TestHelpBoxEllipsisMarksCutLabel proves a box too narrow for its key column
 // cuts a label and says so.
 func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
-	keys := LoadDefault().HelpRows()
+	keys := LoadDefault().HelpEntries()
 	keyW, _ := helpBoxWidths(keys)
 	p := helpBoxParse(t, helpBoxDraw(t, 12, 12, keys))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
@@ -263,7 +265,7 @@ func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 // TestHelpBoxRowsShareColumns is the misalignment the operator saw: every
 // content row must paint the same columns, once each.
 func TestHelpBoxRowsShareColumns(t *testing.T) {
-	keys := LoadDefault().HelpRows()
+	keys := LoadDefault().HelpEntries()
 	p := helpBoxParse(t, helpBoxDraw(t, 100, 30, keys))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
@@ -273,5 +275,129 @@ func TestHelpBoxRowsShareColumns(t *testing.T) {
 				t.Fatalf("content cell %d,%d painted %d times", row, col, len(writes))
 			}
 		}
+	}
+}
+
+// helpBoxSectionRows returns the rows of the named section, header excluded.
+func helpBoxSectionRows(categories [][]displayRow, section string) []displayRow {
+	for _, cat := range categories {
+		if len(cat) > 0 && cat[0].header == section {
+			return cat[1:]
+		}
+	}
+	return nil
+}
+
+// helpBoxSectionHeaders counts the headers that carry the named section.
+func helpBoxSectionHeaders(categories [][]displayRow, section string) int {
+	n := 0
+	for _, cat := range categories {
+		if len(cat) > 0 && cat[0].header == section {
+			n++
+		}
+	}
+	return n
+}
+
+// TestHelpBoxTagMovesRowToNamedSection proves a tagged row leaves its heuristic
+// section for the named one, and that an untagged row keeps the heuristic.
+func TestHelpBoxTagMovesRowToNamedSection(t *testing.T) {
+	cfg, err := parseConfig(`prefix "ctrl+a"
+keymap "main" {
+	"split-right" "|"
+	"scrollback" "["
+	"zoom-pane" "z" help "Layout"
+}`)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	categories := categorizeHelp(cfg.HelpEntries())
+
+	layout := helpBoxSectionRows(categories, "Layout")
+	if len(layout) != 2 {
+		t.Fatalf("Layout rows = %#v, want split right and zoom pane", layout)
+	}
+	if layout[0].action != "split right" || layout[1].action != "zoom pane" {
+		t.Fatalf("Layout rows = %q, %q, want table order split right then zoom pane", layout[0].action, layout[1].action)
+	}
+	pane := helpBoxSectionRows(categories, "Pane")
+	if len(pane) != 1 || pane[0].action != "scrollback" {
+		t.Fatalf("Pane rows = %#v, want the untagged scrollback row", pane)
+	}
+}
+
+// TestHelpBoxTagJoinsEarlierSection proves a row tagged into a section that
+// already opened joins it, with one header, instead of opening a second one.
+func TestHelpBoxTagJoinsEarlierSection(t *testing.T) {
+	cfg, err := parseConfig(`prefix "ctrl+a"
+keymap "main" {
+	"split-right" "|"
+	"scrollback" "["
+	"reload" "R" help "Layout"
+}`)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	categories := categorizeHelp(cfg.HelpEntries())
+
+	if n := helpBoxSectionHeaders(categories, "Layout"); n != 1 {
+		t.Fatalf("Layout headers = %d, want 1", n)
+	}
+	layout := helpBoxSectionRows(categories, "Layout")
+	if len(layout) != 2 || layout[0].action != "split right" || layout[1].action != "reload config" {
+		t.Fatalf("Layout rows = %#v, want split right then reload config", layout)
+	}
+	// The tagged row must not leave a second header where it used to sit.
+	if n := helpBoxSectionHeaders(categories, "Utility"); n != 0 {
+		t.Fatalf("Utility headers = %d, want 0: the tagged row left its heuristic section", n)
+	}
+}
+
+// TestHelpBoxCustomSectionTakesUtilityColour proves a section name outside the
+// five built-ins paints with the Utility colour, header and rows alike.
+func TestHelpBoxCustomSectionTakesUtilityColour(t *testing.T) {
+	cfg, err := parseConfig(`prefix "ctrl+a"
+keymap "main" {
+	"split-right" "|"
+	"zoom-pane" "z" help "Custom"
+}`)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	entries := cfg.HelpEntries()
+	categories := categorizeHelp(entries)
+	if n := helpBoxSectionHeaders(categories, "Custom"); n != 1 {
+		t.Fatalf("Custom headers = %d, want 1", n)
+	}
+	if got, want := helpSectionColor("Custom"), helpCategoryColors["Utility"]; got != want {
+		t.Fatalf("helpSectionColor(Custom) = %q, want the Utility colour %q", got, want)
+	}
+	out := helpBoxDraw(t, 100, 30, entries)
+	if !strings.Contains(out, helpCategoryColors["Utility"]+"Custom") {
+		t.Fatal("the Custom header does not paint with the Utility colour")
+	}
+	if !strings.Contains(out, helpCategoryColors["Utility"]+"\x1b[1mz") {
+		t.Fatal("the Custom row does not paint with the Utility colour")
+	}
+}
+
+// helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30, frozen
+// from the render before help tags. A config without tags must paint these
+// exact bytes: same cells, same colours, same order. Regenerate it by reverting
+// render.go to the pre-tag version and hashing helpBoxDraw's output.
+const helpBoxDefaultSHA256 = "6922944f322ced8617284c9f90a2fed3846651049e92b91acaecd0505262443a"
+
+// TestHelpBoxDefaultBytesFrozen proves the default config, which carries no
+// tags, paints the same bytes as the box did before help tags.
+func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
+	entries := LoadDefault().HelpEntries()
+	for _, e := range entries {
+		if e.Section != "" {
+			t.Fatalf("default entry %q carries section %q, want none", e.Action, e.Section)
+		}
+	}
+	sum := sha256.Sum256([]byte(helpBoxDraw(t, 100, 30, entries)))
+	if got := hex.EncodeToString(sum[:]); got != helpBoxDefaultSHA256 {
+		t.Fatalf("default help box bytes changed: sha256 %s, want %s", got, helpBoxDefaultSHA256)
 	}
 }
