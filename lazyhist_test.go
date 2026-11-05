@@ -11,6 +11,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/wire"
 )
 
@@ -78,15 +79,15 @@ func ringPane(t *testing.T, session, id string) {
 func histServer(t *testing.T, name string, panes int) (*server, []string) {
 	t.Helper()
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState(name)
-	w := st.win()
+	st := session.NewState(name)
+	w := st.ActiveWindow()
 	ids := make([]string, 0, panes)
 	kids := make([]*layout.Node, 0, panes)
 	for i := 0; i < panes; i++ {
-		id := w.newPaneID()
+		id := w.NewPaneID()
 		ids = append(ids, id)
 		kids = append(kids, &layout.Node{Pane: id})
-		st.Panes[id] = &PaneState{}
+		st.Panes[id] = &session.PaneState{}
 	}
 	w.Root = &layout.Node{Dir: "row", Kids: kids}
 	w.Focus = ids[0]

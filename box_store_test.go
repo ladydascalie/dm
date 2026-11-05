@@ -14,6 +14,7 @@ import (
 	"dm/internal/box"
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/wire"
 )
 
@@ -22,7 +23,7 @@ import (
 func boxServer(t *testing.T) *server {
 	t.Helper()
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("boxstore")
+	st := session.NewState("boxstore")
 	rootPane(st)
 	s := railServer(st)
 	// The registry is built with the server, never loaded from state.
@@ -117,7 +118,7 @@ func TestBoxRestartKeepsEveryEntryInOrder(t *testing.T) {
 		boxPost(t, s, cl, conn, "lane/a", "done", "third"),
 	}
 
-	st, err := loadState("boxstore")
+	st, err := session.LoadState("boxstore")
 	if err != nil {
 		t.Fatalf("load state: %v", err)
 	}
@@ -504,7 +505,7 @@ func TestBoxStateFileWithoutBoxLoadsEmpty(t *testing.T) {
 	if err := os.WriteFile(paths.StatePath("oldbox"), []byte(old), 0o600); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
-	st, err := loadState("oldbox")
+	st, err := session.LoadState("oldbox")
 	if err != nil {
 		t.Fatalf("load state: %v", err)
 	}
@@ -515,21 +516,21 @@ func TestBoxStateFileWithoutBoxLoadsEmpty(t *testing.T) {
 
 func TestBoxLoadDropsBadEntryAndKeepsSeq(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("badbox")
+	st := session.NewState("badbox")
 	good := box.Entry{Seq: 1, At: time.Now().UTC().Truncate(time.Second), Key: "lane/a", State: box.StateDone, Msg: "ok"}
 	bad := good
 	bad.Seq = 2
 	bad.State = "clear"
 	st.Box = []box.Entry{good, bad}
 	st.BoxSeq = 2
-	if err := st.save(); err != nil {
+	if err := st.Save(); err != nil {
 		t.Fatalf("save state: %v", err)
 	}
 
 	old := log.Writer()
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	got, err := loadState("badbox")
+	got, err := session.LoadState("badbox")
 	log.SetOutput(old)
 	if err != nil {
 		t.Fatalf("load state: %v", err)
@@ -553,7 +554,7 @@ func boxPane(t *testing.T, s *server) string {
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	id := s.st.win().Focus
+	id := s.st.ActiveWindow().Focus
 	if id == "" {
 		t.Fatal("the session has no pane")
 	}
@@ -771,8 +772,8 @@ func TestBoxWatchClosedPaneDrops(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	w := s.st.win()
-	w.Root = &layout.Node{Pane: w.newPaneID()}
+	w := s.st.ActiveWindow()
+	w.Root = &layout.Node{Pane: w.NewPaneID()}
 	w.Focus = w.Root.Pane
 	s.mu.Unlock()
 
@@ -817,8 +818,8 @@ func TestBoxWatchersOrder(t *testing.T) {
 	cl, conn := boxConn(t)
 	at := time.Now().UTC().Truncate(time.Second)
 	s.mu.Lock()
-	w := s.st.win()
-	first, second := w.Focus, w.newPaneID()
+	w := s.st.ActiveWindow()
+	first, second := w.Focus, w.NewPaneID()
 	w.Root = &layout.Node{Dir: "right", Kids: []*layout.Node{{Pane: first}, {Pane: second}},
 		Sizes: []float64{0.5, 0.5}}
 	s.watches[boxWatchKeyOf(second, "lane/b", "")] = box.Watch{Pane: second, Key: "lane/b", Cursor: 2, At: at}

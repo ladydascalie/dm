@@ -10,6 +10,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/notify"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/wire"
 )
 
@@ -64,7 +65,7 @@ func (s *server) setRail(requested int) int {
 	s.st.Rail = requested
 	s.st.RailSet = true
 	rail := s.railLocked()
-	_ = s.st.save()
+	_ = s.st.Save()
 	return rail
 }
 
@@ -74,7 +75,7 @@ func (s *server) setRail(requested int) int {
 // dropped here, so a dead or switched-away pane cannot hold it. The caller
 // holds s.mu.
 func (s *server) paneRectsLocked() map[string]layout.Rect {
-	win := s.st.win()
+	win := s.st.ActiveWindow()
 	area := layout.PaneAreaFor(s.cols, s.rows, s.railLocked())
 	rects := map[string]layout.Rect{}
 	layout.Layout(win.Root, area, rects)
@@ -95,13 +96,13 @@ func (s *server) clearZoom() {
 }
 
 func (s *server) snapshotLocked() *wire.Snapshot {
-	win := s.st.win()
+	win := s.st.ActiveWindow()
 	rects := s.paneRectsLocked()
 	snap := &wire.Snapshot{
 		Session:      s.st.Name,
-		Workspace:    s.st.ws().Name,
+		Workspace:    s.st.ActiveWorkspace().Name,
 		Windows:      []string{},
-		ActiveWindow: s.st.ws().Active,
+		ActiveWindow: s.st.ActiveWorkspace().Active,
 		Focus:        win.Focus,
 		Cols:         s.cols,
 		Rows:         s.rows,
@@ -110,7 +111,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		Zoom:         s.zoom,
 		Root:         win.Root,
 	}
-	for _, w := range s.st.ws().Windows {
+	for _, w := range s.st.ActiveWorkspace().Windows {
 		snap.Windows = append(snap.Windows, w.Name)
 	}
 	for _, id := range layout.AllPanes(win.Root) {
@@ -155,7 +156,7 @@ func (s *server) noteStatus(id string, st wire.Status) {
 		changed = true
 	}
 	if changed {
-		_ = s.st.save()
+		_ = s.st.Save()
 	}
 }
 
@@ -288,10 +289,10 @@ func (s *server) paneExited(id string) {
 
 	s.syncSizes()
 	s.mu.Lock()
-	_ = s.st.save()
+	_ = s.st.Save()
 	s.broadcastLocked(wire.Msg{Type: "exit", Target: id})
 	s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: s.snapshotLocked()})
-	ids := layout.AllPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.ActiveWindow().Root)
 	s.mu.Unlock()
 
 	s.broadcastScreens(ids)
@@ -312,13 +313,13 @@ func (s *server) paneExited(id string) {
 // dropEmptyWindows removes windows with no panes and workspaces left with no
 // windows, keeping the active window and workspace pointing at something real.
 func (s *server) dropEmptyWindows() {
-	var activeWin *Window
-	if ws := s.st.ws(); ws.Active >= 0 && ws.Active < len(ws.Windows) {
+	var activeWin *session.Window
+	if ws := s.st.ActiveWorkspace(); ws.Active >= 0 && ws.Active < len(ws.Windows) {
 		activeWin = ws.Windows[ws.Active]
 	}
-	var keep []*Workspace
+	var keep []*session.Workspace
 	for _, ws := range s.st.Workspaces {
-		var wins []*Window
+		var wins []*session.Window
 		for _, w := range ws.Windows {
 			if w.Root != nil && len(layout.AllPanes(w.Root)) > 0 {
 				wins = append(wins, w)
@@ -417,7 +418,7 @@ func (s *server) syncSizes() {
 	for _, f := range calls {
 		f()
 	}
-	_ = s.st.save()
+	_ = s.st.Save()
 }
 
 func (s *server) serve(c net.Conn) {
@@ -452,7 +453,7 @@ func (s *server) serve(c net.Conn) {
 			s.attach(cl, m)
 		case "keys":
 			s.mu.Lock()
-			pc := s.panes[s.st.win().Focus]
+			pc := s.panes[s.st.ActiveWindow().Focus]
 			s.mu.Unlock()
 			if pc != nil {
 				_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
@@ -486,7 +487,7 @@ func (s *server) attach(cl *client, m wire.Msg) {
 	s.syncSizes()
 	s.mu.Lock()
 	snap := s.snapshotLocked()
-	ids := layout.AllPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.ActiveWindow().Root)
 	s.mu.Unlock()
 	cl.deliver(wire.Msg{Type: "snapshot", Snap: snap})
 	if s.sendScreens(ids, func(m wire.Msg) { cl.deliver(m) }) {
@@ -572,7 +573,7 @@ func (s *server) broadcastScreens(ids []string) {
 func (s *server) resyncClient(cl *client) {
 	s.mu.Lock()
 	snap := s.snapshotLocked()
-	ids := layout.AllPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.ActiveWindow().Root)
 	s.mu.Unlock()
 	cl.deliver(wire.Msg{Type: "snapshot", Snap: snap})
 	s.sendScreens(ids, func(m wire.Msg) { cl.deliver(m) })

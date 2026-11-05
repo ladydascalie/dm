@@ -10,6 +10,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -26,7 +27,7 @@ func (s *server) toggleFold(id string) (bool, error) {
 				continue
 			}
 			w.Unfolded = !w.Unfolded
-			_ = s.st.save()
+			_ = s.st.Save()
 			return w.Unfolded, nil
 		}
 	}
@@ -181,7 +182,7 @@ func (s *server) mutation(fn func() error) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.st.save()
+	return s.st.Save()
 }
 
 // afterMutation clears the zoom, then resizes panes, broadcasts the new layout
@@ -203,7 +204,7 @@ func (s *server) resync() {
 	// Clients rebuild their VT after a layout change; send the screen, then
 	// replay the rings as history.
 	s.mu.Lock()
-	ids := layout.AllPanes(s.st.win().Root)
+	ids := layout.AllPanes(s.st.ActiveWindow().Root)
 	s.mu.Unlock()
 	s.broadcastScreens(ids)
 	for _, id := range ids {
@@ -286,7 +287,7 @@ func (s *server) workspaceList() []wsInfo {
 
 // findPane locates a pane anywhere in the session. Panes outside the active
 // window are still addressable, which is what a background layout needs.
-func (s *server) findPane(id string) (*Workspace, *Window, bool) {
+func (s *server) findPane(id string) (*session.Workspace, *session.Window, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
@@ -419,7 +420,7 @@ func (s *server) closeWorkspace(id string) error {
 // left behind stays active with its active index on a real window.
 func (s *server) closeWindow(id string) error {
 	s.mu.Lock()
-	var ws *Workspace
+	var ws *session.Workspace
 	idx, wsIdx := -1, -1
 	for i, w := range s.st.Workspaces {
 		for j, win := range w.Windows {
@@ -468,7 +469,7 @@ func (s *server) closeWindow(id string) error {
 func (s *server) activeIDs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return layout.AllPanes(s.st.win().Root)
+	return layout.AllPanes(s.st.ActiveWindow().Root)
 }
 
 func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (string, error) {
@@ -484,10 +485,10 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 	}
 	s.mu.Lock()
 	if target == "" {
-		target = s.st.win().Focus
+		target = s.st.ActiveWindow().Focus
 	}
-	var win *Window
-	var ws *Workspace
+	var win *session.Window
+	var ws *session.Workspace
 	for _, cand := range s.st.Workspaces {
 		for _, w := range cand.Windows {
 			if layout.FindLeaf(w.Root, target) {
@@ -499,7 +500,7 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 		s.mu.Unlock()
 		return "", fmt.Errorf("no pane %q", target)
 	}
-	id := win.newPaneID()
+	id := win.NewPaneID()
 	layout.SplitLeaf(win.Root, target, dir, id, ratio)
 	s.addPaneStateAt(id, cwd, "")
 	if !noFocus {
@@ -604,7 +605,7 @@ func (s *server) setFocus(id string) error {
 func (s *server) focusDir(dir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	win := s.st.win()
+	win := s.st.ActiveWindow()
 	rects := map[string]layout.Rect{}
 	layout.Layout(win.Root, layout.PaneAreaFor(s.cols, s.rows, s.railLocked()), rects)
 	n := layout.Neighbor(rects, win.Focus, dir)
@@ -618,7 +619,7 @@ func (s *server) focusDir(dir string) error {
 func (s *server) cyclePane(step int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	win := s.st.win()
+	win := s.st.ActiveWindow()
 	ids := layout.AllPanes(win.Root)
 	if len(ids) == 0 {
 		return fmt.Errorf("no panes")
@@ -635,7 +636,7 @@ func (s *server) cyclePane(step int) error {
 
 func (s *server) closePane(target string) error {
 	s.mu.Lock()
-	win := s.st.win()
+	win := s.st.ActiveWindow()
 	if target == "" {
 		target = win.Focus
 	}
@@ -696,7 +697,7 @@ func (s *server) setPaneCwd(id, cwd string) {
 		return
 	}
 	ps.Cwd = cwd
-	_ = s.st.save()
+	_ = s.st.Save()
 	s.mu.Unlock()
 	s.pushSnapshot()
 }
@@ -726,7 +727,7 @@ func (s *server) inheritPaneLocked(target string) string {
 	if target != "" && s.st.Panes[target] != nil {
 		return target
 	}
-	ws := s.st.ws()
+	ws := s.st.ActiveWorkspace()
 	for _, cand := range s.st.Workspaces {
 		if target != "" && cand.ID != target {
 			continue
@@ -753,7 +754,7 @@ func (s *server) inheritedCwd(target string) string {
 // windowCwdLocked is the starting directory of a workspace's active pane, or
 // the server's own directory when the workspace has none. The caller holds
 // s.mu.
-func (s *server) windowCwdLocked(ws *Workspace) string {
+func (s *server) windowCwdLocked(ws *session.Workspace) string {
 	if ws != nil && len(ws.Windows) > 0 {
 		if ps := s.st.Panes[ws.Windows[ws.Active].Focus]; ps != nil {
 			return ps.Cwd
@@ -770,7 +771,7 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 		cwd = s.inheritedCwd(wsID)
 	}
 	s.mu.Lock()
-	ws := s.st.ws()
+	ws := s.st.ActiveWorkspace()
 	src := ""
 	if wsID != "" {
 		ws = nil
@@ -804,9 +805,9 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 			cwd = s.windowCwdLocked(ws)
 		}
 	}
-	wid := s.st.newWindowID()
-	w := &Window{ID: wid, Name: label}
-	id := w.newPaneID()
+	wid := s.st.NewWindowID()
+	w := &session.Window{ID: wid, Name: label}
+	id := w.NewPaneID()
 	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
 	if label == "" {
@@ -837,7 +838,7 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 func (s *server) cycleWindow(step int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ws := s.st.ws()
+	ws := s.st.ActiveWorkspace()
 	n := len(ws.Windows)
 	if n == 0 {
 		return fmt.Errorf("no windows")
@@ -849,7 +850,7 @@ func (s *server) cycleWindow(step int) error {
 func (s *server) selectWindow(i int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ws := s.st.ws()
+	ws := s.st.ActiveWorkspace()
 	if i < 0 {
 		i = 0
 	}
@@ -871,7 +872,7 @@ func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string,
 		name = "ws" + strconv.Itoa(len(s.st.Workspaces)+1)
 	}
 	if cwd == "" {
-		cwd = s.windowCwdLocked(s.st.ws())
+		cwd = s.windowCwdLocked(s.st.ActiveWorkspace())
 	}
 	if tabLabel == "" {
 		tabLabel = paths.FolderName(cwd)
@@ -879,13 +880,13 @@ func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string,
 			tabLabel = "1"
 		}
 	}
-	wsid := s.st.newWorkspaceID()
-	wid := s.st.newWindowID()
-	win := &Window{ID: wid, Name: tabLabel}
-	id := win.newPaneID()
+	wsid := s.st.NewWorkspaceID()
+	wid := s.st.NewWindowID()
+	win := &session.Window{ID: wid, Name: tabLabel}
+	id := win.NewPaneID()
 	win.Root = &layout.Node{Pane: id}
 	win.Focus = id
-	ws := &Workspace{ID: wsid, Name: name, Windows: []*Window{win}}
+	ws := &session.Workspace{ID: wsid, Name: name, Windows: []*session.Window{win}}
 	s.st.Workspaces = append(s.st.Workspaces, ws)
 	if !noFocus {
 		s.st.Active = len(s.st.Workspaces) - 1

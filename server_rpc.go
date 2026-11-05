@@ -18,7 +18,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 	case "list", "ls":
 		s.mu.Lock()
 		snap := s.snapshotLocked()
-		win := s.st.win()
+		win := s.st.ActiveWindow()
 		tree := win.Root
 		s.mu.Unlock()
 		s.reply(cl, m, map[string]any{"snapshot": snap, "tree": tree}, nil)
@@ -103,7 +103,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		// The target is the focus of the active window. One pane already fills
 		// the area, so the action is a no-op there.
 		s.mu.Lock()
-		win := s.st.win()
+		win := s.st.ActiveWindow()
 		if len(layout.AllPanes(win.Root)) < 2 {
 			s.mu.Unlock()
 			s.reply(cl, m, map[string]any{"zoom": ""}, nil)

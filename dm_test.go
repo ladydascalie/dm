@@ -23,6 +23,7 @@ import (
 	"dm/internal/panel"
 	"dm/internal/paths"
 	"dm/internal/segment"
+	"dm/internal/session"
 	"dm/internal/theme"
 	"dm/internal/transport"
 	"dm/internal/vt"
@@ -381,34 +382,34 @@ func TestScrollStart(t *testing.T) {
 }
 
 func TestIDsAreAddressable(t *testing.T) {
-	st := newState("x")
-	ws := st.ws()
-	w := st.win()
+	st := session.NewState("x")
+	ws := st.ActiveWorkspace()
+	w := st.ActiveWindow()
 	if ws.ID != "s1" || w.ID != "w1" {
 		t.Fatalf("initial ids %q %q", ws.ID, w.ID)
 	}
-	if p := w.newPaneID(); p != "w1p1" {
+	if p := w.NewPaneID(); p != "w1p1" {
 		t.Fatalf("first pane %q", p)
 	}
-	if p := w.newPaneID(); p != "w1p2" {
+	if p := w.NewPaneID(); p != "w1p2" {
 		t.Fatalf("second pane %q", p)
 	}
-	if id := st.newWindowID(); id != "w2" {
+	if id := st.NewWindowID(); id != "w2" {
 		t.Fatalf("next window %q", id)
 	}
-	if id := st.newWorkspaceID(); id != "s2" {
+	if id := st.NewWorkspaceID(); id != "s2" {
 		t.Fatalf("next workspace %q", id)
 	}
 
 	// A state from the random scheme migrates to the same shape.
-	old := &State{
-		Name: "x", Panes: map[string]*PaneState{"abc12": {}},
-		Workspaces: []*Workspace{{ID: "sz6z50", Name: "main", Windows: []*Window{{
+	old := &session.State{
+		Name: "x", Panes: map[string]*session.PaneState{"abc12": {}},
+		Workspaces: []*session.Workspace{{ID: "sz6z50", Name: "main", Windows: []*session.Window{{
 			ID: "w2e8y4", Focus: "abc12",
 			Root: &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "abc12"}, {Pane: "def34"}}},
 		}}}},
 	}
-	old.migrateIDs()
+	old.MigrateIDs()
 	if old.Workspaces[0].ID != "s1" || old.Workspaces[0].Windows[0].ID != "w1" {
 		t.Fatalf("migrated ids %q %q", old.Workspaces[0].ID, old.Workspaces[0].Windows[0].ID)
 	}
@@ -454,7 +455,7 @@ func TestPaneAreaInset(t *testing.T) {
 
 // railServer is an in-process server with no panes and no clients. Layout and
 // snapshots do not need a spawned process.
-func railServer(st *State) *server {
+func railServer(st *session.State) *server {
 	return &server{
 		st: st, panes: map[string]*paneConn{},
 		clients: map[*client]bool{}, cols: st.Cols, rows: st.Rows,
@@ -462,18 +463,18 @@ func railServer(st *State) *server {
 }
 
 // rootPane gives a state a single focused pane in its first window.
-func rootPane(st *State) string {
-	w := st.win()
-	id := w.newPaneID()
+func rootPane(st *session.State) string {
+	w := st.ActiveWindow()
+	id := w.NewPaneID()
 	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
-	st.Panes[id] = &PaneState{}
+	st.Panes[id] = &session.PaneState{}
 	return id
 }
 
 func TestRailGeometry(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("rail")
+	st := session.NewState("rail")
 	id := rootPane(st)
 	s := railServer(st)
 
@@ -548,7 +549,7 @@ func TestRailBranch(t *testing.T) {
 	}
 	defer func() { detectGit = old }()
 
-	st := newState("branch")
+	st := session.NewState("branch")
 	id := rootPane(st)
 	st.Panes[id].Cwd = "/work/dm"
 	s := railServer(st)
@@ -588,7 +589,7 @@ func TestSameSessionAttachRefused(t *testing.T) {
 
 func TestSessionSizeIsLargestClient(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("sizes")
+	st := session.NewState("sizes")
 	s := railServer(st)
 	big := &client{cols: 133, rows: 43}
 	small := &client{cols: 77, rows: 7}
@@ -621,14 +622,14 @@ func TestSessionSizeIsLargestClient(t *testing.T) {
 
 func TestRailState(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("rr")
+	st := session.NewState("rr")
 	s := railServer(st)
 	s.cols = 100
 	if rail := s.setRail(30); rail != 30 {
 		t.Fatalf("set-rail 30 effective = %d", rail)
 	}
 
-	got, err := loadState("rr")
+	got, err := session.LoadState("rr")
 	if err != nil {
 		t.Fatalf("loadState: %v", err)
 	}
@@ -638,13 +639,13 @@ func TestRailState(t *testing.T) {
 
 	// A state written before the rail existed asks for the default and is
 	// saved with it.
-	old := &State{
+	old := &session.State{
 		Name: "old", Cols: 80, Rows: 24,
-		Panes:      map[string]*PaneState{},
-		Workspaces: []*Workspace{{ID: "s1", Name: "main"}},
+		Panes:      map[string]*session.PaneState{},
+		Workspaces: []*session.Workspace{{ID: "s1", Name: "main"}},
 		IDVersion:  2,
 	}
-	if err := old.save(); err != nil {
+	if err := old.Save(); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(paths.StatePath("old"))
@@ -661,7 +662,7 @@ func TestRailState(t *testing.T) {
 	if err := os.WriteFile(paths.StatePath("old"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err = loadState("old")
+	got, err = session.LoadState("old")
 	if err != nil {
 		t.Fatalf("loadState old: %v", err)
 	}
@@ -680,16 +681,16 @@ func TestRailState(t *testing.T) {
 
 func TestRailAllPanes(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("all")
-	st.Workspaces = []*Workspace{
-		{ID: "s1", Name: "main", Active: 0, Windows: []*Window{{
+	st := session.NewState("all")
+	st.Workspaces = []*session.Workspace{
+		{ID: "s1", Name: "main", Active: 0, Windows: []*session.Window{{
 			ID: "w1", Name: "one", Focus: "w1p1",
 			Root: &layout.Node{
 				Dir: "row", Sizes: []float64{0.5, 0.5},
 				Kids: []*layout.Node{{Pane: "w1p1"}, {Pane: "w1p2"}},
 			},
 		}}},
-		{ID: "s2", Name: "work", Active: 0, Windows: []*Window{{
+		{ID: "s2", Name: "work", Active: 0, Windows: []*session.Window{{
 			ID: "w2", Name: "two", Focus: "w2p1",
 			Root: &layout.Node{
 				Dir: "col", Sizes: []float64{0.5, 0.5},
@@ -698,7 +699,7 @@ func TestRailAllPanes(t *testing.T) {
 		}}},
 	}
 	st.Active = 0
-	st.Panes = map[string]*PaneState{
+	st.Panes = map[string]*session.PaneState{
 		"w1p1": {Name: "alpha"},
 		"w1p2": {},
 		"w2p1": {},
@@ -768,11 +769,11 @@ type zoomFixture struct {
 func newZoomFixture(t *testing.T) *zoomFixture {
 	t.Helper()
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("zoom")
-	w := st.win()
+	st := session.NewState("zoom")
+	w := st.ActiveWindow()
 	left := rootPane(st)
-	right := w.newPaneID()
-	st.Panes[right] = &PaneState{}
+	right := w.NewPaneID()
+	st.Panes[right] = &session.PaneState{}
 	w.Root = &layout.Node{Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: left}, {Pane: right}}}
 	w.Focus = right
@@ -889,8 +890,8 @@ func TestZoomKeepsOnTerminalResize(t *testing.T) {
 func TestZoomStalePaneNotSent(t *testing.T) {
 	f := newZoomFixture(t)
 	f.s.st.Workspaces[0].Windows = append(f.s.st.Workspaces[0].Windows,
-		&Window{ID: "w2", Name: "two", Root: &layout.Node{Pane: "w2p1"}})
-	f.s.st.Panes["w2p1"] = &PaneState{}
+		&session.Window{ID: "w2", Name: "two", Root: &layout.Node{Pane: "w2p1"}})
+	f.s.st.Panes["w2p1"] = &session.PaneState{}
 
 	f.s.mu.Lock()
 	f.s.zoom = "w2p1"
@@ -1917,7 +1918,7 @@ func TestAllPaneInRepo(t *testing.T) {
 	}
 	defer func() { detectGit = old }()
 
-	st := newState("inrepo")
+	st := session.NewState("inrepo")
 	id := rootPane(st)
 	st.Panes[id].Cwd = "/work/dm"
 	s := railServer(st)
@@ -3848,15 +3849,15 @@ func TestFolderName(t *testing.T) {
 // TestWindowNameMigration renames the old positional window labels on load.
 func TestWindowNameMigration(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	st := newState("mig")
+	st := session.NewState("mig")
 	w := st.Workspaces[0].Windows[0]
 	w.Name = "1"
 	w.Focus = "w1p1"
-	st.Panes["w1p1"] = &PaneState{Cwd: "/code/dm"}
-	if err := st.save(); err != nil {
+	st.Panes["w1p1"] = &session.PaneState{Cwd: "/code/dm"}
+	if err := st.Save(); err != nil {
 		t.Fatal(err)
 	}
-	got, err := loadState("mig")
+	got, err := session.LoadState("mig")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3866,10 +3867,10 @@ func TestWindowNameMigration(t *testing.T) {
 
 	// A name that is not positional survives the load.
 	got.Workspaces[0].Windows[0].Name = "tests"
-	if err := got.save(); err != nil {
+	if err := got.Save(); err != nil {
 		t.Fatal(err)
 	}
-	again, err := loadState("mig")
+	again, err := session.LoadState("mig")
 	if err != nil {
 		t.Fatal(err)
 	}

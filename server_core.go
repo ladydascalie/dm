@@ -19,6 +19,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/notify"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/wire"
 )
 
@@ -251,7 +252,7 @@ func msgBytes(m wire.Msg) int {
 
 type server struct {
 	mu      sync.Mutex
-	st      *State
+	st      *session.State
 	panes   map[string]*paneConn
 	clients map[*client]bool
 	cols    int
@@ -299,13 +300,13 @@ func runServer(args []string) error {
 	}
 	defer lf.Close()
 
-	st, err := loadState(*name)
+	st, err := session.LoadState(*name)
 	fromDisk := err == nil
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if st == nil {
-		st = newState(*name)
+		st = session.NewState(*name)
 	}
 	adopt := map[string]bool{}
 	if fromDisk {
@@ -324,9 +325,9 @@ func runServer(args []string) error {
 		s.rows = 24
 	}
 
-	win := st.win()
+	win := st.ActiveWindow()
 	if win.Root == nil {
-		id := win.newPaneID()
+		id := win.NewPaneID()
 		win.Root = &layout.Node{Pane: id}
 		win.Focus = id
 		s.addPaneState(id)
@@ -357,7 +358,7 @@ func runServer(args []string) error {
 		s.watchPane(id)
 	}
 	s.syncSizes()
-	if err := st.save(); err != nil {
+	if err := st.Save(); err != nil {
 		return err
 	}
 
@@ -401,7 +402,7 @@ func (s *server) addPaneStateAt(id, cwd, shell string) {
 	if shell == "" {
 		shell = os.Getenv("SHELL")
 	}
-	s.st.Panes[id] = &PaneState{Shell: shell, Cwd: cwd, Cols: 80, Rows: 24}
+	s.st.Panes[id] = &session.PaneState{Shell: shell, Cwd: cwd, Cols: 80, Rows: 24}
 }
 
 // ensurePane dials the pane's socket and adopts it, or spawns a fresh daemon.

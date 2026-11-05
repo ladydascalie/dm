@@ -29,9 +29,9 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 		Msg:   req.Msg,
 	}
 	s.st.Box = append(s.st.Box, e)
-	s.st.trimBox()
+	s.st.TrimBox()
 	s.boxWakeLocked()
-	_ = s.st.save()
+	_ = s.st.Save()
 	// Every attached client learns the log moved. An open box view asks for
 	// the whole log again, so its picture is never a guess.
 	s.broadcastLocked(wire.Msg{Type: "box"})
@@ -94,7 +94,7 @@ func (s *server) boxClear(req *box.ClearReq) int {
 	}
 	s.st.Box = kept
 	s.boxWakeLocked()
-	_ = s.st.save()
+	_ = s.st.Save()
 	s.broadcastLocked(wire.Msg{Type: "box"})
 	return cleared
 }
