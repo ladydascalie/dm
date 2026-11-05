@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"fmt"
 	"strings"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 )
 
 // drawSessions paints the centred session picker. The panel owns the border, the
@@ -27,12 +29,12 @@ func drawSessions(buf *bytes.Buffer, th Theme, cols, rows int, sessions []Sessio
 	if y < 0 {
 		y = 0
 	}
-	inner := Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 2}
+	inner := layout.Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 2}
 	paintPanel(buf, th, inner, panelTitle{
 		text:  g.BorderHorizontal + " switch session ",
 		style: "\x1b[0m\x1b[90m",
 		fill:  " ",
-	}, "", false, func(b *bytes.Buffer, r Rect) {
+	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
 		for i, s := range sessions {
 			mark := " "
 			if i == sel {
@@ -70,14 +72,14 @@ const renamePromptWidth = 40
 // centred over the pane area and clamped clear of the rail, the toast row and
 // the status bar, so both borders own a row and no band under it is covered.
 // It reports false when the screen cannot hold the box.
-func renameBoxGeometry(cols, rows, rail int) (Rect, bool) {
+func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 	if cols < 1 || rows < 5 {
-		return Rect{}, false
+		return layout.Rect{}, false
 	}
-	rail = effectiveRail(cols, rail)
+	rail = layout.EffectiveRail(cols, rail)
 	avail := cols - rail - 2
 	if avail < 3 {
-		return Rect{}, false
+		return layout.Rect{}, false
 	}
 	w := renamePromptWidth
 	if w > avail {
@@ -100,7 +102,7 @@ func renameBoxGeometry(cols, rows, rail int) (Rect, bool) {
 	if top > rows-5 {
 		top = rows - 5
 	}
-	return Rect{X: x + 1, Y: top + 1, W: w, H: 1}, true
+	return layout.Rect{X: x + 1, Y: top + 1, W: w, H: 1}, true
 }
 
 // drawRename paints the rename prompt as a floating pane over the pane area.
@@ -127,7 +129,7 @@ func drawRename(buf *bytes.Buffer, th Theme, snap *Snapshot, id, draft string, k
 		Rect:  inner,
 		Title: "rename " + k + " " + id,
 		Hint:  "enter  esc",
-		Paint: func(b *bytes.Buffer, r Rect) {
+		Paint: func(b *bytes.Buffer, r layout.Rect) {
 			renameInputRow(b, th, r, draft)
 		},
 	}
@@ -138,7 +140,7 @@ func drawRename(buf *bytes.Buffer, th Theme, snap *Snapshot, id, draft string, k
 // the caret on the rail ground, padded to the full inner width so the row owns
 // every cell inside the box. The draft keeps its tail and drops its head when
 // it runs out of room, and a wide rune is cut whole.
-func renameInputRow(buf *bytes.Buffer, th Theme, r Rect, draft string) {
+func renameInputRow(buf *bytes.Buffer, th Theme, r layout.Rect, draft string) {
 	p := th.Palette
 	const caret = "▏"
 	labelRoom := r.W - cells.Cells(caret)
@@ -171,13 +173,6 @@ func renameInputRow(buf *bytes.Buffer, th Theme, r Rect, draft string) {
 	buf.WriteString("\x1b[0m")
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // drawHelp paints the bottom-right action preview from the configured keymap
 // rows. The box sizes to its widest row and is painted by the floating pane
 // primitive, so the top border carries the word prefix and the bottom border
@@ -190,10 +185,10 @@ func drawHelp(buf *bytes.Buffer, th Theme, cols, rows int, keys []HelpEntry) {
 		return
 	}
 	f := &FloatingPane{
-		Rect:  Rect{X: g.x, Y: g.y, W: g.inner, H: g.h},
+		Rect:  layout.Rect{X: g.x, Y: g.y, W: g.inner, H: g.h},
 		Title: "prefix",
 		Hint:  "esc",
-		Paint: func(b *bytes.Buffer, inner Rect) {
+		Paint: func(b *bytes.Buffer, inner layout.Rect) {
 			helpBoxRows(b, inner, g)
 		},
 	}
@@ -292,8 +287,8 @@ func newHelpColumn(categories [][]displayRow) helpColumn {
 	keyW, actionW := 0, 0
 	for _, r := range rows {
 		if r.header == "" {
-			keyW = maxInt(keyW, cells.Cells(r.key))
-			actionW = maxInt(actionW, cells.Cells(r.action))
+			keyW = layout.MaxInt(keyW, cells.Cells(r.key))
+			actionW = layout.MaxInt(actionW, cells.Cells(r.action))
 		}
 	}
 	if keyW < 1 {
@@ -361,7 +356,7 @@ func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColu
 					w += 3
 				}
 				w += c.width()
-				h = maxInt(h, len(c.rows))
+				h = layout.MaxInt(h, len(c.rows))
 			}
 			if w <= avail {
 				if h < bestHeight || (h == bestHeight && w < bestWidth) {
@@ -391,7 +386,7 @@ func helpBoxGeometry(cols, rows int, keys []HelpEntry) (helpBoxLayout, bool) {
 		return g, false
 	}
 	categories := categorizeHelp(keys)
-	left := maxRail(cols) + 1
+	left := layout.MaxRail(cols) + 1
 	avail := cols - left
 	if avail < 3 {
 		return g, false
@@ -416,7 +411,7 @@ func helpBoxGeometry(cols, rows int, keys []HelpEntry) (helpBoxLayout, bool) {
 			inner += 3
 		}
 		inner += c.width()
-		h = maxInt(h, len(c.rows))
+		h = layout.MaxInt(h, len(c.rows))
 	}
 	if inner < 1 || inner+2 > avail {
 		return g, false
@@ -447,7 +442,7 @@ func helpBoxGeometry(cols, rows int, keys []HelpEntry) (helpBoxLayout, bool) {
 // keeps a glyph the frame before left nor paints past the border. A header is
 // a coloured line, a key is bright and an action label is dim. Columns are
 // separated by a dim vertical bar.
-func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
+func helpBoxRows(buf *bytes.Buffer, inner layout.Rect, g helpBoxLayout) {
 	xOff := 0
 	for ci, col := range g.columns {
 		if ci > 0 {

@@ -7,10 +7,12 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"fmt"
 	"strings"
 	"time"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 
 	"github.com/hinshun/vt10x"
 )
@@ -79,7 +81,7 @@ func keymapRows(cfg *Config) []string {
 // clear of the rail, at most 96 columns and rows-6. The height follows n, the
 // row count, so a short list reads in a short box. A list longer than the cap
 // scrolls.
-func keymapViewRect(snap *Snapshot, n int) Rect {
+func keymapViewRect(snap *Snapshot, n int) layout.Rect {
 	left := snap.Rail
 	if left < 0 {
 		left = 0
@@ -112,7 +114,7 @@ func keymapViewRect(snap *Snapshot, n int) Rect {
 	if y < 1 {
 		y = 1
 	}
-	return clampRect(Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
+	return clampRect(layout.Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
 }
 
 // sync fits the float to the screen after a snapshot or a rail change and

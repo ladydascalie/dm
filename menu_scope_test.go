@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"dm/internal/layout"
 )
 
 // paneMenuLabels is what every pane menu offers, without Focus.
@@ -209,7 +211,7 @@ func TestMenuScopeHints(t *testing.T) {
 		}
 	}
 
-	screen := &tui{snap: testSnapshot(&Node{Pane: "a"}, 100, 30, nil)}
+	screen := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
 	screen.openMenu(screen.paneByID("a"), 5, 3)
 	check(t, screen, pane)
 

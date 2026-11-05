@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -73,7 +75,7 @@ func (t *tui) draw() {
 	if padFreed {
 		blankRect(&blank, t.last.divRect)
 	}
-	t.last.divRect = Rect{}
+	t.last.divRect = layout.Rect{}
 	if div.Len() > 0 {
 		t.last.divRect = t.padZone
 	}

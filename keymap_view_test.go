@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -23,7 +25,7 @@ func keymapScreen(t *testing.T, k *keymapView, cols, rows int) vt10x.Terminal {
 
 // keymapScreenText reads every row of a replayed screen inside the float, so a
 // test can look for a line wherever it landed.
-func keymapScreenText(screen vt10x.Terminal, r Rect) []string {
+func keymapScreenText(screen vt10x.Terminal, r layout.Rect) []string {
 	rows := make([]string, 0, r.H)
 	for y := r.Y; y < r.Y+r.H; y++ {
 		rows = append(rows, boxScreenRow(screen, y, r.X, r.W))
@@ -245,7 +247,7 @@ func TestKeymapSearch(t *testing.T) {
 // TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n
 // moves to the next match, and esc clears it.
 func TestKeymapSearchInput(t *testing.T) {
-	tui := &tui{snap: testSnapshot(&Node{Pane: "a"}, 100, 30, nil), keymap: LoadDefault()}
+	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: LoadDefault()}
 	tui.runAction("help")
 	feed(tui, "/")
 	if tui.keys == nil || !tui.keys.searching {
@@ -283,7 +285,7 @@ func TestKeymapSearchInput(t *testing.T) {
 // with the built-in help bindings.
 func TestHelpKeyFallback(t *testing.T) {
 	// The screen is short enough that the listed rows do not fit.
-	tui := &tui{snap: testSnapshot(&Node{Pane: "a"}, 100, 12, nil)}
+	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 12, nil)}
 	tui.keymap = keymapTestLoad(t, `
 prefix "ctrl+a"
 

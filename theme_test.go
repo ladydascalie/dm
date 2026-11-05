@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -379,9 +381,9 @@ states {
 	}
 
 	// The glyphs reach the grips and the dirty dot.
-	root := &Node{
+	root := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 	}
 	var grips bytes.Buffer
 	drawGrips(&grips, th, &Snapshot{Cols: 40, Rows: 10, Root: root})
@@ -422,9 +424,9 @@ func TestTuiTheme(t *testing.T) {
 func TestThemeDrawGrips(t *testing.T) {
 	th := DefaultTheme()
 	th.Glyphs.Grip = "@"
-	root := &Node{
+	root := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*Node{{Pane: "a"}, {Pane: "b"}},
+		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 	}
 	snap := &Snapshot{Cols: 40, Rows: 10, Rail: 0, Root: root}
 	var buf bytes.Buffer
@@ -470,7 +472,7 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	}
 	items := railItems(agentRail("working"))
 	pane := railRowFind(t, items, railPane, "w1p1")
-	left, _, _ := railRow(th, pane, defaultRail, false, false)
+	left, _, _ := railRow(th, pane, layout.DefaultRail, false, false)
 	found := false
 	for _, seg := range left {
 		if seg.text == "W" {

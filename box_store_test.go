@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/layout"
 	"dm/internal/paths"
 )
 
@@ -770,7 +771,7 @@ func TestBoxWatchClosedPaneDrops(t *testing.T) {
 
 	s.mu.Lock()
 	w := s.st.win()
-	w.Root = &Node{Pane: w.newPaneID()}
+	w.Root = &layout.Node{Pane: w.newPaneID()}
 	w.Focus = w.Root.Pane
 	s.mu.Unlock()
 
@@ -817,7 +818,7 @@ func TestBoxWatchersOrder(t *testing.T) {
 	s.mu.Lock()
 	w := s.st.win()
 	first, second := w.Focus, w.newPaneID()
-	w.Root = &Node{Dir: "right", Kids: []*Node{{Pane: first}, {Pane: second}},
+	w.Root = &layout.Node{Dir: "right", Kids: []*layout.Node{{Pane: first}, {Pane: second}},
 		Sizes: []float64{0.5, 0.5}}
 	s.watches[boxWatchKeyOf(second, "lane/b", "")] = box.Watch{Pane: second, Key: "lane/b", Cursor: 2, At: at}
 	s.watches[boxWatchKeyOf(first, "lane/b", "")] = box.Watch{Pane: first, Key: "lane/b", Cursor: 3, At: at}

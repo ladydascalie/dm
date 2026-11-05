@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -11,7 +13,7 @@ import (
 // ephemeral UI elements without entering the session's split tree.
 type FloatingPane struct {
 	ID     string
-	Rect   Rect
+	Rect   layout.Rect
 	VT     vt10x.Terminal
 	Active bool
 	// Title and Hint paint into the top and bottom border rows, clear of the
@@ -22,13 +24,13 @@ type FloatingPane struct {
 	// Paint, when set, writes the float's content itself and Draw skips the
 	// VT path. It receives the content Rect, so a float with no terminal can
 	// still paint rows inside the box.
-	Paint func(buf *bytes.Buffer, inner Rect)
+	Paint func(buf *bytes.Buffer, inner layout.Rect)
 	last  paint
 }
 
 // Draw writes the pane's content and border into buf.
 func (f *FloatingPane) Draw(buf *bytes.Buffer, th Theme, hover *selRange) {
-	paint := func(b *bytes.Buffer, inner Rect) {
+	paint := func(b *bytes.Buffer, inner layout.Rect) {
 		drawPaneFrom(b, f.VT, f.Rect, 0, nil, hover)
 	}
 	if f.Paint != nil {

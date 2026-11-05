@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -35,7 +37,7 @@ func TestHoverUnderline(t *testing.T) {
 	if _, err := vt.Write([]byte("see https://x.y/a.")); err != nil {
 		t.Fatal(err)
 	}
-	r := Rect{X: 0, Y: 0, W: 20, H: 2}
+	r := layout.Rect{X: 0, Y: 0, W: 20, H: 2}
 	var plain, hovered bytes.Buffer
 	drawPaneFrom(&plain, vt, r, 0, nil, nil)
 	drawPaneFrom(&hovered, vt, r, 0, nil, &selRange{lo: 4, hi: 16})

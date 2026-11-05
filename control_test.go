@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -26,7 +28,7 @@ func ctlPane(id string) AllPane {
 // therefore ends on the row above the control.
 func ctlSnapshot(rail int) *Snapshot {
 	n := 8
-	if !railCompact(rail) {
+	if !layout.RailCompact(rail) {
 		n = 6
 	}
 	snap := &Snapshot{Session: "x", Cols: 40, Rows: 10, Rail: rail}
@@ -95,7 +97,7 @@ func TestRailControlRow(t *testing.T) {
 		thin  bool
 		named bool
 	}{
-		{collapsedRail, "  ▶", true, false},
+		{layout.CollapsedRail, "  ▶", true, false},
 		{8, "◀ colla…", false, false},
 		{20, "◀ collapse", false, true},
 		{40, "◀ collapse", false, true},
@@ -180,7 +182,7 @@ func TestRailControlRow(t *testing.T) {
 // list is longer than the rows above it, and keeps the grip off that row.
 func TestRailControlOwnsItsRow(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := ctlSnapshot(collapsedRail)
+	snap := ctlSnapshot(layout.CollapsedRail)
 	snap.All = append(snap.All, ctlPane("p9"), ctlPane("p10"))
 	row := snap.Rows - 2
 	vt := ctlScreen(t, snap)
@@ -215,8 +217,8 @@ func TestRailControlClickCollapses(t *testing.T) {
 	for x := 1; x <= 20; x++ {
 		tui.handleMouse(mouseEvent{btn: 0, x: x, y: 9})
 		m := nextMsg(t, got)
-		if m.Type != "req" || m.Action != "set-rail" || m.Index != collapsedRail {
-			t.Fatalf("click at column %d sent %+v, want set-rail %d", x, m, collapsedRail)
+		if m.Type != "req" || m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+			t.Fatalf("click at column %d sent %+v, want set-rail %d", x, m, layout.CollapsedRail)
 		}
 		tui.handleMouse(mouseEvent{btn: 0, release: true, x: x, y: 9})
 		noMsg(t, got)
@@ -229,10 +231,10 @@ func TestRailControlClickExpands(t *testing.T) {
 	cases := []struct{ want, railWant int }{
 		{34, 34},
 		{20, 20},
-		{defaultRail, 0},
+		{layout.DefaultRail, 0},
 	}
 	for _, c := range cases {
-		tui, got := ctlTUI(t, collapsedRail)
+		tui, got := ctlTUI(t, layout.CollapsedRail)
 		tui.railWant = c.railWant
 		tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 9})
 		if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != c.want {
@@ -265,15 +267,15 @@ func TestRailControlClickSendsNoPaneGesture(t *testing.T) {
 func TestRailControlMatchesPrefix(t *testing.T) {
 	tui, got := ctlTUI(t, 20)
 	tui.toggleRail()
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != collapsedRail {
-		t.Fatalf("prefix r from a full rail sent %+v, want set-rail %d", m, collapsedRail)
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+		t.Fatalf("prefix r from a full rail sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, x: 10, y: 9})
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != collapsedRail {
-		t.Fatalf("control from a full rail sent %+v, want set-rail %d", m, collapsedRail)
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+		t.Fatalf("control from a full rail sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 
-	tui, got = ctlTUI(t, collapsedRail)
+	tui, got = ctlTUI(t, layout.CollapsedRail)
 	tui.railWant = 20
 	tui.toggleRail()
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
@@ -296,7 +298,7 @@ func TestRailControlHidden(t *testing.T) {
 			t.Fatalf("hidden rail has a control at column %d", x)
 		}
 	}
-	area := paneAreaFor(snap.Cols, snap.Rows, 0)
+	area := layout.PaneAreaFor(snap.Cols, snap.Rows, 0)
 	if row < area.Y || row >= area.Y+area.H {
 		t.Fatalf("row %d is not pane area for a hidden rail: %+v", row, area)
 	}

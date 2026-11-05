@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"dm/internal/cells"
 	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 )
 
 // helpBoxDraw paints the help box for a screen and returns its bytes.
@@ -22,8 +24,8 @@ func helpBoxDraw(t *testing.T, cols, rows int, keys []HelpEntry) string {
 // helpBoxWidths is the widest key and action label in cells.
 func helpBoxWidths(keys []HelpEntry) (keyW, actionW int) {
 	for _, e := range keys {
-		keyW = maxInt(keyW, cells.Cells(e.Key))
-		actionW = maxInt(actionW, cells.Cells(e.Action))
+		keyW = layout.MaxInt(keyW, cells.Cells(e.Key))
+		actionW = layout.MaxInt(actionW, cells.Cells(e.Action))
 	}
 	return keyW, actionW
 }
@@ -99,8 +101,8 @@ func helpBoxBounds(t *testing.T, p helpBoxPainted) (x0, y0, x1, y1 int) {
 		}
 		x0 = min(x0, cell[1])
 		y0 = min(y0, cell[0])
-		x1 = maxInt(x1, cell[1])
-		y1 = maxInt(y1, cell[0])
+		x1 = layout.MaxInt(x1, cell[1])
+		y1 = layout.MaxInt(y1, cell[0])
 	}
 	if first {
 		t.Fatal("the band painted nothing")
@@ -191,7 +193,7 @@ func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 		}
 		// effectiveRail never exceeds maxRail(cols), so a left border at or
 		// right of it clears every rail width.
-		if left := maxRail(c.cols); x0 < left {
+		if left := layout.MaxRail(c.cols); x0 < left {
 			t.Fatalf("%dx%d: box starts at %d, want its border at or right of the rail %d", c.cols, c.rows, x0, left)
 		}
 		if y1 > c.rows-3 {

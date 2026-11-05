@@ -1,9 +1,11 @@
 package main
 
 import (
-	"dm/internal/cells"
 	"strings"
 	"unicode/utf8"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 )
 
 // switcher is the quick switcher's state: the float's rect, the rail tree it
@@ -11,7 +13,7 @@ import (
 // its lines. Drawing and key handling live elsewhere; this file is the model
 // that answers them.
 type switcher struct {
-	rect Rect
+	rect layout.Rect
 
 	// tree is the rail tree the float shows: never compact, every window
 	// unfolded, no note rows, gaps kept. rows are the surviving indices into
@@ -36,7 +38,7 @@ type switcher struct {
 }
 
 // newSwitcher opens the switcher over a snapshot inside rect.
-func newSwitcher(rect Rect, snap *Snapshot) *switcher {
+func newSwitcher(rect layout.Rect, snap *Snapshot) *switcher {
 	s := &switcher{rect: rect, sel: -1}
 	s.sync(snap)
 	return s

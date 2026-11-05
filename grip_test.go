@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -112,20 +114,20 @@ func TestRailGripClamps(t *testing.T) {
 	tui, got := gripTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 20, y: 4})
 	tui.handleMouse(mouseEvent{btn: 32, x: 1, y: 4})
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != collapsedRail {
-		t.Fatalf("left clamp sent %+v, want set-rail %d", m, collapsedRail)
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+		t.Fatalf("left clamp sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 1, y: 4})
 	noMsg(t, got)
 	// A fresh drag from the thin rail still works: the grip sits in column 3
 	// and dragging right expands.
-	tui.snap = railTestSnapshot(collapsedRail)
-	tui.handleMouse(mouseEvent{btn: 0, x: collapsedRail, y: 4})
+	tui.snap = railTestSnapshot(layout.CollapsedRail)
+	tui.handleMouse(mouseEvent{btn: 0, x: layout.CollapsedRail, y: 4})
 	if !tui.railDragging {
 		t.Fatal("thin rail grip did not start a drag")
 	}
 	tui.handleMouse(mouseEvent{btn: 32, x: 90, y: 4})
-	want := maxRail(tui.snap.Cols)
+	want := layout.MaxRail(tui.snap.Cols)
 	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != want {
 		t.Fatalf("right clamp sent %+v, want set-rail %d", m, want)
 	}
@@ -187,7 +189,7 @@ func TestRailGripHover(t *testing.T) {
 	if frame := f.frame(); strings.Contains(frame, "┃") {
 		t.Fatalf("grip strip survived leaving the grip: %q", frame)
 	}
-	if f.tui.padZone != (Rect{}) || f.tui.barInfo() != "" {
+	if f.tui.padZone != (layout.Rect{}) || f.tui.barInfo() != "" {
 		t.Fatalf("grip hover survived: %v %q", f.tui.padZone, f.tui.barInfo())
 	}
 }

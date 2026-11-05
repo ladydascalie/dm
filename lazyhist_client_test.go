@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -120,7 +122,7 @@ func TestScrollDropsHistoryOnGeometry(t *testing.T) {
 		t.Fatal("replay did not fill the scrollback")
 	}
 
-	small := testSnapshot(&Node{Pane: "a"}, 80, 24, nil)
+	small := testSnapshot(&layout.Node{Pane: "a"}, 80, 24, nil)
 	small.Focus = "a"
 	tui.apply(Msg{Type: "snapshot", Snap: small})
 	if got, ok := tui.hist["a"]; ok {

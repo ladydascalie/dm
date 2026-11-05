@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 )
 
 // railRowSnap is a rail with every row kind on it: a workspace header, an
@@ -16,7 +18,7 @@ import (
 func railRowSnap(rail int) *Snapshot {
 	snap := &Snapshot{
 		Cols: 100, Rows: 10, Rail: rail,
-		Root: &Node{Pane: "w1p1"}, Focus: "w1p1",
+		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
 	}
 	snap.Panes = []PaneInfo{{ID: "w1p1", Status: "working"}}
 	snap.All = []AllPane{
@@ -79,11 +81,11 @@ func TestRailRowComposesPaint(t *testing.T) {
 			env = "1"
 		}
 		t.Setenv("DM_NERD", env)
-		for _, w := range []int{defaultRail, 12} {
+		for _, w := range []int{layout.DefaultRail, 12} {
 			snap := railRowSnap(w)
 			painted := railRows(t, snap)
 			items := railItems(snap)
-			compact := railCompact(w)
+			compact := layout.RailCompact(w)
 			gripAt := (snap.Rows - 2) / 2
 			for y, line := range painted {
 				if y == snap.Rows-2 {
@@ -126,11 +128,11 @@ func TestRailRowComposesPaint(t *testing.T) {
 // text, colour and weight, and which run is the tail.
 func TestRailRowSegments(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := railRowSnap(defaultRail)
+	snap := railRowSnap(layout.DefaultRail)
 	items := railItems(snap)
 
 	ws := railRowFind(t, items, railWorkspace, "main")
-	left, right, tail := railRow(DefaultTheme(), ws, defaultRail, false, false)
+	left, right, tail := railRow(DefaultTheme(), ws, layout.DefaultRail, false, false)
 	wantLeft := []railSeg{
 		{text: "\u258c", fg: DefaultTheme().Accents[ws.accent]},
 		{text: " ", fg: DefaultTheme().Palette.RailText},
@@ -145,7 +147,7 @@ func TestRailRowSegments(t *testing.T) {
 	// An unfolded window line carries the caret, the folder, the branch tail
 	// and the stats.
 	win := railRowFind(t, items, railWindow, "one")
-	left, right, tail = railRow(DefaultTheme(), win, defaultRail, false, false)
+	left, right, tail = railRow(DefaultTheme(), win, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{text: "  ", fg: DefaultTheme().Palette.RailWindow},
 		{text: "\u25be", fg: DefaultTheme().Palette.RailWindow},
@@ -172,7 +174,7 @@ func TestRailRowSegments(t *testing.T) {
 	// A folded window line flips the caret and keeps its folder. It has no
 	// branch and no stats outside a repo.
 	folded := railRowFind(t, items, railWindow, "two")
-	left, right, tail = railRow(DefaultTheme(), folded, defaultRail, false, false)
+	left, right, tail = railRow(DefaultTheme(), folded, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{text: "  ", fg: DefaultTheme().Palette.RailWindow},
 		{text: "\u25b8", fg: DefaultTheme().Palette.RailWindow},
@@ -189,7 +191,7 @@ func TestRailRowSegments(t *testing.T) {
 
 	// The note line is one dim run under the window line.
 	note := railRowFind(t, items, railWindowNote, "working hard")
-	left, right, tail = railRow(DefaultTheme(), note, defaultRail, false, false)
+	left, right, tail = railRow(DefaultTheme(), note, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{text: "    ", fg: DefaultTheme().Palette.RailDim},
 		{text: "working hard", fg: DefaultTheme().Palette.RailDim},
@@ -204,7 +206,7 @@ func TestRailRowSegments(t *testing.T) {
 	// the writer's, not the composition's.
 	mark, glyphColour := railMark(true, false), DefaultTheme().Palette.RailWorking
 	pane := railRowFind(t, items, railPane, "pi")
-	left, right, tail = railRow(DefaultTheme(), pane, defaultRail, false, false)
+	left, right, tail = railRow(DefaultTheme(), pane, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
 		{text: "      ", fg: DefaultTheme().Palette.RailText},
 		{text: mark, fg: glyphColour},
@@ -220,7 +222,7 @@ func TestRailRowSegments(t *testing.T) {
 	}
 
 	// The thin rail keeps the marker and the glyph and drops the indents.
-	left, right, tail = railRow(DefaultTheme(), pane, collapsedRail, true, false)
+	left, right, tail = railRow(DefaultTheme(), pane, layout.CollapsedRail, true, false)
 	wantLeft = []railSeg{
 		{text: mark, fg: glyphColour},
 		{text: "\u25cf", fg: glyphColour},
@@ -232,7 +234,7 @@ func TestRailRowSegments(t *testing.T) {
 
 	// A gap row composes nothing at all.
 	gap := railRowFind(t, items, railGap, "")
-	left, right, tail = railRow(DefaultTheme(), gap, defaultRail, false, false)
+	left, right, tail = railRow(DefaultTheme(), gap, layout.DefaultRail, false, false)
 	if left != nil || right != nil || tail != nil {
 		t.Fatalf("gap row = %+v / %+v / %+v, want nothing", left, right, tail)
 	}
@@ -283,12 +285,12 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	}
 
 	// At the default width the branch fits beside the folder and the pair.
-	left, right, tail := railRow(DefaultTheme(), win, defaultRail, false, false)
+	left, right, tail := railRow(DefaultTheme(), win, layout.DefaultRail, false, false)
 	if tail == nil {
-		t.Fatalf("branch dropped at %d columns: %+v", defaultRail, left)
+		t.Fatalf("branch dropped at %d columns: %+v", layout.DefaultRail, left)
 	}
 	if !reflect.DeepEqual(right, full) {
-		t.Fatalf("stats at %d columns = %+v, want the whole pair", defaultRail, right)
+		t.Fatalf("stats at %d columns = %+v, want the whole pair", layout.DefaultRail, right)
 	}
 
 	// Twenty columns: the branch goes whole and the folder stays intact.
@@ -322,13 +324,13 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	// whole, it never writes past the rail, and it composes what the rail
 	// paints.
 	for w := 1; w <= 40; w++ {
-		if railCompact(w) {
+		if layout.RailCompact(w) {
 			// The thin rail lists panes only; there is no window row to elide.
 			continue
 		}
 		snap := railRowSnap(w)
 		it := railRowFind(t, railItems(snap), railWindow, "one")
-		left, right, tail = railRow(DefaultTheme(), it, w, railCompact(w), false)
+		left, right, tail = railRow(DefaultTheme(), it, w, layout.RailCompact(w), false)
 		if right != nil && !reflect.DeepEqual(right, full) {
 			t.Fatalf("stats at %d columns = %+v, want the whole pair or none", w, right)
 		}

@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"fmt"
 	"strconv"
 	"strings"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 )
 
 // drawMenu paints the right-click menu over the panes. The panel owns the border,
@@ -17,12 +19,12 @@ func drawMenu(buf *bytes.Buffer, th Theme, m *menu) {
 	if m == nil || m.w < 8 {
 		return
 	}
-	inner := Rect{X: m.x + 1, Y: m.y + 1, W: m.w - 2, H: len(m.items)}
+	inner := layout.Rect{X: m.x + 1, Y: m.y + 1, W: m.w - 2, H: len(m.items)}
 	paintPanel(buf, th, inner, panelTitle{
 		text:  th.Glyphs.BorderHorizontal + " " + m.title + " ",
 		style: "\x1b[0m\x1b[90m",
 		fill:  th.Glyphs.BorderHorizontal,
-	}, "", false, func(b *bytes.Buffer, r Rect) {
+	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
 		for i, it := range m.items {
 			line := cells.Pad(" "+cells.Pad(it.label, 22)+" "+cells.Pad(it.key, 4), r.W)
 			colour := "\x1b[0m\x1b[90m"

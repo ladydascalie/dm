@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 )
 
 // renamePromptTUI is a client on a snapshot whose active workspace is s1 with
@@ -114,12 +116,12 @@ func TestRenamePromptRailMovedToB(t *testing.T) {
 	tr, got := renamePromptTUI(t)
 	tr.snap.Rail = 0
 	renamePromptKeys(tr, "\x02b")
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != defaultRail {
-		t.Fatalf("prefix b sent %+v, want set-rail %d", m, defaultRail)
+	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.DefaultRail {
+		t.Fatalf("prefix b sent %+v, want set-rail %d", m, layout.DefaultRail)
 	}
 
-	tr.snap.Rail = defaultRail
-	tr.snap.RailWant = defaultRail
+	tr.snap.Rail = layout.DefaultRail
+	tr.snap.RailWant = layout.DefaultRail
 	renamePromptKeys(tr, "\x02r")
 	if tr.mode != "rename" {
 		t.Fatalf("prefix r opened %q, want rename", tr.mode)
@@ -256,7 +258,7 @@ func TestRenamePromptShieldsPane(t *testing.T) {
 // renameFloatPaint draws the prompt and parses its band into the cells it
 // paints, using the help box parser: a wide rune takes the cells cells gives
 // it, and any move but an absolute one fails the test.
-func renameFloatPaint(t *testing.T, snap *Snapshot, id, draft string, kind ...string) (Rect, helpBoxPainted) {
+func renameFloatPaint(t *testing.T, snap *Snapshot, id, draft string, kind ...string) (layout.Rect, helpBoxPainted) {
 	t.Helper()
 	box, ok := renameBoxGeometry(snap.Cols, snap.Rows, snap.Rail)
 	if !ok {
@@ -270,7 +272,7 @@ func renameFloatPaint(t *testing.T, snap *Snapshot, id, draft string, kind ...st
 // renameFloatInside fails when the float painted a cell, or a wide rune's
 // second cell, outside the box: the two border rows and the input row between
 // them, one border column either side.
-func renameFloatInside(t *testing.T, box Rect, p helpBoxPainted) {
+func renameFloatInside(t *testing.T, box layout.Rect, p helpBoxPainted) {
 	t.Helper()
 	for cell, runes := range p.writes {
 		y, x := cell[0], cell[1]
@@ -290,7 +292,7 @@ func renameFloatRow(p helpBoxPainted, y, x, w int) string {
 // The prompt is a float of three rows: the title names the kind and the id, the
 // input row names the draft and holds the caret, and nothing lands outside it.
 func TestRenamePromptDrawsTheBox(t *testing.T) {
-	snap := testSnapshot(&Node{Pane: "a"}, 80, 12, nil)
+	snap := testSnapshot(&layout.Node{Pane: "a"}, 80, 12, nil)
 	box, p := renameFloatPaint(t, snap, "s1", "main")
 	if box.H != 1 {
 		t.Fatalf("box height = %d, want one input row", box.H)
@@ -298,7 +300,7 @@ func TestRenamePromptDrawsTheBox(t *testing.T) {
 	if box.Y+box.H > snap.Rows-3 {
 		t.Fatalf("box %+v touches the toast row or the bar on %d rows", box, snap.Rows)
 	}
-	if box.X-1 < effectiveRail(snap.Cols, snap.Rail) {
+	if box.X-1 < layout.EffectiveRail(snap.Cols, snap.Rail) {
 		t.Fatalf("box %+v starts under the rail", box)
 	}
 	renameFloatInside(t, box, p)
@@ -330,7 +332,7 @@ func TestRenamePromptDrawsTheBox(t *testing.T) {
 func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
 	wide := strings.Repeat("名前", 12)
 	for _, cols := range []int{80, 30, 20, 12} {
-		snap := testSnapshot(&Node{Pane: "a"}, cols, 8, nil)
+		snap := testSnapshot(&layout.Node{Pane: "a"}, cols, 8, nil)
 		box, p := renameFloatPaint(t, snap, "s1", wide)
 		renameFloatInside(t, box, p)
 		if got := renameFloatRow(p, box.Y, box.X, box.W); !strings.HasSuffix(got, "▏") {
@@ -343,7 +345,7 @@ func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
 // readable beside the caret.
 func TestRenamePromptElidesLongDraftHead(t *testing.T) {
 	long := strings.Repeat("a very long workspace name ", 4)
-	snap := testSnapshot(&Node{Pane: "a"}, 30, 8, nil)
+	snap := testSnapshot(&layout.Node{Pane: "a"}, 30, 8, nil)
 	box, p := renameFloatPaint(t, snap, "s1", long)
 	row := renameFloatRow(p, box.Y, box.X, box.W)
 	if !strings.HasPrefix(row, " name: ") {
@@ -363,7 +365,7 @@ func TestRenamePromptElidesLongDraftHead(t *testing.T) {
 // A screen too small to hold the box paints nothing.
 func TestRenamePromptDrawsNothingWhenTooSmall(t *testing.T) {
 	for _, c := range []struct{ cols, rows int }{{1, 8}, {20, 4}} {
-		snap := testSnapshot(&Node{Pane: "a"}, c.cols, c.rows, nil)
+		snap := testSnapshot(&layout.Node{Pane: "a"}, c.cols, c.rows, nil)
 		var b bytes.Buffer
 		drawRename(&b, DefaultTheme(), snap, "s1", "main")
 		if b.Len() != 0 {

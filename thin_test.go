@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -21,7 +23,7 @@ func thinPane(id, ws, win, status string, focus bool) AllPane {
 // thinSnapshot is a thin rail on a 40x6 screen holding panes.
 func thinSnapshot(panes []AllPane) *Snapshot {
 	return &Snapshot{
-		Session: "x", Cols: 40, Rows: 6, Rail: collapsedRail, All: panes,
+		Session: "x", Cols: 40, Rows: 6, Rail: layout.CollapsedRail, All: panes,
 	}
 }
 
@@ -263,10 +265,10 @@ func TestThinRailClips(t *testing.T) {
 		}
 	}
 	for y := 0; y < snap.Rows; y++ {
-		for x := collapsedRail; x < snap.Cols; x++ {
+		for x := layout.CollapsedRail; x < snap.Cols; x++ {
 			if g := vt.Cell(x, y); !thinBlank(g) {
 				t.Fatalf("thin rail wrote %q at %d,%d, past column %d",
-					g.Char, x, y, collapsedRail-1)
+					g.Char, x, y, layout.CollapsedRail-1)
 			}
 		}
 	}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 )
 
@@ -16,10 +18,10 @@ import (
 // narrow and a pane to preview.
 func switcherTUI(t *testing.T) (*tui, chan Msg) {
 	t.Helper()
-	root := &Node{Pane: "w1p1"}
+	root := &layout.Node{Pane: "w1p1"}
 	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 34, Root: root, Focus: "w1p1"}
-	rects := map[string]Rect{}
-	layout(root, paneAreaFor(100, 30, 34), rects)
+	rects := map[string]layout.Rect{}
+	layout.Layout(root, layout.PaneAreaFor(100, 30, 34), rects)
 	snap.Panes = []PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
 	snap.All = []AllPane{
 		{

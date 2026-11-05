@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"fmt"
 	"strings"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 
 	"github.com/hinshun/vt10x"
 )
@@ -12,7 +14,7 @@ import (
 // paletteRect centres the float at 80% by 70%, clamped so its box always fits
 // on screen. It moved here from pal.go with the same rule; the client asks for
 // the rect it opens the switcher with.
-func paletteRect(cols, rows int) Rect {
+func paletteRect(cols, rows int) layout.Rect {
 	w, h := cols*8/10, rows*7/10
 	if w > 132 {
 		w = 132
@@ -38,19 +40,19 @@ func paletteRect(cols, rows int) Rect {
 	if h > rows {
 		h = rows
 	}
-	return Rect{X: (cols - w) / 2, Y: (rows - h) / 2, W: w, H: h}
+	return layout.Rect{X: (cols - w) / 2, Y: (rows - h) / 2, W: w, H: h}
 }
 
 // switcherLayout is the cell geometry of one float: the box, the query row, the
 // band of rows under it and, when the float is wide enough, the columns the
 // preview takes.
 type switcherLayout struct {
-	r      Rect // the float's outer rect, the box border included
-	inner  Rect // inside the border
-	queryY int  // the query row
-	bandY  int  // the first row of the list and preview bands
-	bandH  int  // how many band rows fit
-	listW  int  // the list band's width
+	r      layout.Rect // the float's outer rect, the box border included
+	inner  layout.Rect // inside the border
+	queryY int         // the query row
+	bandY  int         // the first row of the list and preview bands
+	bandH  int         // how many band rows fit
+	listW  int         // the list band's width
 
 	preview bool
 	ruleX   int // the vertical rule between the bands
@@ -69,7 +71,7 @@ func switcherLayoutOf(s *switcher, snap *Snapshot) switcherLayout {
 	s.rect = r
 	l := switcherLayout{
 		r:      r,
-		inner:  Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2},
+		inner:  layout.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2},
 		queryY: r.Y + 1,
 		bandY:  r.Y + 2,
 		bandH:  r.H - 3,
@@ -90,7 +92,7 @@ func switcherLayoutOf(s *switcher, snap *Snapshot) switcherLayout {
 }
 
 // clampRect keeps r inside a cols by rows screen.
-func clampRect(r Rect, cols, rows int) Rect {
+func clampRect(r layout.Rect, cols, rows int) layout.Rect {
 	if r.W > cols {
 		r.W = cols
 	}
@@ -137,7 +139,7 @@ func drawSwitcher(buf *bytes.Buffer, th Theme, s *switcher, snap *Snapshot, vts 
 	if l.r.W < 3 || l.r.H < 3 {
 		return l.r.X, l.r.Y
 	}
-	paintPanel(buf, th, l.inner, panelTitle{}, "", true, func(b *bytes.Buffer, _ Rect) {
+	paintPanel(buf, th, l.inner, panelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
 		cx, cy = paintSwitcherQuery(b, th, s, l)
 		paintSwitcherBands(b, th, s, vts, l)
 	})
@@ -232,7 +234,7 @@ func paintSwitcherBands(buf *bytes.Buffer, th Theme, s *switcher, vts map[string
 		}
 	}
 	if l.preview {
-		paintSwitcherPreview(buf, th, s, vts, Rect{X: l.prevX, Y: l.bandY, W: l.prevW, H: l.bandH})
+		paintSwitcherPreview(buf, th, s, vts, layout.Rect{X: l.prevX, Y: l.bandY, W: l.prevW, H: l.bandH})
 	}
 }
 
@@ -286,7 +288,7 @@ func scrollSwitcher(s *switcher, h int) {
 // paintSwitcherPreview paints the selected pane's screen into the band, bottom
 // aligned. A pane with a live terminal paints from it; otherwise the lines of
 // the model's read reply are used. No data at all leaves the band blank.
-func paintSwitcherPreview(buf *bytes.Buffer, th Theme, s *switcher, vts map[string]vt10x.Terminal, band Rect) {
+func paintSwitcherPreview(buf *bytes.Buffer, th Theme, s *switcher, vts map[string]vt10x.Terminal, band layout.Rect) {
 	if band.W <= 0 || band.H <= 0 {
 		return
 	}
@@ -308,7 +310,7 @@ func paintSwitcherPreview(buf *bytes.Buffer, th Theme, s *switcher, vts map[stri
 		start := band.Y + band.H - h
 		paintBlankRows(buf, th, band, band.Y, start)
 		if h > 0 {
-			drawPaneFrom(buf, vt, Rect{X: band.X, Y: start, W: band.W, H: h}, row0, nil, nil)
+			drawPaneFrom(buf, vt, layout.Rect{X: band.X, Y: start, W: band.W, H: h}, row0, nil, nil)
 		}
 		return
 	}
@@ -332,7 +334,7 @@ func paintSwitcherPreview(buf *bytes.Buffer, th Theme, s *switcher, vts map[stri
 }
 
 // paintBlankRows paints the rows [from, to) of a band on the rail ground.
-func paintBlankRows(buf *bytes.Buffer, th Theme, band Rect, from, to int) {
+func paintBlankRows(buf *bytes.Buffer, th Theme, band layout.Rect, from, to int) {
 	for y := from; y < to; y++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, band.X+1)
 		buf.WriteString("\x1b[0m" + th.Palette.RailBG.bg() + strings.Repeat(" ", band.W) + "\x1b[0m")

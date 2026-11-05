@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"dm/internal/layout"
 )
 
 // renameTargetTUI is a client on a snapshot with one workspace, s1, and two
@@ -81,7 +83,7 @@ func TestRenameWorkspacePromptStillSendsWorkspace(t *testing.T) {
 // The float title names the kind and the id it renames, and its input row
 // names the draft.
 func TestRenamePromptLabelsTheKind(t *testing.T) {
-	snap := testSnapshot(&Node{Pane: "a"}, 60, 8, nil)
+	snap := testSnapshot(&layout.Node{Pane: "a"}, 60, 8, nil)
 
 	var wb bytes.Buffer
 	drawRename(&wb, DefaultTheme(), snap, "w2", "two", "window")

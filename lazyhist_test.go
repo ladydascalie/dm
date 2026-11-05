@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/layout"
 	"dm/internal/paths"
 )
 
@@ -79,14 +80,14 @@ func histServer(t *testing.T, name string, panes int) (*server, []string) {
 	st := newState(name)
 	w := st.win()
 	ids := make([]string, 0, panes)
-	kids := make([]*Node, 0, panes)
+	kids := make([]*layout.Node, 0, panes)
 	for i := 0; i < panes; i++ {
 		id := w.newPaneID()
 		ids = append(ids, id)
-		kids = append(kids, &Node{Pane: id})
+		kids = append(kids, &layout.Node{Pane: id})
 		st.Panes[id] = &PaneState{}
 	}
-	w.Root = &Node{Dir: "row", Kids: kids}
+	w.Root = &layout.Node{Dir: "row", Kids: kids}
 	w.Focus = ids[0]
 	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
 		t.Fatal(err)

@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/layout"
+
 	"github.com/hinshun/vt10x"
 	"golang.org/x/term"
 )
@@ -115,7 +117,7 @@ type tui struct {
 	// padZone is the divider under the pointer and padAxis its orientation.
 	// A zero zone draws no hover affordance. mouseX/mouseY remember the last
 	// pointer cell, so a snapshot can re-resolve the hover.
-	padZone Rect
+	padZone layout.Rect
 	padAxis string
 	mouseX  int
 	mouseY  int
@@ -193,15 +195,15 @@ type lastFrame struct {
 	menu   paint
 	rename paint
 
-	divRect Rect   // divider zone the last frame painted
-	cur     string // cursor block the last frame wrote
+	divRect layout.Rect // divider zone the last frame painted
+	cur     string      // cursor block the last frame wrote
 }
 
 // histCache is one pane's replay bookkeeping: the rect the ring was asked for
 // and whether the reply has landed. The ring itself lives in tui.hist, which
 // applyReplay owns.
 type histCache struct {
-	at  Rect
+	at  layout.Rect
 	got bool
 }
 
@@ -219,7 +221,7 @@ type linkHover struct {
 // first row to show from it, the selection to mark and the hover to underline.
 type panePaint struct {
 	id    string
-	rect  Rect
+	rect  layout.Rect
 	vt    vt10x.View
 	row0  int
 	sel   *selRange
@@ -432,12 +434,12 @@ func (t *tui) apply(m Msg) {
 		// railWant remembers the last expanded width only, so a collapse or a
 		// hide does not replace it with the thin width or zero.
 		switch {
-		case m.Snap.RailWant > collapsedRail:
+		case m.Snap.RailWant > layout.CollapsedRail:
 			t.railWant = m.Snap.RailWant
-		case m.Snap.Rail > collapsedRail:
+		case m.Snap.Rail > layout.CollapsedRail:
 			t.railWant = m.Snap.Rail
 		case t.railWant <= 0:
-			t.railWant = defaultRail
+			t.railWant = layout.DefaultRail
 		}
 		if t.scroll != "" {
 			p := t.paneByID(t.scroll)
@@ -576,7 +578,7 @@ func (t *tui) apply(m Msg) {
 // applyScreen replaces a pane's live VT with a fresh one built from the pane
 // daemon's snapshot. The daemon serialised it at the pane's rect, so the size
 // matches what the layout will paint.
-func applyScreen(vts map[string]vt10x.Terminal, id string, r Rect, data []byte) {
+func applyScreen(vts map[string]vt10x.Terminal, id string, r layout.Rect, data []byte) {
 	if r.W < 1 || r.H < 1 {
 		return
 	}

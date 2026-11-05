@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
-	"dm/internal/cells"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
 
 	"github.com/hinshun/vt10x"
 )
@@ -90,10 +92,10 @@ func switcherFocusRows(out string) []int {
 // takes the 132 by 40 cap, a tiny screen takes the whole of it. pal_test.go
 // already holds the fit loop over the same sizes.
 func TestSwitcherRectRule(t *testing.T) {
-	if r := paletteRect(200, 60); r != (Rect{X: 34, Y: 10, W: 132, H: 40}) {
+	if r := paletteRect(200, 60); r != (layout.Rect{X: 34, Y: 10, W: 132, H: 40}) {
 		t.Fatalf("paletteRect(200,60) = %+v, want 34,10 132x40", r)
 	}
-	if r := paletteRect(12, 5); r != (Rect{X: 0, Y: 0, W: 12, H: 5}) {
+	if r := paletteRect(12, 5); r != (layout.Rect{X: 0, Y: 0, W: 12, H: 5}) {
 		t.Fatalf("paletteRect(12,5) = %+v, want the whole screen", r)
 	}
 }
