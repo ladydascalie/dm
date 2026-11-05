@@ -365,6 +365,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"h j k l", "focus pane"},
 		{"n / p", "next/prev pane"},
 		{"x", "close pane"},
+		{"X", "close window"},
 		{"z", "zoom pane"},
 		{"c", "new window"},
 		{"w / W", "next/prev win"},
@@ -402,6 +403,29 @@ keymap "main" {
 	if rows[1][0] != "ctrl+a" || rows[1][1] != "send prefix" {
 		t.Errorf("row 1 = %#v, want ctrl+a / send prefix", rows[1])
 	}
+}
+
+// TestConfigCloseWindowBinding proves the default main keymap binds close-window
+// to X and the help box carries its row right after close pane.
+func TestConfigCloseWindowBinding(t *testing.T) {
+	cfg := LoadDefault()
+	if got := cfg.Key("main", "close-window"); got != "X" {
+		t.Fatalf("Key(main, close-window) = %q, want X", got)
+	}
+	rows := cfg.HelpRows()
+	for i, r := range rows {
+		if r[1] != "close window" {
+			continue
+		}
+		if r[0] != "X" {
+			t.Fatalf("close window row key = %q, want X", r[0])
+		}
+		if i == 0 || rows[i-1][1] != "close pane" {
+			t.Fatalf("close window row is not after close pane: %#v", rows)
+		}
+		return
+	}
+	t.Fatalf("no close window help row: %#v", rows)
 }
 
 // TestConfigHelpTag proves a tagged binding carries its section in HelpEntries
