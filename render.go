@@ -1629,20 +1629,26 @@ func drawSessions(buf *bytes.Buffer, cols, rows int, sessions []SessionInfo, sel
 }
 
 // drawRename paints the rename prompt as one full row above the status bar,
-// over the last pane row, on the rail ground. The label and the caret are
-// fixed: the draft takes what is left and loses its head first, so a long name
-// still shows its end and the caret stays on screen. drawRename writes at most
-// snap.Cols cells and touches one row.
-func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string) {
+// over the last pane row, on the rail ground. The label names the kind and the
+// id, and the caret is fixed: the draft takes what is left and loses its head
+// first, so a long name still shows its end and the caret stays on screen.
+// drawRename writes at most snap.Cols cells and touches one row. The kind is
+// optional: a call without it renames a workspace, as the frozen prompt test
+// expects.
+func drawRename(buf *bytes.Buffer, snap *Snapshot, id, draft string, kind ...string) {
 	if snap == nil || snap.Rows < 2 || snap.Cols < 1 {
 		return
+	}
+	k := "workspace"
+	if len(kind) > 0 && kind[0] != "" {
+		k = kind[0]
 	}
 	const caret = "▏"
 	labelRoom := snap.Cols - cells(caret)
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
-	segs := clipSegs([]seg{{text: " rename workspace " + id + ": ", fg: railDim}}, labelRoom)
+	segs := clipSegs([]seg{{text: " rename " + k + " " + id + ": ", fg: railDim}}, labelRoom)
 	draftRoom := snap.Cols - cells(caret) - segCells(segs)
 	// The draft loses its head, so a long name still shows its end and the
 	// caret stays on screen.
