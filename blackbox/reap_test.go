@@ -1,4 +1,4 @@
-package main
+package blackbox
 
 import (
 	"bytes"
@@ -12,8 +12,12 @@ import (
 )
 
 // reapWindow bounds how long a lost pane may take to stop: the daemon checks
-// its socket every 5 seconds.
+// its socket every reapSockEvery.
 const reapWindow = 15 * time.Second
+
+// reapSockEvery mirrors pane.go's sockEvery. The test waits for one reaper
+// pass, so it needs the interval the daemon uses.
+const reapSockEvery = 5 * time.Second
 
 // gone reports whether pid has exited. The server never waits for a pane
 // daemon, so an exited daemon lingers as a zombie and signal 0 still succeeds;
@@ -73,7 +77,7 @@ func TestReapOrphans(t *testing.T) {
 	orphanShell := shellPID(t, h, "reap", orphan)
 	keepShell := shellPID(t, h, "reap", keep)
 	// keep answered the pid probe, so its daemon is listening and its own
-	// reaper timer is running. Its first pass lands within sockEvery of this
+	// reaper timer is running. Its first pass lands within reapSockEvery of this
 	// moment; the check below waits for that pass, not just the orphan's.
 	keepUp := time.Now()
 	orphanDaemon := panePID(t, h, "reap", orphan)
@@ -108,7 +112,7 @@ func TestReapOrphans(t *testing.T) {
 
 	// The orphan's death only proves the orphan's reaper pass ran. Each pane
 	// runs its own timer, so wait for keep's first pass too, then look once.
-	if wait := time.Until(keepUp.Add(sockEvery + 300*time.Millisecond)); wait > 0 {
+	if wait := time.Until(keepUp.Add(reapSockEvery + 300*time.Millisecond)); wait > 0 {
 		time.Sleep(wait)
 	}
 	if gone(keepDaemon) || gone(keepShell) {

@@ -1,4 +1,4 @@
-package main
+package blackbox
 
 import (
 	"bufio"
@@ -12,10 +12,49 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // The box CLI tests drive the built binary against a temp session, the way a
 // shell in a pane does, so they prove the wrapper and the server together.
+
+// schemaEnum collects every enum array the published schema carries. The
+// state enum is the parser's set, so a test can read it off the wire.
+func schemaEnum(v any) []string {
+	var out []string
+	var walk func(any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			if enum, ok := t["enum"].([]any); ok {
+				for _, e := range enum {
+					if s, ok := e.(string); ok {
+						out = append(out, s)
+					}
+				}
+			}
+			for _, x := range t {
+				walk(x)
+			}
+		case []any:
+			for _, x := range t {
+				walk(x)
+			}
+		}
+	}
+	walk(v)
+	return out
+}
+
+// boxEntry is one message-box row as the CLI prints it in JSON. It is a local
+// shape: the test proves the printed fields, not a production type.
+type boxEntry struct {
+	Seq   int    `json:"seq"`
+	Key   string `json:"key"`
+	State string `json:"state"`
+	Msg   string `json:"msg"`
+}
 
 // boxEnv builds a child environment with extra entries replacing any of the
 // same name in base.
@@ -129,11 +168,14 @@ func TestBoxCLI(t *testing.T) {
 	}
 
 	// --json prints the reply unchanged.
-	var rep listReply
+	var rep struct {
+		Entries []boxEntry `json:"entries"`
+		Trimmed bool       `json:"trimmed"`
+	}
 	if err := json.Unmarshal([]byte(boxRun(t, h, env, "msg", "list", "--json", "-s", s)), &rep); err != nil {
 		t.Fatalf("list --json is not the reply: %v", err)
 	}
-	if len(rep.Entries) != 3 || rep.Entries[0].Seq != 3 || rep.Entries[0].State != stateBlocked {
+	if len(rep.Entries) != 3 || rep.Entries[0].Seq != 3 || rep.Entries[0].State != "blocked" {
 		t.Fatalf("list --json entries = %+v", rep.Entries)
 	}
 
@@ -143,7 +185,7 @@ func TestBoxCLI(t *testing.T) {
 	narrow := boxEnv(env, "COLUMNS=60")
 	narrowOut := boxRun(t, h, narrow, "msg", "list", "-s", s)
 	for _, line := range boxLines(narrowOut) {
-		if n := cells(line); n > 60 {
+		if n := ansi.StringWidth(line); n > 60 {
 			t.Fatalf("row is %d cells at COLUMNS=60: %q", n, line)
 		}
 	}
@@ -216,7 +258,7 @@ func TestBoxCLISchema(t *testing.T) {
 	}
 	// Every state name in the published enum is one the parser accepts.
 	want := map[string]bool{"note": false, "working": false, "blocked": false, "done": false, "error": false}
-	for _, st := range stateNames() {
+	for _, st := range schemaEnum(got) {
 		if _, ok := want[st]; !ok {
 			t.Fatalf("the parser has a state %q the frozen set does not", st)
 		}
@@ -457,7 +499,13 @@ func TestBoxCLIWatchers(t *testing.T) {
 	}
 
 	// --json prints the reply unchanged.
-	var rep watchersReply
+	var rep struct {
+		Watchers []struct {
+			Pane      string `json:"pane"`
+			Key       string `json:"key"`
+			KeyPrefix string `json:"keyPrefix"`
+		} `json:"watchers"`
+	}
 	if err := json.Unmarshal([]byte(boxRun(t, h, h.env, "msg", "watchers", "--json", "-s", s)), &rep); err != nil {
 		t.Fatalf("watchers --json is not the reply: %v", err)
 	}
@@ -661,11 +709,11 @@ func TestBoxCLISubJSON(t *testing.T) {
 	boxRun(t, h, h.env, "msg", "post", "--key", "lane/a", "--state", "working", "--msg", "two lines", "-s", s)
 
 	line := sub.next(20 * time.Second)
-	var got entry
+	var got boxEntry
 	if err := json.Unmarshal([]byte(line), &got); err != nil {
 		t.Fatalf("sub --json line is not one entry: %v\n%s", err, line)
 	}
-	if got.Seq != 1 || got.Key != "lane/a" || got.State != stateWorking || got.Msg != "two lines" {
+	if got.Seq != 1 || got.Key != "lane/a" || got.State != "working" || got.Msg != "two lines" {
 		t.Fatalf("sub --json entry = %+v", got)
 	}
 	// The frame's trimmed flag does not ride along: the line is the entry.
