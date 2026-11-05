@@ -61,7 +61,7 @@ func TestThemeReachesPainters(t *testing.T) {
 	}
 	accent := false
 	for _, span := range barSegments(th, barTestSnap(80), false, "") {
-		if span.fg == (theme.RGB{R: 7, G: 8, B: 9}) {
+		if span.FG == (theme.RGB{R: 7, G: 8, B: 9}) {
 			accent = true
 		}
 	}
@@ -84,7 +84,7 @@ func TestThemeReachesPainters(t *testing.T) {
 	if !strings.Contains(grips.String(), "@") || strings.Contains(grips.String(), "•") {
 		t.Fatalf("grips = %q, want the themed @ only", grips.String())
 	}
-	if segs := railStats(th, railItem{kind: railWindow, inRepo: true, dirty: true}); len(segs) == 0 || segs[0].text != "o" {
+	if segs := railStats(th, railItem{kind: railWindow, inRepo: true, dirty: true}); len(segs) == 0 || segs[0].Text != "o" {
 		t.Fatalf("dirty dot = %+v, want the themed o", segs)
 	}
 
@@ -170,14 +170,14 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	pane := railRowFind(t, items, railPane, "w1p1")
 	left, _, _ := railRow(th, pane, layout.DefaultRail, false, false)
 	found := false
-	for _, seg := range left {
-		if seg.text == "W" {
+	for _, s := range left {
+		if s.Text == "W" {
 			found = true
-			if seg.fg != (theme.RGB{R: 1, G: 2, B: 3}) {
-				t.Fatalf("themed glyph colour = %v, want 1,2,3", seg.fg)
+			if s.FG != (theme.RGB{R: 1, G: 2, B: 3}) {
+				t.Fatalf("themed glyph colour = %v, want 1,2,3", s.FG)
 			}
 		}
-		if seg.text == "●" {
+		if s.Text == "●" {
 			t.Fatalf("built-in glyph still composed: %+v", left)
 		}
 	}

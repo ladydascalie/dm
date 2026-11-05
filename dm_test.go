@@ -22,6 +22,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -2362,24 +2363,24 @@ func barTestSnap(cols int) *wire.Snapshot {
 }
 
 // barTexts is the text of each span, in paint order.
-func barTexts(segs []seg) []string {
+func barTexts(segs []segment.Seg) []string {
 	out := make([]string, 0, len(segs))
-	for _, seg := range segs {
-		out = append(out, seg.text)
+	for _, s := range segs {
+		out = append(out, s.Text)
 	}
 	return out
 }
 
 // barElideStage names the rung of the elision ladder barTestSnap has reached.
-func barElideStage(segs []seg) string {
+func barElideStage(segs []segment.Seg) string {
 	var text strings.Builder
 	chips := 0
-	for _, seg := range segs {
-		if seg.pin {
+	for _, s := range segs {
+		if s.Pin {
 			continue
 		}
-		text.WriteString(seg.text)
-		if len(seg.text) == 1 && seg.text[0] >= '1' && seg.text[0] <= '9' {
+		text.WriteString(s.Text)
+		if len(s.Text) == 1 && s.Text[0] >= '1' && s.Text[0] <= '9' {
 			chips++
 		}
 	}
@@ -2434,39 +2435,39 @@ func TestBarSegmentOrder(t *testing.T) {
 		t.Fatalf("bar spans = %q, want %q", got, want)
 	}
 
-	if segs[0].fg != theme.DefaultTheme().Palette.RailText {
-		t.Fatalf("session colour = %v, want theme.DefaultTheme().Palette.RailText", segs[0].fg)
+	if segs[0].FG != theme.DefaultTheme().Palette.RailText {
+		t.Fatalf("session colour = %v, want theme.DefaultTheme().Palette.RailText", segs[0].FG)
 	}
-	if segs[2].fg != theme.DefaultTheme().Palette.RailHeader {
-		t.Fatalf("workspace colour = %v, want theme.DefaultTheme().Palette.RailHeader", segs[2].fg)
+	if segs[2].FG != theme.DefaultTheme().Palette.RailHeader {
+		t.Fatalf("workspace colour = %v, want theme.DefaultTheme().Palette.RailHeader", segs[2].FG)
 	}
-	if segs[4].fg != theme.DefaultTheme().Palette.RailDim || segs[4].bg != theme.DefaultTheme().Palette.RailBG || segs[9].fg != theme.DefaultTheme().Palette.RailDim {
+	if segs[4].FG != theme.DefaultTheme().Palette.RailDim || segs[4].BG != theme.DefaultTheme().Palette.RailBG || segs[9].FG != theme.DefaultTheme().Palette.RailDim {
 		t.Fatalf("inactive chips = %+v %+v, want theme.DefaultTheme().Palette.RailDim on theme.DefaultTheme().Palette.RailBG", segs[4], segs[9])
 	}
 
 	// The active window reads as active: an accent mark, then bold text on the
 	// focus fill.
 	mark, chip := segs[6], segs[7]
-	if mark.text != "▸ " || mark.fg != theme.DefaultTheme().Palette.BarAccent || mark.bg != theme.DefaultTheme().Palette.RailFocusBG {
+	if mark.Text != "▸ " || mark.FG != theme.DefaultTheme().Palette.BarAccent || mark.BG != theme.DefaultTheme().Palette.RailFocusBG {
 		t.Fatalf("active mark = %+v, want the accent ▸ on theme.DefaultTheme().Palette.RailFocusBG", mark)
 	}
-	if chip.text != "2 web" || !chip.bold || chip.bg != theme.DefaultTheme().Palette.RailFocusBG {
+	if chip.Text != "2 web" || !chip.Bold || chip.BG != theme.DefaultTheme().Palette.RailFocusBG {
 		t.Fatalf("active chip = %+v, want bold on theme.DefaultTheme().Palette.RailFocusBG", chip)
 	}
 
 	// The state glyph is the only state colour on the bar.
-	if segs[11].fg != colour || segs[11].bg != theme.DefaultTheme().Palette.RailFocusBG {
+	if segs[11].FG != colour || segs[11].BG != theme.DefaultTheme().Palette.RailFocusBG {
 		t.Fatalf("focus glyph = %+v, want %v on theme.DefaultTheme().Palette.RailFocusBG", segs[11], colour)
 	}
-	if segs[12].fg != theme.DefaultTheme().Palette.RailText || !segs[12].bold {
+	if segs[12].FG != theme.DefaultTheme().Palette.RailText || !segs[12].Bold {
 		t.Fatalf("pane id = %+v, want bold theme.DefaultTheme().Palette.RailText", segs[12])
 	}
-	if segs[13].fg != theme.DefaultTheme().Palette.RailDim || segs[14].fg != theme.DefaultTheme().Palette.RailDim {
-		t.Fatalf("pane name and status = %v %v, want theme.DefaultTheme().Palette.RailDim", segs[13].fg, segs[14].fg)
+	if segs[13].FG != theme.DefaultTheme().Palette.RailDim || segs[14].FG != theme.DefaultTheme().Palette.RailDim {
+		t.Fatalf("pane name and status = %v %v, want theme.DefaultTheme().Palette.RailDim", segs[13].FG, segs[14].FG)
 	}
 	for _, k := range []int{11, 12, 13, 14} {
-		if segs[k].bg != theme.DefaultTheme().Palette.RailFocusBG {
-			t.Fatalf("focus span %d bg = %v, want theme.DefaultTheme().Palette.RailFocusBG", k, segs[k].bg)
+		if segs[k].BG != theme.DefaultTheme().Palette.RailFocusBG {
+			t.Fatalf("focus span %d bg = %v, want theme.DefaultTheme().Palette.RailFocusBG", k, segs[k].BG)
 		}
 	}
 
@@ -2474,18 +2475,18 @@ func TestBarSegmentOrder(t *testing.T) {
 	// or ends with one, and none sits inside the focus chip. The gutter is a
 	// single cell of the bar ground, so a colour slip shows here.
 	gutters := 0
-	for k, seg := range segs {
-		if seg.pin {
+	for k, s := range segs {
+		if s.Pin {
 			continue
 		}
-		if seg.text == " " {
+		if s.Text == " " {
 			gutters++
-			if seg.bg != theme.DefaultTheme().Palette.RailBG || seg.bg != theme.DefaultTheme().Palette.RailBG {
-				t.Fatalf("gutter %d bg = %v, want the bar ground %v", k, seg.bg, theme.DefaultTheme().Palette.RailBG)
+			if s.BG != theme.DefaultTheme().Palette.RailBG || s.BG != theme.DefaultTheme().Palette.RailBG {
+				t.Fatalf("gutter %d bg = %v, want the bar ground %v", k, s.BG, theme.DefaultTheme().Palette.RailBG)
 			}
 			continue
 		}
-		if seg.text == "" {
+		if s.Text == "" {
 			t.Fatalf("span %d is empty", k)
 		}
 	}
@@ -2496,18 +2497,18 @@ func TestBarSegmentOrder(t *testing.T) {
 	// The pinned block comes last, and nothing follows it.
 	left := len(want) - 2
 	for k := 0; k < left; k++ {
-		if segs[k].pin {
+		if segs[k].Pin {
 			t.Fatalf("span %d is pinned inside the left block", k)
 		}
 	}
-	if segs[left].text != "PREFIX " || !segs[left].pin {
+	if segs[left].Text != "PREFIX " || !segs[left].Pin {
 		t.Fatalf("span %d = %+v, want the pinned PREFIX", left, segs[left])
 	}
-	if segs[len(segs)-1].text != "READY" || !segs[len(segs)-1].pin {
+	if segs[len(segs)-1].Text != "READY" || !segs[len(segs)-1].Pin {
 		t.Fatalf("last span = %+v, want the pinned info", segs[len(segs)-1])
 	}
-	if segCells(segs) > snap.Cols {
-		t.Fatalf("bar spans %d cells, want <= %d", segCells(segs), snap.Cols)
+	if segment.SegCells(segs) > snap.Cols {
+		t.Fatalf("bar spans %d cells, want <= %d", segment.SegCells(segs), snap.Cols)
 	}
 }
 
@@ -2544,7 +2545,7 @@ func TestBarElide(t *testing.T) {
 	}
 	for _, c := range cases {
 		segs := barSegments(theme.DefaultTheme(), barTestSnap(c.cols), false, "")
-		if got := segCells(segs); got > c.cols {
+		if got := segment.SegCells(segs); got > c.cols {
 			t.Fatalf("cols %d: spans paint %d cells: %q", c.cols, got, barTexts(segs))
 		}
 		if got := barElideStage(segs); got != c.want {
@@ -2561,8 +2562,8 @@ func TestBarElide(t *testing.T) {
 	// The active window chip survives every width that keeps a chip at all.
 	for _, cols := range []int{60, 45, 40, 33, 30, 25, 22, 18, 16, 12} {
 		segs := barSegments(theme.DefaultTheme(), barTestSnap(cols), false, "")
-		if segCells(segs) > cols {
-			t.Fatalf("cols %d: spans paint %d cells", cols, segCells(segs))
+		if segment.SegCells(segs) > cols {
+			t.Fatalf("cols %d: spans paint %d cells", cols, segment.SegCells(segs))
 		}
 		text := strings.Join(barTexts(segs), "")
 		if cols >= 30 && !strings.Contains(text, "2") {
@@ -2606,45 +2607,45 @@ func TestBarPinned(t *testing.T) {
 	info := "12 rows above, 4 hidden"
 
 	segs := barSegments(theme.DefaultTheme(), snap, true, info)
-	var pinned []seg
-	for _, seg := range segs {
-		if seg.pin {
-			pinned = append(pinned, seg)
+	var pinned []segment.Seg
+	for _, s := range segs {
+		if s.Pin {
+			pinned = append(pinned, s)
 		}
 	}
 	if len(pinned) != 2 {
 		t.Fatalf("pinned spans = %q, want PREFIX and info", barTexts(segs))
 	}
-	if pinned[0].text != "PREFIX " || pinned[1].text != info {
+	if pinned[0].Text != "PREFIX " || pinned[1].Text != info {
 		t.Fatalf("pinned spans = %q %q, want PREFIX and the whole info",
-			pinned[0].text, pinned[1].text)
+			pinned[0].Text, pinned[1].Text)
 	}
-	if segCells(segs) > snap.Cols {
-		t.Fatalf("spans paint %d cells, want <= %d", segCells(segs), snap.Cols)
+	if segment.SegCells(segs) > snap.Cols {
+		t.Fatalf("spans paint %d cells, want <= %d", segment.SegCells(segs), snap.Cols)
 	}
 
 	// 20 columns hold the info alone: PREFIX goes whole, never the left block's
 	// room, and the left block gives way first.
 	snap.Cols = 20
 	segs = barSegments(theme.DefaultTheme(), snap, true, info)
-	if len(segs) != 1 || !segs[0].pin {
+	if len(segs) != 1 || !segs[0].Pin {
 		t.Fatalf("20 cols: spans = %q, want the pinned info alone", barTexts(segs))
 	}
-	if strings.Contains(segs[0].text, "PREFIX") {
-		t.Fatalf("20 cols: PREFIX survived: %q", segs[0].text)
+	if strings.Contains(segs[0].Text, "PREFIX") {
+		t.Fatalf("20 cols: PREFIX survived: %q", segs[0].Text)
 	}
-	if !strings.HasSuffix(segs[0].text, "…") {
-		t.Fatalf("20 cols: clipped info has no cells.Ellipsis: %q", segs[0].text)
+	if !strings.HasSuffix(segs[0].Text, "…") {
+		t.Fatalf("20 cols: clipped info has no cells.Ellipsis: %q", segs[0].Text)
 	}
-	if got := segCells(segs); got != 20 {
+	if got := segment.SegCells(segs); got != 20 {
 		t.Fatalf("20 cols: spans paint %d cells, want 20", got)
 	}
 
 	// An unarmed bar carries no PREFIX at all.
 	snap.Cols = 80
 	segs = barSegments(theme.DefaultTheme(), snap, false, info)
-	for _, seg := range segs {
-		if seg.pin && seg.text == "PREFIX " {
+	for _, s := range segs {
+		if s.Pin && s.Text == "PREFIX " {
 			t.Fatalf("unarmed bar painted PREFIX: %q", barTexts(segs))
 		}
 	}
@@ -2667,18 +2668,18 @@ func TestBarPinnedGutter(t *testing.T) {
 	for _, c := range cases {
 		segs := barSegments(theme.DefaultTheme(), barTestSnap(c.cols), c.armed, c.info)
 		leftCells, rightCells, pinned := 0, 0, false
-		for _, seg := range segs {
-			if seg.pin {
+		for _, s := range segs {
+			if s.Pin {
 				pinned = true
-				rightCells += cells.Cells(seg.text)
+				rightCells += cells.Cells(s.Text)
 				continue
 			}
-			leftCells += cells.Cells(seg.text)
+			leftCells += cells.Cells(s.Text)
 		}
 		if !pinned {
 			t.Fatalf("cols %d: no pinned block", c.cols)
 		}
-		if got := segCells(segs); got > c.cols {
+		if got := segment.SegCells(segs); got > c.cols {
 			t.Fatalf("cols %d: spans paint %d cells", c.cols, got)
 		}
 		if leftCells == 0 {
@@ -2699,12 +2700,12 @@ func TestBarPinnedAnchored(t *testing.T) {
 		snap := barTestSnap(cols)
 		segs := barSegments(theme.DefaultTheme(), snap, true, info)
 		var pinnedText, leftText string
-		for _, seg := range segs {
-			if seg.pin {
-				pinnedText += seg.text
+		for _, s := range segs {
+			if s.Pin {
+				pinnedText += s.Text
 				continue
 			}
-			leftText += seg.text
+			leftText += s.Text
 		}
 		if pinnedText != "PREFIX "+info {
 			t.Fatalf("cols %d: pinned spans = %q", cols, pinnedText)
@@ -2768,13 +2769,13 @@ func TestBarWideRunes(t *testing.T) {
 	for _, cols := range []int{80, 41, 40, 21, 8, 3, 1} {
 		snap.Cols = cols
 		segs := barSegments(theme.DefaultTheme(), snap, false, "")
-		if got := segCells(segs); got > cols {
+		if got := segment.SegCells(segs); got > cols {
 			t.Fatalf("cols %d: spans paint %d cells", cols, got)
 		}
-		for _, seg := range segs {
-			text := strings.TrimSuffix(seg.text, "…")
+		for _, s := range segs {
+			text := strings.TrimSuffix(s.Text, "…")
 			if strings.ContainsRune(text, utf8.RuneError) {
-				t.Fatalf("cols %d: split rune in %q", cols, seg.text)
+				t.Fatalf("cols %d: split rune in %q", cols, s.Text)
 			}
 			if text == "" || text == " " {
 				continue
@@ -2789,7 +2790,7 @@ func TestBarWideRunes(t *testing.T) {
 			}
 			if !whole {
 				t.Fatalf("cols %d: %q is not a whole rune prefix of a source",
-					cols, seg.text)
+					cols, s.Text)
 			}
 		}
 	}
@@ -2813,19 +2814,19 @@ func TestBarFocusChip(t *testing.T) {
 		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
 	}
 	chip := segs[2]
-	if chip.text != glyph {
-		t.Fatalf("blocked glyph = %q, want %q", chip.text, glyph)
+	if chip.Text != glyph {
+		t.Fatalf("blocked glyph = %q, want %q", chip.Text, glyph)
 	}
-	if chip.fg != colour {
-		t.Fatalf("blocked glyph colour = %v, want %v", chip.fg, colour)
+	if chip.FG != colour {
+		t.Fatalf("blocked glyph colour = %v, want %v", chip.FG, colour)
 	}
-	if chip.bg != theme.DefaultTheme().Palette.RailFocusBG {
-		t.Fatalf("blocked glyph bg = %v, want theme.DefaultTheme().Palette.RailFocusBG", chip.bg)
+	if chip.BG != theme.DefaultTheme().Palette.RailFocusBG {
+		t.Fatalf("blocked glyph bg = %v, want theme.DefaultTheme().Palette.RailFocusBG", chip.BG)
 	}
 	if colour == theme.DefaultTheme().Palette.RailDim {
 		t.Fatal("blocked shares the shell colour")
 	}
-	if got := segs[len(segs)-1].text; got != " blocked" {
+	if got := segs[len(segs)-1].Text; got != " blocked" {
 		t.Fatalf("status word = %q, want blocked", got)
 	}
 	// The painted bar carries the same glyph in that colour on the focus fill.
@@ -2847,10 +2848,10 @@ func TestBarFocusChip(t *testing.T) {
 	if len(segs) < 4 {
 		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
 	}
-	if segs[2].text != "▶" || segs[2].fg != theme.DefaultTheme().Palette.RailDim {
+	if segs[2].Text != "▶" || segs[2].FG != theme.DefaultTheme().Palette.RailDim {
 		t.Fatalf("shell glyph = %+v, want dim ▶", segs[2])
 	}
-	if got := segs[len(segs)-1].text; got != " unknown" {
+	if got := segs[len(segs)-1].Text; got != " unknown" {
 		t.Fatalf("shell status word = %q, want unknown", got)
 	}
 }
@@ -4906,9 +4907,9 @@ func TestZoomBarMark(t *testing.T) {
 	chipTexts := func(l *barLeft) []string {
 		var out []string
 		for _, g := range l.groups(theme.DefaultTheme()) {
-			if len(g) > 0 && g[0].bg == theme.DefaultTheme().Palette.RailFocusBG {
+			if len(g) > 0 && g[0].BG == theme.DefaultTheme().Palette.RailFocusBG {
 				for _, s := range g {
-					out = append(out, s.text)
+					out = append(out, s.Text)
 				}
 			}
 		}
@@ -4947,14 +4948,14 @@ func TestZoomBarMark(t *testing.T) {
 	// Walk the ladder. The status word goes first, then the mark, then the
 	// name; the mark never shows without the id.
 	l := barLeftFor(theme.DefaultTheme(), f.snap)
-	full := segCells(join(l.groups(theme.DefaultTheme()), seg{text: " "}))
+	full := segment.SegCells(segment.Join(l.groups(theme.DefaultTheme()), segment.Seg{Text: " "}))
 	sawNameWithoutMark := false
 	for budget := 1; budget <= full; budget++ {
 		segs := barLeftFor(theme.DefaultTheme(), f.snap).fit(theme.DefaultTheme(), budget)
 		var got []string
 		for _, s := range segs {
-			if s.bg == theme.DefaultTheme().Palette.RailFocusBG {
-				got = append(got, s.text)
+			if s.BG == theme.DefaultTheme().Palette.RailFocusBG {
+				got = append(got, s.Text)
 			}
 		}
 		mark := has(got, " Z")

@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -221,7 +222,7 @@ func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *switcher, vts map[
 	for i := 0; i < l.bandH; i++ {
 		y := l.bandY + i
 		idx := s.top + i
-		var left, right, tail []seg
+		var left, right, tail []segment.Seg
 		bg, bold := p.RailBG, false
 		if idx >= 0 && idx < len(s.rows) {
 			left, right, tail = railRow(th, s.tree[s.rows[idx]], l.listW, false, nerd)
@@ -242,20 +243,20 @@ func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *switcher, vts map[
 
 // paintRailRow paints one composed rail row on its background, filling the whole
 // width so no cell of the previous frame shows through.
-func paintRailRow(buf *bytes.Buffer, left, tail, right []seg, x, y, w int, bg theme.RGB, bold bool) {
+func paintRailRow(buf *bytes.Buffer, left, tail, right []segment.Seg, x, y, w int, bg theme.RGB, bold bool) {
 	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 	buf.WriteString("\x1b[0m" + bg.BG())
-	for _, seg := range left {
-		writeRailSeg(buf, seg, bg, bold)
+	for _, s := range left {
+		writeRailSeg(buf, s, bg, bold)
 	}
-	for _, seg := range tail {
-		writeRailSeg(buf, seg, bg, bold)
+	for _, s := range tail {
+		writeRailSeg(buf, s, bg, bold)
 	}
-	if n := w - segCells(left) - segCells(tail) - segCells(right); n > 0 {
+	if n := w - segment.SegCells(left) - segment.SegCells(tail) - segment.SegCells(right); n > 0 {
 		buf.WriteString(strings.Repeat(" ", n))
 	}
-	for _, seg := range right {
-		writeRailSeg(buf, seg, bg, bold)
+	for _, s := range right {
+		writeRailSeg(buf, s, bg, bold)
 	}
 	buf.WriteString("\x1b[0m")
 }

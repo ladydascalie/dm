@@ -8,6 +8,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -150,8 +151,8 @@ func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, draft stri
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
-	segs := clipSegs([]seg{{text: " name: ", fg: p.RailDim}}, labelRoom)
-	draftRoom := r.W - cells.Cells(caret) - segCells(segs)
+	segs := segment.ClipSegs([]segment.Seg{{Text: " name: ", FG: p.RailDim}}, labelRoom)
+	draftRoom := r.W - cells.Cells(caret) - segment.SegCells(segs)
 	if cells.Cells(draft) > draftRoom {
 		if draftRoom > 1 {
 			draft = cells.Ellipsis + cells.ClipTail(draft, draftRoom-1)
@@ -160,16 +161,16 @@ func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, draft stri
 		}
 	}
 	segs = append(segs,
-		seg{text: draft, fg: p.RailText},
-		seg{text: caret, fg: p.BarAccent},
+		segment.Seg{Text: draft, FG: p.RailText},
+		segment.Seg{Text: caret, FG: p.BarAccent},
 	)
 	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m", r.Y+1, r.X+1)
 	buf.WriteString(p.RailBG.BG())
-	for _, seg := range segs {
-		buf.WriteString(seg.fg.FG())
-		buf.WriteString(seg.text)
+	for _, s := range segs {
+		buf.WriteString(s.FG.FG())
+		buf.WriteString(s.Text)
 	}
-	if n := r.W - segCells(segs); n > 0 {
+	if n := r.W - segment.SegCells(segs); n > 0 {
 		buf.WriteString(p.RailBG.BG())
 		buf.WriteString(strings.Repeat(" ", n))
 	}
