@@ -26,6 +26,19 @@ func addWindow(st *State, name string) (*Window, string) {
 	return w, id
 }
 
+// addWorkspace appends a workspace with one window and one focused pane.
+func addWorkspace(st *State, name string) (*Workspace, *Window, string) {
+	ws := &Workspace{ID: st.newWorkspaceID(), Name: name}
+	w := &Window{ID: st.newWindowID(), Name: name}
+	id := w.newPaneID()
+	w.Root = &Node{Pane: id}
+	w.Focus = id
+	ws.Windows = []*Window{w}
+	st.Panes[id] = &PaneState{}
+	st.Workspaces = append(st.Workspaces, ws)
+	return ws, w, id
+}
+
 // paneProbe attaches a fake pane conn and records what the server sends it.
 type paneProbe struct {
 	msgs chan Msg
@@ -127,8 +140,14 @@ func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
 	if err == nil || err.Error() != "cannot close the last window" {
 		t.Fatalf("closeWindow(last) = %v, want cannot close the last window", err)
 	}
+	if len(st.Workspaces) != 1 || st.Workspaces[0].ID != ws.ID {
+		t.Fatalf("workspaces after refusal = %+v", st.Workspaces)
+	}
 	if len(ws.Windows) != 1 || ws.Windows[0].ID != w1.ID {
 		t.Fatalf("windows after refusal = %+v", ws.Windows)
+	}
+	if st.Active != 0 || st.win().ID != w1.ID {
+		t.Fatalf("active after refusal = %d %q, want 0 %q", st.Active, st.win().ID, w1.ID)
 	}
 	if _, ok := st.Panes[p1]; !ok {
 		t.Fatalf("pane state %q dropped by a refused close", p1)
@@ -139,6 +158,107 @@ func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
 	select {
 	case m := <-probe.msgs:
 		t.Fatalf("refused close sent %+v", m)
+	default:
+	}
+}
+
+// TestCloseWindowLastWindowDropsBackgroundWorkspace proves a one-window
+// workspace in the background goes away with its window, leaving the active
+// workspace and its panes untouched.
+func TestCloseWindowLastWindowDropsBackgroundWorkspace(t *testing.T) {
+	s, st := windowServer(t)
+	ws := st.ws()
+	w1 := ws.Windows[0]
+	p1 := rootPane(st)
+	_, w2, p2 := addWorkspace(st, "two")
+	st.Active = 0
+
+	probe1 := probePane(t, s, p1)
+	probe2 := probePane(t, s, p2)
+
+	if err := s.closeWindow(w2.ID); err != nil {
+		t.Fatalf("closeWindow(%q): %v", w2.ID, err)
+	}
+
+	if len(st.Workspaces) != 1 || st.Workspaces[0].ID != ws.ID {
+		t.Fatalf("workspaces after close = %+v, want only %q", st.Workspaces, ws.ID)
+	}
+	if _, ok := st.Panes[p2]; ok {
+		t.Fatalf("pane state %q survived the close", p2)
+	}
+	if _, ok := s.panes[p2]; ok {
+		t.Fatalf("pane conn %q survived the close", p2)
+	}
+	if _, ok := st.Panes[p1]; !ok {
+		t.Fatalf("active pane state %q was killed with the other workspace", p1)
+	}
+	if _, ok := s.panes[p1]; !ok {
+		t.Fatalf("active pane conn %q was killed with the other workspace", p1)
+	}
+	if st.Active != 0 || st.win().ID != w1.ID || len(ws.Windows) != 1 {
+		t.Fatalf("active = %d %q, want 0 %q with one window", st.Active, st.win().ID, w1.ID)
+	}
+
+	msgs := probe2.waitKill(t)
+	if len(msgs) != 1 || msgs[0].Action != "kill" {
+		t.Fatalf("closed workspace pane got %+v, want one kill", msgs)
+	}
+	select {
+	case m := <-probe1.msgs:
+		t.Fatalf("active workspace pane got %+v, want nothing", m)
+	default:
+	}
+}
+
+// TestCloseWindowLastWindowDropsActiveWorkspace proves removing the active
+// workspace leaves the active index and its window on a real one.
+func TestCloseWindowLastWindowDropsActiveWorkspace(t *testing.T) {
+	s, st := windowServer(t)
+	ws := st.ws()
+	w1 := ws.Windows[0]
+	p1 := rootPane(st)
+	_, w2, p2 := addWorkspace(st, "two")
+	st.Active = 1
+
+	probe1 := probePane(t, s, p1)
+	probe2 := probePane(t, s, p2)
+
+	if err := s.closeWindow(w2.ID); err != nil {
+		t.Fatalf("closeWindow(%q): %v", w2.ID, err)
+	}
+
+	if len(st.Workspaces) != 1 || st.Workspaces[0].ID != ws.ID {
+		t.Fatalf("workspaces after close = %+v, want only %q", st.Workspaces, ws.ID)
+	}
+	if st.Active < 0 || st.Active >= len(st.Workspaces) {
+		t.Fatalf("active workspace = %d, want a real one", st.Active)
+	}
+	if len(st.ws().Windows) == 0 {
+		t.Fatal("active workspace has no windows")
+	}
+	if got := st.win().ID; got != w1.ID {
+		t.Fatalf("active window = %q, want %q", got, w1.ID)
+	}
+	if _, ok := st.Panes[p1]; !ok {
+		t.Fatalf("pane state %q of the surviving window is gone", p1)
+	}
+	if _, ok := s.panes[p1]; !ok {
+		t.Fatalf("pane conn %q of the surviving window is gone", p1)
+	}
+	if _, ok := st.Panes[p2]; ok {
+		t.Fatalf("pane state %q survived the close", p2)
+	}
+	if _, ok := s.panes[p2]; ok {
+		t.Fatalf("pane conn %q survived the close", p2)
+	}
+
+	msgs := probe2.waitKill(t)
+	if len(msgs) != 1 || msgs[0].Action != "kill" {
+		t.Fatalf("closed workspace pane got %+v, want one kill", msgs)
+	}
+	select {
+	case m := <-probe1.msgs:
+		t.Fatalf("surviving workspace pane got %+v, want nothing", m)
 	default:
 	}
 }

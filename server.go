@@ -2459,22 +2459,10 @@ func (s *server) renameWindow(id, name string) error {
 	return fmt.Errorf("no window %q", id)
 }
 
-func (s *server) closeWorkspace(id string) error {
-	s.mu.Lock()
-	idx := -1
-	for i, ws := range s.st.Workspaces {
-		if ws.ID == id {
-			idx = i
-		}
-	}
-	if idx < 0 {
-		s.mu.Unlock()
-		return fmt.Errorf("no workspace %q", id)
-	}
-	if len(s.st.Workspaces) == 1 {
-		s.mu.Unlock()
-		return fmt.Errorf("cannot close the last workspace")
-	}
+// removeWorkspaceLocked drops the workspace at idx and kills every pane under
+// it. The caller holds s.mu and leaves at least one workspace behind, so the
+// active index can be clamped to a real workspace.
+func (s *server) removeWorkspaceLocked(idx int) {
 	ws := s.st.Workspaces[idx]
 	var ids []string
 	for _, w := range ws.Windows {
@@ -2492,21 +2480,41 @@ func (s *server) closeWorkspace(id string) error {
 		}
 		delete(s.st.Panes, pid)
 	}
+}
+
+func (s *server) closeWorkspace(id string) error {
+	s.mu.Lock()
+	idx := -1
+	for i, ws := range s.st.Workspaces {
+		if ws.ID == id {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("no workspace %q", id)
+	}
+	if len(s.st.Workspaces) == 1 {
+		s.mu.Unlock()
+		return fmt.Errorf("cannot close the last workspace")
+	}
+	s.removeWorkspaceLocked(idx)
 	s.mu.Unlock()
 	return nil
 }
 
-// closeWindow removes a window and kills its panes. It refuses the last window
-// in a workspace, so a close never empties a workspace. The workspace stays
-// active and its active index stays on a real window.
+// closeWindow removes a window and kills its panes. A window that is the only
+// one in its workspace takes the workspace with it. It refuses only the last
+// window of the last workspace, so a close never ends the session. Any window
+// left behind stays active with its active index on a real window.
 func (s *server) closeWindow(id string) error {
 	s.mu.Lock()
 	var ws *Workspace
-	idx := -1
-	for _, w := range s.st.Workspaces {
-		for i, win := range w.Windows {
+	idx, wsIdx := -1, -1
+	for i, w := range s.st.Workspaces {
+		for j, win := range w.Windows {
 			if win.ID == id {
-				ws, idx = w, i
+				ws, idx, wsIdx = w, j, i
 			}
 		}
 	}
@@ -2515,8 +2523,13 @@ func (s *server) closeWindow(id string) error {
 		return fmt.Errorf("no window %q", id)
 	}
 	if len(ws.Windows) == 1 {
+		if len(s.st.Workspaces) == 1 {
+			s.mu.Unlock()
+			return fmt.Errorf("cannot close the last window")
+		}
+		s.removeWorkspaceLocked(wsIdx)
 		s.mu.Unlock()
-		return fmt.Errorf("cannot close the last window")
+		return nil
 	}
 	win := ws.Windows[idx]
 	ids := allPanes(win.Root)
