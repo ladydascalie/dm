@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/theme"
 	"dm/internal/wire"
 )
 
@@ -16,7 +17,7 @@ import (
 // selection highlight. The title row is a fill row: dim, with the label between
 // the border rune and a border-rune fill, where the panel's label style is
 // bright, so the row is one write and its cells are the menu's.
-func drawMenu(buf *bytes.Buffer, th Theme, m *menu) {
+func drawMenu(buf *bytes.Buffer, th theme.Theme, m *menu) {
 	if m == nil || m.w < 8 {
 		return
 	}
@@ -43,7 +44,7 @@ func drawMenu(buf *bytes.Buffer, th Theme, m *menu) {
 // pinned block is anchored to the last column and the gutter fills the gap, so
 // the whole row is written and no cell of the previous frame shows through.
 // drawBar writes at most snap.Cols cells and never touches another row.
-func drawBar(buf *bytes.Buffer, th Theme, snap *wire.Snapshot, armed bool, info string) {
+func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool, info string) {
 	if snap == nil || snap.Rows < 1 || snap.Cols < 1 {
 		return
 	}
@@ -55,7 +56,7 @@ func drawBar(buf *bytes.Buffer, th Theme, snap *wire.Snapshot, armed bool, info 
 	}
 	if n := snap.Cols - segCells(segs); n > 0 {
 		// The bar's ground is the rail's: there is no second background.
-		buf.WriteString("\x1b[0m" + th.Palette.RailBG.bg() + strings.Repeat(" ", n))
+		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", n))
 	}
 	for _, s := range pinned {
 		write(buf, s)
@@ -87,7 +88,7 @@ type barWindow struct {
 // sits after the id, so the chip names the zoomed state.
 type barFocusChip struct {
 	glyph  string
-	colour rgb
+	colour theme.RGB
 	id     string
 	name   string
 	status string
@@ -109,7 +110,7 @@ type barLeft struct {
 // barFocus builds the focus chip from the focused pane. An agent reports a
 // state, so it takes that state's glyph and colour; a shell gets the prompt
 // marker in dim text. A pane the snapshot does not list gets no chip.
-func barFocus(th Theme, snap *wire.Snapshot) *barFocusChip {
+func barFocus(th theme.Theme, snap *wire.Snapshot) *barFocusChip {
 	var p wire.PaneInfo
 	found := false
 	for _, cand := range snap.Panes {
@@ -146,7 +147,7 @@ func barFocus(th Theme, snap *wire.Snapshot) *barFocusChip {
 }
 
 // barLeftFor reads the left block from a snapshot in its full, unelided form.
-func barLeftFor(th Theme, snap *wire.Snapshot) *barLeft {
+func barLeftFor(th theme.Theme, snap *wire.Snapshot) *barLeft {
 	l := &barLeft{
 		session:   snap.Session,
 		workspace: snap.Workspace,
@@ -164,7 +165,7 @@ func barLeftFor(th Theme, snap *wire.Snapshot) *barLeft {
 
 // groups builds the left block spans as they currently stand: session,
 // workspace, one chip per window, then the focus chip.
-func (l *barLeft) groups(th Theme) [][]seg {
+func (l *barLeft) groups(th theme.Theme) [][]seg {
 	p, g := th.Palette, th.Glyphs
 	var out [][]seg
 	if l.session != "" {
@@ -216,7 +217,7 @@ func (l *barLeft) groups(th Theme) [][]seg {
 // window names, then trailing window chips, then the workspace name, then the
 // session name, then the focus chip's status word and name. The focus chip
 // keeps its glyph and id last, and the result never exceeds the budget.
-func (l *barLeft) fit(th Theme, budget int) []seg {
+func (l *barLeft) fit(th theme.Theme, budget int) []seg {
 	if budget <= 0 {
 		return nil
 	}
@@ -287,7 +288,7 @@ func (l *barLeft) fit(th Theme, budget int) []seg {
 
 // barPinned is the right block: the prefix flag while armed, then the scroll
 // info. Both are anchored to the last column, so both are pinned.
-func barPinned(th Theme, armed bool, info string) []seg {
+func barPinned(th theme.Theme, armed bool, info string) []seg {
 	p := th.Palette
 	var out []seg
 	if armed {
@@ -321,7 +322,7 @@ func barFitPinned(segs []seg, cols int) []seg {
 // pinned block leaves, minus one gutter cell, so the blocks never touch and the
 // line never runs past snap.Cols cells. The pinned block is never dropped to
 // make room for the left one.
-func barSegments(th Theme, snap *wire.Snapshot, armed bool, info string) []seg {
+func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string) []seg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}

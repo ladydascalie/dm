@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/theme"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -61,11 +62,11 @@ func LoadDefaultPath(write bool) (*Config, error) {
 		return LoadDefault(), err
 	}
 	mergeDefaults(cfg)
-	theme, err := loadThemeFile(filepath.Dir(path), cfg.themeName)
+	th, err := theme.LoadThemeFile(filepath.Dir(path), cfg.themeName)
 	if err != nil {
 		return cfg, err
 	}
-	cfg.theme = theme
+	cfg.theme = th
 	return cfg, nil
 }
 
@@ -86,11 +87,11 @@ func LoadPath(path string) (*Config, error) {
 		return LoadDefault(), err
 	}
 	mergeDefaults(cfg)
-	theme, err := loadThemeFile(filepath.Dir(path), cfg.themeName)
+	th, err := theme.LoadThemeFile(filepath.Dir(path), cfg.themeName)
 	if err != nil {
 		return cfg, err
 	}
-	cfg.theme = theme
+	cfg.theme = th
 	return cfg, nil
 }
 

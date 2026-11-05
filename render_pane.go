@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"dm/internal/layout"
+	"dm/internal/theme"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -299,14 +300,14 @@ func screenBytes(vt vt10x.View) []byte {
 
 // drawPaneBox draws the border of one pane. The active pane is bright cyan;
 // the rest are dim, so the active one reads at a glance.
-func drawPaneBox(buf *bytes.Buffer, th Theme, content layout.Rect, active bool) {
+func drawPaneBox(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool) {
 	drawPaneBoxRows(buf, th, content, active, false)
 }
 
 // drawPaneBoxRows draws the border of one pane. skipTop leaves the top row
 // alone, for a caller that writes it itself as one row, so no cell of it lands
 // twice.
-func drawPaneBoxRows(buf *bytes.Buffer, th Theme, content layout.Rect, active bool, skipTop bool) {
+func drawPaneBoxRows(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool, skipTop bool) {
 	g := th.Glyphs
 	x0, y0 := content.X-1, content.Y-1
 	x1, y1 := content.X+content.W, content.Y+content.H
@@ -342,7 +343,7 @@ func drawPaneBoxRows(buf *bytes.Buffer, th Theme, content layout.Rect, active bo
 // drawGrips marks every divider at its midpoint, so a handle is visible before
 // the pointer finds it. The hover paints over the whole divider. A zoomed pane
 // covers every divider, so a grip would be a lie over a hidden split.
-func drawGrips(buf *bytes.Buffer, th Theme, snap *wire.Snapshot) {
+func drawGrips(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 	if snap == nil || snap.Root == nil || snap.Rail < 0 || snap.Zoom != "" {
 		return
 	}
@@ -379,7 +380,7 @@ func drawGrips(buf *bytes.Buffer, th Theme, snap *wire.Snapshot) {
 
 // drawDivider paints the hovered divider: heavy line glyphs over both border
 // cells, so the grab target is visible before the press.
-func drawDivider(buf *bytes.Buffer, th Theme, z layout.Rect, axis string) {
+func drawDivider(buf *bytes.Buffer, th theme.Theme, z layout.Rect, axis string) {
 	if z.W <= 0 || z.H <= 0 {
 		return
 	}

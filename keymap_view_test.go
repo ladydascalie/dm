@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/theme"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -16,7 +17,7 @@ import (
 func keymapScreen(t *testing.T, k *keymapView, cols, rows int) vt10x.Terminal {
 	t.Helper()
 	var buf bytes.Buffer
-	k.float.Draw(&buf, DefaultTheme(), nil)
+	k.float.Draw(&buf, theme.DefaultTheme(), nil)
 	screen := vt10x.New(vt10x.WithSize(cols, rows))
 	if _, err := screen.Write(buf.Bytes()); err != nil {
 		t.Fatalf("replay the keymap view: %v", err)

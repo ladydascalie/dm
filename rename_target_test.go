@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/theme"
 	"dm/internal/wire"
 )
 
@@ -87,7 +88,7 @@ func TestRenamePromptLabelsTheKind(t *testing.T) {
 	snap := testSnapshot(&layout.Node{Pane: "a"}, 60, 8, nil)
 
 	var wb bytes.Buffer
-	drawRename(&wb, DefaultTheme(), snap, "w2", "two", "window")
+	drawRename(&wb, theme.DefaultTheme(), snap, "w2", "two", "window")
 	win := renamePromptVisible(wb.String())
 	if !strings.Contains(win, "rename window w2") {
 		t.Fatalf("window title = %q", win)
@@ -97,7 +98,7 @@ func TestRenamePromptLabelsTheKind(t *testing.T) {
 	}
 
 	var sb bytes.Buffer
-	drawRename(&sb, DefaultTheme(), snap, "s1", "main", "workspace")
+	drawRename(&sb, theme.DefaultTheme(), snap, "s1", "main", "workspace")
 	ws := renamePromptVisible(sb.String())
 	if !strings.Contains(ws, "rename workspace s1") {
 		t.Fatalf("workspace title = %q", ws)

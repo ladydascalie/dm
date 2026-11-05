@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"dm/internal/cells"
+	"dm/internal/theme"
 	"strings"
 	"testing"
 )
@@ -63,9 +64,9 @@ func TestSegClip(t *testing.T) {
 	}
 
 	// A cut run keeps the style it carried: only the text shrinks.
-	styled := []seg{{text: "abcd", fg: DefaultTheme().Palette.RailText, bg: DefaultTheme().Palette.RailFocusBG, bold: true, pin: true}}
+	styled := []seg{{text: "abcd", fg: theme.DefaultTheme().Palette.RailText, bg: theme.DefaultTheme().Palette.RailFocusBG, bold: true, pin: true}}
 	if got := clipSegs(styled, 3); len(got) != 1 || got[0] != (seg{
-		text: "abc", fg: DefaultTheme().Palette.RailText, bg: DefaultTheme().Palette.RailFocusBG, bold: true, pin: true,
+		text: "abc", fg: theme.DefaultTheme().Palette.RailText, bg: theme.DefaultTheme().Palette.RailFocusBG, bold: true, pin: true,
 	}) {
 		t.Fatalf("clipSegs dropped the style: %+v", got)
 	}
@@ -75,7 +76,7 @@ func TestSegClip(t *testing.T) {
 // empty head and keeps the runs after it, join keeps the head in place and still
 // lays the gap between groups, and write paints nothing for the empty run.
 func TestSegEmptyFirstRun(t *testing.T) {
-	runs := []seg{{}, {text: "abc", fg: DefaultTheme().Palette.RailText}}
+	runs := []seg{{}, {text: "abc", fg: theme.DefaultTheme().Palette.RailText}}
 	if n := segCells(runs); n != 3 {
 		t.Fatalf("segCells = %d, want 3", n)
 	}
@@ -89,8 +90,8 @@ func TestSegEmptyFirstRun(t *testing.T) {
 	}
 
 	// join leaves the empty head where the caller put it and still gaps groups.
-	gap := seg{text: " ", fg: DefaultTheme().Palette.RailDim, bg: DefaultTheme().Palette.RailBG}
-	joined := join([][]seg{{{}, {text: "a", fg: DefaultTheme().Palette.RailText}}, {{text: "b", fg: DefaultTheme().Palette.RailText}}}, gap)
+	gap := seg{text: " ", fg: theme.DefaultTheme().Palette.RailDim, bg: theme.DefaultTheme().Palette.RailBG}
+	joined := join([][]seg{{{}, {text: "a", fg: theme.DefaultTheme().Palette.RailText}}, {{text: "b", fg: theme.DefaultTheme().Palette.RailText}}}, gap)
 	if want := "|a| |b"; strings.Join(segTexts(joined), "|") != want {
 		t.Fatalf("join = %q, want %q", segTexts(joined), want)
 	}
@@ -102,7 +103,7 @@ func TestSegEmptyFirstRun(t *testing.T) {
 		t.Fatalf("empty run wrote %q", buf.String())
 	}
 	write(&buf, joined[1])
-	if want := "\x1b[0m" + (rgb{}).bg() + DefaultTheme().Palette.RailText.fg() + "a"; buf.String() != want {
+	if want := "\x1b[0m" + (theme.RGB{}).BG() + theme.DefaultTheme().Palette.RailText.FG() + "a"; buf.String() != want {
 		t.Fatalf("run after the empty head = %q, want %q", buf.String(), want)
 	}
 }
@@ -110,25 +111,25 @@ func TestSegEmptyFirstRun(t *testing.T) {
 // TestSegElide ends a cut run set with the ellipsis in the dim colour, and
 // leaves a set that fits alone.
 func TestSegElide(t *testing.T) {
-	runs := []seg{{text: "abcdef", fg: DefaultTheme().Palette.RailText}}
-	got := elideSegs(DefaultTheme(), runs, 3)
+	runs := []seg{{text: "abcdef", fg: theme.DefaultTheme().Palette.RailText}}
+	got := elideSegs(theme.DefaultTheme(), runs, 3)
 	if want := "ab|…"; strings.Join(segTexts(got), "|") != want {
 		t.Fatalf("elideSegs = %q, want %q", segTexts(got), want)
 	}
-	if n := len(got); n != 2 || got[1].fg != DefaultTheme().Palette.RailDim {
+	if n := len(got); n != 2 || got[1].fg != theme.DefaultTheme().Palette.RailDim {
 		t.Fatalf("ellipsis run = %+v, want the dim run", got)
 	}
-	if got := elideSegs(DefaultTheme(), runs, 1); len(got) != 1 || got[0].text != cells.Ellipsis {
+	if got := elideSegs(theme.DefaultTheme(), runs, 1); len(got) != 1 || got[0].text != cells.Ellipsis {
 		t.Fatalf("elideSegs at one cell = %q, want the ellipsis alone", segTexts(got))
 	}
-	if got := elideSegs(DefaultTheme(), runs, 0); got != nil {
+	if got := elideSegs(theme.DefaultTheme(), runs, 0); got != nil {
 		t.Fatalf("elideSegs at no budget = %q, want nothing", segTexts(got))
 	}
 }
 
 // TestSegJoin lays groups left to right with one gap run between them.
 func TestSegJoin(t *testing.T) {
-	gap := seg{text: " ", fg: DefaultTheme().Palette.RailDim, bg: DefaultTheme().Palette.RailBG}
+	gap := seg{text: " ", fg: theme.DefaultTheme().Palette.RailDim, bg: theme.DefaultTheme().Palette.RailBG}
 	groups := [][]seg{{{text: "a"}}, {{text: "b"}, {text: "c"}}}
 	got := join(groups, gap)
 	if want := "a| |b|c"; strings.Join(segTexts(got), "|") != want {
@@ -145,27 +146,27 @@ func TestSegJoin(t *testing.T) {
 // TestSegWrite pins the bytes of one run: reset, ground, weight, foreground and
 // text, in that order, and nothing at all for a run with no text.
 func TestSegWrite(t *testing.T) {
-	zero := rgb{}
+	zero := theme.RGB{}
 	cases := []struct {
 		name string
 		run  seg
 		want string
 	}{
-		{"empty run writes nothing", seg{fg: DefaultTheme().Palette.RailText}, ""},
+		{"empty run writes nothing", seg{fg: theme.DefaultTheme().Palette.RailText}, ""},
 		{
 			"styled run",
-			seg{text: "x", fg: rgb{1, 2, 3}, bg: rgb{4, 5, 6}, bold: true},
-			"\x1b[0m" + (rgb{4, 5, 6}).bg() + "\x1b[1m" + (rgb{1, 2, 3}).fg() + "x",
+			seg{text: "x", fg: theme.RGB{R: 1, G: 2, B: 3}, bg: theme.RGB{R: 4, G: 5, B: 6}, bold: true},
+			"\x1b[0m" + (theme.RGB{R: 4, G: 5, B: 6}).BG() + "\x1b[1m" + (theme.RGB{R: 1, G: 2, B: 3}).FG() + "x",
 		},
 		{
 			"unstyled run keeps its ground",
 			seg{text: "x"},
-			"\x1b[0m" + zero.bg() + zero.fg() + "x",
+			"\x1b[0m" + zero.BG() + zero.FG() + "x",
 		},
 		{
 			"bold without colours",
 			seg{text: "x", bold: true},
-			"\x1b[0m" + zero.bg() + "\x1b[1m" + zero.fg() + "x",
+			"\x1b[0m" + zero.BG() + "\x1b[1m" + zero.FG() + "x",
 		},
 	}
 	for _, c := range cases {

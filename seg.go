@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"dm/internal/cells"
+	"dm/internal/theme"
 )
 
 // seg is one styled run of text: what it paints, the colours it paints with,
@@ -12,8 +13,8 @@ import (
 // anchored to the last column.
 type seg struct {
 	text string
-	fg   rgb
-	bg   rgb
+	fg   theme.RGB
+	bg   theme.RGB
 	bold bool
 	pin  bool
 }
@@ -53,7 +54,7 @@ func clipSegs(runs []seg, budget int) []seg {
 
 // elideSegs cuts a run set to a cell budget and ends it with an cells.Ellipsis, so a
 // long label shrinks before the right-aligned runs beside it lose a cell.
-func elideSegs(th Theme, runs []seg, budget int) []seg {
+func elideSegs(th theme.Theme, runs []seg, budget int) []seg {
 	if budget <= 0 {
 		return nil
 	}
@@ -83,10 +84,10 @@ func write(buf *bytes.Buffer, s seg) {
 	if s.text == "" {
 		return
 	}
-	buf.WriteString("\x1b[0m" + s.bg.bg())
+	buf.WriteString("\x1b[0m" + s.bg.BG())
 	if s.bold {
 		buf.WriteString("\x1b[1m")
 	}
-	buf.WriteString(s.fg.fg())
+	buf.WriteString(s.fg.FG())
 	buf.WriteString(s.text)
 }

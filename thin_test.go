@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/theme"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -32,7 +33,7 @@ func thinSnapshot(panes []wire.AllPane) *wire.Snapshot {
 func thinScreen(t *testing.T, snap *wire.Snapshot) vt10x.Terminal {
 	t.Helper()
 	var b bytes.Buffer
-	drawRail(&b, DefaultTheme(), snap)
+	drawRail(&b, theme.DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw thin rail: %v", err)
@@ -192,7 +193,7 @@ func TestThinRailGlyphColumn(t *testing.T) {
 	}
 }
 
-// TestThinRailFocusBackground paints the focused pane row with DefaultTheme().Palette.RailFocusBG and
+// TestThinRailFocusBackground paints the focused pane row with theme.DefaultTheme().Palette.RailFocusBG and
 // leaves every other row on the rail background, so one row of a stack of
 // glyph rows reads as the focused one.
 func TestThinRailFocusBackground(t *testing.T) {
@@ -202,14 +203,14 @@ func TestThinRailFocusBackground(t *testing.T) {
 		thinPane("w1p2", "s1", "w1", "idle", true),
 		thinPane("w2p1", "s2", "w2", "blocked", false),
 	})
-	ground := func(c rgb) vt10x.Color { return vt10x.Color(c.r<<16 | c.g<<8 | c.b) }
+	ground := func(c theme.RGB) vt10x.Color { return vt10x.Color(c.R<<16 | c.G<<8 | c.B) }
 	vt := thinScreen(t, snap)
 	vt.Lock()
 	defer vt.Unlock()
 	for y := 0; y < snap.Rows-1; y++ {
-		want := ground(DefaultTheme().Palette.RailBG)
+		want := ground(theme.DefaultTheme().Palette.RailBG)
 		if y == 1 {
-			want = ground(DefaultTheme().Palette.RailFocusBG)
+			want = ground(theme.DefaultTheme().Palette.RailFocusBG)
 		}
 		for x := 0; x < snap.Rail; x++ {
 			if g := vt.Cell(x, y); g.BG != want {

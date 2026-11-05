@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/theme"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -42,7 +43,7 @@ type tui struct {
 	keymap *Config
 	// th is the loaded theme. A nil theme means the built-in theme, so a test
 	// TUI runs without a config file.
-	th     *Theme
+	th     *theme.Theme
 	cols   int
 	rows   int
 	snap   *wire.Snapshot
@@ -171,6 +172,15 @@ func (t *tui) km() *Config {
 		return t.keymap
 	}
 	return builtinKeymap()
+}
+
+// theme is the client's theme. A client with no config file has none, and gets
+// the built-in theme.
+func (t *tui) theme() theme.Theme {
+	if t == nil || t.th == nil {
+		return theme.DefaultTheme()
+	}
+	return *t.th
 }
 
 // paint is the bytes one band of the screen painted last frame and, for an

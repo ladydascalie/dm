@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/theme"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -30,7 +31,7 @@ func boxEntries() []box.Entry {
 func boxScreen(t *testing.T, b *boxView, cols, rows int) vt10x.Terminal {
 	t.Helper()
 	var buf bytes.Buffer
-	b.float.Draw(&buf, DefaultTheme(), nil)
+	b.float.Draw(&buf, theme.DefaultTheme(), nil)
 	screen := vt10x.New(vt10x.WithSize(cols, rows))
 	if _, err := screen.Write(buf.Bytes()); err != nil {
 		t.Fatalf("replay the box: %v", err)
@@ -68,8 +69,8 @@ func nextBoxMsg(t *testing.T, got chan wire.Msg) wire.Msg {
 // the title and the key hint.
 func TestBoxViewListsNewestFirst(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 34}
-	b := newBoxView(snap, DefaultTheme())
-	b.set(boxEntries(), DefaultTheme())
+	b := newBoxView(snap, theme.DefaultTheme())
+	b.set(boxEntries(), theme.DefaultTheme())
 	screen := boxScreen(t, b, snap.Cols, snap.Rows)
 	r := b.float.Rect
 
@@ -92,11 +93,11 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 
 	// The state word carries the rail's colour for that state. vt10x stores a
 	// true colour as r<<16|g<<8|b.
-	want := boxStateColour(DefaultTheme(), box.StateDone)
+	want := boxStateColour(theme.DefaultTheme(), box.StateDone)
 	screen.Lock()
 	got := screen.Cell(r.X+boxReceiptW+boxSeqW+1, r.Y).FG
 	screen.Unlock()
-	if got != vt10x.Color(want.r<<16|want.g<<8|want.b) {
+	if got != vt10x.Color(want.R<<16|want.G<<8|want.B) {
 		t.Fatalf("done colour = %v, want %v", got, want)
 	}
 }
@@ -105,27 +106,27 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 // row that still fills the pane.
 func TestBoxViewScrollClamps(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := newBoxView(snap, DefaultTheme())
+	b := newBoxView(snap, theme.DefaultTheme())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
 		entries = append(entries, box.Entry{Seq: i + 1, State: box.StateNote, Msg: "note"})
 	}
-	b.set(entries, DefaultTheme())
+	b.set(entries, theme.DefaultTheme())
 	max := len(entries) - b.float.Rect.H
 	if max <= 0 {
 		t.Fatalf("fixture is too short to scroll: %d entries in %d rows", len(entries), b.float.Rect.H)
 	}
-	b.scroll(100, DefaultTheme())
+	b.scroll(100, theme.DefaultTheme())
 	if b.off != max {
 		t.Fatalf("off = %d, want the oldest row %d", b.off, max)
 	}
-	b.scroll(-100, DefaultTheme())
+	b.scroll(-100, theme.DefaultTheme())
 	if b.off != 0 {
 		t.Fatalf("off = %d, want the newest row", b.off)
 	}
 	// A log that shrinks under the window pulls the view back to the top.
-	b.scroll(max, DefaultTheme())
-	b.set(entries[:2], DefaultTheme())
+	b.scroll(max, theme.DefaultTheme())
+	b.set(entries[:2], theme.DefaultTheme())
 	if b.off != 0 {
 		t.Fatalf("off = %d after the log shrank, want 0", b.off)
 	}
@@ -135,8 +136,8 @@ func TestBoxViewScrollClamps(t *testing.T) {
 // and the title names the rows in view once the log scrolls.
 func TestBoxViewFitsLog(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := newBoxView(snap, DefaultTheme())
-	b.set(boxEntries(), DefaultTheme())
+	b := newBoxView(snap, theme.DefaultTheme())
+	b.set(boxEntries(), theme.DefaultTheme())
 	if got, want := b.float.Rect.H, len(boxEntries()); got != want {
 		t.Fatalf("height = %d, want the log length %d", got, want)
 	}
@@ -144,11 +145,11 @@ func TestBoxViewFitsLog(t *testing.T) {
 	for i := range entries {
 		entries[i] = box.Entry{Seq: i + 1, State: box.StateNote, Msg: "note"}
 	}
-	b.set(entries, DefaultTheme())
+	b.set(entries, theme.DefaultTheme())
 	if b.float.Rect.H != 22 {
 		t.Fatalf("height = %d, want the cap of 22 rows", b.float.Rect.H)
 	}
-	b.scroll(3, DefaultTheme())
+	b.scroll(3, theme.DefaultTheme())
 	if got := b.title(); !strings.Contains(got, "4-25") {
 		t.Fatalf("title = %q, want the rows in view", got)
 	}
@@ -378,10 +379,10 @@ func TestBoxViewWatcherPage(t *testing.T) {
 // TestBoxViewTitleWatching: the title counts parked watches, omits the count
 // when none is parked, and keeps the entry count.
 func TestBoxViewTitleWatching(t *testing.T) {
-	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
-	b.set(boxEntries(), DefaultTheme())
+	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b.set(boxEntries(), theme.DefaultTheme())
 	b.watchers = boxWatches()
-	b.paint(DefaultTheme())
+	b.paint(theme.DefaultTheme())
 	if got, want := b.title(), " box  4 entries  1 watching "; got != want {
 		t.Fatalf("title = %q, want %q", got, want)
 	}
@@ -405,9 +406,9 @@ func receiptWatches() []box.Watch {
 // TestBoxViewReceipt: a wide view prefixes each row with the number of watches
 // served that entry. A narrow view drops the marker whole.
 func TestBoxViewReceipt(t *testing.T) {
-	wide := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
+	wide := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
 	wide.watchers = receiptWatches()
-	wide.set(boxEntries(), DefaultTheme())
+	wide.set(boxEntries(), theme.DefaultTheme())
 	if wide.float.Rect.W < boxReceiptMinW {
 		t.Fatalf("wide rect = %d, want at least %d", wide.float.Rect.W, boxReceiptMinW)
 	}
@@ -420,9 +421,9 @@ func TestBoxViewReceipt(t *testing.T) {
 		t.Fatalf("second row = %q, want two receipts", row)
 	}
 
-	narrow := newBoxView(&wire.Snapshot{Cols: 50, Rows: 30, Rail: 0}, DefaultTheme())
+	narrow := newBoxView(&wire.Snapshot{Cols: 50, Rows: 30, Rail: 0}, theme.DefaultTheme())
 	narrow.watchers = receiptWatches()
-	narrow.set(boxEntries(), DefaultTheme())
+	narrow.set(boxEntries(), theme.DefaultTheme())
 	if narrow.float.Rect.W >= boxReceiptMinW {
 		t.Fatalf("narrow rect = %d, want under %d", narrow.float.Rect.W, boxReceiptMinW)
 	}
@@ -447,9 +448,9 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 		{65, boxReceiptMinW - 1},
 	} {
 		snap := &wire.Snapshot{Cols: tc.cols, Rows: 30, Rail: 0}
-		b := newBoxView(snap, DefaultTheme())
+		b := newBoxView(snap, theme.DefaultTheme())
 		b.watchers = boxWatches()
-		b.set(entries, DefaultTheme())
+		b.set(entries, theme.DefaultTheme())
 		if got := b.float.Rect.W; got != tc.want {
 			t.Fatalf("cols %d: rect = %d, want %d", tc.cols, got, tc.want)
 		}
@@ -472,13 +473,13 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 // grows and names what arrived above it. At the top the view follows the
 // newest entry and the count clears.
 func TestBoxViewAnchor(t *testing.T) {
-	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
+	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
 	entries := make([]box.Entry, 40)
 	for i := range entries {
 		entries[i] = box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"}
 	}
-	b.set(entries, DefaultTheme())
-	b.scroll(5, DefaultTheme())
+	b.set(entries, theme.DefaultTheme())
+	b.scroll(5, theme.DefaultTheme())
 	top := b.entries[b.off].Seq
 	if top != 35 {
 		t.Fatalf("top = %d, want 35", top)
@@ -486,14 +487,14 @@ func TestBoxViewAnchor(t *testing.T) {
 
 	// Two pushes, one entry each: the count must add up, not restart from the
 	// current index.
-	b.set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), DefaultTheme())
+	b.set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), theme.DefaultTheme())
 	if got := b.entries[b.off].Seq; got != top {
 		t.Fatalf("top seq = %d after one entry, want %d", got, top)
 	}
 	if b.new != 1 {
 		t.Fatalf("new = %d after one entry, want 1", b.new)
 	}
-	b.set(append([]box.Entry{{Seq: 42, State: box.StateNote, Msg: "note"}}, b.entries...), DefaultTheme())
+	b.set(append([]box.Entry{{Seq: 42, State: box.StateNote, Msg: "note"}}, b.entries...), theme.DefaultTheme())
 	if got := b.entries[b.off].Seq; got != top {
 		t.Fatalf("top seq = %d after two entries, want %d", got, top)
 	}
@@ -504,8 +505,8 @@ func TestBoxViewAnchor(t *testing.T) {
 		t.Fatalf("title = %q, want the arrival count", got)
 	}
 
-	b.scroll(-b.off, DefaultTheme())
-	b.set(append([]box.Entry{{Seq: 44, State: box.StateNote, Msg: "note"}}, b.entries...), DefaultTheme())
+	b.scroll(-b.off, theme.DefaultTheme())
+	b.set(append([]box.Entry{{Seq: 44, State: box.StateNote, Msg: "note"}}, b.entries...), theme.DefaultTheme())
 	if b.off != 0 || b.new != 0 || strings.Contains(b.title(), "+") {
 		t.Fatalf("off = %d, new = %d, title = %q, want the newest entry", b.off, b.new, b.title())
 	}
@@ -516,12 +517,12 @@ func TestBoxViewAnchor(t *testing.T) {
 // every watch, and the page has its own offset.
 func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	few := append(boxWatches(), box.Watch{Pane: "w1p3", Key: "lane/b", Cursor: 4})
-	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
-	b.setWatchers(few, DefaultTheme())
+	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b.setWatchers(few, theme.DefaultTheme())
 	if got, want := b.float.Rect.H, len(few); got != want {
 		t.Fatalf("height = %d, want one row per watch %d", got, want)
 	}
-	b.togglePage(DefaultTheme())
+	b.togglePage(theme.DefaultTheme())
 	screen := boxScreen(t, b, 100, 30)
 	r := b.float.Rect
 	for i, w := range few {
@@ -543,14 +544,14 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	for i := range many {
 		many[i] = box.Watch{Pane: fmt.Sprintf("p%02d", i+1), Key: "lane/a", Cursor: i}
 	}
-	b = newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
-	b.set(boxEntries(), DefaultTheme())
-	b.setWatchers(many, DefaultTheme())
+	b = newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b.set(boxEntries(), theme.DefaultTheme())
+	b.setWatchers(many, theme.DefaultTheme())
 	if b.float.Rect.H != 22 {
 		t.Fatalf("height = %d, want the cap of 22 rows", b.float.Rect.H)
 	}
-	b.togglePage(DefaultTheme())
-	b.scroll(100, DefaultTheme())
+	b.togglePage(theme.DefaultTheme())
+	b.scroll(100, theme.DefaultTheme())
 	if got := b.pOff; got != len(many)-b.float.Rect.H {
 		t.Fatalf("page offset = %d, want the last page %d", got, len(many)-b.float.Rect.H)
 	}
@@ -563,7 +564,7 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	if !strings.Contains(last, many[len(many)-1].Pane) {
 		t.Fatalf("last row = %q, want the oldest watch %s", last, many[len(many)-1].Pane)
 	}
-	b.scroll(-100, DefaultTheme())
+	b.scroll(-100, theme.DefaultTheme())
 	if b.pOff != 0 {
 		t.Fatalf("page offset = %d after scrolling back, want the first watch", b.pOff)
 	}

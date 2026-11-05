@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/theme"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -772,10 +773,10 @@ func TestConfigThemeSelection(t *testing.T) {
 	if cfg.themeName != "night" {
 		t.Fatalf("themeName = %q, want night", cfg.themeName)
 	}
-	if !reflect.DeepEqual(cfg.Theme(), DefaultTheme()) {
+	if !reflect.DeepEqual(cfg.Theme(), theme.DefaultTheme()) {
 		t.Fatal("parseConfig did not leave the built-in theme")
 	}
-	if !reflect.DeepEqual(LoadDefault().Theme(), DefaultTheme()) {
+	if !reflect.DeepEqual(LoadDefault().Theme(), theme.DefaultTheme()) {
 		t.Fatal("LoadDefault did not leave the built-in theme")
 	}
 }
@@ -839,8 +840,8 @@ glyphs { "grip" "@" }`)
 	if got := cfg.Key("main", "split-right"); got != "S" {
 		t.Fatalf("theme selection dropped the keymap: split-right = %q", got)
 	}
-	want := DefaultTheme()
-	want.Palette.RailBG = rgb{1, 2, 3}
+	want := theme.DefaultTheme()
+	want.Palette.RailBG = theme.RGB{R: 1, G: 2, B: 3}
 	want.Glyphs.Grip = "@"
 	if !reflect.DeepEqual(cfg.Theme(), want) {
 		t.Fatalf("theme = %+v, want %+v", cfg.Theme(), want)
@@ -866,7 +867,7 @@ func TestConfigThemeMissingFallsBack(t *testing.T) {
 	if got := cfg.Key("main", "split-right"); got != "S" {
 		t.Fatalf("missing theme dropped the keymap: split-right = %q", got)
 	}
-	if !reflect.DeepEqual(cfg.Theme(), DefaultTheme()) {
+	if !reflect.DeepEqual(cfg.Theme(), theme.DefaultTheme()) {
 		t.Fatal("missing theme did not fall back to the built-in theme")
 	}
 }
@@ -891,7 +892,7 @@ func TestConfigThemeMalformedFallsBack(t *testing.T) {
 	if got := cfg.Key("main", "split-right"); got != "S" {
 		t.Fatalf("malformed theme dropped the keymap: split-right = %q", got)
 	}
-	if !reflect.DeepEqual(cfg.Theme(), DefaultTheme()) {
+	if !reflect.DeepEqual(cfg.Theme(), theme.DefaultTheme()) {
 		t.Fatal("malformed theme did not fall back to the built-in theme")
 	}
 }
@@ -915,8 +916,8 @@ func TestConfigThemeDefaultPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDefaultPath: %v", err)
 	}
-	want := DefaultTheme()
-	want.Accents[1] = rgb{10, 11, 12}
+	want := theme.DefaultTheme()
+	want.Accents[1] = theme.RGB{R: 10, G: 11, B: 12}
 	if !reflect.DeepEqual(cfg.Theme(), want) {
 		t.Fatalf("theme = %+v, want %+v", cfg.Theme(), want)
 	}
