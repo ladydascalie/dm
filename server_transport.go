@@ -12,12 +12,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"dm/internal/paths"
 )
 
 // ensureServer returns a live connection to the session server, starting it if
 // needed. The returned bool reports whether a new daemon was spawned.
 func ensureServer(name string) (net.Conn, error) {
-	sock := serverSock(name)
+	sock := paths.ServerSock(name)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
 		return c, nil
 	}
@@ -25,10 +27,10 @@ func ensureServer(name string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(sessionDir(name), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
 		return nil, err
 	}
-	logPath := filepath.Join(sessionDir(name), "server.log")
+	logPath := filepath.Join(paths.SessionDir(name), "server.log")
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
@@ -79,7 +81,7 @@ type SessionInfo struct {
 }
 
 func listSessionInfo() ([]SessionInfo, error) {
-	entries, err := os.ReadDir(filepath.Join(stateDir(), "sessions"))
+	entries, err := os.ReadDir(filepath.Join(paths.StateDir(), "sessions"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -93,7 +95,7 @@ func listSessionInfo() ([]SessionInfo, error) {
 		}
 		name := e.Name()
 		info := SessionInfo{Name: name}
-		if c, err := net.DialTimeout("unix", serverSock(name), 100*time.Millisecond); err == nil {
+		if c, err := net.DialTimeout("unix", paths.ServerSock(name), 100*time.Millisecond); err == nil {
 			c.Close()
 			info.Live = true
 		}
@@ -109,7 +111,7 @@ func killSession(name string) error {
 		return err
 	}
 	c.Close()
-	data, err := os.ReadFile(filepath.Join(sessionDir(name), "server.pid"))
+	data, err := os.ReadFile(filepath.Join(paths.SessionDir(name), "server.pid"))
 	if err != nil {
 		return err
 	}
@@ -124,6 +126,6 @@ func killSession(name string) error {
 	if err := p.Signal(syscall.SIGTERM); err != nil {
 		return err
 	}
-	_ = os.Remove(serverSock(name))
+	_ = os.Remove(paths.ServerSock(name))
 	return nil
 }

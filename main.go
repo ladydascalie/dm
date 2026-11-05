@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/paths"
 	"golang.org/x/term"
 )
 
@@ -839,7 +840,7 @@ func runPurge(c *cmdFlags) error {
 		if s.Live {
 			continue
 		}
-		dir := sessionDir(s.Name)
+		dir := paths.SessionDir(s.Name)
 		if pidAlive(filepath.Join(dir, "server.pid")) {
 			fmt.Printf("skip %s: server pid alive\n", s.Name)
 			continue

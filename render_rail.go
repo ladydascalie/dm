@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"dm/internal/paths"
 )
 
 // railKind is the row type the sidebar paints: a workspace row, a window line,
@@ -199,15 +201,15 @@ func railFolder(cwd, root string) string {
 	}
 	cwd = filepath.Clean(cwd)
 	if root == "" {
-		return folderName(cwd)
+		return paths.FolderName(cwd)
 	}
 	root = filepath.Clean(root)
 	if cwd == root {
-		return folderName(root)
+		return paths.FolderName(root)
 	}
 	rel, err := filepath.Rel(root, cwd)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return folderName(cwd)
+		return paths.FolderName(cwd)
 	}
 	return filepath.ToSlash(rel)
 }

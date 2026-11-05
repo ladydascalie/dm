@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dm/internal/paths"
 	"github.com/hinshun/vt10x"
 )
 
@@ -734,7 +735,7 @@ func TestRailState(t *testing.T) {
 	if err := old.save(); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(statePath("old"))
+	b, err := os.ReadFile(paths.StatePath("old"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,7 +746,7 @@ func TestRailState(t *testing.T) {
 	delete(raw, "rail")
 	delete(raw, "railSet")
 	b, _ = json.Marshal(raw)
-	if err := os.WriteFile(statePath("old"), b, 0o600); err != nil {
+	if err := os.WriteFile(paths.StatePath("old"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err = loadState("old")
@@ -755,7 +756,7 @@ func TestRailState(t *testing.T) {
 	if got.Rail != defaultRail || !got.RailSet {
 		t.Fatalf("state without railSet = %d set=%v, want %d true", got.Rail, got.RailSet, defaultRail)
 	}
-	saved, err := os.ReadFile(statePath("old"))
+	saved, err := os.ReadFile(paths.StatePath("old"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3950,8 +3951,8 @@ func TestShellCwd(t *testing.T) {
 func TestFolderName(t *testing.T) {
 	cases := map[string]string{"/": "root", "/a/b/": "b", "/home/b": "b", "": "", ".": "root"}
 	for dir, want := range cases {
-		if got := folderName(dir); got != want {
-			t.Fatalf("folderName(%q) = %q, want %q", dir, got, want)
+		if got := paths.FolderName(dir); got != want {
+			t.Fatalf("paths.FolderName(%q) = %q, want %q", dir, got, want)
 		}
 	}
 }

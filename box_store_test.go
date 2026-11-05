@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dm/internal/paths"
 )
 
 // boxServer is an in-process server over a temp state dir with one pane in its
@@ -492,11 +494,11 @@ func TestBoxSchemaActionAnswers(t *testing.T) {
 
 func TestBoxStateFileWithoutBoxLoadsEmpty(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
-	if err := os.MkdirAll(sessionDir("oldbox"), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDir("oldbox"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	old := `{"name":"oldbox","workspaces":[{"id":"s1","name":"main","windows":[{"id":"w1","name":"main","root":{"pane":"w1p1"},"focus":"w1p1","nextPane":1}],"active":0}],"active":0,"cols":80,"rows":24,"panes":{"w1p1":{}},"nextWorkspace":1,"nextWindow":1,"idVersion":2,"rail":34,"railSet":true}`
-	if err := os.WriteFile(statePath("oldbox"), []byte(old), 0o600); err != nil {
+	if err := os.WriteFile(paths.StatePath("oldbox"), []byte(old), 0o600); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
 	st, err := loadState("oldbox")

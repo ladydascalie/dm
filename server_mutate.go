@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"dm/internal/paths"
 	"github.com/hinshun/vt10x"
 )
 
@@ -805,7 +806,7 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 	w.Root = &Node{Pane: id}
 	w.Focus = id
 	if label == "" {
-		label = folderName(cwd)
+		label = paths.FolderName(cwd)
 		if label == "" {
 			label = strconv.Itoa(len(ws.Windows) + 1)
 		}
@@ -869,7 +870,7 @@ func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string,
 		cwd = s.windowCwdLocked(s.st.ws())
 	}
 	if tabLabel == "" {
-		tabLabel = folderName(cwd)
+		tabLabel = paths.FolderName(cwd)
 		if tabLabel == "" {
 			tabLabel = "1"
 		}
