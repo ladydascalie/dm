@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // switcherSnap is a session for the switcher: two workspaces, three windows and
@@ -12,13 +13,13 @@ import (
 // a rail note row would appear if the switcher kept one. w1 sits in the folder
 // api with the branch dm-api, w2 in the folder web, and w2p2 works in a
 // subfolder, so a query can match a window without matching one of its panes.
-func switcherSnap() *Snapshot {
-	snap := &Snapshot{
+func switcherSnap() *wire.Snapshot {
+	snap := &wire.Snapshot{
 		Cols: 100, Rows: 20, Rail: layout.DefaultRail,
 		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
 	}
-	snap.Panes = []PaneInfo{{ID: "w1p1", Status: "working"}}
-	snap.All = []AllPane{
+	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Status: "working"}}
+	snap.All = []wire.AllPane{
 		{
 			ID: "w1p1", Name: "serve", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
@@ -50,7 +51,7 @@ func switcherSnap() *Snapshot {
 }
 
 // switcherSnapWithout is the fixture with panes removed.
-func switcherSnapWithout(snap *Snapshot, ids ...string) *Snapshot {
+func switcherSnapWithout(snap *wire.Snapshot, ids ...string) *wire.Snapshot {
 	drop := map[string]bool{}
 	for _, id := range ids {
 		drop[id] = true

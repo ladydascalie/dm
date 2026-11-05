@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -341,7 +342,7 @@ func drawPaneBoxRows(buf *bytes.Buffer, th Theme, content layout.Rect, active bo
 // drawGrips marks every divider at its midpoint, so a handle is visible before
 // the pointer finds it. The hover paints over the whole divider. A zoomed pane
 // covers every divider, so a grip would be a lie over a hidden split.
-func drawGrips(buf *bytes.Buffer, th Theme, snap *Snapshot) {
+func drawGrips(buf *bytes.Buffer, th Theme, snap *wire.Snapshot) {
 	if snap == nil || snap.Root == nil || snap.Rail < 0 || snap.Zoom != "" {
 		return
 	}

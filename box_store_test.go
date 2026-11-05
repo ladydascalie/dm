@@ -14,6 +14,7 @@ import (
 	"dm/internal/box"
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 // boxServer is an in-process server over a temp state dir with one pane in its
@@ -41,11 +42,11 @@ func boxConn(t *testing.T) (*client, net.Conn) {
 }
 
 // boxCall sends one box request and returns its reply.
-func boxCall(t *testing.T, s *server, cl *client, conn net.Conn, action, res string) Msg {
+func boxCall(t *testing.T, s *server, cl *client, conn net.Conn, action, res string) wire.Msg {
 	t.Helper()
-	s.handleReq(cl, Msg{Type: "req", Action: action, Res: json.RawMessage(res)})
+	s.handleReq(cl, wire.Msg{Type: "req", Action: action, Res: json.RawMessage(res)})
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	m, err := readMsg(conn)
+	m, err := wire.ReadMsg(conn)
 	if err != nil {
 		t.Fatalf("%s reply: %v", action, err)
 	}
@@ -612,14 +613,14 @@ func boxAwaitWatchers(t *testing.T, s *server, cl *client, conn net.Conn, why st
 
 // boxPark starts a msg-wait on its own connection and returns the reader for
 // the reply, so the test can keep asking the server questions meanwhile.
-func boxPark(t *testing.T, s *server, res string) func(t *testing.T) Msg {
+func boxPark(t *testing.T, s *server, res string) func(t *testing.T) wire.Msg {
 	t.Helper()
 	cl, conn := boxConn(t)
-	go s.handleReq(cl, Msg{Type: "req", Action: "msg-wait", Res: json.RawMessage(res)})
-	return func(t *testing.T) Msg {
+	go s.handleReq(cl, wire.Msg{Type: "req", Action: "msg-wait", Res: json.RawMessage(res)})
+	return func(t *testing.T) wire.Msg {
 		t.Helper()
 		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		m, err := readMsg(conn)
+		m, err := wire.ReadMsg(conn)
 		if err != nil {
 			t.Fatalf("wait reply: %v", err)
 		}
@@ -643,10 +644,10 @@ func boxPushIs(t *testing.T, conn net.Conn, want, why string) {
 }
 
 // boxNextPush reads one frame the server pushed to an attached client.
-func boxNextPush(t *testing.T, conn net.Conn) Msg {
+func boxNextPush(t *testing.T, conn net.Conn) wire.Msg {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	m, err := readMsg(conn)
+	m, err := wire.ReadMsg(conn)
 	if err != nil {
 		t.Fatalf("push: %v", err)
 	}
@@ -657,7 +658,7 @@ func boxNextPush(t *testing.T, conn net.Conn) Msg {
 func boxNoPush(t *testing.T, conn net.Conn, why string) {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Millisecond))
-	m, err := readMsg(conn)
+	m, err := wire.ReadMsg(conn)
 	if err == nil {
 		t.Fatalf("%s: pushed %q", why, m.Type)
 	}
@@ -909,7 +910,7 @@ func boxSubStart(t *testing.T, s *server, cl *client, res string) <-chan struct{
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		s.handleReq(cl, Msg{Type: "req", Action: "msg-sub", Res: json.RawMessage(res)})
+		s.handleReq(cl, wire.Msg{Type: "req", Action: "msg-sub", Res: json.RawMessage(res)})
 	}()
 	return done
 }
@@ -918,7 +919,7 @@ func boxSubStart(t *testing.T, s *server, cl *client, res string) <-chan struct{
 func boxSubFrame(t *testing.T, conn net.Conn) box.SubFrame {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	m, err := readMsg(conn)
+	m, err := wire.ReadMsg(conn)
 	if err != nil {
 		t.Fatalf("sub frame: %v", err)
 	}
@@ -940,7 +941,7 @@ func boxSubFrame(t *testing.T, conn net.Conn) box.SubFrame {
 func boxSubQuiet(t *testing.T, conn net.Conn, why string) {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(80 * time.Millisecond))
-	m, err := readMsg(conn)
+	m, err := wire.ReadMsg(conn)
 	_ = conn.SetReadDeadline(time.Time{})
 	if err == nil {
 		t.Fatalf("%s: the stream sent %q", why, m.Type)

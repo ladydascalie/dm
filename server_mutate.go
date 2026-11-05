@@ -10,6 +10,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -44,10 +45,10 @@ func (s *server) paneInTreeLocked(id string) bool {
 	return false
 }
 
-func (s *server) statuses() map[string]Status {
+func (s *server) statuses() map[string]wire.Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := map[string]Status{}
+	out := map[string]wire.Status{}
 	for id, pc := range s.panes {
 		out[id] = pc.st
 	}
@@ -55,15 +56,15 @@ func (s *server) statuses() map[string]Status {
 }
 
 // paneLines reads the pane VT through a short-lived socket connection.
-func (s *server) paneLines(id string) ([]string, Status, error) {
-	m, err := paneRequest(s.st.Name, id, Msg{Type: "req", Action: "read"})
+func (s *server) paneLines(id string) ([]string, wire.Status, error) {
+	m, err := paneRequest(s.st.Name, id, wire.Msg{Type: "req", Action: "read"})
 	if err != nil {
-		return nil, Status{}, err
+		return nil, wire.Status{}, err
 	}
 	if !m.OK {
-		return nil, Status{}, fmt.Errorf("%s", m.Error)
+		return nil, wire.Status{}, fmt.Errorf("%s", m.Error)
 	}
-	st := Status{}
+	st := wire.Status{}
 	if m.St != nil {
 		st = *m.St
 	}
@@ -168,7 +169,7 @@ func (s *server) writeTo(id, text string, enter bool) error {
 	if pc == nil {
 		return fmt.Errorf("no pane %q", id)
 	}
-	return pc.send(Msg{Action: "write", Msg: text, Enter: enter})
+	return pc.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
 }
 
 // mutation runs fn and saves state. fn takes the lock itself, because it may
@@ -196,7 +197,7 @@ func (s *server) resync() {
 	s.syncSizes()
 	s.mu.Lock()
 	snap := s.snapshotLocked()
-	s.broadcastLocked(Msg{Type: "snapshot", Snap: snap})
+	s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 	s.mu.Unlock()
 	// Clients rebuild their VT after a layout change; send the screen, then
 	// replay the rings as history.
@@ -213,7 +214,7 @@ func (s *server) resync() {
 		if pc := s.panes[id]; pc != nil {
 			pc.alt, pc.mouse = rp.alt, rp.mouse
 		}
-		s.broadcastLocked(Msg{Type: "replay", Target: id, Data: rp.data, St: &rp.st})
+		s.broadcastLocked(wire.Msg{Type: "replay", Target: id, Data: rp.data, St: &rp.st})
 		s.mu.Unlock()
 	}
 }
@@ -382,7 +383,7 @@ func (s *server) removeWorkspaceLocked(idx int) {
 	}
 	for _, pid := range ids {
 		if pc := s.panes[pid]; pc != nil {
-			_ = pc.send(Msg{Action: "kill"})
+			_ = pc.send(wire.Msg{Action: "kill"})
 			_ = pc.c.Close()
 			delete(s.panes, pid)
 		}
@@ -453,7 +454,7 @@ func (s *server) closeWindow(id string) error {
 	}
 	for _, pid := range ids {
 		if pc := s.panes[pid]; pc != nil {
-			_ = pc.send(Msg{Action: "kill"})
+			_ = pc.send(wire.Msg{Action: "kill"})
 			_ = pc.c.Close()
 			delete(s.panes, pid)
 		}
@@ -647,7 +648,7 @@ func (s *server) closePane(target string) error {
 		if pc == nil {
 			return fmt.Errorf("no pane %q", target)
 		}
-		_ = pc.send(Msg{Action: "kill"})
+		_ = pc.send(wire.Msg{Action: "kill"})
 		return nil
 	}
 	defer s.mu.Unlock()
@@ -672,7 +673,7 @@ func (s *server) closePane(target string) error {
 		}
 	}
 	if pc := s.panes[target]; pc != nil {
-		_ = pc.send(Msg{Action: "kill"})
+		_ = pc.send(wire.Msg{Action: "kill"})
 		_ = pc.c.Close()
 		delete(s.panes, target)
 	}
@@ -705,7 +706,7 @@ func (s *server) setPaneCwd(id, cwd string) {
 // spawned by an older binary.
 func (s *server) liveCwd(id string) string {
 	if id != "" {
-		if m, err := paneRequest(s.st.Name, id, Msg{Type: "req", Action: "cwd"}); err == nil && m.Cwd != "" {
+		if m, err := paneRequest(s.st.Name, id, wire.Msg{Type: "req", Action: "cwd"}); err == nil && m.Cwd != "" {
 			return m.Cwd
 		}
 	}

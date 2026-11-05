@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/wire"
 )
 
 // boxSession is a session server on a real unix socket, with one pane in the
@@ -55,22 +56,22 @@ func dialBox(t *testing.T, sock string) *boxPeer {
 
 func (p *boxPeer) send(action, res string) {
 	p.t.Helper()
-	if err := writeMsg(p.c, Msg{Type: "req", Action: action, Res: json.RawMessage(res)}); err != nil {
+	if err := wire.WriteMsg(p.c, wire.Msg{Type: "req", Action: action, Res: json.RawMessage(res)}); err != nil {
 		p.t.Fatalf("%s send: %v", action, err)
 	}
 }
 
-func (p *boxPeer) recv(action string) Msg {
+func (p *boxPeer) recv(action string) wire.Msg {
 	p.t.Helper()
 	_ = p.c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	m, err := readMsg(p.c)
+	m, err := wire.ReadMsg(p.c)
 	if err != nil {
 		p.t.Fatalf("%s recv: %v", action, err)
 	}
 	return m
 }
 
-func (p *boxPeer) call(action, res string) Msg {
+func (p *boxPeer) call(action, res string) wire.Msg {
 	p.t.Helper()
 	p.send(action, res)
 	return p.recv(action)
@@ -108,7 +109,7 @@ func postEntry(t *testing.T, p *boxPeer, key, state string) box.Entry {
 	return rep.Entry
 }
 
-func waitReplyOf(t *testing.T, m Msg) box.Entry {
+func waitReplyOf(t *testing.T, m wire.Msg) box.Entry {
 	t.Helper()
 	var rep box.WaitReply
 	if err := json.Unmarshal(m.Res, &rep); err != nil {

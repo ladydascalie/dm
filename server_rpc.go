@@ -7,9 +7,10 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
-func (s *server) handleReq(cl *client, m Msg) {
+func (s *server) handleReq(cl *client, m wire.Msg) {
 	switch m.Action {
 	case "ping":
 		s.reply(cl, m, map[string]any{"session": s.st.Name}, nil)
@@ -50,7 +51,7 @@ func (s *server) handleReq(cl *client, m Msg) {
 			pc.alt, pc.mouse = rp.alt, rp.mouse
 		}
 		s.mu.Unlock()
-		cl.deliver(Msg{Type: "replay", Target: m.Target, Data: rp.data, St: &rp.st})
+		cl.deliver(wire.Msg{Type: "replay", Target: m.Target, Data: rp.data, St: &rp.st})
 		s.reply(cl, m, map[string]any{"pane": m.Target}, nil)
 
 	case "status":
@@ -85,7 +86,7 @@ func (s *server) handleReq(cl *client, m Msg) {
 			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
 			return
 		}
-		_ = pc.send(Msg{Action: "write", Keys: m.Keys})
+		_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
 		s.reply(cl, m, nil, nil)
 
 	case "split":

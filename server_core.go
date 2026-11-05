@@ -18,21 +18,22 @@ import (
 	"dm/internal/box"
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 type paneConn struct {
 	id    string
 	c     net.Conn
 	mu    sync.Mutex
-	st    Status
+	st    wire.Status
 	alt   bool
 	mouse bool
 }
 
-func (p *paneConn) send(m Msg) error {
+func (p *paneConn) send(m wire.Msg) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return writeMsg(p.c, m)
+	return wire.WriteMsg(p.c, m)
 }
 
 // outboundBytes bounds what one client may have queued, in bytes. A client
@@ -50,7 +51,7 @@ type client struct {
 	// client queues; the writer does not touch the socket.
 	paused bool
 
-	queue  []Msg
+	queue  []wire.Msg
 	qbytes int
 	// stale records that the queue overflowed and queued frames were
 	// dropped. The writer resyncs from a picture once the queue drains.
@@ -73,7 +74,7 @@ func newClient(c net.Conn) *client {
 // and a caller that owns a cursor must not advance past it. It never writes the
 // socket and never waits on it: a stalled client must not block the pane read
 // loop.
-func (c *client) deliver(m Msg) bool {
+func (c *client) deliver(m wire.Msg) bool {
 	c.mu.Lock()
 	queued := c.enqueueLocked(m)
 	c.mu.Unlock()
@@ -84,7 +85,7 @@ func (c *client) deliver(m Msg) bool {
 // it queued. On overflow it drops the queued "bytes" frames, marks the client
 // stale and stops queueing output, so the writer resyncs from the pane screens
 // instead of replaying a backlog.
-func (c *client) enqueueLocked(m Msg) bool {
+func (c *client) enqueueLocked(m wire.Msg) bool {
 	if c.cond == nil {
 		c.cond = sync.NewCond(&c.mu)
 	}
@@ -133,9 +134,9 @@ func (c *client) dropBytesLocked() {
 
 // popLocked removes the head frame and clears its slot, so a lagging client
 // does not pin the buffers of frames it already sent. The caller holds c.mu.
-func (c *client) popLocked() Msg {
+func (c *client) popLocked() wire.Msg {
 	m := c.queue[0]
-	c.queue[0] = Msg{}
+	c.queue[0] = wire.Msg{}
 	c.queue = c.queue[1:]
 	c.qbytes -= msgBytes(m)
 	return m
@@ -153,7 +154,7 @@ func (c *client) writeLoop() {
 		if !ok {
 			return
 		}
-		if err := writeMsg(c.c, m); err != nil {
+		if err := wire.WriteMsg(c.c, m); err != nil {
 			c.shutdown()
 			return
 		}
@@ -165,12 +166,12 @@ func (c *client) writeLoop() {
 
 // next waits for a frame the writer may send. A paused client holds its
 // frames, so the writer waits instead of writing.
-func (c *client) next() (Msg, bool) {
+func (c *client) next() (wire.Msg, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for {
 		if c.closed {
-			return Msg{}, false
+			return wire.Msg{}, false
 		}
 		if !c.paused && len(c.queue) > 0 {
 			return c.popLocked(), true
@@ -243,7 +244,7 @@ func (c *client) queuedFrames() int {
 }
 
 // msgBytes counts what a frame costs on the wire, near enough to bound it.
-func msgBytes(m Msg) int {
+func msgBytes(m wire.Msg) int {
 	return 64 + len(m.Data) + len(m.Keys) + len(m.Msg) + len(m.Name) + len(m.Res)
 }
 
@@ -406,7 +407,7 @@ func (s *server) addPaneStateAt(id, cwd, shell string) {
 func (s *server) ensurePane(id string) error {
 	sock := paths.PaneSock(s.st.Name, id)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
-		pc := &paneConn{id: id, c: c, st: Status{State: "unknown"}}
+		pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
 		s.mu.Lock()
 		s.panes[id] = pc
 		s.mu.Unlock()
@@ -449,7 +450,7 @@ func (s *server) ensurePane(id string) error {
 	for i := 0; i < 100; i++ {
 		c, err := net.DialTimeout("unix", sock, 100*time.Millisecond)
 		if err == nil {
-			pc := &paneConn{id: id, c: c, st: Status{State: "unknown"}}
+			pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
 			s.mu.Lock()
 			s.panes[id] = pc
 			s.mu.Unlock()
@@ -470,7 +471,7 @@ func (s *server) watchPane(id string) {
 	}
 	go func() {
 		for {
-			m, err := readMsg(pc.c)
+			m, err := wire.ReadMsg(pc.c)
 			if err != nil {
 				s.paneExited(id)
 				return
@@ -478,7 +479,7 @@ func (s *server) watchPane(id string) {
 			switch m.Type {
 			case "bytes":
 				s.mu.Lock()
-				s.broadcastLocked(Msg{Type: "bytes", Target: id, Data: m.Data})
+				s.broadcastLocked(wire.Msg{Type: "bytes", Target: id, Data: m.Data})
 				s.mu.Unlock()
 			case "status":
 				if m.St != nil {
@@ -502,7 +503,7 @@ func (s *server) watchPane(id string) {
 				s.mu.Lock()
 				pc.alt, pc.mouse = mi.Alt, mi.Mouse
 				snap := s.snapshotLocked()
-				s.broadcastLocked(Msg{Type: "snapshot", Snap: snap})
+				s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 				s.mu.Unlock()
 			case "exit":
 				s.paneExited(id)
@@ -512,7 +513,7 @@ func (s *server) watchPane(id string) {
 	}()
 }
 
-func (s *server) broadcastLocked(m Msg) {
+func (s *server) broadcastLocked(m wire.Msg) {
 	for c := range s.clients {
 		c.deliver(m)
 	}

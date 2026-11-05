@@ -6,6 +6,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // switcher is the quick switcher's state: the float's rect, the rail tree it
@@ -25,7 +26,7 @@ type switcher struct {
 
 	// panes carries each pane's own folder, branch, worktree and names. A pane
 	// row's railItem holds none of them, and the query matches them.
-	panes map[string]AllPane
+	panes map[string]wire.AllPane
 
 	query []rune
 
@@ -38,7 +39,7 @@ type switcher struct {
 }
 
 // newSwitcher opens the switcher over a snapshot inside rect.
-func newSwitcher(rect layout.Rect, snap *Snapshot) *switcher {
+func newSwitcher(rect layout.Rect, snap *wire.Snapshot) *switcher {
 	s := &switcher{rect: rect, sel: -1}
 	s.sync(snap)
 	return s
@@ -47,7 +48,7 @@ func newSwitcher(rect layout.Rect, snap *Snapshot) *switcher {
 // sync rebuilds the tree after a snapshot. The selection stays on its own row
 // when that row survives, and falls back to the first pane row; when no pane
 // row survives it selects nothing.
-func (s *switcher) sync(snap *Snapshot) {
+func (s *switcher) sync(snap *wire.Snapshot) {
 	prev, prevOK := s.selected()
 	s.tree = switcherTree(snap)
 	s.panes = switcherPanes(snap)
@@ -74,13 +75,13 @@ func (s *switcher) sync(snap *Snapshot) {
 // forced unfolded, so a folded window never hides a pane the switcher could
 // jump to. Note rows are dropped: a switcher is not a status board. Gap rows
 // stay to keep the blocks apart, and only they are unselectable.
-func switcherTree(snap *Snapshot) []railItem {
+func switcherTree(snap *wire.Snapshot) []railItem {
 	if snap == nil {
 		return nil
 	}
 	cp := *snap
 	cp.Rail = 0
-	cp.All = make([]AllPane, len(snap.All))
+	cp.All = make([]wire.AllPane, len(snap.All))
 	copy(cp.All, snap.All)
 	for i := range cp.All {
 		cp.All[i].WindowUnfolded = true
@@ -97,11 +98,11 @@ func switcherTree(snap *Snapshot) []railItem {
 
 // switcherPanes indexes the snapshot by pane id, so a pane row can match on the
 // folder, branch, worktree and names the rail only puts on its header rows.
-func switcherPanes(snap *Snapshot) map[string]AllPane {
+func switcherPanes(snap *wire.Snapshot) map[string]wire.AllPane {
 	if snap == nil {
 		return nil
 	}
-	out := make(map[string]AllPane, len(snap.All))
+	out := make(map[string]wire.AllPane, len(snap.All))
 	for _, p := range snap.All {
 		out[p.ID] = p
 	}
@@ -542,11 +543,11 @@ func closeSwitcher(t *tui) {
 func (t *tui) dispatchPick(target string) {
 	switch {
 	case strings.HasPrefix(target, "s") && cells.AllDigits(target[1:]):
-		t.action("focus-workspace", func(m *Msg) { m.Target = target })
+		t.action("focus-workspace", func(m *wire.Msg) { m.Target = target })
 	case strings.HasPrefix(target, "w") && strings.Contains(target, "p"):
-		t.action("focus", func(m *Msg) { m.Target = target })
+		t.action("focus", func(m *wire.Msg) { m.Target = target })
 	case strings.HasPrefix(target, "w") && cells.AllDigits(target[1:]):
-		t.action("focus-window", func(m *Msg) { m.Target = target })
+		t.action("focus-window", func(m *wire.Msg) { m.Target = target })
 	default:
 		t.notify("switcher: no target " + target)
 	}

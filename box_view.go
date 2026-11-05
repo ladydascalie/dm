@@ -16,6 +16,7 @@ import (
 	"dm/internal/box"
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -72,12 +73,12 @@ type boxView struct {
 	float *FloatingPane
 	// snap sizes the float: the view fits the log until it reaches its cap,
 	// so a short log reads in a short box and a long one fills the screen.
-	snap *Snapshot
+	snap *wire.Snapshot
 }
 
 // newBoxView opens the float on a screen. The log stays empty until the reply
 // lands.
-func newBoxView(snap *Snapshot, th Theme) *boxView {
+func newBoxView(snap *wire.Snapshot, th Theme) *boxView {
 	b := &boxView{float: &FloatingPane{ID: "box", Active: true}, snap: snap}
 	b.sync(snap, th)
 	return b
@@ -88,7 +89,7 @@ func newBoxView(snap *Snapshot, th Theme) *boxView {
 // larger of the entry count and the watch count, so a short list reads in a
 // short box and a list longer than the cap scrolls. A parked watch exists
 // before the first entry, so the watcher page sizes itself from n too.
-func boxViewRect(snap *Snapshot, n int) layout.Rect {
+func boxViewRect(snap *wire.Snapshot, n int) layout.Rect {
 	left := snap.Rail
 	if left < 0 {
 		left = 0
@@ -128,7 +129,7 @@ func boxViewRect(snap *Snapshot, n int) layout.Rect {
 }
 
 // sync fits the float to the screen after a snapshot or a rail change.
-func (b *boxView) sync(snap *Snapshot, th Theme) {
+func (b *boxView) sync(snap *wire.Snapshot, th Theme) {
 	b.snap = snap
 	r := boxViewRect(snap, b.rows())
 	if r == b.float.Rect {
@@ -515,7 +516,7 @@ func (t *tui) boxRequest() {
 	if t.conn == nil {
 		return
 	}
-	_ = t.conn.send(Msg{
+	_ = t.conn.send(wire.Msg{
 		Type: "req", Action: "msg-list",
 		Res: json.RawMessage(`{"key":"","limit":0}`),
 	})
@@ -535,7 +536,7 @@ func (t *tui) boxWatchers(now time.Time) {
 	}
 	b.watchAt = now
 	b.watchWant = false
-	_ = t.conn.send(Msg{
+	_ = t.conn.send(wire.Msg{
 		Type: "req", Action: "msg-watchers",
 		Res: json.RawMessage(`{}`),
 	})
@@ -551,7 +552,7 @@ func (t *tui) flushBoxWatchers(now time.Time) {
 
 // takeBoxList fills the view from a msg-list reply. A closed view, a malformed
 // reply and an error reply leave the picture alone; an error becomes a toast.
-func (t *tui) takeBoxList(m Msg) {
+func (t *tui) takeBoxList(m wire.Msg) {
 	if t.box == nil {
 		return
 	}
@@ -572,7 +573,7 @@ func (t *tui) takeBoxList(m Msg) {
 // arrive in request order on the one connection, so the newest reply is the
 // newest state. A closed view, a malformed reply and an error reply leave the
 // page alone; an error becomes a toast.
-func (t *tui) takeBoxWatchers(m Msg) {
+func (t *tui) takeBoxWatchers(m wire.Msg) {
 	if t.box == nil {
 		return
 	}

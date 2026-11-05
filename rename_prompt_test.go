@@ -9,17 +9,18 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // renamePromptTUI is a client on a snapshot whose active workspace is s1 with
 // the label main, plus a second workspace the prompt must never pick. The
 // snapshot carries the label in Workspace, as the server sends it, and the
 // prompt resolves the id from the rail entries.
-func renamePromptTUI(t *testing.T) (*tui, chan Msg) {
+func renamePromptTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	tr, got := clientTUI(t, nil)
 	tr.snap.Workspace = "main"
-	tr.snap.All = []AllPane{
+	tr.snap.All = []wire.AllPane{
 		{ID: "a", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true},
 		{ID: "z", Workspace: "s2", WorkspaceName: "work", Window: "w1", WindowName: "one"},
 	}
@@ -258,7 +259,7 @@ func TestRenamePromptShieldsPane(t *testing.T) {
 // renameFloatPaint draws the prompt and parses its band into the cells it
 // paints, using the help box parser: a wide rune takes the cells cells gives
 // it, and any move but an absolute one fails the test.
-func renameFloatPaint(t *testing.T, snap *Snapshot, id, draft string, kind ...string) (layout.Rect, helpBoxPainted) {
+func renameFloatPaint(t *testing.T, snap *wire.Snapshot, id, draft string, kind ...string) (layout.Rect, helpBoxPainted) {
 	t.Helper()
 	box, ok := renameBoxGeometry(snap.Cols, snap.Rows, snap.Rail)
 	if !ok {

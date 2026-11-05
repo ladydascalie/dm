@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"dm/internal/cells"
+	"dm/internal/wire"
 	"fmt"
 )
 
@@ -11,7 +12,7 @@ import (
 // box is as wide as the longest text plus its two border cells, clamped to the
 // screen; a longer text is truncated to fit. Only rows above the bar are used,
 // so the bar and the pointer gestures over the panes are untouched.
-func drawToasts(buf *bytes.Buffer, th Theme, snap *Snapshot, toasts []toast) {
+func drawToasts(buf *bytes.Buffer, th Theme, snap *wire.Snapshot, toasts []toast) {
 	if snap == nil || len(toasts) == 0 || snap.Cols < 3 || snap.Rows < 2 {
 		return
 	}

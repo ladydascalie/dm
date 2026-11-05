@@ -14,6 +14,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 // railKind is the row type the sidebar paints: a workspace row, a window line,
@@ -61,7 +62,7 @@ type railItem struct {
 // separates workspace blocks. The thin rail is a glyph column: one pane row
 // per pane, in snapshot order, whatever the fold. It has no workspace row, no
 // window row, no note row and no gap row.
-func railItems(snap *Snapshot) []railItem {
+func railItems(snap *wire.Snapshot) []railItem {
 	if snap == nil {
 		return nil
 	}
@@ -93,7 +94,7 @@ func railItems(snap *Snapshot) []railItem {
 	// The window line takes its folder and git state from one pane: the
 	// focused pane, else the first pane in that window that carries a branch,
 	// else the window's first pane.
-	source := func(window string) (AllPane, bool) {
+	source := func(window string) (wire.AllPane, bool) {
 		if i, ok := focus[window]; ok && snap.All[i].Branch != "" {
 			return snap.All[i], true
 		}
@@ -106,7 +107,7 @@ func railItems(snap *Snapshot) []railItem {
 		if i, ok := first[window]; ok {
 			return snap.All[i], true
 		}
-		return AllPane{}, false
+		return wire.AllPane{}, false
 	}
 	// A workspace keeps its preferred slot when it is free. When two live
 	// workspaces hash alike, the later one takes the next free slot, so no two
@@ -178,7 +179,7 @@ func railItems(snap *Snapshot) []railItem {
 
 // railPaneRow is the pane row both rails draw. The label falls back from the
 // pane name to its app to its id.
-func railPaneRow(p AllPane) railItem {
+func railPaneRow(p wire.AllPane) railItem {
 	label := p.Name
 	if label == "" {
 		label = p.App
@@ -477,7 +478,7 @@ func railRow(th Theme, it railItem, w int, compact, nerd bool) (left, right, tai
 
 // railPaneAt returns the pane whose row is under x,y, or "" for any other row,
 // an empty row, a point outside the rail, or the rail's bottom control row.
-func railPaneAt(snap *Snapshot, x, y int) string {
+func railPaneAt(snap *wire.Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
 	}
@@ -494,7 +495,7 @@ func railPaneAt(snap *Snapshot, x, y int) string {
 // railWindowAt returns the window whose row is under x,y, for a fold click. A
 // window line and its note line both fold the window. The thin rail has no
 // window row, so it never answers.
-func railWindowAt(snap *Snapshot, x, y int) string {
+func railWindowAt(snap *wire.Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
 	}
@@ -517,7 +518,7 @@ func railWindowAt(snap *Snapshot, x, y int) string {
 // railItemAt returns the rail row under x,y. A point outside the rail, on the
 // bottom control row, or past the last item reports false. The gap row between
 // workspace blocks is a row, so it answers true.
-func railItemAt(snap *Snapshot, x, y int) (railItem, bool) {
+func railItemAt(snap *wire.Snapshot, x, y int) (railItem, bool) {
 	if snap == nil || snap.Rail <= 0 {
 		return railItem{}, false
 	}
@@ -534,7 +535,7 @@ func railItemAt(snap *Snapshot, x, y int) (railItem, bool) {
 // railControlAt reports whether x,y is the rail's bottom control row, whose
 // click toggles the rail between full and thin. The whole row inside the rail
 // is the target, so the row belongs to the control and to no item.
-func railControlAt(snap *Snapshot, x, y int) bool {
+func railControlAt(snap *wire.Snapshot, x, y int) bool {
 	if snap == nil || snap.Rail <= 0 || snap.Rows < 2 {
 		return false
 	}
@@ -571,7 +572,7 @@ func railControlSegs(th Theme, compact, nerd bool) []seg {
 // screen are clipped, and every row is written into at most Rail columns. A
 // left run is elided with an ellipsis before the right-aligned stats give up a
 // cell, so the stats survive a narrow rail.
-func drawRail(buf *bytes.Buffer, th Theme, snap *Snapshot) {
+func drawRail(buf *bytes.Buffer, th Theme, snap *wire.Snapshot) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}

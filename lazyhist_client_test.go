@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -17,7 +18,7 @@ import (
 func TestBytesDoNotGrowHistory(t *testing.T) {
 	tui, _ := clientTUI(t, nil)
 	tui.vts["a"] = vt10x.New(vt10x.WithSize(20, 5))
-	tui.apply(Msg{Type: "bytes", Target: "a", Data: []byte("live output")})
+	tui.apply(wire.Msg{Type: "bytes", Target: "a", Data: []byte("live output")})
 	if got := tui.hist["a"]; len(got) != 0 {
 		t.Fatalf("live bytes filled the ring: %q", got)
 	}
@@ -59,7 +60,7 @@ func TestReplayFillsScrollback(t *testing.T) {
 	}
 
 	ring := []byte(strings.Repeat("HIST-ROW\r\n", 200))
-	tui.apply(Msg{Type: "replay", Target: "a", Data: ring})
+	tui.apply(wire.Msg{Type: "replay", Target: "a", Data: ring})
 	if got := string(tui.hist["a"]); got != string(ring) {
 		t.Fatalf("history holds %d bytes, want %d", len(got), len(ring))
 	}
@@ -92,7 +93,7 @@ func TestScrollUnknownPaneIsQuiet(t *testing.T) {
 	}
 
 	// A replay for a pane that is not in the picture is dropped, not cached.
-	tui.apply(Msg{Type: "replay", Target: "ghost", Data: []byte("stale")})
+	tui.apply(wire.Msg{Type: "replay", Target: "ghost", Data: []byte("stale")})
 	if got, ok := tui.hist["ghost"]; ok {
 		t.Fatalf("cached a ring for an unknown pane: %q", got)
 	}
@@ -117,14 +118,14 @@ func TestScrollDropsHistoryOnGeometry(t *testing.T) {
 	tui, sent := clientTUI(t, nil)
 	tui.startScrollOnFocus()
 	nextMsg(t, sent)
-	tui.apply(Msg{Type: "replay", Target: "a", Data: []byte(strings.Repeat("LINE\r\n", 60))})
+	tui.apply(wire.Msg{Type: "replay", Target: "a", Data: []byte(strings.Repeat("LINE\r\n", 60))})
 	if tui.scrollVT == nil {
 		t.Fatal("replay did not fill the scrollback")
 	}
 
 	small := testSnapshot(&layout.Node{Pane: "a"}, 80, 24, nil)
 	small.Focus = "a"
-	tui.apply(Msg{Type: "snapshot", Snap: small})
+	tui.apply(wire.Msg{Type: "snapshot", Snap: small})
 	if got, ok := tui.hist["a"]; ok {
 		t.Fatalf("kept a ring the new rect cannot use: %q", got)
 	}

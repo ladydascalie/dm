@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -51,7 +52,7 @@ func boxScreenRow(screen vt10x.Terminal, y, x, w int) string {
 }
 
 // nextBoxMsg takes the next request the client sends, failing on a timeout.
-func nextBoxMsg(t *testing.T, got chan Msg) Msg {
+func nextBoxMsg(t *testing.T, got chan wire.Msg) wire.Msg {
 	t.Helper()
 	select {
 	case m := <-got:
@@ -59,14 +60,14 @@ func nextBoxMsg(t *testing.T, got chan Msg) Msg {
 	case <-time.After(2 * time.Second):
 		t.Fatal("no request")
 	}
-	return Msg{}
+	return wire.Msg{}
 }
 
 // TestBoxViewListsNewestFirst: the rows follow the entries newest first, the
 // state word carries the rail's colour for that state, and the borders carry
 // the title and the key hint.
 func TestBoxViewListsNewestFirst(t *testing.T) {
-	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 34}
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 34}
 	b := newBoxView(snap, DefaultTheme())
 	b.set(boxEntries(), DefaultTheme())
 	screen := boxScreen(t, b, snap.Cols, snap.Rows)
@@ -103,7 +104,7 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 // TestBoxViewScrollClamps: the window stops at the newest row and at the oldest
 // row that still fills the pane.
 func TestBoxViewScrollClamps(t *testing.T) {
-	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
 	b := newBoxView(snap, DefaultTheme())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
@@ -133,7 +134,7 @@ func TestBoxViewScrollClamps(t *testing.T) {
 // TestBoxViewFitsLog: a short log makes a short box, a long one fills the cap,
 // and the title names the rows in view once the log scrolls.
 func TestBoxViewFitsLog(t *testing.T) {
-	snap := &Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
 	b := newBoxView(snap, DefaultTheme())
 	b.set(boxEntries(), DefaultTheme())
 	if got, want := b.float.Rect.H, len(boxEntries()); got != want {
@@ -186,7 +187,7 @@ func TestBoxListReplyFillsView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tui.apply(Msg{Type: "resp", Action: "msg-list", OK: true, Res: res})
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-list", OK: true, Res: res})
 	if len(tui.box.entries) != 4 {
 		t.Fatalf("entries = %d, want 4", len(tui.box.entries))
 	}
@@ -204,12 +205,12 @@ func TestBoxPushRefreshesOpenView(t *testing.T) {
 	feed(tui, "\x02m")
 	nextBoxMsg(t, got) // the log the open asked for
 	nextBoxMsg(t, got) // the watcher list the open asked for
-	tui.apply(Msg{Type: "box"})
+	tui.apply(wire.Msg{Type: "box"})
 	if m := nextBoxMsg(t, got); m.Action != "msg-list" {
 		t.Fatalf("push asked for %q, want msg-list", m.Action)
 	}
 	feed(tui, "q")
-	tui.apply(Msg{Type: "box"})
+	tui.apply(wire.Msg{Type: "box"})
 	select {
 	case m := <-got:
 		t.Fatalf("a closed view sent %q", m.Action)
@@ -232,19 +233,19 @@ func TestBoxPostPushesAndEchoes(t *testing.T) {
 		cl.shutdown()
 	})
 
-	s.handleReq(cl, Msg{
+	s.handleReq(cl, wire.Msg{
 		Type: "req", Action: "msg-post",
 		Res: json.RawMessage(`{"key":"lane/a","state":"done","msg":"gate green"}`),
 	})
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	push, err := readMsg(conn)
+	push, err := wire.ReadMsg(conn)
 	if err != nil {
 		t.Fatalf("push: %v", err)
 	}
 	if push.Type != "box" {
 		t.Fatalf("first frame = %q, want the box push", push.Type)
 	}
-	reply, err := readMsg(conn)
+	reply, err := wire.ReadMsg(conn)
 	if err != nil {
 		t.Fatalf("reply: %v", err)
 	}
@@ -285,20 +286,20 @@ func TestBoxViewRequestsWatchers(t *testing.T) {
 		t.Fatalf("watchers request: %v", err)
 	}
 
-	tui.apply(Msg{Type: "watch"})
+	tui.apply(wire.Msg{Type: "watch"})
 	noMsg(t, got)
 	if !tui.box.watchWant {
 		t.Fatal("a held-back ask is not marked for the ticker")
 	}
 
 	tui.box.watchAt = time.Now().Add(-boxWatchInterval)
-	tui.apply(Msg{Type: "watch"})
+	tui.apply(wire.Msg{Type: "watch"})
 	if m := nextBoxMsg(t, got); m.Action != "msg-watchers" {
 		t.Fatalf("push asked for %q, want msg-watchers", m.Action)
 	}
 
 	feed(tui, "q")
-	tui.apply(Msg{Type: "watch"})
+	tui.apply(wire.Msg{Type: "watch"})
 	noMsg(t, got)
 }
 
@@ -308,7 +309,7 @@ func TestBoxViewWatchFlush(t *testing.T) {
 	feed(tui, "\x02m")
 	nextBoxMsg(t, got)
 	nextBoxMsg(t, got)
-	tui.apply(Msg{Type: "watch"})
+	tui.apply(wire.Msg{Type: "watch"})
 	noMsg(t, got)
 	tui.box.watchAt = time.Now().Add(-boxWatchInterval)
 	tui.flushBoxWatchers(time.Now())
@@ -329,10 +330,10 @@ func TestBoxViewWatcherPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tui.apply(Msg{Type: "resp", Action: "msg-list", OK: true, Res: list})
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-list", OK: true, Res: list})
 
 	tui.box.watchAt = time.Now().Add(-boxWatchInterval)
-	tui.apply(Msg{Type: "watch"})
+	tui.apply(wire.Msg{Type: "watch"})
 	if m := nextBoxMsg(t, got); m.Action != "msg-watchers" {
 		t.Fatalf("push asked for %q, want msg-watchers", m.Action)
 	}
@@ -340,7 +341,7 @@ func TestBoxViewWatcherPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tui.apply(Msg{Type: "resp", Action: "msg-watchers", OK: true, Res: res})
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-watchers", OK: true, Res: res})
 
 	feed(tui, "w")
 	r := tui.box.float.Rect
@@ -377,7 +378,7 @@ func TestBoxViewWatcherPage(t *testing.T) {
 // TestBoxViewTitleWatching: the title counts parked watches, omits the count
 // when none is parked, and keeps the entry count.
 func TestBoxViewTitleWatching(t *testing.T) {
-	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
+	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
 	b.set(boxEntries(), DefaultTheme())
 	b.watchers = boxWatches()
 	b.paint(DefaultTheme())
@@ -404,7 +405,7 @@ func receiptWatches() []box.Watch {
 // TestBoxViewReceipt: a wide view prefixes each row with the number of watches
 // served that entry. A narrow view drops the marker whole.
 func TestBoxViewReceipt(t *testing.T) {
-	wide := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
+	wide := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
 	wide.watchers = receiptWatches()
 	wide.set(boxEntries(), DefaultTheme())
 	if wide.float.Rect.W < boxReceiptMinW {
@@ -419,7 +420,7 @@ func TestBoxViewReceipt(t *testing.T) {
 		t.Fatalf("second row = %q, want two receipts", row)
 	}
 
-	narrow := newBoxView(&Snapshot{Cols: 50, Rows: 30, Rail: 0}, DefaultTheme())
+	narrow := newBoxView(&wire.Snapshot{Cols: 50, Rows: 30, Rail: 0}, DefaultTheme())
 	narrow.watchers = receiptWatches()
 	narrow.set(boxEntries(), DefaultTheme())
 	if narrow.float.Rect.W >= boxReceiptMinW {
@@ -445,7 +446,7 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 		{66, boxReceiptMinW},
 		{65, boxReceiptMinW - 1},
 	} {
-		snap := &Snapshot{Cols: tc.cols, Rows: 30, Rail: 0}
+		snap := &wire.Snapshot{Cols: tc.cols, Rows: 30, Rail: 0}
 		b := newBoxView(snap, DefaultTheme())
 		b.watchers = boxWatches()
 		b.set(entries, DefaultTheme())
@@ -471,7 +472,7 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 // grows and names what arrived above it. At the top the view follows the
 // newest entry and the count clears.
 func TestBoxViewAnchor(t *testing.T) {
-	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
+	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
 	entries := make([]box.Entry, 40)
 	for i := range entries {
 		entries[i] = box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"}
@@ -515,7 +516,7 @@ func TestBoxViewAnchor(t *testing.T) {
 // every watch, and the page has its own offset.
 func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	few := append(boxWatches(), box.Watch{Pane: "w1p3", Key: "lane/b", Cursor: 4})
-	b := newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
+	b := newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
 	b.setWatchers(few, DefaultTheme())
 	if got, want := b.float.Rect.H, len(few); got != want {
 		t.Fatalf("height = %d, want one row per watch %d", got, want)
@@ -542,7 +543,7 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	for i := range many {
 		many[i] = box.Watch{Pane: fmt.Sprintf("p%02d", i+1), Key: "lane/a", Cursor: i}
 	}
-	b = newBoxView(&Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
+	b = newBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, DefaultTheme())
 	b.set(boxEntries(), DefaultTheme())
 	b.setWatchers(many, DefaultTheme())
 	if b.float.Rect.H != 22 {

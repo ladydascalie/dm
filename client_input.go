@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
@@ -93,7 +94,7 @@ func (t *tui) forwardPaste(seq []byte) {
 	default:
 		t.mode = ""
 	}
-	_ = t.conn.send(Msg{Type: "keys", Keys: seq})
+	_ = t.conn.send(wire.Msg{Type: "keys", Keys: seq})
 }
 
 func (t *tui) processInput() {
@@ -267,7 +268,7 @@ func (t *tui) processInput() {
 			if ci >= 0 && (pi < 0 || ci < pi) {
 				// The prefix arms. Bytes before it belong to the pane.
 				if ci > 0 {
-					_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf[:ci]})
+					_ = t.conn.send(wire.Msg{Type: "keys", Keys: t.inbuf[:ci]})
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[ci+len(prefix):]...)
 				t.arm()
@@ -276,7 +277,7 @@ func (t *tui) processInput() {
 			if pi > 0 {
 				// Plain bytes before a paste are keys; the paste itself is
 				// handled at the head of the buffer on the next pass.
-				_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf[:pi]})
+				_ = t.conn.send(wire.Msg{Type: "keys", Keys: t.inbuf[:pi]})
 				t.inbuf = append([]byte(nil), t.inbuf[pi:]...)
 				continue
 			}
@@ -289,7 +290,7 @@ func (t *tui) processInput() {
 				}
 				return
 			}
-			_ = t.conn.send(Msg{Type: "keys", Keys: t.inbuf})
+			_ = t.conn.send(wire.Msg{Type: "keys", Keys: t.inbuf})
 			t.inbuf = nil
 			return
 		}
@@ -417,7 +418,7 @@ func (t *tui) expirePrefix(now time.Time) bool {
 	}
 	t.pending = false
 	if len(t.inbuf) > 0 && t.conn != nil {
-		_ = t.conn.send(Msg{Type: "keys", Keys: append([]byte(nil), t.inbuf...)})
+		_ = t.conn.send(wire.Msg{Type: "keys", Keys: append([]byte(nil), t.inbuf...)})
 	}
 	t.inbuf = t.inbuf[:0]
 	return true
@@ -444,13 +445,13 @@ func (t *tui) askPreview() {
 	t.swAt = time.Now()
 	t.swPane = it.pane
 	t.sw.setPreview(t.swID, it.pane)
-	_ = t.conn.send(Msg{Type: "req", Action: "read", Target: it.pane, ID: t.swID})
+	_ = t.conn.send(wire.Msg{Type: "req", Action: "read", Target: it.pane, ID: t.swID})
 }
 
 // previewLines pulls the lines out of a read reply. The reply carries them in
 // Res as an object with a lines array, so a malformed one yields no lines and
 // the band stays blank.
-func previewLines(m Msg) []string {
+func previewLines(m wire.Msg) []string {
 	if len(m.Res) == 0 {
 		return nil
 	}
@@ -544,7 +545,7 @@ func (t *tui) exitScroll() {
 // startScroll puts a pane in scrollback. The client keeps no history until the
 // operator asks for it, so the first entry requests one replay and shows the
 // pane's live screen until the ring lands. A second entry asks for nothing.
-func (t *tui) startScroll(p *PaneInfo) {
+func (t *tui) startScroll(p *wire.PaneInfo) {
 	if p.Alt {
 		t.notify("app is on the alternate screen; use its own scroll")
 		return
@@ -567,7 +568,7 @@ func (t *tui) startScroll(p *PaneInfo) {
 
 // requestHistory asks the server for one pane's replay ring. histMeta is the
 // cache key: it goes in before the request, so nothing asks twice.
-func (t *tui) requestHistory(p *PaneInfo) {
+func (t *tui) requestHistory(p *wire.PaneInfo) {
 	if t.hist == nil {
 		t.hist = map[string][]byte{}
 	}
@@ -576,14 +577,14 @@ func (t *tui) requestHistory(p *PaneInfo) {
 	}
 	t.histMeta[p.ID] = histCache{at: p.Rect}
 	if t.conn != nil {
-		_ = t.conn.send(Msg{Type: "req", Action: "replay", Target: p.ID})
+		_ = t.conn.send(wire.Msg{Type: "req", Action: "replay", Target: p.ID})
 	}
 }
 
 // buildScroll builds the tall terminal a scrollback pane is shown from, over
 // the ring the server sent for the pane's current rect. The live screen keeps
 // updating behind it; the tall one is a frozen snapshot.
-func (t *tui) buildScroll(p *PaneInfo) {
+func (t *tui) buildScroll(p *wire.PaneInfo) {
 	rows := replayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
 	t.scrollVT = buildTall(rows, p.Rect.W)
 	_, t.maxOff = scrollStart(t.scrollVT, p.Rect.H, 0)
@@ -664,7 +665,7 @@ func (t *tui) startScrollOnFocus() {
 
 // focusForClick is the pane a left press must focus, or "" when focus is
 // already there or the event is not a plain left press.
-func focusForClick(p *PaneInfo, cur string, ev mouseEvent) string {
+func focusForClick(p *wire.PaneInfo, cur string, ev mouseEvent) string {
 	if ev.btn&3 != 0 || ev.btn&32 != 0 || ev.btn&64 != 0 || ev.release {
 		return ""
 	}
@@ -675,7 +676,7 @@ func focusForClick(p *PaneInfo, cur string, ev mouseEvent) string {
 }
 
 // zoomedPane returns the pane the snapshot marks as zoomed, or nil.
-func (s *Snapshot) zoomedPane() *PaneInfo {
+func zoomedPane(s *wire.Snapshot) *wire.PaneInfo {
 	if s == nil || s.Zoom == "" {
 		return nil
 	}
@@ -690,8 +691,8 @@ func (s *Snapshot) zoomedPane() *PaneInfo {
 // zoomedHit returns the zoomed pane when the point lies in the pane area, the
 // box that pane fills while zoomed. Every hit test while zoomed goes through
 // it, so a click on a hidden sibling's old rectangle lands on the zoomed pane.
-func (s *Snapshot) zoomedHit(x, y int) *PaneInfo {
-	p := s.zoomedPane()
+func zoomedHit(s *wire.Snapshot, x, y int) *wire.PaneInfo {
+	p := zoomedPane(s)
 	if p == nil {
 		return nil
 	}
@@ -705,23 +706,23 @@ func (s *Snapshot) zoomedHit(x, y int) *PaneInfo {
 // visiblePanes is the panes a frame draws: all of them, or only the zoomed one
 // while a zoom is set. The snapshot keeps every rect, so the rail, the switcher
 // and the pane list keep their geometry.
-func visiblePanes(win *Snapshot) []PaneInfo {
+func visiblePanes(win *wire.Snapshot) []wire.PaneInfo {
 	if win == nil {
 		return nil
 	}
-	if z := win.zoomedPane(); z != nil {
-		return []PaneInfo{*z}
+	if z := zoomedPane(win); z != nil {
+		return []wire.PaneInfo{*z}
 	}
 	return win.Panes
 }
 
 // paneAtBox returns the pane whose whole box contains the point, border
 // included. A click on a pane's frame belongs to that pane.
-func (t *tui) paneAtBox(x, y int) *PaneInfo {
+func (t *tui) paneAtBox(x, y int) *wire.PaneInfo {
 	if t.snap == nil {
 		return nil
 	}
-	if p := t.snap.zoomedHit(x, y); p != nil {
+	if p := zoomedHit(t.snap, x, y); p != nil {
 		return p
 	}
 	for i := range t.snap.Panes {
@@ -734,11 +735,11 @@ func (t *tui) paneAtBox(x, y int) *PaneInfo {
 	return nil
 }
 
-func (t *tui) paneAt(x, y int) *PaneInfo {
+func (t *tui) paneAt(x, y int) *wire.PaneInfo {
 	if t.snap == nil {
 		return nil
 	}
-	if p := t.snap.zoomedHit(x, y); p != nil {
+	if p := zoomedHit(t.snap, x, y); p != nil {
 		return p
 	}
 	for i := range t.snap.Panes {
@@ -779,7 +780,7 @@ type heldPress struct {
 }
 
 // cellAt maps a screen point to a cell inside p's content rect.
-func cellAt(p *PaneInfo, x, y int) (cell, bool) {
+func cellAt(p *wire.PaneInfo, x, y int) (cell, bool) {
 	r := p.Rect
 	if x < r.X || y < r.Y || x >= r.X+r.W || y >= r.Y+r.H {
 		return cell{}, false
@@ -878,7 +879,7 @@ func (t *tui) finishPress(x, y int, raw []byte) {
 	}
 	keys = append(keys, raw...)
 	if len(keys) > 0 {
-		_ = t.conn.send(Msg{Type: "keys", Keys: keys})
+		_ = t.conn.send(wire.Msg{Type: "keys", Keys: keys})
 	}
 }
 
@@ -988,7 +989,7 @@ func urlMatchAtRow(vt vt10x.View, w, row, x int) (string, *selRange) {
 // paneHoverAt resolves the point in pane p to the URL range under it, or nil.
 // The range is row-major in the pane's screen-local cells. The live VT is read,
 // or the scrollback view when the pane is scrolled.
-func (t *tui) paneHoverAt(p *PaneInfo, x, y int) *linkHover {
+func (t *tui) paneHoverAt(p *wire.PaneInfo, x, y int) *linkHover {
 	if p == nil {
 		return nil
 	}
@@ -1079,7 +1080,7 @@ func (t *tui) hoverFor(id string, w int) *selRange {
 // is read, or the scrollback view when the pane is scrolled. A URL is a run of
 // non-space characters starting with http:// or https://; the click must land
 // inside that run.
-func (t *tui) urlAt(p *PaneInfo, x, y int) string {
+func (t *tui) urlAt(p *wire.PaneInfo, x, y int) string {
 	if p == nil {
 		return ""
 	}
@@ -1290,7 +1291,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		// copies on release, a release in the same cell forwards a click.
 		t.clearSelection()
 		if focus := focusForClick(p, t.snap.Focus, ev); focus != "" && t.conn != nil {
-			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: focus})
+			_ = t.conn.send(wire.Msg{Type: "req", Action: "focus", Target: focus})
 		}
 		if c, ok := cellAt(p, x, y); ok {
 			t.press = &heldPress{
@@ -1306,7 +1307,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		}
 		// A press on the frame is not a selection: the app gets it as before.
 		if p.Mouse && t.conn != nil {
-			_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
+			_ = t.conn.send(wire.Msg{Type: "keys", Keys: ev.raw})
 		}
 		return
 	}
@@ -1319,7 +1320,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		// The pane daemon owns the mode; the client's VT may have missed the
 		// enable sequence if it scrolled out of the replay ring.
 		if t.conn != nil {
-			_ = t.conn.send(Msg{Type: "keys", Keys: ev.raw})
+			_ = t.conn.send(wire.Msg{Type: "keys", Keys: ev.raw})
 		}
 		return
 	}
@@ -1342,7 +1343,7 @@ const railPadAxis = "rail"
 
 // railGripAt reports whether x,y is the rail's grab strip: its last column,
 // above the row the rail keeps free for its bottom control.
-func railGripAt(snap *Snapshot, x, y int) bool {
+func railGripAt(snap *wire.Snapshot, x, y int) bool {
 	if snap == nil || snap.Rail <= 0 {
 		return false
 	}
@@ -1362,7 +1363,7 @@ type dragStart struct {
 // split's own rect is used for the ratio, so nested splits keep their full
 // span. The divider always belongs to dm, even when a pane in the subtree
 // claims the mouse: the app's PTY covers its content, not the border cells.
-func dragPress(snap *Snapshot, x, y int) (dragStart, bool) {
+func dragPress(snap *wire.Snapshot, x, y int) (dragStart, bool) {
 	if snap == nil || snap.Root == nil || snap.Zoom != "" {
 		return dragStart{}, false
 	}
@@ -1450,7 +1451,7 @@ func (t *tui) dragTo(x, y int, force bool) {
 	}
 	t.dragAt = time.Now()
 	ratio := float64(off) / float64(t.dragSpace)
-	_ = t.conn.send(Msg{
+	_ = t.conn.send(wire.Msg{
 		Type: "req", Action: "resize-split",
 		Target: t.dragFirst, Other: t.dragSecond, Ratio: ratio,
 	})
@@ -1493,7 +1494,7 @@ func (t *tui) railDragTo(x int, force bool) {
 	}
 	t.railDragAt = time.Now()
 	t.railWidth = w
-	_ = t.conn.send(Msg{Type: "req", Action: "set-rail", Index: w})
+	_ = t.conn.send(wire.Msg{Type: "req", Action: "set-rail", Index: w})
 }
 
 type mouseEvent struct {
@@ -1659,7 +1660,7 @@ func (t *tui) submitRename() {
 		return
 	}
 	if t.conn != nil {
-		_ = t.conn.send(Msg{Type: "req", Action: action, Target: target, Name: name})
+		_ = t.conn.send(wire.Msg{Type: "req", Action: action, Target: target, Name: name})
 	}
 }
 
@@ -1723,14 +1724,14 @@ func (t *tui) renameKey() bool {
 // at the last expanded width, or the default when none was seen.
 func (t *tui) toggleRail() {
 	want := t.railToggleWidth(true)
-	t.action("set-rail", func(m *Msg) { m.Index = want })
+	t.action("set-rail", func(m *wire.Msg) { m.Index = want })
 }
 
 // toggleRailControl is a click on the rail's bottom row: full <-> thin. Hiding
 // stays on `prefix b`, so a thin rail expands here instead of going hidden.
 func (t *tui) toggleRailControl() {
 	want := t.railToggleWidth(false)
-	t.action("set-rail", func(m *Msg) { m.Index = want })
+	t.action("set-rail", func(m *wire.Msg) { m.Index = want })
 }
 
 // railToggleWidth is the width a rail toggle asks for. The key and the bottom
@@ -1804,9 +1805,9 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 				t.toggleRailControl()
 			}
 		} else if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
-			_ = t.conn.send(Msg{Type: "req", Action: "focus", Target: id})
+			_ = t.conn.send(wire.Msg{Type: "req", Action: "focus", Target: id})
 		} else if id := railWindowAt(t.snap, x, y); id != "" && t.conn != nil {
-			_ = t.conn.send(Msg{Type: "req", Action: "toggle-fold", Target: id})
+			_ = t.conn.send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
 		}
 	}
 	return true

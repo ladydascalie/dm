@@ -6,16 +6,17 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // renameTargetTUI is a client on a snapshot with one workspace, s1, and two
 // windows: w1 is active and w2 is not. A window prompt must carry the id it
 // was opened for, never the active window's.
-func renameTargetTUI(t *testing.T) (*tui, chan Msg) {
+func renameTargetTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	tr, got := clientTUI(t, nil)
 	tr.snap.Workspace = "main"
-	tr.snap.All = []AllPane{
+	tr.snap.All = []wire.AllPane{
 		{ID: "a", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true},
 		{ID: "b", Workspace: "s1", WorkspaceName: "main", Window: "w2", WindowName: "two"},
 	}
@@ -152,7 +153,7 @@ func TestRenameWindowRefusals(t *testing.T) {
 func TestRenameWindowPromptPaintsWindowID(t *testing.T) {
 	f := newFrameTUI(t, 60, 12, 20)
 	f.snap.Workspace = "main"
-	f.snap.All = []AllPane{
+	f.snap.All = []wire.AllPane{
 		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
 			WindowActive: true, WindowUnfolded: true},
@@ -179,7 +180,7 @@ func TestRenameWindowPromptPaintsWindowID(t *testing.T) {
 func TestRenameWorkspacePromptPaintsWorkspaceID(t *testing.T) {
 	f := newFrameTUI(t, 60, 12, 20)
 	f.snap.Workspace = "s1"
-	f.snap.All = []AllPane{
+	f.snap.All = []wire.AllPane{
 		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
 			WindowActive: true, WindowUnfolded: true},

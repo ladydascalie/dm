@@ -1,4 +1,6 @@
-package main
+// Package wire is the dm socket wire contract: the message envelope, the
+// snapshot it carries and the length-prefixed frame both sides speak.
+package wire
 
 import (
 	"encoding/binary"
@@ -127,9 +129,12 @@ type Snapshot struct {
 	Root *layout.Node `json:"root"`
 }
 
-const maxFrame = 16 << 20
+// MaxFrame is the largest frame the socket accepts, four bytes of length plus
+// the payload.
+const MaxFrame = 16 << 20
 
-func writeMsg(w io.Writer, m Msg) error {
+// WriteMsg writes m to w as a big-endian length prefix followed by its JSON.
+func WriteMsg(w io.Writer, m Msg) error {
 	b, err := json.Marshal(m)
 	if err != nil {
 		return err
@@ -143,14 +148,15 @@ func writeMsg(w io.Writer, m Msg) error {
 	return err
 }
 
-func readMsg(r io.Reader) (Msg, error) {
+// ReadMsg reads one framed message from r.
+func ReadMsg(r io.Reader) (Msg, error) {
 	var m Msg
 	var h [4]byte
 	if _, err := io.ReadFull(r, h[:]); err != nil {
 		return m, err
 	}
 	n := binary.BigEndian.Uint32(h[:])
-	if n == 0 || n > maxFrame {
+	if n == 0 || n > MaxFrame {
 		return m, fmt.Errorf("bad frame length %d", n)
 	}
 	b := make([]byte, n)

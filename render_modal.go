@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // drawSessions paints the centred session picker. The panel owns the border, the
@@ -112,7 +113,7 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 // long name still shows its end and the caret stays on screen. The kind is
 // optional: a call without it renames a workspace, as the frozen prompt test
 // expects. A screen too small to hold the box paints nothing.
-func drawRename(buf *bytes.Buffer, th Theme, snap *Snapshot, id, draft string, kind ...string) {
+func drawRename(buf *bytes.Buffer, th Theme, snap *wire.Snapshot, id, draft string, kind ...string) {
 	if snap == nil {
 		return
 	}

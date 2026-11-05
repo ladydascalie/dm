@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // paneMenuLabels is what every pane menu offers, without Focus.
@@ -123,7 +124,7 @@ func TestRailControlRowMenuOffersSessionActions(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "sessions", "dev"), 0o755); err != nil {
 		t.Fatalf("make session dir: %v", err)
 	}
-	control := func(t *testing.T) (*tui, chan Msg) {
+	control := func(t *testing.T) (*tui, chan wire.Msg) {
 		t.Helper()
 		tui, got := railMenuTUI(t)
 		tui.snap.Session = "dev"

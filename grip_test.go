@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
 
 // gripTUI is a client whose rail is 20 wide on a 100 column screen, so the
 // grip is column 19 zero-based and maxRail is 33.
-func gripTUI(t *testing.T) (*tui, chan Msg) {
+func gripTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	tui, got := clientTUI(t, nil)
 	tui.snap = railTestSnapshot(20)
@@ -21,9 +22,9 @@ func gripTUI(t *testing.T) (*tui, chan Msg) {
 }
 
 // drainMsg collects every message the client sends until the wire is quiet.
-func drainMsg(t *testing.T, got chan Msg) []Msg {
+func drainMsg(t *testing.T, got chan wire.Msg) []wire.Msg {
 	t.Helper()
-	var out []Msg
+	var out []wire.Msg
 	for {
 		select {
 		case m, ok := <-got:

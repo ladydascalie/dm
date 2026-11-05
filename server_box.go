@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/wire"
 )
 
 // boxPost appends the request as one entry, trims the log and saves state under
@@ -33,7 +34,7 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 	_ = s.st.save()
 	// Every attached client learns the log moved. An open box view asks for
 	// the whole log again, so its picture is never a guess.
-	s.broadcastLocked(Msg{Type: "box"})
+	s.broadcastLocked(wire.Msg{Type: "box"})
 	return e, nil
 }
 
@@ -94,7 +95,7 @@ func (s *server) boxClear(req *box.ClearReq) int {
 	s.st.Box = kept
 	s.boxWakeLocked()
 	_ = s.st.save()
-	s.broadcastLocked(Msg{Type: "box"})
+	s.broadcastLocked(wire.Msg{Type: "box"})
 	return cleared
 }
 
@@ -181,7 +182,7 @@ func (s *server) boxExpireLocked(now time.Time) {
 		}
 	}
 	if dropped {
-		s.broadcastLocked(Msg{Type: "watch"})
+		s.broadcastLocked(wire.Msg{Type: "watch"})
 	}
 }
 
@@ -198,7 +199,7 @@ func (s *server) boxSetWatchLocked(k boxWatchKey, cursor int, parked bool) {
 	}
 	s.watches[k] = w
 	if !existed || w.Cursor != old.Cursor || w.Parked != old.Parked {
-		s.broadcastLocked(Msg{Type: "watch"})
+		s.broadcastLocked(wire.Msg{Type: "watch"})
 	}
 }
 
@@ -395,7 +396,7 @@ func (s *server) boxSub(cl *client, req *box.SubReq) error {
 
 		if ok {
 			frame := box.SubFrame{Entry: e, Trimmed: trimmed}
-			if !cl.deliver(Msg{Type: "msg", Res: jsonRaw(frame)}) {
+			if !cl.deliver(wire.Msg{Type: "msg", Res: jsonRaw(frame)}) {
 				// The frame never reached the queue, so the cursor must not
 				// pass it: a reconnect resumes at this entry.
 				s.mu.Lock()

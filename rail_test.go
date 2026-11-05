@@ -9,19 +9,20 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // railRowSnap is a rail with every row kind on it: a workspace header, an
 // unfolded window line with a folder, a branch and its stats, that window's
 // note, the focused pane, a folded window line, the gap, and a second
 // workspace. Rows 8 and up are past the last item.
-func railRowSnap(rail int) *Snapshot {
-	snap := &Snapshot{
+func railRowSnap(rail int) *wire.Snapshot {
+	snap := &wire.Snapshot{
 		Cols: 100, Rows: 10, Rail: rail,
 		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
 	}
-	snap.Panes = []PaneInfo{{ID: "w1p1", Status: "working"}}
-	snap.All = []AllPane{
+	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Status: "working"}}
+	snap.All = []wire.AllPane{
 		{
 			ID: "w1p1", Name: "pi", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",

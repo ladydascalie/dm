@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // windowServer is an in-process server with no clients. closeWindow only needs
@@ -43,7 +44,7 @@ func addWorkspace(st *State, name string) (*Workspace, *Window, string) {
 
 // paneProbe attaches a fake pane conn and records what the server sends it.
 type paneProbe struct {
-	msgs chan Msg
+	msgs chan wire.Msg
 	done chan struct{}
 }
 
@@ -51,12 +52,12 @@ func probePane(t *testing.T, s *server, id string) *paneProbe {
 	t.Helper()
 	a, b := net.Pipe()
 	s.panes[id] = &paneConn{id: id, c: a}
-	p := &paneProbe{msgs: make(chan Msg, 8), done: make(chan struct{})}
+	p := &paneProbe{msgs: make(chan wire.Msg, 8), done: make(chan struct{})}
 	t.Cleanup(func() { _ = b.Close() })
 	go func() {
 		defer close(p.done)
 		for {
-			m, err := readMsg(b)
+			m, err := wire.ReadMsg(b)
 			if err != nil {
 				return
 			}
@@ -67,14 +68,14 @@ func probePane(t *testing.T, s *server, id string) *paneProbe {
 }
 
 // waitKill waits for the probe's conn to close and returns the messages it saw.
-func (p *paneProbe) waitKill(t *testing.T) []Msg {
+func (p *paneProbe) waitKill(t *testing.T) []wire.Msg {
 	t.Helper()
 	select {
 	case <-p.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("pane conn did not close")
 	}
-	var out []Msg
+	var out []wire.Msg
 	for {
 		select {
 		case m := <-p.msgs:
@@ -334,7 +335,7 @@ func TestCloseWindowActiveClampsToLast(t *testing.T) {
 func TestCloseWindowActionSendsWindowID(t *testing.T) {
 	tui, got := clientTUI(t, nil)
 	tui.snap.Focus = "w1p1"
-	tui.snap.All = []AllPane{
+	tui.snap.All = []wire.AllPane{
 		{ID: "w1p1", Window: "w1"},
 		{ID: "w2p1", Window: "w2"},
 	}
@@ -359,7 +360,7 @@ func TestCloseWindowActionSendsWindowID(t *testing.T) {
 func TestCloseWindowActionUnknownPaneSendsNothing(t *testing.T) {
 	tui, got := clientTUI(t, nil)
 	tui.snap.Focus = "w9p9"
-	tui.snap.All = []AllPane{{ID: "w1p1", Window: "w1"}}
+	tui.snap.All = []wire.AllPane{{ID: "w1p1", Window: "w1"}}
 
 	tui.runAction("close-window")
 

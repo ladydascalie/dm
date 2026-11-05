@@ -4,10 +4,11 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 )
 
 // menuHintTUI is a client with a live conn and an open pane menu on pane a.
-func menuHintTUI(t *testing.T) (*tui, chan Msg) {
+func menuHintTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	tui, got := clientTUI(t, nil)
 	tui.openMenu(tui.paneByID("a"), 10, 5)

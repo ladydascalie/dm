@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 	"golang.org/x/term"
@@ -44,7 +45,7 @@ type tui struct {
 	th     *Theme
 	cols   int
 	rows   int
-	snap   *Snapshot
+	snap   *wire.Snapshot
 	vts    map[string]vt10x.Terminal
 	armed  bool
 	toasts []toast // oldest first, newest last
@@ -353,10 +354,10 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 
 	done := make(chan struct{})
 	defer close(done)
-	msgs := make(chan Msg, 256)
+	msgs := make(chan wire.Msg, 256)
 	go func() {
 		for {
-			m, err := readMsg(c)
+			m, err := wire.ReadMsg(c)
 			if err != nil {
 				close(msgs)
 				return
@@ -369,7 +370,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		}
 	}()
 
-	if err := t.conn.send(Msg{Type: "attach", Cols: t.cols, Rows: t.rows}); err != nil {
+	if err := t.conn.send(wire.Msg{Type: "attach", Cols: t.cols, Rows: t.rows}); err != nil {
 		return "", err
 	}
 
@@ -394,7 +395,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			cols, rows, err := term.GetSize(fd)
 			if err == nil && (cols != t.cols || rows != t.rows) {
 				t.cols, t.rows = cols, rows
-				_ = t.conn.send(Msg{Type: "resize", Cols: cols, Rows: rows})
+				_ = t.conn.send(wire.Msg{Type: "resize", Cols: cols, Rows: rows})
 				t.dirty = true
 			}
 		case <-ticker.C:
@@ -421,7 +422,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 	}
 }
 
-func (t *tui) apply(m Msg) {
+func (t *tui) apply(m wire.Msg) {
 	// The history cache is filled on demand, and a replay pushed by a layout
 	// change can arrive before the first request.
 	if t.hist == nil {
@@ -592,7 +593,7 @@ func applyReplay(hist map[string][]byte, id string, data []byte) {
 	hist[id] = append([]byte(nil), data...)
 }
 
-func (t *tui) paneByID(id string) *PaneInfo {
+func (t *tui) paneByID(id string) *wire.PaneInfo {
 	if t.snap == nil {
 		return nil
 	}
@@ -618,8 +619,8 @@ func dialServer(name string) (*conn, error) {
 	return &conn{Conn: nc}, nil
 }
 
-func (c *conn) send(m Msg) error {
+func (c *conn) send(m wire.Msg) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return writeMsg(c.Conn, m)
+	return wire.WriteMsg(c.Conn, m)
 }
