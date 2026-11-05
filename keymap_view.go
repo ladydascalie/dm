@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"fmt"
 	"strings"
 	"time"
@@ -55,7 +56,7 @@ func keymapRows(cfg *Config) []string {
 	w := 0
 	for _, m := range modes {
 		for _, a := range m.Actions {
-			if n := cells(a.Key); n > w {
+			if n := cells.Cells(a.Key); n > w {
 				w = n
 			}
 		}
@@ -68,7 +69,7 @@ func keymapRows(cfg *Config) []string {
 		rows = append(rows, " ["+m.Name+"]")
 		for _, a := range m.Actions {
 			rows = append(rows, fmt.Sprintf(" %s  %s",
-				pad(a.Key, w), strings.ReplaceAll(a.Action, "-", " ")))
+				cells.Pad(a.Key, w), strings.ReplaceAll(a.Action, "-", " ")))
 		}
 	}
 	return rows
@@ -281,7 +282,7 @@ func (k *keymapView) paint() {
 			break
 		}
 		style := k.style(i)
-		fmt.Fprintf(&buf, "\x1b[%d;1H%s%s", row+1, style, clip(k.rows[i], r.W))
+		fmt.Fprintf(&buf, "\x1b[%d;1H%s%s", row+1, style, cells.Clip(k.rows[i], r.W))
 	}
 	_, _ = vt.Write(buf.Bytes())
 	k.float.VT = vt

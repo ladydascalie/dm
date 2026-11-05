@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"fmt"
 	"strings"
 )
@@ -49,10 +50,10 @@ func drawSessions(buf *bytes.Buffer, th Theme, cols, rows int, sessions []Sessio
 			if i == sel {
 				colour = "\x1b[0m\x1b[97m"
 			}
-			line := pad(mark+" "+pad(s.Name, 18)+" "+pad(state, 4)+" "+pad(now, 3), r.W)
+			line := cells.Pad(mark+" "+cells.Pad(s.Name, 18)+" "+cells.Pad(state, 4)+" "+cells.Pad(now, 3), r.W)
 			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", r.Y+i+1, r.X+1, colour, line)
 		}
-		hint := pad(" j/k move  enter switch  esc cancel", r.W)
+		hint := cells.Pad(" j/k move  enter switch  esc cancel", r.W)
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s", r.Y+len(sessions)+2, r.X+1, hint)
 	})
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+len(sessions)+2, x+1,
@@ -140,15 +141,15 @@ func drawRename(buf *bytes.Buffer, th Theme, snap *Snapshot, id, draft string, k
 func renameInputRow(buf *bytes.Buffer, th Theme, r Rect, draft string) {
 	p := th.Palette
 	const caret = "▏"
-	labelRoom := r.W - cells(caret)
+	labelRoom := r.W - cells.Cells(caret)
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
 	segs := clipSegs([]seg{{text: " name: ", fg: p.RailDim}}, labelRoom)
-	draftRoom := r.W - cells(caret) - segCells(segs)
-	if cells(draft) > draftRoom {
+	draftRoom := r.W - cells.Cells(caret) - segCells(segs)
+	if cells.Cells(draft) > draftRoom {
 		if draftRoom > 1 {
-			draft = ellipsis + clipTail(draft, draftRoom-1)
+			draft = cells.Ellipsis + cells.ClipTail(draft, draftRoom-1)
 		} else {
 			draft = ""
 		}
@@ -291,8 +292,8 @@ func newHelpColumn(categories [][]displayRow) helpColumn {
 	keyW, actionW := 0, 0
 	for _, r := range rows {
 		if r.header == "" {
-			keyW = maxInt(keyW, cells(r.key))
-			actionW = maxInt(actionW, cells(r.action))
+			keyW = maxInt(keyW, cells.Cells(r.key))
+			actionW = maxInt(actionW, cells.Cells(r.action))
 		}
 	}
 	if keyW < 1 {
@@ -468,7 +469,7 @@ func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
 				if color == "" {
 					color = "\x1b[1m"
 				}
-				header := pad(elide(r.header, col.width()), col.width())
+				header := cells.Pad(cells.Elide(r.header, col.width()), col.width())
 				fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m%s%s\x1b[0m", y+1, x+1, color, header)
 				continue
 			}
@@ -480,7 +481,7 @@ func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
 				fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 				helpBoxKey(buf, r.key, color, col.keyW)
 				buf.WriteString("  \x1b[90m")
-				buf.WriteString(pad(elide(r.action, col.actionW), col.actionW))
+				buf.WriteString(cells.Pad(cells.Elide(r.action, col.actionW), col.actionW))
 				buf.WriteString("\x1b[0m")
 				continue
 			}
@@ -501,7 +502,7 @@ func helpBoxRows(buf *bytes.Buffer, inner Rect, g helpBoxLayout) {
 // and the " / " separator plain, so a literal slash reads as a key and a slash
 // between keys reads as a separator. It pads the result to budget cells.
 func helpBoxKey(buf *bytes.Buffer, key, color string, budget int) {
-	key = elide(key, budget)
+	key = cells.Elide(key, budget)
 	parts := strings.Split(key, " / ")
 	used := 0
 	for i, part := range parts {
@@ -512,7 +513,7 @@ func helpBoxKey(buf *bytes.Buffer, key, color string, budget int) {
 		buf.WriteString(color)
 		buf.WriteString("\x1b[1m")
 		buf.WriteString(part)
-		used += cells(part)
+		used += cells.Cells(part)
 	}
 	buf.WriteString("\x1b[0m")
 	if n := budget - used; n > 0 {

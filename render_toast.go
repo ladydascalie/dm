@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"fmt"
 )
 
@@ -16,7 +17,7 @@ func drawToasts(buf *bytes.Buffer, th Theme, snap *Snapshot, toasts []toast) {
 	}
 	longest := 0
 	for _, x := range toasts {
-		if n := cells(x.text); n > longest {
+		if n := cells.Cells(x.text); n > longest {
 			longest = n
 		}
 	}
@@ -31,6 +32,6 @@ func drawToasts(buf *bytes.Buffer, th Theme, snap *Snapshot, toasts []toast) {
 			continue
 		}
 		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m%s\x1b[97m%s\x1b[0m\x1b[90m%s\x1b[0m",
-			row, snap.Cols-w+1, th.Glyphs.BorderVertical, pad(x.text, inner), th.Glyphs.BorderVertical)
+			row, snap.Cols-w+1, th.Glyphs.BorderVertical, cells.Pad(x.text, inner), th.Glyphs.BorderVertical)
 	}
 }

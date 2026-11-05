@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dm/internal/cells"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -40,35 +41,35 @@ func textCases() []struct {
 
 func TestTextCells(t *testing.T) {
 	for _, c := range textCases() {
-		if got := cells(c.s); got != c.cells {
-			t.Errorf("%s: cells(%q) = %d, want %d", c.name, c.s, got, c.cells)
+		if got := cells.Cells(c.s); got != c.cells {
+			t.Errorf("%s: cells.Cells(%q) = %d, want %d", c.name, c.s, got, c.cells)
 		}
 	}
 }
 
 func TestTextClipKeepsWholeClusters(t *testing.T) {
 	for _, c := range textCases() {
-		got := clip(c.s, c.budget)
+		got := cells.Clip(c.s, c.budget)
 		if got != c.clip {
-			t.Errorf("%s: clip(%q, %d) = %q, want %q", c.name, c.s, c.budget, got, c.clip)
+			t.Errorf("%s: cells.Clip(%q, %d) = %q, want %q", c.name, c.s, c.budget, got, c.clip)
 		}
-		if n := cells(got); n > c.budget {
-			t.Errorf("%s: clip(%q, %d) paints %d cells", c.name, c.s, c.budget, n)
+		if n := cells.Cells(got); n > c.budget {
+			t.Errorf("%s: cells.Clip(%q, %d) paints %d cells", c.name, c.s, c.budget, n)
 		}
 		if !strings.HasPrefix(c.s, got) {
-			t.Errorf("%s: clip(%q, %d) = %q is not a prefix", c.name, c.s, c.budget, got)
+			t.Errorf("%s: cells.Clip(%q, %d) = %q is not a prefix", c.name, c.s, c.budget, got)
 		}
 	}
 }
 
 func TestTextElideEndsAtTheBudget(t *testing.T) {
 	for _, c := range textCases() {
-		got := elide(c.s, c.budget)
+		got := cells.Elide(c.s, c.budget)
 		if got != c.elide {
-			t.Errorf("%s: elide(%q, %d) = %q, want %q", c.name, c.s, c.budget, got, c.elide)
+			t.Errorf("%s: cells.Elide(%q, %d) = %q, want %q", c.name, c.s, c.budget, got, c.elide)
 		}
-		if n := cells(got); n > c.budget {
-			t.Errorf("%s: elide(%q, %d) paints %d cells", c.name, c.s, c.budget, n)
+		if n := cells.Cells(got); n > c.budget {
+			t.Errorf("%s: cells.Elide(%q, %d) paints %d cells", c.name, c.s, c.budget, n)
 		}
 	}
 }
@@ -76,19 +77,19 @@ func TestTextElideEndsAtTheBudget(t *testing.T) {
 func TestTextPadCountsCells(t *testing.T) {
 	for _, c := range textCases() {
 		for budget := 0; budget <= c.cells+2; budget++ {
-			got := pad(c.s, budget)
-			if n := cells(got); n > budget {
-				t.Errorf("%s: pad(%q, %d) paints %d cells", c.name, c.s, budget, n)
+			got := cells.Pad(c.s, budget)
+			if n := cells.Cells(got); n > budget {
+				t.Errorf("%s: cells.Pad(%q, %d) paints %d cells", c.name, c.s, budget, n)
 			}
 		}
 	}
 	// Two wide runes and one space: three cells, but only two runes.
-	got := pad("日日", 3)
-	if n := cells(got); n != 3 {
-		t.Errorf("pad(%q, 3) paints %d cells, want 3", "日日", n)
+	got := cells.Pad("日日", 3)
+	if n := cells.Cells(got); n != 3 {
+		t.Errorf("cells.Pad(%q, 3) paints %d cells, want 3", "日日", n)
 	}
 	if n := utf8.RuneCountInString(got); n == 3 {
-		t.Errorf("pad(%q, 3) = %q holds %d runes, so it counted runes", "日日", got, n)
+		t.Errorf("cells.Pad(%q, 3) = %q holds %d runes, so it counted runes", "日日", got, n)
 	}
 }
 
@@ -105,15 +106,15 @@ func TestTextClipTailKeepsTheEnd(t *testing.T) {
 		{"a" + family, 1, ""},
 	}
 	for _, c := range cases {
-		got := clipTail(c.s, c.budget)
+		got := cells.ClipTail(c.s, c.budget)
 		if got != c.want {
-			t.Errorf("clipTail(%q, %d) = %q, want %q", c.s, c.budget, got, c.want)
+			t.Errorf("cells.ClipTail(%q, %d) = %q, want %q", c.s, c.budget, got, c.want)
 		}
-		if n := cells(got); n > c.budget {
-			t.Errorf("clipTail(%q, %d) paints %d cells", c.s, c.budget, n)
+		if n := cells.Cells(got); n > c.budget {
+			t.Errorf("cells.ClipTail(%q, %d) paints %d cells", c.s, c.budget, n)
 		}
 		if !strings.HasSuffix(c.s, got) {
-			t.Errorf("clipTail(%q, %d) = %q is not a suffix", c.s, c.budget, got)
+			t.Errorf("cells.ClipTail(%q, %d) = %q is not a suffix", c.s, c.budget, got)
 		}
 	}
 }
@@ -122,30 +123,30 @@ func TestTextClipTailKeepsTheEnd(t *testing.T) {
 // under the name that replaced it.
 func TestTextCoversTheOldNames(t *testing.T) {
 	// runeWidth: one rune at a time, wide and combining.
-	if cells("A") != 1 || cells("日") != 2 || cells("\u0301") != 0 {
+	if cells.Cells("A") != 1 || cells.Cells("日") != 2 || cells.Cells("\u0301") != 0 {
 		t.Errorf("cells of one rune = %d, %d, %d, want 1, 2, 0",
-			cells("A"), cells("日"), cells("\u0301"))
+			cells.Cells("A"), cells.Cells("日"), cells.Cells("\u0301"))
 	}
 	// runeCells: a run of text.
-	if got := cells("ab日"); got != 4 {
-		t.Errorf("cells(%q) = %d, want 4", "ab日", got)
+	if got := cells.Cells("ab日"); got != 4 {
+		t.Errorf("cells.Cells(%q) = %d, want 4", "ab日", got)
 	}
 	// boxCells: a box row.
-	if got := cells("│ key │"); got != 7 {
-		t.Errorf("cells(%q) = %d, want 7", "│ key │", got)
+	if got := cells.Cells("│ key │"); got != 7 {
+		t.Errorf("cells.Cells(%q) = %d, want 7", "│ key │", got)
 	}
-	// helpBoxElide: cut and mark, or the ellipsis alone.
-	if got := elide("label", 4); got != "lab…" {
-		t.Errorf("elide(%q, 4) = %q, want %q", "label", got, "lab…")
+	// helpBoxElide: cut and mark, or the cells.Ellipsis alone.
+	if got := cells.Elide("label", 4); got != "lab…" {
+		t.Errorf("cells.Elide(%q, 4) = %q, want %q", "label", got, "lab…")
 	}
-	if got := elide("label", 1); got != "…" {
-		t.Errorf("elide(%q, 1) = %q, want the ellipsis alone", "label", got)
+	if got := cells.Elide("label", 1); got != "…" {
+		t.Errorf("cells.Elide(%q, 1) = %q, want the cells.Ellipsis alone", "label", got)
 	}
 	// helpBoxPad: fill never cuts, a long string clips to the budget.
-	if got := pad("ab", 4); got != "ab  " {
-		t.Errorf("pad(%q, 4) = %q, want %q", "ab", got, "ab  ")
+	if got := cells.Pad("ab", 4); got != "ab  " {
+		t.Errorf("cells.Pad(%q, 4) = %q, want %q", "ab", got, "ab  ")
 	}
-	if got := pad("abc", 2); got != "ab" {
-		t.Errorf("pad(%q, 2) = %q, want %q", "abc", got, "ab")
+	if got := cells.Pad("abc", 2); got != "ab" {
+		t.Errorf("cells.Pad(%q, 2) = %q, want %q", "abc", got, "ab")
 	}
 }

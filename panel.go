@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"fmt"
 	"strings"
 
@@ -65,8 +66,8 @@ func paintPanel(buf *bytes.Buffer, th Theme, rect Rect, title panelTitle, hint s
 // label clipped to the interior and filled to its width, the right corner. It
 // writes both corners, so the box pass leaves this row alone.
 func paintTitleRow(buf *bytes.Buffer, th Theme, rect Rect, t panelTitle) {
-	row := clip(t.text, rect.W)
-	if n := rect.W - cells(row); n > 0 {
+	row := cells.Clip(t.text, rect.W)
+	if n := rect.W - cells.Cells(row); n > 0 {
 		row += strings.Repeat(t.fill, n)
 	}
 	fmt.Fprintf(buf, "%s\x1b[%d;%dH%s%s%s", t.style, rect.Y, rect.X,
@@ -80,7 +81,7 @@ func paintBorderText(buf *bytes.Buffer, r Rect, y int, text, style string) {
 	if text == "" || r.W < 3 || y < 0 {
 		return
 	}
-	text = clip(text, r.W-2)
+	text = cells.Clip(text, r.W-2)
 	if text == "" {
 		return
 	}

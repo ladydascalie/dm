@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"regexp"
 	"strconv"
 	"strings"
@@ -210,9 +211,9 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 			}
 			// The cursor sits on the left border, so the box is Cols-col+1
 			// cells wide: the text's cells plus its two border cells.
-			if w, want := snap.Cols-col+1, cells(c.text)+2; w != want {
+			if w, want := snap.Cols-col+1, cells.Cells(c.text)+2; w != want {
 				t.Fatalf("box width = %d, want %d for %d cells of text",
-					w, want, cells(c.text))
+					w, want, cells.Cells(c.text))
 			}
 			// The interior is the text alone: bright text, then the right
 			// border, with no padding and no dropped glyph.

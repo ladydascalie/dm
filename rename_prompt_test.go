@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"fmt"
 	"strings"
 	"testing"
@@ -273,7 +274,7 @@ func renameFloatInside(t *testing.T, box Rect, p helpBoxPainted) {
 	t.Helper()
 	for cell, runes := range p.writes {
 		y, x := cell[0], cell[1]
-		w := cells(string(runes[len(runes)-1]))
+		w := cells.Cells(string(runes[len(runes)-1]))
 		if y < box.Y-1 || y > box.Y+box.H || x < box.X-1 || x+w-1 > box.X+box.W {
 			t.Fatalf("cell %d,%d (%d cells) is outside the box %+v", x, y, w, box)
 		}

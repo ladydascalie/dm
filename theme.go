@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"dm/internal/cells"
 	"dm/internal/kdl"
 )
 
@@ -418,7 +419,7 @@ func validateThemeGlyph(s string) error {
 	if len(r) != 1 {
 		return fmt.Errorf("glyph %q must be exactly one rune", s)
 	}
-	if cells(s) != 1 {
+	if cells.Cells(s) != 1 {
 		return fmt.Errorf("glyph %q must be one cell wide", s)
 	}
 	return nil

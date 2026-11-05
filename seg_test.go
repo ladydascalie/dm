@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"dm/internal/cells"
 	"strings"
 	"testing"
 )
@@ -117,7 +118,7 @@ func TestSegElide(t *testing.T) {
 	if n := len(got); n != 2 || got[1].fg != DefaultTheme().Palette.RailDim {
 		t.Fatalf("ellipsis run = %+v, want the dim run", got)
 	}
-	if got := elideSegs(DefaultTheme(), runs, 1); len(got) != 1 || got[0].text != ellipsis {
+	if got := elideSegs(DefaultTheme(), runs, 1); len(got) != 1 || got[0].text != cells.Ellipsis {
 		t.Fatalf("elideSegs at one cell = %q, want the ellipsis alone", segTexts(got))
 	}
 	if got := elideSegs(DefaultTheme(), runs, 0); got != nil {
