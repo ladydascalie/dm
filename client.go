@@ -808,9 +808,9 @@ func (t *tui) closeMenu() {
 	t.dirty = true
 }
 
-// menuKey consumes one key while the menu is open. The menu's own bindings are
-// the menu mode's; its item keys are only hints. It returns false when it needs
-// more bytes for an escape sequence.
+// menuKey consumes one key while the menu is open. The menu's own bindings win
+// first; an item's key label is the hint that dispatches it, as tmux does. It
+// returns false when it needs more bytes for an escape sequence.
 func (t *tui) menuKey() bool {
 	if t.menu == nil {
 		t.closeMenu()
@@ -831,6 +831,21 @@ func (t *tui) menuKey() bool {
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
+		i, hintN, partial := t.menuHint()
+		if partial {
+			// The head is still arriving as part of a longer key.
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		if i >= 0 {
+			t.inbuf = append([]byte(nil), t.inbuf[hintN:]...)
+			t.pending = false
+			t.menuPick(i)
+			return true
+		}
 		// An unbound key closes the menu, as it always has.
 		t.inbuf = t.inbuf[1:]
 		t.pending = false
@@ -854,6 +869,49 @@ func (t *tui) menuKey() bool {
 		t.closeMenu()
 	}
 	return true
+}
+
+// menuHint finds the first menu row whose key label matches the head of the
+// input buffer. The first matching row in menu order wins. A row with no label
+// or a label that names no key is skipped. A label that covers only the head of
+// a longer escape sequence is not a complete key, so it does not match: the
+// rest of the sequence would otherwise reach a pane. partial reports that the
+// head is still arriving as part of some row's label.
+func (t *tui) menuHint() (item, n int, partial bool) {
+	if t.menu == nil || len(t.inbuf) == 0 {
+		return -1, 0, false
+	}
+	prefix := t.km().PrefixBytes()
+	seqs := make([][][]byte, len(t.menu.items))
+	for i, it := range t.menu.items {
+		if it.key == "" {
+			continue
+		}
+		s, err := keySequences(it.key, prefix)
+		if err != nil {
+			continue
+		}
+		seqs[i] = s
+	}
+	for _, s := range seqs {
+		for _, seq := range s {
+			if len(seq) > len(t.inbuf) && bytes.HasPrefix(seq, t.inbuf) {
+				return -1, 0, true
+			}
+		}
+	}
+	run := escapeRun(t.inbuf)
+	for i, s := range seqs {
+		for _, seq := range s {
+			if len(seq) == 0 || len(seq) < run {
+				continue
+			}
+			if bytes.HasPrefix(t.inbuf, seq) {
+				return i, len(seq), false
+			}
+		}
+	}
+	return -1, 0, false
 }
 
 // pickIndex reads a "pick-<n>" action's zero-based row. It reports false for
