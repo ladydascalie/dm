@@ -9,16 +9,16 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/segment"
 	"dm/internal/theme"
 
 	"github.com/hinshun/vt10x"
 )
 
 // railSeg is the name the rail gave a styled run before seg.go made the rail and
-// the bar one type. No production file names it now. rail_test.go still spells it
-// and is outside this unit's fence, so the name lives here until that file is in
-// a fence; the one edit it needs is railSeg -> seg.
-type railSeg = seg
+// the bar one type. No production file names it now. rail_test.go still spells it,
+// so the alias lives here; the one edit it needs is railSeg -> segment.Seg.
+type railSeg = segment.Seg
 
 // panelChar is one cell of a replayed screen; 0 means nothing was painted there.
 func panelChar(screen vt10x.Terminal, x, y int) rune {

@@ -13,6 +13,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/paths"
+	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -300,36 +301,36 @@ func railMark(agent, nerd bool) string {
 // background and one weight per row, so they arrive from the caller and ride
 // the run only for the length of this write. The switcher's rail rows call it
 // too.
-func writeRailSeg(buf *bytes.Buffer, s seg, ground theme.RGB, bold bool) {
-	s.bg = ground
-	s.bold = s.bold || bold
-	write(buf, s)
+func writeRailSeg(buf *bytes.Buffer, s segment.Seg, ground theme.RGB, bold bool) {
+	s.BG = ground
+	s.Bold = s.Bold || bold
+	segment.Write(buf, s)
 }
 
 // railStats is the right-aligned git tail of a window line: an amber dot when
 // the tree is dirty, then the added and deleted line counts, or "clean".
-func railStats(th theme.Theme, it railItem) []seg {
+func railStats(th theme.Theme, it railItem) []segment.Seg {
 	if !it.inRepo {
 		return nil
 	}
 	p := th.Palette
-	var segs []seg
+	var segs []segment.Seg
 	if it.dirty {
-		segs = append(segs, seg{text: th.Glyphs.Dirty, fg: p.RailWorking})
+		segs = append(segs, segment.Seg{Text: th.Glyphs.Dirty, FG: p.RailWorking})
 	}
 	if it.added > 0 {
-		segs = append(segs, seg{text: "+" + strconv.Itoa(it.added), fg: p.RailDiffAdd})
+		segs = append(segs, segment.Seg{Text: "+" + strconv.Itoa(it.added), FG: p.RailDiffAdd})
 	}
 	if it.deleted > 0 {
-		segs = append(segs, seg{text: "-" + strconv.Itoa(it.deleted), fg: p.RailDiffDel})
+		segs = append(segs, segment.Seg{Text: "-" + strconv.Itoa(it.deleted), FG: p.RailDiffDel})
 	}
 	if len(segs) == 0 {
-		return []seg{{text: "clean", fg: p.RailDim}}
+		return []segment.Seg{{Text: "clean", FG: p.RailDim}}
 	}
-	out := make([]seg, 0, len(segs)*2)
+	out := make([]segment.Seg, 0, len(segs)*2)
 	for i, s := range segs {
 		if i > 0 {
-			out = append(out, seg{text: " ", fg: p.RailDim})
+			out = append(out, segment.Seg{Text: " ", FG: p.RailDim})
 		}
 		out = append(out, s)
 	}
@@ -339,7 +340,7 @@ func railStats(th theme.Theme, it railItem) []seg {
 // railRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and nerd are the rail's own switches.
-func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, right, tail []seg) {
+func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, right, tail []segment.Seg) {
 	p, g := th.Palette, th.Glyphs
 	switch it.kind {
 	case railWorkspace:
@@ -348,12 +349,12 @@ func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, righ
 			if !it.active {
 				name = p.RailHeader
 			}
-			left = []seg{
-				{text: g.WorkspaceBar, fg: th.Accents[it.accent]},
-				{text: " ", fg: name},
-				{text: it.text, fg: name, bold: true},
+			left = []segment.Seg{
+				{Text: g.WorkspaceBar, FG: th.Accents[it.accent]},
+				{Text: " ", FG: name},
+				{Text: it.text, FG: name, Bold: true},
 			}
-			right = []seg{{text: strconv.Itoa(it.count), fg: p.RailDim}}
+			right = []segment.Seg{{Text: strconv.Itoa(it.count), FG: p.RailDim}}
 		}
 	case railWindow:
 		base := p.RailWindow
@@ -374,18 +375,18 @@ func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, righ
 			if label == "" {
 				label = it.text
 			}
-			left = []seg{
-				{text: "  ", fg: base},
-				{text: caret, fg: base},
-				{text: " ", fg: base},
-				{text: label, fg: base},
+			left = []segment.Seg{
+				{Text: "  ", FG: base},
+				{Text: caret, FG: base},
+				{Text: " ", FG: base},
+				{Text: label, FG: base},
 			}
 			// The branch trails the folder in dim grey, and only when it says
 			// something the label does not.
 			if it.branch != "" && it.branch != label {
-				tail = []seg{
-					{text: "  ", fg: p.RailDim},
-					{text: it.branch, fg: p.RailDim},
+				tail = []segment.Seg{
+					{Text: "  ", FG: p.RailDim},
+					{Text: it.branch, FG: p.RailDim},
 				}
 			}
 			right = railStats(th, it)
@@ -393,9 +394,9 @@ func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, righ
 	case railWindowNote:
 		if !compact {
 			base := p.RailDim
-			left = []seg{
-				{text: "    ", fg: base},
-				{text: it.text, fg: base},
+			left = []segment.Seg{
+				{Text: "    ", FG: base},
+				{Text: it.text, FG: base},
 			}
 		}
 	case railPane:
@@ -411,22 +412,22 @@ func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, righ
 		}
 		glyph := railMark(it.agent, nerd)
 		if compact {
-			left = []seg{
-				{text: glyph, fg: colour},
-				{text: mark, fg: colour},
+			left = []segment.Seg{
+				{Text: glyph, FG: colour},
+				{Text: mark, FG: colour},
 			}
 		} else {
-			left = []seg{
-				{text: "      ", fg: base},
-				{text: glyph, fg: colour},
-				{text: mark, fg: colour},
-				{text: " " + it.text, fg: base},
+			left = []segment.Seg{
+				{Text: "      ", FG: base},
+				{Text: glyph, FG: colour},
+				{Text: mark, FG: colour},
+				{Text: " " + it.text, FG: base},
 			}
 		}
 	case railGap:
 		// The rail background and nothing else.
 	}
-	rightCells := segCells(right)
+	rightCells := segment.SegCells(right)
 	if rightCells > w {
 		// A tail that does not fit goes whole: half a stats pair lies.
 		right, rightCells = nil, 0
@@ -437,13 +438,13 @@ func railRow(th theme.Theme, it railItem, w int, compact, nerd bool) (left, righ
 	}
 	// The folder outranks the branch: a window line gives up the branch tail
 	// whole, and only then elides the folder.
-	tailCells := segCells(tail)
-	leftCells := segCells(left) + tailCells
+	tailCells := segment.SegCells(tail)
+	leftCells := segment.SegCells(left) + tailCells
 	if tailCells > 0 && leftCells > budget {
-		tail, leftCells = nil, segCells(left)
+		tail, leftCells = nil, segment.SegCells(left)
 	}
 	if leftCells > budget {
-		left = elideSegs(th, left, budget)
+		left = segment.ElideSegs(th, left, budget)
 	}
 	return left, right, tail
 }
@@ -518,24 +519,24 @@ func railControlAt(snap *wire.Snapshot, x, y int) bool {
 // A rail wider than the thin one names the move and collapses. The thin rail
 // shows the expand caret in the state glyph's column and leaves the rest
 // blank, so a narrow rail loses no pane row to a label.
-func railControlSegs(th theme.Theme, compact, nerd bool) []seg {
+func railControlSegs(th theme.Theme, compact, nerd bool) []segment.Seg {
 	if compact {
 		caret := "▶"
 		if nerd {
 			caret = "\uf0da"
 		}
-		return []seg{
-			{text: "  ", fg: th.Palette.RailDim},
-			{text: caret, fg: th.Palette.RailDim},
+		return []segment.Seg{
+			{Text: "  ", FG: th.Palette.RailDim},
+			{Text: caret, FG: th.Palette.RailDim},
 		}
 	}
 	mark := "◀ "
 	if nerd {
 		mark = "\uf0d9 "
 	}
-	return []seg{
-		{text: mark, fg: th.Palette.RailDim},
-		{text: "collapse", fg: th.Palette.RailDim},
+	return []segment.Seg{
+		{Text: mark, FG: th.Palette.RailDim},
+		{Text: "collapse", FG: th.Palette.RailDim},
 	}
 }
 
@@ -559,12 +560,12 @@ func drawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 	controlAt := snap.Rows - 2
 	gripAt := controlAt / 2
 	for y := 0; y < rows; y++ {
-		var left, right, tail []seg
+		var left, right, tail []segment.Seg
 		bg, bold := p.RailBG, false
 		if y == controlAt {
 			left = railControlSegs(th, compact, nerd)
-			if segCells(left) > w {
-				left = elideSegs(th, left, w)
+			if segment.SegCells(left) > w {
+				left = segment.ElideSegs(th, left, w)
 			}
 		} else if y < len(items) {
 			it := items[y]
@@ -574,21 +575,21 @@ func drawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 				bg, bold = p.RailFocusBG, true
 			}
 		}
-		leftCells := segCells(left) + segCells(tail)
-		rightCells := segCells(right)
+		leftCells := segment.SegCells(left) + segment.SegCells(tail)
+		rightCells := segment.SegCells(right)
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
 		buf.WriteString("\x1b[0m" + bg.BG())
-		for _, seg := range left {
-			writeRailSeg(buf, seg, bg, bold)
+		for _, s := range left {
+			writeRailSeg(buf, s, bg, bold)
 		}
-		for _, seg := range tail {
-			writeRailSeg(buf, seg, bg, bold)
+		for _, s := range tail {
+			writeRailSeg(buf, s, bg, bold)
 		}
 		if n := w - leftCells - rightCells; n > 0 {
 			buf.WriteString(strings.Repeat(" ", n))
 		}
-		for _, seg := range right {
-			writeRailSeg(buf, seg, bg, bold)
+		for _, s := range right {
+			writeRailSeg(buf, s, bg, bold)
 		}
 		if y < controlAt && y == gripAt {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, w)

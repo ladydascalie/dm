@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -49,14 +50,14 @@ func railRowSnap(rail int) *wire.Snapshot {
 // then the right-aligned run, with the row's trailing blanks trimmed.
 func railRowComposed(left, tail, right []railSeg, w int) string {
 	var sb strings.Builder
-	for _, seg := range append(append([]railSeg{}, left...), tail...) {
-		sb.WriteString(seg.text)
+	for _, s := range append(append([]railSeg{}, left...), tail...) {
+		sb.WriteString(s.Text)
 	}
-	if pad := w - segCells(left) - segCells(tail) - segCells(right); pad > 0 {
+	if pad := w - segment.SegCells(left) - segment.SegCells(tail) - segment.SegCells(right); pad > 0 {
 		sb.WriteString(strings.Repeat(" ", pad))
 	}
-	for _, seg := range right {
-		sb.WriteString(seg.text)
+	for _, s := range right {
+		sb.WriteString(s.Text)
 	}
 	return strings.TrimRight(sb.String(), " ")
 }
@@ -117,7 +118,7 @@ func TestRailRowComposesPaint(t *testing.T) {
 					t.Fatalf("nerd=%v w=%d row %d kind %d composes %q, rail paints %q",
 						nerd, w, y, items[y].kind, want, line)
 				}
-				if n := segCells(left) + segCells(tail) + segCells(right); n > w {
+				if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > w {
 					t.Fatalf("nerd=%v w=%d row %d is %d cells, want <= %d",
 						nerd, w, y, n, w)
 				}
@@ -136,11 +137,11 @@ func TestRailRowSegments(t *testing.T) {
 	ws := railRowFind(t, items, railWorkspace, "main")
 	left, right, tail := railRow(theme.DefaultTheme(), ws, layout.DefaultRail, false, false)
 	wantLeft := []railSeg{
-		{text: "\u258c", fg: theme.DefaultTheme().Accents[ws.accent]},
-		{text: " ", fg: theme.DefaultTheme().Palette.RailText},
-		{text: "main", fg: theme.DefaultTheme().Palette.RailText, bold: true},
+		{Text: "\u258c", FG: theme.DefaultTheme().Accents[ws.accent]},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailText},
+		{Text: "main", FG: theme.DefaultTheme().Palette.RailText, Bold: true},
 	}
-	wantRight := []railSeg{{text: "2", fg: theme.DefaultTheme().Palette.RailDim}}
+	wantRight := []railSeg{{Text: "2", FG: theme.DefaultTheme().Palette.RailDim}}
 	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) || tail != nil {
 		t.Fatalf("workspace row = %+v / %+v / %+v, want %+v / %+v / nil",
 			left, right, tail, wantLeft, wantRight)
@@ -151,21 +152,21 @@ func TestRailRowSegments(t *testing.T) {
 	win := railRowFind(t, items, railWindow, "one")
 	left, right, tail = railRow(theme.DefaultTheme(), win, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "  ", fg: theme.DefaultTheme().Palette.RailWindow},
-		{text: "\u25be", fg: theme.DefaultTheme().Palette.RailWindow},
-		{text: " ", fg: theme.DefaultTheme().Palette.RailWindow},
-		{text: "rail", fg: theme.DefaultTheme().Palette.RailWindow},
+		{Text: "  ", FG: theme.DefaultTheme().Palette.RailWindow},
+		{Text: "\u25be", FG: theme.DefaultTheme().Palette.RailWindow},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailWindow},
+		{Text: "rail", FG: theme.DefaultTheme().Palette.RailWindow},
 	}
 	wantTail := []railSeg{
-		{text: "  ", fg: theme.DefaultTheme().Palette.RailDim},
-		{text: "dm-rail", fg: theme.DefaultTheme().Palette.RailDim},
+		{Text: "  ", FG: theme.DefaultTheme().Palette.RailDim},
+		{Text: "dm-rail", FG: theme.DefaultTheme().Palette.RailDim},
 	}
 	wantRight = []railSeg{
-		{text: "\u25cf", fg: theme.DefaultTheme().Palette.RailWorking},
-		{text: " ", fg: theme.DefaultTheme().Palette.RailDim},
-		{text: "+12", fg: theme.DefaultTheme().Palette.RailDiffAdd},
-		{text: " ", fg: theme.DefaultTheme().Palette.RailDim},
-		{text: "-4", fg: theme.DefaultTheme().Palette.RailDiffDel},
+		{Text: "\u25cf", FG: theme.DefaultTheme().Palette.RailWorking},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
+		{Text: "+12", FG: theme.DefaultTheme().Palette.RailDiffAdd},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
+		{Text: "-4", FG: theme.DefaultTheme().Palette.RailDiffDel},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) ||
 		!reflect.DeepEqual(tail, wantTail) {
@@ -178,10 +179,10 @@ func TestRailRowSegments(t *testing.T) {
 	folded := railRowFind(t, items, railWindow, "two")
 	left, right, tail = railRow(theme.DefaultTheme(), folded, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "  ", fg: theme.DefaultTheme().Palette.RailWindow},
-		{text: "\u25b8", fg: theme.DefaultTheme().Palette.RailWindow},
-		{text: " ", fg: theme.DefaultTheme().Palette.RailWindow},
-		{text: "other", fg: theme.DefaultTheme().Palette.RailWindow},
+		{Text: "  ", FG: theme.DefaultTheme().Palette.RailWindow},
+		{Text: "\u25b8", FG: theme.DefaultTheme().Palette.RailWindow},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailWindow},
+		{Text: "other", FG: theme.DefaultTheme().Palette.RailWindow},
 	}
 	if folded.folded != true {
 		t.Fatalf("window two is not folded: %+v", folded)
@@ -195,8 +196,8 @@ func TestRailRowSegments(t *testing.T) {
 	note := railRowFind(t, items, railWindowNote, "working hard")
 	left, right, tail = railRow(theme.DefaultTheme(), note, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "    ", fg: theme.DefaultTheme().Palette.RailDim},
-		{text: "working hard", fg: theme.DefaultTheme().Palette.RailDim},
+		{Text: "    ", FG: theme.DefaultTheme().Palette.RailDim},
+		{Text: "working hard", FG: theme.DefaultTheme().Palette.RailDim},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
 		t.Fatalf("note line = %+v / %+v / %+v, want %+v / nil / nil",
@@ -210,10 +211,10 @@ func TestRailRowSegments(t *testing.T) {
 	pane := railRowFind(t, items, railPane, "pi")
 	left, right, tail = railRow(theme.DefaultTheme(), pane, layout.DefaultRail, false, false)
 	wantLeft = []railSeg{
-		{text: "      ", fg: theme.DefaultTheme().Palette.RailText},
-		{text: mark, fg: glyphColour},
-		{text: "\u25cf", fg: glyphColour},
-		{text: " pi", fg: theme.DefaultTheme().Palette.RailText},
+		{Text: "      ", FG: theme.DefaultTheme().Palette.RailText},
+		{Text: mark, FG: glyphColour},
+		{Text: "\u25cf", FG: glyphColour},
+		{Text: " pi", FG: theme.DefaultTheme().Palette.RailText},
 	}
 	if !pane.focus {
 		t.Fatalf("pane pi is not focused: %+v", pane)
@@ -226,8 +227,8 @@ func TestRailRowSegments(t *testing.T) {
 	// The thin rail keeps the marker and the glyph and drops the indents.
 	left, right, tail = railRow(theme.DefaultTheme(), pane, layout.CollapsedRail, true, false)
 	wantLeft = []railSeg{
-		{text: mark, fg: glyphColour},
-		{text: "\u25cf", fg: glyphColour},
+		{Text: mark, FG: glyphColour},
+		{Text: "\u25cf", FG: glyphColour},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
 		t.Fatalf("thin pane row = %+v / %+v / %+v, want %+v / nil / nil",
@@ -279,11 +280,11 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	items := railItems(snap)
 	win := railRowFind(t, items, railWindow, "one")
 	full := []railSeg{
-		{text: "\u25cf", fg: theme.DefaultTheme().Palette.RailWorking},
-		{text: " ", fg: theme.DefaultTheme().Palette.RailDim},
-		{text: "+12", fg: theme.DefaultTheme().Palette.RailDiffAdd},
-		{text: " ", fg: theme.DefaultTheme().Palette.RailDim},
-		{text: "-4", fg: theme.DefaultTheme().Palette.RailDiffDel},
+		{Text: "\u25cf", FG: theme.DefaultTheme().Palette.RailWorking},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
+		{Text: "+12", FG: theme.DefaultTheme().Palette.RailDiffAdd},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
+		{Text: "-4", FG: theme.DefaultTheme().Palette.RailDiffDel},
 	}
 
 	// At the default width the branch fits beside the folder and the pair.
@@ -315,7 +316,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	if !reflect.DeepEqual(right, full) {
 		t.Fatalf("stats at 12 columns = %+v, want the whole pair", right)
 	}
-	if n := len(left); n == 0 || left[n-1].text != "\u2026" {
+	if n := len(left); n == 0 || left[n-1].Text != "\u2026" {
 		t.Fatalf("folder did not elide at 12 columns: %+v", left)
 	}
 	if got := railRowComposed(left, tail, right, 12); got != "  \u2026 \u25cf +12 -4" {
@@ -336,7 +337,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 		if right != nil && !reflect.DeepEqual(right, full) {
 			t.Fatalf("stats at %d columns = %+v, want the whole pair or none", w, right)
 		}
-		if n := segCells(left) + segCells(tail) + segCells(right); n > w {
+		if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > w {
 			t.Fatalf("row at %d columns is %d cells: %+v / %+v / %+v",
 				w, n, left, tail, right)
 		}

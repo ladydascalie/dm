@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -52,23 +53,23 @@ func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool,
 	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
 	for _, s := range left {
-		write(buf, s)
+		segment.Write(buf, s)
 	}
-	if n := snap.Cols - segCells(segs); n > 0 {
+	if n := snap.Cols - segment.SegCells(segs); n > 0 {
 		// The bar's ground is the rail's: there is no second background.
 		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", n))
 	}
 	for _, s := range pinned {
-		write(buf, s)
+		segment.Write(buf, s)
 	}
 	buf.WriteString("\x1b[0m")
 }
 
 // barSplitPinned splits a span run at its first pinned span: the left block,
 // then the right block that is anchored to the last column.
-func barSplitPinned(segs []seg) (left, pinned []seg) {
-	for i, seg := range segs {
-		if seg.pin {
+func barSplitPinned(segs []segment.Seg) (left, pinned []segment.Seg) {
+	for i, s := range segs {
+		if s.Pin {
 			return segs[:i], segs[i:]
 		}
 	}
@@ -165,14 +166,14 @@ func barLeftFor(th theme.Theme, snap *wire.Snapshot) *barLeft {
 
 // groups builds the left block spans as they currently stand: session,
 // workspace, one chip per window, then the focus chip.
-func (l *barLeft) groups(th theme.Theme) [][]seg {
+func (l *barLeft) groups(th theme.Theme) [][]segment.Seg {
 	p, g := th.Palette, th.Glyphs
-	var out [][]seg
+	var out [][]segment.Seg
 	if l.session != "" {
-		out = append(out, []seg{{text: l.session, fg: p.RailText, bg: p.RailBG}})
+		out = append(out, []segment.Seg{{Text: l.session, FG: p.RailText, BG: p.RailBG}})
 	}
 	if l.workspace != "" {
-		out = append(out, []seg{{text: l.workspace, fg: p.RailHeader, bg: p.RailBG}})
+		out = append(out, []segment.Seg{{Text: l.workspace, FG: p.RailHeader, BG: p.RailBG}})
 	}
 	for _, w := range l.windows {
 		if w.active {
@@ -182,9 +183,9 @@ func (l *barLeft) groups(th theme.Theme) [][]seg {
 			if l.winNames && w.name != "" {
 				text += " " + w.name
 			}
-			out = append(out, []seg{
-				{text: g.ActiveMark + " ", fg: p.BarAccent, bg: p.RailFocusBG},
-				{text: text, fg: p.RailText, bg: p.RailFocusBG, bold: true},
+			out = append(out, []segment.Seg{
+				{Text: g.ActiveMark + " ", FG: p.BarAccent, BG: p.RailFocusBG},
+				{Text: text, FG: p.RailText, BG: p.RailFocusBG, Bold: true},
 			})
 			continue
 		}
@@ -192,21 +193,21 @@ func (l *barLeft) groups(th theme.Theme) [][]seg {
 		if l.winNames && w.name != "" {
 			text += " " + w.name
 		}
-		out = append(out, []seg{{text: text, fg: p.RailDim, bg: p.RailBG}})
+		out = append(out, []segment.Seg{{Text: text, FG: p.RailDim, BG: p.RailBG}})
 	}
 	if l.focus != nil {
-		chip := []seg{
-			{text: l.focus.glyph, fg: l.focus.colour, bg: p.RailFocusBG},
-			{text: " " + l.focus.id, fg: p.RailText, bg: p.RailFocusBG, bold: true},
+		chip := []segment.Seg{
+			{Text: l.focus.glyph, FG: l.focus.colour, BG: p.RailFocusBG},
+			{Text: " " + l.focus.id, FG: p.RailText, BG: p.RailFocusBG, Bold: true},
 		}
 		if l.showZoom {
-			chip = append(chip, seg{text: " Z", fg: p.BarAccent, bg: p.RailFocusBG, bold: true})
+			chip = append(chip, segment.Seg{Text: " Z", FG: p.BarAccent, BG: p.RailFocusBG, Bold: true})
 		}
 		if l.showName && l.focus.name != "" {
-			chip = append(chip, seg{text: " " + l.focus.name, fg: p.RailDim, bg: p.RailFocusBG})
+			chip = append(chip, segment.Seg{Text: " " + l.focus.name, FG: p.RailDim, BG: p.RailFocusBG})
 		}
 		if l.showStat && l.focus.status != "" {
-			chip = append(chip, seg{text: " " + l.focus.status, fg: p.RailDim, bg: p.RailFocusBG})
+			chip = append(chip, segment.Seg{Text: " " + l.focus.status, FG: p.RailDim, BG: p.RailFocusBG})
 		}
 		out = append(out, chip)
 	}
@@ -217,19 +218,19 @@ func (l *barLeft) groups(th theme.Theme) [][]seg {
 // window names, then trailing window chips, then the workspace name, then the
 // session name, then the focus chip's status word and name. The focus chip
 // keeps its glyph and id last, and the result never exceeds the budget.
-func (l *barLeft) fit(th theme.Theme, budget int) []seg {
+func (l *barLeft) fit(th theme.Theme, budget int) []segment.Seg {
 	if budget <= 0 {
 		return nil
 	}
-	gap := seg{text: " ", fg: th.Palette.RailDim, bg: th.Palette.RailBG}
-	cur := func() []seg { return join(l.groups(th), gap) }
-	if segs := cur(); segCells(segs) <= budget {
+	gap := segment.Seg{Text: " ", FG: th.Palette.RailDim, BG: th.Palette.RailBG}
+	cur := func() []segment.Seg { return segment.Join(l.groups(th), gap) }
+	if segs := cur(); segment.SegCells(segs) <= budget {
 		return segs
 	}
 
 	// 1. Window chips lose their name and keep the number.
 	l.winNames = false
-	if segs := cur(); segCells(segs) <= budget {
+	if segs := cur(); segment.SegCells(segs) <= budget {
 		return segs
 	}
 
@@ -243,7 +244,7 @@ func (l *barLeft) fit(th theme.Theme, budget int) []seg {
 			break
 		}
 		l.windows = append(l.windows[:i], l.windows[i+1:]...)
-		if segs := cur(); segCells(segs) <= budget {
+		if segs := cur(); segment.SegCells(segs) <= budget {
 			return segs
 		}
 	}
@@ -255,12 +256,12 @@ func (l *barLeft) fit(th theme.Theme, budget int) []seg {
 		if *name == "" {
 			continue
 		}
-		avail := budget - (segCells(cur()) - cells.Cells(*name))
+		avail := budget - (segment.SegCells(cur()) - cells.Cells(*name))
 		if avail < 1 {
 			avail = 1
 		}
 		*name = cells.Elide(*name, avail)
-		if segs := cur(); segCells(segs) <= budget {
+		if segs := cur(); segment.SegCells(segs) <= budget {
 			return segs
 		}
 	}
@@ -268,42 +269,42 @@ func (l *barLeft) fit(th theme.Theme, budget int) []seg {
 	// 5. The focus chip drops its status word, then the zoom mark, then its
 	// name. The glyph and the id are last, and the clip below cuts them.
 	l.showStat = false
-	if segs := cur(); segCells(segs) <= budget {
+	if segs := cur(); segment.SegCells(segs) <= budget {
 		return segs
 	}
 	l.showZoom = false
-	if segs := cur(); segCells(segs) <= budget {
+	if segs := cur(); segment.SegCells(segs) <= budget {
 		return segs
 	}
 	l.showName = false
-	if segs := cur(); segCells(segs) <= budget {
+	if segs := cur(); segment.SegCells(segs) <= budget {
 		return segs
 	}
 
 	// 6. Only the glyph and the id are left; a line too narrow for that is cut
 	// run by run. The first run the room cannot hold ends the line, so no later
 	// run paints out of order.
-	return clipSegs(cur(), budget)
+	return segment.ClipSegs(cur(), budget)
 }
 
 // barPinned is the right block: the prefix flag while armed, then the scroll
 // info. Both are anchored to the last column, so both are pinned.
-func barPinned(th theme.Theme, armed bool, info string) []seg {
+func barPinned(th theme.Theme, armed bool, info string) []segment.Seg {
 	p := th.Palette
-	var out []seg
+	var out []segment.Seg
 	if armed {
-		out = append(out, seg{text: "PREFIX ", fg: p.RailText, bg: p.RailBG, bold: true, pin: true})
+		out = append(out, segment.Seg{Text: "PREFIX ", FG: p.RailText, BG: p.RailBG, Bold: true, Pin: true})
 	}
 	if info != "" {
-		out = append(out, seg{text: info, fg: p.RailDim, bg: p.RailBG, pin: true})
+		out = append(out, segment.Seg{Text: info, FG: p.RailDim, BG: p.RailBG, Pin: true})
 	}
 	return out
 }
 
 // barFitPinned fits the right block to cols cells on its own. A pinned segment
 // goes whole, leftmost first, and the survivor is clipped with an cells.Ellipsis.
-func barFitPinned(segs []seg, cols int) []seg {
-	for segCells(segs) > cols {
+func barFitPinned(segs []segment.Seg, cols int) []segment.Seg {
+	for segment.SegCells(segs) > cols {
 		if len(segs) > 1 {
 			segs = segs[1:]
 			continue
@@ -311,7 +312,7 @@ func barFitPinned(segs []seg, cols int) []seg {
 		if len(segs) == 0 {
 			break
 		}
-		segs[0].text = cells.Elide(segs[0].text, cols)
+		segs[0].Text = cells.Elide(segs[0].Text, cols)
 		break
 	}
 	return segs
@@ -322,12 +323,12 @@ func barFitPinned(segs []seg, cols int) []seg {
 // pinned block leaves, minus one gutter cell, so the blocks never touch and the
 // line never runs past snap.Cols cells. The pinned block is never dropped to
 // make room for the left one.
-func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string) []seg {
+func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string) []segment.Seg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}
 	right := barFitPinned(barPinned(th, armed, info), snap.Cols)
-	budget := snap.Cols - segCells(right)
+	budget := snap.Cols - segment.SegCells(right)
 	if len(right) > 0 {
 		// Keep one gutter cell between the blocks. drawBar spends it as part of
 		// the pad, so the pinned block still ends on the last column.
