@@ -648,53 +648,102 @@ type menuItem struct {
 	run    func()
 }
 
-// openMenu builds the pane menu at a zero-based terminal point, clamped to the
-// screen, and takes over input.
-func (t *tui) openMenu(p *PaneInfo, x, y int) {
-	if t.snap == nil {
-		return
+// paneMenuItems is the item list for a pane menu: the actions that act on one
+// pane. withFocus puts Focus first, as a sidebar pane row does.
+func (t *tui) paneMenuItems(p *PaneInfo, withFocus bool) []menuItem {
+	items := make([]menuItem, 0, 8)
+	if withFocus {
+		items = append(items, menuItem{label: "Focus", action: "focus", run: func() {
+			t.actionOn(p.ID, "focus", nil)
+		}})
 	}
-	title := p.ID
-	if p.Name != "" {
-		title += " " + p.Name
+	for _, split := range []struct{ label, action, dir string }{
+		{"Split right", "split-right", "right"},
+		{"Split down", "split-down", "down"},
+		{"Split left", "split-left", "left"},
+		{"Split up", "split-up", "up"},
+	} {
+		split := split
+		items = append(items, menuItem{label: split.label, action: split.action, run: func() {
+			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = split.dir })
+		}})
 	}
-	items := []menuItem{
-		{label: "Split right", action: "split-right", run: func() {
-			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "right" })
+	return append(items,
+		menuItem{label: "Zoom", action: "zoom-pane", run: func() {
+			t.actionOn(p.ID, "zoom-pane", nil)
 		}},
-		{label: "Split down", action: "split-down", run: func() {
-			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "down" })
-		}},
-		{label: "Split left", action: "split-left", run: func() {
-			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "left" })
-		}},
-		{label: "Split up", action: "split-up", run: func() {
-			t.actionOn(p.ID, "split", func(m *Msg) { m.Dir = "up" })
-		}},
-		{label: "Focus", run: func() { t.actionOn(p.ID, "focus", nil) }},
-		{label: "Close pane", action: "close-pane", run: func() {
+		menuItem{label: "Close pane", action: "close-pane", run: func() {
 			t.actionOn(p.ID, "close-pane", nil)
 		}},
-		{label: "Scrollback", action: "scrollback", run: func() { t.startScroll(p) }},
-		{label: "New window", action: "new-window", run: func() { t.action("new-window", nil) }},
-		{label: "New workspace", action: "new-workspace", run: func() {
-			t.action("new-workspace", nil)
+		menuItem{label: "Scrollback", action: "scrollback", run: func() { t.startScroll(p) }},
+	)
+}
+
+// windowMenuItems is the item list for a window row or its note row: the
+// actions that act on one window. New window targets the row's workspace and
+// carries the window's working directory.
+func (t *tui) windowMenuItems(it railItem) []menuItem {
+	return []menuItem{
+		{label: "New window", action: "new-window", run: func() {
+			t.actionOn(it.workspace, "new-window", func(m *Msg) { m.Cwd = it.cwd })
+		}},
+		{label: "Rename window", action: "rename-window", run: func() {
+			t.openRenamePromptFor("window", it.window, it.windowName)
+		}},
+		{label: "Close window", action: "close-window", run: func() {
+			t.actionOn(it.window, "close-window", nil)
+		}},
+		{label: "Fold/unfold", action: "toggle-fold", run: func() {
+			t.actionOn(it.window, "toggle-fold", nil)
+		}},
+	}
+}
+
+// workspaceMenuItems is the item list for a workspace row: the actions that act
+// on one workspace.
+func (t *tui) workspaceMenuItems(it railItem) []menuItem {
+	return []menuItem{
+		{label: "New window", action: "new-window", run: func() {
+			t.actionOn(it.workspace, "new-window", nil)
 		}},
 		{label: "Rename workspace", action: "rename-workspace", run: func() {
 			t.closeMenu()
-			t.openRenamePrompt()
+			t.openRenamePromptFor("workspace", it.workspace, it.text)
+		}},
+		{label: "Close workspace", action: "close-workspace", run: func() {
+			t.actionOn(it.workspace, "close-workspace", nil)
+		}},
+	}
+}
+
+// sessionMenuItems is the item list for the rail's control row: the actions
+// that act on the whole session.
+func (t *tui) sessionMenuItems() []menuItem {
+	return []menuItem{
+		{label: "New workspace", action: "new-workspace", run: func() {
+			t.action("new-workspace", nil)
 		}},
 		{label: "Switch session", action: "picker", run: func() { t.openPicker() }},
 		{label: "Detach", action: "detach", run: func() { t.quit = true }},
 	}
-	// Each row's key label is the hint the configured main keymap gives it. An
-	// unbound action shows no key.
+}
+
+// hintedItems fills each row's key label from the configured main keymap, so
+// the hint loop resolves the key that dispatches it. A row whose action is
+// unbound keeps an empty hint.
+func (t *tui) hintedItems(items []menuItem) []menuItem {
 	km := t.km()
 	for i := range items {
 		if items[i].action != "" {
 			items[i].key = km.Key("main", items[i].action)
 		}
 	}
+	return items
+}
+
+// openMenuAt places a menu with its title and items at a zero-based terminal
+// point, clamped to the screen, and takes over input.
+func (t *tui) openMenuAt(title string, items []menuItem, x, y int) {
 	w := 34
 	if w > t.snap.Cols-2 {
 		w = t.snap.Cols - 2
@@ -702,90 +751,67 @@ func (t *tui) openMenu(p *PaneInfo, x, y int) {
 	h := len(items) + 2
 	x = clampInt(x, 0, t.snap.Cols-w)
 	y = clampInt(y, 0, t.snap.Rows-h)
-	t.menu = &menu{x: x, y: y, w: w, title: title, pane: p.ID, items: items}
+	t.menu = &menu{x: x, y: y, w: w, title: title, items: items}
 	t.mode = "menu"
 	t.armed = false
 	t.dirty = true
 }
 
-// openRailMenu builds the sidebar menu for the row under a right press. The
-// items depend on the row kind, and every item carries the main keymap's hint
-// for its action. The menu is the pane menu's type, anchored at the click and
-// clamped to the screen.
+// openMenu builds the on-screen pane menu at a zero-based terminal point and
+// takes over input.
+func (t *tui) openMenu(p *PaneInfo, x, y int) {
+	if t.snap == nil {
+		return
+	}
+	title := "pane " + p.ID
+	if p.Name != "" {
+		title += " " + p.Name
+	}
+	t.openMenuAt(title, t.hintedItems(t.paneMenuItems(p, false)), x, y)
+	t.menu.pane = p.ID
+}
+
+// openRailMenu builds the sidebar menu for the row under a right press. Each
+// kind offers only its own actions, its title names the kind, and every item
+// carries the main keymap's hint for its action. A gap row opens nothing.
 func (t *tui) openRailMenu(it railItem, x, y int) {
 	if t.snap == nil {
 		return
 	}
+	var title string
 	var items []menuItem
 	switch it.kind {
 	case railWorkspace:
-		items = []menuItem{
-			{label: "Rename workspace", action: "rename-workspace", run: func() {
-				t.openRenamePromptFor("workspace", it.workspace, it.text)
-			}},
-			{label: "Close workspace", action: "close-workspace", run: func() {
-				t.actionOn(it.workspace, "close-workspace", nil)
-			}},
-			{label: "New window", action: "new-window", run: func() {
-				t.actionOn(it.workspace, "new-window", nil)
-			}},
-			{label: "New workspace", action: "new-workspace", run: func() {
-				t.action("new-workspace", nil)
-			}},
-		}
+		title = "workspace " + it.text
+		items = t.workspaceMenuItems(it)
 	case railWindow, railWindowNote:
-		items = []menuItem{
-			{label: "Rename window", action: "rename-window", run: func() {
-				t.openRenamePromptFor("window", it.window, it.windowName)
-			}},
-			{label: "Close window", action: "close-window", run: func() {
-				t.actionOn(it.window, "close-window", nil)
-			}},
-			{label: "New window", action: "new-window", run: func() {
-				t.actionOn(it.workspace, "new-window", func(m *Msg) { m.Cwd = it.cwd })
-			}},
-			{label: "Fold/unfold", action: "toggle-fold", run: func() {
-				t.actionOn(it.window, "toggle-fold", nil)
-			}},
-		}
+		title = "window " + it.windowName
+		items = t.windowMenuItems(it)
 	case railPane:
-		items = []menuItem{
-			{label: "Focus", action: "focus", run: func() {
-				t.actionOn(it.pane, "focus", nil)
-			}},
-			{label: "Rename window", action: "rename-window", run: func() {
-				t.openRenamePromptFor("window", it.window, it.windowName)
-			}},
-			{label: "Close window", action: "close-window", run: func() {
-				t.actionOn(it.window, "close-window", nil)
-			}},
-			{label: "Fold/unfold", action: "toggle-fold", run: func() {
-				t.actionOn(it.window, "toggle-fold", nil)
-			}},
+		p := t.paneByID(it.pane)
+		if p == nil {
+			// A thin rail lists every pane in the snapshot's All set. A pane
+			// row the Pane set has dropped still gets its menu.
+			p = &PaneInfo{ID: it.pane}
 		}
+		title = "pane " + it.text
+		items = t.paneMenuItems(p, true)
 	default:
 		return
 	}
-	// Each row's key label is the hint the configured main keymap gives it. An
-	// unbound action shows no key.
-	km := t.km()
-	for i := range items {
-		if items[i].action != "" {
-			items[i].key = km.Key("main", items[i].action)
-		}
-	}
-	w := 34
-	if w > t.snap.Cols-2 {
-		w = t.snap.Cols - 2
-	}
-	h := len(items) + 2
-	x = clampInt(x, 0, t.snap.Cols-w)
-	y = clampInt(y, 0, t.snap.Rows-h)
-	t.menu = &menu{x: x, y: y, w: w, title: it.text, items: items}
-	t.mode = "menu"
+	t.openMenuAt(title, t.hintedItems(items), x, y)
 	t.menuPress = true
-	t.armed = false
-	t.dirty = true
+}
+
+// openSessionMenu builds the session menu for a right press on the rail's
+// control row.
+func (t *tui) openSessionMenu(x, y int) {
+	if t.snap == nil {
+		return
+	}
+	title := "session " + t.snap.Session
+	t.openMenuAt(title, t.hintedItems(t.sessionMenuItems()), x, y)
+	t.menuPress = true
 }
 
 func clampInt(v, lo, hi int) int {
@@ -2978,12 +3004,14 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 		t.railPress = false
 		return true
 	}
-	// A right press on a row opens the sidebar menu for that row. The press
-	// arms railPress and the menu swallows its release, so the pane menu
-	// never sees it.
+	// A right press on a row opens that row's menu. The control row is the
+	// session's own menu. The press arms railPress and the menu swallows its
+	// release, so the pane menu never sees it.
 	if ev.btn&3 == 2 && ev.btn&32 == 0 && ev.btn&64 == 0 {
 		t.railPress = true
-		if it, ok := railItemAt(t.snap, x, y); ok {
+		if railControlAt(t.snap, x, y) {
+			t.openSessionMenu(x, y)
+		} else if it, ok := railItemAt(t.snap, x, y); ok {
 			t.openRailMenu(it, x, y)
 		}
 		return true

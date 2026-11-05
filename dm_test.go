@@ -5479,7 +5479,6 @@ prefix "ctrl+b"
 keymap "main" {
     "split-right" "S"
     "close-pane" "Q"
-    "detach" "Z"
 }
 
 keymap "menu" {
@@ -5491,18 +5490,17 @@ keymap "menu" {
 		t.Fatal("menu did not open")
 	}
 	want := map[string]string{
-		"Split right":      "S",
-		"Close pane":       "Q",
-		"Detach":           "Z",
-		"Split down":       "",
-		"Split left":       "",
-		"Split up":         "",
-		"Focus":            "",
-		"Scrollback":       "",
-		"New window":       "",
-		"New workspace":    "",
-		"Rename workspace": "",
-		"Switch session":   "",
+		"Split right": "S",
+		"Split down":  "",
+		"Split left":  "",
+		"Split up":    "",
+		"Zoom":        "",
+		"Close pane":  "Q",
+		"Scrollback":  "",
+	}
+	if len(tui.menu.items) != len(want) {
+		t.Fatalf("pane menu has %d rows, want the %d pane actions",
+			len(tui.menu.items), len(want))
 	}
 	for _, it := range tui.menu.items {
 		key, ok := want[it.label]

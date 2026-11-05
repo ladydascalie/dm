@@ -32,9 +32,15 @@ func TestMenuHintClosesPane(t *testing.T) {
 	}
 }
 
-// TestMenuHintNewWindow: the new-window hint dispatches new window.
+// TestMenuHintNewWindow: the new-window hint in a rail window menu dispatches
+// new window.
 func TestMenuHintNewWindow(t *testing.T) {
-	tui, got := menuHintTUI(t)
+	tui, got := railMenuTUI(t)
+	railRightPress(tui, 1)
+	if tui.menu == nil {
+		t.Fatal("menu did not open")
+	}
+	noMsg(t, got)
 	feed(tui, "c")
 	m := nextMsg(t, got)
 	if m.Type != "req" || m.Action != "new-window" {
