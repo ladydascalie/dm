@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"bytes"
@@ -306,9 +306,9 @@ func (t *tui) expireToasts(now time.Time) {
 	t.dirty = true
 }
 
-// runClient owns the terminal. A session switch returns to this loop with a new
+// Run owns the terminal. A session switch returns to this loop with a new
 // name, so raw mode and the stdin reader survive it.
-func runClient(name string) error {
+func Run(name string) error {
 	// A pane exports its own session name. Attaching that same session from a
 	// pane makes a mirror that can also fight over the shared screen size.
 	if in := os.Getenv("DM_SESSION"); in != "" && in == name {

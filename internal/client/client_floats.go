@@ -1,4 +1,4 @@
-package main
+package client
 
 // The client side of the floats: opening and closing them, the requests the
 // message box sends and the replies it takes, and the keys and wheel each
