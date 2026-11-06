@@ -113,6 +113,9 @@ func TestBoxListReplyFillsView(t *testing.T) {
 		t.Fatal(err)
 	}
 	tui.apply(wire.Msg{Type: "resp", Action: "msg-list", OK: true, Res: res})
+	if n := tui.box.ListLen(); n != 4 {
+		t.Fatalf("entries = %d, want 4", n)
+	}
 	screen := boxScreen(t, tui.box, tui.snap.Cols, tui.snap.Rows)
 	r := tui.box.Float.Rect
 	if row := boxScreenRow(screen, r.Y, r.X, r.W); !strings.Contains(row, "gate green") {
