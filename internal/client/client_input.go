@@ -700,7 +700,7 @@ func zoomedHit(s *wire.Snapshot, x, y int) *wire.PaneInfo {
 	if p == nil {
 		return nil
 	}
-	a := layout.PaneAreaFor(s.Cols, s.Rows, s.Rail)
+	a := layout.PaneAreaForWithTabBar(s.Cols, s.Rows, s.Rail)
 	if x < a.X || y < a.Y || x >= a.X+a.W || y >= a.Y+a.H {
 		return nil
 	}
@@ -1185,6 +1185,11 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			return
 		}
 	}
+	// A tab bar click belongs to the tab bar before any rail or pane logic.
+	// A tab selects its window; a double click opens the window rename prompt.
+	if t.mode == "" && t.tabBarClick(ev, x, y) {
+		return
+	}
 	// The rail grip is the rail's last column. A drag of it adjusts the rail
 	// width and swallows every event, motion and release alike, so nothing
 	// reaches a pane even when the pointer leaves the rail.
@@ -1372,7 +1377,7 @@ func dragPress(snap *wire.Snapshot, x, y int) (dragStart, bool) {
 		return dragStart{}, false
 	}
 	_, first, second, axis, r, zone, ok := padHit(snap.Root,
-		layout.PaneAreaFor(snap.Cols, snap.Rows, snap.Rail), x, y)
+		layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail), x, y)
 	if !ok {
 		return dragStart{}, false
 	}
@@ -1787,6 +1792,59 @@ func (t *tui) isRailDoubleClick(y int) bool {
 // not count as a double click.
 func (t *tui) clearRailPress() {
 	t.railPressAt = time.Time{}
+}
+// tabBarClick consumes a mouse event over the tab bar. A left press on a tab
+// sends select-window with the window index. A second press on the same tab
+// within the double-click window opens the window rename prompt. A press
+// elsewhere in the tab bar row is swallowed.
+func (t *tui) tabBarClick(ev mouseEvent, x, y int) bool {
+	if t.snap == nil {
+		return false
+	}
+	bar := tabBarRect(t.snap)
+	if bar.W < 1 || bar.H < 1 {
+		return false
+	}
+	if y != bar.Y || x < bar.X || x >= bar.X+bar.W {
+		return false
+	}
+	if ev.release {
+		return true
+	}
+	// A right press over the tab bar opens no menu yet; the row belongs to the
+	// window tabs. Swallow it so it never reaches a pane.
+	if ev.btn&3 == 2 && ev.btn&32 == 0 && ev.btn&64 == 0 {
+		return true
+	}
+	if ev.btn&3 != 0 || ev.btn&32 != 0 || ev.btn&64 != 0 {
+		return true
+	}
+	it, ok := tabBarAt(t.snap, x, y)
+	if !ok {
+		return true
+	}
+	now := time.Now()
+	if now.Sub(t.lastTabClick) < 500*time.Millisecond &&
+		t.lastTabClickPos.X == x && t.lastTabClickPos.Y == y {
+		t.lastTabClick = time.Time{}
+		var winID string
+		for _, p := range t.snap.All {
+			if p.Workspace == t.snap.Workspace && p.WindowName == it.Name {
+				winID = p.Window
+				break
+			}
+		}
+		if winID != "" {
+			t.openRenamePromptFor("window", winID, it.Name)
+		}
+		return true
+	}
+	t.lastTabClick = now
+	t.lastTabClickPos = struct{ X, Y int }{x, y}
+	if t.conn != nil {
+		_ = t.conn.Send(wire.Msg{Type: "req", Action: "select-window", Index: it.Index})
+	}
+	return true
 }
 
 // railClick consumes a mouse event over the sidebar. A left press on the bottom

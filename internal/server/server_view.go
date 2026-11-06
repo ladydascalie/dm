@@ -76,7 +76,7 @@ func (s *server) setRail(requested int) int {
 // holds s.mu.
 func (s *server) paneRectsLocked() map[string]layout.Rect {
 	win := s.st.ActiveWindow()
-	area := layout.PaneAreaFor(s.cols, s.rows, s.railLocked())
+	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked())
 	rects := map[string]layout.Rect{}
 	layout.Layout(win.Root, area, rects)
 	if _, ok := rects[s.zoom]; !ok {

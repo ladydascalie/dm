@@ -39,7 +39,7 @@ func (t *tui) draw() {
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
 	th := t.theme()
-	var box, grip, div, railBuf, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
+	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range visiblePanes(win) {
 		panel.DrawPaneBox(&box, th, p.Rect, p.ID == win.Focus)
 	}
@@ -48,6 +48,7 @@ func (t *tui) draw() {
 	// strip its grab zone covers.
 	drawDivider(&div, th, t.padZone, t.padAxis)
 	rail.DrawRail(&railBuf, th, win)
+	DrawTabBar(&tabBar, th, win)
 	drawBar(&bar, th, win, t.armed, t.barInfo())
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
@@ -121,6 +122,7 @@ func (t *tui) draw() {
 		{p: &t.last.box, buf: &box, force: padFreed},
 		{p: &t.last.grip, buf: &grip, force: padFreed},
 		{p: &t.last.rail, buf: &railBuf},
+		{p: &t.last.tabbar, buf: &tabBar},
 		{p: &t.last.div, buf: &div},
 		{p: &t.last.bar, buf: &bar},
 		{p: &t.last.toasts, buf: &toasts, overlay: true},
@@ -263,7 +265,7 @@ func (t *tui) layoutSig(win *wire.Snapshot) string {
 	for _, f := range t.floats {
 		fmt.Fprintf(&b, " F%s:%d,%d,%d,%d", f.ID, f.Rect.X, f.Rect.Y, f.Rect.W, f.Rect.H)
 	}
-	fmt.Fprintf(&b, " f=%s m=%s s=%s", win.Focus, t.mode, t.scroll)
+	fmt.Fprintf(&b, " w=%v a=%d f=%s m=%s s=%s", win.Windows, win.ActiveWindow, win.Focus, t.mode, t.scroll)
 	if t.sw != nil {
 		fmt.Fprintf(&b, " p=%+v", t.sw.Rect)
 	}

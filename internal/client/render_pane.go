@@ -187,7 +187,7 @@ func drawGrips(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 			walk(n.Kids[i], b)
 		}
 	}
-	walk(snap.Root, layout.PaneAreaFor(snap.Cols, snap.Rows, snap.Rail))
+	walk(snap.Root, layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail))
 	buf.WriteString("\x1b[0m")
 }
 

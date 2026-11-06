@@ -275,6 +275,25 @@ func PaneArea(cols, rows int) Rect {
 	return PaneAreaFor(cols, rows, 0)
 }
 
+// TabBarRows is the height of the window tab bar: one row above the pane area.
+// The server keeps the row clear when it lays out panes, and the client draws
+// the window tabs there.
+const TabBarRows = 1
+
+// PaneAreaForWithTabBar is PaneAreaFor with the tab bar row reserved at the
+// top. Pane boxes start one row below the screen top. The last row stays the
+// status bar. A screen too short for both gets an empty area, never a negative
+// one.
+func PaneAreaForWithTabBar(cols, rows, rail int) Rect {
+	a := PaneAreaFor(cols, rows, rail)
+	a.Y += TabBarRows
+	a.H -= TabBarRows
+	if a.H < 0 {
+		a.H = 0
+	}
+	return a
+}
+
 // InsetBox is the content rect of a boxed pane.
 func InsetBox(b Rect) Rect {
 	if b.W < 3 || b.H < 3 {
