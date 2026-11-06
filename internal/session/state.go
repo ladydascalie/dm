@@ -27,6 +27,29 @@ type Workspace struct {
 	Name    string    `json:"name"`
 	Windows []*Window `json:"windows"`
 	Active  int       `json:"active"`
+	// Unfolded shows the workspace's pane rows in the rail. A workspace starts
+	// unfolded. Older state files carry no key; UnmarshalJSON reads that as
+	// unfolded. An explicit false persists as folded.
+	Unfolded bool `json:"unfolded"`
+}
+
+// UnmarshalJSON defaults a workspace to unfolded when an older state file has
+// no workspace fold key. An explicit false in the file stays folded.
+func (ws *Workspace) UnmarshalJSON(b []byte) error {
+	type workspaceJSON Workspace
+	aux := struct {
+		*workspaceJSON
+		Unfolded *bool `json:"unfolded"`
+	}{workspaceJSON: (*workspaceJSON)(ws)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if aux.Unfolded == nil {
+		ws.Unfolded = true
+	} else {
+		ws.Unfolded = *aux.Unfolded
+	}
+	return nil
 }
 
 type PaneState struct {
@@ -104,8 +127,9 @@ func NewState(name string) *State {
 		Rail:          layout.DefaultRail,
 		RailSet:       true,
 		Workspaces: []*Workspace{{
-			ID:   "s1",
-			Name: "main",
+			ID:       "s1",
+			Name:     "main",
+			Unfolded: true,
 			Windows: []*Window{{
 				ID:   "w1",
 				Name: defWin,
