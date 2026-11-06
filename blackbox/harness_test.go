@@ -60,7 +60,12 @@ func newHarness(t *testing.T) *harness {
 		})
 		os.RemoveAll(state)
 	})
-	return &harness{t: t, bin: buildOnce(t), env: append(os.Environ(), "DM_STATE="+state)}
+	cfgDir, err := os.MkdirTemp("", "dmcfg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(cfgDir) })
+	return &harness{t: t, bin: buildOnce(t), env: append(os.Environ(), "DM_STATE="+state, "XDG_CONFIG_HOME="+cfgDir)}
 }
 
 func (h *harness) run(args ...string) string {

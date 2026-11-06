@@ -321,15 +321,19 @@ func Run(args []string) error {
 	if cfgErr != nil {
 		log.Printf("keymap: %v", cfgErr)
 	}
-	s := &server{st: st, cfg: cfg, panes: map[string]*paneConn{}, clients: map[*client]bool{},
+	s := &server{
+		st: st, cfg: cfg, panes: map[string]*paneConn{}, clients: map[*client]bool{},
 		cols: st.Cols, rows: st.Rows, adopt: adopt,
-		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{}}
+		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},
+	}
 	if s.cols < 20 {
 		s.cols = 80
 	}
 	if s.rows < 5 {
 		s.rows = 24
 	}
+
+	applyDefaultFold(st, cfg)
 
 	win := st.ActiveWindow()
 	if win.Root == nil {
@@ -391,6 +395,21 @@ func Run(args []string) error {
 			return err
 		}
 		go s.serve(c)
+	}
+}
+
+// applyDefaultFold gives every restored window the config's fold state when the
+// config carries an explicit default-fold node. An absent node leaves each
+// window's saved fold state alone.
+func applyDefaultFold(st *session.State, cfg *keymap.Config) {
+	if !cfg.DefaultFoldSet() {
+		return
+	}
+	unfolded := cfg.DefaultFold()
+	for _, ws := range st.Workspaces {
+		for _, w := range ws.Windows {
+			w.Unfolded = unfolded
+		}
 	}
 }
 

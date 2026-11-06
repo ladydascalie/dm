@@ -4,9 +4,10 @@ package keymap
 
 import (
 	"bytes"
-	"dm/internal/theme"
 	"fmt"
 	"strings"
+
+	"dm/internal/theme"
 )
 
 // MatchState tells the caller what Match found in the input buffer.
@@ -56,6 +57,15 @@ func (c *Config) Theme() theme.Theme {
 		return theme.DefaultTheme()
 	}
 	return c.theme
+}
+
+// DefaultFoldSet reports whether the config carried a default-fold node.
+// A false result leaves each restored window's saved fold state alone.
+func (c *Config) DefaultFoldSet() bool {
+	if c == nil {
+		return false
+	}
+	return c.defaultFoldSet
 }
 
 // DefaultFold reports whether a new window's rail starts unfolded. The zero

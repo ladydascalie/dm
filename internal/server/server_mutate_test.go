@@ -14,6 +14,33 @@ import (
 	"dm/internal/wire"
 )
 
+// TestApplyDefaultFold proves an explicit default-fold node overrides saved
+// window folds, while an absent node leaves them alone.
+func TestApplyDefaultFold(t *testing.T) {
+	st := session.NewState("fold")
+	w := st.Workspaces[0].Windows[0]
+	w.Unfolded = false
+
+	cfg, err := keymap.ParseConfig(`default-fold "unfold"`)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	applyDefaultFold(st, cfg)
+	if !w.Unfolded {
+		t.Fatal("Unfolded = false after default-fold unfold, want true")
+	}
+
+	w.Unfolded = true
+	absent, err := keymap.ParseConfig(`prefix "ctrl+b"`)
+	if err != nil {
+		t.Fatalf("ParseConfig absent: %v", err)
+	}
+	applyDefaultFold(st, absent)
+	if !w.Unfolded {
+		t.Fatal("Unfolded = false after absent node, want saved true")
+	}
+}
+
 // TestNewWindowTakesDefaultFold proves a new window's Unfolded follows the
 // config's default-fold setting. It starts a fake pane daemon so ensurePane
 // adopts instead of spawning a real shell.
