@@ -1,4 +1,4 @@
-package main
+package client
 
 // The client side of the message box float: the tests that drive it through a
 // tui. The view's own tests live in internal/boxview.
@@ -52,19 +52,6 @@ func boxScreen(t *testing.T, b *boxview.BoxView, cols, rows int) vt10x.Terminal 
 		t.Fatalf("replay the box: %v", err)
 	}
 	return screen
-}
-
-// boxScreenRow reads one row of a replayed screen, trailing blanks dropped.
-func boxScreenRow(screen vt10x.Terminal, y, x, w int) string {
-	var b strings.Builder
-	for i := 0; i < w; i++ {
-		r := switcherCell(screen, x+i, y)
-		if r == 0 {
-			r = ' '
-		}
-		b.WriteRune(r)
-	}
-	return strings.TrimRight(b.String(), " ")
 }
 
 // nextBoxMsg takes the next request the client sends, failing on a timeout.
@@ -140,45 +127,6 @@ func TestBoxPushRefreshesOpenView(t *testing.T) {
 	case m := <-got:
 		t.Fatalf("a closed view sent %q", m.Action)
 	case <-time.After(50 * time.Millisecond):
-	}
-}
-
-// TestBoxPostPushesAndEchoes: a post pushes one box frame to every attached
-// client and the reply names the action it answers.
-func TestBoxPostPushesAndEchoes(t *testing.T) {
-	s := boxServer(t)
-	cl, conn := boxConn(t)
-	s.mu.Lock()
-	s.clients[cl] = true
-	s.mu.Unlock()
-	t.Cleanup(func() {
-		s.mu.Lock()
-		delete(s.clients, cl)
-		s.mu.Unlock()
-		cl.shutdown()
-	})
-
-	s.handleReq(cl, wire.Msg{
-		Type: "req", Action: "msg-post",
-		Res: json.RawMessage(`{"key":"lane/a","state":"done","msg":"gate green"}`),
-	})
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	push, err := wire.ReadMsg(conn)
-	if err != nil {
-		t.Fatalf("push: %v", err)
-	}
-	if push.Type != "box" {
-		t.Fatalf("first frame = %q, want the box push", push.Type)
-	}
-	reply, err := wire.ReadMsg(conn)
-	if err != nil {
-		t.Fatalf("reply: %v", err)
-	}
-	if reply.Type != "resp" || !reply.OK {
-		t.Fatalf("reply = %+v, want a good resp", reply)
-	}
-	if reply.Action != "msg-post" {
-		t.Fatalf("reply action = %q, want msg-post", reply.Action)
 	}
 }
 
