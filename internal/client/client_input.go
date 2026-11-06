@@ -1793,6 +1793,7 @@ func (t *tui) isRailDoubleClick(y int) bool {
 func (t *tui) clearRailPress() {
 	t.railPressAt = time.Time{}
 }
+
 // tabBarClick consumes a mouse event over the tab bar. A left press on a tab
 // sends select-window with the window index. A second press on the same tab
 // within the double-click window opens the window rename prompt. A press
@@ -1858,11 +1859,13 @@ func (t *tui) tabBarClick(ev mouseEvent, x, y int) bool {
 
 // railClick consumes a mouse event over the sidebar. A left press on the bottom
 // control row toggles the rail full <-> thin. A left press on a workspace row
-// focuses its first pane; a left press on the caret cell toggles its fold. A
-// left press on a pane row focuses that pane; a second press within the double
-// click window opens the pane's rename prompt. Every other rail event is
-// swallowed so it never reaches a pane, and a drag that began in the rail stays
-// swallowed outside it.
+// focuses its first pane; a left press on the workspace caret toggles its fold.
+// A left press on a window row focuses the window's first pane; a left press on
+// the window caret toggles the window fold; a second press within the double
+// click window opens the window's rename prompt. A left press on a pane row
+// focuses that pane; a second press within the double click window opens the
+// pane's rename prompt. Every other rail event is swallowed so it never reaches
+// a pane, and a drag that began in the rail stays swallowed outside it.
 func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	if t.snap == nil || t.snap.Rail <= 0 {
 		return false
@@ -1920,15 +1923,30 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
-		t.clearRailPress()
 		if id := rail.RailFoldAt(t.snap, x, y); id != "" {
-			// The caret cell toggles the workspace's fold without moving
-			// focus.
+			// The caret cell toggles the workspace's or window's fold
+			// without moving focus.
+			t.clearRailPress()
 			if t.conn != nil {
 				_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
 			}
 			return true
 		}
+		if id := rail.RailWindowAt(t.snap, x, y); id != "" {
+			// A window row focuses the first available pane in that window,
+			// which also makes the window active. A second press on the same
+			// row within the double click window opens the window rename
+			// prompt.
+			if t.isRailDoubleClick(y) {
+				if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+					t.openRenamePromptFor("window", it.Window, it.WindowName)
+				}
+			} else if pid := t.firstPaneInWindow(id); pid != "" && t.conn != nil {
+				_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: pid})
+			}
+			return true
+		}
+		t.clearRailPress()
 		if ws := rail.RailWorkspaceAt(t.snap, x, y); ws != "" {
 			// The workspace row focuses the first pane in the workspace.
 			if t.conn != nil {
@@ -1954,6 +1972,21 @@ func (t *tui) windowForPane(pane string) string {
 	for _, p := range t.snap.All {
 		if p.ID == pane {
 			return p.Window
+		}
+	}
+	return ""
+}
+
+// firstPaneInWindow returns the first pane in the window from the snapshot, or
+// "" when the window has no pane. A window row click and its menu Focus both
+// go here.
+func (t *tui) firstPaneInWindow(window string) string {
+	if t.snap == nil {
+		return ""
+	}
+	for _, p := range t.snap.All {
+		if p.Window == window {
+			return p.ID
 		}
 	}
 	return ""

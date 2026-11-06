@@ -58,9 +58,12 @@ type RailItem struct {
 }
 
 // RailItems flattens a snapshot into sidebar rows in the server's order: a
-// workspace row, then its pane rows when it is unfolded. A gap row separates
-// workspace blocks. The thin rail is a glyph column: one pane row per pane, in
-// snapshot order, whatever the fold. It has no workspace row and no gap row.
+// workspace row, then per window a Window row, that window's note row when it
+// has a message and is unfolded, and its pane rows when it is unfolded. A gap
+// row separates workspace blocks. A folded workspace hides its windows and
+// panes; a folded window hides only its panes. The thin rail is a glyph
+// column: one pane row per pane, in snapshot order, whatever the fold. It has
+// no workspace row, no window row, no note row and no gap row.
 func RailItems(snap *wire.Snapshot) []RailItem {
 	if snap == nil {
 		return nil
@@ -73,8 +76,40 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		return out
 	}
 	panes := map[string]int{}
-	for _, p := range snap.All {
+	focus := map[string]int{}
+	first := map[string]int{}
+	withBranch := map[string]int{}
+	for i, p := range snap.All {
 		panes[p.Workspace]++
+		if _, ok := first[p.Window]; !ok {
+			first[p.Window] = i
+		}
+		if p.Focus {
+			focus[p.Window] = i
+		}
+		if p.Branch != "" {
+			if _, ok := withBranch[p.Window]; !ok {
+				withBranch[p.Window] = i
+			}
+		}
+	}
+	// The window line takes its folder and git state from one pane: the
+	// focused pane, else the first pane in that window that carries a branch,
+	// else the window's first pane.
+	source := func(window string) (wire.AllPane, bool) {
+		if i, ok := focus[window]; ok && snap.All[i].Branch != "" {
+			return snap.All[i], true
+		}
+		if i, ok := withBranch[window]; ok {
+			return snap.All[i], true
+		}
+		if i, ok := focus[window]; ok {
+			return snap.All[i], true
+		}
+		if i, ok := first[window]; ok {
+			return snap.All[i], true
+		}
+		return wire.AllPane{}, false
 	}
 	// A workspace keeps its preferred slot when it is free. When two live
 	// workspaces hash alike, the later one takes the next free slot, so no two
@@ -93,13 +128,13 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		return pref
 	}
 	var out []RailItem
-	ws := ""
+	ws, win := "", ""
 	for _, p := range snap.All {
 		if p.Workspace != ws {
 			if ws != "" {
 				out = append(out, RailItem{Kind: Gap})
 			}
-			ws = p.Workspace
+			ws, win = p.Workspace, ""
 			name := p.WorkspaceName
 			if name == "" {
 				name = p.Workspace
@@ -111,7 +146,39 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 				Folded: !p.WorkspaceUnfolded,
 			})
 		}
+		// A folded workspace hides its windows and their panes.
 		if !p.WorkspaceUnfolded {
+			continue
+		}
+		if p.Window != win {
+			win = p.Window
+			item := RailItem{
+				Kind: Window, Text: p.WindowName, Window: p.Window,
+				WindowName: p.WindowName, Workspace: p.Workspace,
+				Folded: !p.WindowUnfolded,
+			}
+			if src, ok := source(p.Window); ok {
+				item.Folder = RailFolder(src.Cwd, src.Root)
+				item.Cwd = src.Cwd
+				item.Branch = src.Branch
+				item.Worktree = src.Worktree
+				item.InRepo = src.InRepo
+				item.Dirty = src.Dirty
+				item.Added = src.Added
+				item.Deleted = src.Deleted
+				item.Message = src.Message
+			}
+			out = append(out, item)
+			if item.Message != "" && p.WindowUnfolded {
+				out = append(out, RailItem{
+					Kind: WindowNote, Text: item.Message, Window: p.Window,
+					WindowName: p.WindowName, Workspace: p.Workspace,
+					Folder: item.Folder, Cwd: item.Cwd,
+				})
+			}
+		}
+		// A folded window hides only its panes.
+		if !p.WindowUnfolded {
 			continue
 		}
 		out = append(out, RailPaneRow(p))
@@ -440,6 +507,29 @@ func RailPaneAt(snap *wire.Snapshot, x, y int) string {
 	return items[y].Pane
 }
 
+// RailWindowAt returns the window whose row is under x,y, for a focus click. A
+// window line and its note line both answer. The thin rail has no window row,
+// so it never answers.
+func RailWindowAt(snap *wire.Snapshot, x, y int) string {
+	if snap == nil || snap.Rail <= 0 {
+		return ""
+	}
+	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+		return ""
+	}
+	if layout.RailCompact(snap.Rail) {
+		return ""
+	}
+	items := RailItems(snap)
+	if y >= len(items) {
+		return ""
+	}
+	if k := items[y].Kind; k != Window && k != WindowNote {
+		return ""
+	}
+	return items[y].Window
+}
+
 // RailWorkspaceAt returns the workspace whose row is under x,y. The thin rail
 // has no workspace row, so it never answers.
 func RailWorkspaceAt(snap *wire.Snapshot, x, y int) string {
@@ -462,9 +552,10 @@ func RailWorkspaceAt(snap *wire.Snapshot, x, y int) string {
 	return items[y].Workspace
 }
 
-// RailFoldAt returns the workspace whose fold caret is under x,y. It only
-// answers for the caret cell, so a click on the workspace name still focuses
-// the workspace's first pane.
+// RailFoldAt returns the workspace or window whose fold caret is under x,y. A
+// workspace caret sits in column 0 and a window caret in column 2. It only
+// answers for the caret cell, so a click on the row's name still focuses the
+// row's first pane.
 func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
@@ -480,13 +571,19 @@ func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 		return ""
 	}
 	it := items[y]
-	if it.Kind != Workspace {
-		return ""
+	switch it.Kind {
+	case Workspace:
+		if x != 0 {
+			return ""
+		}
+		return it.Workspace
+	case Window:
+		if x != 2 {
+			return ""
+		}
+		return it.Window
 	}
-	if x != 0 {
-		return ""
-	}
-	return it.Workspace
+	return ""
 }
 
 // RailItemAt returns the rail row under x,y. A point outside the rail, on the

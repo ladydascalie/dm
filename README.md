@@ -353,14 +353,26 @@ detach.
 ## Sidebar
 
 The left columns of the screen show a sidebar when the session asks for one.
-It is a flat list: a workspace row is a foldable header. Panes nest directly
-under it. There is no window row and no window note row. A workspace starts
-unfolded. A workspace row leads with a caret in the workspace's own accent
-colour, then its name in bold, then the pane count at the right edge in dim
-grey. The accent is one of six hues: a stable hash of the workspace id picks
-the preferred one, and the rail gives up to six live workspaces distinct hues.
-A workspace keeps its accent while the workspace list holds. One blank row
-separates workspace blocks.
+It is a tree: a workspace row, then its windows, then each window's panes. A
+workspace starts unfolded. A workspace row leads with a caret in the
+workspace's own accent colour, then its name in bold, then the pane count at
+the right edge in dim grey. The accent is one of six hues: a stable hash of the
+workspace id picks the preferred one, and the rail gives up to six live
+workspaces distinct hues. A workspace keeps its accent while the workspace list
+holds. One blank row separates workspace blocks.
+
+Under an unfolded workspace, each window gets a window row. It leads with a
+caret at the second indent, then the folder of its source pane, then the branch
+in dim grey, then the dirty counts at the right edge. A pane that reports no
+directory falls back to the window name. The source pane is the focused pane
+when it carries a branch, else the first pane in the window that carries a
+branch, else the focused pane, else the window's first pane. When the source
+pane has a commit message, a dim note row sits directly under the window row.
+The window's pane rows follow when the window is unfolded.
+
+Fold is two-level. A folded workspace hides its windows and panes and leaves
+only the workspace row. A folded window keeps its row and hides only its panes
+and note row. The caret on either row toggles that level.
 
 An unfolded pane row labels itself with its recorded name, then the `app=` it
 last reported, then the pane id, with a state glyph in a colour per state beside
@@ -373,13 +385,17 @@ agent, and both the mark and the last `app=` are stored in the state file. The
 focused pane's row is highlighted.
 
 A left press on a workspace row focuses the first available pane in that
-workspace. A left press on the row's fold caret toggles the pane list without
-changing focus. A left press on a pane row focuses that pane. A pane in another
-window switches the active window as well. Double-clicking a pane row opens the
-inline rename prompt for that pane. Right click opens the row menu for the row
-under the pointer: rename, close, new, fold and focus, as the row allows. The
-menu takes its keys from the main keymap. The bottom row toggles the rail
-between full and thin.
+workspace. A left press on the workspace caret toggles the workspace fold
+without changing focus. A left press on a window row focuses the first
+available pane in that window and makes that window the active window. A left
+press on the window caret toggles the window fold without changing focus. A
+left press on a pane row focuses that pane. A pane in another window switches
+the active window as well. Double-clicking a window row opens the inline rename
+prompt for that window, the same prompt the tab bar double-click opens.
+Double-clicking a pane row opens the inline rename prompt for that pane. Right
+click opens the row menu for the row under the pointer: rename, close, new,
+fold and focus, as the row allows. The menu takes its keys from the main
+keymap. The bottom row toggles the rail between full and thin.
 
 A pane keeps the server told where its shell is, so a `cd` moves the folder the
 rail shows and the folder the next pane, window or workspace opens in. The
@@ -389,17 +405,19 @@ it starts in the folder of the pane it was created from; `rename-window`
 overrides the name. A window whose label is still the old positional number is
 renamed from its pane's folder when the session loads.
 
-A long label is cut with `…` so the pane count fits. The rail paints its own
-dark background. The built-in theme uses explicit RGB colours, not palette
-slots, and every label and glyph of it reaches WCAG AA contrast on both the
-rail and the focused row. Icons use Nerd Font code points when `fc-list` finds a
-Nerd font; `DM_NERD=1` forces them and `DM_NERD=0` falls back to the Unicode
-glyphs. The rail is 34 columns by default, at most a third of the screen and
-never wider than 46 columns; `set-rail` changes it. `prefix b` cycles the
-sidebar through three states: full, thin, and hidden. The thin rail is four
-columns: the agent bar, one state glyph per pane, and no names. It always lists
-panes, folded or not, and packs one row per pane, with no header, note or gap
-row. A hidden or thin sidebar remembers the last full width.
+A long label is cut with `…` so the right-aligned stats fit, and the branch is
+dropped first. When even that cannot, the rail draws no tail at all, never half
+a pair. The rail paints its own dark background. The built-in theme uses
+explicit RGB colours, not palette slots, and every label and glyph of it
+reaches WCAG AA contrast on both the rail and the focused row. Icons use Nerd
+Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces them and
+`DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns by
+default, at most a third of the screen and never wider than 46 columns;
+`set-rail` changes it. `prefix b` cycles the sidebar through three states:
+full, thin, and hidden. The thin rail is four columns: the agent bar, one state
+glyph per pane, and no names. It always lists panes, folded or not, and packs
+one row per pane, with no header, note or gap row. A hidden or thin sidebar
+remembers the last full width.
 
 The rail's last column is a grab strip: drag it to resize the rail from four
 columns up to a third of the screen, capped at 46. A drag to the left collapses
