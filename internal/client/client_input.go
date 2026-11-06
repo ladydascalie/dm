@@ -1859,11 +1859,13 @@ func (t *tui) tabBarClick(ev mouseEvent, x, y int) bool {
 
 // railClick consumes a mouse event over the sidebar. A left press on the bottom
 // control row toggles the rail full <-> thin. A left press on a workspace row
-// focuses its first pane; a left press on the caret cell toggles its fold. A
-// left press on a pane row focuses that pane; a second press within the double
-// click window opens the pane's rename prompt. Every other rail event is
-// swallowed so it never reaches a pane, and a drag that began in the rail stays
-// swallowed outside it.
+// focuses its first pane; a left press on the workspace caret toggles its fold.
+// A left press on a window row focuses the window's first pane; a left press on
+// the window caret toggles the window fold; a second press within the double
+// click window opens the window's rename prompt. A left press on a pane row
+// focuses that pane; a second press within the double click window opens the
+// pane's rename prompt. Every other rail event is swallowed so it never reaches
+// a pane, and a drag that began in the rail stays swallowed outside it.
 func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	if t.snap == nil || t.snap.Rail <= 0 {
 		return false

@@ -363,12 +363,12 @@ holds. One blank row separates workspace blocks.
 
 Under an unfolded workspace, each window gets a window row. It leads with a
 caret at the second indent, then the folder of its source pane, then the branch
-in dim grey, then the dirty counts at the right edge. The source pane is the
-focused pane, else the first pane in the window that carries a branch, else the
-window's first pane. A pane that reports no directory falls back to the window
-name. When the source pane has a commit message, a dim note row sits directly
-under the window row. The window's pane rows follow when the window is
-unfolded.
+in dim grey, then the dirty counts at the right edge. A pane that reports no
+directory falls back to the window name. The source pane is the focused pane
+when it carries a branch, else the first pane in the window that carries a
+branch, else the focused pane, else the window's first pane. When the source
+pane has a commit message, a dim note row sits directly under the window row.
+The window's pane rows follow when the window is unfolded.
 
 Fold is two-level. A folded workspace hides its windows and panes and leaves
 only the workspace row. A folded window keeps its row and hides only its panes

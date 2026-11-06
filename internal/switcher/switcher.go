@@ -17,8 +17,9 @@ type Switcher struct {
 	Rect layout.Rect
 
 	// tree is the rail tree the float shows: never compact, every workspace
-	// unfolded, gaps kept. rows are the surviving indices into tree, in tree
-	// order, and sel is one of them. A sel of -1 selects nothing.
+	// and window unfolded, no note rows, gaps kept. rows are the surviving
+	// indices into tree, in tree order, and sel is one of them. A sel of -1
+	// selects nothing.
 	tree []rail.RailItem
 	rows []int
 	sel  int
@@ -71,9 +72,10 @@ func (s *Switcher) Sync(snap *wire.Snapshot) {
 }
 
 // switcherTree is the rail tree the float shows: rail.RailItems on a copy of the
-// snapshot with no rail, so the rows are never compact, and with every workspace
-// forced unfolded, so a folded workspace never hides a pane the switcher could
-// jump to. Gap rows stay to keep the blocks apart, and only they are
+// snapshot with no rail, so the rows are never compact, and with every
+// workspace and window forced unfolded, so a fold never hides a pane the
+// switcher could jump to. Note rows are dropped: a switcher is not a status
+// board. Gap rows stay to keep the blocks apart, and only they are
 // unselectable.
 func switcherTree(snap *wire.Snapshot) []rail.RailItem {
 	if snap == nil {
@@ -85,8 +87,16 @@ func switcherTree(snap *wire.Snapshot) []rail.RailItem {
 	copy(cp.All, snap.All)
 	for i := range cp.All {
 		cp.All[i].WorkspaceUnfolded = true
+		cp.All[i].WindowUnfolded = true
 	}
-	return rail.RailItems(&cp)
+	var out []rail.RailItem
+	for _, it := range rail.RailItems(&cp) {
+		if it.Kind == rail.WindowNote {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // switcherPanes indexes the snapshot by pane id, so a pane row can match on the
@@ -168,7 +178,8 @@ func (s *Switcher) PreviewLines() []string {
 
 // filter rebuilds the surviving row indices for the current query, in tree
 // order. An empty query keeps every row. Otherwise a pane survives by its own
-// match, and a workspace header by its own match or by a pane under it. A gap
+// match, a window line by its own match, which keeps every pane under it, or by
+// a pane under it, and a workspace header the same way one level up. A gap
 // survives between two surviving blocks.
 func (s *Switcher) filter() {
 	q := s.Query()
@@ -177,16 +188,33 @@ func (s *Switcher) filter() {
 	for bi := range blocks {
 		b := &blocks[bi]
 		_, wsMatch := s.match(s.tree[b.row], q)
-		under := false
-		for _, p := range b.panes {
-			_, ok := s.match(s.tree[p], q)
-			keep[p] = ok
-			under = under || ok
+		for wi := range b.wins {
+			w := &b.wins[wi]
+			_, winMatch := s.match(s.tree[w.row], q)
+			under := false
+			for _, p := range w.panes {
+				_, ok := s.match(s.tree[p], q)
+				keep[p] = ok
+				under = under || ok
+			}
+			w.keep = winMatch || under
+			if winMatch {
+				for _, p := range w.panes {
+					keep[p] = true
+				}
+			}
+			keep[w.row] = w.keep
 		}
-		b.keep = wsMatch || under
+		b.keep = wsMatch
+		for _, w := range b.wins {
+			b.keep = b.keep || w.keep
+		}
 		if wsMatch {
-			for _, p := range b.panes {
-				keep[p] = true
+			for _, w := range b.wins {
+				keep[w.row] = true
+				for _, p := range w.panes {
+					keep[p] = true
+				}
 			}
 		}
 		keep[b.row] = b.keep
@@ -204,17 +232,23 @@ func (s *Switcher) filter() {
 	}
 }
 
-// switcherBlock is one workspace header, the pane rows under it and the gap row
-// that follows the block, if any.
-type switcherBlock struct {
-	row   int   // the workspace header
+// switcherWindow is one window line and the pane rows under it.
+type switcherWindow struct {
+	row   int   // the window line
 	panes []int // the pane rows under it
-	gap   int
 	keep  bool
 }
 
-// switcherBlocks splits a rail tree into its workspace blocks. Panes group
-// directly under the workspace header: the flat rail has no window row.
+// switcherBlock is one workspace header, the windows under it and the gap row
+// that follows the block, if any.
+type switcherBlock struct {
+	row  int // the workspace header
+	wins []switcherWindow
+	gap  int
+	keep bool
+}
+
+// switcherBlocks splits a rail tree into its workspace blocks.
 func switcherBlocks(tree []rail.RailItem) []switcherBlock {
 	var out []switcherBlock
 	for i, it := range tree {
@@ -225,12 +259,22 @@ func switcherBlocks(tree []rail.RailItem) []switcherBlock {
 			if n := len(out); n > 0 {
 				out[n-1].gap = i
 			}
+		case rail.Window:
+			if len(out) == 0 {
+				continue
+			}
+			b := &out[len(out)-1]
+			b.wins = append(b.wins, switcherWindow{row: i})
 		case rail.Pane:
 			if len(out) == 0 {
 				continue
 			}
 			b := &out[len(out)-1]
-			b.panes = append(b.panes, i)
+			if len(b.wins) == 0 {
+				continue
+			}
+			w := &b.wins[len(b.wins)-1]
+			w.panes = append(w.panes, i)
 		}
 	}
 	return out
@@ -281,7 +325,8 @@ func (s *Switcher) Selected() (rail.RailItem, bool) {
 }
 
 // target is the id of the selected row: the workspace id for a workspace
-// header and the pane id for a pane row. It is empty when nothing is selected.
+// header, the window id for a window line and the pane id for a pane row. It is
+// empty when nothing is selected.
 func (s *Switcher) Target() string {
 	it, ok := s.Selected()
 	if !ok {

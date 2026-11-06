@@ -9,11 +9,11 @@ import (
 	"dm/internal/wire"
 )
 
-// switcherSnap is a session for the switcher: two workspaces and five panes in
-// three windows. Every workspace is folded, so the switcher must force it open.
-// w1 sits in the folder api with the branch dm-api, w2 in the folder web, and
-// w2p2 works in a subfolder, so a query can match a pane's folder without
-// matching its sibling's.
+// switcherSnap is a session for the switcher: two workspaces, three windows and
+// five panes. Every window is folded and w1's pane carries a status message, so
+// a rail note row would appear if the switcher kept one. w1 sits in the folder
+// api with the branch dm-api, w2 in the folder web, and w2p2 works in a
+// subfolder, so a query can match a window without matching one of its panes.
 func switcherSnap() *wire.Snapshot {
 	snap := &wire.Snapshot{
 		Cols: 100, Rows: 20, Rail: layout.DefaultRail,
@@ -48,11 +48,6 @@ func switcherSnap() *wire.Snapshot {
 			Root: "/work/dm",
 		},
 	}
-	// The switcher opens every window so no folded window hides a pane it
-	// could jump to. The workspace fold is forced in switcherTree.
-	for i := range snap.All {
-		snap.All[i].WindowUnfolded = true
-	}
 	return snap
 }
 
@@ -77,12 +72,14 @@ func switcherKindName(k rail.RailKind) string {
 	switch k {
 	case rail.Workspace:
 		return "ws"
+	case rail.Window:
+		return "win"
 	case rail.Pane:
 		return "pane"
 	case rail.Gap:
 		return "gap"
 	}
-	return "other"
+	return "note"
 }
 
 // switcherRowNames is one "kind id" label per surviving row, in tree order.
@@ -106,9 +103,9 @@ func switcherType(s *Switcher, q string) {
 	}
 }
 
-// TestSwitcherTree checks the tree the float shows: workspaces and panes in the
-// rail's order, a gap between the blocks, and every pane of a folded workspace
-// listed. The raw tree keeps the restored window rows; the visible rows do not.
+// TestSwitcherTree checks the tree the float shows: workspaces, windows and
+// panes in the rail's order, a gap between the blocks, no note row, and every
+// pane of a folded window listed.
 func TestSwitcherTree(t *testing.T) {
 	snap := switcherSnap()
 	s := NewSwitcher(layout.Rect{X: 10, Y: 4, W: 80, H: 24}, snap)
@@ -116,44 +113,34 @@ func TestSwitcherTree(t *testing.T) {
 		t.Fatalf("rect = %+v, want the one it opened with", s.Rect)
 	}
 	want := []string{
-		"ws s1", "pane w1p1", "pane w1p2", "pane w2p1", "pane w2p2",
-		"gap", "ws s2", "pane w3p1",
+		"ws s1", "win w1", "pane w1p1", "pane w1p2",
+		"win w2", "pane w2p1", "pane w2p2",
+		"gap", "ws s2", "win w3", "pane w3p1",
 	}
 	if got := switcherRowNames(s); !reflect.DeepEqual(got, want) {
 		t.Fatalf("tree = %v, want %v", got, want)
 	}
 	gaps := 0
-	windows := 0
 	for _, it := range s.tree {
-		if it.Kind == rail.Window {
-			windows++
+		if it.Kind == rail.WindowNote {
+			t.Fatalf("tree kept a note row: %+v", it)
 		}
 		if it.Kind == rail.Gap {
 			gaps++
 		}
 	}
-	if windows != 3 {
-		t.Fatalf("tree has %d window rows, want three", windows)
-	}
 	if gaps != 1 {
 		t.Fatalf("tree has %d gap rows, want one", gaps)
 	}
-	// The switcher lists panes only: window and note rows stay in the tree but
-	// never become visible rows.
-	for _, row := range s.rows {
-		if k := s.tree[row].Kind; k == rail.Window || k == rail.WindowNote {
-			t.Fatalf("visible row kept a window or note row: %+v", s.tree[row])
-		}
-	}
-	// Every workspace of the fixture is folded, and its panes are still there.
+	// Every window of the fixture is folded, and its panes are still there.
 	for _, p := range snap.All {
-		if p.WorkspaceUnfolded {
+		if p.WindowUnfolded {
 			t.Fatalf("pane %s is not folded in the fixture", p.ID)
 		}
 	}
 	for _, id := range []string{"w1p1", "w1p2", "w2p1", "w2p2", "w3p1"} {
 		if !s.hasPane(id) {
-			t.Fatalf("folded workspace hid pane %s", id)
+			t.Fatalf("folded window hid pane %s", id)
 		}
 	}
 	// An empty query selects the first pane row.
@@ -175,44 +162,45 @@ func TestSwitcherFilter(t *testing.T) {
 			// The folder api is a prefix of api and of api2, and a substring of
 			// tools/capped, so the prefix wins the selection.
 			query: "ap",
-			want:  []string{"ws s1", "pane w1p1", "pane w1p2", "pane w2p2"},
+			want:  []string{"ws s1", "win w1", "pane w1p1", "pane w1p2", "win w2", "pane w2p2"},
 			pick:  "w1p1",
 		},
 		{
-			// One pane matches: its workspace stays, every other pane goes, and
-			// the gap goes with the block it separated.
+			// One pane matches: its window and workspace stay, every other pane
+			// goes, and the gap goes with the block it separated.
 			query: "footer",
-			want:  []string{"ws s1", "pane w2p1"},
+			want:  []string{"ws s1", "win w2", "pane w2p1"},
 			pick:  "w2p1",
 		},
 		{
-			// The pane matches on its folder; its sibling in another folder goes.
+			// The window line matches on its folder, so the pane that works in
+			// another folder stays under it.
 			query: "web",
-			want:  []string{"ws s1", "pane w2p1"},
+			want:  []string{"ws s1", "win w2", "pane w2p1", "pane w2p2"},
 			pick:  "w2p1",
 		},
 		{
 			// A workspace id keeps its whole subtree.
 			query: "s2",
-			want:  []string{"ws s2", "pane w3p1"},
+			want:  []string{"ws s2", "win w3", "pane w3p1"},
 			pick:  "w3p1",
 		},
 		{
-			// A pane branch keeps only the pane that carries it.
+			// A window branch keeps every pane under that window.
 			query: "dm-api",
-			want:  []string{"ws s1", "pane w1p1"},
+			want:  []string{"ws s1", "win w1", "pane w1p1", "pane w1p2"},
 			pick:  "w1p1",
 		},
 		{
 			// A workspace name keeps its whole subtree.
 			query: "docs",
-			want:  []string{"ws s2", "pane w3p1"},
+			want:  []string{"ws s2", "win w3", "pane w3p1"},
 			pick:  "w3p1",
 		},
 		{
-			// A window name matches every pane under that window.
+			// A window name keeps every pane under that window.
 			query: "two",
-			want:  []string{"ws s1", "pane w2p1", "pane w2p2"},
+			want:  []string{"ws s1", "win w2", "pane w2p1", "pane w2p2"},
 			pick:  "w2p1",
 		},
 	}
@@ -235,7 +223,7 @@ func TestSwitcherBackspace(t *testing.T) {
 	s := NewSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
 	all := switcherRowNames(s)
 	switcherType(s, "s2")
-	if got := switcherRowNames(s); !reflect.DeepEqual(got, []string{"ws s2", "pane w3p1"}) {
+	if got := switcherRowNames(s); !reflect.DeepEqual(got, []string{"ws s2", "win w3", "pane w3p1"}) {
 		t.Fatalf("query s2 keeps %v", got)
 	}
 	s.Backspace()
@@ -277,24 +265,24 @@ func TestSwitcherMove(t *testing.T) {
 		s.Move(1)
 	}
 	want := []string{
-		"w1p1", "w1p2", "w2p1", "w2p2", "s2", "w3p1",
-		"w3p1", "w3p1", "w3p1", "w3p1",
+		"w1p1", "w1p2", "w2", "w2p1", "w2p2", "s2", "w3", "w3p1",
+		"w3p1", "w3p1", "w3p1", "w3p1", "w3p1",
 	}
 	if !reflect.DeepEqual(walked, want) {
 		t.Fatalf("walked %v, want %v", walked, want)
 	}
 	// Up again skips the gap from the other side.
 	s.Move(-1)
+	if it, _ := s.Selected(); switcherTarget(it) != "w3" {
+		t.Fatalf("up from w3p1 = %q, want w3", switcherTarget(it))
+	}
+	s.Move(-1)
 	if it, _ := s.Selected(); switcherTarget(it) != "s2" {
-		t.Fatalf("up from w3p1 = %q, want s2", switcherTarget(it))
+		t.Fatalf("up from w3 = %q, want s2", switcherTarget(it))
 	}
 	s.Move(-1)
 	if it, _ := s.Selected(); switcherTarget(it) != "w2p2" {
-		t.Fatalf("up from s2 = %q, want w2p2", switcherTarget(it))
-	}
-	s.Move(-1)
-	if it, _ := s.Selected(); switcherTarget(it) != "w2p1" {
-		t.Fatalf("up over the gap = %q, want w2p1", switcherTarget(it))
+		t.Fatalf("up over the gap = %q, want w2p2", switcherTarget(it))
 	}
 	// The top of the list holds.
 	s.Move(-30)
@@ -382,11 +370,11 @@ func TestSwitcherPreview(t *testing.T) {
 	}
 	// Only a pane row has a screen to preview.
 	s.Move(-1)
-	if it, _ := s.Selected(); it.Kind != rail.Workspace {
-		t.Fatalf("row above the pane = kind %d, want the workspace header", it.Kind)
+	if it, _ := s.Selected(); it.Kind != rail.Window {
+		t.Fatalf("row above the pane = kind %d, want the window line", it.Kind)
 	}
 	if s.PreviewDue() {
-		t.Fatal("the preview is due on a workspace header")
+		t.Fatal("the preview is due on a window line")
 	}
 }
 
@@ -395,6 +383,10 @@ func TestSwitcherTarget(t *testing.T) {
 	s := NewSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
 	if got := s.Target(); got != "w1p1" {
 		t.Fatalf("target on the first pane row = %q, want w1p1", got)
+	}
+	s.Move(-1)
+	if it, _ := s.Selected(); it.Kind != rail.Window || s.Target() != "w1" {
+		t.Fatalf("target on the window line = %q (kind %d), want w1", s.Target(), it.Kind)
 	}
 	s.Move(-1)
 	if it, _ := s.Selected(); it.Kind != rail.Workspace || s.Target() != "s1" {

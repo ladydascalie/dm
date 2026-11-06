@@ -507,9 +507,9 @@ func RailPaneAt(snap *wire.Snapshot, x, y int) string {
 	return items[y].Pane
 }
 
-// RailWindowAt returns the window whose row is under x,y, for a fold click. A
-// window line and its note line both fold the window. The thin rail has no
-// window row, so it never answers.
+// RailWindowAt returns the window whose row is under x,y, for a focus click. A
+// window line and its note line both answer. The thin rail has no window row,
+// so it never answers.
 func RailWindowAt(snap *wire.Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
