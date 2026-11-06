@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/rail"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -219,12 +220,12 @@ func TestRailControlClickCollapses(t *testing.T) {
 	// The control is zero-based row 8, so the one-based mouse row is 9.
 	for x := 1; x <= 20; x++ {
 		tui.handleMouse(mouseEvent{btn: 0, x: x, y: 9})
-		m := nextMsg(t, got)
+		m := testutil.NextMsg(t, got)
 		if m.Type != "req" || m.Action != "set-rail" || m.Index != layout.CollapsedRail {
 			t.Fatalf("click at column %d sent %+v, want set-rail %d", x, m, layout.CollapsedRail)
 		}
 		tui.handleMouse(mouseEvent{btn: 0, release: true, x: x, y: 9})
-		noMsg(t, got)
+		testutil.NoMsg(t, got)
 	}
 }
 
@@ -240,7 +241,7 @@ func TestRailControlClickExpands(t *testing.T) {
 		tui, got := ctlTUI(t, layout.CollapsedRail)
 		tui.railWant = c.railWant
 		tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 9})
-		if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != c.want {
+		if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != c.want {
 			t.Fatalf("railWant %d: click sent %+v, want set-rail %d",
 				c.railWant, m, c.want)
 		}
@@ -253,11 +254,11 @@ func TestRailControlClickSendsNoPaneGesture(t *testing.T) {
 	tui, got := ctlTUI(t, 20)
 	for x := 1; x <= 20; x++ {
 		tui.handleMouse(mouseEvent{btn: 0, x: x, y: 9})
-		if m := nextMsg(t, got); m.Action != "set-rail" {
+		if m := testutil.NextMsg(t, got); m.Action != "set-rail" {
 			t.Fatalf("click at column %d sent %+v, want only set-rail", x, m)
 		}
 		tui.handleMouse(mouseEvent{btn: 0, release: true, x: x, y: 9})
-		noMsg(t, got)
+		testutil.NoMsg(t, got)
 		if tui.railDragging || tui.dragging || tui.railPress {
 			t.Fatalf("click at column %d left a gesture armed: rail %v split %v press %v",
 				x, tui.railDragging, tui.dragging, tui.railPress)
@@ -270,23 +271,23 @@ func TestRailControlClickSendsNoPaneGesture(t *testing.T) {
 func TestRailControlMatchesPrefix(t *testing.T) {
 	tui, got := ctlTUI(t, 20)
 	tui.toggleRail()
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
 		t.Fatalf("prefix r from a full rail sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, x: 10, y: 9})
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
 		t.Fatalf("control from a full rail sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 
 	tui, got = ctlTUI(t, layout.CollapsedRail)
 	tui.railWant = 20
 	tui.toggleRail()
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
 		t.Fatalf("prefix r from the thin rail sent %+v, want the hidden rail", m)
 	}
 	// The thin control row is four columns wide, so click inside them.
 	tui.handleMouse(mouseEvent{btn: 0, x: 2, y: 9})
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 20 {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != 20 {
 		t.Fatalf("control from the thin rail sent %+v, want set-rail 20", m)
 	}
 }

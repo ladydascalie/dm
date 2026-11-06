@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
@@ -41,7 +42,7 @@ func TestScreenRightClickOpensPaneMenuOnly(t *testing.T) {
 		t.Fatalf("title = %q, want pane a", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu, paneMenuLabels...)
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	for _, label := range []string{
 		"Focus", "New window", "New workspace", "Rename window",
 		"Rename workspace", "Close window", "Close workspace",
@@ -65,9 +66,9 @@ func TestRailPaneRowMenuOffersPaneActions(t *testing.T) {
 		t.Fatalf("title = %q, want pane pi", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu, append([]string{"Focus"}, paneMenuLabels...)...)
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	railMenuPick(t, tui, "Close pane")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "close-pane" || m.Target != "w1p1" {
 		t.Fatalf("Close pane sent %+v, want close-pane w1p1", m)
 	}
@@ -87,9 +88,9 @@ func TestRailWindowRowsMenuOffersWindowActions(t *testing.T) {
 		}
 		railWantLabels(t, tui.menu,
 			"New window", "Rename window", "Close window", "Fold/unfold")
-		noMsg(t, got)
+		testutil.NoMsg(t, got)
 		railMenuPick(t, tui, "Fold")
-		m := nextMsg(t, got)
+		m := testutil.NextMsg(t, got)
 		if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "w1" {
 			t.Fatalf("row %d: Fold/unfold sent %+v, want toggle-fold w1", row, m)
 		}
@@ -108,9 +109,9 @@ func TestRailWorkspaceRowMenuOffersWorkspaceActions(t *testing.T) {
 		t.Fatalf("title = %q, want workspace main", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu, "New window", "Rename workspace", "Close workspace")
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	railMenuPick(t, tui, "Close workspace")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "close-workspace" || m.Target != "s1" {
 		t.Fatalf("Close workspace sent %+v, want close-workspace s1", m)
 	}
@@ -136,13 +137,13 @@ func TestRailControlRowMenuOffersSessionActions(t *testing.T) {
 			t.Fatalf("title = %q, want session dev", tui.menu.title)
 		}
 		railWantLabels(t, tui.menu, "New workspace", "Switch session", "Detach")
-		noMsg(t, got)
+		testutil.NoMsg(t, got)
 		return tui, got
 	}
 
 	tui, got := control(t)
 	railMenuPick(t, tui, "New workspace")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "new-workspace" {
 		t.Fatalf("New workspace sent %+v, want new-workspace", m)
 	}
@@ -152,14 +153,14 @@ func TestRailControlRowMenuOffersSessionActions(t *testing.T) {
 	if tui.mode != "sessions" {
 		t.Fatalf("Switch session gave mode %q, want sessions", tui.mode)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	tui, got = control(t)
 	railMenuPick(t, tui, "Detach")
 	if !tui.quit {
 		t.Fatal("Detach did not set quit")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestRailGapRowMenuOpensNothing holds the gap row clear of every menu.
@@ -169,7 +170,7 @@ func TestRailGapRowMenuOpensNothing(t *testing.T) {
 	if tui.mode != "" || tui.menu != nil {
 		t.Fatalf("right press on the gap row: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestMenuScopeHints holds each menu row to the main keymap's key for its
@@ -212,7 +213,7 @@ func TestMenuScopeHints(t *testing.T) {
 		}
 	}
 
-	screen := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
+	screen := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
 	screen.openMenu(screen.paneByID("a"), 5, 3)
 	check(t, screen, pane)
 

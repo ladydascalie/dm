@@ -15,6 +15,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/paths"
 	"dm/internal/session"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
@@ -24,7 +25,7 @@ func boxServer(t *testing.T) *server {
 	t.Helper()
 	t.Setenv("DM_STATE", t.TempDir())
 	st := session.NewState("boxstore")
-	rootPane(st)
+	testutil.RootPane(st)
 	s := railServer(st)
 	// The registry is built with the server, never loaded from state.
 	s.watches = map[boxWatchKey]box.Watch{}

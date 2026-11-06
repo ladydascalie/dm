@@ -11,6 +11,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/keymapview"
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 
 	"github.com/hinshun/vt10x"
@@ -48,7 +49,7 @@ func keymapHint(t *testing.T, k *keymapview.KeymapView, cols, rows int) string {
 // TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n
 // moves to the next match, and esc clears it.
 func TestKeymapSearchInput(t *testing.T) {
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
+	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
 	tui.runAction("help")
 	feed(tui, "/")
 	if tui.keys == nil || !tui.keys.Searching {
@@ -92,8 +93,8 @@ func TestKeymapSearchInput(t *testing.T) {
 // with the built-in help bindings.
 func TestHelpKeyFallback(t *testing.T) {
 	// The screen is short enough that the listed rows do not fit.
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 12, nil)}
-	tui.keymap = keymapTestLoad(t, `
+	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 12, nil)}
+	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+a"
 
 keymap "main" {

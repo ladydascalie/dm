@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -38,13 +39,13 @@ func TestRenameWindowPromptSendsWindowID(t *testing.T) {
 	if tr.renameDraft != "two" {
 		t.Fatalf("draft = %q, want %q", tr.renameDraft, "two")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	renamePromptKeys(tr, "\r")
 	if tr.mode != "" {
 		t.Fatalf("mode = %q after enter, want empty", tr.mode)
 	}
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "rename-window" {
 		t.Fatalf("sent %+v, want req rename-window", m)
 	}
@@ -54,7 +55,7 @@ func TestRenameWindowPromptSendsWindowID(t *testing.T) {
 	if m.Name != "two" {
 		t.Fatalf("name = %q, want two", m.Name)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // A workspace prompt still sends rename-workspace, and the kind is cleared
@@ -69,7 +70,7 @@ func TestRenameWorkspacePromptStillSendsWorkspace(t *testing.T) {
 		t.Fatalf("draft = %q, want main", tr.renameDraft)
 	}
 	renamePromptKeys(tr, "\r")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "rename-workspace" {
 		t.Fatalf("sent %+v, want req rename-workspace", m)
 	}
@@ -79,13 +80,13 @@ func TestRenameWorkspacePromptStillSendsWorkspace(t *testing.T) {
 	if tr.renameKind != "" {
 		t.Fatalf("kind = %q after close, want empty", tr.renameKind)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // The float title names the kind and the id it renames, and its input row
 // names the draft.
 func TestRenamePromptLabelsTheKind(t *testing.T) {
-	snap := testSnapshot(&layout.Node{Pane: "a"}, 60, 8, nil)
+	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 60, 8, nil)
 
 	var wb bytes.Buffer
 	drawRename(&wb, theme.DefaultTheme(), snap, "w2", "two", "window")

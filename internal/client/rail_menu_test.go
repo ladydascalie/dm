@@ -2,6 +2,7 @@ package client
 
 import (
 	"dm/internal/rail"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 	"strings"
 	"testing"
@@ -93,12 +94,12 @@ func TestRailMenuWorkspaceRow(t *testing.T) {
 	}
 	railWantLabels(t, tui.menu,
 		"New window", "Rename workspace", "Close workspace")
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 3, y: 1})
 	if tui.mode != "menu" {
 		t.Fatal("the release of the opening press closed the menu")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestRailMenuWindowRow opens the window menu on a window row and on its note
@@ -115,7 +116,7 @@ func TestRailMenuWindowRow(t *testing.T) {
 		}
 		railWantLabels(t, tui.menu,
 			"New window", "Rename window", "Close window", "Fold/unfold")
-		noMsg(t, got)
+		testutil.NoMsg(t, got)
 	}
 }
 
@@ -132,7 +133,7 @@ func TestRailMenuPaneRow(t *testing.T) {
 	railWantLabels(t, tui.menu,
 		"Focus", "Split right", "Split down", "Split left", "Split up",
 		"Zoom", "Close pane", "Scrollback")
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestRailMenuRenameTargetsRow picks Rename on each row kind and holds the
@@ -180,7 +181,7 @@ func TestRailMenuCloseTargetsRow(t *testing.T) {
 		tui, got := railMenuTUI(t)
 		railRightPress(tui, c.row)
 		railMenuPick(t, tui, "Close")
-		m := nextMsg(t, got)
+		m := testutil.NextMsg(t, got)
 		if m.Type != "req" || m.Action != c.action || m.Target != c.target {
 			t.Fatalf("row %d: sent %+v, want %s %s", c.row, m, c.action, c.target)
 		}
@@ -194,7 +195,7 @@ func TestRailMenuFoldTargetsWindow(t *testing.T) {
 		tui, got := railMenuTUI(t)
 		railRightPress(tui, row)
 		railMenuPick(t, tui, "Fold")
-		m := nextMsg(t, got)
+		m := testutil.NextMsg(t, got)
 		if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "w1" {
 			t.Fatalf("row %d: sent %+v, want toggle-fold w1", row, m)
 		}
@@ -206,7 +207,7 @@ func TestRailMenuFocusTargetsPane(t *testing.T) {
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 3)
 	railMenuPick(t, tui, "Focus")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p1" {
 		t.Fatalf("sent %+v, want focus w1p1", m)
 	}
@@ -228,7 +229,7 @@ func TestRailMenuNewWindowTargetsRow(t *testing.T) {
 		tui, got := railMenuTUI(t)
 		railRightPress(tui, c.row)
 		railMenuPick(t, tui, "New window")
-		m := nextMsg(t, got)
+		m := testutil.NextMsg(t, got)
 		if m.Type != "req" || m.Action != "new-window" || m.Target != "s1" || m.Cwd != c.cwd {
 			t.Fatalf("row %d: sent %+v, want new-window s1 cwd %q", c.row, m, c.cwd)
 		}
@@ -249,7 +250,7 @@ func TestRailMenuNewWindowOutsideGit(t *testing.T) {
 	}
 	railRightPress(tui, 1)
 	railMenuPick(t, tui, "New window")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "new-window" || m.Target != "s1" || m.Cwd != "/tmp/scratch" {
 		t.Fatalf("sent %+v, want new-window s1 cwd /tmp/scratch", m)
 	}
@@ -261,7 +262,7 @@ func TestRailMenuNewWorkspace(t *testing.T) {
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, tui.snap.Rows-2)
 	railMenuPick(t, tui, "New workspace")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "new-workspace" {
 		t.Fatalf("sent %+v, want new-workspace", m)
 	}
@@ -281,12 +282,12 @@ func TestRailMenuControlRowOpensSessionMenu(t *testing.T) {
 		t.Fatalf("title = %q, want session dev", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu, "New workspace", "Switch session", "Detach")
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 3, y: tui.snap.Rows - 1})
 	if tui.mode != "menu" {
 		t.Fatal("the release of the opening press closed the session menu")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestRailLeftPressStillWorks holds the left press to its old behaviour: a
@@ -294,15 +295,15 @@ func TestRailMenuControlRowOpensSessionMenu(t *testing.T) {
 func TestRailLeftPressStillWorks(t *testing.T) {
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p1" {
 		t.Fatalf("left press on the pane row sent %+v, want focus w1p1", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 4})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
-	m = nextMsg(t, got)
+	m = testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "w1" {
 		t.Fatalf("left press on the window row sent %+v, want toggle-fold w1", m)
 	}

@@ -13,13 +13,14 @@ import (
 	"dm/internal/paths"
 	"dm/internal/rail"
 	"dm/internal/session"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
 func TestRailGeometry(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
 	st := session.NewState("rail")
-	id := rootPane(st)
+	id := testutil.RootPane(st)
 	s := railServer(st)
 
 	snap := s.snapshotLocked()
@@ -94,7 +95,7 @@ func TestRailBranch(t *testing.T) {
 	defer func() { detectGit = old }()
 
 	st := session.NewState("branch")
-	id := rootPane(st)
+	id := testutil.RootPane(st)
 	st.Panes[id].Cwd = "/work/dm"
 	s := railServer(st)
 
@@ -296,7 +297,7 @@ func newZoomFixture(t *testing.T) *zoomFixture {
 	t.Setenv("DM_STATE", t.TempDir())
 	st := session.NewState("zoom")
 	w := st.ActiveWindow()
-	left := rootPane(st)
+	left := testutil.RootPane(st)
 	right := w.NewPaneID()
 	st.Panes[right] = &session.PaneState{}
 	w.Root = &layout.Node{Dir: "row", Sizes: []float64{0.5, 0.5},
@@ -456,7 +457,7 @@ func TestAllPaneInRepo(t *testing.T) {
 	defer func() { detectGit = old }()
 
 	st := session.NewState("inrepo")
-	id := rootPane(st)
+	id := testutil.RootPane(st)
 	st.Panes[id].Cwd = "/work/dm"
 	s := railServer(st)
 	deadline := time.Now().Add(2 * time.Second)

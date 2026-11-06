@@ -18,10 +18,9 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
-	"dm/internal/paths"
 	"dm/internal/rail"
 	"dm/internal/segment"
-	"dm/internal/session"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/transport"
 	"dm/internal/vt"
@@ -29,168 +28,6 @@ import (
 
 	"github.com/hinshun/vt10x"
 )
-
-func TestLayout(t *testing.T) {
-	root := &layout.Node{Dir: "row", Kids: []*layout.Node{
-		{Pane: "a"},
-		{Dir: "col", Kids: []*layout.Node{{Pane: "b"}, {Pane: "c"}}},
-	}}
-	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.Rect{X: 0, Y: 0, W: 100, H: 29}, rects)
-	if len(rects) != 3 {
-		t.Fatalf("rects %+v", rects)
-	}
-	seen := map[[2]int]string{}
-	for id, r := range rects {
-		if r.W <= 0 || r.H <= 0 {
-			t.Fatalf("%s has empty rect %+v", id, r)
-		}
-		for y := r.Y; y < r.Y+r.H; y++ {
-			for x := r.X; x < r.X+r.W; x++ {
-				if prev, ok := seen[[2]int{x, y}]; ok {
-					t.Fatalf("%s and %s overlap at %d,%d", prev, id, x, y)
-				}
-				seen[[2]int{x, y}] = id
-			}
-		}
-	}
-	// Each box carries its two borders; adjacent borders form the divider.
-	if rects["a"].W+rects["b"].W+4 != 100 {
-		t.Fatalf("widths do not tile: %+v", rects)
-	}
-	if got := layout.Neighbor(rects, "a", "right"); got != "b" {
-		t.Fatalf("neighbor right = %q", got)
-	}
-	if got := layout.Neighbor(rects, "b", "down"); got != "c" {
-		t.Fatalf("neighbor down = %q", got)
-	}
-}
-
-// walkNodes calls f for every node in the tree, splits included.
-func walkNodes(n *layout.Node, f func(*layout.Node)) {
-	if n == nil {
-		return
-	}
-	f(n)
-	for _, k := range n.Kids {
-		walkNodes(k, f)
-	}
-}
-
-// boxShapes are the tree shapes the geometry must hold for.
-func boxShapes() []struct {
-	name string
-	root *layout.Node
-} {
-	leaf := func(id string) *layout.Node { return &layout.Node{Pane: id} }
-	row := func(kids ...*layout.Node) *layout.Node { return &layout.Node{Dir: "row", Kids: kids} }
-	col := func(kids ...*layout.Node) *layout.Node { return &layout.Node{Dir: "col", Kids: kids} }
-	return []struct {
-		name string
-		root *layout.Node
-	}{
-		{"single", leaf("a")},
-		{"row2", row(leaf("a"), leaf("b"))},
-		{"col2", col(leaf("a"), leaf("b"))},
-		{"row3", row(leaf("a"), leaf("b"), leaf("c"))},
-		{"nested", row(col(leaf("a"), leaf("c")), leaf("b"))},
-		{"nested2", col(row(leaf("a"), leaf("b")), leaf("c"))},
-	}
-}
-
-// TestBoxTiling proves the boxes and pads tile each split exactly, and that
-// pane interiors never overlap.
-func TestBoxTiling(t *testing.T) {
-	for _, shape := range boxShapes() {
-		area := layout.Rect{X: 0, Y: 0, W: 80, H: 24}
-		var walk func(n *layout.Node, a layout.Rect)
-		walk = func(n *layout.Node, a layout.Rect) {
-			if n.Pane != "" {
-				in := layout.InsetBox(a)
-				if in.W <= 0 || in.H <= 0 {
-					t.Fatalf("%s: %s has an empty interior in %v", shape.name, n.Pane, a)
-				}
-				return
-			}
-			boxes := layout.ChildBoxRects(n, a)
-			if len(boxes) != len(n.Kids) {
-				t.Fatalf("%s: %d boxes for %d kids", shape.name, len(boxes), len(n.Kids))
-			}
-			used := 0
-			for i, b := range boxes {
-				if n.Dir == "row" {
-					if b.X < a.X || b.X+b.W > a.X+a.W || b.Y != a.Y || b.H != a.H {
-						t.Fatalf("%s: box %v escapes %v", shape.name, b, a)
-					}
-					used += b.W
-				} else {
-					if b.Y < a.Y || b.Y+b.H > a.Y+a.H || b.X != a.X || b.W != a.W {
-						t.Fatalf("%s: box %v escapes %v", shape.name, b, a)
-					}
-					used += b.H
-				}
-				walk(n.Kids[i], b)
-			}
-			want := a.W
-			if n.Dir != "row" {
-				want = a.H
-			}
-			if used != want {
-				t.Fatalf("%s: boxes and pads use %d of %d", shape.name, used, want)
-			}
-		}
-		walk(shape.root, area)
-
-		rects := map[string]layout.Rect{}
-		layout.Layout(shape.root, area, rects)
-		ids := layout.AllPanes(shape.root)
-		for i := 0; i < len(ids); i++ {
-			for j := i + 1; j < len(ids); j++ {
-				a, b := rects[ids[i]], rects[ids[j]]
-				if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
-					t.Fatalf("%s: %s and %s overlap: %v %v", shape.name, ids[i], ids[j], a, b)
-				}
-			}
-		}
-	}
-}
-
-// TestDividerIsAdjacent pins the pane spacing: boxes touch, so the divider is
-// the two adjacent border cells and there is no empty gap cell.
-func TestDividerIsAdjacent(t *testing.T) {
-	area := layout.Rect{X: 0, Y: 0, W: 80, H: 24}
-	row := &layout.Node{
-		Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
-	}
-	boxes := layout.ChildBoxRects(row, area)
-	if boxes[1].X != boxes[0].X+boxes[0].W {
-		t.Fatalf("row boxes are not adjacent: %v", boxes)
-	}
-	if p := layout.PadRect(row, boxes, 0); p.X != boxes[0].X+boxes[0].W-1 || p.W != 2 {
-		t.Fatalf("row divider = %v, want the two border cells", p)
-	}
-
-	col := &layout.Node{
-		Dir: "col", Sizes: []float64{0.5, 0.5},
-		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
-	}
-	boxes = layout.ChildBoxRects(col, area)
-	if boxes[1].Y != boxes[0].Y+boxes[0].H {
-		t.Fatalf("column boxes are not adjacent: %v", boxes)
-	}
-	if p := layout.PadRect(col, boxes, 0); p.Y != boxes[0].Y+boxes[0].H-1 || p.H != 2 {
-		t.Fatalf("column divider = %v, want the two border cells", p)
-	}
-
-	// The content rects lose only their own borders, so an 80-wide area gives
-	// two 38-cell interiors around four border cells.
-	rects := map[string]layout.Rect{}
-	layout.Layout(row, area, rects)
-	if rects["a"].W != 38 || rects["b"].W != 38 {
-		t.Fatalf("interiors = %v, want 38 each", rects)
-	}
-}
 
 func TestPadHitFindsThePair(t *testing.T) {
 	a, b, c := "a", "b", "c"
@@ -220,29 +57,6 @@ func TestPadHitFindsThePair(t *testing.T) {
 	_, first, second, _, _, _, ok = padHit(nested, area, ipad.X, ipad.Y+3)
 	if !ok || first != b || second != c {
 		t.Fatalf("inner pad hit = %q %q %v", first, second, ok)
-	}
-}
-
-func TestNodeRectMatchesLayout(t *testing.T) {
-	for _, shape := range boxShapes() {
-		area := layout.Rect{X: 0, Y: 0, W: 80, H: 24}
-		rects := map[string]layout.Rect{}
-		layout.Layout(shape.root, area, rects)
-		walkNodes(shape.root, func(n *layout.Node) {
-			got, ok := layout.NodeRect(shape.root, n, area)
-			if !ok {
-				t.Fatalf("%s: nodeRect missed a node", shape.name)
-			}
-			if n.Pane != "" {
-				if got != rects[n.Pane] {
-					t.Fatalf("%s: nodeRect(%s) = %v, layout = %v", shape.name, n.Pane, got, rects[n.Pane])
-				}
-				return
-			}
-			if got.W <= 0 || got.H <= 0 {
-				t.Fatalf("%s: split area %v", shape.name, got)
-			}
-		})
 	}
 }
 
@@ -317,17 +131,6 @@ func TestDrawSessionsWidth(t *testing.T) {
 }
 
 // A pane daemon outlives the server, so the read reply must keep its shape.
-func TestReadReplyStaysBackwardCompatible(t *testing.T) {
-	old, err := wire.ReadMsg(bytes.NewReader(frame(t, `{"type":"resp","lines":["a","b"]}`)))
-	if err != nil || len(old.Lines) != 2 || old.Lines[1] != "b" {
-		t.Fatalf("old read reply: %+v %v", old, err)
-	}
-	req, err := wire.ReadMsg(bytes.NewReader(frame(t, `{"type":"req","action":"history","count":7}`)))
-	if err != nil || req.Count != 7 || req.Lines != nil {
-		t.Fatalf("history request: %+v %v", req, err)
-	}
-}
-
 func TestParseMouse(t *testing.T) {
 	ev, n, ok := parseMouse([]byte("\x1b[<64;12;7Mrest"))
 	if !ok || n != 11 || ev.btn != 64 || ev.x != 12 || ev.y != 7 || ev.release {
@@ -371,49 +174,6 @@ func TestScrollStart(t *testing.T) {
 	}
 }
 
-func TestIDsAreAddressable(t *testing.T) {
-	st := session.NewState("x")
-	ws := st.ActiveWorkspace()
-	w := st.ActiveWindow()
-	if ws.ID != "s1" || w.ID != "w1" {
-		t.Fatalf("initial ids %q %q", ws.ID, w.ID)
-	}
-	if p := w.NewPaneID(); p != "w1p1" {
-		t.Fatalf("first pane %q", p)
-	}
-	if p := w.NewPaneID(); p != "w1p2" {
-		t.Fatalf("second pane %q", p)
-	}
-	if id := st.NewWindowID(); id != "w2" {
-		t.Fatalf("next window %q", id)
-	}
-	if id := st.NewWorkspaceID(); id != "s2" {
-		t.Fatalf("next workspace %q", id)
-	}
-
-	// A state from the random scheme migrates to the same shape.
-	old := &session.State{
-		Name: "x", Panes: map[string]*session.PaneState{"abc12": {}},
-		Workspaces: []*session.Workspace{{ID: "sz6z50", Name: "main", Windows: []*session.Window{{
-			ID: "w2e8y4", Focus: "abc12",
-			Root: &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "abc12"}, {Pane: "def34"}}},
-		}}}},
-	}
-	old.MigrateIDs()
-	if old.Workspaces[0].ID != "s1" || old.Workspaces[0].Windows[0].ID != "w1" {
-		t.Fatalf("migrated ids %q %q", old.Workspaces[0].ID, old.Workspaces[0].Windows[0].ID)
-	}
-	if got := layout.AllPanes(old.Workspaces[0].Windows[0].Root); got[0] != "w1p1" || got[1] != "w1p2" {
-		t.Fatalf("migrated panes %v", got)
-	}
-	if old.Workspaces[0].Windows[0].Focus != "w1p1" {
-		t.Fatalf("migrated focus %q", old.Workspaces[0].Windows[0].Focus)
-	}
-	if _, ok := old.Panes["w1p1"]; !ok {
-		t.Fatalf("pane state not remapped: %v", old.Panes)
-	}
-}
-
 func TestFocusForClick(t *testing.T) {
 	p := &wire.PaneInfo{ID: "w1p2", Mouse: true}
 	if got := focusForClick(p, "w1p1", mouseEvent{btn: 0}); got != "w1p2" {
@@ -430,16 +190,6 @@ func TestFocusForClick(t *testing.T) {
 	}
 	if got := focusForClick(p, "w1p1", mouseEvent{btn: 32}); got != "" {
 		t.Fatalf("motion focused a pane: %q", got)
-	}
-}
-
-func TestPaneAreaInset(t *testing.T) {
-	area := layout.PaneArea(100, 30)
-	if area != (layout.Rect{X: 0, Y: 0, W: 100, H: 29}) {
-		t.Fatalf("pane area = %+v", area)
-	}
-	if layout.PaneArea(3, 4) != (layout.Rect{X: 0, Y: 0, W: 3, H: 3}) {
-		t.Fatalf("tiny area = %+v", layout.PaneArea(3, 4))
 	}
 }
 
@@ -562,7 +312,7 @@ func TestRailGlyphPerState(t *testing.T) {
 		seen[colour] = c.glyph
 
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), agentRail(c.status))
+		rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(c.status))
 		out := b.String()
 		if !strings.Contains(out, c.glyph) || !strings.Contains(out, colour.FG()) {
 			t.Fatalf("status %q not drawn as %q in %q: %q", c.status, c.glyph, colour.FG(), out)
@@ -637,7 +387,7 @@ func TestRailAccent(t *testing.T) {
 // robot for agents, a terminal for shells, and an icon for every state.
 func TestRailNerdIcons(t *testing.T) {
 	t.Setenv("DM_NERD", "1")
-	agent := railOnePane("working", "pi", 12, 40, 6)
+	agent := testutil.RailOnePane("working", "pi", 12, 40, 6)
 	agent.All[0].Agent = true
 	agent.All[0].InRepo = true
 	var b bytes.Buffer
@@ -672,7 +422,7 @@ func TestRailNerdIcons(t *testing.T) {
 			bar, caret, mark, glyph)
 	}
 
-	shell := railOnePane("unknown", "", 12, 40, 6)
+	shell := testutil.RailOnePane("unknown", "", 12, 40, 6)
 	b.Reset()
 	rail.DrawRail(&b, theme.DefaultTheme(), shell)
 	out = b.String()
@@ -691,7 +441,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	for _, status := range []string{"", "unknown"} {
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), railOnePane(status, "w1p1", 12, 40, 6))
+		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 12, 40, 6))
 		vt := vt10x.New(vt10x.WithSize(40, 6))
 		if _, err := vt.Write(b.Bytes()); err != nil {
 			t.Fatalf("draw shell rail: %v", err)
@@ -707,7 +457,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 
 	// An agent that has not reported yet still asks with the question mark.
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), agentRail(""))
+	rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(""))
 	vt := vt10x.New(vt10x.WithSize(40, 6))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw agent rail: %v", err)
@@ -724,7 +474,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 // two cells a shell leaves blank, and its app= stands in for a missing name.
 func TestRailAgentMarker(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	agent := railOnePane("unknown", "", 20, 40, 6)
+	agent := testutil.RailOnePane("unknown", "", 20, 40, 6)
 	agent.All[0].Agent = true
 	agent.All[0].App = "pi"
 	var b bytes.Buffer
@@ -737,7 +487,7 @@ func TestRailAgentMarker(t *testing.T) {
 		t.Fatalf("agent row does not show the app: %q", out)
 	}
 
-	shell := railOnePane("unknown", "", 20, 40, 6)
+	shell := testutil.RailOnePane("unknown", "", 20, 40, 6)
 	b.Reset()
 	rail.DrawRail(&b, theme.DefaultTheme(), shell)
 	out = b.String()
@@ -749,7 +499,7 @@ func TestRailAgentMarker(t *testing.T) {
 	}
 
 	// The thin rail keeps the marker and the glyph in their columns.
-	thin := railOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
+	thin := testutil.RailOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	thin.All[0].Agent = true
 	b.Reset()
 	rail.DrawRail(&b, theme.DefaultTheme(), thin)
@@ -766,7 +516,7 @@ func TestRailAgentMarker(t *testing.T) {
 }
 
 func TestRailHit(t *testing.T) {
-	snap := railTestSnapshot(10)
+	snap := testutil.RailTestSnapshot(10)
 	// Rows: workspace, window, w1p1, w1p2.
 	cases := []struct {
 		x, y int
@@ -788,7 +538,7 @@ func TestRailHit(t *testing.T) {
 	}
 	// The last item row above the control can be a pane row. The control
 	// takes Rows-2, so the item rows stop at Rows-3.
-	small := railTestSnapshot(10)
+	small := testutil.RailTestSnapshot(10)
 	small.Rows = 5
 	small.All = []wire.AllPane{
 		{
@@ -807,17 +557,17 @@ func TestRailHit(t *testing.T) {
 
 func TestRailClickFocusesPane(t *testing.T) {
 	tui, got := clientTUI(t, nil)
-	tui.snap = railTestSnapshot(10)
+	tui.snap = testutil.RailTestSnapshot(10)
 	// Left press on w1p2's row focuses w1p2, not the focused w1p1. The row is
 	// zero-based y=3, so the one-based mouse row is 4.
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
-	if m := nextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
+	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
 		t.Fatalf("rail click sent %+v, want focus w1p2", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 4})
 	// A window row toggles its fold; a workspace row does nothing.
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
-	if m := nextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
+	if m := testutil.NextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
 		t.Fatalf("window click sent %+v, want toggle-fold w1", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 2})
@@ -831,7 +581,7 @@ func TestRailClickFocusesPane(t *testing.T) {
 	// A pane click still focuses the pane under the pointer, not a rail row.
 	p := tui.paneByID("w1p2")
 	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1})
-	if m := nextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
+	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
 		t.Fatalf("pane click sent %+v, want focus w1p2", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 1, y: p.Rect.Y + 1})
@@ -853,7 +603,7 @@ func TestRailClickFocusesPane(t *testing.T) {
 // TestRailFold keeps panes folded by default and unfolds on the window row.
 func TestRailFold(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := railTestSnapshot(20)
+	snap := testutil.RailTestSnapshot(20)
 	for i := range snap.All {
 		snap.All[i].WindowUnfolded = false
 	}
@@ -894,7 +644,7 @@ func TestRailFold(t *testing.T) {
 // TestRailBranchLabel gives the window line the branch of its focused pane.
 func TestRailBranchLabel(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := railTestSnapshot(20)
+	snap := testutil.RailTestSnapshot(20)
 	snap.All[0].Branch = "dm-rail"
 	snap.All[1].Branch = "other"
 	items := rail.RailItems(snap)
@@ -923,7 +673,7 @@ func TestRailBranchLabel(t *testing.T) {
 // branch after it in dim grey. The worktree field still rides the row.
 func TestRailWindowWorktree(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := railOnePane("working", "pi", layout.DefaultRail, 60, 6)
+	snap := testutil.RailOnePane("working", "pi", layout.DefaultRail, 60, 6)
 	snap.All[0].Agent = true
 	snap.All[0].Worktree = "lenient-w1"
 	snap.All[0].Branch = "lazy-branch"
@@ -1179,7 +929,7 @@ func TestRailWindowFolderLine(t *testing.T) {
 func TestRailWindowBranchEqualsFolder(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	// One window, so the colour check below sees this line and no other.
-	snap := railOnePane("working", "pi", layout.DefaultRail, 60, 6)
+	snap := testutil.RailOnePane("working", "pi", layout.DefaultRail, 60, 6)
 	snap.All[0].Cwd, snap.All[0].Root = "/work/main", "/work"
 	snap.All[0].Branch = "main"
 	snap.All[0].InRepo = true
@@ -1238,7 +988,7 @@ func TestRailWindowFolderNested(t *testing.T) {
 // pane the git state comes from, then from the window's first pane.
 func TestRailWindowFolderFocus(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := railTestSnapshot(layout.DefaultRail)
+	snap := testutil.RailTestSnapshot(layout.DefaultRail)
 	snap.All[0].Cwd, snap.All[0].Root = "/work/dm/one", "/work/dm"
 	snap.All[1].Cwd, snap.All[1].Root = "/work/dm/two", "/work/dm"
 	if items := rail.RailItems(snap); items[1].Folder != "one" {
@@ -1332,20 +1082,20 @@ func TestRailTreeHit(t *testing.T) {
 	tui.snap = snap
 	// One-based mouse rows: window 2, note 3, workspace 1, gap 5.
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
-	if m := nextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
+	if m := testutil.NextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
 		t.Fatalf("window line click sent %+v, want toggle-fold w1", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 2})
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 3})
-	if m := nextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
+	if m := testutil.NextMsg(t, got); m.Action != "toggle-fold" || m.Target != "w1" {
 		t.Fatalf("note line click sent %+v, want toggle-fold w1", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 3})
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 5})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 5})
 }
 
@@ -1523,13 +1273,13 @@ func TestRailToggle(t *testing.T) {
 	// A client that has only seen a hidden rail asks for the default.
 	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{Rail: 0, Cols: 100, Rows: 30}})
 	tui.key('b')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.DefaultRail {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != layout.DefaultRail {
 		t.Fatalf("toggle from hidden sent %+v, want set-rail %d", m, layout.DefaultRail)
 	}
 	// A full rail collapses to the thin width, not to hidden.
 	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{Rail: 30, RailWant: 30, Cols: 100, Rows: 30}})
 	tui.key('b')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
 		t.Fatalf("toggle from full sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 	// The thin rail hides, and the full width is still remembered.
@@ -1538,12 +1288,12 @@ func TestRailToggle(t *testing.T) {
 		RailWant: layout.CollapsedRail, Cols: 100, Rows: 30,
 	}})
 	tui.key('b')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != 0 {
 		t.Fatalf("toggle from thin sent %+v, want set-rail 0", m)
 	}
 	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{Rail: 0, Cols: 100, Rows: 30}})
 	tui.key('b')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("toggle after hide sent %+v, want set-rail 30", m)
 	}
 	// A narrow terminal clamps the effective rail but the requested width
@@ -1552,14 +1302,14 @@ func TestRailToggle(t *testing.T) {
 		Rail: layout.EffectiveRail(80, 30), RailWant: 30, Cols: 80, Rows: 30,
 	}})
 	tui.key('b')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
 		t.Fatalf("narrow collapse sent %+v, want set-rail %d", m, layout.CollapsedRail)
 	}
 	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{
 		Rail: 0, RailWant: 0, Cols: 80, Rows: 30,
 	}})
 	tui.key('b')
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != 30 {
 		t.Fatalf("narrow toggle on sent %+v, want set-rail 30", m)
 	}
 	if got := keymap.LoadDefault().Key("main", "rename-workspace"); got != "r" {
@@ -1580,7 +1330,7 @@ func TestRailToggle(t *testing.T) {
 // pane and no names, from the first row, inside the fixed collapsed width.
 func TestRailCollapsed(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	snap := railOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
+	snap := testutil.RailOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	out := b.String()
@@ -1633,7 +1383,7 @@ func TestRailNeverWritesPastWidth(t *testing.T) {
 		{"wide workspace header", "", true},
 	}
 	for _, c := range cases {
-		snap := railOnePane("working", c.label, 6, 20, 6)
+		snap := testutil.RailOnePane("working", c.label, 6, 20, 6)
 		if c.wide {
 			snap.All[0].WorkspaceName = strings.Repeat("全角見出し", 6)
 		}
@@ -1737,7 +1487,7 @@ func barElideStage(segs []segment.Seg) string {
 // TestBarSegmentOrder pins the footer's left block order, its colours, and the
 // single gutter cell between segments, with the pinned right block last.
 func TestBarSegmentOrder(t *testing.T) {
-	snap := barTestSnap(80)
+	snap := testutil.BarTestSnap(80)
 	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "idle", rail.NerdFonts())
 	segs := barSegments(theme.DefaultTheme(), snap, true, "READY")
 
@@ -1759,7 +1509,7 @@ func TestBarSegmentOrder(t *testing.T) {
 		want = append(want, group...)
 	}
 	want = append(want, "PREFIX ", "READY")
-	got := barTexts(segs)
+	got := testutil.BarTexts(segs)
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("bar spans = %q, want %q", got, want)
 	}
@@ -1873,16 +1623,16 @@ func TestBarElide(t *testing.T) {
 		{16, "name", nil},
 	}
 	for _, c := range cases {
-		segs := barSegments(theme.DefaultTheme(), barTestSnap(c.cols), false, "")
+		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(c.cols), false, "")
 		if got := segment.SegCells(segs); got > c.cols {
-			t.Fatalf("cols %d: spans paint %d cells: %q", c.cols, got, barTexts(segs))
+			t.Fatalf("cols %d: spans paint %d cells: %q", c.cols, got, testutil.BarTexts(segs))
 		}
 		if got := barElideStage(segs); got != c.want {
 			t.Fatalf("cols %d: elision reached %q, want %q: %q",
-				c.cols, got, c.want, barTexts(segs))
+				c.cols, got, c.want, testutil.BarTexts(segs))
 		}
 		if c.text != nil {
-			if got := strings.Join(barTexts(segs), "|"); got != strings.Join(c.text, "|") {
+			if got := strings.Join(testutil.BarTexts(segs), "|"); got != strings.Join(c.text, "|") {
 				t.Fatalf("cols %d: spans = %q, want %q", c.cols, got, c.text)
 			}
 		}
@@ -1890,11 +1640,11 @@ func TestBarElide(t *testing.T) {
 
 	// The active window chip survives every width that keeps a chip at all.
 	for _, cols := range []int{60, 45, 40, 33, 30, 25, 22, 18, 16, 12} {
-		segs := barSegments(theme.DefaultTheme(), barTestSnap(cols), false, "")
+		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(cols), false, "")
 		if segment.SegCells(segs) > cols {
 			t.Fatalf("cols %d: spans paint %d cells", cols, segment.SegCells(segs))
 		}
-		text := strings.Join(barTexts(segs), "")
+		text := strings.Join(testutil.BarTexts(segs), "")
 		if cols >= 30 && !strings.Contains(text, "2") {
 			t.Fatalf("cols %d: active chip dropped: %q", cols, text)
 		}
@@ -1910,12 +1660,12 @@ func TestBarElide(t *testing.T) {
 
 	// A zero or negative width paints nothing.
 	for _, cols := range []int{0, -5} {
-		if segs := barSegments(theme.DefaultTheme(), barTestSnap(cols), true, "READY"); len(segs) != 0 {
-			t.Fatalf("cols %d: spans = %q, want none", cols, barTexts(segs))
+		if segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(cols), true, "READY"); len(segs) != 0 {
+			t.Fatalf("cols %d: spans = %q, want none", cols, testutil.BarTexts(segs))
 		}
 	}
 	if segs := barSegments(theme.DefaultTheme(), nil, false, ""); len(segs) != 0 {
-		t.Fatalf("nil snapshot: spans = %q, want none", barTexts(segs))
+		t.Fatalf("nil snapshot: spans = %q, want none", testutil.BarTexts(segs))
 	}
 }
 
@@ -1943,7 +1693,7 @@ func TestBarPinned(t *testing.T) {
 		}
 	}
 	if len(pinned) != 2 {
-		t.Fatalf("pinned spans = %q, want PREFIX and info", barTexts(segs))
+		t.Fatalf("pinned spans = %q, want PREFIX and info", testutil.BarTexts(segs))
 	}
 	if pinned[0].Text != "PREFIX " || pinned[1].Text != info {
 		t.Fatalf("pinned spans = %q %q, want PREFIX and the whole info",
@@ -1958,7 +1708,7 @@ func TestBarPinned(t *testing.T) {
 	snap.Cols = 20
 	segs = barSegments(theme.DefaultTheme(), snap, true, info)
 	if len(segs) != 1 || !segs[0].Pin {
-		t.Fatalf("20 cols: spans = %q, want the pinned info alone", barTexts(segs))
+		t.Fatalf("20 cols: spans = %q, want the pinned info alone", testutil.BarTexts(segs))
 	}
 	if strings.Contains(segs[0].Text, "PREFIX") {
 		t.Fatalf("20 cols: PREFIX survived: %q", segs[0].Text)
@@ -1975,7 +1725,7 @@ func TestBarPinned(t *testing.T) {
 	segs = barSegments(theme.DefaultTheme(), snap, false, info)
 	for _, s := range segs {
 		if s.Pin && s.Text == "PREFIX " {
-			t.Fatalf("unarmed bar painted PREFIX: %q", barTexts(segs))
+			t.Fatalf("unarmed bar painted PREFIX: %q", testutil.BarTexts(segs))
 		}
 	}
 }
@@ -1995,7 +1745,7 @@ func TestBarPinnedGutter(t *testing.T) {
 		{20, true, "12 rows above"},     // info alone: no PREFIX, no left room
 	}
 	for _, c := range cases {
-		segs := barSegments(theme.DefaultTheme(), barTestSnap(c.cols), c.armed, c.info)
+		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(c.cols), c.armed, c.info)
 		leftCells, rightCells, pinned := 0, 0, false
 		for _, s := range segs {
 			if s.Pin {
@@ -2026,7 +1776,7 @@ func TestBarPinnedGutter(t *testing.T) {
 func TestBarPinnedAnchored(t *testing.T) {
 	info := "SCROLL w1p2 +1/9"
 	for _, cols := range []int{60, 50, 34} {
-		snap := barTestSnap(cols)
+		snap := testutil.BarTestSnap(cols)
 		segs := barSegments(theme.DefaultTheme(), snap, true, info)
 		var pinnedText, leftText string
 		for _, s := range segs {
@@ -2140,7 +1890,7 @@ func TestBarFocusChip(t *testing.T) {
 	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "blocked", nerd)
 	segs := barSegments(theme.DefaultTheme(), snap, false, "")
 	if len(segs) < 4 {
-		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
+		t.Fatalf("spans = %q, want the focus chip", testutil.BarTexts(segs))
 	}
 	chip := segs[2]
 	if chip.Text != glyph {
@@ -2175,7 +1925,7 @@ func TestBarFocusChip(t *testing.T) {
 	snap.All[0] = wire.AllPane{ID: "w1p1", Agent: false}
 	segs = barSegments(theme.DefaultTheme(), snap, false, "")
 	if len(segs) < 4 {
-		t.Fatalf("spans = %q, want the focus chip", barTexts(segs))
+		t.Fatalf("spans = %q, want the focus chip", testutil.BarTexts(segs))
 	}
 	if segs[2].Text != "▶" || segs[2].FG != theme.DefaultTheme().Palette.RailDim {
 		t.Fatalf("shell glyph = %+v, want dim ▶", segs[2])
@@ -2265,7 +2015,7 @@ func TestDividerHover(t *testing.T) {
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 	}
-	snap := testSnapshot(row, 100, 30, nil)
+	snap := testutil.TestSnapshot(row, 100, 30, nil)
 	snap.Focus = "a"
 	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
 	boxes := layout.ChildBoxRects(row, layout.PaneArea(100, 30))
@@ -2307,7 +2057,7 @@ func TestHoverMotionNotForwarded(t *testing.T) {
 		btn: 35, x: p.Rect.X + 1, y: p.Rect.Y + 1,
 		raw: []byte("\x1b[<35;2;2M"),
 	})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 func TestRailDragUsesOffset(t *testing.T) {
@@ -2353,7 +2103,7 @@ func TestMenuClampsAndHits(t *testing.T) {
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	p := tui.paneByID("b")
 	tui.openMenu(p, 98, 28)
 	m := tui.menu
@@ -2379,7 +2129,7 @@ func TestRightPressOpensMenuOverMousePane(t *testing.T) {
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	snap := testSnapshot(row, 100, 30, map[string]bool{"b": true})
+	snap := testutil.TestSnapshot(row, 100, 30, map[string]bool{"b": true})
 	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
 	// A right press on pane b, whose app owns the mouse, still opens the menu.
 	tui.handleMouse(mouseEvent{btn: 2, x: 80, y: 5})
@@ -2411,7 +2161,7 @@ func TestPaneAtBoxIncludesBorder(t *testing.T) {
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	b := tui.paneByID("b").Rect
 	if got := tui.paneAtBox(b.X, b.Y); got == nil || got.ID != "b" {
 		t.Fatalf("top-left border did not hit b: %+v", got)
@@ -2437,7 +2187,7 @@ func TestMenuOutsideClickFocusesPane(t *testing.T) {
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	tui := &tui{snap: testSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
 	tui.openMenu(tui.paneByID("b"), 10, 5)
 	a, b := net.Pipe()
 	defer a.Close()
@@ -2467,7 +2217,7 @@ func TestMenuOutsideClickFocusesPane(t *testing.T) {
 
 func TestMenuHoverHighlights(t *testing.T) {
 	row := &layout.Node{Pane: "a"}
-	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	tui.openMenu(tui.paneByID("a"), 10, 5)
 	// Bare motion (no button held) is SGR button 35.
 	tui.handleMouse(mouseEvent{btn: 35, x: 14, y: tui.menu.y + 2 + 1})
@@ -2493,7 +2243,7 @@ func TestWheelIsNotAPress(t *testing.T) {
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	tui := &tui{snap: testSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
 	tui.handleMouse(mouseEvent{btn: 64, x: 5, y: 5})
 	if tui.press != nil || tui.dragging {
 		t.Fatalf("wheel started a press or drag: press=%+v dragging=%v", tui.press, tui.dragging)
@@ -2516,7 +2266,7 @@ func TestWheelIsNotAPress(t *testing.T) {
 
 func TestMenuRightDragPicks(t *testing.T) {
 	row := &layout.Node{Pane: "a"}
-	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	tui.openMenu(tui.paneByID("a"), 10, 5)
 	done := -1
 	tui.menu.items[1].run = func() { done = 1 }
@@ -2541,7 +2291,7 @@ func TestMenuRightDragPicks(t *testing.T) {
 
 func TestMenuKeyboard(t *testing.T) {
 	row := &layout.Node{Pane: "a"}
-	tui := &tui{snap: testSnapshot(row, 100, 30, nil)}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	tui.openMenu(tui.paneByID("a"), 10, 10)
 	if len(tui.menu.items) < 3 {
 		t.Fatalf("menu items = %d", len(tui.menu.items))
@@ -2575,18 +2325,18 @@ func TestPasteIsOneKeysMessage(t *testing.T) {
 	paste := "\x1b[200~line one\nline two\n\x1b[201~"
 	tui.inbuf = append(tui.inbuf, []byte(paste+"tail")...)
 	tui.processInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != paste {
 		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
 	}
 	if tui.armed {
 		t.Fatal("the paste armed the prefix")
 	}
-	m = nextMsg(t, got)
+	m = testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != "tail" {
 		t.Fatalf("trailing bytes came through as %+v (%q)", m, m.Keys)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if len(tui.inbuf) != 0 || tui.armed {
 		t.Fatalf("paste left state: inbuf=%q armed=%v", tui.inbuf, tui.armed)
 	}
@@ -2598,14 +2348,14 @@ func TestPasteCtrlBDoesNotArm(t *testing.T) {
 	paste := "\x1b[200~a\x02b\x1b[201~"
 	tui.inbuf = append(tui.inbuf, []byte(paste)...)
 	tui.processInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != paste {
 		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
 	}
 	if tui.armed {
 		t.Fatal("ctrl+b in a paste armed the prefix")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // A paste split across two reads is buffered and forwarded once, intact.
@@ -2615,17 +2365,17 @@ func TestPasteSpansReads(t *testing.T) {
 	tail := "second\n\x1b[201~"
 	tui.inbuf = append(tui.inbuf, []byte(head)...)
 	tui.processInput()
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if len(tui.inbuf) == 0 {
 		t.Fatal("partial paste was not buffered")
 	}
 	tui.inbuf = append(tui.inbuf, []byte(tail)...)
 	tui.processInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != head+tail {
 		t.Fatalf("split paste came through as %+v (%q)", m, m.Keys)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // A paste closes an open menu and reaches the pane instead of a menu item.
@@ -2638,7 +2388,7 @@ func TestPasteClosesMenu(t *testing.T) {
 	paste := "\x1b[200~x\x1b[201~"
 	tui.inbuf = append(tui.inbuf, []byte(paste)...)
 	tui.processInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != paste {
 		t.Fatalf("paste came through as %+v (%q)", m, m.Keys)
 	}
@@ -2653,18 +2403,18 @@ func TestPasteSplitAtLoneEscape(t *testing.T) {
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, 0x1b)
 	tui.processInput()
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.pasteDeadline.IsZero() {
 		t.Fatal("lone escape was not held")
 	}
 	tui.inbuf = append(tui.inbuf, []byte("[200~a\nb\x1b[201~")...)
 	tui.processInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	want := "\x1b[200~a\nb\x1b[201~"
 	if m.Type != "keys" || string(m.Keys) != want {
 		t.Fatalf("split paste came through as %+v (%q)", m, m.Keys)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // A real lone escape waits for the deadline and then reaches the pane.
@@ -2673,19 +2423,19 @@ func TestLoneEscapeFlushedAfterDeadline(t *testing.T) {
 	start := time.Now()
 	tui.inbuf = append(tui.inbuf, 0x1b)
 	tui.processInput()
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.expirePaste(start) {
 		t.Fatal("the escape expired before its deadline")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if !tui.expirePaste(start.Add(escTimeout + time.Millisecond)) {
 		t.Fatal("the escape did not expire after its deadline")
 	}
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != "\x1b" {
 		t.Fatalf("lone escape came through as %+v (%q)", m, m.Keys)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // Bytes that cannot start a paste disprove the partial marker, so its deadline
@@ -2694,13 +2444,13 @@ func TestPartialMarkerDisprovedClearsDeadline(t *testing.T) {
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[2")...)
 	tui.processInput()
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.pasteDeadline.IsZero() {
 		t.Fatal("partial marker was not held")
 	}
 	tui.inbuf = append(tui.inbuf, 'x')
 	tui.processInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != "\x1b[2x" {
 		t.Fatalf("disproved marker came through as %+v (%q)", m, m.Keys)
 	}
@@ -2718,9 +2468,9 @@ func TestPasteStallFallsBack(t *testing.T) {
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[")...)
 	tui.processInput()
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	tui.staleInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != "\x1b[" {
 		t.Fatalf("stalled marker came through as %+v (%q)", m, m.Keys)
 	}
@@ -2743,7 +2493,7 @@ func TestSelectionRangeNormalizes(t *testing.T) {
 }
 
 func TestExtractSelection(t *testing.T) {
-	vt := testVT(t, 12, 3, "ab  cd\r\nsecond line\r\n")
+	vt := testutil.TestVT(t, 12, 3, "ab  cd\r\nsecond line\r\n")
 	cases := []struct {
 		name string
 		a, b cell
@@ -2780,7 +2530,7 @@ func TestOSC52Clipboard(t *testing.T) {
 func TestClickForwardsToMouseApp(t *testing.T) {
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
-	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello")
+	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello")
 	press := mouseEvent{
 		btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 1,
 		raw: []byte("\x1b[<0;2;2M"),
@@ -2790,12 +2540,12 @@ func TestClickForwardsToMouseApp(t *testing.T) {
 		raw: []byte("\x1b[<0;2;2m"),
 	}
 	tui.handleMouse(press)
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.press == nil {
 		t.Fatal("press was not held")
 	}
 	tui.handleMouse(release)
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	want := string(press.raw) + string(release.raw)
 	if m.Type != "keys" || string(m.Keys) != want {
 		t.Fatalf("click sent %+v (%q), want %q", m, m.Keys, want)
@@ -2803,7 +2553,7 @@ func TestClickForwardsToMouseApp(t *testing.T) {
 	if tui.selText != nil || tui.press != nil {
 		t.Fatal("click left selection state behind")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // A left press held on a pane must not survive a right press and a menu pick.
@@ -2863,14 +2613,14 @@ func TestSelectionClearsOnResize(t *testing.T) {
 	}
 	// The same geometry keeps the selection.
 	row := &layout.Node{Pane: "a"}
-	same := testSnapshot(row, 100, 30, nil)
+	same := testutil.TestSnapshot(row, 100, 30, nil)
 	same.Focus = "a"
 	tui.apply(wire.Msg{Type: "snapshot", Snap: same})
 	if tui.selText == nil {
 		t.Fatal("an unchanged snapshot dropped the selection")
 	}
 	// A resized pane drops it.
-	resized := testSnapshot(row, 90, 30, nil)
+	resized := testutil.TestSnapshot(row, 90, 30, nil)
 	resized.Focus = "a"
 	tui.apply(wire.Msg{Type: "snapshot", Snap: resized})
 	if tui.selText != nil || tui.press != nil {
@@ -2883,7 +2633,7 @@ func TestSelectionClearsOnResize(t *testing.T) {
 func TestClickJitterStaysAClick(t *testing.T) {
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
-	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello")
+	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello")
 	press := mouseEvent{
 		btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 2,
 		raw: []byte("\x1b[<0;3;3M"),
@@ -2899,7 +2649,7 @@ func TestClickJitterStaysAClick(t *testing.T) {
 	tui.handleMouse(press)
 	tui.handleMouse(motion)
 	tui.handleMouse(release)
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" {
 		t.Fatalf("jitter sent %+v", m)
 	}
@@ -2910,15 +2660,15 @@ func TestClickJitterStaysAClick(t *testing.T) {
 	if tui.selText != nil || tui.press != nil {
 		t.Fatal("jitter left selection state behind")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // Two cells is a drag: the range is selected and nothing reaches the app.
 func TestTwoCellDragSelects(t *testing.T) {
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
-	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello world")
-	oscOut := captureStdout(t, func() {
+	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello world")
+	oscOut := testutil.CaptureStdout(t, func() {
 		tui.handleMouse(mouseEvent{
 			btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
 			raw: []byte("\x1b[<0;1;1M"),
@@ -2932,7 +2682,7 @@ func TestTwoCellDragSelects(t *testing.T) {
 			raw: []byte("\x1b[<0;3;1m"),
 		})
 	})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if len(tui.toasts) != 1 || tui.toasts[0].text != "copied 3 chars" {
 		t.Fatalf("toasts = %+v, want copied 3 chars", tui.toasts)
 	}
@@ -2946,8 +2696,8 @@ func TestTwoCellDragSelects(t *testing.T) {
 func TestDragCopiesSelection(t *testing.T) {
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
-	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello world\r\nsecond line")
-	oscOut := captureStdout(t, func() {
+	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello world\r\nsecond line")
+	oscOut := testutil.CaptureStdout(t, func() {
 		tui.handleMouse(mouseEvent{
 			btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
 			raw: []byte("\x1b[<0;1;1M"),
@@ -2961,7 +2711,7 @@ func TestDragCopiesSelection(t *testing.T) {
 			raw: []byte("\x1b[<0;5;1m"),
 		})
 	})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.selText != nil || tui.press != nil {
 		t.Fatal("drag left selection state behind")
 	}
@@ -2997,7 +2747,7 @@ func TestSelectionClampsToStartingPane(t *testing.T) {
 
 // than count sequences: an off-by-one paints the cell after the selection.
 func TestSelectionHighlight(t *testing.T) {
-	vt := testVT(t, 10, 2, "abcdef\r\nghijkl")
+	vt := testutil.TestVT(t, 10, 2, "abcdef\r\nghijkl")
 	plain := &bytes.Buffer{}
 	drawPane(plain, vt, layout.Rect{X: 0, Y: 0, W: 10, H: 2})
 	if strings.Contains(plain.String(), "\x1b[7m") {
@@ -3099,8 +2849,8 @@ func TestBarPadsToWidth(t *testing.T) {
 
 // TestBarUnarmed paints no prefix flag.
 func TestBarUnarmed(t *testing.T) {
-	snap := barTestSnap(80)
-	if out := barTexts(barSegments(theme.DefaultTheme(), snap, false, "12 rows above")); strings.Contains(strings.Join(out, ""), "PREFIX") {
+	snap := testutil.BarTestSnap(80)
+	if out := testutil.BarTexts(barSegments(theme.DefaultTheme(), snap, false, "12 rows above")); strings.Contains(strings.Join(out, ""), "PREFIX") {
 		t.Fatalf("unarmed spans carry PREFIX: %q", out)
 	}
 	var b bytes.Buffer
@@ -3145,86 +2895,12 @@ func TestBarContrast(t *testing.T) {
 	}
 }
 
-func TestSplitRatio(t *testing.T) {
-	root := &layout.Node{Pane: "a"}
-	layout.SplitLeaf(root, "a", "right", "b", 0.25)
-	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.Rect{X: 0, Y: 0, W: 100, H: 10}, rects)
-	if got := rects["a"].W; got < 22 || got > 24 {
-		t.Fatalf("existing pane width = %d, want about 23", got)
-	}
-	if got := rects["b"].W; got < 72 || got > 74 {
-		t.Fatalf("new pane width = %d, want about 73", got)
-	}
-	if rects["a"].W+rects["b"].W+4 != 100 {
-		t.Fatalf("sizes do not tile: %+v", rects)
-	}
-}
-
-func TestSplitAndPrune(t *testing.T) {
-	root := &layout.Node{Pane: "a"}
-	if !layout.SplitLeaf(root, "a", "right", "b", 0) {
-		t.Fatal("split failed")
-	}
-	if root.Dir != "row" || len(root.Kids) != 2 || root.Kids[1].Pane != "b" {
-		t.Fatalf("root %+v", root)
-	}
-	layout.SplitLeaf(root.Kids[1], "b", "down", "c", 0)
-	n, ok := layout.PruneLeaf(root, "b")
-	if !ok || len(n.Kids) != 2 || n.Kids[1].Pane != "c" {
-		t.Fatalf("prune left %+v", n)
-	}
-}
-
-func TestFolderName(t *testing.T) {
-	cases := map[string]string{"/": "root", "/a/b/": "b", "/home/b": "b", "": "", ".": "root"}
-	for dir, want := range cases {
-		if got := paths.FolderName(dir); got != want {
-			t.Fatalf("paths.FolderName(%q) = %q, want %q", dir, got, want)
-		}
-	}
-}
-
-// TestWindowNameMigration renames the old positional window labels on load.
-func TestWindowNameMigration(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("mig")
-	w := st.Workspaces[0].Windows[0]
-	w.Name = "1"
-	w.Focus = "w1p1"
-	st.Panes["w1p1"] = &session.PaneState{Cwd: "/code/dm"}
-	if err := st.Save(); err != nil {
-		t.Fatal(err)
-	}
-	got, err := session.LoadState("mig")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name := got.Workspaces[0].Windows[0].Name; name != "dm" {
-		t.Fatalf("migrated window name = %q, want dm", name)
-	}
-
-	// A name that is not positional survives the load.
-	got.Workspaces[0].Windows[0].Name = "tests"
-	if err := got.Save(); err != nil {
-		t.Fatal(err)
-	}
-	again, err := session.LoadState("mig")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name := again.Workspaces[0].Windows[0].Name; name != "tests" {
-		t.Fatalf("named window = %q, want tests", name)
-	}
-}
-
-// whose subtree claimed the mouse do not. handleMouse must call it.
 func TestDragPress(t *testing.T) {
 	row := &layout.Node{
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	snap := testSnapshot(row, 100, 30, nil)
+	snap := testutil.TestSnapshot(row, 100, 30, nil)
 	ds, ok := dragPress(snap, 49, 5)
 	if !ok || ds.first != "a" || ds.second != "b" || ds.axis != "row" ||
 		ds.rect != layout.PaneArea(100, 30) {
@@ -3252,7 +2928,7 @@ func TestDragPress(t *testing.T) {
 		{Pane: "a"},
 		{Dir: "row", Kids: []*layout.Node{{Pane: "b"}, {Pane: "c"}}},
 	}}
-	snap = testSnapshot(same, 100, 30, nil)
+	snap = testutil.TestSnapshot(same, 100, 30, nil)
 	// The root is what layout hands its tree: the whole pane area.
 	want := layout.PaneArea(snap.Cols, snap.Rows)
 	ds, ok = dragPress(snap, 49, 5)
@@ -3272,7 +2948,7 @@ func TestDragPress(t *testing.T) {
 		{Pane: "a"},
 		{Dir: "row", Kids: []*layout.Node{{Pane: "b"}, {Pane: "c"}}},
 	}}
-	snap = testSnapshot(nested, 100, 30, map[string]bool{"c": true})
+	snap = testutil.TestSnapshot(nested, 100, 30, map[string]bool{"c": true})
 	if ds, ok := dragPress(snap, 49, 5); !ok || ds.first != "a" {
 		t.Fatalf("claimed-mouse divider press = %+v ok=%v", ds, ok)
 	}
@@ -3406,7 +3082,7 @@ func TestClientScreenThenReplay(t *testing.T) {
 // actions and the old keys do not.
 func TestKeymapDispatchRemapsPrefixSplitAndDetach(t *testing.T) {
 	tui, got := clientTUI(t, nil)
-	tui.keymap = keymapTestLoad(t, `
+	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+a"
 
 keymap "main" {
@@ -3420,9 +3096,9 @@ keymap "main" {
 	if !tui.armed {
 		t.Fatal("the configured prefix did not arm")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	feed(tui, "S")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Action != "split" || m.Dir != "right" {
 		t.Fatalf("the configured split key sent %+v", m)
 	}
@@ -3432,7 +3108,7 @@ keymap "main" {
 
 	// The old prefix byte is plain input now.
 	feed(tui, "\x02")
-	m = nextMsg(t, got)
+	m = testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != "\x02" {
 		t.Fatalf("the old prefix byte sent %+v", m)
 	}
@@ -3449,7 +3125,7 @@ keymap "main" {
 	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "no binding") {
 		t.Fatalf("the old split key raised %+v", tui.toasts)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	// The old detach key is unbound: it notifies and does not quit.
 	tui.arm()
@@ -3472,8 +3148,8 @@ keymap "main" {
 // its action, or nothing when the action is unbound. The menu's own keys come
 // from the menu mode.
 func TestKeymapDispatchMenuLabels(t *testing.T) {
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
-	tui.keymap = keymapTestLoad(t, `
+	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
+	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+b"
 
 keymap "main" {
@@ -3539,7 +3215,7 @@ func TestKeymapDispatchUnboundNotifiesAndDisarms(t *testing.T) {
 	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "no binding for") {
 		t.Fatalf("an unbound key raised %+v", tui.toasts)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses: a partial sequence
@@ -3556,7 +3232,7 @@ func TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses(t *testing.T) {
 	if !tui.armed {
 		t.Fatal("the escape disarmed instead of waiting")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	// The escape is held as a possible paste start first. Once that deadline
 	// passes it takes the normal path and waits as the head of an arrow.
 	if !tui.expirePaste(start.Add(escTimeout + time.Millisecond)) {
@@ -3578,7 +3254,7 @@ func TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses(t *testing.T) {
 	// A complete sequence runs its action.
 	feed(tui, "\x02")
 	feed(tui, "\x1b[A")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Action != "focus-dir" || m.Dir != "up" {
 		t.Fatalf("the arrow sent %+v", m)
 	}
@@ -3600,7 +3276,7 @@ func TestKeymapDispatchUnboundEscapeKeepsItsTail(t *testing.T) {
 		if len(tui.inbuf) != 0 {
 			t.Fatalf("%q left %q in the buffer", seq, tui.inbuf)
 		}
-		noMsg(t, got)
+		testutil.NoMsg(t, got)
 	}
 	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "no binding for") {
 		t.Fatalf("the escape tail raised %+v", tui.toasts)
@@ -3611,7 +3287,7 @@ func TestKeymapDispatchUnboundEscapeKeepsItsTail(t *testing.T) {
 // two reads arms and stays armed past the esc deadline.
 func TestKeymapDispatchSplitPrefixStaysArmed(t *testing.T) {
 	tui, got := clientTUI(t, nil)
-	tui.keymap = keymapTestLoad(t, `
+	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "up"
 
 keymap "main" {
@@ -3636,7 +3312,7 @@ keymap "main" {
 		t.Fatal("the client disarmed itself")
 	}
 	feed(tui, "|")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Action != "split" || m.Dir != "right" {
 		t.Fatalf("the split key sent %+v", m)
 	}
@@ -3646,7 +3322,7 @@ keymap "main" {
 // sends the configured prefix bytes, not a literal ctrl+b.
 func TestKeymapDispatchSendPrefixSendsConfiguredBytes(t *testing.T) {
 	tui, got := clientTUI(t, nil)
-	tui.keymap = keymapTestLoad(t, `
+	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+a"
 
 keymap "main" {
@@ -3658,14 +3334,14 @@ keymap "main" {
 		t.Fatal("the configured prefix did not arm")
 	}
 	feed(tui, "\x01")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != "\x01" {
 		t.Fatalf("send-prefix sent %+v (%q)", m, m.Keys)
 	}
 	if tui.armed {
 		t.Fatal("send-prefix left the client armed")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // writeTheme puts a theme file in dir/themes and returns its path.
@@ -3778,7 +3454,7 @@ keymap "main" {
 // TestKeymapDispatchPartialEscapeInMenu: a menu arrow split across two reads
 // waits for its remaining bytes and then moves the selection.
 func TestKeymapDispatchPartialEscapeInMenu(t *testing.T) {
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
+	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
 	tui.openMenu(tui.paneByID("a"), 5, 3)
 	if tui.menu == nil {
 		t.Fatal("menu did not open")
@@ -3826,7 +3502,7 @@ func TestKeymapDispatchSwitcherLeftRightAreNoOps(t *testing.T) {
 	if tui.sw == nil {
 		t.Fatal("the up arrow closed the switcher")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestHelpOpensAndCloses: the help action adds the keymap float and the help
@@ -3884,7 +3560,7 @@ func newZoomFrameTUI(t *testing.T) *zoomFrameTUI {
 	const cols, rows, rail = 100, 20, 20
 	root := &layout.Node{Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
-	snap := testSnapshot(root, cols, rows, nil)
+	snap := testutil.TestSnapshot(root, cols, rows, nil)
 	snap.Rail = rail
 	snap.Focus = "b"
 	snap.Session = "one"

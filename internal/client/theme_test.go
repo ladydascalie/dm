@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/rail"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -56,12 +57,12 @@ func TestThemeReachesPainters(t *testing.T) {
 	th.States["working"] = theme.StateStyle{Glyph: "W", NerdGlyph: "W", Colour: theme.RGB{R: 22, G: 23, B: 24}}
 	// The palette reaches the rail ground and the bar accent.
 	var railBuf bytes.Buffer
-	rail.DrawRail(&railBuf, th, agentRail("working"))
+	rail.DrawRail(&railBuf, th, testutil.AgentRail("working"))
 	if !strings.Contains(railBuf.String(), (theme.RGB{R: 1, G: 2, B: 3}).BG()) {
 		t.Fatalf("rail does not paint the themed ground: %q", railBuf.String())
 	}
 	accent := false
-	for _, span := range barSegments(th, barTestSnap(80), false, "") {
+	for _, span := range barSegments(th, testutil.BarTestSnap(80), false, "") {
 		if span.FG == (theme.RGB{R: 7, G: 8, B: 9}) {
 			accent = true
 		}
@@ -167,7 +168,7 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
 	th.States["working"] = theme.StateStyle{Glyph: "W", NerdGlyph: "W", Colour: theme.RGB{R: 1, G: 2, B: 3}}
-	items := rail.RailItems(agentRail("working"))
+	items := rail.RailItems(testutil.AgentRail("working"))
 	pane := railRowFind(t, items, rail.Pane, "w1p1")
 	left, _, _ := rail.RailRow(th, pane, layout.DefaultRail, false, false)
 	found := false
@@ -190,7 +191,7 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	}
 
 	var b bytes.Buffer
-	rail.DrawRail(&b, th, agentRail("working"))
+	rail.DrawRail(&b, th, testutil.AgentRail("working"))
 	if !strings.Contains(b.String(), "W") || !strings.Contains(b.String(), (theme.RGB{R: 1, G: 2, B: 3}).FG()) {
 		t.Fatalf("themed state glyph not drawn: %q", b.String())
 	}

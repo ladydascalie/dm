@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/transport"
 	"dm/internal/wire"
 
@@ -80,7 +81,7 @@ func TestSwitcherPrefixToggles(t *testing.T) {
 	if tui.sw != nil {
 		t.Fatal("a second prefix press did not close the switcher")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestSwitcherCtrlNPMoves: the contract binds down/up and ctrl+n/p to the same
@@ -100,7 +101,7 @@ func TestSwitcherCtrlNPMoves(t *testing.T) {
 	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p1" {
 		t.Fatalf("ctrl+p selects %+v, want the pane above w1p1", it)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestSwitcherTypeAndEnter: typing narrows the rows and enter sends a focus
@@ -128,7 +129,7 @@ func TestSwitcherTypeAndEnter(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("enter sent nothing")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestSwitcherEscSendsNothing: esc closes the float without a request.
@@ -144,7 +145,7 @@ func TestSwitcherEscSendsNothing(t *testing.T) {
 	if tui.sw != nil {
 		t.Fatal("the pending esc did not close the switcher")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestSwitcherCtrlURestores: ctrl+u clears the query and brings the rows back.
@@ -163,7 +164,7 @@ func TestSwitcherCtrlURestores(t *testing.T) {
 	if q := tui.sw.Query(); q != "" {
 		t.Fatalf("ctrl+u left the query %q", q)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestSwitcherPreviewReplies: a read reply with the wrong id is dropped, one
@@ -190,7 +191,7 @@ func TestSwitcherPreviewReplies(t *testing.T) {
 
 	// A second draw asks for nothing: the pane is already asked for.
 	tui.draw()
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	// A reply with another id is stale and stays out of the band. A failure
 	// with a stale id stays silent too.
@@ -219,10 +220,10 @@ func TestSwitcherMouseSwallowed(t *testing.T) {
 	if tui.sw == nil {
 		t.Fatal("a mouse press closed the switcher")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	feed(tui, "\x1b[<0;10;5m")
 	if tui.sw == nil {
 		t.Fatal("a mouse release closed the switcher")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }

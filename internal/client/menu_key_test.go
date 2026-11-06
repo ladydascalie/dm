@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
@@ -15,7 +16,7 @@ func menuHintTUI(t *testing.T) (*tui, chan wire.Msg) {
 	if tui.menu == nil {
 		t.Fatal("menu did not open")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	return tui, got
 }
 
@@ -24,11 +25,11 @@ func menuHintTUI(t *testing.T) (*tui, chan wire.Msg) {
 func TestMenuHintClosesPane(t *testing.T) {
 	tui, got := menuHintTUI(t)
 	feed(tui, "x")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "close-pane" || m.Target != "a" {
 		t.Fatalf("x sent %+v, want close-pane on a", m)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.menu != nil || tui.mode != "" {
 		t.Fatalf("the hint left the menu open: %+v %q", tui.menu, tui.mode)
 	}
@@ -45,13 +46,13 @@ func TestMenuHintNewWindow(t *testing.T) {
 	if tui.menu == nil {
 		t.Fatal("menu did not open")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	feed(tui, "c")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "new-window" {
 		t.Fatalf("c sent %+v, want new-window", m)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.menu != nil {
 		t.Fatalf("the hint left the menu open: %+v", tui.menu)
 	}
@@ -66,16 +67,16 @@ func TestRailMenuHintClosesWindow(t *testing.T) {
 	if tui.menu == nil {
 		t.Fatal("menu did not open")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	feed(tui, "X")
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "close-window" || m.Target != "w2" {
 		t.Fatalf("X sent %+v, want close-window on w2", m)
 	}
 	if m.Target == tui.snap.Focus {
 		t.Fatalf("the hint targeted the focused pane %q", m.Target)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.menu != nil {
 		t.Fatalf("the hint left the menu open: %+v", tui.menu)
 	}
@@ -86,7 +87,7 @@ func TestRailMenuHintClosesWindow(t *testing.T) {
 func TestMenuBindingBeatsHint(t *testing.T) {
 	tui, got := menuHintTUI(t)
 	feed(tui, "q")
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.menu != nil || tui.mode != "" {
 		t.Fatalf("q did not close the menu: %+v %q", tui.menu, tui.mode)
 	}
@@ -97,7 +98,7 @@ func TestMenuBindingBeatsHint(t *testing.T) {
 func TestMenuHintUnboundCloses(t *testing.T) {
 	tui, got := menuHintTUI(t)
 	feed(tui, "y")
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.menu != nil || tui.mode != "" {
 		t.Fatalf("an unbound key kept the menu open: %+v %q", tui.menu, tui.mode)
 	}
@@ -110,7 +111,7 @@ func TestMenuHintUnboundCloses(t *testing.T) {
 // and the next row's hint still dispatches.
 func TestMenuHintSkipsBadLabel(t *testing.T) {
 	picked := false
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
+	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
 	tui.menu = &menu{x: 1, y: 1, w: 20, title: "t", items: []menuItem{
 		{label: "Bad", key: "bogus"},
 		{label: "Good", key: ""},
@@ -131,7 +132,7 @@ func TestMenuHintSkipsBadLabel(t *testing.T) {
 // mode, so the hint alone decides.
 func TestMenuHintSpansReads(t *testing.T) {
 	tui, got := clientTUI(t, nil)
-	tui.keymap = keymapTestLoad(t, `
+	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+b"
 
 keymap "main" {
@@ -146,10 +147,10 @@ keymap "menu" {
 	if tui.menu == nil {
 		t.Fatal("menu did not open")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[")...)
 	tui.processInput()
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.menu == nil {
 		t.Fatal("a partial hint closed the menu")
 	}
@@ -158,11 +159,11 @@ keymap "menu" {
 	}
 	tui.inbuf = append(tui.inbuf, 'Z')
 	tui.processInput()
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "close-pane" || m.Target != "a" {
 		t.Fatalf("the completed hint sent %+v, want close-pane on a", m)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if tui.menu != nil {
 		t.Fatalf("the hint left the menu open: %+v", tui.menu)
 	}

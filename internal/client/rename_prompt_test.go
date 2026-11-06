@@ -10,6 +10,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/rail"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -74,7 +75,7 @@ func TestRenamePromptOpensOnPrefixR(t *testing.T) {
 	if tr.renameDraft != "main" {
 		t.Fatalf("draft = %q, want %q", tr.renameDraft, "main")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	// A snapshot that lists no workspace for the active id opens an empty
 	// draft, not some other workspace's name.
@@ -84,7 +85,7 @@ func TestRenamePromptOpensOnPrefixR(t *testing.T) {
 	if tr.mode != "rename" || tr.renameDraft != "" {
 		t.Fatalf("no-match open: mode = %q draft = %q", tr.mode, tr.renameDraft)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // The workspace row's menu offers the same prompt and closes itself first.
@@ -111,7 +112,7 @@ func TestRenamePromptMenuRow(t *testing.T) {
 	if tr.mode != "rename" || tr.renameDraft != "main" {
 		t.Fatalf("menu row gave mode %q draft %q", tr.mode, tr.renameDraft)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // Prefix b cycles the rail and prefix r no longer does.
@@ -119,7 +120,7 @@ func TestRenamePromptRailMovedToB(t *testing.T) {
 	tr, got := renamePromptTUI(t)
 	tr.snap.Rail = 0
 	renamePromptKeys(tr, "\x02b")
-	if m := nextMsg(t, got); m.Action != "set-rail" || m.Index != layout.DefaultRail {
+	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != layout.DefaultRail {
 		t.Fatalf("prefix b sent %+v, want set-rail %d", m, layout.DefaultRail)
 	}
 
@@ -129,7 +130,7 @@ func TestRenamePromptRailMovedToB(t *testing.T) {
 	if tr.mode != "rename" {
 		t.Fatalf("prefix r opened %q, want rename", tr.mode)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // Typing appends, both delete bytes drop one rune, and ctrl+u clears.
@@ -159,7 +160,7 @@ func TestRenamePromptEditsDraft(t *testing.T) {
 	if tr.renameDraft != "" {
 		t.Fatalf("ctrl+u draft = %q, want empty", tr.renameDraft)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // Enter sends one req with the trimmed draft and the active workspace id, and
@@ -172,7 +173,7 @@ func TestRenamePromptEnterSendsReq(t *testing.T) {
 	if tr.mode != "" {
 		t.Fatalf("mode = %q after enter, want empty", tr.mode)
 	}
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "rename-workspace" {
 		t.Fatalf("sent %+v, want req rename-workspace", m)
 	}
@@ -182,7 +183,7 @@ func TestRenamePromptEnterSendsReq(t *testing.T) {
 	if m.Name != "api work" {
 		t.Fatalf("name = %q, want %q", m.Name, "api work")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // An empty or spaces-only draft cancels: the prompt closes and nothing is sent.
@@ -194,7 +195,7 @@ func TestRenamePromptEmptyDraftCancels(t *testing.T) {
 		if tr.mode != "" {
 			t.Fatalf("keys %q left mode %q", keys, tr.mode)
 		}
-		noMsg(t, got)
+		testutil.NoMsg(t, got)
 	}
 }
 
@@ -215,7 +216,7 @@ func TestRenamePromptEscArrowAndPasteCancel(t *testing.T) {
 	if tr.mode != "" {
 		t.Fatalf("lone esc left mode %q", tr.mode)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	// The arrow key is one escape sequence: it cancels on its first byte and
 	// its tail never lands in the draft.
@@ -227,7 +228,7 @@ func TestRenamePromptEscArrowAndPasteCancel(t *testing.T) {
 	if strings.Contains(tr.renameDraft, "[") || strings.Contains(tr.renameDraft, "A") {
 		t.Fatalf("arrow corrupted the draft: %q", tr.renameDraft)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 
 	renamePromptKeys(tr, "\x02r")
 	renamePromptKeys(tr, "keep")
@@ -238,7 +239,7 @@ func TestRenamePromptEscArrowAndPasteCancel(t *testing.T) {
 	if strings.Contains(tr.renameDraft, "pasted") {
 		t.Fatalf("paste reached the draft: %q", tr.renameDraft)
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // No byte reaches the pane while the prompt is open, and a stray click leaves
@@ -247,7 +248,7 @@ func TestRenamePromptShieldsPane(t *testing.T) {
 	tr, got := renamePromptTUI(t)
 	renamePromptKeys(tr, "\x02r")
 	renamePromptKeys(tr, "hello")
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	renamePromptKeys(tr, "\x1b[<0;5;5M")
 	if tr.mode != "rename" {
 		t.Fatalf("click closed the prompt: mode %q", tr.mode)
@@ -255,7 +256,7 @@ func TestRenamePromptShieldsPane(t *testing.T) {
 	if tr.renameDraft != "mainhello" {
 		t.Fatalf("draft = %q, want %q", tr.renameDraft, "mainhello")
 	}
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // renameFloatPaint draws the prompt and parses its band into the cells it
@@ -295,7 +296,7 @@ func renameFloatRow(p helpBoxPainted, y, x, w int) string {
 // The prompt is a float of three rows: the title names the kind and the id, the
 // input row names the draft and holds the caret, and nothing lands outside it.
 func TestRenamePromptDrawsTheBox(t *testing.T) {
-	snap := testSnapshot(&layout.Node{Pane: "a"}, 80, 12, nil)
+	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 80, 12, nil)
 	box, p := renameFloatPaint(t, snap, "s1", "main")
 	if box.H != 1 {
 		t.Fatalf("box height = %d, want one input row", box.H)
@@ -335,7 +336,7 @@ func TestRenamePromptDrawsTheBox(t *testing.T) {
 func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
 	wide := strings.Repeat("名前", 12)
 	for _, cols := range []int{80, 30, 20, 12} {
-		snap := testSnapshot(&layout.Node{Pane: "a"}, cols, 8, nil)
+		snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, cols, 8, nil)
 		box, p := renameFloatPaint(t, snap, "s1", wide)
 		renameFloatInside(t, box, p)
 		if got := renameFloatRow(p, box.Y, box.X, box.W); !strings.HasSuffix(got, "▏") {
@@ -348,7 +349,7 @@ func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
 // readable beside the caret.
 func TestRenamePromptElidesLongDraftHead(t *testing.T) {
 	long := strings.Repeat("a very long workspace name ", 4)
-	snap := testSnapshot(&layout.Node{Pane: "a"}, 30, 8, nil)
+	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 30, 8, nil)
 	box, p := renameFloatPaint(t, snap, "s1", long)
 	row := renameFloatRow(p, box.Y, box.X, box.W)
 	if !strings.HasPrefix(row, " name: ") {
@@ -368,7 +369,7 @@ func TestRenamePromptElidesLongDraftHead(t *testing.T) {
 // A screen too small to hold the box paints nothing.
 func TestRenamePromptDrawsNothingWhenTooSmall(t *testing.T) {
 	for _, c := range []struct{ cols, rows int }{{1, 8}, {20, 4}} {
-		snap := testSnapshot(&layout.Node{Pane: "a"}, c.cols, c.rows, nil)
+		snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, c.cols, c.rows, nil)
 		var b bytes.Buffer
 		drawRename(&b, theme.DefaultTheme(), snap, "s1", "main")
 		if b.Len() != 0 {

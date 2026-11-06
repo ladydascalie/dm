@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
@@ -20,7 +21,7 @@ func TestCloseWindowActionSendsWindowID(t *testing.T) {
 
 	tui.runAction("close-window")
 
-	m := nextMsg(t, got)
+	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "close-window" || m.Target != "w1" {
 		t.Fatalf("close-window sent %+v, want a req for w1", m)
 	}

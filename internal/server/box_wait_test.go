@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/session"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
@@ -19,7 +20,7 @@ func boxSession(t *testing.T) (*server, string) {
 	dir := t.TempDir()
 	t.Setenv("DM_STATE", dir)
 	st := session.NewState("boxwait")
-	rootPane(st)
+	testutil.RootPane(st)
 	s := railServer(st)
 	sock := filepath.Join(dir, "s.sock")
 	ln, err := net.Listen("unix", sock)

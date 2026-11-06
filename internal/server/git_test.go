@@ -2,6 +2,7 @@ package server
 
 import (
 	"dm/internal/session"
+	"dm/internal/testutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 func TestGitStateReachesAll(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
 	st := session.NewState("gitstate")
-	id := rootPane(st)
+	id := testutil.RootPane(st)
 	st.Panes[id].Cwd = "/work/dm"
 
 	var mu sync.Mutex

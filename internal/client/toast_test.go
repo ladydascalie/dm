@@ -2,15 +2,17 @@ package client
 
 import (
 	"bytes"
-	"dm/internal/cells"
-	"dm/internal/rail"
-	"dm/internal/theme"
-	"dm/internal/wire"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"dm/internal/cells"
+	"dm/internal/rail"
+	"dm/internal/testutil"
+	"dm/internal/theme"
+	"dm/internal/wire"
 )
 
 func toastTexts(t *tui) []string {
@@ -149,9 +151,11 @@ func TestBarDropsToastSuffix(t *testing.T) {
 	}
 	info := "SCROLL w1p1 +1/9"
 	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", rail.NerdFonts())
-	want := []string{"main", " ", "main", " ", "▸ ", "1 1", " ", glyph,
-		" w1p1", " working", info}
-	got := barTexts(barSegments(theme.DefaultTheme(), snap, false, info))
+	want := []string{
+		"main", " ", "main", " ", "▸ ", "1 1", " ", glyph,
+		" w1p1", " working", info,
+	}
+	got := testutil.BarTexts(barSegments(theme.DefaultTheme(), snap, false, info))
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("bar spans = %q, want %q", got, want)
 	}
@@ -175,14 +179,20 @@ func TestBarDropsToastSuffix(t *testing.T) {
 func TestCopySelectionRaisesToast(t *testing.T) {
 	tui, _ := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
-	tui.vts["a"] = testVT(t, p.Rect.W, p.Rect.H, "hello world")
-	captureStdout(t, func() {
-		tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<0;1;1M")})
-		tui.handleMouse(mouseEvent{btn: 32, x: p.Rect.X + 5, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<32;5;1M")})
-		tui.handleMouse(mouseEvent{btn: 0, release: true, x: p.Rect.X + 5, y: p.Rect.Y + 1,
-			raw: []byte("\x1b[<0;5;1m")})
+	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello world")
+	testutil.CaptureStdout(t, func() {
+		tui.handleMouse(mouseEvent{
+			btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;1;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 32, x: p.Rect.X + 5, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<32;5;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 0, release: true, x: p.Rect.X + 5, y: p.Rect.Y + 1,
+			raw: []byte("\x1b[<0;5;1m"),
+		})
 	})
 	got := toastTexts(tui)
 	if len(got) != 1 || got[0] != "copied 5 chars" {
@@ -198,7 +208,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 		text string
 	}{
 		{"wide runes", "日日"},
-		{"joined family", "edit " + family + " now"},
+		{"joined family", "edit " + testutil.Family + " now"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

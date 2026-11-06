@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/session"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
@@ -91,7 +92,7 @@ func TestCloseWindowKillsPanesAndKeepsTheRest(t *testing.T) {
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
-	p1 := rootPane(st)
+	p1 := testutil.RootPane(st)
 	w2, p2 := addWindow(st, "two")
 	ws.Active = 0
 
@@ -137,7 +138,7 @@ func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
-	p1 := rootPane(st)
+	p1 := testutil.RootPane(st)
 	probe := probePane(t, s, p1)
 
 	err := s.closeWindow(w1.ID)
@@ -173,7 +174,7 @@ func TestCloseWindowLastWindowDropsBackgroundWorkspace(t *testing.T) {
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
-	p1 := rootPane(st)
+	p1 := testutil.RootPane(st)
 	_, w2, p2 := addWorkspace(st, "two")
 	st.Active = 0
 
@@ -220,7 +221,7 @@ func TestCloseWindowLastWindowDropsActiveWorkspace(t *testing.T) {
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
-	p1 := rootPane(st)
+	p1 := testutil.RootPane(st)
 	_, w2, p2 := addWorkspace(st, "two")
 	st.Active = 1
 
@@ -279,7 +280,7 @@ func TestCloseWindowBackgroundKeepsActive(t *testing.T) {
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
-	rootPane(st)
+	testutil.RootPane(st)
 	w2, _ := addWindow(st, "two")
 	w3, _ := addWindow(st, "three")
 	ws.Active = 2
@@ -299,7 +300,7 @@ func TestCloseWindowBelowActiveDecrements(t *testing.T) {
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
-	rootPane(st)
+	testutil.RootPane(st)
 	w2, _ := addWindow(st, "two")
 	w3, _ := addWindow(st, "three")
 	ws.Active = 1
@@ -319,7 +320,7 @@ func TestCloseWindowActiveClampsToLast(t *testing.T) {
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
-	rootPane(st)
+	testutil.RootPane(st)
 	w2, _ := addWindow(st, "two")
 	ws.Active = 0
 
@@ -330,4 +331,3 @@ func TestCloseWindowActiveClampsToLast(t *testing.T) {
 		t.Fatalf("active window = %d %q, want 0 %q", ws.Active, st.ActiveWindow().ID, w2.ID)
 	}
 }
-

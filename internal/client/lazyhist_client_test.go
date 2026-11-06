@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -30,11 +31,11 @@ func TestScrollAsksForHistoryOnce(t *testing.T) {
 	tui, sent := clientTUI(t, nil)
 	tui.startScrollOnFocus()
 
-	m := nextMsg(t, sent)
+	m := testutil.NextMsg(t, sent)
 	if m.Type != "req" || m.Action != "replay" || m.Target != "a" {
 		t.Fatalf("first entry sent %+v, want a replay request for a", m)
 	}
-	noMsg(t, sent)
+	testutil.NoMsg(t, sent)
 	if tui.mode != "scroll" || tui.scroll != "a" {
 		t.Fatalf("awaiting the ring: mode=%q scroll=%q", tui.mode, tui.scroll)
 	}
@@ -44,7 +45,7 @@ func TestScrollAsksForHistoryOnce(t *testing.T) {
 
 	tui.exitScroll()
 	tui.startScrollOnFocus()
-	noMsg(t, sent)
+	testutil.NoMsg(t, sent)
 	if tui.scroll != "a" || tui.mode != "scroll" {
 		t.Fatalf("second entry: mode=%q scroll=%q", tui.mode, tui.scroll)
 	}
@@ -55,7 +56,7 @@ func TestScrollAsksForHistoryOnce(t *testing.T) {
 func TestReplayFillsScrollback(t *testing.T) {
 	tui, sent := clientTUI(t, nil)
 	tui.startScrollOnFocus()
-	if m := nextMsg(t, sent); m.Action != "replay" {
+	if m := testutil.NextMsg(t, sent); m.Action != "replay" {
 		t.Fatalf("first entry sent %+v", m)
 	}
 
@@ -87,7 +88,7 @@ func TestScrollUnknownPaneIsQuiet(t *testing.T) {
 	tui, sent := clientTUI(t, nil)
 	tui.snap.Focus = "ghost"
 	tui.startScrollOnFocus()
-	noMsg(t, sent)
+	testutil.NoMsg(t, sent)
 	if tui.mode != "" || tui.scroll != "" {
 		t.Fatalf("unknown pane entered scrollback: mode=%q scroll=%q", tui.mode, tui.scroll)
 	}
@@ -104,7 +105,7 @@ func TestScrollUnknownPaneIsQuiet(t *testing.T) {
 	// The UI still answers: a real pane asks and opens as usual.
 	tui.snap.Focus = "a"
 	tui.startScrollOnFocus()
-	if m := nextMsg(t, sent); m.Action != "replay" || m.Target != "a" {
+	if m := testutil.NextMsg(t, sent); m.Action != "replay" || m.Target != "a" {
 		t.Fatalf("after the unknown id the client sent %+v", m)
 	}
 	if tui.mode != "scroll" {
@@ -117,13 +118,13 @@ func TestScrollUnknownPaneIsQuiet(t *testing.T) {
 func TestScrollDropsHistoryOnGeometry(t *testing.T) {
 	tui, sent := clientTUI(t, nil)
 	tui.startScrollOnFocus()
-	nextMsg(t, sent)
+	testutil.NextMsg(t, sent)
 	tui.apply(wire.Msg{Type: "replay", Target: "a", Data: []byte(strings.Repeat("LINE\r\n", 60))})
 	if tui.scrollVT == nil {
 		t.Fatal("replay did not fill the scrollback")
 	}
 
-	small := testSnapshot(&layout.Node{Pane: "a"}, 80, 24, nil)
+	small := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 80, 24, nil)
 	small.Focus = "a"
 	tui.apply(wire.Msg{Type: "snapshot", Snap: small})
 	if got, ok := tui.hist["a"]; ok {
@@ -134,7 +135,7 @@ func TestScrollDropsHistoryOnGeometry(t *testing.T) {
 	}
 
 	tui.startScrollOnFocus()
-	if m := nextMsg(t, sent); m.Action != "replay" || m.Target != "a" {
+	if m := testutil.NextMsg(t, sent); m.Action != "replay" || m.Target != "a" {
 		t.Fatalf("re-entry after the resize sent %+v", m)
 	}
 }

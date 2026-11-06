@@ -12,6 +12,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/boxview"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -149,7 +150,7 @@ func TestBoxViewRequestsWatchers(t *testing.T) {
 	}
 
 	tui.apply(wire.Msg{Type: "watch"})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	if !tui.box.WatchWant {
 		t.Fatal("a held-back ask is not marked for the ticker")
 	}
@@ -162,7 +163,7 @@ func TestBoxViewRequestsWatchers(t *testing.T) {
 
 	feed(tui, "q")
 	tui.apply(wire.Msg{Type: "watch"})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 }
 
 // TestBoxViewWatchFlush: the ticker sends the ask that the window held back.
@@ -172,7 +173,7 @@ func TestBoxViewWatchFlush(t *testing.T) {
 	nextBoxMsg(t, got)
 	nextBoxMsg(t, got)
 	tui.apply(wire.Msg{Type: "watch"})
-	noMsg(t, got)
+	testutil.NoMsg(t, got)
 	tui.box.WatchAt = time.Now().Add(-boxview.WatchInterval)
 	tui.flushBoxWatchers(time.Now())
 	if m := nextBoxMsg(t, got); m.Action != "msg-watchers" {
