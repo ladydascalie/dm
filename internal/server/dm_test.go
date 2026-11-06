@@ -32,7 +32,7 @@ func TestRailGeometry(t *testing.T) {
 	if p.ID != id || p.Rect.X-1 != want {
 		t.Fatalf("new session pane %q box starts at %d, want %d", p.ID, p.Rect.X-1, want)
 	}
-	if area := layout.PaneAreaFor(80, 24, snap.Rail); area.X != want || p.Rect.X != area.X+1 {
+	if area := layout.PaneAreaForWithTabBar(80, 24, snap.Rail); area.X != want || p.Rect.X != area.X+1 {
 		t.Fatalf("pane rect %+v does not sit inside area %+v", p.Rect, area)
 	}
 
@@ -345,7 +345,7 @@ func (f *zoomFixture) drain() map[string][]wire.Msg {
 func TestZoomSyncSizes(t *testing.T) {
 	f := newZoomFixture(t)
 	f.s.mu.Lock()
-	area := layout.PaneAreaFor(f.s.cols, f.s.rows, f.s.railLocked())
+	area := layout.PaneAreaForWithTabBar(f.s.cols, f.s.rows, f.s.railLocked())
 	normal := f.s.paneRectsLocked()
 	f.s.zoom = f.right
 	f.s.mu.Unlock()
@@ -395,7 +395,7 @@ func TestZoomKeepsOnTerminalResize(t *testing.T) {
 	if snap.Zoom != f.right {
 		t.Fatalf("a terminal resize cleared the zoom: %q", snap.Zoom)
 	}
-	want := layout.InsetBox(layout.PaneAreaFor(140, 44, layout.EffectiveRail(140, layout.DefaultRail)))
+	want := layout.InsetBox(layout.PaneAreaForWithTabBar(140, 44, layout.EffectiveRail(140, layout.DefaultRail)))
 	var rect layout.Rect
 	for _, p := range snap.Panes {
 		if p.ID == f.right {
@@ -423,7 +423,7 @@ func TestZoomStalePaneNotSent(t *testing.T) {
 	f.s.zoom = "w2p1"
 	snap := f.s.snapshotLocked()
 	held := f.s.zoom
-	area := layout.PaneAreaFor(f.s.cols, f.s.rows, f.s.railLocked())
+	area := layout.PaneAreaForWithTabBar(f.s.cols, f.s.rows, f.s.railLocked())
 	f.s.mu.Unlock()
 	if snap.Zoom != "" {
 		t.Fatalf("snapshot sent a zoom outside the active window: %q", snap.Zoom)

@@ -197,6 +197,49 @@ func TestPaneAreaInset(t *testing.T) {
 	}
 }
 
+// TestPaneAreaWithTabBar pins the reserve: the tab bar takes the first row to
+// the right of the rail, the pane area starts directly below it and loses that
+// row from its height, and the status bar keeps the last row.
+func TestPaneAreaWithTabBar(t *testing.T) {
+	area := PaneAreaForWithTabBar(100, 30, 20)
+	if area != (Rect{X: 20, Y: TabBarRows, W: 80, H: 28}) {
+		t.Fatalf("pane area with tab bar = %+v", area)
+	}
+	bar := Rect{X: area.X, Y: area.Y - TabBarRows, W: area.W, H: TabBarRows}
+	if bar.Y != 0 || bar.Y+bar.H != area.Y {
+		t.Fatalf("tab bar row %+v does not sit above pane area %+v", bar, area)
+	}
+	if area.Y+area.H != 29 {
+		t.Fatalf("pane area reaches row %d, want the row above 29", area.Y+area.H)
+	}
+	// A screen too short for both clamps to an empty area, not a negative one.
+	if got := PaneAreaForWithTabBar(10, 1, 0); got.H < 0 {
+		t.Fatalf("short screen height = %d", got.H)
+	}
+}
+
+// TestPaneBoxesStartBelowTabBar proves every pane box shifts down by the tab
+// bar rows and loses them from its height.
+func TestPaneBoxesStartBelowTabBar(t *testing.T) {
+	root := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	plain := map[string]Rect{}
+	Layout(root, PaneAreaFor(100, 30, 20), plain)
+	shifted := map[string]Rect{}
+	Layout(root, PaneAreaForWithTabBar(100, 30, 20), shifted)
+	for id := range plain {
+		want := plain[id]
+		want.Y += TabBarRows
+		want.H -= TabBarRows
+		if shifted[id] != want {
+			t.Fatalf("%s box %+v, want %+v", id, shifted[id], want)
+		}
+		if shifted[id].Y <= TabBarRows {
+			t.Fatalf("%s starts at row %d, want below the tab bar row %d", id, shifted[id].Y, TabBarRows)
+		}
+	}
+}
+
 func TestSplitRatio(t *testing.T) {
 	root := &Node{Pane: "a"}
 	SplitLeaf(root, "a", "right", "b", 0.25)
