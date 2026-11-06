@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"encoding/json"
@@ -280,7 +280,7 @@ type server struct {
 	zoom string
 }
 
-func runServer(args []string) error {
+func Run(args []string) error {
 	fs := flag.NewFlagSet("__server", flag.ContinueOnError)
 	name := fs.String("s", "main", "session name")
 	fs.Bool("headless", true, "unused, kept for clarity")
