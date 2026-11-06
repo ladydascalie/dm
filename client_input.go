@@ -1025,15 +1025,15 @@ func (t *tui) paneHoverAt(p *wire.PaneInfo, x, y int) *linkHover {
 // float, or nil. The float's VT is the box's interior, so the row is local.
 func (t *tui) boxHoverAt(x, y int) *linkHover {
 	b := t.box
-	if b == nil || b.float == nil || b.float.VT == nil {
+	if b == nil || b.Float == nil || b.Float.VT == nil {
 		return nil
 	}
-	r := b.float.Rect
+	r := b.Float.Rect
 	if x < r.X || x >= r.X+r.W || y < r.Y || y >= r.Y+r.H {
 		return nil
 	}
 	cx, cy := x-r.X, y-r.Y
-	_, rng := urlMatchAtRow(b.float.VT, r.W, cy, cx)
+	_, rng := urlMatchAtRow(b.Float.VT, r.W, cy, cx)
 	if rng == nil {
 		return nil
 	}

@@ -1,4 +1,6 @@
-package main
+// Package boxview paints the message box float: its rows, its watcher page,
+// its scroll window and its borders.
+package boxview
 
 // The message box as a floating pane. The view is read-only: it lists the
 // session's entries newest first, one row each, and follows the log while it is
@@ -8,18 +10,14 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"dm/internal/box"
 	"dm/internal/cells"
-	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
-	"dm/internal/rail"
-	"dm/internal/switcher"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -46,19 +44,19 @@ const (
 )
 
 const (
-	// boxWatchInterval is the shortest gap between watcher requests. A burst
-	// of watch pushes asks the server once.
-	boxWatchInterval = 100 * time.Millisecond
+	// WatchInterval is the shortest gap between watcher requests. A burst of
+	// watch pushes asks the server once.
+	WatchInterval = 100 * time.Millisecond
 
 	// boxReceiptMinW is the narrowest rect that carries the receipt marker.
 	// Below it the marker is dropped whole, so the message keeps its cells.
 	boxReceiptMinW = 60
 )
 
-// boxView is the open message-box float: the entries the server sent, the rows
+// BoxView is the open message-box float: the entries the server sent, the rows
 // of the newest one shown at the top, the watchers the server last reported,
 // and the float that draws them.
-type boxView struct {
+type BoxView struct {
 	entries []box.Entry
 	off     int
 	// new counts the entries that arrived above a scrolled-back window. It is
@@ -70,31 +68,32 @@ type boxView struct {
 	// and pOff is the first watch row in view.
 	page bool
 	pOff int
-	// watchAt is when the view last asked for the watcher list, and watchWant
+	// WatchAt is when the view last asked for the watcher list, and WatchWant
 	// marks a push whose ask the interval held back.
-	watchAt   time.Time
-	watchWant bool
+	WatchAt   time.Time
+	WatchWant bool
 
-	float *panel.FloatingPane
+	// Float is the pane that draws the view.
+	Float *panel.FloatingPane
 	// snap sizes the float: the view fits the log until it reaches its cap,
 	// so a short log reads in a short box and a long one fills the screen.
 	snap *wire.Snapshot
 }
 
-// newBoxView opens the float on a screen. The log stays empty until the reply
+// NewBoxView opens the float on a screen. The log stays empty until the reply
 // lands.
-func newBoxView(snap *wire.Snapshot, th theme.Theme) *boxView {
-	b := &boxView{float: &panel.FloatingPane{ID: "box", Active: true}, snap: snap}
-	b.sync(snap, th)
+func NewBoxView(snap *wire.Snapshot, th theme.Theme) *BoxView {
+	b := &BoxView{Float: &panel.FloatingPane{ID: "box", Active: true}, snap: snap}
+	b.Sync(snap, th)
 	return b
 }
 
-// boxViewRect is where the float sits: centred over the pane area, one cell
+// BoxViewRect is where the float sits: centred over the pane area, one cell
 // clear of the rail, at most 96 columns and 22 rows. The height follows n, the
 // larger of the entry count and the watch count, so a short list reads in a
 // short box and a list longer than the cap scrolls. A parked watch exists
 // before the first entry, so the watcher page sizes itself from n too.
-func boxViewRect(snap *wire.Snapshot, n int) layout.Rect {
+func BoxViewRect(snap *wire.Snapshot, n int) layout.Rect {
 	left := snap.Rail
 	if left < 0 {
 		left = 0
@@ -130,17 +129,52 @@ func boxViewRect(snap *wire.Snapshot, n int) layout.Rect {
 	if y < 1 {
 		y = 1
 	}
-	return switcher.ClampRect(layout.Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
+	return clampRect(layout.Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
 }
 
-// sync fits the float to the screen after a snapshot or a rail change.
-func (b *boxView) sync(snap *wire.Snapshot, th theme.Theme) {
+// clampRect keeps r inside a cols by rows screen.
+func clampRect(r layout.Rect, cols, rows int) layout.Rect {
+	if r.W > cols {
+		r.W = cols
+	}
+	if r.H > rows {
+		r.H = rows
+	}
+	if r.W < 0 {
+		r.W = 0
+	}
+	if r.H < 0 {
+		r.H = 0
+	}
+	if r.X < 0 {
+		r.X = 0
+	}
+	if r.Y < 0 {
+		r.Y = 0
+	}
+	if r.X+r.W > cols {
+		r.X = cols - r.W
+	}
+	if r.Y+r.H > rows {
+		r.Y = rows - r.H
+	}
+	if r.X < 0 {
+		r.X = 0
+	}
+	if r.Y < 0 {
+		r.Y = 0
+	}
+	return r
+}
+
+// Sync fits the float to the screen after a snapshot or a rail change.
+func (b *BoxView) Sync(snap *wire.Snapshot, th theme.Theme) {
 	b.snap = snap
-	r := boxViewRect(snap, b.rows())
-	if r == b.float.Rect {
+	r := BoxViewRect(snap, b.rows())
+	if r == b.Float.Rect {
 		return
 	}
-	b.float.Rect = r
+	b.Float.Rect = r
 	b.clamp()
 	b.pageClamp()
 	b.paint(th)
@@ -148,23 +182,23 @@ func (b *boxView) sync(snap *wire.Snapshot, th theme.Theme) {
 
 // rows is the number of rows the float fits: the larger list wins, so the
 // watcher page is usable before the first entry lands.
-func (b *boxView) rows() int {
+func (b *BoxView) rows() int {
 	if len(b.watchers) > len(b.entries) {
 		return len(b.watchers)
 	}
 	return len(b.entries)
 }
 
-// set replaces the log after a list reply or a box push. A scrolled-back
+// Set replaces the log after a list reply or a box push. A scrolled-back
 // window keeps its top entry by seq, so new entries do not slide the text
 // under the reader. A window at the top follows the newest entry.
-func (b *boxView) set(entries []box.Entry, th theme.Theme) {
+func (b *BoxView) Set(entries []box.Entry, th theme.Theme) {
 	top := 0
 	if b.off > 0 && b.off < len(b.entries) {
 		top = b.entries[b.off].Seq
 	}
 	b.entries = entries
-	b.float.Rect = boxViewRect(b.snap, b.rows())
+	b.Float.Rect = BoxViewRect(b.snap, b.rows())
 	if top != 0 {
 		if i := boxSeqIndex(entries, top); i >= 0 {
 			// The entries between the old top and the new one arrived above
@@ -181,11 +215,11 @@ func (b *boxView) set(entries []box.Entry, th theme.Theme) {
 	b.paint(th)
 }
 
-// setWatchers replaces the watcher page after a msg-watchers reply. The float
+// SetWatchers replaces the watcher page after a msg-watchers reply. The float
 // holds the page whole while the page is longer than the log.
-func (b *boxView) setWatchers(watchers []box.Watch, th theme.Theme) {
+func (b *BoxView) SetWatchers(watchers []box.Watch, th theme.Theme) {
 	b.watchers = watchers
-	b.float.Rect = boxViewRect(b.snap, b.rows())
+	b.Float.Rect = BoxViewRect(b.snap, b.rows())
 	b.clamp()
 	b.pageClamp()
 	b.paint(th)
@@ -201,9 +235,9 @@ func boxSeqIndex(entries []box.Entry, seq int) int {
 	return -1
 }
 
-// scroll moves the window by n rows, positive toward older rows. The page and
+// Scroll moves the window by n rows, positive toward older rows. The page and
 // the log keep their own offsets, so a toggle leaves each where it was.
-func (b *boxView) scroll(n int, th theme.Theme) {
+func (b *BoxView) Scroll(n int, th theme.Theme) {
 	if b.page {
 		b.pOff += n
 		b.pageClamp()
@@ -215,8 +249,8 @@ func (b *boxView) scroll(n int, th theme.Theme) {
 }
 
 // pageClamp keeps the watcher page on its list.
-func (b *boxView) pageClamp() {
-	max := len(b.watchers) - b.float.Rect.H
+func (b *BoxView) pageClamp() {
+	max := len(b.watchers) - b.Float.Rect.H
 	if max < 0 {
 		max = 0
 	}
@@ -228,8 +262,8 @@ func (b *boxView) pageClamp() {
 	}
 }
 
-// listLen is the number of rows in the list the float shows.
-func (b *boxView) listLen() int {
+// ListLen is the number of rows in the list the float shows.
+func (b *BoxView) ListLen() int {
 	if b.page {
 		return len(b.watchers)
 	}
@@ -239,8 +273,8 @@ func (b *boxView) listLen() int {
 // clamp keeps the window on the log: the offset never passes the oldest row
 // that still fills the pane, a log that shrank goes back to the top, and the
 // arrival count clears once the reader is at the top.
-func (b *boxView) clamp() {
-	max := len(b.entries) - b.float.Rect.H
+func (b *BoxView) clamp() {
+	max := len(b.entries) - b.Float.Rect.H
 	if max < 0 {
 		max = 0
 	}
@@ -255,8 +289,8 @@ func (b *boxView) clamp() {
 	}
 }
 
-// togglePage swaps the float between the entry list and the watcher page.
-func (b *boxView) togglePage(th theme.Theme) {
+// TogglePage swaps the float between the entry list and the watcher page.
+func (b *BoxView) TogglePage(th theme.Theme) {
 	b.page = !b.page
 	b.paint(th)
 }
@@ -264,12 +298,12 @@ func (b *boxView) togglePage(th theme.Theme) {
 // paint rewrites the float's terminal from the entries or the watcher list.
 // Every row is placed absolutely, so a view that scrolled paints its new
 // window whole.
-func (b *boxView) paint(th theme.Theme) {
-	r := b.float.Rect
-	b.float.Title = b.title()
-	b.float.Hint = b.hint()
+func (b *BoxView) paint(th theme.Theme) {
+	r := b.Float.Rect
+	b.Float.Title = b.title()
+	b.Float.Hint = b.hint()
 	if r.W < 1 || r.H < 1 {
-		b.float.VT = vt10x.New(vt10x.WithSize(1, 1))
+		b.Float.VT = vt10x.New(vt10x.WithSize(1, 1))
 		return
 	}
 	vt := vt10x.New(vt10x.WithSize(r.W, r.H))
@@ -280,12 +314,12 @@ func (b *boxView) paint(th theme.Theme) {
 		b.paintEntries(&buf, r, th)
 	}
 	_, _ = vt.Write(buf.Bytes())
-	b.float.VT = vt
+	b.Float.VT = vt
 }
 
 // paintEntries draws the window of the log. A wide enough rect carries the
 // receipt count in every row.
-func (b *boxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th theme.Theme) {
+func (b *BoxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th theme.Theme) {
 	if len(b.entries) == 0 {
 		boxPaintNote(buf, 1, "no entries yet", r.W)
 		return
@@ -306,7 +340,7 @@ func (b *boxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th theme.Theme)
 
 // paintWatchers draws the watcher page in the server's order, clipped to the
 // rect and to its rows.
-func (b *boxView) paintWatchers(buf *bytes.Buffer, r layout.Rect, th theme.Theme) {
+func (b *BoxView) paintWatchers(buf *bytes.Buffer, r layout.Rect, th theme.Theme) {
 	if len(b.watchers) == 0 {
 		boxPaintNote(buf, 1, "no watchers yet", r.W)
 		return
@@ -329,7 +363,7 @@ func boxPaintNote(buf *bytes.Buffer, row int, text string, w int) {
 // title is the count in the top border, the visible rows when the log is
 // longer than the box, the parked watches, and the entries that arrived above
 // a scrolled-back window. The last two are omitted when they are zero.
-func (b *boxView) title() string {
+func (b *BoxView) title() string {
 	n := len(b.entries)
 	var head string
 	switch n {
@@ -338,7 +372,7 @@ func (b *boxView) title() string {
 	case 1:
 		head = "box  1 entry"
 	default:
-		rows := b.float.Rect.H
+		rows := b.Float.Rect.H
 		if n <= rows {
 			head = fmt.Sprintf("box  %d entries", n)
 		} else {
@@ -360,7 +394,7 @@ func (b *boxView) title() string {
 }
 
 // hint names the keys the view takes, in its bottom border.
-func (b *boxView) hint() string {
+func (b *BoxView) hint() string {
 	if b.page {
 		return " j/k scroll  w log  esc close "
 	}
@@ -368,7 +402,7 @@ func (b *boxView) hint() string {
 }
 
 // parked counts the watches whose wait is outstanding.
-func (b *boxView) parked() int {
+func (b *BoxView) parked() int {
 	n := 0
 	for _, w := range b.watchers {
 		if w.Parked {
@@ -380,7 +414,7 @@ func (b *boxView) parked() int {
 
 // received counts the watches a filter and a cursor say were served this
 // entry: the filter matches its key and the cursor is at or past its seq.
-func (b *boxView) received(e box.Entry) int {
+func (b *BoxView) received(e box.Entry) int {
 	n := 0
 	for _, w := range b.watchers {
 		if watchMatches(w, e.Key) && w.Cursor >= e.Seq {
@@ -474,212 +508,11 @@ func boxStateColour(th theme.Theme, st box.State) theme.RGB {
 	if st == box.StateNote {
 		return th.Palette.RailDim
 	}
-	_, colour := rail.RailGlyph(th, string(st), false)
-	return colour
-}
-
-// openBoxView opens the message box as a floating pane, or closes it when it is
-// already up. The view asks for the whole log and the watcher list; the replies
-// fill it.
-func openBoxView(t *tui) {
-	if t.snap == nil {
-		t.disarm()
-		return
+	if s, ok := th.States[string(st)]; ok {
+		return s.Colour
 	}
-	if t.box != nil {
-		closeBoxView(t)
-		return
+	if s, ok := th.States["unknown"]; ok {
+		return s.Colour
 	}
-	t.box = newBoxView(t.snap, t.theme())
-	t.AddFloatingPane(t.box.float)
-	t.mode = "box"
-	t.armed = false
-	t.boxRequest()
-	t.boxWatchers(time.Now())
-	t.dirty = true
-}
-
-// closeBoxView takes the float down and gives the keyboard back to the panes.
-func closeBoxView(t *tui) {
-	if t.box == nil {
-		return
-	}
-	t.RemoveFloatingPane(t.box.float.ID)
-	t.box = nil
-	t.mode = ""
-	// The close key stays in the buffer while the pending timer waits. Drop
-	// the whole buffer here, so a later keypress cannot forward a stray escape
-	// to a pane.
-	t.inbuf = nil
-	t.pending = false
-	t.dirty = true
-}
-
-// boxRequest asks the server for the whole log. The reply carries the entries
-// newest first.
-func (t *tui) boxRequest() {
-	if t.conn == nil {
-		return
-	}
-	_ = t.conn.Send(wire.Msg{
-		Type: "req", Action: "msg-list",
-		Res: json.RawMessage(`{"key":"","limit":0}`),
-	})
-}
-
-// boxWatchers asks the server for the watcher list, unless it asked within the
-// last boxWatchInterval. A held-back ask stays marked and the ticker flushes it.
-// The view is not a watcher: the request carries no from.
-func (t *tui) boxWatchers(now time.Time) {
-	b := t.box
-	if b == nil || t.conn == nil {
-		return
-	}
-	if !b.watchAt.IsZero() && now.Sub(b.watchAt) < boxWatchInterval {
-		b.watchWant = true
-		return
-	}
-	b.watchAt = now
-	b.watchWant = false
-	_ = t.conn.Send(wire.Msg{
-		Type: "req", Action: "msg-watchers",
-		Res: json.RawMessage(`{}`),
-	})
-}
-
-// flushBoxWatchers sends a watcher ask that the interval held back.
-func (t *tui) flushBoxWatchers(now time.Time) {
-	if t.box == nil || !t.box.watchWant {
-		return
-	}
-	t.boxWatchers(now)
-}
-
-// takeBoxList fills the view from a msg-list reply. A closed view, a malformed
-// reply and an error reply leave the picture alone; an error becomes a toast.
-func (t *tui) takeBoxList(m wire.Msg) {
-	if t.box == nil {
-		return
-	}
-	if !m.OK {
-		t.notify(m.Error)
-		return
-	}
-	var rep box.ListReply
-	if err := json.Unmarshal(m.Res, &rep); err != nil {
-		t.notify("box: " + err.Error())
-		return
-	}
-	t.box.set(rep.Entries, t.theme())
-	t.dirty = true
-}
-
-// takeBoxWatchers fills the watcher page from a msg-watchers reply. Replies
-// arrive in request order on the one connection, so the newest reply is the
-// newest state. A closed view, a malformed reply and an error reply leave the
-// page alone; an error becomes a toast.
-func (t *tui) takeBoxWatchers(m wire.Msg) {
-	if t.box == nil {
-		return
-	}
-	if !m.OK {
-		t.notify(m.Error)
-		return
-	}
-	var rep box.WatchersReply
-	if err := json.Unmarshal(m.Res, &rep); err != nil {
-		t.notify("box: " + err.Error())
-		return
-	}
-	t.box.setWatchers(rep.Watchers, t.theme())
-	t.dirty = true
-}
-
-// boxWheel scrolls the view from the wheel. A notch up goes toward older
-// entries, the way it goes back in scrollback.
-func (t *tui) boxWheel(ev mouseEvent) {
-	if t.box == nil {
-		return
-	}
-	t.updateLinkHover(ev.x-1, ev.y-1, ev.btn&16 != 0)
-	// Ctrl+click on a URL in the float opens it. The click is consumed; a
-	// ctrl+click elsewhere does nothing.
-	if ev.btn&16 != 0 && ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release {
-		r := t.box.float.Rect
-		x, y := ev.x-1, ev.y-1
-		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
-			if u := urlAtRow(t.box.float.VT, r.W, y-r.Y, x-r.X); u != "" {
-				if err := openURL(u); err != nil {
-					t.notify("open: " + err.Error())
-				} else {
-					t.notify("opened " + u)
-				}
-				return
-			}
-		}
-	}
-	if ev.btn&64 == 0 || ev.release {
-		return
-	}
-	step := -3
-	if ev.btn&1 == 0 {
-		step = 3
-	}
-	t.box.scroll(step, t.theme())
-	t.dirty = true
-}
-
-// boxKey consumes one key while the message box float is up. Every key belongs
-// to the view: nothing reaches a pane. It returns false when it needs more bytes
-// for an escape sequence.
-func (t *tui) boxKey() bool {
-	if len(t.inbuf) == 0 {
-		return true
-	}
-	if p := t.km().PrefixBytes(); len(p) > 0 && bytes.HasPrefix(t.inbuf, p) {
-		// The prefix key closes the view.
-		t.inbuf = append([]byte(nil), t.inbuf[len(p):]...)
-		t.pending = false
-		closeBoxView(t)
-		return true
-	}
-	action, n, state := t.km().Match("box", t.inbuf)
-	switch state {
-	case keymap.Partial:
-		if !t.pending {
-			t.pending = true
-			t.escAt = time.Now()
-		}
-		return false
-	case keymap.Match:
-		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
-		t.pending = false
-	default:
-		// An unbound key closes the view.
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		closeBoxView(t)
-		return true
-	}
-	switch action {
-	case "up", "up-arrow":
-		t.box.scroll(-1, t.theme())
-	case "down", "down-arrow":
-		t.box.scroll(1, t.theme())
-	case "page-up":
-		t.box.scroll(-t.box.float.Rect.H, t.theme())
-	case "page-down":
-		t.box.scroll(t.box.float.Rect.H, t.theme())
-	case "top":
-		t.box.scroll(-t.box.listLen(), t.theme())
-	case "bottom":
-		t.box.scroll(t.box.listLen(), t.theme())
-	case "toggle-page":
-		t.box.togglePage(t.theme())
-	default:
-		closeBoxView(t)
-		return true
-	}
-	t.dirty = true
-	return true
+	return theme.DefaultTheme().States["unknown"].Colour
 }
