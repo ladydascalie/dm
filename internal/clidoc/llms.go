@@ -1,4 +1,4 @@
-package main
+package clidoc
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"dm/internal/keymap"
 )
 
-// llmsText renders llms.txt: the whole dm surface as one dense markdown page an
+// LLMsText renders llms.txt: the whole dm surface as one dense markdown page an
 // LLM can read in a single pass. It draws from the same table the usage text and
 // the man page draw from. docs/llms.txt is a committed snapshot of this output,
 // and a test fails when the two drift.
@@ -131,8 +131,8 @@ func llmsCell(s string) string {
 	return strings.ReplaceAll(s, "|", `\|`)
 }
 
-// llmsText renders the whole page.
-func llmsText() string {
+// LLMsText renders the whole page.
+func LLMsText() string {
 	var b strings.Builder
 
 	b.WriteString("# dm\n\n")

@@ -1,4 +1,4 @@
-package main
+package clidoc
 
 import (
 	"go/ast"
@@ -14,9 +14,9 @@ import (
 func runCLICases(t *testing.T) (labels []string, hasDefault bool) {
 	t.Helper()
 	fset := gotoken.NewFileSet()
-	f, err := parser.ParseFile(fset, "main.go", nil, 0)
+	f, err := parser.ParseFile(fset, "../../main.go", nil, 0)
 	if err != nil {
-		t.Fatalf("parse main.go: %v", err)
+		t.Fatalf("parse ../../main.go: %v", err)
 	}
 	found := false
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -52,7 +52,7 @@ func runCLICases(t *testing.T) (labels []string, hasDefault bool) {
 		return false
 	})
 	if !found {
-		t.Fatal("runCLI not found in main.go")
+		t.Fatal("runCLI not found in ../../main.go")
 	}
 	return labels, hasDefault
 }
@@ -140,7 +140,7 @@ func TestNoDuplicateNamesOrAliases(t *testing.T) {
 }
 
 func TestUsageNamesEveryCommand(t *testing.T) {
-	text := usageText()
+	text := UsageText()
 	for _, c := range cliCommands {
 		if !strings.Contains(text, c.line()) {
 			t.Errorf("usage text does not name %q", c.line())

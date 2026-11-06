@@ -1,11 +1,11 @@
-package main
+package clidoc
 
 import (
 	"fmt"
 	"strings"
 )
 
-// The CLI surface lives here, once. usageText renders the help text from it,
+// The CLI surface lives here, once. UsageText renders the help text from it,
 // and the man page and llms.txt render from the same rows. A test proves every
 // case in runCLI has a row and every row has a case.
 
@@ -349,9 +349,9 @@ func (c cliCommand) line() string {
 	return s
 }
 
-// usageText renders the help text from cliCommands. Rows print in table order,
+// UsageText renders the help text from cliCommands. Rows print in table order,
 // grouped the way the table groups them, with the command column aligned.
-func usageText() string {
+func UsageText() string {
 	type row struct {
 		line    string
 		summary string

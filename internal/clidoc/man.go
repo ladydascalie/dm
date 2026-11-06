@@ -1,4 +1,4 @@
-package main
+package clidoc
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"dm/internal/keymap"
 )
 
-// manPage renders the man page from cliCommands, the same table the usage text
+// ManPage renders the man page from cliCommands, the same table the usage text
 // comes from. docs/dm.1 is a committed snapshot of this output, and a test
 // fails when the two drift.
 
@@ -103,8 +103,8 @@ func roffBold(s string) string { return `\fB` + roffEscape(s) + `\fP` }
 // roffItalic wraps escaped text in italic.
 func roffItalic(s string) string { return `\fI` + roffEscape(s) + `\fP` }
 
-// manPage renders the whole page.
-func manPage() string {
+// ManPage renders the whole page.
+func ManPage() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, ".TH DM 1 %q %q %q\n", manDate, "dm", "User Commands")
 
