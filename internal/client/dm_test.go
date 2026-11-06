@@ -230,14 +230,16 @@ func TestRailItemsGrouping(t *testing.T) {
 	}}
 	items := rail.RailItems(snap)
 	wantKinds := []rail.RailKind{
-		rail.Workspace, rail.Pane, rail.Pane, rail.Pane,
+		rail.Workspace, rail.Window, rail.WindowNote, rail.Pane, rail.Pane,
+		rail.Window, rail.Pane,
 		rail.Gap,
-		rail.Workspace, rail.Pane,
+		rail.Workspace, rail.Window, rail.Pane,
 	}
 	wantText := []string{
-		"main", "alpha", "w1p2", "w1p3",
+		"main", "one", "working hard", "alpha", "w1p2",
+		"two", "w1p3",
 		"",
-		"work", "pi",
+		"work", "three", "pi",
 	}
 	if len(items) != len(wantKinds) {
 		t.Fatalf("rail has %d rows, want %d: %+v", len(items), len(wantKinds), items)
@@ -254,33 +256,35 @@ func TestRailItemsGrouping(t *testing.T) {
 			gaps++
 		}
 	}
-	if gaps != 1 || items[4].Kind != rail.Gap {
-		t.Fatalf("rail has %d gaps, want one at row 4: %+v", gaps, items)
+	if gaps != 1 || items[7].Kind != rail.Gap {
+		t.Fatalf("rail has %d gaps, want one at row 7: %+v", gaps, items)
 	}
-	if items[0].Count != 3 || items[5].Count != 1 {
-		t.Fatalf("workspace pane counts = %d, %d, want 3, 1", items[0].Count, items[5].Count)
+	if items[0].Count != 3 || items[8].Count != 1 {
+		t.Fatalf("workspace pane counts = %d, %d, want 3, 1", items[0].Count, items[8].Count)
 	}
-	if items[0].Workspace != "s1" || items[5].Workspace != "s2" {
-		t.Fatalf("workspace ids = %q, %q", items[0].Workspace, items[5].Workspace)
+	if items[0].Workspace != "s1" || items[8].Workspace != "s2" {
+		t.Fatalf("workspace ids = %q, %q", items[0].Workspace, items[8].Workspace)
 	}
-	if !items[0].Active || items[5].Active {
-		t.Fatalf("workspace rows active = %v, %v", items[0].Active, items[5].Active)
+	if !items[0].Active || items[8].Active {
+		t.Fatalf("workspace rows active = %v, %v", items[0].Active, items[8].Active)
 	}
-	if !items[6].Agent || items[1].Agent {
-		t.Fatalf("pane rows agent = %v, %v", items[6].Agent, items[1].Agent)
+	if !items[10].Agent || items[3].Agent {
+		t.Fatalf("pane rows agent = %v, %v", items[10].Agent, items[3].Agent)
 	}
-	if !items[1].Focus || items[2].Focus {
-		t.Fatalf("pane rows focus = %v, %v", items[1].Focus, items[2].Focus)
+	if !items[3].Focus || items[4].Focus {
+		t.Fatalf("pane rows focus = %v, %v", items[3].Focus, items[4].Focus)
 	}
-	// A folded workspace drops its pane rows and leaves just the workspace row.
+	// A folded workspace drops its windows and panes and leaves just the
+	// workspace row.
 	for i := range snap.All {
 		if snap.All[i].Workspace == "s1" {
 			snap.All[i].WorkspaceUnfolded = false
 		}
 	}
 	items = rail.RailItems(snap)
-	if len(items) != 4 || items[0].Kind != rail.Workspace || items[1].Kind != rail.Gap || items[2].Kind != rail.Workspace || items[3].Kind != rail.Pane {
-		t.Fatalf("folded rail rows = %+v, want workspace, gap, workspace, pane", items)
+	if len(items) != 5 || items[0].Kind != rail.Workspace || items[1].Kind != rail.Gap ||
+		items[2].Kind != rail.Workspace || items[3].Kind != rail.Window || items[4].Kind != rail.Pane {
+		t.Fatalf("folded rail rows = %+v, want workspace, gap, workspace, window, pane", items)
 	}
 }
 
@@ -389,13 +393,13 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	for _, status := range []string{"", "unknown"} {
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 12, 40, 6))
+		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 20, 40, 6))
 		vt := vt10x.New(vt10x.WithSize(40, 6))
 		if _, err := vt.Write(b.Bytes()); err != nil {
 			t.Fatalf("draw shell rail: %v", err)
 		}
 		vt.Lock()
-		glyph, text := vt.Cell(8, 1).Char, vt.Cell(10, 1).Char
+		glyph, text := vt.Cell(8, 2).Char, vt.Cell(10, 2).Char
 		vt.Unlock()
 		if glyph != ' ' || text != 'w' {
 			t.Fatalf("shell row status %q = %q at 8, %q at 10: want a blank cell",
@@ -411,7 +415,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 		t.Fatalf("draw agent rail: %v", err)
 	}
 	vt.Lock()
-	glyph := vt.Cell(8, 1).Char
+	glyph := vt.Cell(8, 2).Char
 	vt.Unlock()
 	if glyph != '?' {
 		t.Fatalf("agent row without a status = %q at 8, want ?", glyph)
@@ -465,18 +469,19 @@ func TestRailAgentMarker(t *testing.T) {
 
 func TestRailHit(t *testing.T) {
 	snap := testutil.RailTestSnapshot(10)
-	// Rows: workspace, w1p1, w1p2.
+	// Rows: workspace, window, w1p1, w1p2.
 	cases := []struct {
 		x, y int
 		want string
 	}{
-		{5, 1, "w1p1"},
-		{5, 2, "w1p2"},
+		{5, 2, "w1p1"},
+		{5, 3, "w1p2"},
 		{5, 0, ""},  // workspace header
-		{5, 3, ""},  // past the last row
+		{5, 1, ""},  // window row
+		{5, 4, ""},  // past the last row
 		{5, 9, ""},  // status bar
-		{10, 1, ""}, // pane area
-		{-1, 1, ""}, // left of the screen
+		{10, 2, ""}, // pane area
+		{-1, 2, ""}, // left of the screen
 	}
 	for _, c := range cases {
 		if got := rail.RailPaneAt(snap, c.x, c.y); got != c.want {
@@ -486,7 +491,7 @@ func TestRailHit(t *testing.T) {
 	// The last item row above the control can be a pane row. The control
 	// takes Rows-2, so the item rows stop at Rows-3.
 	small := testutil.RailTestSnapshot(10)
-	small.Rows = 5
+	small.Rows = 6
 	small.All = []wire.AllPane{
 		{
 			ID: "w1p1", Workspace: "s1", WorkspaceName: "main", Window: "w1",
@@ -497,7 +502,7 @@ func TestRailHit(t *testing.T) {
 			WindowName: "one", WindowUnfolded: true, WorkspaceUnfolded: true,
 		},
 	}
-	if got := rail.RailPaneAt(small, 5, 2); got != "w1p2" {
+	if got := rail.RailPaneAt(small, 5, 3); got != "w1p2" {
 		t.Fatalf("last pane row = %q", got)
 	}
 }
@@ -506,12 +511,12 @@ func TestRailClickFocusesPane(t *testing.T) {
 	tui, got := clientTUI(t, nil)
 	tui.snap = testutil.RailTestSnapshot(10)
 	// Left press on w1p2's row focuses w1p2, not the focused w1p1. The row is
-	// zero-based y=2, so the one-based mouse row is 3.
-	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 3})
+	// zero-based y=3, so the one-based mouse row is 4.
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
 	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
 		t.Fatalf("rail click sent %+v, want focus w1p2", m)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 3})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 4})
 	// A workspace row focuses its first pane; the caret cell toggles its fold.
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
 	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p1" {
@@ -667,7 +672,7 @@ func TestRailWorkspaceAccent(t *testing.T) {
 	count := vt.Cell(layout.DefaultRail-1, 0).Char
 	gapRow := true
 	for x := 0; x < layout.DefaultRail; x++ {
-		if g := vt.Cell(x, 2); g.Char != 0 && g.Char != ' ' {
+		if g := vt.Cell(x, 4); g.Char != 0 && g.Char != ' ' {
 			gapRow = false
 		}
 	}

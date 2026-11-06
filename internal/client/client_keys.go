@@ -60,6 +60,29 @@ func (t *tui) paneMenuItems(p *wire.PaneInfo, withFocus bool) []menuItem {
 	)
 }
 
+// windowMenuItems is the item list for a window row or its note row: the
+// actions that act on one window. Focus goes to the window's first available
+// pane, the same pane a left press on the row focuses.
+func (t *tui) windowMenuItems(it rail.RailItem) []menuItem {
+	return []menuItem{
+		{label: "Rename window", action: "rename-window", run: func() {
+			t.closeMenu()
+			t.openRenamePromptFor("window", it.Window, it.WindowName)
+		}},
+		{label: "Close window", action: "close-window", run: func() {
+			t.actionOn(it.Window, "close-window", nil)
+		}},
+		{label: "Fold/unfold", action: "toggle-fold", run: func() {
+			t.actionOn(it.Window, "toggle-fold", nil)
+		}},
+		{label: "Focus", action: "focus", run: func() {
+			if id := t.firstPaneInWindow(it.Window); id != "" {
+				t.actionOn(id, "focus", nil)
+			}
+		}},
+	}
+}
+
 // workspaceMenuItems is the item list for a workspace row: the actions that act
 // on one workspace.
 func (t *tui) workspaceMenuItems(it rail.RailItem) []menuItem {
@@ -145,6 +168,9 @@ func (t *tui) openRailMenu(it rail.RailItem, x, y int) {
 	case rail.Workspace:
 		title = "workspace " + it.Text
 		items = t.workspaceMenuItems(it)
+	case rail.Window, rail.WindowNote:
+		title = "window " + it.WindowName
+		items = t.windowMenuItems(it)
 	case rail.Pane:
 		p := t.paneByID(it.Pane)
 		if p == nil {

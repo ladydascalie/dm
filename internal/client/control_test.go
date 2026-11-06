@@ -28,12 +28,12 @@ func ctlPane(id string) wire.AllPane {
 
 // ctlSnapshot is a 40x10 screen with the rail at the given width. It holds
 // exactly Rows-2 item rows: one row per pane on the thin rail, and a workspace
-// row in front of the panes on a wider one. The item list therefore ends on
-// the row above the control.
+// row and a window row in front of the panes on a wider one. The item list
+// therefore ends on the row above the control.
 func ctlSnapshot(rail int) *wire.Snapshot {
 	n := 8
 	if !layout.RailCompact(rail) {
-		n = 7
+		n = 6
 	}
 	snap := &wire.Snapshot{Session: "x", Cols: 40, Rows: 10, Rail: rail}
 	for i := 0; i < n; i++ {
