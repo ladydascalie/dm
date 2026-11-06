@@ -4498,13 +4498,13 @@ func TestKeymapDispatchSwitcherLeftRightAreNoOps(t *testing.T) {
 		if tui.sw == nil {
 			t.Fatalf("%q closed the switcher", seq)
 		}
-		if q := tui.sw.q(); q != "" {
+		if q := tui.sw.Query(); q != "" {
 			t.Fatalf("%q typed %q into the query", seq, q)
 		}
 	}
 	// Plain text still reaches the query, and the arrows still move.
 	feed(tui, "beta")
-	if q := tui.sw.q(); q != "beta" {
+	if q := tui.sw.Query(); q != "beta" {
 		t.Fatalf("query = %q, want beta", q)
 	}
 	feed(tui, "\x1b[A")

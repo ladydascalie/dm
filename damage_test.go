@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/switcher"
 	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -736,12 +737,12 @@ func TestOraclePalette(t *testing.T) {
 		checkFrame(t, live, f.tui, label, []byte(raw))
 	}
 	step("first")
-	rect := paletteRect(100, 20)
-	f.tui.sw = newSwitcher(rect, f.snap)
+	rect := switcher.PaletteRect(100, 20)
+	f.tui.sw = switcher.NewSwitcher(rect, f.snap)
 	step("open")
-	f.tui.sw.appendText('t')
+	f.tui.sw.AppendText('t')
 	step("type")
-	f.tui.sw.appendText('y')
+	f.tui.sw.AppendText('y')
 	step("type2")
 	f.tui.sw = nil
 	step("close")
@@ -758,8 +759,8 @@ func TestOracleRailUnderPalette(t *testing.T) {
 		checkFrame(t, live, f.tui, label, []byte(raw))
 	}
 	step("first")
-	rect := paletteRect(100, 30)
-	f.tui.sw = newSwitcher(rect, f.snap)
+	rect := switcher.PaletteRect(100, 30)
+	f.tui.sw = switcher.NewSwitcher(rect, f.snap)
 	step("open")
 	f.snap.All[0].Status = "working"
 	f.snap.All[0].Agent = true
@@ -884,8 +885,8 @@ func TestBandsUseAbsoluteCursorMoves(t *testing.T) {
 		{"help", func() { f.tui.armed = true }},
 		{"palette", func() {
 			f.tui.armed = false
-			rect := paletteRect(f.snap.Cols, f.snap.Rows)
-			f.tui.sw = newSwitcher(rect, f.snap)
+			rect := switcher.PaletteRect(f.snap.Cols, f.snap.Rows)
+			f.tui.sw = switcher.NewSwitcher(rect, f.snap)
 		}},
 		{"menu", func() {
 			f.tui.sw = nil

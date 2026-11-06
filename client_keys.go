@@ -449,7 +449,7 @@ func (t *tui) switcherKey() bool {
 		// An escape sequence with no binding is not text: left, right and
 		// shift-tab have no meaning in a list, and neither does F1.
 		if n == 1 && b >= 0x20 && b < 0x7f {
-			t.sw.appendText(rune(b))
+			t.sw.AppendText(rune(b))
 			t.dirty = true
 		}
 		return true
@@ -460,16 +460,16 @@ func (t *tui) switcherKey() bool {
 	case "pick":
 		t.pickSwitcher()
 	case "clear-query":
-		t.sw.clearQuery()
+		t.sw.ClearQuery()
 		t.dirty = true
 	case "backspace":
-		t.sw.backspace()
+		t.sw.Backspace()
 		t.dirty = true
 	case "down", "down-arrow", "down-ctrl-n":
-		t.sw.move(1)
+		t.sw.Move(1)
 		t.dirty = true
 	case "up", "up-arrow", "up-ctrl-p":
-		t.sw.move(-1)
+		t.sw.Move(-1)
 		t.dirty = true
 	}
 	return true
@@ -480,8 +480,8 @@ func (t *tui) switcherKey() bool {
 // an empty selection closes silently.
 func (t *tui) pickSwitcher() {
 	target := ""
-	if it, ok := t.sw.selected(); ok && it.Kind != rail.Gap {
-		target = t.sw.target()
+	if it, ok := t.sw.Selected(); ok && it.Kind != rail.Gap {
+		target = t.sw.Target()
 	}
 	closeSwitcher(t)
 	if target != "" {

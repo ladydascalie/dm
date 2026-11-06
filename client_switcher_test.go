@@ -14,6 +14,14 @@ import (
 	"github.com/hinshun/vt10x"
 )
 
+// switcherCell reads one cell of a replayed screen. The switcher's own test
+// moved to internal/switcher, so the root tests keep their own copy.
+func switcherCell(screen vt10x.Terminal, x, y int) rune {
+	screen.Lock()
+	defer screen.Unlock()
+	return screen.Cell(x, y).Char
+}
+
 // switcherTUI is a client over a real net.Pipe: keys go in through processInput,
 // and every request it sends lands on the returned channel. The snapshot has one
 // workspace and one window over two panes, so the switcher's tree has rows to
@@ -81,15 +89,15 @@ func TestSwitcherPrefixToggles(t *testing.T) {
 func TestSwitcherCtrlNPMoves(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
-	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p1" {
+	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p1" {
 		t.Fatalf("empty query selects %+v, want the first pane w1p1", it)
 	}
 	feed(tui, "\x0e") // ctrl+n, down
-	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p2" {
+	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p2" {
 		t.Fatalf("ctrl+n selects %+v, want the next pane w1p2", it)
 	}
 	feed(tui, "\x10") // ctrl+p, up
-	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p1" {
+	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p1" {
 		t.Fatalf("ctrl+p selects %+v, want the pane above w1p1", it)
 	}
 	noMsg(t, got)
@@ -100,12 +108,12 @@ func TestSwitcherCtrlNPMoves(t *testing.T) {
 func TestSwitcherTypeAndEnter(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
-	full := len(tui.sw.rows)
+	full := tui.sw.RowCount()
 	feed(tui, "beta")
-	if n := len(tui.sw.rows); n >= full {
+	if n := tui.sw.RowCount(); n >= full {
 		t.Fatalf("typing narrowed %d rows to %d", full, n)
 	}
-	if it, ok := tui.sw.selected(); !ok || it.Pane != "w1p2" {
+	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p2" {
 		t.Fatalf("selected = %+v, want the beta pane", it)
 	}
 	feed(tui, "\r")
@@ -143,16 +151,16 @@ func TestSwitcherEscSendsNothing(t *testing.T) {
 func TestSwitcherCtrlURestores(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
-	full := len(tui.sw.rows)
+	full := tui.sw.RowCount()
 	feed(tui, "beta")
-	if len(tui.sw.rows) == full {
+	if tui.sw.RowCount() == full {
 		t.Fatal("typing dropped no rows")
 	}
 	feed(tui, "\x15")
-	if n := len(tui.sw.rows); n != full {
+	if n := tui.sw.RowCount(); n != full {
 		t.Fatalf("ctrl+u left %d rows, want %d", n, full)
 	}
-	if q := tui.sw.q(); q != "" {
+	if q := tui.sw.Query(); q != "" {
 		t.Fatalf("ctrl+u left the query %q", q)
 	}
 	noMsg(t, got)
@@ -187,8 +195,8 @@ func TestSwitcherPreviewReplies(t *testing.T) {
 	// A reply with another id is stale and stays out of the band. A failure
 	// with a stale id stays silent too.
 	tui.apply(wire.Msg{Type: "resp", ID: read.ID + 1, OK: true, Res: json.RawMessage(`{"lines":["stale"]}`)})
-	if len(tui.sw.lines) != 0 {
-		t.Fatalf("a stale reply filled the preview: %q", tui.sw.lines)
+	if len(tui.sw.PreviewLines()) != 0 {
+		t.Fatalf("a stale reply filled the preview: %q", tui.sw.PreviewLines())
 	}
 	tui.apply(wire.Msg{Type: "resp", ID: read.ID + 2, Error: "gone"})
 	if len(tui.toasts) != 0 {
@@ -197,7 +205,7 @@ func TestSwitcherPreviewReplies(t *testing.T) {
 
 	// The reply to the request fills the band.
 	tui.apply(wire.Msg{Type: "resp", ID: read.ID, OK: true, Res: json.RawMessage(`{"lines":["live"]}`)})
-	if got := tui.sw.lines; len(got) != 1 || got[0] != "live" {
+	if got := tui.sw.PreviewLines(); len(got) != 1 || got[0] != "live" {
 		t.Fatalf("the current reply filled %q, want [live]", got)
 	}
 }

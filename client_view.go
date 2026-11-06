@@ -10,6 +10,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/rail"
+	"dm/internal/switcher"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -50,7 +51,7 @@ func (t *tui) draw() {
 	drawBar(&bar, th, win, t.armed, t.barInfo())
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
-		t.swX, t.swY = drawSwitcher(&pal, th, t.sw, win, t.vts)
+		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.vts, paintPaneFrom)
 		t.askPreview()
 	}
 	if t.armed {
@@ -264,7 +265,7 @@ func (t *tui) layoutSig(win *wire.Snapshot) string {
 	}
 	fmt.Fprintf(&b, " f=%s m=%s s=%s", win.Focus, t.mode, t.scroll)
 	if t.sw != nil {
-		fmt.Fprintf(&b, " p=%+v", t.sw.rect)
+		fmt.Fprintf(&b, " p=%+v", t.sw.Rect)
 	}
 	return b.String()
 }

@@ -15,6 +15,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/switcher"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -117,7 +118,7 @@ func keymapViewRect(snap *wire.Snapshot, n int) layout.Rect {
 	if y < 1 {
 		y = 1
 	}
-	return clampRect(layout.Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
+	return switcher.ClampRect(layout.Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
 }
 
 // sync fits the float to the screen after a snapshot or a rail change and
