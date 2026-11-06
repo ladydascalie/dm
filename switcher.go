@@ -6,6 +6,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/wire"
 )
 
@@ -19,13 +20,13 @@ type switcher struct {
 	// tree is the rail tree the float shows: never compact, every window
 	// unfolded, no note rows, gaps kept. rows are the surviving indices into
 	// tree, in tree order, and sel is one of them. A sel of -1 selects nothing.
-	tree []railItem
+	tree []rail.RailItem
 	rows []int
 	sel  int
 	top  int // first list row on screen, so a redraw does not jump
 
 	// panes carries each pane's own folder, branch, worktree and names. A pane
-	// row's railItem holds none of them, and the query matches them.
+	// row's rail.RailItem holds none of them, and the query matches them.
 	panes map[string]wire.AllPane
 
 	query []rune
@@ -61,7 +62,7 @@ func (s *switcher) sync(snap *wire.Snapshot) {
 	if prevOK {
 		id := switcherTarget(prev)
 		for i, row := range s.rows {
-			if it := s.tree[row]; it.kind == prev.kind && switcherTarget(it) == id {
+			if it := s.tree[row]; it.Kind == prev.Kind && switcherTarget(it) == id {
 				s.sel = i
 				return
 			}
@@ -70,12 +71,12 @@ func (s *switcher) sync(snap *wire.Snapshot) {
 	s.sel = s.firstPane()
 }
 
-// switcherTree is the rail tree the float shows: railItems on a copy of the
+// switcherTree is the rail tree the float shows: rail.RailItems on a copy of the
 // snapshot with no rail, so the rows are never compact, and with every window
 // forced unfolded, so a folded window never hides a pane the switcher could
 // jump to. Note rows are dropped: a switcher is not a status board. Gap rows
 // stay to keep the blocks apart, and only they are unselectable.
-func switcherTree(snap *wire.Snapshot) []railItem {
+func switcherTree(snap *wire.Snapshot) []rail.RailItem {
 	if snap == nil {
 		return nil
 	}
@@ -86,9 +87,9 @@ func switcherTree(snap *wire.Snapshot) []railItem {
 	for i := range cp.All {
 		cp.All[i].WindowUnfolded = true
 	}
-	var out []railItem
-	for _, it := range railItems(&cp) {
-		if it.kind == railWindowNote {
+	var out []rail.RailItem
+	for _, it := range rail.RailItems(&cp) {
+		if it.Kind == rail.WindowNote {
 			continue
 		}
 		out = append(out, it)
@@ -115,7 +116,7 @@ func (s *switcher) hasPane(id string) bool {
 		return false
 	}
 	for _, it := range s.tree {
-		if it.kind == railPane && it.pane == id {
+		if it.Kind == rail.Pane && it.Pane == id {
 			return true
 		}
 	}
@@ -236,23 +237,23 @@ type switcherBlock struct {
 }
 
 // switcherBlocks splits a rail tree into its workspace blocks.
-func switcherBlocks(tree []railItem) []switcherBlock {
+func switcherBlocks(tree []rail.RailItem) []switcherBlock {
 	var out []switcherBlock
 	for i, it := range tree {
-		switch it.kind {
-		case railWorkspace:
+		switch it.Kind {
+		case rail.Workspace:
 			out = append(out, switcherBlock{row: i, gap: -1})
-		case railGap:
+		case rail.Gap:
 			if n := len(out); n > 0 {
 				out[n-1].gap = i
 			}
-		case railWindow:
+		case rail.Window:
 			if len(out) == 0 {
 				continue
 			}
 			b := &out[len(out)-1]
 			b.wins = append(b.wins, switcherWindow{row: i})
-		case railPane:
+		case rail.Pane:
 			if len(out) == 0 {
 				continue
 			}
@@ -290,7 +291,7 @@ func (s *switcher) move(d int) {
 	}
 	for n := 0; n < steps; n++ {
 		next := i + step
-		for next >= 0 && next < len(s.rows) && s.tree[s.rows[next]].kind == railGap {
+		for next >= 0 && next < len(s.rows) && s.tree[s.rows[next]].Kind == rail.Gap {
 			next += step
 		}
 		if next < 0 || next >= len(s.rows) {
@@ -304,9 +305,9 @@ func (s *switcher) move(d int) {
 }
 
 // selected is the highlighted row.
-func (s *switcher) selected() (railItem, bool) {
+func (s *switcher) selected() (rail.RailItem, bool) {
 	if s.sel < 0 || s.sel >= len(s.rows) {
-		return railItem{}, false
+		return rail.RailItem{}, false
 	}
 	return s.tree[s.rows[s.sel]], true
 }
@@ -323,14 +324,14 @@ func (s *switcher) target() string {
 }
 
 // switcherTarget is the id a row stands for.
-func switcherTarget(it railItem) string {
-	switch it.kind {
-	case railWorkspace:
-		return it.workspace
-	case railWindow:
-		return it.window
-	case railPane:
-		return it.pane
+func switcherTarget(it rail.RailItem) string {
+	switch it.Kind {
+	case rail.Workspace:
+		return it.Workspace
+	case rail.Window:
+		return it.Window
+	case rail.Pane:
+		return it.Pane
 	}
 	return ""
 }
@@ -338,7 +339,7 @@ func switcherTarget(it railItem) string {
 // firstPane is the row index of the first pane row the query keeps, or -1.
 func (s *switcher) firstPane() int {
 	for i, row := range s.rows {
-		if s.tree[row].kind == railPane {
+		if s.tree[row].Kind == rail.Pane {
 			return i
 		}
 	}
@@ -355,10 +356,10 @@ func (s *switcher) setPreview(id int, pane string) {
 // caller should ask again. Only a pane row has a screen to preview.
 func (s *switcher) previewDue() bool {
 	it, ok := s.selected()
-	if !ok || it.kind != railPane {
+	if !ok || it.Kind != rail.Pane {
 		return false
 	}
-	return !s.asked || it.pane != s.pane
+	return !s.asked || it.Pane != s.pane
 }
 
 // acceptPreview takes the lines for the newest request and reports whether it
@@ -380,7 +381,7 @@ func (s *switcher) reselect(prev int) {
 	bestDist := 0
 	q := s.q()
 	for i, row := range s.rows {
-		if s.tree[row].kind != railPane {
+		if s.tree[row].Kind != rail.Pane {
 			continue
 		}
 		sc, ok := s.match(s.tree[row], q)
@@ -432,7 +433,7 @@ const (
 
 // match scores a row against the query and reports whether it matches. A row
 // matches on the best of its fields; an empty query matches every row.
-func (s *switcher) match(it railItem, q string) (switcherScore, bool) {
+func (s *switcher) match(it rail.RailItem, q string) (switcherScore, bool) {
 	if q == "" {
 		return switcherScore{}, true
 	}
@@ -453,19 +454,19 @@ func (s *switcher) match(it railItem, q string) (switcherScore, bool) {
 // fields are the strings a row matches on: a pane its id, label, folder,
 // branch, worktree and its window's and workspace's names, a window its name,
 // id, folder, branch and worktree, a workspace its name and id.
-func (s *switcher) fields(it railItem) []string {
-	switch it.kind {
-	case railPane:
-		p := s.panes[it.pane]
+func (s *switcher) fields(it rail.RailItem) []string {
+	switch it.Kind {
+	case rail.Pane:
+		p := s.panes[it.Pane]
 		return []string{
-			it.pane, it.text,
-			railFolder(p.Cwd, p.Root), p.Branch, p.Worktree,
+			it.Pane, it.Text,
+			rail.RailFolder(p.Cwd, p.Root), p.Branch, p.Worktree,
 			p.WindowName, p.WorkspaceName,
 		}
-	case railWindow:
-		return []string{it.text, it.window, it.folder, it.branch, it.worktree}
-	case railWorkspace:
-		return []string{it.text, it.workspace}
+	case rail.Window:
+		return []string{it.Text, it.Window, it.Folder, it.Branch, it.Worktree}
+	case rail.Workspace:
+		return []string{it.Text, it.Workspace}
 	}
 	return nil
 }

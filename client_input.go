@@ -15,6 +15,7 @@ import (
 
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -435,20 +436,20 @@ func (t *tui) askPreview() {
 		return
 	}
 	it, ok := t.sw.selected()
-	if !ok || it.kind != railPane || it.pane == "" {
+	if !ok || it.Kind != rail.Pane || it.Pane == "" {
 		return
 	}
-	if t.vts[it.pane] != nil {
+	if t.vts[it.Pane] != nil {
 		return
 	}
-	if it.pane == t.swPane && time.Since(t.swAt) < 120*time.Millisecond {
+	if it.Pane == t.swPane && time.Since(t.swAt) < 120*time.Millisecond {
 		return
 	}
 	t.swID++
 	t.swAt = time.Now()
-	t.swPane = it.pane
-	t.sw.setPreview(t.swID, it.pane)
-	_ = t.conn.Send(wire.Msg{Type: "req", Action: "read", Target: it.pane, ID: t.swID})
+	t.swPane = it.Pane
+	t.sw.setPreview(t.swID, it.Pane)
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "read", Target: it.Pane, ID: t.swID})
 }
 
 // previewLines pulls the lines out of a read reply. The reply carries them in
@@ -1792,24 +1793,24 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	// release, so the pane menu never sees it.
 	if ev.btn&3 == 2 && ev.btn&32 == 0 && ev.btn&64 == 0 {
 		t.railPress = true
-		if railControlAt(t.snap, x, y) {
+		if rail.RailControlAt(t.snap, x, y) {
 			t.openSessionMenu(x, y)
-		} else if it, ok := railItemAt(t.snap, x, y); ok {
+		} else if it, ok := rail.RailItemAt(t.snap, x, y); ok {
 			t.openRailMenu(it, x, y)
 		}
 		return true
 	}
 	if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 {
 		t.railPress = true
-		if railControlAt(t.snap, x, y) {
+		if rail.RailControlAt(t.snap, x, y) {
 			// The bottom row is the control: it toggles the rail and
 			// never focuses a pane or folds a window.
 			if t.conn != nil {
 				t.toggleRailControl()
 			}
-		} else if id := railPaneAt(t.snap, x, y); id != "" && t.conn != nil {
+		} else if id := rail.RailPaneAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
-		} else if id := railWindowAt(t.snap, x, y); id != "" && t.conn != nil {
+		} else if id := rail.RailWindowAt(t.snap, x, y); id != "" && t.conn != nil {
 			_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
 		}
 	}

@@ -18,6 +18,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/rail"
 	"dm/internal/theme"
 	"dm/internal/wire"
 
@@ -472,7 +473,7 @@ func boxStateColour(th theme.Theme, st box.State) theme.RGB {
 	if st == box.StateNote {
 		return th.Palette.RailDim
 	}
-	_, colour := railGlyph(th, string(st), false)
+	_, colour := rail.RailGlyph(th, string(st), false)
 	return colour
 }
 

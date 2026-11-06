@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"dm/internal/keymap"
+	"dm/internal/rail"
 	"dm/internal/wire"
 	"fmt"
 	"strconv"
@@ -62,36 +63,36 @@ func (t *tui) paneMenuItems(p *wire.PaneInfo, withFocus bool) []menuItem {
 // windowMenuItems is the item list for a window row or its note row: the
 // actions that act on one window. New window targets the row's workspace and
 // carries the window's working directory.
-func (t *tui) windowMenuItems(it railItem) []menuItem {
+func (t *tui) windowMenuItems(it rail.RailItem) []menuItem {
 	return []menuItem{
 		{label: "New window", action: "new-window", run: func() {
-			t.actionOn(it.workspace, "new-window", func(m *wire.Msg) { m.Cwd = it.cwd })
+			t.actionOn(it.Workspace, "new-window", func(m *wire.Msg) { m.Cwd = it.Cwd })
 		}},
 		{label: "Rename window", action: "rename-window", run: func() {
-			t.openRenamePromptFor("window", it.window, it.windowName)
+			t.openRenamePromptFor("window", it.Window, it.WindowName)
 		}},
 		{label: "Close window", action: "close-window", run: func() {
-			t.actionOn(it.window, "close-window", nil)
+			t.actionOn(it.Window, "close-window", nil)
 		}},
 		{label: "Fold/unfold", action: "toggle-fold", run: func() {
-			t.actionOn(it.window, "toggle-fold", nil)
+			t.actionOn(it.Window, "toggle-fold", nil)
 		}},
 	}
 }
 
 // workspaceMenuItems is the item list for a workspace row: the actions that act
 // on one workspace.
-func (t *tui) workspaceMenuItems(it railItem) []menuItem {
+func (t *tui) workspaceMenuItems(it rail.RailItem) []menuItem {
 	return []menuItem{
 		{label: "New window", action: "new-window", run: func() {
-			t.actionOn(it.workspace, "new-window", nil)
+			t.actionOn(it.Workspace, "new-window", nil)
 		}},
 		{label: "Rename workspace", action: "rename-workspace", run: func() {
 			t.closeMenu()
-			t.openRenamePromptFor("workspace", it.workspace, it.text)
+			t.openRenamePromptFor("workspace", it.Workspace, it.Text)
 		}},
 		{label: "Close workspace", action: "close-workspace", run: func() {
-			t.actionOn(it.workspace, "close-workspace", nil)
+			t.actionOn(it.Workspace, "close-workspace", nil)
 		}},
 	}
 }
@@ -154,27 +155,27 @@ func (t *tui) openMenu(p *wire.PaneInfo, x, y int) {
 // openRailMenu builds the sidebar menu for the row under a right press. Each
 // kind offers only its own actions, its title names the kind, and every item
 // carries the main keymap's hint for its action. A gap row opens nothing.
-func (t *tui) openRailMenu(it railItem, x, y int) {
+func (t *tui) openRailMenu(it rail.RailItem, x, y int) {
 	if t.snap == nil {
 		return
 	}
 	var title string
 	var items []menuItem
-	switch it.kind {
-	case railWorkspace:
-		title = "workspace " + it.text
+	switch it.Kind {
+	case rail.Workspace:
+		title = "workspace " + it.Text
 		items = t.workspaceMenuItems(it)
-	case railWindow, railWindowNote:
-		title = "window " + it.windowName
+	case rail.Window, rail.WindowNote:
+		title = "window " + it.WindowName
 		items = t.windowMenuItems(it)
-	case railPane:
-		p := t.paneByID(it.pane)
+	case rail.Pane:
+		p := t.paneByID(it.Pane)
 		if p == nil {
 			// A thin rail lists every pane in the snapshot's All set. A pane
 			// row the Pane set has dropped still gets its menu.
-			p = &wire.PaneInfo{ID: it.pane}
+			p = &wire.PaneInfo{ID: it.Pane}
 		}
-		title = "pane " + it.text
+		title = "pane " + it.Text
 		items = t.paneMenuItems(p, true)
 	default:
 		return
@@ -479,7 +480,7 @@ func (t *tui) switcherKey() bool {
 // an empty selection closes silently.
 func (t *tui) pickSwitcher() {
 	target := ""
-	if it, ok := t.sw.selected(); ok && it.kind != railGap {
+	if it, ok := t.sw.selected(); ok && it.Kind != rail.Gap {
 		target = t.sw.target()
 	}
 	closeSwitcher(t)

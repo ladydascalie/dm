@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -34,7 +35,7 @@ func thinSnapshot(panes []wire.AllPane) *wire.Snapshot {
 func thinScreen(t *testing.T, snap *wire.Snapshot) vt10x.Terminal {
 	t.Helper()
 	var b bytes.Buffer
-	drawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap)
 	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := vt.Write(b.Bytes()); err != nil {
 		t.Fatalf("draw thin rail: %v", err)
@@ -56,14 +57,14 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 	})
 	want := []string{"w1p1", "w1p2", "w2p1"}
 
-	items := railItems(snap)
+	items := rail.RailItems(snap)
 	if len(items) != len(want) {
 		t.Fatalf("thin rail has %d rows, want %d: %+v", len(items), len(want), items)
 	}
 	for i, id := range want {
-		if items[i].kind != railPane || items[i].pane != id {
+		if items[i].Kind != rail.Pane || items[i].Pane != id {
 			t.Fatalf("row %d = kind %d pane %q, want pane %q",
-				i, items[i].kind, items[i].pane, id)
+				i, items[i].Kind, items[i].Pane, id)
 		}
 	}
 
@@ -75,8 +76,8 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 		if g := vt.Cell(2, y); g.Char != glyphs[y] {
 			t.Fatalf("row %d glyph = %q, want %q for %s", y, g.Char, glyphs[y], id)
 		}
-		if got := railPaneAt(snap, 2, y); got != id {
-			t.Fatalf("railPaneAt(2,%d) = %q, want %q", y, got, id)
+		if got := rail.RailPaneAt(snap, 2, y); got != id {
+			t.Fatalf("rail.RailPaneAt(2,%d) = %q, want %q", y, got, id)
 		}
 	}
 	// The rows past the last pane and above the control are blank rail
@@ -100,8 +101,8 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 	}
 	// A thin row is never a window row, so a fold click finds nothing.
 	for y := 0; y < snap.Rows; y++ {
-		if got := railWindowAt(snap, 2, y); got != "" {
-			t.Fatalf("railWindowAt(2,%d) = %q on the thin rail", y, got)
+		if got := rail.RailWindowAt(snap, 2, y); got != "" {
+			t.Fatalf("rail.RailWindowAt(2,%d) = %q on the thin rail", y, got)
 		}
 	}
 }
@@ -131,14 +132,14 @@ func TestThinRailFoldState(t *testing.T) {
 		t.Fatalf("folding the copy changed the open snapshot: %+v", open.All[0])
 	}
 
-	openItems, foldedItems := railItems(open), railItems(folded)
+	openItems, foldedItems := rail.RailItems(open), rail.RailItems(folded)
 	if len(openItems) != len(foldedItems) {
 		t.Fatalf("folded rail has %d rows, unfolded %d",
 			len(foldedItems), len(openItems))
 	}
 	for i := range openItems {
-		if openItems[i].pane != foldedItems[i].pane ||
-			openItems[i].kind != foldedItems[i].kind {
+		if openItems[i].Pane != foldedItems[i].Pane ||
+			openItems[i].Kind != foldedItems[i].Kind {
 			t.Fatalf("row %d differs: folded %+v, unfolded %+v",
 				i, foldedItems[i], openItems[i])
 		}
@@ -146,9 +147,9 @@ func TestThinRailFoldState(t *testing.T) {
 	// The folded window carries a message that an expanded rail would draw as
 	// a note row. No thin row may carry it, or any other header row.
 	for i, it := range foldedItems {
-		if it.kind != railPane {
+		if it.Kind != rail.Pane {
 			t.Fatalf("folded thin row %d is kind %d, want a pane: %+v",
-				i, it.kind, it)
+				i, it.Kind, it)
 		}
 	}
 
@@ -244,7 +245,7 @@ func TestThinRailClips(t *testing.T) {
 	}
 	snap := thinSnapshot(panes)
 
-	items := railItems(snap)
+	items := rail.RailItems(snap)
 	if len(items) != 8 {
 		t.Fatalf("thin rail has %d rows, want 8", len(items))
 	}
@@ -255,16 +256,16 @@ func TestThinRailClips(t *testing.T) {
 	vt.Lock()
 	defer vt.Unlock()
 	for y := 0; y < railRows; y++ {
-		if got := railPaneAt(snap, 2, y); got != items[y].pane {
-			t.Fatalf("railPaneAt(2,%d) = %q, want %q", y, got, items[y].pane)
+		if got := rail.RailPaneAt(snap, 2, y); got != items[y].Pane {
+			t.Fatalf("rail.RailPaneAt(2,%d) = %q, want %q", y, got, items[y].Pane)
 		}
 		if g := vt.Cell(2, y); g.Char != '●' {
 			t.Fatalf("row %d glyph = %q, want the pane glyph", y, g.Char)
 		}
 	}
 	for _, y := range []int{railRows, railRows + 1} {
-		if got := railPaneAt(snap, 2, y); got != "" {
-			t.Fatalf("railPaneAt(2,%d) = %q, want no pane row", y, got)
+		if got := rail.RailPaneAt(snap, 2, y); got != "" {
+			t.Fatalf("rail.RailPaneAt(2,%d) = %q, want no pane row", y, got)
 		}
 	}
 	for y := 0; y < snap.Rows; y++ {

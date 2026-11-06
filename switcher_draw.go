@@ -8,6 +8,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/rail"
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -219,14 +220,14 @@ func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *switcher, vts map[
 	}
 	p := th.Palette
 	scrollSwitcher(s, l.bandH)
-	nerd := nerdFonts()
+	nerd := rail.NerdFonts()
 	for i := 0; i < l.bandH; i++ {
 		y := l.bandY + i
 		idx := s.top + i
 		var left, right, tail []segment.Seg
 		bg, bold := p.RailBG, false
 		if idx >= 0 && idx < len(s.rows) {
-			left, right, tail = railRow(th, s.tree[s.rows[idx]], l.listW, false, nerd)
+			left, right, tail = rail.RailRow(th, s.tree[s.rows[idx]], l.listW, false, nerd)
 			if idx == s.sel {
 				bg, bold = p.RailFocusBG, true
 			}
@@ -248,16 +249,16 @@ func paintRailRow(buf *bytes.Buffer, left, tail, right []segment.Seg, x, y, w in
 	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 	buf.WriteString("\x1b[0m" + bg.BG())
 	for _, s := range left {
-		writeRailSeg(buf, s, bg, bold)
+		rail.WriteRailSeg(buf, s, bg, bold)
 	}
 	for _, s := range tail {
-		writeRailSeg(buf, s, bg, bold)
+		rail.WriteRailSeg(buf, s, bg, bold)
 	}
 	if n := w - segment.SegCells(left) - segment.SegCells(tail) - segment.SegCells(right); n > 0 {
 		buf.WriteString(strings.Repeat(" ", n))
 	}
 	for _, s := range right {
-		writeRailSeg(buf, s, bg, bold)
+		rail.WriteRailSeg(buf, s, bg, bold)
 	}
 	buf.WriteString("\x1b[0m")
 }
@@ -298,8 +299,8 @@ func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *switcher, vts ma
 	}
 	var vt vt10x.Terminal
 	var lines []string
-	if it, ok := s.selected(); ok && it.kind == railPane {
-		vt = vts[it.pane]
+	if it, ok := s.selected(); ok && it.Kind == rail.Pane {
+		vt = vts[it.Pane]
 		lines = s.lines
 	}
 	if vt != nil {

@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/rail"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -37,7 +38,7 @@ func (t *tui) draw() {
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
 	th := t.theme()
-	var box, grip, div, rail, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
+	var box, grip, div, railBuf, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range visiblePanes(win) {
 		panel.DrawPaneBox(&box, th, p.Rect, p.ID == win.Focus)
 	}
@@ -45,7 +46,7 @@ func (t *tui) draw() {
 	// The rail grip paints the same heavy line as a split divider, over the
 	// strip its grab zone covers.
 	drawDivider(&div, th, t.padZone, t.padAxis)
-	drawRail(&rail, th, win)
+	rail.DrawRail(&railBuf, th, win)
 	drawBar(&bar, th, win, t.armed, t.barInfo())
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
@@ -118,7 +119,7 @@ func (t *tui) draw() {
 	bands := []band{
 		{p: &t.last.box, buf: &box, force: padFreed},
 		{p: &t.last.grip, buf: &grip, force: padFreed},
-		{p: &t.last.rail, buf: &rail},
+		{p: &t.last.rail, buf: &railBuf},
 		{p: &t.last.div, buf: &div},
 		{p: &t.last.bar, buf: &bar},
 		{p: &t.last.toasts, buf: &toasts, overlay: true},
