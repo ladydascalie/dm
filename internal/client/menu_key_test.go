@@ -42,7 +42,7 @@ func TestMenuHintClosesPane(t *testing.T) {
 // new window.
 func TestMenuHintNewWindow(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	railRightPress(tui, 1)
+	railRightPress(tui, 0)
 	if tui.menu == nil {
 		t.Fatal("menu did not open")
 	}
@@ -51,30 +51,6 @@ func TestMenuHintNewWindow(t *testing.T) {
 	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "new-window" {
 		t.Fatalf("c sent %+v, want new-window", m)
-	}
-	testutil.NoMsg(t, got)
-	if tui.menu != nil {
-		t.Fatalf("the hint left the menu open: %+v", tui.menu)
-	}
-}
-
-// TestRailMenuHintClosesWindow: the close-window hint in a rail window menu
-// targets that row's window, never the focused pane.
-func TestRailMenuHintClosesWindow(t *testing.T) {
-	tui, got := railMenuTUI(t)
-	// Row 4 is window two, whose pane is not the focused one.
-	railRightPress(tui, 4)
-	if tui.menu == nil {
-		t.Fatal("menu did not open")
-	}
-	testutil.NoMsg(t, got)
-	feed(tui, "X")
-	m := testutil.NextMsg(t, got)
-	if m.Type != "req" || m.Action != "close-window" || m.Target != "w2" {
-		t.Fatalf("X sent %+v, want close-window on w2", m)
-	}
-	if m.Target == tui.snap.Focus {
-		t.Fatalf("the hint targeted the focused pane %q", m.Target)
 	}
 	testutil.NoMsg(t, got)
 	if tui.menu != nil {

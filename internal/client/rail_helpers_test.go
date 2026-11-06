@@ -8,10 +8,9 @@ import (
 	"dm/internal/wire"
 )
 
-// railRowSnap is a rail with every row kind on it: a workspace header, an
-// unfolded window line with a folder, a branch and its stats, that window's
-// note, the focused pane, a folded window line, the gap, and a second
-// workspace. Rows 8 and up are past the last item.
+// railRowSnap is a flat rail with every row kind on it: two unfolded
+// workspaces, the panes under each, and the gap between them. Rows 6 and up
+// are past the last item.
 func railRowSnap(railWidth int) *wire.Snapshot {
 	snap := &wire.Snapshot{
 		Cols: 100, Rows: 10, Rail: railWidth,
@@ -22,19 +21,19 @@ func railRowSnap(railWidth int) *wire.Snapshot {
 		{
 			ID: "w1p1", Name: "pi", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-			Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+			Focus: true, WorkspaceActive: true, WindowActive: true, WorkspaceUnfolded: true,
 			Cwd: "/work/dm/rail", Root: "/work/dm", Branch: "dm-rail", InRepo: true,
 			Dirty: true, Added: 12, Deleted: 4, Message: "working hard",
 		},
 		{
 			ID: "w1p2", Name: "beta", Status: "idle", Workspace: "s1",
 			WorkspaceName: "main", Window: "w2", WindowName: "two",
-			WindowUnfolded: false, Cwd: "/work/dm/other", Root: "/work/dm",
+			WorkspaceUnfolded: true, Cwd: "/work/dm/other", Root: "/work/dm",
 		},
 		{
 			ID: "w2p1", Name: "gamma", Status: "done", Workspace: "s2",
 			WorkspaceName: "work", Window: "w3", WindowName: "three",
-			WindowUnfolded: false,
+			WorkspaceUnfolded: true,
 		},
 	}
 	return snap

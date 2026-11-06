@@ -79,12 +79,12 @@ type tui struct {
 	menuPress bool
 	// renameDraft is the text the rename prompt holds while mode is "rename".
 	renameDraft string
-	// renameID is the id of the workspace or window the prompt renames. The
-	// server looks the target up by id, so the request carries this, not the
-	// draft.
+	// renameID is the id of the workspace, window or pane the prompt renames.
+	// The server looks the target up by id, so the request carries this, not
+	// the draft.
 	renameID string
-	// renameKind is "workspace" or "window" while the prompt is open. It picks
-	// the action the prompt sends and the float title it paints.
+	// renameKind is "workspace", "window" or "pane" while the prompt is open.
+	// It picks the action the prompt sends and the float title it paints.
 	renameKind string
 
 	// hist is each pane's replay ring. It is not filled as output arrives:
@@ -139,6 +139,11 @@ type tui struct {
 	railDragging bool
 	railDragAt   time.Time
 	railWidth    int
+	// railPressAt and railPressRow remember the last left press on a rail row,
+	// so a second press on the same row within railDoubleClick opens the pane's
+	// rename prompt instead of focusing again.
+	railPressAt  time.Time
+	railPressRow int
 
 	// sw is the floating native switcher, nil when closed. swX and swY are
 	// the query cursor cell its last paint asked for, swAt and swPane are the

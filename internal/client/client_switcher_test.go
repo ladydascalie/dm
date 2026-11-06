@@ -38,11 +38,11 @@ func switcherTUI(t *testing.T) (*tui, chan wire.Msg) {
 		{
 			ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
-			WindowActive: true, WindowUnfolded: true,
+			WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 		},
 		{
 			ID: "w1p2", Name: "beta", Workspace: "s1", WorkspaceName: "main",
-			Window: "w1", WindowName: "one", WindowUnfolded: true,
+			Window: "w1", WindowName: "one", WindowUnfolded: true, WorkspaceUnfolded: true,
 		},
 	}
 	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: &bytes.Buffer{}}
