@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"os"
@@ -30,7 +30,7 @@ func TestLLMSTextKeys(t *testing.T) {
 // TestLLMSTextMatchesSnapshot proves docs/llms.txt is the current output.
 func TestLLMSTextMatchesSnapshot(t *testing.T) {
 	want := clidoc.LLMsText()
-	got, err := os.ReadFile(filepath.Join("docs", "llms.txt"))
+	got, err := os.ReadFile(filepath.Join("../../docs", "llms.txt"))
 	if err != nil {
 		t.Fatalf("read docs/llms.txt: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestLLMSTextMatchesSnapshot(t *testing.T) {
 // renders.
 func TestLLMSCommandWritesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "llms.txt")
-	if err := runCLI([]string{"llms", "-o", path}); err != nil {
+	if err := Run([]string{"llms", "-o", path}); err != nil {
 		t.Fatalf("dm llms -o: %v", err)
 	}
 	got, err := os.ReadFile(path)
