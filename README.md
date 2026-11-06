@@ -38,10 +38,44 @@ go build -o dm .
 
 ## Docs
 
-The command table in `clidoc.go` is the source. `dm man` renders it as a man
-page and `dm llms` renders it as a one-pass teaching document. The committed
-files `docs/dm.1` and `docs/llms.txt` are snapshots, and the gate fails when
-one is stale.
+The command table in `internal/clidoc/clidoc.go` is the source. `dm man`
+renders it as a man page and `dm llms` renders it as a one-pass teaching
+document. The committed files `docs/dm.1` and `docs/llms.txt` are snapshots, and
+the gate fails when one is stale.
+
+## Code layout
+
+`main.go` dispatches the internal verbs and hands everything else to the CLI.
+`probe.go` is the `__probe` harness. `blackbox/` holds the integration tests and
+`docs/` the generated snapshots.
+
+```
+internal/cli         the CLI verbs
+internal/clidoc      the command table behind usage, dm man and dm llms
+internal/client      the TUI: input, keys, frames, floats and the bar
+internal/server      the session daemon: layout, focus, clients, state, the box
+internal/pane        the pane daemon: PTY, VT screen, status and output ring
+internal/session     the state file model, the id scheme and its migration
+internal/wire        the socket wire contract
+internal/transport   the client side of the session socket
+internal/box         the message box types, bounds and schema
+internal/osc         the OSC 7501 status filter and parser
+internal/notify      the desktop notification policy
+internal/layout      the split tree and pane geometry
+internal/rail        the sidebar painter
+internal/switcher    the quick switcher
+internal/boxview     the message box float
+internal/keymapview  the keymap float
+internal/keymap      the keymap model, the KDL loader and the help table
+internal/theme       the palette, glyphs and theme file parser
+internal/kdl         the KDL tokenizer shared by keymap and theme
+internal/cells       cell-width measuring and clipping
+internal/segment     a styled run of text
+internal/panel       the bordered box painter
+internal/vt          VT replay and screen serialisation
+internal/paths       the session filesystem layout
+internal/testutil    test helpers shared by more than one package
+```
 
 ## Use
 
@@ -51,6 +85,7 @@ dm attach -s work       # resume a session (durable, see below)
 dm ls                   # sessions and whether their server is live
 dm new -s work          # start a session without attaching
 dm kill -s work         # stop the server; panes keep running
+dm purge                # remove dead sessions whose panes are gone
 dm man                  # the man page, docs/dm.1
 dm llms                 # the one-pass teaching document, docs/llms.txt
 ```
@@ -96,9 +131,9 @@ reflows to that size. `prefix z` again restores the splits. The zoom clears
 when the focus, the window or the workspace changes, and dm does not persist
 it.
 
-The binding is new. An existing `~/.config/dm/config.kdl` does not gain it:
-add `"zoom-pane" "z"` to the `main` keymap, or delete the file and let dm
-write the default one again. Without the line `prefix z` toasts `no binding`.
+The binding comes from the built-in table. A `config.kdl` that leaves out
+`zoom-pane` still gets `z`, because the file is a patch over the defaults. Bind
+it to `none` to drop it, and `prefix z` then toasts `no binding`.
 
 Drag a divider with the left mouse button to resize the split. The client
 sends `resize-split` with the two panes beside the divider and the ratio, at
@@ -122,11 +157,13 @@ keymap "main" {
 }
 ```
 
-The file is the whole table, not a patch. An action the file leaves out is
-unbound. The prefix line sets the prefix key. Each keymap block maps actions to
-keys. `prefix ctrl+r` reloads `config.kdl` and its theme without restarting the
-session. A broken config or theme file leaves the running settings in place and
-toasts the error.
+The file is a patch over the built-in table. An action the file names takes
+its key, and an action it leaves out keeps the built-in key. Bind an action to
+`none` to unbind it. The prefix line sets the prefix key; a file without one
+keeps `ctrl+b`. Each keymap block maps actions to keys, and a mode the file
+leaves out keeps the built-in mode. `prefix ctrl+r` reloads `config.kdl` and its
+theme without restarting the session. A broken config or theme file leaves the
+running settings in place and toasts the error.
 
 A binding line in the main keymap may carry a help tag:
 
@@ -501,11 +538,14 @@ highlights the row under the pointer, a left click on a row runs it, and a
 right press, drag and release runs the row under the release. The release of
 the press that opened the menu, and clicks on the title or border, do not
 dismiss it; a click outside does. The menu
-offers split right/down/left/up, focus, close pane, scrollback, new window, new
-workspace, rename workspace, switch session and detach. If the program in that
-pane enabled mouse reporting itself, the event is forwarded to it instead.
-That is how `pi`, `htop` and `vim` keep their own scrolling: they own the
-wheel when they ask for it.
+offers split right/down/left/up, zoom, focus, close pane, scrollback, new
+window, new workspace, rename workspace, switch session and detach. If the
+program in that pane enabled mouse reporting itself, the event is forwarded to
+it instead. That is how `pi`, `htop` and `vim` keep their own scrolling: they
+own the wheel when they ask for it.
+
+Ctrl+click on a URL opens it with the system handler, and a toast names what
+opened.
 
 Alternate-screen programs have no terminal scrollback to show. Their screen is
 painted in place, not scrolled, so dm refuses to open its own scrollback for
@@ -556,23 +596,21 @@ and a host without `notify-send` gets none.
 ## Rendering
 
 A frame is an ordered stack of painters. Each painter writes into the caller's
-buffer. A box painter paints around its content: `paintPanel` clips the
-interior to a rect and paints the border one cell around it; `drawPaneBox`
-paints the border around content.
+buffer. `internal/client/render_pane.go` owns the pane painters: `drawPane`,
+`drawPaneFrom` and `drawPaneRow`. The shared primitives are in `internal/cells`,
+`internal/segment` and `internal/panel`.
 
-`render.go` owns the pane painters: `drawPane`, `drawPaneFrom`, `drawPaneRow`
-and `drawPaneBox`. The shared primitives are in `text.go`, `seg.go` and
-`panel.go`. `text.go` measures and cuts: cell width, clipping and elision.
-`seg.go` is a styled run: text, foreground, background, weight. `panel.go`
-builds a box: it clips the interior and writes the title and hint rows.
-`drawPaneBox` in `render.go` paints the border.
+`cells` measures and cuts: cell width, clipping, padding and elision. `segment`
+is a styled run: text, foreground, background, weight and the pin mark.
+`panel` builds a box: `PaintPanel` clips the interior to a rect and writes the
+title and hint rows, and `DrawPaneBox` paints the border around content.
 
 On a stable frame, the diff decides what is written. A layout change writes
-every band and row. `paintPanel` holds no state and keeps no buffer between
+every band and row. `PaintPanel` holds no state and keeps no buffer between
 frames. A new overlay is a painter plus a band entry.
 
-`damage_test.go` keeps a refactor honest: it pins the steady frame, the one-row
-repaint and the band cursor moves.
+`internal/client/damage_test.go` keeps a refactor honest: it pins the steady
+frame, the one-row repaint and the band cursor moves.
 
 ## Performance
 
@@ -590,22 +628,24 @@ at `$XDG_STATE_HOME/dm/sessions/<name>/server.sock`. The CLI is a thin wrapper,
 so anything one CLI verb does, an agent can do with one action.
 
 ```sh
-dm exec '{"action":"split","target":"p1","dir":"left"}'
+dm exec '{"action":"split","target":"w1p1","dir":"left"}'
 dm exec '{"action":"focus-dir","dir":"right"}'
 dm exec '{"action":"new-window","name":"tests"}'
 dm rename-workspace s1 api-work
-dm write-to p1 --msg "go test ./..." --enter
-dm read p1 --lines 20
+dm write-to w1p1 --msg "go test ./..." --enter
+dm read w1p1 --lines 20
 dm status
 ```
 
-Actions: `write-to`, `exec`, `read`, `history`, `status`, `keys`, `split`,
-`focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `new-window`,
-`next-window`, `prev-window`, `select-window`, `new-workspace`,
-`next-workspace`, `prev-workspace`, `rename-window`, `rename-workspace`,
-`toggle-fold`, `list`, `ping`, and the seven box actions `msg-post`,
-`msg-list`, `msg-wait`, `msg-sub`, `msg-clear`, `msg-watchers` and
-`msg-schema` below.
+Actions: `ping`, `list` (alias `ls`), `read`, `history`, `replay`, `status`,
+`write-to`, `exec`, `keys`, `split`, `zoom-pane`, `set-rail`, `resize-split`,
+`focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `close-window`,
+`new-window`, `next-window`, `prev-window`, `select-window`, `new-workspace`,
+`next-workspace`, `prev-workspace`, `list-workspaces`, `list-panes`, `pane`,
+`toggle-fold`, `set-pane-name`, `focus-window`, `focus-workspace`,
+`close-workspace`, `rename-window`, `rename-workspace`, and the seven box
+actions `msg-post`, `msg-list`, `msg-wait`, `msg-sub`, `msg-clear`,
+`msg-watchers` and `msg-schema` below.
 `toggle-fold` takes a window id as `target` and replies with the new `unfolded`
 state.
 
@@ -651,8 +691,8 @@ prints `PROBE-REPLY=ok`, `PROBE-REPORTED`, `PROBE-CLEARED` inside a pane. Run it
 from a pane to check a build:
 
 ```sh
-dm split p1 --dir down
-dm write-to p2 --msg "$PWD/dm __probe --hold 5s" --enter
+dm split w1p1 --dir down
+dm write-to w1p2 --msg "$PWD/dm __probe --hold 5s" --enter
 dm status
 ```
 
@@ -918,10 +958,13 @@ State lives in `$DM_STATE`, else `$XDG_STATE_HOME/dm`, else
 `~/.local/state/dm`.
 
 ```
-sessions/<name>/state.json      layout, focus, names, cwd
-sessions/<name>/server.sock     RPC and client socket
-sessions/<name>/panes/p1.sock   one per pane
-sessions/<name>/panes/p1.log    pane daemon stderr
+sessions/<name>/state.json           layout, focus, names, cwd, the box
+sessions/<name>/server.sock          RPC and client socket
+sessions/<name>/server.pid           the server process id
+sessions/<name>/server.log           server stderr
+sessions/<name>/panes/<id>.sock      one per pane
+sessions/<name>/panes/<id>.log       pane daemon stderr
+sessions/<name>/panes/<id>.sock.pid  the pane process id
 ```
 
 ## Tests
@@ -930,6 +973,9 @@ sessions/<name>/panes/p1.log    pane daemon stderr
 go test ./...
 ```
 
-The integration tests run the built binary against a temp state dir. They cover
-the pane-survives-server-kill path, split/close layout, window and workspace
-switching, the JSON action path and OSC 7501 status.
+The integration tests in `blackbox/` run the built binary against a temp state
+dir. They cover the pane-survives-server-kill path, split/close layout, zoom and
+rail resize, window and workspace switching, the JSON action path, OSC 7501
+status, the message box CLI and desktop notifications. Unit tests hold each
+generated document to its renderer: `docs/dm.1` and `docs/llms.txt` fail the
+gate when stale.
