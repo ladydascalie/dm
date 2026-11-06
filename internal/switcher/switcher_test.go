@@ -48,6 +48,11 @@ func switcherSnap() *wire.Snapshot {
 			Root: "/work/dm",
 		},
 	}
+	// The switcher opens every window so no folded window hides a pane it
+	// could jump to. The workspace fold is forced in switcherTree.
+	for i := range snap.All {
+		snap.All[i].WindowUnfolded = true
+	}
 	return snap
 }
 
@@ -103,7 +108,7 @@ func switcherType(s *Switcher, q string) {
 
 // TestSwitcherTree checks the tree the float shows: workspaces and panes in the
 // rail's order, a gap between the blocks, and every pane of a folded workspace
-// listed.
+// listed. The raw tree keeps the restored window rows; the visible rows do not.
 func TestSwitcherTree(t *testing.T) {
 	snap := switcherSnap()
 	s := NewSwitcher(layout.Rect{X: 10, Y: 4, W: 80, H: 24}, snap)
@@ -118,16 +123,27 @@ func TestSwitcherTree(t *testing.T) {
 		t.Fatalf("tree = %v, want %v", got, want)
 	}
 	gaps := 0
+	windows := 0
 	for _, it := range s.tree {
 		if it.Kind == rail.Window {
-			t.Fatalf("tree kept a window row: %+v", it)
+			windows++
 		}
 		if it.Kind == rail.Gap {
 			gaps++
 		}
 	}
+	if windows != 3 {
+		t.Fatalf("tree has %d window rows, want three", windows)
+	}
 	if gaps != 1 {
 		t.Fatalf("tree has %d gap rows, want one", gaps)
+	}
+	// The switcher lists panes only: window and note rows stay in the tree but
+	// never become visible rows.
+	for _, row := range s.rows {
+		if k := s.tree[row].Kind; k == rail.Window || k == rail.WindowNote {
+			t.Fatalf("visible row kept a window or note row: %+v", s.tree[row])
+		}
 	}
 	// Every workspace of the fixture is folded, and its panes are still there.
 	for _, p := range snap.All {
