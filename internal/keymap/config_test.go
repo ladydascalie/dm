@@ -986,3 +986,66 @@ func TestConfigDefaultFoldMalformed(t *testing.T) {
 		})
 	}
 }
+
+// TestConfigTabWidth proves the tab width bounds: absent means the built-in
+// defaults, a bare number sets one bound, and a quoted number is accepted.
+func TestConfigTabWidth(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		wantMin int
+		wantMax int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultTabMin, defaultTabMax},
+		{"both", "tab-min-width 6\ntab-max-width 12", 6, 12},
+		{"quoted", `tab-min-width "6"` + "\n" + `tab-max-width "12"`, 6, 12},
+		{"min only", "tab-min-width 6", 6, defaultTabMax},
+		{"max only", "tab-max-width 12", defaultTabMin, 12},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.TabMinWidth(); got != c.wantMin {
+				t.Fatalf("TabMinWidth() = %d, want %d", got, c.wantMin)
+			}
+			if got := cfg.TabMaxWidth(); got != c.wantMax {
+				t.Fatalf("TabMaxWidth() = %d, want %d", got, c.wantMax)
+			}
+		})
+	}
+	if got := LoadDefault().TabMinWidth(); got != defaultTabMin {
+		t.Fatalf("LoadDefault().TabMinWidth() = %d, want %d", got, defaultTabMin)
+	}
+	if got := LoadDefault().TabMaxWidth(); got != defaultTabMax {
+		t.Fatalf("LoadDefault().TabMaxWidth() = %d, want %d", got, defaultTabMax)
+	}
+}
+
+// TestConfigTabWidthMalformed proves a bad tab width node fails with its line.
+func TestConfigTabWidthMalformed(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"missing value", "tab-min-width", "expected a number after tab-min-width"},
+		{"not a number", "tab-min-width wide", "tab-min-width must be a number"},
+		{"below floor", "tab-min-width 2", "tab-min-width must be at least 3"},
+		{"max below min", "tab-min-width 12\ntab-max-width 6", "tab-max-width 6 is below tab-min-width 12"},
+		{"duplicate", "tab-min-width 6\ntab-min-width 8", "duplicate tab-min-width node"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parseConfig(c.src)
+			if err == nil {
+				t.Fatal("parseConfig accepted a malformed tab width node")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error = %q, want %q", err, c.want)
+			}
+		})
+	}
+}

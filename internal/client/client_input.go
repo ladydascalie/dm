@@ -1820,7 +1820,7 @@ func (t *tui) tabBarClick(ev mouseEvent, x, y int) bool {
 	if ev.btn&3 != 0 || ev.btn&32 != 0 || ev.btn&64 != 0 {
 		return true
 	}
-	it, ok := tabBarAt(t.snap, x, y)
+	it, ok := tabBarAt(t.snap, x, y, tabWidthFor(t.km()))
 	if !ok {
 		return true
 	}

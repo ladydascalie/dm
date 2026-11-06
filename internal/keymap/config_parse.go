@@ -2,6 +2,7 @@ package keymap
 
 import (
 	"fmt"
+	"strconv"
 
 	"dm/internal/kdl"
 	"dm/internal/theme"
@@ -44,6 +45,26 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			}
 			cfg.defaultFoldSet = true
 			i += 2
+		case "tab-min-width":
+			if cfg.tabMin != 0 {
+				return fmt.Errorf("line %d: duplicate tab-min-width node", t.Line)
+			}
+			n, next, err := parseTabWidth(toks, i, "tab-min-width")
+			if err != nil {
+				return err
+			}
+			cfg.tabMin = n
+			i = next
+		case "tab-max-width":
+			if cfg.tabMax != 0 {
+				return fmt.Errorf("line %d: duplicate tab-max-width node", t.Line)
+			}
+			n, next, err := parseTabWidth(toks, i, "tab-max-width")
+			if err != nil {
+				return err
+			}
+			cfg.tabMax = n
+			i = next
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
 				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
@@ -205,6 +226,33 @@ func findPrefix(toks []kdl.Token) (string, []byte, error) {
 	return name, keyBytes, nil
 }
 
+// tabWidthFloor is the smallest tab width the config accepts: one padding
+// cell, one name cell and one padding cell.
+const tabWidthFloor = 3
+
+// defaultTabMin and defaultTabMax are the built-in tab width bounds in cells.
+const (
+	defaultTabMin = 8
+	defaultTabMax = 20
+)
+
+// parseTabWidth reads the integer value of a tab width node. It accepts a bare
+// number or a quoted one and rejects a value below the floor.
+func parseTabWidth(toks []kdl.Token, i int, name string) (int, int, error) {
+	if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+		return 0, i, fmt.Errorf("line %d: expected a number after %s", toks[i].Line, name)
+	}
+	v := toks[i+1]
+	n, err := strconv.Atoi(v.Value)
+	if err != nil {
+		return 0, i, fmt.Errorf("line %d: %s must be a number, got %q", v.Line, name, v.Value)
+	}
+	if n < tabWidthFloor {
+		return 0, i, fmt.Errorf("line %d: %s must be at least %d, got %d", v.Line, name, tabWidthFloor, n)
+	}
+	return n, i + 2, nil
+}
+
 // parseConfig parses the frozen KDL keymap shape. It returns a clear error with
 // the line when the text is malformed.
 func parseConfig(src string) (*Config, error) {
@@ -225,6 +273,9 @@ func parseConfig(src string) (*Config, error) {
 	if err := parseKeymaps(toks, cfg); err != nil {
 		return nil, err
 	}
+	if cfg.tabMin != 0 && cfg.tabMax != 0 && cfg.tabMax < cfg.tabMin {
+		return nil, fmt.Errorf("tab-max-width %d is below tab-min-width %d", cfg.tabMax, cfg.tabMin)
+	}
 	return cfg, nil
 }
 
@@ -242,6 +293,8 @@ const defaultConfigKDL = `// dm keybinding defaults.
 
 prefix "ctrl+b"
 default-fold "fold"
+tab-min-width 8
+tab-max-width 20
 
 keymap "main" {
     "send-prefix" "prefix"

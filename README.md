@@ -433,6 +433,18 @@ selects that window. Double-clicking a tab opens the inline rename prompt for
 that window. The server reserves the tab bar row when it computes pane
 rectangles, so pane boxes start below it.
 
+A tab is its name plus one padding cell on each side, clamped to a minimum and
+a maximum width. The bounds come from `config.kdl`:
+
+```kdl
+tab-min-width 8
+tab-max-width 20
+```
+
+Both are cell counts and both default to the values above. A name wider than
+the maximum is cut with `…`. Set the two equal for a constant tab width. A
+minimum below 3 and a maximum below the minimum are config errors.
+
 ## Status bar
 
 The last row of the screen is the status bar: one line of segments on explicit

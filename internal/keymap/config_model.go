@@ -48,6 +48,8 @@ type Config struct {
 	theme          theme.Theme
 	defaultFold    bool
 	defaultFoldSet bool
+	tabMin         int
+	tabMax         int
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -75,6 +77,24 @@ func (c *Config) DefaultFold() bool {
 		return false
 	}
 	return c.defaultFold
+}
+
+// TabMinWidth returns the smallest tab width in cells. A config without the
+// node reports the built-in default.
+func (c *Config) TabMinWidth() int {
+	if c == nil || c.tabMin < tabWidthFloor {
+		return defaultTabMin
+	}
+	return c.tabMin
+}
+
+// TabMaxWidth returns the largest tab width in cells. A config without the
+// node reports the built-in default.
+func (c *Config) TabMaxWidth() int {
+	if c == nil || c.tabMax < tabWidthFloor {
+		return defaultTabMax
+	}
+	return c.tabMax
 }
 
 // PrefixBytes returns the bytes the prefix key sends.

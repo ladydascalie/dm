@@ -48,7 +48,7 @@ func (t *tui) draw() {
 	// strip its grab zone covers.
 	drawDivider(&div, th, t.padZone, t.padAxis)
 	rail.DrawRail(&railBuf, th, win)
-	DrawTabBar(&tabBar, th, win)
+	DrawTabBar(&tabBar, th, win, tabWidthFor(t.km()))
 	drawBar(&bar, th, win, t.armed, t.barInfo())
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
