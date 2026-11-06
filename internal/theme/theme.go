@@ -48,14 +48,22 @@ func Contrast(a, b RGB) float64 {
 }
 
 // Theme is everything the renderer can restyle: the rail and bar palette, the
-// six workspace accents, the structural glyphs, and the per-state marks. A
-// theme file overrides one theme's defaults; a key it omits keeps the built-in
-// value.
+// six workspace accents, the structural glyphs, the per-state marks, and the
+// rail's row-level marks. A theme file overrides the palette, accents, glyphs
+// and states; the rail marks keep their built-in values.
 type Theme struct {
-	Palette Palette
-	Accents [accentSlots]RGB
-	Glyphs  Glyphs
-	States  map[string]StateStyle
+	Palette   Palette
+	Accents   [accentSlots]RGB
+	Glyphs    Glyphs
+	States    map[string]StateStyle
+	RailMarks RailMarks
+}
+
+// RailMarks are the row-level markers the rail uses to separate a workspace
+// row from a window row from a pane row. They are fixed built-in values.
+type RailMarks struct {
+	Workspace string
+	Pane      string
 }
 
 // Palette is the rail and status bar RGB set.
@@ -150,6 +158,10 @@ func DefaultTheme() Theme {
 			"error":   {Glyph: "✕", NerdGlyph: "\uf057", Colour: RGB{255, 130, 160}}, // #ff82a0
 			"unknown": {Glyph: "?", NerdGlyph: "\uf128", Colour: RGB{143, 147, 168}}, // #8f93a8
 			"shell":   {Glyph: "▶", Colour: RGB{143, 147, 168}},                      // #8f93a8, no Nerd form
+		},
+		RailMarks: RailMarks{
+			Workspace: "•",
+			Pane:      "·",
 		},
 	}
 }

@@ -360,7 +360,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 	switch it.Kind {
 	case Workspace:
 		if !compact {
-			name := p.RailText
+			name := th.Accents[it.Accent]
 			if !it.Active {
 				name = p.RailHeader
 			}
@@ -368,6 +368,9 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 				{Text: g.WorkspaceBar, FG: th.Accents[it.Accent]},
 				{Text: " ", FG: name},
 				{Text: it.Text, FG: name, Bold: true},
+			}
+			if mark := th.RailMarks.Workspace; mark != "" {
+				left = append(left, segment.Seg{Text: " " + mark, FG: name})
 			}
 			right = []segment.Seg{{Text: strconv.Itoa(it.Count), FG: p.RailDim}}
 		}
@@ -416,7 +419,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 		}
 	case Pane:
 		base := p.RailDim
-		if it.Focus || it.Agent {
+		if it.Focus {
 			base = p.RailText
 		}
 		mark, colour := RailGlyph(th, it.Status, nerd)
@@ -437,6 +440,12 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 				{Text: glyph, FG: colour},
 				{Text: mark, FG: colour},
 				{Text: " " + it.Text, FG: base},
+			}
+			// The dot is a level marker, not part of the name. It only joins the
+			// row when the row has room for it, so a narrow rail never loses the
+			// pane name to the marker.
+			if pm := th.RailMarks.Pane; pm != "" && segment.SegCells(left)+2 <= w {
+				left = append(left, segment.Seg{Text: " " + pm, FG: p.RailDim})
 			}
 		}
 	case Gap:
