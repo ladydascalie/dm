@@ -8,20 +8,20 @@ import (
 	"testing"
 )
 
-// runCLICases reads main.go and returns the string labels of every case in
-// runCLI's switch, plus whether the switch has a default clause. The default
+// runCLICases reads cli.go and returns the string labels of every case in
+// Run's switch, plus whether the switch has a default clause. The default
 // is the bare-word attach fallback.
 func runCLICases(t *testing.T) (labels []string, hasDefault bool) {
 	t.Helper()
 	fset := gotoken.NewFileSet()
-	f, err := parser.ParseFile(fset, "../../main.go", nil, 0)
+	f, err := parser.ParseFile(fset, "../cli/cli.go", nil, 0)
 	if err != nil {
-		t.Fatalf("parse ../../main.go: %v", err)
+		t.Fatalf("parse ../cli/cli.go: %v", err)
 	}
 	found := false
 	ast.Inspect(f, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "runCLI" {
+		if !ok || fn.Name.Name != "Run" {
 			return true
 		}
 		found = true
@@ -52,7 +52,7 @@ func runCLICases(t *testing.T) (labels []string, hasDefault bool) {
 		return false
 	})
 	if !found {
-		t.Fatal("runCLI not found in ../../main.go")
+		t.Fatal("Run not found in ../cli/cli.go")
 	}
 	return labels, hasDefault
 }
@@ -79,15 +79,15 @@ func covered(label string) bool {
 func TestTableCoversRunCLI(t *testing.T) {
 	labels, hasDefault := runCLICases(t)
 	if len(labels) == 0 {
-		t.Fatal("no case labels found in runCLI")
+		t.Fatal("no case labels found in Run")
 	}
 	for _, label := range labels {
 		if !covered(label) {
-			t.Errorf("runCLI case %q has no row in cliCommands", label)
+			t.Errorf("Run case %q has no row in cliCommands", label)
 		}
 	}
 	if !hasDefault {
-		t.Fatal("runCLI has no default clause for the bare-word attach fallback")
+		t.Fatal("Run has no default clause for the bare-word attach fallback")
 	}
 	bare := false
 	for _, c := range cliCommands {
@@ -115,7 +115,7 @@ func TestTableNamesHaveCase(t *testing.T) {
 			first = first[:i]
 		}
 		if !set[first] {
-			t.Errorf("cliCommands row %q has no case in runCLI", c.name)
+			t.Errorf("cliCommands row %q has no case in Run", c.name)
 		}
 	}
 }
