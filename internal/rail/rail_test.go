@@ -140,8 +140,9 @@ func TestRailRowSegments(t *testing.T) {
 	left, right, tail := RailRow(theme.DefaultTheme(), ws, layout.DefaultRail, false, false)
 	wantLeft := []railSeg{
 		{Text: "\u258c", FG: theme.DefaultTheme().Accents[ws.Accent]},
-		{Text: " ", FG: theme.DefaultTheme().Palette.RailText},
-		{Text: "main", FG: theme.DefaultTheme().Palette.RailText, Bold: true},
+		{Text: " ", FG: theme.DefaultTheme().Accents[ws.Accent]},
+		{Text: "main", FG: theme.DefaultTheme().Accents[ws.Accent], Bold: true},
+		{Text: " " + theme.DefaultTheme().RailMarks.Workspace, FG: theme.DefaultTheme().Accents[ws.Accent]},
 	}
 	wantRight := []railSeg{{Text: "2", FG: theme.DefaultTheme().Palette.RailDim}}
 	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) || tail != nil {
@@ -217,6 +218,7 @@ func TestRailRowSegments(t *testing.T) {
 		{Text: mark, FG: glyphColour},
 		{Text: "\u25cf", FG: glyphColour},
 		{Text: " pi", FG: theme.DefaultTheme().Palette.RailText},
+		{Text: " " + theme.DefaultTheme().RailMarks.Pane, FG: theme.DefaultTheme().Palette.RailDim},
 	}
 	if !pane.Focus {
 		t.Fatalf("pane pi is not focused: %+v", pane)
@@ -271,6 +273,45 @@ func TestRailRowSegments(t *testing.T) {
 		"\x1b[0m" + theme.DefaultTheme().Palette.RailFocusBG.BG() + "\x1b[1m"
 	if !strings.Contains(out, bold) {
 		t.Fatalf("focused row %d is not bold on the focus fill: %q", focusRow, out)
+	}
+}
+
+// TestRailRowLevelsDiffer proves the rail gives each row level its own look:
+// the workspace row wears the accent and a bullet, the window row a caret,
+// and the pane row an indent and a dot. The three composed rows differ.
+func TestRailRowLevelsDiffer(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	snap := railRowSnap(layout.DefaultRail)
+	items := RailItems(snap)
+	compose := func(it RailItem) string {
+		left, right, tail := RailRow(th, it, layout.DefaultRail, false, false)
+		return railRowComposed(left, tail, right, layout.DefaultRail)
+	}
+	wsLine := compose(railRowFind(t, items, Workspace, "main"))
+	winLine := compose(railRowFind(t, items, Window, "one"))
+	paneLine := compose(railRowFind(t, items, Pane, "pi"))
+	if wsLine == winLine || wsLine == paneLine || winLine == paneLine {
+		t.Fatalf("rows are not distinct: workspace %q, window %q, pane %q",
+			wsLine, winLine, paneLine)
+	}
+	if !strings.Contains(wsLine, th.RailMarks.Workspace) {
+		t.Fatalf("workspace row lacks its mark %q: %q", th.RailMarks.Workspace, wsLine)
+	}
+	if !strings.Contains(winLine, th.Glyphs.FoldOpen) {
+		t.Fatalf("window row lacks the caret %q: %q", th.Glyphs.FoldOpen, winLine)
+	}
+	if !strings.Contains(paneLine, th.RailMarks.Pane) {
+		t.Fatalf("pane row lacks its mark %q: %q", th.RailMarks.Pane, paneLine)
+	}
+	if !strings.HasPrefix(wsLine, th.Glyphs.WorkspaceBar) {
+		t.Fatalf("workspace row does not start with the bar: %q", wsLine)
+	}
+	if !strings.HasPrefix(winLine, "  "+th.Glyphs.FoldOpen) {
+		t.Fatalf("window row does not start with the caret indent: %q", winLine)
+	}
+	if !strings.HasPrefix(paneLine, "      ") {
+		t.Fatalf("pane row does not start with the pane indent: %q", paneLine)
 	}
 }
 
