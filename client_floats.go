@@ -1,8 +1,9 @@
 package main
 
-// The client side of the message box float: opening and closing it, the
-// requests it sends, the replies it takes, and the keys and wheel it consumes.
-// The view itself lives in internal/boxview.
+// The client side of the floats: opening and closing them, the requests the
+// message box sends and the replies it takes, and the keys and wheel each
+// float consumes. The views themselves live in internal/boxview and
+// internal/keymapview.
 
 import (
 	"bytes"
@@ -12,6 +13,7 @@ import (
 	"dm/internal/box"
 	"dm/internal/boxview"
 	"dm/internal/keymap"
+	"dm/internal/keymapview"
 	"dm/internal/wire"
 )
 
@@ -219,4 +221,165 @@ func (t *tui) boxKey() bool {
 	}
 	t.dirty = true
 	return true
+}
+
+// openKeymapView opens the keymap view as a floating pane, or closes it when it
+// is already up. The rows come from the client's keymap.
+func openKeymapView(t *tui) {
+	if t.snap == nil {
+		t.disarm()
+		return
+	}
+	if t.keys != nil {
+		closeKeymapView(t)
+		return
+	}
+	t.keys = keymapview.NewKeymapView(t.snap, t.km())
+	t.AddFloatingPane(t.keys.Float)
+	t.mode = "help"
+	t.armed = false
+	t.dirty = true
+}
+
+// closeKeymapView takes the float down and gives the keyboard back to the
+// panes.
+func closeKeymapView(t *tui) {
+	if t.keys == nil {
+		return
+	}
+	t.RemoveFloatingPane(t.keys.Float.ID)
+	t.keys = nil
+	t.mode = ""
+	// The close key stays in the buffer while the pending timer waits. Drop
+	// the whole buffer here, so a later keypress cannot forward a stray escape
+	// to a pane.
+	t.inbuf = nil
+	t.pending = false
+	t.dirty = true
+}
+
+// keymapKey consumes one key while the keymap view is up. Every key belongs to
+// the view: nothing reaches a pane. It returns false when it needs more bytes
+// for an escape sequence.
+func (t *tui) keymapKey() bool {
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	if t.keys.Searching {
+		return t.keymapSearchKey()
+	}
+	cfg := t.km()
+	if p := cfg.PrefixBytes(); len(p) > 0 && bytes.HasPrefix(t.inbuf, p) {
+		// The prefix key closes the view.
+		t.inbuf = append([]byte(nil), t.inbuf[len(p):]...)
+		t.pending = false
+		closeKeymapView(t)
+		return true
+	}
+	// A config that predates the help mode carries no bindings for the view.
+	// The built-in mode takes over, so the view always scrolls and closes.
+	if !cfg.HasMode("help") {
+		cfg = builtinKeymap()
+	}
+	action, n, state := cfg.Match("help", t.inbuf)
+	switch state {
+	case keymap.Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	case keymap.Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+	default:
+		// An unbound key closes the view.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		closeKeymapView(t)
+		return true
+	}
+	switch action {
+	case "up", "up-arrow":
+		t.keys.Scroll(-1)
+	case "down", "down-arrow":
+		t.keys.Scroll(1)
+	case "page-up":
+		t.keys.Scroll(-t.keys.Float.Rect.H)
+	case "page-down":
+		t.keys.Scroll(t.keys.Float.Rect.H)
+	case "top":
+		t.keys.Scroll(-t.keys.RowCount())
+	case "bottom":
+		t.keys.Scroll(t.keys.RowCount())
+	case "search":
+		t.keys.StartSearch()
+	case "next-match":
+		t.keys.NextMatch(1)
+	case "prev-match":
+		t.keys.NextMatch(-1)
+	default:
+		// Every close action, and any action the view does not scroll with,
+		// closes it.
+		closeKeymapView(t)
+		return true
+	}
+	t.dirty = true
+	return true
+}
+
+// keymapSearchKey consumes one byte of the query. Enter keeps the query, esc
+// clears it, backspace edits and ctrl+u clears. Printable bytes append. Every
+// other control key is swallowed: nothing reaches a pane while the query is
+// typed.
+func (t *tui) keymapSearchKey() bool {
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	b := t.inbuf[0]
+	switch {
+	case b == 0x1b:
+		t.keys.CancelSearch()
+		t.inbuf = nil
+		t.pending = false
+	case b == '\r' || b == '\n':
+		t.keys.AcceptSearch()
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	case b == 0x7f || b == 0x08:
+		t.keys.BackspaceQuery()
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	case b == 0x15:
+		t.keys.SetQuery("")
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	case b >= 0x20 && b < 0x7f:
+		t.keys.AppendQuery(string(b))
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	default:
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+	}
+	t.dirty = true
+	return true
+}
+
+// keymapWheel scrolls the view from the wheel. A notch up goes toward the top,
+// the way it goes back in scrollback. Every other mouse event is swallowed.
+func (t *tui) keymapWheel(ev mouseEvent) {
+	if t.keys == nil {
+		return
+	}
+	t.updateLinkHover(ev.x-1, ev.y-1, ev.btn&16 != 0)
+	if ev.btn&64 == 0 || ev.release {
+		return
+	}
+	step := -3
+	if ev.btn&1 == 0 {
+		step = 3
+	}
+	t.keys.Scroll(step)
+	t.dirty = true
 }

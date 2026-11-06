@@ -12,6 +12,7 @@ import (
 
 	"dm/internal/boxview"
 	"dm/internal/keymap"
+	"dm/internal/keymapview"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/switcher"
@@ -62,7 +63,7 @@ type tui struct {
 	// box is the message-box float, nil when closed.
 	box *boxview.BoxView
 	// keys is the keymap view float, nil when closed.
-	keys  *keymapView
+	keys  *keymapview.KeymapView
 	dirty bool
 
 	// out is the frame sink: os.Stdout in a session, a buffer in a test.
@@ -540,7 +541,7 @@ func (t *tui) apply(m wire.Msg) {
 			t.dirty = true
 		}
 		if t.keys != nil {
-			t.keys.sync(m.Snap)
+			t.keys.Sync(m.Snap)
 			t.dirty = true
 		}
 		t.dirty = true

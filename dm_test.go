@@ -4525,7 +4525,7 @@ func TestHelpOpensAndCloses(t *testing.T) {
 	if tui.mode != "help" {
 		t.Fatalf("mode = %q, want help", tui.mode)
 	}
-	if len(tui.floats) != 1 || tui.floats[0] != tui.keys.float {
+	if len(tui.floats) != 1 || tui.floats[0] != tui.keys.Float {
 		t.Fatalf("floats = %+v, want the keymap float", tui.floats)
 	}
 	if tui.armed {

@@ -1,25 +1,71 @@
-package main
+package keymapview
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
 )
 
+// keymapTestLoad parses a keymap from text. It is a copy of the client's
+// helper: the moved test cannot reach package main.
+func keymapTestLoad(t *testing.T, src string) *keymap.Config {
+	t.Helper()
+	cfg, err := keymap.ParseConfig(src)
+	if err != nil {
+		t.Fatalf("parse test keymap: %v", err)
+	}
+	return cfg
+}
+
+// keymapVTPaint is the content painter for a float backed by a terminal. It is
+// a copy of the client's painter: the moved test cannot reach package main.
+func keymapVTPaint(v vt10x.Terminal) func(*bytes.Buffer, layout.Rect) {
+	return func(buf *bytes.Buffer, r layout.Rect) {
+		if r.W <= 0 || r.H <= 0 {
+			return
+		}
+		cols, rows := v.Size()
+		v.Lock()
+		defer v.Unlock()
+		for y := 0; y < r.H; y++ {
+			fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
+			var cur *vt10x.Glyph
+			for x := 0; x < r.W; x++ {
+				var g vt10x.Glyph
+				if x < cols && y < rows {
+					g = vt.NormCell(v.Cell(x, y))
+				} else {
+					g = vt.NormCell(g)
+				}
+				buf.WriteString(vt.SGR(g, cur))
+				gg := g
+				cur = &gg
+				if g.Char < 0x20 {
+					buf.WriteByte(' ')
+				} else {
+					buf.WriteRune(g.Char)
+				}
+			}
+		}
+	}
+}
+
 // keymapScreen replays the float's bytes into a fresh screen, so a test reads
 // what a terminal would show.
-func keymapScreen(t *testing.T, k *keymapView, cols, rows int) vt10x.Terminal {
+func keymapScreen(t *testing.T, k *KeymapView, cols, rows int) vt10x.Terminal {
 	t.Helper()
 	var buf bytes.Buffer
-	k.float.Paint = floatVTPaint(k.float.VT, nil)
-	k.float.Draw(&buf, theme.DefaultTheme())
+	k.Float.Paint = keymapVTPaint(k.Float.VT)
+	k.Float.Draw(&buf, theme.DefaultTheme())
 	screen := vt10x.New(vt10x.WithSize(cols, rows))
 	if _, err := screen.Write(buf.Bytes()); err != nil {
 		t.Fatalf("replay the keymap view: %v", err)
@@ -27,12 +73,27 @@ func keymapScreen(t *testing.T, k *keymapView, cols, rows int) vt10x.Terminal {
 	return screen
 }
 
+// keymapScreenRow reads one row of a replayed screen, trailing blanks dropped.
+func keymapScreenRow(screen vt10x.Terminal, y, x, w int) string {
+	var b strings.Builder
+	screen.Lock()
+	defer screen.Unlock()
+	for i := 0; i < w; i++ {
+		r := screen.Cell(x+i, y).Char
+		if r == 0 {
+			r = ' '
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimRight(b.String(), " ")
+}
+
 // keymapScreenText reads every row of a replayed screen inside the float, so a
 // test can look for a line wherever it landed.
 func keymapScreenText(screen vt10x.Terminal, r layout.Rect) []string {
 	rows := make([]string, 0, r.H)
 	for y := r.Y; y < r.Y+r.H; y++ {
-		rows = append(rows, boxScreenRow(screen, y, r.X, r.W))
+		rows = append(rows, keymapScreenRow(screen, y, r.X, r.W))
 	}
 	return rows
 }
@@ -114,7 +175,7 @@ keymap "scroll" {
 		}
 	}
 
-	rows := keymapRows(cfg)
+	rows := KeymapRows(cfg)
 	for _, label := range []string{"split right", "split down", "send prefix"} {
 		if !keymapRowsContain(rows, label) {
 			t.Fatalf("rows miss the label %q: %v", label, rows)
@@ -134,11 +195,11 @@ keymap "scroll" {
 // action row, and the key hint.
 func TestKeymapViewPaints(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
-	k := newKeymapView(snap, keymap.LoadDefault())
+	k := NewKeymapView(snap, keymap.LoadDefault())
 	screen := keymapScreen(t, k, snap.Cols, snap.Rows)
-	r := k.float.Rect
+	r := k.Float.Rect
 
-	title := boxScreenRow(screen, r.Y-1, r.X+2, r.W-2)
+	title := keymapScreenRow(screen, r.Y-1, r.X+2, r.W-2)
 	if !strings.Contains(title, "keymaps") {
 		t.Fatalf("title = %q, want keymaps", title)
 	}
@@ -154,7 +215,7 @@ func TestKeymapViewPaints(t *testing.T) {
 			t.Fatalf("scrollback row looks like a header: %q", row)
 		}
 	}
-	hint := boxScreenRow(screen, r.Y+r.H, r.X+2, r.W-2)
+	hint := keymapScreenRow(screen, r.Y+r.H, r.X+2, r.W-2)
 	if !strings.Contains(hint, "j/k scroll") || !strings.Contains(hint, "esc close") {
 		t.Fatalf("hint = %q, want the scroll and close keys", hint)
 	}
@@ -172,37 +233,37 @@ func TestKeymapViewPaints(t *testing.T) {
 // last row that still fills the rect, and the paint follows the offset.
 func TestKeymapViewScrollsAndClamps(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 14, Rail: 0}
-	k := newKeymapView(snap, keymap.LoadDefault())
-	h := k.float.Rect.H
+	k := NewKeymapView(snap, keymap.LoadDefault())
+	h := k.Float.Rect.H
 	max := len(k.rows) - h
 	if max < 1 {
 		t.Fatalf("fixture is too short to scroll: %d rows in %d rows", len(k.rows), h)
 	}
 
-	k.scroll(1000)
+	k.Scroll(1000)
 	if k.off != max {
 		t.Fatalf("off = %d, want the last row %d", k.off, max)
 	}
-	k.scroll(-1000)
+	k.Scroll(-1000)
 	if k.off != 0 {
 		t.Fatalf("off = %d, want the first row 0", k.off)
 	}
 
 	// The paint shows the window that starts at the offset.
-	k.scroll(1)
+	k.Scroll(1)
 	screen := keymapScreen(t, k, snap.Cols, snap.Rows)
-	rows := keymapScreenText(screen, k.float.Rect)
+	rows := keymapScreenText(screen, k.Float.Rect)
 	if got := rows[1]; !strings.Contains(got, "[main]") {
 		t.Fatalf("after one scroll the second row = %q, want the main header", got)
 	}
 
 	// A snapshot that changes the screen keeps the window on the rows.
-	k.scroll(1000)
+	k.Scroll(1000)
 	smaller := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	k.sync(smaller)
-	if k.off > len(k.rows)-k.float.Rect.H {
+	k.Sync(smaller)
+	if k.off > len(k.rows)-k.Float.Rect.H {
 		t.Fatalf("sync left the window past the last row: off=%d rows=%d h=%d",
-			k.off, len(k.rows), k.float.Rect.H)
+			k.off, len(k.rows), k.Float.Rect.H)
 	}
 }
 
@@ -210,13 +271,13 @@ func TestKeymapViewScrollsAndClamps(t *testing.T) {
 // match into view, and next/prev move between matches.
 func TestKeymapSearch(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
-	k := newKeymapView(snap, keymap.LoadDefault())
-	k.startSearch()
-	k.appendQuery("split")
+	k := NewKeymapView(snap, keymap.LoadDefault())
+	k.StartSearch()
+	k.AppendQuery("split")
 	if k.query != "split" || len(k.matches) < 2 {
 		t.Fatalf("query %q matches %v, want at least two split rows", k.query, k.matches)
 	}
-	k.acceptSearch()
+	k.AcceptSearch()
 	if got := k.title(); !strings.Contains(got, "1/") {
 		t.Fatalf("title = %q, want the match position", got)
 	}
@@ -224,10 +285,10 @@ func TestKeymapSearch(t *testing.T) {
 		t.Fatalf("hint = %q, want the next/prev keys", got)
 	}
 	first := k.matches[0]
-	if first < k.off || first >= k.off+k.float.Rect.H {
+	if first < k.off || first >= k.off+k.Float.Rect.H {
 		t.Fatalf("first match %d is outside the window starting at %d", first, k.off)
 	}
-	k.nextMatch(1)
+	k.NextMatch(1)
 	if k.match != 1 {
 		t.Fatalf("next match = %d, want 1", k.match)
 	}
@@ -242,91 +303,8 @@ func TestKeymapSearch(t *testing.T) {
 	if k.style(other) != "\x1b[0m\x1b[30;107m" {
 		t.Fatalf("other match style = %q, want the white match", k.style(other))
 	}
-	k.cancelSearch()
+	k.CancelSearch()
 	if k.query != "" || len(k.matches) != 0 {
 		t.Fatalf("cancel left query %q matches %v", k.query, k.matches)
-	}
-}
-
-// TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n
-// moves to the next match, and esc clears it.
-func TestKeymapSearchInput(t *testing.T) {
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
-	tui.runAction("help")
-	feed(tui, "/")
-	if tui.keys == nil || !tui.keys.searching {
-		t.Fatal("slash did not start a search")
-	}
-	if got := tui.keys.hint(); !strings.Contains(got, "enter keep") {
-		t.Fatalf("search hint = %q, want enter keep", got)
-	}
-	for _, b := range []byte("split") {
-		feed(tui, string(b))
-	}
-	if tui.keys.query != "split" {
-		t.Fatalf("query = %q, want split", tui.keys.query)
-	}
-	feed(tui, "\r")
-	if tui.keys.searching || tui.keys.query != "split" {
-		t.Fatalf("enter left searching=%v query=%q", tui.keys.searching, tui.keys.query)
-	}
-	if got := tui.keys.hint(); !strings.Contains(got, "n/N") {
-		t.Fatalf("match hint = %q, want n/N", got)
-	}
-	feed(tui, "n")
-	if tui.keys.match != 1 {
-		t.Fatalf("n left match %d, want 1", tui.keys.match)
-	}
-	feed(tui, "/")
-	feed(tui, "x")
-	feed(tui, "\x1b")
-	if tui.keys.searching || tui.keys.query != "" {
-		t.Fatalf("esc left searching=%v query=%q", tui.keys.searching, tui.keys.query)
-	}
-}
-
-// TestHelpKeyFallback: a config without a help mode still scrolls and closes
-// with the built-in help bindings.
-func TestHelpKeyFallback(t *testing.T) {
-	// The screen is short enough that the listed rows do not fit.
-	tui := &tui{snap: testSnapshot(&layout.Node{Pane: "a"}, 100, 12, nil)}
-	tui.keymap = keymapTestLoad(t, `
-prefix "ctrl+a"
-
-keymap "main" {
-    "help" "?"
-    "split-right" "|"
-    "split-down" "-"
-    "close-pane" "x"
-    "next-pane" "n"
-}
-`)
-	tui.runAction("help")
-	if tui.keys == nil || tui.mode != "help" {
-		t.Fatalf("the view did not open: keys=%v mode=%q", tui.keys, tui.mode)
-	}
-	max := len(tui.keys.rows) - tui.keys.float.Rect.H
-	if max < 1 {
-		t.Fatalf("fixture is too short to scroll: %d rows in %d rows",
-			len(tui.keys.rows), tui.keys.float.Rect.H)
-	}
-	feed(tui, "j")
-	if tui.keys == nil || tui.keys.off != 1 {
-		t.Fatalf("j did not scroll the view: %+v", tui.keys)
-	}
-	feed(tui, "\x1b[6~")
-	if tui.keys == nil || tui.keys.off != max {
-		t.Fatalf("pgdn did not page the view to the last row %d: %+v", max, tui.keys)
-	}
-	feed(tui, "q")
-	if tui.keys != nil || tui.mode != "" {
-		t.Fatalf("q did not close the view: keys=%v mode=%q", tui.keys, tui.mode)
-	}
-
-	// The prefix closes the view too.
-	tui.runAction("help")
-	feed(tui, "\x01")
-	if tui.keys != nil || tui.mode != "" {
-		t.Fatalf("the prefix did not close the view: keys=%v mode=%q", tui.keys, tui.mode)
 	}
 }
