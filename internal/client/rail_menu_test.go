@@ -119,6 +119,17 @@ func TestRailMenuPaneRow(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
+// TestRailMenuWindowRowOpensNothing proves the window menu is gone with the
+// window row: a right press on a window row opens no menu and sends nothing.
+func TestRailMenuWindowRowOpensNothing(t *testing.T) {
+	tui, got := railMenuTUI(t)
+	tui.openRailMenu(rail.RailItem{Kind: rail.Window, Text: "one", Window: "w1"}, 3, 2)
+	if tui.mode == "menu" || tui.menu != nil {
+		t.Fatalf("window row opened %q %+v, want nothing", tui.mode, tui.menu)
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestRailMenuRenameTargetsRow picks Rename on each row kind and holds the
 // prompt to that row's kind, id and current label.
 func TestRailMenuRenameTargetsRow(t *testing.T) {
