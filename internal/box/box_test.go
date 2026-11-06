@@ -1,4 +1,4 @@
-package main
+package box
 
 import (
 	"encoding/json"
@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"dm/internal/box"
 )
 
 // schemaProp is the part of the published box schema the tests read.
@@ -32,7 +30,7 @@ type schemaDoc struct {
 // assert on.
 func readBoxSchema(t *testing.T) schemaDoc {
 	t.Helper()
-	b, err := json.Marshal(box.Schema())
+	b, err := json.Marshal(Schema())
 	if err != nil {
 		t.Fatalf("marshal schema: %v", err)
 	}
@@ -61,12 +59,12 @@ func sameStrings(a, b []string) bool {
 // TestMessageBoxGoldenEntry pins the frozen entry JSON, field order included.
 func TestMessageBoxGoldenEntry(t *testing.T) {
 	want := `{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green"}`
-	e := box.Entry{
+	e := Entry{
 		Seq:   7,
 		At:    time.Date(2026, time.November, 3, 14, 40, 12, 0, time.UTC),
 		From:  "w3p1",
 		Key:   "lane/a",
-		State: box.StateDone,
+		State: StateDone,
 		Msg:   "gate green",
 	}
 	b, err := json.Marshal(e)
@@ -76,7 +74,7 @@ func TestMessageBoxGoldenEntry(t *testing.T) {
 	if string(b) != want {
 		t.Fatalf("entry json =\n %s\nwant\n %s", b, want)
 	}
-	var back box.Entry
+	var back Entry
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("decode entry: %v", err)
 	}
@@ -105,7 +103,7 @@ func TestMessageBoxDecodeStrict(t *testing.T) {
 		{"null request", "msg-list", `null`, "not an object"},
 	}
 	for _, c := range cases {
-		_, err := box.ParseReq(c.action, json.RawMessage(c.raw))
+		_, err := ParseReq(c.action, json.RawMessage(c.raw))
 		if err == nil {
 			t.Fatalf("%s: %s accepted, want an error", c.name, c.raw)
 		}
@@ -114,18 +112,18 @@ func TestMessageBoxDecodeStrict(t *testing.T) {
 		}
 	}
 
-	got, err := box.ParseReq("msg-post", json.RawMessage(`{"key":"lane/a","state":"done","msg":"gate green","from":"w3p1"}`))
+	got, err := ParseReq("msg-post", json.RawMessage(`{"key":"lane/a","state":"done","msg":"gate green","from":"w3p1"}`))
 	if err != nil {
 		t.Fatalf("valid post rejected: %v", err)
 	}
-	req, ok := got.(*box.PostReq)
+	req, ok := got.(*PostReq)
 	if !ok {
 		t.Fatalf("valid post decoded to %T", got)
 	}
-	if req.Key != "lane/a" || req.State != box.StateDone || req.Msg != "gate green" || req.From != "w3p1" {
+	if req.Key != "lane/a" || req.State != StateDone || req.Msg != "gate green" || req.From != "w3p1" {
 		t.Fatalf("valid post = %+v", req)
 	}
-	if _, err := box.ParseReq("msg-schema", nil); err != nil {
+	if _, err := ParseReq("msg-schema", nil); err != nil {
 		t.Fatalf("schema with an empty request rejected: %v", err)
 	}
 }
@@ -133,17 +131,17 @@ func TestMessageBoxDecodeStrict(t *testing.T) {
 // TestMessageBoxUnknownState proves parseState accepts exactly the enum and
 // names the valid set when it refuses.
 func TestMessageBoxUnknownState(t *testing.T) {
-	for _, name := range box.StateNames() {
-		if _, err := box.ParseState(name); err != nil {
+	for _, name := range StateNames() {
+		if _, err := ParseState(name); err != nil {
 			t.Fatalf("state %q rejected: %v", name, err)
 		}
 	}
 	for _, bad := range []string{"sleepy", "", "Done", "clear"} {
-		_, err := box.ParseState(bad)
+		_, err := ParseState(bad)
 		if err == nil {
 			t.Fatalf("state %q accepted, want an error", bad)
 		}
-		for _, name := range box.StateNames() {
+		for _, name := range StateNames() {
 			if !strings.Contains(err.Error(), name) {
 				t.Fatalf("state %q error %q does not name %q", bad, err, name)
 			}
@@ -153,16 +151,16 @@ func TestMessageBoxUnknownState(t *testing.T) {
 	// The request path refuses the same values. A wait alone admits an empty
 	// state, which asks for any state, so a subscriber can read a stream.
 	for _, raw := range []string{`{"state":"sleepy"}`, `{"state":""}`} {
-		if _, err := box.ParseReq("msg-post", json.RawMessage(raw)); err == nil {
+		if _, err := ParseReq("msg-post", json.RawMessage(raw)); err == nil {
 			t.Fatalf("post %s accepted, want a bad state error", raw)
 		}
 		if raw == `{"state":"sleepy"}` {
-			if _, err := box.ParseReq("msg-wait", json.RawMessage(`{"state":"sleepy","timeoutMs":1000}`)); err == nil {
+			if _, err := ParseReq("msg-wait", json.RawMessage(`{"state":"sleepy","timeoutMs":1000}`)); err == nil {
 				t.Fatalf("wait %s accepted, want a bad state error", raw)
 			}
 		}
 	}
-	if _, err := box.ParseReq("msg-wait", json.RawMessage(`{"state":"","timeoutMs":1000}`)); err != nil {
+	if _, err := ParseReq("msg-wait", json.RawMessage(`{"state":"","timeoutMs":1000}`)); err != nil {
 		t.Fatalf("a wait with an empty state rejected: %v", err)
 	}
 }
@@ -170,10 +168,10 @@ func TestMessageBoxUnknownState(t *testing.T) {
 // TestMessageBoxClearIsNotState proves the pane status "clear" is not a box
 // state.
 func TestMessageBoxClearIsNotState(t *testing.T) {
-	if _, err := box.ParseState("clear"); err == nil {
+	if _, err := ParseState("clear"); err == nil {
 		t.Fatal(`"clear" parsed as a box state`)
 	}
-	_, err := box.ParseReq("msg-post", json.RawMessage(`{"state":"clear"}`))
+	_, err := ParseReq("msg-post", json.RawMessage(`{"state":"clear"}`))
 	if err == nil {
 		t.Fatal(`post with state "clear" accepted`)
 	}
@@ -181,10 +179,10 @@ func TestMessageBoxClearIsNotState(t *testing.T) {
 	if !ok {
 		t.Fatalf("error %q does not name the valid set", err)
 	}
-	if !sameStrings(strings.Split(set, ", "), box.StateNames()) {
-		t.Fatalf("error names %q, want %v", set, box.StateNames())
+	if !sameStrings(strings.Split(set, ", "), StateNames()) {
+		t.Fatalf("error names %q, want %v", set, StateNames())
 	}
-	for _, name := range box.StateNames() {
+	for _, name := range StateNames() {
 		if name == "clear" {
 			t.Fatal(`the enum carries "clear"`)
 		}
@@ -195,10 +193,10 @@ func TestMessageBoxClearIsNotState(t *testing.T) {
 // are one list, in one order.
 func TestMessageBoxSchemaMatchesEnum(t *testing.T) {
 	doc := readBoxSchema(t)
-	if len(doc.Actions) != len(box.Wire) {
-		t.Fatalf("schema has %d actions, want %d", len(doc.Actions), len(box.Wire))
+	if len(doc.Actions) != len(Wire) {
+		t.Fatalf("schema has %d actions, want %d", len(doc.Actions), len(Wire))
 	}
-	for _, action := range box.ActionNames() {
+	for _, action := range ActionNames() {
 		shape, ok := doc.Actions[action]
 		if !ok {
 			t.Fatalf("schema has no action %q", action)
@@ -219,7 +217,7 @@ func TestMessageBoxSchemaMatchesEnum(t *testing.T) {
 		}
 	}
 
-	want := box.StateNames()
+	want := StateNames()
 	post := doc.Actions["msg-post"]
 	if got := post.Request.Properties["state"].Enum; !sameStrings(got, want) {
 		t.Fatalf("post state enum = %v, want %v", got, want)
@@ -269,12 +267,12 @@ func TestMessageBoxSchemaMatchesEnum(t *testing.T) {
 // TestMessageBoxEntryRejectsBadText proves a stored entry obeys the same text
 // rule a request does.
 func TestMessageBoxEntryRejectsBadText(t *testing.T) {
-	base := box.Entry{
+	base := Entry{
 		Seq:   1,
 		At:    time.Date(2026, time.November, 3, 14, 40, 12, 0, time.UTC),
 		From:  "w1p1",
 		Key:   "lane/a",
-		State: box.StateDone,
+		State: StateDone,
 		Msg:   "gate green",
 	}
 	if err := base.Validate(); err != nil {
@@ -282,28 +280,28 @@ func TestMessageBoxEntryRejectsBadText(t *testing.T) {
 	}
 	cases := []struct {
 		name string
-		make func(box.Entry) box.Entry
+		make func(Entry) Entry
 	}{
-		{"nul in msg", func(e box.Entry) box.Entry { e.Msg = "gate\x00green"; return e }},
-		{"newline in msg", func(e box.Entry) box.Entry { e.Msg = "gate\ngreen"; return e }},
-		{"escape in msg", func(e box.Entry) box.Entry { e.Msg = "gate\x1bgreen"; return e }},
-		{"nul in key", func(e box.Entry) box.Entry { e.Key = "lane\x00a"; return e }},
-		{"invalid utf-8", func(e box.Entry) box.Entry { e.Msg = "gate\xffgreen"; return e }},
-		{"bad state", func(e box.Entry) box.Entry { e.State = "clear"; return e }},
+		{"nul in msg", func(e Entry) Entry { e.Msg = "gate\x00green"; return e }},
+		{"newline in msg", func(e Entry) Entry { e.Msg = "gate\ngreen"; return e }},
+		{"escape in msg", func(e Entry) Entry { e.Msg = "gate\x1bgreen"; return e }},
+		{"nul in key", func(e Entry) Entry { e.Key = "lane\x00a"; return e }},
+		{"invalid utf-8", func(e Entry) Entry { e.Msg = "gate\xffgreen"; return e }},
+		{"bad state", func(e Entry) Entry { e.State = "clear"; return e }},
 	}
 	for _, c := range cases {
 		if err := c.make(base).Validate(); err == nil {
 			t.Fatalf("%s: entry accepted, want an error", c.name)
 		}
 	}
-	if _, err := box.ParseReq("msg-post", json.RawMessage(`{"state":"note","msg":"a\u0000b"}`)); err == nil {
+	if _, err := ParseReq("msg-post", json.RawMessage(`{"state":"note","msg":"a\u0000b"}`)); err == nil {
 		t.Fatal("a post with a control character in msg was accepted")
 	}
 }
 
 // TestMessageBoxTextCaps proves the cap is inclusive and one byte over is not.
 func TestMessageBoxTextCaps(t *testing.T) {
-	atCap := strings.Repeat("a", box.MaxMsg)
+	atCap := strings.Repeat("a", MaxMsg)
 	over := atCap + "a"
 	cases := []struct {
 		name string
@@ -312,11 +310,11 @@ func TestMessageBoxTextCaps(t *testing.T) {
 	}{
 		{"msg at the cap", json.RawMessage(`{"state":"note","msg":"` + atCap + `"}`), true},
 		{"msg one byte over", json.RawMessage(`{"state":"note","msg":"` + over + `"}`), false},
-		{"key at the cap", json.RawMessage(`{"state":"note","key":"` + strings.Repeat("k", box.MaxKey) + `"}`), true},
-		{"key one byte over", json.RawMessage(`{"state":"note","key":"` + strings.Repeat("k", box.MaxKey+1) + `"}`), false},
+		{"key at the cap", json.RawMessage(`{"state":"note","key":"` + strings.Repeat("k", MaxKey) + `"}`), true},
+		{"key one byte over", json.RawMessage(`{"state":"note","key":"` + strings.Repeat("k", MaxKey+1) + `"}`), false},
 	}
 	for _, c := range cases {
-		_, err := box.ParseReq("msg-post", c.raw)
+		_, err := ParseReq("msg-post", c.raw)
 		if c.ok && err != nil {
 			t.Fatalf("%s rejected: %v", c.name, err)
 		}
@@ -325,8 +323,8 @@ func TestMessageBoxTextCaps(t *testing.T) {
 		}
 	}
 	// A multibyte rune counts as its bytes, not its runes.
-	wide := strings.Repeat("é", box.MaxMsg/2)
-	if _, err := box.ParseReq("msg-post", json.RawMessage(`{"state":"note","msg":"`+wide+`"}`)); err != nil {
+	wide := strings.Repeat("é", MaxMsg/2)
+	if _, err := ParseReq("msg-post", json.RawMessage(`{"state":"note","msg":"`+wide+`"}`)); err != nil {
 		t.Fatalf("msg of exactly %d bytes rejected: %v", len(wide), err)
 	}
 }
@@ -350,7 +348,7 @@ func TestMessageBoxFromShape(t *testing.T) {
 	}
 	for _, c := range cases {
 		raw := json.RawMessage(`{"state":"note","from":"` + c.from + `"}`)
-		_, err := box.ParseReq("msg-post", raw)
+		_, err := ParseReq("msg-post", raw)
 		if c.ok && err != nil {
 			t.Fatalf("from %q rejected: %v", c.from, err)
 		}
@@ -365,21 +363,21 @@ func TestMessageBoxLimitClamp(t *testing.T) {
 	cases := []struct {
 		in, want int
 	}{
-		{0, box.MaxEntries},
-		{-5, box.MaxEntries},
+		{0, MaxEntries},
+		{-5, MaxEntries},
 		{1, 1},
 		{7, 7},
-		{box.MaxEntries, box.MaxEntries},
-		{box.MaxEntries + 1, box.MaxEntries},
-		{1 << 20, box.MaxEntries},
+		{MaxEntries, MaxEntries},
+		{MaxEntries + 1, MaxEntries},
+		{1 << 20, MaxEntries},
 	}
 	for _, c := range cases {
 		raw := json.RawMessage(`{"limit":` + strconv.Itoa(c.in) + `}`)
-		got, err := box.ParseReq("msg-list", raw)
+		got, err := ParseReq("msg-list", raw)
 		if err != nil {
 			t.Fatalf("limit %d rejected: %v", c.in, err)
 		}
-		if req := got.(*box.ListReq); req.Limit != c.want {
+		if req := got.(*ListReq); req.Limit != c.want {
 			t.Fatalf("limit %d clamped to %d, want %d", c.in, req.Limit, c.want)
 		}
 	}
@@ -407,7 +405,7 @@ func TestMessageBoxWaitFields(t *testing.T) {
 		{"branch and exact topic", `{"timeoutMs":1000,"key":"a","keyPrefix":"b"}`, false},
 	}
 	for _, c := range cases {
-		_, err := box.ParseReq("msg-wait", json.RawMessage(c.raw))
+		_, err := ParseReq("msg-wait", json.RawMessage(c.raw))
 		if c.ok && err != nil {
 			t.Fatalf("%s rejected: %v", c.name, err)
 		}
@@ -420,7 +418,7 @@ func TestMessageBoxWaitFields(t *testing.T) {
 // TestMessageBoxGoldenWatch pins the frozen watch JSON, field order included.
 func TestMessageBoxGoldenWatch(t *testing.T) {
 	want := `{"pane":"w1p2","key":"lane/a","keyPrefix":"","cursor":7,"parked":true,"at":"2026-11-03T14:40:12Z"}`
-	w := box.Watch{
+	w := Watch{
 		Pane:   "w1p2",
 		Key:    "lane/a",
 		Cursor: 7,
@@ -434,7 +432,7 @@ func TestMessageBoxGoldenWatch(t *testing.T) {
 	if string(b) != want {
 		t.Fatalf("watch json =\n %s\nwant\n %s", b, want)
 	}
-	var back box.Watch
+	var back Watch
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("decode watch: %v", err)
 	}
@@ -443,7 +441,7 @@ func TestMessageBoxGoldenWatch(t *testing.T) {
 		t.Fatalf("watch round trip = %+v", back)
 	}
 
-	reply, err := json.Marshal(box.WatchersReply{Watchers: []box.Watch{w}})
+	reply, err := json.Marshal(WatchersReply{Watchers: []Watch{w}})
 	if err != nil {
 		t.Fatalf("marshal watchers reply: %v", err)
 	}
@@ -521,7 +519,7 @@ func TestMessageBoxReadsFrom(t *testing.T) {
 		{"wait bad from", "msg-wait", `{"timeoutMs":1000,"from":"3p1"}`, false},
 	}
 	for _, c := range cases {
-		got, err := box.ParseReq(c.action, json.RawMessage(c.raw))
+		got, err := ParseReq(c.action, json.RawMessage(c.raw))
 		if c.ok && err != nil {
 			t.Fatalf("%s rejected: %v", c.name, err)
 		}
@@ -532,11 +530,11 @@ func TestMessageBoxReadsFrom(t *testing.T) {
 			continue
 		}
 		switch req := got.(type) {
-		case *box.ListReq:
+		case *ListReq:
 			if req.From != "w3p1" && req.From != "" {
 				t.Fatalf("%s from = %q", c.name, req.From)
 			}
-		case *box.WaitReq:
+		case *WaitReq:
 			if req.From != "w12p34" && req.From != "" {
 				t.Fatalf("%s from = %q", c.name, req.From)
 			}
@@ -550,15 +548,15 @@ func TestMessageBoxReadsFrom(t *testing.T) {
 // and refuses a field it does not name.
 func TestMessageBoxWatchersRequest(t *testing.T) {
 	for _, raw := range []json.RawMessage{nil, json.RawMessage(`{}`), json.RawMessage(` { } `)} {
-		got, err := box.ParseReq("msg-watchers", raw)
+		got, err := ParseReq("msg-watchers", raw)
 		if err != nil {
 			t.Fatalf("msg-watchers %q rejected: %v", raw, err)
 		}
-		if _, ok := got.(*box.WatchersReq); !ok {
+		if _, ok := got.(*WatchersReq); !ok {
 			t.Fatalf("msg-watchers %q decoded to %T", raw, got)
 		}
 	}
-	if _, err := box.ParseReq("msg-watchers", json.RawMessage(`{"pane":"w1p1"}`)); err == nil {
+	if _, err := ParseReq("msg-watchers", json.RawMessage(`{"pane":"w1p1"}`)); err == nil {
 		t.Fatal("msg-watchers accepted a field, want an error")
 	}
 }
@@ -582,7 +580,7 @@ func TestMessageBoxSubFields(t *testing.T) {
 		{"pane from", `{"from":"w3p1"}`, true},
 	}
 	for _, c := range cases {
-		_, err := box.ParseReq("msg-sub", json.RawMessage(c.raw))
+		_, err := ParseReq("msg-sub", json.RawMessage(c.raw))
 		if c.ok && err != nil {
 			t.Fatalf("%s rejected: %v", c.name, err)
 		}
@@ -592,26 +590,26 @@ func TestMessageBoxSubFields(t *testing.T) {
 	}
 
 	// A subscription has no timeout: it runs until its connection goes.
-	if _, err := box.ParseReq("msg-sub", json.RawMessage(`{"timeoutMs":1000}`)); err == nil {
+	if _, err := ParseReq("msg-sub", json.RawMessage(`{"timeoutMs":1000}`)); err == nil {
 		t.Fatal("msg-sub accepted timeoutMs")
 	}
 	// The cursor stays a pointer, so 0 is a cursor and absent is not one.
-	got, err := box.ParseReq("msg-sub", json.RawMessage(`{"afterSeq":7,"from":"w1p2"}`))
+	got, err := ParseReq("msg-sub", json.RawMessage(`{"afterSeq":7,"from":"w1p2"}`))
 	if err != nil {
 		t.Fatalf("sub rejected: %v", err)
 	}
-	req, ok := got.(*box.SubReq)
+	req, ok := got.(*SubReq)
 	if !ok {
 		t.Fatalf("sub decoded to %T", got)
 	}
 	if req.AfterSeq == nil || *req.AfterSeq != 7 || req.From != "w1p2" {
 		t.Fatalf("sub = %+v, want the cursor 7 from w1p2", req)
 	}
-	absent, err := box.ParseReq("msg-sub", json.RawMessage(`{}`))
+	absent, err := ParseReq("msg-sub", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("empty sub rejected: %v", err)
 	}
-	if req := absent.(*box.SubReq); req.AfterSeq != nil {
+	if req := absent.(*SubReq); req.AfterSeq != nil {
 		t.Fatalf("empty sub carries a cursor %d, want none", *req.AfterSeq)
 	}
 }
@@ -619,23 +617,23 @@ func TestMessageBoxSubFields(t *testing.T) {
 // TestMessageBoxGoldenSubFrame pins the frame JSON the stream sends, field
 // order included.
 func TestMessageBoxGoldenSubFrame(t *testing.T) {
-	e := box.Entry{
+	e := Entry{
 		Seq:   7,
 		At:    time.Date(2026, time.November, 3, 14, 40, 12, 0, time.UTC),
 		From:  "w3p1",
 		Key:   "lane/a",
-		State: box.StateDone,
+		State: StateDone,
 		Msg:   "gate green",
 	}
 	want := `{"entry":{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green"},"trimmed":true}`
-	b, err := json.Marshal(box.SubFrame{Entry: e, Trimmed: true})
+	b, err := json.Marshal(SubFrame{Entry: e, Trimmed: true})
 	if err != nil {
 		t.Fatalf("marshal sub frame: %v", err)
 	}
 	if string(b) != want {
 		t.Fatalf("sub frame json =\n %s\nwant\n %s", b, want)
 	}
-	var back box.SubFrame
+	var back SubFrame
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("decode sub frame: %v", err)
 	}
@@ -661,8 +659,8 @@ func TestMessageBoxSchemaSub(t *testing.T) {
 			t.Fatalf("sub %s type = %q, want %q", name, got, want)
 		}
 	}
-	if got := req.Properties["state"].Enum; !sameStrings(got, box.StateNames()) {
-		t.Fatalf("sub state enum = %v, want %v", got, box.StateNames())
+	if got := req.Properties["state"].Enum; !sameStrings(got, StateNames()) {
+		t.Fatalf("sub state enum = %v, want %v", got, StateNames())
 	}
 	if got := req.Required; len(got) != 0 {
 		t.Fatalf("sub required = %v, want none", got)
@@ -685,7 +683,7 @@ func TestMessageBoxSchemaSub(t *testing.T) {
 	if want := []string{"seq", "at", "from", "key", "state", "msg"}; !sameStrings(e.Required, want) {
 		t.Fatalf("sub entry required = %v, want %v", e.Required, want)
 	}
-	if got := e.Properties["state"].Enum; !sameStrings(got, box.StateNames()) {
-		t.Fatalf("sub entry state enum = %v, want %v", got, box.StateNames())
+	if got := e.Properties["state"].Enum; !sameStrings(got, StateNames()) {
+		t.Fatalf("sub entry state enum = %v, want %v", got, StateNames())
 	}
 }
