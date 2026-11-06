@@ -10,7 +10,9 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/boxview"
 	"dm/internal/keymap"
+	"dm/internal/keymapview"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/switcher"
@@ -59,9 +61,9 @@ type tui struct {
 	// underline it. It is nil when no link is hovered.
 	hover *linkHover
 	// box is the message-box float, nil when closed.
-	box *boxView
+	box *boxview.BoxView
 	// keys is the keymap view float, nil when closed.
-	keys  *keymapView
+	keys  *keymapview.KeymapView
 	dirty bool
 
 	// out is the frame sink: os.Stdout in a session, a buffer in a test.
@@ -535,11 +537,11 @@ func (t *tui) apply(m wire.Msg) {
 			t.sw.Sync(m.Snap)
 		}
 		if t.box != nil {
-			t.box.sync(m.Snap, t.theme())
+			t.box.Sync(m.Snap, t.theme())
 			t.dirty = true
 		}
 		if t.keys != nil {
-			t.keys.sync(m.Snap)
+			t.keys.Sync(m.Snap)
 			t.dirty = true
 		}
 		t.dirty = true
@@ -594,7 +596,7 @@ func (t *tui) apply(m wire.Msg) {
 		}
 	case "watch":
 		// A watch appeared, advanced, unparked or went. An open view asks for
-		// the list again, at most once per boxWatchInterval.
+		// the list again, at most once per boxview.WatchInterval.
 		if t.box != nil {
 			t.boxWatchers(time.Now())
 		}
