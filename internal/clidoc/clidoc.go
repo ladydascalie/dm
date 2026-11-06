@@ -101,7 +101,7 @@ var cliCommands = []cliCommand{
 			{"s", "name", "session name"},
 			{"action-json", "", "action JSON"},
 		},
-		example: `dm exec '{"action":"split","target":"p1","dir":"right"}'`,
+		example: `dm exec '{"action":"split","target":"w1p1","dir":"right"}'`,
 		group:   groupSession,
 	},
 
@@ -116,7 +116,7 @@ var cliCommands = []cliCommand{
 			{"msg", "", "message text"},
 			{"enter", "", "press enter after the message"},
 		},
-		example: `dm write-to p1 --msg 'ls -la' --enter`,
+		example: `dm write-to w1p1 --msg 'ls -la' --enter`,
 		group:   groupPane,
 	},
 	{
@@ -330,7 +330,7 @@ const usageHeader = "dm - durable terminal multiplexer (prototype)"
 // usageFooter is the closing block: the action JSON is the same on every
 // command that takes one.
 const usageFooter = `Actions are the same everywhere:
-  {"action":"write-to","target":"p1","msg":"ls","enter":true}
+  {"action":"write-to","target":"w1p1","msg":"ls","enter":true}
 `
 
 // usageMaxWidth is the widest command line that still carries a summary. A

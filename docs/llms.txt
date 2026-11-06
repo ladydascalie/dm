@@ -18,8 +18,8 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm ls` | `-` | list sessions and whether they are live (alias: list-sessions) | `dm ls` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
-| `dm exec` | `'<json>' [-s name]` | send an action as JSON | `dm exec '{"action":"split","target":"p1","dir":"right"}'` |
-| `dm write-to` | `<pane> --msg T` | type text into a pane (--enter to accept) (alias: write) | `dm write-to p1 --msg 'ls -la' --enter` |
+| `dm exec` | `'<json>' [-s name]` | send an action as JSON | `dm exec '{"action":"split","target":"w1p1","dir":"right"}'` |
+| `dm write-to` | `<pane> --msg T` | type text into a pane (--enter to accept) (alias: write) | `dm write-to w1p1 --msg 'ls -la' --enter` |
 | `dm read` | `<pane> [--lines N]` | print a pane's screen | `dm read w1p1 --lines 20` |
 | `dm read <pane> --scrollback N` | `-` | print N rows above the screen | `dm read w1p1 --scrollback 200` |
 | `dm split` | `<pane> --dir D` | split a pane: left right up down | `dm split w1p1 --dir right` |
