@@ -7,6 +7,7 @@ import (
 	"dm/internal/cli"
 	"dm/internal/clidoc"
 	"dm/internal/pane"
+	"dm/internal/server"
 )
 
 func main() {
@@ -14,7 +15,7 @@ func main() {
 	if len(args) > 0 {
 		switch args[0] {
 		case "__server":
-			exit(runServer(args[1:]))
+			exit(server.Run(args[1:]))
 			return
 		case "__pane":
 			exit(pane.Run(args[1:]))
