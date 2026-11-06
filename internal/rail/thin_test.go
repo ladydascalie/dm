@@ -19,7 +19,7 @@ func thinPane(id, ws, win, status string, focus bool) wire.AllPane {
 	return wire.AllPane{
 		ID: id, Status: status, Focus: focus,
 		Workspace: ws, Window: win, WorkspaceActive: ws == "s1",
-		WindowActive: win == "w1", WindowUnfolded: true,
+		WindowActive: win == "w1", WindowUnfolded: true, WorkspaceUnfolded: true,
 	}
 }
 
@@ -98,16 +98,19 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 			t.Fatalf("control row %d holds %q at %d, want a blank", ctrl, g.Char, x)
 		}
 	}
-	// A thin row is never a window row, so a fold click finds nothing.
+	// A thin row is never a workspace row, so a workspace or fold click finds nothing.
 	for y := 0; y < snap.Rows; y++ {
-		if got := RailWindowAt(snap, 2, y); got != "" {
-			t.Fatalf("RailWindowAt(2,%d) = %q on the thin rail", y, got)
+		if got := RailWorkspaceAt(snap, 2, y); got != "" {
+			t.Fatalf("RailWorkspaceAt(2,%d) = %q on the thin rail", y, got)
+		}
+		if got := RailFoldAt(snap, 2, y); got != "" {
+			t.Fatalf("RailFoldAt(2,%d) = %q on the thin rail", y, got)
 		}
 	}
 }
 
 // TestThinRailFoldState is a thin rail that talks about panes only, so a
-// folded and an unfolded window draw the same rows.
+// folded and an unfolded workspace draw the same rows.
 func TestThinRailFoldState(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	panes := []wire.AllPane{
@@ -120,14 +123,14 @@ func TestThinRailFoldState(t *testing.T) {
 	// and the comparison below would only be comparing a snapshot to itself.
 	frozen := append([]wire.AllPane(nil), panes...)
 	for i := range frozen {
-		frozen[i].WindowUnfolded = false
+		frozen[i].WorkspaceUnfolded = false
 		frozen[i].Message = "a note no thin row can show"
 	}
 	folded := thinSnapshot(frozen)
-	if folded.All[0].WindowUnfolded || folded.All[0].Message == "" {
+	if folded.All[0].WorkspaceUnfolded || folded.All[0].Message == "" {
 		t.Fatalf("folded snapshot was not folded: %+v", folded.All[0])
 	}
-	if !open.All[0].WindowUnfolded || open.All[0].Message != "" {
+	if !open.All[0].WorkspaceUnfolded || open.All[0].Message != "" {
 		t.Fatalf("folding the copy changed the open snapshot: %+v", open.All[0])
 	}
 
@@ -143,8 +146,8 @@ func TestThinRailFoldState(t *testing.T) {
 				i, foldedItems[i], openItems[i])
 		}
 	}
-	// The folded window carries a message that an expanded rail would draw as
-	// a note row. No thin row may carry it, or any other header row.
+	// The folded workspace carries a message that an expanded rail would draw
+	// as a note row. No thin row may carry it, or any other header row.
 	for i, it := range foldedItems {
 		if it.Kind != Pane {
 			t.Fatalf("folded thin row %d is kind %d, want a pane: %+v",
