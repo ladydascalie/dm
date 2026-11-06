@@ -13,6 +13,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/switcher"
 	"dm/internal/theme"
 	"dm/internal/transport"
 	"dm/internal/wire"
@@ -140,7 +141,7 @@ type tui struct {
 	// sw is the floating native switcher, nil when closed. swX and swY are
 	// the query cursor cell its last paint asked for, swAt and swPane are the
 	// last preview request, and swID numbers the next one.
-	sw     *switcher
+	sw     *switcher.Switcher
 	swX    int
 	swY    int
 	swAt   time.Time
@@ -531,7 +532,7 @@ func (t *tui) apply(m wire.Msg) {
 		}
 		// Folds, names and statuses move under an open float.
 		if t.sw != nil {
-			t.sw.sync(m.Snap)
+			t.sw.Sync(m.Snap)
 		}
 		if t.box != nil {
 			t.box.sync(m.Snap, t.theme())
@@ -569,7 +570,7 @@ func (t *tui) apply(m wire.Msg) {
 		// A preview reply carries the id its request named. Only the newest id
 		// fills the band: an older one is dropped and a failure stays silent.
 		if m.ID > 0 {
-			if t.sw != nil && t.sw.acceptPreview(m.ID, previewLines(m)) {
+			if t.sw != nil && t.sw.AcceptPreview(m.ID, previewLines(m)) {
 				t.dirty = true
 			}
 			break

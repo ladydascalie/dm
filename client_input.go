@@ -432,10 +432,10 @@ func (t *tui) expirePrefix(now time.Time) bool {
 // preview the client does not already have. It asks at most once per pane per
 // 120 ms and never for a pane in the active window, whose screen is in t.vts.
 func (t *tui) askPreview() {
-	if t.sw == nil || t.snap == nil || !t.sw.previewDue() {
+	if t.sw == nil || t.snap == nil || !t.sw.PreviewDue() {
 		return
 	}
-	it, ok := t.sw.selected()
+	it, ok := t.sw.Selected()
 	if !ok || it.Kind != rail.Pane || it.Pane == "" {
 		return
 	}
@@ -448,7 +448,7 @@ func (t *tui) askPreview() {
 	t.swID++
 	t.swAt = time.Now()
 	t.swPane = it.Pane
-	t.sw.setPreview(t.swID, it.Pane)
+	t.sw.SetPreview(t.swID, it.Pane)
 	_ = t.conn.Send(wire.Msg{Type: "req", Action: "read", Target: it.Pane, ID: t.swID})
 }
 

@@ -1,4 +1,4 @@
-package main
+package switcher
 
 import (
 	"bytes"
@@ -16,10 +16,14 @@ import (
 	"github.com/hinshun/vt10x"
 )
 
-// paletteRect centres the float at 80% by 70%, clamped so its box always fits
+// PanePainter paints rows [row0, row0+r.H) of a pane's terminal into r. The
+// switcher owns the float, not the pane painter, so the client supplies it.
+type PanePainter func(buf *bytes.Buffer, vt vt10x.Terminal, r layout.Rect, row0 int)
+
+// PaletteRect centres the float at 80% by 70%, clamped so its box always fits
 // on screen. It moved here from pal.go with the same rule; the client asks for
 // the rect it opens the switcher with.
-func paletteRect(cols, rows int) layout.Rect {
+func PaletteRect(cols, rows int) layout.Rect {
 	w, h := cols*8/10, rows*7/10
 	if w > 132 {
 		w = 132
@@ -66,14 +70,14 @@ type switcherLayout struct {
 }
 
 // switcherLayoutOf measures the float. A switcher opened without a rect takes
-// paletteRect, and the rect is clamped to the screen so no row writes off it.
-func switcherLayoutOf(s *switcher, snap *wire.Snapshot) switcherLayout {
-	r := s.rect
+// PaletteRect, and the rect is clamped to the screen so no row writes off it.
+func switcherLayoutOf(s *Switcher, snap *wire.Snapshot) switcherLayout {
+	r := s.Rect
 	if r.W <= 0 || r.H <= 0 {
-		r = paletteRect(snap.Cols, snap.Rows)
+		r = PaletteRect(snap.Cols, snap.Rows)
 	}
-	r = clampRect(r, snap.Cols, snap.Rows)
-	s.rect = r
+	r = ClampRect(r, snap.Cols, snap.Rows)
+	s.Rect = r
 	l := switcherLayout{
 		r:      r,
 		inner:  layout.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2},
@@ -96,8 +100,8 @@ func switcherLayoutOf(s *switcher, snap *wire.Snapshot) switcherLayout {
 	return l
 }
 
-// clampRect keeps r inside a cols by rows screen.
-func clampRect(r layout.Rect, cols, rows int) layout.Rect {
+// ClampRect keeps r inside a cols by rows screen.
+func ClampRect(r layout.Rect, cols, rows int) layout.Rect {
 	if r.W > cols {
 		r.W = cols
 	}
@@ -131,12 +135,12 @@ func clampRect(r layout.Rect, cols, rows int) layout.Rect {
 	return r
 }
 
-// drawSwitcher writes the whole float into buf and returns the cell the query
-// cursor belongs on. The cell is zero based and always inside s.rect. Every row
+// DrawSwitcher writes the whole float into buf and returns the cell the query
+// cursor belongs on. The cell is zero based and always inside s.Rect. Every row
 // the float owns is painted, blanks included, and every row starts with an
 // absolute cursor move so bandRows can address it. Nothing is written outside
 // the rect and the screen is never cleared.
-func drawSwitcher(buf *bytes.Buffer, th theme.Theme, s *switcher, snap *wire.Snapshot, vts map[string]vt10x.Terminal) (cx, cy int) {
+func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Snapshot, vts map[string]vt10x.Terminal, paint PanePainter) (cx, cy int) {
 	if buf == nil || s == nil || snap == nil || snap.Cols < 1 || snap.Rows < 1 {
 		return 0, 0
 	}
@@ -146,7 +150,7 @@ func drawSwitcher(buf *bytes.Buffer, th theme.Theme, s *switcher, snap *wire.Sna
 	}
 	panel.PaintPanel(buf, th, l.inner, panel.PanelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
 		cx, cy = paintSwitcherQuery(b, th, s, l)
-		paintSwitcherBands(b, th, s, vts, l)
+		paintSwitcherBands(b, th, s, vts, l, paint)
 	})
 	// The title wears the rail ground, which the panel's label style cannot
 	// express, so the switcher paints it on the border row itself.
@@ -169,7 +173,7 @@ func paintSwitcherTitle(buf *bytes.Buffer, th theme.Theme, l switcherLayout) {
 
 // paintSwitcherQuery paints the query row: "> " then the query, clipped to the
 // list band, and returns one past the query's last cell.
-func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *switcher, l switcherLayout) (cx, cy int) {
+func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout) (cx, cy int) {
 	ground, dim, text := th.Palette.RailBG, th.Palette.RailDim, th.Palette.RailText
 	x, y, w := l.inner.X, l.queryY, l.listW
 	cy = y
@@ -214,7 +218,7 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *switcher, l switch
 // paintSwitcherBands paints the rows under the query line: the rail tree on the
 // left and, when the float is wide enough, the selected pane's screen on the
 // right.
-func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *switcher, vts map[string]vt10x.Terminal, l switcherLayout) {
+func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]vt10x.Terminal, l switcherLayout, paint PanePainter) {
 	if l.bandH <= 0 {
 		return
 	}
@@ -239,7 +243,7 @@ func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *switcher, vts map[
 		}
 	}
 	if l.preview {
-		paintSwitcherPreview(buf, th, s, vts, layout.Rect{X: l.prevX, Y: l.bandY, W: l.prevW, H: l.bandH})
+		paintSwitcherPreview(buf, th, s, vts, layout.Rect{X: l.prevX, Y: l.bandY, W: l.prevW, H: l.bandH}, paint)
 	}
 }
 
@@ -265,7 +269,7 @@ func paintRailRow(buf *bytes.Buffer, left, tail, right []segment.Seg, x, y, w in
 
 // scrollSwitcher moves the list's first visible row so the selection stays in
 // the band, and never scrolls past the last row.
-func scrollSwitcher(s *switcher, h int) {
+func scrollSwitcher(s *Switcher, h int) {
 	if h <= 0 || len(s.rows) == 0 {
 		s.top = 0
 		return
@@ -293,13 +297,13 @@ func scrollSwitcher(s *switcher, h int) {
 // paintSwitcherPreview paints the selected pane's screen into the band, bottom
 // aligned. A pane with a live terminal paints from it; otherwise the lines of
 // the model's read reply are used. No data at all leaves the band blank.
-func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *switcher, vts map[string]vt10x.Terminal, band layout.Rect) {
+func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]vt10x.Terminal, band layout.Rect, paint PanePainter) {
 	if band.W <= 0 || band.H <= 0 {
 		return
 	}
 	var vt vt10x.Terminal
 	var lines []string
-	if it, ok := s.selected(); ok && it.Kind == rail.Pane {
+	if it, ok := s.Selected(); ok && it.Kind == rail.Pane {
 		vt = vts[it.Pane]
 		lines = s.lines
 	}
@@ -314,8 +318,8 @@ func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *switcher, vts ma
 		}
 		start := band.Y + band.H - h
 		paintBlankRows(buf, th, band, band.Y, start)
-		if h > 0 {
-			drawPaneFrom(buf, vt, layout.Rect{X: band.X, Y: start, W: band.W, H: h}, row0, nil, nil)
+		if h > 0 && paint != nil {
+			paint(buf, vt, layout.Rect{X: band.X, Y: start, W: band.W, H: h}, row0)
 		}
 		return
 	}

@@ -1,8 +1,10 @@
-package main
+package switcher
 
 import (
 	"bytes"
+	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -10,6 +12,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
 	"github.com/hinshun/vt10x"
@@ -24,22 +27,87 @@ var switcherSizes = [][2]int{
 }
 
 // switcherAt opens the switcher over the fixture on a cols by rows screen.
-func switcherAt(cols, rows int) (*switcher, *wire.Snapshot) {
+func switcherAt(cols, rows int) (*Switcher, *wire.Snapshot) {
 	snap := switcherSnap()
 	snap.Cols, snap.Rows = cols, rows
-	return newSwitcher(paletteRect(cols, rows), snap), snap
+	return NewSwitcher(PaletteRect(cols, rows), snap), snap
 }
 
 // drawFloat draws the switcher and replays its bytes into a fresh screen.
-func drawFloat(t *testing.T, s *switcher, snap *wire.Snapshot, vts map[string]vt10x.Terminal) (string, int, int, vt10x.Terminal) {
+func drawFloat(t *testing.T, s *Switcher, snap *wire.Snapshot, vts map[string]vt10x.Terminal) (string, int, int, vt10x.Terminal) {
 	t.Helper()
 	var b bytes.Buffer
-	cx, cy := drawSwitcher(&b, theme.DefaultTheme(), s, snap, vts)
+	cx, cy := DrawSwitcher(&b, theme.DefaultTheme(), s, snap, vts, testPanePainter)
 	screen := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
 	if _, err := screen.Write(b.Bytes()); err != nil {
 		t.Fatalf("replay the float: %v", err)
 	}
 	return b.String(), cx, cy, screen
+}
+
+// testPanePainter paints a pane's rows the way the client's drawPaneFrom does
+// with no selection or hover, so the preview test reads the real SGR output.
+func testPanePainter(buf *bytes.Buffer, v vt10x.Terminal, r layout.Rect, row0 int) {
+	if r.W <= 0 || r.H <= 0 {
+		return
+	}
+	cols, rows := v.Size()
+	v.Lock()
+	defer v.Unlock()
+	for y := 0; y < r.H; y++ {
+		fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
+		var cur *vt10x.Glyph
+		for x := 0; x < r.W; x++ {
+			var g vt10x.Glyph
+			if x < cols && row0+y < rows {
+				g = vt.NormCell(v.Cell(x, row0+y))
+			} else {
+				g = vt.NormCell(g)
+			}
+			buf.WriteString(vt.SGR(g, cur))
+			gg := g
+			cur = &gg
+			if g.Char < 0x20 {
+				buf.WriteByte(' ')
+			} else {
+				buf.WriteRune(g.Char)
+			}
+		}
+	}
+}
+
+// bandRows returns the rows a band's bytes address, in screen order. It is a
+// copy of the client's helper: the moved test cannot reach package main.
+func bandRows(buf []byte) []int {
+	var rows []int
+	seen := map[int]bool{}
+	for i := 0; i+2 < len(buf); i++ {
+		if buf[i] != 0x1b || buf[i+1] != '[' {
+			continue
+		}
+		j := i + 2
+		n := 0
+		for j < len(buf) && (buf[j] >= '0' && buf[j] <= '9') {
+			n = n*10 + int(buf[j]-'0')
+			j++
+		}
+		for j < len(buf) && (buf[j] == ';' || (buf[j] >= '0' && buf[j] <= '9')) {
+			j++
+		}
+		if j >= len(buf) || (buf[j] != 'H' && buf[j] != 'f') {
+			continue
+		}
+		y := 0
+		if n > 1 {
+			y = n - 1
+		}
+		if !seen[y] {
+			seen[y] = true
+			rows = append(rows, y)
+		}
+	}
+	sort.Ints(rows)
+	return rows
 }
 
 // switcherCell reads one cell of a replayed screen.
@@ -90,15 +158,15 @@ func switcherFocusRows(out string) []int {
 	return rows
 }
 
-// TestSwitcherRectRule pins the rule paletteRect moved here with: a wide screen
+// TestSwitcherRectRule pins the rule PaletteRect moved here with: a wide screen
 // takes the 132 by 40 cap, a tiny screen takes the whole of it. pal_test.go
 // already holds the fit loop over the same sizes.
 func TestSwitcherRectRule(t *testing.T) {
-	if r := paletteRect(200, 60); r != (layout.Rect{X: 34, Y: 10, W: 132, H: 40}) {
-		t.Fatalf("paletteRect(200,60) = %+v, want 34,10 132x40", r)
+	if r := PaletteRect(200, 60); r != (layout.Rect{X: 34, Y: 10, W: 132, H: 40}) {
+		t.Fatalf("PaletteRect(200,60) = %+v, want 34,10 132x40", r)
 	}
-	if r := paletteRect(12, 5); r != (layout.Rect{X: 0, Y: 0, W: 12, H: 5}) {
-		t.Fatalf("paletteRect(12,5) = %+v, want the whole screen", r)
+	if r := PaletteRect(12, 5); r != (layout.Rect{X: 0, Y: 0, W: 12, H: 5}) {
+		t.Fatalf("PaletteRect(12,5) = %+v, want the whole screen", r)
 	}
 }
 
@@ -110,7 +178,7 @@ func TestSwitcherDrawInsideRect(t *testing.T) {
 		cols, rows := size[0], size[1]
 		s, snap := switcherAt(cols, rows)
 		out, cx, cy, screen := drawFloat(t, s, snap, nil)
-		r := s.rect
+		r := s.Rect
 		if r.X < 0 || r.Y < 0 || r.X+r.W > cols || r.Y+r.H > rows {
 			t.Fatalf("%dx%d: rect %+v is off screen", cols, rows, r)
 		}
@@ -153,7 +221,7 @@ func TestSwitcherDrawQueryRow(t *testing.T) {
 	switcherType(s, "ap")
 	_, cx, cy, screen := drawFloat(t, s, snap, nil)
 	l := switcherLayoutOf(s, snap)
-	r := s.rect
+	r := s.Rect
 	if cy != r.Y+1 {
 		t.Fatalf("cursor row %d, want the first row inside the box %d", cy, r.Y+1)
 	}
@@ -165,7 +233,7 @@ func TestSwitcherDrawQueryRow(t *testing.T) {
 		t.Fatalf("cursor col %d, want %d one past the query", cx, want)
 	}
 	// A query wider than the band is clipped and the cursor is clamped inside.
-	s.clearQuery()
+	s.ClearQuery()
 	switcherType(s, strings.Repeat("x", 200))
 	_, cx, cy, _ = drawFloat(t, s, snap, nil)
 	if max := r.X + l.listW; cx != max {
@@ -181,10 +249,10 @@ func TestSwitcherDrawQueryRow(t *testing.T) {
 func TestSwitcherDrawFocusRow(t *testing.T) {
 	cols, rows := 40, 12
 	s, snap := switcherAt(cols, rows)
-	s.move(2)
+	s.Move(2)
 	_, _, _, _ = drawFloat(t, s, snap, nil)
 	out, _, _, _ := drawFloat(t, s, snap, nil)
-	r := s.rect
+	r := s.Rect
 	want := r.Y + 2 + (s.sel - s.top)
 	rows_ := switcherFocusRows(out)
 	if len(rows_) != 1 || rows_[0] != want {
@@ -235,13 +303,13 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	// A first frame with lines, then a request that drops them. Both frames are
 	// replayed into one screen, so a cell the second frame leaves alone shows
 	// the first frame's glyph: that is the stale cell this test hunts.
-	s.setPreview(1, "w1p1")
-	if !s.acceptPreview(1, []string{"old", "screen"}) {
+	s.SetPreview(1, "w1p1")
+	if !s.AcceptPreview(1, []string{"old", "screen"}) {
 		t.Fatal("the preview reply was refused")
 	}
 	screen := vt10x.New(vt10x.WithSize(cols, rows))
 	var b bytes.Buffer
-	drawSwitcher(&b, theme.DefaultTheme(), s, snap, nil)
+	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter)
 	if _, err := screen.Write(b.Bytes()); err != nil {
 		t.Fatalf("replay the first frame: %v", err)
 	}
@@ -249,8 +317,8 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 		t.Fatalf("the first frame drew no preview lines: %q", c)
 	}
 	b.Reset()
-	s.setPreview(2, "w1p1")
-	drawSwitcher(&b, theme.DefaultTheme(), s, snap, nil)
+	s.SetPreview(2, "w1p1")
+	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter)
 	if _, err := screen.Write(b.Bytes()); err != nil {
 		t.Fatalf("replay the second frame: %v", err)
 	}
@@ -291,7 +359,7 @@ func TestSwitcherDrawNarrow(t *testing.T) {
 func TestSwitcherDrawScroll(t *testing.T) {
 	cols, rows := 40, 12
 	s, snap := switcherAt(cols, rows)
-	s.move(100)
+	s.Move(100)
 	l := switcherLayoutOf(s, snap)
 	if l.bandH >= len(s.rows) {
 		t.Fatalf("the band fits every row (%d >= %d), so it cannot scroll", l.bandH, len(s.rows))
