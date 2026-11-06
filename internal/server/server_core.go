@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/notify"
 	"dm/internal/paths"
@@ -253,6 +254,7 @@ func msgBytes(m wire.Msg) int {
 type server struct {
 	mu      sync.Mutex
 	st      *session.State
+	cfg     *keymap.Config
 	panes   map[string]*paneConn
 	clients map[*client]bool
 	cols    int
@@ -315,7 +317,11 @@ func Run(args []string) error {
 		}
 	}
 
-	s := &server{st: st, panes: map[string]*paneConn{}, clients: map[*client]bool{},
+	cfg, cfgErr := keymap.LoadDefaultPath(false)
+	if cfgErr != nil {
+		log.Printf("keymap: %v", cfgErr)
+	}
+	s := &server{st: st, cfg: cfg, panes: map[string]*paneConn{}, clients: map[*client]bool{},
 		cols: st.Cols, rows: st.Rows, adopt: adopt,
 		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{}}
 	if s.cols < 20 {
