@@ -98,14 +98,16 @@ type AllPane struct {
 	Added   int  `json:"added,omitempty"`
 	Deleted int  `json:"deleted,omitempty"`
 	// WindowUnfolded is the rail fold state of the pane's window.
-	WindowUnfolded  bool   `json:"windowUnfolded,omitempty"`
-	Workspace       string `json:"workspace"`
-	WorkspaceName   string `json:"workspaceName"`
-	Window          string `json:"window"`
-	WindowName      string `json:"windowName"`
-	Focus           bool   `json:"focus,omitempty"`
-	WorkspaceActive bool   `json:"workspaceActive,omitempty"`
-	WindowActive    bool   `json:"windowActive,omitempty"`
+	WindowUnfolded bool `json:"windowUnfolded,omitempty"`
+	// WorkspaceUnfolded is the rail fold state of the pane's workspace.
+	WorkspaceUnfolded bool   `json:"workspaceUnfolded,omitempty"`
+	Workspace         string `json:"workspace"`
+	WorkspaceName     string `json:"workspaceName"`
+	Window            string `json:"window"`
+	WindowName        string `json:"windowName"`
+	Focus             bool   `json:"focus,omitempty"`
+	WorkspaceActive   bool   `json:"workspaceActive,omitempty"`
+	WindowActive      bool   `json:"windowActive,omitempty"`
 }
 
 type Snapshot struct {

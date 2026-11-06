@@ -178,6 +178,7 @@ func (s *server) allPanesLocked() []wire.AllPane {
 					Focus: winActive && id == w.Focus,
 				}
 				info.WindowUnfolded = w.Unfolded
+				info.WorkspaceUnfolded = ws.Unfolded
 				ps := s.st.Panes[id]
 				if ps != nil {
 					info.Name = ps.Name
