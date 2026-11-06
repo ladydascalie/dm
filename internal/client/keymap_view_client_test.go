@@ -1,4 +1,4 @@
-package main
+package client
 
 // The client side of the keymap float: the tests that drive it through a tui.
 // The view's own tests live in internal/keymapview.
