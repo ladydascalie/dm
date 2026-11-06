@@ -341,7 +341,7 @@ func paneAreaFor(cols, rows, rail int) paneRect {
 	if w < 1 {
 		w = 1
 	}
-	return paneRect{rail, 0, w, rows - 1}
+	return paneRect{rail, 1, w, rows - 2}
 }
 
 func insetBox(b paneRect) paneRect {

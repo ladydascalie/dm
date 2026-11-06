@@ -282,8 +282,10 @@ func (s *server) workspaceList() []wsInfo {
 	for i, ws := range s.st.Workspaces {
 		info := wsInfo{ID: ws.ID, Name: ws.Name, Active: i == s.st.Active}
 		for j, w := range ws.Windows {
-			info.Windows = append(info.Windows, winInfo{ID: w.ID, Name: w.Name,
-				Active: i == s.st.Active && j == ws.Active})
+			info.Windows = append(info.Windows, winInfo{
+				ID: w.ID, Name: w.Name,
+				Active: i == s.st.Active && j == ws.Active,
+			})
 		}
 		out = append(out, info)
 	}
@@ -556,7 +558,7 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
 			}
 			r, ok := layout.NodeRect(win.Root, split,
-				layout.PaneAreaFor(s.cols, s.rows, s.railLocked()))
+				layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()))
 			if !ok {
 				return fmt.Errorf("no rect for split of %q", first)
 			}
@@ -612,7 +614,7 @@ func (s *server) focusDir(dir string) error {
 	defer s.mu.Unlock()
 	win := s.st.ActiveWindow()
 	rects := map[string]layout.Rect{}
-	layout.Layout(win.Root, layout.PaneAreaFor(s.cols, s.rows, s.railLocked()), rects)
+	layout.Layout(win.Root, layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()), rects)
 	n := layout.Neighbor(rects, win.Focus, dir)
 	if n == "" {
 		return fmt.Errorf("no pane %s of %s", dir, win.Focus)
@@ -892,7 +894,7 @@ func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string,
 	id := win.NewPaneID()
 	win.Root = &layout.Node{Pane: id}
 	win.Focus = id
-	ws := &session.Workspace{ID: wsid, Name: name, Windows: []*session.Window{win}}
+	ws := &session.Workspace{ID: wsid, Name: name, Unfolded: true, Windows: []*session.Window{win}}
 	s.st.Workspaces = append(s.st.Workspaces, ws)
 	if !noFocus {
 		s.st.Active = len(s.st.Workspaces) - 1

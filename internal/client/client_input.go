@@ -1827,11 +1827,20 @@ func (t *tui) tabBarClick(ev mouseEvent, x, y int) bool {
 	if now.Sub(t.lastTabClick) < 500*time.Millisecond &&
 		t.lastTabClickPos.X == x && t.lastTabClickPos.Y == y {
 		t.lastTabClick = time.Time{}
+		seen := make(map[string]bool)
 		var winID string
+		idx := 0
 		for _, p := range t.snap.All {
-			if p.Workspace == t.snap.Workspace && p.WindowName == it.Name {
-				winID = p.Window
-				break
+			if p.Workspace != t.snap.Workspace {
+				continue
+			}
+			if !seen[p.Window] {
+				seen[p.Window] = true
+				if idx == it.Index {
+					winID = p.Window
+					break
+				}
+				idx++
 			}
 		}
 		if winID != "" {

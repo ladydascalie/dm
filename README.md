@@ -401,6 +401,10 @@ columns: the agent bar, one state glyph per pane, and no names. It always lists
 panes, folded or not, and packs one row per pane, with no header, note or gap
 row. A hidden or thin sidebar remembers the last full width.
 
+The rail's last column is a grab strip: drag it to resize the rail from four
+columns up to a third of the screen, capped at 46. A drag to the left collapses
+the rail to its thin form; hiding stays on `prefix b`.
+
 ## Window tab bar
 
 One row sits above the pane area, to the right of the rail. It is always
