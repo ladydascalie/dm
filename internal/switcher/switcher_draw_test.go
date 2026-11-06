@@ -348,9 +348,11 @@ func TestSwitcherDrawNarrow(t *testing.T) {
 			}
 		}
 	}
-	// The window line's stats reach the last cell of the whole width.
-	if c := switcherCell(screen, l.inner.X+l.inner.W-1, l.bandY+1); c != '3' {
-		t.Fatalf("stats do not reach the right edge: %q", c)
+	// The flat rail has no window line, so the first band row is a pane row and
+	// there are no git stats to reach the right edge. The row still fills the
+	// whole width.
+	if c := switcherCell(screen, l.inner.X+l.inner.W-1, l.bandY+1); c != ' ' && c != 0 {
+		t.Fatalf("the narrow row did not fill the whole width: %q", c)
 	}
 }
 
