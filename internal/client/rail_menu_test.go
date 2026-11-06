@@ -1,11 +1,12 @@
 package client
 
 import (
+	"strings"
+	"testing"
+
 	"dm/internal/rail"
 	"dm/internal/testutil"
 	"dm/internal/wire"
-	"strings"
-	"testing"
 )
 
 // railMenuTUI is a client on the railRowSnap rail with a live conn. The rail
@@ -395,6 +396,32 @@ func TestRailDoubleClickRenamesWindow(t *testing.T) {
 			tui.renameKind, tui.renameID, tui.renameDraft)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 5, y: 2})
+	testutil.NoMsg(t, got)
+}
+
+// TestRailDoubleClickRenamesWorkspace proves a second left press on the same
+// workspace row within the double click window opens the workspace rename
+// prompt instead of focusing again.
+func TestRailDoubleClickRenamesWorkspace(t *testing.T) {
+	tui, got := railMenuTUI(t)
+	// The workspace caret is zero-based column 0, so the name starts at
+	// column 2 and the mouse column is 3.
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	if m := testutil.NextMsg(t, got); m.Action != "focus" {
+		t.Fatalf("first press sent %+v, want focus", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	testutil.NoMsg(t, got)
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	testutil.NoMsg(t, got)
+	if tui.mode != "rename" {
+		t.Fatalf("second press mode = %q, want rename", tui.mode)
+	}
+	if tui.renameKind != "workspace" || tui.renameID != "s1" || tui.renameDraft != "main" {
+		t.Fatalf("prompt = kind %q id %q draft %q, want workspace s1 main",
+			tui.renameKind, tui.renameID, tui.renameDraft)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
 	testutil.NoMsg(t, got)
 }
 

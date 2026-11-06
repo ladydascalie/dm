@@ -390,8 +390,9 @@ without changing focus. A left press on a window row focuses the first
 available pane in that window and makes that window the active window. A left
 press on the window caret toggles the window fold without changing focus. A
 left press on a pane row focuses that pane. A pane in another window switches
-the active window as well. Double-clicking a window row opens the inline rename
-prompt for that window, the same prompt the tab bar double-click opens.
+the active window as well. Double-clicking a workspace row opens the inline
+rename prompt for that workspace. Double-clicking a window row opens the inline
+rename prompt for that window, the same prompt the tab bar double-click opens.
 Double-clicking a pane row opens the inline rename prompt for that pane. Right
 click opens the row menu for the row under the pointer: rename, close, new,
 fold and focus, as the row allows. The menu takes its keys from the main

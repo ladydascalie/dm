@@ -1859,7 +1859,9 @@ func (t *tui) tabBarClick(ev mouseEvent, x, y int) bool {
 
 // railClick consumes a mouse event over the sidebar. A left press on the bottom
 // control row toggles the rail full <-> thin. A left press on a workspace row
-// focuses its first pane; a left press on the workspace caret toggles its fold.
+// focuses its first pane; a second press within the double click window opens
+// the workspace's rename prompt; a left press on the workspace caret toggles
+// its fold.
 // A left press on a window row focuses the window's first pane; a left press on
 // the window caret toggles the window fold; a second press within the double
 // click window opens the window's rename prompt. A left press on a pane row
@@ -1946,10 +1948,15 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
-		t.clearRailPress()
 		if ws := rail.RailWorkspaceAt(t.snap, x, y); ws != "" {
-			// The workspace row focuses the first pane in the workspace.
-			if t.conn != nil {
+			// A workspace row focuses the first pane in the workspace. A
+			// second press on the same row within the double click window
+			// opens the workspace rename prompt.
+			if t.isRailDoubleClick(y) {
+				if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+					t.openRenamePromptFor("workspace", it.Workspace, it.Text)
+				}
+			} else if t.conn != nil {
 				for _, p := range t.snap.All {
 					if p.Workspace == ws {
 						_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: p.ID})
@@ -1959,6 +1966,7 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
+		t.clearRailPress()
 	}
 	return true
 }
