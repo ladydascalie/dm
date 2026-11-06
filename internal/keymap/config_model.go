@@ -40,11 +40,13 @@ type mode struct {
 // Config is the loaded keymap. It carries the prefix key and one keymap per
 // mode. A zero Config is not valid; use LoadDefault or a Load function.
 type Config struct {
-	prefixName  string
-	prefixBytes []byte
-	modes       map[string]*mode
-	themeName   string
-	theme       theme.Theme
+	prefixName     string
+	prefixBytes    []byte
+	modes          map[string]*mode
+	themeName      string
+	theme          theme.Theme
+	defaultFold    bool
+	defaultFoldSet bool
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -54,6 +56,15 @@ func (c *Config) Theme() theme.Theme {
 		return theme.DefaultTheme()
 	}
 	return c.theme
+}
+
+// DefaultFold reports whether a new window's rail starts unfolded. The zero
+// value means folded.
+func (c *Config) DefaultFold() bool {
+	if c == nil {
+		return false
+	}
+	return c.defaultFold
 }
 
 // PrefixBytes returns the bytes the prefix key sends.

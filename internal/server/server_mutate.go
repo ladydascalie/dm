@@ -807,6 +807,7 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 	}
 	wid := s.st.NewWindowID()
 	w := &session.Window{ID: wid, Name: label}
+	w.Unfolded = s.cfg.DefaultFold()
 	id := w.NewPaneID()
 	w.Root = &layout.Node{Pane: id}
 	w.Focus = id
