@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"dm/internal/layout"
 	"dm/internal/testutil"
@@ -117,10 +118,10 @@ func TestRenameWindowPromptPaintsWindowID(t *testing.T) {
 	f.snap.All = []wire.AllPane{
 		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
-			WindowActive: true, WindowUnfolded: true},
+			WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 		{ID: "w2p1", Name: "beta", Workspace: "s1", WorkspaceName: "main",
 			Window: "w2", WindowName: "two", WorkspaceActive: true,
-			WindowUnfolded: true},
+			WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	f.tui.openRenamePromptFor("window", "w2", "two")
 
@@ -144,7 +145,7 @@ func TestRenameWorkspacePromptPaintsWorkspaceID(t *testing.T) {
 	f.snap.All = []wire.AllPane{
 		{ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 			Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
-			WindowActive: true, WindowUnfolded: true},
+			WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	f.tui.openRenamePrompt()
 
@@ -158,4 +159,64 @@ func TestRenameWorkspacePromptPaintsWorkspaceID(t *testing.T) {
 	if !strings.Contains(vis, " name: main") {
 		t.Fatalf("prompt input row lost the draft: %q", vis)
 	}
+}
+
+// A pane prompt opens with the pane's current name and submits set-pane-name
+// with the pane's id and the edited draft.
+func TestRenamePanePromptSendsPaneName(t *testing.T) {
+	tr, got := renameTargetTUI(t)
+	tr.openRenamePromptFor("pane", "a", "alpha")
+	if tr.mode != "rename" {
+		t.Fatalf("mode = %q, want rename", tr.mode)
+	}
+	if tr.renameKind != "pane" {
+		t.Fatalf("kind = %q, want pane", tr.renameKind)
+	}
+	if tr.renameDraft != "alpha" {
+		t.Fatalf("draft = %q, want alpha", tr.renameDraft)
+	}
+	testutil.NoMsg(t, got)
+
+	tr.renameDraft = ""
+	renamePromptKeys(tr, "api\r")
+	if tr.mode != "" {
+		t.Fatalf("mode = %q after enter, want empty", tr.mode)
+	}
+	m := testutil.NextMsg(t, got)
+	if m.Type != "req" || m.Action != "set-pane-name" {
+		t.Fatalf("sent %+v, want req set-pane-name", m)
+	}
+	if m.Target != "a" {
+		t.Fatalf("target = %q, want a", m.Target)
+	}
+	if m.Name != "api" {
+		t.Fatalf("name = %q, want api", m.Name)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// Esc cancels a pane rename prompt without sending a request.
+func TestRenamePanePromptEscCancels(t *testing.T) {
+	tr, got := renameTargetTUI(t)
+	tr.openRenamePromptFor("pane", "a", "alpha")
+	renamePromptKeys(tr, "\x1b")
+	tr.pasteDeadline = time.Now().Add(-escTimeout)
+	if !tr.expirePaste(time.Now()) {
+		t.Fatal("the stalled escape was not flushed")
+	}
+	if tr.mode != "" {
+		t.Fatalf("mode = %q after esc, want empty", tr.mode)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// An empty draft cancels a pane rename prompt without sending a request.
+func TestRenamePanePromptEmptyDraftCancels(t *testing.T) {
+	tr, got := renameTargetTUI(t)
+	tr.openRenamePromptFor("pane", "a", "alpha")
+	renamePromptKeys(tr, "\x15\r")
+	if tr.mode != "" {
+		t.Fatalf("mode = %q after empty enter, want empty", tr.mode)
+	}
+	testutil.NoMsg(t, got)
 }

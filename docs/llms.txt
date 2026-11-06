@@ -100,7 +100,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 
 ## Sidebar
 
-The sidebar lists workspaces, windows and panes. A left click on a pane row focuses that pane. A left click on a window row folds or unfolds that window. A right click on any row opens the row menu for that row: rename and close for a workspace, window or pane, new window, new workspace, fold or unfold. The bottom row of the sidebar is its control: a left click there toggles the rail between full and thin. The `toggle-rail` key cycles full, thin and hidden.
+The sidebar lists workspaces and panes in a flat list. A workspace row is a foldable header. Panes nest directly under it. A left click on a pane row focuses that pane. A left click on a workspace row focuses the first available pane in that workspace. A left click on the row's fold caret toggles the pane list without changing focus. A right click on any row opens the row menu for that row: rename and close for a workspace or pane, new window, new workspace, fold or unfold. The bottom row of the sidebar is its control: a left click there toggles the rail between full and thin. The `toggle-rail` key cycles full, thin and hidden. A window tab bar sits above the pane area, to the right of the rail. One tab per window in the active workspace. Clicking a tab selects that window; double-clicking opens the window rename prompt.
 
 ## Recipes
 

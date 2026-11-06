@@ -1621,9 +1621,9 @@ func (t *tui) openRenamePrompt() {
 	t.openRenamePromptFor("workspace", id, current)
 }
 
-// openRenamePromptFor takes over input for the named workspace or window. The
-// kind picks the action the prompt sends and the label it paints; the draft
-// starts as the current name.
+// openRenamePromptFor takes over input for the named workspace, window or
+// pane. The kind picks the action the prompt sends and the label it paints;
+// the draft starts as the current name.
 func (t *tui) openRenamePromptFor(kind, id, current string) {
 	t.renameKind = kind
 	t.renameID = id
@@ -1656,8 +1656,11 @@ func (t *tui) submitRename() {
 	name := strings.TrimSpace(t.renameDraft)
 	target := t.renameID
 	action := "rename-workspace"
-	if t.renameKind == "window" {
+	switch t.renameKind {
+	case "window":
 		action = "rename-window"
+	case "pane":
+		action = "set-pane-name"
 	}
 	t.closeRename()
 	if name == "" {
@@ -1762,10 +1765,37 @@ func (t *tui) railToggleWidth(hide bool) int {
 	}
 }
 
+// railDoubleClick is how soon a second left press on the same rail row counts
+// as a double click.
+const railDoubleClick = 400 * time.Millisecond
+
+// isRailDoubleClick records a left press on rail row y and reports whether it
+// lands within the double click window of the previous press on the same row.
+func (t *tui) isRailDoubleClick(y int) bool {
+	now := time.Now()
+	double := !t.railPressAt.IsZero() && t.railPressRow == y &&
+		now.Sub(t.railPressAt) <= railDoubleClick
+	if double {
+		t.railPressAt = time.Time{}
+	} else {
+		t.railPressAt, t.railPressRow = now, y
+	}
+	return double
+}
+
+// clearRailPress forgets the tracked rail press for t, so a later press does
+// not count as a double click.
+func (t *tui) clearRailPress() {
+	t.railPressAt = time.Time{}
+}
+
 // railClick consumes a mouse event over the sidebar. A left press on the bottom
-// control row toggles the rail full <-> thin. A left press on a pane row focuses
-// that pane. Every other rail event is swallowed so it never reaches a pane,
-// and a drag that began in the rail stays swallowed outside it.
+// control row toggles the rail full <-> thin. A left press on a workspace row
+// focuses its first pane; a left press on the caret cell toggles its fold. A
+// left press on a pane row focuses that pane; a second press within the double
+// click window opens the pane's rename prompt. Every other rail event is
+// swallowed so it never reaches a pane, and a drag that began in the rail stays
+// swallowed outside it.
 func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 	if t.snap == nil || t.snap.Rail <= 0 {
 		return false
@@ -1805,13 +1835,44 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 		if rail.RailControlAt(t.snap, x, y) {
 			// The bottom row is the control: it toggles the rail and
 			// never focuses a pane or folds a window.
+			t.clearRailPress()
 			if t.conn != nil {
 				t.toggleRailControl()
 			}
-		} else if id := rail.RailPaneAt(t.snap, x, y); id != "" && t.conn != nil {
-			_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
-		} else if id := rail.RailWindowAt(t.snap, x, y); id != "" && t.conn != nil {
-			_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
+			return true
+		}
+		if id := rail.RailPaneAt(t.snap, x, y); id != "" {
+			// A pane row focuses its pane. A second press on the same row
+			// within the double click window opens the rename prompt.
+			if t.isRailDoubleClick(y) {
+				if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+					t.openRenamePromptFor("pane", it.Pane, it.PaneName)
+				}
+			} else if t.conn != nil {
+				_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
+			}
+			return true
+		}
+		t.clearRailPress()
+		if id := rail.RailFoldAt(t.snap, x, y); id != "" {
+			// The caret cell toggles the workspace's fold without moving
+			// focus.
+			if t.conn != nil {
+				_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
+			}
+			return true
+		}
+		if ws := rail.RailWorkspaceAt(t.snap, x, y); ws != "" {
+			// The workspace row focuses the first pane in the workspace.
+			if t.conn != nil {
+				for _, p := range t.snap.All {
+					if p.Workspace == ws {
+						_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: p.ID})
+						break
+					}
+				}
+			}
+			return true
 		}
 	}
 	return true

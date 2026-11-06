@@ -108,3 +108,49 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 		})
 	}
 }
+
+func TestToggleWorkspaceFold(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := session.NewState("fold")
+	s := railServer(st)
+
+	ws := st.Workspaces[0]
+	if !ws.Unfolded {
+		t.Fatal("new workspace is folded, want unfolded")
+	}
+
+	// Toggle to folded
+	unfolded, err := s.toggleFold(ws.ID)
+	if err != nil {
+		t.Fatalf("toggleFold(%q): %v", ws.ID, err)
+	}
+	if unfolded {
+		t.Fatal("toggleFold returned unfolded=true, want false")
+	}
+	if ws.Unfolded {
+		t.Fatal("workspace Unfolded = true, want false")
+	}
+
+	// Toggle back to unfolded
+	unfolded, err = s.toggleFold(ws.ID)
+	if err != nil {
+		t.Fatalf("toggleFold(%q): %v", ws.ID, err)
+	}
+	if !unfolded {
+		t.Fatal("toggleFold returned unfolded=false, want true")
+	}
+	if !ws.Unfolded {
+		t.Fatal("workspace Unfolded = false, want true")
+	}
+
+	// A window ID still toggles the window's fold.
+	w := ws.Windows[0]
+	initial := w.Unfolded
+	unfolded, err = s.toggleFold(w.ID)
+	if err != nil {
+		t.Fatalf("toggleFold(%q): %v", w.ID, err)
+	}
+	if unfolded != !initial {
+		t.Fatalf("window Unfolded = %v, want %v", unfolded, !initial)
+	}
+}

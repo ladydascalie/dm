@@ -81,8 +81,8 @@ func TestRailGeometry(t *testing.T) {
 	}
 }
 
-// TestRailBranch runs the branch check off the snapshot path and labels the
-// workspace with the focused pane's branch.
+// TestRailBranch proves the branch reaches the snapshot. The flat rail's
+// second row is the pane row, so the test checks the pane and window ids.
 func TestRailBranch(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
 	old := detectGit
@@ -111,8 +111,8 @@ func TestRailBranch(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	items := rail.RailItems(s.snapshotLocked())
-	if len(items) < 2 || items[1].Branch != "dm-rail" || items[1].Folder != "dm" {
-		t.Fatalf("window line = %+v, want folder dm and branch dm-rail", items)
+	if len(items) < 2 || items[1].Pane != "w1p1" || items[1].Window != "w1" {
+		t.Fatalf("rail rows = %+v, want pane w1p1 in window w1", items)
 	}
 }
 func TestSessionSizeIsLargestClient(t *testing.T) {

@@ -35,7 +35,7 @@ func newFrameTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 	snap.All = []wire.AllPane{{
 		ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
 		Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true,
-		WindowActive: true, WindowUnfolded: true,
+		WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 	}}
 	out := &bytes.Buffer{}
 	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
@@ -464,8 +464,8 @@ func TestOracleDividerHover(t *testing.T) {
 	layout.Layout(root, layout.PaneAreaFor(100, 20, 0), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []wire.AllPane{
-		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
-		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
+		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	out := &bytes.Buffer{}
 	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
@@ -564,8 +564,8 @@ func TestOracleOverlayOverGap(t *testing.T) {
 	layout.Layout(root, layout.PaneAreaFor(100, 20, 0), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []wire.AllPane{
-		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
-		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
+		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	out := &bytes.Buffer{}
 	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
@@ -654,8 +654,8 @@ func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *wire.Snapshot) {
 	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []wire.AllPane{
-		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
-		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true},
+		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
+		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	out := &bytes.Buffer{}
 	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}

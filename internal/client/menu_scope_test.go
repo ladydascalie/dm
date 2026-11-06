@@ -58,42 +58,19 @@ func TestScreenRightClickOpensPaneMenuOnly(t *testing.T) {
 // actions with Focus first, and Close pane to that row's pane.
 func TestRailPaneRowMenuOffersPaneActions(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	railRightPress(tui, 3)
+	railRightPress(tui, 1)
 	if tui.mode != "menu" || tui.menu == nil {
 		t.Fatalf("pane row menu: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
 	if tui.menu.title != "pane pi" {
 		t.Fatalf("title = %q, want pane pi", tui.menu.title)
 	}
-	railWantLabels(t, tui.menu, append([]string{"Focus"}, paneMenuLabels...)...)
+	railWantLabels(t, tui.menu, append([]string{"Focus", "Rename pane"}, paneMenuLabels...)...)
 	testutil.NoMsg(t, got)
 	railMenuPick(t, tui, "Close pane")
 	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "close-pane" || m.Target != "w1p1" {
 		t.Fatalf("Close pane sent %+v, want close-pane w1p1", m)
-	}
-}
-
-// TestRailWindowRowsMenuOffersWindowActions holds a window row and its note row
-// to the window actions, and Fold/unfold to that window.
-func TestRailWindowRowsMenuOffersWindowActions(t *testing.T) {
-	for _, row := range []int{1, 2} {
-		tui, got := railMenuTUI(t)
-		railRightPress(tui, row)
-		if tui.mode != "menu" || tui.menu == nil {
-			t.Fatalf("row %d menu: mode=%q menu=%+v", row, tui.mode, tui.menu)
-		}
-		if tui.menu.title != "window one" {
-			t.Fatalf("row %d: title = %q, want window one", row, tui.menu.title)
-		}
-		railWantLabels(t, tui.menu,
-			"New window", "Rename window", "Close window", "Fold/unfold")
-		testutil.NoMsg(t, got)
-		railMenuPick(t, tui, "Fold")
-		m := testutil.NextMsg(t, got)
-		if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "w1" {
-			t.Fatalf("row %d: Fold/unfold sent %+v, want toggle-fold w1", row, m)
-		}
 	}
 }
 
@@ -166,7 +143,7 @@ func TestRailControlRowMenuOffersSessionActions(t *testing.T) {
 // TestRailGapRowMenuOpensNothing holds the gap row clear of every menu.
 func TestRailGapRowMenuOpensNothing(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	railRightPress(tui, 5)
+	railRightPress(tui, 3)
 	if tui.mode != "" || tui.menu != nil {
 		t.Fatalf("right press on the gap row: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
@@ -179,10 +156,6 @@ func TestMenuScopeHints(t *testing.T) {
 	pane := map[string]string{
 		"Split right": "|", "Split down": "-", "Split left": "<",
 		"Split up": "^", "Zoom": "z", "Close pane": "x", "Scrollback": "[",
-	}
-	window := map[string]string{
-		"New window": "c", "Rename window": "",
-		"Close window": "X", "Fold/unfold": "",
 	}
 	workspace := map[string]string{
 		"New window": "c", "Rename workspace": "r", "Close workspace": "",
@@ -224,11 +197,10 @@ func TestMenuScopeHints(t *testing.T) {
 		return tui
 	}
 	check(t, rail(0), workspace)
-	check(t, rail(1), window)
-	check(t, rail(3), map[string]string{
-		"Focus": "", "Split right": "|", "Split down": "-",
-		"Split left": "<", "Split up": "^", "Zoom": "z",
-		"Close pane": "x", "Scrollback": "[",
+	check(t, rail(1), map[string]string{
+		"Focus": "", "Rename pane": "", "Split right": "|",
+		"Split down": "-", "Split left": "<", "Split up": "^",
+		"Zoom": "z", "Close pane": "x", "Scrollback": "[",
 	})
 	ctl, _ := railMenuTUI(t)
 	ctl.snap.Session = "dev"

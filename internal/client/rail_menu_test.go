@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// railMenuTUI is a client on the railRowSnap rail with a live conn. The rail
-// rows are: 0 workspace main, 1 window one, 2 its note, 3 pane pi, 4 window
-// two, 5 gap, 6 workspace work, 7 window three. Row 8 is the control.
+// railMenuTUI is a client on the flat railRowSnap rail with a live conn. The
+// rail rows are: 0 workspace main, 1 pane pi, 2 pane beta, 3 gap, 4 workspace
+// work, 5 pane gamma. Row 8 is the control.
 func railMenuTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	tui, got := clientTUI(t, nil)
@@ -69,8 +69,8 @@ func TestRailItemAt(t *testing.T) {
 	if it, ok := rail.RailItemAt(snap, 2, 0); !ok || it.Kind != rail.Workspace {
 		t.Fatalf("row 0 = %+v, %v, want the workspace row", it, ok)
 	}
-	if it, ok := rail.RailItemAt(snap, 2, 7); !ok || it.Kind != rail.Window {
-		t.Fatalf("last item row = %+v, %v, want the window row", it, ok)
+	if it, ok := rail.RailItemAt(snap, 2, 5); !ok || it.Kind != rail.Pane {
+		t.Fatalf("last item row = %+v, %v, want the pane row", it, ok)
 	}
 	for _, c := range []struct{ x, y int }{
 		{-1, 0}, {20, 0}, {2, -1}, {2, snap.Rows - 2}, {2, snap.Rows - 1},
@@ -102,28 +102,11 @@ func TestRailMenuWorkspaceRow(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
-// TestRailMenuWindowRow opens the window menu on a window row and on its note
-// row.
-func TestRailMenuWindowRow(t *testing.T) {
-	for _, row := range []int{1, 2} {
-		tui, got := railMenuTUI(t)
-		railRightPress(tui, row)
-		if tui.mode != "menu" || tui.menu == nil {
-			t.Fatalf("row %d: mode=%q menu=%+v", row, tui.mode, tui.menu)
-		}
-		if tui.menu.title != "window one" {
-			t.Fatalf("row %d: title = %q, want window one", row, tui.menu.title)
-		}
-		railWantLabels(t, tui.menu,
-			"New window", "Rename window", "Close window", "Fold/unfold")
-		testutil.NoMsg(t, got)
-	}
-}
-
-// TestRailMenuPaneRow opens the pane menu on a pane row.
+// TestRailMenuPaneRow opens the pane menu on a pane row. A pane row offers its
+// own rename between Focus and the split actions.
 func TestRailMenuPaneRow(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	railRightPress(tui, 3)
+	railRightPress(tui, 1)
 	if tui.mode != "menu" || tui.menu == nil {
 		t.Fatalf("right press on the pane row: mode=%q menu=%+v", tui.mode, tui.menu)
 	}
@@ -131,8 +114,19 @@ func TestRailMenuPaneRow(t *testing.T) {
 		t.Fatalf("title = %q, want pane pi", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu,
-		"Focus", "Split right", "Split down", "Split left", "Split up",
-		"Zoom", "Close pane", "Scrollback")
+		"Focus", "Rename pane", "Split right", "Split down", "Split left",
+		"Split up", "Zoom", "Close pane", "Scrollback")
+	testutil.NoMsg(t, got)
+}
+
+// TestRailMenuWindowRowOpensNothing proves the window menu is gone with the
+// window row: a right press on a window row opens no menu and sends nothing.
+func TestRailMenuWindowRowOpensNothing(t *testing.T) {
+	tui, got := railMenuTUI(t)
+	tui.openRailMenu(rail.RailItem{Kind: rail.Window, Text: "one", Window: "w1"}, 3, 2)
+	if tui.mode == "menu" || tui.menu != nil {
+		t.Fatalf("window row opened %q %+v, want nothing", tui.mode, tui.menu)
+	}
 	testutil.NoMsg(t, got)
 }
 
@@ -146,8 +140,10 @@ func TestRailMenuRenameTargetsRow(t *testing.T) {
 		draft string
 	}{
 		{0, "workspace", "s1", "main"},
-		{1, "window", "w1", "one"},
-		{2, "window", "w1", "one"},
+		{1, "pane", "w1p1", "pi"},
+		{2, "pane", "w1p2", "beta"},
+		{4, "workspace", "s2", "work"},
+		{5, "pane", "w2p1", "gamma"},
 	}
 	for _, c := range cases {
 		tui, _ := railMenuTUI(t)
@@ -165,7 +161,8 @@ func TestRailMenuRenameTargetsRow(t *testing.T) {
 }
 
 // TestRailMenuCloseTargetsRow picks Close on each row kind and holds the
-// request to the right action and target.
+// request to the right action and target. Window rows are gone, so a pane row
+// closes its pane and a workspace row closes the workspace.
 func TestRailMenuCloseTargetsRow(t *testing.T) {
 	cases := []struct {
 		row    int
@@ -173,9 +170,10 @@ func TestRailMenuCloseTargetsRow(t *testing.T) {
 		target string
 	}{
 		{0, "close-workspace", "s1"},
-		{1, "close-window", "w1"},
-		{2, "close-window", "w1"},
-		{3, "close-pane", "w1p1"},
+		{1, "close-pane", "w1p1"},
+		{2, "close-pane", "w1p2"},
+		{4, "close-workspace", "s2"},
+		{5, "close-pane", "w2p1"},
 	}
 	for _, c := range cases {
 		tui, got := railMenuTUI(t)
@@ -188,71 +186,47 @@ func TestRailMenuCloseTargetsRow(t *testing.T) {
 	}
 }
 
-// TestRailMenuFoldTargetsWindow picks Fold/unfold on a window row and its note
-// row and holds the request to the row's window.
-func TestRailMenuFoldTargetsWindow(t *testing.T) {
-	for _, row := range []int{1, 2} {
+// TestRailMenuFocusTargetsPane picks Focus on each pane row and holds the
+// request to that row's pane.
+func TestRailMenuFocusTargetsPane(t *testing.T) {
+	cases := []struct {
+		row    int
+		target string
+	}{
+		{1, "w1p1"},
+		{2, "w1p2"},
+		{5, "w2p1"},
+	}
+	for _, c := range cases {
 		tui, got := railMenuTUI(t)
-		railRightPress(tui, row)
-		railMenuPick(t, tui, "Fold")
+		railRightPress(tui, c.row)
+		railMenuPick(t, tui, "Focus")
 		m := testutil.NextMsg(t, got)
-		if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "w1" {
-			t.Fatalf("row %d: sent %+v, want toggle-fold w1", row, m)
+		if m.Type != "req" || m.Action != "focus" || m.Target != c.target {
+			t.Fatalf("row %d: sent %+v, want focus %s", c.row, m, c.target)
 		}
 	}
 }
 
-// TestRailMenuFocusTargetsPane picks Focus on a pane row.
-func TestRailMenuFocusTargetsPane(t *testing.T) {
-	tui, got := railMenuTUI(t)
-	railRightPress(tui, 3)
-	railMenuPick(t, tui, "Focus")
-	m := testutil.NextMsg(t, got)
-	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p1" {
-		t.Fatalf("sent %+v, want focus w1p1", m)
-	}
-}
-
-// TestRailMenuNewWindowTargetsRow picks New window on a workspace row and a
-// window row. The window row carries the source pane's real cwd; the workspace
-// row carries none, so the server inherits from the active pane.
+// TestRailMenuNewWindowTargetsRow picks New window on a workspace row. The
+// window row that carried a cwd is gone; the workspace row sends the workspace
+// id and no cwd, so the server inherits from the active pane.
 func TestRailMenuNewWindowTargetsRow(t *testing.T) {
 	cases := []struct {
 		row int
-		cwd string
+		ws  string
 	}{
-		{0, ""},
-		{1, "/work/dm/rail"},
-		{2, "/work/dm/rail"},
+		{0, "s1"},
+		{4, "s2"},
 	}
 	for _, c := range cases {
 		tui, got := railMenuTUI(t)
 		railRightPress(tui, c.row)
 		railMenuPick(t, tui, "New window")
 		m := testutil.NextMsg(t, got)
-		if m.Type != "req" || m.Action != "new-window" || m.Target != "s1" || m.Cwd != c.cwd {
-			t.Fatalf("row %d: sent %+v, want new-window s1 cwd %q", c.row, m, c.cwd)
+		if m.Type != "req" || m.Action != "new-window" || m.Target != c.ws || m.Cwd != "" {
+			t.Fatalf("row %d: sent %+v, want new-window %s cwd \"\"", c.row, m, c.ws)
 		}
-	}
-}
-
-// TestRailMenuNewWindowOutsideGit holds the cwd to the real path when the
-// window row's label is only a base name. The label is not a path.
-func TestRailMenuNewWindowOutsideGit(t *testing.T) {
-	tui, got := clientTUI(t, nil)
-	snap := railRowSnap(20)
-	snap.All[0].Root = ""
-	snap.All[0].Cwd = "/tmp/scratch"
-	tui.snap = snap
-	it, ok := rail.RailItemAt(snap, 2, 1)
-	if !ok || it.Folder != "scratch" {
-		t.Fatalf("window row = %+v, %v, want the display label scratch", it, ok)
-	}
-	railRightPress(tui, 1)
-	railMenuPick(t, tui, "New window")
-	m := testutil.NextMsg(t, got)
-	if m.Type != "req" || m.Action != "new-window" || m.Target != "s1" || m.Cwd != "/tmp/scratch" {
-		t.Fatalf("sent %+v, want new-window s1 cwd /tmp/scratch", m)
 	}
 }
 
@@ -290,23 +264,65 @@ func TestRailMenuControlRowOpensSessionMenu(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
-// TestRailLeftPressStillWorks holds the left press to its old behaviour: a
-// pane row focuses its pane and a window row folds its window.
-func TestRailLeftPressStillWorks(t *testing.T) {
+// TestRailLeftPressFocusesPane holds the left press to its flat-rail
+// behaviour: a pane row focuses its pane.
+func TestRailLeftPressFocusesPane(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
 	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p1" {
 		t.Fatalf("left press on the pane row sent %+v, want focus w1p1", m)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 4})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 2})
+	testutil.NoMsg(t, got)
+}
+
+// TestRailLeftPressFocusesWorkspacePane holds the left press on a workspace
+// row to focusing the first pane in that workspace. A press on the caret cell
+// toggles the workspace's fold instead.
+func TestRailLeftPressFocusesWorkspacePane(t *testing.T) {
+	tui, got := railMenuTUI(t)
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	m := testutil.NextMsg(t, got)
+	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p1" {
+		t.Fatalf("left press on the workspace row sent %+v, want focus w1p1", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
 	testutil.NoMsg(t, got)
 
-	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
+	// A press on the caret cell (zero-based column 0, so mouse x 1) toggles
+	// the workspace's fold.
+	tui.handleMouse(mouseEvent{btn: 0, x: 1, y: 1})
 	m = testutil.NextMsg(t, got)
-	if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "w1" {
-		t.Fatalf("left press on the window row sent %+v, want toggle-fold w1", m)
+	if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "s1" {
+		t.Fatalf("left press on the caret sent %+v, want toggle-fold s1", m)
 	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 1, y: 1})
+	testutil.NoMsg(t, got)
+}
+
+// TestRailDoubleClickRenamesPane proves a second left press on the same pane
+// row within the double click window opens the pane rename prompt instead of
+// focusing again.
+func TestRailDoubleClickRenamesPane(t *testing.T) {
+	tui, got := railMenuTUI(t)
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
+	if m := testutil.NextMsg(t, got); m.Action != "focus" {
+		t.Fatalf("first press sent %+v, want focus", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 2})
+	testutil.NoMsg(t, got)
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 2})
+	testutil.NoMsg(t, got)
+	if tui.mode != "rename" {
+		t.Fatalf("second press mode = %q, want rename", tui.mode)
+	}
+	if tui.renameKind != "pane" || tui.renameID != "w1p1" || tui.renameDraft != "pi" {
+		t.Fatalf("prompt = kind %q id %q draft %q, want pane w1p1 pi",
+			tui.renameKind, tui.renameID, tui.renameDraft)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 2})
+	testutil.NoMsg(t, got)
 }
 
 // TestRailMenuKeyHints holds each item to the main keymap's hint for its
@@ -321,13 +337,9 @@ func TestRailMenuKeyHints(t *testing.T) {
 			"Close workspace": "",
 		}},
 		{1, map[string]string{
-			"New window": "c", "Rename window": "",
-			"Close window": "X", "Fold/unfold": "",
-		}},
-		{3, map[string]string{
-			"Focus": "", "Split right": "|", "Split down": "-",
-			"Split left": "<", "Split up": "^", "Zoom": "z",
-			"Close pane": "x", "Scrollback": "[",
+			"Focus": "", "Rename pane": "", "Split right": "|",
+			"Split down": "-", "Split left": "<", "Split up": "^",
+			"Zoom": "z", "Close pane": "x", "Scrollback": "[",
 		}},
 	}
 	for _, c := range cases {

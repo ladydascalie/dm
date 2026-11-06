@@ -125,12 +125,12 @@ func RailTestSnapshot(rail int) *wire.Snapshot {
 		{
 			ID: "w1p1", Name: "alpha", Status: "working", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-			Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+			Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 		},
 		{
 			ID: "w1p2", Status: "idle", Agent: true,
 			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-			WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+			WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 		},
 	}
 	return snap
@@ -146,7 +146,7 @@ func RailOnePane(status, name string, rail, cols, rows int) *wire.Snapshot {
 	snap.All = []wire.AllPane{{
 		ID: "w1p1", Name: name, Status: status,
 		Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-		Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+		Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 	}}
 	return snap
 }

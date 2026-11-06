@@ -60,26 +60,6 @@ func (t *tui) paneMenuItems(p *wire.PaneInfo, withFocus bool) []menuItem {
 	)
 }
 
-// windowMenuItems is the item list for a window row or its note row: the
-// actions that act on one window. New window targets the row's workspace and
-// carries the window's working directory.
-func (t *tui) windowMenuItems(it rail.RailItem) []menuItem {
-	return []menuItem{
-		{label: "New window", action: "new-window", run: func() {
-			t.actionOn(it.Workspace, "new-window", func(m *wire.Msg) { m.Cwd = it.Cwd })
-		}},
-		{label: "Rename window", action: "rename-window", run: func() {
-			t.openRenamePromptFor("window", it.Window, it.WindowName)
-		}},
-		{label: "Close window", action: "close-window", run: func() {
-			t.actionOn(it.Window, "close-window", nil)
-		}},
-		{label: "Fold/unfold", action: "toggle-fold", run: func() {
-			t.actionOn(it.Window, "toggle-fold", nil)
-		}},
-	}
-}
-
 // workspaceMenuItems is the item list for a workspace row: the actions that act
 // on one workspace.
 func (t *tui) workspaceMenuItems(it rail.RailItem) []menuItem {
@@ -165,9 +145,6 @@ func (t *tui) openRailMenu(it rail.RailItem, x, y int) {
 	case rail.Workspace:
 		title = "workspace " + it.Text
 		items = t.workspaceMenuItems(it)
-	case rail.Window, rail.WindowNote:
-		title = "window " + it.WindowName
-		items = t.windowMenuItems(it)
 	case rail.Pane:
 		p := t.paneByID(it.Pane)
 		if p == nil {
@@ -177,6 +154,17 @@ func (t *tui) openRailMenu(it rail.RailItem, x, y int) {
 		}
 		title = "pane " + it.Text
 		items = t.paneMenuItems(p, true)
+		// A pane row offers its own rename, as the workspace row does. The
+		// draft starts from the raw pane name the rail item carries.
+		rename := menuItem{label: "Rename pane", action: "rename-pane", run: func() {
+			t.closeMenu()
+			t.openRenamePromptFor("pane", it.Pane, it.PaneName)
+		}}
+		if len(items) > 0 && items[0].action == "focus" {
+			items = append(items[:1], append([]menuItem{rename}, items[1:]...)...)
+		} else {
+			items = append(items, rename)
+		}
 	default:
 		return
 	}

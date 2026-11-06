@@ -1,9 +1,11 @@
 package session
 
 import (
+	"os"
 	"testing"
 
 	"dm/internal/layout"
+	"dm/internal/paths"
 )
 
 func TestIDsAreAddressable(t *testing.T) {
@@ -79,5 +81,74 @@ func TestWindowNameMigration(t *testing.T) {
 	}
 	if name := again.Workspaces[0].Windows[0].Name; name != "tests" {
 		t.Fatalf("named window = %q, want tests", name)
+	}
+}
+
+// TestWorkspaceFoldDefault proves a workspace starts unfolded and an older
+// state file with no workspace fold key loads unfolded.
+func TestWorkspaceFoldDefault(t *testing.T) {
+	st := NewState("fold")
+	if !st.Workspaces[0].Unfolded {
+		t.Fatal("new workspace is folded, want unfolded")
+	}
+
+	t.Setenv("DM_STATE", t.TempDir())
+	const raw = `{
+  "name": "absent",
+  "workspaces": [
+    {"id": "s1", "name": "main", "windows": [], "active": 0}
+  ],
+  "active": 0,
+  "cols": 80,
+  "rows": 24,
+  "panes": {},
+  "nextWorkspace": 1,
+  "nextWindow": 1,
+  "idVersion": 2,
+  "rail": 30,
+  "railSet": true
+}`
+	if err := os.MkdirAll(paths.SessionDir("absent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePath("absent"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState("absent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Workspaces[0].Unfolded {
+		t.Fatal("workspace with no fold key loaded folded, want unfolded")
+	}
+}
+
+// TestWorkspaceFoldRoundTrip proves a folded workspace stays folded across a
+// save and load, and an unfolded one stays unfolded.
+func TestWorkspaceFoldRoundTrip(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := NewState("fold")
+	st.Workspaces[0].Unfolded = false
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState("fold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Workspaces[0].Unfolded {
+		t.Fatal("folded workspace loaded unfolded")
+	}
+
+	got.Workspaces[0].Unfolded = true
+	if err := got.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := LoadState("fold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.Workspaces[0].Unfolded {
+		t.Fatal("unfolded workspace loaded folded")
 	}
 }

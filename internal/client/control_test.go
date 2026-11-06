@@ -22,18 +22,18 @@ func ctlPane(id string) wire.AllPane {
 		ID: id, Name: id, Status: "working", Agent: true,
 		Workspace: "s1", WorkspaceName: "main",
 		Window: "w1", WindowName: "one",
-		WorkspaceActive: true, WindowActive: true, WindowUnfolded: true,
+		WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 	}
 }
 
 // ctlSnapshot is a 40x10 screen with the rail at the given width. It holds
 // exactly Rows-2 item rows: one row per pane on the thin rail, and a workspace
-// row and a window row in front of the panes on a wider one. The item list
-// therefore ends on the row above the control.
+// row in front of the panes on a wider one. The item list therefore ends on
+// the row above the control.
 func ctlSnapshot(rail int) *wire.Snapshot {
 	n := 8
 	if !layout.RailCompact(rail) {
-		n = 6
+		n = 7
 	}
 	snap := &wire.Snapshot{Session: "x", Cols: 40, Rows: 10, Rail: rail}
 	for i := 0; i < n; i++ {
@@ -171,8 +171,8 @@ func TestRailControlRow(t *testing.T) {
 		if got := rail.RailPaneAt(snap, 2, row); got != "" {
 			t.Fatalf("rail %d: rail.RailPaneAt answered %q on the control row", c.rail, got)
 		}
-		if got := rail.RailWindowAt(snap, 2, row); got != "" {
-			t.Fatalf("rail %d: rail.RailWindowAt answered %q on the control row", c.rail, got)
+		if got := rail.RailWorkspaceAt(snap, 2, row); got != "" {
+			t.Fatalf("rail %d: rail.RailWorkspaceAt answered %q on the control row", c.rail, got)
 		}
 		for x := 0; x < c.rail; x++ {
 			if !rail.RailControlAt(snap, x, row) {

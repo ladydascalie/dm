@@ -17,11 +17,16 @@ import (
 	"github.com/hinshun/vt10x"
 )
 
-// toggleFold flips a window's rail fold state and persists it.
+// toggleFold flips a workspace's or window's rail fold state and persists it.
 func (s *server) toggleFold(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
+		if ws.ID == id {
+			ws.Unfolded = !ws.Unfolded
+			_ = s.st.Save()
+			return ws.Unfolded, nil
+		}
 		for _, w := range ws.Windows {
 			if w.ID != id {
 				continue
@@ -31,7 +36,7 @@ func (s *server) toggleFold(id string) (bool, error) {
 			return w.Unfolded, nil
 		}
 	}
-	return false, fmt.Errorf("no window %q", id)
+	return false, fmt.Errorf("no window or workspace %q", id)
 }
 
 // paneInTreeLocked reports whether id is a pane in this session's layout, in

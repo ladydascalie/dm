@@ -353,79 +353,62 @@ detach.
 ## Sidebar
 
 The left columns of the screen show a sidebar when the session asks for one.
-It is a tree of workspaces, windows and panes. A workspace row leads with a
-bar in the workspace's own accent colour, then its name in bold, then the
-pane count at the right edge in dim grey. The accent is one of six hues: a
-stable hash of the workspace id picks the preferred one, and the rail gives up
-to six live workspaces distinct hues. A workspace keeps its accent while the
-workspace list holds. One blank row separates workspace blocks.
+It is a flat list: a workspace row is a foldable header. Panes nest directly
+under it. There is no window row and no window note row. A workspace starts
+unfolded. A workspace row leads with a caret in the workspace's own accent
+colour, then its name in bold, then the pane count at the right edge in dim
+grey. The accent is one of six hues: a stable hash of the workspace id picks
+the preferred one, and the rail gives up to six live workspaces distinct hues.
+A workspace keeps its accent while the workspace list holds. One blank row
+separates workspace blocks.
 
-Each window follows with its fold caret and its folder: the pane's path below
-the repository root, the folder's own name when the pane sits at the root, and
-the folder name alone outside git. A pane that reports no directory falls back
-to the window name. Two spaces follow with the git branch in dim grey when it
-differs from the folder. The folder names the window, so it outranks the
-branch: a narrow rail drops the branch whole before it cuts the folder. The
-folder and the git state come from one pane: the window's focused pane when it
-is in a repository, else its first pane in a repository, else the focused pane,
-else the window's first pane. The right edge of that line carries the
-uncommitted change count: an amber dot when the tree is dirty, then `+N` in
-green and `-M` in red, with a zero side hidden, or `clean` in dim grey when
-nothing changed. A pane outside a repository gets no stats tail: a directory
-git never saw cannot be clean. A window whose pane has a status message gets a
-dim second line under its folder.
+An unfolded pane row labels itself with its recorded name, then the `app=` it
+last reported, then the pane id, with a state glyph in a colour per state beside
+the label. A pane counts as an agent when it has a recorded name or has spoken
+the status protocol at least once; the rest are shells. An agent row leads with
+a rocket icon (or a `▎` bar without Nerd Fonts), a shell row with a terminal
+icon, and a dim shell row otherwise leaves those two cells blank, so the state
+glyph keeps its column. The report is sticky: `state=clear` does not demote an
+agent, and both the mark and the last `app=` are stored in the state file. The
+focused pane's row is highlighted.
 
-Windows start folded; click a window line or its second line to unfold or fold
-it, and the fold is stored in the state file. An unfolded pane row labels
-itself with its recorded name, then the `app=` it last reported, then the pane
-id, with a state glyph in a colour per state beside the label. A pane counts
-as an agent when it has a recorded name or has spoken the status protocol at
-least once; the rest are shells. An agent row leads with a rocket icon (or a
-`▎` bar without Nerd Fonts), a shell row with a terminal icon, and a dim shell
-row otherwise leaves those two cells blank, so the state glyph keeps its
-column. The report is sticky: `state=clear` does not demote an agent, and both
-the mark and the last `app=` are stored in the state file. The focused pane's
-row is highlighted, and a left click on a pane row focuses that pane.
+A left press on a workspace row focuses the first available pane in that
+workspace. A left press on the row's fold caret toggles the pane list without
+changing focus. A left press on a pane row focuses that pane. A pane in another
+window switches the active window as well. Double-clicking a pane row opens the
+inline rename prompt for that pane. Right click opens the row menu for the row
+under the pointer: rename, close, new, fold and focus, as the row allows. The
+menu takes its keys from the main keymap. The bottom row toggles the rail
+between full and thin.
 
-Left click focuses a pane or folds a window. Right click opens the row menu for
-the row under the pointer: rename, close, new, fold and focus, as the row
-allows. The menu takes its keys from the main keymap. The bottom row toggles
-the rail between full and thin.
+A pane keeps the server told where its shell is, so a `cd` moves the folder the
+rail shows and the folder the next pane, window or workspace opens in. The
+folder follows the shell, not the launch: a window created after a `cd` belongs
+where the shell went. A new window is named after the folder it starts in, and
+it starts in the folder of the pane it was created from; `rename-window`
+overrides the name. A window whose label is still the old positional number is
+renamed from its pane's folder when the session loads.
 
-A new window is named after the folder it starts in, and it starts in the
-folder of the pane it was created from; `rename-window` overrides the name. A
-window whose label is still the old positional number is renamed from its
-pane's folder when the session loads.
+A long label is cut with `…` so the pane count fits. The rail paints its own
+dark background. The built-in theme uses explicit RGB colours, not palette
+slots, and every label and glyph of it reaches WCAG AA contrast on both the
+rail and the focused row. Icons use Nerd Font code points when `fc-list` finds a
+Nerd font; `DM_NERD=1` forces them and `DM_NERD=0` falls back to the Unicode
+glyphs. The rail is 34 columns by default, at most a third of the screen and
+never wider than 46 columns; `set-rail` changes it. `prefix b` cycles the
+sidebar through three states: full, thin, and hidden. The thin rail is four
+columns: the agent bar, one state glyph per pane, and no names. It always lists
+panes, folded or not, and packs one row per pane, with no header, note or gap
+row. A hidden or thin sidebar remembers the last full width.
 
-A pane keeps the server told where its shell is, so a `cd` moves the folder
-the rail shows, the git state beside it, and the folder the next pane, window
-or workspace opens in. The folder follows the shell, not the launch: a window
-created after a `cd` belongs where the shell went.
+## Window tab bar
 
-A long label is cut with `…` so the right-aligned stats fit, and the branch is
-dropped first. When even that cannot, the rail draws no tail at all, never half
-a pair. The rail paints its own dark background. The built-in theme uses
-explicit RGB colours, not palette slots, and every label, glyph and stat of it
-reaches WCAG AA contrast on both the rail and the focused row. Icons use Nerd
-Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces them and
-`DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns by default,
-at most a third of the screen and never wider than 46 columns; `set-rail`
-changes it. `prefix b` cycles the sidebar through three states: full, thin, and
-hidden. The thin rail is four columns: the agent bar, one state glyph per pane,
-and no names. It always lists panes, folded or not, and packs one row per pane,
-with no header, note or gap row. A hidden or thin sidebar remembers the last
-full width.
-
-The rail's last column is a grab strip: drag it to resize the rail from four
-columns up to a third of the screen, capped at 46. A drag to the left collapses
-the rail to its thin form; hiding stays on `prefix b`. The rail's bottom row is
-a control: it shows a collapse mark on a full rail and an expand mark on the
-thin one. A click toggles full and thin, and expanding restores the last full
-width.
-
-In scrollback: `j`/`k` or arrows move a line, `PgUp`/`PgDn` a screen, `g`/`G`
-jump to the top or the live view, `q`, `esc` or `[` return to live. The wheel
-enters scrollback directly.
+One row sits above the pane area, to the right of the rail. It is always
+visible. One tab per window in the active workspace, in window order. The tab
+label is the window's name. The active tab is highlighted. Clicking a tab
+selects that window. Double-clicking a tab opens the inline rename prompt for
+that window. The server reserves the tab bar row when it computes pane
+rectangles, so pane boxes start below it.
 
 ## Status bar
 
