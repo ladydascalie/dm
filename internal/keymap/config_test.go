@@ -922,3 +922,67 @@ func TestConfigThemeDefaultPath(t *testing.T) {
 		t.Fatalf("theme = %+v, want %+v", cfg.Theme(), want)
 	}
 }
+
+// TestConfigDefaultFold proves the default fold setting: absent means folded,
+// "fold" means folded and "unfold" means unfolded.
+func TestConfigDefaultFold(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"absent", `prefix "ctrl+b"`, false},
+		{"fold", `default-fold "fold"`, false},
+		{"unfold", `default-fold "unfold"`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.DefaultFold(); got != c.want {
+				t.Fatalf("DefaultFold() = %v, want %v", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().DefaultFold(); got {
+		t.Fatal("LoadDefault().DefaultFold() = true, want false")
+	}
+}
+
+// TestConfigDefaultFoldDuplicate proves a second default-fold node fails with
+// its line.
+func TestConfigDefaultFoldDuplicate(t *testing.T) {
+	_, err := parseConfig("default-fold \"fold\"\ndefault-fold \"unfold\"")
+	if err == nil {
+		t.Fatal("parseConfig accepted two default-fold nodes")
+	}
+	if !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "duplicate default-fold node") {
+		t.Fatalf("error = %q, want a duplicate on line 2", err)
+	}
+}
+
+// TestConfigDefaultFoldMalformed proves a value outside fold and unfold fails
+// with its line, and a missing value fails.
+func TestConfigDefaultFoldMalformed(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"unknown value", `default-fold "bogus"`, `default-fold must be "fold" or "unfold", got "bogus"`},
+		{"missing value", `default-fold`, "expected quoted value after default-fold"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parseConfig(c.src)
+			if err == nil {
+				t.Fatal("parseConfig accepted a malformed default-fold node")
+			}
+			if !strings.Contains(err.Error(), "line 1") || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error = %q, want line 1 and %q", err, c.want)
+			}
+		})
+	}
+}

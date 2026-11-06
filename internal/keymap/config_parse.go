@@ -26,6 +26,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 				return fmt.Errorf("line %d: malformed prefix node", t.Line)
 			}
 			i += 2
+		case "default-fold":
+			if cfg.defaultFoldSet {
+				return fmt.Errorf("line %d: duplicate default-fold node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected quoted value after default-fold", t.Line)
+			}
+			value := toks[i+1].Value
+			switch value {
+			case "fold":
+				cfg.defaultFold = false
+			case "unfold":
+				cfg.defaultFold = true
+			default:
+				return fmt.Errorf("line %d: default-fold must be \"fold\" or \"unfold\", got %q", toks[i+1].Line, value)
+			}
+			cfg.defaultFoldSet = true
+			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
 				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
@@ -223,6 +241,7 @@ const defaultConfigKDL = `// dm keybinding defaults.
 // Add help "Section" after a key to move its row in the help box.
 
 prefix "ctrl+b"
+default-fold "fold"
 
 keymap "main" {
     "send-prefix" "prefix"

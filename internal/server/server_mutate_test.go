@@ -1,0 +1,110 @@
+package server
+
+import (
+	"net"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+
+	"dm/internal/keymap"
+	"dm/internal/layout"
+	"dm/internal/paths"
+	"dm/internal/session"
+	"dm/internal/wire"
+)
+
+// TestNewWindowTakesDefaultFold proves a new window's Unfolded follows the
+// config's default-fold setting. It starts a fake pane daemon so ensurePane
+// adopts instead of spawning a real shell.
+func TestNewWindowTakesDefaultFold(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"fold", `default-fold "fold"`, false},
+		{"unfold", `default-fold "unfold"`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("DM_STATE", t.TempDir())
+			cfg, err := keymap.ParseConfig(c.src)
+			if err != nil {
+				t.Fatalf("ParseConfig: %v", err)
+			}
+			st := session.NewState("fold")
+			// Keep a live pane in w1 so closing the fake pane in w2 does not
+			// end the session in the middle of the test.
+			w1 := st.Workspaces[0].Windows[0]
+			w1.Root = &layout.Node{Pane: "w1p1"}
+			w1.Focus = "w1p1"
+			st.Panes["w1p1"] = &session.PaneState{Cwd: "/tmp"}
+			s := railServer(st)
+			s.cfg = cfg
+
+			const paneID = "w2p1"
+			sock := paths.PaneSock(st.Name, paneID)
+			if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			ln, err := net.Listen("unix", sock)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var mu sync.Mutex
+			var conns []net.Conn
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				for {
+					conn, err := ln.Accept()
+					if err != nil {
+						return
+					}
+					mu.Lock()
+					conns = append(conns, conn)
+					mu.Unlock()
+					go func(c net.Conn) {
+						defer c.Close()
+						for {
+							m, err := wire.ReadMsg(c)
+							if err != nil {
+								return
+							}
+							if m.Type == "req" {
+								_ = wire.WriteMsg(c, wire.Msg{Type: "resp", OK: true, ID: m.ID})
+							}
+						}
+					}(conn)
+				}
+			}()
+			defer func() {
+				_ = ln.Close()
+				<-done
+				mu.Lock()
+				for _, c := range conns {
+					_ = c.Close()
+				}
+				conns = nil
+				mu.Unlock()
+			}()
+
+			wid, pid, err := s.newWindow("", "test", "/tmp", false)
+			if err != nil {
+				t.Fatalf("newWindow: %v", err)
+			}
+			if wid != "w2" || pid != paneID {
+				t.Fatalf("newWindow ids = %q/%q, want w2/%s", wid, pid, paneID)
+			}
+			ws := st.Workspaces[0]
+			if len(ws.Windows) != 2 {
+				t.Fatalf("windows = %d, want 2", len(ws.Windows))
+			}
+			if got := ws.Windows[1].Unfolded; got != c.want {
+				t.Fatalf("Unfolded = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
