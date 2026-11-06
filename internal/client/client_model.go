@@ -140,6 +140,12 @@ type tui struct {
 	railDragAt   time.Time
 	railWidth    int
 
+	// lastTabClick and lastTabClickPos track the last left press on a tab bar
+	// tab, so a second press in the same cell within the double-click window
+	// opens the window rename prompt instead of selecting the window.
+	lastTabClick    time.Time
+	lastTabClickPos struct{ X, Y int }
+
 	// sw is the floating native switcher, nil when closed. swX and swY are
 	// the query cursor cell its last paint asked for, swAt and swPane are the
 	// last preview request, and swID numbers the next one.
@@ -203,6 +209,7 @@ type lastFrame struct {
 	grip   paint
 	div    paint
 	rail   paint
+	tabbar paint
 	bar    paint
 	toasts paint
 	pal    paint

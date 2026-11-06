@@ -1949,7 +1949,7 @@ func TestPadHitCrossesChildBorders(t *testing.T) {
 		Dir: "col", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, inner},
 	}
-	area := layout.Rect{X: 0, Y: 0, W: 80, H: 24}
+	area := layout.Rect{X: 0, Y: 1, W: 80, H: 23}
 	boxes := layout.ChildBoxRects(root, area)
 	pad := layout.PadRect(root, boxes, 0)
 	ib := layout.ChildBoxRects(inner, boxes[1])
@@ -1994,15 +1994,15 @@ func TestDividerGripsAlwaysVisible(t *testing.T) {
 	vt.Lock()
 	defer vt.Unlock()
 	// Horizontal divider midpoint: both cells.
-	for _, y := range []int{13, 14} {
+	for _, y := range []int{14, 15} {
 		if g := vt.Cell(63, y); g.Char != '•' {
 			t.Fatalf("horizontal grip at 63,%d = %q", y, g.Char)
 		}
 	}
 	// Vertical divider midpoint: both cells.
 	for _, x := range []int{62, 63} {
-		if g := vt.Cell(x, 21); g.Char != '•' {
-			t.Fatalf("vertical grip at %d,21 = %q", x, g.Char)
+		if g := vt.Cell(x, 22); g.Char != '•' {
+			t.Fatalf("vertical grip at %d,22 = %q", x, g.Char)
 		}
 	}
 	if n := strings.Count(buf.String(), "•"); n != 4 {
@@ -2018,7 +2018,7 @@ func TestDividerHover(t *testing.T) {
 	snap := testutil.TestSnapshot(row, 100, 30, nil)
 	snap.Focus = "a"
 	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
-	boxes := layout.ChildBoxRects(row, layout.PaneArea(100, 30))
+	boxes := layout.ChildBoxRects(row, layout.PaneAreaForWithTabBar(100, 30, 0))
 	zone := layout.PadRect(row, boxes, 0)
 	// SGR button 35 is pointer motion with no button.
 	tui.handleMouse(mouseEvent{btn: 35, x: zone.X + 1, y: zone.Y + 2})
@@ -2066,7 +2066,7 @@ func TestRailDragUsesOffset(t *testing.T) {
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 	}
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 20, Root: root}
-	area := layout.PaneAreaFor(100, 30, 20)
+	area := layout.PaneAreaForWithTabBar(100, 30, 20)
 	boxes := layout.ChildBoxRects(root, area)
 	pad := layout.PadRect(root, boxes, 0)
 	ds, ok := dragPress(snap, pad.X, pad.Y+1)
@@ -2903,7 +2903,7 @@ func TestDragPress(t *testing.T) {
 	snap := testutil.TestSnapshot(row, 100, 30, nil)
 	ds, ok := dragPress(snap, 49, 5)
 	if !ok || ds.first != "a" || ds.second != "b" || ds.axis != "row" ||
-		ds.rect != layout.PaneArea(100, 30) {
+		ds.rect != layout.PaneAreaForWithTabBar(100, 30, 0) {
 		t.Fatalf("divider press: %+v ok=%v", ds, ok)
 	}
 	if _, ok := dragPress(snap, 10, 5); ok {
@@ -2930,7 +2930,7 @@ func TestDragPress(t *testing.T) {
 	}}
 	snap = testutil.TestSnapshot(same, 100, 30, nil)
 	// The root is what layout hands its tree: the whole pane area.
-	want := layout.PaneArea(snap.Cols, snap.Rows)
+	want := layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail)
 	ds, ok = dragPress(snap, 49, 5)
 	if !ok || ds.first != "a" || ds.second != "b" || ds.rect != want {
 		t.Fatalf("same-axis outer press: %+v ok=%v, want rect %v", ds, ok, want)
@@ -3593,7 +3593,7 @@ func (f *zoomFrameTUI) zoom(id string) {
 	f.snap.Zoom = id
 	relayout(f.snap)
 	if id != "" {
-		area := layout.PaneAreaFor(f.snap.Cols, f.snap.Rows, f.snap.Rail)
+		area := layout.PaneAreaForWithTabBar(f.snap.Cols, f.snap.Rows, f.snap.Rail)
 		for i := range f.snap.Panes {
 			if f.snap.Panes[i].ID == id {
 				f.snap.Panes[i].Rect = layout.InsetBox(area)
@@ -3642,7 +3642,7 @@ func TestZoomFrameFilter(t *testing.T) {
 	if !strings.Contains(first, "A-MARK") || !strings.Contains(first, "B-MARK") {
 		t.Fatalf("the split frame painted one pane: %q", first)
 	}
-	area := layout.PaneAreaFor(f.snap.Cols, f.snap.Rows, f.snap.Rail)
+	area := layout.PaneAreaForWithTabBar(f.snap.Cols, f.snap.Rows, f.snap.Rail)
 	scr := vt10x.New(vt10x.WithSize(f.snap.Cols, f.snap.Rows))
 	if _, err := scr.Write([]byte(first)); err != nil {
 		t.Fatalf("write frame: %v", err)
