@@ -1,0 +1,53 @@
+// high-contrast: black background, white text, saturated accents.
+// Every foreground clears WCAG AAA on the rail background.
+
+palette {
+  "rail-bg" "#000000"
+  "rail-focus-bg" "#1a1a1a"
+  "rail-text" "#ffffff"
+  "rail-dim" "#c8c8c8"
+  "rail-header" "#ffffff"
+  "rail-window" "#e0e0e0"
+  "rail-diff-add" "#00ff66"
+  "rail-diff-del" "#ff3355"
+  "rail-working" "#ffd000"
+  "bar-accent" "#00d0ff"
+}
+
+accents {
+  "accent-1" "#ff66ff"
+  "accent-2" "#00ffff"
+  "accent-3" "#ff99cc"
+  "accent-4" "#6699ff"
+  "accent-5" "#ffaa00"
+  "accent-6" "#66ff99"
+}
+
+glyphs {
+  "grip" "•"
+  "divider-row" "━"
+  "divider-col" "┃"
+  "border-top-left" "┌"
+  "border-top-right" "┐"
+  "border-bottom-left" "└"
+  "border-bottom-right" "┘"
+  "border-horizontal" "─"
+  "border-vertical" "│"
+  "border-tee-left" "├"
+  "border-tee-right" "┤"
+  "fold-open" "▾"
+  "fold-closed" "▸"
+  "active-mark" "▸"
+  "workspace-bar" "▌"
+  "dirty" "●"
+}
+
+states {
+  "working" { "glyph" "●" "colour" "#ffd000" }
+  "idle" { "glyph" "○" "colour" "#00ffff" }
+  "blocked" { "glyph" "▲" "colour" "#ff3355" }
+  "done" { "glyph" "✓" "colour" "#00ff66" }
+  "error" { "glyph" "✕" "colour" "#ff66ff" }
+  "unknown" { "glyph" "?" "colour" "#c8c8c8" }
+  "shell" { "glyph" "▶" "colour" "#c8c8c8" }
+}

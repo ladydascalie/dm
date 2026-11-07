@@ -1,0 +1,53 @@
+// light: a paper theme. Light rail background, dark text, dark accents.
+// This is a real light theme, not the dark one with two colours flipped.
+
+palette {
+  "rail-bg" "#f4f4ee"
+  "rail-focus-bg" "#e4e4da"
+  "rail-text" "#1c1c22"
+  "rail-dim" "#5c5c68"
+  "rail-header" "#44444e"
+  "rail-window" "#50505c"
+  "rail-diff-add" "#1f7a2e"
+  "rail-diff-del" "#b02020"
+  "rail-working" "#8a5a00"
+  "bar-accent" "#1f5f9e"
+}
+
+accents {
+  "accent-1" "#6a3fb0"
+  "accent-2" "#0f6f80"
+  "accent-3" "#a0308a"
+  "accent-4" "#2a4fb0"
+  "accent-5" "#a05a10"
+  "accent-6" "#2a7a3a"
+}
+
+glyphs {
+  "grip" "•"
+  "divider-row" "━"
+  "divider-col" "┃"
+  "border-top-left" "┌"
+  "border-top-right" "┐"
+  "border-bottom-left" "└"
+  "border-bottom-right" "┘"
+  "border-horizontal" "─"
+  "border-vertical" "│"
+  "border-tee-left" "├"
+  "border-tee-right" "┤"
+  "fold-open" "▾"
+  "fold-closed" "▸"
+  "active-mark" "▸"
+  "workspace-bar" "▌"
+  "dirty" "●"
+}
+
+states {
+  "working" { "glyph" "●" "colour" "#8a5a00" }
+  "idle" { "glyph" "○" "colour" "#0f6f80" }
+  "blocked" { "glyph" "▲" "colour" "#b02020" }
+  "done" { "glyph" "✓" "colour" "#1f7a2e" }
+  "error" { "glyph" "✕" "colour" "#a0308a" }
+  "unknown" { "glyph" "?" "colour" "#5c5c68" }
+  "shell" { "glyph" "▶" "colour" "#5c5c68" }
+}
