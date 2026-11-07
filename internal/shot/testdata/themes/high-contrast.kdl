@@ -1,5 +1,6 @@
 // high-contrast: black background, white text, saturated accents.
-// Every foreground clears WCAG AAA on the rail background.
+// Every foreground clears WCAG AAA (7:1) on the rail background except
+// rail-diff-del, which is 5.86:1 (AA). The red is a deliberate choice.
 
 palette {
   "rail-bg" "#000000"
