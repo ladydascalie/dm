@@ -49,3 +49,14 @@ carry SGR attributes.
   CJK characters, a three-person ZWJ family emoji, a combining acute, and a line
   with italic, faint, strikethrough and a curly underline. This is the width
   invariant's fixture.
+
+## frames/
+
+One `<scene>.bin` per scene: the exact frame bytes the client harness drew for
+that scene, with the scene's own theme. `TestRowWidth` and `TestGoldenCJK`
+replay these bytes into a vt10x screen, so the width invariant is measured on
+dm's own serialiser output, not on a hand-built grid.
+
+Regenerate them with the same harness that regenerates the goldens: build the
+scene tui, call `draw()`, and write the frame buffer. The goldens and the
+frames must move together when a scene changes.
