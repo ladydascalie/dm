@@ -105,15 +105,29 @@ type AllPane struct {
 	WorkspaceName     string `json:"workspaceName"`
 	Window            string `json:"window"`
 	WindowName        string `json:"windowName"`
-	Focus             bool   `json:"focus,omitempty"`
-	WorkspaceActive   bool   `json:"workspaceActive,omitempty"`
-	WindowActive      bool   `json:"windowActive,omitempty"`
+	// WindowNamed is true when the user set the window's name with
+	// rename-window.
+	WindowNamed     bool `json:"windowNamed,omitempty"`
+	Focus           bool `json:"focus,omitempty"`
+	WorkspaceActive bool `json:"workspaceActive,omitempty"`
+	WindowActive    bool `json:"windowActive,omitempty"`
+}
+
+// WindowInfo is one window in the active workspace: its id, its name and
+// whether the user named it.
+type WindowInfo struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Named bool   `json:"named,omitempty"`
 }
 
 type Snapshot struct {
-	Session      string     `json:"session"`
-	Workspace    string     `json:"workspace"`
-	Windows      []string   `json:"windows"`
+	Session   string       `json:"session"`
+	Workspace string       `json:"workspace"`
+	Windows   []WindowInfo `json:"windows"`
+	// WindowLabel is the client's window label template. The server leaves it
+	// empty; the client sets it from config before drawing.
+	WindowLabel  string     `json:"-"`
 	ActiveWindow int        `json:"activeWindow"`
 	Panes        []PaneInfo `json:"panes"`
 	// All lists every pane in the session; Panes is the active window only.

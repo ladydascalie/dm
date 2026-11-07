@@ -615,10 +615,15 @@ func TestWindowAutoName(t *testing.T) {
 	h.run("new", "-s", "auto")
 	cwd, _ := os.Getwd()
 	want := folderName(cwd)
-	windows := func() []any {
+	windows := func() []string {
 		tree := h.rpc("auto", map[string]any{"action": "list"})
 		snap := tree["snapshot"].(map[string]any)
-		return snap["windows"].([]any)
+		raw := snap["windows"].([]any)
+		out := make([]string, len(raw))
+		for i, w := range raw {
+			out[i] = w.(map[string]any)["name"].(string)
+		}
+		return out
 	}
 	if got := windows(); len(got) != 1 || got[0] != want {
 		t.Fatalf("initial windows = %v, want [%q]", got, want)

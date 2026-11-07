@@ -370,6 +370,7 @@ func (s *server) renameWindow(id, name string) error {
 		for _, w := range ws.Windows {
 			if w.ID == id {
 				w.Name = name
+				w.Named = true
 				return nil
 			}
 		}

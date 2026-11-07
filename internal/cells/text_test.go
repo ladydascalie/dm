@@ -92,6 +92,27 @@ func TestTextPadCountsCells(t *testing.T) {
 	}
 }
 
+func TestTextCenterBalancesThePadding(t *testing.T) {
+	if got := Center("one", 7); got != "  one  " {
+		t.Errorf("Center(%q, 7) = %q, want %q", "one", got, "  one  ")
+	}
+	// An odd gap puts the extra cell on the right.
+	if got := Center("one", 8); got != "  one   " {
+		t.Errorf("Center(%q, 8) = %q, want %q", "one", got, "  one   ")
+	}
+	// A long string is elided, never over the budget.
+	if got := Center("label", 4); got != "lab…" {
+		t.Errorf("Center(%q, 4) = %q, want %q", "label", got, "lab…")
+	}
+	for _, c := range textCases() {
+		for budget := 0; budget <= c.cells+2; budget++ {
+			if n := Cells(Center(c.s, budget)); n > budget {
+				t.Errorf("%s: Center(%q, %d) paints %d cells", c.name, c.s, budget, n)
+			}
+		}
+	}
+}
+
 func TestTextClipTailKeepsTheEnd(t *testing.T) {
 	cases := []struct {
 		s      string

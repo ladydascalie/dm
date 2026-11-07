@@ -101,7 +101,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 	snap := &wire.Snapshot{
 		Session:      s.st.Name,
 		Workspace:    s.st.ActiveWorkspace().Name,
-		Windows:      []string{},
+		Windows:      []wire.WindowInfo{},
 		ActiveWindow: s.st.ActiveWorkspace().Active,
 		Focus:        win.Focus,
 		Cols:         s.cols,
@@ -112,7 +112,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		Root:         win.Root,
 	}
 	for _, w := range s.st.ActiveWorkspace().Windows {
-		snap.Windows = append(snap.Windows, w.Name)
+		snap.Windows = append(snap.Windows, wire.WindowInfo{ID: w.ID, Name: w.Name, Named: w.Named})
 	}
 	for _, id := range layout.AllPanes(win.Root) {
 		pc := s.panes[id]
@@ -173,7 +173,7 @@ func (s *server) allPanesLocked() []wire.AllPane {
 			for _, id := range layout.AllPanes(w.Root) {
 				info := wire.AllPane{
 					ID: id, Workspace: ws.ID, WorkspaceName: ws.Name,
-					Window: w.ID, WindowName: w.Name,
+					Window: w.ID, WindowName: w.Name, WindowNamed: w.Named,
 					WorkspaceActive: wsActive, WindowActive: winActive,
 					Focus: winActive && id == w.Focus,
 				}

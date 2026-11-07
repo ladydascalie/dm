@@ -15,6 +15,7 @@ import (
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
+	"dm/internal/wlabel"
 )
 
 // RailKind is the row type the sidebar paints: a workspace row, a window line,
@@ -34,6 +35,7 @@ const (
 type RailItem struct {
 	Kind       RailKind
 	Text       string
+	Label      string
 	Workspace  string
 	Folder     string
 	Cwd        string
@@ -55,6 +57,51 @@ type RailItem struct {
 	Folded     bool
 	Focus      bool
 	Active     bool
+}
+
+// WindowSource returns the pane a window's label and git context come from:
+// the focused pane when it carries a branch, else the first pane in the window
+// that carries a branch, else the focused pane, else the window's first pane.
+func WindowSource(snap *wire.Snapshot, window string) (wire.AllPane, bool) {
+	var focus, first, withBranch *wire.AllPane
+	for i := range snap.All {
+		p := &snap.All[i]
+		if p.Window != window {
+			continue
+		}
+		if first == nil {
+			first = p
+		}
+		if p.Focus {
+			focus = p
+		}
+		if p.Branch != "" && withBranch == nil {
+			withBranch = p
+		}
+	}
+	if focus != nil && focus.Branch != "" {
+		return *focus, true
+	}
+	if withBranch != nil {
+		return *withBranch, true
+	}
+	if focus != nil {
+		return *focus, true
+	}
+	if first != nil {
+		return *first, true
+	}
+	return wire.AllPane{}, false
+}
+
+// WindowVars returns the label template variables for a window: its id and
+// name, and the source pane's working directory and repository root.
+func WindowVars(snap *wire.Snapshot, w wire.WindowInfo) wlabel.Vars {
+	v := wlabel.Vars{ID: w.ID, Name: w.Name, Named: w.Named}
+	if p, ok := WindowSource(snap, w.ID); ok {
+		v.Cwd, v.Root = p.Cwd, p.Root
+	}
+	return v
 }
 
 // RailItems flattens a snapshot into sidebar rows in the server's order: a
@@ -168,6 +215,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 				item.Deleted = src.Deleted
 				item.Message = src.Message
 			}
+			item.Label = wlabel.Render(snap.WindowLabel, WindowVars(snap, wire.WindowInfo{ID: p.Window, Name: p.WindowName, Named: p.WindowNamed}))
 			out = append(out, item)
 			if item.Message != "" && p.WindowUnfolded {
 				out = append(out, RailItem{
@@ -405,9 +453,12 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 					caret = g.NerdFoldClosed
 				}
 			}
-			// The folder names the window. A window whose panes reported no
+			// The label template names the window. A window with no rendered
 			// directory falls back to the window name.
-			label := it.Folder
+			label := it.Label
+			if label == "" {
+				label = it.Folder
+			}
 			if label == "" {
 				label = it.Text
 			}

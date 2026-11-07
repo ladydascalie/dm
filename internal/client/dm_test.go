@@ -873,7 +873,7 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 	snap := &wire.Snapshot{
 		Session:   strings.Repeat("日本語", 10),
 		Workspace: strings.Repeat("作業", 6),
-		Windows:   []string{"一"},
+		Windows:   testWindows("一"),
 		Cols:      20,
 		Rows:      5,
 		Focus:     "w1p1",
@@ -1134,7 +1134,7 @@ func TestBarPinned(t *testing.T) {
 	snap := &wire.Snapshot{
 		Session:      "long-session-name",
 		Workspace:    "a-very-long-workspace-name",
-		Windows:      []string{"a-very-long-window-name-one", "two"},
+		Windows:      testWindows("a-very-long-window-name-one", "two"),
 		ActiveWindow: 0,
 		Focus:        "w1p1",
 		Panes:        []wire.PaneInfo{{ID: "w1p1", Name: "a-long-pane-name", Status: "working"}},
@@ -1297,7 +1297,7 @@ func TestBarWideRunes(t *testing.T) {
 	snap := &wire.Snapshot{
 		Session:      "日本語セッション",
 		Workspace:    "作業ディレクトリ",
-		Windows:      []string{"一二三", "四五六"},
+		Windows:      testWindows("一二三", "四五六"),
 		ActiveWindow: 0,
 		Focus:        "w1p1",
 		Panes:        []wire.PaneInfo{{ID: "w1p1", Name: "日本語", Status: "working"}},
@@ -2270,7 +2270,7 @@ func TestDrawMenu(t *testing.T) {
 // the previous frame survives and the row reaches its final column.
 func TestBarPadsToWidth(t *testing.T) {
 	snap := &wire.Snapshot{
-		Session: "dev", Workspace: "work", Windows: []string{"one", "two"},
+		Session: "dev", Workspace: "work", Windows: testWindows("one", "two"),
 		ActiveWindow: 0, Focus: "w1p1",
 		Panes: []wire.PaneInfo{{ID: "w1p1", Name: "bash"}},
 		All:   []wire.AllPane{{ID: "w1p1", Agent: false}},
@@ -2823,7 +2823,7 @@ func TestReloadActionReadsConfigAndTheme(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	cfgDir := filepath.Join(dir, "dm")
-	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	tui := &tui{keymap: keymap.LoadDefault()}
@@ -2834,7 +2834,7 @@ keymap "main" {
     "split-right" "S"
     "reload" "ctrl+r"
 }
-`), 0600); err != nil {
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeTheme(t, cfgDir, "night", `palette { "rail-bg" "#010203" }`)
@@ -2866,7 +2866,7 @@ func TestReloadActionKeepsSettingsOnBadConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	cfgDir := filepath.Join(dir, "dm")
-	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(cfgDir, "config.kdl")
@@ -2875,7 +2875,7 @@ keymap "main" {
     "split-right" "S"
     "reload" "ctrl+r"
 }
-`), 0600); err != nil {
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writeTheme(t, cfgDir, "old", `palette { "rail-bg" "#040506" }`)
@@ -2886,7 +2886,7 @@ keymap "main" {
 	oldTheme := oldCfg.Theme()
 	tui := &tui{keymap: oldCfg, th: &oldTheme}
 
-	if err := os.WriteFile(path, []byte(`bogus "x"`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`bogus "x"`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	feed(tui, "\x02\x12")
@@ -3017,14 +3017,16 @@ type zoomFrameTUI struct {
 func newZoomFrameTUI(t *testing.T) *zoomFrameTUI {
 	t.Helper()
 	const cols, rows, rail = 100, 20, 20
-	root := &layout.Node{Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
+	root := &layout.Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
+	}
 	snap := testutil.TestSnapshot(root, cols, rows, nil)
 	snap.Rail = rail
 	snap.Focus = "b"
 	snap.Session = "one"
 	snap.Workspace = "s1"
-	snap.Windows = []string{"main"}
+	snap.Windows = testWindows("main")
 	for i := range snap.Panes {
 		snap.Panes[i].Name = snap.Panes[i].ID + "-name"
 	}

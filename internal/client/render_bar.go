@@ -13,6 +13,7 @@ import (
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/wire"
+	"dm/internal/wlabel"
 )
 
 // drawMenu paints the right-click menu over the panes. The panel owns the border,
@@ -159,8 +160,8 @@ func barLeftFor(th theme.Theme, snap *wire.Snapshot) *barLeft {
 		showStat:  true,
 		showZoom:  snap.Zoom != "",
 	}
-	for i, name := range snap.Windows {
-		l.windows = append(l.windows, barWindow{num: i + 1, name: name, active: i == snap.ActiveWindow})
+	for i, w := range snap.Windows {
+		l.windows = append(l.windows, barWindow{num: i + 1, name: wlabel.Render(snap.WindowLabel, rail.WindowVars(snap, w)), active: i == snap.ActiveWindow})
 	}
 	l.focus = barFocus(th, snap)
 	return l

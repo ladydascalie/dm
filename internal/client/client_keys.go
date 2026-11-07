@@ -2,13 +2,14 @@ package client
 
 import (
 	"bytes"
-	"dm/internal/keymap"
-	"dm/internal/rail"
-	"dm/internal/wire"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"dm/internal/keymap"
+	"dm/internal/rail"
+	"dm/internal/wire"
 )
 
 // menu is one open context menu: where it sits, its title, its items and the
@@ -536,6 +537,9 @@ func (t *tui) reload() error {
 		return err
 	}
 	t.keymap = cfg
+	if t.snap != nil {
+		t.snap.WindowLabel = cfg.WindowLabel()
+	}
 	th := cfg.Theme()
 	t.th = &th
 	t.dirty = true

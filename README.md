@@ -362,13 +362,13 @@ workspaces distinct hues. A workspace keeps its accent while the workspace list
 holds. One blank row separates workspace blocks.
 
 Under an unfolded workspace, each window gets a window row. It leads with a
-caret at the second indent, then the folder of its source pane, then the branch
-in dim grey, then the dirty counts at the right edge. A pane that reports no
-directory falls back to the window name. The source pane is the focused pane
-when it carries a branch, else the first pane in the window that carries a
-branch, else the focused pane, else the window's first pane. When the source
-pane has a commit message, a dim note row sits directly under the window row.
-The window's pane rows follow when the window is unfolded.
+caret at the second indent, then the rendered window label, then the branch in
+dim grey, then the dirty counts at the right edge. A window with no rendered
+label falls back to its folder, then to its name. The source pane is the
+focused pane when it carries a branch, else the first pane in the window that
+carries a branch, else the focused pane, else the window's first pane. When
+the source pane has a commit message, a dim note row sits directly under the
+window row. The window's pane rows follow when the window is unfolded.
 
 Fold is two-level. A folded workspace hides its windows and panes and leaves
 only the workspace row. A folded window keeps its row and hides only its panes
@@ -428,22 +428,45 @@ the rail to its thin form; hiding stays on `prefix b`.
 
 One row sits above the pane area, to the right of the rail. It is always
 visible. One tab per window in the active workspace, in window order. The tab
-label is the window's name. The active tab is highlighted. Clicking a tab
-selects that window. Double-clicking a tab opens the inline rename prompt for
-that window. The server reserves the tab bar row when it computes pane
-rectangles, so pane boxes start below it.
+label and the sidebar window row's leading label come from the `window-label`
+template. The active tab is highlighted. Clicking a tab selects that window.
+Double-clicking a tab opens the inline rename prompt for that window. The
+server reserves the tab bar row when it computes pane rectangles, so pane
+boxes start below it.
 
-A tab is its name plus one padding cell on each side, clamped to a minimum and
-a maximum width. The bounds come from `config.kdl`:
+A tab is its label plus one padding cell on each side, clamped to a minimum
+and a maximum width. The bounds come from `config.kdl`:
 
 ```kdl
 tab-min-width 8
 tab-max-width 20
 ```
 
-Both are cell counts and both default to the values above. A name wider than
+Both are cell counts and both default to the values above. A label wider than
 the maximum is cut with `…`. Set the two equal for a constant tab width. A
 minimum below 3 and a maximum below the minimum are config errors.
+
+The label template is a Go `text/template`. It applies to the tab bar, the
+sidebar window row's leading label and the status bar window chip, so one
+window reads the same in every place. The data is a struct with these fields:
+
+- `.ID`: the window id, e.g. `w1`.
+- `.Name`: the window name, the label `rename-window` edits.
+- `.Named`: true when the user set the name with `rename-window`.
+- `.Cwd`: the source pane's working directory.
+- `.Root`: the source pane's repository root, empty outside git.
+
+The `base` function prints the last path element: `{{base .Root}}` is the
+repository folder name. The default template shows the name of a named window
+and the id plus the repository folder of an unnamed one:
+
+```kdl
+window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
+```
+
+An unnamed window in `.../dm` reads `w1 dm`. A window the user renamed to
+`api` reads `api`. A template that does not parse, or that names an unknown
+field or function, is a config error.
 
 ## Status bar
 
@@ -453,8 +476,9 @@ neighbours. The order is fixed: the session name, the workspace name, one chip
 per window, the focus chip, then the pinned right block.
 
 - The session name is railText, then the workspace name in railHeader.
-- One chip per window, in window order, is `N name`, with the number being the
-  window's 1-based position in the window list. A chip keeps its number when a
+- One chip per window, in window order, is `N label`, where the label comes
+  from the `window-label` template. The number is the window's 1-based
+  position in the window list. A chip keeps its number when a
   neighbour is dropped. The active window's chip reads as active: a `▸` in
   barAccent, then the chip in bold railText, both on railFocusBG. The other
   chips are railDim on the ground.

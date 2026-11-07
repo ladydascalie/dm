@@ -24,6 +24,7 @@ func railRowSnap(rail int) *wire.Snapshot {
 	snap := &wire.Snapshot{
 		Cols: 100, Rows: 10, Rail: rail,
 		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
+		WindowLabel: "{{base .Cwd}}",
 	}
 	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Status: "working"}}
 	snap.All = []wire.AllPane{

@@ -36,6 +36,22 @@ func Pad(s string, budget int) string {
 	return s
 }
 
+// Center pads s on both sides to budget cells, with the odd cell going to the
+// right. A long s is elided first, so the result never paints more cells than
+// the budget.
+func Center(s string, budget int) string {
+	if budget <= 0 {
+		return ""
+	}
+	s = Elide(s, budget)
+	n := budget - Cells(s)
+	if n <= 0 {
+		return s
+	}
+	left := n / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", n-left)
+}
+
 // Elide shrinks s to budget cells and ends it with an ellipsis when it had to
 // cut. A string that already fits comes back untouched.
 func Elide(s string, budget int) string {

@@ -145,7 +145,7 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 // The bar keeps its content and no longer carries the toast suffix.
 func TestBarDropsToastSuffix(t *testing.T) {
 	snap := &wire.Snapshot{
-		Session: "main", Workspace: "main", Windows: []string{"1"}, Focus: "w1p1",
+		Session: "main", Workspace: "main", Windows: testWindows("1"), Focus: "w1p1",
 		Cols: 60, Rows: 24,
 		Panes: []wire.PaneInfo{{ID: "w1p1", Status: "working"}},
 	}

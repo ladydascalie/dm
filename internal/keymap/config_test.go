@@ -2,12 +2,14 @@ package keymap
 
 import (
 	"bytes"
-	"dm/internal/theme"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"dm/internal/theme"
+	"dm/internal/wlabel"
 )
 
 // configTestDefaultActions lists every action the frozen keymap header gives to
@@ -1021,6 +1023,29 @@ func TestConfigTabWidth(t *testing.T) {
 	}
 	if got := LoadDefault().TabMaxWidth(); got != defaultTabMax {
 		t.Fatalf("LoadDefault().TabMaxWidth() = %d, want %d", got, defaultTabMax)
+	}
+}
+
+// TestConfigWindowLabel proves the window label template: absent means the
+// built-in default, a quoted template is kept, and a bad template fails.
+func TestConfigWindowLabel(t *testing.T) {
+	if got := LoadDefault().WindowLabel(); got != wlabel.Default {
+		t.Fatalf("LoadDefault().WindowLabel() = %q, want %q", got, wlabel.Default)
+	}
+	cfg, err := parseConfig(`window-label "{{.ID}} - {{.Name}} - {{base .Cwd}}"`)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if got, want := cfg.WindowLabel(), "{{.ID}} - {{.Name}} - {{base .Cwd}}"; got != want {
+		t.Fatalf("WindowLabel() = %q, want %q", got, want)
+	}
+	for _, src := range []string{`window-label "{{.Nope}}"`, `window-label "{{base .Nope}}"`, `window-label "{{.Name"`} {
+		if _, err := parseConfig(src); err == nil {
+			t.Fatalf("parseConfig(%q) accepted a bad template", src)
+		}
+	}
+	if _, err := parseConfig("window-label \"{{.Name}}\"\nwindow-label \"{{.Name}}\""); err == nil {
+		t.Fatal("parseConfig accepted a duplicate window-label node")
 	}
 }
 

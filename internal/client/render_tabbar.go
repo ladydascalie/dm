@@ -8,12 +8,14 @@ import (
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/theme"
 	"dm/internal/wire"
+	"dm/internal/wlabel"
 )
 
-// tabWidth is the tab bar's tab width bounds in cells. A tab is its name plus
-// one padding cell on each side, clamped to these bounds.
+// tabWidth is the tab bar's tab width bounds in cells. A tab is its name
+// centered with at least one padding cell on each side, clamped to these bounds.
 type tabWidth struct {
 	Min int
 	Max int
@@ -46,6 +48,7 @@ func tabBarRect(snap *wire.Snapshot) layout.Rect {
 type tabBarItem struct {
 	Index int
 	Name  string
+	Label string
 	Rect  layout.Rect
 }
 
@@ -66,9 +69,9 @@ func tabCells(name string, tw tabWidth) int {
 }
 
 // tabBarItems lays out one tab per window in the active workspace. A tab is its
-// name plus one padding cell on each side, clamped to the configured width
-// bounds. Tabs run left to right and stop at the tab bar's right edge; a tab
-// that does not fit is dropped.
+// name centered with at least one padding cell on each side, clamped to the
+// configured width bounds. Tabs run left to right and stop at the bar's right
+// edge; a tab that does not fit is dropped.
 func tabBarItems(snap *wire.Snapshot, tw tabWidth) []tabBarItem {
 	bar := tabBarRect(snap)
 	if bar.W < 1 || bar.H < 1 {
@@ -76,17 +79,19 @@ func tabBarItems(snap *wire.Snapshot, tw tabWidth) []tabBarItem {
 	}
 	out := make([]tabBarItem, 0, len(snap.Windows))
 	x := bar.X
-	for i, name := range snap.Windows {
-		w := tabCells(name, tw)
-		if x+w > bar.X+bar.W {
+	for i, win := range snap.Windows {
+		label := wlabel.Render(snap.WindowLabel, rail.WindowVars(snap, win))
+		width := tabCells(label, tw)
+		if x+width > bar.X+bar.W {
 			break
 		}
 		out = append(out, tabBarItem{
 			Index: i,
-			Name:  name,
-			Rect:  layout.Rect{X: x, Y: bar.Y, W: w, H: bar.H},
+			Name:  win.Name,
+			Label: label,
+			Rect:  layout.Rect{X: x, Y: bar.Y, W: width, H: bar.H},
 		})
-		x += w
+		x += width
 	}
 	return out
 }
@@ -126,7 +131,7 @@ func DrawTabBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, tw tabWi
 			buf.WriteString("\x1b[0m" + p.RailBG.BG() + p.RailDim.FG())
 		}
 		fmt.Fprintf(buf, "\x1b[%d;%dH", it.Rect.Y+1, it.Rect.X+1)
-		buf.WriteString(cells.Pad(" "+cells.Elide(it.Name, it.Rect.W-2), it.Rect.W))
+		buf.WriteString(cells.Center(cells.Elide(it.Label, it.Rect.W-2), it.Rect.W))
 	}
 	buf.WriteString("\x1b[0m")
 }

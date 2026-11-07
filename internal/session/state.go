@@ -12,8 +12,11 @@ import (
 )
 
 type Window struct {
-	ID       string       `json:"id"`
-	Name     string       `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Named records that the user set the name with rename-window. A window
+	// created without a label starts unnamed.
+	Named    bool         `json:"named,omitempty"`
 	Root     *layout.Node `json:"root"`
 	Focus    string       `json:"focus"`
 	NextPane int          `json:"nextPane,omitempty"`

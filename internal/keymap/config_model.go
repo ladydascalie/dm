@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"dm/internal/theme"
+	"dm/internal/wlabel"
 )
 
 // MatchState tells the caller what Match found in the input buffer.
@@ -50,6 +51,8 @@ type Config struct {
 	defaultFoldSet bool
 	tabMin         int
 	tabMax         int
+	windowLabel    string
+	windowLabelSet bool
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -95,6 +98,16 @@ func (c *Config) TabMaxWidth() int {
 		return defaultTabMax
 	}
 	return c.tabMax
+}
+
+// WindowLabel returns the template the tab bar and the sidebar window row
+// render a window label with. A config without the node reports the built-in
+// default.
+func (c *Config) WindowLabel() string {
+	if c == nil || c.windowLabel == "" {
+		return wlabel.Default
+	}
+	return c.windowLabel
 }
 
 // PrefixBytes returns the bytes the prefix key sends.

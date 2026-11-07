@@ -112,7 +112,7 @@ func RailTestSnapshot(rail int) *wire.Snapshot {
 		Kids: []*layout.Node{{Pane: "w1p1"}, {Pane: "w1p2"}},
 	}
 	snap := &wire.Snapshot{
-		Session: "x", Workspace: "main", Windows: []string{"one"},
+		Session: "x", Workspace: "main", Windows: []wire.WindowInfo{{ID: "w1", Name: "one"}},
 		Cols: 100, Rows: 10, Rail: rail, Root: root, Focus: "w1p1",
 	}
 	rects := map[string]layout.Rect{}
@@ -165,7 +165,7 @@ func BarTestSnap(cols int) *wire.Snapshot {
 	return &wire.Snapshot{
 		Session:      "dev",
 		Workspace:    "workspace-a",
-		Windows:      []string{"api-server", "web", "docs"},
+		Windows:      []wire.WindowInfo{{ID: "w1", Name: "api-server", Named: true}, {ID: "w2", Name: "web", Named: true}, {ID: "w3", Name: "docs", Named: true}},
 		ActiveWindow: 1,
 		Focus:        "w1p2",
 		Panes: []wire.PaneInfo{

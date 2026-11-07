@@ -476,6 +476,7 @@ func (t *tui) apply(m wire.Msg) {
 	switch m.Type {
 	case "snapshot":
 		t.snap = m.Snap
+		t.snap.WindowLabel = t.km().WindowLabel()
 		t.updatePadHover(t.mouseX, t.mouseY)
 		// railWant remembers the last expanded width only, so a collapse or a
 		// hide does not replace it with the thin width or zero.

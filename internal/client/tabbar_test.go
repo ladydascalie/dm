@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -10,6 +11,15 @@ import (
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
+
+// testWindows builds a window list from names, with ids w1, w2, ...
+func testWindows(names ...string) []wire.WindowInfo {
+	out := make([]wire.WindowInfo, len(names))
+	for i, name := range names {
+		out[i] = wire.WindowInfo{ID: "w" + strconv.Itoa(i+1), Name: name, Named: true}
+	}
+	return out
+}
 
 func testTabWidth() tabWidth {
 	return tabWidthFor(builtinKeymap())
@@ -32,7 +42,7 @@ func TestTabBarRectShortScreen(t *testing.T) {
 }
 
 func TestTabBarItems(t *testing.T) {
-	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: []string{"one", "two"}}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two")}
 	items := tabBarItems(snap, testTabWidth())
 	if len(items) != 2 {
 		t.Fatalf("items = %d, want 2", len(items))
@@ -47,7 +57,7 @@ func TestTabBarItems(t *testing.T) {
 
 func TestTabBarItemsDropsOverflow(t *testing.T) {
 	// A tab bar too narrow for both names keeps only the first tab.
-	snap := &wire.Snapshot{Cols: 30, Rows: 20, Rail: 26, Windows: []string{"long-one", "two"}}
+	snap := &wire.Snapshot{Cols: 30, Rows: 20, Rail: 26, Windows: testWindows("long-one", "two")}
 	items := tabBarItems(snap, testTabWidth())
 	if len(items) != 0 {
 		t.Fatalf("items = %d, want 0 when the first tab does not fit", len(items))
@@ -55,7 +65,7 @@ func TestTabBarItemsDropsOverflow(t *testing.T) {
 }
 
 func TestTabBarAt(t *testing.T) {
-	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: []string{"one", "two"}}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two")}
 	it, ok := tabBarAt(snap, 26, 0, testTabWidth())
 	if !ok || it.Name != "one" {
 		t.Fatalf("tab bar hit = %+v ok=%v", it, ok)
@@ -70,7 +80,7 @@ func TestTabBarAt(t *testing.T) {
 
 func TestTabBarClickSendsSelectWindow(t *testing.T) {
 	tr, got := clientTUI(t, nil)
-	tr.snap.Windows = []string{"one", "two"}
+	tr.snap.Windows = testWindows("one", "two")
 	tr.snap.ActiveWindow = 0
 	tr.snap.Rail = 0
 	tr.snap.Cols = 100
@@ -85,7 +95,7 @@ func TestTabBarClickSendsSelectWindow(t *testing.T) {
 
 func TestTabBarDoubleClickOpensRename(t *testing.T) {
 	tr, got := clientTUI(t, nil)
-	tr.snap.Windows = []string{"one", "two"}
+	tr.snap.Windows = testWindows("one", "two")
 	tr.snap.ActiveWindow = 0
 	tr.snap.Rail = 0
 	tr.snap.Cols = 100
@@ -109,7 +119,7 @@ func TestTabBarDoubleClickOpensRename(t *testing.T) {
 // TestTabBarActiveItem pins the active tab: the tab whose index matches the
 // snapshot's active window is the one the painter highlights.
 func TestTabBarActiveItem(t *testing.T) {
-	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: []string{"one", "two"}, ActiveWindow: 1}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two"), ActiveWindow: 1}
 	items := tabBarItems(snap, testTabWidth())
 	if len(items) != 2 {
 		t.Fatalf("items = %d, want 2", len(items))
@@ -125,7 +135,7 @@ func TestTabBarActiveItem(t *testing.T) {
 // TestDrawTabBarHighlightsActive proves the painter shows every window name and
 // paints the active tab on the focus background.
 func TestDrawTabBarHighlightsActive(t *testing.T) {
-	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: []string{"one", "two"}, ActiveWindow: 1}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two"), ActiveWindow: 1}
 	var buf bytes.Buffer
 	DrawTabBar(&buf, theme.DefaultTheme(), snap, testTabWidth())
 	out := buf.String()
@@ -135,6 +145,27 @@ func TestDrawTabBarHighlightsActive(t *testing.T) {
 	focusBG := theme.DefaultTheme().Palette.RailFocusBG.BG()
 	if !strings.Contains(out, focusBG) {
 		t.Fatalf("active tab background missing: %q", out)
+	}
+}
+
+// TestTabBarUsesWindowLabelTemplate proves the tab bar renders the configured
+// template from the window and its source pane.
+func TestTabBarUsesWindowLabelTemplate(t *testing.T) {
+	snap := &wire.Snapshot{
+		Cols: 100, Rows: 20, Rail: 0,
+		Windows:     testWindows("one"),
+		WindowLabel: "{{.ID}} - {{.Name}} - {{base .Cwd}}",
+		All: []wire.AllPane{{
+			ID: "w1p1", Workspace: "s1", Window: "w1", WindowName: "one",
+			Cwd: "/work/dm", Root: "/work/dm", Focus: true,
+		}},
+	}
+	items := tabBarItems(snap, tabWidth{Min: 8, Max: 40})
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if got, want := items[0].Label, "w1 - one - dm"; got != want {
+		t.Fatalf("label = %q, want %q", got, want)
 	}
 }
 
@@ -177,7 +208,7 @@ func TestTabCellsClamps(t *testing.T) {
 // TestTabBarItemsClampedWidth proves every tab takes the clamped width, so the
 // bar has a known size.
 func TestTabBarItemsClampedWidth(t *testing.T) {
-	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Windows: []string{"a", "abcdefgh", "averylongwindowname"}}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Windows: testWindows("a", "abcdefgh", "averylongwindowname")}
 	items := tabBarItems(snap, tabWidth{Min: 8, Max: 10})
 	if len(items) != 3 {
 		t.Fatalf("items = %d, want 3", len(items))
@@ -193,7 +224,7 @@ func TestTabBarItemsClampedWidth(t *testing.T) {
 // TestDrawTabBarElidesLongName proves a name wider than the tab is cut with an
 // ellipsis and the tab keeps its width.
 func TestDrawTabBarElidesLongName(t *testing.T) {
-	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Windows: []string{"averylongwindowname"}}
+	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Windows: testWindows("averylongwindowname")}
 	var buf bytes.Buffer
 	DrawTabBar(&buf, theme.DefaultTheme(), snap, tabWidth{Min: 8, Max: 10})
 	out := buf.String()

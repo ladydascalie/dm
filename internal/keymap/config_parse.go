@@ -6,6 +6,7 @@ import (
 
 	"dm/internal/kdl"
 	"dm/internal/theme"
+	"dm/internal/wlabel"
 )
 
 // parseKeymaps walks the top-level tokens and fills cfg.modes. It rejects
@@ -65,6 +66,19 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			}
 			cfg.tabMax = n
 			i = next
+		case "window-label":
+			if cfg.windowLabelSet {
+				return fmt.Errorf("line %d: duplicate window-label node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted template after window-label", t.Line)
+			}
+			if err := wlabel.Check(toks[i+1].Value); err != nil {
+				return fmt.Errorf("line %d: %w", toks[i+1].Line, err)
+			}
+			cfg.windowLabel = toks[i+1].Value
+			cfg.windowLabelSet = true
+			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
 				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
@@ -295,6 +309,7 @@ prefix "ctrl+b"
 default-fold "fold"
 tab-min-width 8
 tab-max-width 20
+window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 
 keymap "main" {
     "send-prefix" "prefix"
