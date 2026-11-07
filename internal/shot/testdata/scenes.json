@@ -1,0 +1,107 @@
+{
+  "scenes": [
+    {
+      "name": "split",
+      "cols": 120,
+      "rows": 30,
+      "rail": 34,
+      "theme": "dark",
+      "root": { "dir": "row", "kids": [ { "pane": "a" }, { "pane": "b" } ] },
+      "panes": [
+        { "id": "a", "name": "alpha", "content": "alpha pane\n$ go test ./...\nok  dm/internal/shot" },
+        { "id": "b", "name": "beta", "content": "beta pane\n$ git status\nnothing to commit" }
+      ],
+      "windows": [ { "id": "w1", "name": "one" } ],
+      "activeWindow": 0,
+      "focus": "a",
+      "toast": "saved 3 files"
+    },
+    {
+      "name": "float",
+      "cols": 120,
+      "rows": 30,
+      "rail": 34,
+      "theme": "light",
+      "root": { "dir": "row", "kids": [ { "pane": "a" }, { "pane": "b" } ] },
+      "panes": [
+        { "id": "a", "name": "alpha", "content": "alpha pane\n$ go build ./...\nbuild ok" },
+        { "id": "b", "name": "beta", "content": "beta pane\n$ go vet ./...\nvet ok" }
+      ],
+      "windows": [ { "id": "w1", "name": "one" } ],
+      "activeWindow": 0,
+      "focus": "a",
+      "float": { "id": "f1", "x": 12, "y": 6, "w": 40, "h": 8, "content": "floating pane\n$ echo hello\nhello" }
+    },
+    {
+      "name": "switcher",
+      "cols": 120,
+      "rows": 30,
+      "rail": 34,
+      "theme": "high-contrast",
+      "root": { "dir": "row", "kids": [ { "pane": "a" }, { "pane": "b" } ] },
+      "panes": [
+        { "id": "a", "name": "alpha", "content": "alpha pane\n$ ls\ninternal  go.mod" },
+        { "id": "b", "name": "beta", "content": "beta pane\n$ pwd\n/home/b/Code/Personal/dm" }
+      ],
+      "windows": [ { "id": "w1", "name": "one" } ],
+      "activeWindow": 0,
+      "focus": "a",
+      "switcher": true
+    },
+    {
+      "name": "help",
+      "cols": 120,
+      "rows": 30,
+      "rail": 34,
+      "theme": "dark",
+      "root": { "dir": "row", "kids": [ { "pane": "a" }, { "pane": "b" } ] },
+      "panes": [
+        { "id": "a", "name": "alpha", "content": "alpha pane\n$ dm --help\nusage: dm" },
+        { "id": "b", "name": "beta", "content": "beta pane\n$ dm attach\nattached" }
+      ],
+      "windows": [ { "id": "w1", "name": "one" } ],
+      "activeWindow": 0,
+      "focus": "a",
+      "help": true
+    },
+    {
+      "name": "sessions",
+      "cols": 120,
+      "rows": 30,
+      "rail": 34,
+      "theme": "light",
+      "root": { "dir": "row", "kids": [ { "pane": "a" }, { "pane": "b" } ] },
+      "panes": [
+        { "id": "a", "name": "alpha", "content": "alpha pane\n$ dm ls\nmain  work" },
+        { "id": "b", "name": "beta", "content": "beta pane\n$ dm ls --all\nmain  work  scratch" }
+      ],
+      "windows": [ { "id": "w1", "name": "one" } ],
+      "activeWindow": 0,
+      "focus": "a",
+      "mode": "sessions",
+      "sessions": [
+        { "name": "main", "active": true },
+        { "name": "work", "active": false },
+        { "name": "scratch", "active": false }
+      ]
+    },
+    {
+      "name": "cjk",
+      "cols": 100,
+      "rows": 24,
+      "rail": 30,
+      "theme": "dark",
+      "root": { "pane": "a" },
+      "panes": [
+        {
+          "id": "a",
+          "name": "cjk",
+          "content": "日本語 ok\n👨‍👩‍👧 fam\ne\u0301 accent\n\u001b[3mitalic\u001b[0m \u001b[2mfaint\u001b[0m \u001b[9mstrike\u001b[0m \u001b[4:3mcurly\u001b[0m"
+        }
+      ],
+      "windows": [ { "id": "w1", "name": "one" } ],
+      "activeWindow": 0,
+      "focus": "a"
+    }
+  ]
+}
