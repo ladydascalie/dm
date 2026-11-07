@@ -669,7 +669,8 @@ func TestRailWorkspaceAccent(t *testing.T) {
 		t.Fatalf("draw accent rail: %v", err)
 	}
 	vt.Lock()
-	count := vt.Cell(layout.DefaultRail-1, 0).Char
+	// The grip strip owns the rail's last column, so the count ends one cell in.
+	count := vt.Cell(layout.DefaultRail-2, 0).Char
 	gapRow := true
 	for x := 0; x < layout.DefaultRail; x++ {
 		if g := vt.Cell(x, 4); g.Char != 0 && g.Char != ' ' {

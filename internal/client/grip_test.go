@@ -212,3 +212,48 @@ func TestPanePressStillFocuses(t *testing.T) {
 		t.Fatal("pane press started a rail drag")
 	}
 }
+
+// railRowText reads one rail row off a replayed screen.
+func railRowText(screen vt10x.Terminal, y, w int) string {
+	screen.Lock()
+	defer screen.Unlock()
+	var b strings.Builder
+	for x := 0; x < w; x++ {
+		c := screen.Cell(x, y).Char
+		if c == 0 {
+			c = ' '
+		}
+		b.WriteRune(c)
+	}
+	return b.String()
+}
+
+// TestRailGripHoverKeepsStats proves the grip strip never eats a rail label:
+// the strip owns the rail's last column, so hovering it and leaving it leaves
+// the row's right-aligned stats whole.
+func TestRailGripHoverKeepsStats(t *testing.T) {
+	f := newFrameTUI(t, 100, 30, 20)
+	f.snap.All[0].InRepo = true
+	f.snap.All[0].Branch = "main"
+	screen := vt10x.New(vt10x.WithSize(100, 30))
+	replay := func() {
+		if _, err := screen.Write([]byte(f.frame())); err != nil {
+			t.Fatalf("replay frame: %v", err)
+		}
+	}
+	// Row 1 is the window line, the row that carries the git stats.
+	replay()
+	if got := railRowText(screen, 1, 20); !strings.Contains(got, "clean") {
+		t.Fatalf("window row = %q, want clean", got)
+	}
+	f.tui.handleMouse(mouseEvent{btn: 35, x: 20, y: 5})
+	replay()
+	if got := railRowText(screen, 1, 20); !strings.Contains(got, "clean") {
+		t.Fatalf("hovered window row = %q, want clean", got)
+	}
+	f.tui.handleMouse(mouseEvent{btn: 35, x: 3, y: 5})
+	replay()
+	if got := railRowText(screen, 1, 20); !strings.Contains(got, "clean") {
+		t.Fatalf("window row after hover = %q, want clean", got)
+	}
+}

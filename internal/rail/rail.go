@@ -691,9 +691,10 @@ func RailControlSegs(th theme.Theme, compact, nerd bool) []segment.Seg {
 
 // DrawRail paints the sidebar above the status bar. The rail paints its own
 // background so contrast does not depend on the terminal theme. Rows past the
-// screen are clipped, and every row is written into at most Rail columns. A
-// left run is elided with an ellipsis before the right-aligned stats give up a
-// cell, so the stats survive a narrow rail.
+// screen are clipped, and every row is written into at most Rail columns. The
+// last column above the control row is the grip strip, so no row paints there.
+// A left run is elided with an ellipsis before the right-aligned stats give up
+// a cell, so the stats survive a narrow rail.
 func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
@@ -711,8 +712,10 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 	for y := 0; y < rows; y++ {
 		var left, right, tail []segment.Seg
 		bg, bold := p.RailBG, false
+		// The grip strip owns the rail's last column above the control row, so
+		// no row paints there and the hover line never covers a label.
 		rowW := w
-		if y < controlAt && y == gripAt {
+		if y < controlAt {
 			rowW = w - 1
 		}
 		if y == controlAt {
@@ -744,9 +747,14 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 		for _, s := range right {
 			WriteRailSeg(buf, s, bg, bold)
 		}
-		if y < controlAt && y == gripAt {
+		if y < controlAt {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, w)
-			buf.WriteString("\x1b[0m" + p.RailBG.BG() + p.RailDim.FG() + th.Glyphs.Grip)
+			buf.WriteString("\x1b[0m" + bg.BG())
+			if y == gripAt {
+				buf.WriteString(p.RailDim.FG() + th.Glyphs.Grip)
+			} else {
+				buf.WriteString(" ")
+			}
 		}
 		buf.WriteString("\x1b[0m")
 	}

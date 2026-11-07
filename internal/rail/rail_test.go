@@ -100,7 +100,7 @@ func TestRailRowComposesPaint(t *testing.T) {
 					continue
 				}
 				rowW := w
-				if y < snap.Rows-2 && y == gripAt {
+				if y < snap.Rows-2 {
 					rowW = w - 1
 				}
 				if y >= len(items) {
@@ -382,15 +382,17 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 		}
 		snap := railRowSnap(w)
 		it := railRowFind(t, RailItems(snap), Window, "one")
-		left, right, tail = RailRow(theme.DefaultTheme(), it, w, layout.RailCompact(w), false)
+		// The grip strip owns the rail's last column, so the row composes at w-1.
+		rowW := w - 1
+		left, right, tail = RailRow(theme.DefaultTheme(), it, rowW, layout.RailCompact(w), false)
 		if right != nil && !reflect.DeepEqual(right, full) {
 			t.Fatalf("stats at %d columns = %+v, want the whole pair or none", w, right)
 		}
-		if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > w {
+		if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > rowW {
 			t.Fatalf("row at %d columns is %d cells: %+v / %+v / %+v",
 				w, n, left, tail, right)
 		}
-		if got, line := railRowComposed(left, tail, right, w), railRows(t, snap)[1]; got != line {
+		if got, line := railRowComposed(left, tail, right, rowW), railRows(t, snap)[1]; got != line {
 			t.Fatalf("row at %d columns composes %q, rail paints %q", w, got, line)
 		}
 	}
