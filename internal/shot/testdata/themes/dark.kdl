@@ -1,0 +1,53 @@
+// dark: a low-glare dark theme. The oracle's dark golden.
+// Every block is optional; this file sets all four so the parser is exercised.
+
+palette {
+  "rail-bg" "#101014"
+  "rail-focus-bg" "#1c1c24"
+  "rail-text" "#e6e6ef"
+  "rail-dim" "#8a8a9c"
+  "rail-header" "#a0a0b4"
+  "rail-window" "#9090a4"
+  "rail-diff-add" "#6fd47a"
+  "rail-diff-del" "#ff7a7a"
+  "rail-working" "#f0b84a"
+  "bar-accent" "#6fb8e8"
+}
+
+accents {
+  "accent-1" "#b48ef0"
+  "accent-2" "#5fd0e0"
+  "accent-3" "#e88ad0"
+  "accent-4" "#7a9ef0"
+  "accent-5" "#e89a5a"
+  "accent-6" "#8ad09a"
+}
+
+glyphs {
+  "grip" "•"
+  "divider-row" "━"
+  "divider-col" "┃"
+  "border-top-left" "┌"
+  "border-top-right" "┐"
+  "border-bottom-left" "└"
+  "border-bottom-right" "┘"
+  "border-horizontal" "─"
+  "border-vertical" "│"
+  "border-tee-left" "├"
+  "border-tee-right" "┤"
+  "fold-open" "▾"
+  "fold-closed" "▸"
+  "active-mark" "▸"
+  "workspace-bar" "▌"
+  "dirty" "●"
+}
+
+states {
+  "working" { "glyph" "●" "colour" "#f0b84a" }
+  "idle" { "glyph" "○" "colour" "#5fd0e0" }
+  "blocked" { "glyph" "▲" "colour" "#ff6e6e" }
+  "done" { "glyph" "✓" "colour" "#6fd47a" }
+  "error" { "glyph" "✕" "colour" "#ff82a0" }
+  "unknown" { "glyph" "?" "colour" "#8a8a9c" }
+  "shell" { "glyph" "▶" "colour" "#8a8a9c" }
+}
