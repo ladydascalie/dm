@@ -106,6 +106,11 @@ func Run(ctx context.Context, opts Options) (int, error) {
 	}
 	args = append(args, opts.Args...)
 
+	choice, err := vtChoice()
+	if err != nil {
+		return 1, err
+	}
+
 	cmd := exec.CommandContext(ctx, "python3", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
@@ -116,7 +121,7 @@ func Run(ctx context.Context, opts Options) (int, error) {
 	}
 	defer ptmx.Close()
 
-	h := newHarness(ptmx, opts)
+	h := newHarness(ptmx, opts, choice)
 	runErr := h.run()
 	waitErr := cmd.Wait()
 	if runErr != nil {
@@ -155,16 +160,40 @@ type harness struct {
 	st      state
 }
 
-func newHarness(ptmx *os.File, opts Options) *harness {
+// vtEnv selects the terminal the harness drives. Unset or "vt10x" keeps the
+// original terminal; "new" builds the adapter over the new VT.
+const vtEnv = "DM_ESCTEST_VT"
+
+// vtChoice validates the selector. An unknown value is an error, never a
+// silent fallback: a gate must not measure a terminal it was not asked for.
+func vtChoice() (string, error) {
+	switch v := os.Getenv(vtEnv); v {
+	case "", "vt10x":
+		return "vt10x", nil
+	case "new":
+		return "new", nil
+	default:
+		return "", fmt.Errorf("unknown %s=%q: want \"vt10x\" or \"new\"", vtEnv, v)
+	}
+}
+
+func newTerminal(choice string, ptmx *os.File) vt10x.Terminal {
+	if choice == "new" {
+		return newVTAdapter(80, 25)
+	}
+	return vt10x.New(
+		vt10x.WithSize(80, 25),
+		vt10x.WithWriter(stWriter{ptmx}),
+	)
+}
+
+func newHarness(ptmx *os.File, opts Options, choice string) *harness {
 	errw := opts.Stderr
 	if errw == nil {
 		errw = os.Stderr
 	}
 	h := &harness{ptmx: ptmx, verbose: opts.Verbose, errw: errw}
-	h.vt = vt10x.New(
-		vt10x.WithSize(80, 25),
-		vt10x.WithWriter(stWriter{ptmx}),
-	)
+	h.vt = newTerminal(choice, ptmx)
 	h.reports = vt.NewTerm(80, 25)
 	h.st = newState(25, 80)
 	return h
