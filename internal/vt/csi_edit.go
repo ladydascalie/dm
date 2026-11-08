@@ -7,6 +7,8 @@ func init() {
 	csiTable[csiKey{Inter: "'", Final: '}'}] = csiInsertColumns              // DECIC
 	escTable[escKey{Final: '6'}] = escBackIndex                              // DECBI
 	escTable[escKey{Final: '9'}] = escForwardIndex                           // DECFI
+	escTable[escKey{Final: 'V'}] = escStartProtectedArea                     // SPA
+	escTable[escKey{Final: 'W'}] = escEndProtectedArea                       // EPA
 }
 
 // registerEdit registers the insert and delete family: ICH, DCH, IL and DL.
@@ -75,6 +77,18 @@ func editBounds(term *Term) (left, right int, ok bool) {
 // written afterwards; 0 and 2 turn it off.
 func csiSelectCharacterProtection(term *Term, seq CSI) {
 	term.protected = csiParamOr(seq, 0, 0) == 1
+}
+
+// escStartProtectedArea handles SPA. Cells written from now on are ISO
+// protected: every erase leaves them alone, selective or not.
+func escStartProtectedArea(term *Term) {
+	term.isoProtected = true
+}
+
+// escEndProtectedArea handles EPA: cells written from now on are not ISO
+// protected.
+func escEndProtectedArea(term *Term) {
+	term.isoProtected = false
 }
 
 // csiInsertColumns handles DECIC: insert columns at the cursor on every row of

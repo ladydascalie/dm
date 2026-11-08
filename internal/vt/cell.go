@@ -93,8 +93,12 @@ type Cell struct {
 	Style   Style
 	Link    string
 	// Protected is the DECSCA protection state the cell was written with. A
-	// selective erase (DECSERA) leaves a protected cell alone.
+	// selective erase (DECSED, DECSEL, DECSERA) leaves a protected cell alone,
+	// and ED, EL and ECH ignore it.
 	Protected bool
+	// ISOProtected is the SPA/EPA protection state the cell was written with.
+	// Every erase respects it, selective or not.
+	ISOProtected bool
 }
 
 // NewCell builds a cell for content and measures its width with x/ansi, the

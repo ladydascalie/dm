@@ -35,6 +35,8 @@ func escReset(term *Term) {
 	term.grid.Reset()
 	term.style = DefaultStyle()
 	term.level = 5
+	term.protected = false
+	term.isoProtected = false
 	term.iconTitle = ""
 	term.windowTitle = ""
 	term.link = ""
@@ -67,6 +69,8 @@ func escScreenAlignment(term *Term) {
 func csiSoftReset(term *Term, _ CSI) {
 	term.grid.SoftReset()
 	term.style = DefaultStyle()
+	term.protected = false
+	term.isoProtected = false
 	term.decModeStates = nil
 	term.ansiModeStates = nil
 	term.cursorStyle = 0
