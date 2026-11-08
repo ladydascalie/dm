@@ -261,6 +261,24 @@ func (g *Grid) Clear() {
 	}
 }
 
+// ScrollUp moves the scroll region's rows up by n and fills the rows that enter
+// at the bottom with blanks. Rows outside the region do not move. Left and
+// right margins are not applied yet; DECSLRM lands in a later unit.
+func (g *Grid) ScrollUp(n int) {
+	r := g.scroll
+	height := r.Bottom - r.Top + 1
+	if n <= 0 || height <= 0 {
+		return
+	}
+	if n > height {
+		n = height
+	}
+	copy(g.lines[r.Top:r.Bottom-n+1], g.lines[r.Top+n:r.Bottom+1])
+	for y := r.Bottom - n + 1; y <= r.Bottom; y++ {
+		g.lines[y] = newLine(g.cols, DefaultStyle())
+	}
+}
+
 // Cursor returns the cursor state.
 func (g *Grid) Cursor() Cursor {
 	return g.cursor
@@ -276,6 +294,11 @@ func (g *Grid) SetCursor(x, y int) {
 // SetCursorVisible shows or hides the cursor.
 func (g *Grid) SetCursorVisible(v bool) {
 	g.cursor.Visible = v
+}
+
+// SetWrapNext sets or clears the pending wrap on the cursor.
+func (g *Grid) SetWrapNext(v bool) {
+	g.cursor.WrapNext = v
 }
 
 // Modes returns the terminal modes.
