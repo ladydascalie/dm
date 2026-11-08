@@ -1,18 +1,17 @@
 package esctest
 
-import (
-	"fmt"
-	"strconv"
-	"strings"
-)
+import "fmt"
 
 // rgb is a 16-bit-per-channel colour, the form xterm reports.
 type rgb struct{ r, g, b uint16 }
 
+// esctest2's reset() sets the dynamic foreground to #000 and the background
+// to #ffffff before every test, and the reset tests expect OSC 110/111 to
+// restore those values. The harness's defaults match that environment.
 var (
-	defaultFG     = rgb{0xffff, 0xffff, 0xffff}
-	defaultBG     = rgb{0x0000, 0x0000, 0x0000}
-	defaultCursor = rgb{0xffff, 0xffff, 0xffff}
+	defaultFG     = rgb{0x0000, 0x0000, 0x0000}
+	defaultBG     = rgb{0xffff, 0xffff, 0xffff}
+	defaultCursor = rgb{0x0000, 0x0000, 0x0000}
 )
 
 // ansi16 is xterm's default palette for the first sixteen colours.
@@ -68,68 +67,10 @@ func defaultIndexed(idx int) rgb {
 	return defaultFG
 }
 
-// parseColor parses the forms esctest2 sends: rgb:R/G/B and #RGB, #RRGGBB,
-// #RRRGGGBBB, #RRRRGGGGBBBB. Each channel is scaled to 16 bits the way X11
-// does it. Other X11 forms are not supported.
+// parseColor parses the X11 colour forms esctest2 sends. The conversion lives
+// in x11color.go; the result is the 16-bit value xterm reports.
 func parseColor(s string) (rgb, bool) {
-	if strings.HasPrefix(s, "rgb:") {
-		parts := strings.Split(s[4:], "/")
-		if len(parts) != 3 {
-			return rgb{}, false
-		}
-		var out rgb
-		for i, p := range parts {
-			v, ok := parseChannel(p)
-			if !ok {
-				return rgb{}, false
-			}
-			switch i {
-			case 0:
-				out.r = v
-			case 1:
-				out.g = v
-			case 2:
-				out.b = v
-			}
-		}
-		return out, true
-	}
-	if strings.HasPrefix(s, "#") {
-		h := s[1:]
-		if len(h) != 3 && len(h) != 6 && len(h) != 9 && len(h) != 12 {
-			return rgb{}, false
-		}
-		n := len(h) / 3
-		var out rgb
-		for i := 0; i < 3; i++ {
-			v, ok := parseChannel(h[i*n : (i+1)*n])
-			if !ok {
-				return rgb{}, false
-			}
-			switch i {
-			case 0:
-				out.r = v
-			case 1:
-				out.g = v
-			case 2:
-				out.b = v
-			}
-		}
-		return out, true
-	}
-	return rgb{}, false
-}
-
-func parseChannel(s string) (uint16, bool) {
-	if len(s) < 1 || len(s) > 4 {
-		return 0, false
-	}
-	v, err := strconv.ParseUint(s, 16, 32)
-	if err != nil {
-		return 0, false
-	}
-	shift := uint(16 - 4*len(s))
-	return uint16(v << shift), true
+	return parseX11Color(s)
 }
 
 func formatColor(c rgb) string {
