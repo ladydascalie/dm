@@ -38,6 +38,7 @@ const (
 	decAllow80To132   = 40   // permit DECCOLM
 	decMoreFix        = 41   // more(1) workaround
 	decReverseWrap    = 45   // reverse wraparound
+	decReverseWrap2   = 1045 // extended reverse wraparound
 	decALT47          = 47   // alternate screen
 	decDECNKM         = 66   // application keypad
 	decDECLRMM        = 69   // left/right margin mode
@@ -132,7 +133,7 @@ func (t *Term) setPrivateMode(n int, on bool) {
 		m.Allow80To132 = on
 	case decMoreFix:
 		m.MoreFix = on
-	case decReverseWrap:
+	case decReverseWrap, decReverseWrap2:
 		m.ReverseWrap = on
 	case decALT47:
 		if on {
@@ -145,6 +146,14 @@ func (t *Term) setPrivateMode(n int, on bool) {
 		m.ApplicationKeypad = on
 	case decDECLRMM:
 		m.LeftRightMargin = on
+		if !on {
+			// DECSLRM is disabled when DECLRMM is reset, so the left and
+			// right margins return to the screen edges.
+			cols, _ := g.Size()
+			r := g.ScrollRegion()
+			r.Left, r.Right = 0, cols-1
+			g.SetScrollRegion(r)
+		}
 	case decDECNCSM:
 		m.NoClearOnColumnMode = on
 	case decMouseButton:
@@ -241,7 +250,7 @@ func (t *Term) setColumnMode(on bool) {
 	}
 	_, rows := g.Size()
 	g.Resize(cols, rows)
-	if !m.NoClearOnColumnMode {
+	if !m.NoClearOnColumnMode || t.level < 5 {
 		g.Clear()
 	}
 	g.resetScrollRegion()
@@ -294,7 +303,7 @@ func (t *Term) privateMode(n int) (value, ok bool) {
 		return m.Allow80To132, true
 	case decMoreFix:
 		return m.MoreFix, true
-	case decReverseWrap:
+	case decReverseWrap, decReverseWrap2:
 		return m.ReverseWrap, true
 	case decDECNKM:
 		return m.ApplicationKeypad, true

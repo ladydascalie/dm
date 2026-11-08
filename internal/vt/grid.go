@@ -305,17 +305,24 @@ func (g *Grid) Erase(x, y int) {
 }
 
 // InsertCells shifts row y right from column x by n and blanks the n slots that
-// open. Cells pushed past the right edge are dropped, and a wide cell split by
-// the shift is blanked.
-func (g *Grid) InsertCells(x, y, n int) {
+// open. The shift stops at column right, so the cells outside the left and
+// right margins do not move. Cells pushed past right are dropped, and a wide
+// cell split by the shift is blanked.
+func (g *Grid) InsertCells(x, y, right, n int) {
 	if x < 0 || x >= g.cols || y < 0 || y >= g.rows || n <= 0 {
 		return
 	}
-	if n > g.cols-x {
-		n = g.cols - x
+	if right >= g.cols {
+		right = g.cols - 1
+	}
+	if x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
 	}
 	line := g.lines[y]
-	copy(line[x+n:], line[x:])
+	copy(line[x+n:right+1], line[x:right+1-n])
 	blank := blankCell(DefaultStyle())
 	for i := x; i < x+n; i++ {
 		line[i] = blank
@@ -324,27 +331,63 @@ func (g *Grid) InsertCells(x, y, n int) {
 }
 
 // DeleteCells shifts row y left from column x, dropping n cells, and blanks the
-// n slots that open at the right edge. A wide cell split by the shift is
-// blanked.
-func (g *Grid) DeleteCells(x, y, n int) {
+// n slots that open at column right. The shift stops at right, so the cells
+// outside the left and right margins do not move. A wide cell split by the
+// shift is blanked.
+func (g *Grid) DeleteCells(x, y, right, n int) {
 	if x < 0 || x >= g.cols || y < 0 || y >= g.rows || n <= 0 {
 		return
 	}
-	if n > g.cols-x {
-		n = g.cols - x
+	if right >= g.cols {
+		right = g.cols - 1
+	}
+	if x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
 	}
 	line := g.lines[y]
-	copy(line[x:], line[x+n:])
+	copy(line[x:right+1-n], line[x+n:right+1])
 	blank := blankCell(DefaultStyle())
-	for i := g.cols - n; i < g.cols; i++ {
+	for i := right - n + 1; i <= right; i++ {
 		line[i] = blank
 	}
 	g.repairLine(y)
 }
 
+// DeleteColumns deletes n columns at column x on every row from top to bottom,
+// between the left and right margins. The cells to the left and right of the
+// margins and the rows outside top to bottom do not move.
+func (g *Grid) DeleteColumns(x, top, bottom, left, right, n int) {
+	if x < 0 || x >= g.cols || n <= 0 {
+		return
+	}
+	top = clamp(top, 0, g.rows-1)
+	bottom = clamp(bottom, 0, g.rows-1)
+	left = clamp(left, 0, g.cols-1)
+	right = clamp(right, 0, g.cols-1)
+	if top > bottom || left > right || x < left || x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
+	}
+	blank := blankCell(DefaultStyle())
+	for y := top; y <= bottom; y++ {
+		line := g.lines[y]
+		copy(line[x:right+1-n], line[x+n:right+1])
+		for i := right - n + 1; i <= right; i++ {
+			line[i] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
 // InsertLines opens n blank rows at row y inside the scroll region, pushing the
-// rows below down and dropping the ones that leave the bottom. A row outside
-// the region does nothing.
+// rows below down and dropping the ones that leave the bottom. Only the columns
+// between the left and right margins move; the cells outside them stay put. A
+// row outside the region does nothing.
 func (g *Grid) InsertLines(y, n int) {
 	r := g.scroll
 	if y < r.Top || y > r.Bottom || n <= 0 {
@@ -353,15 +396,21 @@ func (g *Grid) InsertLines(y, n int) {
 	if n > r.Bottom-y+1 {
 		n = r.Bottom - y + 1
 	}
-	copy(g.lines[y+n:r.Bottom+1], g.lines[y:r.Bottom-n+1])
-	for i := y; i < y+n; i++ {
-		g.lines[i] = newLine(g.cols, DefaultStyle())
+	for row := r.Bottom; row >= y+n; row-- {
+		copy(g.lines[row][r.Left:r.Right+1], g.lines[row-n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
+	for row := y; row < y+n; row++ {
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[row][x] = blank
+		}
 	}
 }
 
 // DeleteLines removes n rows at row y inside the scroll region, pulling the
-// rows below up and blanking the ones that enter at the bottom. A row outside
-// the region does nothing.
+// rows below up and blanking the ones that enter at the bottom. Only the
+// columns between the left and right margins move; the cells outside them stay
+// put. A row outside the region does nothing.
 func (g *Grid) DeleteLines(y, n int) {
 	r := g.scroll
 	if y < r.Top || y > r.Bottom || n <= 0 {
@@ -370,9 +419,14 @@ func (g *Grid) DeleteLines(y, n int) {
 	if n > r.Bottom-y+1 {
 		n = r.Bottom - y + 1
 	}
-	copy(g.lines[y:r.Bottom-n+1], g.lines[y+n:r.Bottom+1])
-	for i := r.Bottom - n + 1; i <= r.Bottom; i++ {
-		g.lines[i] = newLine(g.cols, DefaultStyle())
+	for row := y; row <= r.Bottom-n; row++ {
+		copy(g.lines[row][r.Left:r.Right+1], g.lines[row+n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
+	for row := r.Bottom - n + 1; row <= r.Bottom; row++ {
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[row][x] = blank
+		}
 	}
 }
 
@@ -403,8 +457,9 @@ func (g *Grid) Clear() {
 }
 
 // ScrollUp moves the scroll region's rows up by n and fills the rows that enter
-// at the bottom with blanks. Rows outside the region do not move. Left and
-// right margins are not applied yet; DECSLRM lands in a later unit.
+// at the bottom with blanks. Only the columns between the left and right
+// margins move; the cells outside them and the rows outside the region stay
+// put.
 func (g *Grid) ScrollUp(n int) {
 	r := g.scroll
 	height := r.Bottom - r.Top + 1
@@ -414,14 +469,21 @@ func (g *Grid) ScrollUp(n int) {
 	if n > height {
 		n = height
 	}
-	copy(g.lines[r.Top:r.Bottom-n+1], g.lines[r.Top+n:r.Bottom+1])
+	for y := r.Top; y <= r.Bottom-n; y++ {
+		copy(g.lines[y][r.Left:r.Right+1], g.lines[y+n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
 	for y := r.Bottom - n + 1; y <= r.Bottom; y++ {
-		g.lines[y] = newLine(g.cols, DefaultStyle())
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[y][x] = blank
+		}
 	}
 }
 
 // ScrollDown moves the scroll region's rows down by n and fills the rows that
-// enter at the top with blanks. Rows outside the region do not move.
+// enter at the top with blanks. Only the columns between the left and right
+// margins move; the cells outside them and the rows outside the region stay
+// put.
 func (g *Grid) ScrollDown(n int) {
 	r := g.scroll
 	height := r.Bottom - r.Top + 1
@@ -431,9 +493,14 @@ func (g *Grid) ScrollDown(n int) {
 	if n > height {
 		n = height
 	}
-	copy(g.lines[r.Top+n:r.Bottom+1], g.lines[r.Top:r.Bottom-n+1])
+	for y := r.Bottom; y >= r.Top+n; y-- {
+		copy(g.lines[y][r.Left:r.Right+1], g.lines[y-n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
 	for y := r.Top; y < r.Top+n; y++ {
-		g.lines[y] = newLine(g.cols, DefaultStyle())
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[y][x] = blank
+		}
 	}
 }
 

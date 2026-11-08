@@ -34,6 +34,7 @@ func escRestoreCursor(term *Term) {
 func escReset(term *Term) {
 	term.grid.Reset()
 	term.style = DefaultStyle()
+	term.level = 5
 }
 
 // escScreenAlignment handles DECALN: fill the screen with E, home the cursor and

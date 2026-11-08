@@ -175,7 +175,9 @@ func TestCursorSequenceGrids(t *testing.T) {
 			input:  "\x1b[1;3H\x1b[99CX",
 			region: region,
 			want:   []string{"      X"},
-			x:      7, y: 0,
+			// The X lands on the right margin, and the cursor stays there with
+			// a pending wrap, as it does at the screen edge.
+			x: 6, y: 0,
 		},
 	}
 	for _, tc := range cases {

@@ -79,10 +79,15 @@ func columnBounds(g *Grid) (lo, hi int) {
 	return lo, hi
 }
 
-// homeColumn is the column CR, CNL, CPL and NEL move to: the left margin. With
-// no left margin designated it is column 0.
+// homeColumn is the column CR, CNL and CPL move to. In origin mode it is always
+// the left margin. Otherwise it is the left margin when the cursor is at or
+// right of it, and column 0 when the cursor is left of the margin.
 func homeColumn(g *Grid) int {
-	return g.ScrollRegion().Left
+	r := g.ScrollRegion()
+	if g.Modes().Origin || g.Cursor().X >= r.Left {
+		return r.Left
+	}
+	return 0
 }
 
 func csiCursorNextLine(term *Term, seq CSI) {
