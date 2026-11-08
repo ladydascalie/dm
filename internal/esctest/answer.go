@@ -301,8 +301,23 @@ func (h *harness) answerDECRQCRA(s seq) {
 	left := paramAt(rest, 1, 1)
 	bottom := paramAt(rest, 2, h.rows())
 	right := paramAt(rest, 3, h.cols())
+	top, left, bottom, right = h.decrqcraRect(top, left, bottom, right)
 	sum := checksum(h.vt, top, left, bottom, right)
 	h.reply(fmt.Sprintf("\x1bP%d!~%04X\x1b\\", pid, sum), "DECRQCRA")
+}
+
+// decrqcraRect applies the origin-mode offset to a DECRQCRA rectangle. In origin
+// mode xterm reads the rectangle relative to the top and left margins, as it
+// reads the cursor. The margins come from the report terminal, which the
+// harness keeps in step with the terminal under test: the vt10x view does not
+// expose them, and the report terminal sees every margin and mode sequence.
+func (h *harness) decrqcraRect(top, left, bottom, right int) (int, int, int, int) {
+	g := h.reports.Grid()
+	if g == nil || !g.Modes().Origin {
+		return top, left, bottom, right
+	}
+	r := g.ScrollRegion()
+	return top + r.Top, left + r.Left, bottom + r.Top, right + r.Left
 }
 
 func (h *harness) answerDCS(raw []byte, body string) {
