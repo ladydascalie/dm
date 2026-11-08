@@ -363,50 +363,290 @@ send prefix
 .TP
 \fBctrl+r\fP
 reload config
+.SH KEYMAPS
+A keymap mode is a table of actions. A keymap node in config.kdl patches one mode, and an action the file leaves out keeps its built-in key. The built-in bindings are:
+.TP
+\fBmain\fP
+The table the prefix key opens.
+.br
+\fBsend-prefix\fP \fIctrl+b\fP, \fBreload\fP \fIctrl+r\fP, \fBsplit-right\fP \fI|\fP, \fBsplit-down\fP \fI-\fP, \fBsplit-down-alt\fP \fI_\fP, \fBsplit-left\fP \fI<\fP, \fBsplit-up\fP \fI^\fP, \fBscrollback\fP \fI[\fP, \fBfocus-left\fP \fIh\fP, \fBfocus-down\fP \fIj\fP, \fBfocus-up\fP \fIk\fP, \fBfocus-right\fP \fIl\fP, \fBnext-pane\fP \fIn\fP, \fBprev-pane\fP \fIp\fP, \fBclose-pane\fP \fIx\fP, \fBclose-window\fP \fIX\fP, \fBzoom-pane\fP \fIz\fP, \fBnew-window\fP \fIc\fP, \fBnext-window\fP \fIw\fP, \fBprev-window\fP \fIW\fP, \fBnew-workspace\fP \fIt\fP, \fBnext-workspace\fP \fI)\fP, \fBswitcher\fP \fIa\fP, \fBpicker\fP \fIs\fP, \fBrename-workspace\fP \fIr\fP, \fBtoggle-rail\fP \fIb\fP, \fBmessage-box\fP \fIm\fP, \fBdetach\fP \fId\fP, \fBdetach-alt\fP \fIq\fP, \fBwindow-1\fP \fI1\fP, \fBwindow-2\fP \fI2\fP, \fBwindow-3\fP \fI3\fP, \fBwindow-4\fP \fI4\fP, \fBwindow-5\fP \fI5\fP, \fBwindow-6\fP \fI6\fP, \fBwindow-7\fP \fI7\fP, \fBwindow-8\fP \fI8\fP, \fBwindow-9\fP \fI9\fP, \fBwindow-10\fP \fI0\fP, \fBhelp\fP \fI?\fP, \fBdismiss-esc\fP \fIesc\fP, \fBfocus-up-arrow\fP \fIup\fP, \fBfocus-down-arrow\fP \fIdown\fP, \fBfocus-left-arrow\fP \fIleft\fP, \fBfocus-right-arrow\fP \fIright\fP
+.TP
+\fBmenu\fP
+The right-click menu.
+.br
+\fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP, \fBpick\fP \fIenter\fP, \fBclose\fP \fIq\fP, \fBclose-esc\fP \fIesc\fP, \fBpick-1\fP \fI1\fP, \fBpick-2\fP \fI2\fP, \fBpick-3\fP \fI3\fP, \fBpick-4\fP \fI4\fP, \fBpick-5\fP \fI5\fP, \fBpick-6\fP \fI6\fP, \fBpick-7\fP \fI7\fP, \fBpick-8\fP \fI8\fP, \fBpick-9\fP \fI9\fP
+.TP
+\fBpicker\fP
+The session picker.
+.br
+\fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP, \fBpick\fP \fIenter\fP, \fBclose\fP \fIq\fP, \fBclose-s\fP \fIs\fP, \fBclose-esc\fP \fIesc\fP, \fBclose-left\fP \fIleft\fP, \fBclose-right\fP \fIright\fP, \fBpick-1\fP \fI1\fP, \fBpick-2\fP \fI2\fP, \fBpick-3\fP \fI3\fP, \fBpick-4\fP \fI4\fP, \fBpick-5\fP \fI5\fP, \fBpick-6\fP \fI6\fP, \fBpick-7\fP \fI7\fP, \fBpick-8\fP \fI8\fP, \fBpick-9\fP \fI9\fP
+.TP
+\fBswitcher\fP
+The quick switch palette.
+.br
+\fBclose\fP \fIctrl+b\fP, \fBclose-ctrl-c\fP \fIctrl+c\fP, \fBclose-esc\fP \fIesc\fP, \fBpick\fP \fIenter\fP, \fBclear-query\fP \fIctrl+u\fP, \fBbackspace\fP \fIbackspace\fP, \fBdown-ctrl-n\fP \fIctrl+n\fP, \fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBup-ctrl-p\fP \fIctrl+p\fP, \fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP
+.TP
+\fBscroll\fP
+The scrollback view.
+.br
+\fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP, \fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBpage-up\fP \fIpgup\fP, \fBpage-down\fP \fIpgdn\fP, \fBtop\fP \fIg\fP, \fBclose\fP \fIG\fP, \fBclose-q\fP \fIq\fP, \fBclose-bracket\fP \fI[\fP, \fBclose-esc\fP \fIesc\fP
+.TP
+\fBrename\fP
+The rename prompt.
+.br
+\fBcancel\fP \fIesc\fP, \fBcancel-up\fP \fIup\fP, \fBcancel-down\fP \fIdown\fP, \fBcancel-left\fP \fIleft\fP, \fBcancel-right\fP \fIright\fP, \fBsubmit\fP \fIenter\fP, \fBbackspace\fP \fIbackspace\fP, \fBclear\fP \fIctrl+u\fP
+.TP
+\fBbox\fP
+The message box.
+.br
+\fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP, \fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBpage-up\fP \fIpgup\fP, \fBpage-down\fP \fIpgdn\fP, \fBtop\fP \fIg\fP, \fBbottom\fP \fIG\fP, \fBtoggle-page\fP \fIw\fP, \fBclose\fP \fIq\fP, \fBclose-m\fP \fIm\fP, \fBclose-prefix\fP \fIctrl+b\fP, \fBclose-ctrl-c\fP \fIctrl+c\fP, \fBclose-esc\fP \fIesc\fP
+.TP
+\fBhelp\fP
+The keymap view and the armed help overlay.
+.br
+\fBsearch\fP \fI/\fP, \fBnext-match\fP \fIn\fP, \fBprev-match\fP \fIN\fP, \fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP, \fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBpage-up\fP \fIpgup\fP, \fBpage-down\fP \fIpgdn\fP, \fBtop\fP \fIg\fP, \fBbottom\fP \fIG\fP, \fBclose\fP \fIq\fP, \fBclose-esc\fP \fIesc\fP, \fBclose-question\fP \fI?\fP
+.SH CONFIGURATION
+dm reads $XDG_CONFIG_HOME/dm/config.kdl, or $HOME/.config/dm/config.kdl when XDG_CONFIG_HOME is unset. A missing file means the built-in values; dm writes a default file on first run. The file is a patch over the built-in values: a node the file leaves out keeps its built-in value. The nodes are:
+.TP
+\fBprefix\fP
+Value: \fIa quoted key name, one sequence\fP. Default: \fI"ctrl+b"\fP.
+Set the prefix key that opens the main keymap.
+.TP
+\fBdefault-fold\fP
+Value: \fI"fold" or "unfold"\fP. Default: \fI"fold"\fP.
+Set whether a new window's rail starts folded or unfolded.
+.TP
+\fBtab-min-width\fP
+Value: \fIan integer of at least 3 cells\fP. Default: \fI8\fP.
+Set the smallest tab width in the window tab bar.
+.TP
+\fBtab-max-width\fP
+Value: \fIan integer of at least 3 cells, not below tab-min-width\fP. Default: \fI20\fP.
+Set the largest tab width before the label is cut.
+.TP
+\fBpadding\fP
+Value: \fIan integer from 0 to 4 cells\fP. Default: \fI1\fP.
+Set the blank cells between a pane's border and its content.
+.TP
+\fBglyphs\fP
+Value: \fI"auto", "ascii", "unicode" or "nerd"\fP. Default: \fI"auto"\fP.
+Choose the glyph vocabulary the chrome draws with.
+.TP
+\fBwindow-label\fP
+Value: \fIa quoted Go template\fP. Default: \fI"{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"\fP.
+Set the template that renders a window label.
+.TP
+\fBtheme\fP
+Value: \fIa quoted theme name matching [A-Za-z0-9_-]+\fP. Default: none.
+Select a theme from the themes directory beside config.kdl; no node keeps the built-in theme.
+.TP
+\fBkeymap\fP
+Value: \fIa quoted mode name and a { "action" "key" } block\fP. Default: \fIthe built-in table\fP.
+Patch one keymap mode; an action the file leaves out keeps its built-in key.
+.SH THEME
+A theme file is $XDG_CONFIG_HOME/dm/themes/<name>.kdl. The theme node in config.kdl names one, and no theme node keeps the built-in theme. Every block and every key is optional: the file reads over the built-in theme, so it carries only what it changes. A block or key given twice, an unknown block or key, a colour that is not #rrggbb, or a glyph that is not one cell wide is an error. The keys are:
+.PP
+\fBpalette\fP
+.TP
+\fBrail-bg\fP
+Rail background. Default \fI#14131a\fP.
+.TP
+\fBrail-focus-bg\fP
+Focused rail row background. Default \fI#1f1e27\fP.
+.TP
+\fBrail-text\fP
+Primary rail text. Default \fI#e9eaf1\fP.
+.TP
+\fBrail-dim\fP
+Dim rail text and secondary rows. Default \fI#8f93a8\fP.
+.TP
+\fBrail-header\fP
+Workspace header text. Default \fI#a6a9bd\fP.
+.TP
+\fBrail-window\fP
+Window row text. Default \fI#9599ae\fP.
+.TP
+\fBrail-diff-add\fP
+Added-line count. Default \fI#78dc82\fP.
+.TP
+\fBrail-diff-del\fP
+Deleted-line count. Default \fI#ff7d7d\fP.
+.TP
+\fBrail-working\fP
+Working state text in the rail. Default \fI#f5be50\fP.
+.TP
+\fBbar-accent\fP
+Status bar accent. Default \fI#7ac0eb\fP.
+.PP
+\fBaccents\fP
+.TP
+\fBaccent-1\fP
+Workspace accent colour 1. Default \fI#bb9af7\fP.
+.TP
+\fBaccent-2\fP
+Workspace accent colour 2. Default \fI#6edceb\fP.
+.TP
+\fBaccent-3\fP
+Workspace accent colour 3. Default \fI#f08cd7\fP.
+.TP
+\fBaccent-4\fP
+Workspace accent colour 4. Default \fI#7ea9ff\fP.
+.TP
+\fBaccent-5\fP
+Workspace accent colour 5. Default \fI#f0a05a\fP.
+.TP
+\fBaccent-6\fP
+Workspace accent colour 6. Default \fI#8cd79b\fP.
+.PP
+\fBglyphs\fP
+.TP
+\fBgrip\fP
+Drag grip on a pane divider. Default \fI•\fP.
+.TP
+\fBdivider-row\fP
+Horizontal split divider. Default \fI━\fP.
+.TP
+\fBdivider-col\fP
+Vertical split divider. Default \fI┃\fP.
+.TP
+\fBborder-top-left\fP
+Top-left pane border corner. Default \fI┌\fP.
+.TP
+\fBborder-top-right\fP
+Top-right pane border corner. Default \fI┐\fP.
+.TP
+\fBborder-bottom-left\fP
+Bottom-left pane border corner. Default \fI└\fP.
+.TP
+\fBborder-bottom-right\fP
+Bottom-right pane border corner. Default \fI┘\fP.
+.TP
+\fBborder-horizontal\fP
+Horizontal pane border run. Default \fI─\fP.
+.TP
+\fBborder-vertical\fP
+Vertical pane border run. Default \fI│\fP.
+.TP
+\fBborder-tee-left\fP
+Left-facing border tee. Default \fI├\fP.
+.TP
+\fBborder-tee-right\fP
+Right-facing border tee. Default \fI┤\fP.
+.TP
+\fBfold-open\fP
+Open fold caret; also replaces the Nerd Font form. Default \fI▾\fP.
+.TP
+\fBfold-closed\fP
+Closed fold caret; also replaces the Nerd Font form. Default \fI▸\fP.
+.TP
+\fBactive-mark\fP
+Mark beside the active window. Default \fI▸\fP.
+.TP
+\fBworkspace-bar\fP
+Bar beside the active workspace. Default \fI▌\fP.
+.TP
+\fBdirty\fP
+Dirty worktree dot. Default \fI●\fP.
+.PP
+\fBstates\fP
+.TP
+\fBworking glyph\fP
+working state glyph; also replaces the Nerd Font form. Default \fI●\fP.
+.TP
+\fBworking colour\fP
+working state colour. Default \fI#f5be50\fP.
+.TP
+\fBidle glyph\fP
+idle state glyph; also replaces the Nerd Font form. Default \fI○\fP.
+.TP
+\fBidle colour\fP
+idle state colour. Default \fI#78c8e1\fP.
+.TP
+\fBblocked glyph\fP
+blocked state glyph; also replaces the Nerd Font form. Default \fI▲\fP.
+.TP
+\fBblocked colour\fP
+blocked state colour. Default \fI#ff6e6e\fP.
+.TP
+\fBdone glyph\fP
+done state glyph; also replaces the Nerd Font form. Default \fI✓\fP.
+.TP
+\fBdone colour\fP
+done state colour. Default \fI#6ee191\fP.
+.TP
+\fBerror glyph\fP
+error state glyph; also replaces the Nerd Font form. Default \fI✕\fP.
+.TP
+\fBerror colour\fP
+error state colour. Default \fI#ff82a0\fP.
+.TP
+\fBunknown glyph\fP
+unknown state glyph; also replaces the Nerd Font form. Default \fI?\fP.
+.TP
+\fBunknown colour\fP
+unknown state colour. Default \fI#8f93a8\fP.
+.TP
+\fBshell glyph\fP
+shell state glyph; also replaces the Nerd Font form. Default \fI▶\fP.
+.TP
+\fBshell colour\fP
+shell state colour. Default \fI#8f93a8\fP.
 .SH FILES
+Paths use $DM_STATE and $XDG_CONFIG_HOME as ENVIRONMENT describes.
 .TP
 \fB$DM_STATE/sessions/<name>/state.json\fP
+Session state: workspaces, windows, panes, layouts and names.
 .TP
 \fB$DM_STATE/sessions/<name>/server.sock\fP
+Unix socket the session server listens on.
 .TP
 \fB$DM_STATE/sessions/<name>/panes/<id>.sock\fP
+Unix socket one pane's mux listens on.
 .TP
 \fB$DM_STATE/sessions/<name>/panes/<id>.log\fP
+Pane output log.
 .TP
 \fB$XDG_CONFIG_HOME/dm/config.kdl\fP
+Prefix, keymaps, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run.
+.TP
+\fB$XDG_CONFIG_HOME/dm/themes/<name>.kdl\fP
+Theme palette, accents, glyphs and state styles.
 .SH ENVIRONMENT
 .TP
 \fBDM_STATE\fP
-state directory; overrides XDG_STATE_HOME
+State directory; overrides XDG_STATE_HOME.
 .TP
 \fBXDG_STATE_HOME\fP
-state directory base; dm uses $XDG_STATE_HOME/dm
+State directory base; dm uses $XDG_STATE_HOME/dm.
 .TP
 \fBXDG_CONFIG_HOME\fP
-config directory base; dm reads $XDG_CONFIG_HOME/dm/config.kdl
+Config directory base; dm reads $XDG_CONFIG_HOME/dm/config.kdl.
+.TP
+\fBHOME\fP
+Home directory base; dm reads $HOME/.config/dm and $HOME/.local/state/dm when the XDG variables are unset.
 .TP
 \fBDM_SESSION\fP
-the session a pane belongs to; dm refuses to attach that session from inside it
+The session a pane belongs to; dm refuses to attach that session from inside it.
 .TP
 \fBDM_PANE\fP
-the pane id a pane's shell runs in
+The pane id a pane's shell runs in.
 .TP
 \fBDM_NERD\fP
-1 forces Nerd font glyphs, 0 forces the Unicode fallback
+1 forces Nerd Font glyphs, 0 forces the Unicode fallback.
 .TP
 \fBDM_NOTIFY\fP
-0 turns desktop notifications off
+0 turns desktop notifications off.
 .TP
 \fBDM_STATS\fP
-non-empty prints two stderr lines when the client exits: "dm: style cache: <hits> hits, <misses> misses, <rate>% hit rate" and "dm: pacing: <frames> frames written, <wakes> wakes, <ms>ms interval"
+Non-empty prints two stderr lines when the client exits: "dm: style cache: <hits> hits, <misses> misses, <rate>% hit rate" and "dm: pacing: <frames> frames written, <wakes> wakes, <ms>ms interval".
 .TP
 \fBCOLUMNS\fP
-terminal width when the client cannot ask the terminal
+Terminal width when the client cannot ask the terminal.
 .TP
 \fBSHELL\fP
-the shell a new pane runs
+The shell a new pane runs.
 .TP
 \fBTMUX\fP
-set inside tmux; dm uses it to pick its terminal behaviour
+Set inside tmux; dm uses it to pick its terminal behaviour.
 .SH SEE ALSO
 .BR tmux (1)
