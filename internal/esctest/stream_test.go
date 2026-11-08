@@ -56,7 +56,7 @@ func TestScanIncomplete(t *testing.T) {
 
 func TestHandled(t *testing.T) {
 	yes := []string{
-		"\x1b[c", "\x1b[0c", "\x1b[>c", "\x1b[?6n", "\x1b[18t",
+		"\x1b[c", "\x1b[0c", "\x1b[>c", "\x1b[6n", "\x1b[?6n", "\x1b[18t",
 		"\x1b[?1$p", "\x1b[1$p", "\x1b[1;1;1;1;1;1*y",
 		"\x1b]4;0;?\x1b\\", "\x1b]10;?\x1b\\", "\x1b]52;;?\x1b\\",
 		"\x1bP$qr\x1b\\", "\x1bP+q436F\x1b\\", "\x1bZ", "\x1b[>q",
@@ -68,7 +68,7 @@ func TestHandled(t *testing.T) {
 		}
 	}
 	no := []string{
-		"\x1b[6n", "\x1b[?1h", "\x1b[1m", "\x1b]0;title\x1b\\",
+		"\x1b[?1h", "\x1b[1m", "\x1b]0;title\x1b\\",
 		"\x1b]4;0;rgb:ffff/0000/0000\x1b\\", "\x1b[?1049h",
 	}
 	for _, in := range no {

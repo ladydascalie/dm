@@ -342,6 +342,11 @@ func (h *harness) answerCSI(s seq, raw []byte) {
 			h.replyVT(raw, "DECXCPR")
 			return
 		}
+		// A plain cursor-position report belongs to the terminal under test.
+		if s.priv == 0 && firstParam(s.params, 0) == 6 {
+			h.replyVT(raw, "DSR")
+			return
+		}
 		h.answerDSR(s)
 	case 't':
 		h.answerWinop(s)
