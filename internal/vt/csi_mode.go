@@ -133,8 +133,10 @@ func (t *Term) setPrivateMode(n int, on bool) {
 		m.Allow80To132 = on
 	case decMoreFix:
 		m.MoreFix = on
-	case decReverseWrap, decReverseWrap2:
+	case decReverseWrap:
 		m.ReverseWrap = on
+	case decReverseWrap2:
+		m.ReverseWrapExtended = on
 	case decALT47:
 		if on {
 			g.EnterAltScreen(false)
@@ -303,8 +305,10 @@ func (t *Term) privateMode(n int) (value, ok bool) {
 		return m.Allow80To132, true
 	case decMoreFix:
 		return m.MoreFix, true
-	case decReverseWrap, decReverseWrap2:
+	case decReverseWrap:
 		return m.ReverseWrap, true
+	case decReverseWrap2:
+		return m.ReverseWrapExtended, true
 	case decDECNKM:
 		return m.ApplicationKeypad, true
 	case decDECLRMM:

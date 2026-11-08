@@ -216,7 +216,7 @@ func TestBSStopsAtTheLeftMargin(t *testing.T) {
 }
 
 func TestBSReverseWrapsToTheRightMargin(t *testing.T) {
-	term := marginTerm(t, 20, 4, "\x1b[?7h\x1b[?45h\x1b[?69h\x1b[5;10s\x1b[3;5H\b")
+	term := marginTerm(t, 20, 4, "\x1b[?7h\x1b[?1045h\x1b[?69h\x1b[5;10s\x1b[3;5H\b")
 	if c := term.grid.Cursor(); c.X != 9 || c.Y != 1 {
 		t.Fatalf("Cursor() = %+v, want the right margin on the row above 9,1", c)
 	}

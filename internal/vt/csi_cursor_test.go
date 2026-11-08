@@ -217,3 +217,57 @@ func TestCursorMoveClearsPendingWrap(t *testing.T) {
 		t.Error("CUP left the pending wrap set")
 	}
 }
+
+// TestReverseWrapMode45NeedsAWrappedLine pins that mode 45 wraps only a row
+// that autowrap began, and leaves a row reached by NEL alone. Mode 1045 wraps
+// any row.
+func TestReverseWrapMode45NeedsAWrappedLine(t *testing.T) {
+	// Four columns: "abcd" wraps onto row 1, so row 1 is a wrapped line.
+	term := NewTerm(4, 3)
+	writeTerm(term, "\x1b[?7h\x1b[?45habcd\b")
+	if c := term.grid.Cursor(); c.X != 3 || c.Y != 0 {
+		t.Fatalf("mode 45 on a wrapped line: Cursor() = %+v, want 3,0", c)
+	}
+
+	// NEL reaches row 1 without a wrap, so mode 45 does not wrap there.
+	term = NewTerm(4, 3)
+	writeTerm(term, "\x1b[?7h\x1b[?45h\x1b[1;1H\x1bE\b")
+	if c := term.grid.Cursor(); c.X != 0 || c.Y != 1 {
+		t.Fatalf("mode 45 after NEL: Cursor() = %+v, want 0,1", c)
+	}
+
+	// Mode 1045 wraps any row.
+	term = NewTerm(4, 3)
+	writeTerm(term, "\x1b[?7h\x1b[?1045h\x1b[1;1H\x1bE\b")
+	if c := term.grid.Cursor(); c.X != 3 || c.Y != 0 {
+		t.Fatalf("mode 1045 after NEL: Cursor() = %+v, want 3,0", c)
+	}
+}
+
+// TestBackspaceInPendingWrap pins the two xterm cases: without reverse wrap the
+// backspace moves left, and with it the backspace only cancels the pending wrap.
+func TestBackspaceInPendingWrap(t *testing.T) {
+	term := NewTerm(4, 1)
+	writeTerm(term, "abcd\b")
+	if c := term.grid.Cursor(); c.X != 2 || c.WrapNext {
+		t.Fatalf("plain backspace: Cursor() = %+v, want 2 with no pending wrap", c)
+	}
+
+	term = NewTerm(4, 1)
+	writeTerm(term, "\x1b[?7h\x1b[?1045habcd\b")
+	if c := term.grid.Cursor(); c.X != 3 || c.WrapNext {
+		t.Fatalf("reverse-wrap backspace: Cursor() = %+v, want 3", c)
+	}
+}
+
+// TestCUBReverseWraps pins that CUB crosses into a wrapped line at the left
+// edge and stops when the row above was not wrapped.
+func TestCUBReverseWraps(t *testing.T) {
+	term := NewTerm(4, 3)
+	// "abcde" wraps e onto row 1; the cursor sits at x1. CUB(2) steps to x0
+	// and then crosses the wrap to the right margin.
+	writeTerm(term, "\x1b[?7h\x1b[?1045habcde\x1b[2D")
+	if c := term.grid.Cursor(); c.X != 3 || c.Y != 0 {
+		t.Fatalf("CUB across a wrap: Cursor() = %+v, want 3,0", c)
+	}
+}

@@ -47,7 +47,8 @@ type Modes struct {
 	Allow80To132          bool // DECSET 40: DECCOLM may resize
 	NoClearOnColumnMode   bool // DECNCSM: DECCOLM does not erase
 	MoreFix               bool // DECSET 41
-	ReverseWrap           bool // DECSET 45
+	ReverseWrap           bool // DECSET 45: wrap only a wrapped line
+	ReverseWrapExtended   bool // DECSET 1045: wrap any line
 	LeftRightMargin       bool // DECLRMM
 	LineFeedNewLine       bool // LNM
 }
@@ -99,6 +100,9 @@ type SavedCursor struct {
 type Grid struct {
 	cols, rows int
 	lines      [][]Cell
+	// wrapped marks a row that a printable rune reached by autowrap. Mode 45
+	// reverse wrap is limited to those rows; mode 1045 ignores the mark.
+	wrapped []bool
 
 	cursor Cursor
 	// saved holds the DECSC state once per screen: index 0 is the primary
@@ -112,7 +116,8 @@ type Grid struct {
 	// altLines is the alternate screen. It is nil until the application first
 	// enters it, so a terminal that never uses the alternate screen does not
 	// pay for a second grid.
-	altLines [][]Cell
+	altLines   [][]Cell
+	altWrapped []bool
 	// savedModes is the XTSAVE store, keyed by DEC private mode number.
 	savedModes map[int]bool
 }
@@ -130,6 +135,7 @@ func NewGrid(cols, rows int) *Grid {
 		cols:    cols,
 		rows:    rows,
 		lines:   make([][]Cell, rows),
+		wrapped: make([]bool, rows),
 		cursor:  Cursor{Visible: true},
 		scroll:  ScrollRegion{Top: 0, Bottom: rows - 1, Left: 0, Right: cols - 1},
 		tabs:    defaultTabs(cols),
@@ -405,6 +411,10 @@ func (g *Grid) InsertLines(y, n int) {
 			g.lines[row][x] = blank
 		}
 	}
+	copy(g.wrapped[y+n:r.Bottom+1], g.wrapped[y:r.Bottom-n+1])
+	for row := y; row < y+n; row++ {
+		g.wrapped[row] = false
+	}
 }
 
 // DeleteLines removes n rows at row y inside the scroll region, pulling the
@@ -427,6 +437,10 @@ func (g *Grid) DeleteLines(y, n int) {
 		for x := r.Left; x <= r.Right; x++ {
 			g.lines[row][x] = blank
 		}
+	}
+	copy(g.wrapped[y:r.Bottom-n+1], g.wrapped[y+n:r.Bottom+1])
+	for row := r.Bottom - n + 1; row <= r.Bottom; row++ {
+		g.wrapped[row] = false
 	}
 }
 
@@ -454,6 +468,7 @@ func (g *Grid) Clear() {
 	for y := range g.lines {
 		g.lines[y] = newLine(g.cols, DefaultStyle())
 	}
+	g.wrapped = make([]bool, g.rows)
 }
 
 // ScrollUp moves the scroll region's rows up by n and fills the rows that enter
@@ -478,6 +493,10 @@ func (g *Grid) ScrollUp(n int) {
 			g.lines[y][x] = blank
 		}
 	}
+	copy(g.wrapped[r.Top:r.Bottom-n+1], g.wrapped[r.Top+n:r.Bottom+1])
+	for y := r.Bottom - n + 1; y <= r.Bottom; y++ {
+		g.wrapped[y] = false
+	}
 }
 
 // ScrollDown moves the scroll region's rows down by n and fills the rows that
@@ -501,6 +520,10 @@ func (g *Grid) ScrollDown(n int) {
 		for x := r.Left; x <= r.Right; x++ {
 			g.lines[y][x] = blank
 		}
+	}
+	copy(g.wrapped[r.Top+n:r.Bottom+1], g.wrapped[r.Top:r.Bottom-n+1])
+	for y := r.Top; y < r.Top+n; y++ {
+		g.wrapped[y] = false
 	}
 }
 
@@ -656,6 +679,11 @@ func (g *Grid) Resize(cols, rows int) {
 	if altLines != nil {
 		altLines = resizeLines(altLines, cols, rows)
 	}
+	wrapped := resizeBools(g.wrapped, rows)
+	altWrapped := g.altWrapped
+	if altWrapped != nil {
+		altWrapped = resizeBools(altWrapped, rows)
+	}
 	tabs := make([]bool, cols)
 	copy(tabs, g.tabs)
 	for x := len(g.tabs); x < cols; x++ {
@@ -666,6 +694,7 @@ func (g *Grid) Resize(cols, rows int) {
 
 	g.cols, g.rows = cols, rows
 	g.lines, g.altLines, g.tabs = lines, altLines, tabs
+	g.wrapped, g.altWrapped = wrapped, altWrapped
 	g.scroll.Top = clamp(g.scroll.Top, 0, rows-1)
 	g.scroll.Bottom = clamp(g.scroll.Bottom, 0, rows-1)
 	g.scroll.Left = clamp(g.scroll.Left, 0, cols-1)
@@ -692,6 +721,28 @@ func resizeLines(old [][]Cell, cols, rows int) [][]Cell {
 	return lines
 }
 
+// resizeBools copies flags into rows entries, false where there is no old one.
+func resizeBools(old []bool, rows int) []bool {
+	out := make([]bool, rows)
+	copy(out, old)
+	return out
+}
+
+// LineWrapped reports whether row y was reached by autowrap.
+func (g *Grid) LineWrapped(y int) bool {
+	if y < 0 || y >= len(g.wrapped) {
+		return false
+	}
+	return g.wrapped[y]
+}
+
+// SetLineWrapped records that row y was or was not reached by autowrap.
+func (g *Grid) SetLineWrapped(y int, v bool) {
+	if y >= 0 && y < len(g.wrapped) {
+		g.wrapped[y] = v
+	}
+}
+
 // EnterAltScreen switches to the alternate screen. clear wipes it first, which
 // is what DECSET 1049 and 47 do; the cursor stays where it was.
 func (g *Grid) EnterAltScreen(clear bool) {
@@ -700,10 +751,13 @@ func (g *Grid) EnterAltScreen(clear bool) {
 	}
 	if g.altLines == nil {
 		g.altLines = g.blankLines()
+		g.altWrapped = make([]bool, g.rows)
 	}
 	g.lines, g.altLines = g.altLines, g.lines
+	g.wrapped, g.altWrapped = g.altWrapped, g.wrapped
 	if clear {
 		g.lines = g.blankLines()
+		g.wrapped = make([]bool, g.rows)
 	}
 	g.modes.AltScreen = true
 }
@@ -715,8 +769,10 @@ func (g *Grid) ExitAltScreen(clear bool) {
 		return
 	}
 	g.lines, g.altLines = g.altLines, g.lines
+	g.wrapped, g.altWrapped = g.altWrapped, g.wrapped
 	if clear {
 		g.altLines = g.blankLines()
+		g.altWrapped = make([]bool, g.rows)
 	}
 	g.modes.AltScreen = false
 }
@@ -732,6 +788,7 @@ func (g *Grid) Fill(content string) {
 	}
 	g.resetScrollRegion()
 	g.cursor = Cursor{Visible: true}
+	g.wrapped = make([]bool, g.rows)
 }
 
 // Reset returns the grid to its power-on state, as RIS does. The screen is
@@ -748,7 +805,9 @@ func (g *Grid) Reset() {
 	g.resetScrollRegion()
 	g.tabs = defaultTabs(g.cols)
 	g.lines = g.blankLines()
+	g.wrapped = make([]bool, g.rows)
 	g.altLines = nil
+	g.altWrapped = nil
 	g.saved[0] = homeSavedCursor()
 	g.saved[1] = homeSavedCursor()
 	g.savedModes = nil
@@ -764,6 +823,7 @@ func (g *Grid) SoftReset() {
 	m.Insert = false
 	m.ReverseVideo = false
 	m.ReverseWrap = false
+	m.ReverseWrapExtended = false
 	m.LeftRightMargin = false
 	m.CursorKeysApplication = false
 	g.modes = m

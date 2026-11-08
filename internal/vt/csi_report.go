@@ -98,9 +98,22 @@ func csiDECDSR(t *Term, seq CSI) {
 }
 
 // replyCursorPosition sends the cursor position, in grid coordinates plus one.
+// In origin mode the position is relative to the margins, as xterm reports it.
 // The private form adds the page number, always 1.
 func (t *Term) replyCursorPosition(private bool) {
 	c := t.grid.Cursor()
+	if t.grid.Modes().Origin {
+		// xterm reports the position relative to a margin only when the
+		// cursor is inside that margin. A move that ignores origin mode can
+		// put it outside, and then that axis stays absolute.
+		r := t.grid.ScrollRegion()
+		if c.X >= r.Left && c.X <= r.Right {
+			c.X -= r.Left
+		}
+		if c.Y >= r.Top && c.Y <= r.Bottom {
+			c.Y -= r.Top
+		}
+	}
 	if private {
 		t.reply(fmt.Sprintf("\x1b[?%d;%d;1R", c.Y+1, c.X+1))
 		return

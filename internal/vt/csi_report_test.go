@@ -92,14 +92,14 @@ func TestDECRQM(t *testing.T) {
 			want:  "\x1b[?6;1$y",
 		},
 		{
-			name:  "DECSCNM reset",
-			in:    "\x1b[?5$p",
-			want:  "\x1b[?5;2$y",
+			name: "DECSCNM reset",
+			in:   "\x1b[?5$p",
+			want: "\x1b[?5;2$y",
 		},
 		{
-			name:  "DECTCEM visible",
-			in:    "\x1b[?25$p",
-			want:  "\x1b[?25;1$y",
+			name: "DECTCEM visible",
+			in:   "\x1b[?25$p",
+			want: "\x1b[?25;1$y",
 		},
 		{
 			name:  "DECTCEM hidden",
@@ -108,9 +108,9 @@ func TestDECRQM(t *testing.T) {
 			want:  "\x1b[?25;2$y",
 		},
 		{
-			name:  "IRM reset",
-			in:    "\x1b[4$p",
-			want:  "\x1b[4;2$y",
+			name: "IRM reset",
+			in:   "\x1b[4$p",
+			want: "\x1b[4;2$y",
 		},
 		{
 			name: "IRM set",
@@ -123,19 +123,19 @@ func TestDECRQM(t *testing.T) {
 			want: "\x1b[4;1$y",
 		},
 		{
-			name:  "DECHCCM permanently reset",
-			in:    "\x1b[?60$p",
-			want:  "\x1b[?60;4$y",
+			name: "DECHCCM permanently reset",
+			in:   "\x1b[?60$p",
+			want: "\x1b[?60;4$y",
 		},
 		{
-			name:  "GATM permanently reset",
-			in:    "\x1b[1$p",
-			want:  "\x1b[1;4$y",
+			name: "GATM permanently reset",
+			in:   "\x1b[1$p",
+			want: "\x1b[1;4$y",
 		},
 		{
-			name:  "unknown DEC mode",
-			in:    "\x1b[?9999$p",
-			want:  "\x1b[?9999;0$y",
+			name: "unknown DEC mode",
+			in:   "\x1b[?9999$p",
+			want: "\x1b[?9999;0$y",
 		},
 	}
 	for _, tc := range cases {
@@ -180,5 +180,24 @@ func TestXTGETTCAP(t *testing.T) {
 	}
 	if got, want := XTGETTCAPReply("544E"), "\x1bP0+r544E\x1b\\"; got != want {
 		t.Fatalf("XTGETTCAP TN = %q, want %q", got, want)
+	}
+}
+
+// TestCursorReportRelativeInOriginMode pins that the report is relative to the
+// margins in origin mode while the cursor is inside them, and absolute on an
+// axis where a move that ignores origin mode put it outside.
+func TestCursorReportRelativeInOriginMode(t *testing.T) {
+	term := NewTerm(20, 12)
+	writeTerm(term, "\x1b[6;11r\x1b[?69h\x1b[5;10s\x1b[?6h")
+	if got, want := report(t, term, "\x1b[1;1H\x1b[6n"), "\x1b[1;1R"; got != want {
+		t.Fatalf("CUP home in origin mode: report = %q, want %q", got, want)
+	}
+	if got, want := report(t, term, "\x1b[?6n"), "\x1b[?1;1;1R"; got != want {
+		t.Fatalf("DECXCPR in origin mode: report = %q, want %q", got, want)
+	}
+	// VPA is absolute, so row 2 is outside the vertical margin and that axis
+	// stays absolute; the column is still inside its margin and is relative.
+	if got, want := report(t, term, "\x1b[2d\x1b[6n"), "\x1b[2;1R"; got != want {
+		t.Fatalf("VPA outside the vertical margin: report = %q, want %q", got, want)
 	}
 }

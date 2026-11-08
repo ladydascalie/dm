@@ -33,7 +33,43 @@ func csiCursorForward(term *Term, seq CSI) {
 }
 
 func csiCursorBack(term *Term, seq CSI) {
-	moveCursor(term, -csiParam(seq, 0, 1), 0)
+	g := term.grid
+	m := g.Modes()
+	if !m.Wrap || (!m.ReverseWrap && !m.ReverseWrapExtended) {
+		moveCursor(term, -csiParam(seq, 0, 1), 0)
+		return
+	}
+	// Reverse wrap: at the left margin the move continues on the previous
+	// row's right margin, but mode 45 only does so for a row autowrap began.
+	r := g.ScrollRegion()
+	cur := g.Cursor()
+	lo := 0
+	if cur.X >= r.Left {
+		lo = r.Left
+	}
+	hi := g.cols - 1
+	if cur.X <= r.Right {
+		hi = r.Right
+	}
+	x, y := cur.X, cur.Y
+	for i, n := 0, csiParam(seq, 0, 1); i < n; i++ {
+		if x > lo {
+			x--
+			continue
+		}
+		if !m.ReverseWrapExtended && !g.LineWrapped(y) {
+			break
+		}
+		next := y - 1
+		if m.ReverseWrapExtended && y == r.Top {
+			next = r.Bottom
+		}
+		if next < 0 {
+			break
+		}
+		y, x = next, hi
+	}
+	g.SetCursor(x, y)
 }
 
 // moveCursor moves the cursor by dx columns and dy rows. The move stops at the

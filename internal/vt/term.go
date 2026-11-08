@@ -47,11 +47,13 @@ func (t *Term) place(content string) {
 		g.SetCursor(left, cur.Y)
 		t.lineFeed()
 		cur = g.Cursor()
+		g.SetLineWrapped(cur.Y, true)
 	}
 	if c.Width == WidthWide && cur.X == right && g.Modes().Wrap {
 		g.SetCursor(left, cur.Y)
 		t.lineFeed()
 		cur = g.Cursor()
+		g.SetLineWrapped(cur.Y, true)
 	}
 
 	g.Write(cur.X, cur.Y, c)
@@ -121,9 +123,28 @@ func (t *Term) backspace() {
 	cur := g.Cursor()
 	r := g.ScrollRegion()
 	m := g.Modes()
-	if m.Wrap && m.ReverseWrap && cur.X <= r.Left {
+	if cur.WrapNext {
+		// The cursor is still on the cell it just wrote, with a wrap pending.
+		g.SetWrapNext(false)
+		if m.ReverseWrap || m.ReverseWrapExtended {
+			return
+		}
+		cur = g.Cursor()
+	}
+	wraps := false
+	if m.Wrap && cur.X <= r.Left {
+		switch {
+		case m.ReverseWrapExtended:
+			// Mode 1045 wraps anywhere, and around the top and bottom.
+			wraps = true
+		case m.ReverseWrap && g.LineWrapped(cur.Y):
+			// Mode 45 wraps only a line that autowrap began.
+			wraps = true
+		}
+	}
+	if wraps {
 		y := cur.Y - 1
-		if cur.Y == r.Top {
+		if m.ReverseWrapExtended && cur.Y == r.Top {
 			y = r.Bottom
 		}
 		if y >= 0 {
