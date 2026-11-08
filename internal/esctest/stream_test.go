@@ -115,8 +115,19 @@ func TestParseColor(t *testing.T) {
 	}{
 		{"rgb:f0f0/f0f0/f0f0", rgb{0xf0f0, 0xf0f0, 0xf0f0}, true},
 		{"rgb:ffff/0000/0000", rgb{0xffff, 0, 0}, true},
-		{"#f0f0f0", rgb{0xf000, 0xf000, 0xf000}, true},
-		{"#fff", rgb{0xf000, 0xf000, 0xf000}, true},
+		{"#f0f0f0", rgb{0xf0f0, 0xf0f0, 0xf0f0}, true},
+		{"#fff", rgb{0xf0f0, 0xf0f0, 0xf0f0}, true},
+		{"#888", rgb{0x8080, 0x8080, 0x8080}, true},
+		{"#f00f00f00", rgb{0xf0f0, 0xf0f0, 0xf0f0}, true},
+		{"#f000f000f000", rgb{0xf0f0, 0xf0f0, 0xf0f0}, true},
+		{"rgbi:1/1/1", rgb{0xffff, 0xffff, 0xffff}, true},
+		{"rgbi:0.5/0.5/0.5", rgb{0xc1c1, 0xbbbb, 0xbbbb}, true},
+		{"CIEXYZ:0.5/0.5/0.5", rgb{0xdddd, 0xb5b5, 0xa0a0}, true},
+		{"CIEuvY:0.5/0.5/0.5", rgb{0xffff, 0xa3a3, 0xaeae}, true},
+		{"CIExyY:0.5/0.5/0.5", rgb{0xf7f7, 0xb3b3, 0x0e0e}, true},
+		{"CIELab:0.5/0.5/0.5", rgb{0x5252, 0x4f4f, 0x4f4f}, true},
+		{"CIELuv:0.5/0.5/0.5", rgb{0x0e0e, 0x1313, 0x0e0e}, true},
+		{"TekHVC:0.5/0.5/0.5", rgb{0x1111, 0x1313, 0x0e0e}, true},
 		{"nonsense", rgb{}, false},
 	}
 	for _, tt := range tests {
