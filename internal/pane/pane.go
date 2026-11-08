@@ -49,6 +49,9 @@ type paneProc struct {
 	flushTimer *time.Timer
 	flushGen   uint64
 	mode       vt.Modes
+	// fg and bg are the terminal colours this pane answers OSC 10 and OSC 11
+	// with. The server sets them from the client's detection; guarded by mu.
+	fg, bg string
 }
 
 // modeInfo reports the two modes the client must respect: alternate screen
@@ -147,11 +150,16 @@ func Run(args []string) error {
 	shell := fs.String("shell", "", "shell")
 	cols := fs.Int("cols", 80, "columns")
 	rows := fs.Int("rows", 24, "rows")
+	fg := fs.String("fg", osc.TermFG, "terminal foreground colour")
+	bg := fs.String("bg", osc.TermBG, "terminal background colour")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *id == "" || *session == "" {
 		return fmt.Errorf("pane needs --id and --session")
+	}
+	if *fg == "" || *bg == "" {
+		return fmt.Errorf("pane needs a non-empty --fg and --bg")
 	}
 	if *shell == "" {
 		*shell = os.Getenv("SHELL")
@@ -175,6 +183,7 @@ func Run(args []string) error {
 		ring: &scrollRing{},
 		subs: map[*subConn]bool{},
 		st:   wire.Status{State: "unknown"},
+		fg:   *fg, bg: *bg,
 	}
 
 	cmd := exec.Command(p.shell, "-l")
@@ -268,17 +277,11 @@ func (p *paneProc) reap(reason string) {
 func (p *paneProc) readLoop() {
 	buf := make([]byte, 32<<10)
 	var clean bytes.Buffer
-	filter := &osc.Filter{
-		Status: p.setStatus,
-		Query:  p.replyQuery,
-		Reply:  p.replyTerminal,
-		Cursor: p.cursorPos,
-		FG:     osc.TermFG,
-		BG:     osc.TermBG,
-	}
+	filter := p.newFilter()
 	for {
 		n, err := p.ptmx.Read(buf)
 		if n > 0 {
+			p.syncFilter(filter)
 			clean.Reset()
 			filter.Feed(buf[:n], &clean)
 			b := append([]byte(nil), clean.Bytes()...)
@@ -296,6 +299,29 @@ func (p *paneProc) readLoop() {
 			return
 		}
 	}
+}
+
+// newFilter builds the OSC filter with the pane's current colour pair.
+func (p *paneProc) newFilter() *osc.Filter {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return &osc.Filter{
+		Status: p.setStatus,
+		Query:  p.replyQuery,
+		Reply:  p.replyTerminal,
+		Cursor: p.cursorPos,
+		FG:     p.fg,
+		BG:     p.bg,
+	}
+}
+
+// syncFilter refreshes the filter's colour pair from the guarded fields, so a
+// term-colours action reaches the next read and a long-lived filter never
+// answers with a stale pair.
+func (p *paneProc) syncFilter(f *osc.Filter) {
+	p.mu.Lock()
+	f.FG, f.BG = p.fg, p.bg
+	p.mu.Unlock()
 }
 
 // publishLocked feeds one clean chunk to the screen, the ring and the
@@ -488,6 +514,18 @@ func (p *paneProc) serve(c net.Conn) {
 			dir := p.cwd
 			p.mu.Unlock()
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, Cwd: dir})
+		case "term-colours":
+			// An empty value is a no-op: the server may fan out before it has
+			// a pair, and a pane keeps the compiled-in default until then.
+			p.mu.Lock()
+			if m.FG != "" {
+				p.fg = m.FG
+			}
+			if m.BG != "" {
+				p.bg = m.BG
+			}
+			p.mu.Unlock()
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "kill":

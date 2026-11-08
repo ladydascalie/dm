@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"dm/internal/wire"
 	"encoding/base64"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -70,7 +71,7 @@ func TestTerminalQueriesAnswered(t *testing.T) {
 		t.Fatalf("queries were not stripped: %q", out.String())
 	}
 	want := []string{
-		"\x1b]11;theme.RGB:0000/0000/0000\x1b\\",
+		"\x1b]11;rgb:0000/0000/0000\x1b\\",
 		"\x1b[5;10R",
 		"\x1b[?1;2c",
 	}
@@ -102,5 +103,20 @@ func TestOSC7501QueryReply(t *testing.T) {
 	f.Feed([]byte("a\x1b]7501;?\x1b\\b"), &out)
 	if queries != 1 || out.String() != "ab" {
 		t.Fatalf("queries=%d out=%q", queries, out.String())
+	}
+}
+
+// legalTermColour is the two forms the server normalises: rgb:RRRR/GGGG/BBBB
+// and #rrggbb.
+var legalTermColour = regexp.MustCompile(`^(rgb:[0-9a-fA-F]{4}/[0-9a-fA-F]{4}/[0-9a-fA-F]{4}|#[0-9a-fA-F]{6})$`)
+
+// TestTermColoursAreLegalOSC proves the fallback pair is a colour OSC 10 and
+// OSC 11 define, so a pane that has not been told the outer terminal's pair
+// still answers something termenv can parse.
+func TestTermColoursAreLegalOSC(t *testing.T) {
+	for _, c := range []string{TermFG, TermBG} {
+		if !legalTermColour.MatchString(c) {
+			t.Fatalf("%q is not rgb:RRRR/GGGG/BBBB or #rrggbb", c)
+		}
 	}
 }

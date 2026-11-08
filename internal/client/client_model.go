@@ -33,6 +33,10 @@ const (
 	// waits for the rest of its bytes.
 	escTimeout = 40 * time.Millisecond
 
+	// termGrace is how long the client waits for the second colour reply
+	// before sending the one it has, so the two coalesce into one request.
+	termGrace = 300 * time.Millisecond
+
 	// toastMax is how many toasts the stack holds, toastLifetime how long each
 	// one lives, and toastDedupe how close a repeat must be to join the last
 	// toast instead of raising a new one.
@@ -122,6 +126,16 @@ type tui struct {
 
 	pasteDeadline time.Time // set while a paste start marker is still arriving
 	pasteOff      bool      // one pass with paste detection off
+
+	// termFG and termBG are the colours the outer terminal answered OSC 10
+	// and OSC 11 with. termDeadline bounds a partial reply, termGrace the
+	// wait for the second reply, and termSent* what the server already has.
+	termFG, termBG string
+	termDeadline   time.Time
+	termGrace      time.Time
+	termSentFG     string
+	termSentBG     string
+	termOff        bool // one pass with colour-reply detection off
 
 	selText        *selection // text selected with the mouse, nil when none
 	press          *heldPress // left press waiting for a drag or a click
@@ -364,6 +378,11 @@ func Run(name string) error {
 	}
 	defer term.Restore(fd, old)
 
+	// Ask the outer terminal for its colours once per attach, before the
+	// alternate screen. The reply arrives on stdin and the detector consumes
+	// it; a terminal that never answers leaves the pane defaults alone.
+	os.Stdout.WriteString("\x1b]10;?\x1b\\\x1b]11;?\x1b\\")
+
 	keys := make(chan []byte, 64)
 	go stdinReader(keys)
 	winch := make(chan os.Signal, 1)
@@ -428,6 +447,7 @@ func (s *frameSink) wrote() bool { return s.n > 0 }
 func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) {
 	t.expireToasts(now)
 	t.expirePaste(now)
+	t.expireTermColour(now)
 	t.expireSwitcher(now)
 	t.flushBoxWatchers(now)
 	t.expireArmed(now)

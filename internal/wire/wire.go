@@ -27,6 +27,8 @@ type Msg struct {
 	Index   int     `json:"index,omitempty"`
 	ID      int     `json:"id,omitempty"`
 	Cwd     string  `json:"cwd,omitempty"`
+	FG      string  `json:"fg,omitempty"` // terminal foreground the client detected
+	BG      string  `json:"bg,omitempty"` // terminal background the client detected
 	Ratio   float64 `json:"ratio,omitempty"`
 	NoFocus bool    `json:"nofocus,omitempty"`
 

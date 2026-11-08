@@ -44,3 +44,36 @@ func TestAllPaneWorkspaceUnfoldedRoundTrip(t *testing.T) {
 		t.Fatal("workspaceUnfolded key present when false")
 	}
 }
+
+// TestTermColoursRoundTrip proves the detected pair survives the framing with
+// its exact strings, and that an unset pair leaves both keys out of the JSON.
+func TestTermColoursRoundTrip(t *testing.T) {
+	in := wire.Msg{Type: "req", Action: "term-colours",
+		FG: "rgb:ffff/0000/1234", BG: "#aabbcc"}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.FG != in.FG || out.BG != in.BG {
+		t.Fatalf("round trip = %q/%q, want %q/%q", out.FG, out.BG, in.FG, in.BG)
+	}
+
+	b, err := json.Marshal(wire.Msg{Type: "req", Action: "term-colours"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["fg"]; ok {
+		t.Fatalf("unset pair kept the fg key: %s", b)
+	}
+	if _, ok := m["bg"]; ok {
+		t.Fatalf("unset pair kept the bg key: %s", b)
+	}
+}

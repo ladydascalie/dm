@@ -39,6 +39,11 @@ func (p *paneConn) send(m wire.Msg) error {
 	return wire.WriteMsg(p.c, m)
 }
 
+// termColours is the terminal colour pair a client detected, in xterm form.
+type termColours struct {
+	fg, bg string
+}
+
 // outboundBytes bounds what one client may have queued, in bytes. A client
 // past the bound is not reading: it gets a fresh picture instead of a backlog.
 const outboundBytes = 1 << 20
@@ -280,6 +285,15 @@ type server struct {
 	// zoom is the zoomed pane id, empty when no pane is zoomed. Memory only:
 	// a restart shows the splits, so it never reaches state.json.
 	zoom string
+
+	// termColours is the pair a client detected from its own terminal. It is
+	// nil until the first client reports, so a server that never saw one
+	// spawns panes with the compiled-in defaults.
+	termColours *termColours
+
+	// spawn starts a pane daemon. It is a field so a test can capture the
+	// command line without starting a process; nil means exec's Start.
+	spawn func(*exec.Cmd) error
 }
 
 func Run(args []string) error {
@@ -430,6 +444,25 @@ func (s *server) addPaneStateAt(id, cwd, shell string) {
 	s.st.Panes[id] = &session.PaneState{Shell: shell, Cwd: cwd, Cols: 80, Rows: 24}
 }
 
+// paneCommand builds the __pane command for a fresh daemon. A known colour
+// rides as --fg or --bg, so the pane answers OSC 10 and OSC 11 with the
+// client's terminal instead of the compiled-in default. A half-known pair
+// passes only the half it has and leaves the other at its default.
+func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours) *exec.Cmd {
+	args := []string{"__pane", "--id", id, "--session", sess,
+		"--cwd", ps.Cwd, "--shell", ps.Shell,
+		"--cols", strconv.Itoa(ps.Cols), "--rows", strconv.Itoa(ps.Rows)}
+	if tc != nil {
+		if tc.fg != "" {
+			args = append(args, "--fg", tc.fg)
+		}
+		if tc.bg != "" {
+			args = append(args, "--bg", tc.bg)
+		}
+	}
+	return exec.Command(exe, args...)
+}
+
 // ensurePane dials the pane's socket and adopts it, or spawns a fresh daemon.
 func (s *server) ensurePane(id string) error {
 	sock := paths.PaneSock(s.st.Name, id)
@@ -437,7 +470,15 @@ func (s *server) ensurePane(id string) error {
 		pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
 		s.mu.Lock()
 		s.panes[id] = pc
+		tc := s.termColours
 		s.mu.Unlock()
+		// A daemon that outlived a server keeps the colours it was born with,
+		// so hand it the pair a client reported since.
+		if tc != nil {
+			if err := pc.send(wire.Msg{Action: "term-colours", FG: tc.fg, BG: tc.bg}); err != nil {
+				log.Printf("pane %s: term-colours: %v", id, err)
+			}
+		}
 		// A daemon that outlived a server has gone wherever its shell went, so
 		// ask it where that is instead of trusting the state file.
 		s.setPaneCwd(id, s.liveCwd(id))
@@ -453,14 +494,14 @@ func (s *server) ensurePane(id string) error {
 		ps.Restarted = true
 		delete(s.adopt, id)
 	}
+	tc := s.termColours
+	spawn := s.spawn
 	s.mu.Unlock()
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe, "__pane", "--id", id, "--session", s.st.Name,
-		"--cwd", ps.Cwd, "--shell", ps.Shell,
-		"--cols", strconv.Itoa(ps.Cols), "--rows", strconv.Itoa(ps.Rows))
+	cmd := paneCommand(exe, s.st.Name, id, ps, tc)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	logPath := filepath.Join(paths.SessionDir(s.st.Name), "panes", id+".log")
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -469,7 +510,10 @@ func (s *server) ensurePane(id string) error {
 	}
 	defer lf.Close()
 	cmd.Stdout, cmd.Stderr = lf, lf
-	if err := cmd.Start(); err != nil {
+	if spawn == nil {
+		spawn = func(c *exec.Cmd) error { return c.Start() }
+	}
+	if err := spawn(cmd); err != nil {
 		return err
 	}
 	_ = cmd.Process.Release()

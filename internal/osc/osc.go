@@ -25,9 +25,13 @@ type Filter struct {
 // Terminal queries an application makes at startup and then waits on. termenv
 // waits five seconds for the OSC 11 reply, so an unanswered query is a five
 // second stall in every TUI it fronts.
+//
+// TermFG and TermBG are the fallback pair, in the xterm form OSC 10 and OSC 11
+// define, until a client reports the outer terminal's colours. A pane that has
+// not been told the pair answers these, and termenv parses them.
 const (
-	TermFG   = "theme.RGB:ffff/ffff/ffff"
-	TermBG   = "theme.RGB:0000/0000/0000"
+	TermFG   = "rgb:ffff/ffff/ffff"
+	TermBG   = "rgb:0000/0000/0000"
 	replyDA1 = "\x1b[?1;2c"
 	replyDA2 = "\x1b[>0;10;1c"
 )
