@@ -24,6 +24,8 @@ import (
 var (
 	pasteStart = []byte("\x1b[200~")
 	pasteEnd   = []byte("\x1b[201~")
+	oscFG      = []byte("\x1b]10;")
+	oscBG      = []byte("\x1b]11;")
 )
 
 // takePaste reports whether the buffer starts with a bracketed paste. When the
@@ -72,6 +74,100 @@ func (t *tui) staleInput() {
 	t.pasteOff = false
 }
 
+// takeTermColour reports whether buf starts with an OSC 10 or OSC 11 reply.
+// A complete reply returns its kind (10 or 11), its value and its length. A
+// partial prefix returns started true and n 0, so the caller keeps buffering.
+// A lone escape is left to the paste and prefix logic: it is not yet a reply.
+func takeTermColour(buf []byte) (kind int, value string, n int, started bool) {
+	if len(buf) < 2 || buf[0] != 0x1b || buf[1] != ']' {
+		return 0, "", 0, false
+	}
+	var prefix []byte
+	switch {
+	case bytes.HasPrefix(buf, oscFG):
+		prefix, kind = oscFG, 10
+	case bytes.HasPrefix(buf, oscBG):
+		prefix, kind = oscBG, 11
+	case bytes.HasPrefix(oscFG, buf) || bytes.HasPrefix(oscBG, buf):
+		return 0, "", 0, true
+	default:
+		return 0, "", 0, false
+	}
+	rest := buf[len(prefix):]
+	st := bytes.Index(rest, []byte("\x1b\\"))
+	bel := bytes.IndexByte(rest, 0x07)
+	if bel >= 0 && (st < 0 || bel < st) {
+		return kind, string(rest[:bel]), len(prefix) + bel + 1, true
+	}
+	if st < 0 {
+		return 0, "", 0, true
+	}
+	return kind, string(rest[:st]), len(prefix) + st + 2, true
+}
+
+// termColourAt is where the first complete OSC 10 or OSC 11 prefix starts, or
+// -1. It lets the bulk input path stop before a reply that shares a read with
+// a keystroke, so the reply is handled at the head on the next pass.
+func termColourAt(buf []byte) int {
+	at := -1
+	for _, p := range [][]byte{oscFG, oscBG} {
+		if i := bytes.Index(buf, p); i >= 0 && (at < 0 || i < at) {
+			at = i
+		}
+	}
+	return at
+}
+
+// noteTermColour records a reply and sends the pair once both are known, or
+// the one that arrived after a short grace so the two coalesce.
+func (t *tui) noteTermColour(kind int, value string) {
+	switch kind {
+	case 10:
+		t.termFG = value
+	case 11:
+		t.termBG = value
+	}
+	if t.termFG != "" && t.termBG != "" {
+		t.sendTermColours()
+		return
+	}
+	if t.termGrace.IsZero() {
+		t.termGrace = time.Now()
+	}
+}
+
+// sendTermColours sends the pair the client has, once per change. The server
+// normalises the raw reply payloads.
+func (t *tui) sendTermColours() {
+	t.termGrace = time.Time{}
+	if t.termFG == t.termSentFG && t.termBG == t.termSentBG {
+		return
+	}
+	t.termSentFG, t.termSentBG = t.termFG, t.termBG
+	if t.conn != nil {
+		_ = t.conn.Send(wire.Msg{Type: "req", Action: "term-colours", FG: t.termFG, BG: t.termBG})
+	}
+}
+
+// expireTermColour sends the one reply that arrived once the grace for the
+// second passes, and flushes a partial reply that stalled as ordinary input,
+// exactly as expirePaste does.
+func (t *tui) expireTermColour(now time.Time) bool {
+	changed := false
+	if !t.termGrace.IsZero() && now.Sub(t.termGrace) > termGrace {
+		t.sendTermColours()
+		changed = true
+	}
+	if !t.termDeadline.IsZero() && now.Sub(t.termDeadline) > escTimeout {
+		t.termDeadline = time.Time{}
+		t.termOff = true
+		t.processInput()
+		t.termOff = false
+		changed = true
+	}
+	return changed
+}
+
 // forwardPaste sends a bracketed paste to the focused pane as one keys message.
 // A paste closes any open menu, picker, prompt or scrollback first and disarms
 // the prefix: its bytes are text for the pane, never dm commands. A paste into
@@ -101,6 +197,22 @@ func (t *tui) forwardPaste(seq []byte) {
 
 func (t *tui) processInput() {
 	for len(t.inbuf) > 0 {
+		if !t.termOff {
+			if kind, value, n, started := takeTermColour(t.inbuf); started {
+				if n == 0 {
+					// The reply is still arriving. Keep buffering; the ticker
+					// sends these bytes down the normal path if they stall.
+					if t.termDeadline.IsZero() {
+						t.termDeadline = time.Now()
+					}
+					return
+				}
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				t.termDeadline = time.Time{}
+				t.noteTermColour(kind, value)
+				continue
+			}
+		}
 		if t.sw != nil {
 			// While the float is up every key belongs to it: nothing reaches a
 			// pane. A mouse event and a paste are swallowed whole. A lone esc is
@@ -291,6 +403,13 @@ func (t *tui) processInput() {
 					t.escAt = time.Now()
 				}
 				return
+			}
+			if at := termColourAt(t.inbuf); at > 0 {
+				// A colour reply shares this read with a keystroke. Send the
+				// keys before it; the reply is handled at the head next pass.
+				_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:at]})
+				t.inbuf = append([]byte(nil), t.inbuf[at:]...)
+				continue
 			}
 			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf})
 			t.inbuf = nil
