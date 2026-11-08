@@ -38,6 +38,12 @@ const (
 	toastMax      = 3
 	toastLifetime = 3 * time.Second
 	toastDedupe   = time.Second
+
+	// idleFlush is how long a pane's output must be quiet before its pending
+	// grapheme cluster is placed. The parser holds a cluster until the next
+	// rune proves it complete, so a program that writes once and waits would
+	// otherwise show one character short until it writes again.
+	idleFlush = 16 * time.Millisecond
 )
 
 type tui struct {
@@ -55,6 +61,9 @@ type tui struct {
 	vts    map[string]*vt.Term
 	armed  bool
 	toasts []toast // oldest first, newest last
+	// lastByte is when each pane last received output, so a quiet pane's
+	// pending cluster can be placed without waiting for the next chunk.
+	lastByte map[string]time.Time
 	// floats are arbitrary floating panes rendered over the main layout.
 	floats []*panel.FloatingPane
 	// hover is the URL under the pointer while ctrl is held, so the frame can
@@ -452,6 +461,9 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			t.expireArmed(now)
 			t.expirePrefix(now)
 			t.expireMode(now)
+			if t.flushIdle(now) {
+				t.dirty = true
+			}
 			if t.dirty && now.Sub(lastDraw) > 15*time.Millisecond {
 				t.draw()
 				lastDraw = now
@@ -571,6 +583,7 @@ func (t *tui) apply(m wire.Msg) {
 	case "bytes":
 		if term := t.vts[m.Target]; term != nil {
 			term.Write(m.Data)
+			t.noteBytes(m.Target, time.Now())
 			t.dirty = true
 		}
 		// New output moves the ring. A cached replay would be stale, so drop
@@ -644,6 +657,35 @@ func applySnapshot(vts map[string]*vt.Term, id string, r layout.Rect, snap *vt.S
 	}
 	vts[id] = term
 	return true
+}
+
+// noteBytes records when a pane last received output, so flushIdle can tell a
+// quiet pane from a busy one.
+func (t *tui) noteBytes(id string, now time.Time) {
+	if t.lastByte == nil {
+		t.lastByte = map[string]time.Time{}
+	}
+	t.lastByte[id] = now
+}
+
+// flushIdle places each quiet pane's pending grapheme cluster and reports
+// whether it placed any. A pane is quiet when a full tick has passed with no
+// bytes, so a stream never flushes mid-cluster.
+func (t *tui) flushIdle(now time.Time) bool {
+	placed := false
+	for id, at := range t.lastByte {
+		if now.Sub(at) < idleFlush {
+			continue
+		}
+		delete(t.lastByte, id)
+		term := t.vts[id]
+		if term == nil {
+			continue
+		}
+		term.Flush()
+		placed = true
+	}
+	return placed
 }
 
 // applyReplay replaces a pane's history ring only.

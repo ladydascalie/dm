@@ -43,7 +43,12 @@ type paneProc struct {
 	st   wire.Status
 	subs map[*subConn]bool
 	dead bool
-	mode vt.Modes
+	// flushTimer places the parser's pending cluster once the pane's output
+	// stops, and flushGen makes a timer that a later read superseded a no-op.
+	// Both are guarded by mu.
+	flushTimer *time.Timer
+	flushGen   uint64
+	mode       vt.Modes
 }
 
 // modeInfo reports the two modes the client must respect: alternate screen
@@ -82,6 +87,12 @@ func (s *subConn) send(m wire.Msg) error {
 
 // ringMax is the scrollback a pane keeps: a fixed 512 KiB, allocated once.
 const ringMax = 512 << 10
+
+// flushIdle is how long a pane's output must be quiet before the parser's
+// pending grapheme cluster is placed. The parser holds a cluster until the
+// next rune proves it complete, so a program that writes once and waits would
+// otherwise leave the last character off the grid until it writes again.
+const flushIdle = 16 * time.Millisecond
 
 // scrollRing is the pane's history: a circular buffer over one fixed array.
 // Writing wraps in place, so a burst never grows the daemon's heap and no
@@ -273,14 +284,7 @@ func (p *paneProc) readLoop() {
 			b := append([]byte(nil), clean.Bytes()...)
 			if len(b) > 0 {
 				p.mu.Lock()
-				p.vt.Write(b)
-				p.ring.Write(b)
-				p.broadcastLocked(wire.Msg{Type: "bytes", Data: b})
-				if m := p.vt.Grid().Modes(); m != p.mode {
-					p.mode = m
-					alt, mouse := modeInfo(m)
-					p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse)})
-				}
+				p.publishLocked(b)
 				p.mu.Unlock()
 			}
 		}
@@ -292,6 +296,38 @@ func (p *paneProc) readLoop() {
 			return
 		}
 	}
+}
+
+// publishLocked feeds one clean chunk to the screen, the ring and the
+// subscribers, and arms the quiet flush. The caller holds p.mu.
+func (p *paneProc) publishLocked(b []byte) {
+	p.vt.Write(b)
+	p.ring.Write(b)
+	p.broadcastLocked(wire.Msg{Type: "bytes", Data: b})
+	p.armFlushLocked()
+	if m := p.vt.Grid().Modes(); m != p.mode {
+		p.mode = m
+		alt, mouse := modeInfo(m)
+		p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse)})
+	}
+}
+
+// armFlushLocked restarts the quiet timer. The caller holds p.mu. A timer that
+// a later read superseded sees a newer generation and places nothing.
+func (p *paneProc) armFlushLocked() {
+	if p.flushTimer != nil {
+		p.flushTimer.Stop()
+	}
+	p.flushGen++
+	gen := p.flushGen
+	p.flushTimer = time.AfterFunc(flushIdle, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.flushGen != gen {
+			return
+		}
+		p.vt.Flush()
+	})
 }
 
 func (p *paneProc) broadcastLocked(m wire.Msg) {
