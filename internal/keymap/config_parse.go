@@ -66,6 +66,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			}
 			cfg.tabMax = n
 			i = next
+		case "padding":
+			if cfg.paddingSet {
+				return fmt.Errorf("line %d: duplicate padding node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after padding", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: padding must be a number, got %q", v.Line, v.Value)
+			}
+			if n < 0 || n > maxPadding {
+				return fmt.Errorf("line %d: padding must be 0 to %d, got %d", v.Line, maxPadding, n)
+			}
+			cfg.padding = n
+			cfg.paddingSet = true
+			i += 2
 		case "window-label":
 			if cfg.windowLabelSet {
 				return fmt.Errorf("line %d: duplicate window-label node", t.Line)
@@ -250,6 +268,14 @@ const (
 	defaultTabMax = 20
 )
 
+// defaultPadding is the built-in blank cells between a pane's border and its
+// content, and maxPadding is the largest the config accepts. A pane too small
+// for the padding drops it rather than going empty.
+const (
+	defaultPadding = 1
+	maxPadding     = 4
+)
+
 // parseTabWidth reads the integer value of a tab width node. It accepts a bare
 // number or a quoted one and rejects a value below the floor.
 func parseTabWidth(toks []kdl.Token, i int, name string) (int, int, error) {
@@ -309,6 +335,7 @@ prefix "ctrl+b"
 default-fold "fold"
 tab-min-width 8
 tab-max-width 20
+padding 1
 window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 
 keymap "main" {

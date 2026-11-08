@@ -31,7 +31,7 @@ func switcherTUI(t *testing.T) (*tui, chan wire.Msg) {
 	root := &layout.Node{Pane: "w1p1"}
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 34, Root: root, Focus: "w1p1"}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaFor(100, 30, 34), rects)
+	layout.Layout(root, layout.PaneAreaFor(100, 30, 34), testutil.Pad(), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
 	snap.All = []wire.AllPane{
 		{

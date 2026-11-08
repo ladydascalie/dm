@@ -1582,22 +1582,22 @@ func TestPaneAtBoxIncludesBorder(t *testing.T) {
 		Sizes: []float64{0.5, 0.5},
 	}
 	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
-	b := tui.paneByID("b").Rect
-	if got := tui.paneAtBox(b.X, b.Y); got == nil || got.ID != "b" {
+	pad := tui.keymap.Padding()
+	aBox := layout.BoxRect(tui.paneByID("a").Rect, pad)
+	bBox := layout.BoxRect(tui.paneByID("b").Rect, pad)
+	// The border sits one cell outside the box interior.
+	if got := tui.paneAtBox(bBox.X-1, bBox.Y-1); got == nil || got.ID != "b" {
 		t.Fatalf("top-left border did not hit b: %+v", got)
 	}
-	if got := tui.paneAtBox(b.X-1, b.Y-1); got == nil || got.ID != "b" {
-		t.Fatalf("outer corner did not hit b: %+v", got)
-	}
-	if got := tui.paneAtBox(b.X+b.W, b.Y+b.H); got == nil || got.ID != "b" {
+	if got := tui.paneAtBox(bBox.X+bBox.W, bBox.Y+bBox.H); got == nil || got.ID != "b" {
 		t.Fatalf("bottom-right border did not hit b: %+v", got)
 	}
 	// Adjacent boxes share the divider: a's right border and b's left border
 	// are adjacent cells, and each belongs to its own pane.
-	if got := tui.paneAtBox(b.X-1, b.Y+1); got == nil || got.ID != "b" {
+	if got := tui.paneAtBox(bBox.X-1, bBox.Y+1); got == nil || got.ID != "b" {
 		t.Fatalf("left border did not hit b: %+v", got)
 	}
-	if got := tui.paneAtBox(b.X-2, b.Y+1); got == nil || got.ID != "a" {
+	if got := tui.paneAtBox(aBox.X+aBox.W, bBox.Y+1); got == nil || got.ID != "a" {
 		t.Fatalf("a's right border did not hit a: %+v", got)
 	}
 }
@@ -3001,7 +3001,7 @@ func (f *zoomFrameTUI) zoom(id string) {
 		area := layout.PaneAreaForWithTabBar(f.snap.Cols, f.snap.Rows, f.snap.Rail)
 		for i := range f.snap.Panes {
 			if f.snap.Panes[i].ID == id {
-				f.snap.Panes[i].Rect = layout.InsetBox(area)
+				f.snap.Panes[i].Rect = layout.InsetBox(area, testutil.Pad())
 			}
 		}
 	}
@@ -3075,7 +3075,7 @@ func TestZoomFrameFilter(t *testing.T) {
 	// The hidden sibling's own sides run down the zoomed pane's middle. Its
 	// top and bottom rows land under the zoomed box's borders, so the sides are
 	// the cells that tell a filtered frame from an unfiltered one.
-	inside := layout.InsetBox(area)
+	inside := layout.InsetBox(area, testutil.Pad())
 	inside.X, inside.Y = inside.X+1, inside.Y+1
 	inside.W, inside.H = inside.W-2, inside.H-2
 	if got := screenGlyphsIn(scr, '│', inside); got != 0 {

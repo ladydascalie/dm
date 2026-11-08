@@ -405,14 +405,16 @@ func padHit(n *layout.Node, area layout.Rect, x, y int) (split *layout.Node, fir
 	return nil, "", "", "", layout.Rect{}, layout.Rect{}, false
 }
 
-// leafAt returns the leaf pane whose content rect contains x,y.
+// leafAt returns the leaf pane whose box contains x,y. It tests the box, not
+// the content rect: its one caller resolves which pane sits on each side of a
+// divider, and a divider probe lands on a border cell, which is inside the box
+// and outside the content at any padding.
 func leafAt(n *layout.Node, area layout.Rect, x, y int) string {
 	if n == nil {
 		return ""
 	}
 	if n.Pane != "" {
-		r := layout.InsetBox(area)
-		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
+		if x >= area.X && x < area.X+area.W && y >= area.Y && y < area.Y+area.H {
 			return n.Pane
 		}
 		return ""

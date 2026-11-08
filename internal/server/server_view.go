@@ -78,13 +78,14 @@ func (s *server) setRail(requested int) int {
 func (s *server) paneRectsLocked() map[string]layout.Rect {
 	win := s.st.ActiveWindow()
 	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked())
+	pad := s.cfg.Padding()
 	rects := map[string]layout.Rect{}
-	layout.Layout(win.Root, area, rects)
+	layout.Layout(win.Root, area, pad, rects)
 	if _, ok := rects[s.zoom]; !ok {
 		s.zoom = ""
 		return rects
 	}
-	rects[s.zoom] = layout.InsetBox(area)
+	rects[s.zoom] = layout.InsetBox(area, pad)
 	return rects
 }
 

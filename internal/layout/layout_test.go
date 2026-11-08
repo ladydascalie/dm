@@ -8,7 +8,7 @@ func TestLayout(t *testing.T) {
 		{Dir: "col", Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
 	}}
 	rects := map[string]Rect{}
-	Layout(root, Rect{X: 0, Y: 0, W: 100, H: 29}, rects)
+	Layout(root, Rect{X: 0, Y: 0, W: 100, H: 29}, 0, rects)
 	if len(rects) != 3 {
 		t.Fatalf("rects %+v", rects)
 	}
@@ -78,7 +78,7 @@ func TestBoxTiling(t *testing.T) {
 		var walk func(n *Node, a Rect)
 		walk = func(n *Node, a Rect) {
 			if n.Pane != "" {
-				in := InsetBox(a)
+				in := InsetBox(a, 0)
 				if in.W <= 0 || in.H <= 0 {
 					t.Fatalf("%s: %s has an empty interior in %v", shape.name, n.Pane, a)
 				}
@@ -114,7 +114,7 @@ func TestBoxTiling(t *testing.T) {
 		walk(shape.root, area)
 
 		rects := map[string]Rect{}
-		Layout(shape.root, area, rects)
+		Layout(shape.root, area, 0, rects)
 		ids := AllPanes(shape.root)
 		for i := 0; i < len(ids); i++ {
 			for j := i + 1; j < len(ids); j++ {
@@ -158,7 +158,7 @@ func TestDividerIsAdjacent(t *testing.T) {
 	// The content rects lose only their own borders, so an 80-wide area gives
 	// two 38-cell interiors around four border cells.
 	rects := map[string]Rect{}
-	Layout(row, area, rects)
+	Layout(row, area, 0, rects)
 	if rects["a"].W != 38 || rects["b"].W != 38 {
 		t.Fatalf("interiors = %v, want 38 each", rects)
 	}
@@ -168,9 +168,9 @@ func TestNodeRectMatchesLayout(t *testing.T) {
 	for _, shape := range boxShapes() {
 		area := Rect{X: 0, Y: 0, W: 80, H: 24}
 		rects := map[string]Rect{}
-		Layout(shape.root, area, rects)
+		Layout(shape.root, area, 0, rects)
 		walkNodes(shape.root, func(n *Node) {
-			got, ok := NodeRect(shape.root, n, area)
+			got, ok := NodeRect(shape.root, n, area, 0)
 			if !ok {
 				t.Fatalf("%s: nodeRect missed a node", shape.name)
 			}
@@ -224,9 +224,9 @@ func TestPaneBoxesStartBelowTabBar(t *testing.T) {
 	root := &Node{Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
 	plain := map[string]Rect{}
-	Layout(root, PaneAreaFor(100, 30, 20), plain)
+	Layout(root, PaneAreaFor(100, 30, 20), 0, plain)
 	shifted := map[string]Rect{}
-	Layout(root, PaneAreaForWithTabBar(100, 30, 20), shifted)
+	Layout(root, PaneAreaForWithTabBar(100, 30, 20), 0, shifted)
 	for id := range plain {
 		want := plain[id]
 		want.Y += TabBarRows
@@ -244,7 +244,7 @@ func TestSplitRatio(t *testing.T) {
 	root := &Node{Pane: "a"}
 	SplitLeaf(root, "a", "right", "b", 0.25)
 	rects := map[string]Rect{}
-	Layout(root, Rect{X: 0, Y: 0, W: 100, H: 10}, rects)
+	Layout(root, Rect{X: 0, Y: 0, W: 100, H: 10}, 0, rects)
 	if got := rects["a"].W; got < 22 || got > 24 {
 		t.Fatalf("existing pane width = %d, want about 23", got)
 	}
@@ -268,5 +268,49 @@ func TestSplitAndPrune(t *testing.T) {
 	n, ok := PruneLeaf(root, "b")
 	if !ok || len(n.Kids) != 2 || n.Kids[1].Pane != "c" {
 		t.Fatalf("prune left %+v", n)
+	}
+}
+
+// TestInsetBoxPadding proves the content rect clears the border and then the
+// padding, and that a box too small for the padding keeps its border and drops
+// the padding rather than going empty.
+func TestInsetBoxPadding(t *testing.T) {
+	box := Rect{X: 2, Y: 3, W: 20, H: 10}
+	if got, want := InsetBox(box, 0), (Rect{X: 3, Y: 4, W: 18, H: 8}); got != want {
+		t.Fatalf("pad 0 = %+v, want %+v", got, want)
+	}
+	if got, want := InsetBox(box, 1), (Rect{X: 4, Y: 5, W: 16, H: 6}); got != want {
+		t.Fatalf("pad 1 = %+v, want %+v", got, want)
+	}
+	if got, want := InsetBox(box, 2), (Rect{X: 5, Y: 6, W: 14, H: 4}); got != want {
+		t.Fatalf("pad 2 = %+v, want %+v", got, want)
+	}
+	// A 5-cell box fits a border and one cell of padding, not two.
+	if got, want := InsetBox(Rect{X: 0, Y: 0, W: 5, H: 5}, 2), (Rect{X: 1, Y: 1, W: 3, H: 3}); got != want {
+		t.Fatalf("pad 2 in a 5-cell box = %+v, want %+v", got, want)
+	}
+	// A 2-cell box has no room for a border at all.
+	if got, want := InsetBox(Rect{X: 0, Y: 0, W: 2, H: 2}, 1), (Rect{X: 0, Y: 0, W: 2, H: 2}); got != want {
+		t.Fatalf("pad 1 in a 2-cell box = %+v, want %+v", got, want)
+	}
+}
+
+// TestLayoutPadding proves the padding reaches every leaf through the tree.
+func TestLayoutPadding(t *testing.T) {
+	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	area := Rect{X: 0, Y: 0, W: 40, H: 10}
+	plain := map[string]Rect{}
+	Layout(root, area, 0, plain)
+	padded := map[string]Rect{}
+	Layout(root, area, 1, padded)
+	for id := range plain {
+		want := plain[id]
+		want.X++
+		want.Y++
+		want.W -= 2
+		want.H -= 2
+		if padded[id] != want {
+			t.Fatalf("%s padded = %+v, want %+v", id, padded[id], want)
+		}
 	}
 }

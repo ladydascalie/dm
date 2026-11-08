@@ -51,6 +51,8 @@ type Config struct {
 	defaultFoldSet bool
 	tabMin         int
 	tabMax         int
+	padding        int
+	paddingSet     bool
 	windowLabel    string
 	windowLabelSet bool
 }
@@ -98,6 +100,21 @@ func (c *Config) TabMaxWidth() int {
 		return defaultTabMax
 	}
 	return c.tabMax
+}
+
+// Padding returns the blank cells between a pane's border and its content. A
+// config without the node reports the built-in default.
+func (c *Config) Padding() int {
+	if c == nil || !c.paddingSet {
+		return defaultPadding
+	}
+	if c.padding < 0 {
+		return 0
+	}
+	if c.padding > maxPadding {
+		return maxPadding
+	}
+	return c.padding
 }
 
 // WindowLabel returns the template the tab bar and the sidebar window row

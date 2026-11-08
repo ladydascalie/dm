@@ -729,7 +729,9 @@ func (t *tui) paneAtBox(x, y int) *wire.PaneInfo {
 	}
 	for i := range t.snap.Panes {
 		r := t.snap.Panes[i].Rect
-		b := layout.Rect{X: r.X - 1, Y: r.Y - 1, W: r.W + 2, H: r.H + 2}
+		// The hit area is the box including its border, so a click on the
+		// frame focuses the pane.
+		b := layout.BoxRect(r, t.keymap.Padding()+1)
 		if x >= b.X && x < b.X+b.W && y >= b.Y && y < b.Y+b.H {
 			return &t.snap.Panes[i]
 		}

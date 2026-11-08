@@ -39,7 +39,9 @@ func (t *tui) draw() {
 	th := t.theme()
 	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range visiblePanes(win) {
-		panel.DrawPaneBox(&box, th, p.Rect, p.ID == win.Focus)
+		boxRect := layout.BoxRect(p.Rect, t.keymap.Padding())
+		panel.DrawPaneBox(&box, th, boxRect, p.ID == win.Focus)
+		panel.DrawPanePadding(&box, boxRect, p.Rect)
 	}
 	drawGrips(&grip, th, win)
 	// The rail grip paints the same heavy line as a split divider, over the

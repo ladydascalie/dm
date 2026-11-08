@@ -51,7 +51,7 @@ func TestPaneRectsReserveTabBarRow(t *testing.T) {
 	if area.Y != layout.TabBarRows {
 		t.Fatalf("pane area starts at row %d, want %d", area.Y, layout.TabBarRows)
 	}
-	if got, want := s.paneRectsLocked()[id], layout.InsetBox(area); got != want {
+	if got, want := s.paneRectsLocked()[id], layout.InsetBox(area, s.cfg.Padding()); got != want {
 		t.Fatalf("pane rect %+v, want %+v", got, want)
 	}
 
@@ -71,7 +71,7 @@ func TestPaneRectsReserveTabBarRow(t *testing.T) {
 
 	// Zoom fills the area below the tab bar.
 	s.zoom = "tabbar-p2"
-	if got, want := s.paneRectsLocked()["tabbar-p2"], layout.InsetBox(area); got != want {
+	if got, want := s.paneRectsLocked()["tabbar-p2"], layout.InsetBox(area, s.cfg.Padding()); got != want {
 		t.Fatalf("zoomed rect %+v, want %+v", got, want)
 	}
 }

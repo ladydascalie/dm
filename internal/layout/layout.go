@@ -156,29 +156,30 @@ func PadRect(n *Node, boxes []Rect, i int) Rect {
 }
 
 // Layout assigns a rectangle to every pane. Each split burns one column or row
-// for the divider, so panes never share a cell.
-func Layout(n *Node, area Rect, out map[string]Rect) {
+// for the divider, so panes never share a cell. pad is the blank cells between
+// a pane's border and its content.
+func Layout(n *Node, area Rect, pad int, out map[string]Rect) {
 	if n == nil {
 		return
 	}
 	if n.Pane != "" {
-		out[n.Pane] = InsetBox(area)
+		out[n.Pane] = InsetBox(area, pad)
 		return
 	}
 	boxes := ChildBoxRects(n, area)
 	for i, kid := range n.Kids {
-		Layout(kid, boxes[i], out)
+		Layout(kid, boxes[i], pad, out)
 	}
 }
 
 // NodeRect returns the rectangle Layout assigns to a node in the tree.
-func NodeRect(n, target *Node, area Rect) (Rect, bool) {
+func NodeRect(n, target *Node, area Rect, pad int) (Rect, bool) {
 	if n == nil {
 		return Rect{}, false
 	}
 	if n == target {
 		if n.Pane != "" {
-			return InsetBox(area), true
+			return InsetBox(area, pad), true
 		}
 		return area, true
 	}
@@ -186,7 +187,7 @@ func NodeRect(n, target *Node, area Rect) (Rect, bool) {
 		return Rect{}, false
 	}
 	for i, b := range ChildBoxRects(n, area) {
-		if out, ok := NodeRect(n.Kids[i], target, b); ok {
+		if out, ok := NodeRect(n.Kids[i], target, b, pad); ok {
 			return out, ok
 		}
 	}
@@ -294,12 +295,28 @@ func PaneAreaForWithTabBar(cols, rows, rail int) Rect {
 	return a
 }
 
-// InsetBox is the content rect of a boxed pane.
-func InsetBox(b Rect) Rect {
+// BoxRect is the interior of a pane's box: the content rect grown by pad, so
+// the border sits one cell outside it. It is the inverse of InsetBox.
+func BoxRect(content Rect, pad int) Rect {
+	pad = MaxInt(0, pad)
+	return Rect{
+		X: content.X - pad, Y: content.Y - pad,
+		W: content.W + 2*pad, H: content.H + 2*pad,
+	}
+}
+
+// InsetBox is the content rect of a boxed pane: one cell for the border, then
+// pad cells of padding. A box too small for the padding keeps its border and
+// drops the padding, so a tiny pane still shows content.
+func InsetBox(b Rect, pad int) Rect {
 	if b.W < 3 || b.H < 3 {
 		return Rect{X: b.X, Y: b.Y, W: MaxInt(1, b.W), H: MaxInt(1, b.H)}
 	}
-	return Rect{X: b.X + 1, Y: b.Y + 1, W: b.W - 2, H: b.H - 2}
+	inset := 1 + MaxInt(0, pad)
+	if b.W < 2*inset+1 || b.H < 2*inset+1 {
+		inset = 1
+	}
+	return Rect{X: b.X + inset, Y: b.Y + inset, W: b.W - 2*inset, H: b.H - 2*inset}
 }
 
 // SplitSizes turns the node's weights into integer cell counts that sum to

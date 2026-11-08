@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/switcher"
+	"dm/internal/testutil"
 	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -28,7 +29,7 @@ func newFrameTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 	root := &layout.Node{Pane: "w1p1"}
 	snap := &wire.Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaForWithTabBar(cols, rows, rail), rects)
+	layout.Layout(root, layout.PaneAreaForWithTabBar(cols, rows, rail), testutil.Pad(), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Rect: rects["w1p1"]}}
 	snap.All = []wire.AllPane{{
 		ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
@@ -61,7 +62,7 @@ func (f *frameTUI) frame() string {
 // does not: a test owns both halves of the picture.
 func relayout(snap *wire.Snapshot) {
 	rects := map[string]layout.Rect{}
-	layout.Layout(snap.Root, layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail), rects)
+	layout.Layout(snap.Root, layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail), testutil.Pad(), rects)
 	for i := range snap.Panes {
 		snap.Panes[i].Rect = rects[snap.Panes[i].ID]
 	}
@@ -475,7 +476,7 @@ func TestOracleDividerHover(t *testing.T) {
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaForWithTabBar(100, 20, 0), rects)
+	layout.Layout(root, layout.PaneAreaForWithTabBar(100, 20, 0), testutil.Pad(), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []wire.AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
@@ -575,7 +576,7 @@ func TestOracleOverlayOverGap(t *testing.T) {
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaForWithTabBar(100, 20, 0), rects)
+	layout.Layout(root, layout.PaneAreaForWithTabBar(100, 20, 0), testutil.Pad(), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []wire.AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
@@ -665,7 +666,7 @@ func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *wire.Snapshot) {
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &wire.Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaForWithTabBar(cols, rows, rail), rects)
+	layout.Layout(root, layout.PaneAreaForWithTabBar(cols, rows, rail), testutil.Pad(), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []wire.AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", Focus: true, WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},

@@ -232,6 +232,30 @@ func DrawPaneBox(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active 
 	DrawPaneBoxRows(buf, th, content, active, false)
 }
 
+// DrawPanePadding blanks the ring between a pane's border and its content. The
+// border band owns the ring, so a cell the content does not own never keeps an
+// older frame's glyph. box is the box interior and content the content rect.
+func DrawPanePadding(buf *bytes.Buffer, box, content layout.Rect) {
+	if box.W <= 0 || box.H <= 0 {
+		return
+	}
+	buf.WriteString("\x1b[0m")
+	put := func(x, y, n int) {
+		if n <= 0 {
+			return
+		}
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, strings.Repeat(" ", n))
+	}
+	for y := box.Y; y < box.Y+box.H; y++ {
+		if y < content.Y || y >= content.Y+content.H {
+			put(box.X, y, box.W)
+			continue
+		}
+		put(box.X, y, content.X-box.X)
+		put(content.X+content.W, y, box.X+box.W-(content.X+content.W))
+	}
+}
+
 // DrawPaneBoxRows draws the border of one pane. skipTop leaves the top row
 // alone, for a caller that writes it itself as one row, so no cell of it lands
 // twice.

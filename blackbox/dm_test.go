@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/keymap"
 	"dm/internal/vt"
 )
 
@@ -94,16 +95,16 @@ func TestSetRailAction(t *testing.T) {
 		t.Fatalf("new session rail = %d, want %d", rail, wantDefault)
 	}
 	pane := h.focus("ra")
-	if x := h.rects("ra")[pane].X; x != paneAreaFor(cols, rows, defaultRail).X+1 {
-		t.Fatalf("pane starts at x=%d, want rail+border %d", x,
-			paneAreaFor(cols, rows, defaultRail).X+1)
+	if x := h.rects("ra")[pane].X; x != paneAreaFor(cols, rows, defaultRail).X+1+pad() {
+		t.Fatalf("pane starts at x=%d, want rail+border+padding %d", x,
+			paneAreaFor(cols, rows, defaultRail).X+1+pad())
 	}
 
 	if res := h.rpc("ra", map[string]any{"action": "set-rail", "index": 0}); res["rail"] != float64(0) {
 		t.Fatalf("set-rail 0 = %v", res["rail"])
 	}
-	if x := h.rects("ra")[pane].X; x != 1 {
-		t.Fatalf("hidden rail pane starts at x=%d, want 1", x)
+	if x := h.rects("ra")[pane].X; x != 1+pad() {
+		t.Fatalf("hidden rail pane starts at x=%d, want %d", x, 1+pad())
 	}
 
 	want := maxRail(cols)
@@ -111,8 +112,8 @@ func TestSetRailAction(t *testing.T) {
 	if got := int(res["rail"].(float64)); got != want {
 		t.Fatalf("set-rail 500 = %d, want clamp %d", got, want)
 	}
-	if x := h.rects("ra")[pane].X; x != want+1 {
-		t.Fatalf("clamped rail pane starts at x=%d, want %d", x, want+1)
+	if x := h.rects("ra")[pane].X; x != want+1+pad() {
+		t.Fatalf("clamped rail pane starts at x=%d, want %d", x, want+1+pad())
 	}
 }
 
@@ -133,7 +134,7 @@ func TestRailReflow(t *testing.T) {
 		t.Helper()
 		r := h.rects("reflow")[pane]
 		area := paneAreaFor(cols, rows, wantRail)
-		if r.X != area.X+1 || r.W != area.W-2 || r.H != area.H-2 {
+		if r.X != area.X+1+pad() || r.W != area.W-2-2*pad() || r.H != area.H-2-2*pad() {
 			t.Fatalf("%s: pane rect %+v, want content of %+v", label, r, area)
 		}
 		st := h.sessionState("reflow")
@@ -148,16 +149,16 @@ func TestRailReflow(t *testing.T) {
 	}
 
 	before := check("new session", rail)
-	if before.X != rail+1 {
-		t.Fatalf("new session pane x = %d, want %d", before.X, rail+1)
+	if before.X != rail+1+pad() {
+		t.Fatalf("new session pane x = %d, want %d", before.X, rail+1+pad())
 	}
 
 	if res := h.rpc("reflow", map[string]any{"action": "set-rail", "index": 0}); res["rail"] != float64(0) {
 		t.Fatalf("set-rail 0 = %v", res["rail"])
 	}
 	hidden := check("hidden", 0)
-	if hidden.X != 1 {
-		t.Fatalf("hidden pane x = %d, want 1", hidden.X)
+	if hidden.X != 1+pad() {
+		t.Fatalf("hidden pane x = %d, want %d", hidden.X, 1+pad())
 	}
 	if before.X-hidden.X != rail || hidden.W-before.W != rail {
 		t.Fatalf("reflow moved x %d and width %d, want both %d",
@@ -345,8 +346,8 @@ func TestZoomKeepsOnSetRail(t *testing.T) {
 	if got := h.rects("zrail")[right]; got != want {
 		t.Fatalf("zoomed rect %+v after the rail change, want %+v", got, want)
 	}
-	if want.X != 1 {
-		t.Fatalf("hidden rail box starts at %d, want 1", want.X)
+	if want.X != 1+pad() {
+		t.Fatalf("hidden rail content starts at %d, want %d", want.X, 1+pad())
 	}
 }
 
@@ -923,7 +924,9 @@ func TestResizeSplit(t *testing.T) {
 	}
 
 	// Same-axis nesting: row{ q1, row{q2,q3} }. The outer divider spans the
-	// whole row, so the minimum is exactly 3 cells, not the leaf bounding box.
+	// whole row, so the minimum is exactly 3 content cells, not the leaf
+	// bounding box. A pane box is border + padding + content + padding +
+	// border, so a box costs 2+2*pad cells around its content.
 	h.run("new", "-s", "rs2")
 	h.run("exec", `{"action":"set-rail","index":0}`, "-s", "rs2")
 	q1 := h.focus("rs2")
@@ -931,18 +934,20 @@ func TestResizeSplit(t *testing.T) {
 	q3 := h.split("rs2", q2, "right")
 	tree := h.rpc("rs2", map[string]any{"action": "list"})
 	cols := int(tree["snapshot"].(map[string]any)["cols"].(float64))
+	pad := keymap.LoadDefault().Padding()
+	overhead := 2 + 2*pad // border and padding around one pane's content
 	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":0}`, "-s", "rs2")
 	got = h.rects("rs2")
 	if got[q1].W != 3 {
 		t.Fatalf("outer minimum with same-axis nesting = %v, want 3", got)
 	}
-	if got[q2].W+got[q3].W != cols-9 {
-		t.Fatalf("outer right side width: %v", got)
+	if want := cols - 3 - 3*overhead; got[q2].W+got[q3].W != want {
+		t.Fatalf("outer right side width: %v, want %d", got, want)
 	}
 	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":1}`, "-s", "rs2")
 	got = h.rects("rs2")
-	if got[q1].W != cols-7 {
-		t.Fatalf("outer maximum with same-axis nesting: %v", got)
+	if want := cols - 3 - 2*overhead; got[q1].W != want {
+		t.Fatalf("outer maximum with same-axis nesting: %v, want %d", got, want)
 	}
 }
 

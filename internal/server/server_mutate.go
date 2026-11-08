@@ -542,7 +542,7 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 				return fmt.Errorf("split has %d panes, want 2", len(split.Kids))
 			}
 			r, ok := layout.NodeRect(win.Root, split,
-				layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()))
+				layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()), s.cfg.Padding())
 			if !ok {
 				return fmt.Errorf("no rect for split of %q", first)
 			}
@@ -551,9 +551,10 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 			if !horizontal {
 				space = r.H
 			}
-			// A pane box is border + content + border, so the smallest
-			// content a drag may leave is 3 cells, a 5-cell box.
-			const minBox = 5
+			// A pane box is border + padding + content + padding + border.
+			// The smallest content a drag may leave is 3 cells, so padding
+			// does not shrink the floor a pane can be dragged to.
+			minBox := 5 + 2*s.cfg.Padding()
 			if space < 2 {
 				return fmt.Errorf("split between %q and %q is too small", first, second)
 			}
@@ -598,7 +599,7 @@ func (s *server) focusDir(dir string) error {
 	defer s.mu.Unlock()
 	win := s.st.ActiveWindow()
 	rects := map[string]layout.Rect{}
-	layout.Layout(win.Root, layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()), rects)
+	layout.Layout(win.Root, layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()), s.cfg.Padding(), rects)
 	n := layout.Neighbor(rects, win.Focus, dir)
 	if n == "" {
 		return fmt.Errorf("no pane %s of %s", dir, win.Focus)

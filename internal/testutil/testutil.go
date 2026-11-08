@@ -83,11 +83,14 @@ func CaptureStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
+// Pad is the default pane padding, so a test's geometry matches a session's.
+func Pad() int { return keymap.LoadDefault().Padding() }
+
 // TestSnapshot builds a snapshot from a layout tree, with a rect per pane.
 func TestSnapshot(root *layout.Node, cols, rows int, mouse map[string]bool) *wire.Snapshot {
 	snap := &wire.Snapshot{Root: root, Cols: cols, Rows: rows}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneArea(cols, rows), rects)
+	layout.Layout(root, layout.PaneArea(cols, rows), Pad(), rects)
 	for _, id := range layout.AllPanes(root) {
 		snap.Panes = append(snap.Panes, wire.PaneInfo{ID: id, Rect: rects[id], Mouse: mouse[id]})
 	}
@@ -116,7 +119,7 @@ func RailTestSnapshot(rail int) *wire.Snapshot {
 		Cols: 100, Rows: 10, Rail: rail, Root: root, Focus: "w1p1",
 	}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaFor(snap.Cols, snap.Rows, rail), rects)
+	layout.Layout(root, layout.PaneAreaFor(snap.Cols, snap.Rows, rail), Pad(), rects)
 	snap.Panes = []wire.PaneInfo{
 		{ID: "w1p1", Rect: rects["w1p1"], Status: "working"},
 		{ID: "w1p2", Rect: rects["w1p2"], Status: "idle"},
@@ -141,7 +144,7 @@ func RailOnePane(status, name string, rail, cols, rows int) *wire.Snapshot {
 	root := &layout.Node{Pane: "w1p1"}
 	snap := &wire.Snapshot{Cols: cols, Rows: rows, Rail: rail, Root: root, Focus: "w1p1"}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), rects)
+	layout.Layout(root, layout.PaneAreaFor(cols, rows, rail), Pad(), rects)
 	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Rect: rects["w1p1"], Status: status}}
 	snap.All = []wire.AllPane{{
 		ID: "w1p1", Name: name, Status: status,

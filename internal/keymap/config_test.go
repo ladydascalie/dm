@@ -1074,3 +1074,38 @@ func TestConfigTabWidthMalformed(t *testing.T) {
 		})
 	}
 }
+
+// TestConfigPadding proves the pane padding: absent means the built-in default,
+// a bare or quoted number is kept, and a value outside the range fails.
+func TestConfigPadding(t *testing.T) {
+	if got := LoadDefault().Padding(); got != defaultPadding {
+		t.Fatalf("LoadDefault().Padding() = %d, want %d", got, defaultPadding)
+	}
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultPadding},
+		{"zero", "padding 0", 0},
+		{"one", "padding 1", 1},
+		{"max", "padding 4", maxPadding},
+		{"quoted", `padding "2"`, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.Padding(); got != c.want {
+				t.Fatalf("Padding() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	for _, src := range []string{"padding -1", "padding 5", "padding wide", "padding 1\npadding 2"} {
+		if _, err := parseConfig(src); err == nil {
+			t.Fatalf("parseConfig(%q) accepted a bad padding", src)
+		}
+	}
+}

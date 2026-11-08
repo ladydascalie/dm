@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"dm/internal/keymap"
 )
 
 // buildOnce builds the dm binary under test. The test package lives one
@@ -349,11 +351,19 @@ func paneAreaFor(cols, rows, rail int) paneRect {
 	return paneRect{rail, 1, w, rows - 2}
 }
 
+// pad is the pane padding the default config asks for, so the harness geometry
+// follows the same rule the server lays out with.
+func pad() int { return keymap.LoadDefault().Padding() }
+
 func insetBox(b paneRect) paneRect {
 	if b.W < 3 || b.H < 3 {
 		return paneRect{X: b.X, Y: b.Y, W: maxInt(1, b.W), H: maxInt(1, b.H)}
 	}
-	return paneRect{X: b.X + 1, Y: b.Y + 1, W: b.W - 2, H: b.H - 2}
+	inset := 1 + pad()
+	if b.W < 2*inset+1 || b.H < 2*inset+1 {
+		inset = 1
+	}
+	return paneRect{X: b.X + inset, Y: b.Y + inset, W: b.W - 2*inset, H: b.H - 2*inset}
 }
 
 func maxInt(a, b int) int {

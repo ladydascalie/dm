@@ -24,6 +24,7 @@ import (
 	"dm/internal/panel"
 	"dm/internal/shot"
 	"dm/internal/switcher"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/transport"
 	"dm/internal/vt"
@@ -133,7 +134,7 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 		snap.Windows = append(snap.Windows, wire.WindowInfo{ID: w.ID, Name: w.Name})
 	}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaForWithTabBar(sc.Cols, sc.Rows, sc.Rail), rects)
+	layout.Layout(root, layout.PaneAreaForWithTabBar(sc.Cols, sc.Rows, sc.Rail), testutil.Pad(), rects)
 	winID, winName := "w1", "one"
 	if len(sc.Windows) > 0 {
 		winID, winName = sc.Windows[0].ID, sc.Windows[0].Name

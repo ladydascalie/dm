@@ -28,11 +28,13 @@ func TestRailGeometry(t *testing.T) {
 	if snap.Rail != want {
 		t.Fatalf("new session rail = %d, want %d", snap.Rail, want)
 	}
+	pad := s.cfg.Padding()
+	boxX := func(p wire.PaneInfo) int { return layout.BoxRect(p.Rect, pad).X - 1 }
 	p := snap.Panes[0]
-	if p.ID != id || p.Rect.X-1 != want {
-		t.Fatalf("new session pane %q box starts at %d, want %d", p.ID, p.Rect.X-1, want)
+	if p.ID != id || boxX(p) != want {
+		t.Fatalf("new session pane %q box starts at %d, want %d", p.ID, boxX(p), want)
 	}
-	if area := layout.PaneAreaForWithTabBar(80, 24, snap.Rail); area.X != want || p.Rect.X != area.X+1 {
+	if area := layout.PaneAreaForWithTabBar(80, 24, snap.Rail); area.X != want || p.Rect.X != area.X+1+pad {
 		t.Fatalf("pane rect %+v does not sit inside area %+v", p.Rect, area)
 	}
 
@@ -41,8 +43,8 @@ func TestRailGeometry(t *testing.T) {
 		t.Fatalf("set-rail 0 effective = %d", rail)
 	}
 	snap = s.snapshotLocked()
-	if snap.Rail != 0 || snap.Panes[0].Rect.X-1 != 0 {
-		t.Fatalf("hidden rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
+	if snap.Rail != 0 || boxX(snap.Panes[0]) != 0 {
+		t.Fatalf("hidden rail: rail=%d box x=%d", snap.Rail, boxX(snap.Panes[0]))
 	}
 
 	// The thin rail keeps a fixed width and the glyph column.
@@ -50,8 +52,8 @@ func TestRailGeometry(t *testing.T) {
 		t.Fatalf("set-rail %d effective = %d", layout.CollapsedRail, rail)
 	}
 	snap = s.snapshotLocked()
-	if snap.Rail != layout.CollapsedRail || snap.Panes[0].Rect.X-1 != layout.CollapsedRail {
-		t.Fatalf("thin rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
+	if snap.Rail != layout.CollapsedRail || boxX(snap.Panes[0]) != layout.CollapsedRail {
+		t.Fatalf("thin rail: rail=%d box x=%d", snap.Rail, boxX(snap.Panes[0]))
 	}
 
 	// A width over the clamp uses the clamp: a third of 120 is 40, under the
@@ -61,8 +63,8 @@ func TestRailGeometry(t *testing.T) {
 		t.Fatalf("set-rail 50 at 120 cols effective = %d, want 40", rail)
 	}
 	snap = s.snapshotLocked()
-	if snap.Rail != 40 || snap.Panes[0].Rect.X-1 != 40 {
-		t.Fatalf("clamped rail: rail=%d box x=%d", snap.Rail, snap.Panes[0].Rect.X-1)
+	if snap.Rail != 40 || boxX(snap.Panes[0]) != 40 {
+		t.Fatalf("clamped rail: rail=%d box x=%d", snap.Rail, boxX(snap.Panes[0]))
 	}
 	if area := layout.PaneAreaFor(120, 24, 45); area != (layout.Rect{X: 40, Y: 0, W: 80, H: 23}) {
 		t.Fatalf("paneAreaFor clamps to %+v", area)
@@ -349,7 +351,7 @@ func TestZoomSyncSizes(t *testing.T) {
 	normal := f.s.paneRectsLocked()
 	f.s.zoom = f.right
 	f.s.mu.Unlock()
-	want := layout.InsetBox(area)
+	want := layout.InsetBox(area, f.s.cfg.Padding())
 	if normal[f.right] == want {
 		t.Fatalf("the split rect %+v already fills %+v", normal[f.right], want)
 	}
@@ -395,7 +397,7 @@ func TestZoomKeepsOnTerminalResize(t *testing.T) {
 	if snap.Zoom != f.right {
 		t.Fatalf("a terminal resize cleared the zoom: %q", snap.Zoom)
 	}
-	want := layout.InsetBox(layout.PaneAreaForWithTabBar(140, 44, layout.EffectiveRail(140, layout.DefaultRail)))
+	want := layout.InsetBox(layout.PaneAreaForWithTabBar(140, 44, layout.EffectiveRail(140, layout.DefaultRail)), f.s.cfg.Padding())
 	var rect layout.Rect
 	for _, p := range snap.Panes {
 		if p.ID == f.right {
@@ -432,7 +434,7 @@ func TestZoomStalePaneNotSent(t *testing.T) {
 		t.Fatalf("stale zoom %q held after the snapshot", held)
 	}
 	for _, p := range snap.Panes {
-		if p.ID == f.right && p.Rect == layout.InsetBox(area) {
+		if p.ID == f.right && p.Rect == layout.InsetBox(area, f.s.cfg.Padding()) {
 			t.Fatalf("pane %q fills the area %+v", f.right, area)
 		}
 	}
