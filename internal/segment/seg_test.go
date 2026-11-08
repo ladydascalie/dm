@@ -103,7 +103,12 @@ func TestSegEmptyFirstRun(t *testing.T) {
 		t.Fatalf("empty run wrote %q", buf.String())
 	}
 	Write(&buf, joined[1])
-	if want := "\x1b[0m" + (theme.RGB{}).BG() + theme.DefaultTheme().Palette.RailText.FG() + "a"; buf.String() != want {
+	text := theme.DefaultTheme().Palette.RailText
+	want := theme.Style{
+		Fg: theme.RGBColor(uint8(text.R), uint8(text.G), uint8(text.B)),
+		Bg: theme.RGBColor(0, 0, 0),
+	}.SGR() + "a"
+	if buf.String() != want {
 		t.Fatalf("run after the empty head = %q, want %q", buf.String(), want)
 	}
 }
@@ -143,37 +148,44 @@ func TestSegJoin(t *testing.T) {
 	}
 }
 
-// TestSegWrite pins the bytes of one run: reset, ground, weight, foreground and
-// text, in that order, and nothing at all for a run with no text.
+// TestSegWrite pins one run's style: a single escape carrying the weight, the
+// foreground and the ground, then the text, and nothing at all for a run with
+// no text.
 func TestSegWrite(t *testing.T) {
-	zero := theme.RGB{}
 	cases := []struct {
-		name string
-		run  Seg
-		want string
+		name  string
+		run   Seg
+		style theme.Style
 	}{
-		{"empty run writes nothing", Seg{FG: theme.DefaultTheme().Palette.RailText}, ""},
+		{"empty run writes nothing", Seg{FG: theme.DefaultTheme().Palette.RailText}, theme.Style{}},
 		{
 			"styled run",
 			Seg{Text: "x", FG: theme.RGB{R: 1, G: 2, B: 3}, BG: theme.RGB{R: 4, G: 5, B: 6}, Bold: true},
-			"\x1b[0m" + (theme.RGB{R: 4, G: 5, B: 6}).BG() + "\x1b[1m" + (theme.RGB{R: 1, G: 2, B: 3}).FG() + "x",
+			theme.Style{
+				Fg: theme.RGBColor(1, 2, 3), Bg: theme.RGBColor(4, 5, 6),
+				Attrs: theme.AttrBold,
+			},
 		},
 		{
 			"unstyled run keeps its ground",
 			Seg{Text: "x"},
-			"\x1b[0m" + zero.BG() + zero.FG() + "x",
+			theme.Style{Fg: theme.RGBColor(0, 0, 0), Bg: theme.RGBColor(0, 0, 0)},
 		},
 		{
 			"bold without colours",
 			Seg{Text: "x", Bold: true},
-			"\x1b[0m" + zero.BG() + "\x1b[1m" + zero.FG() + "x",
+			theme.Style{Fg: theme.RGBColor(0, 0, 0), Bg: theme.RGBColor(0, 0, 0), Attrs: theme.AttrBold},
 		},
 	}
 	for _, c := range cases {
 		var buf bytes.Buffer
 		Write(&buf, c.run)
-		if got := buf.String(); got != c.want {
-			t.Fatalf("%s: Write = %q, want %q", c.name, got, c.want)
+		want := c.style.SGR() + c.run.Text
+		if c.run.Text == "" {
+			want = ""
+		}
+		if got := buf.String(); got != want {
+			t.Fatalf("%s: Write = %q, want %q", c.name, got, want)
 		}
 	}
 }

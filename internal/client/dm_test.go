@@ -313,8 +313,8 @@ func TestRailGlyphPerState(t *testing.T) {
 		var b bytes.Buffer
 		rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(c.status), theme.GlyphUnicode)
 		out := b.String()
-		if !strings.Contains(out, c.glyph) || !strings.Contains(out, colour.FG()) {
-			t.Fatalf("status %q not drawn as %q in %q: %q", c.status, c.glyph, colour.FG(), out)
+		if !painted(out, c.glyph, paramOf(colour, false)) {
+			t.Fatalf("status %q not drawn as %q in %v: %q", c.status, c.glyph, colour, out)
 		}
 	}
 }
@@ -644,7 +644,7 @@ func TestRailWorkspaceAccent(t *testing.T) {
 	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	for ws, accent := range want {
-		if !strings.Contains(out, accent.FG()+"▾") {
+		if !painted(out, "▾", paramOf(accent, false)) {
 			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
 		}
 	}
@@ -703,7 +703,7 @@ func TestRailAccentDistinct(t *testing.T) {
 	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	for ws, accent := range want {
-		if !strings.Contains(out, accent.FG()+"▾") {
+		if !painted(out, "▾", paramOf(accent, false)) {
 			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
 		}
 	}
@@ -1335,11 +1335,15 @@ func TestBarFocusChip(t *testing.T) {
 	var b bytes.Buffer
 	drawBar(&b, theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 	out := b.String()
-	if !strings.Contains(out, colour.FG()+glyph) {
-		t.Fatalf("bar does not paint %q in %v: %q", glyph, colour, out)
-	}
-	if !strings.Contains(out, theme.DefaultTheme().Palette.RailFocusBG.BG()+colour.FG()+glyph) {
-		t.Fatalf("bar does not paint the glyph on theme.DefaultTheme().Palette.RailFocusBG: %q", out)
+	// One run writes one escape: the chip's colour, the focus fill and the
+	// glyph together.
+	fill := theme.DefaultTheme().Palette.RailFocusBG
+	painted := theme.Style{
+		Fg: theme.RGBColor(uint8(colour.R), uint8(colour.G), uint8(colour.B)),
+		Bg: theme.RGBColor(uint8(fill.R), uint8(fill.G), uint8(fill.B)),
+	}.SGR() + glyph
+	if !strings.Contains(out, painted) {
+		t.Fatalf("bar does not paint %q in %v on the focus fill: %q", glyph, colour, out)
 	}
 
 	// A shell reports no state: it gets the prompt marker in dim text, and its

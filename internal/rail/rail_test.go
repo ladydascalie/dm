@@ -269,10 +269,18 @@ func TestRailRowSegments(t *testing.T) {
 	if focusRow < 0 {
 		t.Fatal("the snapshot has no focused pane row")
 	}
-	bold := fmt.Sprintf("\x1b[%d;1H\x1b[0m", focusRow+1) + theme.DefaultTheme().Palette.RailFocusBG.BG() +
-		"\x1b[0m" + theme.DefaultTheme().Palette.RailFocusBG.BG() + "\x1b[1m"
-	if !strings.Contains(out, bold) {
-		t.Fatalf("focused row %d is not bold on the focus fill: %q", focusRow, out)
+	// A run writes one escape: weight, foreground, then the ground, so the
+	// focused row's first run carries bold and the focus fill together.
+	fill := theme.DefaultTheme().Palette.RailFocusBG
+	fillTail := ";" + fill.SGR(true)
+	row := out[strings.Index(out, fmt.Sprintf("\x1b[%d;1H", focusRow+1)):]
+	at := strings.Index(row, "\x1b[0;1;")
+	if at < 0 {
+		t.Fatalf("focused row %d is not bold: %q", focusRow, out)
+	}
+	esc := row[at:]
+	if end := strings.Index(esc, "m"); end < 0 || !strings.HasSuffix(esc[:end], fillTail) {
+		t.Fatalf("focused row %d is not bold on the focus fill: %q", focusRow, esc)
 	}
 }
 

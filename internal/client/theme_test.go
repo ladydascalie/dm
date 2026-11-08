@@ -188,7 +188,9 @@ func TestThemeRailRowGlyph(t *testing.T) {
 
 	var b bytes.Buffer
 	rail.DrawRail(&b, th, testutil.AgentRail("working"), theme.GlyphUnicode)
-	if !strings.Contains(b.String(), "W") || !strings.Contains(b.String(), (theme.RGB{R: 1, G: 2, B: 3}).FG()) {
+	// The glyph's colour rides inside the row's combined escape.
+	param := ";" + (theme.RGB{R: 1, G: 2, B: 3}).SGR(false) + ";"
+	if !strings.Contains(b.String(), "W") || !strings.Contains(b.String(), param) {
 		t.Fatalf("themed state glyph not drawn: %q", b.String())
 	}
 }

@@ -76,18 +76,22 @@ func Join(groups [][]Seg, gap Seg) []Seg {
 	return out
 }
 
-// Write paints one run: reset, ground, weight, foreground, then the text. The
-// colours are written even when they are zero, because black is a colour a
-// theme may set (rail-bg #000000) and a skipped escape would paint the run on
-// whatever ground is live. An empty run paints nothing.
+// Write paints one run: reset, weight, foreground and ground in one cached
+// escape, then the text. The colours are written even when they are zero,
+// because black is a colour a theme may set (rail-bg #000000) and a skipped
+// escape would paint the run on whatever ground is live. An empty run paints
+// nothing.
 func Write(buf *bytes.Buffer, s Seg) {
 	if s.Text == "" {
 		return
 	}
-	buf.WriteString("\x1b[0m" + s.BG.BG())
-	if s.Bold {
-		buf.WriteString("\x1b[1m")
+	st := theme.Style{
+		Fg: theme.RGBColor(uint8(s.FG.R), uint8(s.FG.G), uint8(s.FG.B)),
+		Bg: theme.RGBColor(uint8(s.BG.R), uint8(s.BG.G), uint8(s.BG.B)),
 	}
-	buf.WriteString(s.FG.FG())
+	if s.Bold {
+		st.Attrs = theme.AttrBold
+	}
+	buf.WriteString(st.SGR())
 	buf.WriteString(s.Text)
 }

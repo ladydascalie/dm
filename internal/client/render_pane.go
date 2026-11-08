@@ -83,90 +83,30 @@ func drawPaneRow(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row, row0 int,
 }
 
 // cellSGR returns the escape sequence that moves a terminal from cur to st.
-// An empty string means st needs no change.
+// An empty string means st needs no change. The style cache carries the rest.
 func cellSGR(st vt.Style, cur *vt.Style) string {
 	if cur != nil && *cur == st {
 		return ""
 	}
-	p := []string{"0"}
-	if st.Attrs&vt.Bold != 0 {
-		p = append(p, "1")
-	}
-	if st.Attrs&vt.Faint != 0 {
-		p = append(p, "2")
-	}
-	if st.Attrs&vt.Italic != 0 {
-		p = append(p, "3")
-	}
-	switch st.Underline {
-	case vt.UnderlineSingle:
-		p = append(p, "4")
-	case vt.UnderlineDouble:
-		p = append(p, "4:2")
-	case vt.UnderlineCurly:
-		p = append(p, "4:3")
-	case vt.UnderlineDotted:
-		p = append(p, "4:4")
-	case vt.UnderlineDashed:
-		p = append(p, "4:5")
-	}
-	if st.Attrs&vt.Blink != 0 {
-		p = append(p, "5")
-	}
-	if st.Attrs&vt.RapidBlink != 0 {
-		p = append(p, "6")
-	}
-	if st.Attrs&vt.Reverse != 0 {
-		p = append(p, "7")
-	}
-	if st.Attrs&vt.Conceal != 0 {
-		p = append(p, "8")
-	}
-	if st.Attrs&vt.Strikethrough != 0 {
-		p = append(p, "9")
-	}
-	p = append(p, cellColorSGR(st.Fg, false), cellColorSGR(st.Bg, true))
-	if st.UnderlineColor.Kind != vt.ColorDefault {
-		p = append(p, underlineColorSGR(st.UnderlineColor))
-	}
-	return "\x1b[" + strings.Join(p, ";") + "m"
+	return renderStyle(st).SGR()
 }
 
-// cellColorSGR maps a cell colour to an SGR parameter at the terminal's colour
-// depth. A 24-bit cell steps down to the nearest palette entry, and a palette
-// entry above 15 steps down to the nearest ANSI colour.
-func cellColorSGR(c vt.Color, bg bool) string {
-	switch c.Kind {
-	case vt.ColorPalette:
-		return theme.PaletteSGR(int(c.Index), bg)
-	case vt.ColorRGB:
-		return theme.RGB{R: int(c.R), G: int(c.G), B: int(c.B)}.SGR(bg)
-	default:
-		if bg {
-			return "49"
-		}
-		return "39"
+// renderStyle maps a cell style onto the theme's render style. The attribute
+// bits, the underline shapes and the colour kinds share their values, which
+// TestCellStyleBitsMatchTheme pins.
+func renderStyle(st vt.Style) theme.Style {
+	return theme.Style{
+		Fg:             renderColor(st.Fg),
+		Bg:             renderColor(st.Bg),
+		UnderlineColor: renderColor(st.UnderlineColor),
+		Underline:      uint8(st.Underline),
+		Attrs:          st.Attrs,
 	}
 }
 
-// underlineColorSGR maps an underline colour to an SGR parameter. SGR 58 has no
-// 16-colour form, so a stepped-down colour keeps the 256-colour form.
-func underlineColorSGR(c vt.Color) string {
-	switch c.Kind {
-	case vt.ColorPalette:
-		return "58;5;" + fmt.Sprint(int(c.Index))
-	case vt.ColorRGB:
-		rgb := theme.RGB{R: int(c.R), G: int(c.G), B: int(c.B)}
-		switch theme.CurrentDepth() {
-		case theme.Color16:
-			return "58;5;" + fmt.Sprint(theme.Nearest16(rgb))
-		case theme.Color256:
-			return "58;5;" + fmt.Sprint(theme.Nearest256(rgb))
-		}
-		return fmt.Sprintf("58;2;%d;%d;%d", c.R, c.G, c.B)
-	default:
-		return "59"
-	}
+// renderColor maps a cell colour onto the theme's colour.
+func renderColor(c vt.Color) theme.Color {
+	return theme.Color{Kind: theme.ColorKind(c.Kind), Index: c.Index, R: c.R, G: c.G, B: c.B}
 }
 
 // selRow moves a pane-wide cell range onto one row, nil when the row holds

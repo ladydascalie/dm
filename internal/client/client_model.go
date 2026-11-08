@@ -334,6 +334,12 @@ func (t *tui) expireToasts(now time.Time) {
 // Run owns the terminal. A session switch returns to this loop with a new
 // name, so raw mode and the stdin reader survive it.
 func Run(name string) error {
+	// DM_STATS asks for the render's cache tallies when the client exits.
+	// It is a diagnostic, off by default, and it writes to stderr so it
+	// never lands inside a frame.
+	if os.Getenv("DM_STATS") != "" {
+		defer func() { fmt.Fprintf(os.Stderr, "dm: style cache: %s\n", theme.SGRCache()) }()
+	}
 	// A pane exports its own session name. Attaching that same session from a
 	// pane makes a mirror that can also fight over the shared screen size.
 	if in := os.Getenv("DM_SESSION"); in != "" && in == name {

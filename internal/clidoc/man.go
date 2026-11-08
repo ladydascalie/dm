@@ -73,6 +73,7 @@ var manEnvs = []manEnv{
 	{"DM_PANE", "the pane id a pane's shell runs in"},
 	{"DM_NERD", "1 forces Nerd font glyphs, 0 forces the Unicode fallback"},
 	{"DM_NOTIFY", "0 turns desktop notifications off"},
+	{"DM_STATS", "non-empty prints the style cache hit rate when the client exits"},
 	{"COLUMNS", "terminal width when the client cannot ask the terminal"},
 	{"SHELL", "the shell a new pane runs"},
 	{"TMUX", "set inside tmux; dm uses it to pick its terminal behaviour"},
