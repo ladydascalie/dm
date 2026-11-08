@@ -163,8 +163,12 @@ func TestModeState(t *testing.T) {
 	if got := h.modeState(false, 1); got != 4 {
 		t.Errorf("GATM = %d, want 4", got)
 	}
-	if got := h.modeState(true, 3); got != 0 {
-		t.Errorf("DECCOLM = %d, want 0", got)
+	if got := h.modeState(true, 3); got != 2 {
+		t.Errorf("DECCOLM default = %d, want 2", got)
+	}
+	h.st.decModes[3] = true
+	if got := h.modeState(true, 3); got != 1 {
+		t.Errorf("DECCOLM set = %d, want 1", got)
 	}
 	_, _ = h.vt.Write([]byte("\x1b[?1h"))
 	if got := h.modeState(true, 1); got != 1 {
