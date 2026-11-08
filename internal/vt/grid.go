@@ -362,6 +362,78 @@ func (g *Grid) DeleteCells(x, y, right, n int) {
 	g.repairLine(y)
 }
 
+// InsertColumns inserts n blank columns at column x on every row from top to
+// bottom, between the left and right margins. The cells to the left and right
+// of the margins and the rows outside top to bottom do not move.
+func (g *Grid) InsertColumns(x, top, bottom, left, right, n int) {
+	if x < 0 || x >= g.cols || n <= 0 {
+		return
+	}
+	top = clamp(top, 0, g.rows-1)
+	bottom = clamp(bottom, 0, g.rows-1)
+	left = clamp(left, 0, g.cols-1)
+	right = clamp(right, 0, g.cols-1)
+	if top > bottom || left > right || x < left || x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
+	}
+	blank := blankCell(DefaultStyle())
+	for y := top; y <= bottom; y++ {
+		line := g.lines[y]
+		copy(line[x+n:right+1], line[x:right+1-n])
+		for i := x; i < x+n; i++ {
+			line[i] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
+// ScrollColumnsRight shifts the scroll region's columns right by n and blanks
+// the columns that enter at the left. Used by DECBI.
+func (g *Grid) ScrollColumnsRight(n int) {
+	r := g.scroll
+	width := r.Right - r.Left + 1
+	if n <= 0 || width <= 0 {
+		return
+	}
+	if n > width {
+		n = width
+	}
+	blank := blankCell(DefaultStyle())
+	for y := r.Top; y <= r.Bottom; y++ {
+		line := g.lines[y]
+		copy(line[r.Left+n:r.Right+1], line[r.Left:r.Right+1-n])
+		for x := r.Left; x < r.Left+n; x++ {
+			line[x] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
+// ScrollColumnsLeft shifts the scroll region's columns left by n and blanks the
+// columns that enter at the right. Used by DECFI.
+func (g *Grid) ScrollColumnsLeft(n int) {
+	r := g.scroll
+	width := r.Right - r.Left + 1
+	if n <= 0 || width <= 0 {
+		return
+	}
+	if n > width {
+		n = width
+	}
+	blank := blankCell(DefaultStyle())
+	for y := r.Top; y <= r.Bottom; y++ {
+		line := g.lines[y]
+		copy(line[r.Left:r.Right+1-n], line[r.Left+n:r.Right+1])
+		for x := r.Right - n + 1; x <= r.Right; x++ {
+			line[x] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
 // DeleteColumns deletes n columns at column x on every row from top to bottom,
 // between the left and right margins. The cells to the left and right of the
 // margins and the rows outside top to bottom do not move.

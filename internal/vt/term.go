@@ -7,6 +7,8 @@ type Term struct {
 	grid   *Grid
 	parser parser
 	style  Style
+	// protected is the DECSCA state applied to cells written from now on.
+	protected bool
 	// level is the DECSCL conformance level. Level 4 and above support
 	// DECSLRM; DECNCSM is a level 5 feature. The default is 5, as xterm's is.
 	level int
@@ -40,6 +42,7 @@ func (t *Term) Flush() {
 func (t *Term) place(content string) {
 	g := t.grid
 	c := NewCell(content, t.style)
+	c.Protected = t.protected
 
 	cur := g.Cursor()
 	left, right := t.wrapBounds(cur.X)
