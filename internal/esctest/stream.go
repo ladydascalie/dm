@@ -191,7 +191,7 @@ func oscIsQuery(body string) bool {
 	return false
 }
 
-// translateC1 rewrites 8-bit C1 controls as their 7-bit forms. vt10x does not
+// translateC1 rewrites 8-bit C1 controls as their 7-bit forms. The harness does not
 // recognise C1 bytes, and esctest2 sends them after S8C1T.
 func translateC1(b []byte) []byte {
 	has := false

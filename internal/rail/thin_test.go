@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"testing"
+	"unicode/utf8"
 
 	"dm/internal/layout"
 	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // thinPane is one pane row of a thin-rail snapshot: a pane in a window in a
@@ -31,18 +30,32 @@ func thinSnapshot(panes []wire.AllPane) *wire.Snapshot {
 }
 
 // thinScreen draws the rail and returns the screen it wrote.
-func thinScreen(t *testing.T, snap *wire.Snapshot) vt10x.Terminal {
+func thinScreen(t *testing.T, snap *wire.Snapshot) *vt.Term {
 	t.Helper()
 	var b bytes.Buffer
 	DrawRail(&b, theme.DefaultTheme(), snap)
-	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw thin rail: %v", err)
-	}
-	return vt
+	term := vt.NewTerm(snap.Cols, snap.Rows)
+	term.Write(b.Bytes())
+	term.Flush()
+	return term
 }
 
-func thinBlank(g vt10x.Glyph) bool { return g.Char == 0 || g.Char == ' ' }
+// railCell is the slice of a cell a thin rail test reads.
+type railCell struct {
+	Char  rune
+	FG    vt.Color
+	BG    vt.Color
+	Bold  bool
+	Width int8
+}
+
+func cellOf(term *vt.Term, x, y int) railCell {
+	c := term.Grid().Cell(x, y)
+	r, _ := utf8.DecodeRuneInString(c.Content)
+	return railCell{Char: r, FG: c.Style.Fg, BG: c.Style.Bg, Bold: c.Style.Attrs&vt.Bold != 0, Width: c.Width}
+}
+
+func thinBlank(g railCell) bool { return g.Char == 0 || g.Char == ' ' }
 
 // TestThinRailPaneRowsOnly draws a thin rail holding three panes over two
 // windows and two workspaces. The rail is one row per pane from row 0, with no
@@ -68,11 +81,9 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 	}
 
 	vt := thinScreen(t, snap)
-	vt.Lock()
-	defer vt.Unlock()
 	glyphs := []rune{'●', '○', '▲'}
 	for y, id := range want {
-		if g := vt.Cell(2, y); g.Char != glyphs[y] {
+		if g := cellOf(vt, 2, y); g.Char != glyphs[y] {
 			t.Fatalf("row %d glyph = %q, want %q for %s", y, g.Char, glyphs[y], id)
 		}
 		if got := RailPaneAt(snap, 2, y); got != id {
@@ -84,17 +95,17 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 	// control row below them holds the expand caret at the glyph column.
 	for y := len(want); y < snap.Rows-2; y++ {
 		for x := 0; x < snap.Rail; x++ {
-			if g := vt.Cell(x, y); !thinBlank(g) {
+			if g := cellOf(vt, x, y); !thinBlank(g) {
 				t.Fatalf("row %d past the last pane holds %q at %d", y, g.Char, x)
 			}
 		}
 	}
 	ctrl := snap.Rows - 2
-	if g := vt.Cell(2, ctrl); g.Char != '▶' {
+	if g := cellOf(vt, 2, ctrl); g.Char != '▶' {
 		t.Fatalf("control row %d glyph = %q at 2, want the expand caret", ctrl, g.Char)
 	}
 	for _, x := range []int{0, 1, 3} {
-		if g := vt.Cell(x, ctrl); !thinBlank(g) {
+		if g := cellOf(vt, x, ctrl); !thinBlank(g) {
 			t.Fatalf("control row %d holds %q at %d, want a blank", ctrl, g.Char, x)
 		}
 	}
@@ -156,13 +167,9 @@ func TestThinRailFoldState(t *testing.T) {
 	}
 
 	openVT, foldedVT := thinScreen(t, open), thinScreen(t, folded)
-	openVT.Lock()
-	foldedVT.Lock()
-	defer openVT.Unlock()
-	defer foldedVT.Unlock()
 	for y := 0; y < open.Rows; y++ {
 		for x := 0; x < open.Cols; x++ {
-			if a, b := openVT.Cell(x, y), foldedVT.Cell(x, y); a.Char != b.Char {
+			if a, b := cellOf(openVT, x, y), cellOf(foldedVT, x, y); a.Char != b.Char {
 				t.Fatalf("cell %d,%d: folded %q, unfolded %q", x, y, b.Char, a.Char)
 			}
 		}
@@ -179,20 +186,18 @@ func TestThinRailGlyphColumn(t *testing.T) {
 	agent.Agent = true
 	snap := thinSnapshot([]wire.AllPane{shell, agent})
 	vt := thinScreen(t, snap)
-	vt.Lock()
-	defer vt.Unlock()
-	if g := vt.Cell(2, 0); !thinBlank(g) {
+	if g := cellOf(vt, 2, 0); !thinBlank(g) {
 		t.Fatalf("shell row glyph = %q at column 2, want a blank", g.Char)
 	}
-	if g := vt.Cell(2, 1); g.Char != '?' {
+	if g := cellOf(vt, 2, 1); g.Char != '?' {
 		t.Fatalf("agent row glyph = %q at column 2, want ?", g.Char)
 	}
 	// The mark before the glyph keeps its column: an agent bar on the agent
 	// row and a blank on the shell row.
-	if g := vt.Cell(0, 1); g.Char != '\u258e' {
+	if g := cellOf(vt, 0, 1); g.Char != '\u258e' {
 		t.Fatalf("agent row mark = %q at column 0, want the agent bar", g.Char)
 	}
-	if g := vt.Cell(0, 0); !thinBlank(g) {
+	if g := cellOf(vt, 0, 0); !thinBlank(g) {
 		t.Fatalf("shell row mark = %q at column 0, want a blank", g.Char)
 	}
 }
@@ -207,28 +212,26 @@ func TestThinRailFocusBackground(t *testing.T) {
 		thinPane("w1p2", "s1", "w1", "idle", true),
 		thinPane("w2p1", "s2", "w2", "blocked", false),
 	})
-	ground := func(c theme.RGB) vt10x.Color { return vt10x.Color(c.R<<16 | c.G<<8 | c.B) }
+	ground := func(c theme.RGB) vt.Color { return vt.RGBColor(uint8(c.R), uint8(c.G), uint8(c.B)) }
 	screen := thinScreen(t, snap)
-	screen.Lock()
-	defer screen.Unlock()
 	for y := 0; y < snap.Rows-1; y++ {
 		want := ground(theme.DefaultTheme().Palette.RailBG)
 		if y == 1 {
 			want = ground(theme.DefaultTheme().Palette.RailFocusBG)
 		}
 		for x := 0; x < snap.Rail; x++ {
-			if g := screen.Cell(x, y); g.BG != want {
+			if g := cellOf(screen, x, y); g.BG != want {
 				t.Fatalf("cell %d,%d bg = %v, want %v", x, y, g.BG, want)
 			}
 		}
 	}
 	// The focused row is the bold one, on its glyph cell.
-	focus := screen.Cell(2, 1)
-	if focus.Char != '○' || focus.Mode&vt.AttrBold == 0 {
-		t.Fatalf("focused glyph = %q mode %d, want a bold ○", focus.Char, focus.Mode)
+	focus := cellOf(screen, 2, 1)
+	if focus.Char != '○' || !focus.Bold {
+		t.Fatalf("focused glyph = %q bold %v, want a bold ○", focus.Char, focus.Bold)
 	}
-	if g := screen.Cell(2, 0); g.Mode&vt.AttrBold != 0 {
-		t.Fatalf("unfocused glyph is bold: mode %d", g.Mode)
+	if g := cellOf(screen, 2, 0); g.Bold {
+		t.Fatalf("unfocused glyph is bold")
 	}
 }
 
@@ -255,13 +258,11 @@ func TestThinRailClips(t *testing.T) {
 	// status bar takes Rows-1, so neither answers as a pane row.
 	railRows := snap.Rows - 2
 	vt := thinScreen(t, snap)
-	vt.Lock()
-	defer vt.Unlock()
 	for y := 0; y < railRows; y++ {
 		if got := RailPaneAt(snap, 2, y); got != items[y].Pane {
 			t.Fatalf("RailPaneAt(2,%d) = %q, want %q", y, got, items[y].Pane)
 		}
-		if g := vt.Cell(2, y); g.Char != '●' {
+		if g := cellOf(vt, 2, y); g.Char != '●' {
 			t.Fatalf("row %d glyph = %q, want the pane glyph", y, g.Char)
 		}
 	}
@@ -272,7 +273,7 @@ func TestThinRailClips(t *testing.T) {
 	}
 	for y := 0; y < snap.Rows; y++ {
 		for x := layout.CollapsedRail; x < snap.Cols; x++ {
-			if g := vt.Cell(x, y); !thinBlank(g) {
+			if g := cellOf(vt, x, y); !thinBlank(g) {
 				t.Fatalf("thin rail wrote %q at %d,%d, past column %d",
 					g.Char, x, y, layout.CollapsedRail-1)
 			}

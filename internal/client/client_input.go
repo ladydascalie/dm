@@ -587,8 +587,8 @@ func (t *tui) requestHistory(p *wire.PaneInfo) {
 // the ring the server sent for the pane's current rect. The live screen keeps
 // updating behind it; the tall one is a frozen snapshot.
 func (t *tui) buildScroll(p *wire.PaneInfo) {
-	rows := replayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
-	t.scrollVT = buildTall(rows, p.Rect.W)
+	rows := vt.ReplayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
+	t.scrollVT = vt.BuildTall(rows, p.Rect.W)
 	_, t.maxOff = scrollStart(t.scrollVT, p.Rect.H, 0)
 }
 

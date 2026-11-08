@@ -11,9 +11,8 @@ import (
 	"dm/internal/layout"
 	"dm/internal/segment"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // railRowSnap is a rail with every row kind on it: a workspace header, an
@@ -407,16 +406,14 @@ func railRows(t *testing.T, snap *wire.Snapshot) []string {
 	t.Helper()
 	var b bytes.Buffer
 	DrawRail(&b, theme.DefaultTheme(), snap)
-	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw rail: %v", err)
-	}
+	term := vt.NewTerm(snap.Cols, snap.Rows)
+	term.Write(b.Bytes())
+	term.Flush()
 	out := make([]string, snap.Rows-1)
-	vt.Lock()
 	for y := range out {
 		var sb strings.Builder
 		for x := 0; x < snap.Rail; x++ {
-			g := vt.Cell(x, y)
+			g := cellOf(term, x, y)
 			if g.Char == 0 {
 				sb.WriteByte(' ')
 				continue
@@ -425,7 +422,6 @@ func railRows(t *testing.T, snap *wire.Snapshot) []string {
 		}
 		out[y] = strings.TrimRight(sb.String(), " ")
 	}
-	vt.Unlock()
 	return out
 }
 

@@ -1,9 +1,9 @@
-// Package esctest runs esctest2 against a vt10x terminal.
+// Package esctest runs esctest2 against the dm VT.
 //
 // esctest2 is a conformance suite for terminal emulators. It is a Python
 // program that writes escape sequences to its stdout and reads replies from
 // its stdin. This package puts it on a pty, feeds everything it writes through
-// a vt10x terminal, and answers the queries vt10x cannot answer itself from
+// the dm VT, and answers the queries the VT cannot answer itself from
 // the terminal's state.
 //
 // esctest2 is GPL-2.0. It is not vendored here. The harness finds it on disk
@@ -23,7 +23,6 @@ import (
 	"dm/internal/vt"
 
 	"github.com/creack/pty"
-	"github.com/hinshun/vt10x"
 )
 
 // Options controls a run.
@@ -93,8 +92,8 @@ func fixedArgs(logPath string) []string {
 	}
 }
 
-// Run starts esctest2 on a 25x80 pty, answers its queries from a vt10x
-// terminal, copies the log to opts.Stdout, and returns esctest2's exit code.
+// Run starts esctest2 on a 25x80 pty, answers its queries from the dm VT,
+// copies the log to opts.Stdout, and returns esctest2's exit code.
 func Run(ctx context.Context, opts Options) (int, error) {
 	dir, err := Find(opts.Dir)
 	if err != nil {
@@ -112,11 +111,6 @@ func Run(ctx context.Context, opts Options) (int, error) {
 
 	args := append(fixedArgs(logPath), opts.Args...)
 
-	choice, err := vtChoice()
-	if err != nil {
-		return 1, err
-	}
-
 	cmd := exec.CommandContext(ctx, "python3", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
@@ -127,7 +121,7 @@ func Run(ctx context.Context, opts Options) (int, error) {
 	}
 	defer ptmx.Close()
 
-	h := newHarness(ptmx, opts, choice)
+	h := newHarness(ptmx, opts)
 	runErr := h.run()
 	waitErr := cmd.Wait()
 	if runErr != nil {
@@ -158,7 +152,7 @@ func Run(ctx context.Context, opts Options) (int, error) {
 // harness owns the pty master and the terminal the stream is replayed into.
 type harness struct {
 	ptmx    *os.File
-	vt      vt10x.Terminal
+	vt      *vt.Term
 	reports *vt.Term
 	verbose bool
 	errw    io.Writer
@@ -166,40 +160,13 @@ type harness struct {
 	st      state
 }
 
-// vtEnv selects the terminal the harness drives. Unset or "vt10x" keeps the
-// original terminal; "new" builds the adapter over the new VT.
-const vtEnv = "DM_ESCTEST_VT"
-
-// vtChoice validates the selector. An unknown value is an error, never a
-// silent fallback: a gate must not measure a terminal it was not asked for.
-func vtChoice() (string, error) {
-	switch v := os.Getenv(vtEnv); v {
-	case "", "vt10x":
-		return "vt10x", nil
-	case "new":
-		return "new", nil
-	default:
-		return "", fmt.Errorf("unknown %s=%q: want \"vt10x\" or \"new\"", vtEnv, v)
-	}
-}
-
-func newTerminal(choice string, ptmx *os.File) vt10x.Terminal {
-	if choice == "new" {
-		return newVTAdapter(80, 25)
-	}
-	return vt10x.New(
-		vt10x.WithSize(80, 25),
-		vt10x.WithWriter(stWriter{ptmx}),
-	)
-}
-
-func newHarness(ptmx *os.File, opts Options, choice string) *harness {
+func newHarness(ptmx *os.File, opts Options) *harness {
 	errw := opts.Stderr
 	if errw == nil {
 		errw = os.Stderr
 	}
 	h := &harness{ptmx: ptmx, verbose: opts.Verbose, errw: errw}
-	h.vt = newTerminal(choice, ptmx)
+	h.vt = vt.NewTerm(80, 25)
 	h.reports = vt.NewTerm(80, 25)
 	h.st = newState(25, 80)
 	return h
@@ -265,7 +232,7 @@ func (h *harness) writeVT(b []byte) {
 	if len(b) == 0 {
 		return
 	}
-	_, _ = h.vt.Write(b)
+	h.vt.Write(b)
 	h.reports.Write(b)
 }
 
@@ -283,29 +250,11 @@ func (h *harness) logf(format string, args ...any) {
 }
 
 func (h *harness) rows() int {
-	_, r := h.vt.Size()
+	_, r := h.vt.Grid().Size()
 	return r
 }
 
 func (h *harness) cols() int {
-	c, _ := h.vt.Size()
+	c, _ := h.vt.Grid().Size()
 	return c
-}
-
-// stWriter turns a BEL-terminated OSC reply into an ST-terminated one.
-// esctest2's ReadOSC only accepts ST.
-type stWriter struct{ w io.Writer }
-
-func (s stWriter) Write(p []byte) (int, error) {
-	if len(p) > 0 && p[len(p)-1] == 0x07 {
-		q := make([]byte, len(p)+1)
-		copy(q, p[:len(p)-1])
-		q[len(p)-1] = 0x1b
-		q[len(p)] = '\\'
-		if _, err := s.w.Write(q); err != nil {
-			return 0, err
-		}
-		return len(p), nil
-	}
-	return s.w.Write(p)
 }

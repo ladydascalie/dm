@@ -1,10 +1,9 @@
 package esctest
 
 import (
-	"io"
 	"testing"
 
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
 func TestScan(t *testing.T) {
@@ -93,16 +92,16 @@ func TestTranslateC1(t *testing.T) {
 }
 
 func TestChecksum(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(80, 25), vt10x.WithWriter(io.Discard))
-	if got := checksum(vt, 1, 1, 1, 1); got != ' ' {
+	term := vt.NewTerm(80, 25)
+	if got := checksum(term, 1, 1, 1, 1); got != ' ' {
 		t.Errorf("empty cell checksum = %#x, want 0x20", got)
 	}
-	_, _ = vt.Write([]byte("X"))
-	if got := checksum(vt, 1, 1, 1, 1); got != 'X' {
+	term.Write([]byte("X"))
+	if got := checksum(term, 1, 1, 1, 1); got != 'X' {
 		t.Errorf("X checksum = %#x, want 0x58", got)
 	}
-	_, _ = vt.Write([]byte("\x1b[2;1HAB"))
-	if got := checksum(vt, 2, 1, 2, 2); got != 'A'+'B' {
+	term.Write([]byte("\x1b[2;1HAB"))
+	if got := checksum(term, 2, 1, 2, 2); got != 'A'+'B' {
 		t.Errorf("AB checksum = %#x, want %#x", got, 'A'+'B')
 	}
 }

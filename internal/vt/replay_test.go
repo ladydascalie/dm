@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/hinshun/vt10x"
 )
 
 // ringOf builds a raw output ring of plain lines, each ending in \r\n.
@@ -18,7 +16,7 @@ func ringOf(prefix string, n int) []byte {
 }
 
 // plainRows renders replay rows as text for assertions.
-func plainRows(rows [][]vt10x.Glyph) []string {
+func plainRows(rows [][]Cell) []string {
 	out := make([]string, len(rows))
 	for i, row := range rows {
 		out[i] = PlainRow(row)

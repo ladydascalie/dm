@@ -1,7 +1,6 @@
 package blackbox
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
 // The pane answers an application's feature query and publishes its status.
@@ -960,19 +959,27 @@ func TestScreenAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("screen: %v", err)
 	}
-	if m.Type != "screen" || len(m.Data) == 0 {
-		t.Fatalf("screen reply type=%q len=%d", m.Type, len(m.Data))
+	if m.Type != "screen" || len(m.VTSnap) == 0 {
+		t.Fatalf("screen reply type=%q snapshot=%d", m.Type, len(m.VTSnap))
 	}
-	if !bytes.Contains(m.Data, []byte("\x1b[")) {
-		t.Fatalf("screen reply has no ANSI: %q", m.Data)
+	snap, err := vt.DecodeSnapshot(m.VTSnap)
+	if err != nil {
+		t.Fatalf("decode snapshot: %v", err)
 	}
 	rect := h.rects("snap")[pane]
-	vt := vt10x.New(vt10x.WithSize(rect.W, rect.H))
-	if _, err := vt.Write(m.Data); err != nil {
-		t.Fatal(err)
+	term := vt.NewTerm(rect.W, rect.H)
+	if err := term.Restore(snap); err != nil {
+		t.Fatalf("restore snapshot: %v", err)
 	}
-	if got := vt.String(); !strings.Contains(got, "SNAP-MARK") {
-		t.Fatalf("screen snapshot lost the pane text:\n%s", got)
+	got := term.Grid().Text(0)
+	found := false
+	for y := 0; y < rect.H; y++ {
+		if strings.Contains(term.Grid().Text(y), "SNAP-MARK") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("screen snapshot lost the pane text, row 0: %s", got)
 	}
 }
 

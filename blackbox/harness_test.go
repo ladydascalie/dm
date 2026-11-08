@@ -380,12 +380,13 @@ func folderName(dir string) string {
 // fields the screen request uses are kept. It mirrors proto.go's Msg, because
 // the pane wire format is part of the contract the test drives.
 type paneMsg struct {
-	Type   string `json:"type"`
-	Action string `json:"action,omitempty"`
-	ID     int    `json:"id,omitempty"`
-	Data   []byte `json:"data,omitempty"`
-	Cols   int    `json:"cols,omitempty"`
-	Rows   int    `json:"rows,omitempty"`
+	Type   string          `json:"type"`
+	Action string          `json:"action,omitempty"`
+	ID     int             `json:"id,omitempty"`
+	Data   []byte          `json:"data,omitempty"`
+	VTSnap json.RawMessage `json:"vtsnap,omitempty"`
+	Cols   int             `json:"cols,omitempty"`
+	Rows   int             `json:"rows,omitempty"`
 }
 
 // paneRequest asks one pane daemon for its screen bytes. It mirrors
