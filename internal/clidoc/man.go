@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"dm/internal/configdoc"
 	"dm/internal/keymap"
 )
 
@@ -57,35 +58,6 @@ var manActionNames = []string{
 	"rename-window", "rename-workspace",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",
 	"msg-watchers", "msg-schema",
-}
-
-// manEnv is one environment variable the page documents.
-type manEnv struct {
-	name string
-	desc string
-}
-
-var manEnvs = []manEnv{
-	{"DM_STATE", "state directory; overrides XDG_STATE_HOME"},
-	{"XDG_STATE_HOME", "state directory base; dm uses $XDG_STATE_HOME/dm"},
-	{"XDG_CONFIG_HOME", "config directory base; dm reads $XDG_CONFIG_HOME/dm/config.kdl"},
-	{"DM_SESSION", "the session a pane belongs to; dm refuses to attach that session from inside it"},
-	{"DM_PANE", "the pane id a pane's shell runs in"},
-	{"DM_NERD", "1 forces Nerd font glyphs, 0 forces the Unicode fallback"},
-	{"DM_NOTIFY", "0 turns desktop notifications off"},
-	{"DM_STATS", "non-empty prints two stderr lines when the client exits: \"dm: style cache: <hits> hits, <misses> misses, <rate>% hit rate\" and \"dm: pacing: <frames> frames written, <wakes> wakes, <ms>ms interval\""},
-	{"COLUMNS", "terminal width when the client cannot ask the terminal"},
-	{"SHELL", "the shell a new pane runs"},
-	{"TMUX", "set inside tmux; dm uses it to pick its terminal behaviour"},
-}
-
-// manFiles is the file layout the page documents.
-var manFiles = []string{
-	"$DM_STATE/sessions/<name>/state.json",
-	"$DM_STATE/sessions/<name>/server.sock",
-	"$DM_STATE/sessions/<name>/panes/<id>.sock",
-	"$DM_STATE/sessions/<name>/panes/<id>.log",
-	"$XDG_CONFIG_HOME/dm/config.kdl",
 }
 
 // roffEscape makes text safe for a roff line. A backslash becomes \e, and a
@@ -165,21 +137,99 @@ func ManPage() string {
 		b.WriteString(roffEscape(action) + "\n")
 	}
 
+	b.WriteString(manKeymaps())
+
+	b.WriteString(manConfig())
+	b.WriteString(manTheme())
+
 	b.WriteString(".SH FILES\n")
-	for _, f := range manFiles {
+	b.WriteString("Paths use $DM_STATE and $XDG_CONFIG_HOME as ENVIRONMENT describes.\n")
+	for _, f := range configdoc.Files {
 		b.WriteString(".TP\n")
-		b.WriteString(roffBold(f) + "\n")
+		b.WriteString(roffBold(f.Path) + "\n")
+		b.WriteString(roffEscape(f.Desc) + "\n")
 	}
 
 	b.WriteString(".SH ENVIRONMENT\n")
-	for _, e := range manEnvs {
+	for _, e := range configdoc.EnvVars {
+		if e.TestOnly {
+			continue
+		}
 		b.WriteString(".TP\n")
-		b.WriteString(roffBold(e.name) + "\n")
-		b.WriteString(roffEscape(e.desc) + "\n")
+		b.WriteString(roffBold(e.Name) + "\n")
+		b.WriteString(roffEscape(e.Desc) + "\n")
 	}
 
 	b.WriteString(".SH SEE ALSO\n")
 	b.WriteString(".BR tmux (1)\n")
 
+	return b.String()
+}
+
+// manKeymaps renders the KEYMAPS section: one entry per mode, and the actions
+// the built-in config binds in it.
+func manKeymaps() string {
+	var b strings.Builder
+	b.WriteString(".SH KEYMAPS\n")
+	b.WriteString("A keymap mode is a table of actions. A keymap node in config.kdl patches one mode, and an action the file leaves out keeps its built-in key. The built-in bindings are:\n")
+	for _, m := range configdoc.KeymapModes() {
+		b.WriteString(".TP\n")
+		b.WriteString(roffBold(m.Name) + "\n")
+		if m.Desc != "" {
+			b.WriteString(roffEscape(m.Desc) + "\n")
+		}
+		parts := make([]string, 0, len(m.Actions))
+		for _, a := range m.Actions {
+			parts = append(parts, roffBold(a.Name)+" "+roffItalic(a.Key))
+		}
+		if len(parts) > 0 {
+			b.WriteString(".br\n")
+			b.WriteString(strings.Join(parts, ", ") + "\n")
+		}
+	}
+	return b.String()
+}
+
+// manConfig renders the CONFIGURATION section from configdoc.ConfigNodes.
+func manConfig() string {
+	var b strings.Builder
+	b.WriteString(".SH CONFIGURATION\n")
+	b.WriteString("dm reads $XDG_CONFIG_HOME/dm/config.kdl, or $HOME/.config/dm/config.kdl when XDG_CONFIG_HOME is unset. A missing file means the built-in values; dm writes a default file on first run. The file is a patch over the built-in values: a node the file leaves out keeps its built-in value. The nodes are:\n")
+	for _, n := range configdoc.ConfigNodes {
+		b.WriteString(".TP\n")
+		b.WriteString(roffBold(n.Name) + "\n")
+		b.WriteString("Value: " + roffItalic(n.Value) + ". ")
+		if n.Default == "" {
+			b.WriteString("Default: none.\n")
+		} else {
+			b.WriteString("Default: " + roffItalic(n.Default) + ".\n")
+		}
+		b.WriteString(roffEscape(n.Desc) + "\n")
+	}
+	return b.String()
+}
+
+// manTheme renders the THEME section from configdoc.ThemeKeys, grouped by
+// block in the order the keys appear in a theme file.
+func manTheme() string {
+	var b strings.Builder
+	b.WriteString(".SH THEME\n")
+	b.WriteString("A theme file is $XDG_CONFIG_HOME/dm/themes/<name>.kdl. The theme node in config.kdl names one, and no theme node keeps the built-in theme. Every block and every key is optional: the file reads over the built-in theme, so it carries only what it changes. A block or key given twice, an unknown block or key, a colour that is not #rrggbb, or a glyph that is not one cell wide is an error. The keys are:\n")
+	block := ""
+	for _, k := range configdoc.ThemeKeys() {
+		root, state, _ := strings.Cut(k.Block, ".")
+		if root != block {
+			block = root
+			b.WriteString(".PP\n")
+			b.WriteString(roffBold(root) + "\n")
+		}
+		name := k.Name
+		if state != "" {
+			name = state + " " + k.Name
+		}
+		b.WriteString(".TP\n")
+		b.WriteString(roffBold(name) + "\n")
+		b.WriteString(roffEscape(k.Desc) + " Default " + roffItalic(k.Default) + ".\n")
+	}
 	return b.String()
 }

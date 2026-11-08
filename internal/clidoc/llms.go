@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"dm/internal/configdoc"
 	"dm/internal/keymap"
 )
 
@@ -174,7 +175,53 @@ func LLMsText() string {
 	b.WriteString("The sidebar is a tree of workspaces, windows and panes. A workspace row is a foldable header. Under an unfolded workspace, each window gets a window row with its fold caret, its rendered window label, branch and dirty counts, and a dim note row when that pane has a commit message. The label falls back to the folder, then the window name, when the template renders empty. The source pane is the focused pane when it carries a branch, else the first pane carrying a branch, else the focused pane, else the window's first pane. The window's pane rows follow when the window is unfolded. A folded workspace hides its windows and panes; a folded window hides only its panes. A left click on a workspace row focuses the first available pane in that workspace. A left click on a workspace caret toggles the workspace fold without changing focus. A left click on a window row focuses the first available pane in that window and makes it the active window. A left click on a window caret toggles the window fold without changing focus. A left click on a pane row focuses that pane. Double-clicking a workspace row opens the workspace rename prompt; double-clicking a window row opens the window rename prompt; double-clicking a pane row opens the pane rename prompt. A right click on any row opens the row menu for that row: rename, close, new, fold and focus, as the row allows. The bottom row of the sidebar is its control: a left click there toggles the rail between full and thin. The `toggle-rail` key cycles full, thin and hidden. A window tab bar sits above the pane area, to the right of the rail. One tab per window in the active workspace. A tab is its label plus one padding cell on each side, clamped to `tab-min-width` and `tab-max-width` from `config.kdl` (defaults 8 and 20 cells); a label wider than the maximum is cut with an ellipsis. The tab label, the window row's leading label and the status bar window chip come from the `window-label` Go template, which defaults to the window name for a named window and the id plus repository folder for an unnamed one. Clicking a tab selects that window; double-clicking opens the window rename prompt.\n")
 
 	b.WriteString("\n## Config\n\n")
-	b.WriteString("`$XDG_CONFIG_HOME/dm/config.kdl` holds the prefix key, the keymaps, the theme name, `default-fold`, `tab-min-width`, `tab-max-width`, `window-label` and `padding`. `padding` is the blank cells between a pane's border and its content, 0 to 4, default 1. A pane too small for the padding drops it rather than going empty. `glyphs` is `auto`, `ascii`, `unicode` or `nerd`: auto picks Nerd Font glyphs when the font is present and Unicode otherwise, and ascii falls back to plain ASCII for every box, caret and mark.\n")
+	b.WriteString("`$XDG_CONFIG_HOME/dm/config.kdl`, or `$HOME/.config/dm/config.kdl` when XDG_CONFIG_HOME is unset, is a patch over the built-in values: a node the file leaves out keeps its built-in value, and an action left out of a `keymap` block keeps its built-in key. dm writes a default file on first run.\n\n")
+	b.WriteString("| Node | Value | Default | What it does |\n")
+	b.WriteString("| --- | --- | --- | --- |\n")
+	for _, n := range configdoc.ConfigNodes {
+		def := "none"
+		if n.Default != "" {
+			def = "`" + llmsCell(n.Default) + "`"
+		}
+		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n",
+			n.Name, llmsCell(n.Value), def, llmsCell(n.Desc))
+	}
+
+	b.WriteString("\n## Keymaps\n\n")
+	b.WriteString("Each mode is a table of actions. The table lists the built-in binding; `dm exec` and a `keymap` node use the action name.\n\n")
+	b.WriteString("| Mode | Action | Key |\n")
+	b.WriteString("| --- | --- | --- |\n")
+	for _, m := range configdoc.KeymapModes() {
+		for _, a := range m.Actions {
+			fmt.Fprintf(&b, "| `%s` | `%s` | `%s` |\n", m.Name, a.Name, llmsCell(a.Key))
+		}
+	}
+
+	b.WriteString("\n## Theme\n\n")
+	b.WriteString("A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, named by the `theme` node; no node keeps the built-in theme. Every block and every key is optional, because the file reads over the built-in theme. A colour is `#rrggbb`; a glyph is one rune one cell wide. The built-in values are:\n\n")
+	b.WriteString("| Block | Keys and built-in defaults | What it carries |\n")
+	b.WriteString("| --- | --- | --- |\n")
+	for _, blk := range llmsThemeBlocks() {
+		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", blk.name, llmsCell(blk.keys), llmsCell(blk.desc))
+	}
+
+	b.WriteString("\n## Environment\n\n")
+	b.WriteString("| Variable | What it sets |\n")
+	b.WriteString("| --- | --- |\n")
+	for _, e := range configdoc.EnvVars {
+		if e.TestOnly {
+			continue
+		}
+		fmt.Fprintf(&b, "| `%s` | %s |\n", e.Name, llmsCell(e.Desc))
+	}
+
+	b.WriteString("\n## Files\n\n")
+	b.WriteString("| Path | What it holds |\n")
+	b.WriteString("| --- | --- |\n")
+	for _, f := range configdoc.Files {
+		fmt.Fprintf(&b, "| `%s` | %s |\n", llmsCell(f.Path), llmsCell(f.Desc))
+	}
+
 	b.WriteString("\n## Recipes\n\n")
 	b.WriteString("Attach to a session, creating it if needed:\n\n")
 	b.WriteString("```sh\ndm attach -s work\n```\n\n")
@@ -197,4 +244,40 @@ func LLMsText() string {
 	b.WriteString("- A bare word is a session name: `dm work` attaches to `work`, it does not run a command called `work`.\n")
 
 	return b.String()
+}
+
+// llmsThemeBlock is one theme block row in llms.txt: its name, every key with
+// its built-in default, and what the block paints.
+type llmsThemeBlock struct {
+	name string
+	keys string
+	desc string
+}
+
+// llmsThemeBlockDesc says what each theme block paints.
+var llmsThemeBlockDesc = map[string]string{
+	"palette": "Rail and status bar colours.",
+	"accents": "Workspace accent colours, assigned in order.",
+	"glyphs":  "Box, divider, fold and mark glyphs.",
+	"states":  "Glyph and colour per pane state: working, idle, blocked, done, error, unknown, shell.",
+}
+
+// llmsThemeBlocks groups configdoc.ThemeKeys by block, keeping the theme
+// file's order, and spells each key with its built-in default.
+func llmsThemeBlocks() []llmsThemeBlock {
+	var out []llmsThemeBlock
+	for _, k := range configdoc.ThemeKeys() {
+		root, state, _ := strings.Cut(k.Block, ".")
+		name := k.Name
+		if state != "" {
+			name = state + "." + k.Name
+		}
+		entry := "`" + name + "` " + k.Default
+		if len(out) > 0 && out[len(out)-1].name == root {
+			out[len(out)-1].keys += ", " + entry
+			continue
+		}
+		out = append(out, llmsThemeBlock{name: root, keys: entry, desc: llmsThemeBlockDesc[root]})
+	}
+	return out
 }
