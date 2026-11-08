@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"dm/internal/box"
@@ -14,6 +15,56 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 	switch m.Action {
 	case "ping":
 		s.reply(cl, m, map[string]any{"session": s.st.Name}, nil)
+
+	case "term-colours":
+		// A client reports the pair its own terminal answered. Normalise both
+		// before storing, so a bad value changes nothing. An empty half is
+		// left as it was: the client may have got only one reply.
+		fg, bg := m.FG, m.BG
+		if fg != "" {
+			v, err := normaliseTermColour(fg)
+			if err != nil {
+				s.reply(cl, m, nil, err)
+				return
+			}
+			fg = v
+		}
+		if bg != "" {
+			v, err := normaliseTermColour(bg)
+			if err != nil {
+				s.reply(cl, m, nil, err)
+				return
+			}
+			bg = v
+		}
+		if fg == "" && bg == "" {
+			s.reply(cl, m, nil, nil)
+			return
+		}
+		s.mu.Lock()
+		tc := s.termColours
+		if tc == nil {
+			tc = &termColours{}
+			s.termColours = tc
+		}
+		if fg != "" {
+			tc.fg = fg
+		}
+		if bg != "" {
+			tc.bg = bg
+		}
+		fg, bg = tc.fg, tc.bg
+		panes := make([]*paneConn, 0, len(s.panes))
+		for _, pc := range s.panes {
+			panes = append(panes, pc)
+		}
+		s.mu.Unlock()
+		for _, pc := range panes {
+			if err := pc.send(wire.Msg{Action: "term-colours", FG: fg, BG: bg}); err != nil {
+				log.Printf("pane %s: term-colours: %v", pc.id, err)
+			}
+		}
+		s.reply(cl, m, nil, nil)
 
 	case "list", "ls":
 		s.mu.Lock()
@@ -346,4 +397,41 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 	default:
 		s.reply(cl, m, nil, fmt.Errorf("unknown action %q", m.Action))
 	}
+}
+
+// normaliseTermColour reads the two forms a terminal answers OSC 10 and OSC 11
+// with and returns the xterm form rgb:RRRR/GGGG/BBBB. Anything else is an
+// error naming the value.
+func normaliseTermColour(s string) (string, error) {
+	if strings.HasPrefix(s, "#") {
+		h := strings.ToLower(s[1:])
+		if len(h) != 6 || !isHex(h) {
+			return "", fmt.Errorf("colour %q is not #rrggbb", s)
+		}
+		return "rgb:" + h[0:2] + h[0:2] + "/" + h[2:4] + h[2:4] + "/" + h[4:6] + h[4:6], nil
+	}
+	if strings.HasPrefix(s, "rgb:") {
+		parts := strings.Split(s[len("rgb:"):], "/")
+		if len(parts) != 3 {
+			return "", fmt.Errorf("colour %q is not rgb:RRRR/GGGG/BBBB", s)
+		}
+		for _, p := range parts {
+			if len(p) != 4 || !isHex(p) {
+				return "", fmt.Errorf("colour %q is not rgb:RRRR/GGGG/BBBB", s)
+			}
+		}
+		return "rgb:" + strings.ToLower(strings.Join(parts, "/")), nil
+	}
+	return "", fmt.Errorf("colour %q is not a terminal colour", s)
+}
+
+// isHex reports whether s is one or more hex digits.
+func isHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+			return false
+		}
+	}
+	return true
 }
