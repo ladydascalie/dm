@@ -64,16 +64,47 @@ func drawPaneFrom(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int, sel
 			if content == "" || c.Width == vt.WidthContinuation {
 				content = " "
 			}
-			if c.Width == vt.WidthWide && x+1 >= r.W {
+			// Clip the row to the content rect. A cluster whose last cell would
+			// fall outside is dropped and the slot it leaves is blanked, so a
+			// row never paints past the rect and a wide glyph is never split.
+			span := clusterSpan(c)
+			if x+span > r.W {
 				content = " "
 			}
 			buf.WriteString(content)
 			if selected {
 				buf.WriteString("\x1b[27m")
 			}
+			// A cluster wider than the grid says it is still paints its own
+			// cells, so the cursor must step over all of them.
+			if adv := x + span; adv > next {
+				next = adv
+			}
 			x = next
 		}
 	}
+}
+
+// clusterSpan returns how many cells c paints on a row: one for a blank or a
+// continuation slot, two for a wide cluster. It measures the content itself
+// and keeps the larger of that and the stored width, so a width table that
+// disagrees with the grid cannot paint a cluster past the rect the caller
+// clipped the row to.
+func clusterSpan(c vt.Cell) int {
+	if c.Content == "" || c.Width == vt.WidthContinuation {
+		return 1
+	}
+	w := int(c.Width)
+	if m := vt.ClusterWidth(c.Content); m > w {
+		w = m
+	}
+	if w < 1 {
+		return 1
+	}
+	if w > 2 {
+		return 2
+	}
+	return w
 }
 
 // drawPaneRow paints one row of a pane's content: the same bytes a full pane
