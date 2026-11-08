@@ -60,12 +60,24 @@ func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool,
 	}
 	if n := snap.Cols - segment.SegCells(segs); n > 0 {
 		// The bar's ground is the rail's: there is no second background.
-		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", n))
+		buf.WriteString(groundSGR(th.Palette.RailBG) + strings.Repeat(" ", n))
 	}
 	for _, s := range pinned {
 		segment.Write(buf, s)
 	}
 	buf.WriteString("\x1b[0m")
+}
+
+// styleColor maps a palette colour onto the style cache's colour.
+func styleColor(c theme.RGB) theme.Color {
+	return theme.RGBColor(uint8(c.R), uint8(c.G), uint8(c.B))
+}
+
+// groundSGR is a chrome row's reset and ground as one cached escape. The
+// escape also names the terminal default foreground, which is the state the
+// reset leaves, so the paint is the same.
+func groundSGR(c theme.RGB) string {
+	return theme.Style{Bg: styleColor(c)}.SGR()
 }
 
 // barSplitPinned splits a span run at its first pinned span: the left block,

@@ -166,14 +166,16 @@ func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, draft stri
 		segment.Seg{Text: draft, FG: p.RailText},
 		segment.Seg{Text: caret, FG: p.BarAccent},
 	)
-	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m", r.Y+1, r.X+1)
-	buf.WriteString(p.RailBG.BG())
+	fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+1, r.X+1)
+	buf.WriteString(groundSGR(p.RailBG))
 	for _, s := range segs {
-		buf.WriteString(s.FG.FG())
+		buf.WriteString(theme.Style{Fg: styleColor(s.FG), Bg: styleColor(p.RailBG)}.SGR())
 		buf.WriteString(s.Text)
 	}
 	if n := r.W - segment.SegCells(segs); n > 0 {
-		buf.WriteString(p.RailBG.BG())
+		// The ground is already live from the last run, so the pad only needs
+		// its cells; a second ground escape would repaint the last run's
+		// foreground to the terminal default.
 		buf.WriteString(strings.Repeat(" ", n))
 	}
 	buf.WriteString("\x1b[0m")

@@ -121,14 +121,14 @@ func DrawTabBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, tw tabWi
 	}
 	p := th.Palette
 	fmt.Fprintf(buf, "\x1b[%d;%dH", bar.Y+1, bar.X+1)
-	buf.WriteString("\x1b[0m" + p.RailBG.BG())
+	buf.WriteString(groundSGR(p.RailBG))
 	buf.WriteString(strings.Repeat(" ", bar.W))
 	buf.WriteString("\x1b[0m")
 	for _, it := range tabBarItems(snap, tw) {
 		if snap.ActiveWindow == it.Index {
-			buf.WriteString("\x1b[0m" + p.RailFocusBG.BG() + p.RailText.FG())
+			buf.WriteString(theme.Style{Fg: styleColor(p.RailText), Bg: styleColor(p.RailFocusBG)}.SGR())
 		} else {
-			buf.WriteString("\x1b[0m" + p.RailBG.BG() + p.RailDim.FG())
+			buf.WriteString(theme.Style{Fg: styleColor(p.RailDim), Bg: styleColor(p.RailBG)}.SGR())
 		}
 		fmt.Fprintf(buf, "\x1b[%d;%dH", it.Rect.Y+1, it.Rect.X+1)
 		buf.WriteString(cells.Center(cells.Elide(it.Label, it.Rect.W-2), it.Rect.W))

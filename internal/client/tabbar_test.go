@@ -142,7 +142,9 @@ func TestDrawTabBarHighlightsActive(t *testing.T) {
 	if !strings.Contains(out, " one ") || !strings.Contains(out, " two ") {
 		t.Fatalf("tab names missing: %q", out)
 	}
-	focusBG := theme.DefaultTheme().Palette.RailFocusBG.BG()
+	// The tab is one cached escape, so the ground is a parameter inside it,
+	// not an escape of its own.
+	focusBG := ";" + theme.DefaultTheme().Palette.RailFocusBG.SGR(true)
 	if !strings.Contains(out, focusBG) {
 		t.Fatalf("active tab background missing: %q", out)
 	}
