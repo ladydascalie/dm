@@ -135,33 +135,30 @@ func TestPacerResetDrawsAtFloor(t *testing.T) {
 	}
 }
 
-// TestPacerStaleAfterArm proves a tick buffered across a ticker reset is not a
-// frame: it neither draws nor decays the interval. Staleness hangs off the
-// arm time, not off the pacer's wakes.
-func TestPacerStaleAfterArm(t *testing.T) {
+// TestPacerRearmPullsADecayedTickerToTheFloor proves the loop's re-arm rule:
+// a ticker the idle decay armed out at the ceiling is pulled back after a wake,
+// and a ticker already at the floor is left alone so a message stream cannot
+// push the frame out forever.
+func TestPacerRearmPullsADecayedTickerToTheFloor(t *testing.T) {
 	var p pacer
 	now := time.Unix(1000, 0)
-	p.decay(now)
-	p.decay(now)
-	if got := p.interval(); got != 4*paceFloor {
-		t.Fatalf("interval after idle = %v, want %v", got, 4*paceFloor)
+
+	for i := 0; i < 6; i++ {
+		p.decay(now)
+	}
+	if got := p.interval(); got != paceCeiling {
+		t.Fatalf("interval after idle = %v, want %v", got, paceCeiling)
+	}
+	if every, ok := p.rearm(paceCeiling); ok || every != paceCeiling {
+		t.Fatalf("rearm an idle ticker = %v, %v, want %v, false", every, ok, paceCeiling)
 	}
 
-	p.arm(now)
-	if !p.stale(now.Add(time.Millisecond)) {
-		t.Fatal("a tick one millisecond after the ticker was armed is not stale")
+	p.reset()
+	if every, ok := p.rearm(paceCeiling); !ok || every != paceFloor {
+		t.Fatalf("rearm after a wake = %v, %v, want %v, true", every, ok, paceFloor)
 	}
-	if p.stale(now.Add(paceFloor)) {
-		t.Fatal("a tick one floor interval after the ticker was armed is stale")
-	}
-
-	// A stream of wakes does not re-arm the ticker, so the next real tick is
-	// not stale.
-	p.reset()
-	p.reset()
-	p.reset()
-	if p.stale(now.Add(paceFloor)) {
-		t.Fatal("a wake stream made the next real tick stale")
+	if every, ok := p.rearm(paceFloor); ok || every != paceFloor {
+		t.Fatalf("rearm a floor ticker = %v, %v, want %v, false", every, ok, paceFloor)
 	}
 }
 

@@ -421,11 +421,11 @@ func (s *frameSink) reset() { s.n = 0 }
 // wrote reports whether the last frame wrote any bytes.
 func (s *frameSink) wrote() bool { return s.n > 0 }
 
-// tick runs the per-tick work: the expiry timers, then at most one frame. It
-// tells the pacer which happened, and returns the interval the loop should arm
-// next. A stale tick, one buffered across a Ticker.Reset, runs the timers but
-// draws nothing: it carries no new time, so it must not advance the decay.
-func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) time.Duration {
+// tick runs the per-tick work: the expiry timers, then at most one frame. A
+// dirty frame inside the floor leaves the interval alone and waits for the next
+// tick, so a burst of changes still coalesces into one frame; a clean tick is
+// the idle tick and decays the interval.
+func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) {
 	t.expireToasts(now)
 	t.expirePaste(now)
 	t.expireSwitcher(now)
@@ -437,15 +437,29 @@ func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) time.Duration {
 		t.dirty = true
 		pace.reset()
 	}
-	if pace.stale(now) {
-		return pace.interval()
-	}
-	if !pace.shouldDraw(now, t.dirty) {
-		// Nothing to draw is an empty frame: it decays the interval but is
-		// not a frame the client drew.
+	if !t.dirty {
 		pace.decay(now)
-		return pace.interval()
+		return
 	}
+	if !pace.shouldDraw(now, true) {
+		return
+	}
+	t.frame(now, pace, sink)
+}
+
+// wake runs after input, a message, a resize or a session switch: it floors the
+// pacer and draws the frame now when the floor allows. Waiting for the next
+// tick would put the first keystroke after a pause behind a ticker the idle
+// decay had armed out at the ceiling.
+func (t *tui) wake(now time.Time, pace *pacer, sink *frameSink) {
+	pace.reset()
+	if t.dirty && pace.shouldDraw(now, true) {
+		t.frame(now, pace, sink)
+	}
+}
+
+// frame draws one frame and tells the pacer whether it said anything.
+func (t *tui) frame(now time.Time, pace *pacer, sink *frameSink) {
 	sink.reset()
 	t.draw()
 	t.dirty = false
@@ -454,7 +468,6 @@ func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) time.Duration {
 	} else {
 		pace.decay(now)
 	}
-	return pace.interval()
 }
 
 func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal, pace *pacer) (string, error) {
@@ -509,7 +522,6 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 	}
 
 	ticker := time.NewTicker(pace.interval())
-	pace.arm(time.Now())
 	defer ticker.Stop()
 	tickEvery := pace.interval()
 
@@ -521,32 +533,30 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 			}
 			t.inbuf = append(t.inbuf, b...)
 			t.processInput()
-			pace.reset()
+			t.wake(time.Now(), pace, sink)
 		case m, ok := <-msgs:
 			if !ok {
 				return "", nil
 			}
 			t.apply(m)
-			pace.reset()
+			t.wake(time.Now(), pace, sink)
 		case <-winch:
 			cols, rows, err := term.GetSize(fd)
 			if err == nil && (cols != t.cols || rows != t.rows) {
 				t.cols, t.rows = cols, rows
 				_ = t.conn.Send(wire.Msg{Type: "resize", Cols: cols, Rows: rows})
 				t.dirty = true
-				pace.reset()
+				t.wake(time.Now(), pace, sink)
 			}
 		case <-ticker.C:
-			// The tick body reports the interval to arm next. A wake or an
-			// empty frame may have moved it. Resetting the ticker reschedules
-			// the next tick from now; the ticker itself is reused. The pacer
-			// records the arm time, so a tick Go left buffered across the
-			// reset is told apart from a real one.
-			if every := t.tick(time.Now(), pace, sink); every != tickEvery {
-				ticker.Reset(every)
-				pace.arm(time.Now())
-				tickEvery = every
-			}
+			t.tick(time.Now(), pace, sink)
+		}
+		// Re-arm the ticker whenever the pacer's interval moved: the idle
+		// decay lengthens it, a wake floors it. One re-arm per change, so a
+		// message stream does not keep pushing the tick out.
+		if every, ok := pace.rearm(tickEvery); ok {
+			ticker.Reset(every)
+			tickEvery = every
 		}
 		if t.quit {
 			return "", nil

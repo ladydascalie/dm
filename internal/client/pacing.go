@@ -19,8 +19,7 @@ const (
 // shouldDraw call sees no previous frame.
 type pacer struct {
 	gap    time.Duration // ticker interval to use next
-	last   time.Time     // when the pacer last handled a frame: a drawn one or an empty one
-	armed  time.Time     // when the ticker was last created or reset
+	last   time.Time     // when the pacer last drew a frame
 	frames uint64        // frames that wrote bytes since the process started
 	wakes  uint64        // wakes reset since the process started
 }
@@ -41,19 +40,15 @@ func (p *pacer) shouldDraw(now time.Time, dirty bool) bool {
 	return dirty && now.Sub(p.last) >= paceFloor
 }
 
-// arm records when the loop created or reset the ticker. Staleness hangs off
-// the ticker's own schedule, not the wakes: a message stream resets the pacer
-// before every tick, and must still be drawn.
-func (p *pacer) arm(now time.Time) {
-	p.armed = now
-}
-
-// stale reports whether now is too soon after the ticker was armed to be a
-// real tick. Go's Ticker.Reset does not drain a tick already delivered, so the
-// tick after a reset may be the buffered one from before it. It carries no new
-// time and must not advance the decay.
-func (p *pacer) stale(now time.Time) bool {
-	return !p.armed.IsZero() && now.Sub(p.armed) < paceFloor
+// rearm reports the interval the ticker must be armed with, given it is
+// currently armed with armed, and whether that differs. A wake floors the
+// interval, so a ticker the idle decay armed out at the ceiling is pulled back
+// and the next frame lands within one floor. A ticker already at the floor is
+// left alone: re-arming on every wake would push the frame out forever while a
+// pane streams.
+func (p *pacer) rearm(armed time.Duration) (time.Duration, bool) {
+	want := p.interval()
+	return want, want != armed
 }
 
 // drew records a frame that wrote bytes at now. It counts the frame and
@@ -65,9 +60,10 @@ func (p *pacer) drew(now time.Time) {
 }
 
 // decay records an empty frame at now: a tick that drew nothing. It advances
-// the interval one doubling step toward the ceiling without counting a frame.
+// the interval one doubling step toward the ceiling without counting a frame,
+// and leaves the frame floor's reference alone: an empty tick is not a draw, so
+// a key arriving right after one still draws at once.
 func (p *pacer) decay(now time.Time) {
-	p.last = now
 	if p.gap = p.interval() * 2; p.gap > paceCeiling {
 		p.gap = paceCeiling
 	}
