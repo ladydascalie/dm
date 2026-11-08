@@ -12,6 +12,7 @@ package vt
 func init() {
 	escTable[escKey{Final: '7'}] = escSaveCursor                  // DECSC
 	escTable[escKey{Final: '8'}] = escRestoreCursor               // DECRC
+	csiTable[csiKey{Final: 'u'}] = csiRestoreCursor               // SCORC
 	escTable[escKey{Final: 'c'}] = escReset                       // RIS
 	escTable[escKey{Inter: "#", Final: '8'}] = escScreenAlignment // DECALN
 	csiTable[csiKey{Inter: "!", Final: 'p'}] = csiSoftReset       // DECSTR
@@ -26,6 +27,12 @@ func escSaveCursor(term *Term) {
 // escRestoreCursor handles DECRC.
 func escRestoreCursor(term *Term) {
 	term.style, term.protection = term.grid.RestoreCursor()
+}
+
+// csiRestoreCursor handles SCORC, the ANSI restore cursor. It is DECRC under
+// another name.
+func csiRestoreCursor(term *Term, _ CSI) {
+	escRestoreCursor(term)
 }
 
 // escReset handles RIS: the full reset. It clears the screen and the alternate

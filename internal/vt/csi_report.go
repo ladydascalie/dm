@@ -189,14 +189,22 @@ func (t *Term) replyCursorPosition(private bool) {
 	t.reply(fmt.Sprintf("\x1b[%d;%dR", c.Y+1, c.X+1))
 }
 
-// csiDECRQM answers a DECRQM for an ANSI mode.
+// csiDECRQM answers a DECRQM for an ANSI mode. DECRQM is a VT level 3 feature,
+// so a terminal told to conform to level 2 stays silent, as the suite requires.
 func csiDECRQM(t *Term, seq CSI) {
+	if t.level < 3 {
+		return
+	}
 	mode := csiParamOr(seq, 0, 0)
 	t.reply(fmt.Sprintf("\x1b[%d;%d$y", mode, t.reportModeState(false, mode)))
 }
 
-// csiDECRQMDEC answers a DECRQM for a DEC private mode.
+// csiDECRQMDEC answers a DECRQM for a DEC private mode. It is silent below VT
+// level 3 for the same reason as csiDECRQM.
 func csiDECRQMDEC(t *Term, seq CSI) {
+	if t.level < 3 {
+		return
+	}
 	mode := csiParamOr(seq, 0, 0)
 	t.reply(fmt.Sprintf("\x1b[?%d;%d$y", mode, t.reportModeState(true, mode)))
 }
