@@ -351,7 +351,8 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			s.reply(cl, m, nil, err)
 			return
 		}
-		s.reply(cl, m, box.ClearReply{Cleared: s.boxClear(req.(*box.ClearReq))}, nil)
+		cleared, err := s.boxClear(req.(*box.ClearReq))
+		s.reply(cl, m, box.ClearReply{Cleared: cleared}, err)
 
 	case "msg-wait":
 		req, err := box.ParseReq(m.Action, m.Res)
