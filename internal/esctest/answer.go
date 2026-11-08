@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"dm/internal/vt"
+
 	"github.com/creack/pty"
 	"github.com/hinshun/vt10x"
 )
@@ -206,6 +208,14 @@ func (h *harness) modeState(priv bool, mode int) int {
 			return 1
 		}
 		return 2
+	case 3, 4, 18, 19, 35, 42, 66, 67, 69:
+		// Modes the new VT's mode family owns. Until that stream lands the
+		// harness reports the state it observed from DECSET and DECRST, so
+		// the report family is provable on its own.
+		if h.st.decModes[mode] {
+			return 1
+		}
+		return 2
 	}
 	return 0
 }
@@ -297,29 +307,41 @@ func (h *harness) observeCSI(s seq) {
 	}
 }
 
-// answer replies to a handled sequence.
-func (h *harness) answer(s seq) {
+// answer replies to a handled sequence. raw is the sequence as it arrived, so
+// a report the new VT owns can be handed over unchanged.
+func (h *harness) answer(s seq, raw []byte) {
 	switch s.kind {
 	case 'Z':
-		h.reply("\x1b[?65;1;2;6;9;15;16;17;18;21;22;28;29c", "DECID")
+		h.replyVT(raw, "DECID")
 	case ']':
 		h.handleOSC(s.body)
 	case 'P':
 		h.answerDCS(s.body)
 	case 'c':
-		h.answerCSI(s)
+		h.answerCSI(s, raw)
 	}
 }
 
-func (h *harness) answerCSI(s seq) {
+// replyVT sends the new VT's answer to the host.
+func (h *harness) replyVT(raw []byte, name string) {
+	if b := h.vtReport(raw); len(b) > 0 {
+		h.reply(string(b), name)
+	}
+}
+
+func (h *harness) answerCSI(s seq, raw []byte) {
 	switch s.final {
 	case 'c':
 		if s.priv == '>' {
-			h.reply("\x1b[>64;411;0c", "DA2")
+			h.replyVT(raw, "DA2")
 		} else {
-			h.reply("\x1b[?65;1;2;6;9;15;16;17;18;21;22;28;29c", "DA1")
+			h.replyVT(raw, "DA1")
 		}
 	case 'n':
+		if s.priv == '?' && firstParam(s.params, 0) == 6 {
+			h.replyVT(raw, "DECXCPR")
+			return
+		}
 		h.answerDSR(s)
 	case 't':
 		h.answerWinop(s)
@@ -340,9 +362,6 @@ func (h *harness) answerCSI(s seq) {
 
 func (h *harness) answerDSR(s seq) {
 	switch firstParam(s.params, 0) {
-	case 6:
-		c := h.vt.Cursor()
-		h.reply(fmt.Sprintf("\x1b[?%d;%d;1R", c.Y+1, c.X+1), "DECXCPR")
 	case 15:
 		h.reply("\x1b[?10n", "DSR printer port")
 	case 25:
@@ -546,12 +565,7 @@ func (h *harness) answerDCS(body string) {
 		pt := body[2:]
 		h.reply("\x1bP"+h.st.decrqss(pt)+"\x1b\\", "DECRQSS")
 	case strings.HasPrefix(body, "+q"):
-		hex := body[2:]
-		if strings.EqualFold(hex, "436F") {
-			h.reply("\x1bP1+r436F=323536\x1b\\", "XTGETTCAP")
-		} else {
-			h.reply("\x1bP0+r"+hex+"\x1b\\", "XTGETTCAP")
-		}
+		h.reply(vt.XTGETTCAPReply(body[2:]), "XTGETTCAP")
 	}
 }
 
