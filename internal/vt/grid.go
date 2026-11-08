@@ -40,6 +40,17 @@ type Modes struct {
 	FocusReporting bool
 	Mouse          MouseMode
 	MouseEncoding  MouseEncoding
+
+	CursorKeysApplication bool // DECCKM
+	ApplicationKeypad     bool // DECNKM
+	ColumnMode            bool // DECCOLM: 132 columns when set
+	Allow80To132          bool // DECSET 40: DECCOLM may resize
+	NoClearOnColumnMode   bool // DECNCSM: DECCOLM does not erase
+	MoreFix               bool // DECSET 41
+	ReverseWrap           bool // DECSET 45: wrap only a wrapped line
+	ReverseWrapExtended   bool // DECSET 1045: wrap any line
+	LeftRightMargin       bool // DECLRMM
+	LineFeedNewLine       bool // LNM
 }
 
 // defaultModes returns a fresh primary screen: wrap on, everything else off.
@@ -89,13 +100,26 @@ type SavedCursor struct {
 type Grid struct {
 	cols, rows int
 	lines      [][]Cell
+	// wrapped marks a row that a printable rune reached by autowrap. Mode 45
+	// reverse wrap is limited to those rows; mode 1045 ignores the mark.
+	wrapped []bool
 
-	cursor  Cursor
-	saved   SavedCursor
+	cursor Cursor
+	// saved holds the DECSC state once per screen: index 0 is the primary
+	// screen and index 1 the alternate, because xterm keeps them apart.
+	saved   [2]SavedCursor
 	scroll  ScrollRegion
 	tabs    []bool
 	modes   Modes
 	charset Charset
+
+	// altLines is the alternate screen. It is nil until the application first
+	// enters it, so a terminal that never uses the alternate screen does not
+	// pay for a second grid.
+	altLines   [][]Cell
+	altWrapped []bool
+	// savedModes is the XTSAVE store, keyed by DEC private mode number.
+	savedModes map[int]bool
 }
 
 // NewGrid returns a blank primary screen of cols by rows. Both are clamped to
@@ -111,6 +135,7 @@ func NewGrid(cols, rows int) *Grid {
 		cols:    cols,
 		rows:    rows,
 		lines:   make([][]Cell, rows),
+		wrapped: make([]bool, rows),
 		cursor:  Cursor{Visible: true},
 		scroll:  ScrollRegion{Top: 0, Bottom: rows - 1, Left: 0, Right: cols - 1},
 		tabs:    defaultTabs(cols),
@@ -120,7 +145,38 @@ func NewGrid(cols, rows int) *Grid {
 	for y := range g.lines {
 		g.lines[y] = newLine(cols, DefaultStyle())
 	}
+	g.saved[0] = homeSavedCursor()
+	g.saved[1] = homeSavedCursor()
 	return g
+}
+
+// homeSavedCursor is the state a saved cursor has before any DECSC: the home
+// position, the default style and the default charset. A DECRC without a DECSC
+// must land here, not on a hidden cursor at the origin.
+func homeSavedCursor() SavedCursor {
+	return SavedCursor{Cursor: Cursor{Visible: true}, Style: DefaultStyle()}
+}
+
+// blankLines returns rows of blank cells for the current size.
+func (g *Grid) blankLines() [][]Cell {
+	lines := make([][]Cell, g.rows)
+	for y := range lines {
+		lines[y] = newLine(g.cols, DefaultStyle())
+	}
+	return lines
+}
+
+// resetScrollRegion makes the whole grid the scroll region.
+func (g *Grid) resetScrollRegion() {
+	g.scroll = ScrollRegion{Top: 0, Bottom: g.rows - 1, Left: 0, Right: g.cols - 1}
+}
+
+// screen returns the index of the visible screen into saved.
+func (g *Grid) screen() int {
+	if g.modes.AltScreen {
+		return 1
+	}
+	return 0
 }
 
 // newLine returns a row of cols blank cells.
@@ -255,17 +311,24 @@ func (g *Grid) Erase(x, y int) {
 }
 
 // InsertCells shifts row y right from column x by n and blanks the n slots that
-// open. Cells pushed past the right edge are dropped, and a wide cell split by
-// the shift is blanked.
-func (g *Grid) InsertCells(x, y, n int) {
+// open. The shift stops at column right, so the cells outside the left and
+// right margins do not move. Cells pushed past right are dropped, and a wide
+// cell split by the shift is blanked.
+func (g *Grid) InsertCells(x, y, right, n int) {
 	if x < 0 || x >= g.cols || y < 0 || y >= g.rows || n <= 0 {
 		return
 	}
-	if n > g.cols-x {
-		n = g.cols - x
+	if right >= g.cols {
+		right = g.cols - 1
+	}
+	if x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
 	}
 	line := g.lines[y]
-	copy(line[x+n:], line[x:])
+	copy(line[x+n:right+1], line[x:right+1-n])
 	blank := blankCell(DefaultStyle())
 	for i := x; i < x+n; i++ {
 		line[i] = blank
@@ -274,27 +337,135 @@ func (g *Grid) InsertCells(x, y, n int) {
 }
 
 // DeleteCells shifts row y left from column x, dropping n cells, and blanks the
-// n slots that open at the right edge. A wide cell split by the shift is
-// blanked.
-func (g *Grid) DeleteCells(x, y, n int) {
+// n slots that open at column right. The shift stops at right, so the cells
+// outside the left and right margins do not move. A wide cell split by the
+// shift is blanked.
+func (g *Grid) DeleteCells(x, y, right, n int) {
 	if x < 0 || x >= g.cols || y < 0 || y >= g.rows || n <= 0 {
 		return
 	}
-	if n > g.cols-x {
-		n = g.cols - x
+	if right >= g.cols {
+		right = g.cols - 1
+	}
+	if x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
 	}
 	line := g.lines[y]
-	copy(line[x:], line[x+n:])
+	copy(line[x:right+1-n], line[x+n:right+1])
 	blank := blankCell(DefaultStyle())
-	for i := g.cols - n; i < g.cols; i++ {
+	for i := right - n + 1; i <= right; i++ {
 		line[i] = blank
 	}
 	g.repairLine(y)
 }
 
+// InsertColumns inserts n blank columns at column x on every row from top to
+// bottom, between the left and right margins. The cells to the left and right
+// of the margins and the rows outside top to bottom do not move.
+func (g *Grid) InsertColumns(x, top, bottom, left, right, n int) {
+	if x < 0 || x >= g.cols || n <= 0 {
+		return
+	}
+	top = clamp(top, 0, g.rows-1)
+	bottom = clamp(bottom, 0, g.rows-1)
+	left = clamp(left, 0, g.cols-1)
+	right = clamp(right, 0, g.cols-1)
+	if top > bottom || left > right || x < left || x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
+	}
+	blank := blankCell(DefaultStyle())
+	for y := top; y <= bottom; y++ {
+		line := g.lines[y]
+		copy(line[x+n:right+1], line[x:right+1-n])
+		for i := x; i < x+n; i++ {
+			line[i] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
+// ScrollColumnsRight shifts the scroll region's columns right by n and blanks
+// the columns that enter at the left. Used by DECBI.
+func (g *Grid) ScrollColumnsRight(n int) {
+	r := g.scroll
+	width := r.Right - r.Left + 1
+	if n <= 0 || width <= 0 {
+		return
+	}
+	if n > width {
+		n = width
+	}
+	blank := blankCell(DefaultStyle())
+	for y := r.Top; y <= r.Bottom; y++ {
+		line := g.lines[y]
+		copy(line[r.Left+n:r.Right+1], line[r.Left:r.Right+1-n])
+		for x := r.Left; x < r.Left+n; x++ {
+			line[x] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
+// ScrollColumnsLeft shifts the scroll region's columns left by n and blanks the
+// columns that enter at the right. Used by DECFI.
+func (g *Grid) ScrollColumnsLeft(n int) {
+	r := g.scroll
+	width := r.Right - r.Left + 1
+	if n <= 0 || width <= 0 {
+		return
+	}
+	if n > width {
+		n = width
+	}
+	blank := blankCell(DefaultStyle())
+	for y := r.Top; y <= r.Bottom; y++ {
+		line := g.lines[y]
+		copy(line[r.Left:r.Right+1-n], line[r.Left+n:r.Right+1])
+		for x := r.Right - n + 1; x <= r.Right; x++ {
+			line[x] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
+// DeleteColumns deletes n columns at column x on every row from top to bottom,
+// between the left and right margins. The cells to the left and right of the
+// margins and the rows outside top to bottom do not move.
+func (g *Grid) DeleteColumns(x, top, bottom, left, right, n int) {
+	if x < 0 || x >= g.cols || n <= 0 {
+		return
+	}
+	top = clamp(top, 0, g.rows-1)
+	bottom = clamp(bottom, 0, g.rows-1)
+	left = clamp(left, 0, g.cols-1)
+	right = clamp(right, 0, g.cols-1)
+	if top > bottom || left > right || x < left || x > right {
+		return
+	}
+	if n > right-x+1 {
+		n = right - x + 1
+	}
+	blank := blankCell(DefaultStyle())
+	for y := top; y <= bottom; y++ {
+		line := g.lines[y]
+		copy(line[x:right+1-n], line[x+n:right+1])
+		for i := right - n + 1; i <= right; i++ {
+			line[i] = blank
+		}
+		g.repairLine(y)
+	}
+}
+
 // InsertLines opens n blank rows at row y inside the scroll region, pushing the
-// rows below down and dropping the ones that leave the bottom. A row outside
-// the region does nothing.
+// rows below down and dropping the ones that leave the bottom. Only the columns
+// between the left and right margins move; the cells outside them stay put. A
+// row outside the region does nothing.
 func (g *Grid) InsertLines(y, n int) {
 	r := g.scroll
 	if y < r.Top || y > r.Bottom || n <= 0 {
@@ -303,15 +474,25 @@ func (g *Grid) InsertLines(y, n int) {
 	if n > r.Bottom-y+1 {
 		n = r.Bottom - y + 1
 	}
-	copy(g.lines[y+n:r.Bottom+1], g.lines[y:r.Bottom-n+1])
-	for i := y; i < y+n; i++ {
-		g.lines[i] = newLine(g.cols, DefaultStyle())
+	for row := r.Bottom; row >= y+n; row-- {
+		copy(g.lines[row][r.Left:r.Right+1], g.lines[row-n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
+	for row := y; row < y+n; row++ {
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[row][x] = blank
+		}
+	}
+	copy(g.wrapped[y+n:r.Bottom+1], g.wrapped[y:r.Bottom-n+1])
+	for row := y; row < y+n; row++ {
+		g.wrapped[row] = false
 	}
 }
 
 // DeleteLines removes n rows at row y inside the scroll region, pulling the
-// rows below up and blanking the ones that enter at the bottom. A row outside
-// the region does nothing.
+// rows below up and blanking the ones that enter at the bottom. Only the
+// columns between the left and right margins move; the cells outside them stay
+// put. A row outside the region does nothing.
 func (g *Grid) DeleteLines(y, n int) {
 	r := g.scroll
 	if y < r.Top || y > r.Bottom || n <= 0 {
@@ -320,9 +501,18 @@ func (g *Grid) DeleteLines(y, n int) {
 	if n > r.Bottom-y+1 {
 		n = r.Bottom - y + 1
 	}
-	copy(g.lines[y:r.Bottom-n+1], g.lines[y+n:r.Bottom+1])
-	for i := r.Bottom - n + 1; i <= r.Bottom; i++ {
-		g.lines[i] = newLine(g.cols, DefaultStyle())
+	for row := y; row <= r.Bottom-n; row++ {
+		copy(g.lines[row][r.Left:r.Right+1], g.lines[row+n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
+	for row := r.Bottom - n + 1; row <= r.Bottom; row++ {
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[row][x] = blank
+		}
+	}
+	copy(g.wrapped[y:r.Bottom-n+1], g.wrapped[y+n:r.Bottom+1])
+	for row := r.Bottom - n + 1; row <= r.Bottom; row++ {
+		g.wrapped[row] = false
 	}
 }
 
@@ -350,11 +540,13 @@ func (g *Grid) Clear() {
 	for y := range g.lines {
 		g.lines[y] = newLine(g.cols, DefaultStyle())
 	}
+	g.wrapped = make([]bool, g.rows)
 }
 
 // ScrollUp moves the scroll region's rows up by n and fills the rows that enter
-// at the bottom with blanks. Rows outside the region do not move. Left and
-// right margins are not applied yet; DECSLRM lands in a later unit.
+// at the bottom with blanks. Only the columns between the left and right
+// margins move; the cells outside them and the rows outside the region stay
+// put.
 func (g *Grid) ScrollUp(n int) {
 	r := g.scroll
 	height := r.Bottom - r.Top + 1
@@ -364,14 +556,25 @@ func (g *Grid) ScrollUp(n int) {
 	if n > height {
 		n = height
 	}
-	copy(g.lines[r.Top:r.Bottom-n+1], g.lines[r.Top+n:r.Bottom+1])
+	for y := r.Top; y <= r.Bottom-n; y++ {
+		copy(g.lines[y][r.Left:r.Right+1], g.lines[y+n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
 	for y := r.Bottom - n + 1; y <= r.Bottom; y++ {
-		g.lines[y] = newLine(g.cols, DefaultStyle())
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[y][x] = blank
+		}
+	}
+	copy(g.wrapped[r.Top:r.Bottom-n+1], g.wrapped[r.Top+n:r.Bottom+1])
+	for y := r.Bottom - n + 1; y <= r.Bottom; y++ {
+		g.wrapped[y] = false
 	}
 }
 
 // ScrollDown moves the scroll region's rows down by n and fills the rows that
-// enter at the top with blanks. Rows outside the region do not move.
+// enter at the top with blanks. Only the columns between the left and right
+// margins move; the cells outside them and the rows outside the region stay
+// put.
 func (g *Grid) ScrollDown(n int) {
 	r := g.scroll
 	height := r.Bottom - r.Top + 1
@@ -381,9 +584,18 @@ func (g *Grid) ScrollDown(n int) {
 	if n > height {
 		n = height
 	}
-	copy(g.lines[r.Top+n:r.Bottom+1], g.lines[r.Top:r.Bottom-n+1])
+	for y := r.Bottom; y >= r.Top+n; y-- {
+		copy(g.lines[y][r.Left:r.Right+1], g.lines[y-n][r.Left:r.Right+1])
+	}
+	blank := blankCell(DefaultStyle())
 	for y := r.Top; y < r.Top+n; y++ {
-		g.lines[y] = newLine(g.cols, DefaultStyle())
+		for x := r.Left; x <= r.Right; x++ {
+			g.lines[y][x] = blank
+		}
+	}
+	copy(g.wrapped[r.Top+n:r.Bottom+1], g.wrapped[r.Top:r.Bottom-n+1])
+	for y := r.Top; y < r.Top+n; y++ {
+		g.wrapped[y] = false
 	}
 }
 
@@ -486,9 +698,10 @@ func (g *Grid) PrevTabStop(x int) int {
 }
 
 // SaveCursor stores the cursor, its style, the charset and origin mode, as
-// DECSC does.
+// DECSC does. Each screen has its own slot, so a save on the alternate screen is
+// not what a restore on the primary screen finds.
 func (g *Grid) SaveCursor(style Style) {
-	g.saved = SavedCursor{
+	g.saved[g.screen()] = SavedCursor{
 		Cursor:  g.cursor,
 		Style:   style,
 		Charset: g.charset,
@@ -496,19 +709,20 @@ func (g *Grid) SaveCursor(style Style) {
 	}
 }
 
-// SavedCursor returns what the last DECSC stored.
+// SavedCursor returns what the last DECSC on the visible screen stored.
 func (g *Grid) SavedCursor() SavedCursor {
-	return g.saved
+	return g.saved[g.screen()]
 }
 
 // RestoreCursor restores the saved cursor, charset and origin mode, and returns
 // the saved style for the caller to make current.
 func (g *Grid) RestoreCursor() Style {
-	c := g.saved.Cursor
+	sc := g.saved[g.screen()]
+	c := sc.Cursor
 	g.cursor = Cursor{X: clamp(c.X, 0, g.cols-1), Y: clamp(c.Y, 0, g.rows-1), Visible: c.Visible, WrapNext: c.WrapNext}
-	g.charset = g.saved.Charset
-	g.modes.Origin = g.saved.Origin
-	return g.saved.Style
+	g.charset = sc.Charset
+	g.modes.Origin = sc.Origin
+	return sc.Style
 }
 
 // Charset returns the G0/G1 designation and the active GL.
@@ -532,16 +746,15 @@ func (g *Grid) Resize(cols, rows int) {
 	if rows < 1 {
 		rows = 1
 	}
-	lines := make([][]Cell, rows)
-	for y := range lines {
-		line := newLine(cols, DefaultStyle())
-		if y < len(g.lines) {
-			copy(line, g.lines[y])
-		}
-		if line[cols-1].Width == WidthWide {
-			line[cols-1] = blankCell(DefaultStyle())
-		}
-		lines[y] = line
+	lines := resizeLines(g.lines, cols, rows)
+	altLines := g.altLines
+	if altLines != nil {
+		altLines = resizeLines(altLines, cols, rows)
+	}
+	wrapped := resizeBools(g.wrapped, rows)
+	altWrapped := g.altWrapped
+	if altWrapped != nil {
+		altWrapped = resizeBools(altWrapped, rows)
 	}
 	tabs := make([]bool, cols)
 	copy(tabs, g.tabs)
@@ -552,7 +765,8 @@ func (g *Grid) Resize(cols, rows int) {
 	}
 
 	g.cols, g.rows = cols, rows
-	g.lines, g.tabs = lines, tabs
+	g.lines, g.altLines, g.tabs = lines, altLines, tabs
+	g.wrapped, g.altWrapped = wrapped, altWrapped
 	g.scroll.Top = clamp(g.scroll.Top, 0, rows-1)
 	g.scroll.Bottom = clamp(g.scroll.Bottom, 0, rows-1)
 	g.scroll.Left = clamp(g.scroll.Left, 0, cols-1)
@@ -560,6 +774,138 @@ func (g *Grid) Resize(cols, rows int) {
 	g.cursor.X = clamp(g.cursor.X, 0, cols-1)
 	g.cursor.Y = clamp(g.cursor.Y, 0, rows-1)
 	g.cursor.WrapNext = false
+}
+
+// resizeLines copies old into a cols by rows grid, blanking what does not fit.
+// A wide cell cut by the new right edge is blanked.
+func resizeLines(old [][]Cell, cols, rows int) [][]Cell {
+	lines := make([][]Cell, rows)
+	for y := range lines {
+		line := newLine(cols, DefaultStyle())
+		if y < len(old) {
+			copy(line, old[y])
+		}
+		if line[cols-1].Width == WidthWide {
+			line[cols-1] = blankCell(DefaultStyle())
+		}
+		lines[y] = line
+	}
+	return lines
+}
+
+// resizeBools copies flags into rows entries, false where there is no old one.
+func resizeBools(old []bool, rows int) []bool {
+	out := make([]bool, rows)
+	copy(out, old)
+	return out
+}
+
+// LineWrapped reports whether row y was reached by autowrap.
+func (g *Grid) LineWrapped(y int) bool {
+	if y < 0 || y >= len(g.wrapped) {
+		return false
+	}
+	return g.wrapped[y]
+}
+
+// SetLineWrapped records that row y was or was not reached by autowrap.
+func (g *Grid) SetLineWrapped(y int, v bool) {
+	if y >= 0 && y < len(g.wrapped) {
+		g.wrapped[y] = v
+	}
+}
+
+// EnterAltScreen switches to the alternate screen. clear wipes it first, which
+// is what DECSET 1049 and 47 do; the cursor stays where it was.
+func (g *Grid) EnterAltScreen(clear bool) {
+	if g.modes.AltScreen {
+		return
+	}
+	if g.altLines == nil {
+		g.altLines = g.blankLines()
+		g.altWrapped = make([]bool, g.rows)
+	}
+	g.lines, g.altLines = g.altLines, g.lines
+	g.wrapped, g.altWrapped = g.altWrapped, g.wrapped
+	if clear {
+		g.lines = g.blankLines()
+		g.wrapped = make([]bool, g.rows)
+	}
+	g.modes.AltScreen = true
+}
+
+// ExitAltScreen switches back to the primary screen. clear wipes the alternate
+// screen, which is what DECRESET 1047 and 1049 do.
+func (g *Grid) ExitAltScreen(clear bool) {
+	if !g.modes.AltScreen {
+		return
+	}
+	g.lines, g.altLines = g.altLines, g.lines
+	g.wrapped, g.altWrapped = g.altWrapped, g.wrapped
+	if clear {
+		g.altLines = g.blankLines()
+		g.altWrapped = make([]bool, g.rows)
+	}
+	g.modes.AltScreen = false
+}
+
+// Fill stores one cluster in every cell, as DECALN does with the letter E. The
+// cursor moves home and the margins return to the whole grid.
+func (g *Grid) Fill(content string) {
+	c := NewCell(content, DefaultStyle())
+	for y := range g.lines {
+		for x := range g.lines[y] {
+			g.lines[y][x] = c
+		}
+	}
+	g.resetScrollRegion()
+	g.cursor = Cursor{Visible: true}
+	g.wrapped = make([]bool, g.rows)
+}
+
+// Reset returns the grid to its power-on state, as RIS does. The screen is
+// blank, the modes are default, the margins are full, the tab stops are the
+// default every eight columns, the charset is ASCII and both screens start
+// blank with the cursor home.
+func (g *Grid) Reset() {
+	if g.modes.ColumnMode && g.cols != 80 {
+		g.Resize(80, g.rows)
+	}
+	g.modes = defaultModes()
+	g.charset = Charset{}
+	g.cursor = Cursor{Visible: true}
+	g.resetScrollRegion()
+	g.tabs = defaultTabs(g.cols)
+	g.lines = g.blankLines()
+	g.wrapped = make([]bool, g.rows)
+	g.altLines = nil
+	g.altWrapped = nil
+	g.saved[0] = homeSavedCursor()
+	g.saved[1] = homeSavedCursor()
+	g.savedModes = nil
+}
+
+// SoftReset resets what DECSTR resets and leaves the screen contents, the
+// cursor position, the alt screen and the tab stops alone. It is the path that
+// stops one test's margins leaking into the next.
+func (g *Grid) SoftReset() {
+	m := g.modes
+	m.Wrap = true
+	m.Origin = false
+	m.Insert = false
+	m.ReverseVideo = false
+	m.ReverseWrap = false
+	m.ReverseWrapExtended = false
+	m.LeftRightMargin = false
+	m.CursorKeysApplication = false
+	g.modes = m
+	g.charset = Charset{}
+	g.cursor.Visible = true
+	g.cursor.WrapNext = false
+	g.resetScrollRegion()
+	g.tabs = defaultTabs(g.cols)
+	g.saved[0] = homeSavedCursor()
+	g.saved[1] = homeSavedCursor()
 }
 
 // clamp folds v into the inclusive range lo to hi.
