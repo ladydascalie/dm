@@ -133,7 +133,9 @@ func TestTabBarActiveItem(t *testing.T) {
 }
 
 // TestDrawTabBarHighlightsActive proves the painter shows every window name and
-// paints the active tab on the focus background.
+// paints the active tab on the focus background. The escapes are the default
+// theme's complete cached escapes, leading ESC included: a fragment would pass
+// on any escape that happens to contain it.
 func TestDrawTabBarHighlightsActive(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two"), ActiveWindow: 1}
 	var buf bytes.Buffer
@@ -142,11 +144,36 @@ func TestDrawTabBarHighlightsActive(t *testing.T) {
 	if !strings.Contains(out, " one ") || !strings.Contains(out, " two ") {
 		t.Fatalf("tab names missing: %q", out)
 	}
-	// The tab is one cached escape, so the ground is a parameter inside it,
-	// not an escape of its own.
-	focusBG := ";" + theme.DefaultTheme().Palette.RailFocusBG.SGR(true)
-	if !strings.Contains(out, focusBG) {
-		t.Fatalf("active tab background missing: %q", out)
+	const (
+		active   = "\x1b[0;38;2;233;234;241;48;2;31;30;39m"
+		inactive = "\x1b[0;38;2;143;147;168;48;2;20;19;26m"
+	)
+	if !strings.Contains(out, active) {
+		t.Fatalf("active tab paint missing %q: %q", active, out)
+	}
+	if !strings.Contains(out, inactive) {
+		t.Fatalf("inactive tab paint missing %q: %q", inactive, out)
+	}
+}
+
+// TestDrawTabBarRowBytes pins one whole tab bar row for the default theme: a
+// single window on a fixed screen. The row is fixed, so the literal is stable;
+// if the paint changes deliberately, this literal is the diff. The escapes are
+// complete, never a fragment.
+func TestDrawTabBarRowBytes(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 40, Rows: 20, Rail: 10, Windows: testWindows("one"), ActiveWindow: 0}
+	var buf bytes.Buffer
+	DrawTabBar(&buf, theme.DefaultTheme(), snap, testTabWidth())
+	want := "\x1b[1;11H" + // the bar's first cell
+		"\x1b[0;39;48;2;20;19;26m" + // reset, default fg, rail ground
+		"                              " + // the bar is 30 cells wide
+		"\x1b[0m" +
+		"\x1b[0;38;2;233;234;241;48;2;31;30;39m" + // the active tab's paint
+		"\x1b[1;11H" +
+		"  one   " + // the label centered in its 8 cells
+		"\x1b[0m"
+	if got := buf.String(); got != want {
+		t.Fatalf("tab bar row:\n got %q\nwant %q", got, want)
 	}
 }
 
