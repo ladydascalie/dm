@@ -33,6 +33,13 @@ const (
 	// waits for the rest of its bytes.
 	escTimeout = 40 * time.Millisecond
 
+	// pasteTimeout bounds how long a paste start marker that is already more
+	// than its escape byte waits for the rest. A paste is written by a program,
+	// not typed, and it can arrive in pieces with a long gap on a slow link, so
+	// the window is the escape-time a conventional multiplexer allows. A lone
+	// escape keeps escTimeout, because that is the dismiss key.
+	pasteTimeout = 500 * time.Millisecond
+
 	// termGrace is how long the client waits for the second colour reply
 	// before sending the one it has, so the two coalesce into one request.
 	termGrace = 300 * time.Millisecond
@@ -125,6 +132,7 @@ type tui struct {
 	pending bool
 
 	pasteDeadline time.Time // set while a paste start marker is still arriving
+	pasteHeld     int       // buffer length when pasteDeadline was last extended
 	pasteOff      bool      // one pass with paste detection off
 
 	// termFG and termBG are the colours the outer terminal answered OSC 10

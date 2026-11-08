@@ -55,10 +55,30 @@ func (t *tui) takePaste() (seq []byte, n int, started bool) {
 	return takePaste(t.inbuf)
 }
 
+// holdPaste arms the paste deadline for a start marker that is still arriving,
+// and slides it forward on every read that grows the held prefix.
+// pasteDeadline is the expiry instant, not the arming instant. A lone escape
+// waits escTimeout, because that is the dismiss key. A longer prefix already
+// proves a marker is being assembled, so it waits pasteTimeout: a paste arrives
+// in pieces on a slow link, and flushing between two pieces tore the block
+// apart and lost the bracketed-paste framing. A buffer that stops growing still
+// expires, which is how a real lone escape reaches the pane.
+func (t *tui) holdPaste(now time.Time) {
+	if len(t.inbuf) == t.pasteHeld && !t.pasteDeadline.IsZero() {
+		return
+	}
+	t.pasteHeld = len(t.inbuf)
+	wait := pasteTimeout
+	if len(t.inbuf) <= 1 {
+		wait = escTimeout
+	}
+	t.pasteDeadline = now.Add(wait)
+}
+
 // expirePaste flushes a start marker that never completed once its deadline
 // passes. A real lone escape reaches the pane this way.
 func (t *tui) expirePaste(now time.Time) bool {
-	if t.pasteDeadline.IsZero() || now.Sub(t.pasteDeadline) <= escTimeout {
+	if t.pasteDeadline.IsZero() || now.Before(t.pasteDeadline) {
 		return false
 	}
 	t.staleInput()
@@ -69,6 +89,7 @@ func (t *tui) expirePaste(now time.Time) bool {
 // stalled. They take the normal input path once.
 func (t *tui) staleInput() {
 	t.pasteDeadline = time.Time{}
+	t.pasteHeld = 0
 	t.pasteOff = true
 	t.processInput()
 	t.pasteOff = false
@@ -193,6 +214,7 @@ func (t *tui) expireTermColour(now time.Time) bool {
 // typed, not dropped in.
 func (t *tui) forwardPaste(seq []byte) {
 	t.pasteDeadline = time.Time{}
+	t.pasteHeld = 0
 	t.pending = false
 	t.disarm()
 	switch t.mode {
@@ -251,9 +273,7 @@ func (t *tui) processInput() {
 			}
 			if seq, n, started := t.takePaste(); started {
 				if n == 0 {
-					if t.pasteDeadline.IsZero() {
-						t.pasteDeadline = time.Now()
-					}
+					t.holdPaste(time.Now())
 					return
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
@@ -285,9 +305,7 @@ func (t *tui) processInput() {
 			}
 			if seq, n, started := t.takePaste(); started {
 				if n == 0 {
-					if t.pasteDeadline.IsZero() {
-						t.pasteDeadline = time.Now()
-					}
+					t.holdPaste(time.Now())
 					return
 				}
 				// A pasted block is text for nobody: the view is read-only.
@@ -320,9 +338,7 @@ func (t *tui) processInput() {
 			}
 			if seq, n, started := t.takePaste(); started {
 				if n == 0 {
-					if t.pasteDeadline.IsZero() {
-						t.pasteDeadline = time.Now()
-					}
+					t.holdPaste(time.Now())
 					return
 				}
 				// A pasted block is text for nobody: the view is read-only.
@@ -339,9 +355,7 @@ func (t *tui) processInput() {
 			if n == 0 {
 				// The marker is still arriving. Keep buffering; the ticker
 				// sends these bytes down the normal path if they stall.
-				if t.pasteDeadline.IsZero() {
-					t.pasteDeadline = time.Now()
-				}
+				t.holdPaste(time.Now())
 				return
 			}
 			rest := append([]byte(nil), t.inbuf[n:]...)
@@ -352,6 +366,7 @@ func (t *tui) processInput() {
 		// These bytes cannot start a paste, so any earlier partial marker is
 		// disproved and must not be flushed early.
 		t.pasteDeadline = time.Time{}
+		t.pasteHeld = 0
 		if ev, n, ok := parseMouse(t.inbuf); ok {
 			t.inbuf = t.inbuf[n:]
 			// The rename prompt owns the keyboard, not the pointer: a stray

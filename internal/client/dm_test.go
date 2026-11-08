@@ -1900,6 +1900,89 @@ func TestPasteStallFallsBack(t *testing.T) {
 	}
 }
 
+// A paste start marker that arrives in two pieces with a gap longer than the
+// escape timeout stays a paste. Before pasteTimeout, the ticker flushed the
+// first piece to the pane, and the rest of the marker then arrived as literal
+// text: the block was torn and its newlines executed.
+func TestPasteMarkerSurvivesAGap(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, []byte("\x1b[2")...)
+	tui.processInput()
+	testutil.NoMsg(t, got)
+	if tui.pasteDeadline.IsZero() {
+		t.Fatal("a longer partial marker was not held")
+	}
+	// A tick inside the old escape window no longer flushes it: a marker that
+	// is already more than its escape byte waits pasteTimeout.
+	if tui.expirePaste(time.Now().Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the marker expired inside the paste window")
+	}
+	testutil.NoMsg(t, got)
+	tui.inbuf = append(tui.inbuf, []byte("00~a\nb\x1b[201~")...)
+	tui.processInput()
+	m := testutil.NextMsg(t, got)
+	want := "\x1b[200~a\nb\x1b[201~"
+	if m.Type != "keys" || string(m.Keys) != want {
+		t.Fatalf("late paste came through as %+v (%q)", m, m.Keys)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// A lone escape keeps the short window: it is the dismiss key, not a paste.
+func TestPasteLoneEscapeKeepsTheShortWindow(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, 0x1b)
+	tui.processInput()
+	testutil.NoMsg(t, got)
+	if !tui.expirePaste(time.Now().Add(escTimeout + time.Millisecond)) {
+		t.Fatal("a lone escape waited longer than the escape window")
+	}
+	m := testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b" {
+		t.Fatalf("lone escape came through as %+v (%q)", m, m.Keys)
+	}
+}
+
+// Each piece of a split marker slides the deadline, so a paste that keeps
+// arriving is never flushed between two reads.
+func TestPasteMarkerDeadlineSlidesPerRead(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, []byte("\x1b[")...)
+	tui.processInput()
+	first := tui.pasteDeadline
+	time.Sleep(2 * time.Millisecond)
+	tui.inbuf = append(tui.inbuf, '2')
+	tui.processInput()
+	if !tui.pasteDeadline.After(first) {
+		t.Fatalf("deadline did not slide: %v then %v", first, tui.pasteDeadline)
+	}
+	if tui.expirePaste(first) {
+		t.Fatal("the extended marker expired on the old deadline")
+	}
+	testutil.NoMsg(t, got)
+}
+
+// A completed paste clears the held-prefix bookkeeping, so the next lone
+// escape gets the short window again.
+func TestPasteCompletionResetsTheHold(t *testing.T) {
+	tui, got := pasteTUI(t)
+	tui.inbuf = append(tui.inbuf, []byte("\x1b[2")...)
+	tui.processInput()
+	tui.inbuf = append(tui.inbuf, []byte("00~hi\x1b[201~")...)
+	tui.processInput()
+	if m := testutil.NextMsg(t, got); m.Type != "keys" {
+		t.Fatalf("paste came through as %+v", m)
+	}
+	if !tui.pasteDeadline.IsZero() || tui.pasteHeld != 0 {
+		t.Fatalf("a completed paste left hold state: deadline %v held %d", tui.pasteDeadline, tui.pasteHeld)
+	}
+	tui.inbuf = append(tui.inbuf, 0x1b)
+	tui.processInput()
+	if !tui.expirePaste(time.Now().Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the escape after a paste did not get the short window")
+	}
+}
+
 // A backwards drag covers the same row-major range as the forward one.
 func TestSelectionRangeNormalizes(t *testing.T) {
 	s := &selection{pane: "a", anchor: cell{4, 2}, focus: cell{1, 0}}
