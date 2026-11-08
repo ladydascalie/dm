@@ -79,7 +79,7 @@ func TestPartialEscapeSurvivesChunk(t *testing.T) {
 		t.Fatalf("after a partial CSI, Text(0) = %q, want %q", got, "a")
 	}
 
-	term.Write([]byte("2Jb"))
+	term.Write([]byte("?25lb"))
 	term.Flush()
 	if got := term.grid.Text(0); got != "ab" {
 		t.Fatalf("after completing the CSI, Text(0) = %q, want %q", got, "ab")

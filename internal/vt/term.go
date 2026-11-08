@@ -129,15 +129,21 @@ func (t *Term) shiftCharset(gl int) {
 	t.grid.SetCharset(cs)
 }
 
-// escape handles a non-CSI escape sequence. The ESC control family lands here
-// with the dispatch table; until then a parsed sequence is ignored, as a
-// terminal ignores one it does not know.
+// escape dispatches a non-CSI escape sequence. An unregistered sequence is
+// ignored, as a terminal ignores one it does not know.
 func (t *Term) escape(inter string, final byte) {
+	if h, ok := escTable[escKey{Inter: inter, Final: final}]; ok {
+		h(t)
+	}
 }
 
-// csi handles one parsed control sequence. The CSI families land here with the
-// dispatch table; until then a parsed sequence is ignored.
+// csi dispatches one parsed control sequence. An unregistered sequence is
+// ignored.
 func (t *Term) csi(seq CSI) {
+	key := csiKey{Priv: seq.Private, Inter: string(seq.Inter), Final: seq.Final}
+	if h, ok := csiTable[key]; ok {
+		h(t, seq)
+	}
 }
 
 // osc handles one OSC body. The OSC families land here with the dispatch table;

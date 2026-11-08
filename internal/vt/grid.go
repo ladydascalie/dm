@@ -254,6 +254,97 @@ func (g *Grid) Erase(x, y int) {
 	g.Write(x, y, blankCell(DefaultStyle()))
 }
 
+// InsertCells shifts row y right from column x by n and blanks the n slots that
+// open. Cells pushed past the right edge are dropped, and a wide cell split by
+// the shift is blanked.
+func (g *Grid) InsertCells(x, y, n int) {
+	if x < 0 || x >= g.cols || y < 0 || y >= g.rows || n <= 0 {
+		return
+	}
+	if n > g.cols-x {
+		n = g.cols - x
+	}
+	line := g.lines[y]
+	copy(line[x+n:], line[x:])
+	blank := blankCell(DefaultStyle())
+	for i := x; i < x+n; i++ {
+		line[i] = blank
+	}
+	g.repairLine(y)
+}
+
+// DeleteCells shifts row y left from column x, dropping n cells, and blanks the
+// n slots that open at the right edge. A wide cell split by the shift is
+// blanked.
+func (g *Grid) DeleteCells(x, y, n int) {
+	if x < 0 || x >= g.cols || y < 0 || y >= g.rows || n <= 0 {
+		return
+	}
+	if n > g.cols-x {
+		n = g.cols - x
+	}
+	line := g.lines[y]
+	copy(line[x:], line[x+n:])
+	blank := blankCell(DefaultStyle())
+	for i := g.cols - n; i < g.cols; i++ {
+		line[i] = blank
+	}
+	g.repairLine(y)
+}
+
+// InsertLines opens n blank rows at row y inside the scroll region, pushing the
+// rows below down and dropping the ones that leave the bottom. A row outside
+// the region does nothing.
+func (g *Grid) InsertLines(y, n int) {
+	r := g.scroll
+	if y < r.Top || y > r.Bottom || n <= 0 {
+		return
+	}
+	if n > r.Bottom-y+1 {
+		n = r.Bottom - y + 1
+	}
+	copy(g.lines[y+n:r.Bottom+1], g.lines[y:r.Bottom-n+1])
+	for i := y; i < y+n; i++ {
+		g.lines[i] = newLine(g.cols, DefaultStyle())
+	}
+}
+
+// DeleteLines removes n rows at row y inside the scroll region, pulling the
+// rows below up and blanking the ones that enter at the bottom. A row outside
+// the region does nothing.
+func (g *Grid) DeleteLines(y, n int) {
+	r := g.scroll
+	if y < r.Top || y > r.Bottom || n <= 0 {
+		return
+	}
+	if n > r.Bottom-y+1 {
+		n = r.Bottom - y + 1
+	}
+	copy(g.lines[y:r.Bottom-n+1], g.lines[y+n:r.Bottom+1])
+	for i := r.Bottom - n + 1; i <= r.Bottom; i++ {
+		g.lines[i] = newLine(g.cols, DefaultStyle())
+	}
+}
+
+// repairLine blanks every half cluster in row y: a continuation with no wide
+// cell to its left and a wide cell with no continuation to its right.
+func (g *Grid) repairLine(y int) {
+	line := g.lines[y]
+	blank := blankCell(DefaultStyle())
+	for x := 0; x < g.cols; x++ {
+		switch line[x].Width {
+		case WidthContinuation:
+			if x == 0 || line[x-1].Width != WidthWide {
+				line[x] = blank
+			}
+		case WidthWide:
+			if x+1 >= g.cols || line[x+1].Width != WidthContinuation {
+				line[x] = blank
+			}
+		}
+	}
+}
+
 // Clear blanks every cell. Cursor, modes and tab stops are untouched.
 func (g *Grid) Clear() {
 	for y := range g.lines {
@@ -275,6 +366,23 @@ func (g *Grid) ScrollUp(n int) {
 	}
 	copy(g.lines[r.Top:r.Bottom-n+1], g.lines[r.Top+n:r.Bottom+1])
 	for y := r.Bottom - n + 1; y <= r.Bottom; y++ {
+		g.lines[y] = newLine(g.cols, DefaultStyle())
+	}
+}
+
+// ScrollDown moves the scroll region's rows down by n and fills the rows that
+// enter at the top with blanks. Rows outside the region do not move.
+func (g *Grid) ScrollDown(n int) {
+	r := g.scroll
+	height := r.Bottom - r.Top + 1
+	if n <= 0 || height <= 0 {
+		return
+	}
+	if n > height {
+		n = height
+	}
+	copy(g.lines[r.Top+n:r.Bottom+1], g.lines[r.Top:r.Bottom-n+1])
+	for y := r.Top; y < r.Top+n; y++ {
 		g.lines[y] = newLine(g.cols, DefaultStyle())
 	}
 }
@@ -338,6 +446,13 @@ func (g *Grid) TabStops() []bool {
 func (g *Grid) SetTabStop(x int) {
 	if x >= 0 && x < len(g.tabs) {
 		g.tabs[x] = true
+	}
+}
+
+// ClearTabStop removes the tab stop at column x.
+func (g *Grid) ClearTabStop(x int) {
+	if x >= 0 && x < len(g.tabs) {
+		g.tabs[x] = false
 	}
 }
 
