@@ -12,6 +12,15 @@ type Term struct {
 	// level is the DECSCL conformance level. Level 4 and above support
 	// DECSLRM; DECNCSM is a level 5 feature. The default is 5, as xterm's is.
 	level int
+
+	// OSC state. The title, the palette overrides, the hyperlink the next
+	// cells carry, the clipboard and the 7501 status.
+	iconTitle   string
+	windowTitle string
+	link        string
+	clipboard   string
+	status      string
+	colors      map[int]Color
 }
 
 // NewTerm returns a terminal with a blank grid of cols by rows and the default
@@ -43,6 +52,7 @@ func (t *Term) place(content string) {
 	g := t.grid
 	c := NewCell(content, t.style)
 	c.Protected = t.protected
+	c.Link = t.link
 
 	cur := g.Cursor()
 	left, right := t.wrapBounds(cur.X)
@@ -205,7 +215,8 @@ func (t *Term) csi(seq CSI) {
 	}
 }
 
-// osc handles one OSC body. The OSC families land here with the dispatch table;
-// until then a parsed string is ignored.
+// osc handles one OSC body. The OSC family lives in osc.go and dispatches on
+// the command number.
 func (t *Term) osc(body string) {
+	t.oscCommand(body)
 }
