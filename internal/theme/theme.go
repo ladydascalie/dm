@@ -20,11 +20,11 @@ const accentSlots = 6
 // rail must pass WCAG AA on every theme.
 type RGB struct{ R, G, B int }
 
-// FG is the 24-bit foreground escape for the colour.
-func (c RGB) FG() string { return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", c.R, c.G, c.B) }
+// FG is the foreground escape for the colour at the current depth.
+func (c RGB) FG() string { return "\x1b[" + c.SGR(false) + "m" }
 
-// BG is the 24-bit background escape for the colour.
-func (c RGB) BG() string { return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.R, c.G, c.B) }
+// BG is the background escape for the colour at the current depth.
+func (c RGB) BG() string { return "\x1b[" + c.SGR(true) + "m" }
 
 // Lum is the WCAG relative luminance.
 func (c RGB) Lum() float64 {

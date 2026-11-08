@@ -132,31 +132,15 @@ func cellSGR(st vt.Style, cur *vt.Style) string {
 	return "\x1b[" + strings.Join(p, ";") + "m"
 }
 
-// cellColorSGR maps a cell colour to an SGR parameter.
+// cellColorSGR maps a cell colour to an SGR parameter at the terminal's colour
+// depth. A 24-bit cell steps down to the nearest palette entry, and a palette
+// entry above 15 steps down to the nearest ANSI colour.
 func cellColorSGR(c vt.Color, bg bool) string {
-	base := 30
-	if bg {
-		base = 40
-	}
 	switch c.Kind {
 	case vt.ColorPalette:
-		n := int(c.Index)
-		switch {
-		case n < 8:
-			return fmt.Sprint(base + n)
-		case n < 16:
-			return fmt.Sprint(base + 60 + n - 8)
-		default:
-			if bg {
-				return "48;5;" + fmt.Sprint(n)
-			}
-			return "38;5;" + fmt.Sprint(n)
-		}
+		return theme.PaletteSGR(int(c.Index), bg)
 	case vt.ColorRGB:
-		if bg {
-			return fmt.Sprintf("48;2;%d;%d;%d", c.R, c.G, c.B)
-		}
-		return fmt.Sprintf("38;2;%d;%d;%d", c.R, c.G, c.B)
+		return theme.RGB{R: int(c.R), G: int(c.G), B: int(c.B)}.SGR(bg)
 	default:
 		if bg {
 			return "49"
@@ -165,12 +149,20 @@ func cellColorSGR(c vt.Color, bg bool) string {
 	}
 }
 
-// underlineColorSGR maps an underline colour to an SGR parameter.
+// underlineColorSGR maps an underline colour to an SGR parameter. SGR 58 has no
+// 16-colour form, so a stepped-down colour keeps the 256-colour form.
 func underlineColorSGR(c vt.Color) string {
 	switch c.Kind {
 	case vt.ColorPalette:
 		return "58;5;" + fmt.Sprint(int(c.Index))
 	case vt.ColorRGB:
+		rgb := theme.RGB{R: int(c.R), G: int(c.G), B: int(c.B)}
+		switch theme.CurrentDepth() {
+		case theme.Color16:
+			return "58;5;" + fmt.Sprint(theme.Nearest16(rgb))
+		case theme.Color256:
+			return "58;5;" + fmt.Sprint(theme.Nearest256(rgb))
+		}
 		return fmt.Sprintf("58;2;%d;%d;%d", c.R, c.G, c.B)
 	default:
 		return "59"

@@ -339,6 +339,9 @@ func Run(name string) error {
 	if !term.IsTerminal(fd) {
 		return fmt.Errorf("dm needs a terminal; use dm exec or dm read otherwise")
 	}
+	// The chrome and the pane content both step down to what the outer
+	// terminal can show. Set once, before the first frame.
+	theme.SetDepth(theme.DetectDepth(os.Getenv))
 	old, err := term.MakeRaw(fd)
 	if err != nil {
 		return err
