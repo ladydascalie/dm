@@ -319,12 +319,23 @@ func InsetBox(b Rect, pad int) Rect {
 	return Rect{X: b.X + inset, Y: b.Y + inset, W: b.W - 2*inset, H: b.H - 2*inset}
 }
 
-// SplitSizes turns the node's weights into integer cell counts that sum to
-// space. A split without weights divides equally.
+// SplitSizes turns the node's weights into integer cell counts. When space
+// holds at least one cell per child, every count is at least 1 and the counts
+// sum to exactly space. A split without weights divides equally. Each child
+// takes the floor of its proportional share, the largest remainders take the
+// spare cells, and any overshoot left by the floor of 1 is reclaimed from the
+// largest counts, lowest index first on a tie. A space too small for one cell
+// per child returns 1 for each child.
 func SplitSizes(n *Node, space int) []int {
 	k := len(n.Kids)
 	out := make([]int, k)
 	if k == 0 {
+		return out
+	}
+	if space < k {
+		for i := range out {
+			out[i] = 1
+		}
 		return out
 	}
 	weights := make([]float64, k)
@@ -337,18 +348,65 @@ func SplitSizes(n *Node, space int) []int {
 		weights[i] = w
 		total += w
 	}
+	// rem holds each child's fractional share, so the spare cells go to the
+	// children that lost the most to rounding. A child floored up to 1 has no
+	// remainder to claim: it already sits above its share.
+	rem := make([]float64, k)
 	used := 0
-	for i := 0; i < k-1; i++ {
-		s := int(weights[i] / total * float64(space))
+	for i := 0; i < k; i++ {
+		exact := weights[i] / total * float64(space)
+		s := int(exact)
 		if s < 1 {
 			s = 1
+			rem[i] = 0
+		} else {
+			rem[i] = exact - float64(s)
 		}
 		out[i] = s
 		used += s
 	}
-	out[k-1] = space - used
-	if out[k-1] < 1 {
-		out[k-1] = 1
+	for used < space {
+		best := -1
+		for i := range out {
+			if rem[i] <= 0 {
+				continue
+			}
+			if best < 0 || rem[i] > rem[best] {
+				best = i
+			}
+		}
+		if best < 0 {
+			// Float drift only: give the cell to the largest count.
+			for i := range out {
+				if best < 0 || out[i] > out[best] {
+					best = i
+				}
+			}
+			out[best]++
+			used++
+			continue
+		}
+		out[best]++
+		rem[best] = 0
+		used++
+	}
+	// Reclaim the overshoot from the largest counts, so a small child keeps
+	// its floor and no child grows past its share to cover the rounding.
+	for used > space {
+		best := -1
+		for i := range out {
+			if out[i] <= 1 {
+				continue
+			}
+			if best < 0 || out[i] > out[best] {
+				best = i
+			}
+		}
+		if best < 0 {
+			break
+		}
+		out[best]--
+		used--
 	}
 	return out
 }
