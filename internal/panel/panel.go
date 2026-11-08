@@ -232,27 +232,45 @@ func DrawPaneBox(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active 
 	DrawPaneBoxRows(buf, th, content, active, false)
 }
 
+// DrawPaneBoxOnGrid draws the border of one pane and keeps only the cells that
+// land inside a cols x rows grid. A pane that overlaps the grid paints its
+// on-screen border cells and nothing past the edge.
+func DrawPaneBoxOnGrid(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool, cols, rows int) {
+	drawPaneBoxRows(buf, th, content, active, false, gridPut(buf, cols, rows))
+}
+
 // DrawPanePadding blanks the ring between a pane's border and its content. The
 // border band owns the ring, so a cell the content does not own never keeps an
 // older frame's glyph. box is the box interior and content the content rect.
 func DrawPanePadding(buf *bytes.Buffer, box, content layout.Rect) {
+	drawPanePadding(buf, box, content, gridPut(buf, 0, 0))
+}
+
+// DrawPanePaddingOnGrid is DrawPanePadding clipped to a cols x rows grid: the
+// ring of a pane that overlaps the edge keeps its on-screen cells only.
+func DrawPanePaddingOnGrid(buf *bytes.Buffer, box, content layout.Rect, cols, rows int) {
+	drawPanePadding(buf, box, content, gridPut(buf, cols, rows))
+}
+
+// drawPanePadding writes the ring through put. See DrawPanePadding.
+func drawPanePadding(buf *bytes.Buffer, box, content layout.Rect, put func(x, y int, s string)) {
 	if box.W <= 0 || box.H <= 0 {
 		return
 	}
 	buf.WriteString("\x1b[0m")
-	put := func(x, y, n int) {
+	spaces := func(n int) string {
 		if n <= 0 {
-			return
+			return ""
 		}
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, strings.Repeat(" ", n))
+		return strings.Repeat(" ", n)
 	}
 	for y := box.Y; y < box.Y+box.H; y++ {
 		if y < content.Y || y >= content.Y+content.H {
-			put(box.X, y, box.W)
+			put(box.X, y, spaces(box.W))
 			continue
 		}
-		put(box.X, y, content.X-box.X)
-		put(content.X+content.W, y, box.X+box.W-(content.X+content.W))
+		put(box.X, y, spaces(content.X-box.X))
+		put(content.X+content.W, y, spaces(box.X+box.W-(content.X+content.W)))
 	}
 }
 
@@ -260,6 +278,11 @@ func DrawPanePadding(buf *bytes.Buffer, box, content layout.Rect) {
 // alone, for a caller that writes it itself as one row, so no cell of it lands
 // twice.
 func DrawPaneBoxRows(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool, skipTop bool) {
+	drawPaneBoxRows(buf, th, content, active, skipTop, gridPut(buf, 0, 0))
+}
+
+// drawPaneBoxRows writes the border through put. See DrawPaneBoxRows.
+func drawPaneBoxRows(buf *bytes.Buffer, th theme.Theme, content layout.Rect, active bool, skipTop bool, put func(x, y int, s string)) {
 	g := th.Glyphs
 	x0, y0 := content.X-1, content.Y-1
 	x1, y1 := content.X+content.W, content.Y+content.H
@@ -270,9 +293,6 @@ func DrawPaneBoxRows(buf *bytes.Buffer, th theme.Theme, content layout.Rect, act
 		buf.WriteString("\x1b[0m\x1b[1;96m")
 	} else {
 		buf.WriteString("\x1b[0m\x1b[90m")
-	}
-	put := func(x, y int, s string) {
-		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
 	}
 	if !skipTop {
 		put(x0, y0, g.BorderTopLeft)
@@ -290,4 +310,47 @@ func DrawPaneBoxRows(buf *bytes.Buffer, th theme.Theme, content layout.Rect, act
 		put(x0, y, g.BorderVertical)
 		put(x1, y, g.BorderVertical)
 	}
+}
+
+// gridPut returns the writer a band places its cells through. cols or rows
+// below 1 means no clip.
+func gridPut(buf *bytes.Buffer, cols, rows int) func(x, y int, s string) {
+	if cols < 1 || rows < 1 {
+		return func(x, y int, s string) {
+			fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, s)
+		}
+	}
+	return func(x, y int, s string) {
+		putClipped(buf, x, y, cols, rows, s)
+	}
+}
+
+// putClipped places a run of cells at x, y and keeps only the part inside a
+// cols x rows grid. The runs here are single-cell glyphs or spaces, so the head
+// and tail are cut by cell count. A run wholly outside the grid writes nothing.
+func putClipped(buf *bytes.Buffer, x, y, cols, rows int, s string) {
+	if s == "" || y < 0 || y >= rows {
+		return
+	}
+	n := cells.Cells(s)
+	lo, hi := x, x+n
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > cols {
+		hi = cols
+	}
+	if lo >= hi {
+		return
+	}
+	if lo > x {
+		s = cells.ClipTail(s, n-(lo-x))
+	}
+	if hi < x+n {
+		s = cells.Clip(s, hi-lo)
+	}
+	if s == "" {
+		return
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, lo+1, s)
 }

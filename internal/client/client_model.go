@@ -79,7 +79,8 @@ type tui struct {
 	keys  *keymapview.KeymapView
 	dirty bool
 
-	// out is the frame sink: os.Stdout in a session, a buffer in a test.
+	// out is the frame sink: a counting wrapper over os.Stdout in a session,
+	// a buffer in a test.
 	out io.Writer
 
 	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help"
@@ -334,11 +335,16 @@ func (t *tui) expireToasts(now time.Time) {
 // Run owns the terminal. A session switch returns to this loop with a new
 // name, so raw mode and the stdin reader survive it.
 func Run(name string) error {
-	// DM_STATS asks for the render's cache tallies when the client exits.
-	// It is a diagnostic, off by default, and it writes to stderr so it
-	// never lands inside a frame.
+	// The pacer spans session switches so the stats describe the process.
+	var pace pacer
+	// DM_STATS asks for the render's cache and pacing tallies when the
+	// client exits. It is a diagnostic, off by default, and it writes to
+	// stderr so it never lands inside a frame.
 	if os.Getenv("DM_STATS") != "" {
-		defer func() { fmt.Fprintf(os.Stderr, "dm: style cache: %s\n", theme.SGRCache()) }()
+		defer func() {
+			fmt.Fprintf(os.Stderr, "dm: style cache: %s\n", theme.SGRCache())
+			fmt.Fprintf(os.Stderr, "dm: pacing: %s\n", pace.stats())
+		}()
 	}
 	// A pane exports its own session name. Attaching that same session from a
 	// pane makes a mirror that can also fight over the shared screen size.
@@ -370,7 +376,7 @@ func Run(name string) error {
 	defer os.Stdout.WriteString("\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
 
 	for {
-		next, err := runSession(fd, name, keys, winch)
+		next, err := runSession(fd, name, keys, winch, &pace)
 		if err != nil {
 			return err
 		}
@@ -395,7 +401,63 @@ func stdinReader(keys chan<- []byte) {
 	}
 }
 
-func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal) (string, error) {
+// frameSink counts the bytes of the frames written through it, so the pacer
+// can tell a frame that said something from one that said nothing.
+type frameSink struct {
+	w io.Writer
+	n int
+}
+
+// Write passes the frame through and counts what it wrote.
+func (s *frameSink) Write(b []byte) (int, error) {
+	n, err := s.w.Write(b)
+	s.n += n
+	return n, err
+}
+
+// reset forgets the bytes of the previous frame.
+func (s *frameSink) reset() { s.n = 0 }
+
+// wrote reports whether the last frame wrote any bytes.
+func (s *frameSink) wrote() bool { return s.n > 0 }
+
+// tick runs the per-tick work: the expiry timers, then at most one frame. It
+// tells the pacer which happened, and returns the interval the loop should arm
+// next. A stale tick, one buffered across a Ticker.Reset, runs the timers but
+// draws nothing: it carries no new time, so it must not advance the decay.
+func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) time.Duration {
+	t.expireToasts(now)
+	t.expirePaste(now)
+	t.expireSwitcher(now)
+	t.flushBoxWatchers(now)
+	t.expireArmed(now)
+	t.expirePrefix(now)
+	t.expireMode(now)
+	if t.flushIdle(now) {
+		t.dirty = true
+		pace.reset()
+	}
+	if pace.stale(now) {
+		return pace.interval()
+	}
+	if !pace.shouldDraw(now, t.dirty) {
+		// Nothing to draw is an empty frame: it decays the interval but is
+		// not a frame the client drew.
+		pace.decay(now)
+		return pace.interval()
+	}
+	sink.reset()
+	t.draw()
+	t.dirty = false
+	if sink.wrote() {
+		pace.drew(now)
+	} else {
+		pace.decay(now)
+	}
+	return pace.interval()
+}
+
+func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal, pace *pacer) (string, error) {
 	c, err := transport.Dial(name)
 	if err != nil {
 		return "", err
@@ -406,6 +468,10 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		session: name, conn: c, vts: map[string]*vt.Term{},
 		hist: map[string][]byte{},
 	}
+	// The sink counts a frame's bytes so the pacer can tell whether the
+	// frame said anything.
+	sink := &frameSink{w: os.Stdout}
+	t.out = sink
 	// The keymap is loaded once for the whole session. A missing file is
 	// written with the defaults first; a load error is toasted and the
 	// built-in defaults carry the session.
@@ -442,9 +508,10 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 		return "", err
 	}
 
-	ticker := time.NewTicker(16 * time.Millisecond)
+	ticker := time.NewTicker(pace.interval())
+	pace.arm(time.Now())
 	defer ticker.Stop()
-	lastDraw := time.Time{}
+	tickEvery := pace.interval()
 
 	for {
 		select {
@@ -454,34 +521,31 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 			}
 			t.inbuf = append(t.inbuf, b...)
 			t.processInput()
+			pace.reset()
 		case m, ok := <-msgs:
 			if !ok {
 				return "", nil
 			}
 			t.apply(m)
+			pace.reset()
 		case <-winch:
 			cols, rows, err := term.GetSize(fd)
 			if err == nil && (cols != t.cols || rows != t.rows) {
 				t.cols, t.rows = cols, rows
 				_ = t.conn.Send(wire.Msg{Type: "resize", Cols: cols, Rows: rows})
 				t.dirty = true
+				pace.reset()
 			}
 		case <-ticker.C:
-			now := time.Now()
-			t.expireToasts(now)
-			t.expirePaste(now)
-			t.expireSwitcher(now)
-			t.flushBoxWatchers(now)
-			t.expireArmed(now)
-			t.expirePrefix(now)
-			t.expireMode(now)
-			if t.flushIdle(now) {
-				t.dirty = true
-			}
-			if t.dirty && now.Sub(lastDraw) > 15*time.Millisecond {
-				t.draw()
-				lastDraw = now
-				t.dirty = false
+			// The tick body reports the interval to arm next. A wake or an
+			// empty frame may have moved it. Resetting the ticker reschedules
+			// the next tick from now; the ticker itself is reused. The pacer
+			// records the arm time, so a tick Go left buffered across the
+			// reset is told apart from a real one.
+			if every := t.tick(time.Now(), pace, sink); every != tickEvery {
+				ticker.Reset(every)
+				pace.arm(time.Now())
+				tickEvery = every
 			}
 		}
 		if t.quit {

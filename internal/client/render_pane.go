@@ -199,6 +199,14 @@ func drawGrips(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 		return
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
+	// A grip is one cell and comes from a pad rect, so clip the move itself: a
+	// pad that only overlaps the edge still keeps the glyph that is on screen.
+	put := func(x, y int) {
+		if x < 0 || x >= snap.Cols || y < 0 || y >= snap.Rows {
+			return
+		}
+		fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, x+1, th.Glyphs.Grip)
+	}
 	var walk func(n *layout.Node, a layout.Rect)
 	walk = func(n *layout.Node, a layout.Rect) {
 		if n == nil || n.Pane != "" {
@@ -209,15 +217,15 @@ func drawGrips(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 			p := layout.PadRect(n, boxes, i)
 			if n.Dir == "row" {
 				y := p.Y + p.H/2
-				fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+1, th.Glyphs.Grip)
+				put(p.X, y)
 				if p.W > 1 {
-					fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, p.X+2, th.Glyphs.Grip)
+					put(p.X+1, y)
 				}
 			} else {
 				x := p.X + p.W/2
-				fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+1, x+1, th.Glyphs.Grip)
+				put(x, p.Y)
 				if p.H > 1 {
-					fmt.Fprintf(buf, "\x1b[%d;%dH%s", p.Y+2, x+1, th.Glyphs.Grip)
+					put(x, p.Y+1)
 				}
 			}
 		}

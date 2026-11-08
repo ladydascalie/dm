@@ -12,7 +12,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-06"
+const manDate = "2026-11-08"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -73,7 +73,7 @@ var manEnvs = []manEnv{
 	{"DM_PANE", "the pane id a pane's shell runs in"},
 	{"DM_NERD", "1 forces Nerd font glyphs, 0 forces the Unicode fallback"},
 	{"DM_NOTIFY", "0 turns desktop notifications off"},
-	{"DM_STATS", "non-empty prints the style cache hit rate when the client exits"},
+	{"DM_STATS", "non-empty prints two stderr lines when the client exits: \"dm: style cache: <hits> hits, <misses> misses, <rate>% hit rate\" and \"dm: pacing: <frames> frames written, <wakes> wakes, <ms>ms interval\""},
 	{"COLUMNS", "terminal width when the client cannot ask the terminal"},
 	{"SHELL", "the shell a new pane runs"},
 	{"TMUX", "set inside tmux; dm uses it to pick its terminal behaviour"},

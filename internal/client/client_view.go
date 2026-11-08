@@ -37,11 +37,12 @@ func (t *tui) draw() {
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
 	th := t.theme()
+	panes := onScreenPanes(win)
 	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
-	for _, p := range visiblePanes(win) {
+	for _, p := range panes {
 		boxRect := layout.BoxRect(p.Rect, t.keymap.Padding())
-		panel.DrawPaneBox(&box, th, boxRect, p.ID == win.Focus)
-		panel.DrawPanePadding(&box, boxRect, p.Rect)
+		panel.DrawPaneBoxOnGrid(&box, th, boxRect, p.ID == win.Focus, win.Cols, win.Rows)
+		panel.DrawPanePaddingOnGrid(&box, boxRect, p.Rect, win.Cols, win.Rows)
 	}
 	drawGrips(&grip, th, win)
 	// The rail grip paints the same heavy line as a split divider, over the
@@ -168,7 +169,7 @@ func (t *tui) draw() {
 	// Pane rows: fingerprint each content row and repaint only the rows that
 	// moved. The fingerprint covers the cells, the selection on them and the
 	// scrollback row they come from.
-	paints := t.panePaints(win)
+	paints := t.panePaints(panes)
 	sigs := make(map[string][]uint64, len(paints))
 	for _, pp := range paints {
 		sigs[pp.id] = paneRowSigs(pp)
@@ -272,9 +273,30 @@ func (t *tui) layoutSig(win *wire.Snapshot) string {
 	return b.String()
 }
 
-// panePaints is the content each pane shows this frame.
-func (t *tui) panePaints(win *wire.Snapshot) []panePaint {
+// paneOnScreen reports whether any cell of r lands inside a cols x rows grid.
+// A pane that misses the grid is not painted and not fingerprinted.
+func paneOnScreen(r layout.Rect, cols, rows int) bool {
+	return r.W > 0 && r.H > 0 &&
+		r.X < cols && r.X+r.W > 0 &&
+		r.Y < rows && r.Y+r.H > 0
+}
+
+// onScreenPanes is the panes a frame paints at all: the visible set, less any
+// pane whose rect misses the grid whole. A pane that overlaps the grid is kept
+// and clipped by the row loop.
+func onScreenPanes(win *wire.Snapshot) []wire.PaneInfo {
 	panes := visiblePanes(win)
+	out := make([]wire.PaneInfo, 0, len(panes))
+	for _, p := range panes {
+		if paneOnScreen(p.Rect, win.Cols, win.Rows) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// panePaints is the content each pane shows this frame.
+func (t *tui) panePaints(panes []wire.PaneInfo) []panePaint {
 	out := make([]panePaint, 0, len(panes))
 	for _, p := range panes {
 		pp := panePaint{id: p.ID, rect: p.Rect}
@@ -426,8 +448,14 @@ func (t *tui) cursorBlock() string {
 		return ""
 	}
 	cur := term.Grid().Cursor()
-	if cur.Visible && cur.X < p.Rect.W && cur.Y < p.Rect.H {
-		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", p.Rect.Y+cur.Y+1, p.Rect.X+cur.X+1)
+	// A pane that misses the grid takes its cursor with it: placing the cursor
+	// off screen leaves the terminal to guess, so hide it instead.
+	if cur.Visible && cur.X < p.Rect.W && cur.Y < p.Rect.H &&
+		paneOnScreen(p.Rect, win.Cols, win.Rows) {
+		x, y := p.Rect.X+cur.X, p.Rect.Y+cur.Y
+		if x < win.Cols && y < win.Rows {
+			return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", y+1, x+1)
+		}
 	}
 	return "\x1b[?25l"
 }

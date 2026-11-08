@@ -221,3 +221,64 @@ func TestPanelClipsInterior(t *testing.T) {
 
 // panelMoveRe finds every absolute cursor move a panel writes.
 var panelMoveRe = regexp.MustCompile("\x1b\\[([0-9]+);([0-9]+)H")
+
+// panelMovesInGrid returns the one-based moves a buffer writes, failing on any
+// that lands outside a cols x rows grid.
+func panelMovesInGrid(t *testing.T, b []byte, cols, rows int) [][2]int {
+	t.Helper()
+	var out [][2]int
+	for _, m := range panelMoveRe.FindAllSubmatch(b, -1) {
+		y, _ := strconv.Atoi(string(m[1]))
+		x, _ := strconv.Atoi(string(m[2]))
+		if x < 1 || x > cols || y < 1 || y > rows {
+			t.Fatalf("a move lands at row %d, col %d outside the %dx%d grid", y, x, cols, rows)
+		}
+		out = append(out, [2]int{y, x})
+	}
+	return out
+}
+
+// panelHas reports whether moves holds the one-based address (row, col).
+func panelHas(moves [][2]int, row, col int) bool {
+	for _, m := range moves {
+		if m[0] == row && m[1] == col {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDrawPaneBoxOnGridClips keeps the border cells that land on the grid and
+// drops the rest. The box around content at Y=15, H=10 runs to row 26 and
+// column 13; pre-fix the bottom border wrote row 26, col 2. The on-screen
+// vertical at row 20, col 2 must survive.
+func TestDrawPaneBoxOnGridClips(t *testing.T) {
+	content := layout.Rect{X: 2, Y: 15, W: 10, H: 10}
+	var b bytes.Buffer
+	DrawPaneBoxOnGrid(&b, theme.DefaultTheme(), content, false, 100, 20)
+	if b.Len() == 0 {
+		t.Fatal("a partially visible box wrote nothing")
+	}
+	moves := panelMovesInGrid(t, b.Bytes(), 100, 20)
+	if !panelHas(moves, 20, 2) {
+		t.Fatalf("the on-screen border cell at row 20, col 2 was dropped: %v", moves)
+	}
+}
+
+// TestDrawPanePaddingOnGridClips keeps the ring cells that land on the grid.
+// The ring around content at Y=15, H=10 runs to row 26; pre-fix it wrote row
+// 21, col 2, the first row past a 20-row grid. The on-screen ring at row 20,
+// col 2 must survive.
+func TestDrawPanePaddingOnGridClips(t *testing.T) {
+	content := layout.Rect{X: 2, Y: 15, W: 10, H: 10}
+	box := layout.BoxRect(content, 1)
+	var b bytes.Buffer
+	DrawPanePaddingOnGrid(&b, box, content, 100, 20)
+	if b.Len() == 0 {
+		t.Fatal("a partially visible ring wrote nothing")
+	}
+	moves := panelMovesInGrid(t, b.Bytes(), 100, 20)
+	if !panelHas(moves, 20, 2) {
+		t.Fatalf("the on-screen ring cell at row 20, col 2 was dropped: %v", moves)
+	}
+}

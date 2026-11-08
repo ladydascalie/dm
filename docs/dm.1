@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-06" "dm" "User Commands"
+.TH DM 1 "2026-11-08" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -398,7 +398,7 @@ the pane id a pane's shell runs in
 0 turns desktop notifications off
 .TP
 \fBDM_STATS\fP
-non-empty prints the style cache hit rate when the client exits
+non-empty prints two stderr lines when the client exits: "dm: style cache: <hits> hits, <misses> misses, <rate>% hit rate" and "dm: pacing: <frames> frames written, <wakes> wakes, <ms>ms interval"
 .TP
 \fBCOLUMNS\fP
 terminal width when the client cannot ask the terminal
