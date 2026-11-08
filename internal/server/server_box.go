@@ -31,11 +31,13 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 	s.st.Box = append(s.st.Box, e)
 	s.st.TrimBox()
 	s.boxWakeLocked()
-	_ = s.st.Save()
+	// The entry stays in memory even when the save fails, so the running
+	// session keeps a consistent log. The error says the state file is stale.
+	err := s.st.Save()
 	// Every attached client learns the log moved. An open box view asks for
 	// the whole log again, so its picture is never a guess.
 	s.broadcastLocked(wire.Msg{Type: "box"})
-	return e, nil
+	return e, err
 }
 
 // boxList returns the entries newest first that pass the request's topic and
@@ -74,8 +76,9 @@ func (s *server) boxTrimmedLocked(after *int) bool {
 
 // boxClear removes every entry for the key, or the whole log when the key is
 // empty, and reports how many went. BoxSeq is untouched, so the next post
-// continues the sequence instead of reusing a number.
-func (s *server) boxClear(req *box.ClearReq) int {
+// continues the sequence instead of reusing a number. The removal stays
+// applied in memory; a failed save returns its error with the count.
+func (s *server) boxClear(req *box.ClearReq) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	kept := make([]box.Entry, 0, len(s.st.Box))
@@ -87,16 +90,18 @@ func (s *server) boxClear(req *box.ClearReq) int {
 	}
 	cleared := len(s.st.Box) - len(kept)
 	if cleared == 0 {
-		return 0
+		return 0, nil
 	}
 	if len(kept) == 0 {
 		kept = nil
 	}
 	s.st.Box = kept
 	s.boxWakeLocked()
-	_ = s.st.Save()
+	// The clear stays applied in memory even when the save fails. The count
+	// reports what went and the error says the state file is stale.
+	err := s.st.Save()
 	s.broadcastLocked(wire.Msg{Type: "box"})
-	return cleared
+	return cleared, err
 }
 
 // boxWaiter is one msg-wait parked on s.boxWaiters. The buffered channel holds
