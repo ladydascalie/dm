@@ -314,3 +314,203 @@ func TestLayoutPadding(t *testing.T) {
 		}
 	}
 }
+
+// sumInts returns the total of a size list.
+func sumInts(v []int) int {
+	n := 0
+	for _, x := range v {
+		n += x
+	}
+	return n
+}
+
+// within reports whether inner lies inside outer.
+func within(inner, outer Rect) bool {
+	return inner.X >= outer.X && inner.Y >= outer.Y &&
+		inner.X+inner.W <= outer.X+outer.W &&
+		inner.Y+inner.H <= outer.Y+outer.H
+}
+
+// checkSizes asserts the SplitSizes contract: an exact sum and a one-cell
+// floor whenever the space can hold every child.
+func checkSizes(t *testing.T, name string, got []int, k, space int) {
+	t.Helper()
+	if len(got) != k {
+		t.Fatalf("%s: %d sizes for %d kids", name, len(got), k)
+	}
+	if sumInts(got) != space {
+		t.Fatalf("%s: sizes %v sum to %d, want %d", name, got, sumInts(got), space)
+	}
+	if space < k {
+		return
+	}
+	for i, v := range got {
+		if v < 1 {
+			t.Fatalf("%s: size %d = %d, want at least 1", name, i, v)
+		}
+	}
+}
+
+// splitNode builds a split with the given weights.
+func splitNode(weights []float64) *Node {
+	n := &Node{Dir: "row"}
+	for range weights {
+		n.Kids = append(n.Kids, &Node{Pane: "p"})
+	}
+	n.Sizes = weights
+	return n
+}
+
+// TestSplitSizesClamp pins the reconciliation: the sizes sum to space, every
+// child keeps at least one cell, and the excess comes off the largest child.
+func TestSplitSizesClamp(t *testing.T) {
+	cases := []struct {
+		name    string
+		weights []float64
+		space   int
+		want    []int
+	}{
+		{"dominant over ten", []float64{100, 1, 1}, 10, []int{8, 1, 1}},
+		{"k2 equal", []float64{1, 1}, 9, []int{5, 4}},
+		{"k2 dominant", []float64{100, 1}, 10, []int{9, 1}},
+		{"k3 equal", []float64{1, 1, 1}, 10, []int{4, 3, 3}},
+		{"k4 equal", []float64{1, 1, 1, 1}, 10, []int{3, 3, 2, 2}},
+		{"k5 equal", []float64{1, 1, 1, 1, 1}, 10, []int{2, 2, 2, 2, 2}},
+		{"k6 equal", []float64{1, 1, 1, 1, 1, 1}, 10, []int{2, 2, 2, 2, 1, 1}},
+		{"one dominant weight", []float64{10, 1, 1}, 12, []int{10, 1, 1}},
+		{"space equals k equal", []float64{1, 1, 1}, 3, []int{1, 1, 1}},
+		{"space equals k dominant", []float64{100, 1, 1}, 3, []int{1, 1, 1}},
+		{"space far above weights", []float64{1, 1, 1}, 60, []int{20, 20, 20}},
+		{"space far above dominant", []float64{100, 1, 1}, 60, []int{58, 1, 1}},
+		{"no weights", []float64{1, 1, 1}, 7, []int{3, 2, 2}},
+	}
+	for _, c := range cases {
+		got := SplitSizes(splitNode(c.weights), c.space)
+		checkSizes(t, c.name, got, len(c.weights), c.space)
+		if c.want == nil {
+			continue
+		}
+		if len(got) != len(c.want) {
+			t.Fatalf("%s: sizes %v, want %v", c.name, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("%s: sizes %v, want %v", c.name, got, c.want)
+			}
+		}
+	}
+	// A split without weights divides equally.
+	none := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}, {Pane: "c"}}}
+	checkSizes(t, "absent sizes", SplitSizes(none, 7), 3, 7)
+}
+
+// TestSplitSizesClampSweep proves the contract holds for every child count,
+// weight shape and space in the range a terminal can produce.
+func TestSplitSizesClampSweep(t *testing.T) {
+	for k := 2; k <= 6; k++ {
+		weights := map[string][]float64{
+			"equal":     make([]float64, k),
+			"dominant":  make([]float64, k),
+			"ramp up":   make([]float64, k),
+			"ramp down": make([]float64, k),
+			"alternate": make([]float64, k),
+		}
+		for i := 0; i < k; i++ {
+			weights["equal"][i] = 1
+			weights["dominant"][i] = 1
+			weights["ramp up"][i] = float64(i + 1)
+			weights["ramp down"][i] = float64(k - i)
+			weights["alternate"][i] = 1 + float64(i%2)*9
+		}
+		weights["dominant"][0] = 1000
+		for name, w := range weights {
+			n := splitNode(w)
+			for space := k; space <= 60; space++ {
+				got := SplitSizes(n, space)
+				checkSizes(t, name, got, k, space)
+			}
+		}
+	}
+}
+
+// TestLayoutChildrenInsideParent proves every child box stays inside its
+// parent's area, for the shapes the tree can take and for a split that needs
+// the clamp.
+func TestLayoutChildrenInsideParent(t *testing.T) {
+	leaf := func(id string) *Node { return &Node{Pane: id} }
+	shapes := append([]struct {
+		name string
+		root *Node
+	}{}, boxShapes()...)
+	shapes = append(shapes,
+		struct {
+			name string
+			root *Node
+		}{"row3 dominant", &Node{Dir: "row", Sizes: []float64{100, 1, 1},
+			Kids: []*Node{leaf("a"), leaf("b"), leaf("c")}}},
+		struct {
+			name string
+			root *Node
+		}{"col3 dominant", &Node{Dir: "col", Sizes: []float64{100, 1, 1},
+			Kids: []*Node{leaf("a"), leaf("b"), leaf("c")}}},
+		struct {
+			name string
+			root *Node
+		}{"mixed dominant", &Node{Dir: "row", Sizes: []float64{100, 1},
+			Kids: []*Node{leaf("a"), &Node{Dir: "col", Sizes: []float64{100, 1},
+				Kids: []*Node{leaf("b"), leaf("c")}}}}},
+	)
+	areas := []Rect{
+		{X: 0, Y: 0, W: 80, H: 24},
+		{X: 3, Y: 1, W: 12, H: 6},
+	}
+	for _, shape := range shapes {
+		for _, area := range areas {
+			rects := map[string]Rect{}
+			Layout(shape.root, area, 0, rects)
+			walkNodes(shape.root, func(n *Node) {
+				if n.Pane != "" {
+					if r := rects[n.Pane]; !within(r, area) {
+						t.Fatalf("%s: pane %s %v escapes %v", shape.name, n.Pane, r, area)
+					}
+					return
+				}
+				parent, ok := NodeRect(shape.root, n, area, 0)
+				if !ok {
+					t.Fatalf("%s: parent rect missing", shape.name)
+				}
+				for _, kid := range n.Kids {
+					got, ok := NodeRect(shape.root, kid, area, 0)
+					if !ok {
+						t.Fatalf("%s: child rect missing", shape.name)
+					}
+					if !within(got, parent) {
+						t.Fatalf("%s: child %v escapes parent %v", shape.name, got, parent)
+					}
+				}
+				boxes := ChildBoxRects(n, parent)
+				sum := 0
+				for i, b := range boxes {
+					if !within(b, parent) {
+						t.Fatalf("%s: box %v escapes parent %v", shape.name, b, parent)
+					}
+					if n.Dir == "row" {
+						sum += b.W
+					} else {
+						sum += b.H
+					}
+					if got := rects[n.Kids[i].Pane]; n.Kids[i].Pane != "" && !within(got, b) {
+						t.Fatalf("%s: pane %s %v escapes box %v", shape.name, n.Kids[i].Pane, got, b)
+					}
+				}
+				want := parent.W
+				if n.Dir != "row" {
+					want = parent.H
+				}
+				if sum != want {
+					t.Fatalf("%s: boxes use %d of %d", shape.name, sum, want)
+				}
+			})
+		}
+	}
+}
