@@ -239,8 +239,12 @@ func TestRISResetsColumnMode(t *testing.T) {
 	if cols, _ := term.grid.Size(); cols != 80 {
 		t.Errorf("cols = %d, want 80 after RIS", cols)
 	}
-	if term.grid.Modes().ColumnMode || term.grid.Modes().Allow80To132 {
-		t.Errorf("Modes() = %+v, want column mode and DECSET 40 cleared", term.grid.Modes())
+	if term.grid.Modes().ColumnMode {
+		t.Errorf("Modes() = %+v, want column mode cleared", term.grid.Modes())
+	}
+	// RIS restores the defaults, and DECSET 40 is on by default in xterm.
+	if !term.grid.Modes().Allow80To132 {
+		t.Errorf("Modes() = %+v, want DECSET 40 at its default", term.grid.Modes())
 	}
 }
 

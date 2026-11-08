@@ -108,10 +108,19 @@ func csiSetLocalKeys(t *Term, seq CSI) { t.localKeys = csiParamOr(seq, 0, 0) }
 // csiSetModifierKeys handles DECSMKR.
 func csiSetModifierKeys(t *Term, seq CSI) { t.modifierKeys = csiParamOr(seq, 0, 0) }
 
-// csiSetLinesPerPage handles the window operation that sets the page height.
-// Only operation 27 carries a value this terminal reports.
+// csiSetLinesPerPage handles the window operations the terminal acts on.
+// Operation 8 resizes the character grid, which is what an application or a
+// test driver means by a window resize. Operation 27 carries the page height a
+// DECRQSS later reports.
 func csiSetLinesPerPage(t *Term, seq CSI) {
-	if csiParamOr(seq, 0, 0) == 27 {
+	switch csiParamOr(seq, 0, 0) {
+	case 8:
+		rows := csiParamOr(seq, 1, 0)
+		cols := csiParamOr(seq, 2, 0)
+		if rows > 0 && cols > 0 {
+			t.grid.Resize(cols, rows)
+		}
+	case 27:
 		t.linesPerPage = 27
 	}
 }
@@ -268,7 +277,7 @@ func (t *Term) DECRQSSReply(pt string) string {
 		return ok(fmt.Sprintf("%d*x", t.changeExtent))
 	case "\"q":
 		state := 0
-		if t.protected {
+		if t.protection.DECSCA {
 			state = 1
 		}
 		return ok(fmt.Sprintf("%d\"q", state))

@@ -187,9 +187,9 @@ func (t *Term) setPrivateMode(n int, on bool) {
 		// No separate encoding state: dm's client encodes mouse input itself.
 	case decSaveCursor:
 		if on {
-			g.SaveCursor(t.style)
+			g.SaveCursor(t.style, t.protection)
 		} else {
-			t.style = g.RestoreCursor()
+			t.style, t.protection = g.RestoreCursor()
 		}
 		return
 	case decALT1047:
@@ -201,11 +201,11 @@ func (t *Term) setPrivateMode(n int, on bool) {
 		return
 	case decALT1049:
 		if on {
-			g.SaveCursor(t.style)
+			g.SaveCursor(t.style, t.protection)
 			g.EnterAltScreen(true)
 		} else {
 			g.ExitAltScreen(true)
-			t.style = g.RestoreCursor()
+			t.style, t.protection = g.RestoreCursor()
 		}
 		return
 	case decBracketedPaste:
