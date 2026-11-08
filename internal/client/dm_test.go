@@ -1957,11 +1957,11 @@ func TestClickForwardsToMouseApp(t *testing.T) {
 	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello")
 	press := mouseEvent{
 		btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 1,
-		raw: []byte("\x1b[<0;2;2M"),
+		raw: []byte("\x1b[<0;2;1M"),
 	}
 	release := mouseEvent{
 		btn: 0, release: true, x: p.Rect.X + 2, y: p.Rect.Y + 1,
-		raw: []byte("\x1b[<0;2;2m"),
+		raw: []byte("\x1b[<0;2;1m"),
 	}
 	tui.handleMouse(press)
 	testutil.NoMsg(t, got)
@@ -1978,6 +1978,38 @@ func TestClickForwardsToMouseApp(t *testing.T) {
 		t.Fatal("click left selection state behind")
 	}
 	testutil.NoMsg(t, got)
+}
+
+// A pane's program sees its own screen, so the mux rewrites an absolute
+// point to a pane-relative one first. A pane that starts away from the screen
+// origin used to get points outside its own grid, and its wheel and its
+// clicks landed nowhere.
+func TestMouseIsPaneRelative(t *testing.T) {
+	tui, got := clientTUI(t, map[string]bool{"a": true})
+	p := tui.paneByID("a")
+	p.Rect = layout.Rect{X: 51, Y: 3, W: 42, H: 44}
+	tui.handleMouse(mouseEvent{
+		btn: 64, x: 61, y: 10,
+		raw: []byte("\x1b[<64;61;10M"),
+	})
+	m := testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b[<64;10;7M" {
+		t.Fatalf("wheel sent %+v (%q), want a pane-relative point", m, m.Keys)
+	}
+	// A click into the content reaches the app at the same pane-relative cell.
+	tui.handleMouse(mouseEvent{btn: 0, x: 55, y: 20, raw: []byte("\x1b[<0;55;20M")})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 55, y: 20, raw: []byte("\x1b[<0;55;20m")})
+	m = testutil.NextMsg(t, got)
+	if want := "\x1b[<0;4;17M\x1b[<0;4;17m"; m.Type != "keys" || string(m.Keys) != want {
+		t.Fatalf("click sent %+v (%q), want %q", m, m.Keys, want)
+	}
+	// A wheel on the border clamps to the nearest content cell, so the app
+	// gets a point it has rather than one beyond its edge.
+	tui.handleMouse(mouseEvent{btn: 64, x: 51, y: 4, raw: []byte("\x1b[<64;51;4M")})
+	m = testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b[<64;1;1M" {
+		t.Fatalf("border wheel sent %+v (%q), want a clamped point", m, m.Keys)
+	}
 }
 
 // A left press held on a pane must not survive a right press and a menu pick.
@@ -2060,15 +2092,15 @@ func TestClickJitterStaysAClick(t *testing.T) {
 	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello")
 	press := mouseEvent{
 		btn: 0, x: p.Rect.X + 2, y: p.Rect.Y + 2,
-		raw: []byte("\x1b[<0;3;3M"),
+		raw: []byte("\x1b[<0;2;2M"),
 	}
 	release := mouseEvent{
 		btn: 0, release: true, x: p.Rect.X + 3, y: p.Rect.Y + 2,
-		raw: []byte("\x1b[<0;4;3m"),
+		raw: []byte("\x1b[<0;3;2m"),
 	}
 	motion := mouseEvent{
 		btn: 32, x: p.Rect.X + 3, y: p.Rect.Y + 2,
-		raw: []byte("\x1b[<32;4;3M"),
+		raw: []byte("\x1b[<32;3;2M"),
 	}
 	tui.handleMouse(press)
 	tui.handleMouse(motion)

@@ -780,7 +780,7 @@ type selection struct {
 type heldPress struct {
 	pane  string
 	mouse bool
-	raws  [][]byte
+	evs   []mouseEvent
 }
 
 // cellAt maps a screen point to a cell inside p's content rect.
@@ -861,7 +861,7 @@ func (t *tui) clearSelection() {
 // finishPress ends a held left press. A release in another cell copies the
 // selection; the same cell is a click, forwarded to an app that claims the
 // mouse.
-func (t *tui) finishPress(x, y int, raw []byte) {
+func (t *tui) finishPress(x, y int, ev mouseEvent) {
 	pr := t.press
 	t.press = nil
 	if pr == nil {
@@ -874,14 +874,14 @@ func (t *tui) finishPress(x, y int, raw []byte) {
 	}
 	t.selText = nil
 	t.dirty = true
-	if !pr.mouse || t.conn == nil {
+	p := t.paneByID(pr.pane)
+	if !pr.mouse || t.conn == nil || p == nil {
 		return
 	}
 	var keys []byte
-	for _, r := range pr.raws {
-		keys = append(keys, r...)
+	for _, e := range append(pr.evs, ev) {
+		keys = append(keys, paneMouse(p, e)...)
 	}
-	keys = append(keys, raw...)
 	if len(keys) > 0 {
 		_ = t.conn.Send(wire.Msg{Type: "keys", Keys: keys})
 	}
@@ -1276,11 +1276,11 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	// A held left press is a selection drag until the button comes up.
 	if t.press != nil {
 		if ev.release && ev.btn&3 == 0 {
-			t.finishPress(x, y, ev.raw)
+			t.finishPress(x, y, ev)
 			return
 		}
 		if ev.btn&32 != 0 && ev.btn&3 == 0 {
-			t.press.raws = append(t.press.raws, ev.raw)
+			t.press.evs = append(t.press.evs, ev)
 			t.selFocus(x, y)
 			return
 		}
@@ -1308,7 +1308,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		if c, ok := cellAt(p, x, y); ok {
 			t.press = &heldPress{
 				pane: p.ID, mouse: p.Mouse,
-				raws: [][]byte{ev.raw},
+				evs: []mouseEvent{ev},
 			}
 			t.selText = &selection{
 				pane: p.ID, anchor: c, focus: c,
@@ -1319,7 +1319,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		}
 		// A press on the frame is not a selection: the app gets it as before.
 		if p.Mouse && t.conn != nil {
-			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: ev.raw})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouse(p, ev)})
 		}
 		return
 	}
@@ -1332,7 +1332,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		// The pane daemon owns the mode; the client's VT may have missed the
 		// enable sequence if it scrolled out of the replay ring.
 		if t.conn != nil {
-			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: ev.raw})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouse(p, ev)})
 		}
 		return
 	}
@@ -1514,6 +1514,43 @@ type mouseEvent struct {
 	x, y    int
 	release bool
 	raw     []byte
+}
+
+// paneMouse rewrites an SGR mouse event for the program in p: the program
+// sees its own screen, so the point must be relative to the pane's content
+// rect. An absolute point names a cell the program does not have, and it
+// drops the wheel and the click. A point outside the content rect clamps to
+// its nearest edge, so a press on the border still lands on the app. A rect
+// with no area cannot map a point, and the bytes go through unchanged.
+func paneMouse(p *wire.PaneInfo, ev mouseEvent) []byte {
+	r := p.Rect
+	if r.W < 1 || r.H < 1 {
+		return ev.raw
+	}
+	x := clampCell(ev.x-1-r.X, r.W)
+	y := clampCell(ev.y-1-r.Y, r.H)
+	return sgrMouse(ev.btn, x+1, y+1, ev.release)
+}
+
+// clampCell folds a content-relative cell into 0..size-1.
+func clampCell(v, size int) int {
+	if v < 0 {
+		return 0
+	}
+	if v >= size {
+		return size - 1
+	}
+	return v
+}
+
+// sgrMouse encodes one SGR mouse event. It is the encoding dm asks the
+// terminal for, and the one a pane program gets: a pane's VT keeps no other.
+func sgrMouse(btn, x, y int, release bool) []byte {
+	end := byte('M')
+	if release {
+		end = 'm'
+	}
+	return []byte(fmt.Sprintf("\x1b[<%d;%d;%d%c", btn, x, y, end))
 }
 
 // parseMouse reads an SGR mouse sequence: ESC [ < b ; x ; y M|m. n is the bytes

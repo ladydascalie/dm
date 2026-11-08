@@ -586,6 +586,10 @@ program in that pane enabled mouse reporting itself, the event is forwarded to
 it instead. That is how `pi`, `htop` and `vim` keep their own scrolling: they
 own the wheel when they ask for it.
 
+A program sees only its own screen, so dm rewrites the point to the pane's
+content rect before it forwards the event; a point on the border clamps to
+the nearest edge cell.
+
 Ctrl+click on a URL opens it with the system handler, and a toast names what
 opened.
 
