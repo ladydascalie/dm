@@ -91,3 +91,50 @@ func TestTermColoursKeystrokeUntouched(t *testing.T) {
 	}
 	testutil.NoMsg(t, got)
 }
+
+// TestTermColoursSplitPrefixAfterKeystroke is the review-term repro: a reply
+// that shares a read with a keystroke and splits inside the OSC prefix must
+// not leak to the pane, and the pair must still be sent.
+func TestTermColoursSplitPrefixAfterKeystroke(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	feed(tui, "x\x1b]1")
+	m := testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "x" {
+		t.Fatalf("first read sent %+v (%q), want only the x", m, m.Keys)
+	}
+	testutil.NoMsg(t, got)
+
+	feed(tui, "0;rgb:ffff/ffff/ffff\x1b\\")
+	testutil.NoMsg(t, got)
+	feed(tui, "\x1b]11;rgb:0000/0000/0000\x1b\\")
+
+	m = testutil.NextMsg(t, got)
+	if m.Type != "req" || m.Action != "term-colours" {
+		t.Fatalf("message = %+v, want a term-colours request", m)
+	}
+	if m.FG != "rgb:ffff/ffff/ffff" || m.BG != "rgb:0000/0000/0000" {
+		t.Fatalf("request = %q/%q, want both replies", m.FG, m.BG)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestTermColoursSplitTailStallsThenReachesPane proves a tail that never
+// completes is flushed to the pane as ordinary input after the deadline.
+func TestTermColoursSplitTailStallsThenReachesPane(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	feed(tui, "x\x1b]1")
+	m := testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "x" {
+		t.Fatalf("first read sent %+v (%q), want only the x", m, m.Keys)
+	}
+	testutil.NoMsg(t, got)
+
+	if !tui.expireTermColour(time.Now().Add(escTimeout + time.Millisecond)) {
+		t.Fatal("expireTermColour reported no change")
+	}
+	m = testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b]1" {
+		t.Fatalf("stalled tail came through as %+v (%q), want the raw bytes", m, m.Keys)
+	}
+	testutil.NoMsg(t, got)
+}

@@ -118,6 +118,24 @@ func termColourAt(buf []byte) int {
 	return at
 }
 
+// termColourTail is where a proper, non-empty prefix of oscFG or oscBG starts
+// and runs to the end of buf, or -1. It lets the bulk path keep a reply that
+// is still arriving after a keystroke instead of forwarding it to a pane.
+func termColourTail(buf []byte) int {
+	for i := 0; i < len(buf); i++ {
+		if buf[i] != 0x1b {
+			continue
+		}
+		tail := buf[i:]
+		for _, p := range [][]byte{oscFG, oscBG} {
+			if len(tail) < len(p) && bytes.HasPrefix(p, tail) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 // noteTermColour records a reply and sends the pair once both are known, or
 // the one that arrived after a short grace so the two coalesce.
 func (t *tui) noteTermColour(kind int, value string) {
@@ -410,6 +428,17 @@ func (t *tui) processInput() {
 				_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:at]})
 				t.inbuf = append([]byte(nil), t.inbuf[at:]...)
 				continue
+			}
+			if at := termColourTail(t.inbuf); at > 0 {
+				// A reply is still arriving after a keystroke. Send the keys
+				// before it and keep the tail; the deadline flushes it as
+				// ordinary input if it never completes.
+				_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:at]})
+				t.inbuf = append([]byte(nil), t.inbuf[at:]...)
+				if t.termDeadline.IsZero() {
+					t.termDeadline = time.Now()
+				}
+				return
 			}
 			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf})
 			t.inbuf = nil
