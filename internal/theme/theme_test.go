@@ -52,6 +52,7 @@ func TestThemeDefaults(t *testing.T) {
 		ActiveMark:        "▸",
 		WorkspaceBar:      "▌",
 		Dirty:             "●",
+		Ellipsis:          "…",
 	}
 	if th.Glyphs != wantGlyphs {
 		t.Fatalf("default glyphs = %+v, want %+v", th.Glyphs, wantGlyphs)

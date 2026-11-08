@@ -52,14 +52,29 @@ func ClipSegs(runs []Seg, budget int) []Seg {
 	return out
 }
 
-// ElideSegs cuts a run set to a cell budget and ends it with an cells.Ellipsis, so a
-// long label shrinks before the right-aligned runs beside it lose a cell.
+// Elide shrinks s to budget cells and ends it with mark when it had to cut, so
+// a painter passes the glyph set's own mark instead of the Unicode ellipsis. A
+// string that already fits comes back untouched.
+func Elide(s string, budget int, mark string) string {
+	if cells.Cells(s) <= budget {
+		return s
+	}
+	if budget < cells.Cells(mark) {
+		return ""
+	}
+	return cells.Clip(s, budget-cells.Cells(mark)) + mark
+}
+
+// ElideSegs cuts a run set to a cell budget and ends it with the set's elision
+// mark, so a long label shrinks before the right-aligned runs beside it lose a
+// cell.
 func ElideSegs(th theme.Theme, runs []Seg, budget int) []Seg {
-	if budget <= 0 {
+	mark := th.Glyphs.ElideMark()
+	if budget < cells.Cells(mark) {
 		return nil
 	}
-	out := ClipSegs(runs, budget-1)
-	return append(out, Seg{Text: cells.Ellipsis, FG: th.Palette.RailDim})
+	out := ClipSegs(runs, budget-cells.Cells(mark))
+	return append(out, Seg{Text: mark, FG: th.Palette.RailDim})
 }
 
 // Join lays groups left to right with one gap run between them, so

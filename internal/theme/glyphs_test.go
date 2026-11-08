@@ -12,10 +12,18 @@ import (
 // would shift the row it lands on and break the rail's column arithmetic.
 func TestGlyphSetsAreOneCell(t *testing.T) {
 	th := DefaultTheme()
-	for _, set := range []GlyphSet{GlyphASCII, GlyphUnicode, GlyphNerd} {
+	for _, set := range []GlyphSet{GlyphAuto, GlyphASCII, GlyphUnicode, GlyphNerd} {
 		g := th.Glyphs.For(set)
+		wantMark := cells.Ellipsis
+		if set == GlyphASCII {
+			wantMark = ">"
+		}
+		if g.Ellipsis != wantMark {
+			t.Fatalf("set %v elision mark = %q, want %q", set, g.Ellipsis, wantMark)
+		}
 		structural := map[string]string{
-			"grip": g.Grip, "divider-row": g.DividerRow, "divider-col": g.DividerCol,
+			"elide": g.Ellipsis,
+			"grip":  g.Grip, "divider-row": g.DividerRow, "divider-col": g.DividerCol,
 			"top-left": g.BorderTopLeft, "top-right": g.BorderTopRight,
 			"bottom-left": g.BorderBottomLeft, "bottom-right": g.BorderBottomRight,
 			"horizontal": g.BorderHorizontal, "vertical": g.BorderVertical,
@@ -62,6 +70,7 @@ func TestASCIIGlyphSetIsASCII(t *testing.T) {
 		g.BorderTopLeft, g.BorderTopRight, g.BorderBottomLeft, g.BorderBottomRight,
 		g.BorderHorizontal, g.BorderVertical, g.BorderTeeLeft, g.BorderTeeRight,
 		g.FoldOpen, g.FoldClosed, g.ActiveMark, g.WorkspaceBar, g.Dirty,
+		g.Ellipsis,
 	}
 	for _, style := range th.States {
 		all = append(all, style.For(GlyphASCII).Glyph)

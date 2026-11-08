@@ -1,5 +1,7 @@
 package theme
 
+import "dm/internal/cells"
+
 // GlyphSet is the glyph vocabulary the chrome draws with.
 type GlyphSet uint8
 
@@ -39,6 +41,7 @@ var asciiGlyphs = map[string]string{
 	"─": "-", "│": "|", "├": "+", "┤": "+",
 	"▾": "v", "▸": ">", "▌": "|", "●": "*", "○": "o",
 	"▲": "!", "✓": "+", "✕": "x", "▶": ">",
+	"…": ">",
 }
 
 // ASCII returns the glyph's ASCII form, or the glyph itself when it has none.
@@ -54,9 +57,14 @@ func ASCII(g string) string {
 // carets are chosen by the caller that draws them, because they are a second
 // field rather than a substitution.
 func (g Glyphs) For(set GlyphSet) Glyphs {
+	// The elision mark follows the set and is not a theme-file key, so
+	// parseTheme never reads it: every set starts from the shipped mark and
+	// ascii substitutes its own.
+	g.Ellipsis = cells.Ellipsis
 	if set != GlyphASCII {
 		return g
 	}
+	g.Ellipsis = ASCII(g.Ellipsis)
 	g.Grip = ASCII(g.Grip)
 	g.DividerRow = ASCII(g.DividerRow)
 	g.DividerCol = ASCII(g.DividerCol)
@@ -74,6 +82,16 @@ func (g Glyphs) For(set GlyphSet) Glyphs {
 	g.WorkspaceBar = ASCII(g.WorkspaceBar)
 	g.Dirty = ASCII(g.Dirty)
 	return g
+}
+
+// ElideMark is the set's elision mark: the Unicode ellipsis, or `>` for ascii.
+// An unresolved Glyphs keeps the Unicode mark, so a caller that drew before
+// resolution still ends a cut run with a one-cell glyph.
+func (g Glyphs) ElideMark() string {
+	if g.Ellipsis == "" {
+		return cells.Ellipsis
+	}
+	return g.Ellipsis
 }
 
 // For returns the state mark for a set, with the glyph resolved into Glyph so a
