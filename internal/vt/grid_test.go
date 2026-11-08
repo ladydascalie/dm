@@ -164,6 +164,26 @@ func TestResizeClampsCursorScrollAndTabs(t *testing.T) {
 	}
 }
 
+// A pane starts small and grows to its split's box. The default margins cover
+// the whole screen, so they must grow with it; a clamped region would wrap and
+// scroll inside the pane's first size.
+func TestResizeExpandsFullScrollRegion(t *testing.T) {
+	g := NewGrid(80, 24)
+	g.Resize(52, 20)
+	g.Resize(97, 39)
+	if r := g.ScrollRegion(); r != (ScrollRegion{Top: 0, Bottom: 38, Left: 0, Right: 96}) {
+		t.Fatalf("ScrollRegion() = %+v, want the whole grid", r)
+	}
+
+	// Margins the application set stay put and are only clamped.
+	g = NewGrid(80, 24)
+	g.SetScrollRegion(ScrollRegion{Top: 2, Bottom: 7, Left: 3, Right: 60})
+	g.Resize(97, 39)
+	if r := g.ScrollRegion(); r != (ScrollRegion{Top: 2, Bottom: 7, Left: 3, Right: 60}) {
+		t.Fatalf("ScrollRegion() = %+v, want the application's margins", r)
+	}
+}
+
 func TestDefaultState(t *testing.T) {
 	g := NewGrid(20, 4)
 

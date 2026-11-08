@@ -758,6 +758,12 @@ func (g *Grid) Resize(cols, rows int) {
 	if rows < 1 {
 		rows = 1
 	}
+	// A full-screen scroll region is the default rather than a margin the
+	// application set, so it follows the grid. The clamp below would otherwise
+	// leave a resized terminal wrapping at its old width and scrolling inside
+	// its old height.
+	full := g.scroll.Top == 0 && g.scroll.Bottom == g.rows-1 &&
+		g.scroll.Left == 0 && g.scroll.Right == g.cols-1
 	lines := resizeLines(g.lines, cols, rows)
 	altLines := g.altLines
 	if altLines != nil {
@@ -783,6 +789,9 @@ func (g *Grid) Resize(cols, rows int) {
 	g.scroll.Bottom = clamp(g.scroll.Bottom, 0, rows-1)
 	g.scroll.Left = clamp(g.scroll.Left, 0, cols-1)
 	g.scroll.Right = clamp(g.scroll.Right, 0, cols-1)
+	if full {
+		g.resetScrollRegion()
+	}
 	g.cursor.X = clamp(g.cursor.X, 0, cols-1)
 	g.cursor.Y = clamp(g.cursor.Y, 0, rows-1)
 	g.cursor.WrapNext = false
