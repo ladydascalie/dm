@@ -1337,7 +1337,6 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	if ev.btn&64 == 0 {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "DEBUG wheel x=%d y=%d pane=%s scroll=%q alt=%v mouse=%v\n", x, y, p.ID, t.scroll, p.Alt, p.Mouse)
 	if t.scroll != p.ID {
 		t.startScroll(p)
 	}
