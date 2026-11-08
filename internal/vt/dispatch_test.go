@@ -128,12 +128,11 @@ func TestInsertDeleteLinesRespectRegion(t *testing.T) {
 	}
 }
 
-func TestSGRIsNotRegisteredYet(t *testing.T) {
-	if _, ok := csiTable[csiKey{Final: 'm'}]; ok {
-		t.Error("SGR is registered, but this unit leaves the family empty")
-	}
-	if _, ok := csiTable[csiKey{Final: 'A'}]; !ok {
-		t.Error("CUU is not registered")
+func TestFamiliesRegisterTheirKeys(t *testing.T) {
+	for _, key := range []csiKey{{Final: 'm'}, {Final: 'A'}, {Final: 'J'}, {Final: 'K'}} {
+		if _, ok := csiTable[key]; !ok {
+			t.Errorf("CSI %q is not registered", key.Final)
+		}
 	}
 	if _, ok := escTable[escKey{Final: 'H'}]; !ok {
 		t.Error("HTS is not registered")

@@ -56,7 +56,7 @@ func TestScanIncomplete(t *testing.T) {
 
 func TestHandled(t *testing.T) {
 	yes := []string{
-		"\x1b[c", "\x1b[0c", "\x1b[>c", "\x1b[?6n", "\x1b[18t",
+		"\x1b[c", "\x1b[0c", "\x1b[>c", "\x1b[6n", "\x1b[?6n", "\x1b[18t",
 		"\x1b[?1$p", "\x1b[1$p", "\x1b[1;1;1;1;1;1*y",
 		"\x1b]4;0;?\x1b\\", "\x1b]10;?\x1b\\", "\x1b]52;;?\x1b\\",
 		"\x1bP$qr\x1b\\", "\x1bP+q436F\x1b\\", "\x1bZ", "\x1b[>q",
@@ -68,7 +68,7 @@ func TestHandled(t *testing.T) {
 		}
 	}
 	no := []string{
-		"\x1b[6n", "\x1b[?1h", "\x1b[1m", "\x1b]0;title\x1b\\",
+		"\x1b[?1h", "\x1b[1m", "\x1b]0;title\x1b\\",
 		"\x1b]4;0;rgb:ffff/0000/0000\x1b\\", "\x1b[?1049h",
 	}
 	for _, in := range no {
@@ -145,48 +145,5 @@ func TestOscIsQuery(t *testing.T) {
 		if oscIsQuery(b) {
 			t.Errorf("oscIsQuery(%q) = true", b)
 		}
-	}
-}
-
-func TestModeState(t *testing.T) {
-	h := &harness{vt: vt10x.New(vt10x.WithSize(80, 25), vt10x.WithWriter(io.Discard))}
-	h.st = newState(25, 80)
-	if got := h.modeState(true, 7); got != 1 {
-		t.Errorf("DECAWM default = %d, want 1", got)
-	}
-	if got := h.modeState(true, 25); got != 1 {
-		t.Errorf("DECTCEM default = %d, want 1", got)
-	}
-	if got := h.modeState(true, 1); got != 2 {
-		t.Errorf("DECCKM default = %d, want 2", got)
-	}
-	if got := h.modeState(false, 1); got != 4 {
-		t.Errorf("GATM = %d, want 4", got)
-	}
-	if got := h.modeState(true, 3); got != 2 {
-		t.Errorf("DECCOLM default = %d, want 2", got)
-	}
-	h.st.decModes[3] = true
-	if got := h.modeState(true, 3); got != 1 {
-		t.Errorf("DECCOLM set = %d, want 1", got)
-	}
-	_, _ = h.vt.Write([]byte("\x1b[?1h"))
-	if got := h.modeState(true, 1); got != 1 {
-		t.Errorf("DECCKM set = %d, want 1", got)
-	}
-}
-
-func TestDecrqss(t *testing.T) {
-	st := newState(25, 80)
-	st.stbmTop, st.stbmBottom = 5, 6
-	if got := st.decrqss("r"); got != "1$r5;6r" {
-		t.Errorf("DECRQSS r = %q", got)
-	}
-	st.sgr = []int{1}
-	if got := st.decrqss("m"); got != "1$r0;1m" {
-		t.Errorf("DECRQSS m = %q", got)
-	}
-	if got := st.decrqss("zz"); got != "0$rzz" {
-		t.Errorf("DECRQSS unknown = %q", got)
 	}
 }

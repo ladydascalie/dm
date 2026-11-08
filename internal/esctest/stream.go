@@ -145,7 +145,10 @@ func handled(s seq) bool {
 		case 'c':
 			return s.priv == 0 || s.priv == '>'
 		case 'n':
-			return s.priv == '?'
+			// A plain DSR 6 is answered by the terminal under test; the
+			// private form, DECXCPR, is handled here. Both are routed to the
+			// report terminal's answer.
+			return s.priv == '?' || (s.priv == 0 && firstParam(s.params, 0) == 6)
 		case 't':
 			return s.priv == 0
 		case 'p':

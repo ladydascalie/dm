@@ -246,10 +246,7 @@ func parseParams(b []byte) []int {
 func (p *parser) stringByte(t *Term, c byte) {
 	switch {
 	case c == esc:
-		if p.state == stateOSC {
-			t.osc(string(p.str))
-		}
-		p.str = p.str[:0]
+		p.endString(t)
 		p.startEscape()
 	case c == 0x9c: // 8-bit ST
 		p.endString(t)
@@ -267,10 +264,13 @@ func (p *parser) stringByte(t *Term, c byte) {
 	}
 }
 
-// endString delivers a completed OSC body.
+// endString delivers a completed OSC or DCS body.
 func (p *parser) endString(t *Term) {
-	if p.state == stateOSC {
+	switch p.state {
+	case stateOSC:
 		t.osc(string(p.str))
+	case stateDCS:
+		t.dcs(string(p.str))
 	}
 	p.str = p.str[:0]
 }

@@ -57,28 +57,58 @@ var diffCorpus = []diffCase{
 	{"tabs", 20, 2, []string{"a\tb\x1b[1;5H\x1bH\x1b[1;1H\tc"}},
 	{"cht-cbt", 20, 2, []string{"\x1b[Ix\x1b[Z"}},
 	{"tbc", 20, 2, []string{"\x1b[1;9H\x1b[g\x1b[1;1H\tx"}},
+	{"altscreen", 10, 1, []string{"\x1b[?1049hX"}},
 
-	// Sequences the new VT does not implement yet. Their differences are
+	{"sgr-bold-red", 10, 1, []string{"\x1b[1;31mX"}},
+	{"sgr-attrs", 10, 1, []string{"\x1b[1;2;3;5;6;7;8;9mX"}},
+	{"sgr-palette", 10, 1, []string{"\x1b[38;5;200mX"}},
+	{"sgr-rgb", 10, 1, []string{"\x1b[38;2;1;2;3mX"}},
+	{"sgr-bg", 10, 1, []string{"\x1b[48;5;100mX"}},
+	{"sgr-underline-style", 10, 1, []string{"\x1b[4:3mX"}},
+	{"sgr-colon-rgb", 10, 1, []string{"\x1b[38:2::10:20:30mX"}},
+	{"sgr-reset", 10, 1, []string{"\x1b[1;31mA\x1b[0mB"}},
+
+	// The new VT does not apply the charset table yet; its difference is
 	// declared below.
-	{"sgr-unimplemented", 10, 1, []string{"\x1b[1;31mX"}},
-	{"altscreen-unimplemented", 10, 1, []string{"\x1b[?1049hX"}},
 	{"charset-unimplemented", 10, 1, []string{"\x1b(0q"}},
 }
 
 // declaredDiffs lists every difference this corpus is allowed to produce.
 var declaredDiffs = []diffEntry{
 	{
-		Case: "sgr-unimplemented", Field: "cell", X: 0, Y: 0,
-		New: "X|fg=d bg=d ul=none at=",
+		Case: "sgr-bold-red", Field: "cell", X: 0, Y: 0,
+		New: "X|fg=1 bg=d ul=none at=b",
 		Old: "X|fg=9 bg=d ul=none at=b",
-		Reason: "SGR is not implemented yet. vt10x sets bold and red, and its " +
-			"bold brightens palette index 1 to 9.",
+		Reason: "vt10x bakes bold into the palette colour, so index 1 becomes " +
+			"9. The new VT keeps bold as an attribute and the index as given.",
 	},
 	{
-		Case: "altscreen-unimplemented", Field: "mode.altscreen", X: -1, Y: -1,
-		New: "off", Old: "on",
-		Reason: "DECSET and DECRST are not implemented yet, so the new VT " +
-			"stays on the primary screen.",
+		Case: "sgr-attrs", Field: "cell", X: 0, Y: 0,
+		New: "X|fg=d bg=d ul=none at=bfilLrcs",
+		Old: "X|fg=d bg=d ul=none at=bilr",
+		Reason: "vt10x has no bit for faint, rapid blink, conceal or " +
+			"strikethrough, so it drops them. The new VT keeps all eight.",
+	},
+	{
+		Case: "sgr-underline-style", Field: "cell", X: 0, Y: 0,
+		New: "X|fg=d bg=d ul=curly at=",
+		Old: "X|fg=d bg=d ul=none at=",
+		Reason: "vt10x reads only the leading number of 4:3 and implements " +
+			"no underline style. The new VT keeps the style and renders curly.",
+	},
+	{
+		Case: "sgr-colon-rgb", Field: "cell", X: 0, Y: 0,
+		New: "X|fg=0a141e bg=d ul=none at=",
+		Old: "X|fg=d bg=d ul=none at=",
+		Reason: "vt10x does not read the colon form of the extended colour " +
+			"parameters, so the colour is lost. The new VT parses it.",
+	},
+	{
+		Case: "sgr-reset", Field: "cell", X: 0, Y: 0,
+		New: "A|fg=1 bg=d ul=none at=b",
+		Old: "A|fg=9 bg=d ul=none at=b",
+		Reason: "The same bold-brightens-the-colour difference as " +
+			"sgr-bold-red. The reset itself agrees: B is default in both.",
 	},
 	{
 		Case: "charset-unimplemented", Field: "cell", X: 0, Y: 0,
