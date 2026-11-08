@@ -2700,10 +2700,14 @@ func TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses(t *testing.T) {
 }
 
 // TestKeymapDispatchUnboundEscapeKeepsItsTail: an unbound escape sequence is one
-// key. It disarms and notifies, and none of its bytes reach the pane.
+// key. It disarms and notifies once, and none of its bytes reach the pane. An
+// Alt+key is a two-byte sequence, so its letter is part of the unknown key and
+// not the pane's text.
 func TestKeymapDispatchUnboundEscapeKeepsItsTail(t *testing.T) {
 	tui, got := clientTUI(t, nil)
-	for _, seq := range []string{"\x1bOP", "\x1b[1;5A", "\x1b[H"} {
+	seqs := []string{"\x1bOP", "\x1b[1;5A", "\x1b[H", "\x1ba", "\x1bZ", "\x1b1", "\x1b\u00e9"}
+	for _, seq := range seqs {
+		tui.toasts = nil
 		tui.arm()
 		feed(tui, seq)
 		if tui.armed {
@@ -2712,11 +2716,69 @@ func TestKeymapDispatchUnboundEscapeKeepsItsTail(t *testing.T) {
 		if len(tui.inbuf) != 0 {
 			t.Fatalf("%q left %q in the buffer", seq, tui.inbuf)
 		}
+		if n := len(tui.toasts); n != 1 || !strings.Contains(tui.toasts[0].text, "no binding for") {
+			t.Fatalf("%q raised %+v, want one no-binding toast", seq, tui.toasts)
+		}
 		testutil.NoMsg(t, got)
 	}
-	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "no binding for") {
-		t.Fatalf("the escape tail raised %+v", tui.toasts)
+}
+
+// TestKeymapDispatchLoneEscapeTimesOutDismisses: a lone esc that never finishes
+// arriving is the dismiss key after the deadline. It notifies nothing and sends
+// nothing to the pane. The esc waits only when some key starts with it, so the
+// test keymap binds an arrow and leaves esc itself unbound.
+func TestKeymapDispatchLoneEscapeTimesOutDismisses(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.keymap = testutil.KeymapTestLoad(t, `
+prefix "ctrl+b"
+
+keymap "main" {
+    "focus-up-arrow" "up"
+}
+`)
+	tui.arm()
+	// A lone esc first looks like the head of a paste, so it waits for that
+	// deadline before the sequence deadline takes it.
+	feed(tui, "\x1b")
+	if !tui.expirePaste(tui.pasteDeadline.Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the lone esc did not pass the paste deadline")
 	}
+	if !tui.armed || !tui.pending {
+		t.Fatalf("a lone esc: armed=%v pending=%v", tui.armed, tui.pending)
+	}
+	if !tui.expireArmed(tui.escAt.Add(escTimeout + time.Millisecond)) {
+		t.Fatal("the lone esc did not expire")
+	}
+	if tui.armed || tui.pending {
+		t.Fatalf("after the deadline: armed=%v pending=%v", tui.armed, tui.pending)
+	}
+	if len(tui.inbuf) != 0 {
+		t.Fatalf("the lone esc left %q in the buffer", tui.inbuf)
+	}
+	if len(tui.toasts) != 0 {
+		t.Fatalf("the lone esc raised %+v", tui.toasts)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestKeymapDispatchBoundSequenceStillMatches: a bound escape sequence still
+// resolves to its action, so treating an Alt+key as one sequence does not
+// swallow the keys that have a binding.
+func TestKeymapDispatchBoundSequenceStillMatches(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.arm()
+	feed(tui, "\x1b[A")
+	if len(tui.inbuf) != 0 {
+		t.Fatalf("the bound sequence left %q in the buffer", tui.inbuf)
+	}
+	if len(tui.toasts) != 0 {
+		t.Fatalf("the bound sequence raised %+v", tui.toasts)
+	}
+	m := testutil.NextMsg(t, got)
+	if m.Action != "focus-dir" || m.Dir != "up" {
+		t.Fatalf("the bound sequence sent %+v", m)
+	}
+	testutil.NoMsg(t, got)
 }
 
 // TestKeymapDispatchSplitPrefixStaysArmed: a multi-byte prefix that arrives in

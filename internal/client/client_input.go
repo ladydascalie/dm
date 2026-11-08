@@ -498,7 +498,9 @@ func (t *tui) armedKey() bool {
 }
 
 // escapeRun returns how many leading bytes belong to one escape sequence. A
-// sequence that has not finished yet runs to the end of the buffer.
+// sequence that has not finished yet runs to the end of the buffer. Esc and any
+// byte other than '[', 'O' or esc is an Alt+key, so the pair is one sequence
+// and the key is not left behind as ordinary input.
 func escapeRun(buf []byte) int {
 	if len(buf) == 0 {
 		return 0
@@ -515,6 +517,16 @@ func escapeRun(buf []byte) int {
 			if c >= 0x40 && c <= 0x7e {
 				break
 			}
+		}
+		return i
+	}
+	if i < len(buf) && buf[i] != 0x1b {
+		// Alt+key: esc and the key are one sequence. The tail of a multi-byte
+		// character belongs to the same key, so it is not left in the buffer
+		// to reach a pane as a stray byte.
+		i++
+		for i < len(buf) && buf[i]&0xc0 == 0x80 {
+			i++
 		}
 	}
 	return i
