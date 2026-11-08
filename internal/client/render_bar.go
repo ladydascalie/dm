@@ -265,8 +265,9 @@ func (l *barLeft) fit(th theme.Theme, budget int) []segment.Seg {
 	}
 
 	// 3. The workspace name, then 4. the session name, shrink to a trailing
-	// cells.Ellipsis. A name that cannot shrink leaves its cells.Ellipsis alone; later
+	// elision mark. A name that cannot shrink leaves its mark alone; later
 	// steps make the room.
+	mark := th.Glyphs.ElideMark()
 	for _, name := range []*string{&l.workspace, &l.session} {
 		if *name == "" {
 			continue
@@ -275,7 +276,7 @@ func (l *barLeft) fit(th theme.Theme, budget int) []segment.Seg {
 		if avail < 1 {
 			avail = 1
 		}
-		*name = cells.Elide(*name, avail)
+		*name = segment.Elide(*name, avail, mark)
 		if segs := cur(); segment.SegCells(segs) <= budget {
 			return segs
 		}
@@ -317,8 +318,9 @@ func barPinned(th theme.Theme, armed bool, info string) []segment.Seg {
 }
 
 // barFitPinned fits the right block to cols cells on its own. A pinned segment
-// goes whole, leftmost first, and the survivor is clipped with an cells.Ellipsis.
-func barFitPinned(segs []segment.Seg, cols int) []segment.Seg {
+// goes whole, leftmost first, and the survivor is clipped with the set's own
+// elision mark.
+func barFitPinned(segs []segment.Seg, cols int, mark string) []segment.Seg {
 	for segment.SegCells(segs) > cols {
 		if len(segs) > 1 {
 			segs = segs[1:]
@@ -327,7 +329,7 @@ func barFitPinned(segs []segment.Seg, cols int) []segment.Seg {
 		if len(segs) == 0 {
 			break
 		}
-		segs[0].Text = cells.Elide(segs[0].Text, cols)
+		segs[0].Text = segment.Elide(segs[0].Text, cols, mark)
 		break
 	}
 	return segs
@@ -342,7 +344,7 @@ func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, s
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}
-	right := barFitPinned(barPinned(th, armed, info), snap.Cols)
+	right := barFitPinned(barPinned(th, armed, info), snap.Cols, th.Glyphs.ElideMark())
 	budget := snap.Cols - segment.SegCells(right)
 	if len(right) > 0 {
 		// Keep one gutter cell between the blocks. drawBar spends it as part of

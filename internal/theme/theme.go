@@ -74,8 +74,8 @@ type Palette struct {
 
 // Glyphs are the structural decorators: the drag grip, the divider hover
 // marks, the box, menu, picker and help borders and tees, the rail's fold
-// carets in both forms, the active-window mark, the workspace bar, and the
-// dirty dot.
+// carets in both forms, the active-window mark, the workspace bar, the dirty
+// dot, and the elision mark.
 type Glyphs struct {
 	Grip              string
 	DividerRow        string
@@ -95,6 +95,9 @@ type Glyphs struct {
 	ActiveMark        string
 	WorkspaceBar      string
 	Dirty             string
+	// Ellipsis marks a cut run. Glyphs.For resolves it per set; it is not a
+	// theme-file key, so Glyphs.set never reads it.
+	Ellipsis string
 }
 
 // StateStyle is one state mark: the Unicode glyph, the Nerd Font glyph when the
@@ -149,6 +152,7 @@ func DefaultTheme() Theme {
 			ActiveMark:        "▸",
 			WorkspaceBar:      "▌",
 			Dirty:             "●",
+			Ellipsis:          "…",
 		},
 		States: map[string]StateStyle{
 			"working": {Glyph: "●", NerdGlyph: "\uf013", Colour: RGB{245, 190, 80}},  // #f5be50

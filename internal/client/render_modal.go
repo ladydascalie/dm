@@ -156,8 +156,9 @@ func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, draft stri
 	segs := segment.ClipSegs([]segment.Seg{{Text: " name: ", FG: p.RailDim}}, labelRoom)
 	draftRoom := r.W - cells.Cells(caret) - segment.SegCells(segs)
 	if cells.Cells(draft) > draftRoom {
-		if draftRoom > 1 {
-			draft = cells.Ellipsis + cells.ClipTail(draft, draftRoom-1)
+		mark := th.Glyphs.ElideMark()
+		if draftRoom > cells.Cells(mark) {
+			draft = mark + cells.ClipTail(draft, draftRoom-cells.Cells(mark))
 		} else {
 			draft = ""
 		}
