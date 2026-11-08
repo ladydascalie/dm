@@ -40,6 +40,16 @@ type Modes struct {
 	FocusReporting bool
 	Mouse          MouseMode
 	MouseEncoding  MouseEncoding
+
+	CursorKeysApplication bool // DECCKM
+	ApplicationKeypad     bool // DECNKM
+	ColumnMode            bool // DECCOLM: 132 columns when set
+	Allow80To132          bool // DECSET 40: DECCOLM may resize
+	NoClearOnColumnMode   bool // DECNCSM: DECCOLM does not erase
+	MoreFix               bool // DECSET 41
+	ReverseWrap           bool // DECSET 45
+	LeftRightMargin       bool // DECLRMM
+	LineFeedNewLine       bool // LNM
 }
 
 // defaultModes returns a fresh primary screen: wrap on, everything else off.
@@ -90,12 +100,21 @@ type Grid struct {
 	cols, rows int
 	lines      [][]Cell
 
-	cursor  Cursor
-	saved   SavedCursor
+	cursor Cursor
+	// saved holds the DECSC state once per screen: index 0 is the primary
+	// screen and index 1 the alternate, because xterm keeps them apart.
+	saved   [2]SavedCursor
 	scroll  ScrollRegion
 	tabs    []bool
 	modes   Modes
 	charset Charset
+
+	// altLines is the alternate screen. It is nil until the application first
+	// enters it, so a terminal that never uses the alternate screen does not
+	// pay for a second grid.
+	altLines [][]Cell
+	// savedModes is the XTSAVE store, keyed by DEC private mode number.
+	savedModes map[int]bool
 }
 
 // NewGrid returns a blank primary screen of cols by rows. Both are clamped to
@@ -120,7 +139,38 @@ func NewGrid(cols, rows int) *Grid {
 	for y := range g.lines {
 		g.lines[y] = newLine(cols, DefaultStyle())
 	}
+	g.saved[0] = homeSavedCursor()
+	g.saved[1] = homeSavedCursor()
 	return g
+}
+
+// homeSavedCursor is the state a saved cursor has before any DECSC: the home
+// position, the default style and the default charset. A DECRC without a DECSC
+// must land here, not on a hidden cursor at the origin.
+func homeSavedCursor() SavedCursor {
+	return SavedCursor{Cursor: Cursor{Visible: true}, Style: DefaultStyle()}
+}
+
+// blankLines returns rows of blank cells for the current size.
+func (g *Grid) blankLines() [][]Cell {
+	lines := make([][]Cell, g.rows)
+	for y := range lines {
+		lines[y] = newLine(g.cols, DefaultStyle())
+	}
+	return lines
+}
+
+// resetScrollRegion makes the whole grid the scroll region.
+func (g *Grid) resetScrollRegion() {
+	g.scroll = ScrollRegion{Top: 0, Bottom: g.rows - 1, Left: 0, Right: g.cols - 1}
+}
+
+// screen returns the index of the visible screen into saved.
+func (g *Grid) screen() int {
+	if g.modes.AltScreen {
+		return 1
+	}
+	return 0
 }
 
 // newLine returns a row of cols blank cells.
@@ -486,9 +536,10 @@ func (g *Grid) PrevTabStop(x int) int {
 }
 
 // SaveCursor stores the cursor, its style, the charset and origin mode, as
-// DECSC does.
+// DECSC does. Each screen has its own slot, so a save on the alternate screen is
+// not what a restore on the primary screen finds.
 func (g *Grid) SaveCursor(style Style) {
-	g.saved = SavedCursor{
+	g.saved[g.screen()] = SavedCursor{
 		Cursor:  g.cursor,
 		Style:   style,
 		Charset: g.charset,
@@ -496,19 +547,20 @@ func (g *Grid) SaveCursor(style Style) {
 	}
 }
 
-// SavedCursor returns what the last DECSC stored.
+// SavedCursor returns what the last DECSC on the visible screen stored.
 func (g *Grid) SavedCursor() SavedCursor {
-	return g.saved
+	return g.saved[g.screen()]
 }
 
 // RestoreCursor restores the saved cursor, charset and origin mode, and returns
 // the saved style for the caller to make current.
 func (g *Grid) RestoreCursor() Style {
-	c := g.saved.Cursor
+	sc := g.saved[g.screen()]
+	c := sc.Cursor
 	g.cursor = Cursor{X: clamp(c.X, 0, g.cols-1), Y: clamp(c.Y, 0, g.rows-1), Visible: c.Visible, WrapNext: c.WrapNext}
-	g.charset = g.saved.Charset
-	g.modes.Origin = g.saved.Origin
-	return g.saved.Style
+	g.charset = sc.Charset
+	g.modes.Origin = sc.Origin
+	return sc.Style
 }
 
 // Charset returns the G0/G1 designation and the active GL.
@@ -532,16 +584,10 @@ func (g *Grid) Resize(cols, rows int) {
 	if rows < 1 {
 		rows = 1
 	}
-	lines := make([][]Cell, rows)
-	for y := range lines {
-		line := newLine(cols, DefaultStyle())
-		if y < len(g.lines) {
-			copy(line, g.lines[y])
-		}
-		if line[cols-1].Width == WidthWide {
-			line[cols-1] = blankCell(DefaultStyle())
-		}
-		lines[y] = line
+	lines := resizeLines(g.lines, cols, rows)
+	altLines := g.altLines
+	if altLines != nil {
+		altLines = resizeLines(altLines, cols, rows)
 	}
 	tabs := make([]bool, cols)
 	copy(tabs, g.tabs)
@@ -552,7 +598,7 @@ func (g *Grid) Resize(cols, rows int) {
 	}
 
 	g.cols, g.rows = cols, rows
-	g.lines, g.tabs = lines, tabs
+	g.lines, g.altLines, g.tabs = lines, altLines, tabs
 	g.scroll.Top = clamp(g.scroll.Top, 0, rows-1)
 	g.scroll.Bottom = clamp(g.scroll.Bottom, 0, rows-1)
 	g.scroll.Left = clamp(g.scroll.Left, 0, cols-1)
@@ -560,6 +606,107 @@ func (g *Grid) Resize(cols, rows int) {
 	g.cursor.X = clamp(g.cursor.X, 0, cols-1)
 	g.cursor.Y = clamp(g.cursor.Y, 0, rows-1)
 	g.cursor.WrapNext = false
+}
+
+// resizeLines copies old into a cols by rows grid, blanking what does not fit.
+// A wide cell cut by the new right edge is blanked.
+func resizeLines(old [][]Cell, cols, rows int) [][]Cell {
+	lines := make([][]Cell, rows)
+	for y := range lines {
+		line := newLine(cols, DefaultStyle())
+		if y < len(old) {
+			copy(line, old[y])
+		}
+		if line[cols-1].Width == WidthWide {
+			line[cols-1] = blankCell(DefaultStyle())
+		}
+		lines[y] = line
+	}
+	return lines
+}
+
+// EnterAltScreen switches to the alternate screen. clear wipes it first, which
+// is what DECSET 1049 and 47 do; the cursor stays where it was.
+func (g *Grid) EnterAltScreen(clear bool) {
+	if g.modes.AltScreen {
+		return
+	}
+	if g.altLines == nil {
+		g.altLines = g.blankLines()
+	}
+	g.lines, g.altLines = g.altLines, g.lines
+	if clear {
+		g.lines = g.blankLines()
+	}
+	g.modes.AltScreen = true
+}
+
+// ExitAltScreen switches back to the primary screen. clear wipes the alternate
+// screen, which is what DECRESET 1047 and 1049 do.
+func (g *Grid) ExitAltScreen(clear bool) {
+	if !g.modes.AltScreen {
+		return
+	}
+	g.lines, g.altLines = g.altLines, g.lines
+	if clear {
+		g.altLines = g.blankLines()
+	}
+	g.modes.AltScreen = false
+}
+
+// Fill stores one cluster in every cell, as DECALN does with the letter E. The
+// cursor moves home and the margins return to the whole grid.
+func (g *Grid) Fill(content string) {
+	c := NewCell(content, DefaultStyle())
+	for y := range g.lines {
+		for x := range g.lines[y] {
+			g.lines[y][x] = c
+		}
+	}
+	g.resetScrollRegion()
+	g.cursor = Cursor{Visible: true}
+}
+
+// Reset returns the grid to its power-on state, as RIS does. The screen is
+// blank, the modes are default, the margins are full, the tab stops are the
+// default every eight columns, the charset is ASCII and both screens start
+// blank with the cursor home.
+func (g *Grid) Reset() {
+	if g.modes.ColumnMode && g.cols != 80 {
+		g.Resize(80, g.rows)
+	}
+	g.modes = defaultModes()
+	g.charset = Charset{}
+	g.cursor = Cursor{Visible: true}
+	g.resetScrollRegion()
+	g.tabs = defaultTabs(g.cols)
+	g.lines = g.blankLines()
+	g.altLines = nil
+	g.saved[0] = homeSavedCursor()
+	g.saved[1] = homeSavedCursor()
+	g.savedModes = nil
+}
+
+// SoftReset resets what DECSTR resets and leaves the screen contents, the
+// cursor position, the alt screen and the tab stops alone. It is the path that
+// stops one test's margins leaking into the next.
+func (g *Grid) SoftReset() {
+	m := g.modes
+	m.Wrap = true
+	m.Origin = false
+	m.Insert = false
+	m.ReverseVideo = false
+	m.ReverseWrap = false
+	m.LeftRightMargin = false
+	m.CursorKeysApplication = false
+	g.modes = m
+	g.charset = Charset{}
+	g.cursor.Visible = true
+	g.cursor.WrapNext = false
+	g.resetScrollRegion()
+	g.tabs = defaultTabs(g.cols)
+	g.saved[0] = homeSavedCursor()
+	g.saved[1] = homeSavedCursor()
 }
 
 // clamp folds v into the inclusive range lo to hi.
