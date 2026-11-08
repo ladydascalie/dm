@@ -64,8 +64,8 @@ func paintRow(t *testing.T, term *vt.Term, r layout.Rect) *vt.Term {
 	return live
 }
 
-// sameCells fails on the first cell where two painted terminals differ.
-func sameCells(t *testing.T, got, want *vt.Term, label string) {
+// samePaneCells fails on the first cell where two painted terminals differ.
+func samePaneCells(t *testing.T, got, want *vt.Term, label string) {
 	t.Helper()
 	gg, wg := got.Grid(), want.Grid()
 	cols, rows := gg.Size()
@@ -112,7 +112,7 @@ func TestPaneRowClipsToContentRect(t *testing.T) {
 
 	// The clipped frame is the frame a 10-cell row paints, cell for cell.
 	fits := clipFrame(t, 10, strings.Repeat("A", 10), "BBBB")
-	sameCells(t, got, paintFrame(t, fits), "clipped row")
+	samePaneCells(t, got, paintFrame(t, fits), "clipped row")
 }
 
 // TestPaneRowDropsWideGlyphAtEdge pins the cell boundary: a wide glyph whose
@@ -141,7 +141,7 @@ func TestPaneRowDropsWideGlyphAtEdge(t *testing.T) {
 	f := clipFrame(t, 30, "abcdefghi世", "BBBB")
 	got := paintFrame(t, f)
 	fits := clipFrame(t, 10, "abcdefghi ", "BBBB")
-	sameCells(t, got, paintFrame(t, fits), "wide glyph at edge")
+	samePaneCells(t, got, paintFrame(t, fits), "wide glyph at edge")
 }
 
 // TestPaneRowDropsClusterWiderThanItsSlot pins the width table the terminal is
@@ -170,7 +170,7 @@ func TestPaneRowDropsClusterWiderThanItsSlot(t *testing.T) {
 
 	f := clipFrame(t, 10, "\x1b[?7labcdefghi世", "BBBB")
 	fits := clipFrame(t, 10, "\x1b[?7labcdefghi ", "BBBB")
-	sameCells(t, paintFrame(t, f), paintFrame(t, fits), "cluster wider than its slot")
+	samePaneCells(t, paintFrame(t, f), paintFrame(t, fits), "cluster wider than its slot")
 }
 
 // TestPaneRowFittingIsUnchanged pins that the clip leaves a row that fits
