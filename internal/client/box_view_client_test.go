@@ -14,9 +14,8 @@ import (
 	"dm/internal/boxview"
 	"dm/internal/testutil"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // boxEntries is a log with one of four states, so a row test covers the column
@@ -43,15 +42,14 @@ func boxWatches() []box.Watch {
 
 // boxScreen replays the float's bytes into a fresh screen, so a test reads what
 // a terminal would show.
-func boxScreen(t *testing.T, b *boxview.BoxView, cols, rows int) vt10x.Terminal {
+func boxScreen(t *testing.T, b *boxview.BoxView, cols, rows int) *vt.Term {
 	t.Helper()
 	var buf bytes.Buffer
 	b.Float.Paint = floatVTPaint(b.Float.VT, nil)
 	b.Float.Draw(&buf, theme.DefaultTheme())
-	screen := vt10x.New(vt10x.WithSize(cols, rows))
-	if _, err := screen.Write(buf.Bytes()); err != nil {
-		t.Fatalf("replay the box: %v", err)
-	}
+	screen := vt.NewTerm(cols, rows)
+	screen.Write(buf.Bytes())
+	screen.Flush()
 	return screen
 }
 

@@ -1,7 +1,7 @@
 package client
 
 // The screenshot oracle. It builds a tui the way newFrameTUI does, draws one
-// frame, replays the frame bytes into a vt10x screen, reads the cells into a
+// frame, replays the frame bytes into a fresh screen, reads the cells into a
 // shot.Grid, rasterises it and compares the PNG with a committed golden.
 //
 // This file lives in package client because newFrameTUI and the tui type are
@@ -26,9 +26,8 @@ import (
 	"dm/internal/switcher"
 	"dm/internal/theme"
 	"dm/internal/transport"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // updateGolden regenerates the golden images. It is the only way to change
@@ -65,7 +64,7 @@ func TestGoldenMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("theme %s: %v", name, err)
 				}
-				r := renderScene(t, sc, th)
+				r, frame := renderScene(t, sc, th)
 				data, err := r.PNG()
 				if err != nil {
 					t.Fatalf("png: %v", err)
@@ -77,6 +76,12 @@ func TestGoldenMatrix(t *testing.T) {
 					}
 					if err := os.WriteFile(path, data, 0o644); err != nil {
 						t.Fatalf("write %s: %v", path, err)
+					}
+					if name == themes[0] {
+						framePath := filepath.Join(shotData, "frames", sc.Name+".bin")
+						if err := os.WriteFile(framePath, frame, 0o644); err != nil {
+							t.Fatalf("write %s: %v", framePath, err)
+						}
 					}
 					return
 				}
@@ -91,23 +96,22 @@ func TestGoldenMatrix(t *testing.T) {
 }
 
 // renderScene draws one frame and rasterises the screen it produced.
-func renderScene(t *testing.T, sc shot.Scene, th theme.Theme) *shot.Raster {
+func renderScene(t *testing.T, sc shot.Scene, th theme.Theme) (*shot.Raster, []byte) {
 	t.Helper()
 	tr, out := buildSceneTUI(t, sc, th)
 	tr.draw()
 	if out.Len() == 0 {
 		t.Fatalf("scene %s: frame is empty", sc.Name)
 	}
-	screen := vt10x.New(vt10x.WithSize(sc.Cols, sc.Rows))
-	if _, err := screen.Write(out.Bytes()); err != nil {
-		t.Fatalf("scene %s: replay: %v", sc.Name, err)
-	}
+	screen := vt.NewTerm(sc.Cols, sc.Rows)
+	screen.Write(out.Bytes())
+	screen.Flush()
 	grid := shot.GridFromScreen(screen, sc.Cols, sc.Rows)
 	r, err := shot.Rasterise(grid, shot.Options{})
 	if err != nil {
 		t.Fatalf("scene %s: rasterise: %v", sc.Name, err)
 	}
-	return r
+	return r, out.Bytes()
 }
 
 // buildSceneTUI builds the tui newFrameTUI would, then applies the scene's
@@ -148,11 +152,12 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 		})
 	}
 	out := &bytes.Buffer{}
-	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out, th: &th}
+	tr := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out, th: &th}
 	for _, p := range sc.Panes {
 		r := rects[p.ID]
-		v := vt10x.New(vt10x.WithSize(r.W, r.H))
-		_, _ = v.Write([]byte(vtContent(p.Content)))
+		v := vt.NewTerm(r.W, r.H)
+		v.Write([]byte(vtContent(p.Content)))
+		v.Flush()
 		tr.vts[p.ID] = v
 	}
 	if sc.Toast != "" {
@@ -160,8 +165,9 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 	}
 	if sc.Float != nil {
 		fr := layout.Rect{X: sc.Float.X, Y: sc.Float.Y, W: sc.Float.W, H: sc.Float.H}
-		fv := vt10x.New(vt10x.WithSize(fr.W, fr.H))
-		_, _ = fv.Write([]byte(vtContent(sc.Float.Content)))
+		fv := vt.NewTerm(fr.W, fr.H)
+		fv.Write([]byte(vtContent(sc.Float.Content)))
+		fv.Flush()
 		tr.AddFloatingPane(&panel.FloatingPane{ID: sc.Float.ID, Rect: fr, VT: fv, Active: true})
 	}
 	if sc.Switcher {
@@ -184,7 +190,7 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 }
 
 // vtContent turns the scene's plain newlines into the CR+LF a terminal needs.
-// vt10x treats a bare LF as a line feed that keeps the column, so a scene
+// A bare LF is a line feed that keeps the column, so a scene
 // written with LF alone would staircase.
 func vtContent(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")

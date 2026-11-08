@@ -26,12 +26,15 @@ const (
 )
 
 // Cell is one grid slot. Content is the glyph text; an empty Content paints a
-// space. Fg and Bg are the colours before any Reverse swap.
+// space. Fg and Bg are the colours before any Reverse swap. Cont marks the
+// second slot of a wide glyph, which the rasteriser skips because the wide
+// glyph already advanced the pen over it.
 type Cell struct {
 	Content string
 	Fg      RGB
 	Bg      RGB
 	Attr    Attr
+	Cont    bool
 }
 
 // Grid is a width, a height and a row-major cell lookup.

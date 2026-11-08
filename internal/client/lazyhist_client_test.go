@@ -6,9 +6,8 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/testutil"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // The client keeps no history until scrollback is opened: the ring is asked
@@ -18,7 +17,7 @@ import (
 // nothing else.
 func TestBytesDoNotGrowHistory(t *testing.T) {
 	tui, _ := clientTUI(t, nil)
-	tui.vts["a"] = vt10x.New(vt10x.WithSize(20, 5))
+	tui.vts["a"] = vt.NewTerm(20, 5)
 	tui.apply(wire.Msg{Type: "bytes", Target: "a", Data: []byte("live output")})
 	if got := tui.hist["a"]; len(got) != 0 {
 		t.Fatalf("live bytes filled the ring: %q", got)

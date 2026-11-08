@@ -7,16 +7,15 @@ import (
 
 	"dm/internal/layout"
 
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
 // TestURLMatchAtRow checks the cell range the hover underline uses: the range
 // covers the URL and leaves its trailing punctuation outside.
 func TestURLMatchAtRow(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 2))
-	if _, err := vt.Write([]byte("see https://x.y/a.")); err != nil {
-		t.Fatal(err)
-	}
+	vt := vt.NewTerm(20, 2)
+	vt.Write([]byte("see https://x.y/a."))
+	vt.Flush()
 	url, rng := urlMatchAtRow(vt, 20, 0, 5)
 	if url != "https://x.y/a" {
 		t.Fatalf("url = %q, want https://x.y/a", url)
@@ -33,10 +32,9 @@ func TestURLMatchAtRow(t *testing.T) {
 // covers. The hover paint carries SGR 4 on the URL run; the plain paint does
 // not, and a nil hover paints like the plain one.
 func TestHoverUnderline(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(20, 2))
-	if _, err := vt.Write([]byte("see https://x.y/a.")); err != nil {
-		t.Fatal(err)
-	}
+	vt := vt.NewTerm(20, 2)
+	vt.Write([]byte("see https://x.y/a."))
+	vt.Flush()
 	r := layout.Rect{X: 0, Y: 0, W: 20, H: 2}
 	var plain, hovered bytes.Buffer
 	drawPaneFrom(&plain, vt, r, 0, nil, nil)

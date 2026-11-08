@@ -16,9 +16,8 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 const (
@@ -326,10 +325,10 @@ func (k *KeymapView) paint() {
 	k.Float.Title = k.title()
 	k.Float.Hint = k.hint()
 	if r.W < 1 || r.H < 1 {
-		k.Float.VT = vt10x.New(vt10x.WithSize(1, 1))
+		k.Float.VT = vt.NewTerm(1, 1)
 		return
 	}
-	vt := vt10x.New(vt10x.WithSize(r.W, r.H))
+	term := vt.NewTerm(r.W, r.H)
 	var buf bytes.Buffer
 	for row := 0; row < r.H; row++ {
 		i := k.off + row
@@ -339,8 +338,9 @@ func (k *KeymapView) paint() {
 		style := k.style(i)
 		fmt.Fprintf(&buf, "\x1b[%d;1H%s%s", row+1, style, cells.Clip(k.rows[i], r.W))
 	}
-	_, _ = vt.Write(buf.Bytes())
-	k.Float.VT = vt
+	term.Write(buf.Bytes())
+	term.Flush()
+	k.Float.VT = term
 }
 
 // keymapHeader reports whether a row is a header rather than a binding.

@@ -10,57 +10,51 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/theme"
-
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
-// panelChar is one cell of a replayed screen; 0 means nothing was painted there.
-func panelChar(screen vt10x.Terminal, x, y int) rune {
-	screen.Lock()
-	defer screen.Unlock()
-	return screen.Cell(x, y).Char
+// panelChar is one cell of a replayed screen; an empty string means nothing was
+// painted there.
+func panelChar(screen *vt.Term, x, y int) string {
+	return screen.Grid().Cell(x, y).Content
 }
 
 // panelRow is one row of a replayed screen as a string, trailing blanks dropped.
-func panelRow(screen vt10x.Terminal, y, x, w int) string {
+func panelRow(screen *vt.Term, y, x, w int) string {
 	var b strings.Builder
 	for i := 0; i < w; i++ {
 		c := panelChar(screen, x+i, y)
-		if c == 0 {
-			c = ' '
+		if c == "" {
+			c = " "
 		}
-		b.WriteRune(c)
+		b.WriteString(c)
 	}
 	return strings.TrimRight(b.String(), " ")
 }
 
 // panelFilled is a screen with every cell set to X, so a test can tell a painted
 // cell from an untouched one.
-func panelFilled(t *testing.T, cols, rows int, raw []byte) vt10x.Terminal {
+func panelFilled(t *testing.T, cols, rows int, raw []byte) *vt.Term {
 	t.Helper()
-	screen := vt10x.New(vt10x.WithSize(cols, rows))
+	screen := vt.NewTerm(cols, rows)
 	var fill strings.Builder
 	for y := 0; y < rows; y++ {
 		fmt.Fprintf(&fill, "\x1b[%d;1H%s", y+1, strings.Repeat("X", cols))
 	}
-	if _, err := screen.Write([]byte(fill.String())); err != nil {
-		t.Fatalf("fill the screen: %v", err)
-	}
-	if _, err := screen.Write(raw); err != nil {
-		t.Fatalf("replay the panel: %v", err)
-	}
+	screen.Write([]byte(fill.String()))
+	screen.Write(raw)
+	screen.Flush()
 	return screen
 }
 
 // panelScreen replays what draw paints into a fresh screen.
-func panelScreen(t *testing.T, cols, rows int, draw func(*bytes.Buffer)) vt10x.Terminal {
+func panelScreen(t *testing.T, cols, rows int, draw func(*bytes.Buffer)) *vt.Term {
 	t.Helper()
 	var b bytes.Buffer
 	draw(&b)
-	screen := vt10x.New(vt10x.WithSize(cols, rows))
-	if _, err := screen.Write(b.Bytes()); err != nil {
-		t.Fatalf("replay the panel: %v", err)
-	}
+	screen := vt.NewTerm(cols, rows)
+	screen.Write(b.Bytes())
+	screen.Flush()
 	return screen
 }
 
@@ -82,10 +76,10 @@ func TestPanelWithoutTitle(t *testing.T) {
 	if got := panelRow(screen, r.Y, r.X, r.W); got != "AB" {
 		t.Fatalf("first interior row = %q, want the painted text", got)
 	}
-	if got := panelChar(screen, r.X-1, r.Y); got != []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0] {
+	if got := panelChar(screen, r.X-1, r.Y); got != theme.DefaultTheme().Glyphs.BorderVertical {
 		t.Fatalf("left border = %q, want the vertical glyph", got)
 	}
-	if got := panelChar(screen, r.X+r.W, r.Y); got != []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0] {
+	if got := panelChar(screen, r.X+r.W, r.Y); got != theme.DefaultTheme().Glyphs.BorderVertical {
 		t.Fatalf("right border = %q, want the vertical glyph", got)
 	}
 }
@@ -140,7 +134,7 @@ func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 		for x := 0; x < 20; x++ {
 			in := x >= r.X-1 && x <= r.X+r.W && y >= r.Y-1 && y <= r.Y+r.H
 			if !in {
-				if got := panelChar(screen, x, y); got != 'X' {
+				if got := panelChar(screen, x, y); got != "X" {
 					t.Fatalf("cell %d,%d outside the box = %q", x, y, got)
 				}
 			}
@@ -209,7 +203,7 @@ func TestPanelClipsInterior(t *testing.T) {
 		for x := 0; x < 20; x++ {
 			in := x >= r.X-1 && x <= r.X+r.W && y >= r.Y-1 && y <= r.Y+r.H
 			got := panelChar(screen, x, y)
-			if !in && got != 'X' {
+			if !in && got != "X" {
 				t.Fatalf("cell %d,%d outside the box = %q", x, y, got)
 			}
 		}

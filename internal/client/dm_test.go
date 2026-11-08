@@ -24,8 +24,6 @@ import (
 	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 func TestPadHitFindsThePair(t *testing.T) {
@@ -60,14 +58,13 @@ func TestPadHitFindsThePair(t *testing.T) {
 }
 
 func TestDrawPaneColors(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(24, 2))
-	if _, err := vt.Write([]byte(
+	vt := vt.NewTerm(24, 2)
+	vt.Write([]byte(
 		"\x1b[38;2;30;144;255mTRUE" +
 			"\x1b[0m\x1b[48;2;10;20;30mBG" +
 			"\x1b[0m\x1b[38;5;196mPAL" +
-			"\x1b[0m\x1b[7mREV\x1b[0m")); err != nil {
-		t.Fatal(err)
-	}
+			"\x1b[0m\x1b[7mREV\x1b[0m"))
+	vt.Flush()
 	var buf bytes.Buffer
 	drawPane(&buf, vt, layout.Rect{X: 0, Y: 0, W: 24, H: 2})
 	out := buf.String()
@@ -148,14 +145,13 @@ func TestParseMouse(t *testing.T) {
 }
 
 func TestScrollStart(t *testing.T) {
-	vt := vt10x.New(vt10x.WithSize(40, 100))
+	vt := vt.NewTerm(40, 100)
 	var b strings.Builder
 	for i := 1; i <= 60; i++ {
 		fmt.Fprintf(&b, "line %d\r\n", i)
 	}
-	if _, err := vt.Write([]byte(b.String())); err != nil {
-		t.Fatal(err)
-	}
+	vt.Write([]byte(b.String()))
+	vt.Flush()
 	live, max := scrollStart(vt, 10, 0)
 	if live < 50 || live+10 > 100 {
 		t.Fatalf("live start = %d", live)
@@ -394,13 +390,10 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	for _, status := range []string{"", "unknown"} {
 		var b bytes.Buffer
 		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 20, 40, 6))
-		vt := vt10x.New(vt10x.WithSize(40, 6))
-		if _, err := vt.Write(b.Bytes()); err != nil {
-			t.Fatalf("draw shell rail: %v", err)
-		}
-		vt.Lock()
-		glyph, text := vt.Cell(8, 2).Char, vt.Cell(10, 2).Char
-		vt.Unlock()
+		vt := vt.NewTerm(40, 6)
+		vt.Write(b.Bytes())
+		vt.Flush()
+		glyph, text := termCell(vt, 8, 2).Char, termCell(vt, 10, 2).Char
 		if glyph != ' ' || text != 'w' {
 			t.Fatalf("shell row status %q = %q at 8, %q at 10: want a blank cell",
 				status, glyph, text)
@@ -410,13 +403,10 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	// An agent that has not reported yet still asks with the question mark.
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(""))
-	vt := vt10x.New(vt10x.WithSize(40, 6))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw agent rail: %v", err)
-	}
-	vt.Lock()
-	glyph := vt.Cell(8, 2).Char
-	vt.Unlock()
+	vt := vt.NewTerm(40, 6)
+	vt.Write(b.Bytes())
+	vt.Flush()
+	glyph := termCell(vt, 8, 2).Char
 	if glyph != '?' {
 		t.Fatalf("agent row without a status = %q at 8, want ?", glyph)
 	}
@@ -455,13 +445,10 @@ func TestRailAgentMarker(t *testing.T) {
 	thin.All[0].Agent = true
 	b.Reset()
 	rail.DrawRail(&b, theme.DefaultTheme(), thin)
-	vt := vt10x.New(vt10x.WithSize(40, 6))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw thin agent rail: %v", err)
-	}
-	vt.Lock()
-	bar, glyph := vt.Cell(0, 0).Char, vt.Cell(2, 0).Char
-	vt.Unlock()
+	vt := vt.NewTerm(40, 6)
+	vt.Write(b.Bytes())
+	vt.Flush()
+	bar, glyph := termCell(vt, 0, 0).Char, termCell(vt, 2, 0).Char
 	if bar != '\u258e' || glyph != '●' {
 		t.Fatalf("thin agent row = %q at 0, %q at 2", bar, glyph)
 	}
@@ -620,16 +607,14 @@ func railRows(t *testing.T, snap *wire.Snapshot) []string {
 	t.Helper()
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), snap)
-	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw rail: %v", err)
-	}
+	vt := vt.NewTerm(snap.Cols, snap.Rows)
+	vt.Write(b.Bytes())
+	vt.Flush()
 	out := make([]string, snap.Rows-1)
-	vt.Lock()
 	for y := range out {
 		var sb strings.Builder
 		for x := 0; x < snap.Rail; x++ {
-			g := vt.Cell(x, y)
+			g := termCell(vt, x, y)
 			if g.Char == 0 {
 				sb.WriteByte(' ')
 				continue
@@ -638,7 +623,6 @@ func railRows(t *testing.T, snap *wire.Snapshot) []string {
 		}
 		out[y] = strings.TrimRight(sb.String(), " ")
 	}
-	vt.Unlock()
 	return out
 }
 
@@ -664,20 +648,17 @@ func TestRailWorkspaceAccent(t *testing.T) {
 			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
 		}
 	}
-	vt := vt10x.New(vt10x.WithSize(100, 12))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw accent rail: %v", err)
-	}
-	vt.Lock()
+	vt := vt.NewTerm(100, 12)
+	vt.Write(b.Bytes())
+	vt.Flush()
 	// The grip strip owns the rail's last column, so the count ends one cell in.
-	count := vt.Cell(layout.DefaultRail-2, 0).Char
+	count := termCell(vt, layout.DefaultRail-2, 0).Char
 	gapRow := true
 	for x := 0; x < layout.DefaultRail; x++ {
-		if g := vt.Cell(x, 4); g.Char != 0 && g.Char != ' ' {
+		if g := termCell(vt, x, 4); g.Char != 0 && g.Char != ' ' {
 			gapRow = false
 		}
 	}
-	vt.Unlock()
 	if count != '1' {
 		t.Fatalf("workspace count at the right edge = %q, want 1", count)
 	}
@@ -802,19 +783,16 @@ func TestRailCollapsed(t *testing.T) {
 			t.Fatalf("thin rail shows %q: %q", name, out)
 		}
 	}
-	vt := vt10x.New(vt10x.WithSize(40, 6))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw thin rail: %v", err)
-	}
-	vt.Lock()
+	vt := vt.NewTerm(40, 6)
+	vt.Write(b.Bytes())
+	vt.Flush()
 	glyphX := -1
 	for x := 0; x < 40; x++ {
-		g := vt.Cell(x, 0)
+		g := termCell(vt, x, 0)
 		if g.Char == '●' {
 			glyphX = x
 		}
 	}
-	vt.Unlock()
 	if glyphX != 2 {
 		t.Fatalf("state glyph at x=%d, want 2", glyphX)
 	}
@@ -849,24 +827,19 @@ func TestRailNeverWritesPastWidth(t *testing.T) {
 		}
 		var b bytes.Buffer
 		rail.DrawRail(&b, theme.DefaultTheme(), snap)
-		vt := vt10x.New(vt10x.WithSize(20, 6))
-		if _, err := vt.Write(b.Bytes()); err != nil {
-			t.Fatalf("%s: draw rail: %v", c.name, err)
-		}
-		vt.Lock()
+		vt := vt.NewTerm(20, 6)
+		vt.Write(b.Bytes())
+		vt.Flush()
 		for y := 0; y < 6; y++ {
 			for x := 6; x < 20; x++ {
-				if g := vt.Cell(x, y); g.Char != 0 && g.Char != ' ' {
-					vt.Unlock()
+				if g := termCell(vt, x, y); g.Char != 0 && g.Char != ' ' {
 					t.Fatalf("%s: rail wrote %q at %d,%d, past width 6", c.name, g.Char, x, y)
 				}
 			}
 		}
-		if g := vt.Cell(0, 0); g.Char == 0 {
-			vt.Unlock()
+		if g := termCell(vt, 0, 0); g.Char == 0 {
 			t.Fatalf("%s: rail drew nothing", c.name)
 		}
-		vt.Unlock()
 	}
 }
 
@@ -885,16 +858,13 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 	}
 	var b bytes.Buffer
 	drawBar(&b, theme.DefaultTheme(), snap, false, "")
-	vt := vt10x.New(vt10x.WithSize(20, 5))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw bar: %v", err)
-	}
-	vt.Lock()
-	defer vt.Unlock()
+	vt := vt.NewTerm(20, 5)
+	vt.Write(b.Bytes())
+	vt.Flush()
 	// The bar is the last row. An overrun would wrap and scroll it up.
 	painted := false
 	for x := 0; x < 20; x++ {
-		if g := vt.Cell(x, 4); g.Char != 0 && g.Char != ' ' {
+		if g := termCell(vt, x, 4); g.Char != 0 && g.Char != ' ' {
 			painted = true
 		}
 	}
@@ -903,7 +873,7 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 	}
 	for y := 0; y < 4; y++ {
 		for x := 0; x < 20; x++ {
-			if g := vt.Cell(x, y); g.Char != 0 && g.Char != ' ' {
+			if g := termCell(vt, x, y); g.Char != 0 && g.Char != ' ' {
 				t.Fatalf("bar wrote past its row at %d,%d: %q", x, y, g.Char)
 			}
 		}
@@ -1253,38 +1223,31 @@ func TestBarPinnedAnchored(t *testing.T) {
 
 		var b bytes.Buffer
 		drawBar(&b, theme.DefaultTheme(), snap, true, info)
-		vt := vt10x.New(vt10x.WithSize(cols, snap.Rows))
-		if _, err := vt.Write(b.Bytes()); err != nil {
-			t.Fatalf("cols %d: draw bar: %v", cols, err)
-		}
-		vt.Lock()
+		term := vt.NewTerm(cols, snap.Rows)
+		term.Write(b.Bytes())
+		term.Flush()
 		// One cell is one rune here: the pin test data carries no wide rune in
 		// the pinned block, so the columns line up with the cells.
 		want := []rune(pinnedText)
 		for i, r := range want {
 			if x := start + i; x >= cols {
-				vt.Unlock()
 				t.Fatalf("cols %d: pinned block starts at %d and runs past the row", cols, start)
-			} else if cell := vt.Cell(x, snap.Rows-1); cell.Char != r {
-				vt.Unlock()
+			} else if cell := termCell(term, x, snap.Rows-1); cell.Char != r {
 				t.Fatalf("cols %d: cell %d = %q, want %q from the pinned block",
 					cols, x, cell.Char, r)
 			}
 		}
-		ground := vt10x.Color(theme.DefaultTheme().Palette.RailBG.R<<16 | theme.DefaultTheme().Palette.RailBG.G<<8 | theme.DefaultTheme().Palette.RailBG.B)
+		ground := vt.RGBColor(uint8(theme.DefaultTheme().Palette.RailBG.R), uint8(theme.DefaultTheme().Palette.RailBG.G), uint8(theme.DefaultTheme().Palette.RailBG.B))
 		if start > 0 {
-			cell := vt.Cell(start-1, snap.Rows-1)
+			cell := termCell(term, start-1, snap.Rows-1)
 			if cell.Char != ' ' || cell.BG != ground {
-				vt.Unlock()
 				t.Fatalf("cols %d: cell before the pinned block = %q bg %v, want a ground gutter",
 					cols, cell.Char, cell.BG)
 			}
 		}
 		if leftText == "" {
-			vt.Unlock()
 			t.Fatalf("cols %d: pinned only, want a left block", cols)
 		}
-		vt.Unlock()
 	}
 }
 
@@ -1447,21 +1410,18 @@ func TestDividerGripsAlwaysVisible(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 26, Root: root}
 	var buf bytes.Buffer
 	drawGrips(&buf, theme.DefaultTheme(), snap)
-	vt := vt10x.New(vt10x.WithSize(100, 30))
-	if _, err := vt.Write(buf.Bytes()); err != nil {
-		t.Fatalf("draw grips: %v", err)
-	}
-	vt.Lock()
-	defer vt.Unlock()
+	vt := vt.NewTerm(100, 30)
+	vt.Write(buf.Bytes())
+	vt.Flush()
 	// Horizontal divider midpoint: both cells.
 	for _, y := range []int{14, 15} {
-		if g := vt.Cell(63, y); g.Char != '•' {
+		if g := termCell(vt, 63, y); g.Char != '•' {
 			t.Fatalf("horizontal grip at 63,%d = %q", y, g.Char)
 		}
 	}
 	// Vertical divider midpoint: both cells.
 	for _, x := range []int{62, 63} {
-		if g := vt.Cell(x, 22); g.Char != '•' {
+		if g := termCell(vt, x, 22); g.Char != '•' {
 			t.Fatalf("vertical grip at %d,22 = %q", x, g.Char)
 		}
 	}
@@ -1477,7 +1437,7 @@ func TestDividerHover(t *testing.T) {
 	}
 	snap := testutil.TestSnapshot(row, 100, 30, nil)
 	snap.Focus = "a"
-	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
+	tui := &tui{snap: snap, vts: map[string]*vt.Term{}}
 	boxes := layout.ChildBoxRects(row, layout.PaneAreaForWithTabBar(100, 30, 0))
 	zone := layout.PadRect(row, boxes, 0)
 	// SGR button 35 is pointer motion with no button.
@@ -1590,7 +1550,7 @@ func TestRightPressOpensMenuOverMousePane(t *testing.T) {
 		Sizes: []float64{0.5, 0.5},
 	}
 	snap := testutil.TestSnapshot(row, 100, 30, map[string]bool{"b": true})
-	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}}
+	tui := &tui{snap: snap, vts: map[string]*vt.Term{}}
 	// A right press on pane b, whose app owns the mouse, still opens the menu.
 	tui.handleMouse(mouseEvent{btn: 2, x: 80, y: 5})
 	if tui.mode != "menu" || tui.menu == nil || tui.menu.pane != "b" {
@@ -1647,7 +1607,7 @@ func TestMenuOutsideClickFocusesPane(t *testing.T) {
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil), vts: map[string]*vt.Term{}}
 	tui.openMenu(tui.paneByID("b"), 10, 5)
 	a, b := net.Pipe()
 	defer a.Close()
@@ -1703,7 +1663,7 @@ func TestWheelIsNotAPress(t *testing.T) {
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
 	}
-	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil), vts: map[string]vt10x.Terminal{}}
+	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil), vts: map[string]*vt.Term{}}
 	tui.handleMouse(mouseEvent{btn: 64, x: 5, y: 5})
 	if tui.press != nil || tui.dragging {
 		t.Fatalf("wheel started a press or drag: press=%+v dragging=%v", tui.press, tui.dragging)
@@ -2277,27 +2237,23 @@ func TestBarPadsToWidth(t *testing.T) {
 		All:   []wire.AllPane{{ID: "w1p1", Agent: false}},
 		Cols:  60, Rows: 6,
 	}
-	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
+	term := vt.NewTerm(snap.Cols, snap.Rows)
 	// A previous frame leaves stale glyphs on the bar row.
-	if _, err := vt.Write([]byte(fmt.Sprintf("\x1b[%d;1H%s", snap.Rows, strings.Repeat("X", snap.Cols)))); err != nil {
-		t.Fatalf("stale frame: %v", err)
-	}
+	term.Write([]byte(fmt.Sprintf("\x1b[%d;1H%s", snap.Rows, strings.Repeat("X", snap.Cols))))
+	term.Flush()
 	var b bytes.Buffer
 	drawBar(&b, theme.DefaultTheme(), snap, false, "")
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw bar: %v", err)
-	}
-	vt.Lock()
-	defer vt.Unlock()
-	ground := vt10x.Color(theme.DefaultTheme().Palette.RailBG.R<<16 | theme.DefaultTheme().Palette.RailBG.G<<8 | theme.DefaultTheme().Palette.RailBG.B)
+	term.Write(b.Bytes())
+	term.Flush()
+	ground := vt.RGBColor(uint8(theme.DefaultTheme().Palette.RailBG.R), uint8(theme.DefaultTheme().Palette.RailBG.G), uint8(theme.DefaultTheme().Palette.RailBG.B))
 	for x := 0; x < snap.Cols; x++ {
-		cell := vt.Cell(x, snap.Rows-1)
+		cell := termCell(term, x, snap.Rows-1)
 		if cell.Char == 'X' || cell.Char == 0 {
 			t.Fatalf("cell %d = %q, want a painted cell", x, cell.Char)
 		}
 	}
 	// The row is padded on the bar ground up to its final column.
-	last := vt.Cell(snap.Cols-1, snap.Rows-1)
+	last := termCell(term, snap.Cols-1, snap.Rows-1)
 	if last.Char != ' ' || last.BG != ground {
 		t.Fatalf("last cell = %q bg %v, want a gutter space on %v",
 			last.Char, last.BG, ground)
@@ -2419,44 +2375,28 @@ func TestDragPress(t *testing.T) {
 
 // compareScreens fails unless two terminals agree cell for cell and on the
 // cursor, visibility, buffer, wrap and mouse modes.
-func compareScreens(t *testing.T, want, got vt10x.View) {
+func compareScreens(t *testing.T, want, got *vt.Term) {
 	t.Helper()
-	wc, wr := want.Size()
-	gc, gr := got.Size()
+	wg, gg := want.Grid(), got.Grid()
+	wc, wr := wg.Size()
+	gc, gr := gg.Size()
 	if wc != gc || wr != gr {
 		t.Fatalf("size %dx%d, want %dx%d", gc, gr, wc, wr)
 	}
-	want.Lock()
-	defer want.Unlock()
-	got.Lock()
-	defer got.Unlock()
 	for y := 0; y < wr; y++ {
 		for x := 0; x < wc; x++ {
-			a := vt.NormCell(want.Cell(x, y))
-			b := vt.NormCell(got.Cell(x, y))
-			if a.Char != b.Char || a.FG != b.FG || a.BG != b.BG {
-				t.Fatalf("cell %d,%d = {%q %v %v}, want {%q %v %v}",
-					x, y, b.Char, b.FG, b.BG, a.Char, a.FG, a.BG)
+			a, b := wg.Cell(x, y), gg.Cell(x, y)
+			if a.Content != b.Content || a.Width != b.Width || a.Style != b.Style || a.Link != b.Link {
+				t.Fatalf("cell %d,%d = {%q %+v}, want {%q %+v}",
+					x, y, b.Content, b.Style, a.Content, a.Style)
 			}
 		}
 	}
-	if a, b := want.Cursor(), got.Cursor(); a.X != b.X || a.Y != b.Y {
-		t.Fatalf("cursor %d,%d, want %d,%d", b.X, b.Y, a.X, a.Y)
+	if a, b := wg.Cursor(), gg.Cursor(); a != b {
+		t.Fatalf("cursor %+v, want %+v", b, a)
 	}
-	if want.CursorVisible() != got.CursorVisible() {
-		t.Fatalf("cursor visible = %v, want %v", got.CursorVisible(), want.CursorVisible())
-	}
-	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeAltScreen) != (b & vt10x.ModeAltScreen) {
-		t.Fatalf("alt = %v, want %v", b&vt10x.ModeAltScreen != 0, a&vt10x.ModeAltScreen != 0)
-	}
-	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeWrap) != (b & vt10x.ModeWrap) {
-		t.Fatalf("wrap = %v, want %v", b&vt10x.ModeWrap != 0, a&vt10x.ModeWrap != 0)
-	}
-	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeMouseMask) != (b & vt10x.ModeMouseMask) {
-		t.Fatalf("mouse mask = %v, want %v", b&vt10x.ModeMouseMask, a&vt10x.ModeMouseMask)
-	}
-	if a, b := want.Mode(), got.Mode(); (a & vt10x.ModeMouseSgr) != (b & vt10x.ModeMouseSgr) {
-		t.Fatalf("mouse sgr = %v, want %v", b&vt10x.ModeMouseSgr != 0, a&vt10x.ModeMouseSgr != 0)
+	if a, b := wg.Modes(), gg.Modes(); a != b {
+		t.Fatalf("modes %+v, want %+v", b, a)
 	}
 }
 
@@ -2464,7 +2404,7 @@ func compareScreens(t *testing.T, want, got vt10x.View) {
 // Plain text, every colour class, reverse video, an alternate screen, a moved
 // cursor and the mode flags all have to survive; dropping any one fails.
 func TestScreenSnapshotRoundTrip(t *testing.T) {
-	src := vt10x.New(vt10x.WithSize(24, 6))
+	src := vt.NewTerm(24, 6)
 	content := "\x1b[?1049h" + // alternate screen, the harder buffer
 		"PLAIN\r\n" +
 		"\x1b[31mRED\x1b[0m \x1b[44mBLUEBG\x1b[0m\r\n" +
@@ -2475,47 +2415,47 @@ func TestScreenSnapshotRoundTrip(t *testing.T) {
 		"\x1b[?25l" + // hidden cursor
 		"\x1b[?7l" + // wrap off
 		"\x1b[?1002h\x1b[?1006h" // mouse motion plus SGR
-	if _, err := src.Write([]byte(content)); err != nil {
-		t.Fatal(err)
-	}
-	dst := vt10x.New(vt10x.WithSize(24, 6))
-	if _, err := dst.Write(vt.ScreenBytes(src)); err != nil {
-		t.Fatal(err)
+	src.Write([]byte(content))
+	src.Flush()
+	dst := vt.NewTerm(24, 6)
+	if err := dst.Restore(src.Snapshot()); err != nil {
+		t.Fatalf("restore: %v", err)
 	}
 	compareScreens(t, src, dst)
 
 	// The same on the primary screen with wrap on, which is the common case.
-	plain := vt10x.New(vt10x.WithSize(20, 3))
-	if _, err := plain.Write([]byte("\x1b[36mCYAN\x1b[0m text\x1b[2;3H")); err != nil {
-		t.Fatal(err)
-	}
-	plainDst := vt10x.New(vt10x.WithSize(20, 3))
-	if _, err := plainDst.Write(vt.ScreenBytes(plain)); err != nil {
-		t.Fatal(err)
+	plain := vt.NewTerm(20, 3)
+	plain.Write([]byte("\x1b[36mCYAN\x1b[0m text\x1b[2;3H"))
+	plain.Flush()
+	plainDst := vt.NewTerm(20, 3)
+	if err := plainDst.Restore(plain.Snapshot()); err != nil {
+		t.Fatalf("restore: %v", err)
 	}
 	compareScreens(t, plain, plainDst)
 }
 
 // A screen replaces the live VT; a later replay only replaces history.
 func TestClientScreenThenReplay(t *testing.T) {
-	src := vt10x.New(vt10x.WithSize(12, 3))
-	if _, err := src.Write([]byte("\x1b[33mLIVE-SCREEN\x1b[0m\x1b[2;4H")); err != nil {
-		t.Fatal(err)
-	}
-	data := vt.ScreenBytes(src)
+	src := vt.NewTerm(12, 3)
+	src.Write([]byte("\x1b[33mLIVE-SCREEN\x1b[0m\x1b[2;4H"))
+	src.Flush()
+	snap := src.Snapshot()
 
-	vts := map[string]vt10x.Terminal{"p1": vt10x.New(vt10x.WithSize(12, 3))}
-	_, _ = vts["p1"].Write([]byte("OLD CONTENT"))
+	vts := map[string]*vt.Term{"p1": vt.NewTerm(12, 3)}
+	vts["p1"].Write([]byte("OLD CONTENT"))
+	vts["p1"].Flush()
 	hist := map[string][]byte{}
 
-	applyScreen(vts, "p1", layout.Rect{W: 12, H: 3}, data)
+	if !applySnapshot(vts, "p1", layout.Rect{W: 12, H: 3}, snap) {
+		t.Fatal("applySnapshot refused the snapshot")
+	}
 	applyReplay(hist, "p1", []byte("RING-HISTORY"))
 
 	live := vts["p1"]
 	if live == nil {
 		t.Fatal("screen did not install a VT")
 	}
-	got := live.String()
+	got := screenString(live)
 	if !strings.Contains(got, "LIVE-SCREEN") {
 		t.Fatalf("live VT missing screen content:\n%s", got)
 	}
@@ -2531,7 +2471,7 @@ func TestClientScreenThenReplay(t *testing.T) {
 
 	// A second replay still leaves the live VT alone.
 	applyReplay(hist, "p1", []byte("MORE-HISTORY"))
-	if again := live.String(); again != got {
+	if again := screenString(live); again != got {
 		t.Fatalf("replay changed the live VT:\n%s", again)
 	}
 	if string(hist["p1"]) != "MORE-HISTORY" {
@@ -3033,9 +2973,9 @@ func newZoomFrameTUI(t *testing.T) *zoomFrameTUI {
 	}
 	relayout(snap)
 	out := &bytes.Buffer{}
-	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out}
 	for _, p := range snap.Panes {
-		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		tui.vts[p.ID] = vt
 		vt.Write([]byte("\x1b[?25l\x1b[1;1H" + strings.ToUpper(p.ID) + "-MARK"))
 	}
@@ -3044,6 +2984,9 @@ func newZoomFrameTUI(t *testing.T) *zoomFrameTUI {
 
 // frame draws one frame and returns its bytes.
 func (f *zoomFrameTUI) frame() string {
+	for _, term := range f.tui.vts {
+		term.Flush()
+	}
 	f.out.Reset()
 	f.tui.draw()
 	return f.out.String()
@@ -3065,14 +3008,14 @@ func (f *zoomFrameTUI) zoom(id string) {
 }
 
 // screenGlyphs counts one glyph as a terminal ends up.
-func screenGlyphs(vt vt10x.Terminal, ch rune) int {
-	cols, rows := vt.Size()
+func screenGlyphs(vt *vt.Term, ch rune) int {
+	cols, rows := vt.Grid().Size()
 	return screenGlyphsIn(vt, ch, layout.Rect{X: 0, Y: 0, W: cols, H: rows})
 }
 
 // screenCorners counts the box corners on a screen, so a frame that paints one
 // box and a frame that paints two are told apart.
-func screenCorners(vt vt10x.Terminal) int {
+func screenCorners(vt *vt.Term) int {
 	n := 0
 	for _, ch := range []rune{'┌', '┐', '└', '┘'} {
 		n += screenGlyphs(vt, ch)
@@ -3081,13 +3024,11 @@ func screenCorners(vt vt10x.Terminal) int {
 }
 
 // screenGlyphsIn counts one glyph inside a rectangle as the terminal ends up.
-func screenGlyphsIn(vt vt10x.Terminal, ch rune, r layout.Rect) int {
-	vt.Lock()
-	defer vt.Unlock()
+func screenGlyphsIn(vt *vt.Term, ch rune, r layout.Rect) int {
 	n := 0
 	for y := r.Y; y < r.Y+r.H; y++ {
 		for x := r.X; x < r.X+r.W; x++ {
-			if vt.Cell(x, y).Char == ch {
+			if termCell(vt, x, y).Char == ch {
 				n++
 			}
 		}
@@ -3105,10 +3046,9 @@ func TestZoomFrameFilter(t *testing.T) {
 		t.Fatalf("the split frame painted one pane: %q", first)
 	}
 	area := layout.PaneAreaForWithTabBar(f.snap.Cols, f.snap.Rows, f.snap.Rail)
-	scr := vt10x.New(vt10x.WithSize(f.snap.Cols, f.snap.Rows))
-	if _, err := scr.Write([]byte(first)); err != nil {
-		t.Fatalf("write frame: %v", err)
-	}
+	scr := vt.NewTerm(f.snap.Cols, f.snap.Rows)
+	scr.Write([]byte(first))
+	scr.Flush()
 	if got := screenCorners(scr); got != 8 {
 		t.Fatalf("split screen carries %d box corners, want two boxes' 8", got)
 	}
@@ -3124,9 +3064,8 @@ func TestZoomFrameFilter(t *testing.T) {
 	if !strings.Contains(zoomed, "B-MARK") {
 		t.Fatalf("the zoomed frame dropped the zoomed pane: %q", zoomed)
 	}
-	if _, err := scr.Write([]byte(zoomed)); err != nil {
-		t.Fatalf("write frame: %v", err)
-	}
+	scr.Write([]byte(zoomed))
+	scr.Flush()
 	if got := screenCorners(scr); got != 4 {
 		t.Fatalf("zoomed screen carries %d box corners, want the zoomed pane's 4", got)
 	}
@@ -3142,9 +3081,7 @@ func TestZoomFrameFilter(t *testing.T) {
 	if got := screenGlyphsIn(scr, '│', inside); got != 0 {
 		t.Fatalf("zoomed screen carries %d sibling borders inside the pane, want none", got)
 	}
-	scr.Lock()
-	corner := scr.Cell(area.X, area.Y).Char
-	scr.Unlock()
+	corner := runeOfCell(scr.Grid().Cell(area.X, area.Y))
 	if corner != '┌' {
 		t.Fatalf("zoomed box corner = %q, want it at the pane area %d,%d", corner, area.X, area.Y)
 	}
@@ -3204,7 +3141,7 @@ func TestZoomDragPressGuard(t *testing.T) {
 	if ds, ok := dragPress(f.snap, x, y); ok {
 		t.Fatalf("a zoomed frame started a drag: %+v", ds)
 	}
-	tui := &tui{snap: f.snap, vts: map[string]vt10x.Terminal{}}
+	tui := &tui{snap: f.snap, vts: map[string]*vt.Term{}}
 	tui.handleMouse(mouseEvent{btn: 0, x: x, y: y})
 	if tui.dragging {
 		t.Fatal("a press on a hidden split's divider started a drag")

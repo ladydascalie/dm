@@ -8,8 +8,6 @@ import (
 
 	"dm/internal/theme"
 	"dm/internal/vt"
-
-	"github.com/hinshun/vt10x"
 )
 
 // Scene is one picture the oracle renders: a size, a pane tree, the pane
@@ -114,39 +112,52 @@ var (
 	DefaultBG = RGB{0, 0, 0}
 )
 
-// attrReverse is vt10x's reverse-video mode bit. vt10x keeps it unexported.
-const attrReverse = 1 << 0
-
 // GridFromScreen reads a terminal's visible cells into a Grid. A wide glyph
-// stays in the one cell vt10x put it in, which is what makes the rasteriser's
-// real-width advance overshoot.
-func GridFromScreen(s vt10x.Terminal, w, h int) *Grid {
+// occupies its first slot and marks its continuation slots, so the rasteriser
+// advances the pen by the glyph's real width once.
+func GridFromScreen(term *vt.Term, w, h int) *Grid {
 	g := NewGrid(w, h)
-	s.Lock()
-	defer s.Unlock()
+	if term == nil {
+		return g
+	}
+	src := term.Grid()
+	cols, rows := src.Size()
 	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			gl := vt.NormCell(s.Cell(x, y))
+		for x := 0; x < w; {
+			if y >= rows || x >= cols {
+				g.Set(x, y, Cell{Content: " ", Fg: DefaultFG, Bg: DefaultBG})
+				x++
+				continue
+			}
+			c := src.Cell(x, y)
+			next := src.Next(x, y)
+			if next <= x {
+				next = x + 1
+			}
 			g.Set(x, y, Cell{
-				Content: string(gl.Char),
-				Fg:      colour(gl.FG, DefaultFG),
-				Bg:      colour(gl.BG, DefaultBG),
-				Attr:    attr(gl.Mode),
+				Content: c.Content,
+				Fg:      colour(c.Style.Fg, DefaultFG),
+				Bg:      colour(c.Style.Bg, DefaultBG),
+				Attr:    attr(c.Style),
 			})
+			for k := x + 1; k < next && k < w; k++ {
+				g.Set(k, y, Cell{Cont: true})
+			}
+			x = next
 		}
 	}
 	return g
 }
 
-func attr(mode int16) Attr {
+func attr(st vt.Style) Attr {
 	var a Attr
-	if mode&vt.AttrBold != 0 {
+	if st.Attrs&vt.Bold != 0 {
 		a |= Bold
 	}
-	if mode&vt.AttrUnderline != 0 {
+	if st.Underline != vt.UnderlineNone {
 		a |= Underline
 	}
-	if mode&attrReverse != 0 {
+	if st.Attrs&vt.Reverse != 0 {
 		a |= Reverse
 	}
 	return a
@@ -160,17 +171,18 @@ var ansi16 = [16]RGB{
 	{0x5c, 0x5c, 0xff}, {0xff, 0x00, 0xff}, {0x00, 0xff, 0xff}, {0xff, 0xff, 0xff},
 }
 
-// colour maps a vt10x colour to RGB. A default colour takes def.
-func colour(c vt10x.Color, def RGB) RGB {
-	switch {
-	case c == vt10x.DefaultFG || c == vt10x.DefaultBG || c == vt10x.DefaultCursor:
-		return def
-	case c < 16:
-		return ansi16[c]
-	case c < 256:
-		return xterm256(int(c))
+// colour maps a cell colour to RGB. A default colour takes def.
+func colour(c vt.Color, def RGB) RGB {
+	switch c.Kind {
+	case vt.ColorPalette:
+		if c.Index < 16 {
+			return ansi16[c.Index]
+		}
+		return xterm256(int(c.Index))
+	case vt.ColorRGB:
+		return RGB{c.R, c.G, c.B}
 	default:
-		return RGB{uint8(c >> 16), uint8(c >> 8), uint8(c)}
+		return def
 	}
 }
 

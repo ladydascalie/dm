@@ -9,11 +9,10 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // boxEntries is a log with one of four states, so a row test covers the column
@@ -47,62 +46,34 @@ func receiptWatches() []box.Watch {
 
 // boxVTPaint is the content painter for a float backed by a terminal. It is a
 // copy of the client's painter: the moved test cannot reach package main.
-func boxVTPaint(v vt10x.Terminal) func(*bytes.Buffer, layout.Rect) {
+func boxVTPaint(term *vt.Term) func(*bytes.Buffer, layout.Rect) {
 	return func(buf *bytes.Buffer, r layout.Rect) {
-		if r.W <= 0 || r.H <= 0 {
-			return
-		}
-		cols, rows := v.Size()
-		v.Lock()
-		defer v.Unlock()
-		for y := 0; y < r.H; y++ {
-			fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
-			var cur *vt10x.Glyph
-			for x := 0; x < r.W; x++ {
-				var g vt10x.Glyph
-				if x < cols && y < rows {
-					g = vt.NormCell(v.Cell(x, y))
-				} else {
-					g = vt.NormCell(g)
-				}
-				buf.WriteString(vt.SGR(g, cur))
-				gg := g
-				cur = &gg
-				if g.Char < 0x20 {
-					buf.WriteByte(' ')
-				} else {
-					buf.WriteRune(g.Char)
-				}
-			}
-		}
+		testutil.PaintTerm(buf, term, r, 0)
 	}
 }
 
 // boxScreen replays the float's bytes into a fresh screen, so a test reads what
 // a terminal would show.
-func boxScreen(t *testing.T, b *BoxView, cols, rows int) vt10x.Terminal {
+func boxScreen(t *testing.T, b *BoxView, cols, rows int) *vt.Term {
 	t.Helper()
 	var buf bytes.Buffer
 	b.Float.Paint = boxVTPaint(b.Float.VT)
 	b.Float.Draw(&buf, theme.DefaultTheme())
-	screen := vt10x.New(vt10x.WithSize(cols, rows))
-	if _, err := screen.Write(buf.Bytes()); err != nil {
-		t.Fatalf("replay the box: %v", err)
-	}
+	screen := vt.NewTerm(cols, rows)
+	screen.Write(buf.Bytes())
+	screen.Flush()
 	return screen
 }
 
 // boxScreenRow reads one row of a replayed screen, trailing blanks dropped.
-func boxScreenRow(screen vt10x.Terminal, y, x, w int) string {
+func boxScreenRow(screen *vt.Term, y, x, w int) string {
 	var b strings.Builder
-	screen.Lock()
-	defer screen.Unlock()
 	for i := 0; i < w; i++ {
-		r := screen.Cell(x+i, y).Char
-		if r == 0 {
-			r = ' '
+		c := screen.Grid().Cell(x+i, y).Content
+		if c == "" {
+			c = " "
 		}
-		b.WriteRune(r)
+		b.WriteString(c)
 	}
 	return strings.TrimRight(b.String(), " ")
 }
@@ -134,14 +105,11 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 		t.Fatalf("hint = %q, want the close key", got)
 	}
 
-	// The state word carries the rail's colour for that state. vt10x stores a
-	// true colour as r<<16|g<<8|b.
+	// The state word carries the rail's colour for that state.
 	want := boxStateColour(theme.DefaultTheme(), box.StateDone)
-	screen.Lock()
-	got := screen.Cell(r.X+boxReceiptW+boxSeqW+1, r.Y).FG
-	screen.Unlock()
-	if got != vt10x.Color(want.R<<16|want.G<<8|want.B) {
-		t.Fatalf("done colour = %v, want %v", got, want)
+	got := screen.Grid().Cell(r.X+boxReceiptW+boxSeqW+1, r.Y).Style.Fg
+	if got.Kind != vt.ColorRGB || got.R != uint8(want.R) || got.G != uint8(want.G) || got.B != uint8(want.B) {
+		t.Fatalf("done colour = %+v, want %v", got, want)
 	}
 }
 

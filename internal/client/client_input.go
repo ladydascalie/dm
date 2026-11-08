@@ -19,8 +19,6 @@ import (
 	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 var (
@@ -589,8 +587,8 @@ func (t *tui) requestHistory(p *wire.PaneInfo) {
 // the ring the server sent for the pane's current rect. The live screen keeps
 // updating behind it; the tall one is a frozen snapshot.
 func (t *tui) buildScroll(p *wire.PaneInfo) {
-	rows := vt.ReplayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
-	t.scrollVT = vt.BuildTall(rows, p.Rect.W)
+	rows := replayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
+	t.scrollVT = buildTall(rows, p.Rect.W)
 	_, t.maxOff = scrollStart(t.scrollVT, p.Rect.H, 0)
 }
 
@@ -897,11 +895,11 @@ func (t *tui) copySelection() {
 		return
 	}
 	p := t.paneByID(s.pane)
-	vt := t.vts[s.pane]
-	if p == nil || vt == nil {
+	term := t.vts[s.pane]
+	if p == nil || term == nil {
 		return
 	}
-	text := extractSelection(vt, p.Rect.W, s.anchor, s.focus)
+	text := extractSelection(term, p.Rect.W, s.anchor, s.focus)
 	os.Stdout.WriteString(osc52(text))
 	t.notify(fmt.Sprintf("copied %d chars", len(text)))
 }
@@ -935,26 +933,29 @@ func openURL(url string) error {
 	return cmd.Start()
 }
 
-// rowText reads one row of vt as text. Trailing blanks go. It takes the vt
-// lock, so the caller must not hold it.
-func rowText(v vt10x.View, w, row int) string {
-	if v == nil || w < 1 {
+// rowText reads one row of term as text. Trailing blanks go.
+func rowText(term *vt.Term, w, row int) string {
+	if term == nil || w < 1 {
 		return ""
 	}
-	cols, rows := v.Size()
-	v.Lock()
-	defer v.Unlock()
+	g := term.Grid()
+	cols, rows := g.Size()
 	if row < 0 || row >= rows {
 		return ""
 	}
 	var b strings.Builder
-	for x := 0; x < w && x < cols; x++ {
-		g := vt.NormCell(v.Cell(x, row))
-		if g.Char < 0x20 {
-			b.WriteByte(' ')
-		} else {
-			b.WriteRune(g.Char)
+	for x := 0; x < w && x < cols; {
+		c := g.Cell(x, row)
+		content := c.Content
+		if content == "" {
+			content = " "
 		}
+		b.WriteString(content)
+		next := g.Next(x, row)
+		if next <= x {
+			next = x + 1
+		}
+		x = next
 	}
 	return strings.TrimRight(b.String(), " ")
 }
@@ -962,8 +963,8 @@ func rowText(v vt10x.View, w, row int) string {
 // urlAtRow returns the URL in row of vt whose cell range covers x. The row is
 // read as text and matched against urlPattern. Cells are treated one per rune,
 // which holds for the ASCII URLs this matches.
-func urlAtRow(vt vt10x.View, w, row, x int) string {
-	text := rowText(vt, w, row)
+func urlAtRow(term *vt.Term, w, row, x int) string {
+	text := rowText(term, w, row)
 	for _, loc := range urlPattern.FindAllStringIndex(text, -1) {
 		start := len([]rune(text[:loc[0]]))
 		end := start + len([]rune(text[loc[0]:loc[1]])) - 1
@@ -977,8 +978,8 @@ func urlAtRow(vt vt10x.View, w, row, x int) string {
 // urlMatchAtRow returns the URL in row of vt whose cell range covers x and the
 // cell range itself. The row is read as text and matched against urlPattern.
 // Cells are treated one per rune, which holds for the ASCII URLs this matches.
-func urlMatchAtRow(vt vt10x.View, w, row, x int) (string, *selRange) {
-	text := rowText(vt, w, row)
+func urlMatchAtRow(term *vt.Term, w, row, x int) (string, *selRange) {
+	text := rowText(term, w, row)
 	for _, loc := range urlPattern.FindAllStringIndex(text, -1) {
 		start := len([]rune(text[:loc[0]]))
 		url := strings.TrimRight(text[loc[0]:loc[1]], ".,;:!?")
@@ -1001,17 +1002,17 @@ func (t *tui) paneHoverAt(p *wire.PaneInfo, x, y int) *linkHover {
 	if !ok {
 		return nil
 	}
-	vt := t.vts[p.ID]
+	term := t.vts[p.ID]
 	row := c.y
 	if t.scroll == p.ID && t.scrollVT != nil {
-		vt = t.scrollVT
+		term = t.scrollVT
 		row0, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
 		row = row0 + c.y
 	}
-	if vt == nil {
+	if term == nil {
 		return nil
 	}
-	_, rng := urlMatchAtRow(vt, p.Rect.W, row, c.x)
+	_, rng := urlMatchAtRow(term, p.Rect.W, row, c.x)
 	if rng == nil {
 		return nil
 	}
@@ -1092,17 +1093,17 @@ func (t *tui) urlAt(p *wire.PaneInfo, x, y int) string {
 	if !ok {
 		return ""
 	}
-	vt := t.vts[p.ID]
+	term := t.vts[p.ID]
 	row := c.y
 	if t.scroll == p.ID && t.scrollVT != nil {
-		vt = t.scrollVT
+		term = t.scrollVT
 		row0, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
 		row = row0 + c.y
 	}
-	if vt == nil {
+	if term == nil {
 		return ""
 	}
-	return urlAtRow(vt, p.Rect.W, row, c.x)
+	return urlAtRow(term, p.Rect.W, row, c.x)
 }
 
 func (t *tui) handleMouse(ev mouseEvent) {

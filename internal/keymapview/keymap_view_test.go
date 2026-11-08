@@ -2,17 +2,15 @@ package keymapview
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 	"testing"
 
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // keymapTestLoad parses a keymap from text. It is a copy of the client's
@@ -28,69 +26,41 @@ func keymapTestLoad(t *testing.T, src string) *keymap.Config {
 
 // keymapVTPaint is the content painter for a float backed by a terminal. It is
 // a copy of the client's painter: the moved test cannot reach package main.
-func keymapVTPaint(v vt10x.Terminal) func(*bytes.Buffer, layout.Rect) {
+func keymapVTPaint(term *vt.Term) func(*bytes.Buffer, layout.Rect) {
 	return func(buf *bytes.Buffer, r layout.Rect) {
-		if r.W <= 0 || r.H <= 0 {
-			return
-		}
-		cols, rows := v.Size()
-		v.Lock()
-		defer v.Unlock()
-		for y := 0; y < r.H; y++ {
-			fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
-			var cur *vt10x.Glyph
-			for x := 0; x < r.W; x++ {
-				var g vt10x.Glyph
-				if x < cols && y < rows {
-					g = vt.NormCell(v.Cell(x, y))
-				} else {
-					g = vt.NormCell(g)
-				}
-				buf.WriteString(vt.SGR(g, cur))
-				gg := g
-				cur = &gg
-				if g.Char < 0x20 {
-					buf.WriteByte(' ')
-				} else {
-					buf.WriteRune(g.Char)
-				}
-			}
-		}
+		testutil.PaintTerm(buf, term, r, 0)
 	}
 }
 
 // keymapScreen replays the float's bytes into a fresh screen, so a test reads
 // what a terminal would show.
-func keymapScreen(t *testing.T, k *KeymapView, cols, rows int) vt10x.Terminal {
+func keymapScreen(t *testing.T, k *KeymapView, cols, rows int) *vt.Term {
 	t.Helper()
 	var buf bytes.Buffer
 	k.Float.Paint = keymapVTPaint(k.Float.VT)
 	k.Float.Draw(&buf, theme.DefaultTheme())
-	screen := vt10x.New(vt10x.WithSize(cols, rows))
-	if _, err := screen.Write(buf.Bytes()); err != nil {
-		t.Fatalf("replay the keymap view: %v", err)
-	}
+	screen := vt.NewTerm(cols, rows)
+	screen.Write(buf.Bytes())
+	screen.Flush()
 	return screen
 }
 
 // keymapScreenRow reads one row of a replayed screen, trailing blanks dropped.
-func keymapScreenRow(screen vt10x.Terminal, y, x, w int) string {
+func keymapScreenRow(screen *vt.Term, y, x, w int) string {
 	var b strings.Builder
-	screen.Lock()
-	defer screen.Unlock()
 	for i := 0; i < w; i++ {
-		r := screen.Cell(x+i, y).Char
-		if r == 0 {
-			r = ' '
+		c := screen.Grid().Cell(x+i, y).Content
+		if c == "" {
+			c = " "
 		}
-		b.WriteRune(r)
+		b.WriteString(c)
 	}
 	return strings.TrimRight(b.String(), " ")
 }
 
 // keymapScreenText reads every row of a replayed screen inside the float, so a
 // test can look for a line wherever it landed.
-func keymapScreenText(screen vt10x.Terminal, r layout.Rect) []string {
+func keymapScreenText(screen *vt.Term, r layout.Rect) []string {
 	rows := make([]string, 0, r.H)
 	for y := r.Y; y < r.Y+r.H; y++ {
 		rows = append(rows, keymapScreenRow(screen, y, r.X, r.W))
