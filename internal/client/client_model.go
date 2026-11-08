@@ -623,21 +623,24 @@ func (t *tui) apply(m wire.Msg) {
 }
 
 // applySnapshot restores a pane's visible state from the pane daemon's
-// snapshot. The daemon serialised it at the pane's rect, so a size that does
-// not match the layout is refused rather than drawn at the wrong width.
+// snapshot. The snapshot carries its own size, and it can be the size the pane
+// had before the layout's resize reached it: syncSizes sends the resize and
+// asks for the screen without waiting, so the two race. Restore at the
+// snapshot's size and reflow to the rect, which is what the old ANSI replay
+// did. Refusing a mismatch leaves the pane blank until the program redraws.
 func applySnapshot(vts map[string]*vt.Term, id string, r layout.Rect, snap *vt.Snapshot) bool {
 	if r.W < 1 || r.H < 1 || snap == nil {
 		return false
 	}
-	if snap.Cols != r.W || snap.Rows != r.H {
-		return false
-	}
 	term := vts[id]
 	if term == nil {
-		term = vt.NewTerm(r.W, r.H)
+		term = vt.NewTerm(snap.Cols, snap.Rows)
 	}
 	if err := term.Restore(snap); err != nil {
 		return false
+	}
+	if c, rw := term.Grid().Size(); c != r.W || rw != r.H {
+		resizeTerm(term, r.W, r.H)
 	}
 	vts[id] = term
 	return true
