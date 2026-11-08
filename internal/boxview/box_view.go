@@ -19,9 +19,8 @@ import (
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // The columns of one entry row, in order: receipt, seq, state, key, from, msg.
@@ -303,18 +302,19 @@ func (b *BoxView) paint(th theme.Theme) {
 	b.Float.Title = b.title()
 	b.Float.Hint = b.hint()
 	if r.W < 1 || r.H < 1 {
-		b.Float.VT = vt10x.New(vt10x.WithSize(1, 1))
+		b.Float.VT = vt.NewTerm(1, 1)
 		return
 	}
-	vt := vt10x.New(vt10x.WithSize(r.W, r.H))
+	term := vt.NewTerm(r.W, r.H)
 	var buf bytes.Buffer
 	if b.page {
 		b.paintWatchers(&buf, r, th)
 	} else {
 		b.paintEntries(&buf, r, th)
 	}
-	_, _ = vt.Write(buf.Bytes())
-	b.Float.VT = vt
+	term.Write(buf.Bytes())
+	term.Flush()
+	b.Float.VT = term
 }
 
 // paintEntries draws the window of the log. A wide enough rect carries the

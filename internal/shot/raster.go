@@ -106,8 +106,12 @@ func Rasterise(g *Grid, opts Options) (*Raster, error) {
 	for y := 0; y < g.H; y++ {
 		pen := 0
 		for x := 0; x < g.W; x++ {
-			drawCell(img, face, opts, base, pen, y, g.Cell(x, y))
-			pen += cellWidth(g.Cell(x, y).Content)
+			c := g.Cell(x, y)
+			if c.Cont {
+				continue
+			}
+			drawCell(img, face, opts, base, pen, y, c)
+			pen += cellWidth(c.Content)
 		}
 		rows[y] = Row{Y: y, Pen: pen}
 	}

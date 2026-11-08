@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"dm/internal/vt"
 
 	"github.com/creack/pty"
-	"github.com/hinshun/vt10x"
 )
 
 // The pty is 25x80, the size esctest2 resets the terminal to before every
@@ -309,7 +311,7 @@ func (h *harness) answerDECRQCRA(s seq) {
 // decrqcraRect applies the origin-mode offset to a DECRQCRA rectangle. In origin
 // mode xterm reads the rectangle relative to the top and left margins, as it
 // reads the cursor. The margins come from the report terminal, which the
-// harness keeps in step with the terminal under test: the vt10x view does not
+// harness keeps in step with the terminal under test: the VT view does not
 // expose them, and the report terminal sees every margin and mode sequence.
 func (h *harness) decrqcraRect(top, left, bottom, right int) (int, int, int, int) {
 	g := h.reports.Grid()
@@ -463,7 +465,7 @@ func (h *harness) resize(rows, cols int) {
 	if rows == h.rows() && cols == h.cols() {
 		return
 	}
-	h.vt.Resize(cols, rows)
+	h.vt.Grid().Resize(cols, rows)
 	_ = pty.Setsize(h.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	h.logf("resize %dx%d", rows, cols)
 }
@@ -471,8 +473,9 @@ func (h *harness) resize(rows, cols int) {
 // checksum is xterm's DECRQCRA with checksumExtension 23: the sum of the
 // character codes in the rectangle, erased cells as a space, attributes
 // ignored, no trimming, no negation.
-func checksum(vt vt10x.Terminal, top, left, bottom, right int) int {
-	cols, rows := vt.Size()
+func checksum(term *vt.Term, top, left, bottom, right int) int {
+	term.Flush()
+	cols, rows := term.Grid().Size()
 	if top < 1 {
 		top = 1
 	}
@@ -488,11 +491,11 @@ func checksum(vt vt10x.Terminal, top, left, bottom, right int) int {
 	total := 0
 	for y := top - 1; y <= bottom-1; y++ {
 		for x := left - 1; x <= right-1; x++ {
-			ch := vt.Cell(x, y).Char
-			if ch == 0 {
-				ch = ' '
+			r, _ := utf8.DecodeRuneInString(term.Grid().Cell(x, y).Content)
+			if r == 0 {
+				r = ' '
 			}
-			total += int(ch)
+			total += int(r)
 		}
 	}
 	return total & 0xffff

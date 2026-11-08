@@ -5,8 +5,10 @@ package testutil
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,9 +16,8 @@ import (
 	"dm/internal/layout"
 	"dm/internal/segment"
 	"dm/internal/session"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // Frame wraps a payload in the wire length prefix.
@@ -54,13 +55,12 @@ func NoMsg(t *testing.T, got chan wire.Msg) {
 }
 
 // TestVT builds a terminal painted with data, the way a pane's VT looks.
-func TestVT(t *testing.T, w, h int, data string) vt10x.Terminal {
+func TestVT(t *testing.T, w, h int, data string) *vt.Term {
 	t.Helper()
-	vt := vt10x.New(vt10x.WithSize(w, h))
-	if _, err := vt.Write([]byte(data)); err != nil {
-		t.Fatalf("write vt: %v", err)
-	}
-	return vt
+	term := vt.NewTerm(w, h)
+	term.Write([]byte(data))
+	term.Flush()
+	return term
 }
 
 // CaptureStdout runs fn with os.Stdout on a pipe and returns what it printed.
@@ -203,4 +203,89 @@ func RootPane(st *session.State) string {
 	w.Focus = id
 	st.Panes[id] = &session.PaneState{}
 	return id
+}
+
+// PaintTerm writes one pane's rows into buf with absolute cursor moves and a
+// full SGR for each style change. Tests that replay a frame use it instead of
+// carrying a copy of the client's painter.
+func PaintTerm(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int) {
+	if term == nil || r.W <= 0 || r.H <= 0 {
+		return
+	}
+	g := term.Grid()
+	cols, rows := g.Size()
+	for y := 0; y < r.H; y++ {
+		fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
+		var cur *vt.Style
+		for x := 0; x < r.W; {
+			var c vt.Cell
+			next := x + 1
+			row := row0 + y
+			if x < cols && row >= 0 && row < rows {
+				c = g.Cell(x, row)
+				if n := g.Next(x, row); n > next {
+					next = n
+				}
+			}
+			buf.WriteString(testSGR(c.Style, cur))
+			st := c.Style
+			cur = &st
+			content := c.Content
+			if content == "" || c.Width == vt.WidthContinuation {
+				content = " "
+			}
+			buf.WriteString(content)
+			x = next
+		}
+	}
+}
+
+func testSGR(st vt.Style, cur *vt.Style) string {
+	if cur != nil && *cur == st {
+		return ""
+	}
+	p := []string{"0"}
+	if st.Attrs&vt.Bold != 0 {
+		p = append(p, "1")
+	}
+	if st.Underline != vt.UnderlineNone {
+		p = append(p, "4")
+	}
+	if st.Attrs&vt.Reverse != 0 {
+		p = append(p, "7")
+	}
+	p = append(p, testColor(st.Fg, false), testColor(st.Bg, true))
+	return "\x1b[" + strings.Join(p, ";") + "m"
+}
+
+func testColor(c vt.Color, bg bool) string {
+	base := 30
+	if bg {
+		base = 40
+	}
+	switch c.Kind {
+	case vt.ColorPalette:
+		n := int(c.Index)
+		switch {
+		case n < 8:
+			return fmt.Sprint(base + n)
+		case n < 16:
+			return fmt.Sprint(base + 60 + n - 8)
+		default:
+			if bg {
+				return "48;5;" + fmt.Sprint(n)
+			}
+			return "38;5;" + fmt.Sprint(n)
+		}
+	case vt.ColorRGB:
+		if bg {
+			return fmt.Sprintf("48;2;%d;%d;%d", c.R, c.G, c.B)
+		}
+		return fmt.Sprintf("38;2;%d;%d;%d", c.R, c.G, c.B)
+	default:
+		if bg {
+			return "49"
+		}
+		return "39"
+	}
 }

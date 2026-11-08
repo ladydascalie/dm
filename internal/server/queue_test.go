@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"net"
 	"os"
 	"path/filepath"
@@ -47,7 +48,7 @@ func screenPane(t *testing.T, session, id string) {
 					switch m.Action {
 					case "screen":
 						_ = wire.WriteMsg(c, wire.Msg{Type: "screen", ID: m.ID,
-							Target: id, Data: []byte("screen " + id)})
+							Target: id, VTSnap: newScreenSnapshot(id)})
 					case "replay":
 						st := wire.Status{State: "idle"}
 						_ = wire.WriteMsg(c, wire.Msg{Type: "replay", ID: m.ID,
@@ -235,6 +236,12 @@ func TestStalledClientResyncsFromScreens(t *testing.T) {
 		}
 		if m.Type != "screen" {
 			t.Fatalf("frame %d after the snapshot is %q, want a screen", i, m.Type)
+		}
+		if m.VTSnap == nil {
+			t.Fatalf("screen for %q carried no snapshot", m.Target)
+		}
+		if !bytes.Equal(snapshotBytes(t, m.VTSnap), snapshotBytes(t, newScreenSnapshot(m.Target))) {
+			t.Fatalf("screen for %q changed in the server", m.Target)
 		}
 		screens[m.Target] = true
 	}

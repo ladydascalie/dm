@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -22,7 +23,6 @@ import (
 	"dm/internal/wire"
 
 	"github.com/creack/pty"
-	"github.com/hinshun/vt10x"
 )
 
 // paneProc is one pane daemon: it owns the PTY, the VT screen, the status and
@@ -38,20 +38,30 @@ type paneProc struct {
 	cmd  *exec.Cmd
 
 	mu   sync.Mutex
-	vt   vt10x.Terminal
+	vt   *vt.Term
 	ring *scrollRing
 	st   wire.Status
 	subs map[*subConn]bool
 	dead bool
-	mode vt10x.ModeFlag
+	mode vt.Modes
 }
 
 // modeInfo reports the two modes the client must respect: alternate screen
 // (no terminal scrollback) and mouse reporting (the wheel belongs to the app).
-func modeInfo(m vt10x.ModeFlag) (alt, mouse bool) {
-	alt = m&vt10x.ModeAltScreen != 0
-	mouse = m&(vt10x.ModeMouseMask|vt10x.ModeMouseSgr) != 0
-	return alt, mouse
+func modeInfo(m vt.Modes) (alt, mouse bool) {
+	return m.AltScreen, m.Mouse != vt.MouseOff
+}
+
+// screenText returns the visible rows joined by a newline, the shape the read
+// action has always sent. Trailing blank rows are kept; splitLines trims them.
+func screenText(t *vt.Term) string {
+	g := t.Grid()
+	_, rows := g.Size()
+	lines := make([]string, rows)
+	for y := 0; y < rows; y++ {
+		lines[y] = g.Text(y)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func modeRes(alt, mouse bool) json.RawMessage {
@@ -150,7 +160,7 @@ func Run(args []string) error {
 	p := &paneProc{
 		id: *id, session: *session, sock: paths.PaneSock(*session, *id),
 		shell: *shell, cwd: *cwd,
-		vt:   vt10x.New(vt10x.WithSize(*cols, *rows)),
+		vt:   vt.NewTerm(*cols, *rows),
 		ring: &scrollRing{},
 		subs: map[*subConn]bool{},
 		st:   wire.Status{State: "unknown"},
@@ -263,10 +273,10 @@ func (p *paneProc) readLoop() {
 			b := append([]byte(nil), clean.Bytes()...)
 			if len(b) > 0 {
 				p.mu.Lock()
-				_, _ = p.vt.Write(b)
+				p.vt.Write(b)
 				p.ring.Write(b)
 				p.broadcastLocked(wire.Msg{Type: "bytes", Data: b})
-				if m := p.vt.Mode(); m != p.mode {
+				if m := p.vt.Grid().Modes(); m != p.mode {
 					p.mode = m
 					alt, mouse := modeInfo(m)
 					p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse)})
@@ -309,7 +319,7 @@ func (p *paneProc) replyTerminal(s string) {
 func (p *paneProc) cursorPos() (row, col int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	c := p.vt.Cursor()
+	c := p.vt.Grid().Cursor()
 	return c.Y, c.X
 }
 
@@ -403,12 +413,12 @@ func (p *paneProc) serve(c net.Conn) {
 				continue
 			}
 			p.mu.Lock()
-			p.vt.Resize(m.Cols, m.Rows)
+			p.vt.Grid().Resize(m.Cols, m.Rows)
 			p.mu.Unlock()
 			_ = pty.Setsize(p.ptmx, &pty.Winsize{Cols: uint16(m.Cols), Rows: uint16(m.Rows)})
 		case "read":
 			p.mu.Lock()
-			text := p.vt.String()
+			text := screenText(p.vt)
 			st := p.st
 			title := p.vt.Title()
 			dead := p.dead
@@ -418,17 +428,17 @@ func (p *paneProc) serve(c net.Conn) {
 				Res: jsonRaw(map[string]any{"title": title, "dead": dead})})
 		case "screen":
 			p.mu.Lock()
-			data := vt.ScreenBytes(p.vt)
-			alt, mouse := modeInfo(p.vt.Mode())
+			snap := p.vt.Snapshot()
+			alt, mouse := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
-			_ = sc.send(wire.Msg{Type: "screen", Data: data, Res: modeRes(alt, mouse)})
+			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse)})
 		case "replay":
 			p.mu.Lock()
 			data := p.ring.Bytes()
 			st := p.st
 			dead := p.dead
 			title := p.vt.Title()
-			alt, mouse := modeInfo(p.vt.Mode())
+			alt, mouse := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
 			_ = sc.send(wire.Msg{Type: "replay", Data: data, St: &st,
 				Res: jsonRaw(map[string]any{"title": title, "dead": dead, "alt": alt, "mouse": mouse})})

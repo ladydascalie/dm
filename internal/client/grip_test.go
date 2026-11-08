@@ -10,9 +10,8 @@ import (
 	"dm/internal/rail"
 	"dm/internal/testutil"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // gripTUI is a client whose rail is 20 wide on a 100 column screen, so the
@@ -66,15 +65,12 @@ func TestRailGripMark(t *testing.T) {
 	snap := railRowSnap(20)
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), snap)
-	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw rail: %v", err)
-	}
-	vt.Lock()
-	defer vt.Unlock()
+	vt := vt.NewTerm(snap.Cols, snap.Rows)
+	vt.Write(b.Bytes())
+	vt.Flush()
 	strip := snap.Rail - 1
 	mid := (snap.Rows - 2) / 2
-	if g := vt.Cell(strip, mid); g.Char != []rune(theme.DefaultTheme().Glyphs.Grip)[0] {
+	if g := termCell(vt, strip, mid); g.Char != []rune(theme.DefaultTheme().Glyphs.Grip)[0] {
 		t.Fatalf("grip mark = %q at %d,%d, want %q", g.Char, strip, mid, theme.DefaultTheme().Glyphs.Grip)
 	}
 }
@@ -214,12 +210,10 @@ func TestPanePressStillFocuses(t *testing.T) {
 }
 
 // railRowText reads one rail row off a replayed screen.
-func railRowText(screen vt10x.Terminal, y, w int) string {
-	screen.Lock()
-	defer screen.Unlock()
+func railRowText(screen *vt.Term, y, w int) string {
 	var b strings.Builder
 	for x := 0; x < w; x++ {
-		c := screen.Cell(x, y).Char
+		c := termCell(screen, x, y).Char
 		if c == 0 {
 			c = ' '
 		}
@@ -235,11 +229,10 @@ func TestRailGripHoverKeepsStats(t *testing.T) {
 	f := newFrameTUI(t, 100, 30, 20)
 	f.snap.All[0].InRepo = true
 	f.snap.All[0].Branch = "main"
-	screen := vt10x.New(vt10x.WithSize(100, 30))
+	screen := vt.NewTerm(100, 30)
 	replay := func() {
-		if _, err := screen.Write([]byte(f.frame())); err != nil {
-			t.Fatalf("replay frame: %v", err)
-		}
+		screen.Write([]byte(f.frame()))
+		screen.Flush()
 	}
 	// Row 1 is the window line, the row that carries the git stats.
 	replay()

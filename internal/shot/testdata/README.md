@@ -54,9 +54,9 @@ carry SGR attributes.
 
 One `<scene>.bin` per scene: the exact frame bytes the client harness drew for
 that scene, with the scene's own theme. `TestRowWidth` and `TestGoldenCJK`
-replay these bytes into a vt10x screen, so the width invariant is measured on
+replay these bytes into a fresh screen, so the width invariant is measured on
 dm's own serialiser output, not on a hand-built grid.
 
-Regenerate them with the same harness that regenerates the goldens: build the
-scene tui, call `draw()`, and write the frame buffer. The goldens and the
-frames must move together when a scene changes.
+`go test ./internal/client -run TestGoldenMatrix -update` regenerates both the
+goldens and the frames. The goldens and the frames move together when a scene
+changes.

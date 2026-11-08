@@ -13,21 +13,19 @@ import (
 	"dm/internal/layout"
 	"dm/internal/testutil"
 	"dm/internal/theme"
-
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
 // keymapScreen replays the float's bytes into a fresh screen, so a test reads
 // what a terminal would show.
-func keymapScreen(t *testing.T, k *keymapview.KeymapView, cols, rows int) vt10x.Terminal {
+func keymapScreen(t *testing.T, k *keymapview.KeymapView, cols, rows int) *vt.Term {
 	t.Helper()
 	var buf bytes.Buffer
 	k.Float.Paint = floatVTPaint(k.Float.VT, nil)
 	k.Float.Draw(&buf, theme.DefaultTheme())
-	screen := vt10x.New(vt10x.WithSize(cols, rows))
-	if _, err := screen.Write(buf.Bytes()); err != nil {
-		t.Fatalf("replay the keymap view: %v", err)
-	}
+	screen := vt.NewTerm(cols, rows)
+	screen.Write(buf.Bytes())
+	screen.Flush()
 	return screen
 }
 

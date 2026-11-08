@@ -13,8 +13,6 @@ import (
 	"dm/internal/switcher"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // frameOpen and frameClose bracket a frame so the terminal swaps it in whole.
@@ -296,26 +294,21 @@ func (t *tui) panePaints(win *wire.Snapshot) []panePaint {
 }
 
 // paneRowSigs fingerprints one pane's content rows. Every visible change moves
-// the row's hash: the glyph, its colours, its mode, the selection over it and
-// the scrollback row it comes from.
+// the row's hash: the cluster, its colours, its attributes, the selection over
+// it and the scrollback row it comes from.
 func paneRowSigs(pp panePaint) []uint64 {
-	cols, rows := pp.vt.Size()
+	cols, rows := pp.vt.Grid().Size()
 	out := make([]uint64, pp.rect.H)
-	pp.vt.Lock()
-	defer pp.vt.Unlock()
 	for row := 0; row < pp.rect.H; row++ {
 		h := uint64(14695981039346656037)
 		for x := 0; x < pp.rect.W; x++ {
-			var g vt10x.Glyph
+			var c vt.Cell
 			if x < cols && pp.row0+row < rows {
-				g = vt.NormCell(pp.vt.Cell(x, pp.row0+row))
+				c = pp.vt.Grid().Cell(x, pp.row0+row)
 			} else {
-				g = vt.NormCell(g)
+				c = vt.NewCell(" ", vt.DefaultStyle())
 			}
-			h = mix(h, uint64(g.Char))
-			h = mix(h, uint64(g.FG))
-			h = mix(h, uint64(g.BG))
-			h = mix(h, uint64(g.Mode))
+			h = mixCell(h, c)
 			if pp.sel.has(row*pp.rect.W+x) || pp.hover.has(row*pp.rect.W+x) {
 				h = mix(h, 1)
 				if pp.hover.has(row*pp.rect.W + x) {
@@ -326,6 +319,34 @@ func paneRowSigs(pp panePaint) []uint64 {
 		out[row] = h
 	}
 	return out
+}
+
+// mixCell folds one cell into a row fingerprint.
+func mixCell(h uint64, c vt.Cell) uint64 {
+	for i := 0; i < len(c.Content); i++ {
+		h = mix(h, uint64(c.Content[i]))
+	}
+	h = mix(h, uint64(c.Width))
+	h = mix(h, uint64(c.Style.Fg.Kind))
+	h = mix(h, uint64(c.Style.Fg.Index))
+	h = mix(h, uint64(c.Style.Fg.R)<<16|uint64(c.Style.Fg.G)<<8|uint64(c.Style.Fg.B))
+	h = mix(h, uint64(c.Style.Bg.Kind))
+	h = mix(h, uint64(c.Style.Bg.Index))
+	h = mix(h, uint64(c.Style.Bg.R)<<16|uint64(c.Style.Bg.G)<<8|uint64(c.Style.Bg.B))
+	h = mix(h, uint64(c.Style.UnderlineColor.Kind))
+	h = mix(h, uint64(c.Style.UnderlineColor.Index))
+	h = mix(h, uint64(c.Style.Underline))
+	h = mix(h, uint64(c.Style.Attrs))
+	for i := 0; i < len(c.Link); i++ {
+		h = mix(h, uint64(c.Link[i]))
+	}
+	if c.Protected {
+		h = mix(h, 3)
+	}
+	if c.ISOProtected {
+		h = mix(h, 4)
+	}
+	return h
 }
 
 // mix folds one value into a row fingerprint (FNV-1a).
@@ -398,15 +419,12 @@ func (t *tui) cursorBlock() string {
 	if p == nil {
 		return ""
 	}
-	vt := t.vts[p.ID]
-	if vt == nil {
+	term := t.vts[p.ID]
+	if term == nil {
 		return ""
 	}
-	vt.Lock()
-	cur := vt.Cursor()
-	visible := vt.CursorVisible()
-	vt.Unlock()
-	if visible && cur.X < p.Rect.W && cur.Y < p.Rect.H {
+	cur := term.Grid().Cursor()
+	if cur.Visible && cur.X < p.Rect.W && cur.Y < p.Rect.H {
 		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", p.Rect.Y+cur.Y+1, p.Rect.X+cur.X+1)
 	}
 	return "\x1b[?25l"

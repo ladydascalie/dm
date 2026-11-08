@@ -6,21 +6,20 @@ import (
 	"net"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"dm/internal/layout"
 	"dm/internal/testutil"
 	"dm/internal/transport"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // switcherCell reads one cell of a replayed screen. The switcher's own test
 // moved to internal/switcher, so the root tests keep their own copy.
-func switcherCell(screen vt10x.Terminal, x, y int) rune {
-	screen.Lock()
-	defer screen.Unlock()
-	return screen.Cell(x, y).Char
+func switcherCell(screen *vt.Term, x, y int) rune {
+	r, _ := utf8.DecodeRuneInString(screen.Grid().Cell(x, y).Content)
+	return r
 }
 
 // switcherTUI is a client over a real net.Pipe: keys go in through processInput,
@@ -45,7 +44,7 @@ func switcherTUI(t *testing.T) (*tui, chan wire.Msg) {
 			Window: "w1", WindowName: "one", WindowUnfolded: true, WorkspaceUnfolded: true,
 		},
 	}
-	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: &bytes.Buffer{}}
+	tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: &bytes.Buffer{}}
 	a, b := net.Pipe()
 	t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
 	tui.conn = &transport.Conn{Conn: a}

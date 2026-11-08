@@ -5,8 +5,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/panel"
-
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
 // AddFloatingPane appends a floating pane to the client's render stack.
@@ -29,8 +28,8 @@ func (t *tui) RemoveFloatingPane(id string) {
 // floatVTPaint is the content painter for a float backed by a terminal. The
 // panel owns the box; this closure owns the cells, so the panel never imports
 // the terminal or the pane painter.
-func floatVTPaint(vt vt10x.Terminal, hover *selRange) func(*bytes.Buffer, layout.Rect) {
+func floatVTPaint(term *vt.Term, hover *selRange) func(*bytes.Buffer, layout.Rect) {
 	return func(buf *bytes.Buffer, inner layout.Rect) {
-		drawPaneFrom(buf, vt, inner, 0, nil, hover)
+		drawPaneFrom(buf, term, inner, 0, nil, hover)
 	}
 }
