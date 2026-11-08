@@ -43,6 +43,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm msg schema` | `-` | print the box schema the server serves | `dm msg schema` |
 | `dm man` | `[-o path]` | print the man page, or write it to a file | `dm man -o dm.1` |
 | `dm llms` | `[-o path]` | print llms.txt, or write it to a file | `dm llms -o llms.txt` |
+| `dm html` | `[-o path]` | print this page as HTML, or write it to a file | `dm html [-o path]` |
 
 ## Actions: `dm exec`
 
