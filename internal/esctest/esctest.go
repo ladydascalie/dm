@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"dm/internal/vt"
+
 	"github.com/creack/pty"
 	"github.com/hinshun/vt10x"
 )
@@ -97,6 +99,9 @@ func Run(ctx context.Context, opts Options) (int, error) {
 		"--xterm-checksum=411",
 		"--xterm-reverse-wrap=411",
 		"--timeout=0.2",
+		// The harness answers 8-bit C1 controls, so declare the capability. It
+		// unblocks the DECID 8-bit test that was a declared harness gap.
+		"--options=allowC2Controls",
 		"--logfile=" + logPath,
 	}
 	args = append(args, opts.Args...)
@@ -143,6 +148,7 @@ func Run(ctx context.Context, opts Options) (int, error) {
 type harness struct {
 	ptmx    *os.File
 	vt      vt10x.Terminal
+	reports *vt.Term
 	verbose bool
 	errw    io.Writer
 	buf     []byte
@@ -159,6 +165,7 @@ func newHarness(ptmx *os.File, opts Options) *harness {
 		vt10x.WithSize(80, 25),
 		vt10x.WithWriter(stWriter{ptmx}),
 	)
+	h.reports = vt.NewTerm(80, 25)
 	h.st = newState(25, 80)
 	return h
 }
@@ -205,7 +212,7 @@ func (h *harness) feed(chunk []byte) {
 				h.writeVT(h.buf[:qStart])
 			}
 			s, _, _ := scan(h.buf[qStart:qEnd])
-			h.answer(s)
+			h.answer(s, h.buf[qStart:qEnd])
 			h.buf = append(h.buf[:0], h.buf[qEnd:]...)
 			continue
 		}
@@ -217,11 +224,14 @@ func (h *harness) feed(chunk []byte) {
 	}
 }
 
+// writeVT feeds the terminal under test and the report VT the same bytes, so
+// the report VT's cursor and grid stay where the tested terminal's are.
 func (h *harness) writeVT(b []byte) {
 	if len(b) == 0 {
 		return
 	}
 	_, _ = h.vt.Write(b)
+	h.reports.Write(b)
 }
 
 func (h *harness) reply(s, name string) {
