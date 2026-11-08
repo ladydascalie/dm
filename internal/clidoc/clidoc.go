@@ -322,6 +322,13 @@ var cliCommands = []cliCommand{
 		flags:   []cliFlag{{"o", "path", "write the document to this path"}},
 		group:   groupDocs,
 	},
+	{
+		name:    "html",
+		args:    "[-o path]",
+		summary: "print this page as HTML, or write it to a file",
+		flags:   []cliFlag{{"o", "path", "write the page to this path"}},
+		group:   groupDocs,
+	},
 }
 
 // usageHeader is the first line of the help text.
