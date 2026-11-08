@@ -57,11 +57,11 @@ var diffCorpus = []diffCase{
 	{"tabs", 20, 2, []string{"a\tb\x1b[1;5H\x1bH\x1b[1;1H\tc"}},
 	{"cht-cbt", 20, 2, []string{"\x1b[Ix\x1b[Z"}},
 	{"tbc", 20, 2, []string{"\x1b[1;9H\x1b[g\x1b[1;1H\tx"}},
+	{"altscreen", 10, 1, []string{"\x1b[?1049hX"}},
 
 	// Sequences the new VT does not implement yet. Their differences are
 	// declared below.
 	{"sgr-unimplemented", 10, 1, []string{"\x1b[1;31mX"}},
-	{"altscreen-unimplemented", 10, 1, []string{"\x1b[?1049hX"}},
 	{"charset-unimplemented", 10, 1, []string{"\x1b(0q"}},
 }
 
@@ -73,12 +73,6 @@ var declaredDiffs = []diffEntry{
 		Old: "X|fg=9 bg=d ul=none at=b",
 		Reason: "SGR is not implemented yet. vt10x sets bold and red, and its " +
 			"bold brightens palette index 1 to 9.",
-	},
-	{
-		Case: "altscreen-unimplemented", Field: "mode.altscreen", X: -1, Y: -1,
-		New: "off", Old: "on",
-		Reason: "DECSET and DECRST are not implemented yet, so the new VT " +
-			"stays on the primary screen.",
 	},
 	{
 		Case: "charset-unimplemented", Field: "cell", X: 0, Y: 0,

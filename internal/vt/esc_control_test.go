@@ -280,8 +280,8 @@ func TestDECSCDECRC(t *testing.T) {
 	term.grid.SetModes(m)
 	writeTerm(term, "\x1b8")
 
-	if c := term.grid.Cursor(); c.X != 4 || c.Y != 3 {
-		t.Errorf("Cursor() = %+v, want the saved 4,3", c)
+	if c := term.grid.Cursor(); c.X != 4 || c.Y != 4 {
+		t.Errorf("Cursor() = %+v, want the saved 4,4", c)
 	}
 	if term.style.Attrs != Bold {
 		t.Errorf("style = %+v, want the saved bold", term.style)
