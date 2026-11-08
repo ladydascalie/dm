@@ -2,14 +2,13 @@ package pane
 
 import (
 	"bytes"
+	"dm/internal/vt"
 	"dm/internal/wire"
 	"fmt"
 	"net"
 	"runtime"
 	"testing"
 	"time"
-
-	"github.com/hinshun/vt10x"
 )
 
 // memBound is what a pane may keep after a burst: the fixed ring, one screen
@@ -113,7 +112,7 @@ func TestReplayAfterWrap(t *testing.T) {
 
 	p := &paneProc{
 		id:   "w1p1",
-		vt:   vt10x.New(vt10x.WithSize(80, 24)),
+		vt:   vt.NewTerm(80, 24),
 		ring: r,
 		subs: map[*subConn]bool{},
 		st:   wire.Status{State: "unknown"},
@@ -152,12 +151,12 @@ func TestPaneHeapAfterBurst(t *testing.T) {
 
 	p := &paneProc{
 		id:   "w1p1",
-		vt:   vt10x.New(vt10x.WithSize(80, 24)),
+		vt:   vt.NewTerm(80, 24),
 		ring: &scrollRing{},
 		st:   wire.Status{State: "unknown"},
 	}
 	writeChunks(burst, func(b []byte) {
-		_, _ = p.vt.Write(b)
+		p.vt.Write(b)
 		p.ring.Write(b)
 	})
 

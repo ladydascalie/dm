@@ -10,6 +10,7 @@ import (
 	"io"
 
 	"dm/internal/layout"
+	"dm/internal/vt"
 )
 
 // Msg is the single envelope for every dm socket, in both directions.
@@ -34,6 +35,10 @@ type Msg struct {
 
 	Keys []byte `json:"keys,omitempty"`
 	Data []byte `json:"data,omitempty"`
+	// VTSnap is a pane's visible terminal state. It travels beside Data:
+	// Data stays the replay action's raw ring, while a screen reply carries
+	// the snapshot. The server passes it through untouched.
+	VTSnap *vt.Snapshot `json:"vtsnap,omitempty"`
 
 	OK    bool      `json:"ok,omitempty"`
 	Error string    `json:"error,omitempty"`
