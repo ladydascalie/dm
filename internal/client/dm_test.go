@@ -301,7 +301,7 @@ func TestRailGlyphPerState(t *testing.T) {
 	}
 	seen := map[theme.RGB]string{}
 	for _, c := range cases {
-		g, colour := rail.RailGlyph(theme.DefaultTheme(), c.status, false)
+		g, colour := rail.RailGlyph(theme.DefaultTheme(), c.status, theme.GlyphUnicode)
 		if g != c.glyph || colour != c.colour {
 			t.Fatalf("rail.RailGlyph(theme.DefaultTheme(), %q) = %q/%v, want %q/%v", c.status, g, colour, c.glyph, c.colour)
 		}
@@ -311,7 +311,7 @@ func TestRailGlyphPerState(t *testing.T) {
 		seen[colour] = c.glyph
 
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(c.status))
+		rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(c.status), theme.GlyphUnicode)
 		out := b.String()
 		if !strings.Contains(out, c.glyph) || !strings.Contains(out, colour.FG()) {
 			t.Fatalf("status %q not drawn as %q in %q: %q", c.status, c.glyph, colour.FG(), out)
@@ -335,8 +335,8 @@ func TestRailContrast(t *testing.T) {
 	for _, status := range []string{
 		"working", "idle", "blocked", "done", "error", "unknown", "",
 	} {
-		fallback, colour := rail.RailGlyph(theme.DefaultTheme(), status, false)
-		_, nerdColour := rail.RailGlyph(theme.DefaultTheme(), status, true)
+		fallback, colour := rail.RailGlyph(theme.DefaultTheme(), status, theme.GlyphUnicode)
+		_, nerdColour := rail.RailGlyph(theme.DefaultTheme(), status, theme.GlyphNerd)
 		if fallback == "" || nerdColour != colour {
 			t.Fatalf("state %q differs between glyph forms", status)
 		}
@@ -389,7 +389,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	for _, status := range []string{"", "unknown"} {
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 20, 40, 6))
+		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 20, 40, 6), theme.GlyphUnicode)
 		vt := vt.NewTerm(40, 6)
 		vt.Write(b.Bytes())
 		vt.Flush()
@@ -402,7 +402,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 
 	// An agent that has not reported yet still asks with the question mark.
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(""))
+	rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(""), theme.GlyphUnicode)
 	vt := vt.NewTerm(40, 6)
 	vt.Write(b.Bytes())
 	vt.Flush()
@@ -420,7 +420,7 @@ func TestRailAgentMarker(t *testing.T) {
 	agent.All[0].Agent = true
 	agent.All[0].App = "pi"
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), agent)
+	rail.DrawRail(&b, theme.DefaultTheme(), agent, theme.GlyphUnicode)
 	out := b.String()
 	if !strings.Contains(out, "\u258e") {
 		t.Fatalf("agent row has no marker: %q", out)
@@ -431,7 +431,7 @@ func TestRailAgentMarker(t *testing.T) {
 
 	shell := testutil.RailOnePane("unknown", "", 20, 40, 6)
 	b.Reset()
-	rail.DrawRail(&b, theme.DefaultTheme(), shell)
+	rail.DrawRail(&b, theme.DefaultTheme(), shell, theme.GlyphUnicode)
 	out = b.String()
 	if strings.Contains(out, "\u258e") {
 		t.Fatalf("shell row has the agent marker: %q", out)
@@ -444,7 +444,7 @@ func TestRailAgentMarker(t *testing.T) {
 	thin := testutil.RailOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	thin.All[0].Agent = true
 	b.Reset()
-	rail.DrawRail(&b, theme.DefaultTheme(), thin)
+	rail.DrawRail(&b, theme.DefaultTheme(), thin, theme.GlyphUnicode)
 	vt := vt.NewTerm(40, 6)
 	vt.Write(b.Bytes())
 	vt.Flush()
@@ -552,7 +552,7 @@ func TestRailFold(t *testing.T) {
 		t.Fatalf("folded workspace row = %+v", items[0])
 	}
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	if strings.Contains(b.String(), "alpha") {
 		t.Fatalf("folded rail drew a pane: %q", b.String())
 	}
@@ -606,7 +606,7 @@ func railTree(rail int) *wire.Snapshot {
 func railRows(t *testing.T, snap *wire.Snapshot) []string {
 	t.Helper()
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	vt := vt.NewTerm(snap.Cols, snap.Rows)
 	vt.Write(b.Bytes())
 	vt.Flush()
@@ -641,7 +641,7 @@ func TestRailWorkspaceAccent(t *testing.T) {
 		t.Fatalf("workspace accents = %v, want two distinct hues", want)
 	}
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	for ws, accent := range want {
 		if !strings.Contains(out, accent.FG()+"▾") {
@@ -700,7 +700,7 @@ func TestRailAccentDistinct(t *testing.T) {
 	}
 	// rail.DrawRail paints the carried accent, not a fresh hash.
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	for ws, accent := range want {
 		if !strings.Contains(out, accent.FG()+"▾") {
@@ -773,7 +773,7 @@ func TestRailCollapsed(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := testutil.RailOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	if !strings.Contains(out, "●") {
 		t.Fatalf("thin rail has no state glyph: %q", out)
@@ -826,7 +826,7 @@ func TestRailNeverWritesPastWidth(t *testing.T) {
 			snap.All[0].WorkspaceName = strings.Repeat("全角見出し", 6)
 		}
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), snap)
+		rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 		vt := vt.NewTerm(20, 6)
 		vt.Write(b.Bytes())
 		vt.Flush()
@@ -857,7 +857,7 @@ func TestBarNeverWritesPastWidth(t *testing.T) {
 		}},
 	}
 	var b bytes.Buffer
-	drawBar(&b, theme.DefaultTheme(), snap, false, "")
+	drawBar(&b, theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 	vt := vt.NewTerm(20, 5)
 	vt.Write(b.Bytes())
 	vt.Flush()
@@ -918,8 +918,8 @@ func barElideStage(segs []segment.Seg) string {
 // single gutter cell between segments, with the pinned right block last.
 func TestBarSegmentOrder(t *testing.T) {
 	snap := testutil.BarTestSnap(80)
-	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "idle", rail.NerdFonts())
-	segs := barSegments(theme.DefaultTheme(), snap, true, "READY")
+	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "idle", theme.GlyphNerd)
+	segs := barSegments(theme.DefaultTheme(), snap, true, "READY", theme.GlyphNerd)
 
 	// Groups, in paint order: session, workspace, one chip per window in index
 	// order, the focus chip, then the pinned block.
@@ -1024,7 +1024,7 @@ func TestBarSegmentOrder(t *testing.T) {
 // TestBarElide walks the elision ladder: each width stops at the rung it needs
 // and never paints past the column count.
 func TestBarElide(t *testing.T) {
-	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "idle", rail.NerdFonts())
+	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "idle", theme.GlyphNerd)
 	cases := []struct {
 		cols int
 		want string
@@ -1053,7 +1053,7 @@ func TestBarElide(t *testing.T) {
 		{16, "name", nil},
 	}
 	for _, c := range cases {
-		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(c.cols), false, "")
+		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(c.cols), false, "", theme.GlyphNerd)
 		if got := segment.SegCells(segs); got > c.cols {
 			t.Fatalf("cols %d: spans paint %d cells: %q", c.cols, got, testutil.BarTexts(segs))
 		}
@@ -1070,7 +1070,7 @@ func TestBarElide(t *testing.T) {
 
 	// The active window chip survives every width that keeps a chip at all.
 	for _, cols := range []int{60, 45, 40, 33, 30, 25, 22, 18, 16, 12} {
-		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(cols), false, "")
+		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(cols), false, "", theme.GlyphNerd)
 		if segment.SegCells(segs) > cols {
 			t.Fatalf("cols %d: spans paint %d cells", cols, segment.SegCells(segs))
 		}
@@ -1090,11 +1090,11 @@ func TestBarElide(t *testing.T) {
 
 	// A zero or negative width paints nothing.
 	for _, cols := range []int{0, -5} {
-		if segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(cols), true, "READY"); len(segs) != 0 {
+		if segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(cols), true, "READY", theme.GlyphNerd); len(segs) != 0 {
 			t.Fatalf("cols %d: spans = %q, want none", cols, testutil.BarTexts(segs))
 		}
 	}
-	if segs := barSegments(theme.DefaultTheme(), nil, false, ""); len(segs) != 0 {
+	if segs := barSegments(theme.DefaultTheme(), nil, false, "", theme.GlyphNerd); len(segs) != 0 {
 		t.Fatalf("nil snapshot: spans = %q, want none", testutil.BarTexts(segs))
 	}
 }
@@ -1115,7 +1115,7 @@ func TestBarPinned(t *testing.T) {
 	}
 	info := "12 rows above, 4 hidden"
 
-	segs := barSegments(theme.DefaultTheme(), snap, true, info)
+	segs := barSegments(theme.DefaultTheme(), snap, true, info, theme.GlyphNerd)
 	var pinned []segment.Seg
 	for _, s := range segs {
 		if s.Pin {
@@ -1136,7 +1136,7 @@ func TestBarPinned(t *testing.T) {
 	// 20 columns hold the info alone: PREFIX goes whole, never the left block's
 	// room, and the left block gives way first.
 	snap.Cols = 20
-	segs = barSegments(theme.DefaultTheme(), snap, true, info)
+	segs = barSegments(theme.DefaultTheme(), snap, true, info, theme.GlyphNerd)
 	if len(segs) != 1 || !segs[0].Pin {
 		t.Fatalf("20 cols: spans = %q, want the pinned info alone", testutil.BarTexts(segs))
 	}
@@ -1152,7 +1152,7 @@ func TestBarPinned(t *testing.T) {
 
 	// An unarmed bar carries no PREFIX at all.
 	snap.Cols = 80
-	segs = barSegments(theme.DefaultTheme(), snap, false, info)
+	segs = barSegments(theme.DefaultTheme(), snap, false, info, theme.GlyphNerd)
 	for _, s := range segs {
 		if s.Pin && s.Text == "PREFIX " {
 			t.Fatalf("unarmed bar painted PREFIX: %q", testutil.BarTexts(segs))
@@ -1175,7 +1175,7 @@ func TestBarPinnedGutter(t *testing.T) {
 		{20, true, "12 rows above"},     // info alone: no PREFIX, no left room
 	}
 	for _, c := range cases {
-		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(c.cols), c.armed, c.info)
+		segs := barSegments(theme.DefaultTheme(), testutil.BarTestSnap(c.cols), c.armed, c.info, theme.GlyphNerd)
 		leftCells, rightCells, pinned := 0, 0, false
 		for _, s := range segs {
 			if s.Pin {
@@ -1207,7 +1207,7 @@ func TestBarPinnedAnchored(t *testing.T) {
 	info := "SCROLL w1p2 +1/9"
 	for _, cols := range []int{60, 50, 34} {
 		snap := testutil.BarTestSnap(cols)
-		segs := barSegments(theme.DefaultTheme(), snap, true, info)
+		segs := barSegments(theme.DefaultTheme(), snap, true, info, theme.GlyphNerd)
 		var pinnedText, leftText string
 		for _, s := range segs {
 			if s.Pin {
@@ -1222,7 +1222,7 @@ func TestBarPinnedAnchored(t *testing.T) {
 		start := cols - cells.Cells(pinnedText)
 
 		var b bytes.Buffer
-		drawBar(&b, theme.DefaultTheme(), snap, true, info)
+		drawBar(&b, theme.DefaultTheme(), snap, true, info, theme.GlyphNerd)
 		term := vt.NewTerm(cols, snap.Rows)
 		term.Write(b.Bytes())
 		term.Flush()
@@ -1253,7 +1253,7 @@ func TestBarPinnedAnchored(t *testing.T) {
 
 // TestBarWideRunes keeps wide runes whole and inside the column count.
 func TestBarWideRunes(t *testing.T) {
-	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", rail.NerdFonts())
+	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", theme.GlyphNerd)
 	sources := []string{
 		"日本語セッション", "作業ディレクトリ", "▸ ", "1 一二三",
 		"2 四五六", " w1p1", " 日本語", " working", glyph,
@@ -1270,7 +1270,7 @@ func TestBarWideRunes(t *testing.T) {
 	}
 	for _, cols := range []int{80, 41, 40, 21, 8, 3, 1} {
 		snap.Cols = cols
-		segs := barSegments(theme.DefaultTheme(), snap, false, "")
+		segs := barSegments(theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 		if got := segment.SegCells(segs); got > cols {
 			t.Fatalf("cols %d: spans paint %d cells", cols, got)
 		}
@@ -1301,7 +1301,7 @@ func TestBarWideRunes(t *testing.T) {
 // TestBarFocusChip reads the focus chip from the focused pane: an agent shows
 // its state glyph and colour on the focus fill, a shell shows the prompt marker.
 func TestBarFocusChip(t *testing.T) {
-	nerd := rail.NerdFonts()
+	nerd := theme.GlyphNerd
 	snap := &wire.Snapshot{
 		Session: "s",
 		Focus:   "w1p1",
@@ -1311,7 +1311,7 @@ func TestBarFocusChip(t *testing.T) {
 		Rows:    24,
 	}
 	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "blocked", nerd)
-	segs := barSegments(theme.DefaultTheme(), snap, false, "")
+	segs := barSegments(theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 	if len(segs) < 4 {
 		t.Fatalf("spans = %q, want the focus chip", testutil.BarTexts(segs))
 	}
@@ -1333,7 +1333,7 @@ func TestBarFocusChip(t *testing.T) {
 	}
 	// The painted bar carries the same glyph in that colour on the focus fill.
 	var b bytes.Buffer
-	drawBar(&b, theme.DefaultTheme(), snap, false, "")
+	drawBar(&b, theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 	out := b.String()
 	if !strings.Contains(out, colour.FG()+glyph) {
 		t.Fatalf("bar does not paint %q in %v: %q", glyph, colour, out)
@@ -1346,7 +1346,7 @@ func TestBarFocusChip(t *testing.T) {
 	// empty status reads as unknown.
 	snap.Panes[0] = wire.PaneInfo{ID: "w1p1", Name: "bash"}
 	snap.All[0] = wire.AllPane{ID: "w1p1", Agent: false}
-	segs = barSegments(theme.DefaultTheme(), snap, false, "")
+	segs = barSegments(theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 	if len(segs) < 4 {
 		t.Fatalf("spans = %q, want the focus chip", testutil.BarTexts(segs))
 	}
@@ -2242,7 +2242,7 @@ func TestBarPadsToWidth(t *testing.T) {
 	term.Write([]byte(fmt.Sprintf("\x1b[%d;1H%s", snap.Rows, strings.Repeat("X", snap.Cols))))
 	term.Flush()
 	var b bytes.Buffer
-	drawBar(&b, theme.DefaultTheme(), snap, false, "")
+	drawBar(&b, theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 	term.Write(b.Bytes())
 	term.Flush()
 	ground := vt.RGBColor(uint8(theme.DefaultTheme().Palette.RailBG.R), uint8(theme.DefaultTheme().Palette.RailBG.G), uint8(theme.DefaultTheme().Palette.RailBG.B))
@@ -2266,16 +2266,16 @@ func TestBarPadsToWidth(t *testing.T) {
 // TestBarUnarmed paints no prefix flag.
 func TestBarUnarmed(t *testing.T) {
 	snap := testutil.BarTestSnap(80)
-	if out := testutil.BarTexts(barSegments(theme.DefaultTheme(), snap, false, "12 rows above")); strings.Contains(strings.Join(out, ""), "PREFIX") {
+	if out := testutil.BarTexts(barSegments(theme.DefaultTheme(), snap, false, "12 rows above", theme.GlyphNerd)); strings.Contains(strings.Join(out, ""), "PREFIX") {
 		t.Fatalf("unarmed spans carry PREFIX: %q", out)
 	}
 	var b bytes.Buffer
-	drawBar(&b, theme.DefaultTheme(), snap, false, "")
+	drawBar(&b, theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
 	if strings.Contains(b.String(), "PREFIX") {
 		t.Fatalf("unarmed bar paints PREFIX: %q", b.String())
 	}
 	b.Reset()
-	drawBar(&b, theme.DefaultTheme(), snap, true, "")
+	drawBar(&b, theme.DefaultTheme(), snap, true, "", theme.GlyphNerd)
 	if !strings.Contains(b.String(), "PREFIX") {
 		t.Fatalf("armed bar has no PREFIX: %q", b.String())
 	}
@@ -2293,8 +2293,8 @@ func TestBarContrast(t *testing.T) {
 	for _, status := range []string{
 		"working", "idle", "blocked", "done", "error", "unknown", "",
 	} {
-		fallback, colour := rail.RailGlyph(theme.DefaultTheme(), status, false)
-		_, nerdColour := rail.RailGlyph(theme.DefaultTheme(), status, true)
+		fallback, colour := rail.RailGlyph(theme.DefaultTheme(), status, theme.GlyphUnicode)
+		_, nerdColour := rail.RailGlyph(theme.DefaultTheme(), status, theme.GlyphNerd)
 		if fallback == "" || nerdColour != colour {
 			t.Fatalf("state %q differs between glyph forms", status)
 		}
@@ -3196,12 +3196,12 @@ func TestZoomBarMark(t *testing.T) {
 		return false
 	}
 
-	plain := chipTexts(barLeftFor(theme.DefaultTheme(), f.snap))
+	plain := chipTexts(barLeftFor(theme.DefaultTheme(), f.snap, theme.GlyphNerd))
 	if has(plain, " Z") {
 		t.Fatalf("an unzoomed chip carries the mark: %q", plain)
 	}
 	f.snap.Zoom = "b"
-	zoomed := chipTexts(barLeftFor(theme.DefaultTheme(), f.snap))
+	zoomed := chipTexts(barLeftFor(theme.DefaultTheme(), f.snap, theme.GlyphNerd))
 	if !has(zoomed, " Z") {
 		t.Fatalf("the zoomed chip carries no mark: %q", zoomed)
 	}
@@ -3219,11 +3219,11 @@ func TestZoomBarMark(t *testing.T) {
 
 	// Walk the ladder. The status word goes first, then the mark, then the
 	// name; the mark never shows without the id.
-	l := barLeftFor(theme.DefaultTheme(), f.snap)
+	l := barLeftFor(theme.DefaultTheme(), f.snap, theme.GlyphNerd)
 	full := segment.SegCells(segment.Join(l.groups(theme.DefaultTheme()), segment.Seg{Text: " "}))
 	sawNameWithoutMark := false
 	for budget := 1; budget <= full; budget++ {
-		segs := barLeftFor(theme.DefaultTheme(), f.snap).fit(theme.DefaultTheme(), budget)
+		segs := barLeftFor(theme.DefaultTheme(), f.snap, theme.GlyphNerd).fit(theme.DefaultTheme(), budget)
 		var got []string
 		for _, s := range segs {
 			if s.BG == theme.DefaultTheme().Palette.RailFocusBG {

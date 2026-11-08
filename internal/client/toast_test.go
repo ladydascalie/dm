@@ -150,18 +150,18 @@ func TestBarDropsToastSuffix(t *testing.T) {
 		Panes: []wire.PaneInfo{{ID: "w1p1", Status: "working"}},
 	}
 	info := "SCROLL w1p1 +1/9"
-	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", rail.NerdFonts())
+	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", theme.GlyphNerd)
 	want := []string{
 		"main", " ", "main", " ", "▸ ", "1 1", " ", glyph,
 		" w1p1", " working", info,
 	}
-	got := testutil.BarTexts(barSegments(theme.DefaultTheme(), snap, false, info))
+	got := testutil.BarTexts(barSegments(theme.DefaultTheme(), snap, false, info, theme.GlyphNerd))
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("bar spans = %q, want %q", got, want)
 	}
 
 	var b bytes.Buffer
-	drawBar(&b, theme.DefaultTheme(), snap, false, info)
+	drawBar(&b, theme.DefaultTheme(), snap, false, info, theme.GlyphNerd)
 	out := b.String()
 	if !strings.Contains(out, info) {
 		t.Fatalf("bar lost its scroll segment: %q", out)

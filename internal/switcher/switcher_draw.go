@@ -139,7 +139,7 @@ func ClampRect(r layout.Rect, cols, rows int) layout.Rect {
 // the float owns is painted, blanks included, and every row starts with an
 // absolute cursor move so bandRows can address it. Nothing is written outside
 // the rect and the screen is never cleared.
-func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Snapshot, vts map[string]*vt.Term, paint PanePainter) (cx, cy int) {
+func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Snapshot, vts map[string]*vt.Term, paint PanePainter, set theme.GlyphSet) (cx, cy int) {
 	if buf == nil || s == nil || snap == nil || snap.Cols < 1 || snap.Rows < 1 {
 		return 0, 0
 	}
@@ -149,7 +149,7 @@ func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Sna
 	}
 	panel.PaintPanel(buf, th, l.inner, panel.PanelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
 		cx, cy = paintSwitcherQuery(b, th, s, l)
-		paintSwitcherBands(b, th, s, vts, l, paint)
+		paintSwitcherBands(b, th, s, vts, l, paint, set)
 	})
 	// The title wears the rail ground, which the panel's label style cannot
 	// express, so the switcher paints it on the border row itself.
@@ -217,20 +217,19 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 // paintSwitcherBands paints the rows under the query line: the rail tree on the
 // left and, when the float is wide enough, the selected pane's screen on the
 // right.
-func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, l switcherLayout, paint PanePainter) {
+func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, l switcherLayout, paint PanePainter, set theme.GlyphSet) {
 	if l.bandH <= 0 {
 		return
 	}
 	p := th.Palette
 	scrollSwitcher(s, l.bandH)
-	nerd := rail.NerdFonts()
 	for i := 0; i < l.bandH; i++ {
 		y := l.bandY + i
 		idx := s.top + i
 		var left, right, tail []segment.Seg
 		bg, bold := p.RailBG, false
 		if idx >= 0 && idx < len(s.rows) {
-			left, right, tail = rail.RailRow(th, s.tree[s.rows[idx]], l.listW, false, nerd)
+			left, right, tail = rail.RailRow(th, s.tree[s.rows[idx]], l.listW, false, set)
 			if idx == s.sel {
 				bg, bold = p.RailFocusBG, true
 			}

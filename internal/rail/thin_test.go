@@ -33,7 +33,7 @@ func thinSnapshot(panes []wire.AllPane) *wire.Snapshot {
 func thinScreen(t *testing.T, snap *wire.Snapshot) *vt.Term {
 	t.Helper()
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()

@@ -48,11 +48,11 @@ func drawMenu(buf *bytes.Buffer, th theme.Theme, m *menu) {
 // pinned block is anchored to the last column and the gutter fills the gap, so
 // the whole row is written and no cell of the previous frame shows through.
 // drawBar writes at most snap.Cols cells and never touches another row.
-func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool, info string) {
+func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool, info string, set theme.GlyphSet) {
 	if snap == nil || snap.Rows < 1 || snap.Cols < 1 {
 		return
 	}
-	segs := barSegments(th, snap, armed, info)
+	segs := barSegments(th, snap, armed, info, set)
 	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
 	for _, s := range left {
@@ -114,7 +114,7 @@ type barLeft struct {
 // barFocus builds the focus chip from the focused pane. An agent reports a
 // state, so it takes that state's glyph and colour; a shell gets the prompt
 // marker in dim text. A pane the snapshot does not list gets no chip.
-func barFocus(th theme.Theme, snap *wire.Snapshot) *barFocusChip {
+func barFocus(th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) *barFocusChip {
 	var p wire.PaneInfo
 	found := false
 	for _, cand := range snap.Panes {
@@ -139,10 +139,10 @@ func barFocus(th theme.Theme, snap *wire.Snapshot) *barFocusChip {
 			break
 		}
 	}
-	shell := rail.StateStyle(th, "shell")
+	shell := rail.StateStyle(th, "shell").For(set)
 	glyph, colour := shell.Glyph, shell.Colour
 	if agent {
-		glyph, colour = rail.RailGlyph(th, status, rail.NerdFonts())
+		glyph, colour = rail.RailGlyph(th, status, set)
 	}
 	return &barFocusChip{
 		glyph: glyph, colour: colour,
@@ -151,7 +151,7 @@ func barFocus(th theme.Theme, snap *wire.Snapshot) *barFocusChip {
 }
 
 // barLeftFor reads the left block from a snapshot in its full, unelided form.
-func barLeftFor(th theme.Theme, snap *wire.Snapshot) *barLeft {
+func barLeftFor(th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) *barLeft {
 	l := &barLeft{
 		session:   snap.Session,
 		workspace: snap.Workspace,
@@ -163,7 +163,7 @@ func barLeftFor(th theme.Theme, snap *wire.Snapshot) *barLeft {
 	for i, w := range snap.Windows {
 		l.windows = append(l.windows, barWindow{num: i + 1, name: wlabel.Render(snap.WindowLabel, rail.WindowVars(snap, w)), active: i == snap.ActiveWindow})
 	}
-	l.focus = barFocus(th, snap)
+	l.focus = barFocus(th, snap, set)
 	return l
 }
 
@@ -326,7 +326,7 @@ func barFitPinned(segs []segment.Seg, cols int) []segment.Seg {
 // pinned block leaves, minus one gutter cell, so the blocks never touch and the
 // line never runs past snap.Cols cells. The pinned block is never dropped to
 // make room for the left one.
-func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string) []segment.Seg {
+func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, set theme.GlyphSet) []segment.Seg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}
@@ -340,6 +340,6 @@ func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string) [
 	if budget < 0 {
 		budget = 0
 	}
-	left := barLeftFor(th, snap).fit(th, budget)
+	left := barLeftFor(th, snap, set).fit(th, budget)
 	return append(left, right...)
 }

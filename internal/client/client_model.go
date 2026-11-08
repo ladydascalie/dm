@@ -15,6 +15,7 @@ import (
 	"dm/internal/keymapview"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/rail"
 	"dm/internal/switcher"
 	"dm/internal/theme"
 	"dm/internal/transport"
@@ -64,6 +65,9 @@ type tui struct {
 	// lastByte is when each pane last received output, so a quiet pane's
 	// pending cluster can be placed without waiting for the next chunk.
 	lastByte map[string]time.Time
+	// glyphs is the resolved glyph set. The zero value is auto, so a test TUI
+	// resolves it on first use.
+	glyphs theme.GlyphSet
 	// floats are arbitrary floating panes rendered over the main layout.
 	floats []*panel.FloatingPane
 	// hover is the URL under the pointer while ctrl is held, so the frame can
@@ -203,9 +207,9 @@ func (t *tui) km() *keymap.Config {
 // the built-in theme.
 func (t *tui) theme() theme.Theme {
 	if t == nil || t.th == nil {
-		return theme.DefaultTheme()
+		return theme.DefaultTheme().For(t.glyphSet())
 	}
-	return *t.th
+	return t.th.For(t.glyphSet())
 }
 
 // paint is the bytes one band of the screen painted last frame and, for an
@@ -401,6 +405,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 	// built-in defaults carry the session.
 	cfg, err := keymap.LoadDefaultPath(true)
 	t.keymap = cfg
+	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())
 	th := cfg.Theme()
 	t.th = &th
 	if err != nil {
@@ -660,6 +665,15 @@ func applySnapshot(vts map[string]*vt.Term, id string, r layout.Rect, snap *vt.S
 	}
 	vts[id] = term
 	return true
+}
+
+// glyphSet is the glyph vocabulary the chrome draws with, resolved once. Auto
+// picks Nerd Font glyphs when the font is present and Unicode otherwise.
+func (t *tui) glyphSet() theme.GlyphSet {
+	if t.glyphs == theme.GlyphAuto {
+		t.glyphs = rail.ResolveGlyphs(theme.GlyphAuto)
+	}
+	return t.glyphs
 }
 
 // noteBytes records when a pane last received output, so flushIdle can tell a

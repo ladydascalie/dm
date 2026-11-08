@@ -104,7 +104,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 
 ## Config
 
-`$XDG_CONFIG_HOME/dm/config.kdl` holds the prefix key, the keymaps, the theme name, `default-fold`, `tab-min-width`, `tab-max-width`, `window-label` and `padding`. `padding` is the blank cells between a pane's border and its content, 0 to 4, default 1. A pane too small for the padding drops it rather than going empty.
+`$XDG_CONFIG_HOME/dm/config.kdl` holds the prefix key, the keymaps, the theme name, `default-fold`, `tab-min-width`, `tab-max-width`, `window-label` and `padding`. `padding` is the blank cells between a pane's border and its content, 0 to 4, default 1. A pane too small for the padding drops it rather than going empty. `glyphs` is `auto`, `ascii`, `unicode` or `nerd`: auto picks Nerd Font glyphs when the font is present and Unicode otherwise, and ascii falls back to plain ASCII for every box, caret and mark.
 
 ## Recipes
 

@@ -35,7 +35,7 @@ func switcherAt(cols, rows int) (*Switcher, *wire.Snapshot) {
 func drawFloat(t *testing.T, s *Switcher, snap *wire.Snapshot, vts map[string]*vt.Term) (string, int, int, *vt.Term) {
 	t.Helper()
 	var b bytes.Buffer
-	cx, cy := DrawSwitcher(&b, theme.DefaultTheme(), s, snap, vts, testPanePainter)
+	cx, cy := DrawSwitcher(&b, theme.DefaultTheme(), s, snap, vts, testPanePainter, theme.GlyphNerd)
 	screen := vt.NewTerm(snap.Cols, snap.Rows)
 	screen.Write(b.Bytes())
 	screen.Flush()
@@ -278,7 +278,7 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	}
 	screen := vt.NewTerm(cols, rows)
 	var b bytes.Buffer
-	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter)
+	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter, theme.GlyphNerd)
 	screen.Write(b.Bytes())
 	screen.Flush()
 	if c := switcherCell(screen, l.prevX, l.bandY+l.bandH-1); c == " " || c == "" {
@@ -286,7 +286,7 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	}
 	b.Reset()
 	s.SetPreview(2, "w1p1")
-	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter)
+	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter, theme.GlyphNerd)
 	screen.Write(b.Bytes())
 	screen.Flush()
 	for y := l.bandY; y < l.bandY+l.bandH; y++ {

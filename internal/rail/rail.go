@@ -324,6 +324,19 @@ func NerdFonts() bool {
 	return nerdOn
 }
 
+// ResolveGlyphs turns an auto set into the set the terminal can show: Nerd
+// Font glyphs when the font is present, Unicode otherwise. Any other set is
+// returned as it is.
+func ResolveGlyphs(set theme.GlyphSet) theme.GlyphSet {
+	if set != theme.GlyphAuto {
+		return set
+	}
+	if NerdFonts() {
+		return theme.GlyphNerd
+	}
+	return theme.GlyphUnicode
+}
+
 // StateStyle returns the mark for a status. A status the theme does not name
 // falls back to the unknown style.
 func StateStyle(th theme.Theme, status string) theme.StateStyle {
@@ -342,26 +355,24 @@ func StateStyle(th theme.Theme, status string) theme.StateStyle {
 // glyph. The question mark marks an agent whose state has not arrived; DrawRail
 // leaves the cell blank for a shell, which reports no state. A theme's glyph
 // replaces both forms; an empty NerdGlyph keeps the Unicode glyph.
-func RailGlyph(th theme.Theme, status string, nerd bool) (glyph string, colour theme.RGB) {
-	style := StateStyle(th, status)
-	glyph = style.Glyph
-	if nerd && style.NerdGlyph != "" {
-		glyph = style.NerdGlyph
-	}
-	return glyph, style.Colour
+func RailGlyph(th theme.Theme, status string, set theme.GlyphSet) (glyph string, colour theme.RGB) {
+	style := StateStyle(th, status).For(set)
+	return style.Glyph, style.Colour
 }
 
 // RailMark is the two-cell prefix of a pane row: an agent icon, a shell icon,
 // or the fallback agent bar. The status glyph lands in column 3 either way.
 // Every icon here is from the Font Awesome 4 range that even old Nerd Font
 // patches carry; newer code points such as the FA5 robot render as tofu.
-func RailMark(agent, nerd bool) string {
+func RailMark(agent bool, set theme.GlyphSet) string {
 	switch {
-	case agent && nerd:
+	case agent && set == theme.GlyphNerd:
 		return "\uf135 "
+	case agent && set == theme.GlyphASCII:
+		return "a "
 	case agent:
 		return "\u258e "
-	case nerd:
+	case set == theme.GlyphNerd:
 		return "\uf120 "
 	default:
 		return "  "
@@ -380,7 +391,7 @@ func WriteRailSeg(buf *bytes.Buffer, s segment.Seg, ground theme.RGB, bold bool)
 
 // RailStats is the right-aligned git tail of a window line: an amber dot when
 // the tree is dirty, then the added and deleted line counts, or "clean".
-func RailStats(th theme.Theme, it RailItem) []segment.Seg {
+func RailStats(th theme.Theme, it RailItem, set theme.GlyphSet) []segment.Seg {
 	if !it.InRepo {
 		return nil
 	}
@@ -410,8 +421,8 @@ func RailStats(th theme.Theme, it RailItem) []segment.Seg {
 
 // RailRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
-// and yields first. compact and nerd are the rail's own switches.
-func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, right, tail []segment.Seg) {
+// and yields first. compact and set are the rail's own switches.
+func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSet) (left, right, tail []segment.Seg) {
 	p, g := th.Palette, th.Glyphs
 	switch it.Kind {
 	case Workspace:
@@ -424,12 +435,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 			if it.Folded {
 				caret = g.FoldClosed
 			}
-			if nerd {
-				caret = g.NerdFoldOpen
-				if it.Folded {
-					caret = g.NerdFoldClosed
-				}
-			}
+
 			left = []segment.Seg{
 				{Text: caret, FG: th.Accents[it.Accent]},
 				{Text: " ", FG: name},
@@ -447,12 +453,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 			if it.Folded {
 				caret = g.FoldClosed
 			}
-			if nerd {
-				caret = g.NerdFoldOpen
-				if it.Folded {
-					caret = g.NerdFoldClosed
-				}
-			}
+
 			// The label template names the window. A window with no rendered
 			// directory falls back to the window name.
 			label := it.Label
@@ -476,7 +477,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 					{Text: it.Branch, FG: p.RailDim},
 				}
 			}
-			right = RailStats(th, it)
+			right = RailStats(th, it, set)
 		}
 	case WindowNote:
 		if !compact {
@@ -491,13 +492,13 @@ func RailRow(th theme.Theme, it RailItem, w int, compact, nerd bool) (left, righ
 		if it.Focus {
 			base = p.RailText
 		}
-		mark, colour := RailGlyph(th, it.Status, nerd)
+		mark, colour := RailGlyph(th, it.Status, set)
 		// A shell has no state to report, so the fallback mark would be a
 		// question about nothing. Leave the cell blank instead.
 		if !it.Agent && (it.Status == "" || it.Status == "unknown") {
 			mark = " "
 		}
-		glyph := RailMark(it.Agent, nerd)
+		glyph := RailMark(it.Agent, set)
 		if compact {
 			left = []segment.Seg{
 				{Text: glyph, FG: colour},
@@ -668,10 +669,13 @@ func RailControlAt(snap *wire.Snapshot, x, y int) bool {
 // A rail wider than the thin one names the move and collapses. The thin rail
 // shows the expand caret in the state glyph's column and leaves the rest
 // blank, so a narrow rail loses no pane row to a label.
-func RailControlSegs(th theme.Theme, compact, nerd bool) []segment.Seg {
+func RailControlSegs(th theme.Theme, compact bool, set theme.GlyphSet) []segment.Seg {
 	if compact {
 		caret := "▶"
-		if nerd {
+		switch set {
+		case theme.GlyphASCII:
+			caret = ">"
+		case theme.GlyphNerd:
 			caret = "\uf0da"
 		}
 		return []segment.Seg{
@@ -680,7 +684,10 @@ func RailControlSegs(th theme.Theme, compact, nerd bool) []segment.Seg {
 		}
 	}
 	mark := "◀ "
-	if nerd {
+	switch set {
+	case theme.GlyphASCII:
+		mark = "< "
+	case theme.GlyphNerd:
 		mark = "\uf0d9 "
 	}
 	return []segment.Seg{
@@ -695,7 +702,7 @@ func RailControlSegs(th theme.Theme, compact, nerd bool) []segment.Seg {
 // last column above the control row is the grip strip, so no row paints there.
 // A left run is elided with an ellipsis before the right-aligned stats give up
 // a cell, so the stats survive a narrow rail.
-func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
+func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
@@ -703,7 +710,6 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 	w := snap.Rail
 	rows := snap.Rows - 1
 	items := RailItems(snap)
-	nerd := NerdFonts()
 	compact := layout.RailCompact(snap.Rail)
 	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
 	// in rows 0..Rows-3 and clip there. Nothing overwrites the control row.
@@ -719,13 +725,13 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 			rowW = w - 1
 		}
 		if y == controlAt {
-			left = RailControlSegs(th, compact, nerd)
+			left = RailControlSegs(th, compact, set)
 			if segment.SegCells(left) > rowW {
 				left = segment.ElideSegs(th, left, rowW)
 			}
 		} else if y < len(items) {
 			it := items[y]
-			left, right, tail = RailRow(th, it, rowW, compact, nerd)
+			left, right, tail = RailRow(th, it, rowW, compact, set)
 			// A focused pane row paints its own background and every run bold.
 			if it.Kind == Pane && it.Focus {
 				bg, bold = p.RailFocusBG, true

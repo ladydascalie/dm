@@ -9,6 +9,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/switcher"
 	"dm/internal/testutil"
+	"dm/internal/theme"
 	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -37,7 +38,9 @@ func newFrameTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 		WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 	}}
 	out := &bytes.Buffer{}
-	tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out}
+	// The glyph set is pinned so a golden does not depend on the machine's
+	// fonts.
+	tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out, glyphs: theme.GlyphNerd}
 	p := snap.Panes[0]
 	vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 	tui.vts[p.ID] = vt

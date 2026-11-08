@@ -81,15 +81,10 @@ func railRowFind(t *testing.T, items []RailItem, kind RailKind, text string) Rai
 // the row DrawRail paints, at the default width and at a narrow one, in both
 // glyph forms. No row writes past the rail width.
 func TestRailRowComposesPaint(t *testing.T) {
-	for _, nerd := range []bool{false, true} {
-		env := "0"
-		if nerd {
-			env = "1"
-		}
-		t.Setenv("DM_NERD", env)
+	for _, set := range []theme.GlyphSet{theme.GlyphUnicode, theme.GlyphNerd} {
 		for _, w := range []int{layout.DefaultRail, 12} {
 			snap := railRowSnap(w)
-			painted := railRows(t, snap)
+			painted := railRows(t, snap, set)
 			items := RailItems(snap)
 			compact := layout.RailCompact(w)
 			gripAt := (snap.Rows - 2) / 2
@@ -108,12 +103,12 @@ func TestRailRowComposesPaint(t *testing.T) {
 						want = strings.Repeat(" ", rowW) + theme.DefaultTheme().Glyphs.Grip
 					}
 					if line != want {
-						t.Fatalf("nerd=%v w=%d row %d past the last item = %q, want %q",
-							nerd, w, y, line, want)
+						t.Fatalf("set=%v w=%d row %d past the last item = %q, want %q",
+							set, w, y, line, want)
 					}
 					continue
 				}
-				left, right, tail := RailRow(theme.DefaultTheme(), items[y], rowW, compact, nerd)
+				left, right, tail := RailRow(theme.DefaultTheme().For(set), items[y], rowW, compact, set)
 				want := railRowComposed(left, tail, right, rowW)
 				if y == gripAt {
 					if pad := rowW - cells.Cells(want); pad > 0 {
@@ -122,12 +117,12 @@ func TestRailRowComposesPaint(t *testing.T) {
 					want += theme.DefaultTheme().Glyphs.Grip
 				}
 				if want != line {
-					t.Fatalf("nerd=%v w=%d row %d kind %d composes %q, rail paints %q",
-						nerd, w, y, items[y].Kind, want, line)
+					t.Fatalf("set=%v w=%d row %d kind %d composes %q, rail paints %q",
+						set, w, y, items[y].Kind, want, line)
 				}
 				if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > rowW {
-					t.Fatalf("nerd=%v w=%d row %d is %d cells, want <= %d",
-						nerd, w, y, n, rowW)
+					t.Fatalf("set=%v w=%d row %d is %d cells, want <= %d",
+						set, w, y, n, rowW)
 				}
 			}
 		}
@@ -142,7 +137,7 @@ func TestRailRowSegments(t *testing.T) {
 	items := RailItems(snap)
 
 	ws := railRowFind(t, items, Workspace, "main")
-	left, right, tail := RailRow(theme.DefaultTheme(), ws, layout.DefaultRail, false, false)
+	left, right, tail := RailRow(theme.DefaultTheme(), ws, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft := []railSeg{
 		{Text: "\u25be", FG: theme.DefaultTheme().Accents[ws.Accent]},
 		{Text: " ", FG: theme.DefaultTheme().Accents[ws.Accent]},
@@ -158,7 +153,7 @@ func TestRailRowSegments(t *testing.T) {
 	// An unfolded window line carries the caret, the folder, the branch tail
 	// and the stats.
 	win := railRowFind(t, items, Window, "one")
-	left, right, tail = RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
 		{Text: "  ", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: "\u25be", FG: theme.DefaultTheme().Palette.RailWindow},
@@ -185,7 +180,7 @@ func TestRailRowSegments(t *testing.T) {
 	// A folded window line flips the caret and keeps its folder. It has no
 	// branch and no stats outside a repo.
 	folded := railRowFind(t, items, Window, "two")
-	left, right, tail = RailRow(theme.DefaultTheme(), folded, layout.DefaultRail, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), folded, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
 		{Text: "  ", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: "\u25b8", FG: theme.DefaultTheme().Palette.RailWindow},
@@ -202,7 +197,7 @@ func TestRailRowSegments(t *testing.T) {
 
 	// The note line is one dim run under the window line.
 	note := railRowFind(t, items, WindowNote, "working hard")
-	left, right, tail = RailRow(theme.DefaultTheme(), note, layout.DefaultRail, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), note, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
 		{Text: "    ", FG: theme.DefaultTheme().Palette.RailDim},
 		{Text: "working hard", FG: theme.DefaultTheme().Palette.RailDim},
@@ -215,9 +210,9 @@ func TestRailRowSegments(t *testing.T) {
 	// A focused pane row puts its indents, marker, glyph and name on rail text,
 	// and carries no right-aligned run. The focus fill and the row's bold are
 	// the writer's, not the composition's.
-	mark, glyphColour := RailMark(true, false), theme.DefaultTheme().Palette.RailWorking
+	mark, glyphColour := RailMark(true, theme.GlyphUnicode), theme.DefaultTheme().Palette.RailWorking
 	pane := railRowFind(t, items, Pane, "pi")
-	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.DefaultRail, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
 		{Text: "      ", FG: theme.DefaultTheme().Palette.RailText},
 		{Text: mark, FG: glyphColour},
@@ -234,7 +229,7 @@ func TestRailRowSegments(t *testing.T) {
 	}
 
 	// The thin rail keeps the marker and the glyph and drops the indents.
-	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.CollapsedRail, true, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.CollapsedRail, true, theme.GlyphUnicode)
 	wantLeft = []railSeg{
 		{Text: mark, FG: glyphColour},
 		{Text: "\u25cf", FG: glyphColour},
@@ -246,7 +241,7 @@ func TestRailRowSegments(t *testing.T) {
 
 	// A gap row composes nothing at all.
 	gap := railRowFind(t, items, Gap, "")
-	left, right, tail = RailRow(theme.DefaultTheme(), gap, layout.DefaultRail, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), gap, layout.DefaultRail, false, theme.GlyphUnicode)
 	if left != nil || right != nil || tail != nil {
 		t.Fatalf("gap row = %+v / %+v / %+v, want nothing", left, right, tail)
 	}
@@ -255,7 +250,7 @@ func TestRailRowSegments(t *testing.T) {
 	// the focused pane row paints the focus fill bold, and every other row the
 	// rail fill plain.
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	focusRow := -1
 	for y := 0; y < snap.Rows-1; y++ {
@@ -290,7 +285,7 @@ func TestRailRowLevelsDiffer(t *testing.T) {
 	snap := railRowSnap(layout.DefaultRail)
 	items := RailItems(snap)
 	compose := func(it RailItem) string {
-		left, right, tail := RailRow(th, it, layout.DefaultRail, false, false)
+		left, right, tail := RailRow(th, it, layout.DefaultRail, false, theme.GlyphUnicode)
 		return railRowComposed(left, tail, right, layout.DefaultRail)
 	}
 	wsLine := compose(railRowFind(t, items, Workspace, "main"))
@@ -336,7 +331,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	}
 
 	// At the default width the branch fits beside the folder and the pair.
-	left, right, tail := RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, false)
+	left, right, tail := RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, theme.GlyphUnicode)
 	if tail == nil {
 		t.Fatalf("branch dropped at %d columns: %+v", layout.DefaultRail, left)
 	}
@@ -345,7 +340,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	}
 
 	// Twenty columns: the branch goes whole and the folder stays intact.
-	left, right, tail = RailRow(theme.DefaultTheme(), win, 20, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), win, 20, false, theme.GlyphUnicode)
 	if tail != nil {
 		t.Fatalf("branch survived at 20 columns: %+v", tail)
 	}
@@ -357,7 +352,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 	}
 
 	// Twelve columns: the folder elides and the pair still keeps every cell.
-	left, right, tail = RailRow(theme.DefaultTheme(), win, 12, false, false)
+	left, right, tail = RailRow(theme.DefaultTheme(), win, 12, false, theme.GlyphUnicode)
 	if tail != nil {
 		t.Fatalf("branch survived at 12 columns: %+v", tail)
 	}
@@ -383,7 +378,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 		it := railRowFind(t, RailItems(snap), Window, "one")
 		// The grip strip owns the rail's last column, so the row composes at w-1.
 		rowW := w - 1
-		left, right, tail = RailRow(theme.DefaultTheme(), it, rowW, layout.RailCompact(w), false)
+		left, right, tail = RailRow(theme.DefaultTheme(), it, rowW, layout.RailCompact(w), theme.GlyphUnicode)
 		if right != nil && !reflect.DeepEqual(right, full) {
 			t.Fatalf("stats at %d columns = %+v, want the whole pair or none", w, right)
 		}
@@ -391,7 +386,7 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 			t.Fatalf("row at %d columns is %d cells: %+v / %+v / %+v",
 				w, n, left, tail, right)
 		}
-		if got, line := railRowComposed(left, tail, right, rowW), railRows(t, snap)[1]; got != line {
+		if got, line := railRowComposed(left, tail, right, rowW), railRows(t, snap, theme.GlyphUnicode)[1]; got != line {
 			t.Fatalf("row at %d columns composes %q, rail paints %q", w, got, line)
 		}
 	}
@@ -402,10 +397,10 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 type railSeg = segment.Seg
 
 // railRows draws a rail and returns the text of each row inside the rail width.
-func railRows(t *testing.T, snap *wire.Snapshot) []string {
+func railRows(t *testing.T, snap *wire.Snapshot, set theme.GlyphSet) []string {
 	t.Helper()
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap)
+	DrawRail(&b, theme.DefaultTheme().For(set), snap, set)
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()
@@ -636,5 +631,19 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 	}
 	if got := RailFoldAt(snap, 0, paneIndex); got != "" {
 		t.Fatalf("RailFoldAt(0,%d) = %q on a pane row", paneIndex, got)
+	}
+}
+
+// TestRailASCIIGlyphs proves the ascii set reaches the rail: no glyph from the
+// Unicode set survives, so a terminal with no Unicode still draws the sidebar.
+func TestRailASCIIGlyphs(t *testing.T) {
+	snap := railRowSnap(layout.DefaultRail)
+	var b bytes.Buffer
+	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII)
+	out := b.String()
+	for _, glyph := range []string{"▾", "▸", "•", "·", "●", "○", "▲", "✓", "✕", "▶", "▌"} {
+		if strings.Contains(out, glyph) {
+			t.Fatalf("ascii rail carries %q", glyph)
+		}
 	}
 }

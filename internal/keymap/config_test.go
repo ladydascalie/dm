@@ -1109,3 +1109,31 @@ func TestConfigPadding(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigGlyphs proves the glyph set key: absent means auto, each spelling
+// maps to its set, and an unknown spelling fails.
+func TestConfigGlyphs(t *testing.T) {
+	if got := LoadDefault().GlyphSet(); got != theme.GlyphAuto {
+		t.Fatalf("LoadDefault().GlyphSet() = %v, want auto", got)
+	}
+	cases := map[string]theme.GlyphSet{
+		`glyphs "auto"`:    theme.GlyphAuto,
+		`glyphs "ascii"`:   theme.GlyphASCII,
+		`glyphs "unicode"`: theme.GlyphUnicode,
+		`glyphs "nerd"`:    theme.GlyphNerd,
+	}
+	for src, want := range cases {
+		cfg, err := parseConfig(src)
+		if err != nil {
+			t.Fatalf("parseConfig(%q): %v", src, err)
+		}
+		if got := cfg.GlyphSet(); got != want {
+			t.Fatalf("parseConfig(%q).GlyphSet() = %v, want %v", src, got, want)
+		}
+	}
+	for _, src := range []string{`glyphs "emoji"`, `glyphs nerd`, `glyphs "nerd"` + "\n" + `glyphs "ascii"`} {
+		if _, err := parseConfig(src); err == nil {
+			t.Fatalf("parseConfig(%q) accepted a bad glyph set", src)
+		}
+	}
+}

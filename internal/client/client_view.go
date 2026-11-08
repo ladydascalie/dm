@@ -47,12 +47,12 @@ func (t *tui) draw() {
 	// The rail grip paints the same heavy line as a split divider, over the
 	// strip its grab zone covers.
 	drawDivider(&div, th, t.padZone, t.padAxis)
-	rail.DrawRail(&railBuf, th, win)
+	rail.DrawRail(&railBuf, th, win, t.glyphSet())
 	DrawTabBar(&tabBar, th, win, tabWidthFor(t.km()))
-	drawBar(&bar, th, win, t.armed, t.barInfo())
+	drawBar(&bar, th, win, t.armed, t.barInfo(), t.glyphSet())
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
-		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.vts, paintPaneFrom)
+		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.vts, paintPaneFrom, t.glyphSet())
 		t.askPreview()
 	}
 	if t.armed {

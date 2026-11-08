@@ -64,7 +64,7 @@ func TestRailGripMark(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railRowSnap(20)
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	vt := vt.NewTerm(snap.Cols, snap.Rows)
 	vt.Write(b.Bytes())
 	vt.Flush()

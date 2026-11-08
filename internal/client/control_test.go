@@ -47,7 +47,7 @@ func ctlSnapshot(rail int) *wire.Snapshot {
 func ctlScreen(t *testing.T, snap *wire.Snapshot) *vt.Term {
 	t.Helper()
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()
@@ -311,7 +311,7 @@ func TestRailControlHidden(t *testing.T) {
 		t.Fatalf("row %d is not pane area for a hidden rail: %+v", row, area)
 	}
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	if b.Len() != 0 {
 		t.Fatalf("hidden rail drew %d bytes", b.Len())
 	}

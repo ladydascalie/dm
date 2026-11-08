@@ -53,6 +53,8 @@ type Config struct {
 	tabMax         int
 	padding        int
 	paddingSet     bool
+	glyphSet       theme.GlyphSet
+	glyphSetSet    bool
 	windowLabel    string
 	windowLabelSet bool
 }
@@ -115,6 +117,16 @@ func (c *Config) Padding() int {
 		return maxPadding
 	}
 	return c.padding
+}
+
+// GlyphSet returns the glyph vocabulary the chrome draws with. A config
+// without the node reports auto, which picks Nerd Font glyphs when the font is
+// present and Unicode otherwise.
+func (c *Config) GlyphSet() theme.GlyphSet {
+	if c == nil || !c.glyphSetSet {
+		return theme.GlyphAuto
+	}
+	return c.glyphSet
 }
 
 // WindowLabel returns the template the tab bar and the sidebar window row

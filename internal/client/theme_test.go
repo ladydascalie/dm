@@ -29,7 +29,7 @@ func TestThemeDefaultNerdGlyphs(t *testing.T) {
 		if got := theme.DefaultTheme().States[name].NerdGlyph; got != glyph {
 			t.Fatalf("state %q NerdGlyph = %q, want %q", name, got, glyph)
 		}
-		if got, _ := rail.RailGlyph(theme.DefaultTheme(), name, true); got != glyph {
+		if got, _ := rail.RailGlyph(theme.DefaultTheme(), name, theme.GlyphNerd); got != glyph {
 			t.Fatalf("rail.RailGlyph(theme.DefaultTheme(), %q, nerd) = %q, want %q", name, got, glyph)
 		}
 	}
@@ -56,12 +56,12 @@ func TestThemeReachesPainters(t *testing.T) {
 	th.States["working"] = theme.StateStyle{Glyph: "W", NerdGlyph: "W", Colour: theme.RGB{R: 22, G: 23, B: 24}}
 	// The palette reaches the rail ground and the bar accent.
 	var railBuf bytes.Buffer
-	rail.DrawRail(&railBuf, th, testutil.AgentRail("working"))
+	rail.DrawRail(&railBuf, th, testutil.AgentRail("working"), theme.GlyphUnicode)
 	if !strings.Contains(railBuf.String(), (theme.RGB{R: 1, G: 2, B: 3}).BG()) {
 		t.Fatalf("rail does not paint the themed ground: %q", railBuf.String())
 	}
 	accent := false
-	for _, span := range barSegments(th, testutil.BarTestSnap(80), false, "") {
+	for _, span := range barSegments(th, testutil.BarTestSnap(80), false, "", theme.GlyphNerd) {
 		if span.FG == (theme.RGB{R: 7, G: 8, B: 9}) {
 			accent = true
 		}
@@ -85,28 +85,28 @@ func TestThemeReachesPainters(t *testing.T) {
 	if !strings.Contains(grips.String(), "@") || strings.Contains(grips.String(), "•") {
 		t.Fatalf("grips = %q, want the themed @ only", grips.String())
 	}
-	if segs := rail.RailStats(th, rail.RailItem{Kind: rail.Window, InRepo: true, Dirty: true}); len(segs) == 0 || segs[0].Text != "o" {
+	if segs := rail.RailStats(th, rail.RailItem{Kind: rail.Window, InRepo: true, Dirty: true}, theme.GlyphUnicode); len(segs) == 0 || segs[0].Text != "o" {
 		t.Fatalf("dirty dot = %+v, want the themed o", segs)
 	}
 
 	// The states reach the glyph and the colour.
-	if g, colour := rail.RailGlyph(th, "working", false); g != "W" || colour != (theme.RGB{R: 22, G: 23, B: 24}) {
+	if g, colour := rail.RailGlyph(th, "working", theme.GlyphUnicode); g != "W" || colour != (theme.RGB{R: 22, G: 23, B: 24}) {
 		t.Fatalf("working = %q/%v, want W/22,23,24", g, colour)
 	}
 
 	// Nothing was installed: the built-in theme still paints its own values.
-	if g, _ := rail.RailGlyph(theme.DefaultTheme(), "working", false); g != "●" {
+	if g, _ := rail.RailGlyph(theme.DefaultTheme(), "working", theme.GlyphUnicode); g != "●" {
 		t.Fatalf("built-in working = %q, want the built-in glyph", g)
 	}
 }
 
 // TestTuiTheme proves a client with no loaded theme runs the built-in one, and a
-// loaded theme is the one its painters see.
-
-// TestTuiTheme proves a client with no loaded theme runs the built-in one, and a
-// loaded theme is the one its painters see.
+// loaded theme is the one its painters see. The theme a painter sees is resolved
+// for the glyph set, so the built-in theme is compared after the same
+// resolution.
 func TestTuiTheme(t *testing.T) {
-	if got := (&tui{}).theme(); !reflect.DeepEqual(got, theme.DefaultTheme()) {
+	c0 := &tui{}
+	if got, want := c0.theme(), theme.DefaultTheme().For(c0.glyphSet()); !reflect.DeepEqual(got, want) {
 		t.Fatalf("nil theme = %+v, want the built-in theme", got)
 	}
 	th := theme.DefaultTheme()
@@ -166,7 +166,7 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	th.States["working"] = theme.StateStyle{Glyph: "W", NerdGlyph: "W", Colour: theme.RGB{R: 1, G: 2, B: 3}}
 	items := rail.RailItems(testutil.AgentRail("working"))
 	pane := railRowFind(t, items, rail.Pane, "w1p1")
-	left, _, _ := rail.RailRow(th, pane, layout.DefaultRail, false, false)
+	left, _, _ := rail.RailRow(th, pane, layout.DefaultRail, false, theme.GlyphUnicode)
 	found := false
 	for _, s := range left {
 		if s.Text == "W" {
@@ -182,12 +182,12 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	if !found {
 		t.Fatalf("themed state glyph not composed: %+v", left)
 	}
-	if got, colour := rail.RailGlyph(th, "working", true); got != "W" || colour != (theme.RGB{R: 1, G: 2, B: 3}) {
+	if got, colour := rail.RailGlyph(th, "working", theme.GlyphNerd); got != "W" || colour != (theme.RGB{R: 1, G: 2, B: 3}) {
 		t.Fatalf("nerd glyph = %q/%v, want W/1,2,3", got, colour)
 	}
 
 	var b bytes.Buffer
-	rail.DrawRail(&b, th, testutil.AgentRail("working"))
+	rail.DrawRail(&b, th, testutil.AgentRail("working"), theme.GlyphUnicode)
 	if !strings.Contains(b.String(), "W") || !strings.Contains(b.String(), (theme.RGB{R: 1, G: 2, B: 3}).FG()) {
 		t.Fatalf("themed state glyph not drawn: %q", b.String())
 	}

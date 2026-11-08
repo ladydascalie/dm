@@ -84,6 +84,28 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.padding = n
 			cfg.paddingSet = true
 			i += 2
+		case "glyphs":
+			if cfg.glyphSetSet {
+				return fmt.Errorf("line %d: duplicate glyphs node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted set after glyphs", t.Line)
+			}
+			v := toks[i+1]
+			switch v.Value {
+			case "auto":
+				cfg.glyphSet = theme.GlyphAuto
+			case "ascii":
+				cfg.glyphSet = theme.GlyphASCII
+			case "unicode":
+				cfg.glyphSet = theme.GlyphUnicode
+			case "nerd":
+				cfg.glyphSet = theme.GlyphNerd
+			default:
+				return fmt.Errorf("line %d: glyphs must be \"auto\", \"ascii\", \"unicode\" or \"nerd\", got %q", v.Line, v.Value)
+			}
+			cfg.glyphSetSet = true
+			i += 2
 		case "window-label":
 			if cfg.windowLabelSet {
 				return fmt.Errorf("line %d: duplicate window-label node", t.Line)
@@ -336,6 +358,7 @@ default-fold "fold"
 tab-min-width 8
 tab-max-width 20
 padding 1
+glyphs "auto"
 window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 
 keymap "main" {
