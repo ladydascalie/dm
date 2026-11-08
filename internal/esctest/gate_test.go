@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// TestEsctestBaseline runs the full esctest2 suite against vt10x and fails
+// TestEsctestBaseline runs the full esctest2 suite against the dm VT and fails
 // when the pass count drops below the recorded baseline. The full run takes
 // minutes, so it is opt-in: set DM_ESCTEST=1. It skips when python3 or
 // esctest2 is absent, so go test ./... stays green without the dependency.

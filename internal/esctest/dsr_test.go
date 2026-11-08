@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"dm/internal/vt"
-
-	"github.com/hinshun/vt10x"
 )
 
 // dsrHarness returns a harness whose reports go to a pipe, plus the read end.
@@ -24,7 +22,7 @@ func dsrHarness(t *testing.T) (*harness, *os.File, *os.File) {
 	})
 	h := &harness{
 		ptmx:    w,
-		vt:      vt10x.New(vt10x.WithSize(80, 25), vt10x.WithWriter(io.Discard)),
+		vt:      vt.NewTerm(80, 25),
 		reports: vt.NewTerm(80, 25),
 		errw:    io.Discard,
 	}

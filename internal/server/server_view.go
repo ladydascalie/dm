@@ -11,6 +11,7 @@ import (
 	"dm/internal/notify"
 	"dm/internal/paths"
 	"dm/internal/session"
+	"dm/internal/vt"
 	"dm/internal/wire"
 )
 
@@ -507,10 +508,10 @@ func (s *server) attach(cl *client, m wire.Msg) {
 	cl.resume()
 }
 
-// paneScreen is the pane's visible screen, serialised as ANSI for a fresh
-// terminal. It is the picture; the ring below is history.
+// paneScreen is the pane's visible screen as the VT snapshot. It is the
+// picture; the ring below is history.
 type paneScreen struct {
-	data  []byte
+	snap  *vt.Snapshot
 	alt   bool
 	mouse bool
 	ok    bool
@@ -526,17 +527,28 @@ func readPaneScreen(session, id string) paneScreen {
 	if err := wire.WriteMsg(c, wire.Msg{Type: "req", Action: "screen", ID: 1}); err != nil {
 		return ps
 	}
-	m, err := wire.ReadMsg(c)
-	if err != nil || m.Type != "screen" {
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	// A fresh connection is a subscriber, so a busy pane can deliver bytes,
+	// status or cwd before the screen. Take the screen, not the first frame.
+	for {
+		m, err := wire.ReadMsg(c)
+		if err != nil {
+			return ps
+		}
+		if m.Type != "screen" {
+			continue
+		}
+		if m.VTSnap == nil {
+			return ps
+		}
+		var extra struct {
+			Alt   bool `json:"alt"`
+			Mouse bool `json:"mouse"`
+		}
+		_ = json.Unmarshal(m.Res, &extra)
+		ps.snap, ps.alt, ps.mouse, ps.ok = m.VTSnap, extra.Alt, extra.Mouse, true
 		return ps
 	}
-	var extra struct {
-		Alt   bool `json:"alt"`
-		Mouse bool `json:"mouse"`
-	}
-	_ = json.Unmarshal(m.Res, &extra)
-	ps.data, ps.alt, ps.mouse, ps.ok = m.Data, extra.Alt, extra.Mouse, true
-	return ps
 }
 
 // sendScreens asks each pane for its visible screen and hands it to send. It
@@ -555,7 +567,7 @@ func (s *server) sendScreens(ids []string, send func(wire.Msg)) (changed bool) {
 			pc.alt, pc.mouse = ps.alt, ps.mouse
 		}
 		s.mu.Unlock()
-		send(wire.Msg{Type: "screen", Target: id, Data: ps.data})
+		send(wire.Msg{Type: "screen", Target: id, VTSnap: ps.snap})
 	}
 	return changed
 }

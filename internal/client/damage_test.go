@@ -11,8 +11,6 @@ import (
 	"dm/internal/transport"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // frameTUI is a tui whose frames land in a buffer, with one pane whose screen
@@ -38,9 +36,9 @@ func newFrameTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 		WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true,
 	}}
 	out := &bytes.Buffer{}
-	tui := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out}
 	p := snap.Panes[0]
-	vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+	vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 	tui.vts[p.ID] = vt
 	vt.Write([]byte("\x1b[?25l\x1b[1;1HPANE-MARK"))
 	return &frameTUI{tui: tui, snap: snap, out: out}
@@ -48,6 +46,12 @@ func newFrameTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 
 // frame draws one frame and returns its bytes.
 func (f *frameTUI) frame() string {
+	for _, term := range f.tui.vts {
+		term.Flush()
+	}
+	if f.tui.scrollVT != nil {
+		f.tui.scrollVT.Flush()
+	}
 	f.out.Reset()
 	f.tui.draw()
 	return f.out.String()
@@ -152,7 +156,7 @@ func TestFrameResizeRepaints(t *testing.T) {
 	f.snap.Cols, f.snap.Rows = 120, 24
 	relayout(f.snap)
 	p := f.snap.Panes[0]
-	f.tui.vts[p.ID].Resize(p.Rect.W, p.Rect.H)
+	resizeTerm(f.tui.vts[p.ID], p.Rect.W, p.Rect.H)
 
 	got := f.frame()
 	if !strings.Contains(got, "\x1b[2J") {
@@ -201,13 +205,13 @@ func TestFrameRailOnly(t *testing.T) {
 func TestFrameLeaveScrollback(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
 	p := f.snap.Panes[0]
-	vt := f.tui.vts[p.ID]
+	term := f.tui.vts[p.ID]
 	for i := 0; i < 80; i++ {
-		vt.Write([]byte(fmt.Sprintf("LINE-%03d\r\n", i)))
+		term.Write([]byte(fmt.Sprintf("LINE-%03d\r\n", i)))
 	}
 	f.frame()
 
-	f.tui.scrollVT = vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H+histRows))
+	f.tui.scrollVT = vt.NewTerm(p.Rect.W, p.Rect.H+histRows)
 	f.tui.scrollVT.Write([]byte("HIST-ONE\r\nHIST-TWO"))
 	f.tui.scroll = p.ID
 	f.tui.mode = "scroll"
@@ -356,7 +360,7 @@ func frameRows(s string) map[int]bool {
 
 // oracle compares the accumulated diff frames against a clean full repaint of
 // the same state.
-func checkFrame(t *testing.T, live vt10x.Terminal, tr *tui, label string, raw []byte) {
+func checkFrame(t *testing.T, live *vt.Term, tr *tui, label string, raw []byte) {
 	t.Helper()
 	clone := *tr
 	var buf bytes.Buffer
@@ -368,20 +372,30 @@ func checkFrame(t *testing.T, live vt10x.Terminal, tr *tui, label string, raw []
 	if buf.Len() == 0 {
 		t.Fatalf("%s: oracle frame empty", label)
 	}
-	ref := vt10x.New(vt10x.WithSize(tr.snap.Cols, tr.snap.Rows))
+	ref := vt.NewTerm(tr.snap.Cols, tr.snap.Rows)
 	ref.Write(buf.Bytes())
-	cols, rows := live.Size()
+	live.Flush()
+	ref.Flush()
+	lg, rg := live.Grid(), ref.Grid()
+	cols, rows := lg.Size()
 	for y := 0; y < rows; y++ {
 		for x := 0; x < cols; x++ {
-			a, b := vt.NormCell(live.Cell(x, y)), vt.NormCell(ref.Cell(x, y))
-			if a.Char != b.Char || a.FG != b.FG || a.BG != b.BG || a.Mode != b.Mode {
-				t.Fatalf("%s: cell %d,%d live=%q/%v/%v/%v ref=%q/%v/%v/%v byte=%q",
-					label, x, y, a.Char, a.FG, a.BG, a.Mode, b.Char, b.FG, b.BG, b.Mode, frameBytes(tr))
+			a, b := lg.Cell(x, y), rg.Cell(x, y)
+			if a.Content != b.Content || a.Width != b.Width || a.Style != b.Style || a.Link != b.Link {
+				t.Fatalf("%s: cell %d,%d live=%q/%+v ref=%q/%+v byte=%q",
+					label, x, y, a.Content, a.Style, b.Content, b.Style, frameBytes(tr))
 			}
 		}
 	}
-	if bytes.Contains(raw, []byte("\x1b[?25h")) && live.Cursor() != ref.Cursor() {
-		t.Fatalf("%s: visible cursor live=%v ref=%v", label, live.Cursor(), ref.Cursor())
+	if bytes.Contains(raw, []byte("\x1b[?25h")) {
+		lc, rc := lg.Cursor(), rg.Cursor()
+		if lc != rc {
+			t.Fatalf("%s: visible cursor live=%+v ref=%+v", label, lc, rc)
+		}
+	}
+	lm, rm := lg.Modes(), rg.Modes()
+	if lm.AltScreen != rm.AltScreen || lm.Wrap != rm.Wrap || lm.Mouse != rm.Mouse || lm.MouseEncoding != rm.MouseEncoding {
+		t.Fatalf("%s: modes live=%+v ref=%+v", label, lm, rm)
 	}
 }
 
@@ -395,7 +409,7 @@ func frameBytes(tr *tui) []byte {
 	return nil
 }
 
-func scene(t *testing.T, f *frameTUI, live vt10x.Terminal) {
+func scene(t *testing.T, f *frameTUI, live *vt.Term) {
 	t.Helper()
 	step := func(label string) {
 		raw := f.frame()
@@ -430,19 +444,19 @@ func scene(t *testing.T, f *frameTUI, live vt10x.Terminal) {
 
 func TestOracleOnePane(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	scene(t, f, live)
 }
 
 func TestOracleResize(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	f.frame()
 	live.Write([]byte("\x1b[2J"))
 	// live must match the accumulated picture; feed the whole history instead.
 	// Rebuild from scratch: first frame then resize.
 	f2 := newFrameTUI(t, 100, 20, 34)
-	live = vt10x.New(vt10x.WithSize(100, 20))
+	live = vt.NewTerm(100, 20)
 	f2.frame()
 	live.Write([]byte(f2.out.String()))
 	f2.out.Reset()
@@ -468,13 +482,13 @@ func TestOracleDividerHover(t *testing.T) {
 		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	out := &bytes.Buffer{}
-	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	tr := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out}
 	for _, p := range snap.Panes {
-		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		tr.vts[p.ID] = vt
 		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s", p.ID)))
 	}
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	step := func(label string) {
 		out.Reset()
 		tr.draw()
@@ -497,11 +511,11 @@ func TestOracleDividerHover(t *testing.T) {
 func TestOracleScrollback(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
 	p := f.snap.Panes[0]
-	vt := f.tui.vts[p.ID]
+	term := f.tui.vts[p.ID]
 	for i := 0; i < 80; i++ {
-		vt.Write([]byte(fmt.Sprintf("LINE-%03d\r\n", i)))
+		term.Write([]byte(fmt.Sprintf("LINE-%03d\r\n", i)))
 	}
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	step := func(label string) {
 		raw := f.frame()
 		live.Write([]byte(raw))
@@ -509,7 +523,7 @@ func TestOracleScrollback(t *testing.T) {
 	}
 	step("first")
 	// Enter scrollback the way exitScroll/enterScroll do it.
-	f.tui.scrollVT = vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H+histRows))
+	f.tui.scrollVT = vt.NewTerm(p.Rect.W, p.Rect.H+histRows)
 	f.tui.scrollVT.Write([]byte("HIST-ONE\r\nHIST-TWO"))
 	f.tui.scroll = p.ID
 	f.tui.mode = "scroll"
@@ -527,7 +541,7 @@ func TestOracleScrollback(t *testing.T) {
 
 func TestOracleModes(t *testing.T) {
 	f := newFrameTUI(t, 100, 24, 34)
-	live := vt10x.New(vt10x.WithSize(100, 24))
+	live := vt.NewTerm(100, 24)
 	step := func(label string) {
 		raw := f.frame()
 		live.Write([]byte(raw))
@@ -568,13 +582,13 @@ func TestOracleOverlayOverGap(t *testing.T) {
 		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	out := &bytes.Buffer{}
-	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	tr := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out}
 	for _, p := range snap.Panes {
-		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		tr.vts[p.ID] = vt
 		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s-content", p.ID)))
 	}
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	step := func(label string) {
 		out.Reset()
 		tr.draw()
@@ -595,7 +609,7 @@ func TestOracleOverlayOverGap(t *testing.T) {
 
 func TestOracleToastsShrink(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	step := func(label string) {
 		raw := f.frame()
 		live.Write([]byte(raw))
@@ -622,7 +636,7 @@ func TestOracleToastsShrink(t *testing.T) {
 
 func TestOracleResizeLive(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	raw := f.frame()
 	live.Write([]byte(raw))
 	checkFrame(t, live, f.tui, "first", []byte(raw))
@@ -631,9 +645,9 @@ func TestOracleResizeLive(t *testing.T) {
 	f.snap.Rail = layout.EffectiveRail(120, f.snap.Rail)
 	relayout(f.snap)
 	p := f.snap.Panes[0]
-	f.tui.vts[p.ID].Resize(p.Rect.W, p.Rect.H)
+	resizeTerm(f.tui.vts[p.ID], p.Rect.W, p.Rect.H)
 	f.tui.vts[p.ID].Write([]byte("\x1b[1;1HSIZED"))
-	live.Resize(120, 24)
+	resizeTerm(live, 120, 24)
 	raw = f.frame()
 	live.Write([]byte(raw))
 	checkFrame(t, live, f.tui, "resize", []byte(raw))
@@ -641,7 +655,7 @@ func TestOracleResizeLive(t *testing.T) {
 	f.snap.Rail = 0
 	relayout(f.snap)
 	p = f.snap.Panes[0]
-	f.tui.vts[p.ID].Resize(p.Rect.W, p.Rect.H)
+	resizeTerm(f.tui.vts[p.ID], p.Rect.W, p.Rect.H)
 	raw = f.frame()
 	live.Write([]byte(raw))
 	checkFrame(t, live, f.tui, "rail-hidden", []byte(raw))
@@ -658,9 +672,9 @@ func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *wire.Snapshot) {
 		{ID: "b", Name: "two", Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one", WorkspaceActive: true, WindowActive: true, WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	out := &bytes.Buffer{}
-	tr := &tui{snap: snap, vts: map[string]vt10x.Terminal{}, out: out}
+	tr := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out}
 	for _, p := range snap.Panes {
-		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		tr.vts[p.ID] = vt
 		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s-content", p.ID)))
 	}
@@ -671,7 +685,7 @@ func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *wire.Snapshot) {
 // the toasts band, so the toast must be painted again.
 func TestOracleDividerOverToast(t *testing.T) {
 	tr, out, snap := twoPaneTUI(100, 20, 0)
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	step := func(label string) {
 		out.Reset()
 		tr.draw()
@@ -691,7 +705,7 @@ func TestOracleDividerOverToast(t *testing.T) {
 // A help box over the rail on a narrow screen, then a rail label change.
 func TestOracleRailUnderHelp(t *testing.T) {
 	f := newFrameTUI(t, 40, 14, 13)
-	live := vt10x.New(vt10x.WithSize(40, 14))
+	live := vt.NewTerm(40, 14)
 	step := func(label string) {
 		raw := f.frame()
 		live.Write([]byte(raw))
@@ -712,7 +726,7 @@ func TestOracleRailUnderHelp(t *testing.T) {
 // A wide toast over the rail on a narrow screen, then a rail label change.
 func TestOracleRailUnderToast(t *testing.T) {
 	f := newFrameTUI(t, 40, 14, 13)
-	live := vt10x.New(vt10x.WithSize(40, 14))
+	live := vt.NewTerm(40, 14)
 	step := func(label string) {
 		raw := f.frame()
 		live.Write([]byte(raw))
@@ -730,7 +744,7 @@ func TestOracleRailUnderToast(t *testing.T) {
 
 func TestOraclePalette(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	step := func(label string) {
 		raw := f.frame()
 		live.Write([]byte(raw))
@@ -752,7 +766,7 @@ func TestOraclePalette(t *testing.T) {
 // The palette floats over the rail columns; a rail change must not eat it.
 func TestOracleRailUnderPalette(t *testing.T) {
 	f := newFrameTUI(t, 100, 30, 34)
-	live := vt10x.New(vt10x.WithSize(100, 30))
+	live := vt.NewTerm(100, 30)
 	step := func(label string) {
 		raw := f.frame()
 		live.Write([]byte(raw))
@@ -770,7 +784,7 @@ func TestOracleRailUnderPalette(t *testing.T) {
 // A toast up, then a divider hover, with the default rail.
 func TestOracleDefaultRailDividerOverToast(t *testing.T) {
 	tr, out, snap := twoPaneTUI(120, 30, 34)
-	live := vt10x.New(vt10x.WithSize(120, 30))
+	live := vt.NewTerm(120, 30)
 	step := func(label string) {
 		out.Reset()
 		tr.draw()
@@ -789,7 +803,7 @@ func TestOracleDefaultRailDividerOverToast(t *testing.T) {
 // paint everything.
 func TestOracleSplit(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
-	live := vt10x.New(vt10x.WithSize(100, 20))
+	live := vt.NewTerm(100, 20)
 	raw := f.frame()
 	live.Write([]byte(raw))
 	checkFrame(t, live, f.tui, "first", []byte(raw))
@@ -798,7 +812,7 @@ func TestOracleSplit(t *testing.T) {
 	f.snap.Panes = []wire.PaneInfo{{ID: "w1p1"}, {ID: "w1p2"}}
 	relayout(f.snap)
 	for _, p := range f.snap.Panes {
-		vt := vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		f.tui.vts[p.ID] = vt
 		vt.Write([]byte("\x1b[2;1H" + p.ID))
 	}

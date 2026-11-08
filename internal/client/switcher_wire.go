@@ -7,15 +7,14 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/switcher"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // paintPaneFrom paints a pane's rows for the switcher preview, with no
 // selection or hover.
-func paintPaneFrom(buf *bytes.Buffer, vt vt10x.Terminal, r layout.Rect, row0 int) {
-	drawPaneFrom(buf, vt, r, row0, nil, nil)
+func paintPaneFrom(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int) {
+	drawPaneFrom(buf, term, r, row0, nil, nil)
 }
 
 // openSwitcher raises the native switcher over the panes. A second call while

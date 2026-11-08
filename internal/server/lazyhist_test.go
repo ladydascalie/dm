@@ -57,7 +57,7 @@ func ringPane(t *testing.T, session, id string) {
 					switch m.Action {
 					case "screen":
 						_ = wire.WriteMsg(c, wire.Msg{Type: "screen", ID: m.ID, Target: id,
-							Data: []byte("\x1b[Hscreen " + id), Res: jsonRaw(struct {
+							VTSnap: newScreenSnapshot(id), Res: jsonRaw(struct {
 								Alt   bool `json:"alt"`
 								Mouse bool `json:"mouse"`
 							}{Alt: true, Mouse: true})})
@@ -202,6 +202,12 @@ func TestAttachDoesNotPushHistory(t *testing.T) {
 		}
 		frames = append(frames, m)
 		if m.Type == "screen" {
+			if m.VTSnap == nil {
+				t.Fatalf("screen for %q carried no snapshot", m.Target)
+			}
+			if !bytes.Equal(snapshotBytes(t, m.VTSnap), snapshotBytes(t, newScreenSnapshot(m.Target))) {
+				t.Fatalf("screen for %q changed in the server", m.Target)
+			}
 			screens[m.Target] = true
 		}
 		if m.Type == "replay" {

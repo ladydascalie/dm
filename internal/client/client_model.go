@@ -18,9 +18,9 @@ import (
 	"dm/internal/switcher"
 	"dm/internal/theme"
 	"dm/internal/transport"
+	"dm/internal/vt"
 	"dm/internal/wire"
 
-	"github.com/hinshun/vt10x"
 	"golang.org/x/term"
 )
 
@@ -52,7 +52,7 @@ type tui struct {
 	cols   int
 	rows   int
 	snap   *wire.Snapshot
-	vts    map[string]vt10x.Terminal
+	vts    map[string]*vt.Term
 	armed  bool
 	toasts []toast // oldest first, newest last
 	// floats are arbitrary floating panes rendered over the main layout.
@@ -97,7 +97,7 @@ type tui struct {
 	scroll   string // pane id shown from scrollback
 	offset   int
 	maxOff   int
-	scrollVT vt10x.Terminal
+	scrollVT *vt.Term
 
 	quit     bool
 	switchTo string
@@ -268,7 +268,7 @@ type linkHover struct {
 type panePaint struct {
 	id    string
 	rect  layout.Rect
-	vt    vt10x.View
+	vt    *vt.Term
 	row0  int
 	sel   *selRange
 	hover *selRange
@@ -381,7 +381,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal)
 	defer c.Close()
 
 	t := &tui{
-		session: name, conn: c, vts: map[string]vt10x.Terminal{},
+		session: name, conn: c, vts: map[string]*vt.Term{},
 		hist: map[string][]byte{},
 	}
 	// The keymap is loaded once for the whole session. A missing file is
@@ -493,21 +493,21 @@ func (t *tui) apply(m wire.Msg) {
 			if p == nil {
 				t.exitScroll()
 			} else if t.scrollVT != nil {
-				c, r := t.scrollVT.Size()
+				c, r := t.scrollVT.Grid().Size()
 				if c != p.Rect.W || r != p.Rect.H+histRows {
 					t.exitScroll()
 				}
 			}
 		}
 		for _, p := range m.Snap.Panes {
-			vt := t.vts[p.ID]
-			if vt != nil {
-				c, r := vt.Size()
+			term := t.vts[p.ID]
+			if term != nil {
+				c, r := term.Grid().Size()
 				if c != p.Rect.W || r != p.Rect.H {
-					vt.Resize(p.Rect.W, p.Rect.H)
+					resizeTerm(term, p.Rect.W, p.Rect.H)
 				}
 			} else {
-				t.vts[p.ID] = vt10x.New(vt10x.WithSize(p.Rect.W, p.Rect.H))
+				t.vts[p.ID] = vt.NewTerm(p.Rect.W, p.Rect.H)
 			}
 		}
 		keep := map[string]bool{}
@@ -560,7 +560,7 @@ func (t *tui) apply(m wire.Msg) {
 		t.dirty = true
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
-			applyScreen(t.vts, m.Target, p.Rect, m.Data)
+			applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
 		}
 		t.dirty = true
 	case "replay":
@@ -569,8 +569,8 @@ func (t *tui) apply(m wire.Msg) {
 		applyReplay(t.hist, m.Target, m.Data)
 		t.dirty = true
 	case "bytes":
-		if vt := t.vts[m.Target]; vt != nil {
-			_, _ = vt.Write(m.Data)
+		if term := t.vts[m.Target]; term != nil {
+			term.Write(m.Data)
 			t.dirty = true
 		}
 		// New output moves the ring. A cached replay would be stale, so drop
@@ -622,16 +622,25 @@ func (t *tui) apply(m wire.Msg) {
 	}
 }
 
-// applyScreen replaces a pane's live VT with a fresh one built from the pane
-// daemon's snapshot. The daemon serialised it at the pane's rect, so the size
-// matches what the layout will paint.
-func applyScreen(vts map[string]vt10x.Terminal, id string, r layout.Rect, data []byte) {
-	if r.W < 1 || r.H < 1 {
-		return
+// applySnapshot restores a pane's visible state from the pane daemon's
+// snapshot. The daemon serialised it at the pane's rect, so a size that does
+// not match the layout is refused rather than drawn at the wrong width.
+func applySnapshot(vts map[string]*vt.Term, id string, r layout.Rect, snap *vt.Snapshot) bool {
+	if r.W < 1 || r.H < 1 || snap == nil {
+		return false
 	}
-	vt := vt10x.New(vt10x.WithSize(r.W, r.H))
-	_, _ = vt.Write(data)
-	vts[id] = vt
+	if snap.Cols != r.W || snap.Rows != r.H {
+		return false
+	}
+	term := vts[id]
+	if term == nil {
+		term = vt.NewTerm(r.W, r.H)
+	}
+	if err := term.Restore(snap); err != nil {
+		return false
+	}
+	vts[id] = term
+	return true
 }
 
 // applyReplay replaces a pane's history ring only.
@@ -649,4 +658,17 @@ func (t *tui) paneByID(id string) *wire.PaneInfo {
 		}
 	}
 	return nil
+}
+
+// resizeTerm resizes a pane terminal. A full-screen scroll region moves with
+// the grid: the VT's Resize clamps it to the old edge, which would leave a
+// resized pane wrapping at its previous width.
+func resizeTerm(term *vt.Term, cols, rows int) {
+	g := term.Grid()
+	oc, or := g.Size()
+	r := g.ScrollRegion()
+	g.Resize(cols, rows)
+	if r.Top == 0 && r.Bottom == or-1 && r.Left == 0 && r.Right == oc-1 {
+		g.SetScrollRegion(vt.ScrollRegion{Top: 0, Bottom: rows - 1, Left: 0, Right: cols - 1})
+	}
 }

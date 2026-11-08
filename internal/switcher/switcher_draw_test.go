@@ -2,7 +2,6 @@ package switcher
 
 import (
 	"bytes"
-	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
@@ -11,11 +10,10 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // switcherMoveRe finds every absolute cursor move a float writes.
@@ -34,46 +32,20 @@ func switcherAt(cols, rows int) (*Switcher, *wire.Snapshot) {
 }
 
 // drawFloat draws the switcher and replays its bytes into a fresh screen.
-func drawFloat(t *testing.T, s *Switcher, snap *wire.Snapshot, vts map[string]vt10x.Terminal) (string, int, int, vt10x.Terminal) {
+func drawFloat(t *testing.T, s *Switcher, snap *wire.Snapshot, vts map[string]*vt.Term) (string, int, int, *vt.Term) {
 	t.Helper()
 	var b bytes.Buffer
 	cx, cy := DrawSwitcher(&b, theme.DefaultTheme(), s, snap, vts, testPanePainter)
-	screen := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
-	if _, err := screen.Write(b.Bytes()); err != nil {
-		t.Fatalf("replay the float: %v", err)
-	}
+	screen := vt.NewTerm(snap.Cols, snap.Rows)
+	screen.Write(b.Bytes())
+	screen.Flush()
 	return b.String(), cx, cy, screen
 }
 
 // testPanePainter paints a pane's rows the way the client's drawPaneFrom does
 // with no selection or hover, so the preview test reads the real SGR output.
-func testPanePainter(buf *bytes.Buffer, v vt10x.Terminal, r layout.Rect, row0 int) {
-	if r.W <= 0 || r.H <= 0 {
-		return
-	}
-	cols, rows := v.Size()
-	v.Lock()
-	defer v.Unlock()
-	for y := 0; y < r.H; y++ {
-		fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
-		var cur *vt10x.Glyph
-		for x := 0; x < r.W; x++ {
-			var g vt10x.Glyph
-			if x < cols && row0+y < rows {
-				g = vt.NormCell(v.Cell(x, row0+y))
-			} else {
-				g = vt.NormCell(g)
-			}
-			buf.WriteString(vt.SGR(g, cur))
-			gg := g
-			cur = &gg
-			if g.Char < 0x20 {
-				buf.WriteByte(' ')
-			} else {
-				buf.WriteRune(g.Char)
-			}
-		}
-	}
+func testPanePainter(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int) {
+	testutil.PaintTerm(buf, term, r, row0)
 }
 
 // bandRows returns the rows a band's bytes address, in screen order. It is a
@@ -111,21 +83,19 @@ func bandRows(buf []byte) []int {
 }
 
 // switcherCell reads one cell of a replayed screen.
-func switcherCell(screen vt10x.Terminal, x, y int) rune {
-	screen.Lock()
-	defer screen.Unlock()
-	return screen.Cell(x, y).Char
+func switcherCell(screen *vt.Term, x, y int) string {
+	return screen.Grid().Cell(x, y).Content
 }
 
 // switcherText reads one row of a replayed screen as a string, blanks dropped.
-func switcherText(screen vt10x.Terminal, x, y, w int) string {
+func switcherText(screen *vt.Term, x, y, w int) string {
 	var b strings.Builder
 	for i := 0; i < w; i++ {
 		c := switcherCell(screen, x+i, y)
-		if c == 0 {
-			c = ' '
+		if c == "" {
+			c = " "
 		}
-		b.WriteRune(c)
+		b.WriteString(c)
 	}
 	return strings.TrimRight(b.String(), " ")
 }
@@ -202,7 +172,7 @@ func TestSwitcherDrawInsideRect(t *testing.T) {
 				if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
 					continue
 				}
-				if c := switcherCell(screen, x, y); c != 0 && c != ' ' {
+				if c := switcherCell(screen, x, y); c != "" && c != " " {
 					t.Fatalf("%dx%d: cell %d,%d = %q outside %+v", cols, rows, x, y, c, r)
 				}
 			}
@@ -269,22 +239,21 @@ func TestSwitcherDrawPreview(t *testing.T) {
 	if !l.preview {
 		t.Fatalf("%dx%d: rect %+v dropped the preview", cols, rows, l.r)
 	}
-	pane := vt10x.New(vt10x.WithSize(20, 4))
-	if _, err := pane.Write([]byte("hello")); err != nil {
-		t.Fatalf("fill the pane: %v", err)
-	}
-	vts := map[string]vt10x.Terminal{"w1p1": pane}
+	pane := vt.NewTerm(20, 4)
+	pane.Write([]byte("hello"))
+	pane.Flush()
+	vts := map[string]*vt.Term{"w1p1": pane}
 	_, _, _, screen := drawFloat(t, s, snap, vts)
 	// The pane's screen is bottom aligned in the band: four rows at the bottom.
 	start := l.bandY + l.bandH - 4
 	for i := 0; i < 5; i++ {
-		if c := switcherCell(screen, l.prevX+i, start); c != rune("hello"[i]) {
-			t.Fatalf("preview cell %d,%d = %q, want %q", l.prevX+i, start, c, rune("hello"[i]))
+		if c := switcherCell(screen, l.prevX+i, start); c != string("hello"[i]) {
+			t.Fatalf("preview cell %d,%d = %q, want %q", l.prevX+i, start, c, string("hello"[i]))
 		}
 	}
 	// The rule runs down the split from the query row to the last band row.
 	for y := l.queryY; y < l.bandY+l.bandH; y++ {
-		if c := switcherCell(screen, l.ruleX, y); c != '│' {
+		if c := switcherCell(screen, l.ruleX, y); c != "│" {
 			t.Fatalf("rule cell %d,%d = %q, want │", l.ruleX, y, c)
 		}
 	}
@@ -307,24 +276,22 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	if !s.AcceptPreview(1, []string{"old", "screen"}) {
 		t.Fatal("the preview reply was refused")
 	}
-	screen := vt10x.New(vt10x.WithSize(cols, rows))
+	screen := vt.NewTerm(cols, rows)
 	var b bytes.Buffer
 	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter)
-	if _, err := screen.Write(b.Bytes()); err != nil {
-		t.Fatalf("replay the first frame: %v", err)
-	}
-	if c := switcherCell(screen, l.prevX, l.bandY+l.bandH-1); c == ' ' || c == 0 {
+	screen.Write(b.Bytes())
+	screen.Flush()
+	if c := switcherCell(screen, l.prevX, l.bandY+l.bandH-1); c == " " || c == "" {
 		t.Fatalf("the first frame drew no preview lines: %q", c)
 	}
 	b.Reset()
 	s.SetPreview(2, "w1p1")
 	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter)
-	if _, err := screen.Write(b.Bytes()); err != nil {
-		t.Fatalf("replay the second frame: %v", err)
-	}
+	screen.Write(b.Bytes())
+	screen.Flush()
 	for y := l.bandY; y < l.bandY+l.bandH; y++ {
 		for x := l.prevX; x < l.prevX+l.prevW; x++ {
-			if c := switcherCell(screen, x, y); c != 0 && c != ' ' {
+			if c := switcherCell(screen, x, y); c != "" && c != " " {
 				t.Fatalf("stale preview cell %d,%d = %q", x, y, c)
 			}
 		}
@@ -343,7 +310,7 @@ func TestSwitcherDrawNarrow(t *testing.T) {
 	_, _, _, screen := drawFloat(t, s, snap, nil)
 	for y := l.queryY; y < l.bandY+l.bandH; y++ {
 		for x := l.inner.X; x < l.inner.X+l.inner.W; x++ {
-			if c := switcherCell(screen, x, y); c == '│' {
+			if c := switcherCell(screen, x, y); c == "│" {
 				t.Fatalf("narrow float drew a rule at %d,%d", x, y)
 			}
 		}
@@ -351,7 +318,7 @@ func TestSwitcherDrawNarrow(t *testing.T) {
 	// The first band rows are the workspace header and the window line. The
 	// pane row below them has no git stats to reach the right edge, so it still
 	// fills the whole width.
-	if c := switcherCell(screen, l.inner.X+l.inner.W-1, l.bandY+2); c != ' ' && c != 0 {
+	if c := switcherCell(screen, l.inner.X+l.inner.W-1, l.bandY+2); c != " " && c != "" {
 		t.Fatalf("the narrow row did not fill the whole width: %q", c)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
 // loadScenes reads the scene list. A missing file is a skip.
@@ -45,22 +45,16 @@ func loadFrame(t *testing.T, name string) []byte {
 // frameGrid replays a frame into a fresh terminal and reads its cells.
 func frameGrid(t *testing.T, sc Scene, frame []byte) *Grid {
 	t.Helper()
-	screen := vt10x.New(vt10x.WithSize(sc.Cols, sc.Rows))
-	if _, err := screen.Write(frame); err != nil {
-		t.Fatalf("scene %s: replay: %v", sc.Name, err)
-	}
+	screen := vt.NewTerm(sc.Cols, sc.Rows)
+	screen.Write(frame)
+	screen.Flush()
 	return GridFromScreen(screen, sc.Cols, sc.Rows)
 }
 
 // TestRowWidth is the width invariant. Every row the rasteriser reports must
-// land exactly on the scene width.
-//
-// The ASCII scenes pass. The cjk scene does not: a wide glyph sits in a
-// one-cell slot, so the rasteriser advances two columns and the row runs past
-// the width. This test pins that known state so the suite stays green; the
-// failing assertion is TestGoldenCJK, which is the evidence for step 3 of the
-// spec. If the cjk rows ever land on the width here, the rasteriser is
-// advancing one cell per rune and unit 2 is wrong.
+// land exactly on the scene width. A wide glyph marks its continuation slot,
+// so the rasteriser advances the pen once for the glyph and skips the slot it
+// already covered.
 func TestRowWidth(t *testing.T) {
 	for _, sc := range loadScenes(t) {
 		t.Run(sc.Name, func(t *testing.T) {
@@ -68,18 +62,8 @@ func TestRowWidth(t *testing.T) {
 			if err != nil {
 				t.Fatalf("rasterise: %v", err)
 			}
-			if sc.Name == "cjk" {
-				bad := r.Overshoot(sc.Cols)
-				if len(bad) == 0 {
-					t.Fatalf("cjk rows all land on %d; the rasteriser is advancing one cell per rune", sc.Cols)
-				}
+			if bad := r.Overshoot(sc.Cols); len(bad) > 0 {
 				for _, row := range bad {
-					t.Logf("row %d: pen %d, overshoot %+d cells", row.Y, row.Pen, row.Pen-sc.Cols)
-				}
-				return
-			}
-			for _, row := range r.Rows {
-				if row.Pen != sc.Cols {
 					t.Errorf("row %d: pen %d, want %d", row.Y, row.Pen, sc.Cols)
 				}
 			}
@@ -87,17 +71,9 @@ func TestRowWidth(t *testing.T) {
 	}
 }
 
-// TestGoldenCJK compares the cjk scene against its golden. The golden shows
-// the bug: three CJK glyphs in one-cell slots, a three-person ZWJ family emoji
-// split across cells, and a combining acute. The rasteriser advances by the
-// glyph's real width, so the row runs past the grid width and the picture is
-// compressed.
-//
-// The width assertion lives in TestRowWidth, which pins the bug: rows 2, 3 and
-// 4 report pen 103, 101 and 99 against width 100. That pin is the evidence for
-// step 3 of specs/dm/ui-fidelity/README.md, "Write dm's VT". This test keeps
-// only the golden comparison so the full gate stays green until step 3 lands.
-// Do not skip it, do not mark it as an expected failure, and do not delete it.
+// TestGoldenCJK compares the cjk scene against its golden. The scene carries
+// three CJK glyphs, a three-person ZWJ family emoji and a combining acute. It
+// is the oracle that proves the new VT clusters each one in its real width.
 func TestGoldenCJK(t *testing.T) {
 	var sc Scene
 	for _, s := range loadScenes(t) {

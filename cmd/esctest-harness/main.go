@@ -1,4 +1,4 @@
-// Command esctest-harness runs esctest2 against a vt10x terminal.
+// Command esctest-harness runs esctest2 against the dm VT.
 //
 // The log goes to stdout. Arguments the harness does not recognise are passed
 // to esctest.py, for example --include=DECRQCRA.

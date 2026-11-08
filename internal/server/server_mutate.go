@@ -6,15 +6,12 @@ import (
 	"math"
 	"os"
 	"strconv"
-	"strings"
 
 	"dm/internal/layout"
 	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // toggleFold flips a workspace's or window's rail fold state and persists it.
@@ -121,7 +118,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	// directly above the live screen and are a real window, not padding above
 	// the oldest content.
 	top := 0
-	for top < end && vt.BlankGlyphRow(rows[top]) {
+	for top < end && vt.BlankRow(rows[top]) {
 		top++
 	}
 	if top == end {
@@ -139,20 +136,6 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 		out = append(out, vt.PlainRow(rows[y]))
 	}
 	return out, nil
-}
-
-// historyRow renders one terminal row as plain text.
-func historyRow(v vt10x.View, y, cols int) string {
-	var b strings.Builder
-	for x := 0; x < cols; x++ {
-		g := v.Cell(x, y)
-		if g.Char == 0 || g.Char < 0x20 {
-			b.WriteByte(' ')
-			continue
-		}
-		b.WriteRune(g.Char)
-	}
-	return strings.TrimRight(b.String(), " \x00")
 }
 
 func (s *server) writeTo(id, text string, enter bool) error {

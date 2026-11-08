@@ -1,7 +1,4 @@
-# esctest2 against vt10x, full run, no --include filter.
+# esctest2 against the dm VT, full run, no --include filter.
 # Tally line, verbatim:
-*** 288 tests passed, 38 known bugs, 241 TESTS FAILED ***
+*** 535 tests passed, 25 known bugs, 7 tests failed ***
 # 567 tests run.
-# 203 failures are vt10x. 38 are harness gaps: 37 colour queries and
-# DECIDTests.test_DECID_8bit. See the esctest-baseline report for the
-# per-family breakdown.

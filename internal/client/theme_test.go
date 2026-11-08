@@ -10,9 +10,8 @@ import (
 	"dm/internal/rail"
 	"dm/internal/testutil"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // TestThemeDefaultNerdGlyphs pins every built-in Nerd Font glyph and keeps the
@@ -140,16 +139,13 @@ func TestThemeDrawGrips(t *testing.T) {
 	if strings.Contains(out, "•") {
 		t.Fatalf("built-in grip still drawn: %q", out)
 	}
-	vt := vt10x.New(vt10x.WithSize(40, 10))
-	if _, err := vt.Write(buf.Bytes()); err != nil {
-		t.Fatalf("draw grips: %v", err)
-	}
-	vt.Lock()
-	defer vt.Unlock()
+	vt := vt.NewTerm(40, 10)
+	vt.Write(buf.Bytes())
+	vt.Flush()
 	grips := 0
 	for y := 0; y < snap.Rows; y++ {
 		for x := 0; x < snap.Cols; x++ {
-			if vt.Cell(x, y).Char == '@' {
+			if termCell(vt, x, y).Char == '@' {
 				grips++
 			}
 		}

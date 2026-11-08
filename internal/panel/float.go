@@ -5,8 +5,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/theme"
-
-	"github.com/hinshun/vt10x"
+	"dm/internal/vt"
 )
 
 // FloatingPane is a pane rendered at an arbitrary position over the main
@@ -15,7 +14,7 @@ import (
 type FloatingPane struct {
 	ID     string
 	Rect   layout.Rect
-	VT     vt10x.Terminal
+	VT     *vt.Term
 	Active bool
 	// Title and Hint paint into the top and bottom border rows, clear of the
 	// corners. A float that is not a terminal uses them to say what it is and

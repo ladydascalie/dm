@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"dm/internal/layout"
 	"dm/internal/rail"
 	"dm/internal/testutil"
 	"dm/internal/theme"
+	"dm/internal/vt"
 	"dm/internal/wire"
-
-	"github.com/hinshun/vt10x"
 )
 
 // ctlPane is one pane row of a control snapshot: a named agent pane in one
@@ -44,33 +44,37 @@ func ctlSnapshot(rail int) *wire.Snapshot {
 }
 
 // ctlScreen draws the rail and returns the screen it wrote.
-func ctlScreen(t *testing.T, snap *wire.Snapshot) vt10x.Terminal {
+func ctlScreen(t *testing.T, snap *wire.Snapshot) *vt.Term {
 	t.Helper()
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), snap)
-	vt := vt10x.New(vt10x.WithSize(snap.Cols, snap.Rows))
-	if _, err := vt.Write(b.Bytes()); err != nil {
-		t.Fatalf("draw rail: %v", err)
-	}
-	return vt
+	term := vt.NewTerm(snap.Cols, snap.Rows)
+	term.Write(b.Bytes())
+	term.Flush()
+	return term
+}
+
+// ctlGlyph is the slice of a cell a rail test reads.
+type ctlGlyph struct {
+	Char rune
+	FG   vt.Color
+	BG   vt.Color
 }
 
 // ctlCell reads one screen cell.
-func ctlCell(t *testing.T, vt vt10x.Terminal, x, y int) vt10x.Glyph {
+func ctlCell(t *testing.T, term *vt.Term, x, y int) ctlGlyph {
 	t.Helper()
-	vt.Lock()
-	defer vt.Unlock()
-	return vt.Cell(x, y)
+	c := term.Grid().Cell(x, y)
+	r, _ := utf8.DecodeRuneInString(c.Content)
+	return ctlGlyph{Char: r, FG: c.Style.Fg, BG: c.Style.Bg}
 }
 
 // ctlRow reads one screen row as text, one rune per cell.
-func ctlRow(t *testing.T, vt vt10x.Terminal, y, cells int) string {
+func ctlRow(t *testing.T, term *vt.Term, y, cells int) string {
 	t.Helper()
-	vt.Lock()
-	defer vt.Unlock()
 	var runes []rune
 	for x := 0; x < cells; x++ {
-		r := vt.Cell(x, y).Char
+		r := ctlCell(t, term, x, y).Char
 		if r == 0 {
 			r = ' '
 		}
@@ -80,7 +84,7 @@ func ctlRow(t *testing.T, vt vt10x.Terminal, y, cells int) string {
 }
 
 // ctlBlank reports an unwritten or space-filled cell.
-func ctlBlank(g vt10x.Glyph) bool { return g.Char == 0 || g.Char == ' ' }
+func ctlBlank(g ctlGlyph) bool { return g.Char == 0 || g.Char == ' ' }
 
 // ctlTUI is a client on a 40x10 screen with the rail at the given width.
 func ctlTUI(t *testing.T, rail int) (*tui, chan wire.Msg) {
@@ -106,8 +110,8 @@ func TestRailControlRow(t *testing.T) {
 		{20, "◀ collapse", false, true},
 		{40, "◀ collapse", false, true},
 	}
-	dim := vt10x.Color(theme.DefaultTheme().Palette.RailDim.R<<16 | theme.DefaultTheme().Palette.RailDim.G<<8 | theme.DefaultTheme().Palette.RailDim.B)
-	ground := vt10x.Color(theme.DefaultTheme().Palette.RailBG.R<<16 | theme.DefaultTheme().Palette.RailBG.G<<8 | theme.DefaultTheme().Palette.RailBG.B)
+	dim := vt.RGBColor(uint8(theme.DefaultTheme().Palette.RailDim.R), uint8(theme.DefaultTheme().Palette.RailDim.G), uint8(theme.DefaultTheme().Palette.RailDim.B))
+	ground := vt.RGBColor(uint8(theme.DefaultTheme().Palette.RailBG.R), uint8(theme.DefaultTheme().Palette.RailBG.G), uint8(theme.DefaultTheme().Palette.RailBG.B))
 	for _, c := range cases {
 		snap := ctlSnapshot(c.rail)
 		vt := ctlScreen(t, snap)
