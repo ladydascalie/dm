@@ -40,8 +40,10 @@ go build -o dm .
 
 The command table in `internal/clidoc/clidoc.go` is the source. `dm man`
 renders it as a man page and `dm llms` renders it as a one-pass teaching
-document. The committed files `docs/dm.1` and `docs/llms.txt` are snapshots, and
-the gate fails when one is stale.
+document. `dm html` renders the whole surface, config, keymaps and themes
+included, as one self-contained page. The committed files `docs/dm.1`,
+`docs/llms.txt` and `docs/dm.html` are snapshots, and the gate fails when one is
+stale.
 
 ## Code layout
 
@@ -140,6 +142,50 @@ sends `resize-split` with the two panes beside the divider and the ratio, at
 most every 30 ms plus a final call on release. Both sides keep at least three
 cells. A divider always belongs to dm, even when a pane claims the mouse: the
 app's PTY covers only its content rect, so the border press is not its event.
+
+## Config
+
+One file holds the config. dm reads `$HOME/.config/dm/config.kdl`, or
+`$XDG_CONFIG_HOME/dm/config.kdl` when `XDG_CONFIG_HOME` is set. On first run dm
+writes that file with the built-in values, then you edit it. Every node is
+optional and each one overrides its built-in value.
+
+| node | value | default | does |
+| --- | --- | --- | --- |
+| `prefix` | one key sequence | `"ctrl+b"` | Set the prefix key that opens the main keymap. |
+| `default-fold` | `"fold"` or `"unfold"` | `"fold"` | Set whether a new window's rail starts folded or unfolded. |
+| `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
+| `tab-max-width` | an integer of at least 3 cells, not below `tab-min-width` | `20` | Set the largest tab width before the label is cut. |
+| `padding` | an integer from 0 to 4 cells | `1` | Set the blank cells between a pane's border and its content. |
+| `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
+| `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
+| `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
+| `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
+
+A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, or
+`$HOME/.config/dm/themes/<name>.kdl` when `XDG_CONFIG_HOME` is unset. That is
+the `themes/` directory beside `config.kdl`.
+
+dm reads these environment variables:
+
+| variable | effect |
+| --- | --- |
+| `DM_STATE` | State directory; overrides `XDG_STATE_HOME`. |
+| `XDG_STATE_HOME` | State directory base; dm uses `$XDG_STATE_HOME/dm`. |
+| `XDG_CONFIG_HOME` | Config directory base; dm reads `$XDG_CONFIG_HOME/dm/config.kdl`. |
+| `HOME` | Home directory base; the fallback for both XDG paths. |
+| `DM_SESSION` | The session a pane belongs to; dm refuses to attach that session from inside it. |
+| `DM_PANE` | The pane id a pane's shell runs in. |
+| `DM_NERD` | `1` forces Nerd Font glyphs, `0` forces the Unicode fallback. |
+| `DM_NOTIFY` | `0` turns desktop notifications off. |
+| `DM_STATS` | Non-empty prints style-cache and frame-pacing stats to stderr on exit. |
+| `COLUMNS` | Terminal width when the client cannot ask the terminal. |
+| `SHELL` | The shell a new pane runs. |
+| `TMUX` | Set inside tmux; dm uses it to pick its terminal behaviour. |
+| `ESCTEST_DIR` | Test only: the esctest2 directory the conformance harness searches. |
+
+`dm html` prints every table here, with the keymaps and the theme keys, as one
+page.
 
 ## Keybindings
 
