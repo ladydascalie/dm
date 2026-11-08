@@ -126,6 +126,8 @@ func csiSelectiveRect(term *Term, seq CSI) {
 	g := term.grid
 	for y := top; y <= bottom; y++ {
 		for x := left; x <= right; x++ {
+			// DECSERA respects DECSCA protection and ignores ISO
+			// protection, unlike DECSED and DECSEL.
 			if g.Cell(x, y).Protected {
 				continue
 			}

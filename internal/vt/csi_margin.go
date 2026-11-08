@@ -7,7 +7,7 @@ package vt
 
 func init() {
 	csiTable[csiKey{Final: 'r'}] = csiSetTopBottomMargins           // DECSTBM
-	csiTable[csiKey{Final: 's'}] = csiSetLeftRightMargins           // DECSLRM
+	csiTable[csiKey{Final: 's'}] = csiSaveCursorOrMargins           // SCOSC / DECSLRM
 	csiTable[csiKey{Inter: "\"", Final: 'p'}] = csiConformanceLevel // DECSCL
 	csiTable[csiKey{Inter: "'", Final: '~'}] = csiDeleteColumns     // DECDC
 }
@@ -32,6 +32,17 @@ func csiSetTopBottomMargins(term *Term, seq CSI) {
 	r.Top, r.Bottom = top, bottom
 	g.SetScrollRegion(r)
 	homeCursor(g)
+}
+
+// csiSaveCursorOrMargins handles CSI s. In left-right margin mode it is
+// DECSLRM; otherwise it is SCOSC, the ANSI save cursor. The two share a final
+// byte in the standard, and the mode decides, as it does in xterm.
+func csiSaveCursorOrMargins(term *Term, seq CSI) {
+	if term.level >= 4 && term.grid.Modes().LeftRightMargin {
+		csiSetLeftRightMargins(term, seq)
+		return
+	}
+	escSaveCursor(term)
 }
 
 // csiSetLeftRightMargins handles DECSLRM. It has no effect unless DECLRMM is

@@ -7,8 +7,9 @@ type Term struct {
 	grid   *Grid
 	parser parser
 	style  Style
-	// protected is the DECSCA state applied to cells written from now on.
-	protected bool
+	// protection is the DECSCA and SPA/EPA state applied to cells written
+	// from now on.
+	protection Protection
 	// level is the DECSCL conformance level. Level 4 and above support
 	// DECSLRM; DECNCSM is a level 5 feature. The default is 5, as xterm's is.
 	level int
@@ -71,7 +72,8 @@ func (t *Term) Flush() {
 func (t *Term) place(content string) {
 	g := t.grid
 	c := NewCell(content, t.style)
-	c.Protected = t.protected
+	c.Protected = t.protection.DECSCA
+	c.ISOProtected = t.protection.ISO
 	c.Link = t.link
 
 	cur := g.Cursor()
@@ -89,6 +91,11 @@ func (t *Term) place(content string) {
 		g.SetLineWrapped(cur.Y, true)
 	}
 
+	if g.Modes().Insert {
+		// Insert mode opens room at the cursor and pushes the rest of the
+		// line right, truncating at the right margin.
+		g.InsertCells(cur.X, cur.Y, right, int(c.Width))
+	}
 	g.Write(cur.X, cur.Y, c)
 	placed := g.Cell(cur.X, cur.Y)
 
@@ -123,6 +130,9 @@ func (t *Term) control(b byte) {
 	case 0x09: // HT
 		t.tab()
 	case 0x0a, 0x0b, 0x0c: // LF, VT, FF
+		if t.grid.Modes().LineFeedNewLine {
+			t.carriageReturn()
+		}
 		t.lineFeed()
 	case 0x0d: // CR
 		t.carriageReturn()
@@ -203,6 +213,19 @@ func (t *Term) backspace() {
 func (t *Term) tab() {
 	g := t.grid
 	cur := g.Cursor()
+	if cur.WrapNext {
+		// DECSET 41, xterm's more(1) fix: a tab in the pending-wrap state
+		// wraps to the next row and lands on its first tab stop. Without the
+		// fix the tab does nothing and the wrap stays pending.
+		if g.Modes().MoreFix {
+			g.SetWrapNext(false)
+			t.lineFeed()
+			y := g.Cursor().Y
+			g.SetLineWrapped(y, true)
+			g.SetCursor(g.NextTabStop(0), y)
+		}
+		return
+	}
 	r := g.ScrollRegion()
 	x := g.NextTabStop(cur.X)
 	if cur.X <= r.Right && x > r.Right {
