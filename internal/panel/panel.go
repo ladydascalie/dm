@@ -10,8 +10,6 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/theme"
-
-	"github.com/charmbracelet/x/ansi"
 )
 
 // The two border-row label styles: a title reads bright, a hint dim.
@@ -160,7 +158,7 @@ func (c *panelClipWriter) text(s []byte) {
 			s = s[1:]
 			continue
 		}
-		cluster, w := ansi.FirstGraphemeCluster(s, ansi.GraphemeWidth)
+		cluster, w := cells.FirstClusterBytes(s)
 		if len(cluster) == 0 {
 			return
 		}

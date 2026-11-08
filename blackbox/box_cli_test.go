@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
+	"dm/internal/cells"
 )
 
 // The box CLI tests drive the built binary against a temp session, the way a
@@ -185,7 +185,7 @@ func TestBoxCLI(t *testing.T) {
 	narrow := boxEnv(env, "COLUMNS=60")
 	narrowOut := boxRun(t, h, narrow, "msg", "list", "-s", s)
 	for _, line := range boxLines(narrowOut) {
-		if n := ansi.StringWidth(line); n > 60 {
+		if n := cells.Cells(line); n > 60 {
 			t.Fatalf("row is %d cells at COLUMNS=60: %q", n, line)
 		}
 	}

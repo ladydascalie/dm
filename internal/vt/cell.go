@@ -1,6 +1,6 @@
 package vt
 
-import "github.com/charmbracelet/x/ansi"
+import "dm/internal/cells"
 
 // ColorKind says how a Color names its colour.
 type ColorKind uint8
@@ -101,8 +101,8 @@ type Cell struct {
 	ISOProtected bool
 }
 
-// NewCell builds a cell for content and measures its width with x/ansi, the
-// same table the chrome uses. Empty content is a blank cell of width 1; a
+// NewCell builds a cell for content and measures its width with the cells
+// package, the same table the chrome uses. Empty content is a blank cell of width 1; a
 // cluster that measures zero columns is widened to 1 so it still occupies a
 // slot.
 func NewCell(content string, st Style) Cell {
@@ -140,16 +140,15 @@ func (c Cell) IsBlank() bool {
 }
 
 // FirstCluster splits the first grapheme cluster from s and returns it with its
-// width in cells. The width comes from x/ansi, so the grid and the chrome agree
-// on how much room a cluster takes.
+// width in cells. The width comes from the cells package, so the grid and the
+// chrome agree on how much room a cluster takes.
 func FirstCluster(s string) (string, int) {
-	cluster, w := ansi.FirstGraphemeCluster(s, ansi.GraphemeWidth)
-	return cluster, w
+	return cells.FirstCluster(s)
 }
 
 // ClusterWidth returns how many cells s paints, counting grapheme clusters.
 func ClusterWidth(s string) int {
-	return ansi.StringWidth(s)
+	return cells.Cells(s)
 }
 
 // blankCell is the cell an erase or a disconnected continuation leaves behind.

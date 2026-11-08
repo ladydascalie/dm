@@ -6,7 +6,8 @@ import (
 	"image/draw"
 	"sync"
 
-	"github.com/charmbracelet/x/ansi"
+	"dm/internal/cells"
+
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gomono"
 	"golang.org/x/image/font/opentype"
@@ -124,7 +125,7 @@ func cellWidth(s string) int {
 	if s == "" {
 		return 1
 	}
-	return ansi.StringWidth(s)
+	return cells.Cells(s)
 }
 
 func baseline(face font.Face, cellH int) int {

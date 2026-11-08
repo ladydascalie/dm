@@ -4,8 +4,13 @@ package cells
 import (
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/clipperhouse/displaywidth"
+	"github.com/clipperhouse/uax29/v2/graphemes"
 )
+
+// opts measures text the way the chrome does: grapheme clusters, and an escape
+// sequence is one zero-width unit rather than a run of printable bytes.
+var opts = displaywidth.Options{ControlSequences: true}
 
 // Ellipsis marks a cut string. Every caller ends an elided run with it.
 const Ellipsis = "…"
@@ -14,13 +19,33 @@ const Ellipsis = "…"
 // clusters, so a wide rune is two cells, a combining mark rides its base, and
 // a join such as a family emoji is one glyph of the width its cluster has.
 func Cells(s string) int {
-	return ansi.StringWidth(s)
+	return opts.String(s)
+}
+
+// FirstCluster splits the first grapheme cluster from s and returns it with its
+// width in cells.
+func FirstCluster(s string) (string, int) {
+	if s == "" {
+		return "", 0
+	}
+	first := graphemes.FromString(s).First()
+	return first, opts.String(first)
+}
+
+// FirstClusterBytes is FirstCluster for a byte slice, so a caller that walks a
+// buffer keeps slicing without a copy.
+func FirstClusterBytes(s []byte) ([]byte, int) {
+	if len(s) == 0 {
+		return nil, 0
+	}
+	first := graphemes.FromBytes(s).First()
+	return first, opts.Bytes(first)
 }
 
 // Clip keeps the longest prefix of s that fits budget cells. It never splits a
 // grapheme cluster and never returns more cells than the budget.
 func Clip(s string, budget int) string {
-	return ansi.Truncate(s, budget, "")
+	return opts.TruncateString(s, budget, "")
 }
 
 // Pad fills s on the right to budget cells. A long s is clipped first, so the
@@ -55,7 +80,13 @@ func Center(s string, budget int) string {
 // Elide shrinks s to budget cells and ends it with an ellipsis when it had to
 // cut. A string that already fits comes back untouched.
 func Elide(s string, budget int) string {
-	return ansi.Truncate(s, budget, Ellipsis)
+	if Cells(s) <= budget {
+		return s
+	}
+	if budget < Cells(Ellipsis) {
+		return ""
+	}
+	return opts.TruncateString(s, budget, Ellipsis)
 }
 
 // ClipTail keeps the last budget cells of s, whole clusters only. It exists for
@@ -73,10 +104,11 @@ func ClipTail(s string, budget int) string {
 		width int
 	}
 	var clusters []cluster
-	for i := 0; i < len(s); {
-		text, w := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
-		clusters = append(clusters, cluster{at: i, width: w})
-		i += len(text)
+	at := 0
+	g := opts.StringGraphemes(s)
+	for g.Next() {
+		clusters = append(clusters, cluster{at: at, width: g.Width()})
+		at += len(g.Value())
 	}
 	used, at := 0, len(s)
 	for i := len(clusters) - 1; i >= 0; i-- {
