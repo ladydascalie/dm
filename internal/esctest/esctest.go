@@ -76,6 +76,23 @@ func esctestPy(dir string) (string, bool) {
 	return "", false
 }
 
+// fixedArgs returns the esctest2 arguments the harness always passes, before
+// the caller's own. The options declare what the harness answers itself:
+// allowC2Controls for the 8-bit C1 forms, and xtermWinopsEnabled because the
+// harness handles the window operations, including the resize that makes
+// DECCOLM work.
+func fixedArgs(logPath string) []string {
+	return []string{
+		"esctest.py",
+		"--expected-terminal=xterm",
+		"--xterm-checksum=411",
+		"--xterm-reverse-wrap=411",
+		"--timeout=0.2",
+		"--options", "allowC2Controls", "xtermWinopsEnabled",
+		"--logfile=" + logPath,
+	}
+}
+
 // Run starts esctest2 on a 25x80 pty, answers its queries from a vt10x
 // terminal, copies the log to opts.Stdout, and returns esctest2's exit code.
 func Run(ctx context.Context, opts Options) (int, error) {
@@ -93,18 +110,7 @@ func Run(ctx context.Context, opts Options) (int, error) {
 	os.Remove(logPath)
 	defer os.Remove(logPath)
 
-	args := []string{
-		"esctest.py",
-		"--expected-terminal=xterm",
-		"--xterm-checksum=411",
-		"--xterm-reverse-wrap=411",
-		"--timeout=0.2",
-		// The harness answers 8-bit C1 controls, so declare the capability. It
-		// unblocks the DECID 8-bit test that was a declared harness gap.
-		"--options=allowC2Controls",
-		"--logfile=" + logPath,
-	}
-	args = append(args, opts.Args...)
+	args := append(fixedArgs(logPath), opts.Args...)
 
 	choice, err := vtChoice()
 	if err != nil {

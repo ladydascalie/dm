@@ -224,16 +224,19 @@ func TestSaveAndRestoreCursor(t *testing.T) {
 	m := g.Modes()
 	m.Origin = true
 	g.SetModes(m)
-	g.SaveCursor(style)
+	g.SaveCursor(style, Protection{DECSCA: true, ISO: true})
 
 	g.SetCursor(0, 0)
 	g.SetCharset(Charset{})
 	m.Origin = false
 	g.SetModes(m)
 
-	got := g.RestoreCursor()
+	got, prot := g.RestoreCursor()
 	if got.Attrs != Bold {
 		t.Errorf("RestoreCursor() style = %+v, want bold", got)
+	}
+	if !prot.DECSCA || !prot.ISO {
+		t.Errorf("RestoreCursor() protection = %+v, want both set", prot)
 	}
 	if c := g.Cursor(); c.X != 4 || c.Y != 3 {
 		t.Errorf("after restore, Cursor() = %+v, want 4,3", c)

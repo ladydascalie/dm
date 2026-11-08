@@ -53,9 +53,11 @@ type Modes struct {
 	LineFeedNewLine       bool // LNM
 }
 
-// defaultModes returns a fresh primary screen: wrap on, everything else off.
+// defaultModes returns a fresh primary screen. Autowrap and the permission for
+// DECCOLM are on by default, as they are in xterm: DECCOLM resizes without an
+// application enabling it first. Everything else is off.
 func defaultModes() Modes {
-	return Modes{Wrap: true}
+	return Modes{Wrap: true, Allow80To132: true}
 }
 
 // CharsetSet is one designated character set.
@@ -82,12 +84,21 @@ type Cursor struct {
 	WrapNext bool
 }
 
+// Protection is the character protection a terminal applies to the cells it
+// writes. DECSCA and SPA/EPA are separate: a selective erase leaves both, while
+// ED, EL and ECH leave only the ISO one.
+type Protection struct {
+	DECSCA bool
+	ISO    bool
+}
+
 // SavedCursor is what DECSC stores and DECRC restores.
 type SavedCursor struct {
-	Cursor  Cursor
-	Style   Style
-	Charset Charset
-	Origin  bool
+	Cursor     Cursor
+	Style      Style
+	Charset    Charset
+	Origin     bool
+	Protection Protection
 }
 
 // Grid is the visible screen: rows of cells, a cursor, a scroll region, tab
@@ -697,15 +708,16 @@ func (g *Grid) PrevTabStop(x int) int {
 	return 0
 }
 
-// SaveCursor stores the cursor, its style, the charset and origin mode, as
-// DECSC does. Each screen has its own slot, so a save on the alternate screen is
-// not what a restore on the primary screen finds.
-func (g *Grid) SaveCursor(style Style) {
+// SaveCursor stores the cursor, its style, the charset, origin mode and
+// character protection, as DECSC does. Each screen has its own slot, so a save
+// on the alternate screen is not what a restore on the primary screen finds.
+func (g *Grid) SaveCursor(style Style, prot Protection) {
 	g.saved[g.screen()] = SavedCursor{
-		Cursor:  g.cursor,
-		Style:   style,
-		Charset: g.charset,
-		Origin:  g.modes.Origin,
+		Cursor:     g.cursor,
+		Style:      style,
+		Charset:    g.charset,
+		Origin:     g.modes.Origin,
+		Protection: prot,
 	}
 }
 
@@ -714,15 +726,15 @@ func (g *Grid) SavedCursor() SavedCursor {
 	return g.saved[g.screen()]
 }
 
-// RestoreCursor restores the saved cursor, charset and origin mode, and returns
-// the saved style for the caller to make current.
-func (g *Grid) RestoreCursor() Style {
+// RestoreCursor restores the saved cursor, charset, origin mode and character
+// protection, and returns the saved style for the caller to make current.
+func (g *Grid) RestoreCursor() (Style, Protection) {
 	sc := g.saved[g.screen()]
 	c := sc.Cursor
 	g.cursor = Cursor{X: clamp(c.X, 0, g.cols-1), Y: clamp(c.Y, 0, g.rows-1), Visible: c.Visible, WrapNext: c.WrapNext}
 	g.charset = sc.Charset
 	g.modes.Origin = sc.Origin
-	return sc.Style
+	return sc.Style, sc.Protection
 }
 
 // Charset returns the G0/G1 designation and the active GL.
@@ -774,6 +786,10 @@ func (g *Grid) Resize(cols, rows int) {
 	g.cursor.X = clamp(g.cursor.X, 0, cols-1)
 	g.cursor.Y = clamp(g.cursor.Y, 0, rows-1)
 	g.cursor.WrapNext = false
+	// A window resize decides the column mode the way DECCOLM does: the mode
+	// is the wide screen. This keeps the mode and the width in step when a
+	// window operation resizes the terminal instead of DECCOLM.
+	g.modes.ColumnMode = cols > 80
 }
 
 // resizeLines copies old into a cols by rows grid, blanking what does not fit.

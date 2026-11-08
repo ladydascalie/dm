@@ -301,8 +301,23 @@ func (h *harness) answerDECRQCRA(s seq) {
 	left := paramAt(rest, 1, 1)
 	bottom := paramAt(rest, 2, h.rows())
 	right := paramAt(rest, 3, h.cols())
+	top, left, bottom, right = h.decrqcraRect(top, left, bottom, right)
 	sum := checksum(h.vt, top, left, bottom, right)
 	h.reply(fmt.Sprintf("\x1bP%d!~%04X\x1b\\", pid, sum), "DECRQCRA")
+}
+
+// decrqcraRect applies the origin-mode offset to a DECRQCRA rectangle. In origin
+// mode xterm reads the rectangle relative to the top and left margins, as it
+// reads the cursor. The margins come from the report terminal, which the
+// harness keeps in step with the terminal under test: the vt10x view does not
+// expose them, and the report terminal sees every margin and mode sequence.
+func (h *harness) decrqcraRect(top, left, bottom, right int) (int, int, int, int) {
+	g := h.reports.Grid()
+	if g == nil || !g.Modes().Origin {
+		return top, left, bottom, right
+	}
+	r := g.ScrollRegion()
+	return top + r.Top, left + r.Left, bottom + r.Top, right + r.Left
 }
 
 func (h *harness) answerDCS(raw []byte, body string) {
@@ -333,12 +348,17 @@ func (h *harness) handleOSC(body string) {
 			if err != nil {
 				continue
 			}
+			// OSC 5 addresses the special colours, which live at 256+n.
+			key := idx
+			if fields[0] == "5" {
+				key += 256
+			}
 			val := fields[i+1]
 			if val == "?" {
-				c := h.st.indexedColor(idx)
+				c := h.st.indexedColor(key)
 				h.reply(fmt.Sprintf("\x1b]%s;%d;%s\x1b\\", fields[0], idx, formatColor(c)), "OSC "+fields[0])
 			} else if c, ok := parseColor(val); ok {
-				h.st.indexed[idx] = c
+				h.st.indexed[key] = c
 			}
 		}
 	case "10", "11", "12":
@@ -354,10 +374,35 @@ func (h *harness) handleOSC(body string) {
 			}
 		}
 	case "104", "105":
-		for i := 1; i < len(fields); i++ {
-			idx, err := strconv.Atoi(fields[i])
+		// OSC 104 resets the ANSI palette, OSC 105 the special colours.
+		// With no arguments each resets its whole range. A special colour
+		// number n is stored at index 256+n, the offset esctest2 uses.
+		hasArgs := false
+		for _, f := range fields[1:] {
+			if f != "" {
+				hasArgs = true
+				break
+			}
+		}
+		if !hasArgs {
+			if fields[0] == "104" {
+				h.st.indexed = map[int]rgb{}
+			} else {
+				for idx := range h.st.indexed {
+					if idx >= 256 {
+						delete(h.st.indexed, idx)
+					}
+				}
+			}
+			break
+		}
+		for _, f := range fields[1:] {
+			idx, err := strconv.Atoi(f)
 			if err != nil {
 				continue
+			}
+			if fields[0] == "105" {
+				idx += 256
 			}
 			delete(h.st.indexed, idx)
 		}

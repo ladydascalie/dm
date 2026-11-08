@@ -300,7 +300,8 @@ func TestDECSETColumnMode(t *testing.T) {
 }
 
 func TestDECSETColumnModeRequiresAllow(t *testing.T) {
-	term := modeTerm(t, 80, 5, "\x1b[?3h")
+	// DECSET 40 is on by default, so the test turns it off first.
+	term := modeTerm(t, 80, 5, "\x1b[?40l\x1b[?3h")
 	if cols, _ := term.grid.Size(); cols != 80 {
 		t.Fatalf("cols = %d, want 80 without DECSET 40", cols)
 	}
