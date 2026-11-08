@@ -169,8 +169,63 @@ func TestDECRQSSMargins(t *testing.T) {
 
 func TestDECRQSSInvalid(t *testing.T) {
 	term := NewTerm(10, 5)
-	if got, want := term.DECRQSSReply("m"), "\x1bP0$rm\x1b\\"; got != want {
+	if got, want := term.DECRQSSReply("zz"), "\x1bP0$rzz\x1b\\"; got != want {
+		t.Fatalf("DECRQSS zz = %q, want %q", got, want)
+	}
+}
+
+// TestDECRQSSSettings pins a report for each setting the terminal keeps for
+// DECRQSS, including the ones the grid does not otherwise model.
+func TestDECRQSSSettings(t *testing.T) {
+	tests := []struct {
+		in   string
+		pt   string
+		want string
+	}{
+		{"\x1b[0+q", "+q", "\x1bP1$r0+q\x1b\\"},
+		{"\x1b[0*} ", "*}", "\x1bP1$r0*}\x1b\\"},
+		{"\x1b[0$}", "$}", "\x1bP1$r0$}\x1b\\"},
+		{"\x1b[0*x", "*x", "\x1bP1$r0*x\x1b\\"},
+		{"\x1b[1\"q", "\"q", "\x1bP1$r1\"q\x1b\\"},
+		{"\x1b[65;1\"p", "\"p", "\x1bP1$r65;1\"p\x1b\\"},
+		{"\x1b[4 q", " q", "\x1bP1$r4 q\x1b\\"},
+		{"\x1b[24*|", "*|", "\x1bP1$r24*|\x1b\\"},
+		{"\x1b[0$~", "$~", "\x1bP1$r0$~\x1b\\"},
+		{"\x1b[0+r", "+r", "\x1bP1$r0+r\x1b\\"},
+		{"\x1b[27t", "t", "\x1bP1$r27t\x1b\\"},
+	}
+	for _, tt := range tests {
+		term := NewTerm(10, 5)
+		writeTerm(term, tt.in)
+		if got := term.DECRQSSReply(tt.pt); got != tt.want {
+			t.Errorf("%q DECRQSS %q = %q, want %q", tt.in, tt.pt, got, tt.want)
+		}
+	}
+}
+
+func TestDECRQSSSGR(t *testing.T) {
+	term := NewTerm(10, 5)
+	writeTerm(term, "\x1b[1;4:3;38;5;200;48;2;1;2;3;58;5;9m")
+	want := "\x1bP1$r0;1;4:3;38;5;200;48;2;1;2;3;58;5;9m\x1b\\"
+	if got := term.DECRQSSReply("m"); got != want {
 		t.Fatalf("DECRQSS m = %q, want %q", got, want)
+	}
+	// A reset reports the default rendition.
+	writeTerm(term, "\x1b[0m")
+	if got, want := term.DECRQSSReply("m"), "\x1bP1$r0m\x1b\\"; got != want {
+		t.Fatalf("DECRQSS m after reset = %q, want %q", got, want)
+	}
+}
+
+// TestDCSDispatch pins that the parser delivers DECRQSS and XTGETTCAP to the
+// terminal, so the harness can hand the sequence over unchanged.
+func TestDCSDispatch(t *testing.T) {
+	term := NewTerm(10, 5)
+	if got, want := report(t, term, "\x1bP$qr\x1b\\"), "\x1bP1$r1;5r\x1b\\"; got != want {
+		t.Fatalf("DECRQSS DCS = %q, want %q", got, want)
+	}
+	if got, want := report(t, term, "\x1bP+q436F\x1b\\"), "\x1bP1+r436F=323536\x1b\\"; got != want {
+		t.Fatalf("XTGETTCAP DCS = %q, want %q", got, want)
 	}
 }
 

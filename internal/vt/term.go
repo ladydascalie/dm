@@ -21,12 +21,32 @@ type Term struct {
 	clipboard   string
 	status      string
 	colors      map[int]Color
+
+	// Settings the report family answers but the grid does not model.
+	cursorStyle  int
+	screenLines  int
+	statusType   int
+	activeStatus int
+	changeExtent int
+	localFuncs   int
+	localKeys    int
+	modifierKeys int
+	linesPerPage int
+	sevenBit     int
+
+	// decModeStates and ansiModeStates record every mode set and reset, so a
+	// DECRQM can report a mode the grid does not model.
+	decModeStates  map[int]bool
+	ansiModeStates map[int]bool
 }
 
 // NewTerm returns a terminal with a blank grid of cols by rows and the default
 // style.
 func NewTerm(cols, rows int) *Term {
-	return &Term{grid: NewGrid(cols, rows), style: DefaultStyle(), level: 5}
+	return &Term{
+		grid: NewGrid(cols, rows), style: DefaultStyle(), level: 5,
+		screenLines: defaultScreenLines, sevenBit: 1,
+	}
 }
 
 // Write parses b and places what it holds. Pending parser state survives the

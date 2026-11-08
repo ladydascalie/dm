@@ -41,6 +41,18 @@ func escReset(term *Term) {
 	term.clipboard = ""
 	term.status = ""
 	term.colors = nil
+	term.decModeStates = nil
+	term.ansiModeStates = nil
+	term.cursorStyle = 0
+	term.screenLines = defaultScreenLines
+	term.statusType = 0
+	term.activeStatus = 0
+	term.changeExtent = 0
+	term.localFuncs = 0
+	term.localKeys = 0
+	term.modifierKeys = 0
+	term.linesPerPage = 0
+	term.sevenBit = 1
 }
 
 // escScreenAlignment handles DECALN: fill the screen with E, home the cursor and
@@ -55,6 +67,17 @@ func escScreenAlignment(term *Term) {
 func csiSoftReset(term *Term, _ CSI) {
 	term.grid.SoftReset()
 	term.style = DefaultStyle()
+	term.decModeStates = nil
+	term.ansiModeStates = nil
+	term.cursorStyle = 0
+	term.screenLines = defaultScreenLines
+	term.statusType = 0
+	term.activeStatus = 0
+	term.changeExtent = 0
+	term.localFuncs = 0
+	term.localKeys = 0
+	term.modifierKeys = 0
+	term.linesPerPage = 0
 }
 
 // csiRepeat handles REP: repeat the preceding graphic character. The character

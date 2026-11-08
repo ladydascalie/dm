@@ -83,6 +83,10 @@ func csiResetPrivateMode(term *Term, seq CSI) {
 // setANSIModes applies an SM or RM to each parameter.
 func (t *Term) setANSIModes(params []int, on bool) {
 	for _, n := range params {
+		if t.ansiModeStates == nil {
+			t.ansiModeStates = map[int]bool{}
+		}
+		t.ansiModeStates[n] = on
 		m := t.grid.Modes()
 		switch n {
 		case ansiIRM:
@@ -100,6 +104,10 @@ func (t *Term) setANSIModes(params []int, on bool) {
 
 // setPrivateMode applies one DECSET or DECRST parameter.
 func (t *Term) setPrivateMode(n int, on bool) {
+	if t.decModeStates == nil {
+		t.decModeStates = map[int]bool{}
+	}
+	t.decModeStates[n] = on
 	g := t.grid
 	m := g.Modes()
 	switch n {

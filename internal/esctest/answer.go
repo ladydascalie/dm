@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"dm/internal/vt"
-
 	"github.com/creack/pty"
 	"github.com/hinshun/vt10x"
 )
@@ -20,44 +18,15 @@ const (
 	displayRows = 54
 )
 
-// permanentlyResetAnsi are the ANSI modes esctest2 expects a terminal to
-// report as permanently reset (4).
-var permanentlyResetDec = map[int]bool{
-	60: true, // DECHCCM
-}
-
-var permanentlyResetAnsi = map[int]bool{
-	1: true, 5: true, 7: true, 10: true, 11: true, 13: true,
-	14: true, 15: true, 16: true, 17: true, 18: true, 19: true,
-}
-
 // titlePair is one entry on the title stack. A combined push stores both
 // titles in one entry, and a pop of either kind removes the whole entry.
 type titlePair struct {
 	icon, window string
 }
 
-// state is what the harness tracks for the queries vt10x cannot answer.
+// state is what the harness tracks for the queries the terminal does not
+// answer: the window, the title stack and the OSC colours.
 type state struct {
-	decModes  map[int]bool
-	ansiModes map[int]bool
-
-	stbmTop, stbmBottom int
-	slrmLeft, slrmRight int
-	sgr                 []int
-	decsca              int
-	decscl              string
-	decsclLevel         int
-	decscusr            int
-	slpp                int
-	smkr                int
-	snls                int
-	ssdt                int
-	elf                 int
-	lfkc                int
-	sasd                int
-	sace                int
-
 	iconTitle   string
 	windowTitle string
 	titleStack  []titlePair
@@ -77,233 +46,19 @@ type state struct {
 
 func newState(rows, cols int) state {
 	return state{
-		decModes:  map[int]bool{7: true, 25: true},
-		ansiModes: map[int]bool{},
-		stbmTop:   1, stbmBottom: rows,
-		slrmLeft: 1, slrmRight: cols,
-		decscl:      "65;1",
-		decsclLevel: 5,
-		snls:        24,
-		indexed:     map[int]rgb{},
-		fg:          defaultFG,
-		bg:          defaultBG,
-		cursor:      defaultCursor,
+		indexed: map[int]rgb{},
+		fg:      defaultFG,
+		bg:      defaultBG,
+		cursor:  defaultCursor,
 	}
-}
-
-func (st *state) softReset(rows, cols int) {
-	st.decModes = map[int]bool{7: true, 25: true}
-	st.ansiModes = map[int]bool{}
-	st.sgr = nil
-	st.decsca = 0
-	st.decscusr = 0
-	st.stbmTop, st.stbmBottom = 1, rows
-	st.slrmLeft, st.slrmRight = 1, cols
-	st.slpp = 0
-	st.smkr = 0
-	st.snls = 24
-	st.ssdt = 0
-	st.elf = 0
-	st.lfkc = 0
-	st.sasd = 0
-	st.sace = 0
-}
-
-func (st *state) applySGR(params []int) {
-	if len(params) == 0 {
-		params = []int{0}
-	}
-	for i := 0; i < len(params); i++ {
-		p := params[i]
-		switch p {
-		case 0:
-			st.sgr = nil
-		case 1, 3, 4, 5, 7, 8, 9:
-			st.sgr = append(st.sgr, p)
-		case 22:
-			st.sgr = removeInt(st.sgr, 1)
-		case 23:
-			st.sgr = removeInt(st.sgr, 3)
-		case 24:
-			st.sgr = removeInt(st.sgr, 4)
-		case 25:
-			st.sgr = removeInt(st.sgr, 5)
-		case 27:
-			st.sgr = removeInt(st.sgr, 7)
-		case 28:
-			st.sgr = removeInt(st.sgr, 8)
-		case 29:
-			st.sgr = removeInt(st.sgr, 9)
-		case 38, 48:
-			if i+1 < len(params) && params[i+1] == 5 {
-				i += 2
-			} else if i+1 < len(params) && params[i+1] == 2 {
-				i += 4
-			}
-		}
-	}
-}
-
-func removeInt(s []int, v int) []int {
-	out := s[:0]
-	for _, x := range s {
-		if x != v {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
-// modeState reports a mode the way xterm's DECRQM does. It reads vt10x's
-// state, so a mode vt10x does not implement reports 0 (not recognised).
-func (h *harness) modeState(priv bool, mode int) int {
-	if !priv {
-		if permanentlyResetAnsi[mode] {
-			return 4
-		}
-		var bit vt10x.ModeFlag
-		switch mode {
-		case 2: // KAM
-			bit = vt10x.ModeKeyboardLock
-		case 4: // IRM
-			bit = vt10x.ModeInsert
-		case 12: // SRM
-			bit = vt10x.ModeEcho
-		case 20: // LNM
-			bit = vt10x.ModeCRLF
-		default:
-			return 0
-		}
-		if h.vt.Mode()&bit != 0 {
-			return 1
-		}
-		return 2
-	}
-	if permanentlyResetDec[mode] {
-		return 4
-	}
-	switch mode {
-	case 1: // DECCKM
-		if h.vt.Mode()&vt10x.ModeAppCursor != 0 {
-			return 1
-		}
-		return 2
-	case 5: // DECSCNM
-		if h.vt.Mode()&vt10x.ModeReverse != 0 {
-			return 1
-		}
-		return 2
-	case 6: // DECOM, tracked because vt10x does not expose it
-		if h.st.decModes[6] {
-			return 1
-		}
-		return 2
-	case 7: // DECAWM
-		if h.vt.Mode()&vt10x.ModeWrap != 0 {
-			return 1
-		}
-		return 2
-	case 25: // DECTCEM
-		if h.vt.Mode()&vt10x.ModeHide == 0 {
-			return 1
-		}
-		return 2
-	case 3, 4, 18, 19, 35, 42, 66, 67, 69:
-		// Modes the new VT's mode family owns. Until that stream lands the
-		// harness reports the state it observed from DECSET and DECRST, so
-		// the report family is provable on its own.
-		if h.st.decModes[mode] {
-			return 1
-		}
-		return 2
-	}
-	return 0
 }
 
 // observe updates tracked state for a sequence that is also written to the
-// terminal.
+// terminal. The report family used to need mode and DECRQSS tracking here; the
+// terminal answers those now, so only the OSC state is left.
 func (h *harness) observe(s seq) {
-	switch s.kind {
-	case ']':
+	if s.kind == ']' {
 		h.handleOSC(s.body)
-	case 'c':
-		h.observeCSI(s)
-	}
-}
-
-func (h *harness) observeCSI(s seq) {
-	switch s.final {
-	case 'h', 'l':
-		set := s.final == 'h'
-		for _, p := range s.params {
-			if p < 0 {
-				continue
-			}
-			switch s.priv {
-			case '?':
-				h.st.decModes[p] = set
-			case 0:
-				h.st.ansiModes[p] = set
-			}
-		}
-	case 'm':
-		if s.priv == 0 && s.inter == "" {
-			h.st.applySGR(s.params)
-		}
-	case 'r':
-		switch s.inter {
-		case "":
-			top, bottom := 1, h.rows()
-			if len(s.params) > 0 && s.params[0] > 0 {
-				top = s.params[0]
-			}
-			if len(s.params) > 1 && s.params[1] > 0 {
-				bottom = s.params[1]
-			}
-			h.st.stbmTop, h.st.stbmBottom = top, bottom
-		case "+":
-			h.st.smkr = firstParam(s.params, 0)
-		}
-	case 's':
-		if s.priv == 0 && s.inter == "" && len(s.params) >= 2 {
-			h.st.slrmLeft, h.st.slrmRight = s.params[0], s.params[1]
-		}
-	case 'p':
-		switch s.inter {
-		case "!":
-			h.st.softReset(h.rows(), h.cols())
-		case "\"":
-			h.st.decscl = joinParams(s.params)
-			h.st.decsclLevel = firstParam(s.params, 65) - 60
-		}
-	case 'q':
-		switch s.inter {
-		case "\"":
-			h.st.decsca = firstParam(s.params, 0)
-		case " ":
-			h.st.decscusr = firstParam(s.params, 0)
-		}
-	case '|':
-		if s.inter == "*" {
-			h.st.snls = firstParam(s.params, 0)
-		}
-	case '~':
-		if s.inter == "$" {
-			h.st.ssdt = firstParam(s.params, 0)
-		}
-	case '}':
-		switch s.inter {
-		case "'":
-			h.st.elf = firstParam(s.params, 0)
-		case "*":
-			h.st.lfkc = firstParam(s.params, 0)
-		case "$":
-			h.st.sasd = firstParam(s.params, 0)
-		}
-	case 'x':
-		if s.inter == "*" {
-			h.st.sace = firstParam(s.params, 0)
-		}
 	}
 }
 
@@ -316,7 +71,7 @@ func (h *harness) answer(s seq, raw []byte) {
 	case ']':
 		h.handleOSC(s.body)
 	case 'P':
-		h.answerDCS(s.body)
+		h.answerDCS(raw, s.body)
 	case 'c':
 		h.answerCSI(s, raw)
 	}
@@ -349,10 +104,13 @@ func (h *harness) answerCSI(s seq, raw []byte) {
 		}
 		h.answerDSR(s)
 	case 't':
+		// The window operations are the harness's, but the terminal records
+		// the page height a DECRQSS later reports.
+		_ = h.vtReport(raw)
 		h.answerWinop(s)
 	case 'p':
 		if s.inter == "$" {
-			h.answerDECRQM(s)
+			h.replyVT(raw, "DECRQM")
 		}
 	case 'y':
 		if s.inter == "*" {
@@ -526,22 +284,8 @@ func (h *harness) answerWinop(s seq) {
 		}
 	default:
 		if code := firstParam(s.params, 0); code >= 24 {
-			h.st.slpp = code
 			h.resize(code, h.cols())
 		}
-	}
-}
-
-func (h *harness) answerDECRQM(s seq) {
-	if h.st.decsclLevel < 3 {
-		return
-	}
-	p := firstParam(s.params, 0)
-	state := h.modeState(s.priv == '?', p)
-	if s.priv == '?' {
-		h.reply(fmt.Sprintf("\x1b[?%d;%d$y", p, state), "DECRQM")
-	} else {
-		h.reply(fmt.Sprintf("\x1b[%d;%d$y", p, state), "DECRQM")
 	}
 }
 
@@ -561,59 +305,13 @@ func (h *harness) answerDECRQCRA(s seq) {
 	h.reply(fmt.Sprintf("\x1bP%d!~%04X\x1b\\", pid, sum), "DECRQCRA")
 }
 
-func (h *harness) answerDCS(body string) {
+func (h *harness) answerDCS(raw []byte, body string) {
 	switch {
 	case strings.HasPrefix(body, "$q"):
-		if h.st.decsclLevel < 3 {
-			return
-		}
-		pt := body[2:]
-		h.reply("\x1bP"+h.st.decrqss(pt)+"\x1b\\", "DECRQSS")
+		h.replyVT(raw, "DECRQSS")
 	case strings.HasPrefix(body, "+q"):
-		h.reply(vt.XTGETTCAPReply(body[2:]), "XTGETTCAP")
+		h.replyVT(raw, "XTGETTCAP")
 	}
-}
-
-func (st *state) decrqss(pt string) string {
-	ok := func(v string) string { return "1$r" + v }
-	switch pt {
-	case "$}":
-		return ok(strconv.Itoa(st.sasd) + "$}")
-	case "*x":
-		return ok(strconv.Itoa(st.sace) + "*x")
-	case "\"q":
-		return ok(strconv.Itoa(st.decsca) + "\"q")
-	case "\"p":
-		return ok(st.decscl + "\"p")
-	case "r":
-		return ok(fmt.Sprintf("%d;%d", st.stbmTop, st.stbmBottom) + "r")
-	case "m":
-		return ok("0" + sgrSuffix(st.sgr) + "m")
-	case " q":
-		return ok(strconv.Itoa(st.decscusr) + " q")
-	case "s":
-		return ok(fmt.Sprintf("%d;%d", st.slrmLeft, st.slrmRight) + "s")
-	case "t":
-		return ok(strconv.Itoa(st.slpp) + "t")
-	case "*|":
-		return ok(strconv.Itoa(st.snls) + "*|")
-	case "$~":
-		return ok(strconv.Itoa(st.ssdt) + "$~")
-	}
-	// xterm does not implement these, and esctest2 marks them as known bugs
-	// for xterm. Report them as invalid so the suite sees xterm's behaviour.
-	return "0$r" + pt
-}
-
-func sgrSuffix(sgr []int) string {
-	if len(sgr) == 0 {
-		return ""
-	}
-	parts := make([]string, len(sgr))
-	for i, p := range sgr {
-		parts[i] = strconv.Itoa(p)
-	}
-	return ";" + strings.Join(parts, ";")
 }
 
 func (h *harness) handleOSC(body string) {
@@ -720,28 +418,9 @@ func (h *harness) resize(rows, cols int) {
 	if rows == h.rows() && cols == h.cols() {
 		return
 	}
-	oldRows, oldCols := h.rows(), h.cols()
 	h.vt.Resize(cols, rows)
 	_ = pty.Setsize(h.ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
-	if h.st.stbmBottom == oldRows {
-		h.st.stbmBottom = rows
-	}
-	if h.st.slrmRight == oldCols {
-		h.st.slrmRight = cols
-	}
 	h.logf("resize %dx%d", rows, cols)
-}
-
-func joinParams(params []int) string {
-	parts := make([]string, len(params))
-	for i, p := range params {
-		if p < 0 {
-			parts[i] = ""
-		} else {
-			parts[i] = strconv.Itoa(p)
-		}
-	}
-	return strings.Join(parts, ";")
 }
 
 // checksum is xterm's DECRQCRA with checksumExtension 23: the sum of the

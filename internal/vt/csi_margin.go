@@ -66,6 +66,9 @@ func csiConformanceLevel(term *Term, seq CSI) {
 	if level >= 61 && level <= 65 {
 		term.level = level - 60
 	}
+	if len(seq.Params) > 1 && seq.Params[1] >= 0 && seq.Params[1] <= 2 {
+		term.sevenBit = seq.Params[1]
+	}
 }
 
 // csiDeleteColumns handles DECDC. It deletes columns at the cursor on every row

@@ -46,6 +46,16 @@ var permanentlyResetDEC = map[int]bool{
 	60: true, // DECHCCM
 }
 
+// xtermUnsupportedDEC are the DEC private modes xterm reports as not
+// recognised. esctest2 marks their DECRQM tests as known bugs for xterm, so the
+// terminal must keep failing them to stay xterm-compatible.
+var xtermUnsupportedDEC = map[int]bool{
+	8: true, 34: true, 36: true, 57: true, 61: true, 64: true,
+	68: true, 73: true, 81: true, 95: true, 96: true, 97: true,
+	98: true, 99: true, 100: true, 101: true, 102: true,
+	103: true, 104: true, 106: true,
+}
+
 // registerReports registers the CSI and ESC keys of the report family.
 func registerReports(t map[csiKey]csiHandler, e map[escKey]escHandler) {
 	t[csiKey{Final: 'c'}] = csiDA1
@@ -55,6 +65,55 @@ func registerReports(t map[csiKey]csiHandler, e map[escKey]escHandler) {
 	t[csiKey{Inter: "$", Final: 'p'}] = csiDECRQM
 	t[csiKey{Priv: '?', Inter: "$", Final: 'p'}] = csiDECRQMDEC
 	e[escKey{Final: 'Z'}] = csiDECID
+
+	// The DECRQSS settings the grid does not otherwise model. They are kept
+	// so a report answers with what the application last set.
+	t[csiKey{Inter: " ", Final: 'q'}] = csiSetCursorStyle  // DECSCUSR
+	t[csiKey{Inter: "*", Final: '|'}] = csiSetScreenLines  // DECSNLS
+	t[csiKey{Inter: "$", Final: '~'}] = csiSetStatusType   // DECSSDT
+	t[csiKey{Inter: "$", Final: '}'}] = csiSetActiveStatus // DECSASD
+	t[csiKey{Inter: "*", Final: 'x'}] = csiSetChangeExtent // DECSACE
+	t[csiKey{Inter: "+", Final: 'q'}] = csiSetLocalFuncs   // DECELF
+	t[csiKey{Inter: "*", Final: '}'}] = csiSetLocalKeys    // DECLFKC
+	t[csiKey{Inter: "+", Final: 'r'}] = csiSetModifierKeys // DECSMKR
+	t[csiKey{Final: 't'}] = csiSetLinesPerPage             // DECSLPP / window op
+}
+
+// The state behind the DECRQSS settings that are not grid state.
+const (
+	defaultScreenLines = 24
+)
+
+// csiSetCursorStyle handles DECSCUSR.
+func csiSetCursorStyle(t *Term, seq CSI) { t.cursorStyle = csiParamOr(seq, 0, 0) }
+
+// csiSetScreenLines handles DECSNLS.
+func csiSetScreenLines(t *Term, seq CSI) { t.screenLines = csiParamOr(seq, 0, 0) }
+
+// csiSetStatusType handles DECSSDT.
+func csiSetStatusType(t *Term, seq CSI) { t.statusType = csiParamOr(seq, 0, 0) }
+
+// csiSetActiveStatus handles DECSASD.
+func csiSetActiveStatus(t *Term, seq CSI) { t.activeStatus = csiParamOr(seq, 0, 0) }
+
+// csiSetChangeExtent handles DECSACE.
+func csiSetChangeExtent(t *Term, seq CSI) { t.changeExtent = csiParamOr(seq, 0, 0) }
+
+// csiSetLocalFuncs handles DECELF.
+func csiSetLocalFuncs(t *Term, seq CSI) { t.localFuncs = csiParamOr(seq, 0, 0) }
+
+// csiSetLocalKeys handles DECLFKC.
+func csiSetLocalKeys(t *Term, seq CSI) { t.localKeys = csiParamOr(seq, 0, 0) }
+
+// csiSetModifierKeys handles DECSMKR.
+func csiSetModifierKeys(t *Term, seq CSI) { t.modifierKeys = csiParamOr(seq, 0, 0) }
+
+// csiSetLinesPerPage handles the window operation that sets the page height.
+// Only operation 27 carries a value this terminal reports.
+func csiSetLinesPerPage(t *Term, seq CSI) {
+	if csiParamOr(seq, 0, 0) == 27 {
+		t.linesPerPage = 27
+	}
 }
 
 // identify is the device attributes reply: a VT level 4 terminal with the
@@ -134,15 +193,21 @@ func csiDECRQMDEC(t *Term, seq CSI) {
 }
 
 // reportModeState reads the state of a mode the way xterm's DECRQM reports it.
-// A mode the grid does not model reports not recognised, because a terminal
-// that ignores a mode has no state to report. The mode family fills this in as
-// it adds modes; the harness keeps its own answer until then.
+// Every DECSET, DECRST, SM and RM is recorded, so a mode without a model still
+// reports the value the application last set. A mode never seen and never
+// modelled reports not recognised.
 func (t *Term) reportModeState(private bool, mode int) int {
 	g := t.grid
 	m := g.Modes()
 	if private {
 		if permanentlyResetDEC[mode] {
 			return modePermanentlyReset
+		}
+		if xtermUnsupportedDEC[mode] {
+			return modeNotRecognised
+		}
+		if v, ok := t.decModeStates[mode]; ok {
+			return boolState(v)
 		}
 		switch mode {
 		case 5: // DECSCNM
@@ -167,9 +232,14 @@ func (t *Term) reportModeState(private bool, mode int) int {
 	if permanentlyResetANSI[mode] {
 		return modePermanentlyReset
 	}
+	if v, ok := t.ansiModeStates[mode]; ok {
+		return boolState(v)
+	}
 	switch mode {
 	case 4: // IRM
 		return boolState(m.Insert)
+	case 20: // LNM
+		return boolState(m.LineFeedNewLine)
 	}
 	return modeNotRecognised
 }
@@ -185,19 +255,122 @@ func boolState(on bool) int {
 // DECRQSSReply answers a DECRQSS body for the settings the grid holds. It
 // returns the complete DCS reply. A setting it does not model reports as
 // invalid, as xterm does for the ones it does not implement.
-//
-// The foundation parser buffers a DCS body but does not dispatch it yet, so the
-// harness calls this directly. The parser unit adds the dispatch.
 func (t *Term) DECRQSSReply(pt string) string {
+	ok := func(v string) string { return dcsReply("1", v) }
 	switch pt {
+	case "+q":
+		return ok(fmt.Sprintf("%d+q", t.localFuncs))
+	case "*}":
+		return ok(fmt.Sprintf("%d*}", t.localKeys))
+	case "$}":
+		return ok(fmt.Sprintf("%d$}", t.activeStatus))
+	case "*x":
+		return ok(fmt.Sprintf("%d*x", t.changeExtent))
+	case "\"q":
+		state := 0
+		if t.protected {
+			state = 1
+		}
+		return ok(fmt.Sprintf("%d\"q", state))
+	case "\"p":
+		return ok(fmt.Sprintf("%d;%d\"p", 60+t.level, t.sevenBit))
 	case "r":
 		r := t.grid.ScrollRegion()
-		return dcsReply("1", fmt.Sprintf("%d;%d", r.Top+1, r.Bottom+1)+"r")
+		return ok(fmt.Sprintf("%d;%d", r.Top+1, r.Bottom+1) + "r")
+	case "m":
+		return ok(sgrReport(t.style) + "m")
+	case " q":
+		return ok(fmt.Sprintf("%d q", t.cursorStyle))
 	case "s":
 		r := t.grid.ScrollRegion()
-		return dcsReply("1", fmt.Sprintf("%d;%d", r.Left+1, r.Right+1)+"s")
+		return ok(fmt.Sprintf("%d;%d", r.Left+1, r.Right+1) + "s")
+	case "t":
+		return ok(fmt.Sprintf("%dt", t.linesPerPage))
+	case "*|":
+		return ok(fmt.Sprintf("%d*|", t.screenLines))
+	case "$~":
+		return ok(fmt.Sprintf("%d$~", t.statusType))
+	case "+r":
+		return ok(fmt.Sprintf("%d+r", t.modifierKeys))
 	}
 	return dcsReply("0", pt)
+}
+
+// sgrReport renders the current rendition as an SGR parameter list. It starts
+// with 0, as xterm's DECRQSS does.
+func sgrReport(st Style) string {
+	parts := []string{"0"}
+	attrs := []struct {
+		bit  uint8
+		code string
+	}{
+		{Bold, "1"}, {Faint, "2"}, {Italic, "3"}, {Blink, "5"},
+		{RapidBlink, "6"}, {Reverse, "7"}, {Conceal, "8"}, {Strikethrough, "9"},
+	}
+	for _, a := range attrs {
+		if st.Attrs&a.bit != 0 {
+			parts = append(parts, a.code)
+		}
+	}
+	switch st.Underline {
+	case UnderlineSingle:
+		parts = append(parts, "4")
+	case UnderlineDouble:
+		parts = append(parts, "21")
+	case UnderlineCurly:
+		parts = append(parts, "4:3")
+	case UnderlineDotted:
+		parts = append(parts, "4:4")
+	case UnderlineDashed:
+		parts = append(parts, "4:5")
+	}
+	parts = append(parts, colorReport(st.Fg, true)...)
+	parts = append(parts, colorReport(st.Bg, false)...)
+	parts = append(parts, underlineColorReport(st.UnderlineColor)...)
+	return strings.Join(parts, ";")
+}
+
+// colorReport renders one foreground or background colour as SGR parameters.
+func colorReport(c Color, fg bool) []string {
+	base := 30
+	if !fg {
+		base = 40
+	}
+	switch c.Kind {
+	case ColorPalette:
+		if c.Index < 8 {
+			return []string{fmt.Sprint(base + int(c.Index))}
+		}
+		if c.Index < 16 {
+			return []string{fmt.Sprint(base + 60 + int(c.Index) - 8)}
+		}
+		return []string{fmt.Sprintf("%d;5;%d", base+8, c.Index)}
+	case ColorRGB:
+		return []string{fmt.Sprintf("%d;2;%d;%d;%d", base+8, c.R, c.G, c.B)}
+	}
+	return nil
+}
+
+// underlineColorReport renders the underline colour as SGR 58 parameters.
+func underlineColorReport(c Color) []string {
+	switch c.Kind {
+	case ColorPalette:
+		return []string{fmt.Sprintf("58;5;%d", c.Index)}
+	case ColorRGB:
+		return []string{fmt.Sprintf("58;2;%d;%d;%d", c.R, c.G, c.B)}
+	}
+	return nil
+}
+
+// dcs handles one DCS body. DECRQSS and XTGETTCAP are the two the terminal
+// answers.
+func (t *Term) dcs(body string) {
+	switch {
+	case strings.HasPrefix(body, "$q"):
+		t.reply(t.DECRQSSReply(body[2:]))
+	case strings.HasPrefix(body, "+q"):
+		t.reply(XTGETTCAPReply(body[2:]))
+	}
 }
 
 // dcsReply wraps a DECRQSS result in the DCS envelope.
