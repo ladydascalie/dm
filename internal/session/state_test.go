@@ -2,6 +2,9 @@ package session
 
 import (
 	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 
 	"dm/internal/layout"
@@ -150,5 +153,88 @@ func TestWorkspaceFoldRoundTrip(t *testing.T) {
 	}
 	if !again.Workspaces[0].Unfolded {
 		t.Fatal("unfolded workspace loaded folded")
+	}
+}
+
+// TestSaveConcurrent runs many saves over one state at once. It is a
+// regression guard, not a reliable red on the old fixed-name temp file: the
+// overlap window is real but the scheduler decides whether it trips. It
+// requires every save to succeed and the file to hold the saved content after.
+func TestSaveConcurrent(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := NewState("race")
+	// Enough content that the write window is real, so the saves overlap.
+	for i := 0; i < 200; i++ {
+		st.Workspaces = append(st.Workspaces, &Workspace{
+			ID:       "s" + strconv.Itoa(i+2),
+			Name:     "ws" + strconv.Itoa(i),
+			Unfolded: true,
+			Windows: []*Window{{
+				ID:    "w" + strconv.Itoa(i+2),
+				Name:  "win" + strconv.Itoa(i),
+				Focus: "fill",
+				Root:  &layout.Node{Pane: "fill"},
+			}},
+		})
+	}
+	const n = 64
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- st.Save()
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent save: %v", err)
+		}
+	}
+	got, err := LoadState("race")
+	if err != nil {
+		t.Fatalf("load after concurrent saves: %v", err)
+	}
+	if got.Name != "race" || len(got.Workspaces) != len(st.Workspaces) {
+		t.Fatalf("loaded name %q with %d workspaces, want race with %d",
+			got.Name, len(got.Workspaces), len(st.Workspaces))
+	}
+	if last := got.Workspaces[len(got.Workspaces)-1]; last.Name != "ws199" {
+		t.Fatalf("last workspace %q, want ws199", last.Name)
+	}
+	if tmp, _ := filepath.Glob(filepath.Join(paths.SessionDir("race"), "*.tmp")); len(tmp) != 0 {
+		t.Fatalf("temp files left behind: %v", tmp)
+	}
+}
+
+// TestSaveFailureLeavesNoTemp makes the write fail with a read-only session
+// directory and requires the error to surface with no temp file behind it.
+func TestSaveFailureLeavesNoTemp(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	t.Setenv("DM_STATE", t.TempDir())
+	dir := paths.SessionDir("ro")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	st := NewState("ro")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	if err := st.Save(); err == nil {
+		t.Fatal("save into a read-only directory succeeded, want an error")
+	}
+	left, err := filepath.Glob(filepath.Join(dir, "*.tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("failed save left temp files: %v", left)
 	}
 }

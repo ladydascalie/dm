@@ -150,11 +150,29 @@ func (st *State) Save() error {
 	if err != nil {
 		return err
 	}
-	tmp := paths.StatePath(st.Name) + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	// A unique temp name per save. Overlapping saves then write and rename
+	// separate paths, so the last rename wins instead of one failing with
+	// ENOENT on a temp file another save already moved. CreateTemp makes the
+	// file 0600, so the state stays private while it is written.
+	f, err := os.CreateTemp(paths.SessionDir(st.Name), "state-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, paths.StatePath(st.Name))
+	tmp := f.Name()
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, paths.StatePath(st.Name)); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 func LoadState(name string) (*State, error) {
