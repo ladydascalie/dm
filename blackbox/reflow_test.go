@@ -1,7 +1,6 @@
 package blackbox
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -9,7 +8,7 @@ import (
 
 // xRows returns the screen rows that hold only the long line's characters,
 // oldest first. The echoed command carries no such run, so a row of pure "x"
-// is the printed line alone.
+// is the written line alone.
 func xRows(out string) []string {
 	var rows []string
 	for _, line := range strings.Split(out, "\n") {
@@ -31,6 +30,18 @@ func xTotal(rows []string) int {
 	return n
 }
 
+// hasBareRow reports whether the screen holds want on a row of its own. A live
+// shell prefixes a typed line with its prompt, so a bare row can only be the
+// program's own output.
+func hasBareRow(out, want string) bool {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // paneContentWidth is the columns a pane can print in at a given rail width:
 // the pane area minus its border and padding, the same rule TestRailReflow
 // asserts on.
@@ -39,15 +50,15 @@ func paneContentWidth(cols, rail int) int {
 	return area.W - 2 - 2*pad()
 }
 
-// waitScreen polls the visible screen until hold accepts it. It never sleeps
-// on a guess: it reads the pane and re-checks against a deadline.
-func waitScreen(t *testing.T, h *harness, session, pane string, hold func([]string) bool) string {
+// waitScreen polls the visible screen until hold accepts the read. It never
+// sleeps on a guess: it reads the pane and re-checks against a deadline.
+func waitScreen(t *testing.T, h *harness, session, pane string, hold func(string) bool) string {
 	t.Helper()
 	deadline := time.Now().Add(waitBudget)
 	var last string
 	for time.Now().Before(deadline) {
 		last = h.run("read", pane, "-s", session)
-		if hold(xRows(last)) {
+		if hold(last) {
 			return last
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -55,6 +66,26 @@ func waitScreen(t *testing.T, h *harness, session, pane string, hold func([]stri
 	t.Fatalf("pane %s never reached the expected screen within the %s wait budget; last read:\n%s",
 		pane, waitBudget, last)
 	return last
+}
+
+// plainPane replaces the shell with a tty consumer, so nothing repaints on
+// SIGWINCH and no prompt sits in front of what the test writes. The tty echoes
+// each written line once and cat discards it, which is the only text the test
+// asserts on. It returns once the shell has handed the tty over: CAT-READY
+// only appears from the command, and the shell runs exec without reading
+// another line.
+func plainPane(t *testing.T, h *harness, session, pane string) {
+	t.Helper()
+	h.run("write-to", pane, "-s", session, "--msg", "echo CAT-READY; exec cat >/dev/null", "--enter")
+	waitScreen(t, h, session, pane, func(out string) bool {
+		return hasBareRow(out, "CAT-READY")
+	})
+}
+
+// writeLine sends one line of the test's text to the pane's tty.
+func writeLine(t *testing.T, h *harness, session, pane, line string) {
+	t.Helper()
+	h.run("write-to", pane, "-s", session, "--msg", line, "--enter")
 }
 
 // TestReflowOnResize proves the pane re-wraps its live screen when its width
@@ -83,11 +114,12 @@ func TestReflowOnResize(t *testing.T) {
 	if res := h.rpc(session, map[string]any{"action": "set-rail", "index": wide}); res["rail"] != float64(wide) {
 		t.Fatalf("set-rail %d = %v", wide, res["rail"])
 	}
+	plainPane(t, h, session, pane)
 
-	// Print the line at the wide width: it fits on one row.
-	h.run("write-to", pane, "-s", session, "--msg",
-		fmt.Sprintf(`printf 'x%%.0s' $(seq 1 %d); echo`, line), "--enter")
-	waitScreen(t, h, session, pane, func(rows []string) bool {
+	// Write the line at the wide width: it fits on one row.
+	writeLine(t, h, session, pane, strings.Repeat("x", line))
+	waitScreen(t, h, session, pane, func(out string) bool {
+		rows := xRows(out)
 		return len(rows) == 1 && xTotal(rows) == line
 	})
 
@@ -96,22 +128,21 @@ func TestReflowOnResize(t *testing.T) {
 	if res := h.rpc(session, map[string]any{"action": "set-rail", "index": narrow}); res["rail"] != float64(narrow) {
 		t.Fatalf("set-rail %d = %v", narrow, res["rail"])
 	}
-	waitScreen(t, h, session, pane, func(rows []string) bool {
+	waitScreen(t, h, session, pane, func(out string) bool {
+		rows := xRows(out)
 		return len(rows) == 2 && xTotal(rows) == line
 	})
 	rows := xRows(h.run("read", pane, "-s", session))
 	if len(rows[0]) > narrowW {
 		t.Fatalf("first wrapped row is %d columns, want at most %d", len(rows[0]), narrowW)
 	}
-	if rows[0] == strings.Repeat("x", line) {
-		t.Fatalf("the line did not wrap at the narrow width: %q", rows[0])
-	}
 
 	// Widen it back: the same characters come back on one row.
 	if res := h.rpc(session, map[string]any{"action": "set-rail", "index": wide}); res["rail"] != float64(wide) {
 		t.Fatalf("set-rail %d = %v", wide, res["rail"])
 	}
-	waitScreen(t, h, session, pane, func(rows []string) bool {
+	waitScreen(t, h, session, pane, func(out string) bool {
+		rows := xRows(out)
 		return len(rows) == 1 && xTotal(rows) == line
 	})
 }
@@ -140,9 +171,10 @@ func TestReflowEndsAtFinalWidth(t *testing.T) {
 	line := wideW - 1
 
 	h.rpc(session, map[string]any{"action": "set-rail", "index": wide})
-	h.run("write-to", pane, "-s", session, "--msg",
-		fmt.Sprintf(`printf 'x%%.0s' $(seq 1 %d); echo`, line), "--enter")
-	waitScreen(t, h, session, pane, func(rows []string) bool {
+	plainPane(t, h, session, pane)
+	writeLine(t, h, session, pane, strings.Repeat("x", line))
+	waitScreen(t, h, session, pane, func(out string) bool {
+		rows := xRows(out)
 		return len(rows) == 1 && xTotal(rows) == line
 	})
 
@@ -150,7 +182,8 @@ func TestReflowEndsAtFinalWidth(t *testing.T) {
 	h.rpc(session, map[string]any{"action": "set-rail", "index": mid})
 	h.rpc(session, map[string]any{"action": "set-rail", "index": narrow})
 
-	waitScreen(t, h, session, pane, func(rows []string) bool {
+	waitScreen(t, h, session, pane, func(out string) bool {
+		rows := xRows(out)
 		return len(rows) == 2 && xTotal(rows) == line && len(rows[0]) == narrowW
 	})
 }
