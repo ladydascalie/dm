@@ -173,8 +173,6 @@ dl.flags > div { display: flex; gap: .75rem; padding: .15rem 0; }
 dl.flags dt { flex: 0 0 14rem; }
 dl.flags dt code { color: var(--text); }
 dl.flags dd { margin: 0; color: var(--dim); }
-.names { columns: 12rem; margin: .5rem 0; padding-left: 1.2rem; }
-.names li { margin: .1rem 0; }
 .provenance { color: var(--dim); font-size: .9rem; border-left: 3px solid var(--accent); padding-left: .75rem; }
 [hidden] { display: none !important; }
 @media (max-width: 800px) {
@@ -499,12 +497,18 @@ func htmlActions(ids *idGen) string {
 	b.WriteString("</tbody></table>")
 
 	b.WriteString(`<h3 id="sec-action-names">Action names</h3>`)
-	b.WriteString(`<p>The <code>action</code> field names one of these. The action is the same over the socket, from a script and from a keymap.</p>`)
-	b.WriteString(`<ul class="names">`)
+	b.WriteString(`<p>The <code>action</code> field names one of these. The action is the same over the socket, from a script and from a keymap. Each example is one JSON object, carrying only the fields that action needs.</p>`)
+	b.WriteString(`<dl class="clist">`)
 	for _, n := range manActionNames {
-		fmt.Fprintf(&b, `<li id="%s" data-row><code>%s</code></li>`, htmlEscape(ids.id("action", "name "+n)), htmlEscape(n))
+		ex, ok := actionExampleOf(n)
+		if !ok {
+			ex = `{"action":"` + n + `"}`
+		}
+		fmt.Fprintf(&b, `<div class="row" id="%s" data-row>`, htmlEscape(ids.id("action", "name "+n)))
+		fmt.Fprintf(&b, "<dt><code>%s</code></dt>", htmlEscape(n))
+		fmt.Fprintf(&b, "<dd><pre><code>%s</code></pre></dd></div>", htmlEscape(ex))
 	}
-	b.WriteString(`</ul>`)
+	b.WriteString(`</dl>`)
 
 	b.WriteString(`<h3 id="sec-action-desc">Keymap actions</h3>`)
 	b.WriteString(`<p>What each action the built-in keymap binds does. The table says what the code does, not what the key is called.</p>`)
