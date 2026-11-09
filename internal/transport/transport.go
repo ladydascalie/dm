@@ -168,7 +168,7 @@ func ResetSession(name string) error {
 		return err
 	}
 	stopServer(dir)
-	reapPanes(name, dir)
+	reapPanes(dir)
 	return os.RemoveAll(dir)
 }
 
@@ -176,6 +176,9 @@ func ResetSession(name string) error {
 func stopServer(dir string) {
 	pid, ok := readPID(filepath.Join(dir, "server.pid"))
 	if !ok {
+		return
+	}
+	if !isDMProcess(pid, "__server") {
 		return
 	}
 	_ = syscall.Kill(pid, syscall.SIGTERM)
@@ -186,10 +189,12 @@ func stopServer(dir string) {
 	waitGone(pid, time.Second)
 }
 
-// reapPanes asks every pane daemon to kill its shell's process group and
-// exit. A daemon that does not answer still watches its socket, so removing
-// the path makes it reap itself.
-func reapPanes(name, dir string) {
+// reapPanes ends every pane daemon and the shell it owns. The shell is a
+// session leader, so killing its process group takes its children too. The
+// daemon is killed last, after its children are read, because a dead daemon
+// cannot name them. This works on a daemon built before reset existed: it
+// needs no cooperation from the pane.
+func reapPanes(dir string) {
 	entries, err := os.ReadDir(filepath.Join(dir, "panes"))
 	if err != nil {
 		return
@@ -198,23 +203,46 @@ func reapPanes(name, dir string) {
 		if !strings.HasSuffix(e.Name(), ".sock.pid") {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".sock.pid")
 		pid, ok := readPID(filepath.Join(dir, "panes", e.Name()))
 		if !ok {
 			continue
 		}
-		sock := paths.PaneSock(name, id)
-		if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
-			_ = wire.WriteMsg(c, wire.Msg{Action: "reap"})
-			c.Close()
-		} else {
-			_ = os.Remove(sock)
-		}
-		if waitGone(pid, 6*time.Second) {
+		if !isDMProcess(pid, "__pane") {
 			continue
+		}
+		for _, child := range childPIDs(pid) {
+			_ = syscall.Kill(-child, syscall.SIGKILL)
+			_ = syscall.Kill(child, syscall.SIGKILL)
 		}
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
+}
+
+// isDMProcess reports whether pid still runs the named dm subcommand. A
+// stale pid file can name a reused pid, and reset must not kill an unrelated
+// process.
+func isDMProcess(pid int, subcommand string) bool {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(b), subcommand)
+}
+
+// childPIDs returns the direct children of pid from procfs. A missing file
+// means the process is gone or has no children.
+func childPIDs(pid int) []int {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, f := range strings.Fields(string(b)) {
+		if n, err := strconv.Atoi(f); err == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // readPID reads a pid file. A missing or malformed file is not a pid.
@@ -231,10 +259,21 @@ func readPID(path string) (int, bool) {
 }
 
 // processAlive reports whether pid names a running process. A process owned by
-// another user answers EPERM, which still means it is alive.
+// another user answers EPERM, which still means it is alive. A zombie has
+// exited and only waits to be reaped, so it is not alive.
 func processAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	if err := syscall.Kill(pid, 0); err != nil && !errors.Is(err, syscall.EPERM) {
+		return false
+	}
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return true
+	}
+	// The state is the field after the parenthesised command name.
+	if i := strings.LastIndexByte(string(b), ')'); i >= 0 && i+2 < len(b) {
+		return b[i+2] != 'Z'
+	}
+	return true
 }
 
 // waitGone waits up to d for pid to exit and reports whether it did.

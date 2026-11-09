@@ -1,8 +1,10 @@
 package blackbox
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -22,9 +24,30 @@ func waitDead(t *testing.T, pid int) {
 	t.Fatalf("pid %d is still alive", pid)
 }
 
-// TestResetSession proves reset discards a live session: the server and every
-// pane process go, and the state directory is removed. Without --force it
-// prints the plan and refuses.
+// paneShellPIDs returns the shells a pane daemon owns, read from procfs.
+func paneShellPIDs(t *testing.T, panePID int) []int {
+	t.Helper()
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", panePID, panePID))
+	if err != nil {
+		t.Fatalf("children of %d: %v", panePID, err)
+	}
+	var out []int
+	for _, f := range strings.Fields(string(b)) {
+		n, err := strconv.Atoi(f)
+		if err != nil {
+			t.Fatalf("child pid %q: %v", f, err)
+		}
+		out = append(out, n)
+	}
+	if len(out) == 0 {
+		t.Fatalf("pane %d has no shell child", panePID)
+	}
+	return out
+}
+
+// TestResetSession proves reset discards a live session: the server, every
+// pane daemon and every shell go, and the state directory is removed. Without
+// --force it prints the plan and refuses.
 func TestResetSession(t *testing.T) {
 	h := newHarness(t)
 	h.run("new", "-s", "reset")
@@ -36,6 +59,10 @@ func TestResetSession(t *testing.T) {
 	panePIDs := []int{
 		readPID(t, filepath.Join(dir, "panes", root+".sock.pid")),
 		readPID(t, filepath.Join(dir, "panes", p2+".sock.pid")),
+	}
+	var shellPIDs []int
+	for _, pid := range panePIDs {
+		shellPIDs = append(shellPIDs, paneShellPIDs(t, pid)...)
 	}
 
 	out, err := h.try("reset", "-s", "reset")
@@ -60,8 +87,28 @@ func TestResetSession(t *testing.T) {
 	for _, pid := range panePIDs {
 		waitDead(t, pid)
 	}
+	for _, pid := range shellPIDs {
+		waitDead(t, pid)
+	}
 	if out := h.run("ls"); strings.Contains(out, "reset") {
 		t.Fatalf("ls still lists the reset session: %q", out)
+	}
+}
+
+// TestResetManyPanesIsFast proves reset does not wait on each pane in turn.
+// The old path gave every pane a six second grace period, so six panes took
+// half a minute.
+func TestResetManyPanesIsFast(t *testing.T) {
+	h := newHarness(t)
+	h.run("new", "-s", "many")
+	root := h.focus("many")
+	for i := 0; i < 5; i++ {
+		h.split("many", root, "right")
+	}
+	start := time.Now()
+	h.run("reset", "-s", "many", "--force")
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("reset of six panes took %s", d)
 	}
 }
 
