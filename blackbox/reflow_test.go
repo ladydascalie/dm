@@ -68,6 +68,26 @@ func waitScreen(t *testing.T, h *harness, session, pane string, hold func(string
 	return last
 }
 
+// waitPaneWidth polls the layout until the pane rect is the content width the
+// rail implies. set-rail replies before the pane daemon has applied the resize,
+// so a write is gated on the pane's real size, never on the RPC reply.
+func waitPaneWidth(t *testing.T, h *harness, session, pane string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(waitBudget)
+	var last paneRect
+	for time.Now().Before(deadline) {
+		if got, ok := h.rects(session)[pane]; ok {
+			last = got
+			if got.W == want {
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("pane %s rect is %+v, want content width %d within the %s wait budget",
+		pane, last, want, waitBudget)
+}
+
 // plainPane replaces the shell with a tty consumer, so nothing repaints on
 // SIGWINCH and no prompt sits in front of what the test writes. The tty echoes
 // each written line once and cat discards it, which is the only text the test
@@ -114,6 +134,7 @@ func TestReflowOnResize(t *testing.T) {
 	if res := h.rpc(session, map[string]any{"action": "set-rail", "index": wide}); res["rail"] != float64(wide) {
 		t.Fatalf("set-rail %d = %v", wide, res["rail"])
 	}
+	waitPaneWidth(t, h, session, pane, wideW)
 	plainPane(t, h, session, pane)
 
 	// Write the line at the wide width: it fits on one row.
@@ -128,6 +149,7 @@ func TestReflowOnResize(t *testing.T) {
 	if res := h.rpc(session, map[string]any{"action": "set-rail", "index": narrow}); res["rail"] != float64(narrow) {
 		t.Fatalf("set-rail %d = %v", narrow, res["rail"])
 	}
+	waitPaneWidth(t, h, session, pane, narrowW)
 	waitScreen(t, h, session, pane, func(out string) bool {
 		rows := xRows(out)
 		return len(rows) == 2 && xTotal(rows) == line
@@ -141,6 +163,7 @@ func TestReflowOnResize(t *testing.T) {
 	if res := h.rpc(session, map[string]any{"action": "set-rail", "index": wide}); res["rail"] != float64(wide) {
 		t.Fatalf("set-rail %d = %v", wide, res["rail"])
 	}
+	waitPaneWidth(t, h, session, pane, wideW)
 	waitScreen(t, h, session, pane, func(out string) bool {
 		rows := xRows(out)
 		return len(rows) == 1 && xTotal(rows) == line
@@ -171,6 +194,7 @@ func TestReflowEndsAtFinalWidth(t *testing.T) {
 	line := wideW - 1
 
 	h.rpc(session, map[string]any{"action": "set-rail", "index": wide})
+	waitPaneWidth(t, h, session, pane, wideW)
 	plainPane(t, h, session, pane)
 	writeLine(t, h, session, pane, strings.Repeat("x", line))
 	waitScreen(t, h, session, pane, func(out string) bool {
@@ -181,6 +205,7 @@ func TestReflowEndsAtFinalWidth(t *testing.T) {
 	// Two width changes back to back: the intermediate one must not survive.
 	h.rpc(session, map[string]any{"action": "set-rail", "index": mid})
 	h.rpc(session, map[string]any{"action": "set-rail", "index": narrow})
+	waitPaneWidth(t, h, session, pane, narrowW)
 
 	waitScreen(t, h, session, pane, func(out string) bool {
 		rows := xRows(out)
