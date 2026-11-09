@@ -145,6 +145,17 @@ var cliCommands = []cliCommand{
 		group: groupPane,
 	},
 	{
+		name:    "yank",
+		args:    "<pane> [--lines N]",
+		summary: "print a pane's output since the last Enter",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"lines", "N", "number of output lines"},
+		},
+		example: `dm yank w1p1`,
+		group:   groupPane,
+	},
+	{
 		name:    "split",
 		args:    "<pane> --dir D",
 		summary: "split a pane: left right up down",

@@ -238,6 +238,22 @@ func Run(argv []string) error {
 		fmt.Println(strings.Join(lines, "\n"))
 		return nil
 
+	case "yank":
+		c := newFlags("yank")
+		c.parse(argv[1:])
+		if len(c.args) < 1 {
+			return fmt.Errorf("yank needs a pane id")
+		}
+		lines, err := yankLines(c.session, c.args[0])
+		if err != nil {
+			return err
+		}
+		if c.lines > 0 && len(lines) > c.lines {
+			lines = lines[len(lines)-c.lines:]
+		}
+		fmt.Println(strings.Join(lines, "\n"))
+		return nil
+
 	case "split":
 		c := newFlags("split")
 		c.parse(argv[1:])
@@ -1168,6 +1184,41 @@ func dash(session string) error {
 		fmt.Println(r)
 	}
 	return nil
+}
+
+// yankLines returns the output a pane produced since the last Enter, the same
+// rows prefix y copies. A pane that has never been sent an Enter has nothing
+// to cut at, so it has no output to print.
+func yankLines(session, target string) ([]string, error) {
+	m, err := transport.RPC(session, wire.Msg{Action: "yank", Target: target})
+	if err != nil {
+		return nil, err
+	}
+	if !m.OK {
+		return nil, fmt.Errorf("%s", m.Error)
+	}
+	var res struct {
+		Lines  []string `json:"lines"`
+		Start  int      `json:"start"`
+		Rows   int      `json:"rows"`
+		Anchor bool     `json:"anchor"`
+	}
+	if len(m.Res) > 0 {
+		if err := json.Unmarshal(m.Res, &res); err != nil {
+			return nil, err
+		}
+	}
+	if !res.Anchor {
+		return nil, fmt.Errorf("pane %s has no Enter yet", target)
+	}
+	if res.Start < 0 || res.Start > res.Rows || res.Rows > len(res.Lines) {
+		return nil, fmt.Errorf("yank reply out of range")
+	}
+	lines := res.Lines[res.Start:res.Rows]
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines, nil
 }
 
 // peek prints the screen a palette row shows.

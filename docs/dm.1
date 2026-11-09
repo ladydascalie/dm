@@ -88,6 +88,15 @@ print a pane's screen
 .br
 \fBdm read <pane> --scrollback N\fP print N rows above the screen
 .TP
+\fBdm yank <pane> [--lines N]\fP
+print a pane's output since the last Enter
+.br
+\fB--s name\fP session name
+.br
+\fB--lines N\fP number of output lines
+.br
+Example: \fBdm yank w1p1\fP
+.TP
 \fBdm split <pane> --dir D\fP
 split a pane: left right up down
 .br

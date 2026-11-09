@@ -706,14 +706,20 @@ alternate-screen pane has no scrollback, so the wheel keeps the selection
 clamped and says why.
 
 `prefix y` copies what the focused pane produced since the last Enter you sent
-it. The anchor is local: dm records the output stream position when it
-forwards an Enter, so a remote shell needs no setup. A pane that has never been
-sent an Enter has no anchor, and the copy falls back to the visible screen with
-a toast that says so. `prefix Y` copies the visible screen. Both write OSC 52
-and raise one `copied N chars` toast.
+it, and `dm yank <pane>` prints the same rows. The anchor is local: dm records
+the output stream position when it forwards an Enter, so a remote shell needs no
+setup. A pane that has never been sent an Enter has no anchor: the copy falls
+back to the visible screen with a toast that says so, and `dm yank` reports that
+it has nothing to cut at. `prefix Y` copies the visible screen. Both keys write
+OSC 52 and raise one `copied N chars` toast.
 
-A shell that emits OSC 133 prompt marks gets an exact copy: the trailing prompt
-is dropped. Add this line to `~/.zshrc` to emit them:
+The copy holds the command's output only. The command line dm wrote is dropped
+by matching the echoed text, and the line end the pty echoes at the anchor is
+dropped by the newline rule. A shell that emits OSC 133 prompt marks gets the
+exact range instead: the copy starts at the command start mark and ends at the
+command end mark, so a prompt that repaints its line on Enter, a trailing
+prompt and the blank rows around them never reach the copy. Add this line to
+`~/.zshrc` to emit the marks:
 
     precmd() { print -Pn '\e]133;D\e\\\e]133;A\e\\' }; preexec() { print -Pn '\e]133;C\e\\' }
 
@@ -789,10 +795,12 @@ dm exec '{"action":"new-window","name":"tests"}'
 dm rename-workspace s1 api-work
 dm write-to w1p1 --msg "go test ./..." --enter
 dm read w1p1 --lines 20
+dm yank w1p1
 dm status
 ```
 
-Actions: `ping`, `list` (alias `ls`), `read`, `history`, `replay`, `status`,
+Actions: `ping`, `list` (alias `ls`), `read`, `history`, `yank`, `replay`,
+`status`,
 `write-to`, `exec`, `keys`, `split`, `zoom-pane`, `set-rail`, `resize-split`,
 `focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `close-window`,
 `new-window`, `next-window`, `prev-window`, `select-window`, `new-workspace`,
