@@ -34,18 +34,18 @@ import "bytes"
 // first line is accepted: replaying back to its beginning could walk the whole
 // ring. A ring no longer than the window is replayed whole, byte for byte.
 //
-// The window is sound only for append-only output. A cursor move, a scroll
-// region set, a lone carriage return or an alternate-screen toggle in the tail
-// means the live rows were drawn from output above the window, and a fresh
-// terminal cannot reproduce them: the replay would start at row 0 and paint
-// over them. Reflow then replays the whole ring, a few hundred milliseconds
-// instead of a few milliseconds. A progress line, a status block or a pager is
-// the common trigger; the settle runs once per gesture, so the trade is
-// accepted. reflowWindowSafe holds the exact sequence list.
+// The window is sound only for a plain tail. Only printable text, CRLF, a bare
+// LF, TAB, SGR and the OSC 0, 1, 2 and 7 reports are replayed from the window;
+// anything else means the live rows were drawn from output above the window,
+// and a fresh terminal cannot reproduce them. Reflow then replays the whole ring, a
+// few hundred milliseconds instead of a few milliseconds. A progress line, a
+// status block or a pager is the common trigger; the settle runs once per
+// gesture, so the trade is accepted. plainTail lists the four allowed shapes
+// and nothing else.
 //
 // The window says nothing about screen state set before it that survives: a
-// style or a mode is not replayed. For append-only text that does not move a
-// row, the visible rows and the cursor are what it must reproduce, and it does.
+// style or a mode is not replayed. For a plain tail, the visible rows and the
+// cursor are what it must reproduce, and it does.
 func Reflow(ring []byte, cols, rows int) *Term {
 	cols, rows = reflowSize(cols, rows)
 	return reflowFrom(ring, cols, rows, reflowStart(ring, cols, rows))
@@ -122,137 +122,117 @@ func reflowStart(ring []byte, cols, rows int) int {
 	if start == 0 {
 		return 0
 	}
-	if !reflowWindowSafe(ring, start) {
+	// The window is sound only for a plain tail. Anything that moves the cursor,
+	// saves or restores it, sets a scroll region or switches the screen means
+	// the live rows were drawn from output above the window, and a fresh
+	// terminal cannot reproduce them: it would start at row 0 and paint over
+	// them. The whole ring is replayed then, a few hundred milliseconds instead
+	// of a few milliseconds. The settle runs once per gesture, so the trade is
+	// accepted.
+	if !plainTail(ring[start:]) {
 		return 0
 	}
 	return start
 }
 
-// reflowWindowSafe reports whether the tail from start can be replayed on its
-// own. The window is sound only for append-only output: a replay that begins
-// inside cursor-addressed output starts at row 0 and paints over a row the
-// live screen holds from above the window. The rows are not reproducible from
-// the tail, so the whole ring is replayed instead. Three shapes defeat the
-// window:
+// plainTail reports whether b is plain text the window may replay on its own.
+// Four shapes are allowed, and nothing else is:
 //
-//   - a cursor move that does not advance a line: CUU A, CUD B, CUP/HVP H and
-//     f, VPA d, CHA G, CNL E, CPL F, RI ESC M, SU S, SD T;
-//   - a scroll region set (DECSTBM r), which makes line feeds scroll a band;
-//   - a carriage return that is not part of CRLF, which rewrites the line.
+//   - printable text: any byte at or above 0x20, UTF-8 continuation bytes
+//     included (the test is permissive, not a UTF-8 validation);
+//   - a CRLF pair, a bare LF, and TAB. A CR on its own rewrites the line it is
+//     on, so it is not plain;
+//   - SGR, CSI <digits and semicolons> m;
+//   - an OSC 0, 1, 2 or 7 body terminated by BEL or ST, with no ESC inside.
 //
-// A screen switch anywhere in the ring also defeats it. In the skipped prefix
-// the window starts inside the cycle, so the primary screen it restores lost
-// the rows above. In the replayed slice the window saves its own partial
-// primary screen on ?1049h and restores that on ?1049l, leaving the top blank
-// and the prompt too high. The pane sees primary mode after ?1049l, so it
-// cannot refuse either result.
+// Everything else returns false: a lone CR, backspace and every other C0
+// control, every other CSI final byte, every other escape, every other OSC. A
+// A screen switch is just another byte outside this list, so the older
+// alternate-screen rule is covered here too.
 //
-// The trade is one slow replay for correctness. A pager, a build progress line
-// or a cargo-style status block triggers it, and such output is common but its
-// pane pays the whole ring once per settle, the same trade the plan header
-// accepts for the alternate screen.
-func reflowWindowSafe(ring []byte, start int) bool {
-	if hasAltScreenCycle(ring[:start]) || hasAltScreenCycle(ring[start:]) {
-		return false
-	}
-	return !hasScreenControl(ring[start:])
-}
-
-// hasScreenControl reports whether b holds a cursor move, a scroll region set,
-// a carriage return outside CRLF, or a reverse index. It mirrors the parser's
-// byte states, so text inside an escape body does not count.
-func hasScreenControl(b []byte) bool {
-	state := scanGround
-	for i := 0; i < len(b); i++ {
+// The allow-list is deliberate. The set of controls that can move a cursor is
+// unbounded (backspace, DECSC/DECRC, CSI s/u and more), so a control that is
+// not named here must not silently inherit the window: it takes the whole-ring
+// path until someone adds it, with a test.
+func plainTail(b []byte) bool {
+	for i := 0; i < len(b); {
 		c := b[i]
-		switch state {
-		case scanGround:
-			switch {
-			case c == 0x1b:
-				state = scanEscape
-			case c == '\r':
-				// CRLF only returns to the left margin of a fresh line; a lone
-				// CR rewrites the row it is on.
-				if i+1 >= len(b) || b[i+1] != '\n' {
-					return true
-				}
-			case c < 0x20 || c == 0x7f:
+		switch c {
+		case '\r':
+			// CR is plain only as the first half of CRLF. A lone CR is the
+			// progress-line rewrite.
+			if i+1 >= len(b) || b[i+1] != '\n' {
+				return false
 			}
-		case scanEscape:
-			switch {
-			case c == 0x1b:
-			case c == 0x18 || c == 0x1a: // CAN, SUB
-				state = scanGround
-			case c < 0x20 || c == 0x7f:
-			case c >= 0x20 && c <= 0x2f:
-				switch c {
-				case '(', ')', '*', '+':
-					state = scanCharset
-				}
-			case c == 'M': // RI
-				return true
-			case c == '[':
-				state = scanCSI
-			case c == ']' || c == 'P' || c == 'X' || c == '^' || c == '_':
-				state = scanString
-			default:
-				state = scanGround
+			i++
+		case '\n', '\t':
+			i++
+		case 0x1b:
+			n, ok := plainEscape(b[i:])
+			if !ok {
+				return false
 			}
-		case scanCSI:
-			switch {
-			case c == 0x1b:
-				state = scanEscape
-			case c == 0x18 || c == 0x1a:
-				state = scanGround
-			case c < 0x20 || c == 0x7f:
-			case c >= 0x40 && c <= 0x7e:
-				switch c {
-				case 'A', 'B', 'E', 'F', 'G', 'H', 'S', 'T', 'd', 'f', 'r':
-					// CUU, CUD, CNL, CPL, CHA, CUP, SU, SD, VPA, HVP, DECSTBM.
-					return true
-				}
-				state = scanGround
+			i += n
+		default:
+			if c < 0x20 {
+				return false
 			}
-		case scanString:
-			switch {
-			case c == 0x1b:
-				state = scanEscape
-			case c == 0x9c || c == 0x07 || c == 0x18 || c == 0x1a:
-				state = scanGround
-			}
-		case scanCharset:
-			switch {
-			case c == 0x1b:
-				state = scanEscape
-			case c == 0x18 || c == 0x1a:
-				state = scanGround
-			case c >= 0x30 && c <= 0x7e:
-				state = scanGround
-			}
+			i++
 		}
 	}
-	return false
+	return true
 }
 
-// altScreenModes are the paired set and reset sequences of a screen switch:
-// the alternate screen (47, 1047, 1049) and the cursor save and restore around
-// it (1048). A pager's entry and exit are two of these.
-var altScreenModes = [...][2]string{
-	{"?47h", "?47l"},
-	{"?1047h", "?1047l"},
-	{"?1048h", "?1048l"},
-	{"?1049h", "?1049l"},
-}
-
-// hasAltScreenCycle reports whether prefix holds an alternate-screen entry or
-// exit. A false positive only costs a whole-ring replay.
-func hasAltScreenCycle(prefix []byte) bool {
-	for _, pair := range altScreenModes {
-		if bytes.Contains(prefix, []byte(pair[0])) || bytes.Contains(prefix, []byte(pair[1])) {
-			return true
-		}
+// plainEscape parses one escape sequence from the start of b, which begins
+// with ESC, and returns its length. It accepts only SGR and the OSC 0, 1, 2
+// and 7 reports. A truncated sequence is not accepted.
+func plainEscape(b []byte) (int, bool) {
+	if len(b) < 2 {
+		return 0, false
 	}
-	return false
+	switch b[1] {
+	case '[':
+		i := 2
+		for i < len(b) && (b[i] >= '0' && b[i] <= '9' || b[i] == ';') {
+			i++
+		}
+		if i < len(b) && b[i] == 'm' {
+			return i + 1, true
+		}
+		return 0, false
+	case ']':
+		i := 2
+		code, digits := 0, 0
+		for i < len(b) && b[i] >= '0' && b[i] <= '9' {
+			code = code*10 + int(b[i]-'0')
+			digits++
+			i++
+		}
+		if digits == 0 || i >= len(b) || b[i] != ';' {
+			return 0, false
+		}
+		switch code {
+		case 0, 1, 2, 7:
+		default:
+			return 0, false
+		}
+		i++
+		for i < len(b) {
+			switch b[i] {
+			case 0x07: // BEL
+				return i + 1, true
+			case 0x1b:
+				if i+1 < len(b) && b[i+1] == '\\' {
+					return i + 2, true
+				}
+				return 0, false
+			}
+			i++
+		}
+		return 0, false
+	default:
+		return 0, false
+	}
 }
 
 // scanCount returns how many printable bytes b holds, stopping at limit.

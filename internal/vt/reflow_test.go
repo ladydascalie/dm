@@ -269,14 +269,31 @@ func TestReflowStartWindow(t *testing.T) {
 		t.Errorf("pager start = %d, want 0 for a whole-ring replay", got)
 	}
 
-	for _, seq := range []string{"?47h", "?47l", "?1047h", "?1047l", "?1048h", "?1048l", "?1049h", "?1049l"} {
-		ring := []byte("text \x1b[" + seq + " more text")
-		if !hasAltScreenCycle(ring) {
-			t.Errorf("hasAltScreenCycle missed %s", seq)
+	for _, tail := range []string{
+		"plain text\r\nsecond line\ttabbed",
+		"\x1b[1;32mcoloured\x1b[0m text",
+		"\x1b]0;title\x07\x1b]1;icon\x07",
+		"\x1b]2;title\x07",
+		"\x1b]7;file:///home/user\x1b\\",
+	} {
+		if !plainTail([]byte(tail)) {
+			t.Errorf("plainTail(%q) = false, want true", tail)
 		}
 	}
-	if hasAltScreenCycle([]byte("plain output with ?1049 and no final")) {
-		t.Error("hasAltScreenCycle reported a cycle in plain text")
+	for _, tail := range []string{
+		"back\bspace",
+		"\x1b[2Jclear",
+		"\x1b[2Acursor up",
+		"\x1b]8;id=x;https://example.com\x1b\\",
+		"\x1b7save",
+		"\x1b8restore",
+		"lone \x1b",
+		"\x1b[?1049h",
+		"\x1b]2;unterminated",
+	} {
+		if plainTail([]byte(tail)) {
+			t.Errorf("plainTail(%q) = true, want false", tail)
+		}
 	}
 }
 
@@ -395,9 +412,9 @@ func compareReflow(t *testing.T, ring []byte, cols, rows int) {
 
 // TestReflowPagerInsideWindow is the review repro: a pager cycle that lies
 // wholly inside the window. The alt dump is between roughly one and two
-// screens, so the cutoff lands after the ?1049h entry and the prefix check
-// alone does not fire; the window saves its own partial primary screen and the
-// ?1049l restore leaves the top rows blank and the prompt too high.
+// screens, so the cutoff lands after the ?1049h entry; a window there would
+// save its own partial primary screen and the ?1049l restore would leave the
+// top rows blank and the prompt too high. The whole ring is replayed instead.
 func TestReflowPagerInsideWindow(t *testing.T) {
 	cases := []struct{ cols, rows, altLines int }{
 		{80, 24, 90},
@@ -471,44 +488,151 @@ func addressedRing(cols, _ int) []byte {
 	return b.Bytes()
 }
 
-// TestReflowControlFallback proves cursor-addressed output replays the whole
-// ring, and that a control-free tail still takes the window.
-func TestReflowControlFallback(t *testing.T) {
+// backspaceRing builds plain output followed by a counter rewritten in place
+// with backspaces.
+func backspaceRing(cols, _ int) []byte {
+	lines, ticks := 2000, 3000
+	if cols >= 200 {
+		lines, ticks = 3000, 10000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "output line %04d payload\r\n", i)
+	}
+	b.WriteString("progress   0%")
+	for i := 0; i < ticks; i++ {
+		fmt.Fprintf(&b, "\b\b\b\b%3d%%", i%100)
+	}
+	return b.Bytes()
+}
+
+// saveRestoreRing saves the cursor, writes more lines, then restores the
+// cursor and writes a marker.
+func saveRestoreRing(cols, _ int) []byte {
+	lines := 300
+	if cols >= 200 {
+		lines = 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "saved line %04d text\r\n", i)
+	}
+	b.WriteString("\x1b7")
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "later line %04d text\r\n", i)
+	}
+	b.WriteString("\x1b8marker")
+	return b.Bytes()
+}
+
+// scrollRegionRing sets a scroll region and writes inside it.
+func scrollRegionRing(cols, _ int) []byte {
+	lines := 2000
+	if cols >= 200 {
+		lines = 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "region line %04d text\r\n", i)
+	}
+	b.WriteString("\x1b[5;10r")
+	for i := 0; i < 200; i++ {
+		fmt.Fprintf(&b, "scrolling %04d\r\n", i)
+	}
+	b.WriteString("\x1b[r")
+	return b.Bytes()
+}
+
+// titleOSC2Ring builds plain output followed by a pane title report.
+func titleOSC2Ring(cols, _ int) []byte {
+	lines := 2000
+	if cols >= 200 {
+		lines = 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "title line %04d text\r\n", i)
+	}
+	b.WriteString("\x1b]2;dm pane\x07prompt$ ")
+	return b.Bytes()
+}
+
+// cwdOSC7Ring builds plain output followed by an OSC 7 cwd report.
+func cwdOSC7Ring(cols, _ int) []byte {
+	lines := 2000
+	if cols >= 200 {
+		lines = 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "cwd line %04d text\r\n", i)
+	}
+	b.WriteString("\x1b]7;file:///home/user/project\x1b\\prompt$ ")
+	return b.Bytes()
+}
+
+// plainSGRRing builds plain output with SGR colouring only.
+func plainSGRRing(cols, _ int) []byte {
+	lines := 2000
+	if cols >= 200 {
+		lines = 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "\x1b[1;32mgreen line %04d\x1b[0m text\r\n", i)
+	}
+	return b.Bytes()
+}
+
+// TestReflowPlainTail proves the allow-list: a plain tail (text, CR, LF, TAB,
+// SGR, OSC 0/1/2/7) takes the window, and every other shape replays the whole
+// ring. Both paths are compared with the whole-ring replay.
+func TestReflowPlainTail(t *testing.T) {
 	sizes := []struct{ cols, rows int }{
 		{80, 24},
 		{200, 50},
 	}
-	builders := []struct {
+	windowCases := []struct {
 		name  string
 		build func(cols, rows int) []byte
 	}{
-		{"progress CR", progressRing},
-		{"cursor-up frames", frameRing},
-		{"cursor addressed", addressedRing},
+		{"plain SGR", plainSGRRing},
+		{"title OSC 2", titleOSC2Ring},
+		{"cwd OSC 7", cwdOSC7Ring},
 	}
-	for _, b := range builders {
+	for _, c := range windowCases {
 		for _, size := range sizes {
-			t.Run(fmt.Sprintf("%s/%dx%d", b.name, size.cols, size.rows), func(t *testing.T) {
-				ring := b.build(size.cols, size.rows)
-				if start := reflowStart(ring, size.cols, size.rows); start != 0 {
-					t.Errorf("start = %d, want 0: screen control must replay the whole ring", start)
+			t.Run(fmt.Sprintf("%s/%dx%d", c.name, size.cols, size.rows), func(t *testing.T) {
+				ring := c.build(size.cols, size.rows)
+				if start := reflowStart(ring, size.cols, size.rows); start <= 0 || start >= len(ring) {
+					t.Errorf("start = %d, want a cut inside 0..%d: a plain tail takes the window", start, len(ring))
 				}
 				compareReflow(t, ring, size.cols, size.rows)
 			})
 		}
 	}
 
-	// Plain append-only output still takes the window.
-	for _, size := range sizes {
-		ring := windowStream(2000, func(i int) string {
-			return fmt.Sprintf("plain line %04d %s", i, strings.Repeat("w", 20))
-		})
-		t.Run(fmt.Sprintf("control free/%dx%d", size.cols, size.rows), func(t *testing.T) {
-			if start := reflowStart(ring, size.cols, size.rows); start <= 0 || start >= len(ring) {
-				t.Errorf("start = %d, want a cut inside 0..%d", start, len(ring))
-			}
-			compareReflow(t, ring, size.cols, size.rows)
-		})
+	wholeCases := []struct {
+		name  string
+		build func(cols, rows int) []byte
+	}{
+		{"progress CR", progressRing},
+		{"cursor-up frames", frameRing},
+		{"cursor addressed", addressedRing},
+		{"backspace counter", backspaceRing},
+		{"DECSC DECRC", saveRestoreRing},
+		{"DECSTBM", scrollRegionRing},
+	}
+	for _, c := range wholeCases {
+		for _, size := range sizes {
+			t.Run(fmt.Sprintf("%s/%dx%d", c.name, size.cols, size.rows), func(t *testing.T) {
+				ring := c.build(size.cols, size.rows)
+				if start := reflowStart(ring, size.cols, size.rows); start != 0 {
+					t.Errorf("start = %d, want 0: a non-plain tail replays the whole ring", start)
+				}
+				compareReflow(t, ring, size.cols, size.rows)
+			})
+		}
 	}
 }
 
