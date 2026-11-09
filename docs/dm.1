@@ -645,8 +645,8 @@ Value: \fIan integer of at least 3 cells, not below tab-min-width\fP. Default: \
 Set the largest tab width before the label is cut.
 .TP
 \fBpadding\fP
-Value: \fIan integer from 0 to 4 cells\fP. Default: \fI1\fP.
-Set the blank cells between a pane's border and its content.
+Value: \fIan integer from 0 to 4 cells\fP. Default: \fI0\fP.
+Set the blank cells between a pane's border and its content. A change needs dm kill and a fresh attach: the server lays out with the padding it started with, so a reloaded value draws boxes and content at different offsets.
 .TP
 \fBglyphs\fP
 Value: \fI"auto", "ascii", "unicode" or "nerd"\fP. Default: \fI"auto"\fP.

@@ -152,7 +152,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `default-fold` | "fold" or "unfold" | `"fold"` | Set whether a new window's rail starts folded or unfolded. |
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below tab-min-width | `20` | Set the largest tab width before the label is cut. |
-| `padding` | an integer from 0 to 4 cells | `1` | Set the blank cells between a pane's border and its content. |
+| `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A change needs dm kill and a fresh attach: the server lays out with the padding it started with, so a reloaded value draws boxes and content at different offsets. |
 | `glyphs` | "auto", "ascii", "unicode" or "nerd" | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | `"{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"` | Set the template that renders a window label. |
 | `theme` | a quoted theme name matching [A-Za-z0-9_-]+ | none | Select a theme from the themes directory beside config.kdl; no node keeps the built-in theme. |

@@ -15,12 +15,16 @@ import (
 // clipFrame builds a two-pane frame with a rail. Pane a's content rect is 10
 // cells wide, so a row wider than that is the client's to clip, not the outer
 // terminal's. Pane b and the rail are the cells the overflow would reach.
+//
+// The fixture pins padding 1 rather than following the built-in default: these
+// tests are about a 10-cell content rect, and the default moved to 0 once.
 func clipFrame(t *testing.T, aCols int, aRow, bRow string) *frameTUI {
 	t.Helper()
+	const pad = 1
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &wire.Snapshot{Cols: 36, Rows: 7, Rail: 8, Root: root, Focus: "b"}
 	rects := map[string]layout.Rect{}
-	layout.Layout(root, layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail), testutil.Pad(), rects)
+	layout.Layout(root, layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail), pad, rects)
 	snap.Panes = []wire.PaneInfo{{ID: "a", Rect: rects["a"]}, {ID: "b", Rect: rects["b"]}}
 	snap.All = []wire.AllPane{
 		{ID: "a", Name: "one", Workspace: "s1", WorkspaceName: "main", Window: "w1",
@@ -31,7 +35,8 @@ func clipFrame(t *testing.T, aCols int, aRow, bRow string) *frameTUI {
 			WindowUnfolded: true, WorkspaceUnfolded: true},
 	}
 	out := &bytes.Buffer{}
-	tr := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out, glyphs: theme.GlyphNerd}
+	tr := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out, glyphs: theme.GlyphNerd,
+		keymap: testutil.KeymapTestLoad(t, "padding 1\n")}
 	aTerm := vt.NewTerm(aCols, rects["a"].H)
 	aTerm.Write([]byte(aRow))
 	tr.vts["a"] = aTerm

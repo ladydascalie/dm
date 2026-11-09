@@ -37,8 +37,8 @@ var ConfigNodes = []ConfigNode{
 	{
 		Name:    "padding",
 		Value:   "an integer from 0 to 4 cells",
-		Default: "1",
-		Desc:    "Set the blank cells between a pane's border and its content.",
+		Default: "0",
+		Desc:    "Set the blank cells between a pane's border and its content. A change needs dm kill and a fresh attach: the server lays out with the padding it started with, so a reloaded value draws boxes and content at different offsets.",
 	},
 	{
 		Name:    "glyphs",

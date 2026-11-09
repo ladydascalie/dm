@@ -156,11 +156,17 @@ optional and each one overrides its built-in value.
 | `default-fold` | `"fold"` or `"unfold"` | `"fold"` | Set whether a new window's rail starts folded or unfolded. |
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below `tab-min-width` | `20` | Set the largest tab width before the label is cut. |
-| `padding` | an integer from 0 to 4 cells | `1` | Set the blank cells between a pane's border and its content. |
+| `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. Needs a fresh server, see below. |
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
+
+Changing `padding` needs a fresh server, not a reload. The server lays out every
+pane with the padding it started with, so a client that reloads a new value
+draws its boxes and its content at different offsets, and the frame looks
+broken. Run `dm kill` and attach again; the panes keep running. Every other node
+takes effect on reload.
 
 A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, or
 `$HOME/.config/dm/themes/<name>.kdl` when `XDG_CONFIG_HOME` is unset. That is

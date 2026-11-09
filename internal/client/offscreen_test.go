@@ -180,9 +180,10 @@ func TestGripsStayOnGrid(t *testing.T) {
 }
 
 // TestFramePartialPaneWritesNoOffGridMove pins the reviewer's probe: a pane at
-// Y=15 with H=10 on a 20-row grid. Its box runs to row 27, so pre-fix the
-// border wrote row 27, col 1. The box cells that are on screen must survive:
-// the right border still paints at row 20, col 14.
+// Y=15 with H=10 on a 20-row grid. Its box runs past the last row, so pre-fix
+// the border wrote off the grid. The box cells that are on screen must survive:
+// the right border still paints on the last visible row, at the border column
+// the configured padding puts it at.
 func TestFramePartialPaneWritesNoOffGridMove(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
 	p := &f.snap.Panes[0]
@@ -195,13 +196,18 @@ func TestFramePartialPaneWritesNoOffGridMove(t *testing.T) {
 				f.snap.Cols, f.snap.Rows, a[0], a[1])
 		}
 	}
+	box := layout.BoxRect(p.Rect, f.tui.km().Padding())
+	// drawPaneBoxRows puts the right border one cell past the box rect, in
+	// zero-based cells, and frameAddrs addresses are one-based.
+	wantRow, wantCol := f.snap.Rows, box.X+box.W+1
 	onScreen := false
 	for _, a := range frameAddrs(got) {
-		if a[0] == 20 && a[1] == 14 {
+		if a[0] == wantRow && a[1] == wantCol {
 			onScreen = true
 		}
 	}
 	if !onScreen {
-		t.Fatalf("the pane's on-screen border cell at row 20, col 14 was dropped: %q", got)
+		t.Fatalf("the pane's on-screen border cell at row %d, col %d was dropped: %q",
+			wantRow, wantCol, got)
 	}
 }

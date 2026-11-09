@@ -157,7 +157,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"default-fold":  `"fold"`,
 		"tab-min-width": "8",
 		"tab-max-width": "20",
-		"padding":       "1",
+		"padding":       "0",
 		"glyphs":        `"auto"`,
 		"window-label":  `"` + wlabel.Default + `"`,
 		"theme":         "",

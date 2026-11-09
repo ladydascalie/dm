@@ -292,9 +292,15 @@ const (
 
 // defaultPadding is the built-in blank cells between a pane's border and its
 // content, and maxPadding is the largest the config accepts. A pane too small
-// for the padding drops it rather than going empty.
+// for the padding drops it rather than going empty. The default is 0: the
+// border already separates a pane from its neighbours, and a blank ring costs
+// two columns and two rows on every pane.
+//
+// Changing the padding needs a fresh server. The server lays out every pane
+// with the padding it started with, so a client that reloads a new value draws
+// its boxes and its content at different offsets. dm kill, then attach again.
 const (
-	defaultPadding = 1
+	defaultPadding = 0
 	maxPadding     = 4
 )
 
@@ -357,7 +363,7 @@ prefix "ctrl+b"
 default-fold "fold"
 tab-min-width 8
 tab-max-width 20
-padding 1
+padding 0
 glyphs "auto"
 window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 
