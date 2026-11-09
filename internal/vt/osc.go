@@ -59,8 +59,10 @@ func (t *Term) oscPrompt(rest string) {
 	switch kind {
 	case "A":
 		t.promptPos, t.promptSet = t.markStart, true
-	case "C", "D":
-		t.commandPos, t.commandSet = t.markStart, true
+	case "C":
+		t.startPos, t.startSet = t.markStart, true
+	case "D":
+		t.endPos, t.endSet = t.markStart, true
 	}
 }
 
@@ -70,10 +72,16 @@ func (t *Term) PromptStart() (pos int64, ok bool) {
 	return t.promptPos, t.promptSet
 }
 
-// CommandMark returns the most recent OSC 133 C or D mark as a stream byte
-// offset, and whether one has been seen.
-func (t *Term) CommandMark() (pos int64, ok bool) {
-	return t.commandPos, t.commandSet
+// CommandStart returns the most recent OSC 133 C mark as a stream byte offset,
+// and whether one has been seen. It is where the command's output begins.
+func (t *Term) CommandStart() (pos int64, ok bool) {
+	return t.startPos, t.startSet
+}
+
+// CommandEnd returns the most recent OSC 133 D mark as a stream byte offset,
+// and whether one has been seen. It is where the command's output ends.
+func (t *Term) CommandEnd() (pos int64, ok bool) {
+	return t.endPos, t.endSet
 }
 
 // oscPalette handles OSC 4: index;colour pairs.

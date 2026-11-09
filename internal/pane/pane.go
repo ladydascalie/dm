@@ -55,13 +55,18 @@ type paneProc struct {
 
 	// produced counts the bytes the pty has produced, after the pane's filter.
 	// anchor is the value of produced when the last Enter was written, so it is
-	// a position in the same stream the ring holds; a yank slices the ring at
-	// the first newline after it. anchorSet is false until an Enter arrives.
-	// Both are guarded by mu.
+	// a position in the same stream the ring holds. echo is the command text
+	// that Enter carried, so a yank can drop the line the shell echoed back.
+	// anchorSet is false until an Enter arrives. All are guarded by mu.
 	produced  int64
 	anchor    int64
 	anchorSet bool
+	echo      []byte
 }
+
+// echoMax is the longest command text a pane keeps to drop its echo from a
+// yank. A longer write is a pasted block, not a command line.
+const echoMax = 4096
 
 // modeInfo reports the modes the client must respect: alternate screen (no
 // terminal scrollback), mouse reporting (the wheel belongs to the app) and
@@ -392,7 +397,7 @@ func (p *paneProc) publishLocked(b []byte) {
 		// that falls back to the screen instead of spanning the excursion. A
 		// counter notices an excursion that entered and left inside one chunk;
 		// the chunk-boundary mode comparison would miss it.
-		p.anchor, p.anchorSet = 0, false
+		p.anchor, p.anchorSet, p.echo = 0, false, nil
 	}
 	if m != p.mode {
 		p.mode = m
@@ -534,6 +539,14 @@ func (p *paneProc) serve(c net.Conn) {
 			if m.Enter || bytes.ContainsAny(b, "\r\n") {
 				p.anchor = p.produced
 				p.anchorSet = true
+				// Keep the text to drop its echo from a later yank, but not a
+				// whole pasted block: the pane would hold it until the next
+				// Enter, and a bulky echo is not worth a command to match.
+				if len(b) <= echoMax {
+					p.echo = append(p.echo[:0], b...)
+				} else {
+					p.echo = p.echo[:0]
+				}
 			}
 			p.mu.Unlock()
 			_, _ = p.ptmx.Write(b)
@@ -650,41 +663,55 @@ func (p *paneProc) serve(c net.Conn) {
 	}
 }
 
-// yankTailLocked returns the stream bytes after the anchor and before the
-// prompt, plus the pane's size. It skips the newline the pty echoes at the
-// anchor, so the copy starts on the first row the command produced and not on
-// the command line the prompt shared. A command mark after the anchor and a
-// prompt start after it cut the tail at the prompt, so the trailing prompt is
-// not copied. ok is false when no Enter has been recorded. The caller holds
-// p.mu and owns the returned copy.
+// yankTailLocked returns the stream bytes the last command produced, plus the
+// pane's size. The copy starts at the command start mark when the shell sends
+// one, because a prompt that repaints the line on Enter puts bytes between the
+// anchor and the output that are not output. Without a mark it starts after the
+// echoed command line: either the text dm wrote, or the line end the pty
+// echoes at the anchor. The end is the command end mark, or the prompt that
+// follows, so the trailing prompt is not copied. ok is false when no Enter has
+// been recorded. The caller holds p.mu and owns the returned copy.
 func (p *paneProc) yankTailLocked() (tail []byte, cols, h int, ok bool) {
 	cols, h = p.vt.Grid().Size()
 	if !p.anchorSet || p.ring.Len() == 0 {
 		return nil, cols, h, false
 	}
 	ringStart := p.produced - int64(p.ring.Len())
-	rel := int(p.anchor - ringStart)
-	if rel < 0 {
-		// The ring dropped the anchor's bytes. Start at the oldest row held;
-		// the first partial line is dropped by the newline search.
-		rel = 0
+	head, marked := p.anchor, false
+	if start, has := p.vt.CommandStart(); has && start >= p.anchor {
+		head, marked = start, true
 	}
-	nl := p.ring.indexByte('\n', rel)
-	if nl < 0 {
-		// The command has produced no line yet, so it has no output row.
-		return []byte{}, cols, h, true
+	tailEnd := p.produced
+	ended := false
+	if end, has := p.vt.CommandEnd(); has && end >= head {
+		tailEnd, ended = end, true
 	}
-	// The pty normally echoes an Enter as "\r\n" at the anchor, so the copy
-	// starts after it. A pane whose Enter is not echoed puts its first output
-	// row right at the anchor; skipping a newline that has text before it would
-	// drop that row. The echo is the newline within two bytes that has nothing
-	// but CR and LF between it and the anchor.
-	from, to := rel, p.ring.Len()
-	if nl-rel <= 2 && onlyLineEnds(p.ring, rel, nl) {
-		from = nl + 1
+	from, to := int(head-ringStart), int(tailEnd-ringStart)
+	if from < 0 {
+		// The ring dropped the anchor's bytes. Start at the oldest row held.
+		from = 0
 	}
-	if cmd, hasCmd := p.vt.CommandMark(); hasCmd && cmd >= p.anchor {
-		if prompt, hasPrompt := p.vt.PromptStart(); hasPrompt && prompt >= cmd {
+	if to > p.ring.Len() {
+		to = p.ring.Len()
+	}
+	if from > to {
+		from = to
+	}
+	if !marked {
+		// Drop the echo of the command dm wrote, then the line end after it.
+		if n := len(p.echo); n > 0 && to-from >= n && bytes.Equal(p.ring.slice(from, from+n), p.echo) {
+			from += n
+		}
+		// The pty normally echoes an Enter as "\r\n" at the anchor, so the copy
+		// starts after it. A pane whose Enter is not echoed puts its first
+		// output row right at the anchor; skipping a newline that has text
+		// before it would drop that row.
+		if nl := p.ring.indexByte('\n', from); nl >= 0 && nl < to && onlyLineEnds(p.ring, from, nl) {
+			from = nl + 1
+		}
+	}
+	if !ended {
+		if prompt, has := p.vt.PromptStart(); has {
 			if cut := int(prompt - ringStart); cut >= from && cut <= to {
 				to = cut
 			}

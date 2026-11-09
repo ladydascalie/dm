@@ -179,6 +179,66 @@ func TestYankWithoutEnterHasNoAnchor(t *testing.T) {
 	}
 }
 
+// The shell echoes the command dm wrote, then ends the line. The copy starts
+// on the output, not on that echoed command line.
+func TestYankDropsTheWrittenEcho(t *testing.T) {
+	p, cli, msgs := yankPane(t, 20, 5)
+	p.mu.Lock()
+	p.publishLocked([]byte("old\r\n"))
+	p.mu.Unlock()
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "write",
+		Msg: "go test ./...", Enter: true, ID: 1})
+	paneSync(t, cli, msgs)
+
+	p.mu.Lock()
+	p.publishLocked([]byte("go test ./...\r\nok dm 1.2s\r\nfail dm 0.1s\r\n"))
+	p.mu.Unlock()
+	res := decodeYank(t, paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "yank", ID: 2}))
+	if want := []string{"ok dm 1.2s", "fail dm 0.1s"}; !reflect.DeepEqual(yankCopy(res), want) {
+		t.Fatalf("yank copy = %#v, want %#v", yankCopy(res), want)
+	}
+}
+
+// A prompt that repaints the line on Enter puts bytes between the anchor and
+// the output. The command start mark beats them: the copy begins at the output.
+func TestYankStartsAtTheCommandMark(t *testing.T) {
+	p, cli, msgs := yankPane(t, 20, 5)
+	p.mu.Lock()
+	p.publishLocked([]byte("old\r\n"))
+	p.mu.Unlock()
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "write",
+		Msg: "make", Enter: true, ID: 1})
+	paneSync(t, cli, msgs)
+
+	p.mu.Lock()
+	p.publishLocked([]byte("make\r\n\x1b]133;C\x1b\\built target\r\ndone\r\n"))
+	p.mu.Unlock()
+	res := decodeYank(t, paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "yank", ID: 2}))
+	if want := []string{"built target", "done"}; !reflect.DeepEqual(yankCopy(res), want) {
+		t.Fatalf("yank copy = %#v, want %#v", yankCopy(res), want)
+	}
+}
+
+// A command end mark cuts the copy exactly, so no prompt and no trailing blank
+// rows follow the last line of output.
+func TestYankEndsAtTheCommandEnd(t *testing.T) {
+	p, cli, msgs := yankPane(t, 20, 5)
+	p.mu.Lock()
+	p.publishLocked([]byte("old\r\n"))
+	p.mu.Unlock()
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "write",
+		Msg: "ls", Enter: true, ID: 1})
+	paneSync(t, cli, msgs)
+
+	p.mu.Lock()
+	p.publishLocked([]byte("ls\r\n\x1b]133;C\x1b\\a.txt\r\nb.txt\r\n\x1b]133;D\x1b\\prompt$ "))
+	p.mu.Unlock()
+	res := decodeYank(t, paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "yank", ID: 2}))
+	if want := []string{"a.txt", "b.txt"}; !reflect.DeepEqual(yankCopy(res), want) {
+		t.Fatalf("yank copy = %#v, want %#v", yankCopy(res), want)
+	}
+}
+
 // A marked pane ends the copy at the prompt that follows the command, so the
 // trailing prompt is not copied.
 func TestYankDropsTheMarkedPrompt(t *testing.T) {

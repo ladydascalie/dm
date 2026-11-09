@@ -23,14 +23,17 @@ type Term struct {
 	status      string
 	colors      map[int]Color
 
-	// OSC 133 prompt marks. promptPos is the most recent A mark and commandPos
-	// the most recent C or D mark, both stream byte offsets: the count of bytes
-	// this terminal has parsed. That is the space the yank anchor uses, so a
-	// mark can be compared with the anchor and sliced from the same ring.
-	promptPos  int64
-	promptSet  bool
-	commandPos int64
-	commandSet bool
+	// OSC 133 prompt marks, all stream byte offsets: the count of bytes this
+	// terminal has parsed. That is the space the yank anchor uses, so a mark
+	// can be compared with the anchor and sliced from the same ring. promptPos
+	// is the most recent A mark, startPos the most recent C and endPos the most
+	// recent D.
+	promptPos int64
+	promptSet bool
+	startPos  int64
+	startSet  bool
+	endPos    int64
+	endSet    bool
 
 	// streamPos counts the bytes this terminal has parsed. markStart is where
 	// the OSC currently being parsed began, so a mark names the start of its
@@ -80,7 +83,8 @@ func (t *Term) ResetStream(pos int64) {
 	t.streamPos = pos
 	t.markStart = 0
 	t.promptPos, t.promptSet = 0, false
-	t.commandPos, t.commandSet = 0, false
+	t.startPos, t.startSet = 0, false
+	t.endPos, t.endSet = 0, false
 }
 
 // Flush places the cluster under construction. A cluster is complete only when

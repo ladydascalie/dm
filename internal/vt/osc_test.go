@@ -132,13 +132,16 @@ func TestOSCPromptMarks(t *testing.T) {
 	}
 	writeTerm(term, "\x1b]133;B\x1b\\")
 	writeTerm(term, "\x1b]133;C\x1b\\")
-	if pos, ok := term.CommandMark(); !ok || pos != 28 {
+	if pos, ok := term.CommandStart(); !ok || pos != 28 {
 		t.Fatalf("command start = %d, %v, want 28, true", pos, ok)
 	}
 	writeTerm(term, "out\r\n")
 	writeTerm(term, "\x1b]133;D\x1b\\")
-	if pos, ok := term.CommandMark(); !ok || pos != 42 {
+	if pos, ok := term.CommandEnd(); !ok || pos != 42 {
 		t.Fatalf("command end = %d, %v, want 42, true", pos, ok)
+	}
+	if pos, ok := term.CommandStart(); !ok || pos != 28 {
+		t.Fatalf("the D mark moved the command start to %d", pos)
 	}
 	writeTerm(term, "\x1b]133;A\x1b\\")
 	if pos, ok := term.PromptStart(); !ok || pos != 51 {
@@ -150,7 +153,10 @@ func TestOSCPromptMarks(t *testing.T) {
 	if pos, _ := term.PromptStart(); pos != 51 {
 		t.Fatalf("junk moved the prompt start to %d", pos)
 	}
-	if pos, _ := term.CommandMark(); pos != 42 {
-		t.Fatalf("junk moved the command mark to %d", pos)
+	if pos, _ := term.CommandEnd(); pos != 42 {
+		t.Fatalf("junk moved the command end to %d", pos)
+	}
+	if pos, _ := term.CommandStart(); pos != 28 {
+		t.Fatalf("junk moved the command start to %d", pos)
 	}
 }
