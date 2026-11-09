@@ -427,6 +427,21 @@ func Run(args []string) error {
 	}
 }
 
+// reloadConfig re-reads the operator's config file and swaps it in when the
+// read succeeds. The server reads the file because it owns the layout padding
+// and the fold a new window gets. A failed read keeps the old config, so a bad
+// file never changes the picture.
+func (s *server) reloadConfig() error {
+	cfg, err := keymap.LoadDefaultPath(false)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.cfg = cfg
+	s.mu.Unlock()
+	return nil
+}
+
 // applyDefaultFold gives every restored window the config's fold state when the
 // config carries an explicit default-fold node. An absent node leaves each
 // window's saved fold state alone.
