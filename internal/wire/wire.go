@@ -146,9 +146,13 @@ type Snapshot struct {
 	Focus    string `json:"focus"`
 	// Zoom is the zoomed pane id, empty when no pane is zoomed. Panes still
 	// carry their layout rectangles: the rail and the switcher read them.
-	Zoom string       `json:"zoom,omitempty"`
-	Cols int          `json:"cols"`
-	Rows int          `json:"rows"`
+	Zoom string `json:"zoom,omitempty"`
+	Cols int    `json:"cols"`
+	Rows int    `json:"rows"`
+	// Pad is the pane padding the server laid the layout out with: the blank
+	// cells between a pane's border and its content. The server owns the
+	// value and the client draws and hit-tests with it.
+	Pad  int          `json:"pad"`
 	Root *layout.Node `json:"root"`
 }
 

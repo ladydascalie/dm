@@ -2949,6 +2949,23 @@ func TestReloadActionReadsConfigAndTheme(t *testing.T) {
 		t.Fatal(err)
 	}
 	tui := &tui{keymap: keymap.LoadDefault()}
+	srv, cli := net.Pipe()
+	tui.conn = &transport.Conn{Conn: srv}
+	got := make(chan wire.Msg, 8)
+	go func() {
+		for {
+			m, err := wire.ReadMsg(cli)
+			if err != nil {
+				close(got)
+				return
+			}
+			got <- m
+		}
+	}()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		_ = cli.Close()
+	})
 
 	path := filepath.Join(cfgDir, "config.kdl")
 	if err := os.WriteFile(path, []byte(`theme "night"
@@ -2962,6 +2979,12 @@ keymap "main" {
 	writeTheme(t, cfgDir, "night", `palette { "rail-bg" "#010203" }`)
 
 	feed(tui, "\x02\x12")
+	// The action asks the server to re-read its own copy of the file, once and
+	// without waiting for the reply.
+	if m := testutil.NextMsg(t, got); m.Type != "req" || m.Action != "reload" {
+		t.Fatalf("reload sent %+v, want one reload request", m)
+	}
+	testutil.NoMsg(t, got)
 	if tui.armed {
 		t.Fatal("reload left the client armed")
 	}
@@ -2979,6 +3002,21 @@ keymap "main" {
 	}
 	if n := len(tui.toasts); n == 0 || tui.toasts[n-1].text != "config reloaded" {
 		t.Fatalf("reload toasts = %+v, want a config reloaded toast", tui.toasts)
+	}
+
+	// A send that fails must not stop the client's own read.
+	_ = srv.Close()
+	_ = cli.Close()
+	if err := os.WriteFile(path, []byte(`keymap "main" {
+    "split-right" "T"
+    "reload" "ctrl+r"
+}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	feed(tui, "\x02\x12")
+	if got := tui.keymap.Key("main", "split-right"); got != "T" {
+		t.Fatalf("split-right key after a failed send = %q, want T", got)
 	}
 }
 

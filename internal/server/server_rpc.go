@@ -172,6 +172,20 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.resync()
 		s.reply(cl, m, map[string]any{"zoom": zoom}, nil)
 
+	case "reload":
+		// The client asks the server to re-read the file it owns. On a failed
+		// read nothing changes and the error rides back; on success the layout
+		// is resynced and the reply carries the padding now in force.
+		if err := s.reloadConfig(); err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.resync()
+		s.mu.Lock()
+		pad := s.cfg.Padding()
+		s.mu.Unlock()
+		s.reply(cl, m, map[string]any{"pad": pad}, nil)
+
 	case "set-rail":
 		rail := s.setRail(m.Index)
 		s.syncSizes()
