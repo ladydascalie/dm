@@ -34,21 +34,18 @@ import "bytes"
 // first line is accepted: replaying back to its beginning could walk the whole
 // ring. A ring no longer than the window is replayed whole, byte for byte.
 //
-// A ring that switches screens forces a whole-ring replay, whether the switch
-// is in the skipped prefix or in the slice the window would replay. A pager
-// saves the primary screen on ?1049h and restores it on ?1049l. If the window
-// starts inside the cycle, the primary screen it restores lost the rows above
-// the window. If the cycle sits wholly inside the window, the window saves a
-// partial primary screen and the restore leaves the top blank and the prompt
-// too high. The pane sees primary mode again after ?1049l, so it cannot refuse
-// either result. The cycle is rare and its window is a pager dump, so the
-// trade is one slow replay for correctness: this fires only when one of the
-// eight sequences appears, anywhere and for any pane output, and the whole
-// ring costs a few hundred milliseconds then.
+// The window is sound only for append-only output. A cursor move, a scroll
+// region set, a lone carriage return or an alternate-screen toggle in the tail
+// means the live rows were drawn from output above the window, and a fresh
+// terminal cannot reproduce them: the replay would start at row 0 and paint
+// over them. Reflow then replays the whole ring, a few hundred milliseconds
+// instead of a few milliseconds. A progress line, a status block or a pager is
+// the common trigger; the settle runs once per gesture, so the trade is
+// accepted. reflowWindowSafe holds the exact sequence list.
 //
-// The window assumes the dropped prefix does not change the screen state that
-// survives it: a style or a mode set before the window is not replayed. The
-// visible rows and the cursor are what it must reproduce, and it does.
+// The window says nothing about screen state set before it that survives: a
+// style or a mode is not replayed. For append-only text that does not move a
+// row, the visible rows and the cursor are what it must reproduce, and it does.
 func Reflow(ring []byte, cols, rows int) *Term {
 	cols, rows = reflowSize(cols, rows)
 	return reflowFrom(ring, cols, rows, reflowStart(ring, cols, rows))
@@ -125,16 +122,116 @@ func reflowStart(ring []byte, cols, rows int) int {
 	if start == 0 {
 		return 0
 	}
-	// A screen switch anywhere in the ring forces the whole ring. In the
-	// skipped prefix it means the window starts inside the cycle, so the
-	// primary screen it restores is partial. In the replayed slice it means
-	// the window saves its own partial primary screen on ?1049h and restores
-	// that on ?1049l, which leaves the top blank and the prompt too high. Both
-	// halves of the ring are checked, so either kind of cycle is caught.
-	if hasAltScreenCycle(ring) {
+	if !reflowWindowSafe(ring, start) {
 		return 0
 	}
 	return start
+}
+
+// reflowWindowSafe reports whether the tail from start can be replayed on its
+// own. The window is sound only for append-only output: a replay that begins
+// inside cursor-addressed output starts at row 0 and paints over a row the
+// live screen holds from above the window. The rows are not reproducible from
+// the tail, so the whole ring is replayed instead. Three shapes defeat the
+// window:
+//
+//   - a cursor move that does not advance a line: CUU A, CUD B, CUP/HVP H and
+//     f, VPA d, CHA G, CNL E, CPL F, RI ESC M, SU S, SD T;
+//   - a scroll region set (DECSTBM r), which makes line feeds scroll a band;
+//   - a carriage return that is not part of CRLF, which rewrites the line.
+//
+// A screen switch anywhere in the ring also defeats it. In the skipped prefix
+// the window starts inside the cycle, so the primary screen it restores lost
+// the rows above. In the replayed slice the window saves its own partial
+// primary screen on ?1049h and restores that on ?1049l, leaving the top blank
+// and the prompt too high. The pane sees primary mode after ?1049l, so it
+// cannot refuse either result.
+//
+// The trade is one slow replay for correctness. A pager, a build progress line
+// or a cargo-style status block triggers it, and such output is common but its
+// pane pays the whole ring once per settle, the same trade the plan header
+// accepts for the alternate screen.
+func reflowWindowSafe(ring []byte, start int) bool {
+	if hasAltScreenCycle(ring[:start]) || hasAltScreenCycle(ring[start:]) {
+		return false
+	}
+	return !hasScreenControl(ring[start:])
+}
+
+// hasScreenControl reports whether b holds a cursor move, a scroll region set,
+// a carriage return outside CRLF, or a reverse index. It mirrors the parser's
+// byte states, so text inside an escape body does not count.
+func hasScreenControl(b []byte) bool {
+	state := scanGround
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		switch state {
+		case scanGround:
+			switch {
+			case c == 0x1b:
+				state = scanEscape
+			case c == '\r':
+				// CRLF only returns to the left margin of a fresh line; a lone
+				// CR rewrites the row it is on.
+				if i+1 >= len(b) || b[i+1] != '\n' {
+					return true
+				}
+			case c < 0x20 || c == 0x7f:
+			}
+		case scanEscape:
+			switch {
+			case c == 0x1b:
+			case c == 0x18 || c == 0x1a: // CAN, SUB
+				state = scanGround
+			case c < 0x20 || c == 0x7f:
+			case c >= 0x20 && c <= 0x2f:
+				switch c {
+				case '(', ')', '*', '+':
+					state = scanCharset
+				}
+			case c == 'M': // RI
+				return true
+			case c == '[':
+				state = scanCSI
+			case c == ']' || c == 'P' || c == 'X' || c == '^' || c == '_':
+				state = scanString
+			default:
+				state = scanGround
+			}
+		case scanCSI:
+			switch {
+			case c == 0x1b:
+				state = scanEscape
+			case c == 0x18 || c == 0x1a:
+				state = scanGround
+			case c < 0x20 || c == 0x7f:
+			case c >= 0x40 && c <= 0x7e:
+				switch c {
+				case 'A', 'B', 'E', 'F', 'G', 'H', 'S', 'T', 'd', 'f', 'r':
+					// CUU, CUD, CNL, CPL, CHA, CUP, SU, SD, VPA, HVP, DECSTBM.
+					return true
+				}
+				state = scanGround
+			}
+		case scanString:
+			switch {
+			case c == 0x1b:
+				state = scanEscape
+			case c == 0x9c || c == 0x07 || c == 0x18 || c == 0x1a:
+				state = scanGround
+			}
+		case scanCharset:
+			switch {
+			case c == 0x1b:
+				state = scanEscape
+			case c == 0x18 || c == 0x1a:
+				state = scanGround
+			case c >= 0x30 && c <= 0x7e:
+				state = scanGround
+			}
+		}
+	}
+	return false
 }
 
 // altScreenModes are the paired set and reset sequences of a screen switch:

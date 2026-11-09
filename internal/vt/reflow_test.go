@@ -145,9 +145,10 @@ func TestReflowPartialEscape(t *testing.T) {
 	}
 }
 
-// benchRing builds a raw output ring of realistic shell output: a prompt, ls
-// rows, git status, go test output and a progress line, coloured as a shell
-// writes them.
+// benchRing builds a raw output ring of realistic, append-only shell output: a
+// prompt, ls rows, git status, go test output and a build log, coloured as a
+// shell writes them. No carriage return and no cursor move, so the window
+// applies.
 func benchRing(n int) []byte {
 	blocks := []string{
 		"\x1b[1;32muser@host\x1b[0m:\x1b[1;34m~/Code/Personal/dm\x1b[0m$ ls -la\r\n" +
@@ -173,7 +174,9 @@ func benchRing(n int) []byte {
 			"?   \tgithub.com/example/dm/cmd/dm\t[no test files]\r\n",
 		"\x1b[1;32muser@host\x1b[0m:\x1b[1;34m~/Code/Personal/dm\x1b[0m$ make build\r\n" +
 			"  building release binary\r\n" +
-			"  12%\r  47%\r  88%\r 100%\r\n" +
+			"  compiling 12 of 88 files\r\n" +
+			"  compiling 47 of 88 files\r\n" +
+			"  compiling 88 of 88 files\r\n" +
 			"wrote ./bin/dm\r\n",
 	}
 	var buf bytes.Buffer
@@ -413,5 +416,110 @@ func TestReflowPagerInsideWindow(t *testing.T) {
 			b.WriteString("\x1b[?1049luser@host$ ")
 			compareReflow(t, b.Bytes(), tc.cols, tc.rows)
 		})
+	}
+}
+
+// progressRing builds plain output followed by an in-place progress line
+// rewritten with carriage returns.
+func progressRing(cols, _ int) []byte {
+	lines, ticks := 200, 500
+	if cols >= 200 {
+		lines, ticks = 3000, 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "downloaded asset %04d payload\r\n", i)
+	}
+	for i := 0; i < ticks; i++ {
+		fmt.Fprintf(&b, "\rdownloading %3d%%", i%100)
+	}
+	return b.Bytes()
+}
+
+// frameRing builds plain output followed by a three-line block redrawn with
+// cursor-up frames.
+func frameRing(cols, _ int) []byte {
+	lines, frames := 200, 300
+	if cols >= 200 {
+		lines, frames = 3000, 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "build line %04d output\r\n", i)
+	}
+	b.WriteString("status alpha\r\nstatus beta\r\nstatus gamma\r\n")
+	for i := 0; i < frames; i++ {
+		fmt.Fprintf(&b, "\x1b[2Aframe %04d alpha\r\nframe %04d beta\r\nframe %04d gamma\r\n", i, i, i)
+	}
+	return b.Bytes()
+}
+
+// addressedRing builds plain output followed by a block placed with an
+// absolute cursor position on each frame.
+func addressedRing(cols, _ int) []byte {
+	lines, frames := 200, 300
+	if cols >= 200 {
+		lines, frames = 3000, 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "log line %04d text\r\n", i)
+	}
+	for i := 0; i < frames; i++ {
+		fmt.Fprintf(&b, "\x1b[4;1Hblock %04d one\r\nblock %04d two\r\nblock %04d three", i, i, i)
+	}
+	return b.Bytes()
+}
+
+// TestReflowControlFallback proves cursor-addressed output replays the whole
+// ring, and that a control-free tail still takes the window.
+func TestReflowControlFallback(t *testing.T) {
+	sizes := []struct{ cols, rows int }{
+		{80, 24},
+		{200, 50},
+	}
+	builders := []struct {
+		name  string
+		build func(cols, rows int) []byte
+	}{
+		{"progress CR", progressRing},
+		{"cursor-up frames", frameRing},
+		{"cursor addressed", addressedRing},
+	}
+	for _, b := range builders {
+		for _, size := range sizes {
+			t.Run(fmt.Sprintf("%s/%dx%d", b.name, size.cols, size.rows), func(t *testing.T) {
+				ring := b.build(size.cols, size.rows)
+				if start := reflowStart(ring, size.cols, size.rows); start != 0 {
+					t.Errorf("start = %d, want 0: screen control must replay the whole ring", start)
+				}
+				compareReflow(t, ring, size.cols, size.rows)
+			})
+		}
+	}
+
+	// Plain append-only output still takes the window.
+	for _, size := range sizes {
+		ring := windowStream(2000, func(i int) string {
+			return fmt.Sprintf("plain line %04d %s", i, strings.Repeat("w", 20))
+		})
+		t.Run(fmt.Sprintf("control free/%dx%d", size.cols, size.rows), func(t *testing.T) {
+			if start := reflowStart(ring, size.cols, size.rows); start <= 0 || start >= len(ring) {
+				t.Errorf("start = %d, want a cut inside 0..%d", start, len(ring))
+			}
+			compareReflow(t, ring, size.cols, size.rows)
+		})
+	}
+}
+
+// BenchmarkReflow512KCR measures the same ring with a progress line at the end.
+// Its carriage return defeats the window, so the whole ring is replayed.
+func BenchmarkReflow512KCR(b *testing.B) {
+	ring := append(benchRing(512<<10), []byte("\rdownloading 42%")...)
+	b.SetBytes(int64(len(ring)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Reflow(ring, 200, 50)
 	}
 }
