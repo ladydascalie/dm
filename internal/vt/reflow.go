@@ -26,11 +26,20 @@ import "bytes"
 // the line began at, so a replay that starts mid-line would place the rest of
 // that line at the wrong columns. When the next newline after the cutoff still
 // leaves a screenful of text, the cut is moved forward past the partial line:
-// it is above the screen anyway and need not be replayed. When it does not (a
-// line longer than the window, or the stream ends inside one), the replay
-// starts at the beginning of the line that holds the cutoff, so the wrap
-// alignment is kept. A ring no longer than the window is replayed whole, byte
-// for byte.
+// it is above the screen anyway and need not be replayed. When that boundary
+// leaves too little (a line longer than the window followed by a few short
+// ones), the replay starts at the beginning of the line that holds the cutoff,
+// so the wrap alignment is kept. When the stream ends inside a line, with no
+// newline after the cutoff, the start is clamped to the cutoff and the partial
+// first line is accepted: replaying back to its beginning could walk the whole
+// ring. A ring no longer than the window is replayed whole, byte for byte.
+//
+// A skipped prefix that switches screens forces a whole-ring replay. A pager
+// saves the primary screen on ?1049h and restores it on ?1049l; a window that
+// starts inside that cycle either restores nothing or drops the saved primary
+// content, so every row would be wrong. The pane checks only the current mode,
+// which is primary again after ?1049l. The cycle is rare, so replaying the
+// whole ring (a few hundred milliseconds) is the cheap safe answer.
 //
 // The window assumes the dropped prefix does not change the screen state that
 // survives it: a style or a mode set before the window is not replayed. The
@@ -95,19 +104,50 @@ func reflowStart(ring []byte, cols, rows int) int {
 		}
 		return true
 	})
-	// Prefer the next line boundary: the partial line above it is not needed.
+	start := cut
 	if n := bytes.IndexByte(ring[cut:], '\n'); n >= 0 {
-		start := cut + n + 1
-		if scanCount(ring[start:], rows*cols) >= rows*cols {
-			return start
+		next := cut + n + 1
+		if scanCount(ring[next:], rows*cols) >= rows*cols {
+			// The next boundary still leaves a screenful: the partial line
+			// above it is above the screen and need not be replayed.
+			start = next
+		} else if n := bytes.LastIndexByte(ring[:cut], '\n'); n >= 0 {
+			// The line holding the cutoff is still on screen. Start at its
+			// beginning so its wrapped text keeps the same columns.
+			start = n + 1
 		}
 	}
-	// Too little text after that boundary, so the line holding the cutoff is
-	// still on screen. Start at its beginning to keep the wrap alignment.
-	if n := bytes.LastIndexByte(ring[:cut], '\n'); n >= 0 {
-		return n + 1
+	if start == 0 {
+		return 0
 	}
-	return 0
+	// A screen switch in the skipped prefix forces the whole ring: the saved
+	// primary screen cannot be rebuilt from a window that starts inside the
+	// cycle.
+	if hasAltScreenCycle(ring[:start]) {
+		return 0
+	}
+	return start
+}
+
+// altScreenModes are the paired set and reset sequences of a screen switch:
+// the alternate screen (47, 1047, 1049) and the cursor save and restore around
+// it (1048). A pager's entry and exit are two of these.
+var altScreenModes = [...][2]string{
+	{"?47h", "?47l"},
+	{"?1047h", "?1047l"},
+	{"?1048h", "?1048l"},
+	{"?1049h", "?1049l"},
+}
+
+// hasAltScreenCycle reports whether prefix holds an alternate-screen entry or
+// exit. A false positive only costs a whole-ring replay.
+func hasAltScreenCycle(prefix []byte) bool {
+	for _, pair := range altScreenModes {
+		if bytes.Contains(prefix, []byte(pair[0])) || bytes.Contains(prefix, []byte(pair[1])) {
+			return true
+		}
+	}
+	return false
 }
 
 // scanCount returns how many printable bytes b holds, stopping at limit.

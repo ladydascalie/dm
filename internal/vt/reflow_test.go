@@ -209,9 +209,9 @@ func windowStream(n int, body func(i int) string) []byte {
 }
 
 // TestReflowStartWindow pins the offset derivation: a short ring replays whole,
-// a normal stream starts on the next line boundary, and a stream that ends in a
-// line longer than the window starts at that line's beginning so its wrap stays
-// aligned.
+// a normal stream starts on the next line boundary, a stream that ends inside a
+// line is clamped to the cutoff, and a screen switch in the skipped prefix
+// forces the whole ring.
 func TestReflowStartWindow(t *testing.T) {
 	short := []byte("abc\r\n")
 	if got := reflowStart(short, 10, 2); got != 0 {
@@ -225,11 +225,15 @@ func TestReflowStartWindow(t *testing.T) {
 		t.Errorf("line-boundary start = %d, want %d", got, len("aaaa\r\nbbbb\r\n"))
 	}
 
-	// A line longer than the window has no boundary near the cutoff, so the
-	// replay starts where the line starts.
-	long := []byte("aa\r\n" + strings.Repeat("0123456789", 600))
-	if got := reflowStart(long, 10, 2); got != len("aa\r\n") {
-		t.Errorf("long-line start = %d, want %d", got, len("aa\r\n"))
+	// A newline-free tail longer than the window is clamped to the cutoff, so
+	// the replay stays bounded by the cell count.
+	long := []byte(strings.Repeat("0123456789", 600))
+	clamped := reflowStart(long, 10, 2)
+	if clamped <= 0 || clamped >= len(long) {
+		t.Errorf("newline-free start = %d, want a cut inside 0..%d", clamped, len(long))
+	}
+	if left := scanCount(long[clamped:], 2*2*10+1); left > 2*2*10 {
+		t.Errorf("newline-free tail holds %d printable bytes, want at most %d", left, 2*2*10)
 	}
 
 	// A long line inside the window with enough text after it: the next
@@ -240,17 +244,36 @@ func TestReflowStartWindow(t *testing.T) {
 	if got := reflowStart(longThenMany, 10, 2); got != wantPastLong {
 		t.Errorf("long-line follow start = %d, want %d", got, wantPastLong)
 	}
-	// One line fewer and the boundary leaves less than a screenful, so the
-	// long line starts the replay and its wrap stays aligned.
+	// One line fewer and the boundary leaves less than a screenful, with no
+	// earlier newline to walk back to: the start is clamped to the cutoff.
 	longThenFew := []byte(longBody + "\r\nabcdefghij\r\nklmno")
-	if got := reflowStart(longThenFew, 10, 2); got != 0 {
-		t.Errorf("long-line tail start = %d, want 0", got)
+	if got := reflowStart(longThenFew, 10, 2); got <= 0 || scanCount(longThenFew[got:], 2*2*10+1) > 2*2*10 {
+		t.Errorf("long-line tail start = %d, want a clamped cut inside 0..%d", got, len(longThenFew))
 	}
 
 	// An ordinary long stream is cut, not replayed whole.
 	big := windowStream(2000, func(i int) string { return fmt.Sprintf("line %04d %s", i, strings.Repeat("x", 20)) })
 	if start := reflowStart(big, 80, 24); start <= 0 || start >= len(big) {
 		t.Errorf("big ring start = %d, want a cut inside 0..%d", start, len(big))
+	}
+
+	// A pager cycle in the skipped prefix replays the whole ring. The alt dump
+	// here is long enough that the cutoff lands inside it, after the entry.
+	head := windowStream(400, func(i int) string { return fmt.Sprintf("primary %03d %s", i, strings.Repeat("p", 20)) })
+	altDump := "\x1b[?1049h\x1b[2J\x1b[H" + strings.Repeat("alt row\r\n", 3000) + "\x1b[?1049l$ "
+	pager := append(append([]byte(nil), head...), []byte(altDump)...)
+	if got := reflowStart(pager, 80, 24); got != 0 {
+		t.Errorf("pager start = %d, want 0 for a whole-ring replay", got)
+	}
+
+	for _, seq := range []string{"?47h", "?47l", "?1047h", "?1047l", "?1048h", "?1048l", "?1049h", "?1049l"} {
+		ring := []byte("text \x1b[" + seq + " more text")
+		if !hasAltScreenCycle(ring) {
+			t.Errorf("hasAltScreenCycle missed %s", seq)
+		}
+	}
+	if hasAltScreenCycle([]byte("plain output with ?1049 and no final")) {
+		t.Error("hasAltScreenCycle reported a cycle in plain text")
 	}
 }
 
@@ -296,7 +319,27 @@ func TestReflowWindowSameScreen(t *testing.T) {
 		b = append(b, []byte(strings.Repeat("0123456789", 600)+"01234\r\n")...)
 		return append(b, []byte("last one\r\nsecond\r\nthird\r\n")...)
 	}()
-	longLast := append(append([]byte(nil), plain...), []byte(strings.Repeat("0123456789", 600)+"01234")...)
+	// A newline-free tail of a line that is a whole number of screens long at
+	// each size below, so the clamped replay starts on a column boundary.
+	longLastLine := strings.Repeat("abcdefg", 857) + "z"
+	longLast := append(append([]byte(nil), plain...), []byte(longLastLine)...)
+	pager := func(flat bool) []byte {
+		var b bytes.Buffer
+		for i := 0; i < 400; i++ {
+			fmt.Fprintf(&b, "primary row %03d %s\r\n", i, strings.Repeat("p", 20))
+		}
+		b.WriteString("\x1b[?1049h\x1b[2J\x1b[H")
+		if flat {
+			b.WriteString(strings.Repeat("v", 10000))
+		} else {
+			for i := 0; i < 3000; i++ {
+				fmt.Fprintf(&b, "alt row %04d %s\r\n", i, strings.Repeat("v", 20))
+			}
+		}
+		b.WriteString("\x1b[?1049l")
+		b.WriteString("user@host$ ")
+		return b.Bytes()
+	}
 
 	cases := []struct {
 		name string
@@ -310,6 +353,8 @@ func TestReflowWindowSameScreen(t *testing.T) {
 		{"long middle", longMiddle},
 		{"long tail", longTail},
 		{"long last", longLast},
+		{"pager", pager(false)},
+		{"pager flat", pager(true)},
 	}
 	sizes := []struct{ cols, rows int }{
 		{20, 6},
