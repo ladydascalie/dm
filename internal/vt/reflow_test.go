@@ -282,6 +282,8 @@ func TestReflowStartWindow(t *testing.T) {
 	}
 	for _, tail := range []string{
 		"back\bspace",
+		"staircase\nnext line",
+		"carriage\rreturn",
 		"\x1b[2Jclear",
 		"\x1b[2Acursor up",
 		"\x1b]8;id=x;https://example.com\x1b\\",
@@ -584,6 +586,46 @@ func plainSGRRing(cols, _ int) []byte {
 	return b.Bytes()
 }
 
+// staircaseRing builds plain lines ended with a bare LF, the staircase a
+// program produces when it turns ONLCR off.
+func staircaseRing(cols, _ int) []byte {
+	lines := 2000
+	if cols >= 200 {
+		lines = 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "line %04d %s\n", i, strings.Repeat("x", 20))
+	}
+	return b.Bytes()
+}
+
+// overwriteRing builds plain output followed by a line rewritten in place with
+// a bare carriage return.
+func overwriteRing(cols, _ int) []byte {
+	lines := 2000
+	if cols >= 200 {
+		lines = 3000
+	}
+	var b bytes.Buffer
+	for i := 0; i < lines; i++ {
+		fmt.Fprintf(&b, "row %04d text\r\n", i)
+	}
+	b.WriteString("waiting for lock....\rdone        ")
+	return b.Bytes()
+}
+
+// crlfRing builds plain text whose only line break is CRLF.
+func crlfRing(cols, _ int) []byte {
+	lines := 2000
+	if cols >= 200 {
+		lines = 3000
+	}
+	return windowStream(lines, func(i int) string {
+		return fmt.Sprintf("crlf line %04d text", i)
+	})
+}
+
 // TestReflowPlainTail proves the allow-list: a plain tail (text, CR, LF, TAB,
 // SGR, OSC 0/1/2/7) takes the window, and every other shape replays the whole
 // ring. Both paths are compared with the whole-ring replay.
@@ -596,6 +638,7 @@ func TestReflowPlainTail(t *testing.T) {
 		name  string
 		build func(cols, rows int) []byte
 	}{
+		{"plain CRLF", crlfRing},
 		{"plain SGR", plainSGRRing},
 		{"title OSC 2", titleOSC2Ring},
 		{"cwd OSC 7", cwdOSC7Ring},
@@ -622,6 +665,8 @@ func TestReflowPlainTail(t *testing.T) {
 		{"backspace counter", backspaceRing},
 		{"DECSC DECRC", saveRestoreRing},
 		{"DECSTBM", scrollRegionRing},
+		{"staircase LF", staircaseRing},
+		{"CR overwrite", overwriteRing},
 	}
 	for _, c := range wholeCases {
 		for _, size := range sizes {

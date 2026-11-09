@@ -34,10 +34,12 @@ import "bytes"
 // first line is accepted: replaying back to its beginning could walk the whole
 // ring. A ring no longer than the window is replayed whole, byte for byte.
 //
-// The window is sound only for a plain tail. Only printable text, CRLF, a bare
-// LF, TAB, SGR and the OSC 0, 1, 2 and 7 reports are replayed from the window;
-// anything else means the live rows were drawn from output above the window,
-// and a fresh terminal cannot reproduce them. Reflow then replays the whole ring, a
+// The window is sound only for a plain tail. Only printable text, CRLF, TAB,
+// SGR and the OSC 0, 1, 2 and 7 reports are replayed from the window; anything
+// else means the live rows were drawn from output above the window, and a
+// fresh terminal cannot reproduce them. A line break must be CRLF: a bare LF
+// keeps the column and a bare CR keeps the row, so the window could start at a
+// phase the replay does not know. Reflow then replays the whole ring, a
 // few hundred milliseconds instead of a few milliseconds. A progress line, a
 // status block or a pager is the common trigger; the settle runs once per
 // gesture, so the trade is accepted. plainTail lists the four allowed shapes
@@ -140,8 +142,10 @@ func reflowStart(ring []byte, cols, rows int) int {
 //
 //   - printable text: any byte at or above 0x20, UTF-8 continuation bytes
 //     included (the test is permissive, not a UTF-8 validation);
-//   - a CRLF pair, a bare LF, and TAB. A CR on its own rewrites the line it is
-//     on, so it is not plain;
+//   - a CRLF pair and TAB. A bare LF keeps the column and a bare CR keeps the
+//     row, so either one can start the window at a column or row phase the
+//     replay does not know; only a CRLF returns to both the left margin and the
+//     next row;
 //   - SGR, CSI <digits and semicolons> m;
 //   - an OSC 0, 1, 2 or 7 body terminated by BEL or ST, with no ESC inside.
 //
@@ -165,7 +169,14 @@ func plainTail(b []byte) bool {
 				return false
 			}
 			i++
-		case '\n', '\t':
+		case '\n':
+			// LF is plain only as the second half of CRLF. A bare LF keeps the
+			// column, which is the staircase a program with ONLCR off writes.
+			if i == 0 || b[i-1] != '\r' {
+				return false
+			}
+			i++
+		case '\t':
 			i++
 		case 0x1b:
 			n, ok := plainEscape(b[i:])
