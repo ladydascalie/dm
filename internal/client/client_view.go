@@ -22,6 +22,16 @@ const (
 	frameClose = "\x1b[?2026l"
 )
 
+// pad is the pane padding the server published in the snapshot. The server
+// owns the value: it lays the layout out with it, and the client draws and
+// hit-tests with it. A client with no snapshot yet draws with no padding.
+func (t *tui) pad() int {
+	if t.snap == nil {
+		return 0
+	}
+	return t.snap.Pad
+}
+
 // draw writes one frame. A frame that changes one cell writes one row: the
 // rows of every pane are fingerprinted, and each band of the picture (the
 // boxes, the grips, the divider, the rail, the bar, the toasts and the
@@ -40,7 +50,7 @@ func (t *tui) draw() {
 	panes := onScreenPanes(win)
 	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range panes {
-		boxRect := layout.BoxRect(p.Rect, t.keymap.Padding())
+		boxRect := layout.BoxRect(p.Rect, t.pad())
 		panel.DrawPaneBoxOnGrid(&box, th, boxRect, p.ID == win.Focus, win.Cols, win.Rows)
 		panel.DrawPanePaddingOnGrid(&box, boxRect, p.Rect, win.Cols, win.Rows)
 	}

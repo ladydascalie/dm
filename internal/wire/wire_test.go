@@ -77,3 +77,26 @@ func TestTermColoursRoundTrip(t *testing.T) {
 		t.Fatalf("unset pair kept the bg key: %s", b)
 	}
 }
+
+// TestSnapshotPadRoundTrip proves the padding the server publishes survives
+// the frame with its value, and that 0 travels as a real value: the client
+// must draw with it, not fall back to a default.
+func TestSnapshotPadRoundTrip(t *testing.T) {
+	for _, pad := range []int{0, 2} {
+		in := wire.Snapshot{Session: "s", Cols: 80, Rows: 24, Pad: pad}
+		var buf bytes.Buffer
+		if err := wire.WriteMsg(&buf, wire.Msg{Type: "snapshot", Snap: &in}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := wire.ReadMsg(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Snap == nil || out.Snap.Pad != pad {
+			t.Fatalf("pad %d round trip = %+v, want %d", pad, out.Snap, pad)
+		}
+		if out.Snap.Cols != 80 || out.Snap.Rows != 24 {
+			t.Fatalf("snapshot fields lost beside pad: %+v", out.Snap)
+		}
+	}
+}

@@ -112,6 +112,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		Rail:         s.railLocked(),
 		RailWant:     s.requestedRailLocked(),
 		Zoom:         s.zoom,
+		Pad:          s.cfg.Padding(),
 		Root:         win.Root,
 	}
 	for _, w := range s.st.ActiveWorkspace().Windows {
