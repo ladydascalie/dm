@@ -156,7 +156,7 @@ optional and each one overrides its built-in value.
 | `default-fold` | `"fold"` or `"unfold"` | `"fold"` | Set whether a new window's rail starts folded or unfolded. |
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below `tab-min-width` | `20` | Set the largest tab width before the label is cut. |
-| `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. Needs a fresh server, see below. |
+| `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A change resizes every pane on reload. |
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
@@ -164,25 +164,10 @@ optional and each one overrides its built-in value.
 
 ### What a reload picks up
 
-`ctrl+r` re-reads `config.kdl` and the theme file it names. It applies every node
-the client draws or interprets. Two nodes belong to the server, which reads the
-file once at startup, and those two need `dm kill` and a fresh attach. The panes
-keep running.
-
-| node | reload |
-| --- | --- |
-| `prefix` and every `keymap` block | yes |
-| `theme`, and the theme file it names | yes |
-| `window-label` | yes |
-| `glyphs` | yes |
-| `tab-min-width`, `tab-max-width` | yes |
-| `default-fold` | no, the server applies it when it creates a window |
-| `padding` | no, the server lays out every pane with its startup value |
-
-A restarted server takes `padding` and `default-fold` from the file. A padding
-that disagrees with the client is the visible failure: the server places the
-boxes and the content, while the client paints them, so a reloaded value draws
-the box and its content at different offsets and the frame looks broken.
+`ctrl+r` re-reads `config.kdl` and the theme file it names, and applies every
+node. It also asks the server to re-read the same file, so the server's layout
+follows `padding` and `default-fold` too. A failed read on either side keeps the
+previous values. A padding change resizes every pane, so a reflow follows.
 
 A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, or
 `$HOME/.config/dm/themes/<name>.kdl` when `XDG_CONFIG_HOME` is unset. That is

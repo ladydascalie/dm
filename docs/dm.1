@@ -634,7 +634,7 @@ Set the prefix key that opens the main keymap.
 .TP
 \fBdefault-fold\fP
 Value: \fI"fold" or "unfold"\fP. Default: \fI"fold"\fP.
-Set whether a new window's rail starts folded or unfolded. Needs a fresh server, because the server creates windows and reads this once at startup.
+Set whether a new window's rail starts folded or unfolded. A reload applies it to windows created after it.
 .TP
 \fBtab-min-width\fP
 Value: \fIan integer of at least 3 cells\fP. Default: \fI8\fP.
@@ -646,7 +646,7 @@ Set the largest tab width before the label is cut.
 .TP
 \fBpadding\fP
 Value: \fIan integer from 0 to 4 cells\fP. Default: \fI0\fP.
-Set the blank cells between a pane's border and its content. A change needs dm kill and a fresh attach: the server lays out with the padding it started with, so a reloaded value draws boxes and content at different offsets.
+Set the blank cells between a pane's border and its content. A reload resizes every pane.
 .TP
 \fBglyphs\fP
 Value: \fI"auto", "ascii", "unicode" or "nerd"\fP. Default: \fI"auto"\fP.
