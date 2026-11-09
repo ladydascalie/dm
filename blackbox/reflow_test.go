@@ -1,6 +1,7 @@
 package blackbox
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -88,24 +89,22 @@ func waitPaneWidth(t *testing.T, h *harness, session, pane string, want int) {
 		pane, last, want, waitBudget)
 }
 
-// plainPane replaces the shell with a tty consumer, so nothing repaints on
-// SIGWINCH and no prompt sits in front of what the test writes. The tty echoes
-// each written line once and cat discards it, which is the only text the test
-// asserts on. It returns once the shell has handed the tty over: CAT-READY
-// only appears from the command, and the shell runs exec without reading
-// another line.
-func plainPane(t *testing.T, h *harness, session, pane string) {
+// printLine prints the line as program output, never as typed input, then
+// hands the tty to cat so nothing repaints on SIGWINCH. The command ends in
+// exec cat, so the shell is gone before any resize and no prompt can sit in
+// front of the screen. CAT-READY is the program's own output; a bare row of it
+// proves the shell has exec'd.
+func printLine(t *testing.T, h *harness, session, pane string, n int) {
 	t.Helper()
-	h.run("write-to", pane, "-s", session, "--msg", "echo CAT-READY; exec cat >/dev/null", "--enter")
+	cmd := fmt.Sprintf("printf 'x%%.0s' $(seq 1 %d); echo; echo CAT-READY; exec cat >/dev/null", n)
+	h.run("write-to", pane, "-s", session, "--msg", cmd, "--enter")
+	waitScreen(t, h, session, pane, func(out string) bool {
+		rows := xRows(out)
+		return len(rows) == 1 && xTotal(rows) == n
+	})
 	waitScreen(t, h, session, pane, func(out string) bool {
 		return hasBareRow(out, "CAT-READY")
 	})
-}
-
-// writeLine sends one line of the test's text to the pane's tty.
-func writeLine(t *testing.T, h *harness, session, pane, line string) {
-	t.Helper()
-	h.run("write-to", pane, "-s", session, "--msg", line, "--enter")
 }
 
 // TestReflowOnResize proves the pane re-wraps its live screen when its width
@@ -135,14 +134,9 @@ func TestReflowOnResize(t *testing.T) {
 		t.Fatalf("set-rail %d = %v", wide, res["rail"])
 	}
 	waitPaneWidth(t, h, session, pane, wideW)
-	plainPane(t, h, session, pane)
 
-	// Write the line at the wide width: it fits on one row.
-	writeLine(t, h, session, pane, strings.Repeat("x", line))
-	waitScreen(t, h, session, pane, func(out string) bool {
-		rows := xRows(out)
-		return len(rows) == 1 && xTotal(rows) == line
-	})
+	// Print the line at the wide width: it fits on one row.
+	printLine(t, h, session, pane, line)
 
 	// Narrow the pane. The reflow replays the ring at the new width, so the
 	// line wraps rather than being clipped: every character survives.
@@ -195,12 +189,7 @@ func TestReflowEndsAtFinalWidth(t *testing.T) {
 
 	h.rpc(session, map[string]any{"action": "set-rail", "index": wide})
 	waitPaneWidth(t, h, session, pane, wideW)
-	plainPane(t, h, session, pane)
-	writeLine(t, h, session, pane, strings.Repeat("x", line))
-	waitScreen(t, h, session, pane, func(out string) bool {
-		rows := xRows(out)
-		return len(rows) == 1 && xTotal(rows) == line
-	})
+	printLine(t, h, session, pane, line)
 
 	// Two width changes back to back: the intermediate one must not survive.
 	h.rpc(session, map[string]any{"action": "set-rail", "index": mid})
