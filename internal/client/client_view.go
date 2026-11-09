@@ -316,11 +316,22 @@ func (t *tui) panePaints(panes []wire.PaneInfo) []panePaint {
 			pp.row0, _ = scrollStart(t.scrollVT, p.Rect.H, t.offset)
 		} else {
 			pp.vt = t.vts[p.ID]
-			if t.selText != nil && t.selText.pane == p.ID {
-				pp.sel = t.selText.rangeIn(p.Rect.W)
-			}
 		}
 		if pp.vt != nil {
+			if t.selText != nil && t.selText.pane == p.ID {
+				switch t.selText.src {
+				case selScroll:
+					// A scroll selection is counted in the tall terminal and
+					// only paints while its own pane is the one scrolled. On
+					// another pane's scrollback the pane shows its live screen,
+					// so the selection has no rows to mark.
+					if p.ID == t.scroll && t.scrollVT != nil {
+						pp.sel = shiftRange(t.selText.rangeIn(), -pp.row0*p.Rect.W)
+					}
+				default:
+					pp.sel = t.selText.rangeIn()
+				}
+			}
 			out = append(out, pp)
 		}
 	}

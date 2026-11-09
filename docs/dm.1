@@ -340,6 +340,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 {"action":"history","target":"w1p1","count":200}
 .fi
 .TP
+\fByank\fP
+.nf
+{"action":"yank","target":"w1p1"}
+.fi
+.TP
 \fBreplay\fP
 .nf
 {"action":"replay","target":"w1p1"}
@@ -554,6 +559,9 @@ split left / up
 \fB[\fP
 scrollback
 .TP
+\fBy / Y\fP
+copy output / screen
+.TP
 \fBh j k l\fP
 focus pane
 .TP
@@ -613,7 +621,7 @@ A keymap mode is a table of actions. A keymap node in config.kdl patches one mod
 \fBmain\fP
 The table the prefix key opens.
 .br
-\fBsend-prefix\fP \fIctrl+b\fP, \fBreload\fP \fIctrl+r\fP, \fBsplit-right\fP \fI|\fP, \fBsplit-down\fP \fI-\fP, \fBsplit-down-alt\fP \fI_\fP, \fBsplit-left\fP \fI<\fP, \fBsplit-up\fP \fI^\fP, \fBscrollback\fP \fI[\fP, \fBfocus-left\fP \fIh\fP, \fBfocus-down\fP \fIj\fP, \fBfocus-up\fP \fIk\fP, \fBfocus-right\fP \fIl\fP, \fBnext-pane\fP \fIn\fP, \fBprev-pane\fP \fIp\fP, \fBclose-pane\fP \fIx\fP, \fBclose-window\fP \fIX\fP, \fBzoom-pane\fP \fIz\fP, \fBnew-window\fP \fIc\fP, \fBnext-window\fP \fIw\fP, \fBprev-window\fP \fIW\fP, \fBnew-workspace\fP \fIt\fP, \fBnext-workspace\fP \fI)\fP, \fBswitcher\fP \fIa\fP, \fBpicker\fP \fIs\fP, \fBrename-workspace\fP \fIr\fP, \fBset-project\fP \fIP\fP, \fBtoggle-rail\fP \fIb\fP, \fBmessage-box\fP \fIm\fP, \fBdetach\fP \fId\fP, \fBdetach-alt\fP \fIq\fP, \fBwindow-1\fP \fI1\fP, \fBwindow-2\fP \fI2\fP, \fBwindow-3\fP \fI3\fP, \fBwindow-4\fP \fI4\fP, \fBwindow-5\fP \fI5\fP, \fBwindow-6\fP \fI6\fP, \fBwindow-7\fP \fI7\fP, \fBwindow-8\fP \fI8\fP, \fBwindow-9\fP \fI9\fP, \fBwindow-10\fP \fI0\fP, \fBhelp\fP \fI?\fP, \fBdismiss-esc\fP \fIesc\fP, \fBfocus-up-arrow\fP \fIup\fP, \fBfocus-down-arrow\fP \fIdown\fP, \fBfocus-left-arrow\fP \fIleft\fP, \fBfocus-right-arrow\fP \fIright\fP
+\fBsend-prefix\fP \fIctrl+b\fP, \fBreload\fP \fIctrl+r\fP, \fBsplit-right\fP \fI|\fP, \fBsplit-down\fP \fI-\fP, \fBsplit-down-alt\fP \fI_\fP, \fBsplit-left\fP \fI<\fP, \fBsplit-up\fP \fI^\fP, \fBscrollback\fP \fI[\fP, \fBcopy-output\fP \fIy\fP, \fBcopy-screen\fP \fIY\fP, \fBfocus-left\fP \fIh\fP, \fBfocus-down\fP \fIj\fP, \fBfocus-up\fP \fIk\fP, \fBfocus-right\fP \fIl\fP, \fBnext-pane\fP \fIn\fP, \fBprev-pane\fP \fIp\fP, \fBclose-pane\fP \fIx\fP, \fBclose-window\fP \fIX\fP, \fBzoom-pane\fP \fIz\fP, \fBnew-window\fP \fIc\fP, \fBnext-window\fP \fIw\fP, \fBprev-window\fP \fIW\fP, \fBnew-workspace\fP \fIt\fP, \fBnext-workspace\fP \fI)\fP, \fBswitcher\fP \fIa\fP, \fBpicker\fP \fIs\fP, \fBrename-workspace\fP \fIr\fP, \fBset-project\fP \fIP\fP, \fBtoggle-rail\fP \fIb\fP, \fBmessage-box\fP \fIm\fP, \fBdetach\fP \fId\fP, \fBdetach-alt\fP \fIq\fP, \fBwindow-1\fP \fI1\fP, \fBwindow-2\fP \fI2\fP, \fBwindow-3\fP \fI3\fP, \fBwindow-4\fP \fI4\fP, \fBwindow-5\fP \fI5\fP, \fBwindow-6\fP \fI6\fP, \fBwindow-7\fP \fI7\fP, \fBwindow-8\fP \fI8\fP, \fBwindow-9\fP \fI9\fP, \fBwindow-10\fP \fI0\fP, \fBhelp\fP \fI?\fP, \fBdismiss-esc\fP \fIesc\fP, \fBfocus-up-arrow\fP \fIup\fP, \fBfocus-down-arrow\fP \fIdown\fP, \fBfocus-left-arrow\fP \fIleft\fP, \fBfocus-right-arrow\fP \fIright\fP
 .TP
 \fBmenu\fP
 The right-click menu.

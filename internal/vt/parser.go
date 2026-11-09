@@ -56,6 +56,9 @@ type parser struct {
 	str []byte
 	// charsetSlot is the designator that opened stateCharset: '(' or ')'.
 	charsetSlot byte
+	// strStart is the stream byte offset where the current OSC or DCS
+	// sequence began, so a mark names its introducer, not its terminator.
+	strStart int64
 }
 
 // write consumes b. A rune, an escape sequence and a grapheme cluster may all
@@ -74,12 +77,15 @@ func (p *parser) write(t *Term, b []byte) {
 				p.flush(t)
 				p.startEscape()
 				i++
+				t.streamPos++
 			case c < 0x20:
 				p.flush(t)
 				t.control(c)
 				i++
+				t.streamPos++
 			case c == 0x7f:
 				i++
+				t.streamPos++
 			default:
 				r, size := utf8.DecodeRune(b[i:])
 				if r == utf8.RuneError && size == 1 && !utf8.FullRune(b[i:]) {
@@ -90,19 +96,24 @@ func (p *parser) write(t *Term, b []byte) {
 				}
 				p.rune(t, r)
 				i += size
+				t.streamPos += int64(size)
 			}
 		case stateEscape:
 			p.escapeByte(t, c)
 			i++
+			t.streamPos++
 		case stateCSI:
 			p.csiByte(t, c)
 			i++
+			t.streamPos++
 		case stateOSC, stateDCS:
 			p.stringByte(t, c)
 			i++
+			t.streamPos++
 		case stateCharset:
 			p.charsetByte(t, c)
 			i++
+			t.streamPos++
 		}
 	}
 }
@@ -161,10 +172,14 @@ func (p *parser) escapeByte(t *Term, c byte) {
 		p.state = stateCSI
 	case c == ']':
 		p.str = p.str[:0]
+		// streamPos counts the ESC that opened the sequence; the ']' has not
+		// been counted yet.
+		p.strStart = t.streamPos - 1
 		p.state = stateOSC
 	case c == 'P' || c == 'X' || c == '^' || c == '_':
 		// DCS, SOS, PM and APC all run to ST.
 		p.str = p.str[:0]
+		p.strStart = t.streamPos - 1
 		p.state = stateDCS
 	default:
 		t.escape(string(p.esc), c)
@@ -268,6 +283,7 @@ func (p *parser) stringByte(t *Term, c byte) {
 func (p *parser) endString(t *Term) {
 	switch p.state {
 	case stateOSC:
+		t.markStart = p.strStart
 		t.osc(string(p.str))
 	case stateDCS:
 		t.dcs(string(p.str))

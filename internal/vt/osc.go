@@ -35,9 +35,45 @@ func (t *Term) oscCommand(body string) {
 		t.oscLink(rest)
 	case 52:
 		t.oscClipboard(rest)
+	case 133:
+		t.oscPrompt(rest)
 	case 7501:
 		t.status = rest
 	}
+}
+
+// oscPrompt handles OSC 133: the shell integration prompt marks. A is the
+// prompt start, B the end of the prompt, C the command start and D the command
+// end. The mark records the stream byte offset where its sequence began, the
+// same coordinate space the yank anchor uses. Unknown or malformed bodies are
+// ignored, as every other unknown OSC command is.
+func (t *Term) oscPrompt(rest string) {
+	kind := rest
+	if i := strings.IndexByte(kind, ';'); i >= 0 {
+		kind = kind[:i]
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return
+	}
+	switch kind {
+	case "A":
+		t.promptPos, t.promptSet = t.markStart, true
+	case "C", "D":
+		t.commandPos, t.commandSet = t.markStart, true
+	}
+}
+
+// PromptStart returns the most recent OSC 133 prompt start as a stream byte
+// offset, and whether one has been seen.
+func (t *Term) PromptStart() (pos int64, ok bool) {
+	return t.promptPos, t.promptSet
+}
+
+// CommandMark returns the most recent OSC 133 C or D mark as a stream byte
+// offset, and whether one has been seen.
+func (t *Term) CommandMark() (pos int64, ok bool) {
+	return t.commandPos, t.commandSet
 }
 
 // oscPalette handles OSC 4: index;colour pairs.

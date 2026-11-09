@@ -574,6 +574,10 @@ func (t *tui) runAction(name string) {
 		t.action("split", func(m *wire.Msg) { m.Dir = "up" })
 	case "scrollback":
 		t.startScrollOnFocus()
+	case "copy-output":
+		t.copyOutput()
+	case "copy-screen":
+		t.copyScreen()
 	case "focus-left", "focus-left-arrow":
 		t.action("focus-dir", func(m *wire.Msg) { m.Dir = "left" })
 	case "focus-down", "focus-down-arrow":

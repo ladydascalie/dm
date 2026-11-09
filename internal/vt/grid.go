@@ -123,6 +123,14 @@ type Grid struct {
 	tabs    []bool
 	modes   Modes
 	charset Charset
+	// scrolls counts the rows the grid has scrolled up, less the rows it has
+	// scrolled down. Added to the cursor row it names the cursor's absolute
+	// output row.
+	scrolls int
+	// altTransitions counts the successful switches between the primary and
+	// alternate screens. A caller that reads output in chunks uses it to notice
+	// an excursion that entered and left inside one chunk.
+	altTransitions int
 
 	// altLines is the alternate screen. It is nil until the application first
 	// enters it, so a terminal that never uses the alternate screen does not
@@ -567,6 +575,7 @@ func (g *Grid) ScrollUp(n int) {
 	if n > height {
 		n = height
 	}
+	g.scrolls += n
 	for y := r.Top; y <= r.Bottom-n; y++ {
 		copy(g.lines[y][r.Left:r.Right+1], g.lines[y+n][r.Left:r.Right+1])
 	}
@@ -595,6 +604,7 @@ func (g *Grid) ScrollDown(n int) {
 	if n > height {
 		n = height
 	}
+	g.scrolls -= n
 	for y := r.Bottom; y >= r.Top+n; y-- {
 		copy(g.lines[y][r.Left:r.Right+1], g.lines[y-n][r.Left:r.Right+1])
 	}
@@ -609,6 +619,14 @@ func (g *Grid) ScrollDown(n int) {
 		g.wrapped[y] = false
 	}
 }
+
+// Scrolls returns the rows the grid has scrolled up, less the rows it has
+// scrolled down. Added to the cursor row it names the cursor's absolute output
+// row.
+func (g *Grid) Scrolls() int { return g.scrolls }
+
+// AltTransitions returns the number of successful alternate-screen switches.
+func (g *Grid) AltTransitions() int { return g.altTransitions }
 
 // Cursor returns the cursor state.
 func (g *Grid) Cursor() Cursor {
@@ -857,6 +875,7 @@ func (g *Grid) EnterAltScreen(clear bool) {
 		g.wrapped = make([]bool, g.rows)
 	}
 	g.modes.AltScreen = true
+	g.altTransitions++
 }
 
 // ExitAltScreen switches back to the primary screen. clear wipes the alternate
@@ -872,6 +891,7 @@ func (g *Grid) ExitAltScreen(clear bool) {
 		g.altWrapped = make([]bool, g.rows)
 	}
 	g.modes.AltScreen = false
+	g.altTransitions++
 }
 
 // Fill stores one cluster in every cell, as DECALN does with the letter E. The
@@ -905,6 +925,7 @@ func (g *Grid) Reset() {
 	g.wrapped = make([]bool, g.rows)
 	g.altLines = nil
 	g.altWrapped = nil
+	g.altTransitions = 0
 	g.saved[0] = homeSavedCursor()
 	g.saved[1] = homeSavedCursor()
 	g.savedModes = nil

@@ -694,6 +694,33 @@ still reaches the app that claims the mouse; dm only takes the drag. Trailing
 spaces go and lines join with a newline. An app's own drag selection loses to
 dm's while dm owns the gesture, which is why Shift exists.
 
+The selection is anchored to the pane's content, not to the cells a frame
+shows. Turning the wheel while the left button is held scrolls the pane's
+scrollback and extends the selection into older rows, even when the pointer
+rests past the pane's top edge. The release copies the scrolled rows. A
+selection made in scrollback copies the scrollback rows, and leaving its own
+pane's scrollback drops it. New output that scrolls the live screen drops a
+live selection, because the text under it has moved; output that does not
+scroll leaves it alone. A geometry change drops the selection. An
+alternate-screen pane has no scrollback, so the wheel keeps the selection
+clamped and says why.
+
+`prefix y` copies what the focused pane produced since the last Enter you sent
+it. The anchor is local: dm records the output stream position when it
+forwards an Enter, so a remote shell needs no setup. A pane that has never been
+sent an Enter has no anchor, and the copy falls back to the visible screen with
+a toast that says so. `prefix Y` copies the visible screen. Both write OSC 52
+and raise one `copied N chars` toast.
+
+A shell that emits OSC 133 prompt marks gets an exact copy: the trailing prompt
+is dropped. Add this line to `~/.zshrc` to emit them:
+
+    precmd() { print -Pn '\e]133;D\e\\\e]133;A\e\\' }; preexec() { print -Pn '\e]133;C\e\\' }
+
+The marks travel over ssh like any other output, so the hook works on the
+remote host too. Without marks, the copy ends at the last row with content and
+the trailing prompt is included.
+
 dm enables bracketed paste (2004) on attach and disables it again on detach, so
 ctrl+shift+v inserts newlines literally. The client sends a paste to the focused
 pane as one chunk and never reads a byte inside it as a dm key: an embedded

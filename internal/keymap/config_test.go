@@ -17,7 +17,8 @@ import (
 var configTestDefaultActions = map[string][]string{
 	"main": {
 		"send-prefix", "reload", "split-right", "split-down", "split-down-alt",
-		"split-left", "split-up", "scrollback", "focus-left", "focus-down",
+		"split-left", "split-up", "scrollback", "copy-output", "copy-screen",
+		"focus-left", "focus-down",
 		"focus-up", "focus-right", "next-pane", "prev-pane", "close-pane",
 		"zoom-pane", "new-window", "next-window", "prev-window", "new-workspace",
 		"next-workspace", "switcher", "picker", "rename-workspace", "set-project",
@@ -365,6 +366,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"-", "split down"},
 		{"< / ^", "split left / up"},
 		{"[", "scrollback"},
+		{"y / Y", "copy output / screen"},
 		{"h j k l", "focus pane"},
 		{"n / p", "next/prev pane"},
 		{"x", "close pane"},

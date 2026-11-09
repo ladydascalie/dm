@@ -119,3 +119,38 @@ func TestParseOSCColor(t *testing.T) {
 		}
 	}
 }
+
+// OSC 133 records the prompt start and the command marks as stream byte
+// offsets at the start of their sequence, and ignores unknown or malformed
+// bodies.
+func TestOSCPromptMarks(t *testing.T) {
+	term := NewTerm(20, 4)
+	writeTerm(term, "one\r\ntwo\r\n")
+	writeTerm(term, "\x1b]133;A\x1b\\")
+	if pos, ok := term.PromptStart(); !ok || pos != 10 {
+		t.Fatalf("prompt start = %d, %v, want 10, true", pos, ok)
+	}
+	writeTerm(term, "\x1b]133;B\x1b\\")
+	writeTerm(term, "\x1b]133;C\x1b\\")
+	if pos, ok := term.CommandMark(); !ok || pos != 28 {
+		t.Fatalf("command start = %d, %v, want 28, true", pos, ok)
+	}
+	writeTerm(term, "out\r\n")
+	writeTerm(term, "\x1b]133;D\x1b\\")
+	if pos, ok := term.CommandMark(); !ok || pos != 42 {
+		t.Fatalf("command end = %d, %v, want 42, true", pos, ok)
+	}
+	writeTerm(term, "\x1b]133;A\x1b\\")
+	if pos, ok := term.PromptStart(); !ok || pos != 51 {
+		t.Fatalf("next prompt start = %d, %v, want 51, true", pos, ok)
+	}
+	// Unknown and malformed bodies are ignored.
+	writeTerm(term, "\x1b]133;X\x1b\\")
+	writeTerm(term, "\x1b]133;\x1b\\")
+	if pos, _ := term.PromptStart(); pos != 51 {
+		t.Fatalf("junk moved the prompt start to %d", pos)
+	}
+	if pos, _ := term.CommandMark(); pos != 42 {
+		t.Fatalf("junk moved the command mark to %d", pos)
+	}
+}

@@ -288,6 +288,7 @@ var helpRows = []helpRow{
 	{[]string{"split-down"}, "split down"},
 	{[]string{"split-left", "split-up"}, "split left / up"},
 	{[]string{"scrollback"}, "scrollback"},
+	{[]string{"copy-output", "copy-screen"}, "copy output / screen"},
 	{[]string{"focus-left", "focus-down", "focus-up", "focus-right"}, "focus pane"},
 	{[]string{"next-pane", "prev-pane"}, "next/prev pane"},
 	{[]string{"close-pane"}, "close pane"},

@@ -66,6 +66,12 @@ func ringPane(t *testing.T, session, id string) {
 						st := wire.Status{State: "idle", Message: "ring"}
 						_ = wire.WriteMsg(c, wire.Msg{Type: "replay", ID: m.ID, Target: id,
 							Data: ringFor(id), St: &st})
+					case "yank":
+						_ = wire.WriteMsg(c, wire.Msg{Type: "resp", ID: m.ID, OK: true,
+							Res: jsonRaw(map[string]any{
+								"lines": []string{"after", "the", "enter"},
+								"start": 7, "rows": 10, "anchor": true,
+							})})
 					default:
 						_ = wire.WriteMsg(c, wire.Msg{Type: "resp", ID: m.ID, OK: true})
 					}

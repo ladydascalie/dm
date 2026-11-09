@@ -90,6 +90,16 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		s.reply(cl, m, map[string]any{"lines": lines}, nil)
 
+	case "yank":
+		lines, start, rows, anchor, err := s.paneYank(m.Target)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		s.reply(cl, m, map[string]any{
+			"lines": lines, "start": start, "rows": rows, "anchor": anchor,
+		}, nil)
+
 	case "replay":
 		// The pane's history ring, on demand. Attach no longer pushes it.
 		rp := readPaneReplay(s.st.Name, m.Target)

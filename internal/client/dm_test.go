@@ -2010,16 +2010,16 @@ func TestPasteCompletionResetsTheHold(t *testing.T) {
 
 // A backwards drag covers the same row-major range as the forward one.
 func TestSelectionRangeNormalizes(t *testing.T) {
-	s := &selection{pane: "a", anchor: cell{4, 2}, focus: cell{1, 0}}
-	r := s.rangeIn(10)
+	s := &selection{pane: "a", anchor: 24, focus: 1}
+	r := s.rangeIn()
 	if r.lo != 1 || r.hi != 24 {
 		t.Fatalf("backwards range = %+v, want lo 1 hi 24", r)
 	}
-	s = &selection{pane: "a", anchor: cell{1, 0}, focus: cell{4, 2}}
-	if got := s.rangeIn(10); got.lo != 1 || got.hi != 24 {
+	s = &selection{pane: "a", anchor: 1, focus: 24}
+	if got := s.rangeIn(); got.lo != 1 || got.hi != 24 {
 		t.Fatalf("forwards range = %+v", got)
 	}
-	if got := (*selection)(nil).rangeIn(10); got != nil {
+	if got := (*selection)(nil).rangeIn(); got != nil {
 		t.Fatal("nil selection has a range")
 	}
 }
@@ -2027,17 +2027,17 @@ func TestSelectionRangeNormalizes(t *testing.T) {
 func TestExtractSelection(t *testing.T) {
 	vt := testutil.TestVT(t, 12, 3, "ab  cd\r\nsecond line\r\n")
 	cases := []struct {
-		name string
-		a, b cell
-		want string
+		name   string
+		lo, hi int
+		want   string
 	}{
-		{"trailing spaces", cell{0, 0}, cell{6, 0}, "ab  cd"},
-		{"multiple rows", cell{0, 0}, cell{5, 1}, "ab  cd\nsecond"},
-		{"single cell", cell{1, 0}, cell{1, 0}, "b"},
-		{"backwards drag", cell{5, 1}, cell{0, 0}, "ab  cd\nsecond"},
+		{"trailing spaces", 0, 6, "ab  cd"},
+		{"multiple rows", 0, 12 + 5, "ab  cd\nsecond"},
+		{"single cell", 1, 1, "b"},
+		{"backwards drag", 12 + 5, 0, "ab  cd\nsecond"},
 	}
 	for _, c := range cases {
-		if got := extractSelection(vt, 12, c.a, c.b); got != c.want {
+		if got := extractSelection(vt, 12, c.lo, c.hi); got != c.want {
 			t.Fatalf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -2300,9 +2300,9 @@ func TestSelectionClampsToStartingPane(t *testing.T) {
 		btn: 32, x: p.Rect.X + p.Rect.W + 40,
 		y: p.Rect.Y + p.Rect.H + 40, raw: []byte("\x1b[<32;99;99M"),
 	})
-	want := cell{x: p.Rect.W - 1, y: p.Rect.H - 1}
+	want := (p.Rect.H-1)*p.Rect.W + p.Rect.W - 1
 	if tui.selText == nil || tui.selText.focus != want {
-		t.Fatalf("focus = %+v, want %+v", tui.selText, want)
+		t.Fatalf("focus = %+v, want %d", tui.selText, want)
 	}
 	if tui.selText.pane != "a" {
 		t.Fatalf("selection left its pane: %q", tui.selText.pane)

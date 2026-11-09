@@ -18,6 +18,7 @@ var actionExamples = []actionExample{
 	{"list", `{"action":"list"}`},
 	{"read", `{"action":"read","target":"w1p1"}`},
 	{"history", `{"action":"history","target":"w1p1","count":200}`},
+	{"yank", `{"action":"yank","target":"w1p1"}`},
 	{"replay", `{"action":"replay","target":"w1p1"}`},
 	{"status", `{"action":"status","target":"w1p1"}`},
 

@@ -139,7 +139,7 @@ func llmsCell(s string) string {
 // sibling. Every action in manActionNames appears here exactly once.
 var llmsActionGroups = [][]string{
 	{"ping", "list"},
-	{"read"}, {"history"}, {"replay"}, {"status"},
+	{"read"}, {"history", "yank"}, {"replay"}, {"status"},
 	{"write-to"}, {"exec"}, {"keys"},
 	{"split"}, {"zoom-pane"}, {"set-rail"}, {"resize-split"},
 	{"focus"}, {"focus-dir"}, {"next-pane", "prev-pane"}, {"close-pane"},

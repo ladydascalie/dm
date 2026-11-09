@@ -725,6 +725,13 @@ func (t *tui) scrollBy(n int) {
 }
 
 func (t *tui) exitScroll() {
+	// A selection anchored in this pane's scrollback has no terminal to point
+	// at once the pane shows its live screen again. A selection that belongs
+	// to another pane is kept: its own scroll view is not the one closing.
+	if t.selText != nil && t.selText.src == selScroll && t.selText.pane == t.scroll {
+		t.selText = nil
+		t.press = nil
+	}
 	t.scroll = ""
 	t.scrollVT = nil
 	t.offset = 0
@@ -780,6 +787,9 @@ func (t *tui) buildScroll(p *wire.PaneInfo) {
 	rows := vt.ReplayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
 	t.scrollVT = vt.BuildTall(rows, p.Rect.W)
 	_, t.maxOff = scrollStart(t.scrollVT, p.Rect.H, 0)
+	// A selection held on the live screen moves to the tall terminal now that
+	// the pane shows scrollback.
+	t.selToScroll(p)
 }
 
 // noteHist records a ring that just landed. A ring wrapped for a rect the pane
@@ -810,8 +820,26 @@ func (t *tui) histArrived(id string) {
 	if m, ok := t.histMeta[id]; !ok || !m.got {
 		return
 	}
-	if p := t.paneByID(id); p != nil {
+	p := t.paneByID(id)
+	// A net wheel-down before the ring lands asked to scroll below the live
+	// row. There is nothing there, so leave scrollback and keep the live
+	// selection instead of sitting in scroll mode on the live row.
+	if s := t.selText; s != nil && s.pane == id && p != nil && s.pending < 0 {
+		s.pending = 0
+		t.exitScroll()
+		return
+	}
+	if p != nil {
 		t.buildScroll(p)
+	}
+	// A wheel turn during a drag asked for this ring. Apply the turns that
+	// arrived before it instead of the one-row entry scrollback normally takes.
+	if s := t.selText; s != nil && s.pane == id && p != nil && s.pending != 0 {
+		n := s.pending
+		s.pending = 0
+		t.selScrollBy(p, n)
+		t.dirty = true
+		return
 	}
 	t.scrollTop()
 }
@@ -949,12 +977,23 @@ func (t *tui) paneAt(x, y int) *wire.PaneInfo {
 // rect top-left.
 type cell struct{ x, y int }
 
-// selection is the text dm selected with the mouse. Both cells lie inside the
-// content rect of the pane the drag started in.
+// selSource names the terminal a selection's coordinates are counted in: the
+// pane's live screen or the tall terminal its scrollback is drawn from.
+type selSource int
+
+const (
+	selLive selSource = iota
+	selScroll
+)
+
+// selection is the text dm selected with the mouse. anchor and focus are
+// row-major cell offsets in the terminal src names, so a wheel turn moves the
+// text under the selection and not the selection off the text.
 type selection struct {
 	pane   string
-	anchor cell
-	focus  cell
+	src    selSource
+	anchor int
+	focus  int
 
 	// w and h are the pane's content size when the press landed. A snapshot
 	// that changes the geometry drops the selection.
@@ -963,6 +1002,10 @@ type selection struct {
 	// moved is set once the pointer passed the drag threshold, so a jitter on
 	// a click stays a click.
 	moved bool
+
+	// pending is the wheel delta that arrived before the scrollback ring did.
+	// histArrived applies it once the tall terminal exists.
+	pending int
 }
 
 // heldPress is a left press on a pane that has not been forwarded yet. A drag
@@ -982,32 +1025,52 @@ func cellAt(p *wire.PaneInfo, x, y int) (cell, bool) {
 	return cell{x: x - r.X, y: y - r.Y}, true
 }
 
+// selRow0 is the first row of the terminal the selection is drawn from that
+// the pane's window shows. A live selection starts at row 0; a scrollback one
+// starts at the scroll offset.
+func (t *tui) selRow0(s *selection, p *wire.PaneInfo) int {
+	if s.src != selScroll || t.scroll != p.ID || t.scrollVT == nil {
+		return 0
+	}
+	row0, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
+	return row0
+}
+
 // selFocus moves the selection's focus to the point, clamped to the content
-// rect of the pane the drag started in.
+// rect of the pane the drag started in. The row is counted in the terminal the
+// selection is anchored in, so a scrolled pane moves the focus with the rows
+// under the pointer.
 func (t *tui) selFocus(x, y int) {
-	if t.selText == nil {
+	s := t.selText
+	if s == nil {
 		return
 	}
-	p := t.paneByID(t.selText.pane)
+	if s.src == selScroll && t.scroll != s.pane {
+		return
+	}
+	p := t.paneByID(s.pane)
 	if p == nil || p.Rect.W < 1 || p.Rect.H < 1 {
 		return
 	}
-	c := cell{x: x - p.Rect.X, y: y - p.Rect.Y}
-	if c.x < 0 {
-		c.x = 0
+	cx := x - p.Rect.X
+	cy := y - p.Rect.Y
+	if cx < 0 {
+		cx = 0
 	}
-	if c.y < 0 {
-		c.y = 0
+	if cy < 0 {
+		cy = 0
 	}
-	if c.x >= p.Rect.W {
-		c.x = p.Rect.W - 1
+	if cx >= p.Rect.W {
+		cx = p.Rect.W - 1
 	}
-	if c.y >= p.Rect.H {
-		c.y = p.Rect.H - 1
+	if cy >= p.Rect.H {
+		cy = p.Rect.H - 1
 	}
-	s := t.selText
+	row0 := t.selRow0(s, p)
+	off := (row0+cy)*p.Rect.W + cx
 	if !s.moved {
-		dx, dy := c.x-s.anchor.x, c.y-s.anchor.y
+		ax, ay := s.anchor%p.Rect.W, s.anchor/p.Rect.W
+		dx, dy := cx-ax, (row0+cy)-ay
 		if dx < 0 {
 			dx = -dx
 		}
@@ -1019,23 +1082,34 @@ func (t *tui) selFocus(x, y int) {
 		}
 		s.moved = true
 	}
-	if c != s.focus {
-		s.focus = c
+	if off != s.focus {
+		s.focus = off
 		t.dirty = true
 	}
 }
 
-// rangeIn returns the selection as a row-major cell range for a pane w wide.
-func (s *selection) rangeIn(w int) *selRange {
-	if s == nil || w < 1 {
+// rangeIn returns the selection as a row-major range in the terminal it is
+// anchored in.
+func (s *selection) rangeIn() *selRange {
+	if s == nil {
 		return nil
 	}
-	lo := s.anchor.y*w + s.anchor.x
-	hi := s.focus.y*w + s.focus.x
+	lo, hi := s.anchor, s.focus
 	if lo > hi {
 		lo, hi = hi, lo
 	}
 	return &selRange{lo: lo, hi: hi}
+}
+
+// dropLiveSelection drops a selection on the live screen when new output
+// scrolls that screen: the cells it named have moved, so it cannot hold its
+// text. A selection in the frozen scrollback is not touched.
+func (t *tui) dropLiveSelection(id string) {
+	if t.selText != nil && t.selText.pane == id && t.selText.src == selLive {
+		t.selText = nil
+		t.press = nil
+		t.dirty = true
+	}
 }
 
 // clearSelection drops the selection and the press held for it. A press that
@@ -1059,7 +1133,13 @@ func (t *tui) finishPress(x, y int, ev mouseEvent) {
 	}
 	t.selFocus(x, y)
 	if t.selText != nil && t.selText.pane == pr.pane && t.selText.focus != t.selText.anchor {
+		pane := t.selText.pane
 		t.copySelection()
+		// A drag that wheeled back to the live screen leaves scrollback at
+		// offset 0; close it so the next key reaches the app.
+		if t.scroll == pane && t.offset == 0 {
+			t.exitScroll()
+		}
 		return
 	}
 	t.selText = nil
@@ -1087,13 +1167,214 @@ func (t *tui) copySelection() {
 		return
 	}
 	p := t.paneByID(s.pane)
+	if p == nil {
+		return
+	}
 	term := t.vts[s.pane]
-	if p == nil || term == nil {
+	if s.src == selScroll {
+		if t.scroll != s.pane {
+			return
+		}
+		term = t.scrollVT
+	}
+	if term == nil {
 		return
 	}
 	text := extractSelection(term, p.Rect.W, s.anchor, s.focus)
 	os.Stdout.WriteString(osc52(text))
 	t.notify(fmt.Sprintf("copied %d chars", len(text)))
+}
+
+// focusedPane is the pane the main keymap acts on, nil when the picture has
+// none.
+func (t *tui) focusedPane() *wire.PaneInfo {
+	if t.snap == nil {
+		return nil
+	}
+	return t.paneByID(t.snap.Focus)
+}
+
+// copyOutput asks the server for the focused pane's output since the last
+// Enter. The reply lands on the message loop, which writes the clipboard.
+func (t *tui) copyOutput() {
+	p := t.focusedPane()
+	if p == nil {
+		t.notify("no pane")
+		t.disarm()
+		return
+	}
+	t.yankID++
+	t.yankPane = p.ID
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "yank", Target: p.ID, ID: t.yankID})
+	t.disarm()
+}
+
+// copyScreen copies the focused pane's visible screen to the clipboard.
+func (t *tui) copyScreen() {
+	p := t.focusedPane()
+	if p == nil {
+		t.notify("no pane")
+		t.disarm()
+		return
+	}
+	term := t.vts[p.ID]
+	if term == nil {
+		t.notify("no screen for " + p.ID)
+		t.disarm()
+		return
+	}
+	text := screenText(term)
+	t.writeClipboard(text)
+	t.notify(fmt.Sprintf("copied %d chars", len(text)))
+	t.disarm()
+}
+
+// takeYank writes the clipboard for a yank reply. A pane with no Enter has no
+// anchor, so the copy falls back to the visible screen and the toast says so.
+func (t *tui) takeYank(m wire.Msg) {
+	if !m.OK {
+		t.notify(m.Error)
+		return
+	}
+	var res struct {
+		Lines  []string `json:"lines"`
+		Start  int      `json:"start"`
+		Rows   int      `json:"rows"`
+		Anchor bool     `json:"anchor"`
+	}
+	if len(m.Res) > 0 {
+		if err := json.Unmarshal(m.Res, &res); err != nil {
+			t.notify("yank: " + err.Error())
+			return
+		}
+	}
+	if !res.Anchor {
+		term := t.vts[t.yankPane]
+		if term == nil {
+			t.notify("no screen for " + t.yankPane)
+			return
+		}
+		text := screenText(term)
+		t.writeClipboard(text)
+		t.notify(fmt.Sprintf("no Enter yet; copied %d chars from screen", len(text)))
+		return
+	}
+	if res.Start < 0 || res.Start > res.Rows || res.Rows > len(res.Lines) {
+		t.notify("yank: reply out of range")
+		return
+	}
+	lines := res.Lines[res.Start:res.Rows]
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	text := strings.Join(lines, "\n")
+	t.writeClipboard(text)
+	t.notify(fmt.Sprintf("copied %d chars", len(text)))
+}
+
+// writeClipboard sends text to the terminal's clipboard with OSC 52.
+func (t *tui) writeClipboard(text string) {
+	os.Stdout.WriteString(osc52(text))
+}
+
+// screenText returns the visible rows joined by a newline, trailing blanks
+// trimmed and trailing blank rows dropped.
+func screenText(term *vt.Term) string {
+	if term == nil {
+		return ""
+	}
+	g := term.Grid()
+	_, rows := g.Size()
+	lines := make([]string, 0, rows)
+	for y := 0; y < rows; y++ {
+		lines = append(lines, g.Text(y))
+	}
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// liveToTall is the row offset from the live screen to the tall terminal the
+// scrollback is drawn from. The tall terminal ends with the live screen's
+// rows, so live row r is tall row r+liveToTall.
+func (t *tui) liveToTall(p *wire.PaneInfo) int {
+	if t.scrollVT == nil {
+		return 0
+	}
+	_, rows := t.scrollVT.Grid().Size()
+	return rows - p.Rect.H
+}
+
+// selToScroll moves a live selection onto the tall terminal the scrollback is
+// drawn from. It does nothing once the selection is already there.
+func (t *tui) selToScroll(p *wire.PaneInfo) {
+	s := t.selText
+	if s == nil || s.pane != p.ID || s.src != selLive || t.scrollVT == nil {
+		return
+	}
+	off := t.liveToTall(p) * p.Rect.W
+	s.anchor += off
+	s.focus += off
+	s.src = selScroll
+}
+
+// selScrollBy scrolls the pane's scrollback while a selection drag is held and
+// moves the focus with the rows under the pointer. It reports false when the
+// ring has not landed yet.
+func (t *tui) selScrollBy(p *wire.PaneInfo, n int) bool {
+	s := t.selText
+	if s == nil || s.pane != p.ID || t.scroll != p.ID || t.scrollVT == nil {
+		return false
+	}
+	t.selToScroll(p)
+	moved := t.scrollDrag(n)
+	s.focus -= moved * p.Rect.W
+	if moved != 0 {
+		s.moved = true
+	}
+	t.dirty = true
+	return true
+}
+
+// scrollDrag scrolls the scrollback by n rows and keeps it open at offset 0,
+// so a selection stays anchored to the tall terminal until the button comes
+// up. It returns the rows the view actually moved.
+func (t *tui) scrollDrag(n int) int {
+	if t.scrollVT == nil {
+		return 0
+	}
+	before := t.offset
+	t.offset += n
+	if t.offset < 0 {
+		t.offset = 0
+	}
+	if t.offset > t.maxOff {
+		t.offset = t.maxOff
+	}
+	t.dirty = true
+	return t.offset - before
+}
+
+// wheelSelect scrolls the pane's scrollback while a selection drag is held.
+// The focus moves with the rows under the pointer, so a wheel turn past the
+// pane's edge keeps selecting older rows. An alternate-screen pane has no
+// scrollback: the focus stays clamped and the toast says why.
+func (t *tui) wheelSelect(p *wire.PaneInfo, n int) {
+	s := t.selText
+	if s == nil {
+		return
+	}
+	if p.Alt {
+		t.notify("app is on the alternate screen; use its own scroll")
+		return
+	}
+	if t.scroll != p.ID {
+		t.startScroll(p)
+	}
+	if !t.selScrollBy(p, n) {
+		s.pending += n
+	}
 }
 
 // osc52 is the clipboard sequence for text. Under tmux it must ride the
@@ -1463,6 +1744,19 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		t.dragTo(x, y, false)
 		return
 	}
+	// A wheel while a selection drag is held scrolls the pane's scrollback and
+	// moves the focus with the rows under the pointer. dm owns the gesture, so
+	// the wheel does not reach the app even when the app claims the mouse.
+	if t.press != nil && ev.btn&64 != 0 {
+		if p := t.paneByID(t.press.pane); p != nil {
+			n := 3
+			if ev.btn&1 != 0 {
+				n = -3
+			}
+			t.wheelSelect(p, n)
+		}
+		return
+	}
 	// A held left press is a selection drag until the button comes up.
 	if t.press != nil {
 		if ev.release && ev.btn&3 == 0 {
@@ -1500,10 +1794,18 @@ func (t *tui) handleMouse(ev mouseEvent) {
 				pane: p.ID, mouse: p.Mouse,
 				evs: []mouseEvent{ev},
 			}
-			t.selText = &selection{
-				pane: p.ID, anchor: c, focus: c,
-				w: p.Rect.W, h: p.Rect.H,
+			s := &selection{pane: p.ID, w: p.Rect.W, h: p.Rect.H}
+			if t.scroll == p.ID && t.scrollVT != nil {
+				// The pane shows scrollback: anchor the selection there, not
+				// on the live screen hidden behind it.
+				row0, _ := scrollStart(t.scrollVT, p.Rect.H, t.offset)
+				s.src = selScroll
+				s.anchor = (row0+c.y)*p.Rect.W + c.x
+			} else {
+				s.anchor = c.y*p.Rect.W + c.x
 			}
+			s.focus = s.anchor
+			t.selText = s
 			t.dirty = true
 			return
 		}

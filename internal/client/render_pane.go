@@ -19,6 +19,14 @@ func (s *selRange) has(off int) bool {
 	return s != nil && off >= s.lo && off <= s.hi
 }
 
+// shiftRange moves a row-major range by by cells, nil when there is none.
+func shiftRange(s *selRange, by int) *selRange {
+	if s == nil {
+		return nil
+	}
+	return &selRange{lo: s.lo + by, hi: s.hi + by}
+}
+
 // drawPane paints one pane's cells inside r.
 func drawPane(buf *bytes.Buffer, term *vt.Term, r layout.Rect) {
 	drawPaneFrom(buf, term, r, 0, nil, nil)
@@ -172,31 +180,28 @@ func blankRect(buf *bytes.Buffer, r layout.Rect) {
 	}
 }
 
-// selOrder returns the two cells in row-major order.
-func selOrder(a, b cell) (cell, cell) {
-	if a.y > b.y || (a.y == b.y && a.x > b.x) {
-		return b, a
-	}
-	return a, b
-}
-
-// extractSelection reads the selected cells from term row by row. Trailing
-// spaces go, lines join with a newline, and no newline follows the last line.
-func extractSelection(term *vt.Term, w int, a, b cell) string {
+// extractSelection reads the selected cells from term row by row. lo and hi
+// are row-major cell offsets in term. Trailing spaces go, lines join with a
+// newline, and no newline follows the last line.
+func extractSelection(term *vt.Term, w int, lo, hi int) string {
 	if term == nil || w < 1 {
 		return ""
 	}
+	if lo > hi {
+		lo, hi = hi, lo
+	}
 	g := term.Grid()
 	cols, rows := g.Size()
-	start, end := selOrder(a, b)
-	lines := make([]string, 0, end.y-start.y+1)
-	for y := start.y; y <= end.y; y++ {
+	startRow, startX := lo/w, lo%w
+	endRow, endX := hi/w, hi%w
+	lines := make([]string, 0, endRow-startRow+1)
+	for y := startRow; y <= endRow; y++ {
 		x0, x1 := 0, w-1
-		if y == start.y {
-			x0 = start.x
+		if y == startRow {
+			x0 = startX
 		}
-		if y == end.y {
-			x1 = end.x
+		if y == endRow {
+			x1 = endX
 		}
 		var line strings.Builder
 		for x := x0; x <= x1; {

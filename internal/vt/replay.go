@@ -82,6 +82,10 @@ func ReplayRows(ring []byte, w, h, keep int) [][]Cell {
 			term.Write([]byte("\n"))
 		}
 	}
+	// The parser holds the last grapheme cluster until the next rune proves it
+	// complete. A copy must carry that cluster: the last line may end without a
+	// newline and its final rune would otherwise be missing.
+	term.Flush()
 	for y := 0; y < h; y++ {
 		add(cellRow(term.Grid(), y, w))
 	}

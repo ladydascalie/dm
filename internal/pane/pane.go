@@ -52,6 +52,15 @@ type paneProc struct {
 	// fg and bg are the terminal colours this pane answers OSC 10 and OSC 11
 	// with. The server sets them from the client's detection; guarded by mu.
 	fg, bg string
+
+	// produced counts the bytes the pty has produced, after the pane's filter.
+	// anchor is the value of produced when the last Enter was written, so it is
+	// a position in the same stream the ring holds; a yank slices the ring at
+	// the first newline after it. anchorSet is false until an Enter arrives.
+	// Both are guarded by mu.
+	produced  int64
+	anchor    int64
+	anchorSet bool
 }
 
 // modeInfo reports the modes the client must respect: alternate screen (no
@@ -133,14 +142,55 @@ func (r *scrollRing) Len() int { return r.n }
 // Bytes copies the ring out, oldest first. The reply owns the copy; the ring
 // stays fixed.
 func (r *scrollRing) Bytes() []byte {
-	out := make([]byte, 0, r.n)
+	return r.appendTo(nil)
+}
+
+// appendTo appends the ring to dst, oldest first. A caller that keeps a
+// scratch slice reuses it instead of allocating the ring again.
+func (r *scrollRing) appendTo(dst []byte) []byte {
+	dst = dst[:0]
 	start := (r.w - r.n + ringMax) % ringMax
 	end := start + r.n
 	if end <= ringMax {
-		return append(out, r.buf[start:end]...)
+		return append(dst, r.buf[start:end]...)
 	}
-	out = append(out, r.buf[start:]...)
-	return append(out, r.buf[:end-ringMax]...)
+	dst = append(dst, r.buf[start:]...)
+	return append(dst, r.buf[:end-ringMax]...)
+}
+
+// at returns the byte at logical index i, where 0 is the oldest byte held.
+func (r *scrollRing) at(i int) byte {
+	return r.buf[(r.w-r.n+i+ringMax)%ringMax]
+}
+
+// indexByte returns the logical index of the first c at or after from, or -1.
+func (r *scrollRing) indexByte(c byte, from int) int {
+	for i := from; i < r.n; i++ {
+		if r.at(i) == c {
+			return i
+		}
+	}
+	return -1
+}
+
+// slice copies logical bytes [from, to) into a new slice, oldest first.
+func (r *scrollRing) slice(from, to int) []byte {
+	if from < 0 {
+		from = 0
+	}
+	if to > r.n {
+		to = r.n
+	}
+	if from >= to {
+		return []byte{}
+	}
+	start := (r.w - r.n + from + ringMax) % ringMax
+	out := make([]byte, to-from)
+	n := copy(out, r.buf[start:])
+	if n < len(out) {
+		copy(out[n:], r.buf[:])
+	}
+	return out
 }
 
 func Run(args []string) error {
@@ -328,11 +378,23 @@ func (p *paneProc) syncFilter(f *osc.Filter) {
 // publishLocked feeds one clean chunk to the screen, the ring and the
 // subscribers, and arms the quiet flush. The caller holds p.mu.
 func (p *paneProc) publishLocked(b []byte) {
+	oldTransitions := p.vt.Grid().AltTransitions()
 	p.vt.Write(b)
 	p.ring.Write(b)
+	p.produced += int64(len(b))
 	p.broadcastLocked(wire.Msg{Type: "bytes", Data: b})
 	p.armFlushLocked()
-	if m := p.vt.Grid().Modes(); m != p.mode {
+	m := p.vt.Grid().Modes()
+	if p.vt.Grid().AltTransitions() != oldTransitions {
+		// An alternate-screen excursion swaps the picture and may scroll rows
+		// that are not the shell's history. Drop the anchor on enter and on
+		// exit: the next command's Enter records a fresh one, and a copy before
+		// that falls back to the screen instead of spanning the excursion. A
+		// counter notices an excursion that entered and left inside one chunk;
+		// the chunk-boundary mode comparison would miss it.
+		p.anchor, p.anchorSet = 0, false
+	}
+	if m != p.mode {
 		p.mode = m
 		alt, mouse, paste := modeInfo(m)
 		p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse, paste)})
@@ -466,6 +528,13 @@ func (p *paneProc) serve(c net.Conn) {
 			if m.Keys != nil {
 				b = m.Keys
 			}
+			// An Enter records the stream position the output after it starts
+			// on. The last Enter wins, and the anchor is taken before the
+			// write so the output the Enter produces lands after it.
+			if m.Enter || bytes.ContainsAny(b, "\r\n") {
+				p.anchor = p.produced
+				p.anchorSet = true
+			}
 			p.mu.Unlock()
 			_, _ = p.ptmx.Write(b)
 			if m.Enter {
@@ -476,6 +545,9 @@ func (p *paneProc) serve(c net.Conn) {
 				continue
 			}
 			p.mu.Lock()
+			// The anchor is a stream byte offset, so a geometry change only
+			// changes how a later yank replays those bytes. It is rebased, not
+			// dropped.
 			p.vt.Grid().Resize(m.Cols, m.Rows)
 			p.mu.Unlock()
 			_ = pty.Setsize(p.ptmx, &pty.Winsize{Cols: uint16(m.Cols), Rows: uint16(m.Rows)})
@@ -508,11 +580,30 @@ func (p *paneProc) serve(c net.Conn) {
 				// is a picture, not output: leave the PTY size and the ring
 				// alone. Only the screen is rebuilt, from the ring's stream.
 				p.vt = vt.Reflow(p.ring.Bytes(), m.Cols, m.Rows)
+				// The rebuilt terminal parsed a window of the ring, so its
+				// stream position and marks are not absolute. The anchor is a
+				// byte offset and survives the reflow; future marks start from
+				// the pane's real stream position.
+				p.vt.ResetStream(p.produced)
 			}
 			snap := p.vt.Snapshot()
 			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
 			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)})
+		case "yank":
+			p.mu.Lock()
+			tail, cols, h, ok := p.yankTailLocked()
+			p.mu.Unlock()
+			// Replay outside the lock: the pane's pty reader must not wait on
+			// a copy of every row in the command's output.
+			var lines []string
+			start, rows := 0, 0
+			if ok {
+				lines, start, rows = yankRows(tail, cols, h)
+			}
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, Res: jsonRaw(map[string]any{
+				"lines": lines, "start": start, "rows": rows, "anchor": ok,
+			})})
 		case "replay":
 			p.mu.Lock()
 			data := p.ring.Bytes()
@@ -557,6 +648,78 @@ func (p *paneProc) serve(c net.Conn) {
 			}()
 		}
 	}
+}
+
+// yankTailLocked returns the stream bytes after the anchor and before the
+// prompt, plus the pane's size. It skips the newline the pty echoes at the
+// anchor, so the copy starts on the first row the command produced and not on
+// the command line the prompt shared. A command mark after the anchor and a
+// prompt start after it cut the tail at the prompt, so the trailing prompt is
+// not copied. ok is false when no Enter has been recorded. The caller holds
+// p.mu and owns the returned copy.
+func (p *paneProc) yankTailLocked() (tail []byte, cols, h int, ok bool) {
+	cols, h = p.vt.Grid().Size()
+	if !p.anchorSet || p.ring.Len() == 0 {
+		return nil, cols, h, false
+	}
+	ringStart := p.produced - int64(p.ring.Len())
+	rel := int(p.anchor - ringStart)
+	if rel < 0 {
+		// The ring dropped the anchor's bytes. Start at the oldest row held;
+		// the first partial line is dropped by the newline search.
+		rel = 0
+	}
+	nl := p.ring.indexByte('\n', rel)
+	if nl < 0 {
+		// The command has produced no line yet, so it has no output row.
+		return []byte{}, cols, h, true
+	}
+	// The pty normally echoes an Enter as "\r\n" at the anchor, so the copy
+	// starts after it. A pane whose Enter is not echoed puts its first output
+	// row right at the anchor; skipping a newline that has text before it would
+	// drop that row. The echo is the newline within two bytes that has nothing
+	// but CR and LF between it and the anchor.
+	from, to := rel, p.ring.Len()
+	if nl-rel <= 2 && onlyLineEnds(p.ring, rel, nl) {
+		from = nl + 1
+	}
+	if cmd, hasCmd := p.vt.CommandMark(); hasCmd && cmd >= p.anchor {
+		if prompt, hasPrompt := p.vt.PromptStart(); hasPrompt && prompt >= cmd {
+			if cut := int(prompt - ringStart); cut >= from && cut <= to {
+				to = cut
+			}
+		}
+	}
+	return p.ring.slice(from, to), cols, h, true
+}
+
+// onlyLineEnds reports whether ring[from:to] holds only CR and LF, the bytes a
+// pty echoes for an Enter.
+func onlyLineEnds(r *scrollRing, from, to int) bool {
+	for i := from; i < to; i++ {
+		if c := r.at(i); c != '\r' && c != '\n' {
+			return false
+		}
+	}
+	return true
+}
+
+// yankRows turns a yank tail into the row space the client places. lines holds
+// every replayed row, start is the first row with content, and rows is the
+// total. The client slices lines at start and drops trailing blank rows, so
+// leading blank rows after the prompt are not copied.
+func yankRows(tail []byte, cols, h int) (lines []string, start, rows int) {
+	all := vt.ReplayRows(tail, cols, h, 0)
+	rows = len(all)
+	start = 0
+	for start < rows && vt.BlankRow(all[start]) {
+		start++
+	}
+	lines = make([]string, rows)
+	for y := range all {
+		lines[y] = vt.PlainRow(all[y])
+	}
+	return lines, start, rows
 }
 
 func splitLines(s string) []string {

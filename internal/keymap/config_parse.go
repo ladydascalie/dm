@@ -373,6 +373,8 @@ keymap "main" {
     "split-left" "<"
     "split-up" "^"
     "scrollback" "["
+    "copy-output" "y"
+    "copy-screen" "Y"
     "focus-left" "h"
     "focus-down" "j"
     "focus-up" "k"

@@ -47,7 +47,7 @@ var manActionFields = []manField{
 
 // manActionNames is every action the server accepts through dm exec.
 var manActionNames = []string{
-	"ping", "list", "read", "history", "replay", "status",
+	"ping", "list", "read", "history", "yank", "replay", "status",
 	"write-to", "exec", "keys",
 	"split", "zoom-pane", "set-rail", "resize-split",
 	"focus", "focus-dir", "next-pane", "prev-pane", "close-pane",

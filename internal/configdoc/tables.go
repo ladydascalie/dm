@@ -143,6 +143,8 @@ var ActionDesc = map[string]string{
 	"split-left":        "Split the focused pane side by side, with the new pane on the left.",
 	"split-up":          "Split the focused pane top and bottom, with the new pane above.",
 	"scrollback":        "Open the focused pane's scrollback.",
+	"copy-output":       "Copy the focused pane's output since the last Enter.",
+	"copy-screen":       "Copy the focused pane's visible screen.",
 	"focus-left":        "Move focus to the pane left of the focused pane.",
 	"focus-down":        "Move focus to the pane below the focused pane.",
 	"focus-up":          "Move focus to the pane above the focused pane.",

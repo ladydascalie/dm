@@ -23,6 +23,21 @@ type Term struct {
 	status      string
 	colors      map[int]Color
 
+	// OSC 133 prompt marks. promptPos is the most recent A mark and commandPos
+	// the most recent C or D mark, both stream byte offsets: the count of bytes
+	// this terminal has parsed. That is the space the yank anchor uses, so a
+	// mark can be compared with the anchor and sliced from the same ring.
+	promptPos  int64
+	promptSet  bool
+	commandPos int64
+	commandSet bool
+
+	// streamPos counts the bytes this terminal has parsed. markStart is where
+	// the OSC currently being parsed began, so a mark names the start of its
+	// sequence and not its terminator.
+	streamPos int64
+	markStart int64
+
 	// Settings the report family answers but the grid does not model.
 	cursorStyle  int
 	screenLines  int
@@ -55,6 +70,17 @@ func NewTerm(cols, rows int) *Term {
 // chunk.
 func (t *Term) Write(b []byte) {
 	t.parser.write(t, b)
+}
+
+// ResetStream sets the stream position and drops the prompt marks. A pane that
+// rebuilds its terminal from a window of the ring uses it: the marks the window
+// replayed do not describe the whole stream, and the next output is appended to
+// the pane's real position.
+func (t *Term) ResetStream(pos int64) {
+	t.streamPos = pos
+	t.markStart = 0
+	t.promptPos, t.promptSet = 0, false
+	t.commandPos, t.commandSet = 0, false
 }
 
 // Flush places the cluster under construction. A cluster is complete only when

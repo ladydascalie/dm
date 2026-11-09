@@ -165,6 +165,33 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	return out, nil
 }
 
+// paneYank asks a pane for the replay rows of its last Enter, up to the prompt
+// when the shell marks one. The reply carries every replayed row, the first row
+// with content and the total row count: the client cuts lines at start, drops
+// trailing blank rows and owns the clipboard. The anchor flag is false when the
+// pane has never been sent an Enter.
+func (s *server) paneYank(id string) ([]string, int, int, bool, error) {
+	m, err := paneRequest(s.st.Name, id, wire.Msg{Type: "req", Action: "yank"})
+	if err != nil {
+		return nil, 0, 0, false, err
+	}
+	if !m.OK {
+		return nil, 0, 0, false, fmt.Errorf("%s", m.Error)
+	}
+	var res struct {
+		Lines  []string `json:"lines"`
+		Start  int      `json:"start"`
+		Rows   int      `json:"rows"`
+		Anchor bool     `json:"anchor"`
+	}
+	if len(m.Res) > 0 {
+		if err := json.Unmarshal(m.Res, &res); err != nil {
+			return nil, 0, 0, false, err
+		}
+	}
+	return res.Lines, res.Start, res.Rows, res.Anchor, nil
+}
+
 func (s *server) writeTo(id, text string, enter bool) error {
 	s.mu.Lock()
 	pc := s.panes[id]

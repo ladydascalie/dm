@@ -58,7 +58,7 @@ func TestLLMSCommandWritesFile(t *testing.T) {
 // TestLLMSTextStaysOnePass proves the document stays short enough to read in
 // one pass.
 func TestLLMSTextStaysOnePass(t *testing.T) {
-	if n := strings.Count(clidoc.LLMsText(), "\n"); n >= 400 {
-		t.Fatalf("llms.txt is %d lines, want under 400", n)
+	if n := strings.Count(clidoc.LLMsText(), "\n"); n >= 420 {
+		t.Fatalf("llms.txt is %d lines, want under 420", n)
 	}
 }

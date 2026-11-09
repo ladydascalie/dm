@@ -79,7 +79,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | --- | --- |
 | `ping`, `list` | `{"action":"ping"}`, `{"action":"list"}` |
 | `read` | `{"action":"read","target":"w1p1"}` |
-| `history` | `{"action":"history","target":"w1p1","count":200}` |
+| `history`, `yank` | `{"action":"history","target":"w1p1","count":200}`, `{"action":"yank","target":"w1p1"}` |
 | `replay` | `{"action":"replay","target":"w1p1"}` |
 | `status` | `{"action":"status","target":"w1p1"}` |
 | `write-to` | `{"action":"write-to","target":"w1p1","msg":"go test ./...","enter":true}` |
@@ -122,6 +122,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `-` | `split-down` | split down |
 | `< / ^` | `split-left / split-up` | split left / up |
 | `[` | `scrollback` | scrollback |
+| `y / Y` | `copy-output / copy-screen` | copy output / screen |
 | `h j k l` | `focus-left / focus-down / focus-up / focus-right` | focus pane |
 | `n / p` | `next-pane / prev-pane` | next/prev pane |
 | `x` | `close-pane` | close pane |
@@ -175,6 +176,8 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `split-left` | `<` |
 | `main` | `split-up` | `^` |
 | `main` | `scrollback` | `[` |
+| `main` | `copy-output` | `y` |
+| `main` | `copy-screen` | `Y` |
 | `main` | `focus-left` | `h` |
 | `main` | `focus-down` | `j` |
 | `main` | `focus-up` | `k` |

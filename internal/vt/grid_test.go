@@ -279,3 +279,19 @@ func TestTextSkipsContinuationAndTrims(t *testing.T) {
 		t.Errorf("Text(0) = %q, want %q", got, "a世b")
 	}
 }
+
+// AltTransitions counts each successful switch, so a caller reading output in
+// chunks can notice an excursion that entered and left inside one read.
+func TestAltTransitionsCountsBothSwitches(t *testing.T) {
+	g := NewGrid(10, 3)
+	if n := g.AltTransitions(); n != 0 {
+		t.Fatalf("new grid transitions = %d, want 0", n)
+	}
+	g.EnterAltScreen(true)
+	g.EnterAltScreen(true) // already there: no switch
+	g.ExitAltScreen(true)
+	g.ExitAltScreen(true) // already back: no switch
+	if n := g.AltTransitions(); n != 2 {
+		t.Fatalf("transitions = %d, want 2", n)
+	}
+}

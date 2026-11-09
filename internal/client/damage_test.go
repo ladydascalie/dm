@@ -301,7 +301,7 @@ func TestFrameSelectionRepaintsRows(t *testing.T) {
 	f.frame()
 
 	f.tui.selText = &selection{
-		pane: p.ID, anchor: cell{x: 0, y: 5}, focus: cell{x: 6, y: 5},
+		pane: p.ID, anchor: 5 * p.Rect.W, focus: 5*p.Rect.W + 6,
 		w: p.Rect.W, h: p.Rect.H,
 	}
 	got := f.frame()
@@ -435,7 +435,7 @@ func scene(t *testing.T, f *frameTUI, live *vt.Term) {
 	f.tui.armed = false
 	step("help-gone")
 	p := f.snap.Panes[0]
-	f.tui.selText = &selection{pane: p.ID, anchor: cell{x: 2, y: 3}, focus: cell{x: 8, y: 6}, w: p.Rect.W, h: p.Rect.H}
+	f.tui.selText = &selection{pane: p.ID, anchor: 3*p.Rect.W + 2, focus: 6*p.Rect.W + 8, w: p.Rect.W, h: p.Rect.H}
 	step("selection")
 	f.tui.selText = nil
 	step("selection-gone")

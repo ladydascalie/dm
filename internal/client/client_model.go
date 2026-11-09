@@ -197,6 +197,12 @@ type tui struct {
 	swPane string
 	swID   int
 
+	// yankID numbers the next copy-output request and yankPane is the pane it
+	// names, so a reply writes the clipboard for the pane the operator asked
+	// about even if focus moved before it landed.
+	yankID   int
+	yankPane string
+
 	// rowsig holds one fingerprint per pane content row, so a steady frame
 	// repaints only the rows that moved. laysig is the shape of the picture:
 	// when it changes the next frame repaints whole. last is what the previous
@@ -698,7 +704,11 @@ func (t *tui) apply(m wire.Msg) {
 		t.dirty = true
 	case "bytes":
 		if term := t.vts[m.Target]; term != nil {
+			before := term.Grid().Scrolls()
 			term.Write(m.Data)
+			if term.Grid().Scrolls() != before {
+				t.dropLiveSelection(m.Target)
+			}
 			t.noteBytes(m.Target, time.Now())
 			t.dirty = true
 		}
@@ -711,6 +721,10 @@ func (t *tui) apply(m wire.Msg) {
 	case "exit":
 		t.notify("pane " + m.Target + " exited")
 	case "resp":
+		if m.Action == "yank" && m.ID == t.yankID {
+			t.takeYank(m)
+			break
+		}
 		// A preview reply carries the id its request named. Only the newest id
 		// fills the band: an older one is dropped and a failure stays silent.
 		if m.ID > 0 {
