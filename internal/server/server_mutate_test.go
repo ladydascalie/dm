@@ -181,3 +181,41 @@ func TestToggleWorkspaceFold(t *testing.T) {
 		t.Fatalf("window Unfolded = %v, want %v", unfolded, !initial)
 	}
 }
+
+// TestToggleProjectFold proves a project target flips the project's fold in
+// the state and reaches the snapshot.
+func TestToggleProjectFold(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	st := session.NewState("fold")
+	st.Workspaces[0].Project = "dm"
+	st.Workspaces[0].Windows[0].Root = &layout.Node{Pane: "w1p1"}
+	st.Workspaces[0].Windows[0].Focus = "w1p1"
+	st.Panes["w1p1"] = &session.PaneState{Cwd: "/tmp"}
+	s := railServer(st)
+
+	unfolded, err := s.toggleFold(wire.ProjectTargetPrefix + "dm")
+	if err != nil {
+		t.Fatalf("toggleFold(project dm): %v", err)
+	}
+	if unfolded {
+		t.Fatal("toggleFold returned unfolded=true, want false")
+	}
+	if !st.ProjectFold["dm"] {
+		t.Fatal("project dm is not folded in the state")
+	}
+	panes := s.allPanesLocked()
+	if len(panes) == 0 || !panes[0].ProjectFolded {
+		t.Fatalf("snapshot does not carry the folded project: %+v", panes)
+	}
+
+	unfolded, err = s.toggleFold(wire.ProjectTargetPrefix + "dm")
+	if err != nil {
+		t.Fatalf("toggleFold(project dm): %v", err)
+	}
+	if !unfolded {
+		t.Fatal("toggleFold returned unfolded=false, want true")
+	}
+	if st.ProjectFold["dm"] {
+		t.Fatal("project dm is still folded in the state")
+	}
+}

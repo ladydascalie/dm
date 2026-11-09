@@ -203,10 +203,11 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 	}
 	var out []RailItem
 	ws, win, project, prev := "", "", "", ""
+	folded := false
 	slot := 0
 	for _, p := range snap.All {
 		if p.Workspace != ws {
-			if ws != "" {
+			if ws != "" && !folded {
 				gap := RailItem{Kind: Gap}
 				// A gap between two workspaces of one project stays inside the
 				// group, so the bar runs on through it.
@@ -217,6 +218,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 			}
 			ws, win = p.Workspace, ""
 			project, prev, slot = p.Project, project, 0
+			folded = p.ProjectFolded
 			if project != "" {
 				s, ok := slotsFor[project]
 				if !ok {
@@ -228,8 +230,13 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 					out = append(out, RailItem{
 						Kind: Project, Text: project, Project: project,
 						ProjectAccent: slot, Count: projectCount[project],
+						Folded: folded,
 					})
 				}
+			}
+			// A folded project hides its workspaces, windows and panes.
+			if folded {
+				continue
 			}
 			name := p.WorkspaceName
 			if name == "" {
@@ -243,8 +250,8 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 				Folded: !p.WorkspaceUnfolded,
 			})
 		}
-		// A folded workspace hides its windows and their panes.
-		if !p.WorkspaceUnfolded {
+		// A folded project or workspace hides its windows and their panes.
+		if folded || !p.WorkspaceUnfolded {
 			continue
 		}
 		if p.Window != win {
@@ -491,11 +498,17 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 	p, g := th.Palette, th.Glyphs
 	switch it.Kind {
 	case Project:
-		// The bar in column 0 is the writer's. The row itself is a space, the
-		// project's name in its accent, and the group's workspace count.
+		// The bar in column 0 is the writer's. The row itself is the fold
+		// caret, a space, the project's name in its accent, and the group's
+		// workspace count.
 		if !compact {
 			name := th.Accents[it.ProjectAccent]
+			caret := g.FoldOpen
+			if it.Folded {
+				caret = g.FoldClosed
+			}
 			left = []segment.Seg{
+				{Text: caret, FG: name},
 				{Text: " ", FG: name},
 				{Text: it.Text, FG: name, Bold: true},
 			}
@@ -682,9 +695,10 @@ func RailWorkspaceAt(snap *wire.Snapshot, x, y int) string {
 	return items[y].Workspace
 }
 
-// RailFoldAt returns the workspace or window whose fold caret is under x,y. The
-// project bar holds column 0, so a workspace caret sits in column 1 and a
-// window caret in column 3. It only answers for the caret cell, so a click on
+// RailFoldAt returns the project, workspace or window whose fold caret is
+// under x,y. The project bar holds column 0, so a project or workspace caret
+// sits in column 1 and a window caret in column 3. A project target carries
+// wire.ProjectTargetPrefix. It only answers for the caret cell, so a click on
 // the row's name still focuses the row's first pane.
 func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
@@ -702,6 +716,11 @@ func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 	}
 	it := items[y]
 	switch it.Kind {
+	case Project:
+		if x != 1 {
+			return ""
+		}
+		return wire.ProjectTargetPrefix + it.Project
 	case Workspace:
 		if x != 1 {
 			return ""

@@ -447,8 +447,8 @@ func TestRenamePromptSetProjectMenuRow(t *testing.T) {
 			continue
 		}
 		found = true
-		if it.key != "" {
-			t.Fatalf("Set project key = %q, want no hint", it.key)
+		if it.key != "P" {
+			t.Fatalf("Set project key = %q, want P", it.key)
 		}
 		it.run()
 	}
@@ -501,5 +501,16 @@ func TestRenamePromptProjectLabel(t *testing.T) {
 	}
 	if !strings.HasSuffix(row, "▏") {
 		t.Fatalf("input row = %q, want the caret last", row)
+	}
+}
+
+// TestSetProjectKeyOpensPrompt proves the P key opens the project prompt for
+// the active workspace with its current project as the draft.
+func TestSetProjectKeyOpensPrompt(t *testing.T) {
+	tr, _ := renamePromptTUI(t)
+	tr.snap.All[0].Project = "dm"
+	renamePromptKeys(tr, "\x02P")
+	if tr.mode != "rename" || tr.renameKind != "project" || tr.renameID != "s1" || tr.renameDraft != "dm" {
+		t.Fatalf("P opened mode=%q kind=%q id=%q draft=%q", tr.mode, tr.renameKind, tr.renameID, tr.renameDraft)
 	}
 }

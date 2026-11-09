@@ -300,6 +300,7 @@ var helpRows = []helpRow{
 	{[]string{"next-workspace"}, "next workspace"},
 	{[]string{"picker"}, "switch session"},
 	{[]string{"rename-workspace"}, "rename workspace"},
+	{[]string{"set-project"}, "set project"},
 	{[]string{"message-box"}, "message box"},
 	{[]string{"toggle-rail"}, "cycle rail: full, thin, hidden"},
 	{[]string{"detach", "detach-alt"}, "detach"},

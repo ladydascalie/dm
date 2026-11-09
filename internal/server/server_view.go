@@ -183,6 +183,7 @@ func (s *server) allPanesLocked() []wire.AllPane {
 				}
 				info.WindowUnfolded = w.Unfolded
 				info.WorkspaceUnfolded = ws.Unfolded
+				info.ProjectFolded = s.st.ProjectFold[ws.Project]
 				ps := s.st.Panes[id]
 				if ps != nil {
 					info.Name = ps.Name

@@ -81,6 +81,10 @@ type PaneInfo struct {
 	Mouse bool `json:"mouse,omitempty"`
 }
 
+// ProjectTargetPrefix marks a toggle-fold target as a project name rather than
+// a workspace or window id.
+const ProjectTargetPrefix = "project:"
+
 // AllPane is one pane anywhere in the session, for a sidebar that lists the
 // whole fleet. Panes stays the active window; All is everything, grouped by
 // workspace then window in tree order.
@@ -114,9 +118,11 @@ type AllPane struct {
 	Workspace         string `json:"workspace"`
 	WorkspaceName     string `json:"workspaceName"`
 	// Project is the pane's workspace project name. Empty means no project.
-	Project    string `json:"project,omitempty"`
-	Window     string `json:"window"`
-	WindowName string `json:"windowName"`
+	Project string `json:"project,omitempty"`
+	// ProjectFolded is true when the rail folds the whole project group.
+	ProjectFolded bool   `json:"projectFolded,omitempty"`
+	Window        string `json:"window"`
+	WindowName    string `json:"windowName"`
 	// WindowNamed is true when the user set the window's name with
 	// rename-window.
 	WindowNamed     bool `json:"windowNamed,omitempty"`

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 
 	"dm/internal/layout"
 	"dm/internal/paths"
@@ -16,6 +17,9 @@ import (
 
 // toggleFold flips a workspace's or window's rail fold state and persists it.
 func (s *server) toggleFold(id string) (bool, error) {
+	if name, ok := strings.CutPrefix(id, wire.ProjectTargetPrefix); ok {
+		return s.toggleProjectFold(name)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
@@ -34,6 +38,29 @@ func (s *server) toggleFold(id string) (bool, error) {
 		}
 	}
 	return false, fmt.Errorf("no window or workspace %q", id)
+}
+
+// toggleProjectFold flips a project's rail fold state and persists it. A
+// project is a name, so the state is the set of folded names.
+func (s *server) toggleProjectFold(name string) (bool, error) {
+	if name == "" {
+		return false, fmt.Errorf("no project %q", name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.st.ProjectFold == nil {
+		s.st.ProjectFold = map[string]bool{}
+	}
+	folded := !s.st.ProjectFold[name]
+	if folded {
+		s.st.ProjectFold[name] = true
+	} else {
+		delete(s.st.ProjectFold, name)
+	}
+	if err := s.st.Save(); err != nil {
+		return false, err
+	}
+	return !folded, nil
 }
 
 // paneInTreeLocked reports whether id is a pane in this session's layout, in

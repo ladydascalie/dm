@@ -134,6 +134,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `)` | `next-workspace` | next workspace |
 | `s` | `picker` | switch session |
 | `r` | `rename-workspace` | rename workspace |
+| `P` | `set-project` | set project |
 | `m` | `message-box` | message box |
 | `b` | `toggle-rail` | cycle rail: full, thin, hidden |
 | `d / q` | `detach / detach-alt` | detach |
@@ -191,6 +192,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `switcher` | `a` |
 | `main` | `picker` | `s` |
 | `main` | `rename-workspace` | `r` |
+| `main` | `set-project` | `P` |
 | `main` | `toggle-rail` | `b` |
 | `main` | `message-box` | `m` |
 | `main` | `detach` | `d` |
@@ -385,15 +387,11 @@ dm msg post --key build --state done --msg 'all green'
 dm msg wait --key build --state done --timeout 10m
 ```
 
-List sessions:
-
-```sh
-dm ls
-```
 
 ## Gotchas
 
 - `dm kill` stops a session's server. The panes keep running; attach again and they are there.
 - `dm purge` removes dead sessions whose panes are gone. Add `--dry-run` to see the list first.
 - `dm reset` discards a session and its panes for a full restart. It needs `--force`; `--all` resets every session.
+- `toggle-fold` takes a workspace id, a window id, or `project:<name>` to fold a whole project group.
 - A bare word is a session name: `dm work` attaches to `work`, it does not run a command called `work`.

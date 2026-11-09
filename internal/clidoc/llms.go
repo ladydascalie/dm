@@ -274,13 +274,11 @@ func LLMsText() string {
 	b.WriteString("```sh\ndm exec '{\"action\":\"close-window\",\"target\":\"w1\"}'\n```\n\n")
 	b.WriteString("Post to the box and wait on it:\n\n")
 	b.WriteString("```sh\ndm msg post --key build --state done --msg 'all green'\ndm msg wait --key build --state done --timeout 10m\n```\n\n")
-	b.WriteString("List sessions:\n\n")
-	b.WriteString("```sh\ndm ls\n```\n")
-
 	b.WriteString("\n## Gotchas\n\n")
 	b.WriteString("- `dm kill` stops a session's server. The panes keep running; attach again and they are there.\n")
 	b.WriteString("- `dm purge` removes dead sessions whose panes are gone. Add `--dry-run` to see the list first.\n")
 	b.WriteString("- `dm reset` discards a session and its panes for a full restart. It needs `--force`; `--all` resets every session.\n")
+	b.WriteString("- `toggle-fold` takes a workspace id, a window id, or `project:<name>` to fold a whole project group.\n")
 	b.WriteString("- A bare word is a session name: `dm work` attaches to `work`, it does not run a command called `work`.\n")
 
 	return b.String()

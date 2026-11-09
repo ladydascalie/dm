@@ -434,7 +434,7 @@ func TestRailMenuKeyHints(t *testing.T) {
 	}{
 		{0, map[string]string{
 			"New window": "c", "Rename workspace": "r",
-			"Set project": "", "Close workspace": "",
+			"Set project": "P", "Close workspace": "",
 		}},
 		{1, map[string]string{
 			"Rename window": "", "Close window": "X",

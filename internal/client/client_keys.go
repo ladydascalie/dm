@@ -618,6 +618,8 @@ func (t *tui) runAction(name string) {
 		t.openPicker()
 	case "rename-workspace":
 		t.openRenamePrompt()
+	case "set-project":
+		t.openProjectPrompt()
 	case "toggle-rail":
 		t.toggleRail()
 	case "message-box":

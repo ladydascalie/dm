@@ -158,7 +158,7 @@ func TestMenuScopeHints(t *testing.T) {
 		"Split up": "^", "Zoom": "z", "Close pane": "x", "Scrollback": "[",
 	}
 	workspace := map[string]string{
-		"New window": "c", "Rename workspace": "r", "Set project": "", "Close workspace": "",
+		"New window": "c", "Rename workspace": "r", "Set project": "P", "Close workspace": "",
 	}
 	window := map[string]string{
 		"Rename window": "", "Close window": "X", "Fold/unfold": "", "Focus": "",

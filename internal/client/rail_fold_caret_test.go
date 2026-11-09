@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"dm/internal/testutil"
+	"dm/internal/wire"
 )
 
 // TestRailCaretToggleDoesNotChangeFocus checks that a left press on the
@@ -37,5 +38,21 @@ func TestRailWindowCaretToggleDoesNotChangeFocus(t *testing.T) {
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 4, y: 2})
 	// A caret press must not change focus, so no further message follows.
+	testutil.NoMsg(t, got)
+}
+
+// TestRailProjectCaretToggle checks that a left press on a project row's caret
+// sends toggle-fold with the project target and sends no focus request. The
+// project bar owns column 0, so the caret is zero-based column 1 and the mouse
+// column is 2. Row 0 is the project header, so the mouse row is 1.
+func TestRailProjectCaretToggle(t *testing.T) {
+	tui, got := railMenuTUI(t)
+	tui.snap = projectRailSnap()
+	tui.handleMouse(mouseEvent{btn: 0, x: 2, y: 1})
+	m := testutil.NextMsg(t, got)
+	if m.Type != "req" || m.Action != "toggle-fold" || m.Target != wire.ProjectTargetPrefix+"dm" {
+		t.Fatalf("left press on the project caret sent %+v, want toggle-fold project:dm", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 2, y: 1})
 	testutil.NoMsg(t, got)
 }

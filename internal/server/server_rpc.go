@@ -299,7 +299,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		if err == nil {
 			s.pushSnapshot()
 		}
-		s.reply(cl, m, map[string]any{"window": m.Target, "unfolded": unfolded}, err)
+		s.reply(cl, m, map[string]any{"target": m.Target, "unfolded": unfolded}, err)
 
 	case "set-pane-name":
 		err := s.mutation(func() error {

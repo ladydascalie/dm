@@ -390,6 +390,7 @@ keymap "main" {
     "switcher" "a"
     "picker" "s"
     "rename-workspace" "r"
+    "set-project" "P"
     "toggle-rail" "b"
     "message-box" "m"
     "detach" "d"

@@ -814,10 +814,10 @@ func TestRailProjectGroup(t *testing.T) {
 			t.Fatalf("row %d bar colour = %v, want %v", y, g.FG, want)
 		}
 	}
-	// The header has no fold caret: only the workspace row and its windows do.
+	// The header has a fold caret: a project row folds its whole group.
 	for i, it := range items {
-		if it.Kind == Project && RailFoldAt(snap, 1, i) != "" {
-			t.Fatalf("project row %d answers a workspace fold", i)
+		if it.Kind == Project && RailFoldAt(snap, 1, i) != wire.ProjectTargetPrefix+it.Project {
+			t.Fatalf("project row %d does not answer a project fold", i)
 		}
 	}
 }
@@ -947,4 +947,50 @@ func theBar() rune {
 		return r
 	}
 	return 0
+}
+
+// TestRailFoldedProjectHidesGroup proves a folded project paints its header
+// with a closed caret and hides every workspace, window and pane of the group.
+func TestRailFoldedProjectHidesGroup(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railProjectSnap(layout.DefaultRail)
+	for i := range snap.All {
+		if snap.All[i].Project == "alpha" {
+			snap.All[i].ProjectFolded = true
+		}
+	}
+	items := RailItems(snap)
+
+	var alpha *RailItem
+	beta, loose := false, false
+	for i := range items {
+		it := &items[i]
+		if it.Kind == Project && it.Text == "alpha" {
+			alpha = it
+		}
+		if it.Project == "alpha" && it.Kind != Project {
+			t.Fatalf("folded alpha still paints %+v", *it)
+		}
+		if it.Kind == Project && it.Text == "beta" {
+			beta = true
+		}
+		if it.Kind == Workspace && it.Workspace == "s3" {
+			loose = true
+		}
+	}
+	if alpha == nil {
+		t.Fatal("folded alpha has no project row")
+	}
+	if !alpha.Folded {
+		t.Fatal("alpha project row is not folded")
+	}
+	if !beta || !loose {
+		t.Fatalf("folded alpha hid beta or loose: %+v", items)
+	}
+
+	th := theme.DefaultTheme()
+	left, _, _ := RailRow(th, *alpha, layout.DefaultRail, false, theme.GlyphUnicode)
+	if len(left) == 0 || left[0].Text != th.Glyphs.FoldClosed {
+		t.Fatalf("project caret = %+v, want the closed glyph", left)
+	}
 }

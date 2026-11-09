@@ -95,6 +95,10 @@ type State struct {
 	Rail    int  `json:"rail,omitempty"`
 	RailSet bool `json:"railSet,omitempty"`
 
+	// ProjectFold is the set of project names whose rail group is folded.
+	// A name absent from the map is unfolded.
+	ProjectFold map[string]bool `json:"projectFold,omitempty"`
+
 	// Box is the session's message box: an append-only log any pane can post
 	// into. BoxSeq is the last seq handed out. It never resets, so a clear
 	// leaves a gap instead of reusing a number. A state file written before the

@@ -160,6 +160,7 @@ var ActionDesc = map[string]string{
 	"switcher":          "Open the workspace and session switcher.",
 	"picker":            "Open the session picker.",
 	"rename-workspace":  "Rename the active workspace.",
+	"set-project":       "Set or clear the active workspace project.",
 	"toggle-rail":       "Cycle the rail between full, thin and hidden.",
 	"message-box":       "Open the message box.",
 	"detach":            "Detach the client and leave the session running.",

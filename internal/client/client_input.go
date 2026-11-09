@@ -1841,6 +1841,22 @@ func (t *tui) openRenamePrompt() {
 	t.openRenamePromptFor("workspace", id, current)
 }
 
+// openProjectPrompt opens the project prompt for the active workspace.
+func (t *tui) openProjectPrompt() {
+	if t.snap == nil {
+		t.disarm()
+		return
+	}
+	id, project := "", ""
+	for _, p := range t.snap.All {
+		if p.WorkspaceName == t.snap.Workspace || p.Workspace == t.snap.Workspace {
+			id, project = p.Workspace, p.Project
+			break
+		}
+	}
+	t.openRenamePromptFor("project", id, project)
+}
+
 // openRenamePromptFor takes over input for the named workspace, window or
 // pane. The kind picks the action the prompt sends and the label it paints;
 // the draft starts as the current name.
@@ -2133,6 +2149,13 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			return true
 		}
 		if it, ok := rail.RailItemAt(t.snap, x, y); ok && it.Kind == rail.Project {
+			if id := rail.RailFoldAt(t.snap, x, y); id != "" {
+				t.clearRailPress()
+				if t.conn != nil {
+					_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
+				}
+				return true
+			}
 			// A project header focuses the first pane of the group's first
 			// workspace. A second press does nothing, and the row never
 			// opens a menu.
