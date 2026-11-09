@@ -634,7 +634,7 @@ Set the prefix key that opens the main keymap.
 .TP
 \fBdefault-fold\fP
 Value: \fI"fold" or "unfold"\fP. Default: \fI"fold"\fP.
-Set whether a new window's rail starts folded or unfolded.
+Set whether a new window's rail starts folded or unfolded. Needs a fresh server, because the server creates windows and reads this once at startup.
 .TP
 \fBtab-min-width\fP
 Value: \fIan integer of at least 3 cells\fP. Default: \fI8\fP.

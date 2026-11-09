@@ -2982,6 +2982,34 @@ keymap "main" {
 	}
 }
 
+// TestReloadActionAppliesTheGlyphSet: the glyph set is resolved once at attach
+// and cached, so a reload has to resolve it again. A change from auto to ascii
+// applies without a reattach.
+func TestReloadActionAppliesTheGlyphSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "dm")
+	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tui := &tui{keymap: keymap.LoadDefault(), glyphs: theme.GlyphNerd}
+	path := filepath.Join(cfgDir, "config.kdl")
+	if err := os.WriteFile(path, []byte(`glyphs "ascii"
+keymap "main" {
+    "reload" "ctrl+r"
+}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	feed(tui, "\x02\x12")
+	if got := tui.glyphSet(); got != theme.GlyphASCII {
+		t.Fatalf("glyph set after reload = %v, want ascii", got)
+	}
+	if got := tui.theme().Glyphs.BorderTopLeft; got != "+" {
+		t.Fatalf("resolved border glyph after reload = %q, want the ascii form", got)
+	}
+}
+
 // TestReloadActionKeepsSettingsOnBadConfig: a malformed reload leaves the
 // running keymap and theme in place and toasts the error.
 func TestReloadActionKeepsSettingsOnBadConfig(t *testing.T) {

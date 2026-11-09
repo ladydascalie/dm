@@ -537,6 +537,10 @@ func (t *tui) reload() error {
 		return err
 	}
 	t.keymap = cfg
+	// The glyph set is resolved once at attach and cached, so a reload has to
+	// resolve it again or a change from auto to ascii would only take effect on
+	// the next attach.
+	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())
 	if t.snap != nil {
 		t.snap.WindowLabel = cfg.WindowLabel()
 	}

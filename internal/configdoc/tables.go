@@ -20,7 +20,7 @@ var ConfigNodes = []ConfigNode{
 		Name:    "default-fold",
 		Value:   `"fold" or "unfold"`,
 		Default: `"fold"`,
-		Desc:    "Set whether a new window's rail starts folded or unfolded.",
+		Desc:    "Set whether a new window's rail starts folded or unfolded. Needs a fresh server, because the server creates windows and reads this once at startup.",
 	},
 	{
 		Name:    "tab-min-width",
