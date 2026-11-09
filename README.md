@@ -700,6 +700,11 @@ pane as one chunk and never reads a byte inside it as a dm key: an embedded
 ctrl+b does not arm the prefix, and newlines do not submit. A paste also closes
 an open menu, picker or scrollback first.
 
+The 200~ and 201~ markers go only to a program that asked for bracketed paste.
+A program that never asked, such as a line editor without 2004, gets the text
+alone: it would read the markers as keys and leave their tail on the line, which
+is how a pasted mysql statement showed up as `0~SET GLOBAL ...;1~`.
+
 Small actions answer with a toast, not text in the status bar: the bar's right
 block is reserved for the scroll position and the divider hint. The client
 keeps up to three, each with the time it was raised, and draws them bottom

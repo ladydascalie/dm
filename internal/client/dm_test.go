@@ -1742,7 +1742,16 @@ func TestMenuKeyboard(t *testing.T) {
 
 func pasteTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
-	return clientTUI(t, nil)
+	return pasteTUIOn(t, true)
+}
+
+// pasteTUIOn builds a TUI whose focused pane has asked for bracketed paste, or
+// has not, so a test can check the framing the pane receives.
+func pasteTUIOn(t *testing.T, paste bool) (*tui, chan wire.Msg) {
+	t.Helper()
+	tui, got := clientTUI(t, nil)
+	tui.paneByID("a").Paste = paste
+	return tui, got
 }
 
 // whole buffer, or armed on its contents, fails here.
@@ -1766,6 +1775,20 @@ func TestPasteIsOneKeysMessage(t *testing.T) {
 	if len(tui.inbuf) != 0 || tui.armed {
 		t.Fatalf("paste left state: inbuf=%q armed=%v", tui.inbuf, tui.armed)
 	}
+}
+
+// A pane whose program never asked for bracketed paste gets the text alone. A
+// line editor without 2004 reads the markers as keys and leaves their tail on
+// the line, which is how a pasted mysql statement showed as "0~...1~".
+func TestPasteUnframedWithoutBracketedPaste(t *testing.T) {
+	tui, got := pasteTUIOn(t, false)
+	tui.inbuf = append(tui.inbuf, []byte("\x1b[200~SET GLOBAL x = 1;\x1b[201~")...)
+	tui.processInput()
+	m := testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "SET GLOBAL x = 1;" {
+		t.Fatalf("unframed paste came through as %+v (%q)", m, m.Keys)
+	}
+	testutil.NoMsg(t, got)
 }
 
 // A ctrl+b inside a paste is text, not a prefix arm.

@@ -54,10 +54,11 @@ type paneProc struct {
 	fg, bg string
 }
 
-// modeInfo reports the two modes the client must respect: alternate screen
-// (no terminal scrollback) and mouse reporting (the wheel belongs to the app).
-func modeInfo(m vt.Modes) (alt, mouse bool) {
-	return m.AltScreen, m.Mouse != vt.MouseOff
+// modeInfo reports the modes the client must respect: alternate screen (no
+// terminal scrollback), mouse reporting (the wheel belongs to the app) and
+// bracketed paste (a paste arrives framed by the 200~ and 201~ markers).
+func modeInfo(m vt.Modes) (alt, mouse, paste bool) {
+	return m.AltScreen, m.Mouse != vt.MouseOff, m.BracketedPaste
 }
 
 // screenText returns the visible rows joined by a newline, the shape the read
@@ -72,8 +73,8 @@ func screenText(t *vt.Term) string {
 	return strings.Join(lines, "\n")
 }
 
-func modeRes(alt, mouse bool) json.RawMessage {
-	return jsonRaw(map[string]any{"alt": alt, "mouse": mouse})
+func modeRes(alt, mouse, paste bool) json.RawMessage {
+	return jsonRaw(map[string]any{"alt": alt, "mouse": mouse, "paste": paste})
 }
 
 // subConn serialises frames: the read loop and request handlers both write.
@@ -333,8 +334,8 @@ func (p *paneProc) publishLocked(b []byte) {
 	p.armFlushLocked()
 	if m := p.vt.Grid().Modes(); m != p.mode {
 		p.mode = m
-		alt, mouse := modeInfo(m)
-		p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse)})
+		alt, mouse, paste := modeInfo(m)
+		p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse, paste)})
 	}
 }
 
@@ -491,9 +492,9 @@ func (p *paneProc) serve(c net.Conn) {
 		case "screen":
 			p.mu.Lock()
 			snap := p.vt.Snapshot()
-			alt, mouse := modeInfo(p.vt.Grid().Modes())
+			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
-			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse)})
+			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)})
 		case "reflow":
 			if m.Cols < 2 || m.Rows < 2 {
 				continue
@@ -509,19 +510,19 @@ func (p *paneProc) serve(c net.Conn) {
 				p.vt = vt.Reflow(p.ring.Bytes(), m.Cols, m.Rows)
 			}
 			snap := p.vt.Snapshot()
-			alt, mouse := modeInfo(p.vt.Grid().Modes())
+			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
-			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse)})
+			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)})
 		case "replay":
 			p.mu.Lock()
 			data := p.ring.Bytes()
 			st := p.st
 			dead := p.dead
 			title := p.vt.Title()
-			alt, mouse := modeInfo(p.vt.Grid().Modes())
+			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
 			_ = sc.send(wire.Msg{Type: "replay", Data: data, St: &st,
-				Res: jsonRaw(map[string]any{"title": title, "dead": dead, "alt": alt, "mouse": mouse})})
+				Res: jsonRaw(map[string]any{"title": title, "dead": dead, "alt": alt, "mouse": mouse, "paste": paste})})
 		case "status":
 			p.mu.Lock()
 			st := p.st

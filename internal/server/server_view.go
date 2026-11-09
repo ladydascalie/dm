@@ -126,6 +126,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 			info.Message = pc.st.Message
 			info.Alt = pc.alt
 			info.Mouse = pc.mouse
+			info.Paste = pc.paste
 		}
 		if ps := s.st.Panes[id]; ps != nil {
 			info.Name = ps.Name
@@ -611,6 +612,7 @@ type paneScreen struct {
 	snap  *vt.Snapshot
 	alt   bool
 	mouse bool
+	paste bool
 	ok    bool
 }
 
@@ -643,9 +645,10 @@ func paneScreenRequest(session, id string, m wire.Msg) paneScreen {
 		var extra struct {
 			Alt   bool `json:"alt"`
 			Mouse bool `json:"mouse"`
+			Paste bool `json:"paste"`
 		}
 		_ = json.Unmarshal(m.Res, &extra)
-		ps.snap, ps.alt, ps.mouse, ps.ok = m.VTSnap, extra.Alt, extra.Mouse, true
+		ps.snap, ps.alt, ps.mouse, ps.paste, ps.ok = m.VTSnap, extra.Alt, extra.Mouse, extra.Paste, true
 		return ps
 	}
 }
@@ -665,10 +668,10 @@ func (s *server) sendScreens(ids []string, send func(wire.Msg)) (changed bool) {
 		}
 		s.mu.Lock()
 		if pc := s.panes[id]; pc != nil {
-			if pc.alt != ps.alt || pc.mouse != ps.mouse {
+			if pc.alt != ps.alt || pc.mouse != ps.mouse || pc.paste != ps.paste {
 				changed = true
 			}
-			pc.alt, pc.mouse = ps.alt, ps.mouse
+			pc.alt, pc.mouse, pc.paste = ps.alt, ps.mouse, ps.paste
 		}
 		s.mu.Unlock()
 		send(wire.Msg{Type: "screen", Target: id, VTSnap: ps.snap})
@@ -701,6 +704,7 @@ type paneReplay struct {
 	st    wire.Status
 	alt   bool
 	mouse bool
+	paste bool
 	ok    bool
 }
 
@@ -732,9 +736,10 @@ func readPaneReplay(session, id string) paneReplay {
 		var extra struct {
 			Alt   bool `json:"alt"`
 			Mouse bool `json:"mouse"`
+			Paste bool `json:"paste"`
 		}
 		_ = json.Unmarshal(m.Res, &extra)
-		rp.data, rp.alt, rp.mouse, rp.ok = m.Data, extra.Alt, extra.Mouse, true
+		rp.data, rp.alt, rp.mouse, rp.paste, rp.ok = m.Data, extra.Alt, extra.Mouse, extra.Paste, true
 		return rp
 	}
 }

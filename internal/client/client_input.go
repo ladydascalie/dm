@@ -232,7 +232,22 @@ func (t *tui) forwardPaste(seq []byte) {
 	default:
 		t.mode = ""
 	}
-	_ = t.conn.Send(wire.Msg{Type: "keys", Keys: seq})
+	_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.pasteKeys(seq)})
+}
+
+// pasteKeys frames the paste only for a program that asked for bracketed paste.
+// A program that never asked, such as a line editor without 2004, reads the
+// markers as keys and leaves their tail on the line: it gets the text alone.
+func (t *tui) pasteKeys(seq []byte) []byte {
+	if t.snap != nil {
+		if p := t.paneByID(t.snap.Focus); p != nil && p.Paste {
+			return seq
+		}
+	}
+	if len(seq) < len(pasteStart)+len(pasteEnd) {
+		return nil
+	}
+	return seq[len(pasteStart) : len(seq)-len(pasteEnd)]
 }
 
 func (t *tui) processInput() {

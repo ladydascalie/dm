@@ -60,7 +60,8 @@ func ringPane(t *testing.T, session, id string) {
 							VTSnap: newScreenSnapshot(id), Res: jsonRaw(struct {
 								Alt   bool `json:"alt"`
 								Mouse bool `json:"mouse"`
-							}{Alt: true, Mouse: true})})
+								Paste bool `json:"paste"`
+							}{Alt: true, Mouse: true, Paste: true})})
 					case "replay":
 						st := wire.Status{State: "idle", Message: "ring"}
 						_ = wire.WriteMsg(c, wire.Msg{Type: "replay", ID: m.ID, Target: id,
@@ -229,8 +230,9 @@ func TestAttachDoesNotPushHistory(t *testing.T) {
 	t.Logf("attach sent %d bytes for %d panes; their rings are %d bytes",
 		cl.read, len(ids), rings)
 
-	// Alternate screen and mouse came back with the screens and the refreshed
-	// snapshot, exactly as the replay loop used to provide them.
+	// Alternate screen, mouse and bracketed paste came back with the screens
+	// and the refreshed snapshot, exactly as the replay loop used to provide
+	// them.
 	facts := false
 	for _, m := range frames {
 		if m.Type != "snapshot" || m.Snap == nil {
@@ -238,14 +240,14 @@ func TestAttachDoesNotPushHistory(t *testing.T) {
 		}
 		all := len(m.Snap.Panes) == len(ids)
 		for _, p := range m.Snap.Panes {
-			if !p.Alt || !p.Mouse {
+			if !p.Alt || !p.Mouse || !p.Paste {
 				all = false
 			}
 		}
 		facts = facts || all
 	}
 	if !facts {
-		t.Fatal("no attach snapshot carried alt and mouse for every pane")
+		t.Fatal("no attach snapshot carried alt, mouse and paste for every pane")
 	}
 }
 

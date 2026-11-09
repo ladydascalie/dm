@@ -31,6 +31,7 @@ type paneConn struct {
 	st    wire.Status
 	alt   bool
 	mouse bool
+	paste bool
 }
 
 func (p *paneConn) send(m wire.Msg) error {
@@ -599,10 +600,11 @@ func (s *server) watchPane(id string) {
 				var mi struct {
 					Alt   bool `json:"alt"`
 					Mouse bool `json:"mouse"`
+					Paste bool `json:"paste"`
 				}
 				_ = json.Unmarshal(m.Res, &mi)
 				s.mu.Lock()
-				pc.alt, pc.mouse = mi.Alt, mi.Mouse
+				pc.alt, pc.mouse, pc.paste = mi.Alt, mi.Mouse, mi.Paste
 				snap := s.snapshotLocked()
 				s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 				s.mu.Unlock()

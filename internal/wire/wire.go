@@ -79,6 +79,11 @@ type PaneInfo struct {
 	Alt bool `json:"alt,omitempty"`
 	// Mouse is true when the program asked for mouse reporting.
 	Mouse bool `json:"mouse,omitempty"`
+	// Paste is true when the program asked for bracketed paste, so a paste
+	// must arrive framed by the 200~ and 201~ markers. A program that never
+	// asked gets the text alone: its line editor would read the markers as
+	// keys and leave their tail on the line.
+	Paste bool `json:"paste,omitempty"`
 }
 
 // ProjectTargetPrefix marks a toggle-fold target as a project name rather than
