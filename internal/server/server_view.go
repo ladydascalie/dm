@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"dm/internal/layout"
@@ -366,6 +367,7 @@ func (s *server) countPanes() int {
 func (s *server) endSession() {
 	s.mu.Lock()
 	s.ending = true
+	s.stopReflowLocked()
 	clients := make([]*client, 0, len(s.clients))
 	for c := range s.clients {
 		clients = append(clients, c)
@@ -395,12 +397,98 @@ func (s *server) pushSnapshot() {
 	s.mu.Unlock()
 }
 
+// armReflowLocked records panes whose width changed and (re)starts the settle
+// timer. Merging the ids and resetting the timer make one drag produce one
+// settle at its final size. The caller holds s.mu.
+func (s *server) armReflowLocked(ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	if s.reflowWait == nil {
+		s.reflowWait = make(map[string]bool, len(ids))
+	}
+	for _, id := range ids {
+		s.reflowWait[id] = true
+	}
+	if s.reflowTimer == nil {
+		s.reflowTimer = time.AfterFunc(reflowSettle, s.settleReflow)
+		return
+	}
+	s.reflowTimer.Reset(reflowSettle)
+}
+
+// stopReflowLocked cancels a pending settle and forgets the panes waiting on
+// it. The caller holds s.mu.
+func (s *server) stopReflowLocked() {
+	if s.reflowTimer != nil {
+		s.reflowTimer.Stop()
+		s.reflowTimer = nil
+	}
+	s.reflowWait = nil
+}
+
+func (s *server) stopReflow() {
+	s.mu.Lock()
+	s.stopReflowLocked()
+	s.mu.Unlock()
+}
+
+// settleReflow runs reflowSettle after the last width change. It asks every
+// affected pane to rebuild its screen from its ring at the recorded size and
+// broadcasts each answer, the same screen frame sendScreens sends. The
+// requests run concurrently, so one pane that does not answer cannot hold the
+// rest; a pane that fails is skipped.
+func (s *server) settleReflow() {
+	s.mu.Lock()
+	wait := s.reflowWait
+	s.stopReflowLocked()
+	sizes := make(map[string][2]int, len(wait))
+	for id := range wait {
+		if ps := s.st.Panes[id]; ps != nil {
+			sizes[id] = [2]int{ps.Cols, ps.Rows}
+		}
+	}
+	name := s.st.Name
+	s.mu.Unlock()
+
+	type answer struct {
+		id string
+		ps paneScreen
+	}
+	answers := make(chan answer, len(sizes))
+	var wg sync.WaitGroup
+	for id, sz := range sizes {
+		wg.Add(1)
+		go func(id string, cols, rows int) {
+			defer wg.Done()
+			m := wire.Msg{Type: "req", Action: "reflow", Cols: cols, Rows: rows}
+			answers <- answer{id: id, ps: paneScreenRequest(name, id, m)}
+		}(id, sz[0], sz[1])
+	}
+	go func() {
+		wg.Wait()
+		close(answers)
+	}()
+	for a := range answers {
+		if !a.ps.ok {
+			continue
+		}
+		s.mu.Lock()
+		if pc := s.panes[a.id]; pc != nil {
+			pc.alt, pc.mouse = a.ps.alt, a.ps.mouse
+		}
+		s.broadcastLocked(wire.Msg{Type: "screen", Target: a.id, VTSnap: a.ps.snap})
+		s.mu.Unlock()
+	}
+}
+
 // syncSizes pushes each active-window pane's rectangle into its PTY and VT.
 func (s *server) syncSizes() {
 	s.mu.Lock()
 	rects := s.paneRectsLocked()
 	s.st.Cols, s.st.Rows = s.cols, s.rows
 	var calls []func()
+	var widened []string
 	for id, r := range rects {
 		pc := s.panes[id]
 		ps := s.st.Panes[id]
@@ -410,6 +498,11 @@ func (s *server) syncSizes() {
 		if ps.Cols == r.W && ps.Rows == r.H {
 			continue
 		}
+		// Only a width change re-wraps the line model, so only those panes
+		// wait for a reflow. A height change gets the cheap resize alone.
+		if ps.Cols != r.W {
+			widened = append(widened, id)
+		}
 		ps.Cols, ps.Rows = r.W, r.H
 		calls = append(calls, func() {
 			if pc != nil {
@@ -417,6 +510,7 @@ func (s *server) syncSizes() {
 			}
 		})
 	}
+	s.armReflowLocked(widened)
 	s.mu.Unlock()
 	for _, f := range calls {
 		f()
@@ -518,19 +612,21 @@ type paneScreen struct {
 	ok    bool
 }
 
-func readPaneScreen(session, id string) paneScreen {
+// paneScreenRequest dials the pane, sends one request and reads the screen
+// reply. A fresh connection is a subscriber, so a busy pane can deliver bytes,
+// status or cwd before the screen. Take the screen, not the first frame.
+func paneScreenRequest(session, id string, m wire.Msg) paneScreen {
 	var ps paneScreen
 	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
 	if err != nil {
 		return ps
 	}
 	defer c.Close()
-	if err := wire.WriteMsg(c, wire.Msg{Type: "req", Action: "screen", ID: 1}); err != nil {
+	m.ID = 1
+	if err := wire.WriteMsg(c, m); err != nil {
 		return ps
 	}
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
-	// A fresh connection is a subscriber, so a busy pane can deliver bytes,
-	// status or cwd before the screen. Take the screen, not the first frame.
 	for {
 		m, err := wire.ReadMsg(c)
 		if err != nil {
@@ -550,6 +646,11 @@ func readPaneScreen(session, id string) paneScreen {
 		ps.snap, ps.alt, ps.mouse, ps.ok = m.VTSnap, extra.Alt, extra.Mouse, true
 		return ps
 	}
+}
+
+// readPaneScreen asks a pane for its visible screen.
+func readPaneScreen(session, id string) paneScreen {
+	return paneScreenRequest(session, id, wire.Msg{Type: "req", Action: "screen"})
 }
 
 // sendScreens asks each pane for its visible screen and hands it to send. It
