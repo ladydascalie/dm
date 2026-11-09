@@ -84,7 +84,8 @@ internal/testutil    test helpers shared by more than one package
 ```sh
 dm                      # attach to "main", creating it if missing
 dm attach -s work       # resume a session (durable, see below)
-dm ls                   # sessions and whether their server is live
+dm ls                   # sessions with pane counts and project
+dm list                 # panes as a table
 dm new -s work          # start a session without attaching
 dm kill -s work         # stop the server; panes keep running
 dm purge                # remove dead sessions whose panes are gone

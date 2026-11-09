@@ -18,6 +18,7 @@ import (
 	"dm/internal/clidoc"
 	"dm/internal/client"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/transport"
 	"dm/internal/wire"
 
@@ -130,30 +131,7 @@ func Run(argv []string) error {
 	case "ls", "list-sessions":
 		c := newFlags("ls")
 		c.parse(argv[1:])
-		sessions, err := transport.ListSessions()
-		if err != nil {
-			return err
-		}
-		if c.jsonOut {
-			if sessions == nil {
-				sessions = []transport.SessionInfo{}
-			}
-			b, _ := json.Marshal(sessions)
-			fmt.Println(string(b))
-			return nil
-		}
-		if len(sessions) == 0 {
-			fmt.Println("no sessions")
-			return nil
-		}
-		for _, s := range sessions {
-			state := "dead"
-			if s.Live {
-				state = "live"
-			}
-			fmt.Println(s.Name + "\t" + state)
-		}
-		return nil
+		return runLs(c)
 
 	case "kill":
 		c := newFlags("kill")
@@ -377,22 +355,7 @@ func Run(argv []string) error {
 	case "list":
 		c := newFlags("list")
 		c.parse(argv[1:])
-		m, err := transport.RPC(c.session, wire.Msg{Action: "list"})
-		if err != nil {
-			return err
-		}
-		if !m.OK {
-			return fmt.Errorf("%s", m.Error)
-		}
-		if c.jsonOut {
-			fmt.Println(string(m.Res))
-		} else {
-			var pretty any
-			_ = json.Unmarshal(m.Res, &pretty)
-			b, _ := json.MarshalIndent(pretty, "", "  ")
-			fmt.Println(string(b))
-		}
-		return nil
+		return runList(c)
 
 	default:
 		// A bare word is a session name; leading flags are attach flags.
@@ -951,7 +914,8 @@ func pidAliveAny(dir string) bool {
 	return false
 }
 
-func dashRows(session string) ([]string, error) {
+// snapshotOf asks a live session for its pane tree.
+func snapshotOf(session string) (*wire.Snapshot, error) {
 	m, err := transport.RPC(session, wire.Msg{Action: "list"})
 	if err != nil {
 		return nil, err
@@ -965,11 +929,17 @@ func dashRows(session string) ([]string, error) {
 	if err := json.Unmarshal(m.Res, &res); err != nil {
 		return nil, err
 	}
-	snap := res.Snapshot
-	if snap == nil {
+	if res.Snapshot == nil {
 		return nil, fmt.Errorf("no snapshot")
 	}
+	return res.Snapshot, nil
+}
 
+func dashRows(session string) ([]string, error) {
+	snap, err := snapshotOf(session)
+	if err != nil {
+		return nil, err
+	}
 	var rows []string
 	for _, p := range snap.All {
 		mark := " "
@@ -979,6 +949,179 @@ func dashRows(session string) ([]string, error) {
 		rows = append(rows, p.ID+" "+mark+" "+paneLabel(p))
 	}
 	return rows, nil
+}
+
+// runList prints the pane tree. Without --json it is a table, one row per
+// pane, so the ids and their meaning are visible at a glance.
+func runList(c *cmdFlags) error {
+	m, err := transport.RPC(c.session, wire.Msg{Action: "list"})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
+	var res struct {
+		Snapshot *wire.Snapshot `json:"snapshot"`
+	}
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		return err
+	}
+	if res.Snapshot == nil {
+		return fmt.Errorf("no snapshot")
+	}
+	printPaneTable(res.Snapshot.All)
+	return nil
+}
+
+// printPaneTable prints one row per pane: its id, workspace, window, app,
+// status, cwd and branch. A star marks the focused pane.
+func printPaneTable(panes []wire.AllPane) {
+	if len(panes) == 0 {
+		fmt.Println("no panes")
+		return
+	}
+	rows := make([][]string, 0, len(panes))
+	for _, p := range panes {
+		id := p.ID
+		if p.Focus {
+			id += "*"
+		}
+		app := p.App
+		if app == "" {
+			if p.Agent {
+				app = "agent"
+			} else {
+				app = "shell"
+			}
+		}
+		status := p.Status
+		if status == "" || status == "unknown" {
+			status = "-"
+		}
+		rows = append(rows, []string{id, p.Workspace, p.Window, app, status, dashIfEmpty(p.Cwd), dashIfEmpty(p.Branch)})
+	}
+	printTable([]string{"PANE", "WS", "WINDOW", "APP", "STATUS", "CWD", "BRANCH"}, rows)
+}
+
+// runLs prints one row per session: its state, counts, project and the
+// focused pane's cwd. A dead session is read from its state file, so ls never
+// starts a server.
+func runLs(c *cmdFlags) error {
+	sessions, err := transport.ListSessions()
+	if err != nil {
+		return err
+	}
+	if c.jsonOut {
+		if sessions == nil {
+			sessions = []transport.SessionInfo{}
+		}
+		b, _ := json.Marshal(sessions)
+		fmt.Println(string(b))
+		return nil
+	}
+	if len(sessions) == 0 {
+		fmt.Println("no sessions")
+		return nil
+	}
+	rows := make([][]string, 0, len(sessions))
+	for _, s := range sessions {
+		rows = append(rows, sessionSummary(s))
+	}
+	printTable([]string{"NAME", "STATE", "PANES", "WINDOWS", "WORKSPACES", "PROJECT", "CWD"}, rows)
+	return nil
+}
+
+// sessionSummary is one dm ls row. A live session answers with its snapshot;
+// a dead one is read from state.json.
+func sessionSummary(s transport.SessionInfo) []string {
+	state := "dead"
+	if s.Live {
+		state = "live"
+	}
+	panes, windows, workspaces := 0, 0, 0
+	project, cwd := "-", "-"
+	if s.Live {
+		if snap, err := snapshotOf(s.Name); err == nil {
+			panes = len(snap.All)
+			wsSet := map[string]bool{}
+			winSet := map[string]bool{}
+			for _, p := range snap.All {
+				wsSet[p.Workspace] = true
+				winSet[p.Window] = true
+				if p.WorkspaceName == snap.Workspace && project == "-" {
+					project = dashIfEmpty(p.Project)
+				}
+				if p.ID == snap.Focus {
+					cwd = dashIfEmpty(p.Cwd)
+				}
+			}
+			workspaces = len(wsSet)
+			windows = len(winSet)
+		}
+	} else if st, err := session.LoadState(s.Name); err == nil && st != nil {
+		workspaces = len(st.Workspaces)
+		for _, ws := range st.Workspaces {
+			windows += len(ws.Windows)
+		}
+		panes = len(st.Panes)
+		if st.Active >= 0 && st.Active < len(st.Workspaces) {
+			ws := st.Workspaces[st.Active]
+			project = dashIfEmpty(ws.Project)
+			if ws.Active >= 0 && ws.Active < len(ws.Windows) {
+				w := ws.Windows[ws.Active]
+				if ps := st.Panes[w.Focus]; ps != nil {
+					cwd = dashIfEmpty(ps.Cwd)
+				}
+			}
+		}
+	}
+	return []string{s.Name, state, strconv.Itoa(panes), strconv.Itoa(windows), strconv.Itoa(workspaces), project, cwd}
+}
+
+// printTable prints a header and rows with two spaces between columns. The
+// last column is not padded, so no row carries trailing spaces.
+func printTable(header []string, rows [][]string) {
+	widths := make([]int, len(header))
+	for i, h := range header {
+		widths[i] = cells.Cells(h)
+	}
+	for _, row := range rows {
+		for i, cell := range row {
+			widths[i] = max(widths[i], cells.Cells(cell))
+		}
+	}
+	printRow := func(row []string) {
+		var b strings.Builder
+		for i, cell := range row {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			if i == len(row)-1 {
+				b.WriteString(cell)
+				continue
+			}
+			b.WriteString(cells.Pad(cell, widths[i]))
+		}
+		fmt.Println(strings.TrimRight(b.String(), " "))
+	}
+	printRow(header)
+	for _, row := range rows {
+		printRow(row)
+	}
+}
+
+// dashIfEmpty prints a dash for an empty cell, so a missing value is visible
+// instead of a gap.
+func dashIfEmpty(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // paneLabel names a pane in a palette row: its name when it has one, then its

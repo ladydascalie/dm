@@ -72,7 +72,7 @@ var cliCommands = []cliCommand{
 	{
 		name:    "ls",
 		aliases: []string{"list-sessions"},
-		summary: "list sessions and whether they are live",
+		summary: "list sessions with pane counts and project",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"json", "", "print JSON"},
@@ -216,7 +216,7 @@ var cliCommands = []cliCommand{
 	},
 	{
 		name:    "list",
-		summary: "print the pane tree as JSON",
+		summary: "print panes as a table, or the raw tree with --json",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"json", "", "print JSON"},

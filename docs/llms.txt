@@ -15,7 +15,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm` | `[-s name]` | attach to a session, creating it if needed | `dm -s work` |
 | `dm attach` | `[-s name]` | attach to a session, creating it if needed (alias: a) | `dm attach -s work` |
 | `dm new` | `[-s name]` | start a session without attaching | `dm new -s work` |
-| `dm ls` | `-` | list sessions and whether they are live (alias: list-sessions) | `dm ls` |
+| `dm ls` | `-` | list sessions with pane counts and project (alias: list-sessions) | `dm ls` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
 | `dm reset` | `[-s name \| --all] --force` | discard a session and its panes for a full restart | `dm reset -s work --force` |
@@ -33,7 +33,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm next-window` | `-` | focus the next window | `dm next-window` |
 | `dm prev-window` | `-` | focus the previous window | `dm prev-window` |
 | `dm status` | `[pane]` | show OSC 7501 agent status | `dm status w1p1` |
-| `dm list` | `-` | print the pane tree as JSON | `dm list` |
+| `dm list` | `-` | print panes as a table, or the raw tree with --json | `dm list` |
 | `dm dash` | `[-s name]` | print the palette rows | `dm dash` |
 | `dm peek` | `<id> [--lines N]` | print the screen a palette row lands on | `dm peek w1p1 --lines 10` |
 | `dm msg post` | `--state S [--key K] [--msg T]` | post one entry to the box | `dm msg post --key build --state done --msg 'all green'` |
