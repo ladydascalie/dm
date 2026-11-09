@@ -725,7 +725,10 @@ prompt and the blank rows around them never reach the copy. Add this line to
 
 The marks travel over ssh like any other output, so the hook works on the
 remote host too. Without marks, the copy ends at the last row with content and
-the trailing prompt is included.
+the trailing prompt is included. The marks come from the semantic prompts
+proposal:
+<https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/semantic-prompts.md>.
+`dm man`, `dm html` and `dm llms` carry the same section.
 
 dm enables bracketed paste (2004) on attach and disables it again on detach, so
 ctrl+shift+v inserts newlines literally. The client sends a paste to the focused

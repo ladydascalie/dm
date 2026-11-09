@@ -323,6 +323,19 @@ A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, named by the `theme` no
 | `glyphs` | `grip` •, `divider-row` ━, `divider-col` ┃, `border-top-left` ┌, `border-top-right` ┐, `border-bottom-left` └, `border-bottom-right` ┘, `border-horizontal` ─, `border-vertical` │, `border-tee-left` ├, `border-tee-right` ┤, `fold-open` ▾, `fold-closed` ▸, `active-mark` ▸, `workspace-bar` ▌, `dirty` ● | Box, divider, fold and mark glyphs. |
 | `states` | `working.glyph` ●, `working.colour` #f5be50, `idle.glyph` ○, `idle.colour` #78c8e1, `blocked.glyph` ▲, `blocked.colour` #ff6e6e, `done.glyph` ✓, `done.colour` #6ee191, `error.glyph` ✕, `error.colour` #ff82a0, `unknown.glyph` ?, `unknown.colour` #8f93a8, `shell.glyph` ▶, `shell.colour` #8f93a8 | Glyph and colour per pane state: working, idle, blocked, done, error, unknown, shell. |
 
+## Prompt marks
+
+dm copies a command's output with prefix y and dm yank. The Enter dm forwards marks where that output starts; the shell's OSC 133 marks make both edges exact. Without them the copy starts after the echoed command line and ends at the last row with content, so the trailing prompt is copied too. With them the copy is the command's output alone, even when the prompt repaints its line on Enter.
+zsh emits the marks with one line in ~/.zshrc, before the prompt theme registers its own precmd hook:
+
+```zsh
+precmd() { print -Pn '\e]133;D\e\\\e]133;A\e\\' }; preexec() { print -Pn '\e]133;C\e\\' }
+```
+
+dm reads `133;A` (the prompt starts, and the output ends there when no D arrives), `133;C` (the command starts, and the copy starts here) and `133;D` (the command ended, and the copy ends here).
+The marks are ordinary output, so they travel over ssh and a nested multiplexer like any other bytes. A shell on a remote host needs the same line in its own start file; a pane running a program instead of a shell has no prompt and no marks. dm reads the marks per pane and needs no configuration of its own.
+The marks are defined by the semantic prompts proposal: https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/semantic-prompts.md
+
 ## Environment
 
 | Variable | What it sets |

@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-08"
+const manDate = "2026-11-09"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -153,6 +153,8 @@ func ManPage() string {
 	b.WriteString(manConfig())
 	b.WriteString(manTheme())
 
+	b.WriteString(manPromptMarks())
+
 	b.WriteString(".SH FILES\n")
 	b.WriteString("Paths use $DM_STATE and $XDG_CONFIG_HOME as ENVIRONMENT describes.\n")
 	for _, f := range configdoc.Files {
@@ -174,6 +176,31 @@ func ManPage() string {
 	b.WriteString(".SH SEE ALSO\n")
 	b.WriteString(".BR tmux (1)\n")
 
+	return b.String()
+}
+
+// manPromptMarks renders the PROMPT MARKS section: what a copy uses the marks
+// for, the marks dm reads, and the hook that emits them.
+func manPromptMarks() string {
+	var b strings.Builder
+	b.WriteString(".SH PROMPT MARKS\n")
+	b.WriteString(roffEscape(PromptMarkIntro) + "\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(PromptMarkWhere) + "\n")
+	b.WriteString(".PP\n.nf\n")
+	b.WriteString(roffEscape(PromptMarkHook) + "\n")
+	b.WriteString(".fi\n")
+	b.WriteString(".PP\n")
+	b.WriteString("dm reads these marks:\n")
+	for _, m := range PromptMarks {
+		b.WriteString(".TP\n")
+		b.WriteString(roffBold("OSC 133;"+m.Letter) + "\n")
+		b.WriteString(roffEscape(m.Meaning) + ".\n")
+	}
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(PromptMarkLanes) + "\n")
+	b.WriteString(".PP\n")
+	b.WriteString("The marks are defined by the semantic prompts proposal: " + roffEscape(PromptMarkSpec) + "\n")
 	return b.String()
 }
 

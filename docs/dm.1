@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-08" "dm" "User Commands"
+.TH DM 1 "2026-11-09" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -852,6 +852,29 @@ shell state glyph; also replaces the Nerd Font form. Default \fI▶\fP.
 .TP
 \fBshell colour\fP
 shell state colour. Default \fI#8f93a8\fP.
+.SH PROMPT MARKS
+dm copies a command's output with prefix y and dm yank. The Enter dm forwards marks where that output starts; the shell's OSC 133 marks make both edges exact. Without them the copy starts after the echoed command line and ends at the last row with content, so the trailing prompt is copied too. With them the copy is the command's output alone, even when the prompt repaints its line on Enter.
+.PP
+zsh emits the marks with one line in ~/.zshrc, before the prompt theme registers its own precmd hook:
+.PP
+.nf
+precmd() { print -Pn '\ee]133;D\ee\e\e\ee]133;A\ee\e\e' }; preexec() { print -Pn '\ee]133;C\ee\e\e' }
+.fi
+.PP
+dm reads these marks:
+.TP
+\fBOSC 133;A\fP
+the prompt starts. Without a D mark, this is where the output ends.
+.TP
+\fBOSC 133;C\fP
+the command starts, and its output begins here. The copy starts here.
+.TP
+\fBOSC 133;D\fP
+the command ended. The copy ends here.
+.PP
+The marks are ordinary output, so they travel over ssh and a nested multiplexer like any other bytes. A shell on a remote host needs the same line in its own start file; a pane running a program instead of a shell has no prompt and no marks. dm reads the marks per pane and needs no configuration of its own.
+.PP
+The marks are defined by the semantic prompts proposal: https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/semantic-prompts.md
 .SH FILES
 Paths use $DM_STATE and $XDG_CONFIG_HOME as ENVIRONMENT describes.
 .TP

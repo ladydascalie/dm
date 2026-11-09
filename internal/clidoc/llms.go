@@ -244,6 +244,14 @@ func LLMsText() string {
 		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", blk.name, llmsCell(blk.keys), llmsCell(blk.desc))
 	}
 
+	b.WriteString("\n## Prompt marks\n\n")
+	b.WriteString(PromptMarkIntro + "\n")
+	b.WriteString(PromptMarkWhere + "\n\n")
+	b.WriteString("```zsh\n" + PromptMarkHook + "\n```\n\n")
+	b.WriteString(PromptMarkLine + "\n")
+	b.WriteString(PromptMarkLanes + "\n")
+	b.WriteString("The marks are defined by the semantic prompts proposal: " + PromptMarkSpec + "\n")
+
 	b.WriteString("\n## Environment\n\n")
 	b.WriteString("| Variable | What it sets |\n")
 	b.WriteString("| --- | --- |\n")
