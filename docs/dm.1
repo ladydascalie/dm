@@ -98,6 +98,13 @@ rename a workspace
 .br
 \fB--s name\fP session name
 .TP
+\fBdm set-project <ws> [name]\fP
+set a workspace's project, or clear it with no name
+.br
+\fB--s name\fP session name
+.br
+Example: \fBdm set-project s1 dm\fP
+.TP
 \fBdm next-pane\fP
 focus the next pane
 .br
@@ -482,6 +489,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBrename-workspace\fP
 .nf
 {"action":"rename-workspace","target":"s1","name":"build"}
+.fi
+.TP
+\fBset-project\fP
+.nf
+{"action":"set-project","target":"s1","name":"dm"}
 .fi
 .TP
 \fBmsg-post\fP

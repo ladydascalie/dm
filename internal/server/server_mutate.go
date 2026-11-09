@@ -254,6 +254,7 @@ type winInfo struct {
 type wsInfo struct {
 	ID      string    `json:"id"`
 	Name    string    `json:"name"`
+	Project string    `json:"project,omitempty"`
 	Active  bool      `json:"active"`
 	Windows []winInfo `json:"windows"`
 }
@@ -263,7 +264,7 @@ func (s *server) workspaceList() []wsInfo {
 	defer s.mu.Unlock()
 	out := make([]wsInfo, 0, len(s.st.Workspaces))
 	for i, ws := range s.st.Workspaces {
-		info := wsInfo{ID: ws.ID, Name: ws.Name, Active: i == s.st.Active}
+		info := wsInfo{ID: ws.ID, Name: ws.Name, Project: ws.Project, Active: i == s.st.Active}
 		for j, w := range ws.Windows {
 			info.Windows = append(info.Windows, winInfo{
 				ID: w.ID, Name: w.Name,
@@ -338,6 +339,57 @@ func (s *server) renameWorkspace(id, name string) error {
 		}
 	}
 	return fmt.Errorf("no workspace %q", id)
+}
+
+// setProject tags the workspace with a project name and moves it to the end of
+// that project's block. An empty name clears the project. The id, the windows
+// and the panes stay; the active workspace stays the same workspace.
+func (s *server) setProject(id, project string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := -1
+	for i, ws := range s.st.Workspaces {
+		if ws.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return fmt.Errorf("no workspace %q", id)
+	}
+	activeID := ""
+	if aws := s.st.ActiveWorkspace(); aws != nil {
+		activeID = aws.ID
+	}
+	ws := s.st.Workspaces[idx]
+	ws.Project = project
+	s.st.Workspaces = append(s.st.Workspaces[:idx], s.st.Workspaces[idx+1:]...)
+	s.insertWorkspaceLocked(ws)
+	for i, w := range s.st.Workspaces {
+		if w.ID == activeID {
+			s.st.Active = i
+			break
+		}
+	}
+	return nil
+}
+
+// insertWorkspaceLocked puts ws at the end of its project's block and regroups
+// the slice. An untagged workspace goes to the end of the slice, which is where
+// GroupWorkspaces keeps it. The caller holds s.mu.
+func (s *server) insertWorkspaceLocked(ws *session.Workspace) {
+	at := len(s.st.Workspaces)
+	if ws.Project != "" {
+		for i, w := range s.st.Workspaces {
+			if w.Project == ws.Project {
+				at = i + 1
+			}
+		}
+	}
+	s.st.Workspaces = append(s.st.Workspaces, nil)
+	copy(s.st.Workspaces[at+1:], s.st.Workspaces[at:])
+	s.st.Workspaces[at] = ws
+	s.st.GroupWorkspaces()
 }
 
 // renameWindow sets the named window's name and nothing else: the id, the
@@ -854,13 +906,20 @@ func (s *server) selectWindow(i int) error {
 	return nil
 }
 
-func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string, string, string, error) {
+func (s *server) newWorkspace(name, tabLabel, cwd, project string, noFocus bool) (string, string, string, error) {
 	// Ask the pane before taking the lock: the folder is where the user is now,
 	// and asking is a socket round trip.
 	if cwd == "" {
 		cwd = s.inheritedCwd("")
 	}
 	s.mu.Lock()
+	activeID := ""
+	if aws := s.st.ActiveWorkspace(); aws != nil {
+		activeID = aws.ID
+		if project == "" {
+			project = aws.Project
+		}
+	}
 	if name == "" {
 		name = "ws" + strconv.Itoa(len(s.st.Workspaces)+1)
 	}
@@ -879,10 +938,24 @@ func (s *server) newWorkspace(name, tabLabel, cwd string, noFocus bool) (string,
 	id := win.NewPaneID()
 	win.Root = &layout.Node{Pane: id}
 	win.Focus = id
-	ws := &session.Workspace{ID: wsid, Name: name, Unfolded: true, Windows: []*session.Window{win}}
-	s.st.Workspaces = append(s.st.Workspaces, ws)
-	if !noFocus {
-		s.st.Active = len(s.st.Workspaces) - 1
+	ws := &session.Workspace{ID: wsid, Name: name, Project: project, Unfolded: true, Windows: []*session.Window{win}}
+	s.insertWorkspaceLocked(ws)
+	// The insert can land before the active workspace, so follow the active
+	// workspace by id. A focused new workspace becomes the active one.
+	if noFocus {
+		for i, w := range s.st.Workspaces {
+			if w.ID == activeID {
+				s.st.Active = i
+				break
+			}
+		}
+	} else {
+		for i, w := range s.st.Workspaces {
+			if w.ID == wsid {
+				s.st.Active = i
+				break
+			}
+		}
 	}
 	s.addPaneStateAt(id, cwd, "")
 	s.mu.Unlock()

@@ -85,7 +85,7 @@ func TestRailWorkspaceRowMenuOffersWorkspaceActions(t *testing.T) {
 	if tui.menu.title != "workspace main" {
 		t.Fatalf("title = %q, want workspace main", tui.menu.title)
 	}
-	railWantLabels(t, tui.menu, "New window", "Rename workspace", "Close workspace")
+	railWantLabels(t, tui.menu, "New window", "Rename workspace", "Set project", "Close workspace")
 	testutil.NoMsg(t, got)
 	railMenuPick(t, tui, "Close workspace")
 	m := testutil.NextMsg(t, got)
@@ -158,7 +158,7 @@ func TestMenuScopeHints(t *testing.T) {
 		"Split up": "^", "Zoom": "z", "Close pane": "x", "Scrollback": "[",
 	}
 	workspace := map[string]string{
-		"New window": "c", "Rename workspace": "r", "Close workspace": "",
+		"New window": "c", "Rename workspace": "r", "Set project": "", "Close workspace": "",
 	}
 	window := map[string]string{
 		"Rename window": "", "Close window": "X", "Fold/unfold": "", "Focus": "",

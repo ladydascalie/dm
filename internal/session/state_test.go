@@ -238,3 +238,180 @@ func TestSaveFailureLeavesNoTemp(t *testing.T) {
 		t.Fatalf("failed save left temp files: %v", left)
 	}
 }
+
+// wsNames reads the workspace names in slice order.
+func wsNames(st *State) []string {
+	names := make([]string, len(st.Workspaces))
+	for i, ws := range st.Workspaces {
+		names[i] = ws.Name
+	}
+	return names
+}
+
+func workspace(id, name, project string) *Workspace {
+	return &Workspace{ID: id, Name: name, Project: project, Unfolded: true}
+}
+
+// TestGroupWorkspaces proves a stable sort by project: first appearance
+// decides the group's position and the order inside a group holds.
+func TestGroupWorkspaces(t *testing.T) {
+	st := &State{Workspaces: []*Workspace{
+		workspace("s1", "a1", "alpha"),
+		workspace("s2", "b1", "beta"),
+		workspace("s3", "a2", "alpha"),
+		workspace("s4", "b2", "beta"),
+		workspace("s5", "a3", "alpha"),
+	}}
+	st.GroupWorkspaces()
+	want := []string{"a1", "a2", "a3", "b1", "b2"}
+	if got := wsNames(st); !equalStrings(got, want) {
+		t.Fatalf("grouped = %v, want %v", got, want)
+	}
+}
+
+// TestGroupWorkspacesIdempotent proves a second call changes nothing.
+func TestGroupWorkspacesIdempotent(t *testing.T) {
+	st := &State{Workspaces: []*Workspace{
+		workspace("s1", "b1", "beta"),
+		workspace("s2", "a1", "alpha"),
+		workspace("s3", "b2", "beta"),
+	}}
+	st.GroupWorkspaces()
+	first := wsNames(st)
+	st.GroupWorkspaces()
+	if got := wsNames(st); !equalStrings(got, first) {
+		t.Fatalf("second group = %v, want %v", got, first)
+	}
+}
+
+// TestGroupWorkspacesKeepsUntaggedApart proves untagged workspaces never merge
+// into one group.
+func TestGroupWorkspacesKeepsUntaggedApart(t *testing.T) {
+	st := &State{Workspaces: []*Workspace{
+		workspace("s1", "loose1", ""),
+		workspace("s2", "p1", "alpha"),
+		workspace("s3", "loose2", ""),
+		workspace("s4", "p2", "alpha"),
+		workspace("s5", "loose3", ""),
+	}}
+	st.GroupWorkspaces()
+	want := []string{"loose1", "p1", "p2", "loose2", "loose3"}
+	if got := wsNames(st); !equalStrings(got, want) {
+		t.Fatalf("grouped = %v, want %v", got, want)
+	}
+	if st.Workspaces[0].Project != "" || st.Workspaces[3].Project != "" {
+		t.Fatal("untagged workspace gained a project")
+	}
+}
+
+// TestLoadStateGroupsInterleaved proves a hand-edited, interleaved state file
+// loads grouped.
+func TestLoadStateGroupsInterleaved(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	const raw = `{
+  "name": "grouped",
+  "workspaces": [
+    {"id": "s1", "name": "a1", "project": "alpha", "windows": [], "active": 0},
+    {"id": "s2", "name": "b1", "project": "beta", "windows": [], "active": 0},
+    {"id": "s3", "name": "a2", "project": "alpha", "windows": [], "active": 0},
+    {"id": "s4", "name": "loose", "windows": [], "active": 0}
+  ],
+  "active": 0,
+  "cols": 80,
+  "rows": 24,
+  "panes": {},
+  "nextWorkspace": 4,
+  "nextWindow": 0,
+  "idVersion": 2,
+  "rail": 30,
+  "railSet": true
+}`
+	if err := os.MkdirAll(paths.SessionDir("grouped"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePath("grouped"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState("grouped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a1", "a2", "b1", "loose"}
+	if names := wsNames(got); !equalStrings(names, want) {
+		t.Fatalf("loaded = %v, want %v", names, want)
+	}
+	if got.Workspaces[0].Project != "alpha" {
+		t.Fatalf("project = %q, want alpha", got.Workspaces[0].Project)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestGroupWorkspacesKeepsActive proves a load of an interleaved file leaves the
+// active workspace the same workspace, not the same index.
+func TestGroupWorkspacesKeepsActive(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	const raw = `{
+  "name": "active",
+  "workspaces": [
+    {"id": "s1", "name": "a1", "project": "a", "windows": [], "active": 0},
+    {"id": "s2", "name": "b1", "project": "b", "windows": [], "active": 0},
+    {"id": "s3", "name": "a2", "project": "a", "windows": [], "active": 0}
+  ],
+  "active": 2,
+  "cols": 80,
+  "rows": 24,
+  "panes": {},
+  "nextWorkspace": 3,
+  "nextWindow": 0,
+  "idVersion": 2,
+  "rail": 30,
+  "railSet": true
+}`
+	if err := os.MkdirAll(paths.SessionDir("active"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePath("active"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := wsNames(got); !equalStrings(names, []string{"a1", "a2", "b1"}) {
+		t.Fatalf("loaded = %v, want [a1 a2 b1]", names)
+	}
+	ws := got.ActiveWorkspace()
+	if ws.ID != "s3" {
+		t.Fatalf("active = %q, want s3", ws.ID)
+	}
+}
+
+// TestGroupWorkspacesOutOfRangeActive proves grouping leaves an out-of-range
+// Active out of range instead of panicking or inventing a workspace.
+func TestGroupWorkspacesOutOfRangeActive(t *testing.T) {
+	for _, active := range []int{5, -1} {
+		st := &State{
+			Active: active,
+			Workspaces: []*Workspace{
+				workspace("s1", "a1", "a"),
+				workspace("s2", "b1", "b"),
+				workspace("s3", "a2", "a"),
+			},
+		}
+		st.GroupWorkspaces()
+		if st.Active != active {
+			t.Fatalf("active = %d, want %d left alone", st.Active, active)
+		}
+	}
+}

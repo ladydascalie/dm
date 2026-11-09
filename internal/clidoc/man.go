@@ -55,7 +55,7 @@ var manActionNames = []string{
 	"new-workspace", "next-workspace", "prev-workspace", "list-workspaces",
 	"list-panes", "pane", "toggle-fold", "set-pane-name",
 	"focus-window", "focus-workspace", "close-workspace",
-	"rename-window", "rename-workspace",
+	"rename-window", "rename-workspace", "set-project",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",
 	"msg-watchers", "msg-schema",
 }

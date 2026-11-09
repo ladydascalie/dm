@@ -18,12 +18,14 @@ import (
 	"dm/internal/wlabel"
 )
 
-// RailKind is the row type the sidebar paints: a workspace row, a window line,
-// that window's dim second line, a pane, or the gap between workspace blocks.
+// RailKind is the row type the sidebar paints: a project header, a workspace
+// row, a window line, that window's dim second line, a pane, or the gap
+// between workspace blocks.
 type RailKind int
 
 const (
-	Workspace RailKind = iota
+	Project RailKind = iota
+	Workspace
 	Window
 	WindowNote
 	Pane
@@ -51,12 +53,17 @@ type RailItem struct {
 	Added      int
 	Deleted    int
 	Accent     int // an accent slot, resolved against the theme by the painter
-	Agent      bool
-	Dirty      bool
-	InRepo     bool
-	Folded     bool
-	Focus      bool
-	Active     bool
+	// Project is the project the row belongs to, empty outside a project.
+	// ProjectAccent is that project's accent slot, set on every row of the
+	// group so the painter can tie them with one bar.
+	Project       string
+	ProjectAccent int
+	Agent         bool
+	Dirty         bool
+	InRepo        bool
+	Folded        bool
+	Focus         bool
+	Active        bool
 }
 
 // WindowSource returns the pane a window's label and git context come from:
@@ -158,30 +165,72 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		}
 		return wire.AllPane{}, false
 	}
-	// A workspace keeps its preferred slot when it is free. When two live
-	// workspaces hash alike, the later one takes the next free slot, so no two
-	// workspaces in a session ever share an accent.
-	used := map[int]bool{}
+	// A slot is preferred by hashing its name. When two live names hash alike,
+	// the later one takes the next free slot, so no two names in a session ever
+	// share an accent.
 	slots := len(theme.DefaultTheme().Accents)
-	accent := func(id string) int {
-		pref := RailAccentSlot(id)
-		for i := 0; i < slots; i++ {
-			slot := (pref + i) % slots
-			if !used[slot] {
-				used[slot] = true
-				return slot
+	allocator := func() func(string) int {
+		used := map[int]bool{}
+		return func(name string) int {
+			pref := RailAccentSlot(name)
+			for i := 0; i < slots; i++ {
+				slot := (pref + i) % slots
+				if !used[slot] {
+					used[slot] = true
+					return slot
+				}
 			}
+			return pref
 		}
-		return pref
+	}
+	// Workspaces keep their old per-workspace slot for the callers that still
+	// read it, though the rail no longer paints it. Projects own their column.
+	accent := allocator()
+	projectAccent := allocator()
+	// A project row names its group once, before the group's first workspace,
+	// and carries the number of workspaces in the group.
+	projectCount := map[string]int{}
+	seen := map[string]bool{}
+	slotsFor := map[string]int{}
+	for _, p := range snap.All {
+		if seen[p.Workspace] {
+			continue
+		}
+		seen[p.Workspace] = true
+		if p.Project != "" {
+			projectCount[p.Project]++
+		}
 	}
 	var out []RailItem
-	ws, win := "", ""
+	ws, win, project, prev := "", "", "", ""
+	slot := 0
 	for _, p := range snap.All {
 		if p.Workspace != ws {
 			if ws != "" {
-				out = append(out, RailItem{Kind: Gap})
+				gap := RailItem{Kind: Gap}
+				// A gap between two workspaces of one project stays inside the
+				// group, so the bar runs on through it.
+				if project != "" && p.Project == project {
+					gap.Project, gap.ProjectAccent = project, slot
+				}
+				out = append(out, gap)
 			}
 			ws, win = p.Workspace, ""
+			project, prev, slot = p.Project, project, 0
+			if project != "" {
+				s, ok := slotsFor[project]
+				if !ok {
+					s = projectAccent(project)
+					slotsFor[project] = s
+				}
+				slot = s
+				if project != prev {
+					out = append(out, RailItem{
+						Kind: Project, Text: project, Project: project,
+						ProjectAccent: slot, Count: projectCount[project],
+					})
+				}
+			}
 			name := p.WorkspaceName
 			if name == "" {
 				name = p.Workspace
@@ -189,6 +238,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 			out = append(out, RailItem{
 				Kind: Workspace, Text: name, Workspace: p.Workspace,
 				Count: panes[p.Workspace], Accent: accent(p.Workspace),
+				Project: project, ProjectAccent: slot,
 				Active: p.WorkspaceActive,
 				Folded: !p.WorkspaceUnfolded,
 			})
@@ -202,6 +252,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 			item := RailItem{
 				Kind: Window, Text: p.WindowName, Window: p.Window,
 				WindowName: p.WindowName, Workspace: p.Workspace,
+				Project: project, ProjectAccent: slot,
 				Folded: !p.WindowUnfolded,
 			}
 			if src, ok := source(p.Window); ok {
@@ -221,6 +272,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 				out = append(out, RailItem{
 					Kind: WindowNote, Text: item.Message, Window: p.Window,
 					WindowName: p.WindowName, Workspace: p.Workspace,
+					Project: project, ProjectAccent: slot,
 					Folder: item.Folder, Cwd: item.Cwd,
 				})
 			}
@@ -229,7 +281,9 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		if !p.WindowUnfolded {
 			continue
 		}
-		out = append(out, RailPaneRow(p))
+		row := RailPaneRow(p)
+		row.Project, row.ProjectAccent = project, slot
+		out = append(out, row)
 	}
 	return out
 }
@@ -289,12 +343,12 @@ func RailFolder(cwd, root string) string {
 	return filepath.ToSlash(rel)
 }
 
-// RailAccentSlot returns the accent slot a workspace prefers. FNV-1a is the
-// seed; the mix step matters because its low bits repeat for ids of equal
-// length, and a workspace id is short.
-func RailAccentSlot(workspace string) int {
+// RailAccentSlot returns the accent slot a name prefers. FNV-1a is the seed;
+// the mix step matters because its low bits repeat for names of equal length,
+// and both a workspace id and a project name are short.
+func RailAccentSlot(name string) int {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(workspace))
+	_, _ = h.Write([]byte(name))
 	x := h.Sum32()
 	x ^= x >> 16
 	x *= 0x7feb352d
@@ -419,17 +473,41 @@ func RailStats(th theme.Theme, it RailItem, set theme.GlyphSet) []segment.Seg {
 	return out
 }
 
+// RailBar is the cell the full rail paints in column 0 of an item row: the
+// theme's workspace-bar glyph in the row's project accent, or a blank outside
+// a project. It sits before the row's own runs, and the row composes one cell
+// narrower to keep the right edge stable.
+func RailBar(th theme.Theme, it RailItem) segment.Seg {
+	if it.Project == "" {
+		return segment.Seg{Text: " ", FG: th.Palette.RailDim}
+	}
+	return segment.Seg{Text: th.Glyphs.WorkspaceBar, FG: th.Accents[it.ProjectAccent]}
+}
+
 // RailRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and set are the rail's own switches.
 func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSet) (left, right, tail []segment.Seg) {
 	p, g := th.Palette, th.Glyphs
 	switch it.Kind {
+	case Project:
+		// The bar in column 0 is the writer's. The row itself is a space, the
+		// project's name in its accent, and the group's workspace count.
+		if !compact {
+			name := th.Accents[it.ProjectAccent]
+			left = []segment.Seg{
+				{Text: " ", FG: name},
+				{Text: it.Text, FG: name, Bold: true},
+			}
+			right = []segment.Seg{{Text: strconv.Itoa(it.Count), FG: p.RailDim}}
+		}
 	case Workspace:
 		if !compact {
-			name := th.Accents[it.Accent]
-			if !it.Active {
-				name = p.RailHeader
+			// The project owns the colour: the active workspace is bright, the
+			// others header grey, both bold. No per-workspace accent.
+			name := p.RailHeader
+			if it.Active {
+				name = p.RailText
 			}
 			caret := g.FoldOpen
 			if it.Folded {
@@ -437,7 +515,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			}
 
 			left = []segment.Seg{
-				{Text: caret, FG: th.Accents[it.Accent]},
+				{Text: caret, FG: name},
 				{Text: " ", FG: name},
 				{Text: it.Text, FG: name, Bold: true},
 			}
@@ -604,10 +682,10 @@ func RailWorkspaceAt(snap *wire.Snapshot, x, y int) string {
 	return items[y].Workspace
 }
 
-// RailFoldAt returns the workspace or window whose fold caret is under x,y. A
-// workspace caret sits in column 0 and a window caret in column 2. It only
-// answers for the caret cell, so a click on the row's name still focuses the
-// row's first pane.
+// RailFoldAt returns the workspace or window whose fold caret is under x,y. The
+// project bar holds column 0, so a workspace caret sits in column 1 and a
+// window caret in column 3. It only answers for the caret cell, so a click on
+// the row's name still focuses the row's first pane.
 func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 	if snap == nil || snap.Rail <= 0 {
 		return ""
@@ -625,12 +703,12 @@ func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 	it := items[y]
 	switch it.Kind {
 	case Workspace:
-		if x != 0 {
+		if x != 1 {
 			return ""
 		}
 		return it.Workspace
 	case Window:
-		if x != 2 {
+		if x != 3 {
 			return ""
 		}
 		return it.Window
@@ -731,7 +809,16 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			}
 		} else if y < len(items) {
 			it := items[y]
-			left, right, tail = RailRow(th, it, rowW, compact, set)
+			// The full rail gives column 0 to the project bar. The thin rail
+			// paints no bar and no project row, so its rows keep their width.
+			itemW := rowW
+			if !compact {
+				left = append(left, RailBar(th, it))
+				itemW = rowW - 1
+			}
+			l, r, t := RailRow(th, it, itemW, compact, set)
+			left = append(left, l...)
+			right, tail = r, t
 			// A focused pane row paints its own background and every run bold.
 			if it.Kind == Pane && it.Focus {
 				bg, bold = p.RailFocusBG, true

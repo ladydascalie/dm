@@ -393,3 +393,26 @@ func TestSwitcherTarget(t *testing.T) {
 		t.Fatalf("target on the workspace header = %q (kind %d), want s1", s.Target(), it.Kind)
 	}
 }
+
+// TestSwitcherDropsProjectRows proves a tagged session keeps the same switcher
+// rows: the rail's project header is dropped, the way a note row is.
+func TestSwitcherDropsProjectRows(t *testing.T) {
+	snap := switcherSnap()
+	for i := range snap.All {
+		snap.All[i].Project = "dm"
+	}
+	s := NewSwitcher(layout.Rect{X: 10, Y: 4, W: 80, H: 24}, snap)
+	want := []string{
+		"ws s1", "win w1", "pane w1p1", "pane w1p2",
+		"win w2", "pane w2p1", "pane w2p2",
+		"gap", "ws s2", "win w3", "pane w3p1",
+	}
+	if got := switcherRowNames(s); !reflect.DeepEqual(got, want) {
+		t.Fatalf("tree = %v, want %v", got, want)
+	}
+	for _, it := range s.tree {
+		if it.Kind == rail.Project {
+			t.Fatalf("tree kept a project row: %+v", it)
+		}
+	}
+}

@@ -95,6 +95,10 @@ func (t *tui) workspaceMenuItems(it rail.RailItem) []menuItem {
 			t.closeMenu()
 			t.openRenamePromptFor("workspace", it.Workspace, it.Text)
 		}},
+		{label: "Set project", action: "set-project", run: func() {
+			t.closeMenu()
+			t.openRenamePromptFor("project", it.Workspace, it.Project)
+		}},
 		{label: "Close workspace", action: "close-workspace", run: func() {
 			t.actionOn(it.Workspace, "close-workspace", nil)
 		}},

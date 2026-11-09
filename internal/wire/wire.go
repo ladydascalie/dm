@@ -15,12 +15,15 @@ import (
 
 // Msg is the single envelope for every dm socket, in both directions.
 type Msg struct {
-	Type    string  `json:"type"`             // req resp attach keys resize snapshot bytes replay status exit
-	Action  string  `json:"action,omitempty"` // req action
-	Target  string  `json:"target,omitempty"` // pane id
-	Dir     string  `json:"dir,omitempty"`    // left right up down
-	Other   string  `json:"other,omitempty"`  // resize-split: pane on the other side
-	Msg     string  `json:"msg,omitempty"`
+	Type   string `json:"type"`             // req resp attach keys resize snapshot bytes replay status exit
+	Action string `json:"action,omitempty"` // req action
+	Target string `json:"target,omitempty"` // pane id
+	Dir    string `json:"dir,omitempty"`    // left right up down
+	Other  string `json:"other,omitempty"`  // resize-split: pane on the other side
+	Msg    string `json:"msg,omitempty"`
+	// Project is the explicit project name on new-workspace. Empty means the
+	// new workspace inherits the project of the one it was created from.
+	Project string  `json:"project,omitempty"`
 	Enter   bool    `json:"enter,omitempty"`
 	Name    string  `json:"name,omitempty"`
 	Window  string  `json:"window,omitempty"`
@@ -110,8 +113,10 @@ type AllPane struct {
 	WorkspaceUnfolded bool   `json:"workspaceUnfolded,omitempty"`
 	Workspace         string `json:"workspace"`
 	WorkspaceName     string `json:"workspaceName"`
-	Window            string `json:"window"`
-	WindowName        string `json:"windowName"`
+	// Project is the pane's workspace project name. Empty means no project.
+	Project    string `json:"project,omitempty"`
+	Window     string `json:"window"`
+	WindowName string `json:"windowName"`
 	// WindowNamed is true when the user set the window's name with
 	// rename-window.
 	WindowNamed     bool `json:"windowNamed,omitempty"`

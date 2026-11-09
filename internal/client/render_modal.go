@@ -112,8 +112,10 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 }
 
 // drawRename paints the rename prompt as a floating pane over the pane area.
-// The title names the kind and the id, the hint names the keys that submit and
-// cancel, and the one input row holds the label, the draft and the caret. The
+// The title names the action, the kind and the id: a project is set, not
+// renamed, so that title reads "set project <id>". The hint names the keys that
+// submit and cancel, and the one input row holds the label, the draft and the
+// caret. The
 // caret is fixed: the draft takes what is left and loses its head first, so a
 // long name still shows its end and the caret stays on screen. The kind is
 // optional: a call without it renames a workspace, as the frozen prompt test
@@ -130,13 +132,17 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 	if !ok {
 		return
 	}
+	title := "rename " + k + " " + id
+	if k == "project" {
+		title = "set project " + id
+	}
 	f := &panel.FloatingPane{
 		ID:    "rename",
 		Rect:  inner,
-		Title: "rename " + k + " " + id,
+		Title: title,
 		Hint:  "enter  esc",
 		Paint: func(b *bytes.Buffer, r layout.Rect) {
-			renameInputRow(b, th, r, draft)
+			renameInputRow(b, th, r, k, draft)
 		},
 	}
 	f.Draw(buf, th)
@@ -144,16 +150,21 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 
 // renameInputRow paints the float's one input row: the dim label, the draft and
 // the caret on the rail ground, padded to the full inner width so the row owns
-// every cell inside the box. The draft keeps its tail and drops its head when
-// it runs out of room, and a wide rune is cut whole.
-func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, draft string) {
+// every cell inside the box. The label names the kind: a project prompt reads
+// "project: ", every other kind " name: ". The draft keeps its tail and drops
+// its head when it runs out of room, and a wide rune is cut whole.
+func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, kind, draft string) {
 	p := th.Palette
 	const caret = "▏"
+	label := " name: "
+	if kind == "project" {
+		label = "project: "
+	}
 	labelRoom := r.W - cells.Cells(caret)
 	if labelRoom < 0 {
 		labelRoom = 0
 	}
-	segs := segment.ClipSegs([]segment.Seg{{Text: " name: ", FG: p.RailDim}}, labelRoom)
+	segs := segment.ClipSegs([]segment.Seg{{Text: label, FG: p.RailDim}}, labelRoom)
 	draftRoom := r.W - cells.Cells(caret) - segment.SegCells(segs)
 	if cells.Cells(draft) > draftRoom {
 		mark := th.Glyphs.ElideMark()

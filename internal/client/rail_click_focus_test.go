@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"dm/internal/testutil"
+	"dm/internal/wire"
 )
 
 // TestRailWorkspaceClickFocusesFirstPane checks that a left press on a
@@ -58,5 +59,68 @@ func TestRailWindowClickSwitchesWindow(t *testing.T) {
 		t.Fatalf("window click sent %+v, want focus w1p2", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 5, y: 5})
+	testutil.NoMsg(t, got)
+}
+
+// projectRailSnap is a rail with one project group of two workspaces: a
+// project header, then s1 with its window and two panes, a gap, then s2 with
+// its window and one pane. Row 0 is the project header.
+func projectRailSnap() *wire.Snapshot {
+	snap := testutil.RailTestSnapshot(20)
+	for i := range snap.All {
+		snap.All[i].Project = "dm"
+	}
+	snap.All = append(snap.All, wire.AllPane{
+		ID: "w2p1", Name: "delta", Status: "idle",
+		Workspace: "s2", WorkspaceName: "work", Window: "w3", WindowName: "three",
+		Project:           "dm",
+		WorkspaceUnfolded: true, WindowUnfolded: true,
+	})
+	return snap
+}
+
+// TestRailProjectClickFocusesGroupFirstPane proves a left press on a project
+// header focuses the first pane of the group's first workspace, not the row
+// that follows it.
+func TestRailProjectClickFocusesGroupFirstPane(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.snap = projectRailSnap()
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p1" {
+		t.Fatalf("project click sent %+v, want focus w1p1", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	testutil.NoMsg(t, got)
+}
+
+// TestRailProjectDoubleClickDoesNothing proves a second press on the same
+// project row sends nothing and opens no prompt or menu.
+func TestRailProjectDoubleClickDoesNothing(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.snap = projectRailSnap()
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p1" {
+		t.Fatalf("first press sent %+v, want focus w1p1", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	testutil.NoMsg(t, got)
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	testutil.NoMsg(t, got)
+	if tui.mode != "" {
+		t.Fatalf("second press opened mode %q", tui.mode)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	testutil.NoMsg(t, got)
+}
+
+// TestRailProjectRightPressOpensNoMenu proves a project row offers no menu.
+func TestRailProjectRightPressOpensNoMenu(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.snap = projectRailSnap()
+	tui.handleMouse(mouseEvent{btn: 2, x: 3, y: 1})
+	if tui.mode != "" || tui.menu != nil {
+		t.Fatalf("right press on a project row: mode = %q menu = %+v", tui.mode, tui.menu)
+	}
+	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 3, y: 1})
 	testutil.NoMsg(t, got)
 }

@@ -108,8 +108,15 @@ func TestRailRowComposesPaint(t *testing.T) {
 					}
 					continue
 				}
-				left, right, tail := RailRow(theme.DefaultTheme().For(set), items[y], rowW, compact, set)
-				want := railRowComposed(left, tail, right, rowW)
+				th := theme.DefaultTheme().For(set)
+				itemW := rowW
+				var bar []railSeg
+				if !compact {
+					bar = []railSeg{RailBar(th, items[y])}
+					itemW = rowW - 1
+				}
+				left, right, tail := RailRow(th, items[y], itemW, compact, set)
+				want := railRowComposed(append(bar, left...), tail, right, rowW)
 				if y == gripAt {
 					if pad := rowW - cells.Cells(want); pad > 0 {
 						want += strings.Repeat(" ", pad)
@@ -120,7 +127,7 @@ func TestRailRowComposesPaint(t *testing.T) {
 					t.Fatalf("set=%v w=%d row %d kind %d composes %q, rail paints %q",
 						set, w, y, items[y].Kind, want, line)
 				}
-				if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > rowW {
+				if n := len(bar) + segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > rowW {
 					t.Fatalf("set=%v w=%d row %d is %d cells, want <= %d",
 						set, w, y, n, rowW)
 				}
@@ -139,10 +146,10 @@ func TestRailRowSegments(t *testing.T) {
 	ws := railRowFind(t, items, Workspace, "main")
 	left, right, tail := RailRow(theme.DefaultTheme(), ws, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft := []railSeg{
-		{Text: "\u25be", FG: theme.DefaultTheme().Accents[ws.Accent]},
-		{Text: " ", FG: theme.DefaultTheme().Accents[ws.Accent]},
-		{Text: "main", FG: theme.DefaultTheme().Accents[ws.Accent], Bold: true},
-		{Text: " " + theme.DefaultTheme().RailMarks.Workspace, FG: theme.DefaultTheme().Accents[ws.Accent]},
+		{Text: "\u25be", FG: theme.DefaultTheme().Palette.RailText},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailText},
+		{Text: "main", FG: theme.DefaultTheme().Palette.RailText, Bold: true},
+		{Text: " " + theme.DefaultTheme().RailMarks.Workspace, FG: theme.DefaultTheme().Palette.RailText},
 	}
 	wantRight := []railSeg{{Text: "2", FG: theme.DefaultTheme().Palette.RailDim}}
 	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) || tail != nil {
@@ -384,17 +391,20 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 		}
 		snap := railRowSnap(w)
 		it := railRowFind(t, RailItems(snap), Window, "one")
-		// The grip strip owns the rail's last column, so the row composes at w-1.
+		// The grip strip owns the rail's last column, so the row composes at w-1,
+		// and the project bar takes column 0 of that.
 		rowW := w - 1
-		left, right, tail = RailRow(theme.DefaultTheme(), it, rowW, layout.RailCompact(w), theme.GlyphUnicode)
+		th := theme.DefaultTheme()
+		bar := []railSeg{RailBar(th, it)}
+		left, right, tail = RailRow(th, it, rowW-1, layout.RailCompact(w), theme.GlyphUnicode)
 		if right != nil && !reflect.DeepEqual(right, full) {
 			t.Fatalf("stats at %d columns = %+v, want the whole pair or none", w, right)
 		}
-		if n := segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > rowW {
+		if n := len(bar) + segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > rowW {
 			t.Fatalf("row at %d columns is %d cells: %+v / %+v / %+v",
 				w, n, left, tail, right)
 		}
-		if got, line := railRowComposed(left, tail, right, rowW), railRows(t, snap, theme.GlyphUnicode)[1]; got != line {
+		if got, line := railRowComposed(append(bar, left...), tail, right, rowW), railRows(t, snap, theme.GlyphUnicode)[1]; got != line {
 			t.Fatalf("row at %d columns composes %q, rail paints %q", w, got, line)
 		}
 	}
@@ -587,17 +597,17 @@ func TestRailWindowAndFoldAt(t *testing.T) {
 	if got := RailWindowAt(snap, 0, paneIndex); got != "" {
 		t.Fatalf("RailWindowAt(0,%d) = %q on a pane row", paneIndex, got)
 	}
-	if got := RailFoldAt(snap, 2, winIndex); got != "w1" {
-		t.Fatalf("RailFoldAt(2,%d) = %q, want w1", winIndex, got)
+	if got := RailFoldAt(snap, 3, winIndex); got != "w1" {
+		t.Fatalf("RailFoldAt(3,%d) = %q, want w1", winIndex, got)
 	}
-	if got := RailFoldAt(snap, 0, winIndex); got != "" {
-		t.Fatalf("RailFoldAt(0,%d) = %q, want empty", winIndex, got)
+	if got := RailFoldAt(snap, 2, winIndex); got != "" {
+		t.Fatalf("RailFoldAt(2,%d) = %q, want empty", winIndex, got)
 	}
-	if got := RailFoldAt(snap, 2, wsIndex); got != "" {
-		t.Fatalf("RailFoldAt(2,%d) = %q on a workspace row, want empty", wsIndex, got)
+	if got := RailFoldAt(snap, 3, wsIndex); got != "" {
+		t.Fatalf("RailFoldAt(3,%d) = %q on a workspace row, want empty", wsIndex, got)
 	}
-	if got := RailFoldAt(snap, 2, noteIndex); got != "" {
-		t.Fatalf("RailFoldAt(2,%d) = %q on the note row, want empty", noteIndex, got)
+	if got := RailFoldAt(snap, 3, noteIndex); got != "" {
+		t.Fatalf("RailFoldAt(3,%d) = %q on the note row, want empty", noteIndex, got)
 	}
 }
 
@@ -618,11 +628,11 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 	if got := RailWorkspaceAt(snap, 0, wsIndex); got != "s1" {
 		t.Fatalf("RailWorkspaceAt(0,%d) = %q, want s1", wsIndex, got)
 	}
-	if got := RailFoldAt(snap, 0, wsIndex); got != "s1" {
-		t.Fatalf("RailFoldAt(0,%d) = %q, want s1", wsIndex, got)
+	if got := RailFoldAt(snap, 1, wsIndex); got != "s1" {
+		t.Fatalf("RailFoldAt(1,%d) = %q, want s1", wsIndex, got)
 	}
-	if got := RailFoldAt(snap, 1, wsIndex); got != "" {
-		t.Fatalf("RailFoldAt(1,%d) = %q, want empty", wsIndex, got)
+	if got := RailFoldAt(snap, 2, wsIndex); got != "" {
+		t.Fatalf("RailFoldAt(2,%d) = %q, want empty", wsIndex, got)
 	}
 	paneIndex := -1
 	for i, it := range items {
@@ -637,8 +647,8 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 	if got := RailWorkspaceAt(snap, 0, paneIndex); got != "" {
 		t.Fatalf("RailWorkspaceAt(0,%d) = %q on a pane row", paneIndex, got)
 	}
-	if got := RailFoldAt(snap, 0, paneIndex); got != "" {
-		t.Fatalf("RailFoldAt(0,%d) = %q on a pane row", paneIndex, got)
+	if got := RailFoldAt(snap, 1, paneIndex); got != "" {
+		t.Fatalf("RailFoldAt(1,%d) = %q on a pane row", paneIndex, got)
 	}
 }
 
@@ -654,4 +664,287 @@ func TestRailASCIIGlyphs(t *testing.T) {
 			t.Fatalf("ascii rail carries %q", glyph)
 		}
 	}
+}
+
+// railProjectSnap is a rail with a two-workspace project, an untagged
+// workspace and a second project, all unfolded down to their panes.
+func railProjectSnap(rail int) *wire.Snapshot {
+	snap := &wire.Snapshot{
+		Cols: 100, Rows: 20, Rail: rail,
+		Root: &layout.Node{Pane: "a1p1"}, Focus: "a1p1",
+	}
+	snap.All = []wire.AllPane{
+		{
+			ID: "a1p1", Name: "one", Workspace: "s1", WorkspaceName: "alpha-main",
+			Project: "alpha", Window: "a1", WindowName: "one",
+			WorkspaceUnfolded: true, WindowUnfolded: true,
+			Focus: true, WorkspaceActive: true,
+			Cwd: "/work/proj/web", Root: "/work/proj", InRepo: true,
+			Branch: "web", Dirty: true, Added: 3, Deleted: 1,
+		},
+		{
+			ID: "a2p1", Name: "two", Workspace: "s2", WorkspaceName: "alpha-lane",
+			Project: "alpha", Window: "a2", WindowName: "two",
+			WorkspaceUnfolded: true, WindowUnfolded: true,
+		},
+		{
+			ID: "u1p1", Name: "loose", Workspace: "s3", WorkspaceName: "loose",
+			Window: "u1", WindowName: "three",
+			WorkspaceUnfolded: true, WindowUnfolded: true,
+		},
+		{
+			ID: "b1p1", Name: "four", Workspace: "s4", WorkspaceName: "beta",
+			Project: "beta", Window: "b1", WindowName: "four",
+			WorkspaceUnfolded: true, WindowUnfolded: true,
+		},
+	}
+	return snap
+}
+
+// railColour is theme RGB as the terminal reports it.
+func railColour(c theme.RGB) vt.Color {
+	return vt.RGBColor(uint8(c.R), uint8(c.G), uint8(c.B))
+}
+
+// TestRailProjectGroup proves a project names its group once and ties every
+// row of it with the theme's bar in the project's accent. An untagged
+// workspace and the gap after it carry no bar.
+func TestRailProjectGroup(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	snap := railProjectSnap(layout.DefaultRail)
+	items := RailItems(snap)
+
+	var projects []int
+	for i, it := range items {
+		if it.Kind == Project {
+			projects = append(projects, i)
+		}
+	}
+	if len(projects) != 2 {
+		t.Fatalf("rail has %d project rows, want 2: %+v", len(projects), items)
+	}
+	alpha, beta := items[projects[0]], items[projects[1]]
+	if alpha.Text != "alpha" || alpha.Count != 2 {
+		t.Fatalf("alpha row = %+v, want the name and two workspaces", alpha)
+	}
+	if beta.Text != "beta" || beta.Count != 1 {
+		t.Fatalf("beta row = %+v, want the name and one workspace", beta)
+	}
+	if projects[0] != 0 || projects[1] >= len(items) {
+		t.Fatalf("project rows sit at %v, want alpha first", projects)
+	}
+	// Every row from the alpha header through the gap between its two
+	// workspaces carries the project and its accent. The gap before the loose
+	// workspace, and the loose block itself, carry neither.
+	loose := -1
+	for i, it := range items {
+		if it.Kind == Workspace && it.Workspace == "s3" {
+			loose = i
+		}
+	}
+	if loose < 0 {
+		t.Fatalf("fixture has no loose workspace row: %+v", items)
+	}
+	for i, it := range items {
+		inAlpha := i >= projects[0] && i < loose-1
+		if inAlpha {
+			if it.Project != "alpha" || it.ProjectAccent != alpha.ProjectAccent {
+				t.Fatalf("row %d inside alpha = %+v, want the group's project and accent", i, it)
+			}
+			continue
+		}
+		if it.Kind != Project && it.Project == "alpha" {
+			t.Fatalf("row %d outside alpha still carries it: %+v", i, it)
+		}
+	}
+	// The gap between alpha's two workspaces is inside the group, so the bar
+	// runs on through it. The gap before the loose workspace is outside.
+	sawAlphaGap, sawLooseGap := false, false
+	for _, it := range items {
+		if it.Kind != Gap {
+			continue
+		}
+		if it.Project == "alpha" {
+			sawAlphaGap = true
+		} else {
+			sawLooseGap = true
+		}
+	}
+	if !sawAlphaGap || !sawLooseGap {
+		t.Fatalf("gaps = alpha %v loose %v, want one of each", sawAlphaGap, sawLooseGap)
+	}
+
+	// The painter puts the bar in column 0 of every row of the group, header
+	// included, and a blank cell outside it, in both glyph forms.
+	for _, set := range []theme.GlyphSet{theme.GlyphUnicode, theme.GlyphNerd} {
+		glyphs := th.Glyphs.WorkspaceBar
+		painted := railRows(t, snap, set)
+		for y, line := range painted {
+			if y >= len(items) || y == snap.Rows-2 {
+				continue
+			}
+			it := items[y]
+			if it.Project == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, glyphs) {
+				t.Fatalf("set=%v row %d %+v starts %q, want the bar %q", set, y, it, line, glyphs)
+			}
+		}
+	}
+	term := vt.NewTerm(snap.Cols, snap.Rows)
+	var b bytes.Buffer
+	DrawRail(&b, th, snap, theme.GlyphUnicode)
+	term.Write(b.Bytes())
+	term.Flush()
+	for y, it := range items {
+		g := cellOf(term, 0, y)
+		if it.Project == "" {
+			if !thinBlank(g) {
+				t.Fatalf("row %d outside a project holds %q in column 0", y, g.Char)
+			}
+			continue
+		}
+		if g.Char != theBar() {
+			t.Fatalf("row %d bar = %q, want %q", y, g.Char, th.Glyphs.WorkspaceBar)
+		}
+		want := railColour(th.Accents[it.ProjectAccent])
+		if g.FG != want {
+			t.Fatalf("row %d bar colour = %v, want %v", y, g.FG, want)
+		}
+	}
+	// The header has no fold caret: only the workspace row and its windows do.
+	for i, it := range items {
+		if it.Kind == Project && RailFoldAt(snap, 1, i) != "" {
+			t.Fatalf("project row %d answers a workspace fold", i)
+		}
+	}
+}
+
+// TestRailUntaggedWorkspaceHasNoProject proves a snapshot with no project
+// names paints no project row and no bar column.
+func TestRailUntaggedWorkspaceHasNoProject(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railRowSnap(layout.DefaultRail)
+	for _, it := range RailItems(snap) {
+		if it.Kind == Project {
+			t.Fatalf("untagged rail has a project row: %+v", it)
+		}
+		if it.Project != "" || it.ProjectAccent != 0 {
+			t.Fatalf("untagged row carries a project: %+v", it)
+		}
+	}
+	term := vt.NewTerm(snap.Cols, snap.Rows)
+	var b bytes.Buffer
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
+	term.Write(b.Bytes())
+	term.Flush()
+	for y := 0; y < snap.Rows-2; y++ {
+		if g := cellOf(term, 0, y); !thinBlank(g) {
+			t.Fatalf("row %d outside a project holds %q in column 0", y, g.Char)
+		}
+	}
+}
+
+// TestRailProjectAccentCollision proves two projects that prefer one slot get
+// different ones, the way workspaces did.
+func TestRailProjectAccentCollision(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	slots := len(theme.DefaultTheme().Accents)
+	bySlot := map[int]string{}
+	var first, second string
+	for i := 0; i < 100 && first == ""; i++ {
+		name := fmt.Sprintf("proj-%d", i)
+		slot := RailAccentSlot(name)
+		if other, ok := bySlot[slot]; ok {
+			first, second = other, name
+			break
+		}
+		bySlot[slot] = name
+	}
+	if first == "" {
+		t.Fatal("found no two project names that prefer one slot")
+	}
+	snap := &wire.Snapshot{Cols: 100, Rows: 8, Rail: layout.DefaultRail}
+	snap.All = []wire.AllPane{
+		{ID: "a", Workspace: "s1", WorkspaceName: "a", Project: first, Window: "w1", WorkspaceUnfolded: true},
+		{ID: "b", Workspace: "s2", WorkspaceName: "b", Project: second, Window: "w2", WorkspaceUnfolded: true},
+	}
+	slotOf := map[string]int{}
+	for _, it := range RailItems(snap) {
+		if it.Kind == Project {
+			slotOf[it.Text] = it.ProjectAccent
+		}
+	}
+	if slotOf[first] == slotOf[second] {
+		t.Fatalf("%q and %q share accent slot %d", first, second, slotOf[first])
+	}
+	if slotOf[first] >= slots || slotOf[second] >= slots {
+		t.Fatalf("accent slots %v run past the theme's %d", slotOf, slots)
+	}
+}
+
+// TestRailFoldCaretAfterBar proves the fold carets sit one column right of
+// where they sat before the bar took column 0.
+func TestRailFoldCaretAfterBar(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railProjectSnap(layout.DefaultRail)
+	items := RailItems(snap)
+	wsIndex, winIndex := -1, -1
+	for i, it := range items {
+		if it.Kind == Workspace && wsIndex < 0 {
+			wsIndex = i
+		}
+		if it.Kind == Window && winIndex < 0 {
+			winIndex = i
+		}
+	}
+	if wsIndex < 0 || winIndex < 0 {
+		t.Fatalf("fixture has no workspace or window row: %+v", items)
+	}
+	if got := RailFoldAt(snap, 1, wsIndex); got != items[wsIndex].Workspace {
+		t.Fatalf("RailFoldAt(1,%d) = %q, want %q", wsIndex, got, items[wsIndex].Workspace)
+	}
+	if got := RailFoldAt(snap, 0, wsIndex); got != "" {
+		t.Fatalf("RailFoldAt(0,%d) = %q, want empty", wsIndex, got)
+	}
+	if got := RailFoldAt(snap, 3, winIndex); got != items[winIndex].Window {
+		t.Fatalf("RailFoldAt(3,%d) = %q, want %q", winIndex, got, items[winIndex].Window)
+	}
+	if got := RailFoldAt(snap, 2, winIndex); got != "" {
+		t.Fatalf("RailFoldAt(2,%d) = %q, want empty", winIndex, got)
+	}
+	if got := RailPaneAt(snap, 2, winIndex); got != "" {
+		t.Fatalf("RailPaneAt(2,%d) = %q on a window row, want empty", winIndex, got)
+	}
+}
+
+// TestThinRailHasNoProject proves the thin rail drops project rows and the bar
+// column, however the snapshot is grouped.
+func TestThinRailHasNoProject(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railProjectSnap(layout.CollapsedRail)
+	for _, it := range RailItems(snap) {
+		if it.Kind != Pane {
+			t.Fatalf("thin rail has a %d row: %+v", it.Kind, it)
+		}
+	}
+	term := thinScreen(t, snap)
+	for y := 0; y < snap.Rows-2; y++ {
+		if g := cellOf(term, 0, y); theBar() == g.Char {
+			t.Fatalf("thin row %d paints the bar in column 0", y)
+		}
+	}
+	if got := RailFoldAt(snap, 1, 0); got != "" {
+		t.Fatalf("thin rail answers a fold at 1: %q", got)
+	}
+}
+
+// theBar is the first rune of the default theme's workspace bar.
+func theBar() rune {
+	for _, r := range theme.DefaultTheme().Glyphs.WorkspaceBar {
+		return r
+	}
+	return 0
 }

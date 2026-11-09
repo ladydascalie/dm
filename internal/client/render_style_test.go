@@ -316,7 +316,7 @@ func TestModalInputRowPaintsLikeTheDirectForm(t *testing.T) {
 	r := layout.Rect{X: 2, Y: 1, W: 30, H: 1}
 
 	var direct bytes.Buffer
-	renameInputRow(&direct, th, r, "worktree")
+	renameInputRow(&direct, th, r, "workspace", "worktree")
 
 	// The pre-change row: a reset, the bare ground, then one foreground escape
 	// per run.

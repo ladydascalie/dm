@@ -393,7 +393,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 		vt := vt.NewTerm(40, 6)
 		vt.Write(b.Bytes())
 		vt.Flush()
-		glyph, text := termCell(vt, 8, 2).Char, termCell(vt, 10, 2).Char
+		glyph, text := termCell(vt, 9, 2).Char, termCell(vt, 11, 2).Char
 		if glyph != ' ' || text != 'w' {
 			t.Fatalf("shell row status %q = %q at 8, %q at 10: want a blank cell",
 				status, glyph, text)
@@ -406,7 +406,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	vt := vt.NewTerm(40, 6)
 	vt.Write(b.Bytes())
 	vt.Flush()
-	glyph := termCell(vt, 8, 2).Char
+	glyph := termCell(vt, 9, 2).Char
 	if glyph != '?' {
 		t.Fatalf("agent row without a status = %q at 8, want ?", glyph)
 	}
@@ -510,11 +510,11 @@ func TestRailClickFocusesPane(t *testing.T) {
 		t.Fatalf("workspace click sent %+v, want focus w1p1", m)
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
-	tui.handleMouse(mouseEvent{btn: 0, x: 1, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, x: 2, y: 1})
 	if m := testutil.NextMsg(t, got); m.Action != "toggle-fold" || m.Target != "s1" {
 		t.Fatalf("caret click sent %+v, want toggle-fold s1", m)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 1, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 2, y: 1})
 	// A pane click still focuses the pane under the pointer, not a rail row.
 	p := tui.paneByID("w1p2")
 	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1})
@@ -626,9 +626,10 @@ func railRows(t *testing.T, snap *wire.Snapshot) []string {
 	return out
 }
 
-// TestRailWorkspaceAccent paints the caret in the workspace's own hue, keeps the
-// pane count at the right edge, and leaves a gap row empty.
-func TestRailWorkspaceAccent(t *testing.T) {
+// TestRailWorkspaceHasNoAccent proves the rail no longer paints a workspace's
+// own hue: the project owns the colour, and an untagged workspace paints none.
+// The pane count still sits at the right edge and the gap row stays empty.
+func TestRailWorkspaceHasNoAccent(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railTree(layout.DefaultRail)
 	want := map[string]theme.RGB{}
@@ -644,8 +645,8 @@ func TestRailWorkspaceAccent(t *testing.T) {
 	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	for ws, accent := range want {
-		if !painted(out, "▾", paramOf(accent, false)) {
-			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
+		if painted(out, "▾", paramOf(accent, false)) {
+			t.Fatalf("workspace %q still wears its accent %v: %q", ws, accent, out)
 		}
 	}
 	vt := vt.NewTerm(100, 12)
@@ -698,13 +699,14 @@ func TestRailAccentDistinct(t *testing.T) {
 	if len(want) != len(ids) || len(seen) != len(ids) {
 		t.Fatalf("rail has %d workspace accents, want %d", len(seen), len(ids))
 	}
-	// rail.DrawRail paints the carried accent, not a fresh hash.
+	// The slots stay distinct, but the rail paints none of them: a workspace
+	// name no longer carries its own hue.
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
 	out := b.String()
 	for ws, accent := range want {
-		if !painted(out, "▾", paramOf(accent, false)) {
-			t.Fatalf("workspace %q does not wear its accent %v: %q", ws, accent, out)
+		if painted(out, "▾", paramOf(accent, false)) {
+			t.Fatalf("workspace %q still wears its accent %v: %q", ws, accent, out)
 		}
 	}
 }

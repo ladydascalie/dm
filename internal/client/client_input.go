@@ -1866,8 +1866,9 @@ func (t *tui) closeRename() {
 }
 
 // submitRename sends the trimmed draft to the server and closes the prompt. An
-// empty result cancels: a workspace label is never blank. The prompt closes
-// first, so a refusal toast lands on the live picture.
+// empty result cancels every kind but project: a workspace label is never
+// blank, while an empty project clears the tag. The prompt closes first, so a
+// refusal toast lands on the live picture.
 func (t *tui) submitRename() {
 	if t.snap == nil {
 		t.closeRename()
@@ -1875,15 +1876,18 @@ func (t *tui) submitRename() {
 	}
 	name := strings.TrimSpace(t.renameDraft)
 	target := t.renameID
+	kind := t.renameKind
 	action := "rename-workspace"
-	switch t.renameKind {
+	switch kind {
 	case "window":
 		action = "rename-window"
 	case "pane":
 		action = "set-pane-name"
+	case "project":
+		action = "set-project"
 	}
 	t.closeRename()
-	if name == "" {
+	if name == "" && kind != "project" {
 		return
 	}
 	if t.conn != nil {
@@ -2128,6 +2132,18 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
+		if it, ok := rail.RailItemAt(t.snap, x, y); ok && it.Kind == rail.Project {
+			// A project header focuses the first pane of the group's first
+			// workspace. A second press does nothing, and the row never
+			// opens a menu.
+			if t.isRailDoubleClick(y) {
+				return true
+			}
+			if id := t.firstPaneInProject(it.Project); id != "" && t.conn != nil {
+				_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
+			}
+			return true
+		}
 		if id := rail.RailPaneAt(t.snap, x, y); id != "" {
 			// A pane row focuses its pane. A second press on the same row
 			// within the double click window opens the rename prompt.
@@ -2195,6 +2211,32 @@ func (t *tui) windowForPane(pane string) string {
 	for _, p := range t.snap.All {
 		if p.ID == pane {
 			return p.Window
+		}
+	}
+	return ""
+}
+
+// firstPaneInProject returns the first pane of the group's first workspace, or
+// "" when the group or that workspace has no pane. A project row click goes
+// here: the row names the group, and the group's first workspace is the first
+// workspace row tagged with that project.
+func (t *tui) firstPaneInProject(project string) string {
+	if t.snap == nil || project == "" {
+		return ""
+	}
+	workspace := ""
+	for _, it := range rail.RailItems(t.snap) {
+		if it.Kind == rail.Workspace && it.Project == project {
+			workspace = it.Workspace
+			break
+		}
+	}
+	if workspace == "" {
+		return ""
+	}
+	for _, p := range t.snap.All {
+		if p.Workspace == workspace {
+			return p.ID
 		}
 	}
 	return ""

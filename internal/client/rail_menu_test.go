@@ -95,9 +95,9 @@ func TestRailMenuWorkspaceRow(t *testing.T) {
 		t.Fatalf("title = %q, want workspace main", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu,
-		"New window", "Rename workspace", "Close workspace")
+		"New window", "Rename workspace", "Set project", "Close workspace")
 	testutil.NoMsg(t, got)
-	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 3, y: 1})
+	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 4, y: 1})
 	if tui.mode != "menu" {
 		t.Fatal("the release of the opening press closed the menu")
 	}
@@ -330,22 +330,22 @@ func TestRailLeftPressFocusesPane(t *testing.T) {
 // toggles the workspace's fold instead.
 func TestRailLeftPressFocusesWorkspacePane(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, x: 4, y: 1})
 	m := testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p1" {
 		t.Fatalf("left press on the workspace row sent %+v, want focus w1p1", m)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 4, y: 1})
 	testutil.NoMsg(t, got)
 
-	// A press on the caret cell (zero-based column 0, so mouse x 1) toggles
+	// A press on the caret cell (zero-based column 1, so mouse x 2) toggles
 	// the workspace's fold.
-	tui.handleMouse(mouseEvent{btn: 0, x: 1, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, x: 2, y: 1})
 	m = testutil.NextMsg(t, got)
 	if m.Type != "req" || m.Action != "toggle-fold" || m.Target != "s1" {
 		t.Fatalf("left press on the caret sent %+v, want toggle-fold s1", m)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 1, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 2, y: 1})
 	testutil.NoMsg(t, got)
 }
 
@@ -380,13 +380,13 @@ func TestRailDoubleClickRenamesWindow(t *testing.T) {
 	tui, got := railMenuTUI(t)
 	// The window caret is zero-based column 2, so the name starts at column 4
 	// and the mouse column is 5.
-	tui.handleMouse(mouseEvent{btn: 0, x: 5, y: 2})
+	tui.handleMouse(mouseEvent{btn: 0, x: 6, y: 2})
 	if m := testutil.NextMsg(t, got); m.Action != "focus" {
 		t.Fatalf("first press sent %+v, want focus", m)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 5, y: 2})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 6, y: 2})
 	testutil.NoMsg(t, got)
-	tui.handleMouse(mouseEvent{btn: 0, x: 5, y: 2})
+	tui.handleMouse(mouseEvent{btn: 0, x: 6, y: 2})
 	testutil.NoMsg(t, got)
 	if tui.mode != "rename" {
 		t.Fatalf("second press mode = %q, want rename", tui.mode)
@@ -395,7 +395,7 @@ func TestRailDoubleClickRenamesWindow(t *testing.T) {
 		t.Fatalf("prompt = kind %q id %q draft %q, want window w1 one",
 			tui.renameKind, tui.renameID, tui.renameDraft)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 5, y: 2})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 6, y: 2})
 	testutil.NoMsg(t, got)
 }
 
@@ -404,15 +404,15 @@ func TestRailDoubleClickRenamesWindow(t *testing.T) {
 // prompt instead of focusing again.
 func TestRailDoubleClickRenamesWorkspace(t *testing.T) {
 	tui, got := railMenuTUI(t)
-	// The workspace caret is zero-based column 0, so the name starts at
-	// column 2 and the mouse column is 3.
-	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	// The project bar owns column 0, so the workspace caret is zero-based
+	// column 1 and the name starts at column 3. The mouse column is 4.
+	tui.handleMouse(mouseEvent{btn: 0, x: 4, y: 1})
 	if m := testutil.NextMsg(t, got); m.Action != "focus" {
 		t.Fatalf("first press sent %+v, want focus", m)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 4, y: 1})
 	testutil.NoMsg(t, got)
-	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, x: 4, y: 1})
 	testutil.NoMsg(t, got)
 	if tui.mode != "rename" {
 		t.Fatalf("second press mode = %q, want rename", tui.mode)
@@ -421,7 +421,7 @@ func TestRailDoubleClickRenamesWorkspace(t *testing.T) {
 		t.Fatalf("prompt = kind %q id %q draft %q, want workspace s1 main",
 			tui.renameKind, tui.renameID, tui.renameDraft)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 1})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 4, y: 1})
 	testutil.NoMsg(t, got)
 }
 
@@ -434,7 +434,7 @@ func TestRailMenuKeyHints(t *testing.T) {
 	}{
 		{0, map[string]string{
 			"New window": "c", "Rename workspace": "r",
-			"Close workspace": "",
+			"Set project": "", "Close workspace": "",
 		}},
 		{1, map[string]string{
 			"Rename window": "", "Close window": "X",

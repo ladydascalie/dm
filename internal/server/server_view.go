@@ -176,7 +176,7 @@ func (s *server) allPanesLocked() []wire.AllPane {
 			winActive := wsActive && j == ws.Active
 			for _, id := range layout.AllPanes(w.Root) {
 				info := wire.AllPane{
-					ID: id, Workspace: ws.ID, WorkspaceName: ws.Name,
+					ID: id, Workspace: ws.ID, WorkspaceName: ws.Name, Project: ws.Project,
 					Window: w.ID, WindowName: w.Name, WindowNamed: w.Named,
 					WorkspaceActive: wsActive, WindowActive: winActive,
 					Focus: winActive && id == w.Focus,

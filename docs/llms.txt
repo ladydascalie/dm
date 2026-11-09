@@ -25,6 +25,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm split` | `<pane> --dir D` | split a pane: left right up down | `dm split w1p1 --dir right` |
 | `dm focus` | `<pane>` | focus a pane | `dm focus w1p2` |
 | `dm rename-workspace` | `<ws> <name>` | rename a workspace | `dm rename-workspace s1 build` |
+| `dm set-project` | `<ws> [name]` | set a workspace's project, or clear it with no name | `dm set-project s1 dm` |
 | `dm next-pane` | `-` | focus the next pane | `dm next-pane` |
 | `dm prev-pane` | `-` | focus the previous pane | `dm prev-pane` |
 | `dm new-window` | `-` | open a new window | `dm new-window` |
@@ -102,7 +103,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `toggle-fold` | `{"action":"toggle-fold","target":"w1"}` |
 | `set-pane-name` | `{"action":"set-pane-name","target":"w1p1","name":"tests"}` |
 | `focus-window`, `focus-workspace` | `{"action":"focus-window","target":"w1"}`, `{"action":"focus-workspace","target":"s1"}` |
-| `rename-window`, `rename-workspace` | `{"action":"rename-window","target":"w1","name":"build"}`, `{"action":"rename-workspace","target":"s1","name":"build"}` |
+| `rename-window`, `rename-workspace`, `set-project` | `{"action":"rename-window","target":"w1","name":"build"}`, `{"action":"rename-workspace","target":"s1","name":"build"}`, `{"action":"set-project","target":"s1","name":"dm"}` |
 | `msg-post` | `{"action":"msg-post","res":{"key":"build","state":"done","msg":"all green"}}` |
 | `msg-list` | `{"action":"msg-list","res":{"key":"build","limit":20}}` |
 | `msg-clear` | `{"action":"msg-clear","res":{"key":"build"}}` |

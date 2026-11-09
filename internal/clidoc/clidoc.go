@@ -159,6 +159,14 @@ var cliCommands = []cliCommand{
 		group:   groupPane,
 	},
 	{
+		name:    "set-project",
+		args:    "<ws> [name]",
+		summary: "set a workspace's project, or clear it with no name",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		example: "dm set-project s1 dm",
+		group:   groupPane,
+	},
+	{
 		name:    "next-pane",
 		summary: "focus the next pane",
 		flags:   []cliFlag{{"s", "name", "session name"}},

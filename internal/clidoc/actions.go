@@ -58,6 +58,7 @@ var actionExamples = []actionExample{
 
 	{"rename-window", `{"action":"rename-window","target":"w1","name":"build"}`},
 	{"rename-workspace", `{"action":"rename-workspace","target":"s1","name":"build"}`},
+	{"set-project", `{"action":"set-project","target":"s1","name":"dm"}`},
 
 	{"msg-post", `{"action":"msg-post","res":{"key":"build","state":"done","msg":"all green"}}`},
 	{"msg-list", `{"action":"msg-list","res":{"key":"build","limit":20}}`},

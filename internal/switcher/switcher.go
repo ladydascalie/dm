@@ -74,9 +74,9 @@ func (s *Switcher) Sync(snap *wire.Snapshot) {
 // switcherTree is the rail tree the float shows: rail.RailItems on a copy of the
 // snapshot with no rail, so the rows are never compact, and with every
 // workspace and window forced unfolded, so a fold never hides a pane the
-// switcher could jump to. Note rows are dropped: a switcher is not a status
-// board. Gap rows stay to keep the blocks apart, and only they are
-// unselectable.
+// switcher could jump to. Note rows and project rows are dropped: a switcher
+// is not a status board. Gap rows stay to keep the blocks apart, and only they
+// are unselectable.
 func switcherTree(snap *wire.Snapshot) []rail.RailItem {
 	if snap == nil {
 		return nil
@@ -91,7 +91,7 @@ func switcherTree(snap *wire.Snapshot) []rail.RailItem {
 	}
 	var out []rail.RailItem
 	for _, it := range rail.RailItems(&cp) {
-		if it.Kind == rail.WindowNote {
+		if it.Kind == rail.WindowNote || it.Kind == rail.Project {
 			continue
 		}
 		out = append(out, it)

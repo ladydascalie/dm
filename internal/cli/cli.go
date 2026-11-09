@@ -290,6 +290,18 @@ func Run(argv []string) error {
 		}
 		return printRPC(c.session, wire.Msg{Action: "rename-workspace", Target: c.args[0], Name: c.args[1]})
 
+	case "set-project":
+		c := newFlags("set-project")
+		c.parse(argv[1:])
+		if len(c.args) < 1 {
+			return fmt.Errorf("set-project needs a workspace id and a project name")
+		}
+		name := ""
+		if len(c.args) > 1 {
+			name = c.args[1]
+		}
+		return printRPC(c.session, wire.Msg{Action: "set-project", Target: c.args[0], Name: name})
+
 	case "next-pane", "prev-pane", "new-window", "next-window", "prev-window":
 		c := newFlags(argv[0])
 		c.parse(argv[1:])

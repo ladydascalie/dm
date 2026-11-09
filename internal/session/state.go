@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 
 	"dm/internal/box"
@@ -26,8 +27,11 @@ type Window struct {
 }
 
 type Workspace struct {
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Project is the name of the project the workspace belongs to. Workspaces
+	// that share a name form one contiguous group. Empty means no project.
+	Project string    `json:"project,omitempty"`
 	Windows []*Window `json:"windows"`
 	Active  int       `json:"active"`
 	// Unfolded shows the workspace's pane rows in the rail. A workspace starts
@@ -208,6 +212,9 @@ func LoadState(name string) (*State, error) {
 		st.IDVersion = 2
 		changed = true
 	}
+	// A hand-edited or interleaved state file loads grouped, because the rail
+	// and the cycle keys both read the slice order.
+	st.GroupWorkspaces()
 	// Windows used to be named by position. Rename the unchanged numeric ones
 	// after the folder they start in, which is what a new window gets now.
 	for _, ws := range st.Workspaces {
@@ -229,6 +236,46 @@ func LoadState(name string) (*State, error) {
 		_ = st.Save()
 	}
 	return st, nil
+}
+
+// GroupWorkspaces stable-sorts st.Workspaces so workspaces that share a project
+// are contiguous. The first appearance of a project decides the group's
+// position, and the order inside a group is preserved. A workspace with no
+// project is its own group of one, keyed by its id, so untagged workspaces
+// never merge with each other. Active follows the workspace it named before the
+// sort. An out-of-range Active stays out of range.
+func (st *State) GroupWorkspaces() {
+	// Active is an index into the slice, so it has to survive the reorder.
+	var activeID string
+	activeOK := st.Active >= 0 && st.Active < len(st.Workspaces)
+	if activeOK {
+		activeID = st.Workspaces[st.Active].ID
+	}
+	key := func(ws *Workspace) string {
+		if ws.Project == "" {
+			return "\x00" + ws.ID
+		}
+		return "p" + ws.Project
+	}
+	rank := make(map[string]int, len(st.Workspaces))
+	for _, ws := range st.Workspaces {
+		k := key(ws)
+		if _, ok := rank[k]; !ok {
+			rank[k] = len(rank)
+		}
+	}
+	sort.SliceStable(st.Workspaces, func(i, j int) bool {
+		return rank[key(st.Workspaces[i])] < rank[key(st.Workspaces[j])]
+	})
+	if !activeOK {
+		return
+	}
+	for i, ws := range st.Workspaces {
+		if ws.ID == activeID {
+			st.Active = i
+			return
+		}
+	}
 }
 
 // dropBadBoxEntries removes entries that fail the box contract and reports how

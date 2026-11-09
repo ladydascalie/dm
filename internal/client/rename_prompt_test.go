@@ -432,3 +432,74 @@ func TestRenamePromptBandRepaints(t *testing.T) {
 		t.Fatalf("steady frame after close wrote %d bytes: %q", len(got), got)
 	}
 }
+
+// The workspace row's menu offers Set project after Rename workspace. The
+// prompt opens on the workspace's current project and sends set-project, not a
+// rename, when it submits.
+func TestRenamePromptSetProjectMenuRow(t *testing.T) {
+	tr, got := renamePromptTUI(t)
+	tr.openRailMenu(rail.RailItem{
+		Kind: rail.Workspace, Text: "main", Workspace: "s1", Project: "dm",
+	}, 10, 10)
+	found := false
+	for _, it := range tr.menu.items {
+		if it.label != "Set project" {
+			continue
+		}
+		found = true
+		if it.key != "" {
+			t.Fatalf("Set project key = %q, want no hint", it.key)
+		}
+		it.run()
+	}
+	if !found {
+		t.Fatal("the menu has no Set project row")
+	}
+	if tr.menu != nil {
+		t.Fatalf("menu is still open: %+v", tr.menu)
+	}
+	if tr.mode != "rename" || tr.renameKind != "project" || tr.renameID != "s1" || tr.renameDraft != "dm" {
+		t.Fatalf("menu row gave mode %q kind %q id %q draft %q",
+			tr.mode, tr.renameKind, tr.renameID, tr.renameDraft)
+	}
+	renamePromptKeys(tr, "\r")
+	m := testutil.NextMsg(t, got)
+	if m.Type != "req" || m.Action != "set-project" || m.Target != "s1" || m.Name != "dm" {
+		t.Fatalf("sent %+v, want req set-project s1 dm", m)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// An empty draft clears the project instead of cancelling: set-project goes out
+// with an empty name.
+func TestRenamePromptSetProjectEmptyDraftClears(t *testing.T) {
+	tr, got := renamePromptTUI(t)
+	tr.openRenamePromptFor("project", "s1", "dm")
+	renamePromptKeys(tr, "\x15\r")
+	if tr.mode != "" {
+		t.Fatalf("mode = %q after enter, want empty", tr.mode)
+	}
+	m := testutil.NextMsg(t, got)
+	if m.Type != "req" || m.Action != "set-project" || m.Target != "s1" || m.Name != "" {
+		t.Fatalf("sent %+v, want req set-project s1 with an empty name", m)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// The project prompt names its kind in the title and labels the input row
+// "project: ".
+func TestRenamePromptProjectLabel(t *testing.T) {
+	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 80, 12, nil)
+	box, p := renameFloatPaint(t, snap, "s1", "dm", "project")
+	renameFloatInside(t, box, p)
+	if got := renameFloatRow(p, box.Y-1, box.X-1, box.W+2); !strings.Contains(got, "set project s1") {
+		t.Fatalf("title row = %q, want set project and the id", got)
+	}
+	row := renameFloatRow(p, box.Y, box.X, box.W)
+	if !strings.HasPrefix(row, "project: dm") {
+		t.Fatalf("input row = %q, want the project label and the draft", row)
+	}
+	if !strings.HasSuffix(row, "▏") {
+		t.Fatalf("input row = %q, want the caret last", row)
+	}
+}

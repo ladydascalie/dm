@@ -406,13 +406,34 @@ detach.
 ## Sidebar
 
 The left columns of the screen show a sidebar when the session asks for one.
-It is a tree: a workspace row, then its windows, then each window's panes. A
-workspace starts unfolded. A workspace row leads with a caret in the
-workspace's own accent colour, then its name in bold, then the pane count at
-the right edge in dim grey. The accent is one of six hues: a stable hash of the
-workspace id picks the preferred one, and the rail gives up to six live
-workspaces distinct hues. A workspace keeps its accent while the workspace list
-holds. One blank row separates workspace blocks.
+It is a tree: a project header, then its workspaces, then each workspace's
+windows, then each window's panes. A workspace starts unfolded. A workspace row
+leads with a caret, then its name in bold, then the pane count at the right
+edge in dim grey. One blank row separates workspace blocks.
+
+A workspace may carry a project name. Workspaces that share a name form one
+group, and the rail paints the group as one block. A group opens with a project
+header row: the bar in column 0, the project name in the project's accent and
+bold, then the group's workspace count at the right edge. Every row of the
+group paints the same bar in column 0, the header included. A row outside a
+project leaves that cell blank, so the fold carets keep one x for the whole
+rail. The bar is the tie. The header is the name.
+
+A project name hashes to one of six accents, with the collision avoidance the
+rail uses elsewhere: a preferred slot, then the next free slot. Two projects in
+one session never share a hue. The project owns the colour, so a workspace name
+drops its own accent: the active workspace name is bright, the rest are header
+grey, both bold.
+
+Workspaces that share a project stay contiguous. The state slice is the order,
+and a group keeps the position of its first workspace; order inside a group
+holds. The rail never re-sorts: it paints the slice order it is given, and
+`next-workspace` and `prev-workspace` walk the same slice, so the keys and the
+rail agree on where the next workspace is. A new workspace lands at the end of
+its project's block, and inherits the project of the workspace it was created
+from. `dm set-project <ws> <name>` tags a workspace; an empty name clears the
+tag. The workspace row menu offers `Set project`, which opens the rename prompt
+with the current project as its draft.
 
 Under an unfolded workspace, each window gets a window row. It leads with a
 caret at the second indent, then the rendered window label, then the branch in
@@ -437,12 +458,13 @@ glyph keeps its column. The report is sticky: `state=clear` does not demote an
 agent, and both the mark and the last `app=` are stored in the state file. The
 focused pane's row is highlighted.
 
-A left press on a workspace row focuses the first available pane in that
-workspace. A left press on the workspace caret toggles the workspace fold
-without changing focus. A left press on a window row focuses the first
-available pane in that window and makes that window the active window. A left
-press on the window caret toggles the window fold without changing focus. A
-left press on a pane row focuses that pane. A pane in another window switches
+A left press on a project header row focuses the first pane of the group's
+first workspace. A left press on a workspace row focuses the first available
+pane in that workspace. A left press on the workspace caret toggles the
+workspace fold without changing focus. A left press on a window row focuses the
+first available pane in that window and makes that window the active window. A
+left press on the window caret toggles the window fold without changing focus.
+A left press on a pane row focuses that pane. A pane in another window switches
 the active window as well. Double-clicking a workspace row opens the inline
 rename prompt for that workspace. Double-clicking a window row opens the inline
 rename prompt for that window, the same prompt the tab bar double-click opens.
@@ -470,8 +492,8 @@ default, at most a third of the screen and never wider than 46 columns;
 `set-rail` changes it. `prefix b` cycles the sidebar through three states:
 full, thin, and hidden. The thin rail is four columns: the agent bar, one state
 glyph per pane, and no names. It always lists panes, folded or not, and packs
-one row per pane, with no header, note or gap row. A hidden or thin sidebar
-remembers the last full width.
+one row per pane, with no header, note or gap row, and no project header or
+bar. A hidden or thin sidebar remembers the last full width.
 
 The rail's last column is a grab strip: drag it to resize the rail from four
 columns up to a third of the screen, capped at 46. A drag to the left collapses

@@ -258,7 +258,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var wsid, wid, pid string
 		err := s.mutation(func() error {
 			var e error
-			wsid, wid, pid, e = s.newWorkspace(m.Name, m.Window, m.Cwd, m.NoFocus)
+			wsid, wid, pid, e = s.newWorkspace(m.Name, m.Window, m.Cwd, m.Project, m.NoFocus)
 			return e
 		})
 		s.afterMutation()
@@ -402,6 +402,12 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			return
 		}
 		s.reply(cl, m, box.SchemaReply{Schema: box.Schema()}, nil)
+
+	case "set-project":
+		project := strings.TrimSpace(m.Name)
+		err := s.mutation(func() error { return s.setProject(m.Target, project) })
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"workspace": m.Target, "project": project}, err)
 
 	case "rename-workspace":
 		name := strings.TrimSpace(m.Name)
