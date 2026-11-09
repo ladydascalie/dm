@@ -494,6 +494,24 @@ func (p *paneProc) serve(c net.Conn) {
 			alt, mouse := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
 			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse)})
+		case "reflow":
+			if m.Cols < 2 || m.Rows < 2 {
+				continue
+			}
+			p.mu.Lock()
+			// A pane whose app is on the alternate screen is not reflowed: the
+			// app repaints itself on SIGWINCH and that screen is not history.
+			// Its grid stays as it is, and the snapshot answers with it.
+			if !p.vt.Grid().Modes().AltScreen {
+				// The PTY was already sized by the resize action, and a reflow
+				// is a picture, not output: leave the PTY size and the ring
+				// alone. Only the screen is rebuilt, from the ring's stream.
+				p.vt = vt.Reflow(p.ring.Bytes(), m.Cols, m.Rows)
+			}
+			snap := p.vt.Snapshot()
+			alt, mouse := modeInfo(p.vt.Grid().Modes())
+			p.mu.Unlock()
+			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse)})
 		case "replay":
 			p.mu.Lock()
 			data := p.ring.Bytes()
