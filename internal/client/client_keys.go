@@ -532,6 +532,12 @@ func (t *tui) key(b byte) {
 // untouched. On success it swaps both in place, marks the frame dirty and
 // toasts.
 func (t *tui) reload() error {
+	// The server owns the layout padding and the fold a new window gets, so it
+	// re-reads the same file. The reply lands on the message loop, not here: a
+	// server error is toasted there and never stops the client's own read.
+	if t.conn != nil {
+		_ = t.conn.Send(wire.Msg{Type: "req", Action: "reload"})
+	}
 	cfg, err := keymap.LoadDefaultPath(false)
 	if err != nil {
 		return err
