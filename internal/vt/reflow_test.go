@@ -196,3 +196,144 @@ func BenchmarkReflow512K(b *testing.B) {
 		Reflow(ring, 200, 50)
 	}
 }
+
+// windowStream builds a raw stream of n lines. body returns one line without
+// its ending; every line ends in \r\n.
+func windowStream(n int, body func(i int) string) []byte {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteString(body(i))
+		b.WriteString("\r\n")
+	}
+	return []byte(b.String())
+}
+
+// TestReflowStartWindow pins the offset derivation: a short ring replays whole,
+// a normal stream starts on the next line boundary, and a stream that ends in a
+// line longer than the window starts at that line's beginning so its wrap stays
+// aligned.
+func TestReflowStartWindow(t *testing.T) {
+	short := []byte("abc\r\n")
+	if got := reflowStart(short, 10, 2); got != 0 {
+		t.Errorf("short ring start = %d, want 0", got)
+	}
+
+	// Four printable bytes per line at two columns: the window keeps the last
+	// line and starts after the newline that ends the previous one.
+	lines := []byte("aaaa\r\nbbbb\r\ncccc\r\n")
+	if got := reflowStart(lines, 2, 1); got != len("aaaa\r\nbbbb\r\n") {
+		t.Errorf("line-boundary start = %d, want %d", got, len("aaaa\r\nbbbb\r\n"))
+	}
+
+	// A line longer than the window has no boundary near the cutoff, so the
+	// replay starts where the line starts.
+	long := []byte("aa\r\n" + strings.Repeat("0123456789", 600))
+	if got := reflowStart(long, 10, 2); got != len("aa\r\n") {
+		t.Errorf("long-line start = %d, want %d", got, len("aa\r\n"))
+	}
+
+	// A long line inside the window with enough text after it: the next
+	// boundary still fills the screen, so the cut moves past the long line.
+	longBody := strings.Repeat("0123456789", 3)
+	longThenMany := []byte(longBody + "\r\nabcdefghij\r\nklmnopqrst")
+	wantPastLong := len(longBody) + len("\r\n")
+	if got := reflowStart(longThenMany, 10, 2); got != wantPastLong {
+		t.Errorf("long-line follow start = %d, want %d", got, wantPastLong)
+	}
+	// One line fewer and the boundary leaves less than a screenful, so the
+	// long line starts the replay and its wrap stays aligned.
+	longThenFew := []byte(longBody + "\r\nabcdefghij\r\nklmno")
+	if got := reflowStart(longThenFew, 10, 2); got != 0 {
+		t.Errorf("long-line tail start = %d, want 0", got)
+	}
+
+	// An ordinary long stream is cut, not replayed whole.
+	big := windowStream(2000, func(i int) string { return fmt.Sprintf("line %04d %s", i, strings.Repeat("x", 20)) })
+	if start := reflowStart(big, 80, 24); start <= 0 || start >= len(big) {
+		t.Errorf("big ring start = %d, want a cut inside 0..%d", start, len(big))
+	}
+}
+
+// TestReflowWindowSameScreen proves the window never changes a visible row:
+// every size and stream gives the same rows and cursor as a replay that is
+// forced to start at the ring's first byte.
+func TestReflowWindowSameScreen(t *testing.T) {
+	plain := windowStream(2000, func(i int) string {
+		return fmt.Sprintf("line %04d %s", i, strings.Repeat("x", 20))
+	})
+	coloured := windowStream(2000, func(i int) string {
+		return fmt.Sprintf("\x1b[1;32mline %04d\x1b[0m \x1b[34m%s\x1b[0m", i, strings.Repeat("y", 20))
+	})
+	wide := windowStream(1000, func(i int) string {
+		return strings.Repeat("日本語", 10)
+	})
+	combining := windowStream(1000, func(i int) string {
+		return strings.Repeat("e\u0301", 15)
+	})
+	cleared := func() []byte {
+		var b bytes.Buffer
+		for i := 0; i < 2000; i++ {
+			if i%50 == 0 {
+				b.WriteString("\x1b[2J\x1b[H")
+			}
+			fmt.Fprintf(&b, "row %04d %s\r\n", i, strings.Repeat("c", 20))
+		}
+		return b.Bytes()
+	}()
+	longMiddle := func() []byte {
+		var b bytes.Buffer
+		for i := 0; i < 2000; i++ {
+			if i == 1200 {
+				b.WriteString(strings.Repeat("0123456789", 600) + "01234\r\n")
+				continue
+			}
+			fmt.Fprintf(&b, "line %04d %s\r\n", i, strings.Repeat("m", 20))
+		}
+		return b.Bytes()
+	}()
+	longTail := func() []byte {
+		b := append([]byte(nil), plain...)
+		b = append(b, []byte(strings.Repeat("0123456789", 600)+"01234\r\n")...)
+		return append(b, []byte("last one\r\nsecond\r\nthird\r\n")...)
+	}()
+	longLast := append(append([]byte(nil), plain...), []byte(strings.Repeat("0123456789", 600)+"01234")...)
+
+	cases := []struct {
+		name string
+		ring []byte
+	}{
+		{"plain", plain},
+		{"coloured", coloured},
+		{"wide", wide},
+		{"combining", combining},
+		{"clear", cleared},
+		{"long middle", longMiddle},
+		{"long tail", longTail},
+		{"long last", longLast},
+	}
+	sizes := []struct{ cols, rows int }{
+		{20, 6},
+		{80, 24},
+		{200, 50},
+	}
+	for _, tc := range cases {
+		for _, size := range sizes {
+			t.Run(fmt.Sprintf("%s/%dx%d", tc.name, size.cols, size.rows), func(t *testing.T) {
+				windowed := Reflow(tc.ring, size.cols, size.rows)
+				whole := reflowFrom(tc.ring, size.cols, size.rows, 0)
+
+				if got, want := windowed.Grid().Cursor(), whole.Grid().Cursor(); got != want {
+					t.Errorf("cursor = %+v, want the whole-ring %+v", got, want)
+				}
+				for y := 0; y < size.rows; y++ {
+					if got, want := windowed.Grid().Text(y), whole.Grid().Text(y); got != want {
+						t.Errorf("row %d = %q, want the whole-ring %q", y, got, want)
+					}
+					if got, want := windowed.Grid().LineWrapped(y), whole.Grid().LineWrapped(y); got != want {
+						t.Errorf("row %d wrapped = %v, want %v", y, got, want)
+					}
+				}
+			})
+		}
+	}
+}
