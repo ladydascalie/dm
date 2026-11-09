@@ -123,7 +123,18 @@ func ManPage() string {
 		b.WriteString(roffEscape(f.desc) + "\n")
 	}
 	b.WriteString(".PP\n")
-	b.WriteString("The action field names one of: " + roffEscape(strings.Join(manActionNames, ", ")) + ".\n")
+	b.WriteString("The action field names one of these. Each example is one JSON object, carrying only the fields that action needs.\n")
+	for _, n := range manActionNames {
+		b.WriteString(".TP\n")
+		b.WriteString(roffBold(n) + "\n")
+		ex, ok := actionExampleOf(n)
+		if !ok {
+			ex = `{"action":"` + n + `"}`
+		}
+		b.WriteString(".nf\n")
+		b.WriteString(roffEscape(ex) + "\n")
+		b.WriteString(".fi\n")
+	}
 
 	b.WriteString(".SH KEYS\n")
 	b.WriteString("The default keymap. A key label is the key pressed after the prefix key.\n")

@@ -132,6 +132,27 @@ func llmsCell(s string) string {
 	return strings.ReplaceAll(s, "|", `\|`)
 }
 
+// llmsActionGroups is how the action table packs its rows. A page that gave
+// every action its own row would push llms.txt past its one-pass line budget,
+// so the actions with no fields of their own share a row with their nearest
+// sibling. Every action in manActionNames appears here exactly once.
+var llmsActionGroups = [][]string{
+	{"ping", "list"},
+	{"read"}, {"history"}, {"replay"}, {"status"},
+	{"write-to"}, {"exec"}, {"keys"},
+	{"split"}, {"zoom-pane"}, {"set-rail"}, {"resize-split"},
+	{"focus"}, {"focus-dir"}, {"next-pane", "prev-pane"}, {"close-pane"},
+	{"close-window", "close-workspace"}, {"new-window"},
+	{"next-window", "prev-window"}, {"select-window"},
+	{"new-workspace"}, {"next-workspace", "prev-workspace"},
+	{"list-workspaces", "list-panes"},
+	{"pane"}, {"toggle-fold"}, {"set-pane-name"},
+	{"focus-window", "focus-workspace"},
+	{"rename-window", "rename-workspace"},
+	{"msg-post"}, {"msg-list"}, {"msg-clear"}, {"msg-wait"}, {"msg-sub"},
+	{"msg-watchers", "msg-schema"},
+}
+
 // LLMsText renders the whole page.
 func LLMsText() string {
 	var b strings.Builder
@@ -161,6 +182,23 @@ func LLMsText() string {
 	b.WriteString("| --- | --- |\n")
 	for _, f := range manActionFields {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", f.name, f.desc)
+	}
+
+	b.WriteString("\nThe action field names one of these. Each example is one JSON object, carrying only the fields that action needs.\n\n")
+	b.WriteString("| Action | Example |\n")
+	b.WriteString("| --- | --- |\n")
+	for _, group := range llmsActionGroups {
+		names := make([]string, 0, len(group))
+		examples := make([]string, 0, len(group))
+		for _, n := range group {
+			names = append(names, "`"+n+"`")
+			ex, ok := actionExampleOf(n)
+			if !ok {
+				ex = `{"action":"` + n + `"}`
+			}
+			examples = append(examples, "`"+llmsCell(ex)+"`")
+		}
+		fmt.Fprintf(&b, "| %s | %s |\n", strings.Join(names, ", "), strings.Join(examples, ", "))
 	}
 
 	b.WriteString("\n## Keys\n\n")
