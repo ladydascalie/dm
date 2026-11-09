@@ -364,21 +364,54 @@ func TestReflowWindowSameScreen(t *testing.T) {
 	for _, tc := range cases {
 		for _, size := range sizes {
 			t.Run(fmt.Sprintf("%s/%dx%d", tc.name, size.cols, size.rows), func(t *testing.T) {
-				windowed := Reflow(tc.ring, size.cols, size.rows)
-				whole := reflowFrom(tc.ring, size.cols, size.rows, 0)
-
-				if got, want := windowed.Grid().Cursor(), whole.Grid().Cursor(); got != want {
-					t.Errorf("cursor = %+v, want the whole-ring %+v", got, want)
-				}
-				for y := 0; y < size.rows; y++ {
-					if got, want := windowed.Grid().Text(y), whole.Grid().Text(y); got != want {
-						t.Errorf("row %d = %q, want the whole-ring %q", y, got, want)
-					}
-					if got, want := windowed.Grid().LineWrapped(y), whole.Grid().LineWrapped(y); got != want {
-						t.Errorf("row %d wrapped = %v, want %v", y, got, want)
-					}
-				}
+				compareReflow(t, tc.ring, size.cols, size.rows)
 			})
 		}
+	}
+}
+
+// compareReflow requires the windowed replay to match a replay of the whole
+// ring on every row, every wrap flag and the cursor.
+func compareReflow(t *testing.T, ring []byte, cols, rows int) {
+	t.Helper()
+	windowed := Reflow(ring, cols, rows)
+	whole := reflowFrom(ring, cols, rows, 0)
+
+	if got, want := windowed.Grid().Cursor(), whole.Grid().Cursor(); got != want {
+		t.Errorf("cursor = %+v, want the whole-ring %+v", got, want)
+	}
+	for y := 0; y < rows; y++ {
+		if got, want := windowed.Grid().Text(y), whole.Grid().Text(y); got != want {
+			t.Errorf("row %d = %q, want the whole-ring %q", y, got, want)
+		}
+		if got, want := windowed.Grid().LineWrapped(y), whole.Grid().LineWrapped(y); got != want {
+			t.Errorf("row %d wrapped = %v, want %v", y, got, want)
+		}
+	}
+}
+
+// TestReflowPagerInsideWindow is the review repro: a pager cycle that lies
+// wholly inside the window. The alt dump is between roughly one and two
+// screens, so the cutoff lands after the ?1049h entry and the prefix check
+// alone does not fire; the window saves its own partial primary screen and the
+// ?1049l restore leaves the top rows blank and the prompt too high.
+func TestReflowPagerInsideWindow(t *testing.T) {
+	cases := []struct{ cols, rows, altLines int }{
+		{80, 24, 90},
+		{200, 50, 520},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%dx%d", tc.cols, tc.rows), func(t *testing.T) {
+			var b bytes.Buffer
+			for i := 0; i < 2000; i++ {
+				fmt.Fprintf(&b, "primary line %04d %s\r\n", i, strings.Repeat("p", 20))
+			}
+			b.WriteString("\x1b[?1049h\x1b[2J\x1b[H")
+			for i := 0; i < tc.altLines; i++ {
+				fmt.Fprintf(&b, "alt line %04d %s\r\n", i, strings.Repeat("v", 20))
+			}
+			b.WriteString("\x1b[?1049luser@host$ ")
+			compareReflow(t, b.Bytes(), tc.cols, tc.rows)
+		})
 	}
 }

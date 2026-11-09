@@ -34,12 +34,17 @@ import "bytes"
 // first line is accepted: replaying back to its beginning could walk the whole
 // ring. A ring no longer than the window is replayed whole, byte for byte.
 //
-// A skipped prefix that switches screens forces a whole-ring replay. A pager
-// saves the primary screen on ?1049h and restores it on ?1049l; a window that
-// starts inside that cycle either restores nothing or drops the saved primary
-// content, so every row would be wrong. The pane checks only the current mode,
-// which is primary again after ?1049l. The cycle is rare, so replaying the
-// whole ring (a few hundred milliseconds) is the cheap safe answer.
+// A ring that switches screens forces a whole-ring replay, whether the switch
+// is in the skipped prefix or in the slice the window would replay. A pager
+// saves the primary screen on ?1049h and restores it on ?1049l. If the window
+// starts inside the cycle, the primary screen it restores lost the rows above
+// the window. If the cycle sits wholly inside the window, the window saves a
+// partial primary screen and the restore leaves the top blank and the prompt
+// too high. The pane sees primary mode again after ?1049l, so it cannot refuse
+// either result. The cycle is rare and its window is a pager dump, so the
+// trade is one slow replay for correctness: this fires only when one of the
+// eight sequences appears, anywhere and for any pane output, and the whole
+// ring costs a few hundred milliseconds then.
 //
 // The window assumes the dropped prefix does not change the screen state that
 // survives it: a style or a mode set before the window is not replayed. The
@@ -120,10 +125,13 @@ func reflowStart(ring []byte, cols, rows int) int {
 	if start == 0 {
 		return 0
 	}
-	// A screen switch in the skipped prefix forces the whole ring: the saved
-	// primary screen cannot be rebuilt from a window that starts inside the
-	// cycle.
-	if hasAltScreenCycle(ring[:start]) {
+	// A screen switch anywhere in the ring forces the whole ring. In the
+	// skipped prefix it means the window starts inside the cycle, so the
+	// primary screen it restores is partial. In the replayed slice it means
+	// the window saves its own partial primary screen on ?1049h and restores
+	// that on ?1049l, which leaves the top blank and the prompt too high. Both
+	// halves of the ring are checked, so either kind of cycle is caught.
+	if hasAltScreenCycle(ring) {
 		return 0
 	}
 	return start
