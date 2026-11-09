@@ -48,6 +48,11 @@ type termColours struct {
 // past the bound is not reading: it gets a fresh picture instead of a backlog.
 const outboundBytes = 1 << 20
 
+// reflowSettle is the quiet period after the last width change before the
+// server asks the affected panes to reflow. It is a var so a test can shorten
+// it.
+var reflowSettle = 150 * time.Millisecond
+
 type client struct {
 	c    net.Conn
 	mu   sync.Mutex
@@ -294,6 +299,13 @@ type server struct {
 	// spawn starts a pane daemon. It is a field so a test can capture the
 	// command line without starting a process; nil means exec's Start.
 	spawn func(*exec.Cmd) error
+
+	// reflowTimer and reflowWait hold the pending reflow: the timer that fires
+	// once the resize goes quiet, and the panes whose width changed. Both are
+	// guarded by mu. A drag sends one resize per pointer step, so the set grows
+	// and the timer restarts; one settle asks each pane once at its final size.
+	reflowTimer *time.Timer
+	reflowWait  map[string]bool
 }
 
 func Run(args []string) error {
@@ -340,6 +352,9 @@ func Run(args []string) error {
 		cols: st.Cols, rows: st.Rows, adopt: adopt,
 		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},
 	}
+	// A pending settle must not outlive the accept loop. endSession exits the
+	// process before this defer runs, so it stops the timer itself.
+	defer s.stopReflow()
 	if s.cols < 20 {
 		s.cols = 80
 	}
