@@ -41,6 +41,8 @@ type cmdFlags struct {
 	after      int
 	timeout    time.Duration
 	dry        bool
+	all        bool
+	force      bool
 	args       []string
 }
 
@@ -65,6 +67,8 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.IntVar(&c.after, "after", -1, "box seq cursor: entries after this one")
 	c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, "wait timeout")
 	c.fs.BoolVar(&c.dry, "dry-run", false, "print what would be removed")
+	c.fs.BoolVar(&c.all, "all", false, "reset every session")
+	c.fs.BoolVar(&c.force, "force", false, "confirm the discard")
 	_ = c.fs.Parse(reorder(args))
 	c.args = c.fs.Args()
 }
@@ -159,6 +163,11 @@ func Run(argv []string) error {
 			name = c.args[0]
 		}
 		return transport.KillSession(name)
+
+	case "reset":
+		c := newFlags("reset")
+		c.parse(argv[1:])
+		return runReset(c)
 
 	case "purge":
 		c := newFlags("purge")
@@ -827,6 +836,46 @@ func boxPrint(entries []box.Entry, width int) {
 			cells.Pad(e.Key, keyW), cells.Pad(string(e.State), stateW), cells.Pad(e.From, fromW), msg)
 		fmt.Println(strings.TrimRight(line, " "))
 	}
+}
+
+// runReset discards sessions for a full restart: it stops each server, reaps
+// every pane and its shell, and removes the session directory. Without
+// --force it prints the plan and refuses, because the discard is final.
+func runReset(c *cmdFlags) error {
+	names := []string{c.session}
+	if c.all {
+		sessions, err := transport.ListSessions()
+		if err != nil {
+			return err
+		}
+		names = names[:0]
+		for _, s := range sessions {
+			names = append(names, s.Name)
+		}
+	}
+	if len(names) == 0 {
+		fmt.Println("nothing to reset")
+		return nil
+	}
+	if !c.force {
+		for _, name := range names {
+			fmt.Printf("would reset %s\n", name)
+		}
+		return fmt.Errorf("reset discards the session and its panes; pass --force")
+	}
+	failed := 0
+	for _, name := range names {
+		if err := transport.ResetSession(name); err != nil {
+			fmt.Printf("error resetting %s: %v\n", name, err)
+			failed++
+			continue
+		}
+		fmt.Printf("reset %s\n", name)
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d session(s) not reset", failed)
+	}
+	return nil
 }
 
 // runPurge removes dead sessions whose server and panes are gone. A session

@@ -546,6 +546,11 @@ func (p *paneProc) serve(c net.Conn) {
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
+		case "reap":
+			// Reset discards the session: kill the shell's process group, not
+			// just the shell, so no child outlives the pane.
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
+			p.reap("reset")
 		case "kill":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 			p.shutdown()

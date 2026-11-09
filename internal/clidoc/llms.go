@@ -50,6 +50,7 @@ var llmsExamples = map[string]string{
 	"ls":                         "dm ls",
 	"kill":                       "dm kill -s work",
 	"purge":                      "dm purge --dry-run",
+	"reset":                      "dm reset -s work --force",
 	"read":                       "dm read w1p1 --lines 20",
 	"read <pane> --scrollback N": "dm read w1p1 --scrollback 200",
 	"split":                      "dm split w1p1 --dir right",
@@ -279,6 +280,7 @@ func LLMsText() string {
 	b.WriteString("\n## Gotchas\n\n")
 	b.WriteString("- `dm kill` stops a session's server. The panes keep running; attach again and they are there.\n")
 	b.WriteString("- `dm purge` removes dead sessions whose panes are gone. Add `--dry-run` to see the list first.\n")
+	b.WriteString("- `dm reset` discards a session and its panes for a full restart. It needs `--force`; `--all` resets every session.\n")
 	b.WriteString("- A bare word is a session name: `dm work` attaches to `work`, it does not run a command called `work`.\n")
 
 	return b.String()

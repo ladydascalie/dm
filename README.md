@@ -88,6 +88,7 @@ dm ls                   # sessions and whether their server is live
 dm new -s work          # start a session without attaching
 dm kill -s work         # stop the server; panes keep running
 dm purge                # remove dead sessions whose panes are gone
+dm reset -s work --force  # discard a session and its panes for a full restart
 dm man                  # the man page, docs/dm.1
 dm llms                 # the one-pass teaching document, docs/llms.txt
 ```

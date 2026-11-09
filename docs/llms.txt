@@ -18,6 +18,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm ls` | `-` | list sessions and whether they are live (alias: list-sessions) | `dm ls` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
+| `dm reset` | `[-s name \| --all] --force` | discard a session and its panes for a full restart | `dm reset -s work --force` |
 | `dm exec` | `'<json>' [-s name]` | send an action as JSON | `dm exec '{"action":"split","target":"w1p1","dir":"right"}'` |
 | `dm write-to` | `<pane> --msg T` | type text into a pane (--enter to accept) (alias: write) | `dm write-to w1p1 --msg 'ls -la' --enter` |
 | `dm read` | `<pane> [--lines N]` | print a pane's screen | `dm read w1p1 --lines 20` |
@@ -394,4 +395,5 @@ dm ls
 
 - `dm kill` stops a session's server. The panes keep running; attach again and they are there.
 - `dm purge` removes dead sessions whose panes are gone. Add `--dry-run` to see the list first.
+- `dm reset` discards a session and its panes for a full restart. It needs `--force`; `--all` resets every session.
 - A bare word is a session name: `dm work` attaches to `work`, it does not run a command called `work`.

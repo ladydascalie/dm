@@ -46,6 +46,15 @@ remove dead sessions whose panes are gone
 .br
 \fB--dry-run\fP print what would be removed
 .TP
+\fBdm reset [-s name | --all] --force\fP
+discard a session and its panes for a full restart
+.br
+\fB--s name\fP session name
+.br
+\fB--all\fP reset every session
+.br
+\fB--force\fP confirm the discard
+.TP
 \fBdm exec '<json>' [-s name]\fP
 send an action as JSON
 .br

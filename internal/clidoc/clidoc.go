@@ -94,6 +94,17 @@ var cliCommands = []cliCommand{
 		group:   groupSession,
 	},
 	{
+		name:    "reset",
+		args:    "[-s name | --all] --force",
+		summary: "discard a session and its panes for a full restart",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"all", "", "reset every session"},
+			{"force", "", "confirm the discard"},
+		},
+		group: groupSession,
+	},
+	{
 		name:    "exec",
 		args:    "'<json>' [-s name]",
 		summary: "send an action as JSON",

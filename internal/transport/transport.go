@@ -141,13 +141,9 @@ func KillSession(name string) error {
 		return err
 	}
 	c.Close()
-	data, err := os.ReadFile(filepath.Join(paths.SessionDir(name), "server.pid"))
-	if err != nil {
-		return err
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return err
+	pid, ok := readPID(filepath.Join(paths.SessionDir(name), "server.pid"))
+	if !ok {
+		return fmt.Errorf("session %q has no server pid", name)
 	}
 	p, err := os.FindProcess(pid)
 	if err != nil {
@@ -158,4 +154,99 @@ func KillSession(name string) error {
 	}
 	_ = os.Remove(paths.ServerSock(name))
 	return nil
+}
+
+// ResetSession discards a session for a full restart: it stops the server,
+// reaps every pane and its shell, and removes the session directory. Kill
+// leaves panes alive and purge skips them, so neither can do this.
+func ResetSession(name string) error {
+	dir := paths.SessionDir(name)
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no session %q", name)
+		}
+		return err
+	}
+	stopServer(dir)
+	reapPanes(name, dir)
+	return os.RemoveAll(dir)
+}
+
+// stopServer ends the session's server and waits for the process to go.
+func stopServer(dir string) {
+	pid, ok := readPID(filepath.Join(dir, "server.pid"))
+	if !ok {
+		return
+	}
+	_ = syscall.Kill(pid, syscall.SIGTERM)
+	if waitGone(pid, 2*time.Second) {
+		return
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
+	waitGone(pid, time.Second)
+}
+
+// reapPanes asks every pane daemon to kill its shell's process group and
+// exit. A daemon that does not answer still watches its socket, so removing
+// the path makes it reap itself.
+func reapPanes(name, dir string) {
+	entries, err := os.ReadDir(filepath.Join(dir, "panes"))
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".sock.pid") {
+			continue
+		}
+		id := strings.TrimSuffix(e.Name(), ".sock.pid")
+		pid, ok := readPID(filepath.Join(dir, "panes", e.Name()))
+		if !ok {
+			continue
+		}
+		sock := paths.PaneSock(name, id)
+		if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
+			_ = wire.WriteMsg(c, wire.Msg{Action: "reap"})
+			c.Close()
+		} else {
+			_ = os.Remove(sock)
+		}
+		if waitGone(pid, 6*time.Second) {
+			continue
+		}
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+// readPID reads a pid file. A missing or malformed file is not a pid.
+func readPID(path string) (int, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	return pid, true
+}
+
+// processAlive reports whether pid names a running process. A process owned by
+// another user answers EPERM, which still means it is alive.
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// waitGone waits up to d for pid to exit and reports whether it did.
+func waitGone(pid int, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		if !processAlive(pid) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
