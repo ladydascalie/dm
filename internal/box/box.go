@@ -22,11 +22,23 @@ import (
 // poster cannot grow the state file without limit.
 const (
 	MaxMsg     = 2000      // bytes in one entry's msg
+	MaxBody    = 16 << 10  // bytes in one entry's body
 	MaxKey     = 128       // bytes in one entry's key
 	MaxEntries = 1000      // entries kept in one box
 	MaxBytes   = 256 << 10 // bytes kept in one box
 	MaxWaitMs  = 3600000   // longest wait, one hour
 )
+
+// NotifyPrefix marks the topic branch the server renders as desktop
+// notifications. An entry under it keeps every box behaviour: validation, caps,
+// seq, trim, watchers. The prefix only adds the render.
+const NotifyPrefix = "notify/"
+
+// IsNotifyTopic reports whether key names the notify topic itself or anything
+// under it, so a caller decides on the key alone.
+func IsNotifyTopic(key string) bool {
+	return key == NotifyPrefix || strings.HasPrefix(key, NotifyPrefix)
+}
 
 // Entry is one line of the box, exactly as it travels in Res. Every field is
 // always present, so the tags carry no omitempty: a reader can tell an empty
@@ -38,6 +50,10 @@ type Entry struct {
 	Key   string    `json:"key"`
 	State State     `json:"state"`
 	Msg   string    `json:"msg"`
+	// Body is the long text under the one-line Msg. Optional: an empty body
+	// is the normal case, and it still travels, so a reader can tell an
+	// empty body from a missing one.
+	Body string `json:"body"`
 }
 
 // Watch is one reader's place in the log: the pane, its filter and the highest
@@ -97,6 +113,8 @@ type PostReq struct {
 	State State  `json:"state"`
 	Msg   string `json:"msg"`
 	From  string `json:"from"`
+	// Body is the optional long text; empty is the normal case.
+	Body string `json:"body"`
 }
 
 // ListReq is the msg-list request. Limit zero or less means the whole box.
@@ -302,7 +320,10 @@ func ValidateReq(action string, req any) error {
 		if err := CheckText("key", r.Key, MaxKey); err != nil {
 			return err
 		}
-		return CheckText("msg", r.Msg, MaxMsg)
+		if err := CheckText("msg", r.Msg, MaxMsg); err != nil {
+			return err
+		}
+		return CheckBody("body", r.Body)
 	case *ListReq:
 		if err := CheckFrom(r.From); err != nil {
 			return err
@@ -410,9 +431,29 @@ func CheckText(field, s string, max int) error {
 	return nil
 }
 
-// Validate checks the parts of an entry a request can carry: the state and the
-// key and message text. The server owns seq and at. A loader drops an entry
-// that fails this instead of failing the whole box.
+// CheckBody applies the body rule: the same text rule as CheckText under the
+// body cap, except newlines are legal because a body is long text, not a row.
+func CheckBody(field, s string) error {
+	if len(s) > MaxBody {
+		return fmt.Errorf("box: %s is %d bytes, cap is %d", field, len(s), MaxBody)
+	}
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("box: %s is not valid UTF-8", field)
+	}
+	for _, r := range s {
+		if r == '\n' {
+			continue
+		}
+		if unicode.IsControl(r) {
+			return fmt.Errorf("box: %s has a control character %q", field, r)
+		}
+	}
+	return nil
+}
+
+// Validate checks the parts of an entry a request can carry: the state, the
+// key and message text, and the optional body. The server owns seq and at. A
+// loader drops an entry that fails this instead of failing the whole box.
 func (e Entry) Validate() error {
 	if _, err := ParseState(string(e.State)); err != nil {
 		return err
@@ -420,7 +461,10 @@ func (e Entry) Validate() error {
 	if err := CheckText("key", e.Key, MaxKey); err != nil {
 		return err
 	}
-	return CheckText("msg", e.Msg, MaxMsg)
+	if err := CheckText("msg", e.Msg, MaxMsg); err != nil {
+		return err
+	}
+	return CheckBody("body", e.Body)
 }
 
 // CheckFrom is the optional reader pane on a read. Empty means the caller is

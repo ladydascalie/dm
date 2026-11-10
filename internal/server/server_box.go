@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/notify"
 	"dm/internal/wire"
 )
 
@@ -27,6 +29,7 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 		Key:   req.Key,
 		State: req.State,
 		Msg:   req.Msg,
+		Body:  req.Body,
 	}
 	s.st.Box = append(s.st.Box, e)
 	s.st.TrimBox()
@@ -37,7 +40,24 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 	// Every attached client learns the log moved. An open box view asks for
 	// the whole log again, so its picture is never a guess.
 	s.broadcastLocked(wire.Msg{Type: "box"})
+	// A notify/ entry renders after it is logged, so the log is never
+	// suppressed. SystemNotify runs async and never blocks the post.
+	if box.IsNotifyTopic(e.Key) {
+		s.notifyBoxEntryLocked(e)
+	}
 	return e, err
+}
+
+// notifyBoxEntryLocked renders one notify/ entry as a desktop notification:
+// the topic and state as the title, the message as the body. Suppression is
+// renderer-side: a topic that names a pane the operator is looking at pops
+// nothing, and the entry is logged either way. The caller holds s.mu.
+func (s *server) notifyBoxEntryLocked(e box.Entry) {
+	pane := strings.TrimPrefix(e.Key, box.NotifyPrefix)
+	if pane != "" && s.operatorSeesLocked(pane) {
+		return
+	}
+	notify.SystemNotify(e.Key+" "+string(e.State), e.Msg)
 }
 
 // boxList returns the entries newest first that pass the request's topic and

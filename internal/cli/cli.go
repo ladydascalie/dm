@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +39,8 @@ type cmdFlags struct {
 	key        string
 	keyPrefix  string
 	state      string
+	body       string
+	bodyFile   string
 	limit      int
 	after      int
 	timeout    time.Duration
@@ -64,6 +67,8 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.StringVar(&c.key, "key", "", "box key")
 	c.fs.StringVar(&c.keyPrefix, "prefix", "", "box key prefix")
 	c.fs.StringVar(&c.state, "state", "", "box state: note working blocked done error")
+	c.fs.StringVar(&c.body, "body", "", "long body text under the message line")
+	c.fs.StringVar(&c.bodyFile, "body-file", "", "read the body from a path, - for stdin")
 	c.fs.IntVar(&c.limit, "limit", 0, "list rows, 0 for the whole box")
 	c.fs.IntVar(&c.after, "after", -1, "box seq cursor: entries after this one")
 	c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, "wait timeout")
@@ -81,6 +86,7 @@ func reorder(args []string) []string {
 		"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
 		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true,
 		"-key": true, "--key": true, "-state": true, "--state": true,
+		"-body": true, "--body": true, "-body-file": true, "--body-file": true,
 		"-prefix": true, "--prefix": true, "-after": true, "--after": true,
 		"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
 	}
@@ -422,13 +428,40 @@ func runBox(c *cmdFlags) error {
 	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, sub, clear, watchers or schema", c.args[0])
 }
 
+// boxBody resolves the body the post carries: --body wins, --body-file reads
+// a path or stdin, and naming both is ambiguous.
+func boxBody(c *cmdFlags) (string, error) {
+	if c.body != "" && c.bodyFile != "" {
+		return "", fmt.Errorf("msg: --body and --body-file are exclusive")
+	}
+	if c.bodyFile == "" {
+		return c.body, nil
+	}
+	if c.bodyFile == "-" {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("msg: read body: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := os.ReadFile(c.bodyFile)
+	if err != nil {
+		return "", fmt.Errorf("msg: read body: %w", err)
+	}
+	return string(b), nil
+}
+
 // boxPostVerb posts one entry and prints it as the server stored it.
 func boxPostVerb(c *cmdFlags) error {
 	st, err := box.ParseState(c.state)
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(box.PostReq{Key: c.key, State: st, Msg: c.msg, From: boxFrom(c.session)})
+	body, err := boxBody(c)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(box.PostReq{Key: c.key, State: st, Msg: c.msg, Body: body, From: boxFrom(c.session)})
 	if err != nil {
 		return err
 	}
