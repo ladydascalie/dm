@@ -115,8 +115,8 @@ func DefaultTheme() Theme {
 	return Theme{
 		Palette: Palette{
 			RailBG:      RGB{20, 19, 26},    // #14131a
-			RailFocusBG: RGB{31, 30, 39},    // #1f1e27
-			RailHoverBG: RGB{25, 24, 32},    // #191820
+			RailFocusBG: RGB{44, 42, 56},    // #2c2a38
+			RailHoverBG: RGB{33, 32, 45},    // #21202d
 			RailText:    RGB{233, 234, 241}, // #e9eaf1
 			RailDim:     RGB{143, 147, 168}, // #8f93a8
 			RailHeader:  RGB{166, 169, 189}, // #a6a9bd

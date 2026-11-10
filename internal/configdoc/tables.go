@@ -401,8 +401,8 @@ func rgbHex(c theme.RGB) string {
 // value. Pasted as a theme it paints the built-in theme.
 const ThemeSampleKDL = `palette {
     "rail-bg"       "#14131a"
-    "rail-focus-bg" "#1f1e27"
-    "rail-hover-bg" "#191820"
+    "rail-focus-bg" "#2c2a38"
+    "rail-hover-bg" "#21202d"
     "rail-text"     "#e9eaf1"
     "rail-dim"      "#8f93a8"
     "rail-header"   "#a6a9bd"

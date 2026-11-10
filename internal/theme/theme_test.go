@@ -13,8 +13,8 @@ func TestThemeDefaults(t *testing.T) {
 
 	wantPalette := Palette{
 		RailBG:      RGB{20, 19, 26},
-		RailFocusBG: RGB{31, 30, 39},
-		RailHoverBG: RGB{25, 24, 32},
+		RailFocusBG: RGB{44, 42, 56},
+		RailHoverBG: RGB{33, 32, 45},
 		RailText:    RGB{233, 234, 241},
 		RailDim:     RGB{143, 147, 168},
 		RailHeader:  RGB{166, 169, 189},
