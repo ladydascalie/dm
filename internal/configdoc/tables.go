@@ -59,6 +59,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.",
 	},
 	{
+		Name:    "diff-command",
+		Value:   "a quoted shell command",
+		Default: `"git diff"`,
+		Desc:    "Set the command the dashboard diff key runs in a floating pane. It runs through sh -c in the selected pane folder.",
+	},
+	{
 		Name:    "dashboard-layout",
 		Value:   `"full" or "float"`,
 		Default: `"full"`,
@@ -233,7 +239,7 @@ var ActionDesc = map[string]string{
 	"preview-smaller": "Narrow the preview band.",
 	"peek":            "Hide or show the preview band.",
 	"input":           "Send every key to the selected pane until esc.",
-	"diff":            "Show the selected pane's uncommitted diff in a pager.",
+	"diff":            "Run the diff command on the selected pane in a floating pane.",
 
 	// scroll and box
 	"page-up":     "Scroll up one page.",

@@ -3,6 +3,7 @@ package keymap
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"dm/internal/kdl"
 	"dm/internal/theme"
@@ -154,6 +155,19 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 				return fmt.Errorf("line %d: dashboard-layout must be \"full\" or \"float\", got %q", v.Line, v.Value)
 			}
 			cfg.dashFullSet = true
+			i += 2
+		case "diff-command":
+			if cfg.diffCommand != "" {
+				return fmt.Errorf("line %d: duplicate diff-command node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted command after diff-command", t.Line)
+			}
+			v := toks[i+1]
+			if strings.TrimSpace(v.Value) == "" {
+				return fmt.Errorf("line %d: diff-command must not be empty", v.Line)
+			}
+			cfg.diffCommand = v.Value
 			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
@@ -330,6 +344,10 @@ const (
 // preview band takes when it opens.
 const defaultDashboardPreview = 60
 
+// defaultDiffCommand is the built-in command the dashboard diff key runs in a
+// floating pane.
+const defaultDiffCommand = "git diff"
+
 // defaultPadding is the built-in blank cells between a pane's border and its
 // content, and maxPadding is the largest the config accepts. A pane too small
 // for the padding drops it rather than going empty. The default is 0: the
@@ -404,6 +422,8 @@ padding 0
 glyphs "auto"
 window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 dashboard-preview 60
+// The diff key runs this in a floating pane through sh -c, in the selected pane folder.
+diff-command "git diff"
 dashboard-layout "full"
 
 keymap "main" {

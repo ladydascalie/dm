@@ -67,6 +67,9 @@ type Config struct {
 	// from a config that never named the node.
 	dashFull    bool
 	dashFullSet bool
+	// diffCommand is the shell command the dashboard diff key runs in a
+	// floating pane. An empty value means the config never named the node.
+	diffCommand string
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -143,6 +146,16 @@ func (c *Config) DashboardPreview() int {
 		return 100
 	}
 	return c.dashPreview
+}
+
+// DiffCommand returns the shell command the dashboard diff key runs in a
+// floating pane. It runs through sh -c in the selected pane's folder. A config
+// without the node reports the built-in default.
+func (c *Config) DiffCommand() string {
+	if c == nil || c.diffCommand == "" {
+		return defaultDiffCommand
+	}
+	return c.diffCommand
 }
 
 // DashboardFullScreen reports whether the dashboard takes the whole screen. A
