@@ -602,30 +602,6 @@ func railTree(rail int) *wire.Snapshot {
 	return snap
 }
 
-// railRows draws a rail and returns the text of each row inside the rail width.
-func railRows(t *testing.T, snap *wire.Snapshot) []string {
-	t.Helper()
-	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1)
-	vt := vt.NewTerm(snap.Cols, snap.Rows)
-	vt.Write(b.Bytes())
-	vt.Flush()
-	out := make([]string, snap.Rows-1)
-	for y := range out {
-		var sb strings.Builder
-		for x := 0; x < snap.Rail; x++ {
-			g := termCell(vt, x, y)
-			if g.Char == 0 {
-				sb.WriteByte(' ')
-				continue
-			}
-			sb.WriteRune(g.Char)
-		}
-		out[y] = strings.TrimRight(sb.String(), " ")
-	}
-	return out
-}
-
 // TestRailWorkspaceHasNoAccent proves the rail no longer paints a workspace's
 // own hue: the project owns the colour, and an untagged workspace paints none.
 // The pane count still sits at the right edge and the gap row stays empty.
@@ -992,7 +968,7 @@ func TestBarSegmentOrder(t *testing.T) {
 		}
 		if s.Text == " " {
 			gutters++
-			if s.BG != theme.DefaultTheme().Palette.RailBG || s.BG != theme.DefaultTheme().Palette.RailBG {
+			if s.BG != theme.DefaultTheme().Palette.RailBG {
 				t.Fatalf("gutter %d bg = %v, want the bar ground %v", k, s.BG, theme.DefaultTheme().Palette.RailBG)
 			}
 			continue
@@ -1616,8 +1592,8 @@ func TestMenuOutsideClickFocusesPane(t *testing.T) {
 	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil), vts: map[string]*vt.Term{}}
 	tui.openMenu(tui.paneByID("b"), 10, 5)
 	a, b := net.Pipe()
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	tui.conn = &transport.Conn{Conn: a}
 	got := make(chan wire.Msg, 1)
 	go func() {

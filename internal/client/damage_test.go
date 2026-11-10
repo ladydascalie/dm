@@ -462,7 +462,7 @@ func TestOracleResize(t *testing.T) {
 	f2 := newFrameTUI(t, 100, 20, 34)
 	live = vt.NewTerm(100, 20)
 	f2.frame()
-	live.Write([]byte(f2.out.String()))
+	live.Write(f2.out.Bytes())
 	f2.out.Reset()
 	f2.tui.draw()
 
@@ -471,7 +471,7 @@ func TestOracleResize(t *testing.T) {
 	vt.Write([]byte("\x1b[2;1Hhello"))
 	f2.out.Reset()
 	f2.tui.draw()
-	live.Write([]byte(f2.out.String()))
+	live.Write(f2.out.Bytes())
 	checkFrame(t, live, f2.tui, "pre-resize", nil)
 }
 

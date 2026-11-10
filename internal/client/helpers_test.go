@@ -23,8 +23,8 @@ func clientTUI(t *testing.T, mouse map[string]bool) (*tui, chan wire.Msg) {
 	tui := &tui{snap: snap, vts: map[string]*vt.Term{}}
 	a, b := net.Pipe()
 	t.Cleanup(func() {
-		a.Close()
-		b.Close()
+		_ = a.Close()
+		_ = b.Close()
 	})
 	tui.conn = &transport.Conn{Conn: a}
 	got := make(chan wire.Msg, 16)

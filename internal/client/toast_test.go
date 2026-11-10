@@ -113,7 +113,7 @@ func TestDrawToastsStack(t *testing.T) {
 	out := b.String()
 	oldRow, _ := toastRow(t, out, "older")
 	newRow, _ := toastRow(t, out, "newest")
-	if !(oldRow < newRow) {
+	if oldRow >= newRow {
 		t.Fatalf("rows older=%d newest=%d, want newest below", oldRow, newRow)
 	}
 	if newRow != snap.Rows-2 {

@@ -455,12 +455,12 @@ func Run(name string) error {
 	if err != nil {
 		return err
 	}
-	defer term.Restore(fd, old)
+	defer func() { _ = term.Restore(fd, old) }()
 
 	// Ask the outer terminal for its colours once per attach, before the
 	// alternate screen. The reply arrives on stdin and the detector consumes
 	// it; a terminal that never answers leaves the pane defaults alone.
-	os.Stdout.WriteString("\x1b]10;?\x1b\\\x1b]11;?\x1b\\")
+	_, _ = os.Stdout.WriteString("\x1b]10;?\x1b\\\x1b]11;?\x1b\\")
 
 	keys := make(chan []byte, 64)
 	go stdinReader(keys)
@@ -470,8 +470,10 @@ func Run(name string) error {
 
 	var out bytes.Buffer
 	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h")
-	os.Stdout.Write(out.Bytes())
-	defer os.Stdout.WriteString("\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
+	_, _ = os.Stdout.Write(out.Bytes())
+	defer func() {
+		_, _ = os.Stdout.WriteString("\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
+	}()
 
 	for {
 		next, err := runSession(fd, name, keys, winch, &pace)
@@ -482,7 +484,7 @@ func Run(name string) error {
 			return nil
 		}
 		name = next
-		os.Stdout.WriteString("\x1b[0m\x1b[2J\x1b[H")
+		_, _ = os.Stdout.WriteString("\x1b[0m\x1b[2J\x1b[H")
 	}
 }
 
@@ -575,7 +577,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 	if err != nil {
 		return "", err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	t := &tui{
 		session: name, conn: c, vts: map[string]*vt.Term{},

@@ -6,15 +6,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"dm/internal/segment"
-
 	"dm/internal/vt"
 )
-
-// railSeg is the name the rail gave a styled run before seg.go made the rail and
-// the bar one type. No production file names it now. rail_test.go still spells it,
-// so the alias lives here; the one edit it needs is railSeg -> segment.Seg.
-type railSeg = segment.Seg
 
 // panelChar is one cell of a replayed screen; 0 means nothing was painted there.
 func panelChar(screen *vt.Term, x, y int) rune {

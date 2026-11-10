@@ -67,7 +67,7 @@ func helpBoxParse(t *testing.T, s string) helpBoxPainted {
 				continue
 			case 'H':
 				var r, c int
-				fmt.Sscanf(params, "%d;%d", &r, &c)
+				_, _ = fmt.Sscanf(params, "%d;%d", &r, &c)
 				row, col = r-1, c-1
 				continue
 			default:
