@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -160,4 +161,87 @@ func TestDashboardInputAsksOnce(t *testing.T) {
 		t.Fatalf("screen request = %+v, want %s", req, farPane)
 	}
 	testutil.NoMsg(t, got)
+}
+
+// TestDashboardPreviewReadOnlyIds proves the band takes a read reply and never
+// a screen reply, even when the two request spaces hand out the same id.
+// Otherwise a screen reply lands as the read reply and blanks the band until
+// the read arrives.
+func TestDashboardPreviewReadOnlyIds(t *testing.T) {
+	tui, got := switcherWithFar(t)
+	feed(tui, "\x02a")
+	tui.sw.Jump(3)
+	tui.draw()
+
+	var read wire.Msg
+	select {
+	case m := <-got:
+		if m.Type != "req" || m.Action != "read" || m.Target != farPane {
+			t.Fatalf("draw sent %+v, want a read request for %s", m, farPane)
+		}
+		read = m
+	case <-time.After(time.Second):
+		t.Fatal("draw sent no read request")
+	}
+
+	tui.apply(wire.Msg{Type: "resp", Action: "read", ID: read.ID, OK: true,
+		Res: json.RawMessage(`{"lines":["live"]}`)})
+	if got := tui.sw.PreviewLines(); len(got) != 1 || got[0] != "live" {
+		t.Fatalf("the read reply filled %q, want [live]", got)
+	}
+
+	// A screen reply carrying the newest read id is another reply space: it
+	// must not reach the band, and its failure stays silent.
+	tui.apply(wire.Msg{Type: "resp", Action: "screen", ID: read.ID, OK: true,
+		Res: json.RawMessage(`{"pane":"` + farPane + `"}`)})
+	if got := tui.sw.PreviewLines(); len(got) != 1 || got[0] != "live" {
+		t.Fatalf("a screen reply carrying the read id changed the band to %q", got)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "screen", ID: read.ID, Error: "no pane"})
+	if len(tui.toasts) != 0 {
+		t.Fatalf("a screen failure raised a toast: %+v", tui.toasts)
+	}
+	if got := tui.sw.PreviewLines(); len(got) != 1 || got[0] != "live" {
+		t.Fatalf("a failed screen reply changed the band to %q", got)
+	}
+}
+
+// TestDashboardInputCoalescesScreens proves a burst of typing in input mode
+// costs one screen request: the first byte asks at once, the rest ride the
+// cadence. Every byte still reaches the pane as its own keys message.
+func TestDashboardInputCoalescesScreens(t *testing.T) {
+	tui, got := switcherWithFar(t)
+	feed(tui, "\x02a")
+	tui.sw.Jump(3)
+	feed(tui, "i")
+	if !tui.swInput {
+		t.Fatal("i did not enter input mode")
+	}
+
+	feed(tui, "x")
+	feed(tui, "y")
+	feed(tui, "z")
+
+	var keys, screens []string
+	deadline := time.After(300 * time.Millisecond)
+collect:
+	for {
+		select {
+		case m := <-got:
+			switch {
+			case m.Type == "keys":
+				keys = append(keys, string(m.Keys))
+			case m.Type == "req" && m.Action == "screen":
+				screens = append(screens, m.Target)
+			}
+		case <-deadline:
+			break collect
+		}
+	}
+	if len(keys) != 3 || keys[0] != "x" || keys[1] != "y" || keys[2] != "z" {
+		t.Fatalf("keys sent = %q, want one message per byte", keys)
+	}
+	if len(screens) != 1 || screens[0] != farPane {
+		t.Fatalf("screen requests = %q, want one for %s", screens, farPane)
+	}
 }

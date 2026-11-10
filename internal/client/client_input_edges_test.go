@@ -123,8 +123,10 @@ func TestDashboardInputCoalescedEsc(t *testing.T) {
 	testutil.NoMsg(t, quiet)
 }
 
-// forwardedKeys reads one keys message for target and the screen request that
-// follows it, so a test can assert the pane got exactly the bytes it should.
+// forwardedKeys reads one keys message for target, so a test can assert the
+// pane got exactly the bytes it should. The screen request behind it is the
+// test's to check: the preview ask rides the cadence, so a second key inside
+// the interval asks for nothing.
 func forwardedKeys(t *testing.T, got chan wire.Msg, target, keys string) {
 	t.Helper()
 	select {
@@ -134,9 +136,6 @@ func forwardedKeys(t *testing.T, got chan wire.Msg, target, keys string) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("no keys %q forwarded to %s", keys, target)
-	}
-	if req := screenRequest(t, got); req.Target != target {
-		t.Fatalf("screen request = %+v, want %s", req, target)
 	}
 }
 
@@ -152,6 +151,9 @@ func TestDashboardInputForwardsArrows(t *testing.T) {
 		t.Fatal("an up arrow left input mode")
 	}
 	forwardedKeys(t, got, "w1p1", "\x1b[A")
+	if req := screenRequest(t, got); req.Target != "w1p1" {
+		t.Fatalf("screen request = %+v, want w1p1", req)
+	}
 	testutil.NoMsg(t, got)
 
 	// The head of a sequence waits for the final byte.
@@ -164,6 +166,8 @@ func TestDashboardInputForwardsArrows(t *testing.T) {
 	if !tui.swInput {
 		t.Fatal("the sequence's final byte left input mode")
 	}
+	// The arrow that just asked holds the next ask back: the keys go, the
+	// screen request waits for the cadence.
 	forwardedKeys(t, got, "w1p1", "\x1b[1A")
 	testutil.NoMsg(t, got)
 }

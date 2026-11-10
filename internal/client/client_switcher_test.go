@@ -377,17 +377,17 @@ func TestSwitcherPreviewReplies(t *testing.T) {
 
 	// A reply with another id is stale and stays out of the band. A failure
 	// with a stale id stays silent too.
-	tui.apply(wire.Msg{Type: "resp", ID: read.ID + 1, OK: true, Res: json.RawMessage(`{"lines":["stale"]}`)})
+	tui.apply(wire.Msg{Type: "resp", Action: "read", ID: read.ID + 1, OK: true, Res: json.RawMessage(`{"lines":["stale"]}`)})
 	if len(tui.sw.PreviewLines()) != 0 {
 		t.Fatalf("a stale reply filled the preview: %q", tui.sw.PreviewLines())
 	}
-	tui.apply(wire.Msg{Type: "resp", ID: read.ID + 2, Error: "gone"})
+	tui.apply(wire.Msg{Type: "resp", Action: "read", ID: read.ID + 2, Error: "gone"})
 	if len(tui.toasts) != 0 {
 		t.Fatalf("a stale preview failure raised a toast: %+v", tui.toasts)
 	}
 
 	// The reply to the request fills the band.
-	tui.apply(wire.Msg{Type: "resp", ID: read.ID, OK: true, Res: json.RawMessage(`{"lines":["live"]}`)})
+	tui.apply(wire.Msg{Type: "resp", Action: "read", ID: read.ID, OK: true, Res: json.RawMessage(`{"lines":["live"]}`)})
 	if got := tui.sw.PreviewLines(); len(got) != 1 || got[0] != "live" {
 		t.Fatalf("the current reply filled %q, want [live]", got)
 	}

@@ -746,16 +746,12 @@ func (t *tui) askScreen(pane string, now time.Time) {
 }
 
 // previewNow asks for the selected pane's screen at once, so a key sent in
-// input mode shows its answer without waiting for the cadence.
+// input mode shows its answer without waiting for the cadence. It rides the
+// same interval as the cadence: one ask inside previewEvery, however many keys
+// arrive, so a burst of typing costs one request and the next tick fills in
+// the rest.
 func (t *tui) previewNow() {
-	if t.sw == nil || t.conn == nil {
-		return
-	}
-	pane := t.sw.Target()
-	if pane == "" || t.vts[pane] != nil {
-		return
-	}
-	t.askScreen(pane, time.Now())
+	t.previewTick(time.Now())
 }
 
 // applyPreviewScreen restores one pane's screen into the dashboard's terminal.

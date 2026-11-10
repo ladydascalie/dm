@@ -775,10 +775,12 @@ func (t *tui) apply(m wire.Msg) {
 			t.openDiffView(m.Lines)
 			break
 		}
-		// A preview reply carries the id its request named. Only the newest id
-		// fills the band: an older one is dropped and a failure stays silent.
+		// A read reply carries the id its request named. Only the newest read
+		// id fills the band: an older one is dropped and a failure stays
+		// silent. A screen reply numbers its request in its own space, so it
+		// never reaches the band even when the ids collide.
 		if m.ID > 0 {
-			if t.sw != nil && t.sw.AcceptPreview(m.ID, previewLines(m)) {
+			if m.Action == "read" && t.sw != nil && t.sw.AcceptPreview(m.ID, previewLines(m)) {
 				t.dirty = true
 			}
 			break
