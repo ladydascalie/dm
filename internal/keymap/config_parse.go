@@ -119,6 +119,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.windowLabel = toks[i+1].Value
 			cfg.windowLabelSet = true
 			i += 2
+		case "dashboard-preview":
+			if cfg.dashPreviewSet {
+				return fmt.Errorf("line %d: duplicate dashboard-preview node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after dashboard-preview", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: dashboard-preview must be a number, got %q", v.Line, v.Value)
+			}
+			if n < 0 || n > 100 {
+				return fmt.Errorf("line %d: dashboard-preview must be 0 to 100, got %d", v.Line, n)
+			}
+			cfg.dashPreview = n
+			cfg.dashPreviewSet = true
+			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
 				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
@@ -290,6 +308,10 @@ const (
 	defaultTabMax = 20
 )
 
+// defaultDashboardPreview is the built-in share of the dashboard body the
+// preview band takes when it opens.
+const defaultDashboardPreview = 60
+
 // defaultPadding is the built-in blank cells between a pane's border and its
 // content, and maxPadding is the largest the config accepts. A pane too small
 // for the padding drops it rather than going empty. The default is 0: the
@@ -363,6 +385,7 @@ tab-max-width 20
 padding 0
 glyphs "auto"
 window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
+dashboard-preview 60
 
 keymap "main" {
     "send-prefix" "prefix"

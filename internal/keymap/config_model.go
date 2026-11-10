@@ -57,6 +57,11 @@ type Config struct {
 	glyphSetSet    bool
 	windowLabel    string
 	windowLabelSet bool
+	// dashPreview is the dashboard's starting preview share of the body, in
+	// percent. Zero means the band starts hidden; dashPreviewSet separates that
+	// from a config that never named the node.
+	dashPreview    int
+	dashPreviewSet bool
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -117,6 +122,22 @@ func (c *Config) Padding() int {
 		return maxPadding
 	}
 	return c.padding
+}
+
+// DashboardPreview returns the dashboard's starting preview share of the body,
+// in percent. Zero starts with the band hidden and leaves the peek key to show
+// it. A config without the node reports the built-in default.
+func (c *Config) DashboardPreview() int {
+	if c == nil || !c.dashPreviewSet {
+		return defaultDashboardPreview
+	}
+	if c.dashPreview < 0 {
+		return 0
+	}
+	if c.dashPreview > 100 {
+		return 100
+	}
+	return c.dashPreview
 }
 
 // GlyphSet returns the glyph vocabulary the chrome draws with. A config

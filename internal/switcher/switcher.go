@@ -261,14 +261,32 @@ func (s *Switcher) PreviewRatio() int {
 // ResizePreview widens or narrows the preview band by d percent, clamps it to
 // its bounds, and returns the ratio it kept.
 func (s *Switcher) ResizePreview(d int) int {
-	s.ratio += d
-	if s.ratio < previewRatioMin {
-		s.ratio = previewRatioMin
-	}
-	if s.ratio > previewRatioMax {
-		s.ratio = previewRatioMax
-	}
+	s.ratio = clampPreviewRatio(s.ratio + d)
 	return s.ratio
+}
+
+// SetPreviewShare applies the configured starting share of the body, in
+// percent. Zero opens the dashboard on the table alone and leaves the peek key
+// to show the band at its default share. A share inside the bounds is kept; one
+// outside them is clamped into them.
+func (s *Switcher) SetPreviewShare(pct int) {
+	if pct <= 0 {
+		s.previewOn = false
+		return
+	}
+	s.previewOn = true
+	s.ratio = clampPreviewRatio(pct)
+}
+
+// clampPreviewRatio holds the band's share between its bounds.
+func clampPreviewRatio(pct int) int {
+	if pct < previewRatioMin {
+		return previewRatioMin
+	}
+	if pct > previewRatioMax {
+		return previewRatioMax
+	}
+	return pct
 }
 
 // PreviewOn reports whether the preview band is visible: toggled on and with a

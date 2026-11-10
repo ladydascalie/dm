@@ -109,15 +109,16 @@ func TestKeymapModesFoldsPicks(t *testing.T) {
 // proves the parser accepts it and the getters return the values it sets.
 func TestConfigNodesParse(t *testing.T) {
 	samples := map[string]string{
-		"prefix":        `prefix "ctrl+a"`,
-		"default-fold":  `default-fold "unfold"`,
-		"tab-min-width": `tab-min-width 10`,
-		"tab-max-width": `tab-max-width 30`,
-		"padding":       `padding 3`,
-		"glyphs":        `glyphs "nerd"`,
-		"window-label":  `window-label "{{.ID}}"`,
-		"theme":         `theme "probe"`,
-		"keymap":        `keymap "main" { "detach" "D" }`,
+		"prefix":            `prefix "ctrl+a"`,
+		"default-fold":      `default-fold "unfold"`,
+		"tab-min-width":     `tab-min-width 10`,
+		"tab-max-width":     `tab-max-width 30`,
+		"padding":           `padding 3`,
+		"glyphs":            `glyphs "nerd"`,
+		"window-label":      `window-label "{{.ID}}"`,
+		"dashboard-preview": `dashboard-preview 25`,
+		"theme":             `theme "probe"`,
+		"keymap":            `keymap "main" { "detach" "D" }`,
 	}
 	if len(samples) != len(ConfigNodes) {
 		t.Fatalf("table has %d nodes, test has %d samples", len(ConfigNodes), len(samples))
@@ -158,6 +159,9 @@ func TestConfigNodesParse(t *testing.T) {
 	if got := cfg.WindowLabel(); got != "{{.ID}}" {
 		t.Errorf("WindowLabel = %q, want %q", got, "{{.ID}}")
 	}
+	if got := cfg.DashboardPreview(); got != 25 {
+		t.Errorf("DashboardPreview = %d, want 25", got)
+	}
 	if got := cfg.Key("main", "detach"); got != "D" {
 		t.Errorf("Key(main, detach) = %q, want D", got)
 	}
@@ -184,15 +188,16 @@ func TestConfigNodesParse(t *testing.T) {
 // the one the code uses.
 func TestConfigNodeDefaults(t *testing.T) {
 	want := map[string]string{
-		"prefix":        `"` + keymap.LoadDefault().PrefixName() + `"`,
-		"default-fold":  `"fold"`,
-		"tab-min-width": "8",
-		"tab-max-width": "20",
-		"padding":       "0",
-		"glyphs":        `"auto"`,
-		"window-label":  `"` + wlabel.Default + `"`,
-		"theme":         "",
-		"keymap":        "the built-in table",
+		"prefix":            `"` + keymap.LoadDefault().PrefixName() + `"`,
+		"default-fold":      `"fold"`,
+		"tab-min-width":     "8",
+		"tab-max-width":     "20",
+		"padding":           "0",
+		"glyphs":            `"auto"`,
+		"window-label":      `"` + wlabel.Default + `"`,
+		"dashboard-preview": "60",
+		"theme":             "",
+		"keymap":            "the built-in table",
 	}
 	for _, n := range ConfigNodes {
 		if got, ok := want[n.Name]; !ok {

@@ -33,6 +33,12 @@ func openSwitcher(t *tui) {
 	// it takes its own mode, so the frame repaints whole, the tab bar takes no
 	// clicks and no hover shows through the table.
 	t.sw = switcher.NewSwitcher(layout.Rect{W: t.snap.Cols, H: t.snap.Rows}, t.snap)
+	// The config sets the share the band opens at, and zero opens the table
+	// alone. A reload does not move an open dashboard: the share is read when
+	// it opens, the way the ordering is.
+	if km := t.km(); km != nil {
+		t.sw.SetPreviewShare(km.DashboardPreview())
+	}
 	t.mode = "dashboard"
 	t.swInput = false
 	t.disarm()

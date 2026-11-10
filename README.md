@@ -161,6 +161,7 @@ optional and each one overrides its built-in value.
 | `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A change resizes every pane on reload. |
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
+| `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 
@@ -427,7 +428,9 @@ paints the far pane first, then the client asks the server for that pane's
 screen every 250 ms while it stays selected. ctrl+u and ctrl+d scroll it toward
 older and newer rows, `+` and `-` resize the band, and `p` peeks: it hides the
 band so the table takes the full width. A float under 10 rows or 60 columns
-drops the band whatever the toggle says.
+drops the band whatever the toggle says. The `dashboard-preview` config node
+sets the share the band opens at, from 0 for the table alone to 100; the band
+keeps its own 20 to 85 range, and the peek key uses the configured share.
 
 `i` sends every key to the selected pane until esc. The dashboard stays up and
 the answer shows in the preview, and the footer says `input` while the mode is

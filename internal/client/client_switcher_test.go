@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/switcher"
 	"dm/internal/testutil"
@@ -233,6 +236,60 @@ func TestSwitcherCtrlLRestores(t *testing.T) {
 		t.Fatalf("ctrl+l left the query %q", q)
 	}
 	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherPreviewShare: the config sets the share the band opens at, zero
+// opens the table alone, and the peek key still shows the band at the default
+// share.
+func TestSwitcherPreviewShare(t *testing.T) {
+	cases := []struct {
+		name  string
+		node  string
+		on    bool
+		ratio int
+	}{
+		{"absent", "", true, 60},
+		{"off", "dashboard-preview 0\n", false, 60},
+		{"small", "dashboard-preview 25\n", true, 25},
+		{"under the floor", "dashboard-preview 5\n", true, 20},
+		{"over the ceiling", "dashboard-preview 100\n", true, 85},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "config.kdl")
+			if err := os.WriteFile(path, []byte(c.node), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := keymap.LoadPath(path)
+			if err != nil {
+				t.Fatalf("LoadPath: %v", err)
+			}
+			tui, got := switcherTUI(t)
+			tui.keymap = cfg
+			feed(tui, "\x02a")
+			if tui.sw == nil {
+				t.Fatal("prefix a did not open the dashboard")
+			}
+			if got, want := tui.sw.PreviewOn(), c.on; got != want {
+				t.Fatalf("PreviewOn = %v, want %v", got, want)
+			}
+			if got := tui.sw.PreviewRatio(); got != c.ratio {
+				t.Fatalf("PreviewRatio = %d, want %d", got, c.ratio)
+			}
+			// Peek always brings the band back, at the share the config set.
+			if !c.on {
+				feed(tui, "p")
+				if !tui.sw.PreviewOn() {
+					t.Fatal("the peek key did not show the band")
+				}
+				if got := tui.sw.PreviewRatio(); got != c.ratio {
+					t.Fatalf("peeked share = %d, want %d", got, c.ratio)
+				}
+			}
+			testutil.NoMsg(t, got)
+		})
+	}
 }
 
 // TestSwitcherFullScreen: prefix a opens the dashboard over the whole screen in

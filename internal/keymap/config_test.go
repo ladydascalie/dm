@@ -932,6 +932,43 @@ func TestConfigThemeDefaultPath(t *testing.T) {
 	}
 }
 
+// TestConfigDashboardPreview reads the dashboard's starting preview share: the
+// node, the default, the zero that hides the band, and the bounds it rejects.
+func TestConfigDashboardPreview(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultDashboardPreview},
+		{"zero", `dashboard-preview 0`, 0},
+		{"share", `dashboard-preview 25`, 25},
+		{"full", `dashboard-preview 100`, 100},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.DashboardPreview(); got != c.want {
+				t.Fatalf("DashboardPreview() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().DashboardPreview(); got != defaultDashboardPreview {
+		t.Fatalf("LoadDefault().DashboardPreview() = %d, want %d", got, defaultDashboardPreview)
+	}
+	for _, bad := range []string{"dashboard-preview 101", "dashboard-preview -1", "dashboard-preview wide"} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	if _, err := parseConfig("dashboard-preview 10\ndashboard-preview 20"); err == nil {
+		t.Fatal("parseConfig accepted two dashboard-preview nodes")
+	}
+}
+
 // TestConfigDefaultFold proves the default fold setting: absent means folded,
 // "fold" means folded and "unfold" means unfolded.
 func TestConfigDefaultFold(t *testing.T) {

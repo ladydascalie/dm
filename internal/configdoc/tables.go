@@ -53,6 +53,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the template that renders a window label.",
 	},
 	{
+		Name:    "dashboard-preview",
+		Value:   "an integer from 0 to 100",
+		Default: "60",
+		Desc:    "Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.",
+	},
+	{
 		Name:    "theme",
 		Value:   `a quoted theme name matching [A-Za-z0-9_-]+`,
 		Default: "",

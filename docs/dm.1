@@ -697,6 +697,10 @@ Choose the glyph vocabulary the chrome draws with.
 Value: \fIa quoted Go template\fP. Default: \fI"{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"\fP.
 Set the template that renders a window label.
 .TP
+\fBdashboard-preview\fP
+Value: \fIan integer from 0 to 100\fP. Default: \fI60\fP.
+Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.
+.TP
 \fBtheme\fP
 Value: \fIa quoted theme name matching [A-Za-z0-9_-]+\fP. Default: none.
 Select a theme from the themes directory beside config.kdl; no node keeps the built-in theme.
