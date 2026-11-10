@@ -65,7 +65,7 @@ internal/osc         the OSC 7501 status filter and parser
 internal/notify      the desktop notification policy
 internal/layout      the split tree and pane geometry
 internal/rail        the sidebar painter
-internal/switcher    the quick switcher
+internal/switcher    the dashboard model and painter
 internal/boxview     the message box float
 internal/keymapview  the keymap float
 internal/keymap      the keymap model, the KDL loader and the help table
@@ -115,7 +115,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `0-9` | select window |
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
-| `a` | quick switch palette: panes, windows, workspaces |
+| `a` | dashboard: every pane in a full-screen table |
 | `m` | message box: the session's log as a floating pane |
 | `?` | all keymaps, in a floating pane |
 | `)` | next workspace |
@@ -241,7 +241,7 @@ One mode is one keymap.
 - `main` is the table the prefix key opens.
 - `menu` is the right-click menu.
 - `picker` is the session picker.
-- `switcher` is the quick switch palette.
+- `switcher` is the dashboard.
 - `scroll` is scrollback.
 - `rename` is the rename prompt.
 - `box` is the message box.
@@ -254,9 +254,10 @@ defines, in the order above, with each action and its key. `j`/`k` and
 back to the built-in help bindings, so the view always scrolls and closes.
 
 A key is one key. Arrows and `PgUp`/`PgDn` are named sequences: `up`, `down`,
-`left`, `right`, `pgup`, `pgdn`. The switcher and the rename prompt keep every
-printable key as text, and bind only their control keys. The keymap view, the
-armed help box and the right-click menu take their keys from the config, so
+`left`, `right`, `pgup`, `pgdn`. The dashboard binds its own letters and digits,
+and takes every other printable key as query text. The rename prompt keeps
+every printable key as text and binds only its control keys. The keymap view,
+the armed help box and the right-click menu take their keys from the config, so
 a remap shows there too.
 
 ## Themes
@@ -387,23 +388,52 @@ A missing or malformed theme file toasts the error, and dm runs on the built-in
 theme. The built-in theme reaches WCAG AA on every ground it paints. dm does
 not check a user theme: its contrast is the author's.
 
-## Palette
+## Dashboard
 
-`prefix a` floats a quick switcher over the panes. It is native: no child
-process and no PTY. It floats the rail tree: a workspace header, its window
-lines and their pane rows. Type to filter the tree; the query is a
-case-insensitive subsequence over an id, name, folder, branch, worktree, window
-or workspace name. Down and up, or ctrl+n and ctrl+p, move the selection, and
-enter lands on the selected row. Backspace edits the query and ctrl+u clears
-it. Press the prefix key again or `esc` to close without picking. It previews
-the selected pane's live screen: from the local VT in the active window and
-from the server's read elsewhere. It takes no mouse input. `dm dash` prints the
-pane rows outside the TUI, and `dm peek <id>` prints the screen a row shows, so
-the palette can be driven from a shell.
+`prefix a` opens the dashboard: a full-screen table of every pane in the
+session, one row per pane. It is native: no child process and no PTY. The
+default order is recent, the newest agent status change first.
 
-The palette is client owned: it starts when the key is pressed and ends when
+The columns are the jump key, the project, the agent label, git, the status,
+the time since the last status change and the OSC window title. The label is
+the recorded name, else the reporting app, else the pane id. Git reads `+N -N`
+for the lines the tree gains and loses, or `clean`, and a dash outside a
+repository. The status cell carries the state glyph and its word; a pane that
+never reported a state reads as a shell. The age is seconds under a minute,
+then minutes, hours and days, and a dash when the server has no stamp. The
+title is the program's own window title, elided to its column.
+
+The digits pick: `1` to `9` select that row and go to its pane. `j` and `k`,
+the arrows, or ctrl+n and ctrl+p move the selection, and enter goes to the
+selected pane. The prefix key again, ctrl+c or `esc` closes without picking.
+It takes no mouse input.
+
+The query filters the table: type to match a name, the app, the title, the
+branch, the worktree, the folder or the project. Backspace edits it and ctrl+l
+clears it. The letters the dashboard binds run their action instead of reaching
+the query, so `s`, `p`, `i` and `d` are not text.
+
+`s` cycles the ordering: recent, then project, then status. Recent puts the
+newest status change first. Project groups the rows by project name, with the
+panes outside a project last. Status puts the states that want attention first:
+blocked, error, working, done, idle, unknown, then a shell.
+
+The right of the screen previews the selected pane's live screen: from the
+local VT in the active window and from the server's read elsewhere. ctrl+u and
+ctrl+d scroll it toward older and newer rows, `+` and `-` resize the band, and
+`p` peeks: it hides the band so the table takes the full width. A float under
+10 rows or 60 columns drops the band whatever the toggle says.
+
+`i` sends every key to the selected pane until esc. The dashboard stays up and
+the answer shows in the preview, and the footer says `input` while the mode is
+on. `d` shows the selected pane's uncommitted diff in a read-only pager: `j`
+and `k` scroll a row, `pgup` and `pgdn` a page, `g` and `G` jump to the ends,
+and `q` or `esc` closes. The pager border names the worktree.
+
+The dashboard is client owned: it starts when the key is pressed and ends when
 the choice is taken, so it never enters the session tree and never survives a
-detach.
+detach. `dm dash` prints the pane rows outside the TUI, and `dm peek <id>`
+prints the screen a row shows, so the dashboard can be driven from a shell.
 
 ## Sidebar
 

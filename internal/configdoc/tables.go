@@ -159,7 +159,7 @@ var ActionDesc = map[string]string{
 	"prev-window":       "Select the previous window in the active workspace.",
 	"new-workspace":     "Create a workspace.",
 	"next-workspace":    "Select the next workspace.",
-	"switcher":          "Open the workspace and session switcher.",
+	"switcher":          "Open the dashboard: a full-screen table of every pane.",
 	"picker":            "Open the session picker.",
 	"rename-workspace":  "Rename the active workspace.",
 	"set-project":       "Set or clear the active workspace project.",
@@ -208,11 +208,19 @@ var ActionDesc = map[string]string{
 	"close-right": "Close the picker without choosing; right is an alternative close key.",
 
 	// switcher
-	"close-ctrl-c": "Close the switcher without choosing; ctrl+c is an alternative close key.",
-	"clear-query":  "Clear the switcher query.",
-	"backspace":    "Delete the last character of the query or name.",
-	"down-ctrl-n":  "Move the selection down one row; ctrl+n is an alternative key.",
-	"up-ctrl-p":    "Move the selection up one row; ctrl+p is an alternative key.",
+	"close-ctrl-c":    "Close the overlay without choosing; ctrl+c is an alternative close key.",
+	"clear-query":     "Clear the dashboard query.",
+	"backspace":       "Delete the last character of the query or name.",
+	"down-ctrl-n":     "Move the selection down one row; ctrl+n is an alternative key.",
+	"up-ctrl-p":       "Move the selection up one row; ctrl+p is an alternative key.",
+	"sort":            "Cycle the dashboard ordering: recent, project, status.",
+	"preview-up":      "Scroll the preview toward older rows.",
+	"preview-down":    "Scroll the preview toward newer rows.",
+	"preview-bigger":  "Widen the preview band.",
+	"preview-smaller": "Narrow the preview band.",
+	"peek":            "Hide or show the preview band.",
+	"input":           "Send every key to the selected pane until esc.",
+	"diff":            "Show the selected pane's uncommitted diff in a pager.",
 
 	// scroll and box
 	"page-up":     "Scroll up one page.",
@@ -250,11 +258,20 @@ var modeDesc = map[string]string{
 	"main":     "The table the prefix key opens.",
 	"menu":     "The right-click menu.",
 	"picker":   "The session picker.",
-	"switcher": "The quick switch palette.",
+	"switcher": "The dashboard, a full-screen pane table.",
 	"scroll":   "The scrollback view.",
 	"rename":   "The rename prompt.",
 	"box":      "The message box.",
 	"help":     "The keymap view and the armed help overlay.",
+}
+
+// pickFold is the run of numbered pick actions the docs print as one row. The
+// menu, the picker and the dashboard bind the same nine keys to the same job,
+// so nine rows per mode say no more than one. The help overlay folds the window
+// digits the same way.
+var pickFold = [9]string{
+	"pick-1", "pick-2", "pick-3", "pick-4", "pick-5",
+	"pick-6", "pick-7", "pick-8", "pick-9",
 }
 
 // KeymapModes returns every mode the built-in config binds, in the order the
@@ -272,7 +289,36 @@ func KeymapModes() []Mode {
 				Desc: ActionDesc[a.Action],
 			})
 		}
+		m.Actions = foldPicks(m.Actions)
 		out = append(out, m)
+	}
+	return out
+}
+
+// foldPicks prints a complete run of numbered pick actions as one row, named by
+// the whole run so a config still learns the action pattern. A partial run
+// stays as it is, so the table never claims a key the mode does not bind.
+func foldPicks(actions []Action) []Action {
+	out := make([]Action, 0, len(actions))
+	for i := 0; i < len(actions); i++ {
+		if actions[i].Name != pickFold[0] {
+			out = append(out, actions[i])
+			continue
+		}
+		n := 1
+		for n < len(pickFold) && i+n < len(actions) && actions[i+n].Name == pickFold[n] {
+			n++
+		}
+		if n < len(pickFold) {
+			out = append(out, actions[i])
+			continue
+		}
+		out = append(out, Action{
+			Name: pickFold[0] + ".." + pickFold[len(pickFold)-1],
+			Key:  actions[i].Key + "-" + actions[i+n-1].Key,
+			Desc: "Run item 1 to 9.",
+		})
+		i += n - 1
 	}
 	return out
 }

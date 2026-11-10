@@ -74,6 +74,37 @@ func TestKeymapModes(t *testing.T) {
 	}
 }
 
+// TestKeymapModesFoldsPicks proves the nine numbered pick actions print as one
+// row per mode that binds the whole run, and that no row claims a key a mode
+// does not bind.
+func TestKeymapModesFoldsPicks(t *testing.T) {
+	for _, m := range KeymapModes() {
+		folded := false
+		for _, a := range m.Actions {
+			if a.Name == "pick-1" {
+				t.Errorf("mode %q lists pick-1 on its own", m.Name)
+			}
+			if a.Name != "pick-1..pick-9" {
+				continue
+			}
+			folded = true
+			if a.Key != "1-9" || a.Desc == "" {
+				t.Errorf("mode %q folded row = %+v, want key 1-9 and a description", m.Name, a)
+			}
+		}
+		switch m.Name {
+		case "menu", "picker", "switcher":
+			if !folded {
+				t.Errorf("mode %q binds the nine pick keys but has no folded row", m.Name)
+			}
+		default:
+			if folded {
+				t.Errorf("mode %q has a folded row but does not bind the run", m.Name)
+			}
+		}
+	}
+}
+
 // TestConfigNodesParse builds a config that names every node in the table and
 // proves the parser accepts it and the getters return the values it sets.
 func TestConfigNodesParse(t *testing.T) {
