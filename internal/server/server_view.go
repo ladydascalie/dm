@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/layout"
-	"dm/internal/notify"
 	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/vt"
@@ -237,13 +237,10 @@ func (s *server) paneExited(id string) {
 	s.mu.Lock()
 	pc := s.panes[id]
 	// An exit interrupts the operator unless a client is attached and the pane
-	// is the focus it is looking at. The title is built before the pane leaves
-	// the state, because its recorded name goes with it.
+	// is the focus it is looking at. The decision and the pane's last message
+	// are taken before the pane leaves the state, because its recorded name
+	// and message go with it.
 	notifyExit := !s.operatorSeesLocked(id)
-	exitTitle := ""
-	if notifyExit {
-		exitTitle = s.notifyTitleLocked(id, "exited")
-	}
 	exitBody := ""
 	if pc != nil {
 		exitBody = pc.st.Message
@@ -290,11 +287,27 @@ func (s *server) paneExited(id string) {
 	if emptyWindow {
 		s.dropEmptyWindows()
 	}
+	// The exit joins the box before the teardown, so the entry names the pane
+	// while the suppression decision is still the one on screen. The entry is
+	// logged whatever the decision; the renderer pops it unless the operator
+	// was focused on the pane, and an exit no layout knew about never pops,
+	// as the old notify path did.
+	if found || pc != nil {
+		msg := "exited"
+		if exitBody != "" {
+			msg = "exited: " + exitBody
+		}
+		// A failed save keeps the entry in memory; the producer has no caller
+		// to tell.
+		e, _ := s.boxStoreLocked(&box.PostReq{
+			Key:   box.NotifyPrefix + id,
+			State: box.StateNote,
+			Msg:   msg,
+		})
+		s.notifyBoxEntryLocked(e, !(found && notifyExit))
+	}
 	if s.countPanes() == 0 {
 		s.mu.Unlock()
-		if found {
-			notify.SystemNotify(exitTitle, exitBody)
-		}
 		if pc != nil {
 			_ = pc.c.Close()
 		}
@@ -302,10 +315,6 @@ func (s *server) paneExited(id string) {
 		return
 	}
 	s.mu.Unlock()
-	if found {
-		notify.SystemNotify(exitTitle, exitBody)
-	}
-
 	if pc != nil {
 		_ = pc.c.Close()
 	}
@@ -384,6 +393,10 @@ func (s *server) countPanes() int {
 	return n
 }
 
+// endSessionExit terminates the process. It is a variable so a test can
+// survive a last-pane exit's shutdown and assert on what came before it.
+var endSessionExit = os.Exit
+
 // endSession closes every client, removes the session directory and exits. A
 // session with no panes is gone, the same way tmux ends one.
 func (s *server) endSession() {
@@ -409,7 +422,7 @@ func (s *server) endSession() {
 	if s.ln != nil {
 		_ = s.ln.Close()
 	}
-	os.Exit(0)
+	endSessionExit(0)
 }
 
 func (s *server) pushSnapshot() {
