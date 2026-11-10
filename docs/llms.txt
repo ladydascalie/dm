@@ -39,6 +39,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm peek` | `<id> [--lines N]` | print the screen a palette row lands on | `dm peek w1p1 --lines 10` |
 | `dm msg post` | `--state S [--key K] [--msg T]` | post one entry to the box | `dm msg post --key build --state done --msg 'all green'` |
 | `dm msg list` | `[--key K \| --prefix P] [--after SEQ] [--limit N] [--json]` | print the box newest first | `dm msg list --key build --limit 20` |
+| `dm msg show` | `--key K [--seq N \| --from PANE]` | print one entry's body, or its summary line | `dm msg show --key build --seq 12` |
 | `dm msg wait` | `[--key K \| --prefix P] [--state S] [--after SEQ] [--timeout 5m]` | block until an entry matches | `dm msg wait --key build --state done --timeout 10m` |
 | `dm msg sub` | `[--key K \| --prefix P] [--state S] [--after SEQ] [--json]` | stream entries as they arrive | `dm msg sub --prefix build --json` |
 | `dm msg clear` | `[--key K]` | clear one key, or the whole box | `dm msg clear --key build` |
@@ -139,6 +140,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `r` | `rename-workspace` | rename workspace |
 | `P` | `set-project` | set project |
 | `m` | `message-box` | message box |
+| `N` | `notification-centre` | notifications |
 | `b` | `toggle-rail` | cycle rail: full, thin, hidden |
 | `d / q` | `detach / detach-alt` | detach |
 | `ctrl+b` | `send-prefix` | send prefix |
@@ -204,6 +206,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `set-project` | `P` |
 | `main` | `toggle-rail` | `b` |
 | `main` | `message-box` | `m` |
+| `main` | `notification-centre` | `N` |
 | `main` | `detach` | `d` |
 | `main` | `detach-alt` | `q` |
 | `main` | `window-1` | `1` |

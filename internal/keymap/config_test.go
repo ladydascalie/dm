@@ -387,6 +387,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"r", "rename workspace"},
 		{"P", "set project"},
 		{"m", "message box"},
+		{"N", "notifications"},
 		{"b", "cycle rail: full, thin, hidden"},
 		{"d / q", "detach"},
 		{"ctrl+b", "send prefix"},

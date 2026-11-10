@@ -458,6 +458,7 @@ keymap "main" {
     "set-project" "P"
     "toggle-rail" "b"
     "message-box" "m"
+    "notification-centre" "N"
     "detach" "d"
     "detach-alt" "q"
     "window-1" "1"

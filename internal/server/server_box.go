@@ -44,6 +44,7 @@ func (s *server) boxStoreLocked(req *box.PostReq) (box.Entry, error) {
 		Key:   req.Key,
 		State: req.State,
 		Msg:   req.Msg,
+		Body:  req.Body,
 	}
 	s.st.Box = append(s.st.Box, e)
 	s.st.TrimBox()

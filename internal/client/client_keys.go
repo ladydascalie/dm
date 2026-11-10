@@ -710,6 +710,8 @@ func (t *tui) runAction(name string) {
 		t.toggleRail()
 	case "message-box":
 		openBoxView(t)
+	case "notification-centre":
+		openNotifyCentre(t)
 	case "help":
 		openKeymapView(t)
 		t.disarm()
