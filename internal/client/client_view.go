@@ -60,7 +60,7 @@ func (t *tui) draw() {
 	drawDivider(&div, th, t.padZone, t.padAxis)
 	rail.DrawRail(&railBuf, th, win, t.glyphSet(), t.railHoverRow())
 	DrawTabBar(&tabBar, th, win, tabWidthFor(t.km()))
-	drawBar(&bar, th, win, t.armed, t.barInfo(), t.glyphSet())
+	drawBar(&bar, th, win, t.armed, t.barInfo(), t.glyphSet(), t.barBadgeOf(th, t.glyphSet()))
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
 		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.previewTerms(), paintPaneFrom, t.glyphSet())

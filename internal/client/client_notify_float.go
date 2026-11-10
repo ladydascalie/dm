@@ -221,6 +221,7 @@ func closeNotifyCentre(t *tui) {
 			t.notifyRead = e.Seq
 		}
 	}
+
 	t.RemoveFloatingPane(t.ncentre.Float.ID)
 	t.ncentre = nil
 	t.mode = ""
@@ -261,6 +262,9 @@ func (t *tui) takeNotifyCentreList(m wire.Msg) {
 		return
 	}
 	t.ncentre.entries = rep.Entries
+	// The centre's list is the server's own recent window, so it is the
+	// truth the badge counts from while the centre is open.
+	t.notifyRecent = append(t.notifyRecent[:0], rep.Entries...)
 	if t.ncentre.sel >= len(rep.Entries) {
 		t.ncentre.sel = len(rep.Entries) - 1
 	}
@@ -470,12 +474,14 @@ func (t *tui) notifClearKey() {
 	if !ok {
 		return
 	}
+	t.notifyRecentDropKey(e.Key)
 	t.notifyClear(box.ClearReq{Key: e.Key})
 }
 
 // notifClearAll clears the whole notify/ topic and lets the reply refetch the
 // centre, so the list empties.
 func (t *tui) notifClearAll() {
+	t.notifyRecent = nil
 	t.notifyClear(box.ClearReq{KeyPrefix: box.NotifyPrefix})
 }
 
@@ -492,4 +498,52 @@ func (t *tui) notifyClear(req box.ClearReq) {
 	t.notifyID++
 	t.notifyRouteTag(t.notifyID, notifyRouteClear)
 	_ = t.conn.Send(wire.Msg{Type: "req", Action: "msg-clear", ID: t.notifyID, Res: body})
+}
+
+// notifyRecentMerge folds a msg-list reply into the client's recent entries.
+// The reply is newest first; the known seqs are skipped and the cache keeps
+// its newest-first order, capped at notifyCentreLimit.
+func (t *tui) notifyRecentMerge(entries []box.Entry) {
+	known := make(map[int]bool, len(t.notifyRecent))
+	for _, e := range t.notifyRecent {
+		known[e.Seq] = true
+	}
+	var fresh []box.Entry
+	for _, e := range entries {
+		if !known[e.Seq] {
+			fresh = append(fresh, e)
+			known[e.Seq] = true
+		}
+	}
+	for i := len(fresh) - 1; i >= 0; i-- {
+		t.notifyRecent = append([]box.Entry{fresh[i]}, t.notifyRecent...)
+	}
+	if len(t.notifyRecent) > notifyCentreLimit {
+		t.notifyRecent = t.notifyRecent[:notifyCentreLimit]
+	}
+}
+
+// notifyRecentDropKey drops every cached entry under key, the rows a msg-clear
+// with that key removed server-side. The badge follows the centre's list, so
+// the cache cannot keep a cleared entry alive.
+func (t *tui) notifyRecentDropKey(key string) {
+	out := make([]box.Entry, 0, len(t.notifyRecent))
+	for _, e := range t.notifyRecent {
+		if e.Key != key {
+			out = append(out, e)
+		}
+	}
+	t.notifyRecent = out
+}
+
+// notifyUnread counts the cached entries past the read mark: the same rows
+// the centre marks unread, so the bar badge and the marks never drift.
+func (t *tui) notifyUnread() int {
+	n := 0
+	for _, e := range t.notifyRecent {
+		if e.Seq > t.notifyRead {
+			n++
+		}
+	}
+	return n
 }

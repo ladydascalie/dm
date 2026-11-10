@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"dm/internal/box"
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/panel"
@@ -47,12 +48,13 @@ func drawMenu(buf *bytes.Buffer, th theme.Theme, m *menu) {
 // segment model span by span: reset, ground, foreground, weight, text. The
 // pinned block is anchored to the last column and the gutter fills the gap, so
 // the whole row is written and no cell of the previous frame shows through.
-// drawBar writes at most snap.Cols cells and never touches another row.
-func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool, info string, set theme.GlyphSet) {
+// An optional unread badge rides the end of the pinned block. drawBar writes
+// at most snap.Cols cells and never touches another row.
+func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool, info string, set theme.GlyphSet, badge ...barBadge) {
 	if snap == nil || snap.Rows < 1 || snap.Cols < 1 {
 		return
 	}
-	segs := barSegments(th, snap, armed, info, set)
+	segs := barSegments(th, snap, armed, info, set, badge...)
 	left, pinned := barSplitPinned(segs)
 	fmt.Fprintf(buf, "\x1b[%d;1H", snap.Rows)
 	for _, s := range left {
@@ -303,9 +305,18 @@ func (l *barLeft) fit(th theme.Theme, budget int) []segment.Seg {
 	return segment.ClipSegs(cur(), budget)
 }
 
+// barBadge is the bar's unread mark: how many notify entries sit past the
+// read mark, and the glyph and colour of the newest one. Zero hides it.
+type barBadge struct {
+	n      int
+	glyph  string
+	colour theme.RGB
+}
+
 // barPinned is the right block: the prefix flag while armed, then the scroll
-// info. Both are anchored to the last column, so both are pinned.
-func barPinned(th theme.Theme, armed bool, info string) []segment.Seg {
+// info, then the unread badge. All are anchored to the last column, so all
+// are pinned, and the badge is the last thing to give way.
+func barPinned(th theme.Theme, armed bool, info string, badge barBadge) []segment.Seg {
 	p := th.Palette
 	var out []segment.Seg
 	if armed {
@@ -313,6 +324,12 @@ func barPinned(th theme.Theme, armed bool, info string) []segment.Seg {
 	}
 	if info != "" {
 		out = append(out, segment.Seg{Text: info, FG: p.RailDim, BG: p.RailBG, Pin: true})
+	}
+	if badge.n > 0 {
+		out = append(out, segment.Seg{
+			Text: " " + badge.glyph + " " + strconv.Itoa(badge.n),
+			FG:   badge.colour, BG: p.RailBG, Pin: true,
+		})
 	}
 	return out
 }
@@ -340,11 +357,15 @@ func barFitPinned(segs []segment.Seg, cols int, mark string) []segment.Seg {
 // pinned block leaves, minus one gutter cell, so the blocks never touch and the
 // line never runs past snap.Cols cells. The pinned block is never dropped to
 // make room for the left one.
-func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, set theme.GlyphSet) []segment.Seg {
+func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, set theme.GlyphSet, badge ...barBadge) []segment.Seg {
 	if snap == nil || snap.Cols <= 0 {
 		return nil
 	}
-	right := barFitPinned(barPinned(th, armed, info), snap.Cols, th.Glyphs.ElideMark())
+	var b barBadge
+	if len(badge) > 0 {
+		b = badge[0]
+	}
+	right := barFitPinned(barPinned(th, armed, info, b), snap.Cols, th.Glyphs.ElideMark())
 	budget := snap.Cols - segment.SegCells(right)
 	if len(right) > 0 {
 		// Keep one gutter cell between the blocks. drawBar spends it as part of
@@ -356,4 +377,25 @@ func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, s
 	}
 	left := barLeftFor(th, snap, set).fit(th, budget)
 	return append(left, right...)
+}
+
+// barBadgeOf collects the unread mark the bar pins: the count of notify
+// entries past the read mark and the newest one's state glyph and colour,
+// so the badge carries the theme's state colour for what is waiting. Zero
+// unread is the zero badge, and the bar paints nothing.
+func (t *tui) barBadgeOf(th theme.Theme, set theme.GlyphSet) barBadge {
+	n := t.notifyUnread()
+	if n == 0 {
+		return barBadge{}
+	}
+	var newest box.Entry
+	for _, e := range t.notifyRecent {
+		if e.Seq > t.notifyRead {
+			if newest.Seq == 0 || e.Seq > newest.Seq {
+				newest = e
+			}
+		}
+	}
+	glyph, colour := rail.RailGlyph(th, string(newest.State), set)
+	return barBadge{n: n, glyph: glyph, colour: colour}
 }
