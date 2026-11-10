@@ -445,10 +445,13 @@ the answer shows in the preview, and the footer says `input` while the mode is
 on. `d` runs the diff command, `git diff` by default, in a floating terminal
 over the panes, in the selected pane's folder, through `sh -c`. The float takes
 every key while the command runs, and the prefix then `q` closes it. After the
-command exits the float keeps its last screen until a key is pressed. The
+command exits the float keeps the screen the command left behind until a key is
+pressed; a full screen program such as tig leaves the alternate screen on exit,
+so its float ends blank. A client that falls far enough behind to be resynced
+loses the float's screen with the backlog: close it and press `d` again. The
 `diff-command` config node sets the command, and a reload picks it up with the
-rest of `config.kdl`. `diff-command "tig"` and `diff-command "hunk"` are the
-two examples.
+rest of `config.kdl`. `diff-command "tig"` and `diff-command "hunk diff"` are
+the two examples.
 
 The dashboard is client owned: it starts when the key is pressed and ends when
 the choice is taken, so it never enters the session tree and never survives a

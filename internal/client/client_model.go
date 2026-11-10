@@ -201,9 +201,12 @@ type tui struct {
 	swInput bool
 
 	// float is the floating command, nil when closed. floatID numbers the
-	// request, so a reply to an older one opens nothing.
-	float   *floatView
-	floatID int
+	// request, so a reply to an older one opens nothing. floatGone is the id
+	// of the float last closed, so its late frames are the child's last words
+	// and never pane news.
+	float     *floatView
+	floatID   int
+	floatGone string
 
 	// swVT holds the dashboard's own preview terminals, one per pane it has
 	// asked the server about. A pane in the active window has a local terminal
@@ -761,10 +764,13 @@ func (t *tui) apply(m wire.Msg) {
 	case "close":
 		t.quit = true
 	case "exit":
-		// A float keeps its last screen and says the command has gone. The
-		// next key closes it.
+		// A float's exit never toasts: the live float keeps its last screen
+		// and says so, and a closed float is already off the screen.
 		if t.float != nil && m.Target == t.float.id {
 			t.floatExited()
+			break
+		}
+		if m.Target == t.floatGone {
 			break
 		}
 		t.notify("pane " + m.Target + " exited")
@@ -798,6 +804,9 @@ func (t *tui) apply(m wire.Msg) {
 			break
 		}
 		if !m.OK {
+			if t.floatErrorSwallowed(m.Error) {
+				break
+			}
 			t.notify(m.Error)
 		}
 	case "box":

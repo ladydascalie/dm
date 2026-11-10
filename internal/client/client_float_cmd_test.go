@@ -87,9 +87,11 @@ func TestFloatReplyOpens(t *testing.T) {
 	tui, got := switcherTUI(t)
 	req := askFloat(t, tui, got)
 
+	// A reply to an older request is dropped: the pending float keeps waiting
+	// for its own, and nothing lands on the screen.
 	tui.apply(floatReply(t, wire.Msg{Type: "resp", Action: "float-open", ID: req.ID + 1, Float: req.Float}, "git diff"))
-	if tui.mode != "" || len(tui.floats) != 0 {
-		t.Fatalf("a stale reply left mode %q and %d floats", tui.mode, len(tui.floats))
+	if tui.mode != "float" || len(tui.floats) != 0 || tui.float.opened {
+		t.Fatalf("a stale reply left mode %q, %d floats and opened %v", tui.mode, len(tui.floats), tui.float.opened)
 	}
 
 	tui.apply(floatReply(t, req, "git diff --stat"))
@@ -150,10 +152,10 @@ func TestFloatPrefixCloses(t *testing.T) {
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "cat")
 
-	// The prefix alone waits for the next byte.
+	// The prefix alone waits for the next byte, with no timer under it.
 	feed(tui, "\x02")
-	if !tui.pending {
-		t.Fatal("a lone prefix did not wait for the next key")
+	if tui.pending {
+		t.Fatal("the chord head waited on the escape timer")
 	}
 	testutil.NoMsg(t, got)
 
@@ -255,5 +257,120 @@ func TestFloatResizeFollowsScreen(t *testing.T) {
 	testutil.NoMsg(t, got)
 	if before == after {
 		t.Fatal("the test's snapshot did not change the rect")
+	}
+}
+
+// TestFloatPendingHoldsKeys: keys typed while the open reply is in flight go to
+// neither the pane nor the child, and the reply then lets them through.
+func TestFloatPendingHoldsKeys(t *testing.T) {
+	tui, got := switcherTUI(t)
+	req := askFloat(t, tui, got)
+	if tui.mode != "float" {
+		t.Fatalf("mode = %q while the reply is in flight, want float", tui.mode)
+	}
+	feed(tui, "x")
+	testutil.NoMsg(t, got)
+	if tui.mode != "float" {
+		t.Fatalf("a held key left mode %q", tui.mode)
+	}
+	tui.apply(floatReply(t, req, "cat"))
+	feed(tui, "y")
+	m := <-got
+	if m.Type != "keys" || m.Target != req.Float || string(m.Keys) != "y" {
+		t.Fatalf("after the reply y sent %+v, want the key to the float", m)
+	}
+}
+
+// TestFloatExitBeatsReply: an exit frame that lands before the open reply still
+// ends in a float that says the command exited, and any key closes it.
+func TestFloatExitBeatsReply(t *testing.T) {
+	tui, got := switcherTUI(t)
+	req := askFloat(t, tui, got)
+	tui.apply(wire.Msg{Type: "exit", Target: req.Float})
+	if tui.float == nil || !tui.float.exited {
+		t.Fatalf("the early exit left float %v", tui.float)
+	}
+	tui.apply(floatReply(t, req, "git diff"))
+	if tui.mode != "float" || len(tui.floats) != 1 {
+		t.Fatalf("the reply left mode %q and %d floats", tui.mode, len(tui.floats))
+	}
+	if got := tui.float.float.Title; !strings.Contains(got, "exited") {
+		t.Fatalf("title = %q, want the exited note", got)
+	}
+	feed(tui, "x")
+	if tui.float != nil || tui.mode != "" || len(tui.floats) != 0 {
+		t.Fatalf("a key after the early exit left float %v and mode %q", tui.float, tui.mode)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestFloatPrefixStallKeepsFloat: the close chord does not race a clock. A
+// lone prefix waits for as long as the operator takes, no frame goes out while
+// it waits, and the q that follows closes the float instead of reaching a pane.
+func TestFloatPrefixStallKeepsFloat(t *testing.T) {
+	tui, got := switcherTUI(t)
+	req := openFloat(t, tui, got, "cat")
+	testutil.NoMsg(t, got)
+	feed(tui, "\x02")
+	if tui.pending {
+		t.Fatal("the chord head waited on the escape timer")
+	}
+	// Longer than any human chord, and past the esc timeout the overlays use.
+	tui.escAt = time.Now().Add(-time.Second)
+	if tui.expireMode(time.Now()) {
+		t.Fatal("expireMode closed or touched the float")
+	}
+	if tui.float == nil || tui.mode != "float" || len(tui.floats) != 1 {
+		t.Fatalf("the stall left float %v, mode %q and %d floats", tui.float, tui.mode, len(tui.floats))
+	}
+	testutil.NoMsg(t, got)
+	feed(tui, "q")
+	m := <-got
+	if m.Type != "req" || m.Action != "float-close" || m.Float != req.Float {
+		t.Fatalf("q after the stall sent %+v, want a float-close", m)
+	}
+	if tui.float != nil || tui.mode != "" || len(tui.floats) != 0 {
+		t.Fatalf("q after the stall left float %v, mode %q and %d floats", tui.float, tui.mode, len(tui.floats))
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestFloatClosedFloatSwallowsExit: the exit frame that follows a client close
+// does not come back as a pane toast naming the float.
+func TestFloatClosedFloatSwallowsExit(t *testing.T) {
+	tui, got := switcherTUI(t)
+	req := openFloat(t, tui, got, "sleep 30")
+	feed(tui, "\x02q")
+	m := <-got
+	if m.Type != "req" || m.Action != "float-close" || m.Float != req.Float {
+		t.Fatalf("prefix q sent %+v, want a float-close", m)
+	}
+	testutil.NoMsg(t, got)
+	tui.apply(wire.Msg{Type: "exit", Target: req.Float})
+	if texts := toastTexts(tui); len(texts) != 0 {
+		t.Fatalf("the exit came back as toasts %q, want none", texts)
+	}
+}
+
+// TestFloatErrorRacingExitIsSwallowed: an error reply that names the float is a
+// key that raced the child's exit, not pane news, both while the float is up
+// and after the client closed it. A pane error still toasts.
+func TestFloatErrorRacingExitIsSwallowed(t *testing.T) {
+	tui, got := switcherTUI(t)
+	req := openFloat(t, tui, got, "sleep 30")
+	tui.apply(wire.Msg{Type: "resp", Action: "keys", Error: `no pane "` + req.Float + `"`})
+	if texts := toastTexts(tui); len(texts) != 0 {
+		t.Fatalf("a racing key toasted %q, want nothing", texts)
+	}
+	feed(tui, "\x02q")
+	<-got
+	tui.apply(wire.Msg{Type: "resp", Action: "keys", Error: `no pane "` + req.Float + `"`})
+	if texts := toastTexts(tui); len(texts) != 0 {
+		t.Fatalf("a key after the close toasted %q, want nothing", texts)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "keys", Error: `no pane "w1p1"`})
+	texts := toastTexts(tui)
+	if len(texts) == 0 || !strings.Contains(texts[len(texts)-1], "w1p1") {
+		t.Fatalf("toasts = %q, want the pane error", texts)
 	}
 }

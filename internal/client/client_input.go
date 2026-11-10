@@ -647,11 +647,9 @@ func (t *tui) expireMode(now time.Time) bool {
 	t.pending = false
 	// The lone esc was consumed by the mode's key handler but left in the
 	// buffer. Drop it with the mode, so the next keypress does not forward a
-	// stray escape to a pane. A float is the exception: a lone prefix is a key
-	// of its own, so the command gets it.
-	if t.mode == "float" {
-		t.floatPrefixStalled(t.inbuf)
-	}
+	// stray escape to a pane. The float never gets here: its lone prefix is
+	// the close chord's head, and that wait does not expire, so expireMode
+	// never sees a float pending.
 	t.inbuf = t.inbuf[:0]
 	switch t.mode {
 	case "menu":
@@ -666,8 +664,6 @@ func (t *tui) expireMode(now time.Time) bool {
 		closeKeymapView(t)
 	case "rename":
 		t.closeRename()
-	case "float":
-		t.closeFloat()
 	}
 	return true
 }

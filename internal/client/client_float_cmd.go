@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"dm/internal/cells"
@@ -23,6 +24,10 @@ type floatView struct {
 	float   *panel.FloatingPane
 	exited  bool
 	closed  bool
+	// opened turns true when the float-open reply lands. Keys typed before
+	// that are dropped: the child does not exist yet, and forwarding them
+	// would either miss it or answer with a phantom error.
+	opened bool
 }
 
 // floatRect is where the floating command sits: centred, eight cells clear of
@@ -83,6 +88,10 @@ func (t *tui) openFloatCommand() {
 		Type: "req", Action: "float-open", ID: t.floatID, Target: pane,
 		Float: id, Cols: r.W, Rows: r.H,
 	})
+	// The mode goes on before the reply, so a key typed during the round trip
+	// waits instead of reaching the pane behind the coming float.
+	t.mode = "float"
+	t.armed = false
 	t.dirty = true
 }
 
@@ -95,6 +104,9 @@ func (t *tui) takeFloatOpen(m wire.Msg) {
 	}
 	if !m.OK {
 		t.float = nil
+		t.mode = ""
+		t.inbuf = nil
+		t.pending = false
 		t.notify(m.Error)
 		t.dirty = true
 		return
@@ -104,6 +116,7 @@ func (t *tui) takeFloatOpen(m wire.Msg) {
 	}
 	_ = json.Unmarshal(m.Res, &res)
 	f.command = res.Command
+	f.opened = true
 	f.setBorders()
 	f.float.VT = f.vt
 	f.float.Paint = floatVTPaint(f.vt, nil)
@@ -143,6 +156,20 @@ func (t *tui) applyFloatBytes(m wire.Msg) bool {
 	return true
 }
 
+// floatErrorSwallowed reports whether an error reply names the float the client
+// holds or the one it just closed. A key or a resize that raced the child's
+// exit is not news: the exit frame already said the command is gone, and the
+// reply must not surface a float id as a pane toast.
+func (t *tui) floatErrorSwallowed(err string) bool {
+	if err == "" {
+		return false
+	}
+	if t.float != nil && strings.Contains(err, t.float.id) {
+		return true
+	}
+	return t.floatGone != "" && strings.Contains(err, t.floatGone)
+}
+
 // floatExited keeps the last screen and says the command is gone. The next key
 // closes the float and goes nowhere.
 func (t *tui) floatExited() {
@@ -163,6 +190,7 @@ func (t *tui) closeFloat() {
 		return
 	}
 	f.closed = true
+	t.floatGone = f.id
 	t.RemoveFloatingPane(f.float.ID)
 	if t.conn != nil && !f.exited {
 		_ = t.conn.Send(wire.Msg{Type: "req", Action: "float-close", Float: f.id})
@@ -199,8 +227,10 @@ func (t *tui) syncFloat(snap *wire.Snapshot) {
 
 // floatKey sends one read's worth of bytes to the command. The prefix is the
 // client's: prefix then q closes the float, and any other byte after the prefix
-// goes through with the prefix in front. It returns false when the byte after a
-// lone prefix has not arrived yet.
+// goes through with the prefix in front. A lone prefix waits for the next byte
+// for as long as it takes, the way the main keymap's armed prefix does: it is
+// the head of a chord, not an escape, so no timer resolves it. It returns false
+// while it waits.
 func (t *tui) floatKey() bool {
 	f := t.float
 	if f == nil {
@@ -213,13 +243,20 @@ func (t *tui) floatKey() bool {
 		t.closeFloat()
 		return true
 	}
+	if !f.opened {
+		// The open reply has not landed. Drop the read: nothing exists yet to
+		// take it, and holding it would only delay a key the operator typed
+		// against a screen that is not there.
+		t.inbuf = nil
+		t.pending = false
+		return true
+	}
 	prefix := t.km().PrefixBytes()
 	if len(prefix) > 0 && bytes.HasPrefix(t.inbuf, prefix) {
 		if len(t.inbuf) == len(prefix) {
-			if !t.pending {
-				t.pending = true
-				t.escAt = time.Now()
-			}
+			// The chord's head. Wait for the next byte without a timer: a
+			// human chord takes longer than escTimeout, and expiring here
+			// would kill the command under the operator's hand.
 			return false
 		}
 		if t.inbuf[len(prefix)] == 'q' {
@@ -236,13 +273,4 @@ func (t *tui) floatKey() bool {
 		_ = t.conn.Send(wire.Msg{Type: "keys", Target: f.id, Keys: keys})
 	}
 	return true
-}
-
-// floatPrefixStalled sends a prefix that never finished arriving. A lone prefix
-// is a key of its own, so the command gets it.
-func (t *tui) floatPrefixStalled(keys []byte) {
-	if t.float == nil || t.conn == nil || len(keys) == 0 {
-		return
-	}
-	_ = t.conn.Send(wire.Msg{Type: "keys", Target: t.float.id, Keys: append([]byte(nil), keys...)})
 }
