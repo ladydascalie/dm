@@ -56,8 +56,8 @@ func TestProbeWheelAltLeft(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		cmd.Process.Kill()
-		f.Close()
+		_ = cmd.Process.Kill()
+		_ = f.Close()
 	}()
 	var out buf
 	go func() {
@@ -65,7 +65,7 @@ func TestProbeWheelAltLeft(t *testing.T) {
 		for {
 			n, err := f.Read(b)
 			if n > 0 {
-				out.Write(b[:n])
+				_, _ = out.Write(b[:n])
 			}
 			if err != nil {
 				return

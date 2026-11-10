@@ -479,7 +479,8 @@ func boxPaintRow(buf *bytes.Buffer, th theme.Theme, e box.Entry, w int, receipt 
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
 	buf.WriteString(row[:start])
-	buf.WriteString("\x1b[0m" + boxStateColour(th, e.State).FG())
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(boxStateColour(th, e.State).FG())
 	buf.WriteString(state)
 	buf.WriteString("\x1b[0m\x1b[90m")
 	buf.WriteString(row[start+len(state):])

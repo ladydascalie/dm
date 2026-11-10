@@ -225,7 +225,7 @@ func TestSaveFailureLeavesNoTemp(t *testing.T) {
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 	if err := st.Save(); err == nil {
 		t.Fatal("save into a read-only directory succeeded, want an error")
