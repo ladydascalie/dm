@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"dm/internal/box"
+	"dm/internal/cells"
+	"dm/internal/layout"
 	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -160,5 +162,103 @@ func TestBodyReaderFollowsResize(t *testing.T) {
 	}
 	if tui.reader.Float.Rect != tui.box.Float.Rect {
 		t.Fatalf("reader rect = %+v, want the float's %+v", tui.reader.Float.Rect, tui.box.Float.Rect)
+	}
+}
+
+// wrapRect is a reader float whose inner width is 38 cells.
+func wrapRect() layout.Rect { return layout.Rect{X: 2, Y: 2, W: 40, H: 6} }
+
+// A body line longer than the inner width wraps, and no wrapped row paints
+// more cells than the width.
+func TestBodyReaderWrapsLongLine(t *testing.T) {
+	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
+		Body: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo"}
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	inner := wrapRect().W - 2
+	if len(r.lines) < 2 {
+		t.Fatalf("lines = %q, want the long line wrapped", r.lines)
+	}
+	for i, row := range r.lines {
+		if n := cells.Cells(row); n > inner {
+			t.Fatalf("row %d paints %d cells, want at most %d", i, n, inner)
+		}
+	}
+	if got := strings.Join(r.lines, " "); got != e.Body {
+		t.Fatalf("wrapped rows = %q, want the body's words back in order", got)
+	}
+}
+
+// A run with no break opportunity hard-breaks at the inner width.
+func TestBodyReaderHardBreaksUnbrokenRun(t *testing.T) {
+	body := strings.Repeat("a", 100)
+	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1", Body: body}
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	inner := wrapRect().W - 2
+	if len(r.lines) != 3 {
+		t.Fatalf("rows = %d, want 3 hard-broken rows", len(r.lines))
+	}
+	for i, row := range r.lines {
+		if n := cells.Cells(row); n > inner {
+			t.Fatalf("row %d paints %d cells, want at most %d", i, n, inner)
+		}
+	}
+	if got := strings.Join(r.lines, ""); got != body {
+		t.Fatalf("rows = %q, want the run back whole", got)
+	}
+}
+
+// Wide runes wrap on cell boundaries: no row splits a rune and no row passes
+// the inner width.
+func TestBodyReaderWrapsWideRunes(t *testing.T) {
+	body := strings.Repeat("日", 30) // 60 cells, wider than the 38-cell row
+	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1", Body: body}
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	inner := wrapRect().W - 2
+	got := 0
+	for i, row := range r.lines {
+		if n := cells.Cells(row); n > inner {
+			t.Fatalf("row %d paints %d cells, want at most %d", i, n, inner)
+		}
+		for _, c := range row {
+			if c != '日' {
+				t.Fatalf("row %q holds a split rune %q", row, string(c))
+			}
+			got++
+		}
+	}
+	if got != 30 {
+		t.Fatalf("rows hold %d runes, want the body's 30", got)
+	}
+}
+
+// Scrolling runs over wrapped rows: the bottom key rests on the last wrapped
+// row and the screen shows it.
+func TestBodyReaderScrollsWrappedRows(t *testing.T) {
+	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
+		Body: strings.Repeat("word ", 40)}
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	if len(r.lines) < 3 {
+		t.Fatalf("lines = %q, want a wrapped body", r.lines)
+	}
+	r.Scroll(len(r.lines), theme.DefaultTheme())
+	if want := len(r.lines) - wrapRect().H; r.off != want {
+		t.Fatalf("offset = %d, want the bottom at %d", r.off, want)
+	}
+	screen := readerScreen(t, r, 80, 24)
+	rect := r.Float.Rect
+	last := r.lines[len(r.lines)-1]
+	if row := boxScreenRow(screen, rect.Y+rect.H-1, rect.X, rect.W); !strings.Contains(row, last) {
+		t.Fatalf("last content row = %q, want the last wrapped row %q", row, last)
+	}
+}
+
+// A body of short lines keeps one row per line, exactly as before the wrap.
+func TestBodyReaderKeepsShortLines(t *testing.T) {
+	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
+		Msg: "summary", Body: "one\ntwo\nthree"}
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	want := []string{"summary", "one", "two", "three"}
+	if strings.Join(r.lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("lines = %q, want %q", r.lines, want)
 	}
 }
