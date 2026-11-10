@@ -24,16 +24,16 @@ func yankPane(t *testing.T, cols, rows int) (*paneProc, net.Conn, chan wire.Msg)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		r.Close()
-		w.Close()
+		_ = r.Close()
+		_ = w.Close()
 	})
-	go io.Copy(io.Discard, r)
+	go func() { _, _ = io.Copy(io.Discard, r) }()
 	p := &paneProc{
 		id: "w1p1", vt: vt.NewTerm(cols, rows), ring: &scrollRing{},
 		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, ptmx: w,
 	}
 	serve, cli := net.Pipe()
-	t.Cleanup(func() { cli.Close() })
+	t.Cleanup(func() { _ = cli.Close() })
 	msgs := make(chan wire.Msg, 64)
 	go func() {
 		for {

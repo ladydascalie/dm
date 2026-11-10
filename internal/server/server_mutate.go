@@ -562,13 +562,6 @@ func (s *server) closeWindow(id string) error {
 	s.mu.Unlock()
 	return nil
 }
-
-func (s *server) activeIDs() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return layout.AllPanes(s.st.ActiveWindow().Root)
-}
-
 func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (string, error) {
 	// A split opens in the folder its source pane stands in now. Ask before
 	// taking the lock, for the same reason a window asks.

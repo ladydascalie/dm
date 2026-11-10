@@ -310,7 +310,7 @@ func newZoomFixture(t *testing.T) *zoomFixture {
 		inbox: make(chan paneMsg, 64)}
 	for _, id := range []string{left, right} {
 		srv, cli := net.Pipe()
-		t.Cleanup(func() { srv.Close(); cli.Close() })
+		t.Cleanup(func() { _ = srv.Close(); _ = cli.Close() })
 		f.s.panes[id] = &paneConn{id: id, c: srv}
 		go func(id string, c net.Conn) {
 			for {

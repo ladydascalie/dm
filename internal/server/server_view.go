@@ -304,7 +304,7 @@ func (s *server) paneExited(id string) {
 			State: box.StateNote,
 			Msg:   msg,
 		})
-		s.notifyBoxEntryLocked(e, !(found && notifyExit))
+		s.notifyBoxEntryLocked(e, !found || !notifyExit)
 	}
 	if s.countPanes() == 0 {
 		s.mu.Unlock()
@@ -615,7 +615,7 @@ func (s *server) serve(c net.Conn) {
 		// child is not a pane and nothing else would ever end it.
 		s.killClientFloats(cl)
 		cl.shutdown()
-		c.Close()
+		_ = c.Close()
 	}()
 
 	for {
@@ -726,7 +726,7 @@ func paneScreenRequest(session, id string, m wire.Msg) paneScreen {
 	if err != nil {
 		return ps
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	m.ID = 1
 	if err := wire.WriteMsg(c, m); err != nil {
 		return ps
@@ -816,7 +816,7 @@ func readPaneReplay(session, id string) paneReplay {
 	if err != nil {
 		return rp
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
 	if err := wire.WriteMsg(c, wire.Msg{Type: "req", Action: "replay", ID: 1}); err != nil {
 		return rp
@@ -854,7 +854,7 @@ func paneRequest(session, id string, m wire.Msg) (wire.Msg, error) {
 	if err != nil {
 		return out, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	m.ID = 1
 	if err := wire.WriteMsg(c, m); err != nil {
 		return out, err

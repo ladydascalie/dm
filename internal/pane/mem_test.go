@@ -118,7 +118,7 @@ func TestReplayAfterWrap(t *testing.T) {
 		st:   wire.Status{State: "unknown"},
 	}
 	serve, cli := net.Pipe()
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(10 * time.Second))

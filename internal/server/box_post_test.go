@@ -65,7 +65,7 @@ func readOnlySession(t *testing.T, s *server) {
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 }
 
 // TestBoxPostSaveErrorReplies: a failed state save rides out on the reply,

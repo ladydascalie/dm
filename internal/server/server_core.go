@@ -346,7 +346,7 @@ func Run(args []string) error {
 	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		return fmt.Errorf("session %q already has a server", *name)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	st, err := session.LoadState(*name)
 	fromDisk := err == nil
@@ -560,7 +560,7 @@ func (s *server) ensurePane(id string) error {
 	if err != nil {
 		return err
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 	cmd.Stdout, cmd.Stderr = lf, lf
 	if spawn == nil {
 		spawn = func(c *exec.Cmd) error { return c.Start() }

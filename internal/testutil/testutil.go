@@ -24,7 +24,7 @@ import (
 func Frame(t *testing.T, payload string) []byte {
 	t.Helper()
 	var b bytes.Buffer
-	binary.Write(&b, binary.BigEndian, uint32(len(payload)))
+	_ = binary.Write(&b, binary.BigEndian, uint32(len(payload)))
 	b.WriteString(payload)
 	return b.Bytes()
 }
@@ -74,8 +74,8 @@ func CaptureStdout(t *testing.T, fn func()) string {
 	os.Stdout = w
 	fn()
 	os.Stdout = old
-	w.Close()
-	defer r.Close()
+	_ = w.Close()
+	defer func() { _ = r.Close() }()
 	out, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatal(err)

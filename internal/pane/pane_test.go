@@ -19,7 +19,7 @@ func TestShellCwd(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer cmd.Process.Kill()
+	defer func() { _ = cmd.Process.Kill() }()
 	deadline := time.Now().Add(5 * time.Second)
 	for shellCwd(cmd.Process.Pid) != want {
 		if time.Now().After(deadline) {

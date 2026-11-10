@@ -39,7 +39,7 @@ func screenPane(t *testing.T, session, id string) {
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				for {
 					m, err := wire.ReadMsg(c)
 					if err != nil {

@@ -62,7 +62,7 @@ func TestReflowWidensScreen(t *testing.T) {
 	ringBefore := string(p.ring.Bytes())
 
 	serve, cli := net.Pipe()
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
@@ -106,7 +106,7 @@ func TestReflowAltScreenUnchanged(t *testing.T) {
 	p.mu.Unlock()
 
 	serve, cli := net.Pipe()
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
@@ -143,7 +143,7 @@ func TestReflowBadSizeIgnored(t *testing.T) {
 	feedReflow(p, "hello")
 
 	serve, cli := net.Pipe()
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))

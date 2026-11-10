@@ -94,7 +94,7 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 					conns = append(conns, conn)
 					mu.Unlock()
 					go func(c net.Conn) {
-						defer c.Close()
+						defer func() { _ = c.Close() }()
 						for {
 							m, err := wire.ReadMsg(c)
 							if err != nil {
