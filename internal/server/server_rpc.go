@@ -82,6 +82,30 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		s.reply(cl, m, map[string]any{"lines": lines, "status": st}, nil)
 
+	case "screen":
+		// One pane's visible screen, on request. A client that previews a pane
+		// outside the active window has no bytes stream for it, so the screen
+		// is the only way to paint the pane live. The reply is the pane's own
+		// frame, forwarded as the replay case forwards its ring.
+		s.mu.Lock()
+		pc := s.panes[m.Target]
+		s.mu.Unlock()
+		if pc == nil {
+			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
+			return
+		}
+		got, err := paneRequest(s.st.Name, m.Target, wire.Msg{Type: "req", Action: "screen"})
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		if got.VTSnap == nil {
+			s.reply(cl, m, nil, fmt.Errorf("pane %q sent no screen", m.Target))
+			return
+		}
+		cl.deliver(wire.Msg{Type: "screen", Target: m.Target, VTSnap: got.VTSnap, Res: got.Res})
+		s.reply(cl, m, map[string]any{"pane": m.Target}, nil)
+
 	case "history":
 		lines, err := s.paneHistory(m.Target, m.Count)
 		if err != nil {
