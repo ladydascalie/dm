@@ -696,7 +696,7 @@ func boxSubStream(session string, req *box.SubReq, jsonOut bool) (bool, error) {
 	if err != nil {
 		return false, errBoxSubEnded
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if err := c.Send(wire.Msg{Type: "req", Action: "msg-sub", ID: 1, Res: raw}); err != nil {
 		return true, errBoxSubEnded
 	}
@@ -858,7 +858,7 @@ func rpcWithin(name string, req wire.Msg, wait time.Duration) (wire.Msg, error) 
 	if err != nil {
 		return wire.Msg{}, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	req.Type = "req"
 	req.ID = 1
 	if err := wire.WriteMsg(c, req); err != nil {

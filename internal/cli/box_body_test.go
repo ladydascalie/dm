@@ -58,7 +58,7 @@ func TestBodyFileDashReadsStdin(t *testing.T) {
 	if _, err := w.WriteString("piped\nbody"); err != nil {
 		t.Fatal(err)
 	}
-	w.Close()
+	_ = w.Close()
 	old := os.Stdin
 	os.Stdin = r
 	t.Cleanup(func() { os.Stdin = old })

@@ -39,7 +39,7 @@ func writeHTMLTemp(page string) (string, error) {
 		return "", err
 	}
 	if _, err := f.WriteString(page); err != nil {
-		f.Close()
+		_ = f.Close()
 		return "", err
 	}
 	if err := f.Close(); err != nil {
