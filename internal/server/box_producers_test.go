@@ -92,8 +92,9 @@ func TestNotifyPaneStateSuppressedWhenFocused(t *testing.T) {
 	}
 }
 
-// A pane exit with a survivor logs one entry under the pane's notify topic
-// and pops for a headless session.
+// A pane exit with a survivor logs one entry under the pane's notify topic.
+// The exit rides note, and note is not urgent, so a headless session pops
+// nothing; the entry is logged either way.
 func TestPaneExitPostsEntry(t *testing.T) {
 	dir, log := fakeNotifySend(t)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -110,18 +111,15 @@ func TestPaneExitPostsEntry(t *testing.T) {
 	if entries[0].Key != "notify/"+gone || entries[0].State != box.StateNote || entries[0].Msg != "exited: building x" {
 		t.Fatalf("entry = %+v, want the exit on the pane's topic", entries[0])
 	}
-	lines := waitNotifySend(t, log, 1)
-	if !strings.Contains(lines[0], "exited: building x") {
-		t.Fatalf("dispatch = %q, want the exit message", lines[0])
-	}
+	noNotifySend(t, log, 0)
 	if s.countPanes() != 1 {
 		t.Fatalf("panes left = %d, want the survivor", s.countPanes())
 	}
 }
 
-// The last pane's exit logs the same entry and pops; the session ends after.
-// endSession's process exit is stubbed, so the test survives the shutdown it
-// runs.
+// The last pane's exit logs the same entry without popping; the session ends
+// after. endSession's process exit is stubbed, so the test survives the
+// shutdown it runs.
 func TestLastPaneExitPostsEntry(t *testing.T) {
 	exitCode := make(chan int, 1)
 	endSessionExit = func(code int) { exitCode <- code }
@@ -141,7 +139,7 @@ func TestLastPaneExitPostsEntry(t *testing.T) {
 	if entries[0].Key != "notify/"+id || entries[0].State != box.StateNote || entries[0].Msg != "exited: done for now" {
 		t.Fatalf("entry = %+v, want the exit on the pane's topic", entries[0])
 	}
-	waitNotifySend(t, log, 1)
+	noNotifySend(t, log, 0)
 	s.mu.Lock()
 	ended := s.ending
 	s.mu.Unlock()

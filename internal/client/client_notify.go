@@ -108,6 +108,7 @@ func (t *tui) takeNotifyList(m wire.Msg) {
 		}
 		t.notify(notifyToastText(e))
 	}
+	t.notifyRecentMerge(rep.Entries)
 	t.notifySeen = true
 	if t.notifyWant {
 		t.notifyWant = false

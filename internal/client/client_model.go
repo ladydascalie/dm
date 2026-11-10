@@ -262,6 +262,12 @@ type tui struct {
 	notifyPending bool
 	notifyWant    bool
 
+	// notifyRecent is the newest notify/ entries the client knows, newest
+	// first, capped at notifyCentreLimit. Every notify msg-list reply feeds
+	// it and a clear prunes it, so the bar badge counts the same rows the
+	// centre's unread marks do.
+	notifyRecent []box.Entry
+
 	// rowsig holds one fingerprint per pane content row, so a steady frame
 	// repaints only the rows that moved. laysig is the shape of the picture:
 	// when it changes the next frame repaints whole. last is what the previous

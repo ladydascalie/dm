@@ -87,6 +87,27 @@ func TestNotifyStateChange(t *testing.T) {
 	}
 }
 
+// Urgency is a state property, independent of the transition: blocked and
+// error are urgent, done, note, working and unknown are not.
+func TestNotifyUrgent(t *testing.T) {
+	for _, c := range []struct {
+		state string
+		want  bool
+	}{
+		{"blocked", true},
+		{"error", true},
+		{"done", false},
+		{"note", false},
+		{"working", false},
+		{"clear", false},
+		{"", false},
+	} {
+		if got := Urgent(c.state); got != c.want {
+			t.Fatalf("Urgent(%q) = %v, want %v", c.state, got, c.want)
+		}
+	}
+}
+
 // systemNotify runs notify-send with the pinned arguments, and DM_NOTIFY=0
 // stops it.
 func TestSystemNotifyRunsNotifySend(t *testing.T) {
