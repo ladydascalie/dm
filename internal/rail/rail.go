@@ -610,13 +610,13 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 		}
 		glyph := RailMark(it.Agent, it.App, set)
 		if compact {
-			// The mark gives up its trailing space, and the project bar takes the
-			// cell between mark and state, so a thin row still says which project
-			// the pane belongs to while the glyph keeps its column.
+			// The bar goes full left, the agent mark gives up its trailing
+			// space to sit between the bar and the state glyph, so the state
+			// glyph keeps its column.
 			m1, _ := utf8.DecodeRuneInString(glyph)
 			left = []segment.Seg{
-				{Text: string(m1), FG: colour},
 				RailBar(th, it),
+				{Text: string(m1), FG: colour},
 				{Text: mark, FG: colour},
 			}
 		} else {

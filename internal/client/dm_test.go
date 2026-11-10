@@ -448,9 +448,9 @@ func TestRailAgentMarker(t *testing.T) {
 	vt := vt.NewTerm(40, 6)
 	vt.Write(b.Bytes())
 	vt.Flush()
-	bar, glyph := termCell(vt, 0, 0).Char, termCell(vt, 2, 0).Char
+	bar, glyph := termCell(vt, 1, 0).Char, termCell(vt, 2, 0).Char
 	if bar != '\u258e' || glyph != '●' {
-		t.Fatalf("thin agent row = %q at 0, %q at 2", bar, glyph)
+		t.Fatalf("thin agent row = %q at 1, %q at 2", bar, glyph)
 	}
 }
 

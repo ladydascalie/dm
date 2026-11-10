@@ -192,13 +192,13 @@ func TestThinRailGlyphColumn(t *testing.T) {
 	if g := cellOf(vt, 2, 1); g.Char != '?' {
 		t.Fatalf("agent row glyph = %q at column 2, want ?", g.Char)
 	}
-	// The mark before the glyph keeps its column: an agent bar on the agent
-	// row and a blank on the shell row.
-	if g := cellOf(vt, 0, 1); g.Char != '\u258e' {
-		t.Fatalf("agent row mark = %q at column 0, want the agent bar", g.Char)
+	// The mark sits between the bar and the glyph: the agent mark on the
+	// agent row and a blank on the shell row.
+	if g := cellOf(vt, 1, 1); g.Char != '\u258e' {
+		t.Fatalf("agent row mark = %q at column 1, want the agent bar", g.Char)
 	}
-	if g := cellOf(vt, 0, 0); !thinBlank(g) {
-		t.Fatalf("shell row mark = %q at column 0, want a blank", g.Char)
+	if g := cellOf(vt, 1, 0); !thinBlank(g) {
+		t.Fatalf("shell row mark = %q at column 1, want a blank", g.Char)
 	}
 }
 
