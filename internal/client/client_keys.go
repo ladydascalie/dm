@@ -537,13 +537,24 @@ func (t *tui) switcherInputKey() bool {
 	if len(t.inbuf) == 0 {
 		return true
 	}
-	if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
-		// The byte is the mode change itself. Keep it out of the buffer, or the
-		// dashboard would read it again as the head of a close key.
+	if t.inbuf[0] == 0x1b {
+		// Esc is the mode change itself and never a byte for the pane. Anything
+		// that arrived behind it in the same read is the tail of the keypress
+		// the operator was already making, so it still goes to the pane; the
+		// escape itself does not. Keeping it would make the dashboard read it
+		// again as the head of a close key, and forwarding it would leave the
+		// pane mid-sequence.
+		rest := append([]byte(nil), t.inbuf[1:]...)
 		t.inbuf = t.inbuf[:0]
 		t.swInput = false
 		t.pending = false
 		t.dirty = true
+		if len(rest) > 0 && t.conn != nil {
+			if pane := t.sw.Target(); pane != "" {
+				_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: rest})
+				t.previewNow()
+			}
+		}
 		return true
 	}
 	keys := append([]byte(nil), t.inbuf...)

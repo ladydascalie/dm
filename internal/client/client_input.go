@@ -232,22 +232,46 @@ func (t *tui) forwardPaste(seq []byte) {
 	default:
 		t.mode = ""
 	}
-	_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.pasteKeys(seq)})
+	focus := ""
+	if t.snap != nil {
+		focus = t.snap.Focus
+	}
+	_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.pasteKeys(seq, focus)})
 }
 
-// pasteKeys frames the paste only for a program that asked for bracketed paste.
-// A program that never asked, such as a line editor without 2004, reads the
-// markers as keys and leaves their tail on the line: it gets the text alone.
-func (t *tui) pasteKeys(seq []byte) []byte {
-	if t.snap != nil {
-		if p := t.paneByID(t.snap.Focus); p != nil && p.Paste {
-			return seq
-		}
+// pasteKeys frames the paste only for the pane it is aimed at, and only when
+// that pane asked for bracketed paste. A program that never asked, such as a
+// line editor without 2004, reads the markers as keys and leaves their tail on
+// the line: it gets the text alone.
+func (t *tui) pasteKeys(seq []byte, pane string) []byte {
+	if t.paneWantsPaste(pane) {
+		return seq
 	}
 	if len(seq) < len(pasteStart)+len(pasteEnd) {
 		return nil
 	}
 	return seq[len(pasteStart) : len(seq)-len(pasteEnd)]
+}
+
+// paneWantsPaste reports whether a pane asked for bracketed paste. The pane's
+// own terminal is the live answer: the client tracks the mode in every byte
+// stream, and a restored screen carries it, so the dashboard's preview
+// terminal answers for a pane outside the active window too. The snapshot's
+// pane info covers a pane the client has no terminal for yet.
+func (t *tui) paneWantsPaste(pane string) bool {
+	if pane == "" {
+		return false
+	}
+	if term := t.vts[pane]; term != nil {
+		return term.Grid().Modes().BracketedPaste
+	}
+	if term := t.swVT[pane]; term != nil {
+		return term.Grid().Modes().BracketedPaste
+	}
+	if p := t.paneByID(pane); p != nil {
+		return p.Paste
+	}
+	return false
 }
 
 func (t *tui) processInput() {
@@ -296,7 +320,9 @@ func (t *tui) processInput() {
 				// over the dashboard is otherwise swallowed whole.
 				if t.swInput {
 					if pane := t.sw.Target(); pane != "" && t.conn != nil {
-						_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: t.pasteKeys(seq)})
+						// The block is framed for the pane the dashboard sends
+						// to, not for the focused pane of the window behind it.
+						_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: t.pasteKeys(seq, pane)})
 						t.previewNow()
 					}
 				}
