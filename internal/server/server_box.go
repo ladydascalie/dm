@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/notify"
 	"dm/internal/wire"
 )
 
@@ -16,6 +18,21 @@ import (
 func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	e, err := s.boxStoreLocked(req)
+	// A notify/ entry renders after it is logged, so the log is never
+	// suppressed. SystemNotify runs async and never blocks the post.
+	if box.IsNotifyTopic(e.Key) {
+		pane := strings.TrimPrefix(e.Key, box.NotifyPrefix)
+		s.notifyBoxEntryLocked(e, pane != "" && s.operatorSeesLocked(pane))
+	}
+	return e, err
+}
+
+// boxStoreLocked appends the request as one entry, trims the log and saves
+// state. The caller holds s.mu and renders any notify/ entry itself through
+// notifyBoxEntryLocked, so a caller that already made the suppression decision
+// can keep it.
+func (s *server) boxStoreLocked(req *box.PostReq) (box.Entry, error) {
 	if req.From != "" && !s.paneInTreeLocked(req.From) {
 		return box.Entry{}, fmt.Errorf("box: no pane %q", req.From)
 	}
@@ -38,6 +55,16 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 	// the whole log again, so its picture is never a guess.
 	s.broadcastLocked(wire.Msg{Type: "box"})
 	return e, err
+}
+
+// notifyBoxEntryLocked renders one notify/ entry as a desktop notification:
+// the topic and state as the title, the message as the body. A true suppress
+// drops only the pop; the entry is logged either way. The caller holds s.mu.
+func (s *server) notifyBoxEntryLocked(e box.Entry, suppress bool) {
+	if suppress {
+		return
+	}
+	notify.SystemNotify(e.Key+" "+string(e.State), e.Msg)
 }
 
 // boxList returns the entries newest first that pass the request's topic and
