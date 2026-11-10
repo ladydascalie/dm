@@ -419,10 +419,12 @@ panes outside a project last. Status puts the states that want attention first:
 blocked, error, working, done, idle, unknown, then a shell.
 
 The right of the screen previews the selected pane's live screen: from the
-local VT in the active window and from the server's read elsewhere. ctrl+u and
-ctrl+d scroll it toward older and newer rows, `+` and `-` resize the band, and
-`p` peeks: it hides the band so the table takes the full width. A float under
-10 rows or 60 columns drops the band whatever the toggle says.
+local VT in the active window, and from a screen request elsewhere. A read
+paints the far pane first, then the client asks the server for that pane's
+screen every 250 ms while it stays selected. ctrl+u and ctrl+d scroll it toward
+older and newer rows, `+` and `-` resize the band, and `p` peeks: it hides the
+band so the table takes the full width. A float under 10 rows or 60 columns
+drops the band whatever the toggle says.
 
 `i` sends every key to the selected pane until esc. The dashboard stays up and
 the answer shows in the preview, and the footer says `input` while the mode is
@@ -762,9 +764,10 @@ proposal:
 
 dm enables bracketed paste (2004) on attach and disables it again on detach, so
 ctrl+shift+v inserts newlines literally. The client sends a paste to the focused
-pane as one chunk and never reads a byte inside it as a dm key: an embedded
-ctrl+b does not arm the prefix, and newlines do not submit. A paste also closes
-an open menu, picker or scrollback first.
+pane as one chunk, or to the selected pane while the dashboard's input mode is
+on, and never reads a byte inside it as a dm key: an embedded ctrl+b does not
+arm the prefix, and newlines do not submit. A paste also closes an open menu,
+picker or scrollback first.
 
 The 200~ and 201~ markers go only to a program that asked for bracketed paste.
 A program that never asked, such as a line editor without 2004, gets the text
