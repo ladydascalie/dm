@@ -137,7 +137,7 @@ func TestSwitcherTypeAndEnter(t *testing.T) {
 }
 
 // TestSwitcherFilterHoldsBoundLetters: the bug filter mode exists for. A query
-// that holds a letter the table binds is text, so it neither opens the diff,
+// that holds a letter the table binds is text, so it neither opens the float,
 // nor sorts, nor enters input mode, nor jumps.
 func TestSwitcherFilterHoldsBoundLetters(t *testing.T) {
 	tui, got := switcherTUI(t)
@@ -153,8 +153,8 @@ func TestSwitcherFilterHoldsBoundLetters(t *testing.T) {
 	if tui.swInput {
 		t.Fatal("i entered input mode from the query")
 	}
-	if tui.diff != nil {
-		t.Fatal("d opened the diff from the query")
+	if tui.float != nil {
+		t.Fatal("d opened the float from the query")
 	}
 	if q := tui.sw.Query(); q != "dsip1" {
 		t.Fatalf("query = %q, want the whole word dsip1", q)

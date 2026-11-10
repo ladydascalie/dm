@@ -1005,6 +1005,58 @@ func TestConfigDashboardPreview(t *testing.T) {
 	}
 }
 
+// TestConfigDiffCommand reads the dashboard diff command: the node, its
+// default, and the empty and missing values it rejects.
+func TestConfigDiffCommand(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"absent", `prefix "ctrl+b"`, "git diff"},
+		{"set", `diff-command "git diff --stat"`, "git diff --stat"},
+		{"compound", `diff-command "git diff -- src && true"`, "git diff -- src && true"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.DiffCommand(); got != c.want {
+				t.Fatalf("DiffCommand() = %q, want %q", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().DiffCommand(); got != defaultDiffCommand {
+		t.Fatalf("LoadDefault().DiffCommand() = %q, want %q", got, defaultDiffCommand)
+	}
+	if defaultDiffCommand != "git diff" {
+		t.Fatalf("defaultDiffCommand = %q, want git diff", defaultDiffCommand)
+	}
+}
+
+// TestConfigDiffCommandEmpty proves an empty or missing value fails with the
+// node name, and a second node fails as a duplicate.
+func TestConfigDiffCommandEmpty(t *testing.T) {
+	for _, src := range []string{`diff-command ""`, `diff-command`} {
+		_, err := parseConfig(src)
+		if err == nil {
+			t.Fatalf("parseConfig accepted %q", src)
+		}
+		if !strings.Contains(err.Error(), "diff-command") {
+			t.Fatalf("error = %q, want the node name", err)
+		}
+	}
+	_, err := parseConfig(`diff-command ""`)
+	if err == nil || !strings.Contains(err.Error(), "diff-command must not be empty") {
+		t.Fatalf("error = %q, want diff-command must not be empty", err)
+	}
+	if _, err := parseConfig("diff-command \"git diff\"\ndiff-command \"git show\""); err == nil {
+		t.Fatal("parseConfig accepted two diff-command nodes")
+	}
+}
+
 // TestConfigDefaultFold proves the default fold setting: absent means folded,
 // "fold" means folded and "unfold" means unfolded.
 func TestConfigDefaultFold(t *testing.T) {

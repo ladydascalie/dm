@@ -1,0 +1,276 @@
+package client
+
+import (
+	"bytes"
+	"encoding/json"
+	"strconv"
+	"strings"
+	"time"
+
+	"dm/internal/cells"
+	"dm/internal/layout"
+	"dm/internal/panel"
+	"dm/internal/vt"
+	"dm/internal/wire"
+)
+
+// floatView is one floating command pane: the terminal the child's bytes paint
+// into, the panel the client draws around it, and the command the server named.
+// The client keeps one at a time.
+type floatView struct {
+	id      string
+	command string
+	vt      *vt.Term
+	float   *panel.FloatingPane
+	exited  bool
+	closed  bool
+	// opened turns true when the float-open reply lands. Keys typed before
+	// that are dropped: the child does not exist yet, and forwarding them
+	// would either miss it or answer with a phantom error.
+	opened bool
+}
+
+// floatRect is where the floating command sits: centred, eight cells clear of
+// the screen's sides, at most 110 columns wide and rows-4 tall, so the box and
+// its border always fit. It is the interior; the panel draws the border around
+// it.
+func floatRect(snap *wire.Snapshot) layout.Rect {
+	w := snap.Cols - 8
+	if w > 110 {
+		w = 110
+	}
+	if w < 10 {
+		w = snap.Cols - 2
+	}
+	h := snap.Rows - 4
+	if h < 3 {
+		h = snap.Rows - 2
+	}
+	x := (snap.Cols - w) / 2
+	y := (snap.Rows - (h + 2)) / 2
+	if x+w > snap.Cols-1 {
+		x = snap.Cols - 1 - w
+	}
+	if y+h > snap.Rows-1 {
+		y = snap.Rows - 1 - h
+	}
+	if x < 1 {
+		x = 1
+	}
+	if y < 1 {
+		y = 1
+	}
+	return layout.Rect{X: x, Y: y, W: w, H: h}
+}
+
+// openFloatCommand closes the dashboard and asks the server to run the diff
+// command on the selected pane's folder. The client picks the id and builds the
+// terminal at the size it will draw first, so the child's first bytes cannot
+// arrive before there is a terminal to hold them.
+func (t *tui) openFloatCommand() {
+	if t.sw == nil || t.conn == nil || t.snap == nil {
+		return
+	}
+	pane := t.sw.Target()
+	if pane == "" {
+		return
+	}
+	closeSwitcher(t)
+	r := floatRect(t.snap)
+	id := "float-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	t.float = &floatView{
+		id:    id,
+		vt:    vt.NewTerm(r.W, r.H),
+		float: &panel.FloatingPane{ID: id, Rect: r, Active: true},
+	}
+	t.floatID++
+	_ = t.conn.Send(wire.Msg{
+		Type: "req", Action: "float-open", ID: t.floatID, Target: pane,
+		Float: id, Cols: r.W, Rows: r.H,
+	})
+	// The mode goes on before the reply, so a key typed during the round trip
+	// waits instead of reaching the pane behind the coming float.
+	t.mode = "float"
+	t.armed = false
+	t.dirty = true
+}
+
+// takeFloatOpen shows the float the reply opened. A refusal toasts the reason
+// and drops the terminal, leaving the panes as they were.
+func (t *tui) takeFloatOpen(m wire.Msg) {
+	f := t.float
+	if f == nil || f.closed {
+		return
+	}
+	if !m.OK {
+		t.float = nil
+		t.mode = ""
+		t.inbuf = nil
+		t.pending = false
+		t.notify(m.Error)
+		t.dirty = true
+		return
+	}
+	var res struct {
+		Command string `json:"command"`
+	}
+	_ = json.Unmarshal(m.Res, &res)
+	f.command = res.Command
+	f.opened = true
+	f.setBorders()
+	f.float.VT = f.vt
+	f.float.Paint = floatVTPaint(f.vt, nil)
+	t.AddFloatingPane(f.float)
+	t.mode = "float"
+	t.armed = false
+	t.dirty = true
+}
+
+// setBorders writes the border title and hint from the command and whether the
+// child is still running.
+func (f *floatView) setBorders() {
+	title := " diff · " + f.command + " "
+	if f.exited {
+		title = " diff · " + f.command + " · exited "
+	}
+	f.float.Title = cells.Clip(title, f.float.Rect.W-2)
+	if f.exited {
+		f.float.Hint = " exited · any key closes "
+		return
+	}
+	f.float.Hint = " keys go to the command · prefix q close "
+}
+
+// applyFloatBytes paints the child's output into the float's own terminal. The
+// terminal is not in t.vts, so the snapshot's prune loop never reaches it.
+func (t *tui) applyFloatBytes(m wire.Msg) bool {
+	f := t.float
+	if f == nil || f.closed || m.Target != f.id {
+		return false
+	}
+	f.vt.Write(m.Data)
+	// The last grapheme of a read stays pending until the stream goes quiet,
+	// the way a pane's does, so a character split across two reads lands whole.
+	t.noteBytes(f.id, time.Now())
+	t.dirty = true
+	return true
+}
+
+// floatErrorSwallowed reports whether an error reply names the float the client
+// holds or the one it just closed. A key or a resize that raced the child's
+// exit is not news: the exit frame already said the command is gone, and the
+// reply must not surface a float id as a pane toast.
+func (t *tui) floatErrorSwallowed(err string) bool {
+	if err == "" {
+		return false
+	}
+	if t.float != nil && strings.Contains(err, t.float.id) {
+		return true
+	}
+	return t.floatGone != "" && strings.Contains(err, t.floatGone)
+}
+
+// floatExited keeps the last screen and says the command is gone. The next key
+// closes the float and goes nowhere.
+func (t *tui) floatExited() {
+	f := t.float
+	if f == nil || f.exited {
+		return
+	}
+	f.exited = true
+	f.setBorders()
+	t.dirty = true
+}
+
+// closeFloat drops the float and gives the keys back to the panes. A child that
+// already exited is not closed again: the server dropped it with the exit.
+func (t *tui) closeFloat() {
+	f := t.float
+	if f == nil {
+		return
+	}
+	f.closed = true
+	t.floatGone = f.id
+	t.RemoveFloatingPane(f.float.ID)
+	if t.conn != nil && !f.exited {
+		_ = t.conn.Send(wire.Msg{Type: "req", Action: "float-close", Float: f.id})
+	}
+	t.float = nil
+	t.mode = ""
+	// The close key stays in the buffer while the pending timer waits. Drop
+	// the whole buffer here, so a later keypress cannot forward a stray escape
+	// to a pane.
+	t.inbuf = nil
+	t.pending = false
+	t.dirty = true
+}
+
+// syncFloat fits the float to the screen. A changed rect resizes the terminal
+// and tells the server, so the command reflows to the box the client draws.
+func (t *tui) syncFloat(snap *wire.Snapshot) {
+	f := t.float
+	if f == nil {
+		return
+	}
+	r := floatRect(snap)
+	if f.float.Rect == r {
+		return
+	}
+	f.float.Rect = r
+	resizeTerm(f.vt, r.W, r.H)
+	f.setBorders()
+	if t.conn != nil && !f.exited {
+		_ = t.conn.Send(wire.Msg{Type: "resize", Target: f.id, Cols: r.W, Rows: r.H})
+	}
+	t.dirty = true
+}
+
+// floatKey sends one read's worth of bytes to the command. The prefix is the
+// client's: prefix then q closes the float, and any other byte after the prefix
+// goes through with the prefix in front. A lone prefix waits for the next byte
+// for as long as it takes, the way the main keymap's armed prefix does: it is
+// the head of a chord, not an escape, so no timer resolves it. It returns false
+// while it waits.
+func (t *tui) floatKey() bool {
+	f := t.float
+	if f == nil {
+		return true
+	}
+	if f.exited {
+		// The command is gone. The last screen stays and any key closes it.
+		t.inbuf = nil
+		t.pending = false
+		t.closeFloat()
+		return true
+	}
+	if !f.opened {
+		// The open reply has not landed. Drop the read: nothing exists yet to
+		// take it, and holding it would only delay a key the operator typed
+		// against a screen that is not there.
+		t.inbuf = nil
+		t.pending = false
+		return true
+	}
+	prefix := t.km().PrefixBytes()
+	if len(prefix) > 0 && bytes.HasPrefix(t.inbuf, prefix) {
+		if len(t.inbuf) == len(prefix) {
+			// The chord's head. Wait for the next byte without a timer: a
+			// human chord takes longer than escTimeout, and expiring here
+			// would kill the command under the operator's hand.
+			return false
+		}
+		if t.inbuf[len(prefix)] == 'q' {
+			t.inbuf = append([]byte(nil), t.inbuf[len(prefix)+1:]...)
+			t.pending = false
+			t.closeFloat()
+			return true
+		}
+	}
+	keys := append([]byte(nil), t.inbuf...)
+	t.inbuf = t.inbuf[:0]
+	t.pending = false
+	if t.conn != nil {
+		_ = t.conn.Send(wire.Msg{Type: "keys", Target: f.id, Keys: keys})
+	}
+	return true
+}

@@ -166,6 +166,7 @@ optional and each one overrides its built-in value.
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
 | `dashboard-layout` | `"full"` or `"float"` | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
 | `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
+| `diff-command` | a quoted shell command | `"git diff"` | Set the command the dashboard diff key runs in a floating pane. It runs through `sh -c` in the selected pane's folder. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 
@@ -442,9 +443,16 @@ keeps its own 20 to 85 range, and the peek key uses the configured share.
 
 `i` sends every key to the selected pane until esc. The dashboard stays up and
 the answer shows in the preview, and the footer says `input` while the mode is
-on. `d` shows the selected pane's uncommitted diff in a read-only pager: `j`
-and `k` scroll a row, `pgup` and `pgdn` a page, `g` and `G` jump to the ends,
-and `q` or `esc` closes. The pager border names the worktree.
+on. `d` runs the diff command, `git diff` by default, in a floating terminal
+over the panes, in the selected pane's folder, through `sh -c`. The float takes
+every key while the command runs, and the prefix then `q` closes it. After the
+command exits the float keeps the screen the command left behind until a key is
+pressed; a full screen program such as tig leaves the alternate screen on exit,
+so its float ends blank. A client that falls far enough behind to be resynced
+loses the float's screen with the backlog: close it and press `d` again. The
+`diff-command` config node sets the command, and a reload picks it up with the
+rest of `config.kdl`. `diff-command "tig"` and `diff-command "hunk diff"` are
+the two examples.
 
 The dashboard is client owned: it starts when the key is pressed and ends when
 the choice is taken, so it never enters the session tree and never survives a

@@ -100,3 +100,32 @@ func TestSnapshotPadRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestFloatRoundTrip proves the float id survives the frame in both directions
+// and that an unset id leaves the key out.
+func TestFloatRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	in := wire.Msg{Type: "bytes", Target: "f1", Float: "f1", Data: []byte("hi")}
+	if err := wire.WriteMsg(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Float != "f1" || out.Target != "f1" {
+		t.Fatalf("round trip float/target = %q/%q, want f1/f1", out.Float, out.Target)
+	}
+
+	b, err := json.Marshal(wire.Msg{Type: "keys", Target: "f1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["float"]; ok {
+		t.Fatalf("unset float kept the key: %s", b)
+	}
+}

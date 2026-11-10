@@ -598,6 +598,9 @@ func (s *server) serve(c net.Conn) {
 				s.pushSnapshot()
 			}
 		}
+		// A client that goes away takes its floating commands with it: the
+		// child is not a pane and nothing else would ever end it.
+		s.killClientFloats(cl)
 		cl.shutdown()
 		c.Close()
 	}()
@@ -617,20 +620,33 @@ func (s *server) serve(c net.Conn) {
 		case "keys":
 			// The keys go to the pane the message names: that is the row the
 			// dashboard's footer, preview and paste frame describe. An empty
-			// target is the pane the active window has focus.
+			// target is the pane the active window has focus. A target that
+			// names a float takes the keys instead: the client is typing into
+			// its own floating command.
 			s.mu.Lock()
 			id := m.Target
 			if id == "" {
 				id = s.st.ActiveWindow().Focus
 			}
+			f := s.floats[id]
 			pc := s.panes[id]
 			s.mu.Unlock()
+			if f != nil {
+				_, _ = f.pty.Write(m.Keys)
+				break
+			}
 			if pc == nil {
 				s.reply(cl, m, nil, fmt.Errorf("no pane %q", id))
 				break
 			}
 			_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
 		case "resize":
+			// A float is sized by its own frame and does not change the
+			// client's size, so the panes keep the room they had.
+			if s.floatFor(m.Target) != nil {
+				s.resizeFloat(m.Target, m.Cols, m.Rows)
+				break
+			}
 			s.mu.Lock()
 			if m.Cols > 20 && m.Rows > 5 {
 				cl.cols, cl.rows = m.Cols, m.Rows
