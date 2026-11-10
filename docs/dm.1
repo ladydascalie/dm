@@ -200,6 +200,19 @@ print the box newest first
 .br
 \fB--json\fP print JSON
 .TP
+\fBdm msg show --key K [--seq N | --from PANE]\fP
+print one entry's body, or its summary line
+.br
+\fB--s name\fP session name
+.br
+\fB--key K\fP box key
+.br
+\fB--seq N\fP the entry's seq
+.br
+\fB--from PANE\fP the posting pane
+.br
+Example: \fBdm msg show --key build --seq 12\fP
+.TP
 \fBdm msg wait [--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]\fP
 block until an entry matches
 .br

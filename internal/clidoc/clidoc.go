@@ -281,6 +281,19 @@ var cliCommands = []cliCommand{
 		group: groupBox,
 	},
 	{
+		name:    "msg show",
+		args:    "--key K [--seq N | --from PANE]",
+		summary: "print one entry's body, or its summary line",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"key", "K", "box key"},
+			{"seq", "N", "the entry's seq"},
+			{"from", "PANE", "the posting pane"},
+		},
+		example: `dm msg show --key build --seq 12`,
+		group:   groupBox,
+	},
+	{
 		name:    "msg wait",
 		args:    "[--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]",
 		summary: "block until an entry matches",
