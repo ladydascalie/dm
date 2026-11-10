@@ -310,10 +310,10 @@ func TestFloatExitBeatsReply(t *testing.T) {
 func TestFloatClosedFloatSwallowsExit(t *testing.T) {
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "sleep 30")
-	feed(tui, "\x02q")
+	feed(tui, "\x02")
 	m := <-got
 	if m.Type != "req" || m.Action != "float-close" || m.Float != req.Float {
-		t.Fatalf("prefix q sent %+v, want a float-close", m)
+		t.Fatalf("the prefix sent %+v, want a float-close", m)
 	}
 	testutil.NoMsg(t, got)
 	tui.apply(wire.Msg{Type: "exit", Target: req.Float})
@@ -332,7 +332,7 @@ func TestFloatErrorRacingExitIsSwallowed(t *testing.T) {
 	if texts := toastTexts(tui); len(texts) != 0 {
 		t.Fatalf("a racing key toasted %q, want nothing", texts)
 	}
-	feed(tui, "\x02q")
+	feed(tui, "\x02")
 	<-got
 	tui.apply(wire.Msg{Type: "resp", Action: "keys", Error: `no pane "` + req.Float + `"`})
 	if texts := toastTexts(tui); len(texts) != 0 {

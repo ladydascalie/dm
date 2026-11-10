@@ -228,11 +228,10 @@ func (t *tui) syncFloat(snap *wire.Snapshot) {
 }
 
 // floatKey sends one read's worth of bytes to the command. The prefix is the
-// client's: prefix then q closes the float, and any other byte after the prefix
-// goes through with the prefix in front. A lone prefix waits for the next byte
-// for as long as it takes, the way the main keymap's armed prefix does: it is
-// the head of a chord, not an escape, so no timer resolves it. It returns false
-// while it waits.
+// client's and it is not a chord head here: one press kills the float and the
+// command with it, so the command never sees that byte. Every other read goes
+// to the command whole. It never asks for more bytes, so it always returns
+// true.
 func (t *tui) floatKey() bool {
 	f := t.float
 	if f == nil {
