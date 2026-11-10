@@ -47,6 +47,9 @@ func closeSwitcher(t *tui) {
 	}
 	t.sw = nil
 	t.swInput = false
+	// The preview terminals belong to the dashboard: closed, they are dead
+	// weight, and the cadence that refreshed them stops with it.
+	t.swVT = nil
 	if t.mode == "dashboard" {
 		t.mode = ""
 	}

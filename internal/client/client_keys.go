@@ -551,6 +551,9 @@ func (t *tui) switcherInputKey() bool {
 	t.pending = false
 	if pane := t.sw.Target(); pane != "" && t.conn != nil {
 		_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: keys})
+		// Ask now rather than on the next cadence: the answer should appear as
+		// soon as the pane has one.
+		t.previewNow()
 	}
 	return true
 }

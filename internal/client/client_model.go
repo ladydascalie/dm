@@ -207,6 +207,16 @@ type tui struct {
 	diffID   int
 	diffPane string
 
+	// swVT holds the dashboard's own preview terminals, one per pane it has
+	// asked the server about. A pane in the active window has a local terminal
+	// in vts; every other pane has no bytes stream, so the dashboard keeps the
+	// screen the server sent here. It is memory only and dies with the
+	// dashboard. swScreen numbers those requests and swScreenAt is when the
+	// last one went out, so the preview refreshes on a cadence.
+	swVT       map[string]*vt.Term
+	swScreen   int
+	swScreenAt time.Time
+
 	// yankID numbers the next copy-output request and yankPane is the pane it
 	// names, so a reply writes the clipboard for the pane the operator asked
 	// about even if focus moved before it landed.
@@ -473,6 +483,7 @@ func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) {
 	t.expirePaste(now)
 	t.expireTermColour(now)
 	t.expireSwitcher(now)
+	t.previewTick(now)
 	t.flushBoxWatchers(now)
 	t.expireArmed(now)
 	t.expirePrefix(now)
@@ -689,6 +700,18 @@ func (t *tui) apply(m wire.Msg) {
 				t.clearSelection()
 			}
 		}
+		// A pane that left the session takes its preview terminal with it.
+		if len(t.swVT) > 0 {
+			live := make(map[string]bool, len(m.Snap.All))
+			for _, p := range m.Snap.All {
+				live[p.ID] = true
+			}
+			for id := range t.swVT {
+				if !live[id] {
+					delete(t.swVT, id)
+				}
+			}
+		}
 		// Folds, names and statuses move under an open float.
 		if t.sw != nil {
 			t.sw.Sync(m.Snap)
@@ -709,6 +732,10 @@ func (t *tui) apply(m wire.Msg) {
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
 			applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+		} else {
+			// A pane outside the active window has no local terminal. The
+			// dashboard owns the one its preview paints from.
+			t.applyPreviewScreen(m.Target, m.VTSnap)
 		}
 		t.dirty = true
 	case "replay":

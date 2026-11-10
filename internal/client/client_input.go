@@ -297,6 +297,7 @@ func (t *tui) processInput() {
 				if t.swInput {
 					if pane := t.sw.Target(); pane != "" && t.conn != nil {
 						_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: t.pasteKeys(seq)})
+						t.previewNow()
 					}
 				}
 				continue
@@ -677,6 +678,82 @@ func (t *tui) askPreview() {
 	t.swPane = it.Pane
 	t.sw.SetPreview(t.swID, it.Pane)
 	_ = t.conn.Send(wire.Msg{Type: "req", Action: "read", Target: it.Pane, ID: t.swID})
+}
+
+// previewEvery is the cadence the dashboard's live preview rides on: one screen
+// request per interval while a pane outside the active window is selected. The
+// pacer wakes at this ceiling even when idle, so the cadence costs no extra
+// wake.
+const previewEvery = 250 * time.Millisecond
+
+// previewTick refreshes the dashboard's preview. A pane in the active window
+// has a local terminal, so nothing is asked for it; every other pane gets one
+// screen request per cadence, and a closed dashboard asks for nothing. One
+// preview lives at a time: a terminal for a pane the selection left goes.
+func (t *tui) previewTick(now time.Time) {
+	if t.sw == nil || t.snap == nil || t.conn == nil {
+		return
+	}
+	pane := t.sw.Target()
+	for id := range t.swVT {
+		if id != pane {
+			delete(t.swVT, id)
+		}
+	}
+	if pane == "" || t.vts[pane] != nil {
+		return
+	}
+	if now.Sub(t.swScreenAt) < previewEvery {
+		return
+	}
+	t.askScreen(pane, now)
+}
+
+// askScreen asks the server for one pane's visible screen and restores the
+// reply into the dashboard's own terminal. The request carries an id, so a
+// reply the server refuses lands in the ordinary reply path and stays silent:
+// a read keeps the band usable until a screen arrives.
+func (t *tui) askScreen(pane string, now time.Time) {
+	t.swScreen++
+	t.swScreenAt = now
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "screen", Target: pane, ID: t.swScreen})
+}
+
+// previewNow asks for the selected pane's screen at once, so a key sent in
+// input mode shows its answer without waiting for the cadence.
+func (t *tui) previewNow() {
+	if t.sw == nil || t.conn == nil {
+		return
+	}
+	pane := t.sw.Target()
+	if pane == "" || t.vts[pane] != nil {
+		return
+	}
+	t.askScreen(pane, time.Now())
+}
+
+// applyPreviewScreen restores one pane's screen into the dashboard's terminal.
+// The terminal keeps the pane's own size, not the band's: the painter draws the
+// pane's grid into the band, the way it draws any pane row.
+func (t *tui) applyPreviewScreen(id string, snap *vt.Snapshot) bool {
+	if t.sw == nil || snap == nil || id == "" || id != t.sw.Target() {
+		return false
+	}
+	term := t.swVT[id]
+	if term == nil {
+		term = vt.NewTerm(snap.Cols, snap.Rows)
+	}
+	if err := term.Restore(snap); err != nil {
+		return false
+	}
+	if c, r := term.Grid().Size(); c != snap.Cols || r != snap.Rows {
+		resizeTerm(term, snap.Cols, snap.Rows)
+	}
+	if t.swVT == nil {
+		t.swVT = map[string]*vt.Term{}
+	}
+	t.swVT[id] = term
+	return true
 }
 
 // previewLines pulls the lines out of a read reply. The reply carries them in

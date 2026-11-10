@@ -68,7 +68,7 @@ func (t *tui) draw() {
 	drawBar(&bar, th, win, t.armed, t.barInfo(), t.glyphSet())
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
-		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.vts, paintPaneFrom, t.glyphSet())
+		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.previewTerms(), paintPaneFrom, t.glyphSet())
 		if t.swInput {
 			drawSwitcherMode(&pal, th, t.sw.Rect, switcherInputLine(t))
 		}
@@ -455,6 +455,25 @@ func rowsHit(rows []int, dirty map[int]bool) bool {
 		}
 	}
 	return false
+}
+
+// previewTerms is the terminal map the dashboard paints from: the local
+// terminals of the active window, plus the dashboard's own screens for the
+// panes outside it. The local terminal wins when both exist.
+func (t *tui) previewTerms() map[string]*vt.Term {
+	if len(t.swVT) == 0 {
+		return t.vts
+	}
+	out := make(map[string]*vt.Term, len(t.vts)+len(t.swVT))
+	for id, term := range t.vts {
+		out[id] = term
+	}
+	for id, term := range t.swVT {
+		if out[id] == nil {
+			out[id] = term
+		}
+	}
+	return out
 }
 
 // cursorBlock is the tail of a frame that places the cursor, or hides it. It

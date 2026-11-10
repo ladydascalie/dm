@@ -281,6 +281,11 @@ func TestSwitcherInputForwards(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("input mode forwarded nothing")
 	}
+	// The key also asks for the selected pane's screen, so its answer appears
+	// without waiting for the preview cadence.
+	if req := screenRequest(t, got); req.Target != "w1p1" {
+		t.Fatalf("screen request = %+v, want w1p1", req)
+	}
 	// A lone esc leaves input mode and closes nothing.
 	feed(tui, "\x1b")
 	if tui.swInput || tui.sw == nil {
