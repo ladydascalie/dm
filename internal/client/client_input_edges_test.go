@@ -106,13 +106,64 @@ func TestDashboardInputCoalescedEsc(t *testing.T) {
 	}
 	testutil.NoMsg(t, got)
 
-	// A lone esc leaves the mode and sends nothing at all.
+	// A lone esc waits for a sequence's final byte; the pending timer then
+	// leaves the mode and sends nothing at all.
 	lonely, quiet := switcherTUI(t)
 	feed(lonely, "\x02a")
 	feed(lonely, "i")
 	feed(lonely, "\x1b")
+	if !lonely.pending {
+		t.Fatal("a lone esc did not wait for the rest of a sequence")
+	}
+	lonely.escAt = time.Now().Add(-time.Second)
+	lonely.expireSwitcher(time.Now())
 	if lonely.swInput || lonely.sw == nil {
 		t.Fatalf("a lone esc left input %v with the dashboard %v", lonely.swInput, lonely.sw != nil)
 	}
 	testutil.NoMsg(t, quiet)
+}
+
+// forwardedKeys reads one keys message for target and the screen request that
+// follows it, so a test can assert the pane got exactly the bytes it should.
+func forwardedKeys(t *testing.T, got chan wire.Msg, target, keys string) {
+	t.Helper()
+	select {
+	case m := <-got:
+		if m.Type != "keys" || m.Target != target || string(m.Keys) != keys {
+			t.Fatalf("forwarded %+v, want keys %q to %s", m, keys, target)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("no keys %q forwarded to %s", keys, target)
+	}
+	if req := screenRequest(t, got); req.Target != target {
+		t.Fatalf("screen request = %+v, want %s", req, target)
+	}
+}
+
+// TestDashboardInputForwardsArrows proves an arrow is a key the program asked
+// for: it goes to the pane whole and input mode stays on. A sequence split
+// across reads waits for its final byte, then forwards.
+func TestDashboardInputForwardsArrows(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	feed(tui, "i")
+	feed(tui, "\x1b[A") // up arrow, one read
+	if !tui.swInput {
+		t.Fatal("an up arrow left input mode")
+	}
+	forwardedKeys(t, got, "w1p1", "\x1b[A")
+	testutil.NoMsg(t, got)
+
+	// The head of a sequence waits for the final byte.
+	feed(tui, "\x1b[1")
+	if !tui.pending {
+		t.Fatal("the head of a sequence did not wait")
+	}
+	testutil.NoMsg(t, got)
+	feed(tui, "A")
+	if !tui.swInput {
+		t.Fatal("the sequence's final byte left input mode")
+	}
+	forwardedKeys(t, got, "w1p1", "\x1b[1A")
+	testutil.NoMsg(t, got)
 }

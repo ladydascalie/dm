@@ -538,18 +538,30 @@ func (t *tui) switcherInputKey() bool {
 		return true
 	}
 	if t.inbuf[0] == 0x1b {
-		// Esc is the mode change itself and never a byte for the pane. Anything
-		// that arrived behind it in the same read is the tail of the keypress
-		// the operator was already making, so it still goes to the pane; the
-		// escape itself does not. Keeping it would make the dashboard read it
-		// again as the head of a close key, and forwarding it would leave the
-		// pane mid-sequence.
+		// An arrow, a function key or a modified key arrives as one whole
+		// escape sequence. It is a key the program asked for, so it goes to the
+		// pane whole and input mode stays on.
+		if escapeComplete(t.inbuf) {
+			return t.forwardInputKeys()
+		}
+		// A sequence whose final byte has not arrived waits; the pending timer
+		// leaves the mode if it never comes.
+		if len(t.inbuf) == 1 || t.inbuf[1] == '[' || t.inbuf[1] == 'O' {
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		// A bare esc. A byte behind it in the same read is the tail of the
+		// keypress the operator was already making, so it still goes to the
+		// pane; the escape does not, and the mode ends.
 		rest := append([]byte(nil), t.inbuf[1:]...)
 		t.inbuf = t.inbuf[:0]
 		t.swInput = false
 		t.pending = false
 		t.dirty = true
-		if len(rest) > 0 && t.conn != nil {
+		if len(rest) > 0 && rest[0] != 0x1b && t.conn != nil {
 			if pane := t.sw.Target(); pane != "" {
 				_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: rest})
 				t.previewNow()
@@ -557,6 +569,12 @@ func (t *tui) switcherInputKey() bool {
 		}
 		return true
 	}
+	return t.forwardInputKeys()
+}
+
+// forwardInputKeys sends the whole read to the selected pane and keeps input
+// mode on.
+func (t *tui) forwardInputKeys() bool {
 	keys := append([]byte(nil), t.inbuf...)
 	t.inbuf = t.inbuf[:0]
 	t.pending = false
@@ -567,6 +585,22 @@ func (t *tui) switcherInputKey() bool {
 		t.previewNow()
 	}
 	return true
+}
+
+// escapeComplete reports whether buf holds a whole CSI or SS3 sequence, the
+// forms an arrow, a function key and a modified key arrive in. A bare esc and
+// an esc followed by an ordinary byte are not sequences: in input mode they are
+// the mode key and the key behind it.
+func escapeComplete(buf []byte) bool {
+	if len(buf) < 3 || buf[0] != 0x1b || (buf[1] != '[' && buf[1] != 'O') {
+		return false
+	}
+	for i := 2; i < len(buf); i++ {
+		if buf[i] >= 0x40 && buf[i] <= 0x7e {
+			return true
+		}
+	}
+	return false
 }
 
 // diffKey consumes one key while the diff pager is up. The pager is read-only:
@@ -654,6 +688,12 @@ func (t *tui) expireSwitcher(now time.Time) {
 	}
 	t.pending = false
 	t.inbuf = t.inbuf[:0]
+	if t.swInput {
+		// A stalled esc in input mode is the mode key, not the close key.
+		t.swInput = false
+		t.dirty = true
+		return
+	}
 	closeSwitcher(t)
 }
 

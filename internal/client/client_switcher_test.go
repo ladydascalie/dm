@@ -286,8 +286,14 @@ func TestSwitcherInputForwards(t *testing.T) {
 	if req := screenRequest(t, got); req.Target != "w1p1" {
 		t.Fatalf("screen request = %+v, want w1p1", req)
 	}
-	// A lone esc leaves input mode and closes nothing.
+	// A lone esc waits for the rest of a possible sequence; the pending timer
+	// then leaves input mode and closes nothing.
 	feed(tui, "\x1b")
+	if !tui.pending {
+		t.Fatal("a bare esc did not wait for the rest of a sequence")
+	}
+	tui.escAt = time.Now().Add(-time.Second)
+	tui.expireSwitcher(time.Now())
 	if tui.swInput || tui.sw == nil {
 		t.Fatalf("esc left input %v with the dashboard %v", tui.swInput, tui.sw != nil)
 	}
