@@ -327,11 +327,12 @@ var cliCommands = []cliCommand{
 	},
 	{
 		name:    "msg clear",
-		args:    "[--key K]",
-		summary: "clear one key, or the whole box",
+		args:    "[--key K | --prefix P]",
+		summary: "clear one key, or a prefix branch, or the whole box",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"key", "K", "box key"},
+			{"prefix", "P", "box key prefix"},
 		},
 		group: groupBox,
 	},

@@ -21,6 +21,7 @@ const notifyFetch = 3
 const (
 	notifyRouteCatchUp = "catchup"
 	notifyRouteCentre  = "centre"
+	notifyRouteClear   = "clear"
 )
 
 // notifyRouteTag tags an outstanding id'd msg-list with the read it serves.

@@ -251,12 +251,14 @@ stream entries as they arrive
 .br
 Example: \fBdm msg sub --prefix build --json\fP
 .TP
-\fBdm msg clear [--key K]\fP
-clear one key, or the whole box
+\fBdm msg clear [--key K | --prefix P]\fP
+clear one key, or a prefix branch, or the whole box
 .br
 \fB--s name\fP session name
 .br
 \fB--key K\fP box key
+.br
+\fB--prefix P\fP box key prefix
 .TP
 \fBdm msg watchers [--json]\fP
 print the live watches

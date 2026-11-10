@@ -61,7 +61,7 @@ func (c *notifyCentre) Sync(snap *wire.Snapshot, th theme.Theme) {
 func (c *notifyCentre) paint(th theme.Theme) {
 	r := c.Float.Rect
 	c.Float.Title = c.title()
-	c.Float.Hint = " j/k move  enter body  g pane  m box  esc close "
+	c.Float.Hint = " j/k move  enter body  g pane  m box  x clear  X clear all  esc close "
 	if r.W < 1 || r.H < 1 {
 		c.Float.VT = vt.NewTerm(1, 1)
 		return
@@ -337,6 +337,18 @@ func (t *tui) notifKey() bool {
 		t.notifToBox()
 		t.dirty = true
 		return true
+	case 'x':
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		t.notifClearKey()
+		t.dirty = true
+		return true
+	case 'X':
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		t.notifClearAll()
+		t.dirty = true
+		return true
 	}
 	action, n, state := t.km().Match("box", t.inbuf)
 	switch state {
@@ -449,4 +461,35 @@ func (t *tui) notifToBox() {
 	closeNotifyCentre(t)
 	t.boxJumpSeq = e.Seq
 	openBoxView(t)
+}
+
+// notifClearKey clears the selected entry's key through msg-clear and lets
+// the reply refetch the centre, so the row leaves the list.
+func (t *tui) notifClearKey() {
+	e, ok := t.ncentre.selected()
+	if !ok {
+		return
+	}
+	t.notifyClear(box.ClearReq{Key: e.Key})
+}
+
+// notifClearAll clears the whole notify/ topic and lets the reply refetch the
+// centre, so the list empties.
+func (t *tui) notifClearAll() {
+	t.notifyClear(box.ClearReq{KeyPrefix: box.NotifyPrefix})
+}
+
+// notifyClear sends one msg-clear tagged with the centre's route. The reply
+// handler owns the refetch; a session without a connection clears nothing.
+func (t *tui) notifyClear(req box.ClearReq) {
+	if t.conn == nil {
+		return
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	t.notifyID++
+	t.notifyRouteTag(t.notifyID, notifyRouteClear)
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "msg-clear", ID: t.notifyID, Res: body})
 }
