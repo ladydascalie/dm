@@ -8,14 +8,26 @@ import (
 	"time"
 
 	"dm/internal/keymap"
+	"dm/internal/session"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
+
+// paneServer is an in-process server with one pane whose shell stands in dir.
+func paneServer(t *testing.T, name, dir string) (*server, string) {
+	t.Helper()
+	t.Setenv("DM_STATE", t.TempDir())
+	st := session.NewState(name)
+	id := testutil.RootPane(st)
+	st.Panes[id].Cwd = dir
+	return railServer(st), id
+}
 
 // floatServer is a server with one pane in dir and a config whose diff-command
 // is command. The float process is a real /bin/sh.
 func floatServer(t *testing.T, name, dir, command string) (*server, string) {
 	t.Helper()
-	s, id := diffServer(t, name, dir)
+	s, id := paneServer(t, name, dir)
 	cfg, err := keymap.ParseConfig(`diff-command "` + command + `"`)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
@@ -145,7 +157,7 @@ func TestFloatOpenEchoesToOwner(t *testing.T) {
 // TestFloatOpenNeedsCwd: a pane with no folder is refused with the pane named,
 // and no process starts.
 func TestFloatOpenNeedsCwd(t *testing.T) {
-	s, pane := diffServer(t, "floatnocwd", "")
+	s, pane := paneServer(t, "floatnocwd", "")
 	cl, cli := floatClient(t, s)
 	reply := openFloatAt(t, s, cl, cli, pane, "f1")
 	if reply.OK || !strings.Contains(reply.Error, "has no working directory") {

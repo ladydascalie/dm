@@ -200,12 +200,10 @@ type tui struct {
 	// pane. Esc leaves it; the dashboard stays up.
 	swInput bool
 
-	// diff is the read-only diff pager, nil when closed. diffID numbers the
-	// request and diffPane is the pane it named, so a late reply still opens
-	// under the right worktree name.
-	diff     *diffView
-	diffID   int
-	diffPane string
+	// float is the floating command, nil when closed. floatID numbers the
+	// request, so a reply to an older one opens nothing.
+	float   *floatView
+	floatID int
 
 	// swVT holds the dashboard's own preview terminals, one per pane it has
 	// asked the server about. A pane in the active window has a local terminal
@@ -716,9 +714,8 @@ func (t *tui) apply(m wire.Msg) {
 		if t.sw != nil {
 			t.sw.Sync(m.Snap)
 		}
-		if t.diff != nil {
-			t.diff.sync(m.Snap)
-			t.dirty = true
+		if t.float != nil {
+			t.syncFloat(m.Snap)
 		}
 		if t.box != nil {
 			t.box.Sync(m.Snap, t.theme())
@@ -744,6 +741,10 @@ func (t *tui) apply(m wire.Msg) {
 		applyReplay(t.hist, m.Target, m.Data)
 		t.dirty = true
 	case "bytes":
+		// A float's bytes belong to its own terminal, never to a pane's.
+		if t.applyFloatBytes(m) {
+			break
+		}
 		if term := t.vts[m.Target]; term != nil {
 			before := term.Grid().Scrolls()
 			term.Write(m.Data)
@@ -760,19 +761,22 @@ func (t *tui) apply(m wire.Msg) {
 	case "close":
 		t.quit = true
 	case "exit":
+		// A float keeps its last screen and says the command has gone. The
+		// next key closes it.
+		if t.float != nil && m.Target == t.float.id {
+			t.floatExited()
+			break
+		}
 		t.notify("pane " + m.Target + " exited")
 	case "resp":
 		if m.Action == "yank" && m.ID == t.yankID {
 			t.takeYank(m)
 			break
 		}
-		// The diff reply opens the pager. A failure toasts and opens nothing.
-		if m.Action == "diff" && m.ID > 0 && m.ID == t.diffID {
-			if !m.OK {
-				t.notify(m.Error)
-				break
-			}
-			t.openDiffView(m.Lines)
+		// The float-open reply shows the floating command. A failure toasts
+		// and opens nothing.
+		if m.Action == "float-open" && m.ID > 0 && m.ID == t.floatID {
+			t.takeFloatOpen(m)
 			break
 		}
 		// A read reply carries the id its request named. Only the newest read
@@ -859,9 +863,10 @@ func (t *tui) noteBytes(id string, now time.Time) {
 	t.lastByte[id] = now
 }
 
-// flushIdle places each quiet pane's pending grapheme cluster and reports
-// whether it placed any. A pane is quiet when a full tick has passed with no
-// bytes, so a stream never flushes mid-cluster.
+// flushIdle places each quiet terminal's pending grapheme cluster and reports
+// whether it placed any. A terminal is quiet when a full tick has passed with
+// no bytes, so a stream never flushes mid-cluster. A float's terminal is one of
+// them: it is not in vts, so it is matched by its own id.
 func (t *tui) flushIdle(now time.Time) bool {
 	placed := false
 	for id, at := range t.lastByte {
@@ -869,6 +874,11 @@ func (t *tui) flushIdle(now time.Time) bool {
 			continue
 		}
 		delete(t.lastByte, id)
+		if t.float != nil && t.float.id == id {
+			t.float.vt.Flush()
+			placed = true
+			continue
+		}
 		term := t.vts[id]
 		if term == nil {
 			continue

@@ -47,11 +47,6 @@ func (t *tui) draw() {
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
 	th := t.theme()
-	if t.diff != nil {
-		// The pager paints from the theme this frame drew with, so a reload
-		// reaches it without reopening.
-		t.diff.th = th
-	}
 	panes := onScreenPanes(win)
 	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range panes {
@@ -489,8 +484,9 @@ func (t *tui) cursorBlock() string {
 		// The dashboard owns the cursor while it filters: the query cell.
 		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.swY+1, t.swX+1)
 	}
-	if t.diff != nil {
-		// The pager is read-only: no cell of it takes typing.
+	if t.float != nil {
+		// No cell of the float takes typing from the client: its keys go to
+		// the command's own cursor.
 		return "\x1b[?25l"
 	}
 	win := t.snap

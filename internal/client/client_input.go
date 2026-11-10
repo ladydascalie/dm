@@ -398,19 +398,20 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
-		if t.mode == "diff" {
-			// The pager is read-only and owns every key while it is up. A lone
-			// esc is the close key, so it skips the paste marker check. A mouse
-			// event scrolls and a paste is swallowed whole.
+		if t.mode == "float" {
+			// The float owns the keyboard: the bytes go to the command, and
+			// the prefix alone is the client's. A lone esc is the esc key, so
+			// it skips the mouse and paste checks. A mouse event and a paste
+			// are swallowed: the command asked for neither.
 			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
-				if !t.diffKey() {
+				if !t.floatKey() {
 					return
 				}
 				continue
 			}
 			if ev, n, ok := parseMouse(t.inbuf); ok {
 				t.inbuf = t.inbuf[n:]
-				t.diffWheel(ev)
+				_ = ev
 				continue
 			} else if n == 0 {
 				return // partial sequence, wait for the rest
@@ -424,7 +425,7 @@ func (t *tui) processInput() {
 				_ = seq
 				continue
 			}
-			if !t.diffKey() {
+			if !t.floatKey() {
 				return
 			}
 			continue
@@ -646,7 +647,11 @@ func (t *tui) expireMode(now time.Time) bool {
 	t.pending = false
 	// The lone esc was consumed by the mode's key handler but left in the
 	// buffer. Drop it with the mode, so the next keypress does not forward a
-	// stray escape to a pane.
+	// stray escape to a pane. A float is the exception: a lone prefix is a key
+	// of its own, so the command gets it.
+	if t.mode == "float" {
+		t.floatPrefixStalled(t.inbuf)
+	}
 	t.inbuf = t.inbuf[:0]
 	switch t.mode {
 	case "menu":
@@ -661,8 +666,8 @@ func (t *tui) expireMode(now time.Time) bool {
 		closeKeymapView(t)
 	case "rename":
 		t.closeRename()
-	case "diff":
-		t.closeDiff()
+	case "float":
+		t.closeFloat()
 	}
 	return true
 }
