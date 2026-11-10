@@ -132,8 +132,28 @@ func attachClient(t *testing.T, h *harness, session string) {
 	}
 }
 
-// A blocked pane the operator is not looking at notifies once, and the title
-// names the session, the pane, its recorded agent name and the state.
+// notifyEntry fails unless the box log holds an entry under key with the
+// state and the message, so a test asserts the history the renderers consume,
+// not only the popup.
+func notifyEntry(t *testing.T, h *harness, session, key, state, msg string) {
+	t.Helper()
+	res := h.rpc(session, map[string]any{"action": "msg-list", "keyPrefix": "notify/", "limit": 100})
+	entries, _ := res["entries"].([]any)
+	for _, e := range entries {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["key"] == key && m["state"] == state && m["msg"] == msg {
+			return
+		}
+	}
+	t.Fatalf("box log = %v, want an entry under %s with state %s and msg %q", entries, key, state, msg)
+}
+
+// A blocked pane the operator is not looking at lands in the box under its
+// notify topic with the entered state, and the headless renderer pops the
+// topic, the state and the message.
 func TestNotifyBlockedInBackgroundPane(t *testing.T) {
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
@@ -148,12 +168,13 @@ func TestNotifyBlockedInBackgroundPane(t *testing.T) {
 		t.Fatalf("notifications = %q, want one", lines)
 	}
 	line := lines[0]
-	for _, want := range []string{"dm n " + p2 + " pi blocked", "needs review"} {
+	for _, want := range []string{"notify/" + p2 + " blocked", "needs review"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("notification %q missing %q", line, want)
 		}
 	}
 	stillNotify(t, log, 1, 400*time.Millisecond)
+	notifyEntry(t, h, "n", "notify/"+p2, "blocked", "needs review")
 }
 
 // The same state twice is one notification: a second report for a pane already
@@ -186,6 +207,7 @@ func TestNotifySuppressedForAttachedFocus(t *testing.T) {
 
 	writeStatus(t, h, "n", p2, "blocked", "hidden")
 	stillNotify(t, log, 0, 400*time.Millisecond)
+	notifyEntry(t, h, "n", "notify/"+p2, "blocked", "hidden")
 
 	// The same pane in the background, entering another state, does notify.
 	h.run("focus", root, "-s", "n")
@@ -194,9 +216,11 @@ func TestNotifySuppressedForAttachedFocus(t *testing.T) {
 	if len(lines) != 1 || !strings.Contains(lines[0], "seen") {
 		t.Fatalf("notifications = %q, want one carrying seen", lines)
 	}
+	notifyEntry(t, h, "n", "notify/"+p2, "done", "seen")
 }
 
-// DM_NOTIFY=0 turns the desktop notifications off.
+// DM_NOTIFY=0 turns the desktop notifications off, and the box log still
+// carries the event.
 func TestNotifyDisabledByEnv(t *testing.T) {
 	h, log := notifyHarness(t, "DM_NOTIFY=0")
 	h.run("new", "-s", "n")
@@ -206,9 +230,12 @@ func TestNotifyDisabledByEnv(t *testing.T) {
 
 	writeStatus(t, h, "n", p2, "blocked", "needs review")
 	stillNotify(t, log, 0, 400*time.Millisecond)
+	notifyEntry(t, h, "n", "notify/"+p2, "blocked", "needs review")
 }
 
-// A pane exit notifies when the operator is not looking at it.
+// A pane exit lands in the box under the pane's notify topic, rides the note
+// state with the exit in its message, and pops when the operator is not
+// looking at it.
 func TestNotifyPaneExit(t *testing.T) {
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
@@ -222,9 +249,10 @@ func TestNotifyPaneExit(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("notifications = %q, want one", lines)
 	}
-	for _, want := range []string{"dm n " + p2, "exited"} {
+	for _, want := range []string{"notify/" + p2 + " note", "exited"} {
 		if !strings.Contains(lines[0], want) {
 			t.Fatalf("notification %q missing %q", lines[0], want)
 		}
 	}
+	notifyEntry(t, h, "n", "notify/"+p2, "note", "exited")
 }
