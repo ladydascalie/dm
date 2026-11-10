@@ -66,7 +66,7 @@ func runProbe(args []string) error {
 	fmt.Printf("\x1b]7501;state=working:app=dmprobe:msg=%s\x1b\\", msg)
 	out("PROBE-REPORTED\n")
 	time.Sleep(*hold)
-	os.Stdout.WriteString("\x1b]7501;state=clear\x1b\\")
+	_, _ = os.Stdout.WriteString("\x1b]7501;state=clear\x1b\\")
 	out("PROBE-CLEARED\n")
 	return nil
 }

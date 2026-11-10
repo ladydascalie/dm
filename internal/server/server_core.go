@@ -679,5 +679,5 @@ func connGone(c net.Conn) bool {
 }
 
 func writePID(path string) {
-	_ = os.WriteFile(path, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600)
+	_ = os.WriteFile(path, fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600)
 }
