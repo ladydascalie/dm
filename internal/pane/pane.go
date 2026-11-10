@@ -33,6 +33,7 @@ type paneProc struct {
 	sock    string
 	shell   string
 	cwd     string // where the shell is now, not where it started; guarded by mu
+	title   string // the last OSC window title reported; guarded by mu
 
 	ptmx *os.File
 	cmd  *exec.Cmd
@@ -276,7 +277,7 @@ func Run(args []string) error {
 	}()
 
 	go p.readLoop()
-	go p.watchCwd()
+	go p.watchShell()
 	go func() {
 		_ = cmd.Wait()
 		p.shutdown()
@@ -453,9 +454,10 @@ func (p *paneProc) cursorPos() (row, col int) {
 	return c.Y, c.X
 }
 
-// cwdEvery is how often a pane asks the kernel where its shell is. One
-// readlink per pane per interval: a shell's own process carries the cwd, so a
-// builtin cd moves it and /proc reports it without any shell integration.
+// cwdEvery is how often a pane samples its shell: where it stands and what
+// its window title is. The cwd costs one readlink per pane per interval: a
+// shell's own process carries the cwd, so a builtin cd moves it and /proc
+// reports it without any shell integration.
 const cwdEvery = 500 * time.Millisecond
 
 // shellCwd is the directory a process stands in, or empty when the kernel will
@@ -468,26 +470,46 @@ func shellCwd(pid int) string {
 	return dir
 }
 
-// watchCwd follows the shell around the filesystem and reports each move. The
-// poll is the coalescer: a burst of cds costs one report.
-func (p *paneProc) watchCwd() {
+// watchShell samples the shell every cwdEvery: where it stands and what its
+// window title is. The poll is the coalescer, so a burst of cds costs one cwd
+// report and an animated title costs one title report per sample.
+func (p *paneProc) watchShell() {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return
 	}
 	pid := p.cmd.Process.Pid
 	for {
 		time.Sleep(cwdEvery)
-		dir := shellCwd(pid)
-		if dir == "" {
-			continue
-		}
-		p.mu.Lock()
-		if dir != p.cwd {
-			p.cwd = dir
-			p.broadcastLocked(wire.Msg{Type: "cwd", Cwd: dir})
-		}
-		p.mu.Unlock()
+		p.sampleCwd(pid)
+		p.sampleTitle()
 	}
+}
+
+// sampleCwd reports the shell's directory when it moved.
+func (p *paneProc) sampleCwd(pid int) {
+	dir := shellCwd(pid)
+	if dir == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if dir != p.cwd {
+		p.cwd = dir
+		p.broadcastLocked(wire.Msg{Type: "cwd", Cwd: dir})
+	}
+}
+
+// sampleTitle reports the shell's OSC window title when it moved. A program
+// that never sets one reports nothing, so the pane keeps an empty title.
+func (p *paneProc) sampleTitle() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	title := p.vt.Title()
+	if title == p.title {
+		return
+	}
+	p.title = title
+	p.broadcastLocked(wire.Msg{Type: "title", Res: jsonRaw(map[string]any{"title": title})})
 }
 
 func (p *paneProc) setStatus(st wire.Status) {

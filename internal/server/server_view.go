@@ -141,6 +141,21 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 	return snap
 }
 
+// noteStatusChange stamps the second a pane's agent state moved. A repeat of
+// the same state is not a change, so a chatty program that reports working
+// every second keeps its first stamp.
+func (s *server) noteStatusChange(id, from, to string) {
+	if from == to {
+		return
+	}
+	s.mu.Lock()
+	if s.statusChangedAt == nil {
+		s.statusChangedAt = map[string]int64{}
+	}
+	s.statusChangedAt[id] = time.Now().Unix()
+	s.mu.Unlock()
+}
+
 // noteStatus persists the agent mark and the reporting app. Both keep the
 // sidebar calling a pane an agent after state=clear, and both survive a server
 // or pane restart because they live in the state file.
@@ -202,6 +217,8 @@ func (s *server) allPanesLocked() []wire.AllPane {
 				if pc := s.panes[id]; pc != nil {
 					info.Status = pc.st.State
 					info.Message = pc.st.Message
+					info.Title = pc.title
+					info.StatusChangedAt = s.statusChangedAt[id]
 				}
 				info.Agent = info.Name != "" || (ps != nil && ps.Reported) ||
 					(info.Status != "" && info.Status != "unknown")
@@ -232,6 +249,7 @@ func (s *server) paneExited(id string) {
 	}
 	delete(s.panes, id)
 	delete(s.st.Panes, id)
+	delete(s.statusChangedAt, id)
 
 	found, emptyWindow := false, false
 	for _, ws := range s.st.Workspaces {
@@ -398,6 +416,50 @@ func (s *server) pushSnapshot() {
 	snap := s.snapshotLocked()
 	s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 	s.mu.Unlock()
+}
+
+// titlePushEvery bounds how often a title change alone repaints every client.
+// The pane samples its title twice as often, so without this cap a spinner in
+// a title would repaint the fleet twice a poll.
+const titlePushEvery = time.Second
+
+// pushTitleLocked pushes the snapshot a title change asks for, at most once
+// per titlePushEvery. A change inside the window arms one trailing push, so
+// the last title always lands. The caller holds s.mu.
+func (s *server) pushTitleLocked() {
+	s.titleDirty = true
+	wait := titlePushEvery - time.Since(s.titlePushed)
+	if wait > 0 {
+		if s.titleTimer == nil {
+			s.titleTimer = time.AfterFunc(wait, s.flushTitle)
+		}
+		return
+	}
+	if s.titleTimer != nil {
+		s.titleTimer.Stop()
+		s.titleTimer = nil
+	}
+	s.flushTitleLocked()
+}
+
+// flushTitle is the trailing push: it takes s.mu and pushes only what is still
+// pending, so a title that has since been reported costs nothing.
+func (s *server) flushTitle() {
+	s.mu.Lock()
+	s.titleTimer = nil
+	s.flushTitleLocked()
+	s.mu.Unlock()
+}
+
+// flushTitleLocked takes the pending title push. The caller holds s.mu.
+func (s *server) flushTitleLocked() {
+	if !s.titleDirty {
+		return
+	}
+	s.titleDirty = false
+	s.titlePushed = time.Now()
+	snap := s.snapshotLocked()
+	s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 }
 
 // armReflowLocked records panes whose width changed and (re)starts the settle
@@ -702,6 +764,7 @@ func (s *server) resyncClient(cl *client) {
 type paneReplay struct {
 	data  []byte
 	st    wire.Status
+	title string
 	alt   bool
 	mouse bool
 	paste bool
@@ -734,12 +797,14 @@ func readPaneReplay(session, id string) paneReplay {
 			rp.st = *m.St
 		}
 		var extra struct {
-			Alt   bool `json:"alt"`
-			Mouse bool `json:"mouse"`
-			Paste bool `json:"paste"`
+			Title string `json:"title"`
+			Alt   bool   `json:"alt"`
+			Mouse bool   `json:"mouse"`
+			Paste bool   `json:"paste"`
 		}
 		_ = json.Unmarshal(m.Res, &extra)
 		rp.data, rp.alt, rp.mouse, rp.paste, rp.ok = m.Data, extra.Alt, extra.Mouse, extra.Paste, true
+		rp.title = extra.Title
 		return rp
 	}
 }
