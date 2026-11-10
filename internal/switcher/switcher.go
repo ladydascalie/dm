@@ -1,7 +1,10 @@
 package switcher
 
 import (
+	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"dm/internal/layout"
@@ -9,29 +12,72 @@ import (
 	"dm/internal/wire"
 )
 
-// switcher is the quick switcher's state: the float's rect, the rail tree it
-// shows, the rows the query keeps, the selection, and the preview request and
-// its lines. Drawing and key handling live elsewhere; this file is the model
-// that answers them.
+// SortMode is how the table orders its rows.
+type SortMode int
+
+const (
+	// SortRecent puts the newest agent status change first. It is the default.
+	SortRecent SortMode = iota
+	// SortProject groups the rows by project name and keeps the snapshot's
+	// order inside a group. A pane outside a project sorts last.
+	SortProject
+	// SortStatus puts the states that want attention first: blocked, error,
+	// working, done, idle, unknown, then a shell.
+	SortStatus
+)
+
+// String is the mode's footer label.
+func (m SortMode) String() string {
+	switch m {
+	case SortProject:
+		return "project"
+	case SortStatus:
+		return "status"
+	}
+	return "recent"
+}
+
+// nextSort is the mode CycleSort lands on.
+func (m SortMode) nextSort() SortMode { return (m + 1) % 3 }
+
+// The preview band's share of the body, in percent, and the bounds
+// ResizePreview keeps it in.
+const (
+	previewRatioDefault = 60
+	previewRatioMin     = 20
+	previewRatioMax     = 85
+)
+
+// A float smaller than this hides the preview band, so the table still works
+// when the dashboard is drawn on a small screen.
+const (
+	previewMinRows = 10
+	previewMinCols = 60
+)
+
+// Switcher is the dashboard's model: one row per pane in the snapshot, the rows
+// the query keeps, the selection, the ordering, the preview band's size and
+// scroll, and the preview request with the lines it got back. Drawing and key
+// handling live elsewhere; this file is the model that answers them.
 type Switcher struct {
 	Rect layout.Rect
 
-	// tree is the rail tree the float shows: never compact, every workspace
-	// and window unfolded, no note rows, gaps kept. rows are the surviving
-	// indices into tree, in tree order, and sel is one of them. A sel of -1
-	// selects nothing.
-	tree []rail.RailItem
-	rows []int
+	// all is the snapshot's pane list, and rows are the panes the query keeps
+	// in the sort mode's order. sel is one of rows, or -1 when nothing
+	// survives. top is the first row on screen, so a redraw does not jump.
+	all  []wire.AllPane
+	rows []wire.AllPane
 	sel  int
-	top  int // first list row on screen, so a redraw does not jump
-
-	// panes carries each pane's own folder, branch, worktree and names. A pane
-	// row's rail.RailItem holds none of them, and the query matches them.
-	panes map[string]wire.AllPane
+	top  int
 
 	query []rune
 
-	// The preview: whether a request is outstanding, the newest request id and
+	mode      SortMode
+	ratio     int
+	offset    int
+	previewOn bool
+
+	// The preview request: whether one is outstanding, the newest request id,
 	// the pane it asked for, and the lines the server sent for it.
 	asked bool
 	req   int
@@ -39,99 +85,35 @@ type Switcher struct {
 	lines []string
 }
 
-// NewSwitcher opens the switcher over a snapshot inside rect.
+// NewSwitcher opens the dashboard over a snapshot inside rect.
 func NewSwitcher(rect layout.Rect, snap *wire.Snapshot) *Switcher {
-	s := &Switcher{Rect: rect, sel: -1}
+	s := &Switcher{Rect: rect, sel: -1, ratio: previewRatioDefault, previewOn: true}
 	s.Sync(snap)
 	return s
 }
 
-// sync rebuilds the tree after a snapshot. The selection stays on its own row
-// when that row survives, and falls back to the first pane row; when no pane
-// row survives it selects nothing.
+// Sync rebuilds the rows after a snapshot. The selection stays on its own pane
+// when that pane survives, and falls back to the nearest row when it is gone. A
+// preview of a pane that is gone is stale, so its request and lines go with it.
 func (s *Switcher) Sync(snap *wire.Snapshot) {
-	prev, prevOK := s.Selected()
-	s.tree = switcherTree(snap)
-	s.panes = switcherPanes(snap)
-	s.filter()
-	s.top = 0
-	// A preview of a pane that is gone is stale, so forget the request with it.
+	s.all = s.all[:0]
+	if snap != nil {
+		s.all = append(s.all, snap.All...)
+	}
 	if s.asked && !s.hasPane(s.pane) {
-		s.asked, s.pane, s.lines = false, "", nil
+		s.asked, s.pane, s.lines, s.offset = false, "", nil, 0
 	}
-	if prevOK {
-		id := switcherTarget(prev)
-		for i, row := range s.rows {
-			if it := s.tree[row]; it.Kind == prev.Kind && switcherTarget(it) == id {
-				s.sel = i
-				return
-			}
-		}
-	}
-	s.sel = s.firstPane()
+	prev := s.Target()
+	s.rebuild(s.sel, prev)
 }
 
-// switcherTree is the rail tree the float shows: rail.RailItems on a copy of the
-// snapshot with no rail, so the rows are never compact, and with every
-// workspace and window forced unfolded, so a fold never hides a pane the
-// switcher could jump to. Note rows and project rows are dropped: a switcher
-// is not a status board. Gap rows stay to keep the blocks apart, and only they
-// are unselectable.
-func switcherTree(snap *wire.Snapshot) []rail.RailItem {
-	if snap == nil {
-		return nil
-	}
-	cp := *snap
-	cp.Rail = 0
-	cp.All = make([]wire.AllPane, len(snap.All))
-	copy(cp.All, snap.All)
-	for i := range cp.All {
-		cp.All[i].WorkspaceUnfolded = true
-		cp.All[i].WindowUnfolded = true
-	}
-	var out []rail.RailItem
-	for _, it := range rail.RailItems(&cp) {
-		if it.Kind == rail.WindowNote || it.Kind == rail.Project {
-			continue
-		}
-		out = append(out, it)
-	}
-	return out
-}
-
-// switcherPanes indexes the snapshot by pane id, so a pane row can match on the
-// folder, branch, worktree and names the rail only puts on its header rows.
-func switcherPanes(snap *wire.Snapshot) map[string]wire.AllPane {
-	if snap == nil {
-		return nil
-	}
-	out := make(map[string]wire.AllPane, len(snap.All))
-	for _, p := range snap.All {
-		out[p.ID] = p
-	}
-	return out
-}
-
-// hasPane reports whether a pane is still in the tree.
-func (s *Switcher) hasPane(id string) bool {
-	if id == "" {
-		return false
-	}
-	for _, it := range s.tree {
-		if it.Kind == rail.Pane && it.Pane == id {
-			return true
-		}
-	}
-	return false
-}
-
-// appendText adds a rune to the query and reselects.
+// AppendText adds a rune to the query and reselects the best match.
 func (s *Switcher) AppendText(r rune) {
 	s.query = append(s.query, r)
 	s.refilter()
 }
 
-// backspace removes the query's last rune and reselects.
+// Backspace removes the query's last rune and reselects.
 func (s *Switcher) Backspace() {
 	if len(s.query) == 0 {
 		return
@@ -140,7 +122,7 @@ func (s *Switcher) Backspace() {
 	s.refilter()
 }
 
-// clearQuery empties the query and reselects.
+// ClearQuery empties the query and reselects.
 func (s *Switcher) ClearQuery() {
 	if len(s.query) == 0 {
 		return
@@ -149,26 +131,129 @@ func (s *Switcher) ClearQuery() {
 	s.refilter()
 }
 
-// refilter rebuilds the rows for the query and lands the selection on the best
-// surviving pane row, as close as possible to the row selected before.
-func (s *Switcher) refilter() {
-	prev := -1
-	if s.sel >= 0 && s.sel < len(s.rows) {
-		prev = s.rows[s.sel]
-	}
-	s.filter()
-	s.top = 0
-	s.reselect(prev)
-}
-
 // Query is the query as a lower-case string to match against.
 func (s *Switcher) Query() string {
 	return strings.ToLower(string(s.query))
 }
 
-// RowCount is how many rows the query keeps.
+// RowCount is how many panes the query keeps.
 func (s *Switcher) RowCount() int {
 	return len(s.rows)
+}
+
+// Move steps the selection d rows and stops at either end of the table.
+func (s *Switcher) Move(d int) {
+	if len(s.rows) == 0 {
+		s.sel = -1
+		return
+	}
+	i := s.sel
+	if i < 0 {
+		i = 0
+	}
+	i += d
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(s.rows) {
+		i = len(s.rows) - 1
+	}
+	s.sel = i
+}
+
+// Jump selects the n'th row, numbered from one the way the 1-9 keys are, and
+// reports whether that row exists.
+func (s *Switcher) Jump(n int) bool {
+	if n < 1 || n > len(s.rows) {
+		return false
+	}
+	s.sel = n - 1
+	return true
+}
+
+// Selected is the highlighted pane row. It is always a rail.Pane item built
+// from the AllPane, so a caller that reads Kind and Pane keeps working.
+func (s *Switcher) Selected() (rail.RailItem, bool) {
+	if s.sel < 0 || s.sel >= len(s.rows) {
+		return rail.RailItem{}, false
+	}
+	return paneItem(s.rows[s.sel]), true
+}
+
+// Target is the pane id of the selected row, or empty when nothing is selected.
+func (s *Switcher) Target() string {
+	if s.sel < 0 || s.sel >= len(s.rows) {
+		return ""
+	}
+	return s.rows[s.sel].ID
+}
+
+// SortMode is the table's current ordering.
+func (s *Switcher) SortMode() SortMode {
+	return s.mode
+}
+
+// CycleSort moves to the next ordering, keeps the selected pane selected, and
+// returns the mode it landed on.
+func (s *Switcher) CycleSort() SortMode {
+	s.mode = s.mode.nextSort()
+	prev := s.Target()
+	s.rebuild(s.sel, prev)
+	return s.mode
+}
+
+// PreviewRatio is the preview band's share of the body, in percent.
+func (s *Switcher) PreviewRatio() int {
+	return s.ratio
+}
+
+// ResizePreview widens or narrows the preview band by d percent, clamps it to
+// its bounds, and returns the ratio it kept.
+func (s *Switcher) ResizePreview(d int) int {
+	s.ratio += d
+	if s.ratio < previewRatioMin {
+		s.ratio = previewRatioMin
+	}
+	if s.ratio > previewRatioMax {
+		s.ratio = previewRatioMax
+	}
+	return s.ratio
+}
+
+// PreviewOn reports whether the preview band is visible: toggled on and with a
+// float big enough to hold a table beside it.
+func (s *Switcher) PreviewOn() bool {
+	return s.previewOn && s.previewFits()
+}
+
+// TogglePreview turns the band on or off for the peek key and reports the new
+// state.
+func (s *Switcher) TogglePreview() bool {
+	s.previewOn = !s.previewOn
+	return s.previewOn
+}
+
+// PreviewOffset is how many rows the preview is scrolled up from the bottom of
+// its content. It is zero at the newest row.
+func (s *Switcher) PreviewOffset() int {
+	return s.offset
+}
+
+// ScrollPreview moves the preview d rows, positive toward older rows, and
+// clamps it between the newest row and the oldest one the read lines hold.
+func (s *Switcher) ScrollPreview(d int) int {
+	max := len(s.lines) - s.bodyRows()
+	if max < 0 {
+		max = 0
+	}
+	s.offset += d
+	if s.offset < 0 {
+		s.offset = 0
+	}
+	if s.offset > max {
+		s.offset = max
+	}
+	return s.offset
 }
 
 // PreviewLines are the lines the server sent for the selected pane.
@@ -176,205 +261,27 @@ func (s *Switcher) PreviewLines() []string {
 	return s.lines
 }
 
-// filter rebuilds the surviving row indices for the current query, in tree
-// order. An empty query keeps every row. Otherwise a pane survives by its own
-// match, a window line by its own match, which keeps every pane under it, or by
-// a pane under it, and a workspace header the same way one level up. A gap
-// survives between two surviving blocks.
-func (s *Switcher) filter() {
-	q := s.Query()
-	keep := make([]bool, len(s.tree))
-	blocks := switcherBlocks(s.tree)
-	for bi := range blocks {
-		b := &blocks[bi]
-		_, wsMatch := s.match(s.tree[b.row], q)
-		for wi := range b.wins {
-			w := &b.wins[wi]
-			_, winMatch := s.match(s.tree[w.row], q)
-			under := false
-			for _, p := range w.panes {
-				_, ok := s.match(s.tree[p], q)
-				keep[p] = ok
-				under = under || ok
-			}
-			w.keep = winMatch || under
-			if winMatch {
-				for _, p := range w.panes {
-					keep[p] = true
-				}
-			}
-			keep[w.row] = w.keep
-		}
-		b.keep = wsMatch
-		for _, w := range b.wins {
-			b.keep = b.keep || w.keep
-		}
-		if wsMatch {
-			for _, w := range b.wins {
-				keep[w.row] = true
-				for _, p := range w.panes {
-					keep[p] = true
-				}
-			}
-		}
-		keep[b.row] = b.keep
-	}
-	for bi, b := range blocks {
-		if b.gap >= 0 && bi+1 < len(blocks) && b.keep && blocks[bi+1].keep {
-			keep[b.gap] = true
-		}
-	}
-	s.rows = s.rows[:0]
-	for i, k := range keep {
-		if k {
-			s.rows = append(s.rows, i)
-		}
-	}
-}
-
-// switcherWindow is one window line and the pane rows under it.
-type switcherWindow struct {
-	row   int   // the window line
-	panes []int // the pane rows under it
-	keep  bool
-}
-
-// switcherBlock is one workspace header, the windows under it and the gap row
-// that follows the block, if any.
-type switcherBlock struct {
-	row  int // the workspace header
-	wins []switcherWindow
-	gap  int
-	keep bool
-}
-
-// switcherBlocks splits a rail tree into its workspace blocks.
-func switcherBlocks(tree []rail.RailItem) []switcherBlock {
-	var out []switcherBlock
-	for i, it := range tree {
-		switch it.Kind {
-		case rail.Workspace:
-			out = append(out, switcherBlock{row: i, gap: -1})
-		case rail.Gap:
-			if n := len(out); n > 0 {
-				out[n-1].gap = i
-			}
-		case rail.Window:
-			if len(out) == 0 {
-				continue
-			}
-			b := &out[len(out)-1]
-			b.wins = append(b.wins, switcherWindow{row: i})
-		case rail.Pane:
-			if len(out) == 0 {
-				continue
-			}
-			b := &out[len(out)-1]
-			if len(b.wins) == 0 {
-				continue
-			}
-			w := &b.wins[len(b.wins)-1]
-			w.panes = append(w.panes, i)
-		}
-	}
-	return out
-}
-
-// move steps the selection d selectable rows, never landing on a gap, and stops
-// at either end of the list.
-func (s *Switcher) Move(d int) {
-	if len(s.rows) == 0 {
-		s.sel = -1
-		return
-	}
-	if d == 0 {
-		return
-	}
-	step, steps := 1, d
-	if d < 0 {
-		step, steps = -1, -d
-	}
-	i := s.sel
-	if i < 0 {
-		i = -1
-		if step < 0 {
-			i = len(s.rows)
-		}
-	}
-	for n := 0; n < steps; n++ {
-		next := i + step
-		for next >= 0 && next < len(s.rows) && s.tree[s.rows[next]].Kind == rail.Gap {
-			next += step
-		}
-		if next < 0 || next >= len(s.rows) {
-			break
-		}
-		i = next
-	}
-	if i >= 0 && i < len(s.rows) {
-		s.sel = i
-	}
-}
-
-// selected is the highlighted row.
-func (s *Switcher) Selected() (rail.RailItem, bool) {
-	if s.sel < 0 || s.sel >= len(s.rows) {
-		return rail.RailItem{}, false
-	}
-	return s.tree[s.rows[s.sel]], true
-}
-
-// target is the id of the selected row: the workspace id for a workspace
-// header, the window id for a window line and the pane id for a pane row. It is
-// empty when nothing is selected.
-func (s *Switcher) Target() string {
-	it, ok := s.Selected()
-	if !ok {
-		return ""
-	}
-	return switcherTarget(it)
-}
-
-// switcherTarget is the id a row stands for.
-func switcherTarget(it rail.RailItem) string {
-	switch it.Kind {
-	case rail.Workspace:
-		return it.Workspace
-	case rail.Window:
-		return it.Window
-	case rail.Pane:
-		return it.Pane
-	}
-	return ""
-}
-
-// firstPane is the row index of the first pane row the query keeps, or -1.
-func (s *Switcher) firstPane() int {
-	for i, row := range s.rows {
-		if s.tree[row].Kind == rail.Pane {
-			return i
-		}
-	}
-	return -1
-}
-
-// setPreview records a preview request for a pane and drops the lines of the
-// request before it, so a stale screen is never drawn.
+// SetPreview records a preview request for a pane and drops the lines of the
+// request before it, so a stale screen is never drawn. A new pane starts at the
+// newest row of its screen.
 func (s *Switcher) SetPreview(id int, pane string) {
+	if pane != s.pane {
+		s.offset = 0
+	}
 	s.asked, s.req, s.pane, s.lines = true, id, pane, nil
 }
 
-// previewDue reports whether the selected pane is not the one asked for, so the
-// caller should ask again. Only a pane row has a screen to preview.
+// PreviewDue reports whether the selected pane is not the one asked for, so the
+// caller should ask again.
 func (s *Switcher) PreviewDue() bool {
-	it, ok := s.Selected()
-	if !ok || it.Kind != rail.Pane {
+	id := s.Target()
+	if id == "" {
 		return false
 	}
-	return !s.asked || it.Pane != s.pane
+	return !s.asked || id != s.pane
 }
 
-// acceptPreview takes the lines for the newest request and reports whether it
+// AcceptPreview takes the lines for the newest request and reports whether it
 // did. A reply to an older request is refused.
 func (s *Switcher) AcceptPreview(id int, lines []string) bool {
 	if !s.asked || id != s.req {
@@ -384,37 +291,241 @@ func (s *Switcher) AcceptPreview(id int, lines []string) bool {
 	return true
 }
 
-// reselect lands the selection on the best surviving pane row. Rows that score
-// alike are broken by the distance to prev, the tree row selected before, so a
-// query edit keeps the operator near where they were.
-func (s *Switcher) reselect(prev int) {
-	s.sel = -1
-	var best switcherScore
-	bestDist := 0
+// refilter rebuilds the rows after a query edit and lands the selection on the
+// best match, so a typed query shows the nearest of its hits.
+func (s *Switcher) refilter() {
+	s.top = 0
+	s.rebuild(s.sel, "")
+}
+
+// rebuild filters and sorts the rows, then takes a selection: keep is the pane
+// id to hold when it survives, and old is the row index the reselect measured
+// from when it does not.
+func (s *Switcher) rebuild(old int, keep string) {
+	s.rows = s.rows[:0]
 	q := s.Query()
-	for i, row := range s.rows {
-		if s.tree[row].Kind != rail.Pane {
-			continue
+	for _, p := range s.all {
+		if _, ok := matchPane(p, q); ok {
+			s.rows = append(s.rows, p)
 		}
-		sc, ok := s.match(s.tree[row], q)
-		if !ok {
-			// Kept by a header's match, so it survives without scoring.
-			sc = switcherScore{quality: switcherNoMatch}
-		}
-		dist := row
-		if prev >= 0 {
-			dist = row - prev
-			if dist < 0 {
-				dist = -dist
+	}
+	s.sortRows()
+	if keep != "" {
+		for i, p := range s.rows {
+			if p.ID == keep {
+				s.sel = i
+				return
 			}
 		}
-		if s.sel < 0 || sc.better(best) || (sc == best && dist < bestDist) {
-			s.sel, best, bestDist = i, sc, dist
-		}
+	}
+	s.sel = s.pick(old)
+}
+
+// sortRows orders the rows for the current sort mode. Every mode is stable, so
+// panes the mode cannot tell apart keep the snapshot's order.
+func (s *Switcher) sortRows() {
+	switch s.mode {
+	case SortProject:
+		sort.SliceStable(s.rows, func(i, j int) bool {
+			a, b := s.rows[i].Project, s.rows[j].Project
+			if (a == "") != (b == "") {
+				return a != ""
+			}
+			return strings.ToLower(a) < strings.ToLower(b)
+		})
+	case SortStatus:
+		sort.SliceStable(s.rows, func(i, j int) bool {
+			return statusRank(s.rows[i].Status) < statusRank(s.rows[j].Status)
+		})
+	default:
+		sort.SliceStable(s.rows, func(i, j int) bool {
+			return s.rows[i].StatusChangedAt > s.rows[j].StatusChangedAt
+		})
 	}
 }
 
-// switcherScore ranks how well a row matches: quality 0 is a field prefix, 1 a
+// statusRank orders the states for SortStatus: what wants attention first,
+// then the reported states, then the ones that report nothing.
+func statusRank(status string) int {
+	switch status {
+	case "blocked":
+		return 0
+	case "error":
+		return 1
+	case "working":
+		return 2
+	case "done":
+		return 3
+	case "idle":
+		return 4
+	case "unknown":
+		return 5
+	}
+	return 6
+}
+
+// pick is the row a query edit selects: the best-scoring match, with the
+// distance to the row selected before breaking a tie, so an edit keeps the
+// operator near where they were.
+func (s *Switcher) pick(old int) int {
+	if len(s.rows) == 0 {
+		return -1
+	}
+	q := s.Query()
+	if q == "" {
+		if old < 0 {
+			return 0
+		}
+		if old >= len(s.rows) {
+			return len(s.rows) - 1
+		}
+		return old
+	}
+	best := -1
+	var bestScore switcherScore
+	bestDist := 0
+	for i, p := range s.rows {
+		sc, _ := matchPane(p, q)
+		dist := i - old
+		if old < 0 {
+			dist = i
+		}
+		if dist < 0 {
+			dist = -dist
+		}
+		if best < 0 || sc.better(bestScore) || (sc == bestScore && dist < bestDist) {
+			best, bestScore, bestDist = i, sc, dist
+		}
+	}
+	return best
+}
+
+// hasPane reports whether a pane is still in the snapshot.
+func (s *Switcher) hasPane(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, p := range s.all {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// previewFits reports whether the float has room for a table and a preview
+// band side by side.
+func (s *Switcher) previewFits() bool {
+	return s.Rect.W >= previewMinCols && s.Rect.H >= previewMinRows
+}
+
+// bodyRows is how many rows the float's body holds: the box, the query row, the
+// header and the footer taken out. A float that has not been measured has none.
+func (s *Switcher) bodyRows() int {
+	if s.Rect.H < 6 {
+		return 0
+	}
+	return s.Rect.H - 5
+}
+
+// matchPane scores a pane against the query and reports whether it matches. The
+// fields are the pane's own: its recorded name, its app, its OSC title, its
+// branch, worktree and folder, its project and its id.
+func matchPane(p wire.AllPane, q string) (switcherScore, bool) {
+	if q == "" {
+		return switcherScore{}, true
+	}
+	var best switcherScore
+	found := false
+	for _, field := range paneFields(p) {
+		sc, ok := switcherField(field, q)
+		if !ok {
+			continue
+		}
+		if !found || sc.better(best) {
+			best, found = sc, true
+		}
+	}
+	return best, found
+}
+
+// paneFields are the strings a pane row matches on.
+func paneFields(p wire.AllPane) []string {
+	return []string{p.Name, p.App, p.Title, p.Branch, p.Worktree, p.Cwd, p.Project, p.ID}
+}
+
+// paneItem is the rail item a selected pane hands back. The client reads Kind
+// and Pane from it, and the label, state and folder are there for a caller that
+// wants to describe the pane.
+func paneItem(p wire.AllPane) rail.RailItem {
+	label := paneLabel(p)
+	it := rail.RailItem{
+		Kind: rail.Pane, Pane: p.ID, Text: label, PaneName: label,
+		Status: p.Status, Message: p.Message, Agent: p.Agent,
+		Project: p.Project,
+		Folder:  rail.RailFolder(p.Cwd, p.Root), Cwd: p.Cwd,
+		Branch: p.Branch, Worktree: p.Worktree,
+		Added: p.Added, Deleted: p.Deleted, Dirty: p.Dirty, InRepo: p.InRepo,
+		Workspace: p.Workspace, Window: p.Window, WindowName: p.WindowName,
+		Focus: p.Focus, Active: p.WorkspaceActive,
+	}
+	if p.Project != "" {
+		it.ProjectAccent = rail.RailAccentSlot(p.Project)
+	}
+	return it
+}
+
+// paneLabel is the agent label: the recorded name, else the reporting app, else
+// the pane id.
+func paneLabel(p wire.AllPane) string {
+	if p.Name != "" {
+		return p.Name
+	}
+	if p.App != "" {
+		return p.App
+	}
+	return p.ID
+}
+
+// paneState is the status cell's word and its theme style: a pane that never
+// reported a state and is not an agent is a shell, and a pane that reports
+// nothing at all is unknown.
+func paneState(p wire.AllPane) string {
+	if p.Status != "" {
+		return p.Status
+	}
+	if p.Agent {
+		return "unknown"
+	}
+	return "shell"
+}
+
+// switcherClock is how long ago a status change was: seconds under a minute,
+// then minutes, hours and days. A pane the server has no stamp for reads "-".
+func switcherClock(at, now int64) string {
+	if at <= 0 {
+		return "-"
+	}
+	d := now - at
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < 60:
+		return strconv.FormatInt(d, 10) + "s"
+	case d < 3600:
+		return strconv.FormatInt(d/60, 10) + "m"
+	case d < 86400:
+		return strconv.FormatInt(d/3600, 10) + "h"
+	}
+	return strconv.FormatInt(d/86400, 10) + "d"
+}
+
+// switcherNow is the clock the table reads. It is a var so a test can stop the
+// clock instead of racing it.
+var switcherNow = time.Now
+
+// switcherScore ranks how well a pane matches: quality 0 is a field prefix, 1 a
 // substring, 2 a subsequence, and a shorter field then an earlier match break a
 // tie.
 type switcherScore struct {
@@ -438,50 +549,7 @@ const (
 	switcherPrefix = iota
 	switcherSubstring
 	switcherSubsequence
-	// switcherNoMatch is the score of a pane row that survives on a header's
-	// match alone: any match of its own ranks above it.
-	switcherNoMatch
 )
-
-// match scores a row against the query and reports whether it matches. A row
-// matches on the best of its fields; an empty query matches every row.
-func (s *Switcher) match(it rail.RailItem, q string) (switcherScore, bool) {
-	if q == "" {
-		return switcherScore{}, true
-	}
-	var best switcherScore
-	found := false
-	for _, field := range s.fields(it) {
-		sc, ok := switcherField(field, q)
-		if !ok {
-			continue
-		}
-		if !found || sc.better(best) {
-			best, found = sc, true
-		}
-	}
-	return best, found
-}
-
-// fields are the strings a row matches on: a pane its id, label, folder,
-// branch, worktree and its window's and workspace's names, a window its name,
-// id, folder, branch and worktree, a workspace its name and id.
-func (s *Switcher) fields(it rail.RailItem) []string {
-	switch it.Kind {
-	case rail.Pane:
-		p := s.panes[it.Pane]
-		return []string{
-			it.Pane, it.Text,
-			rail.RailFolder(p.Cwd, p.Root), p.Branch, p.Worktree,
-			p.WindowName, p.WorkspaceName,
-		}
-	case rail.Window:
-		return []string{it.Text, it.Window, it.Folder, it.Branch, it.Worktree}
-	case rail.Workspace:
-		return []string{it.Text, it.Workspace}
-	}
-	return nil
-}
 
 // switcherField scores the query against one field, case-insensitively.
 func switcherField(field, q string) (switcherScore, bool) {

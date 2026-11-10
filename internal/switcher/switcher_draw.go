@@ -3,6 +3,7 @@ package switcher
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"dm/internal/cells"
@@ -20,8 +21,8 @@ import (
 type PanePainter func(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int)
 
 // PaletteRect centres the float at 80% by 70%, clamped so its box always fits
-// on screen. It moved here from pal.go with the same rule; the client asks for
-// the rect it opens the switcher with.
+// on screen. It moved here from pal.go with the same rule; a caller that does
+// not own the whole screen asks for the rect it opens the switcher with.
 func PaletteRect(cols, rows int) layout.Rect {
 	w, h := cols*8/10, rows*7/10
 	if w > 132 {
@@ -49,54 +50,6 @@ func PaletteRect(cols, rows int) layout.Rect {
 		h = rows
 	}
 	return layout.Rect{X: (cols - w) / 2, Y: (rows - h) / 2, W: w, H: h}
-}
-
-// switcherLayout is the cell geometry of one float: the box, the query row, the
-// band of rows under it and, when the float is wide enough, the columns the
-// preview takes.
-type switcherLayout struct {
-	r      layout.Rect // the float's outer rect, the box border included
-	inner  layout.Rect // inside the border
-	queryY int         // the query row
-	bandY  int         // the first row of the list and preview bands
-	bandH  int         // how many band rows fit
-	listW  int         // the list band's width
-
-	preview bool
-	ruleX   int // the vertical rule between the bands
-	prevX   int // the preview band's first column
-	prevW   int // the preview band's width
-}
-
-// switcherLayoutOf measures the float. A switcher opened without a rect takes
-// PaletteRect, and the rect is clamped to the screen so no row writes off it.
-func switcherLayoutOf(s *Switcher, snap *wire.Snapshot) switcherLayout {
-	r := s.Rect
-	if r.W <= 0 || r.H <= 0 {
-		r = PaletteRect(snap.Cols, snap.Rows)
-	}
-	r = ClampRect(r, snap.Cols, snap.Rows)
-	s.Rect = r
-	l := switcherLayout{
-		r:      r,
-		inner:  layout.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2},
-		queryY: r.Y + 1,
-		bandY:  r.Y + 2,
-		bandH:  r.H - 3,
-		listW:  r.W - 2,
-	}
-	if r.W >= 64 && r.H >= 12 {
-		pw := (r.W - 2) / 2
-		lw := r.W - 2 - pw - 1
-		if pw >= 4 && lw >= 4 {
-			l.preview = true
-			l.prevW = pw
-			l.listW = lw
-			l.ruleX = r.X + 1 + lw
-			l.prevX = l.ruleX + 1
-		}
-	}
-	return l
 }
 
 // ClampRect keeps r inside a cols by rows screen.
@@ -134,6 +87,134 @@ func ClampRect(r layout.Rect, cols, rows int) layout.Rect {
 	return r
 }
 
+// switcherLayout is the cell geometry of one float: the box, the query row, the
+// column header, the body, the footer hint row and, when the float is wide
+// enough, the columns the preview takes on the right of the split.
+type switcherLayout struct {
+	r      layout.Rect // the float's outer rect, the box border included
+	inner  layout.Rect // inside the border
+	queryY int         // the query row
+	headY  int         // the column names
+	bodyY  int         // the first table row
+	bodyH  int         // how many table rows fit
+	footY  int         // the footer hint row, -1 when the float has no room
+	listW  int         // the table's width
+
+	preview bool
+	ruleX   int // the vertical rule between the table and the preview
+	prevX   int // the preview band's first column
+	prevW   int // the preview band's width
+}
+
+// hasRow reports whether a row falls inside the inner rect.
+func (l switcherLayout) hasRow(y int) bool {
+	return y >= l.inner.Y && y < l.inner.Y+l.inner.H
+}
+
+// switcherLayoutOf measures the float. A switcher opened without a rect takes
+// PaletteRect, and the rect is clamped to the screen so no row writes off it.
+func switcherLayoutOf(s *Switcher, snap *wire.Snapshot) switcherLayout {
+	r := s.Rect
+	if r.W <= 0 || r.H <= 0 {
+		r = PaletteRect(snap.Cols, snap.Rows)
+	}
+	r = ClampRect(r, snap.Cols, snap.Rows)
+	s.Rect = r
+	l := switcherLayout{
+		r:      r,
+		inner:  layout.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2},
+		queryY: r.Y + 1,
+		headY:  r.Y + 2,
+		bodyY:  r.Y + 3,
+		footY:  r.Y + r.H - 2,
+		listW:  r.W - 2,
+	}
+	// A float too short for the footer gives its last inner row to the body.
+	if l.inner.H < 3 || l.footY >= l.inner.Y+l.inner.H {
+		l.footY = -1
+	}
+	if l.footY >= 0 {
+		l.bodyH = l.footY - l.bodyY
+		if l.bodyH < 0 {
+			l.bodyH = 0
+		}
+	}
+	if s.PreviewOn() {
+		prevW := l.inner.W * s.ratio / 100
+		listW := l.inner.W - prevW - 1
+		if listW < 12 {
+			// A table narrower than this cannot name its columns, so the
+			// preview gives way instead of eating it.
+			listW = 12
+			prevW = l.inner.W - listW - 1
+		}
+		if prevW >= 4 && listW >= 4 {
+			l.preview = true
+			l.listW = listW
+			l.prevW = prevW
+			l.ruleX = l.inner.X + listW
+			l.prevX = l.ruleX + 1
+		}
+	}
+	return l
+}
+
+// switcherHead names the columns, in the table's order.
+var switcherHead = [7]string{"#", "proj", "agent", "git", "status", "time", "title"}
+
+// switcherColumnFloor is the least width a column keeps while the table shrinks.
+// switcherColumnFloor keeps the status word whole: a table that elides the
+// state has lost the one thing the dashboard exists to show.
+var switcherColumnFloor = [6]int{1, 4, 4, 4, 9, 4}
+
+// switcherTitleFloor is the least room the title column keeps while the others
+// shrink, so a narrow table still shows part of a name.
+const switcherTitleFloor = 8
+
+// switcherColumns returns the cell width of each column for a table w cells
+// wide: the jump digit, project, agent, git, status, time and title. The title
+// takes whatever the others leave; when they do not fit, the widest column
+// gives a cell up until they do, and the title never drops under one mark.
+func switcherColumns(w int) [7]int {
+	out := [6]int{1, 10, 14, 8, 10, 4}
+	for sum6(out)+len(out)+switcherTitleFloor > w {
+		idx := -1
+		for i := 0; i < len(out); i++ {
+			if out[i] <= switcherColumnFloor[i] {
+				continue
+			}
+			if idx < 0 || out[i]-switcherColumnFloor[i] >= out[idx]-switcherColumnFloor[idx] {
+				idx = i
+			}
+		}
+		if idx < 0 {
+			for i := 0; i < len(out); i++ {
+				if out[i] > 1 && (idx < 0 || out[i] > out[idx]) {
+					idx = i
+				}
+			}
+		}
+		if idx < 0 {
+			break
+		}
+		out[idx]--
+	}
+	title := w - sum6(out) - len(out)
+	if title < 1 {
+		title = 1
+	}
+	return [7]int{out[0], out[1], out[2], out[3], out[4], out[5], title}
+}
+
+// sum6 is the cell width of the six fixed columns.
+func sum6(c [6]int) int {
+	n := 0
+	for _, v := range c {
+		n += v
+	}
+	return n
+}
+
 // DrawSwitcher writes the whole float into buf and returns the cell the query
 // cursor belongs on. The cell is zero based and always inside s.Rect. Every row
 // the float owns is painted, blanks included, and every row starts with an
@@ -143,16 +224,18 @@ func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Sna
 	if buf == nil || s == nil || snap == nil || snap.Cols < 1 || snap.Rows < 1 {
 		return 0, 0
 	}
+	th = th.For(set)
 	l := switcherLayoutOf(s, snap)
 	if l.r.W < 3 || l.r.H < 3 {
 		return l.r.X, l.r.Y
 	}
+	cols := switcherColumns(l.listW)
 	panel.PaintPanel(buf, th, l.inner, panel.PanelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
 		cx, cy = paintSwitcherQuery(b, th, s, l)
-		paintSwitcherBands(b, th, s, vts, l, paint, set)
+		paintSwitcherHead(b, th, l, cols)
+		paintSwitcherBody(b, th, s, vts, l, cols, paint, set)
+		paintSwitcherFoot(b, th, s, l)
 	})
-	// The title wears the rail ground, which the panel's label style cannot
-	// express, so the switcher paints it on the border row itself.
 	paintSwitcherTitle(buf, th, l)
 	return cx, cy
 }
@@ -171,8 +254,11 @@ func paintSwitcherTitle(buf *bytes.Buffer, th theme.Theme, l switcherLayout) {
 }
 
 // paintSwitcherQuery paints the query row: "> " then the query, clipped to the
-// list band, and returns one past the query's last cell.
+// table, and returns one past the query's last cell.
 func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout) (cx, cy int) {
+	if !l.hasRow(l.queryY) {
+		return l.inner.X, l.inner.Y
+	}
 	ground, dim, text := th.Palette.RailBG, th.Palette.RailDim, th.Palette.RailText
 	x, y, w := l.inner.X, l.queryY, l.listW
 	cy = y
@@ -203,71 +289,218 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 	if cx < x {
 		cx = x
 	}
-	// The columns right of the list still belong to this row, so paint them:
-	// the rule keeps the split visible and the preview band stays blank.
+	// The columns right of the table still belong to this row, so paint them:
+	// the rule keeps the split visible and the preview stays blank.
 	if l.preview {
-		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.ruleX+1)
-		buf.WriteString("\x1b[0m" + ground.BG() + dim.FG() + th.Glyphs.BorderVertical)
+		paintRuleCell(buf, th, l.ruleX, y)
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.prevX+1)
 		buf.WriteString("\x1b[0m" + ground.BG() + strings.Repeat(" ", l.prevW) + "\x1b[0m")
 	}
 	return cx, cy
 }
 
-// paintSwitcherBands paints the rows under the query line: the rail tree on the
-// left and, when the float is wide enough, the selected pane's screen on the
-// right.
-func paintSwitcherBands(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, l switcherLayout, paint PanePainter, set theme.GlyphSet) {
-	if l.bandH <= 0 {
+// paintSwitcherHead paints the column names under the query row.
+func paintSwitcherHead(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols [7]int) {
+	if !l.hasRow(l.headY) {
 		return
 	}
-	p := th.Palette
-	scrollSwitcher(s, l.bandH)
-	for i := 0; i < l.bandH; i++ {
-		y := l.bandY + i
-		idx := s.top + i
-		var left, right, tail []segment.Seg
-		bg, bold := p.RailBG, false
-		if idx >= 0 && idx < len(s.rows) {
-			left, right, tail = rail.RailRow(th, s.tree[s.rows[idx]], l.listW, false, set)
-			if idx == s.sel {
-				bg, bold = p.RailFocusBG, true
-			}
+	ground := th.Palette.RailBG
+	fmt.Fprintf(buf, "\x1b[%d;%dH", l.headY+1, l.inner.X+1)
+	buf.WriteString("\x1b[0m" + ground.BG())
+	used := 0
+	for i, name := range switcherHead {
+		if i > 0 {
+			buf.WriteString(" ")
+			used++
 		}
-		paintRailRow(buf, left, tail, right, l.inner.X, y, l.listW, bg, bold)
-		if l.preview {
-			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.ruleX+1)
-			buf.WriteString("\x1b[0m" + p.RailBG.BG() + p.RailDim.FG() + th.Glyphs.BorderVertical + "\x1b[0m")
+		runs := switcherFit(th, []segment.Seg{{Text: name, FG: th.Palette.RailDim}}, cols[i])
+		writeSwitcherRuns(buf, runs, ground, true)
+		used += segment.SegCells(runs)
+		if n := cols[i] - segment.SegCells(runs); n > 0 {
+			buf.WriteString(strings.Repeat(" ", n))
+			used += n
 		}
 	}
+	if n := l.listW - used; n > 0 {
+		buf.WriteString(strings.Repeat(" ", n))
+	}
+	buf.WriteString("\x1b[0m")
 	if l.preview {
-		paintSwitcherPreview(buf, th, s, vts, layout.Rect{X: l.prevX, Y: l.bandY, W: l.prevW, H: l.bandH}, paint)
+		paintRuleCell(buf, th, l.ruleX, l.headY)
+		paintSwitcherBlankRow(buf, th, l.headY, l.prevX, l.prevW)
 	}
 }
 
-// paintRailRow paints one composed rail row on its background, filling the whole
-// width so no cell of the previous frame shows through.
-func paintRailRow(buf *bytes.Buffer, left, tail, right []segment.Seg, x, y, w int, bg theme.RGB, bold bool) {
-	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-	buf.WriteString("\x1b[0m" + bg.BG())
-	for _, s := range left {
-		rail.WriteRailSeg(buf, s, bg, bold)
+// paintSwitcherBody paints the table rows and, on the right of the split, the
+// selected pane's screen.
+func paintSwitcherBody(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, l switcherLayout, cols [7]int, paint PanePainter, set theme.GlyphSet) {
+	if l.bodyH > 0 {
+		s.scrollTo(l.bodyH)
 	}
-	for _, s := range tail {
-		rail.WriteRailSeg(buf, s, bg, bold)
+	now := switcherNow().Unix()
+	for i := 0; i < l.bodyH; i++ {
+		y := l.bodyY + i
+		idx := s.top + i
+		if idx >= 0 && idx < len(s.rows) {
+			selected := idx == s.sel
+			paintSwitcherRow(buf, th, l, cols, s.rows[idx], idx+1, selected, set, now, y)
+		} else {
+			paintSwitcherBlankRow(buf, th, y, l.inner.X, l.listW)
+		}
+		if l.preview {
+			paintRuleCell(buf, th, l.ruleX, y)
+		}
 	}
-	if n := w - segment.SegCells(left) - segment.SegCells(tail) - segment.SegCells(right); n > 0 {
+	if l.preview {
+		paintSwitcherPreview(buf, th, s, vts, layout.Rect{X: l.prevX, Y: l.bodyY, W: l.prevW, H: l.bodyH}, paint)
+	}
+}
+
+// paintSwitcherRow paints one pane row: the jump key, project, agent label, git
+// state, status, age and title, each elided to its column. The selected row
+// wears the focus ground across the whole table.
+func paintSwitcherRow(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols [7]int, p wire.AllPane, jump int, selected bool, set theme.GlyphSet, now int64, y int) {
+	ground := th.Palette.RailBG
+	if selected {
+		ground = th.Palette.RailFocusBG
+	}
+	cellsOf := switcherRowCells(th, set, p, jump, now)
+	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.inner.X+1)
+	buf.WriteString("\x1b[0m" + ground.BG())
+	used := 0
+	for i := 0; i < len(cols); i++ {
+		if i > 0 {
+			buf.WriteString(" ")
+			used++
+		}
+		runs := switcherFit(th, cellsOf[i], cols[i])
+		writeSwitcherRuns(buf, runs, ground, selected)
+		used += segment.SegCells(runs)
+		if n := cols[i] - segment.SegCells(runs); n > 0 {
+			buf.WriteString(strings.Repeat(" ", n))
+			used += n
+		}
+	}
+	if n := l.listW - used; n > 0 {
 		buf.WriteString(strings.Repeat(" ", n))
-	}
-	for _, s := range right {
-		rail.WriteRailSeg(buf, s, bg, bold)
 	}
 	buf.WriteString("\x1b[0m")
 }
 
-// scrollSwitcher moves the list's first visible row so the selection stays in
-// the band, and never scrolls past the last row.
-func scrollSwitcher(s *Switcher, h int) {
+// switcherRowCells composes the seven column runs of one pane row.
+func switcherRowCells(th theme.Theme, set theme.GlyphSet, p wire.AllPane, jump int, now int64) [7][]segment.Seg {
+	pal := th.Palette
+	var out [7][]segment.Seg
+	jumpText := ""
+	if jump >= 1 && jump <= 9 {
+		jumpText = strconv.Itoa(jump)
+	}
+	out[0] = []segment.Seg{{Text: jumpText, FG: pal.RailDim}}
+	project, projectFG := "-", pal.RailDim
+	if p.Project != "" {
+		project, projectFG = p.Project, th.Accents[rail.RailAccentSlot(p.Project)]
+	}
+	out[1] = []segment.Seg{{Text: project, FG: projectFG}}
+	out[2] = []segment.Seg{{Text: paneLabel(p), FG: pal.RailText}}
+	out[3] = paneGit(th, p)
+	state := paneState(p)
+	style := rail.StateStyle(th, state).For(set)
+	out[4] = []segment.Seg{{Text: style.Glyph + " " + state, FG: style.Colour}}
+	out[5] = []segment.Seg{{Text: switcherClock(p.StatusChangedAt, now), FG: pal.RailDim}}
+	out[6] = []segment.Seg{{Text: p.Title, FG: pal.RailDim}}
+	return out
+}
+
+// paneGit is the git cell: the lines the tree gains and loses, "clean" when it
+// has none, and a dash outside a repository.
+func paneGit(th theme.Theme, p wire.AllPane) []segment.Seg {
+	pal := th.Palette
+	if !p.InRepo {
+		return []segment.Seg{{Text: "-", FG: pal.RailDim}}
+	}
+	var out []segment.Seg
+	if p.Added != 0 {
+		out = append(out, segment.Seg{Text: "+" + strconv.Itoa(p.Added), FG: pal.RailDiffAdd})
+	}
+	if p.Deleted != 0 {
+		if len(out) > 0 {
+			out = append(out, segment.Seg{Text: " ", FG: pal.RailDim})
+		}
+		out = append(out, segment.Seg{Text: "-" + strconv.Itoa(p.Deleted), FG: pal.RailDiffDel})
+	}
+	if len(out) == 0 {
+		return []segment.Seg{{Text: "clean", FG: pal.RailDim}}
+	}
+	return out
+}
+
+// switcherFit cuts a column's runs to its width, with the elision mark only
+// when they do not fit.
+func switcherFit(th theme.Theme, runs []segment.Seg, w int) []segment.Seg {
+	if segment.SegCells(runs) <= w {
+		return runs
+	}
+	return segment.ElideSegs(th, runs, w)
+}
+
+// writeSwitcherRuns paints a row's runs on its ground, in the row's weight.
+func writeSwitcherRuns(buf *bytes.Buffer, runs []segment.Seg, ground theme.RGB, bold bool) {
+	for _, seg := range runs {
+		seg.BG = ground
+		seg.Bold = seg.Bold || bold
+		segment.Write(buf, seg)
+	}
+}
+
+// paintSwitcherBlankRow paints one table row on the rail ground.
+func paintSwitcherBlankRow(buf *bytes.Buffer, th theme.Theme, y, x, w int) {
+	if w <= 0 {
+		return
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
+	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", w) + "\x1b[0m")
+}
+
+// paintRuleCell paints one cell of the vertical rule between the table and the
+// preview.
+func paintRuleCell(buf *bytes.Buffer, th theme.Theme, x, y int) {
+	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
+	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailDim.FG() + th.Glyphs.BorderVertical + "\x1b[0m")
+}
+
+// paintSwitcherFoot paints the hint row at the bottom of the box: the keys on
+// the left and the ordering with the preview's share on the right.
+func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout) {
+	if l.footY <= l.queryY || !l.hasRow(l.footY) || l.inner.W <= 0 {
+		return
+	}
+	hint := "enter pick  esc close  type filter  s sort  p peek  +/- size  ^u/^d scroll"
+	right := s.mode.String()
+	if s.PreviewOn() {
+		right += " " + strconv.Itoa(s.ratio) + "%"
+	}
+	room := l.inner.W - cells.Cells(right) - 2
+	if room < 0 {
+		right, room = "", l.inner.W
+	}
+	left := cells.Clip(hint, room)
+	pad := l.inner.W - cells.Cells(left) - cells.Cells(right)
+	if pad < 0 {
+		pad = 0
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH", l.footY+1, l.inner.X+1)
+	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailDim.FG())
+	buf.WriteString(left)
+	buf.WriteString(strings.Repeat(" ", pad))
+	if right != "" {
+		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailDim.FG() + right)
+	}
+	buf.WriteString("\x1b[0m")
+}
+
+// scrollTo moves the table's first visible row so the selection stays in the
+// body, and never scrolls past the last row.
+func (s *Switcher) scrollTo(h int) {
 	if h <= 0 || len(s.rows) == 0 {
 		s.top = 0
 		return
@@ -292,28 +525,45 @@ func scrollSwitcher(s *Switcher, h int) {
 	}
 }
 
+// previewRow0 is the first content row to paint for a band of h rows over n rows
+// of content, scrolled up by the model's offset and clamped to the content.
+func (s *Switcher) previewRow0(n, h int) int {
+	if n <= 0 || h <= 0 {
+		return 0
+	}
+	max := n - h
+	if max < 0 {
+		max = 0
+	}
+	row0 := n - h - s.offset
+	if row0 > max {
+		row0 = max
+	}
+	if row0 < 0 {
+		row0 = 0
+	}
+	return row0
+}
+
 // paintSwitcherPreview paints the selected pane's screen into the band, bottom
-// aligned. A pane with a live terminal paints from it; otherwise the lines of
-// the model's read reply are used. No data at all leaves the band blank.
+// aligned and scrolled by the model's offset. A pane with a live terminal paints
+// from it; otherwise the lines of the model's read reply are used. No data at
+// all leaves the band blank.
 func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, band layout.Rect, paint PanePainter) {
 	if band.W <= 0 || band.H <= 0 {
 		return
 	}
 	var term *vt.Term
-	var lines []string
-	if it, ok := s.Selected(); ok && it.Kind == rail.Pane {
-		term = vts[it.Pane]
-		lines = s.lines
+	if id := s.Target(); id != "" {
+		term = vts[id]
 	}
 	if term != nil {
-		_, rows := term.Grid().Size()
-		h, row0 := band.H, 0
-		if rows < h {
-			h = rows
+		_, n := term.Grid().Size()
+		h := band.H
+		if n < h {
+			h = n
 		}
-		if rows > band.H {
-			row0 = rows - band.H
-		}
+		row0 := s.previewRow0(n, h)
 		start := band.Y + band.H - h
 		paintBlankRows(buf, th, band, band.Y, start)
 		if h > 0 && paint != nil {
@@ -321,17 +571,18 @@ func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts ma
 		}
 		return
 	}
-	h := len(lines)
-	if h > band.H {
-		lines = lines[len(lines)-band.H:]
-		h = band.H
+	n := len(s.lines)
+	h := band.H
+	if n < h {
+		h = n
 	}
+	row0 := s.previewRow0(n, h)
 	start := band.Y + band.H - h
 	paintBlankRows(buf, th, band, band.Y, start)
 	for i := 0; i < h; i++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", start+i+1, band.X+1)
 		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailText.FG())
-		text := cells.Clip(lines[i], band.W)
+		text := cells.Clip(s.lines[row0+i], band.W)
 		buf.WriteString(text)
 		if n := band.W - cells.Cells(text); n > 0 {
 			buf.WriteString(strings.Repeat(" ", n))
@@ -343,6 +594,9 @@ func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts ma
 // paintBlankRows paints the rows [from, to) of a band on the rail ground.
 func paintBlankRows(buf *bytes.Buffer, th theme.Theme, band layout.Rect, from, to int) {
 	for y := from; y < to; y++ {
+		if y < band.Y {
+			continue
+		}
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, band.X+1)
 		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", band.W) + "\x1b[0m")
 	}
