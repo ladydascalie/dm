@@ -227,9 +227,9 @@ func LowestCommonAncestor(a, b []*Node) *Node {
 // room for a window label and its right-aligned git stats.
 const DefaultRail = 34
 
-// CollapsedRail is the width of the thin rail: two leading spaces, the state
-// glyph, and one trailing space. The glyph keeps the column it has in the
-// expanded rail, so collapsing does not move the mark.
+// CollapsedRail is the width of the thin rail: an agent mark, the project
+// bar, the state glyph, and the grip strip. The glyph keeps the column it
+// has in the expanded rail, so collapsing does not move the mark.
 const CollapsedRail = 4
 
 // RailCompact reports whether a rail width is the thin, glyph-only form.

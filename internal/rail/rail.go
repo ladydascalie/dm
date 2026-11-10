@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"dm/internal/layout"
 	"dm/internal/segment"
@@ -117,15 +118,46 @@ func WindowVars(snap *wire.Snapshot, w wire.WindowInfo) wlabel.Vars {
 // row separates workspace blocks. A folded workspace hides its windows and
 // panes; a folded window hides only its panes. The thin rail is a glyph
 // column: one pane row per pane, in snapshot order, whatever the fold. It has
-// no workspace row, no window row, no note row and no gap row.
+// no workspace row, no window row, no note row and no gap row. Its pane rows
+// still carry their project and accent, so the bar ties them to their
+// project even when no project row is drawn.
 func RailItems(snap *wire.Snapshot) []RailItem {
 	if snap == nil {
 		return nil
 	}
+	// A slot is preferred by hashing its name. When two live names hash alike,
+	// the later one takes the next free slot, so no two names in a session ever
+	// share an accent.
+	slots := len(theme.DefaultTheme().Accents)
+	allocator := func() func(string) int {
+		used := map[int]bool{}
+		return func(name string) int {
+			pref := RailAccentSlot(name)
+			for i := 0; i < slots; i++ {
+				slot := (pref + i) % slots
+				if !used[slot] {
+					used[slot] = true
+					return slot
+				}
+			}
+			return pref
+		}
+	}
+	projectAccent := allocator()
 	if layout.RailCompact(snap.Rail) {
+		seen := map[string]int{}
 		out := make([]RailItem, 0, len(snap.All))
 		for _, p := range snap.All {
-			out = append(out, RailPaneRow(p))
+			row := RailPaneRow(p)
+			if p.Project != "" {
+				s, ok := seen[p.Project]
+				if !ok {
+					s = projectAccent(p.Project)
+					seen[p.Project] = s
+				}
+				row.Project, row.ProjectAccent = p.Project, s
+			}
+			out = append(out, row)
 		}
 		return out
 	}
@@ -165,28 +197,9 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		}
 		return wire.AllPane{}, false
 	}
-	// A slot is preferred by hashing its name. When two live names hash alike,
-	// the later one takes the next free slot, so no two names in a session ever
-	// share an accent.
-	slots := len(theme.DefaultTheme().Accents)
-	allocator := func() func(string) int {
-		used := map[int]bool{}
-		return func(name string) int {
-			pref := RailAccentSlot(name)
-			for i := 0; i < slots; i++ {
-				slot := (pref + i) % slots
-				if !used[slot] {
-					used[slot] = true
-					return slot
-				}
-			}
-			return pref
-		}
-	}
 	// Workspaces keep their old per-workspace slot for the callers that still
 	// read it, though the rail no longer paints it. Projects own their column.
 	accent := allocator()
-	projectAccent := allocator()
 	// A project row names its group once, before the group's first workspace,
 	// and carries the number of workspaces in the group.
 	projectCount := map[string]int{}
@@ -480,10 +493,11 @@ func RailStats(th theme.Theme, it RailItem, set theme.GlyphSet) []segment.Seg {
 	return out
 }
 
-// RailBar is the cell the full rail paints in column 0 of an item row: the
-// theme's workspace-bar glyph in the row's project accent, or a blank outside
-// a project. It sits before the row's own runs, and the row composes one cell
-// narrower to keep the right edge stable.
+// RailBar is the bar cell of an item row: the theme's workspace-bar glyph
+// in the row's project accent, or a blank outside a project. The full rail
+// paints it in column 0; the thin rail paints it between the agent mark and
+// the state glyph. It sits before the row's own runs, and the row composes
+// one cell narrower to keep the right edge stable.
 func RailBar(th theme.Theme, it RailItem) segment.Seg {
 	if it.Project == "" {
 		return segment.Seg{Text: " ", FG: th.Palette.RailDim}
@@ -591,8 +605,13 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 		}
 		glyph := RailMark(it.Agent, set)
 		if compact {
+			// The mark gives up its trailing space, and the project bar takes the
+			// cell between mark and state, so a thin row still says which project
+			// the pane belongs to while the glyph keeps its column.
+			m1, _ := utf8.DecodeRuneInString(glyph)
 			left = []segment.Seg{
-				{Text: glyph, FG: colour},
+				{Text: string(m1), FG: colour},
+				RailBar(th, it),
 				{Text: mark, FG: colour},
 			}
 		} else {
@@ -834,7 +853,8 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 		} else if y < len(items) {
 			it := items[y]
 			// The full rail gives column 0 to the project bar. The thin rail
-			// paints no bar and no project row, so its rows keep their width.
+			// paints no project row and composes its own bar inside RailRow, so
+			// its rows keep their width.
 			itemW := rowW
 			if !compact {
 				left = append(left, RailBar(th, it))

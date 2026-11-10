@@ -235,10 +235,13 @@ func TestRailRowSegments(t *testing.T) {
 			left, right, tail, wantLeft)
 	}
 
-	// The thin rail keeps the marker and the glyph and drops the indents.
+	// The thin rail keeps the marker and the glyph, drops the indents, and
+	// puts the project bar cell between them: blank here, since pi has no
+	// project.
 	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.CollapsedRail, true, theme.GlyphUnicode)
 	wantLeft = []railSeg{
-		{Text: mark, FG: glyphColour},
+		{Text: strings.TrimSuffix(mark, " "), FG: glyphColour},
+		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
 		{Text: "\u25cf", FG: glyphColour},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
@@ -920,12 +923,14 @@ func TestRailFoldCaretAfterBar(t *testing.T) {
 	}
 }
 
-// TestThinRailHasNoProject proves the thin rail drops project rows and the bar
-// column, however the snapshot is grouped.
-func TestThinRailHasNoProject(t *testing.T) {
+// TestThinRailProjectTrack proves the thin rail keeps the project track:
+// every pane row paints its project's bar in the cell between mark and glyph,
+// and no project row ever appears.
+func TestThinRailProjectTrack(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railProjectSnap(layout.CollapsedRail)
-	for _, it := range RailItems(snap) {
+	items := RailItems(snap)
+	for _, it := range items {
 		if it.Kind != Pane {
 			t.Fatalf("thin rail has a %d row: %+v", it.Kind, it)
 		}
@@ -935,6 +940,32 @@ func TestThinRailHasNoProject(t *testing.T) {
 		if g := cellOf(term, 0, y); theBar() == g.Char {
 			t.Fatalf("thin row %d paints the bar in column 0", y)
 		}
+	}
+
+	// Project rows paint the bar in column 1, in the project's accent; the
+	// loose row paints no bar. Two live projects never share an accent, and
+	// no row is a project row.
+	for y, it := range items {
+		bar := cellOf(term, 1, y)
+		if it.Project == "" {
+			if bar.Char == theBar() {
+				t.Fatalf("loose thin row %d paints the bar", y)
+			}
+			continue
+		}
+		if bar.Char != theBar() {
+			t.Fatalf("thin row %d for %s has no bar in column 1", y, it.Project)
+		}
+		if want := theme.DefaultTheme().Accents[it.ProjectAccent]; bar.FG != railColour(want) {
+			t.Fatalf("thin row %d bar = %v, want the %s accent %v", y, bar.FG, it.Project, want)
+		}
+	}
+	if items[0].Project != "alpha" || items[2].Project != "" || items[3].Project != "beta" {
+		t.Fatalf("thin rows carry %q / %q / %q, want alpha / none / beta",
+			items[0].Project, items[2].Project, items[3].Project)
+	}
+	if items[3].ProjectAccent == items[0].ProjectAccent {
+		t.Fatalf("projects alpha and beta share accent slot %d", items[0].ProjectAccent)
 	}
 	if got := RailFoldAt(snap, 1, 0); got != "" {
 		t.Fatalf("thin rail answers a fold at 1: %q", got)
