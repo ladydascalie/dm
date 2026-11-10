@@ -445,14 +445,16 @@ keeps its own 20 to 85 range, and the peek key uses the configured share.
 the answer shows in the preview, and the footer says `input` while the mode is
 on. `d` runs the diff command, `git diff` by default, in a floating terminal
 over the panes, in the selected pane's folder, through `sh -c`. The float takes
-every key while the command runs, and the prefix then `q` closes it. After the
-command exits the float keeps the screen the command left behind until a key is
-pressed; a full screen program such as tig leaves the alternate screen on exit,
-so its float ends blank. A client that falls far enough behind to be resynced
-loses the float's screen with the backlog: close it and press `d` again. The
-`diff-command` config node sets the command, and a reload picks it up with the
-rest of `config.kdl`. `diff-command "tig"` and `diff-command "hunk diff"` are
-the two examples.
+every key while the command runs, except the prefix: one press of it kills the
+float and the command under it, so there is no need to quit the program first.
+The command never sees the prefix byte, so a program that wants that key needs
+a different `prefix`. After the command exits the float keeps the screen the
+command left behind until a key is pressed; a full screen program such as tig
+leaves the alternate screen on exit, so its float ends blank. A client that
+falls far enough behind to be resynced loses the float's screen with the
+backlog: close it and press `d` again. The `diff-command` config node sets the
+command, and a reload picks it up with the rest of `config.kdl`.
+`diff-command "tig"` and `diff-command "hunk diff"` are the two examples.
 
 The dashboard is client owned: it starts when the key is pressed and ends when
 the choice is taken, so it never enters the session tree and never survives a
@@ -586,6 +588,8 @@ window reads the same in every place. The data is a struct with these fields:
 - `.Named`: true when the user set the name with `rename-window`.
 - `.Cwd`: the source pane's working directory.
 - `.Root`: the source pane's repository root, empty outside git.
+
+i added useles changes lol
 
 The `base` function prints the last path element: `{{base .Root}}` is the
 repository folder name. The default template shows the name of a named window

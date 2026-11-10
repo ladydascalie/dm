@@ -20,6 +20,7 @@ import (
 type floatView struct {
 	id      string
 	command string
+	prefix  string
 	vt      *vt.Term
 	float   *panel.FloatingPane
 	exited  bool
@@ -79,9 +80,10 @@ func (t *tui) openFloatCommand() {
 	r := floatRect(t.snap)
 	id := "float-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	t.float = &floatView{
-		id:    id,
-		vt:    vt.NewTerm(r.W, r.H),
-		float: &panel.FloatingPane{ID: id, Rect: r, Active: true},
+		id:     id,
+		prefix: t.km().PrefixName(),
+		vt:     vt.NewTerm(r.W, r.H),
+		float:  &panel.FloatingPane{ID: id, Rect: r, Active: true},
 	}
 	t.floatID++
 	_ = t.conn.Send(wire.Msg{
@@ -138,7 +140,7 @@ func (f *floatView) setBorders() {
 		f.float.Hint = " exited · any key closes "
 		return
 	}
-	f.float.Hint = " keys go to the command · prefix q close "
+	f.float.Hint = " " + f.prefix + " kills the float · keys go to the command "
 }
 
 // applyFloatBytes paints the child's output into the float's own terminal. The
@@ -253,18 +255,15 @@ func (t *tui) floatKey() bool {
 	}
 	prefix := t.km().PrefixBytes()
 	if len(prefix) > 0 && bytes.HasPrefix(t.inbuf, prefix) {
-		if len(t.inbuf) == len(prefix) {
-			// The chord's head. Wait for the next byte without a timer: a
-			// human chord takes longer than escTimeout, and expiring here
-			// would kill the command under the operator's hand.
-			return false
-		}
-		if t.inbuf[len(prefix)] == 'q' {
-			t.inbuf = append([]byte(nil), t.inbuf[len(prefix)+1:]...)
-			t.pending = false
-			t.closeFloat()
-			return true
-		}
+		// The prefix kills the float and the command under it in one press, so
+		// there is no need to quit the program first. The command never sees
+		// the prefix byte: the dashboard, the message box and the float agree
+		// that the prefix is the chrome's, not the program's. A program that
+		// needs that byte needs a different prefix.
+		t.inbuf = t.inbuf[:0]
+		t.pending = false
+		t.closeFloat()
+		return true
 	}
 	keys := append([]byte(nil), t.inbuf...)
 	t.inbuf = t.inbuf[:0]

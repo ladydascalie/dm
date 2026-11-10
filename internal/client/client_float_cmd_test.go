@@ -104,8 +104,8 @@ func TestFloatReplyOpens(t *testing.T) {
 	if got := tui.float.float.Title; !strings.Contains(got, "git diff --stat") {
 		t.Fatalf("title = %q, want the command", got)
 	}
-	if got := tui.float.float.Hint; !strings.Contains(got, "prefix q close") {
-		t.Fatalf("hint = %q, want the close key", got)
+	if got := tui.float.float.Hint; !strings.Contains(got, "ctrl+b kills the float") {
+		t.Fatalf("hint = %q, want the kill key", got)
 	}
 }
 
@@ -146,36 +146,37 @@ func TestFloatForwardsKeys(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
-// TestFloatPrefixCloses: the prefix followed by q closes the float and tells
-// the server; any other byte after the prefix goes through with it in front.
+// TestFloatPrefixCloses: the prefix alone kills the float and the command
+// under it in one press, with no chord and no clock, and the command never sees
+// the prefix byte, so a prefix followed by any key kills it as well.
 func TestFloatPrefixCloses(t *testing.T) {
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "cat")
 
-	// The prefix alone waits for the next byte, with no timer under it.
 	feed(tui, "\x02")
-	if tui.pending {
-		t.Fatal("the chord head waited on the escape timer")
-	}
-	testutil.NoMsg(t, got)
-
-	feed(tui, "q")
 	m := <-got
 	if m.Type != "req" || m.Action != "float-close" || m.Float != req.Float {
-		t.Fatalf("prefix q sent %+v, want a float-close for the float", m)
+		t.Fatalf("the prefix sent %+v, want a float-close for the float", m)
 	}
 	if tui.float != nil || tui.mode != "" || len(tui.floats) != 0 {
-		t.Fatalf("prefix q left float %v, mode %q and %d floats", tui.float, tui.mode, len(tui.floats))
+		t.Fatalf("the prefix left float %v, mode %q and %d floats", tui.float, tui.mode, len(tui.floats))
+	}
+	if tui.pending {
+		t.Fatal("the prefix armed the escape timer")
 	}
 	testutil.NoMsg(t, got)
 
-	// A prefix before another key is that key with the prefix in front.
+	// A prefix followed by another key kills it too: the command gets none of
+	// the bytes that carry the prefix.
 	tui2, got2 := switcherTUI(t)
 	req2 := openFloat(t, tui2, got2, "cat")
 	feed(tui2, "\x02k")
 	m = <-got2
-	if m.Type != "keys" || m.Target != req2.Float || string(m.Keys) != "\x02k" {
-		t.Fatalf("prefix k sent %+v, want both bytes to the float", m)
+	if m.Type != "req" || m.Action != "float-close" || m.Float != req2.Float {
+		t.Fatalf("prefix k sent %+v, want a float-close", m)
+	}
+	if tui2.float != nil || tui2.mode != "" {
+		t.Fatalf("prefix k left float %v and mode %q", tui2.float, tui2.mode)
 	}
 }
 
@@ -300,37 +301,6 @@ func TestFloatExitBeatsReply(t *testing.T) {
 	feed(tui, "x")
 	if tui.float != nil || tui.mode != "" || len(tui.floats) != 0 {
 		t.Fatalf("a key after the early exit left float %v and mode %q", tui.float, tui.mode)
-	}
-	testutil.NoMsg(t, got)
-}
-
-// TestFloatPrefixStallKeepsFloat: the close chord does not race a clock. A
-// lone prefix waits for as long as the operator takes, no frame goes out while
-// it waits, and the q that follows closes the float instead of reaching a pane.
-func TestFloatPrefixStallKeepsFloat(t *testing.T) {
-	tui, got := switcherTUI(t)
-	req := openFloat(t, tui, got, "cat")
-	testutil.NoMsg(t, got)
-	feed(tui, "\x02")
-	if tui.pending {
-		t.Fatal("the chord head waited on the escape timer")
-	}
-	// Longer than any human chord, and past the esc timeout the overlays use.
-	tui.escAt = time.Now().Add(-time.Second)
-	if tui.expireMode(time.Now()) {
-		t.Fatal("expireMode closed or touched the float")
-	}
-	if tui.float == nil || tui.mode != "float" || len(tui.floats) != 1 {
-		t.Fatalf("the stall left float %v, mode %q and %d floats", tui.float, tui.mode, len(tui.floats))
-	}
-	testutil.NoMsg(t, got)
-	feed(tui, "q")
-	m := <-got
-	if m.Type != "req" || m.Action != "float-close" || m.Float != req.Float {
-		t.Fatalf("q after the stall sent %+v, want a float-close", m)
-	}
-	if tui.float != nil || tui.mode != "" || len(tui.floats) != 0 {
-		t.Fatalf("q after the stall left float %v, mode %q and %d floats", tui.float, tui.mode, len(tui.floats))
 	}
 	testutil.NoMsg(t, got)
 }
