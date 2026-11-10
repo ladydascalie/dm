@@ -440,17 +440,6 @@ func UsageText() string {
 	return b.String()
 }
 
-// cliCommandByName finds a row by its name. It is used by the man page and
-// llms.txt renderers.
-func cliCommandByName(name string) (cliCommand, bool) {
-	for _, c := range cliCommands {
-		if c.name == name {
-			return c, true
-		}
-	}
-	return cliCommand{}, false
-}
-
 // cliFlagText renders one flag the way a man page names it.
 func (f cliFlag) text() string {
 	if f.arg == "" {

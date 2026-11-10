@@ -28,10 +28,7 @@ func llmsKeys() []llmsKeyRow {
 	var rows []llmsKeyRow
 	for _, e := range keymap.LoadDefault().HelpEntries() {
 		actions := keymap.HelpActions(e.Action)
-		llms := make([]string, 0, len(actions))
-		for _, a := range actions {
-			llms = append(llms, a)
-		}
+		llms := append(make([]string, 0, len(actions)), actions...)
 		rows = append(rows, llmsKeyRow{
 			keys:    e.Key,
 			actions: strings.Join(llms, " / "),

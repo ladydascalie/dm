@@ -82,7 +82,7 @@ func TestHTMLCommandFallsBackToAPathWhenNoOpenerStarts(t *testing.T) {
 	if !strings.HasSuffix(path, ".html") {
 		t.Fatalf("dm html printed %q, want a page path", out)
 	}
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("printed path %q: %v", path, err)
 	}
@@ -95,7 +95,7 @@ func TestHTMLTempFileCarriesThePage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write temp page: %v", err)
 	}
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 	if !strings.HasSuffix(path, ".html") {
 		t.Errorf("temp page %q does not end in .html", path)
 	}
