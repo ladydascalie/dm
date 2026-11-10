@@ -254,13 +254,35 @@ func TestSwitcherDrawFrame(t *testing.T) {
 			t.Fatalf("rule cell %d,%d = %q, want |", l.ruleX, y, c)
 		}
 	}
-	// The footer carries the hints on the left and the ordering on the right.
-	foot := switcherText(screen, l.inner.X, l.footY, l.inner.W)
-	if !strings.HasPrefix(foot, "enter pick  esc close  type filter") {
-		t.Fatalf("footer = %q, want the key hints first", foot)
+	// The footer names every key the dashboard takes, then the ordering and the
+	// preview's share at the right edge.
+	wantLeft := "enter pick  esc close  1-9 jump  i input  d diff  " +
+		"type filter  s sort  p peek  +/- size  ^u/^d scroll"
+	wantRight := "recent 20%"
+	wantFoot := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
+	if foot := switcherText(screen, l.inner.X, l.footY, l.inner.W); foot != wantFoot {
+		t.Fatalf("footer = %q, want %q", foot, wantFoot)
 	}
-	if !strings.HasSuffix(foot, "recent 20%") {
-		t.Fatalf("footer = %q, want the sort and the preview share last", foot)
+}
+
+// TestSwitcherDrawFootDropsHints checks a narrow float keeps the hints that
+// fit and drops the rest whole: it loses the scroll reminder before it loses
+// the jump keys, and it never names half a key.
+func TestSwitcherDrawFootDropsHints(t *testing.T) {
+	s, snap := switcherOn(80, 24)
+	l := switcherLayoutOf(s, snap)
+	_, _, _, screen := drawFloat(t, s, snap, nil)
+	foot := switcherText(screen, l.inner.X, l.footY, l.inner.W)
+	wantLeft := "enter pick  esc close  1-9 jump  i input  d diff  type filter"
+	wantRight := "recent 60%"
+	want := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
+	if foot != want {
+		t.Fatalf("footer = %q, want %q", foot, want)
+	}
+	for _, gone := range []string{"s sort", "p peek", "+/- size", "^u/^d scroll"} {
+		if strings.Contains(foot, gone) {
+			t.Fatalf("footer kept %q: %q", gone, foot)
+		}
 	}
 }
 

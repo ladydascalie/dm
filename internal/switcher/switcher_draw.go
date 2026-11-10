@@ -468,13 +468,39 @@ func paintRuleCell(buf *bytes.Buffer, th theme.Theme, x, y int) {
 	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailDim.FG() + th.Glyphs.BorderVertical + "\x1b[0m")
 }
 
+// switcherHints is the footer's key hints in the order they are worth cells.
+// A narrow float keeps the head of the list and drops the rest whole, so it
+// loses the scroll reminder before it loses the jump keys.
+var switcherHints = []string{
+	"enter pick", "esc close", "1-9 jump", "i input", "d diff",
+	"type filter", "s sort", "p peek", "+/- size", "^u/^d scroll",
+}
+
+// switcherHint fits the hints into room cells and drops the ones that do not
+// fit. It never ends on half a hint: a key that does not fit is not named.
+func switcherHint(room int) string {
+	kept := make([]string, 0, len(switcherHints))
+	used := 0
+	for _, hint := range switcherHints {
+		need := cells.Cells(hint)
+		if len(kept) > 0 {
+			need += 2
+		}
+		if used+need > room {
+			break
+		}
+		kept = append(kept, hint)
+		used += need
+	}
+	return strings.Join(kept, "  ")
+}
+
 // paintSwitcherFoot paints the hint row at the bottom of the box: the keys on
 // the left and the ordering with the preview's share on the right.
 func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout) {
 	if l.footY <= l.queryY || !l.hasRow(l.footY) || l.inner.W <= 0 {
 		return
 	}
-	hint := "enter pick  esc close  type filter  s sort  p peek  +/- size  ^u/^d scroll"
 	right := s.mode.String()
 	if s.PreviewOn() {
 		right += " " + strconv.Itoa(s.ratio) + "%"
@@ -483,7 +509,7 @@ func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switche
 	if room < 0 {
 		right, room = "", l.inner.W
 	}
-	left := cells.Clip(hint, room)
+	left := switcherHint(room)
 	pad := l.inner.W - cells.Cells(left) - cells.Cells(right)
 	if pad < 0 {
 		pad = 0
