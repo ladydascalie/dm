@@ -194,8 +194,7 @@ func BenchmarkReflow512K(b *testing.B) {
 	ring := benchRing(512 << 10)
 	b.SetBytes(int64(len(ring)))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Reflow(ring, 200, 50)
 	}
 }
@@ -329,7 +328,8 @@ func TestReflowWindowSameScreen(t *testing.T) {
 		var b bytes.Buffer
 		for i := 0; i < 2000; i++ {
 			if i == 1200 {
-				b.WriteString(strings.Repeat("0123456789", 600) + "01234\r\n")
+				b.WriteString(strings.Repeat("0123456789", 600))
+				b.WriteString("01234\r\n")
 				continue
 			}
 			fmt.Fprintf(&b, "line %04d %s\r\n", i, strings.Repeat("m", 20))
@@ -687,8 +687,7 @@ func BenchmarkReflow512KCR(b *testing.B) {
 	ring := append(benchRing(512<<10), []byte("\rdownloading 42%")...)
 	b.SetBytes(int64(len(ring)))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Reflow(ring, 200, 50)
 	}
 }
