@@ -45,7 +45,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() {
 		// Stop panes and servers this test spawned.
-		filepath.Walk(state, func(p string, info os.FileInfo, err error) error {
+		_ = filepath.Walk(state, func(p string, info os.FileInfo, err error) error {
 			if err != nil || info.IsDir() || !strings.HasSuffix(p, ".pid") {
 				return nil
 			}
@@ -54,19 +54,19 @@ func newHarness(t *testing.T) *harness {
 				return nil
 			}
 			var pid int
-			fmt.Sscanf(string(b), "%d", &pid)
+			_, _ = fmt.Sscanf(string(b), "%d", &pid)
 			if pid > 0 {
 				_ = syscall.Kill(pid, syscall.SIGKILL)
 			}
 			return nil
 		})
-		os.RemoveAll(state)
+		_ = os.RemoveAll(state)
 	})
 	cfgDir, err := os.MkdirTemp("", "dmcfg")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(cfgDir) })
+	t.Cleanup(func() { _ = os.RemoveAll(cfgDir) })
 	return &harness{t: t, bin: buildOnce(t), env: append(os.Environ(), "DM_STATE="+state, "XDG_CONFIG_HOME="+cfgDir)}
 }
 
@@ -408,7 +408,7 @@ func paneRequest(session, id string, m paneMsg) (paneMsg, error) {
 	if err != nil {
 		return out, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	m.ID = 1
 	if err := writePaneMsg(c, m); err != nil {
 		return out, err

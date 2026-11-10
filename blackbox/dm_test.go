@@ -788,7 +788,7 @@ func TestPaneHistory(t *testing.T) {
 		t.Fatalf("background history rows = %d, want 5: %v", len(bgHist), bgHist)
 	}
 	lastBg := 0
-	fmt.Sscanf(bgHist[len(bgHist)-1], "BG-%d", &lastBg)
+	_, _ = fmt.Sscanf(bgHist[len(bgHist)-1], "BG-%d", &lastBg)
 	if lastBg < 30 || lastBg > 45 {
 		t.Fatalf("background history window is not next to the screen: last=%d\n%v", lastBg, bgHist)
 	}
