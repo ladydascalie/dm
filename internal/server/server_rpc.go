@@ -120,6 +120,46 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		lines := s.paneDiff(m.Target)
 		cl.deliver(wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, OK: true, Lines: lines})
 
+	case "float-open":
+		// The dashboard diff key opens a floating command on the selected
+		// pane's folder. The client picks the id and the size; the server
+		// supplies the folder and the command, and echoes the id in the
+		// reply so the client can match the process to its view.
+		if m.Float == "" {
+			s.reply(cl, m, nil, fmt.Errorf("float-open needs a float id"))
+			return
+		}
+		cwd := s.liveCwd(m.Target)
+		if cwd == "" {
+			s.reply(cl, m, nil, fmt.Errorf("pane %s has no working directory", m.Target))
+			return
+		}
+		s.mu.Lock()
+		command := s.cfg.DiffCommand()
+		s.mu.Unlock()
+		if command == "" {
+			s.reply(cl, m, nil, fmt.Errorf("diff-command is empty"))
+			return
+		}
+		err := s.openFloat(cl, floatSpec{
+			id: m.Float, target: m.Target, cwd: cwd, command: command,
+			cols: m.Cols, rows: m.Rows,
+		})
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		cl.deliver(wire.Msg{
+			Type: "resp", Action: m.Action, ID: m.ID, Float: m.Float, OK: true,
+			Res: jsonRaw(map[string]any{"command": command}),
+		})
+
+	case "float-close":
+		// Closing a float the server does not know, or one another client
+		// owns, answers OK: neither is this client's to open or close.
+		s.closeFloatFor(cl, m.Float)
+		cl.deliver(wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, Float: m.Float, OK: true})
+
 	case "yank":
 		lines, start, rows, anchor, err := s.paneYank(m.Target)
 		if err != nil {

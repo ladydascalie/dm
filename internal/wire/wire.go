@@ -37,6 +37,9 @@ type Msg struct {
 
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`
+	// Float is the client chosen id of a floating command pane. It rides the
+	// request that opens one and the frames the server sends for it.
+	Float string `json:"float,omitempty"`
 
 	Keys []byte `json:"keys,omitempty"`
 	Data []byte `json:"data,omitempty"`

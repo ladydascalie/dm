@@ -275,6 +275,11 @@ type server struct {
 	ending  bool            // session is shutting down; accept errors are expected
 	adopt   map[string]bool // panes loaded from disk: a fresh spawn is a restart
 
+	// floats are the floating command processes, keyed by the client chosen
+	// id. They belong to one client and never reach the layout or the
+	// snapshot. Guarded by mu.
+	floats map[string]*floatProc
+
 	// Git branch labels for the rail, one entry per working directory. The
 	// check runs off s.mu and the result arrives with a later snapshot.
 	branchMu sync.Mutex
@@ -364,7 +369,8 @@ func Run(args []string) error {
 	}
 	s := &server{
 		st: st, cfg: cfg, panes: map[string]*paneConn{}, clients: map[*client]bool{},
-		cols: st.Cols, rows: st.Rows, adopt: adopt,
+		floats: map[string]*floatProc{},
+		cols:   st.Cols, rows: st.Rows, adopt: adopt,
 		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},
 		statusChangedAt: map[string]int64{},
 	}
