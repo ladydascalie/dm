@@ -232,22 +232,46 @@ func (t *tui) forwardPaste(seq []byte) {
 	default:
 		t.mode = ""
 	}
-	_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.pasteKeys(seq)})
+	focus := ""
+	if t.snap != nil {
+		focus = t.snap.Focus
+	}
+	_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.pasteKeys(seq, focus)})
 }
 
-// pasteKeys frames the paste only for a program that asked for bracketed paste.
-// A program that never asked, such as a line editor without 2004, reads the
-// markers as keys and leaves their tail on the line: it gets the text alone.
-func (t *tui) pasteKeys(seq []byte) []byte {
-	if t.snap != nil {
-		if p := t.paneByID(t.snap.Focus); p != nil && p.Paste {
-			return seq
-		}
+// pasteKeys frames the paste only for the pane it is aimed at, and only when
+// that pane asked for bracketed paste. A program that never asked, such as a
+// line editor without 2004, reads the markers as keys and leaves their tail on
+// the line: it gets the text alone.
+func (t *tui) pasteKeys(seq []byte, pane string) []byte {
+	if t.paneWantsPaste(pane) {
+		return seq
 	}
 	if len(seq) < len(pasteStart)+len(pasteEnd) {
 		return nil
 	}
 	return seq[len(pasteStart) : len(seq)-len(pasteEnd)]
+}
+
+// paneWantsPaste reports whether a pane asked for bracketed paste. The pane's
+// own terminal is the live answer: the client tracks the mode in every byte
+// stream, and a restored screen carries it, so the dashboard's preview
+// terminal answers for a pane outside the active window too. The snapshot's
+// pane info covers a pane the client has no terminal for yet.
+func (t *tui) paneWantsPaste(pane string) bool {
+	if pane == "" {
+		return false
+	}
+	if term := t.vts[pane]; term != nil {
+		return term.Grid().Modes().BracketedPaste
+	}
+	if term := t.swVT[pane]; term != nil {
+		return term.Grid().Modes().BracketedPaste
+	}
+	if p := t.paneByID(pane); p != nil {
+		return p.Paste
+	}
+	return false
 }
 
 func (t *tui) processInput() {
@@ -292,7 +316,16 @@ func (t *tui) processInput() {
 					return
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
-				_ = seq
+				// Input mode forwards the block as text for the pane; a paste
+				// over the dashboard is otherwise swallowed whole.
+				if t.swInput {
+					if pane := t.sw.Target(); pane != "" && t.conn != nil {
+						// The block is framed for the pane the dashboard sends
+						// to, not for the focused pane of the window behind it.
+						_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: t.pasteKeys(seq, pane)})
+						t.previewNow()
+					}
+				}
 				continue
 			}
 			if !t.switcherKey() {
@@ -362,6 +395,37 @@ func (t *tui) processInput() {
 				continue
 			}
 			if !t.boxKey() {
+				return
+			}
+			continue
+		}
+		if t.mode == "diff" {
+			// The pager is read-only and owns every key while it is up. A lone
+			// esc is the close key, so it skips the paste marker check. A mouse
+			// event scrolls and a paste is swallowed whole.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.diffKey() {
+					return
+				}
+				continue
+			}
+			if ev, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				t.diffWheel(ev)
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if seq, n, started := t.takePaste(); started {
+				if n == 0 {
+					t.holdPaste(time.Now())
+					return
+				}
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				_ = seq
+				continue
+			}
+			if !t.diffKey() {
 				return
 			}
 			continue
@@ -598,6 +662,8 @@ func (t *tui) expireMode(now time.Time) bool {
 		closeKeymapView(t)
 	case "rename":
 		t.closeRename()
+	case "diff":
+		t.closeDiff()
 	}
 	return true
 }
@@ -638,6 +704,78 @@ func (t *tui) askPreview() {
 	t.swPane = it.Pane
 	t.sw.SetPreview(t.swID, it.Pane)
 	_ = t.conn.Send(wire.Msg{Type: "req", Action: "read", Target: it.Pane, ID: t.swID})
+}
+
+// previewEvery is the cadence the dashboard's live preview rides on: one screen
+// request per interval while a pane outside the active window is selected. The
+// pacer wakes at this ceiling even when idle, so the cadence costs no extra
+// wake.
+const previewEvery = 250 * time.Millisecond
+
+// previewTick refreshes the dashboard's preview. A pane in the active window
+// has a local terminal, so nothing is asked for it; every other pane gets one
+// screen request per cadence, and a closed dashboard asks for nothing. One
+// preview lives at a time: a terminal for a pane the selection left goes.
+func (t *tui) previewTick(now time.Time) {
+	if t.sw == nil || t.snap == nil || t.conn == nil {
+		return
+	}
+	pane := t.sw.Target()
+	for id := range t.swVT {
+		if id != pane {
+			delete(t.swVT, id)
+		}
+	}
+	if pane == "" || t.vts[pane] != nil {
+		return
+	}
+	if now.Sub(t.swScreenAt) < previewEvery {
+		return
+	}
+	t.askScreen(pane, now)
+}
+
+// askScreen asks the server for one pane's visible screen and restores the
+// reply into the dashboard's own terminal. The request carries an id, so a
+// reply the server refuses lands in the ordinary reply path and stays silent:
+// a read keeps the band usable until a screen arrives.
+func (t *tui) askScreen(pane string, now time.Time) {
+	t.swScreen++
+	t.swScreenAt = now
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "screen", Target: pane, ID: t.swScreen})
+}
+
+// previewNow asks for the selected pane's screen at once, so a key sent in
+// input mode shows its answer without waiting for the cadence. It rides the
+// same interval as the cadence: one ask inside previewEvery, however many keys
+// arrive, so a burst of typing costs one request and the next tick fills in
+// the rest.
+func (t *tui) previewNow() {
+	t.previewTick(time.Now())
+}
+
+// applyPreviewScreen restores one pane's screen into the dashboard's terminal.
+// The terminal keeps the pane's own size, not the band's: the painter draws the
+// pane's grid into the band, the way it draws any pane row.
+func (t *tui) applyPreviewScreen(id string, snap *vt.Snapshot) bool {
+	if t.sw == nil || snap == nil || id == "" || id != t.sw.Target() {
+		return false
+	}
+	term := t.swVT[id]
+	if term == nil {
+		term = vt.NewTerm(snap.Cols, snap.Rows)
+	}
+	if err := term.Restore(snap); err != nil {
+		return false
+	}
+	if c, r := term.Grid().Size(); c != snap.Cols || r != snap.Rows {
+		resizeTerm(term, snap.Cols, snap.Rows)
+	}
+	if t.swVT == nil {
+		t.swVT = map[string]*vt.Term{}
+	}
+	t.swVT[id] = term
+	return true
 }
 
 // previewLines pulls the lines out of a read reply. The reply carries them in

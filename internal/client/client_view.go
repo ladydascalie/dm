@@ -47,6 +47,11 @@ func (t *tui) draw() {
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
 	th := t.theme()
+	if t.diff != nil {
+		// The pager paints from the theme this frame drew with, so a reload
+		// reaches it without reopening.
+		t.diff.th = th
+	}
 	panes := onScreenPanes(win)
 	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
 	for _, p := range panes {
@@ -63,7 +68,10 @@ func (t *tui) draw() {
 	drawBar(&bar, th, win, t.armed, t.barInfo(), t.glyphSet())
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
-		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.vts, paintPaneFrom, t.glyphSet())
+		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.previewTerms(), paintPaneFrom, t.glyphSet())
+		if t.swInput {
+			drawSwitcherMode(&pal, th, t.sw.Rect, switcherInputLine(t))
+		}
 		t.askPreview()
 	}
 	if t.armed {
@@ -449,12 +457,40 @@ func rowsHit(rows []int, dirty map[int]bool) bool {
 	return false
 }
 
+// previewTerms is the terminal map the dashboard paints from: the local
+// terminals of the active window, plus the dashboard's own screens for the
+// panes outside it. The local terminal wins when both exist.
+func (t *tui) previewTerms() map[string]*vt.Term {
+	if len(t.swVT) == 0 {
+		return t.vts
+	}
+	out := make(map[string]*vt.Term, len(t.vts)+len(t.swVT))
+	for id, term := range t.vts {
+		out[id] = term
+	}
+	for id, term := range t.swVT {
+		if out[id] == nil {
+			out[id] = term
+		}
+	}
+	return out
+}
+
 // cursorBlock is the tail of a frame that places the cursor, or hides it. It
 // is empty when the frame leaves the cursor alone.
 func (t *tui) cursorBlock() string {
 	if t.sw != nil {
-		// The float owns the cursor while it is up: the query cell, shown.
+		if t.swInput {
+			// Input mode types into the pane, not into the query, so the query
+			// cell is not where the cursor belongs.
+			return "\x1b[?25l"
+		}
+		// The dashboard owns the cursor while it is up: the query cell, shown.
 		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.swY+1, t.swX+1)
+	}
+	if t.diff != nil {
+		// The pager is read-only: no cell of it takes typing.
+		return "\x1b[?25l"
 	}
 	win := t.snap
 	if win == nil || t.mode != "" {

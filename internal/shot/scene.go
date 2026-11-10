@@ -38,11 +38,17 @@ type Node struct {
 	Kids []*Node `json:"kids,omitempty"`
 }
 
-// Pane is one pane's id, name and initial screen content.
+// Pane is one pane's id, name, agent state and initial screen content. Status,
+// Agent, Title and Project are the dashboard's columns; a scene that leaves
+// them out draws the pane as a shell with no title and no project.
 type Pane struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
 	Content string `json:"content"`
+	Status  string `json:"status,omitempty"`
+	Agent   bool   `json:"agent,omitempty"`
+	Title   string `json:"title,omitempty"`
+	Project string `json:"project,omitempty"`
 }
 
 // Window is one tab bar entry.

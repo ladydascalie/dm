@@ -29,6 +29,7 @@ type paneConn struct {
 	c     net.Conn
 	mu    sync.Mutex
 	st    wire.Status
+	title string
 	alt   bool
 	mouse bool
 	paste bool
@@ -301,6 +302,19 @@ type server struct {
 	// command line without starting a process; nil means exec's Start.
 	spawn func(*exec.Cmd) error
 
+	// statusChangedAt is when each pane's agent state last moved, in unix
+	// seconds. It is memory only: a restart has no baseline, and a stale
+	// stamp from disk would claim a change nobody saw.
+	statusChangedAt map[string]int64
+
+	// titlePushed, titleTimer and titleDirty cap the snapshot a title change
+	// alone may push. An animated title names a frame, not news: one push per
+	// titlePushEvery, with one trailing push so the last title lands. All three
+	// are guarded by mu.
+	titlePushed time.Time
+	titleTimer  *time.Timer
+	titleDirty  bool
+
 	// reflowTimer and reflowWait hold the pending reflow: the timer that fires
 	// once the resize goes quiet, and the panes whose width changed. Both are
 	// guarded by mu. A drag sends one resize per pointer step, so the set grows
@@ -352,6 +366,7 @@ func Run(args []string) error {
 		st: st, cfg: cfg, panes: map[string]*paneConn{}, clients: map[*client]bool{},
 		cols: st.Cols, rows: st.Rows, adopt: adopt,
 		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},
+		statusChangedAt: map[string]int64{},
 	}
 	// A pending settle must not outlive the accept loop. endSession exits the
 	// process before this defer runs, so it stops the timer itself.
@@ -391,7 +406,7 @@ func Run(args []string) error {
 		if rp.ok {
 			s.mu.Lock()
 			if pc := s.panes[id]; pc != nil {
-				pc.st, pc.alt, pc.mouse = rp.st, rp.alt, rp.mouse
+				pc.st, pc.title, pc.alt, pc.mouse = rp.st, rp.title, rp.alt, rp.mouse
 			}
 			s.mu.Unlock()
 		}
@@ -589,6 +604,7 @@ func (s *server) watchPane(id string) {
 					pc.st = *m.St
 					to, message := pc.st.State, pc.st.Message
 					s.noteStatus(id, *m.St)
+					s.noteStatusChange(id, from, to)
 					s.pushSnapshot()
 					if notify.StateChange(from, to) {
 						s.notifyPaneState(id, to, message)
@@ -596,6 +612,12 @@ func (s *server) watchPane(id string) {
 				}
 			case "cwd":
 				s.setPaneCwd(id, m.Cwd)
+			case "title":
+				var ti struct {
+					Title string `json:"title"`
+				}
+				_ = json.Unmarshal(m.Res, &ti)
+				s.setPaneTitle(id, ti.Title)
 			case "mode":
 				var mi struct {
 					Alt   bool `json:"alt"`

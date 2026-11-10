@@ -40,8 +40,12 @@
       "theme": "high-contrast",
       "root": { "dir": "row", "kids": [ { "pane": "a" }, { "pane": "b" } ] },
       "panes": [
-        { "id": "a", "name": "alpha", "content": "alpha pane\n$ ls\ninternal  go.mod" },
-        { "id": "b", "name": "beta", "content": "beta pane\n$ pwd\n/home/b/Code/Personal/dm" }
+        { "id": "a", "name": "alpha", "status": "working", "agent": true,
+          "title": "dm server", "project": "dm",
+          "content": "alpha pane\n$ ls\ninternal  go.mod" },
+        { "id": "b", "name": "beta", "status": "done", "agent": true,
+          "title": "go vet", "project": "dm",
+          "content": "beta pane\n$ pwd\n/home/b/Code/Personal/dm" }
       ],
       "windows": [ { "id": "w1", "name": "one" } ],
       "activeWindow": 0,
