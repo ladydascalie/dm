@@ -755,7 +755,9 @@ func TestOraclePalette(t *testing.T) {
 		checkFrame(t, live, f.tui, label, []byte(raw))
 	}
 	step("first")
-	rect := switcher.PaletteRect(100, 20)
+	// The dashboard owns the whole screen, so the frame under it is covered
+	// edge to edge.
+	rect := layout.Rect{W: f.snap.Cols, H: f.snap.Rows}
 	f.tui.sw = switcher.NewSwitcher(rect, f.snap)
 	step("open")
 	f.tui.sw.AppendText('t')
@@ -777,7 +779,7 @@ func TestOracleRailUnderPalette(t *testing.T) {
 		checkFrame(t, live, f.tui, label, []byte(raw))
 	}
 	step("first")
-	rect := switcher.PaletteRect(100, 30)
+	rect := layout.Rect{W: f.snap.Cols, H: f.snap.Rows}
 	f.tui.sw = switcher.NewSwitcher(rect, f.snap)
 	step("open")
 	f.snap.All[0].Status = "working"
@@ -903,8 +905,7 @@ func TestBandsUseAbsoluteCursorMoves(t *testing.T) {
 		{"help", func() { f.tui.armed = true }},
 		{"palette", func() {
 			f.tui.armed = false
-			rect := switcher.PaletteRect(f.snap.Cols, f.snap.Rows)
-			f.tui.sw = switcher.NewSwitcher(rect, f.snap)
+			f.tui.sw = switcher.NewSwitcher(layout.Rect{W: f.snap.Cols, H: f.snap.Rows}, f.snap)
 		}},
 		{"menu", func() {
 			f.tui.sw = nil

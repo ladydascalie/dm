@@ -429,13 +429,23 @@ func (t *tui) pickerKey() bool {
 	return true
 }
 
-// switcherKey consumes one key while the native switcher is open. Its own
-// bindings are the switcher mode's; a printable key that matches none of them
-// is text for the query. It returns false when it needs more bytes for an
-// escape sequence.
+// switcherScrollStep is how many preview rows one preview key moves.
+const switcherScrollStep = 3
+
+// switcherPreviewStep is how much one preview size key changes the band, in
+// percent of the body.
+const switcherPreviewStep = 5
+
+// switcherKey consumes one key while the dashboard is open. Its own bindings
+// are the switcher mode's; a printable key that matches none of them is text
+// for the query. It returns false when it needs more bytes for an escape
+// sequence.
 func (t *tui) switcherKey() bool {
 	if len(t.inbuf) == 0 {
 		return true
+	}
+	if t.swInput {
+		return t.switcherInputKey()
 	}
 	if p := t.km().PrefixBytes(); len(p) > 0 && bytes.HasPrefix(t.inbuf, p) {
 		// The prefix key pressed again closes the float.
@@ -484,19 +494,81 @@ func (t *tui) switcherKey() bool {
 	case "backspace":
 		t.sw.Backspace()
 		t.dirty = true
+	case "sort":
+		t.sw.CycleSort()
+		t.dirty = true
+	case "peek":
+		t.sw.TogglePreview()
+		t.dirty = true
+	case "preview-up":
+		t.sw.ScrollPreview(switcherScrollStep)
+		t.dirty = true
+	case "preview-down":
+		t.sw.ScrollPreview(-switcherScrollStep)
+		t.dirty = true
+	case "preview-bigger":
+		t.sw.ResizePreview(switcherPreviewStep)
+		t.dirty = true
+	case "preview-smaller":
+		t.sw.ResizePreview(-switcherPreviewStep)
+		t.dirty = true
+	case "input":
+		t.startSwitcherInput()
+	case "diff":
+		// The diff pager is its own change. The key is bound so the contract is
+		// whole, and it stays inert until that lands.
 	case "down", "down-arrow", "down-ctrl-n":
 		t.sw.Move(1)
 		t.dirty = true
 	case "up", "up-arrow", "up-ctrl-p":
 		t.sw.Move(-1)
 		t.dirty = true
+	default:
+		if n, ok := pickIndex(action); ok && t.sw.Jump(n+1) {
+			t.pickSwitcher()
+		}
 	}
 	return true
 }
 
-// pickSwitcher closes the float, then goes to its row. A workspace goes to
-// focus-workspace, a window to focus-window and a pane to focus. A gap row or
-// an empty selection closes silently.
+// switcherInputKey forwards one read's worth of bytes to the selected pane. Esc
+// alone leaves input mode and never reaches the pane: the dashboard stays open
+// and the query is untouched.
+func (t *tui) switcherInputKey() bool {
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+		// The byte is the mode change itself. Keep it out of the buffer, or the
+		// dashboard would read it again as the head of a close key.
+		t.inbuf = t.inbuf[:0]
+		t.swInput = false
+		t.pending = false
+		t.dirty = true
+		return true
+	}
+	keys := append([]byte(nil), t.inbuf...)
+	t.inbuf = t.inbuf[:0]
+	t.pending = false
+	if pane := t.sw.Target(); pane != "" && t.conn != nil {
+		_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: keys})
+	}
+	return true
+}
+
+// startSwitcherInput sends the dashboard's keys to the selected pane until esc.
+// The dashboard stays up, so the answer shows in the preview.
+func (t *tui) startSwitcherInput() {
+	if t.sw == nil || t.sw.Target() == "" {
+		return
+	}
+	t.swInput = true
+	t.pending = false
+	t.dirty = true
+}
+
+// pickSwitcher closes the dashboard, then goes to its row: the selected pane.
+// An empty selection closes silently.
 func (t *tui) pickSwitcher() {
 	target := ""
 	if it, ok := t.sw.Selected(); ok && it.Kind != rail.Gap {

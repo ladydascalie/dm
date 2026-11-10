@@ -143,6 +143,7 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 		snap.Panes = append(snap.Panes, wire.PaneInfo{ID: p.ID, Rect: rects[p.ID]})
 		snap.All = append(snap.All, wire.AllPane{
 			ID: p.ID, Name: p.Name,
+			Status: p.Status, Agent: p.Agent, Title: p.Title, Project: p.Project,
 			Workspace: "s1", WorkspaceName: "main",
 			Window: winID, WindowName: winName,
 			Focus:             p.ID == sc.Focus,
@@ -172,7 +173,7 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 		tr.AddFloatingPane(&panel.FloatingPane{ID: sc.Float.ID, Rect: fr, VT: fv, Active: true})
 	}
 	if sc.Switcher {
-		tr.sw = switcher.NewSwitcher(switcher.PaletteRect(sc.Cols, sc.Rows), snap)
+		tr.sw = switcher.NewSwitcher(layout.Rect{W: sc.Cols, H: sc.Rows}, snap)
 	}
 	if sc.Help {
 		tr.armed = true

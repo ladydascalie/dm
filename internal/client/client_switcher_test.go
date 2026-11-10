@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"dm/internal/layout"
+	"dm/internal/switcher"
 	"dm/internal/testutil"
 	"dm/internal/transport"
 	"dm/internal/vt"
@@ -24,8 +26,8 @@ func switcherCell(screen *vt.Term, x, y int) rune {
 
 // switcherTUI is a client over a real net.Pipe: keys go in through processInput,
 // and every request it sends lands on the returned channel. The snapshot has one
-// workspace and one window over two panes, so the switcher's tree has rows to
-// narrow and a pane to preview.
+// workspace and one window over two panes, so the dashboard has two rows to walk
+// and a pane to preview.
 func switcherTUI(t *testing.T) (*tui, chan wire.Msg) {
 	t.Helper()
 	root := &layout.Node{Pane: "w1p1"}
@@ -147,8 +149,8 @@ func TestSwitcherEscSendsNothing(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
-// TestSwitcherCtrlURestores: ctrl+u clears the query and brings the rows back.
-func TestSwitcherCtrlURestores(t *testing.T) {
+// TestSwitcherCtrlLRestores: ctrl+l clears the query and brings the rows back.
+func TestSwitcherCtrlLRestores(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	full := tui.sw.RowCount()
@@ -156,14 +158,184 @@ func TestSwitcherCtrlURestores(t *testing.T) {
 	if tui.sw.RowCount() == full {
 		t.Fatal("typing dropped no rows")
 	}
-	feed(tui, "\x15")
+	feed(tui, "\x0c")
 	if n := tui.sw.RowCount(); n != full {
-		t.Fatalf("ctrl+u left %d rows, want %d", n, full)
+		t.Fatalf("ctrl+l left %d rows, want %d", n, full)
 	}
 	if q := tui.sw.Query(); q != "" {
-		t.Fatalf("ctrl+u left the query %q", q)
+		t.Fatalf("ctrl+l left the query %q", q)
 	}
 	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherFullScreen: prefix a opens the dashboard over the whole screen in
+// its own mode, and the close key gives the screen back.
+func TestSwitcherFullScreen(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	if tui.sw == nil {
+		t.Fatal("prefix a did not open the dashboard")
+	}
+	if r := tui.sw.Rect; r != (layout.Rect{W: 100, H: 30}) {
+		t.Fatalf("dashboard rect = %+v, want the whole 100x30 screen", r)
+	}
+	if tui.mode != "dashboard" {
+		t.Fatalf("mode = %q, want dashboard", tui.mode)
+	}
+	feed(tui, "\x02")
+	if tui.sw != nil || tui.mode != "" {
+		t.Fatalf("close left sw %v and mode %q", tui.sw, tui.mode)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherSortKey: s cycles the ordering recent, project, status.
+func TestSwitcherSortKey(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	if m := tui.sw.SortMode(); m != switcher.SortRecent {
+		t.Fatalf("default sort = %v, want recent", m)
+	}
+	feed(tui, "s")
+	if m := tui.sw.SortMode(); m != switcher.SortProject {
+		t.Fatalf("s landed on %v, want project", m)
+	}
+	feed(tui, "s")
+	if m := tui.sw.SortMode(); m != switcher.SortStatus {
+		t.Fatalf("a second s landed on %v, want status", m)
+	}
+	feed(tui, "s")
+	if m := tui.sw.SortMode(); m != switcher.SortRecent {
+		t.Fatalf("a third s landed on %v, want recent", m)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherPreviewKeys: ctrl+u and ctrl+d scroll the preview, +/- resize it
+// and p hides it.
+func TestSwitcherPreviewKeys(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	lines := make([]string, 60)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	tui.sw.SetPreview(1, "w1p1")
+	if !tui.sw.AcceptPreview(1, lines) {
+		t.Fatal("the preview reply was refused")
+	}
+	feed(tui, "\x15") // ctrl+u, up
+	if n := tui.sw.PreviewOffset(); n != 3 {
+		t.Fatalf("ctrl+u moved the offset to %d, want 3", n)
+	}
+	feed(tui, "\x15")
+	if n := tui.sw.PreviewOffset(); n != 6 {
+		t.Fatalf("a second ctrl+u moved the offset to %d, want 6", n)
+	}
+	feed(tui, "\x04") // ctrl+d, down
+	if n := tui.sw.PreviewOffset(); n != 3 {
+		t.Fatalf("ctrl+d moved the offset to %d, want 3", n)
+	}
+	feed(tui, "+")
+	if n := tui.sw.PreviewRatio(); n != 65 {
+		t.Fatalf("+ took the ratio to %d, want 65", n)
+	}
+	feed(tui, "-")
+	if n := tui.sw.PreviewRatio(); n != 60 {
+		t.Fatalf("- took the ratio to %d, want 60", n)
+	}
+	for i := 0; i < 20; i++ {
+		feed(tui, "-")
+	}
+	if n := tui.sw.PreviewRatio(); n != 20 {
+		t.Fatalf("the ratio stopped at %d, want the 20 floor", n)
+	}
+	if !tui.sw.PreviewOn() {
+		t.Fatal("the preview is off before the peek key")
+	}
+	feed(tui, "p")
+	if tui.sw.PreviewOn() {
+		t.Fatal("p did not hide the preview")
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherInputForwards: i sends every key to the selected pane, esc leaves
+// input mode without closing the dashboard, and the query stays untouched.
+func TestSwitcherInputForwards(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	feed(tui, "i")
+	if !tui.swInput {
+		t.Fatal("i did not enter input mode")
+	}
+	if q := tui.sw.Query(); q != "" {
+		t.Fatalf("input mode edited the query: %q", q)
+	}
+	feed(tui, "x")
+	select {
+	case m := <-got:
+		if m.Type != "keys" || m.Target != "w1p1" || string(m.Keys) != "x" {
+			t.Fatalf("input mode sent %+v, want keys x to w1p1", m)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("input mode forwarded nothing")
+	}
+	// A lone esc leaves input mode and closes nothing.
+	feed(tui, "\x1b")
+	if tui.swInput || tui.sw == nil {
+		t.Fatalf("esc left input %v with the dashboard %v", tui.swInput, tui.sw != nil)
+	}
+	if q := tui.sw.Query(); q != "" {
+		t.Fatalf("esc in input mode touched the query: %q", q)
+	}
+	testutil.NoMsg(t, got)
+	// The dashboard still takes the keys its own way after the mode ends, and
+	// a printable byte is query text again rather than a key for the pane.
+	feed(tui, "j")
+	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p2" {
+		t.Fatalf("after input mode j selects %+v, want w1p2", it)
+	}
+	feed(tui, "z")
+	if q := tui.sw.Query(); q != "z" {
+		t.Fatalf("after input mode the query is %q, want z", q)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherInputFooter: the footer names input mode while it is on.
+func TestSwitcherInputFooter(t *testing.T) {
+	tui, _ := switcherTUI(t)
+	out := tui.out.(*bytes.Buffer)
+	feed(tui, "\x02a")
+	tui.draw()
+	if strings.Contains(out.String(), "keys go to") {
+		t.Fatal("the footer names input mode before it is on")
+	}
+	feed(tui, "i")
+	out.Reset()
+	tui.draw()
+	if got := out.String(); !strings.Contains(got, "keys go to w1p1") {
+		t.Fatal("the footer does not name input mode")
+	}
+}
+
+// TestSwitcherPickDigit: a digit goes to that row and picks it.
+func TestSwitcherPickDigit(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	feed(tui, "2")
+	if tui.sw != nil {
+		t.Fatal("a pick digit left the dashboard open")
+	}
+	select {
+	case m := <-got:
+		if m.Type != "req" || m.Action != "focus" || m.Target != "w1p2" {
+			t.Fatalf("digit 2 sent %+v, want a focus request for w1p2", m)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("digit 2 sent nothing")
+	}
 }
 
 // TestSwitcherPreviewReplies: a read reply with the wrong id is dropped, one

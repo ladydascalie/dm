@@ -196,6 +196,9 @@ type tui struct {
 	swAt   time.Time
 	swPane string
 	swID   int
+	// swInput is true while the dashboard forwards every key to the selected
+	// pane. Esc leaves it; the dashboard stays up.
+	swInput bool
 
 	// yankID numbers the next copy-output request and yankPane is the pane it
 	// names, so a reply writes the clipboard for the pane the operator asked

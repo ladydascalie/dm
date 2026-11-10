@@ -292,7 +292,13 @@ func (t *tui) processInput() {
 					return
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
-				_ = seq
+				// Input mode forwards the block as text for the pane; a paste
+				// over the dashboard is otherwise swallowed whole.
+				if t.swInput {
+					if pane := t.sw.Target(); pane != "" && t.conn != nil {
+						_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: t.pasteKeys(seq)})
+					}
+				}
 				continue
 			}
 			if !t.switcherKey() {

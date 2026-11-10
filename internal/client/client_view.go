@@ -64,6 +64,9 @@ func (t *tui) draw() {
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
 		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.vts, paintPaneFrom, t.glyphSet())
+		if t.swInput {
+			drawSwitcherMode(&pal, th, t.sw.Rect, switcherInputLine(t))
+		}
 		t.askPreview()
 	}
 	if t.armed {
@@ -453,7 +456,12 @@ func rowsHit(rows []int, dirty map[int]bool) bool {
 // is empty when the frame leaves the cursor alone.
 func (t *tui) cursorBlock() string {
 	if t.sw != nil {
-		// The float owns the cursor while it is up: the query cell, shown.
+		if t.swInput {
+			// Input mode types into the pane, not into the query, so the query
+			// cell is not where the cursor belongs.
+			return "\x1b[?25l"
+		}
+		// The dashboard owns the cursor while it is up: the query cell, shown.
 		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.swY+1, t.swX+1)
 	}
 	win := t.snap
