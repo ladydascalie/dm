@@ -59,6 +59,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.",
 	},
 	{
+		Name:    "dashboard-layout",
+		Value:   `"full" or "float"`,
+		Default: `"full"`,
+		Desc:    "Draw the dashboard over the whole screen, or as a palette centred over the panes.",
+	},
+	{
 		Name:    "theme",
 		Value:   `a quoted theme name matching [A-Za-z0-9_-]+`,
 		Default: "",

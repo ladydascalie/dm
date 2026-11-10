@@ -161,6 +161,7 @@ optional and each one overrides its built-in value.
 | `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A change resizes every pane on reload. |
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
+| `dashboard-layout` | `"full"` or `"float"` | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
 | `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
@@ -391,9 +392,11 @@ not check a user theme: its contrast is the author's.
 
 ## Dashboard
 
-`prefix a` opens the dashboard: a full-screen table of every pane in the
-session, one row per pane. It is native: no child process and no PTY. The
-default order is recent, the newest agent status change first.
+`prefix a` opens the dashboard: a table of every pane in the session, one row
+per pane. It is native: no child process and no PTY. It takes the whole screen
+by default; `dashboard-layout "float"` draws it as a palette centred over the
+panes instead, and leaves the panes live under it. The default order is recent,
+the newest agent status change first.
 
 The columns are the jump key, the project, the agent label, git, the status,
 the time since the last status change and the OSC window title. The label is

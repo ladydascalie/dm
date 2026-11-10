@@ -932,6 +932,42 @@ func TestConfigThemeDefaultPath(t *testing.T) {
 	}
 }
 
+// TestConfigDashboardLayout reads the dashboard's shape: the node, its default
+// of the full screen, and the two words it accepts.
+func TestConfigDashboardLayout(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"absent", `prefix "ctrl+b"`, true},
+		{"full", `dashboard-layout "full"`, true},
+		{"float", `dashboard-layout "float"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.DashboardFullScreen(); got != c.want {
+				t.Fatalf("DashboardFullScreen() = %v, want %v", got, c.want)
+			}
+		})
+	}
+	if !LoadDefault().DashboardFullScreen() {
+		t.Fatal("LoadDefault().DashboardFullScreen() = false, want true")
+	}
+	for _, bad := range []string{`dashboard-layout "wide"`, `dashboard-layout 1`} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	if _, err := parseConfig("dashboard-layout \"full\"\ndashboard-layout \"float\""); err == nil {
+		t.Fatal("parseConfig accepted two dashboard-layout nodes")
+	}
+}
+
 // TestConfigDashboardPreview reads the dashboard's starting preview share: the
 // node, the default, the zero that hides the band, and the bounds it rejects.
 func TestConfigDashboardPreview(t *testing.T) {

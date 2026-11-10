@@ -117,6 +117,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"glyphs":            `glyphs "nerd"`,
 		"window-label":      `window-label "{{.ID}}"`,
 		"dashboard-preview": `dashboard-preview 25`,
+		"dashboard-layout":  `dashboard-layout "float"`,
 		"theme":             `theme "probe"`,
 		"keymap":            `keymap "main" { "detach" "D" }`,
 	}
@@ -162,6 +163,9 @@ func TestConfigNodesParse(t *testing.T) {
 	if got := cfg.DashboardPreview(); got != 25 {
 		t.Errorf("DashboardPreview = %d, want 25", got)
 	}
+	if cfg.DashboardFullScreen() {
+		t.Error("DashboardFullScreen = true, want the float layout")
+	}
 	if got := cfg.Key("main", "detach"); got != "D" {
 		t.Errorf("Key(main, detach) = %q, want D", got)
 	}
@@ -196,6 +200,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"glyphs":            `"auto"`,
 		"window-label":      `"` + wlabel.Default + `"`,
 		"dashboard-preview": "60",
+		"dashboard-layout":  `"full"`,
 		"theme":             "",
 		"keymap":            "the built-in table",
 	}

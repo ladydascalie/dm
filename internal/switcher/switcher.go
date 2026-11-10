@@ -62,6 +62,14 @@ const (
 type Switcher struct {
 	Rect layout.Rect
 
+	// scrCols and scrRows are the screen the dashboard is drawn on, and full is
+	// its shape: the whole screen, or the palette rect centred over the panes.
+	// The rect is derived from all three, so a resize and a shape change land
+	// in one place.
+	scrCols int
+	scrRows int
+	full    bool
+
 	// all is the snapshot's pane list, and rows are the panes the query keeps
 	// in the sort mode's order. sel is one of rows, or -1 when nothing
 	// survives. top is the first row on screen, so a redraw does not jump.
@@ -90,25 +98,50 @@ type Switcher struct {
 	lines []string
 }
 
-// NewSwitcher opens the dashboard over a snapshot inside rect.
+// NewSwitcher opens the dashboard over a snapshot. It takes the whole screen
+// by default; SetFullScreen makes it a palette. rect seeds the geometry for a
+// caller that has no snapshot yet, and the snapshot's size wins once there is
+// one.
 func NewSwitcher(rect layout.Rect, snap *wire.Snapshot) *Switcher {
-	s := &Switcher{Rect: rect, sel: -1, ratio: previewRatioDefault, previewOn: true}
+	s := &Switcher{Rect: rect, sel: -1, ratio: previewRatioDefault, previewOn: true, full: true}
 	s.Sync(snap)
 	return s
+}
+
+// SetFullScreen chooses the dashboard's shape: the whole screen, or the palette
+// rect centred over the panes. It re-derives the rect from the screen the
+// dashboard was last synced with.
+func (s *Switcher) SetFullScreen(on bool) {
+	s.full = on
+	s.place()
+}
+
+// place derives the rect from the screen and the shape. A screen of no size
+// leaves the rect as the caller seeded it.
+func (s *Switcher) place() {
+	if s.scrCols < 1 || s.scrRows < 1 {
+		return
+	}
+	if s.full {
+		s.Rect = layout.Rect{W: s.scrCols, H: s.scrRows}
+		return
+	}
+	s.Rect = PaletteRect(s.scrCols, s.scrRows)
 }
 
 // Sync rebuilds the rows after a snapshot. The selection stays on its own pane
 // when that pane survives, and falls back to the nearest row when it is gone. A
 // preview of a pane that is gone is stale, so its request and lines go with it.
 //
-// The dashboard owns the whole screen, so a snapshot whose size differs moves
-// the rect with it: a grow and a shrink both land here, and the painter keeps
-// its clamp only as a guard.
+// A snapshot whose size differs moves the rect with it, in whichever shape the
+// dashboard has: a grow and a shrink both land here, and the painter keeps its
+// clamp only as a guard.
 func (s *Switcher) Sync(snap *wire.Snapshot) {
 	s.all = s.all[:0]
 	if snap != nil {
-		if snap.Cols != s.Rect.W || snap.Rows != s.Rect.H {
-			s.Rect = layout.Rect{W: snap.Cols, H: snap.Rows}
+		if snap.Cols != s.scrCols || snap.Rows != s.scrRows {
+			s.scrCols, s.scrRows = snap.Cols, snap.Rows
+			s.place()
 		}
 		s.all = append(s.all, snap.All...)
 	}

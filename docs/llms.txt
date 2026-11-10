@@ -161,6 +161,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `glyphs` | "auto", "ascii", "unicode" or "nerd" | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | `"{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"` | Set the template that renders a window label. |
 | `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band. |
+| `dashboard-layout` | "full" or "float" | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. |
 | `theme` | a quoted theme name matching [A-Za-z0-9_-]+ | none | Select a theme from the themes directory beside config.kdl; no node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a { "action" "key" } block | `the built-in table` | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 

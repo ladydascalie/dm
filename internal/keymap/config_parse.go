@@ -137,6 +137,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.dashPreview = n
 			cfg.dashPreviewSet = true
 			i += 2
+		case "dashboard-layout":
+			if cfg.dashFullSet {
+				return fmt.Errorf("line %d: duplicate dashboard-layout node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted layout after dashboard-layout", t.Line)
+			}
+			v := toks[i+1]
+			switch v.Value {
+			case "full":
+				cfg.dashFull = true
+			case "float":
+				cfg.dashFull = false
+			default:
+				return fmt.Errorf("line %d: dashboard-layout must be \"full\" or \"float\", got %q", v.Line, v.Value)
+			}
+			cfg.dashFullSet = true
+			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
 				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
@@ -386,6 +404,7 @@ padding 0
 glyphs "auto"
 window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 dashboard-preview 60
+dashboard-layout "full"
 
 keymap "main" {
     "send-prefix" "prefix"

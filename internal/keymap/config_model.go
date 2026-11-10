@@ -62,6 +62,11 @@ type Config struct {
 	// from a config that never named the node.
 	dashPreview    int
 	dashPreviewSet bool
+	// dashFull is the dashboard's shape: true takes the whole screen, false
+	// centres the palette over the panes. dashFullSet separates the default
+	// from a config that never named the node.
+	dashFull    bool
+	dashFullSet bool
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -138,6 +143,16 @@ func (c *Config) DashboardPreview() int {
 		return 100
 	}
 	return c.dashPreview
+}
+
+// DashboardFullScreen reports whether the dashboard takes the whole screen. A
+// false result draws it as a centred palette over the panes. A config without
+// the node reports the built-in default, which is the full screen.
+func (c *Config) DashboardFullScreen() bool {
+	if c == nil || !c.dashFullSet {
+		return true
+	}
+	return c.dashFull
 }
 
 // GlyphSet returns the glyph vocabulary the chrome draws with. A config

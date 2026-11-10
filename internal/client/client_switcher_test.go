@@ -292,6 +292,50 @@ func TestSwitcherPreviewShare(t *testing.T) {
 	}
 }
 
+// TestSwitcherFloatLayout: dashboard-layout "float" centres the palette and
+// leaves the panes live under it, so it claims no screen mode and the frame
+// keeps its tab bar and hover.
+func TestSwitcherFloatLayout(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.kdl")
+	if err := os.WriteFile(path, []byte("dashboard-layout \"float\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := keymap.LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	tui, got := switcherTUI(t)
+	tui.keymap = cfg
+	feed(tui, "\x02a")
+	if tui.sw == nil {
+		t.Fatal("prefix a did not open the dashboard")
+	}
+	if tui.mode != "" {
+		t.Fatalf("the palette claimed the screen with mode %q", tui.mode)
+	}
+	want := switcher.PaletteRect(100, 30)
+	if tui.sw.Rect != want {
+		t.Fatalf("palette rect = %+v, want %+v", tui.sw.Rect, want)
+	}
+	if tui.sw.Rect.W >= 100 || tui.sw.Rect.H >= 30 {
+		t.Fatalf("palette rect %+v fills the 100x30 screen", tui.sw.Rect)
+	}
+	// The palette still picks and closes like the full-screen dashboard.
+	feed(tui, "\r")
+	if tui.sw != nil {
+		t.Fatal("enter left the palette open")
+	}
+	select {
+	case m := <-got:
+		if m.Type != "req" || m.Action != "focus" || m.Target != "w1p1" {
+			t.Fatalf("enter sent %+v, want a focus request for w1p1", m)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("enter sent nothing")
+	}
+}
+
 // TestSwitcherFullScreen: prefix a opens the dashboard over the whole screen in
 // its own mode, and the close key gives the screen back.
 func TestSwitcherFullScreen(t *testing.T) {

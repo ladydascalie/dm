@@ -265,6 +265,37 @@ func TestSwitcherDrawFrame(t *testing.T) {
 	}
 }
 
+// TestSwitcherSetFullScreen: the dashboard takes the whole screen or the
+// palette rect, and a resize keeps the shape it has.
+func TestSwitcherSetFullScreen(t *testing.T) {
+	s, snap := switcherOn(160, 40)
+	if got, want := s.Rect, (layout.Rect{W: 160, H: 40}); got != want {
+		t.Fatalf("full rect = %+v, want %+v", got, want)
+	}
+	s.SetFullScreen(false)
+	if got, want := s.Rect, PaletteRect(160, 40); got != want {
+		t.Fatalf("palette rect = %+v, want %+v", got, want)
+	}
+	// A palette keeps its shape through a resize, and so does a full screen.
+	snap.Cols, snap.Rows = 100, 24
+	s.Sync(snap)
+	if got, want := s.Rect, PaletteRect(100, 24); got != want {
+		t.Fatalf("palette rect after resize = %+v, want %+v", got, want)
+	}
+	s.SetFullScreen(true)
+	if got, want := s.Rect, (layout.Rect{W: 100, H: 24}); got != want {
+		t.Fatalf("full rect after resize = %+v, want %+v", got, want)
+	}
+	// The palette stays inside a screen too small for its share.
+	s.SetFullScreen(false)
+	snap.Cols, snap.Rows = 20, 6
+	s.Sync(snap)
+	r := s.Rect
+	if r.X < 0 || r.Y < 0 || r.X+r.W > 20 || r.Y+r.H > 6 {
+		t.Fatalf("palette rect %+v misses the 20x6 screen", r)
+	}
+}
+
 // TestSwitcherSyncFollowsScreen syncs the dashboard through a grow and a
 // shrink and checks the rect and the drawn frame take the new size each time.
 func TestSwitcherSyncFollowsScreen(t *testing.T) {
