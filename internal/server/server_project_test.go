@@ -198,7 +198,7 @@ func fakePane(t *testing.T, st *session.State, paneID string) {
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
+				defer func() { _ = c.Close() }()
 				for {
 					m, err := wire.ReadMsg(c)
 					if err != nil {

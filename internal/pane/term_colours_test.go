@@ -49,7 +49,7 @@ func TestTermColoursActionReachesFilter(t *testing.T) {
 	filter, replies := captureReplies(p)
 
 	serve, cli := net.Pipe()
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
@@ -115,7 +115,7 @@ func TestTermColoursFromStart(t *testing.T) {
 func TestTermColoursEmptyIsNoOp(t *testing.T) {
 	p := newTestPane(osc.TermFG, osc.TermBG)
 	serve, cli := net.Pipe()
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))

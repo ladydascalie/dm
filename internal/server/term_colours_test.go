@@ -232,7 +232,7 @@ func TestTermColoursAdoptedPaneGetsAction(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer c2.Close()
+		defer func() { _ = c2.Close() }()
 		if m, err := wire.ReadMsg(c2); err == nil {
 			_ = wire.WriteMsg(c2, wire.Msg{Type: "resp", ID: m.ID, OK: true, Cwd: "/tmp"})
 		}

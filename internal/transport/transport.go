@@ -61,7 +61,7 @@ func Ensure(name string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 	cmd := exec.Command(exe, "__server", "-s", name)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout, cmd.Stderr = lf, lf
@@ -84,7 +84,7 @@ func RPC(name string, m wire.Msg) (wire.Msg, error) {
 	if err != nil {
 		return wire.Msg{}, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	m.Type = "req"
 	m.ID = 1
 	if err := wire.WriteMsg(c, m); err != nil {
@@ -125,7 +125,7 @@ func ListSessions() ([]SessionInfo, error) {
 		name := e.Name()
 		info := SessionInfo{Name: name}
 		if c, err := net.DialTimeout("unix", paths.ServerSock(name), 100*time.Millisecond); err == nil {
-			c.Close()
+			_ = c.Close()
 			info.Live = true
 		}
 		out = append(out, info)
@@ -140,7 +140,7 @@ func KillSession(name string) error {
 	if err != nil {
 		return err
 	}
-	c.Close()
+	_ = c.Close()
 	pid, ok := readPID(filepath.Join(paths.SessionDir(name), "server.pid"))
 	if !ok {
 		return fmt.Errorf("session %q has no server pid", name)

@@ -215,16 +215,6 @@ func (s *server) resizeFloat(id string, cols, rows int) {
 	_ = pty.Setsize(f.pty, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 }
 
-// writeFloat sends keys to a float. It reports whether id named one.
-func (s *server) writeFloat(id string, keys []byte) bool {
-	f := s.floatFor(id)
-	if f == nil {
-		return false
-	}
-	_, _ = f.pty.Write(keys)
-	return true
-}
-
 // markDead flips the dead flag once and reports whether this call flipped it.
 func (f *floatProc) markDead() bool {
 	f.mu.Lock()

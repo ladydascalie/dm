@@ -26,7 +26,7 @@ func TestScreenReplyCarriesSnapshot(t *testing.T) {
 	p.vt.Grid().SetScrollRegion(vt.ScrollRegion{Top: 1, Bottom: 2, Left: 0, Right: 19})
 
 	serve, cli := net.Pipe()
-	defer cli.Close()
+	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
 
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))

@@ -282,7 +282,7 @@ func Run(args []string) error {
 		_ = cmd.Wait()
 		p.shutdown()
 		time.Sleep(2 * time.Second) // let attached clients read the exit
-		os.Remove(p.sock)
+		_ = os.Remove(p.sock)
 		os.Exit(0)
 	}()
 
@@ -532,7 +532,7 @@ func (p *paneProc) shutdown() {
 }
 
 func (p *paneProc) serve(c net.Conn) {
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	sc := &subConn{c: c}
 	p.mu.Lock()
 	p.subs[sc] = true
@@ -678,7 +678,7 @@ func (p *paneProc) serve(c net.Conn) {
 			p.shutdown()
 			go func() {
 				time.Sleep(50 * time.Millisecond)
-				os.Remove(p.sock)
+				_ = os.Remove(p.sock)
 				os.Exit(0)
 			}()
 		}
@@ -793,5 +793,5 @@ func init() {
 }
 
 func writePID(path string) {
-	_ = os.WriteFile(path, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o600)
+	_ = os.WriteFile(path, fmt.Appendf(nil, "%d\n", os.Getpid()), 0o600)
 }

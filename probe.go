@@ -24,7 +24,7 @@ func runProbe(args []string) error {
 	fd := int(os.Stdin.Fd())
 	if term.IsTerminal(fd) {
 		if old, err := term.MakeRaw(fd); err == nil {
-			defer term.Restore(fd, old)
+			defer func() { _ = term.Restore(fd, old) }()
 		}
 	}
 
