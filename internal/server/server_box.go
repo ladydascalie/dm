@@ -102,16 +102,17 @@ func (s *server) boxTrimmedLocked(after *int) bool {
 	return *after+1 < s.st.Box[0].Seq
 }
 
-// boxClear removes every entry for the key, or the whole log when the key is
-// empty, and reports how many went. BoxSeq is untouched, so the next post
-// continues the sequence instead of reusing a number. The removal stays
-// applied in memory; a failed save returns its error with the count.
+// boxClear removes every entry the request matches: the exact key, or every
+// key under the prefix, or the whole log when the request names neither, and
+// reports how many went. BoxSeq is untouched, so the next post continues the
+// sequence instead of reusing a number. The removal stays applied in memory;
+// a failed save returns its error with the count.
 func (s *server) boxClear(req *box.ClearReq) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	kept := make([]box.Entry, 0, len(s.st.Box))
 	for _, e := range s.st.Box {
-		if req.Key == "" || e.Key == req.Key {
+		if box.Match(e, req.Key, req.KeyPrefix, nil) {
 			continue
 		}
 		kept = append(kept, e)

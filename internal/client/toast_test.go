@@ -129,7 +129,7 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 	var b bytes.Buffer
 	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
 	out := b.String()
-	row, col := toastRow(t, out, "a toast mu")
+	row, col := toastRow(t, out, "a toast m"+cells.Ellipsis)
 	if row != snap.Rows-1 {
 		t.Fatalf("row = %d, want %d", row, snap.Rows-1)
 	}
@@ -137,8 +137,8 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 	if col != 1 {
 		t.Fatalf("col = %d, want the box flush at 1", col)
 	}
-	if strings.Contains(out, "longer") {
-		t.Fatalf("overflowing text was not truncated: %q", out)
+	if !strings.Contains(out, "a toast m"+cells.Ellipsis) {
+		t.Fatalf("overflowing text was not truncated with an ellipsis: %q", out)
 	}
 }
 
@@ -235,5 +235,76 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 				t.Fatalf("interior is not the whole text %q: %q", c.text, out)
 			}
 		})
+	}
+}
+
+// A toast longer than the cap is cut to the cap with an ellipsis, and the box
+// never grows past the cap.
+func TestDrawToastsCapsWidth(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 8}
+	tui := &tui{}
+	tui.notify(strings.Repeat("x", 60))
+	var b bytes.Buffer
+	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
+	out := b.String()
+	// The ellipsis is the last cell of the interior, inside the box.
+	head := strings.Repeat("x", toastMaxWidth-1) + cells.Ellipsis
+	if !strings.Contains(out, head) {
+		t.Fatalf("toast is not truncated with an ellipsis at the cap: %q", out)
+	}
+	if strings.Contains(out, strings.Repeat("x", toastMaxWidth)) {
+		t.Fatalf("toast kept more than the cap: %q", out)
+	}
+	_, col := toastRow(t, out, head)
+	if w := snap.Cols - col + 1; w != toastMaxWidth+2 {
+		t.Fatalf("box width = %d, want %d", w, toastMaxWidth+2)
+	}
+}
+
+// A toast under the cap renders whole, and its box is the text plus borders.
+func TestDrawToastsKeepsShortToastWhole(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 8}
+	tui := &tui{}
+	tui.notify("saved 3 files")
+	var b bytes.Buffer
+	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
+	out := b.String()
+	if !strings.Contains(out, "saved 3 files") {
+		t.Fatalf("short toast was truncated: %q", out)
+	}
+	if strings.Contains(out, cells.Ellipsis) {
+		t.Fatalf("short toast gained an ellipsis: %q", out)
+	}
+	_, col := toastRow(t, out, "saved 3 files")
+	if w := snap.Cols - col + 1; w != cells.Cells("saved 3 files")+2 {
+		t.Fatalf("box width = %d, want %d", w, cells.Cells("saved 3 files")+2)
+	}
+}
+
+// A wide-rune toast is cut on a cluster boundary: every painted rune is whole
+// and the interior never passes the cap.
+func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 8}
+	tui := &tui{}
+	tui.notify(strings.Repeat("日", 30)) // 60 cells, twice the cap
+	var b bytes.Buffer
+	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
+	out := b.String()
+	at := strings.Index(out, "\x1b[97m")
+	end := strings.Index(out[at:], "\x1b[0m\x1b[90m")
+	if at < 0 || end < 0 {
+		t.Fatalf("no toast interior in %q", out)
+	}
+	got := strings.TrimRight(out[at+len("\x1b[97m"):at+end], " ")
+	if n := cells.Cells(got); n > toastMaxWidth {
+		t.Fatalf("interior paints %d cells, want at most %d", n, toastMaxWidth)
+	}
+	if !strings.HasSuffix(got, cells.Ellipsis) {
+		t.Fatalf("interior %q does not end with the ellipsis", got)
+	}
+	for _, r := range got {
+		if r != '日' && r != '…' {
+			t.Fatalf("interior %q holds a split rune %q", got, string(r))
+		}
 	}
 }

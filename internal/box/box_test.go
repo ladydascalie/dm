@@ -687,3 +687,18 @@ func TestMessageBoxSchemaSub(t *testing.T) {
 		t.Fatalf("sub entry state enum = %v, want %v", got, StateNames())
 	}
 }
+
+// A msg-clear naming both the exact key and the prefix is ambiguous and
+// fails; either alone parses.
+func TestClearReqTopicRule(t *testing.T) {
+	if _, err := ParseReq("msg-clear", json.RawMessage(`{"key":"a","keyPrefix":"b"}`)); err == nil ||
+		!strings.Contains(err.Error(), "key and keyPrefix are exclusive") {
+		t.Fatalf("clear with key and keyPrefix = %v, want the exclusivity error", err)
+	}
+	if _, err := ParseReq("msg-clear", json.RawMessage(`{"key":"notify/w1p1"}`)); err != nil {
+		t.Fatalf("clear with a key: %v", err)
+	}
+	if _, err := ParseReq("msg-clear", json.RawMessage(`{"keyPrefix":"notify/"}`)); err != nil {
+		t.Fatalf("clear with a keyPrefix: %v", err)
+	}
+}

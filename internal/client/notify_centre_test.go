@@ -232,3 +232,127 @@ func TestCentreCloseKeys(t *testing.T) {
 		}
 	}
 }
+
+// x clears the selected entry's key through msg-clear, and the reply
+// refetches the list without the cleared entry.
+func TestCentreXClearsSelectedKey(t *testing.T) {
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	feed(tui, "j") // select notify/w1p2
+	feed(tui, "x")
+	m := nextBoxMsg(t, got)
+	if m.Action != "msg-clear" {
+		t.Fatalf("x sent %+v, want msg-clear", m)
+	}
+	var req box.ClearReq
+	if err := json.Unmarshal(m.Res, &req); err != nil {
+		t.Fatalf("clear request body: %v", err)
+	}
+	if req.Key != "notify/w1p2" || req.KeyPrefix != "" {
+		t.Fatalf("clear request = %+v, want the selected entry's key", req)
+	}
+	res, err := json.Marshal(box.ClearReply{Cleared: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-clear", ID: m.ID, OK: true, Res: res})
+	// The reply refetches the centre list.
+	refetch := nextBoxMsg(t, got)
+	if refetch.Action != "msg-list" || refetch.ID != m.ID+1 {
+		t.Fatalf("after the clear the client sent %+v, want a refetching msg-list", refetch)
+	}
+	tui.apply(centreReply(t, refetch.ID, []box.Entry{centreEntries()[0], centreEntries()[2]}))
+	if got := tui.ncentre.entries; len(got) != 2 {
+		t.Fatalf("entries = %+v, want the cleared entry gone", got)
+	}
+	if got := tui.ncentre.title(); !strings.Contains(got, "2 entries") {
+		t.Fatalf("title = %q, want the refetched count", got)
+	}
+}
+
+// X clears the whole notify/ branch with the prefix clear, and the reply
+// refetches the list empty.
+func TestCentreXClearsWholeBranch(t *testing.T) {
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	feed(tui, "X")
+	m := nextBoxMsg(t, got)
+	if m.Action != "msg-clear" {
+		t.Fatalf("X sent %+v, want msg-clear", m)
+	}
+	var req box.ClearReq
+	if err := json.Unmarshal(m.Res, &req); err != nil {
+		t.Fatalf("clear request body: %v", err)
+	}
+	if req.Key != "" || req.KeyPrefix != box.NotifyPrefix {
+		t.Fatalf("clear request = %+v, want the notify/ prefix", req)
+	}
+	res, err := json.Marshal(box.ClearReply{Cleared: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-clear", ID: m.ID, OK: true, Res: res})
+	refetch := nextBoxMsg(t, got)
+	if refetch.Action != "msg-list" {
+		t.Fatalf("after the clear the client sent %+v, want a refetching msg-list", refetch)
+	}
+	tui.apply(centreReply(t, refetch.ID, nil))
+	if got := tui.ncentre.entries; len(got) != 0 {
+		t.Fatalf("entries = %+v, want the branch emptied", got)
+	}
+	if got := tui.ncentre.title(); !strings.Contains(got, "empty") {
+		t.Fatalf("title = %q, want the empty count", got)
+	}
+}
+
+// x with the reader up fires the clear once and closes nothing: the reader
+// keeps the body and the centre stays up for the refetch.
+func TestCentreXWithReaderFiresOnce(t *testing.T) {
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	feed(tui, "\r") // open the body reader on the selected entry
+	if tui.reader == nil {
+		t.Fatal("enter did not open the reader")
+	}
+	feed(tui, "x")
+	m := nextBoxMsg(t, got)
+	if m.Action != "msg-clear" {
+		t.Fatalf("x sent %+v, want msg-clear", m)
+	}
+	// The close keys did not fire: the centre and the reader are both up.
+	if tui.ncentre == nil || tui.reader == nil {
+		t.Fatalf("centre %v reader %v, want both still up", tui.ncentre, tui.reader)
+	}
+	res, err := json.Marshal(box.ClearReply{Cleared: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-clear", ID: m.ID, OK: true, Res: res})
+	if refetch := nextBoxMsg(t, got); refetch.Action != "msg-list" {
+		t.Fatalf("after the clear the client sent %+v, want one refetch", refetch)
+	}
+}
+
+// The read cursor stays monotonic across a clear: entries the centre has
+// shown keep their mark even when the list refetches shorter.
+func TestCentreClearKeepsCursorMonotonic(t *testing.T) {
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	feed(tui, "\r") // open the newest entry's body, which marks it read
+	if tui.notifyRead != 3 {
+		t.Fatalf("read mark = %d, want 3 after opening the newest", tui.notifyRead)
+	}
+	feed(tui, "X")
+	m := nextBoxMsg(t, got)
+	res, err := json.Marshal(box.ClearReply{Cleared: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-clear", ID: m.ID, OK: true, Res: res})
+	refetch := nextBoxMsg(t, got)
+	tui.apply(centreReply(t, refetch.ID, nil))
+	feed(tui, "\x1b") // close the emptied centre
+	if tui.notifyRead != 3 {
+		t.Fatalf("read mark = %d, want it to stay at 3", tui.notifyRead)
+	}
+}

@@ -854,6 +854,14 @@ func (t *tui) apply(m wire.Msg) {
 				}
 				delete(t.notifyRoute, m.ID)
 			}
+			// A centre clear refetches the list from the reply, whatever the
+			// count was; the reply itself carries only the number that went.
+			if m.Action == "msg-clear" && t.notifyRoute[m.ID] == notifyRouteClear {
+				delete(t.notifyRoute, m.ID)
+				if t.ncentre != nil {
+					t.notifyCentreRequest()
+				}
+			}
 			break
 		}
 		if m.Action == "msg-list" {

@@ -748,10 +748,13 @@ func (c *cmdFlags) boxCursor() *int {
 	return &n
 }
 
-// boxClearVerb clears one key, or the whole box when no key is given, and
-// prints how many entries went.
+// boxClearVerb clears one key, or every key under a prefix, or the whole box
+// when neither is given, and prints how many entries went.
 func boxClearVerb(c *cmdFlags) error {
-	raw, err := json.Marshal(box.ClearReq{Key: c.key})
+	if c.key != "" && c.keyPrefix != "" {
+		return fmt.Errorf("box: key and keyPrefix are exclusive")
+	}
+	raw, err := json.Marshal(box.ClearReq{Key: c.key, KeyPrefix: c.keyPrefix})
 	if err != nil {
 		return err
 	}

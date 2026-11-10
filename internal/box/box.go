@@ -131,9 +131,12 @@ type ListReq struct {
 	From string `json:"from"`
 }
 
-// ClearReq is the msg-clear request. An empty key clears every entry.
+// ClearReq is the msg-clear request. An empty key and an empty keyPrefix
+// clear every entry. Key is an exact topic and KeyPrefix a branch of the
+// topic tree; naming both is ambiguous and fails.
 type ClearReq struct {
-	Key string `json:"key"`
+	Key       string `json:"key"`
+	KeyPrefix string `json:"keyPrefix"`
 }
 
 // WaitReq is the msg-wait request. Without AfterSeq it waits for the newest
@@ -337,7 +340,7 @@ func ValidateReq(action string, req any) error {
 		r.Limit = ClampLimit(r.Limit)
 		return nil
 	case *ClearReq:
-		return CheckText("key", r.Key, MaxKey)
+		return CheckTopic(r.Key, r.KeyPrefix)
 	case *WaitReq:
 		// An empty state asks for any state, which a subscriber needs.
 		if r.State != "" {

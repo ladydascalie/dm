@@ -19,10 +19,12 @@ import (
 )
 
 // bodyReader is the open reader overlay: the entry it shows, its lines with
-// the summary on top and the body below, and the first line in view. The text
-// is plain, unwrapped, and clipped to the float's width.
+// the summary on top and the body below, and the first line in view. The
+// lines are wrapped to the float's inner width; scroll moves over wrapped
+// rows.
 type bodyReader struct {
 	e     box.Entry
+	raw   []string
 	lines []string
 	off   int
 	Float *panel.FloatingPane
@@ -33,17 +35,17 @@ type bodyReader struct {
 // the entry does not carry is skipped, and one trailing empty line from the
 // body's final newline is dropped.
 func newBodyReader(e box.Entry, r layout.Rect, th theme.Theme) *bodyReader {
-	lines := make([]string, 0, strings.Count(e.Body, "\n")+2)
+	raw := make([]string, 0, strings.Count(e.Body, "\n")+2)
 	if e.Msg != "" {
-		lines = append(lines, e.Msg)
+		raw = append(raw, e.Msg)
 	}
-	lines = append(lines, strings.Split(e.Body, "\n")...)
-	if n := len(lines); n > 0 && lines[n-1] == "" {
-		lines = lines[:n-1]
+	raw = append(raw, strings.Split(e.Body, "\n")...)
+	if n := len(raw); n > 0 && raw[n-1] == "" {
+		raw = raw[:n-1]
 	}
 	b := &bodyReader{
-		e:     e,
-		lines: lines,
+		e:   e,
+		raw: raw,
 		Float: &panel.FloatingPane{
 			ID:     "body",
 			Active: true,
@@ -52,11 +54,56 @@ func newBodyReader(e box.Entry, r layout.Rect, th theme.Theme) *bodyReader {
 			Hint:   " j/k scroll  esc back ",
 		},
 	}
+	b.rewrap()
 	b.paint(th)
 	return b
 }
 
-// paint rewrites the overlay's terminal from the window of lines. Every row
+// rewrap refits the lines to the float's current inner width, the rect minus
+// its two border cells. A resize calls it, so a wider float re-joins what a
+// narrower one broke apart.
+func (r *bodyReader) rewrap() {
+	inner := r.Float.Rect.W - 2
+	r.lines = make([]string, 0, len(r.raw))
+	for _, line := range r.raw {
+		r.lines = append(r.lines, wrapLine(line, inner)...)
+	}
+}
+
+// wrapLine breaks one line into rows of at most width cells. A line that
+// fits comes back alone and whole. A longer line breaks at the last space
+// that fits, and a run with no space hard-breaks at the width. Cutting walks
+// grapheme clusters, so a wide rune counts its cells and never splits.
+func wrapLine(s string, width int) []string {
+	if width < 1 || cells.Cells(s) <= width {
+		return []string{s}
+	}
+	var rows []string
+	for cells.Cells(s) > width {
+		cut := len(cells.Clip(s, width))
+		if j := strings.LastIndex(s[:cut], " "); j > 0 {
+			rows = append(rows, s[:j])
+			s = strings.TrimLeft(s[j:], " ")
+			continue
+		}
+		if cut == 0 { // one cluster wider than the whole row
+			f, _ := cells.FirstCluster(s)
+			cut = len(f)
+		}
+		rows = append(rows, s[:cut])
+		s = s[cut:]
+	}
+	if s != "" {
+		rows = append(rows, s)
+	}
+	// A wrapped row never ends in spaces: the break consumed them.
+	for i := range rows {
+		rows[i] = strings.TrimRight(rows[i], " ")
+	}
+	return rows
+}
+
+// paint rewrites the overlay's terminal from the window of rows. Every row
 // is placed absolutely, so a scrolled reader paints its window whole. The
 // text sits in the theme's dim colour, the way the box paints its rows.
 func (r *bodyReader) paint(th theme.Theme) {
@@ -86,14 +133,16 @@ func (r *bodyReader) Scroll(n int, th theme.Theme) {
 	r.paint(th)
 }
 
-// Sync fits the overlay to the float's rect after a resize and repaints.
+// Sync fits the overlay to the float's rect after a resize, rewraps the
+// lines to the new width and repaints.
 func (r *bodyReader) Sync(rect layout.Rect, th theme.Theme) {
 	r.Float.Rect = rect
+	r.rewrap()
 	r.clamp()
 	r.paint(th)
 }
 
-// clamp keeps the window on the lines: the offset never passes the last row
+// clamp keeps the window on the rows: the offset never passes the last row
 // that still fills the pane.
 func (r *bodyReader) clamp() {
 	rect := r.Float.Rect
