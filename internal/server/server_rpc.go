@@ -90,6 +90,12 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		s.reply(cl, m, map[string]any{"lines": lines}, nil)
 
+	case "diff":
+		// The selected pane's uncommitted change, for the dashboard's pager.
+		// The text rides in Lines, the way a read reply's rows do.
+		lines := s.paneDiff(m.Target)
+		cl.deliver(wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, OK: true, Lines: lines})
+
 	case "yank":
 		lines, start, rows, anchor, err := s.paneYank(m.Target)
 		if err != nil {

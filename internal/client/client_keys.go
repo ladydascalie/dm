@@ -515,8 +515,7 @@ func (t *tui) switcherKey() bool {
 	case "input":
 		t.startSwitcherInput()
 	case "diff":
-		// The diff pager is its own change. The key is bound so the contract is
-		// whole, and it stays inert until that lands.
+		t.openDiff()
 	case "down", "down-arrow", "down-ctrl-n":
 		t.sw.Move(1)
 		t.dirty = true
@@ -553,6 +552,55 @@ func (t *tui) switcherInputKey() bool {
 	if pane := t.sw.Target(); pane != "" && t.conn != nil {
 		_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: keys})
 	}
+	return true
+}
+
+// diffKey consumes one key while the diff pager is up. The pager is read-only:
+// it scrolls and closes, and every other bound key is swallowed. It returns
+// false when it needs more bytes for an escape sequence.
+func (t *tui) diffKey() bool {
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	action, n, state := t.km().Match("help", t.inbuf)
+	if state == keymap.Match && escapeRun(t.inbuf) > n {
+		// The match covered only the head of an escape sequence. The sequence
+		// as a whole is unbound, and an unbound escape is not a key.
+		state = keymap.NoMatch
+	}
+	switch state {
+	case keymap.Partial:
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	case keymap.Match:
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+	default:
+		t.inbuf = append([]byte(nil), t.inbuf[escapeRun(t.inbuf):]...)
+		t.pending = false
+		return true
+	}
+	switch action {
+	case "up", "up-arrow":
+		t.diff.scroll(-1)
+	case "down", "down-arrow":
+		t.diff.scroll(1)
+	case "page-up":
+		t.diff.scroll(-t.diff.float.Rect.H)
+	case "page-down":
+		t.diff.scroll(t.diff.float.Rect.H)
+	case "top":
+		t.diff.scroll(-len(t.diff.lines))
+	case "bottom":
+		t.diff.scroll(len(t.diff.lines))
+	case "close", "close-esc", "close-question":
+		t.closeDiff()
+		return true
+	}
+	t.dirty = true
 	return true
 }
 

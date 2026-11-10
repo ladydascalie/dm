@@ -372,6 +372,37 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
+		if t.mode == "diff" {
+			// The pager is read-only and owns every key while it is up. A lone
+			// esc is the close key, so it skips the paste marker check. A mouse
+			// event scrolls and a paste is swallowed whole.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.diffKey() {
+					return
+				}
+				continue
+			}
+			if ev, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				t.diffWheel(ev)
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if seq, n, started := t.takePaste(); started {
+				if n == 0 {
+					t.holdPaste(time.Now())
+					return
+				}
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				_ = seq
+				continue
+			}
+			if !t.diffKey() {
+				return
+			}
+			continue
+		}
 		if seq, n, started := t.takePaste(); started {
 			if n == 0 {
 				// The marker is still arriving. Keep buffering; the ticker
@@ -604,6 +635,8 @@ func (t *tui) expireMode(now time.Time) bool {
 		closeKeymapView(t)
 	case "rename":
 		t.closeRename()
+	case "diff":
+		t.closeDiff()
 	}
 	return true
 }

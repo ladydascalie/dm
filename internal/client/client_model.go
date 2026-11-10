@@ -200,6 +200,13 @@ type tui struct {
 	// pane. Esc leaves it; the dashboard stays up.
 	swInput bool
 
+	// diff is the read-only diff pager, nil when closed. diffID numbers the
+	// request and diffPane is the pane it named, so a late reply still opens
+	// under the right worktree name.
+	diff     *diffView
+	diffID   int
+	diffPane string
+
 	// yankID numbers the next copy-output request and yankPane is the pane it
 	// names, so a reply writes the clipboard for the pane the operator asked
 	// about even if focus moved before it landed.
@@ -686,6 +693,10 @@ func (t *tui) apply(m wire.Msg) {
 		if t.sw != nil {
 			t.sw.Sync(m.Snap)
 		}
+		if t.diff != nil {
+			t.diff.sync(m.Snap)
+			t.dirty = true
+		}
 		if t.box != nil {
 			t.box.Sync(m.Snap, t.theme())
 			t.dirty = true
@@ -726,6 +737,15 @@ func (t *tui) apply(m wire.Msg) {
 	case "resp":
 		if m.Action == "yank" && m.ID == t.yankID {
 			t.takeYank(m)
+			break
+		}
+		// The diff reply opens the pager. A failure toasts and opens nothing.
+		if m.Action == "diff" && m.ID > 0 && m.ID == t.diffID {
+			if !m.OK {
+				t.notify(m.Error)
+				break
+			}
+			t.openDiffView(m.Lines)
 			break
 		}
 		// A preview reply carries the id its request named. Only the newest id
