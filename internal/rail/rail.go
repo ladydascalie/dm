@@ -59,6 +59,7 @@ type RailItem struct {
 	// group so the painter can tie them with one bar.
 	Project       string
 	ProjectAccent int
+	App           string
 	Agent         bool
 	Dirty         bool
 	InRepo        bool
@@ -321,7 +322,7 @@ func RailPaneRow(p wire.AllPane) RailItem {
 	return RailItem{
 		Kind: Pane, Text: label, Pane: p.ID, PaneName: p.Name,
 		Window: p.Window, WindowName: p.WindowName, Workspace: p.Workspace,
-		Status: p.Status, Agent: p.Agent, Focus: p.Focus,
+		Status: p.Status, Agent: p.Agent, Focus: p.Focus, App: p.App,
 	}
 }
 
@@ -437,9 +438,13 @@ func RailGlyph(th theme.Theme, status string, set theme.GlyphSet) (glyph string,
 // RailMark is the two-cell prefix of a pane row: an agent icon, a shell icon,
 // or the fallback agent bar. The status glyph lands in column 3 either way.
 // Every icon here is from the Font Awesome 4 range that even old Nerd Font
-// patches carry; newer code points such as the FA5 robot render as tofu.
-func RailMark(agent bool, set theme.GlyphSet) string {
+// patches carry; newer code points such as the FA5 robot render as tofu. The
+// pi agent is the one exception: its Nerd mark is the plain Greek letter pi,
+// which every font has.
+func RailMark(agent bool, app string, set theme.GlyphSet) string {
 	switch {
+	case agent && app == "pi" && set == theme.GlyphNerd:
+		return "\u03c0 "
 	case agent && set == theme.GlyphNerd:
 		return "\uf135 "
 	case agent && set == theme.GlyphASCII:
@@ -603,7 +608,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 		if !it.Agent && (it.Status == "" || it.Status == "unknown") {
 			mark = " "
 		}
-		glyph := RailMark(it.Agent, set)
+		glyph := RailMark(it.Agent, it.App, set)
 		if compact {
 			// The mark gives up its trailing space, and the project bar takes the
 			// cell between mark and state, so a thin row still says which project

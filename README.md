@@ -512,10 +512,11 @@ An unfolded pane row labels itself with its recorded name, then the `app=` it
 last reported, then the pane id, with a state glyph in a colour per state beside
 the label. A pane counts as an agent when it has a recorded name or has spoken
 the status protocol at least once; the rest are shells. An agent row leads with
-a rocket icon (or a `▎` bar without Nerd Fonts), a shell row with a terminal
-icon, and a dim shell row otherwise leaves those two cells blank, so the state
-glyph keeps its column. The report is sticky: `state=clear` does not demote an
-agent, and both the mark and the last `app=` are stored in the state file. The
+a rocket icon (pi agents get the plain Greek letter `π` in Nerd Fonts, or a
+`▎` bar without them), a shell row with a terminal icon, and a dim shell row
+otherwise leaves those two cells blank, so the state glyph keeps its column.
+The report is sticky: `state=clear` does not demote an agent, and both the
+mark and the last `app=` are stored in the state file. The
 focused pane's row is highlighted.
 
 A left press on a project header row focuses the first pane of the group's

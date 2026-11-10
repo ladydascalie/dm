@@ -217,7 +217,7 @@ func TestRailRowSegments(t *testing.T) {
 	// A focused pane row puts its indents, marker, glyph and name on rail text,
 	// and carries no right-aligned run. The focus fill and the row's bold are
 	// the writer's, not the composition's.
-	mark, glyphColour := RailMark(true, theme.GlyphUnicode), theme.DefaultTheme().Palette.RailWorking
+	mark, glyphColour := RailMark(true, "", theme.GlyphUnicode), theme.DefaultTheme().Palette.RailWorking
 	pane := railRowFind(t, items, Pane, "pi")
 	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
@@ -236,12 +236,12 @@ func TestRailRowSegments(t *testing.T) {
 	}
 
 	// The thin rail keeps the marker and the glyph, drops the indents, and
-	// puts the project bar cell between them: blank here, since pi has no
+	// puts the project bar cell full left: blank here, since pi has no
 	// project.
 	left, right, tail = RailRow(theme.DefaultTheme(), pane, layout.CollapsedRail, true, theme.GlyphUnicode)
 	wantLeft = []railSeg{
-		{Text: strings.TrimSuffix(mark, " "), FG: glyphColour},
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
+		{Text: strings.TrimSuffix(mark, " "), FG: glyphColour},
 		{Text: "\u25cf", FG: glyphColour},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
@@ -924,7 +924,7 @@ func TestRailFoldCaretAfterBar(t *testing.T) {
 }
 
 // TestThinRailProjectTrack proves the thin rail keeps the project track:
-// every pane row paints its project's bar in the cell between mark and glyph,
+// every pane row paints its project's bar in column 0, and no project row
 // and no project row ever appears.
 func TestThinRailProjectTrack(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
@@ -936,17 +936,12 @@ func TestThinRailProjectTrack(t *testing.T) {
 		}
 	}
 	term := thinScreen(t, snap)
-	for y := 0; y < snap.Rows-2; y++ {
-		if g := cellOf(term, 0, y); theBar() == g.Char {
-			t.Fatalf("thin row %d paints the bar in column 0", y)
-		}
-	}
 
-	// Project rows paint the bar in column 1, in the project's accent; the
+	// Project rows paint the bar in column 0, in the project's accent; the
 	// loose row paints no bar. Two live projects never share an accent, and
 	// no row is a project row.
 	for y, it := range items {
-		bar := cellOf(term, 1, y)
+		bar := cellOf(term, 0, y)
 		if it.Project == "" {
 			if bar.Char == theBar() {
 				t.Fatalf("loose thin row %d paints the bar", y)
@@ -954,7 +949,7 @@ func TestThinRailProjectTrack(t *testing.T) {
 			continue
 		}
 		if bar.Char != theBar() {
-			t.Fatalf("thin row %d for %s has no bar in column 1", y, it.Project)
+			t.Fatalf("thin row %d for %s has no bar in column 0", y, it.Project)
 		}
 		if want := theme.DefaultTheme().Accents[it.ProjectAccent]; bar.FG != railColour(want) {
 			t.Fatalf("thin row %d bar = %v, want the %s accent %v", y, bar.FG, it.Project, want)
