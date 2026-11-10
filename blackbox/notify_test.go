@@ -298,7 +298,7 @@ func TestNotifyUrgencyGatesDesktopPops(t *testing.T) {
 	waitNotifyEntry(t, h, "n", "notify/"+p2, "error", "build failed")
 
 	writeStatus(t, h, "n", p2, "blocked", "needs review")
-	lines = waitNotify(t, log, 2)
+	waitNotify(t, log, 2)
 	waitNotifyEntry(t, h, "n", "notify/"+p2, "blocked", "needs review")
 
 	h.run("write-to", p2, "-s", "n", "--msg", "exit", "--enter")

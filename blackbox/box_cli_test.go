@@ -660,7 +660,7 @@ func boxKillServer(t *testing.T, h *harness, session string) int {
 		if err != nil {
 			return pid
 		}
-		c.Close()
+		_ = c.Close()
 		if time.Now().After(deadline) {
 			t.Fatalf("server socket %s still answers after the kill", sock)
 		}

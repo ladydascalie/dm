@@ -45,7 +45,7 @@ func writeReloadConfig(t *testing.T, path, src string) {
 	}
 	tmp := f.Name()
 	if _, err := f.WriteString(src); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {
