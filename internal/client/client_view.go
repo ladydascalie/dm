@@ -480,12 +480,13 @@ func (t *tui) previewTerms() map[string]*vt.Term {
 // is empty when the frame leaves the cursor alone.
 func (t *tui) cursorBlock() string {
 	if t.sw != nil {
-		if t.swInput {
-			// Input mode types into the pane, not into the query, so the query
-			// cell is not where the cursor belongs.
+		if t.swInput || !t.sw.Filtering() {
+			// Only the query takes typing. Input mode types into the pane, and
+			// outside filter mode every key acts on the table, so neither puts
+			// the cursor on the query row.
 			return "\x1b[?25l"
 		}
-		// The dashboard owns the cursor while it is up: the query cell, shown.
+		// The dashboard owns the cursor while it filters: the query cell.
 		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.swY+1, t.swX+1)
 	}
 	if t.diff != nil {

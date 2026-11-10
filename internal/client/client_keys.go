@@ -468,6 +468,16 @@ func (t *tui) switcherKey() bool {
 		}
 		return false
 	case keymap.Match:
+		// Filter mode takes every printable key as text, including the letters
+		// and digits that are keys on the table: a query has to be able to hold
+		// d, s, i, p and the digits without an action firing mid word.
+		if b := t.inbuf[0]; t.sw.Filtering() && n == 1 && b >= 0x20 && b < 0x7f {
+			t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+			t.pending = false
+			t.sw.AppendText(rune(b))
+			t.dirty = true
+			return true
+		}
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
@@ -476,16 +486,22 @@ func (t *tui) switcherKey() bool {
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 		// An escape sequence with no binding is not text: left, right and
-		// shift-tab have no meaning in a list, and neither does F1.
-		if n == 1 && b >= 0x20 && b < 0x7f {
+		// shift-tab have no meaning in a list, and neither does F1. Text only
+		// reaches the query in filter mode, where the letters are not keys.
+		if n == 1 && b >= 0x20 && b < 0x7f && t.sw.Filtering() {
 			t.sw.AppendText(rune(b))
 			t.dirty = true
 		}
 		return true
 	}
 	switch action {
-	case "close", "close-ctrl-c", "close-esc":
+	case "close", "close-ctrl-c":
 		closeSwitcher(t)
+	case "close-esc":
+		t.switcherEsc()
+	case "filter":
+		t.sw.StartFilter()
+		t.dirty = true
 	case "pick":
 		t.pickSwitcher()
 	case "clear-query":
@@ -694,7 +710,23 @@ func (t *tui) expireSwitcher(now time.Time) {
 		t.dirty = true
 		return
 	}
-	closeSwitcher(t)
+	t.switcherEsc()
+}
+
+// switcherEsc is what one esc means to the dashboard. In filter mode it unwinds
+// the query first: it clears it, then it leaves the mode, and only then does the
+// next esc close. A search is therefore never one keystroke from closing.
+func (t *tui) switcherEsc() {
+	if !t.sw.Filtering() {
+		closeSwitcher(t)
+		return
+	}
+	if t.sw.Query() != "" {
+		t.sw.ClearQuery()
+	} else {
+		t.sw.StopFilter()
+	}
+	t.dirty = true
 }
 
 // key runs one single-byte key through the main keymap. Tests call it directly;

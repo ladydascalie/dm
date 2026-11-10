@@ -111,7 +111,7 @@ func TestSwitcherTypeAndEnter(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	full := tui.sw.RowCount()
-	feed(tui, "beta")
+	feed(tui, "/beta")
 	if n := tui.sw.RowCount(); n >= full {
 		t.Fatalf("typing narrowed %d rows to %d", full, n)
 	}
@@ -129,6 +129,73 @@ func TestSwitcherTypeAndEnter(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("enter sent nothing")
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherFilterHoldsBoundLetters: the bug filter mode exists for. A query
+// that holds a letter the table binds is text, so it neither opens the diff,
+// nor sorts, nor enters input mode, nor jumps.
+func TestSwitcherFilterHoldsBoundLetters(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	feed(tui, "/")
+	if !tui.sw.Filtering() {
+		t.Fatal("the filter key did not enter filter mode")
+	}
+	feed(tui, "dsip1")
+	if tui.sw == nil {
+		t.Fatal("a bound letter closed the dashboard")
+	}
+	if tui.swInput {
+		t.Fatal("i entered input mode from the query")
+	}
+	if tui.diff != nil {
+		t.Fatal("d opened the diff from the query")
+	}
+	if q := tui.sw.Query(); q != "dsip1" {
+		t.Fatalf("query = %q, want the whole word dsip1", q)
+	}
+	if m := tui.sw.SortMode(); m != switcher.SortRecent {
+		t.Fatalf("s sorted the table to %v", m)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestSwitcherEscUnwindsFilter: esc clears the query, then leaves the mode, then
+// closes. Outside the mode a letter is a key again.
+func TestSwitcherEscUnwindsFilter(t *testing.T) {
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	feed(tui, "/beta")
+	esc := func() {
+		feed(tui, "\x1b")
+		if !tui.pending {
+			t.Fatal("esc did not wait for the pending timer")
+		}
+		tui.escAt = time.Now().Add(-time.Second)
+		tui.expireSwitcher(time.Now())
+	}
+	esc()
+	if tui.sw == nil || !tui.sw.Filtering() || tui.sw.Query() != "" {
+		t.Fatalf("the first esc left filtering %v with query %q", tui.sw.Filtering(), tui.sw.Query())
+	}
+	if n := tui.sw.RowCount(); n != 2 {
+		t.Fatalf("the first esc left %d rows, want both", n)
+	}
+	esc()
+	if tui.sw == nil || tui.sw.Filtering() {
+		t.Fatal("the second esc did not leave filter mode")
+	}
+	// The mode is gone, so the letters act again: j moves the selection.
+	before := tui.sw.Target()
+	feed(tui, "j")
+	if tui.sw.Target() == before {
+		t.Fatalf("j did not move the selection off %q after filter mode", before)
+	}
+	esc()
+	if tui.sw != nil {
+		t.Fatal("the third esc did not close the dashboard")
 	}
 	testutil.NoMsg(t, got)
 }
@@ -154,7 +221,7 @@ func TestSwitcherCtrlLRestores(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	full := tui.sw.RowCount()
-	feed(tui, "beta")
+	feed(tui, "/beta")
 	if tui.sw.RowCount() == full {
 		t.Fatal("typing dropped no rows")
 	}
@@ -307,9 +374,12 @@ func TestSwitcherInputForwards(t *testing.T) {
 	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p2" {
 		t.Fatalf("after input mode j selects %+v, want w1p2", it)
 	}
-	feed(tui, "z")
+	if q := tui.sw.Query(); q != "" {
+		t.Fatalf("after input mode the query is %q, want it empty", q)
+	}
+	feed(tui, "/z")
 	if q := tui.sw.Query(); q != "z" {
-		t.Fatalf("after input mode the query is %q, want z", q)
+		t.Fatalf("after input mode /z typed %q, want z", q)
 	}
 	testutil.NoMsg(t, got)
 }
@@ -354,7 +424,7 @@ func TestSwitcherPickDigit(t *testing.T) {
 func TestSwitcherPreviewReplies(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
-	feed(tui, "beta")
+	feed(tui, "/beta")
 	tui.draw()
 
 	var read wire.Msg

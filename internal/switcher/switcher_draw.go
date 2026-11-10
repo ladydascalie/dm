@@ -253,8 +253,13 @@ func paintSwitcherTitle(buf *bytes.Buffer, th theme.Theme, l switcherLayout) {
 	buf.WriteString("\x1b[0m")
 }
 
-// paintSwitcherQuery paints the query row: "> " then the query, clipped to the
-// table, and returns one past the query's last cell.
+// switcherIdleHint is the query row's text outside filter mode. The row keeps
+// its place so the table never moves, and the hint says how to start typing.
+const switcherIdleHint = "press / to filter"
+
+// paintSwitcherQuery paints the query row: "> " then the query while filter mode
+// is on, a prompt otherwise, both clipped to the table. It returns one past the
+// query's last cell.
 func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout) (cx, cy int) {
 	if !l.hasRow(l.queryY) {
 		return l.inner.X, l.inner.Y
@@ -268,6 +273,20 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 		buf.WriteString("\x1b[0m" + ground.BG())
 	} else {
 		prompt := "> "
+		if !s.Filtering() {
+			hint := cells.Clip(switcherIdleHint, w)
+			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
+			buf.WriteString("\x1b[0m" + ground.BG() + dim.FG() + hint)
+			if n := w - cells.Cells(hint); n > 0 {
+				buf.WriteString(strings.Repeat(" ", n))
+			}
+			buf.WriteString("\x1b[0m")
+			if l.preview {
+				paintRuleCell(buf, th, l.ruleX, y)
+				paintSwitcherBlankRow(buf, th, y, l.prevX, l.prevW)
+			}
+			return x, cy
+		}
 		q := cells.Clip(string(s.query), w-len(prompt))
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 		buf.WriteString("\x1b[0m" + ground.BG() + dim.FG() + prompt)
@@ -473,7 +492,7 @@ func paintRuleCell(buf *bytes.Buffer, th theme.Theme, x, y int) {
 // loses the scroll reminder before it loses the jump keys.
 var switcherHints = []string{
 	"enter pick", "esc close", "1-9 jump", "i input", "d diff",
-	"type filter", "s sort", "p peek", "+/- size", "^u/^d scroll",
+	"/ filter", "s sort", "p peek", "+/- size", "^u/^d scroll",
 }
 
 // switcherHint fits the hints into room cells and drops the ones that do not

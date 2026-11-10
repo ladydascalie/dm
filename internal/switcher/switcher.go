@@ -70,7 +70,12 @@ type Switcher struct {
 	sel  int
 	top  int
 
-	query []rune
+	// query is the filter's text and filter says whether it is live. A query
+	// only filters while the dashboard is in filter mode, because outside it
+	// every letter is a key. Leaving the mode drops the query with it, so the
+	// table shows every pane again the moment the letters are keys again.
+	query  []rune
+	filter bool
 
 	mode      SortMode
 	ratio     int
@@ -114,24 +119,63 @@ func (s *Switcher) Sync(snap *wire.Snapshot) {
 	s.rebuild(s.sel, prev)
 }
 
-// AppendText adds a rune to the query and reselects the best match.
+// Filtering reports whether the dashboard is in filter mode, where every
+// printable key edits the query instead of acting on the table.
+func (s *Switcher) Filtering() bool {
+	return s.filter
+}
+
+// StartFilter enters filter mode and keeps the table as it is. The query starts
+// empty, so the first keystroke in the mode narrows a full table.
+func (s *Switcher) StartFilter() {
+	if s.filter {
+		return
+	}
+	s.filter = true
+	if len(s.query) > 0 {
+		s.query = nil
+		s.refilter()
+	}
+}
+
+// StopFilter leaves filter mode and drops the query with it, so the table shows
+// every pane again. A query outliving the mode would hide rows while the
+// letters stopped being text.
+func (s *Switcher) StopFilter() {
+	if !s.filter {
+		return
+	}
+	s.filter = false
+	if len(s.query) == 0 {
+		return
+	}
+	s.query = nil
+	s.refilter()
+}
+
+// AppendText adds a rune to the query and reselects the best match. Text
+// outside filter mode is ignored: there the letters are keys.
 func (s *Switcher) AppendText(r rune) {
+	if !s.filter {
+		return
+	}
 	s.query = append(s.query, r)
 	s.refilter()
 }
 
 // Backspace removes the query's last rune and reselects.
 func (s *Switcher) Backspace() {
-	if len(s.query) == 0 {
+	if !s.filter || len(s.query) == 0 {
 		return
 	}
 	s.query = s.query[:len(s.query)-1]
 	s.refilter()
 }
 
-// ClearQuery empties the query and reselects.
+// ClearQuery empties the query and reselects. The table stays in the mode it is
+// in, so the next keystroke is still a letter of the query.
 func (s *Switcher) ClearQuery() {
-	if len(s.query) == 0 {
+	if !s.filter || len(s.query) == 0 {
 		return
 	}
 	s.query = nil

@@ -221,11 +221,11 @@ func TestSwitcherDrawFrame(t *testing.T) {
 	if !l.preview || l.listW != 126 || l.prevW != 31 {
 		t.Fatalf("layout table %d preview %d (%v), want 126 and 31", l.listW, l.prevW, l.preview)
 	}
-	if cy != l.queryY || cx != l.inner.X+2 {
-		t.Fatalf("cursor %d,%d, want %d,%d", cx, cy, l.inner.X+2, l.queryY)
+	if cy != l.queryY || cx != l.inner.X {
+		t.Fatalf("cursor %d,%d, want %d,%d", cx, cy, l.inner.X, l.queryY)
 	}
 	want := []string{
-		">",
+		"press / to filter",
 		switcherTableLine("#", "proj", "agent", "git", "status", "time", "title"),
 		switcherTableLine("1", "dm", "serve", "+3 -12", "* working", "30s", "dm server"),
 		switcherTableLine("2", "web", "build", "clean", "! blocked", "4m", "make all"),
@@ -257,7 +257,7 @@ func TestSwitcherDrawFrame(t *testing.T) {
 	// The footer names every key the dashboard takes, then the ordering and the
 	// preview's share at the right edge.
 	wantLeft := "enter pick  esc close  1-9 jump  i input  d diff  " +
-		"type filter  s sort  p peek  +/- size  ^u/^d scroll"
+		"/ filter  s sort  p peek  +/- size  ^u/^d scroll"
 	wantRight := "recent 20%"
 	wantFoot := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
 	if foot := switcherText(screen, l.inner.X, l.footY, l.inner.W); foot != wantFoot {
@@ -305,21 +305,42 @@ func TestSwitcherDrawFootDropsHints(t *testing.T) {
 	l := switcherLayoutOf(s, snap)
 	_, _, _, screen := drawFloat(t, s, snap, nil)
 	foot := switcherText(screen, l.inner.X, l.footY, l.inner.W)
-	wantLeft := "enter pick  esc close  1-9 jump  i input  d diff  type filter"
+	wantLeft := "enter pick  esc close  1-9 jump  i input  d diff  / filter  s sort"
 	wantRight := "recent 60%"
 	want := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
 	if foot != want {
 		t.Fatalf("footer = %q, want %q", foot, want)
 	}
-	for _, gone := range []string{"s sort", "p peek", "+/- size", "^u/^d scroll"} {
+	for _, gone := range []string{"p peek", "+/- size", "^u/^d scroll"} {
 		if strings.Contains(foot, gone) {
 			t.Fatalf("footer kept %q: %q", gone, foot)
 		}
 	}
 }
 
-// TestSwitcherDrawQueryRow checks the query row reads "> " and the query, and
-// the returned cursor sits one past the query's last cell.
+// TestSwitcherDrawIdleQueryRow checks the query row says how to start filtering
+// while the letters are keys, and that the row is blank but for that hint.
+func TestSwitcherDrawIdleQueryRow(t *testing.T) {
+	s, snap := switcherOn(80, 24)
+	_, cx, cy, screen := drawFloat(t, s, snap, nil)
+	l := switcherLayoutOf(s, snap)
+	if cy != l.queryY || cx != l.inner.X {
+		t.Fatalf("cursor %d,%d, want the query row's first cell %d,%d", cx, cy, l.inner.X, l.queryY)
+	}
+	line := switcherText(screen, l.inner.X, l.queryY, l.listW)
+	if !strings.HasPrefix(line, "press / to filter") {
+		t.Fatalf("idle query row = %q, want the filter hint", line)
+	}
+	// Entering the mode swaps the hint for the prompt.
+	s.StartFilter()
+	_, _, _, screen = drawFloat(t, s, snap, nil)
+	if line := switcherText(screen, l.inner.X, l.queryY, l.listW); line != ">" {
+		t.Fatalf("filter row = %q, want the bare > prompt", line)
+	}
+}
+
+// TestSwitcherDrawQueryRow checks the query row reads "> " and the query in
+// filter mode, and the returned cursor sits one past the query's last cell.
 func TestSwitcherDrawQueryRow(t *testing.T) {
 	s, snap := switcherOn(80, 24)
 	switcherType(s, "ap")

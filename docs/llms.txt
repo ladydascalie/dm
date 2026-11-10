@@ -240,6 +240,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `switcher` | `close-ctrl-c` | `ctrl+c` |
 | `switcher` | `close-esc` | `esc` |
 | `switcher` | `pick` | `enter` |
+| `switcher` | `filter` | `/` |
 | `switcher` | `clear-query` | `ctrl+l` |
 | `switcher` | `backspace` | `backspace` |
 | `switcher` | `sort` | `s` |

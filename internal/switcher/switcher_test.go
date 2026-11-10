@@ -85,8 +85,9 @@ func switcherRowIDs(s *Switcher) []string {
 	return out
 }
 
-// switcherType types a whole query.
+// switcherType types a whole query, which is what filter mode is for.
 func switcherType(s *Switcher, q string) {
+	s.StartFilter()
 	for _, r := range q {
 		s.AppendText(r)
 	}
@@ -196,6 +197,60 @@ func TestSwitcherBackspace(t *testing.T) {
 	s.ClearQuery()
 	if got := switcherRowIDs(s); !reflect.DeepEqual(got, all) {
 		t.Fatalf("clearQuery keeps %v, want %v", got, all)
+	}
+}
+
+// TestSwitcherFilterMode holds the mode's rule: the query only filters while
+// filter mode is on, and leaving the mode drops it so the table is whole again.
+// Outside the mode a letter is a key, so text never narrows the table there.
+func TestSwitcherFilterMode(t *testing.T) {
+	s := switcherFull(160, 30)
+	all := switcherRowIDs(s)
+	if s.Filtering() {
+		t.Fatal("the dashboard opens outside filter mode")
+	}
+	// Text outside the mode is not text: the client routes letters to actions,
+	// and the model refuses the edit either way.
+	s.AppendText('d')
+	s.Backspace()
+	s.ClearQuery()
+	if s.Filtering() || len(s.query) != 0 || s.RowCount() != len(all) {
+		t.Fatalf("typing outside the mode changed the table: query %q rows %d", s.Query(), s.RowCount())
+	}
+	s.StartFilter()
+	if !s.Filtering() {
+		t.Fatal("StartFilter did not enter the mode")
+	}
+	s.AppendText('d')
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p1", "w2p2", "w3p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("query d keeps %v, want %v", got, want)
+	}
+	if s.Query() != "d" {
+		t.Fatalf("Query = %q, want d", s.Query())
+	}
+	// A second StartFilter keeps the query it already has.
+	s.StartFilter()
+	if s.Query() != "d" {
+		t.Fatalf("a second StartFilter cleared the query to %q", s.Query())
+	}
+	// Leaving the mode drops the query and shows every pane again.
+	s.StopFilter()
+	if s.Filtering() || s.Query() != "" {
+		t.Fatalf("StopFilter left filtering %v and query %q", s.Filtering(), s.Query())
+	}
+	if got := switcherRowIDs(s); !reflect.DeepEqual(got, all) {
+		t.Fatalf("after StopFilter the table keeps %v, want %v", got, all)
+	}
+	// StopFilter outside the mode is a no-op.
+	s.StopFilter()
+	if s.Filtering() || s.RowCount() != len(all) {
+		t.Fatal("StopFilter outside the mode changed the table")
+	}
+	// Starting the mode again begins from an empty query, so one keystroke
+	// narrows a whole table.
+	switcherType(s, "serve")
+	if got := switcherRowIDs(s); !reflect.DeepEqual(got, []string{"w1p1"}) {
+		t.Fatalf("second filter keeps %v, want w1p1", got)
 	}
 }
 

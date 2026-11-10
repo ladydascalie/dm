@@ -403,15 +403,18 @@ never reported a state reads as a shell. The age is seconds under a minute,
 then minutes, hours and days, and a dash when the server has no stamp. The
 title is the program's own window title, elided to its column.
 
-The digits pick: `1` to `9` select that row and go to its pane. `j` and `k`,
-the arrows, or ctrl+n and ctrl+p move the selection, and enter goes to the
-selected pane. The prefix key again, ctrl+c or `esc` closes without picking.
-It takes no mouse input.
+The letters are keys. The digits pick: `1` to `9` select that row and go to
+its pane. `j` and `k`, the arrows, or ctrl+n and ctrl+p move the selection, and
+enter goes to the selected pane. The prefix key again, ctrl+c or `esc` closes
+without picking. It takes no mouse input.
 
-The query filters the table: type to match a name, the app, the title, the
-branch, the worktree, the folder or the project. Backspace edits it and ctrl+l
-clears it. The letters the dashboard binds run their action instead of reaching
-the query, so `s`, `p`, `i` and `d` are not text.
+`/` starts filtering, and the query row then takes every printable key, so a
+search holds `d`, `s`, `i` and the digits without an action firing mid word.
+The query matches a name, the app, the title, the branch, the worktree, the
+folder or the project. Backspace edits it and ctrl+l clears it. In filter mode
+`esc` unwinds: the first press clears the query, the next leaves the mode and
+the table shows every pane again, and only the next one closes the dashboard.
+The arrows and ctrl+n and ctrl+p still move the selection while filtering.
 
 `s` cycles the ordering: recent, then project, then status. Recent puts the
 newest status change first. Project groups the rows by project name, with the

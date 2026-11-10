@@ -760,6 +760,8 @@ func TestOraclePalette(t *testing.T) {
 	rect := layout.Rect{W: f.snap.Cols, H: f.snap.Rows}
 	f.tui.sw = switcher.NewSwitcher(rect, f.snap)
 	step("open")
+	f.tui.sw.StartFilter()
+	step("filter")
 	f.tui.sw.AppendText('t')
 	step("type")
 	f.tui.sw.AppendText('y')

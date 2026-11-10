@@ -209,6 +209,7 @@ var ActionDesc = map[string]string{
 
 	// switcher
 	"close-ctrl-c":    "Close the overlay without choosing; ctrl+c is an alternative close key.",
+	"filter":          "Start filtering; in filter mode every printable key edits the query and esc leaves it.",
 	"clear-query":     "Clear the dashboard query.",
 	"backspace":       "Delete the last character of the query or name.",
 	"down-ctrl-n":     "Move the selection down one row; ctrl+n is an alternative key.",

@@ -461,6 +461,7 @@ keymap "switcher" {
     "close-ctrl-c" "ctrl+c"
     "close-esc" "esc"
     "pick" "enter"
+    "filter" "/"
     "clear-query" "ctrl+l"
     "backspace" "backspace"
     "sort" "s"
