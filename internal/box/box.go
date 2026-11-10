@@ -28,6 +28,17 @@ const (
 	MaxWaitMs  = 3600000   // longest wait, one hour
 )
 
+// NotifyPrefix marks the topic branch the server renders as desktop
+// notifications. An entry under it keeps every box behaviour: validation, caps,
+// seq, trim, watchers. The prefix only adds the render.
+const NotifyPrefix = "notify/"
+
+// IsNotifyTopic reports whether key names the notify topic itself or anything
+// under it, so a caller decides on the key alone.
+func IsNotifyTopic(key string) bool {
+	return key == NotifyPrefix || strings.HasPrefix(key, NotifyPrefix)
+}
+
 // Entry is one line of the box, exactly as it travels in Res. Every field is
 // always present, so the tags carry no omitempty: a reader can tell an empty
 // key from a missing one. The server owns seq and at.
