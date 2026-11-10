@@ -173,7 +173,9 @@ func oldBarRow(th theme.Theme, snap *wire.Snapshot, armed bool, info string, set
 		segment.Write(&b, s)
 	}
 	if n := snap.Cols - segment.SegCells(segs); n > 0 {
-		b.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", n))
+		b.WriteString("\x1b[0m")
+		b.WriteString(th.Palette.RailBG.BG())
+		b.WriteString(strings.Repeat(" ", n))
 	}
 	for _, s := range pinned {
 		segment.Write(&b, s)
@@ -192,14 +194,19 @@ func oldTabBarRow(th theme.Theme, snap *wire.Snapshot, tw tabWidth) string {
 	p := th.Palette
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "\x1b[%d;%dH", bar.Y+1, bar.X+1)
-	b.WriteString("\x1b[0m" + p.RailBG.BG())
+	b.WriteString("\x1b[0m")
+	b.WriteString(p.RailBG.BG())
 	b.WriteString(strings.Repeat(" ", bar.W))
 	b.WriteString("\x1b[0m")
 	for _, it := range tabBarItems(snap, tw) {
 		if snap.ActiveWindow == it.Index {
-			b.WriteString("\x1b[0m" + p.RailFocusBG.BG() + p.RailText.FG())
+			b.WriteString("\x1b[0m")
+			b.WriteString(p.RailFocusBG.BG())
+			b.WriteString(p.RailText.FG())
 		} else {
-			b.WriteString("\x1b[0m" + p.RailBG.BG() + p.RailDim.FG())
+			b.WriteString("\x1b[0m")
+			b.WriteString(p.RailBG.BG())
+			b.WriteString(p.RailDim.FG())
 		}
 		fmt.Fprintf(&b, "\x1b[%d;%dH", it.Rect.Y+1, it.Rect.X+1)
 		b.WriteString(cells.Center(cells.Elide(it.Label, it.Rect.W-2), it.Rect.W))
@@ -326,10 +333,13 @@ func TestModalInputRowPaintsLikeTheDirectForm(t *testing.T) {
 	fmt.Fprintf(&want, "\x1b[%d;%dH\x1b[0m", r.Y+1, r.X+1)
 	want.WriteString(p.RailBG.BG())
 	fmt.Fprintf(&want, "%s name: ", p.RailDim.FG())
-	want.WriteString(p.RailText.FG() + "worktree")
-	want.WriteString(p.BarAccent.FG() + caret)
+	want.WriteString(p.RailText.FG())
+	want.WriteString("worktree")
+	want.WriteString(p.BarAccent.FG())
+	want.WriteString(caret)
 	if n := r.W - cells.Cells(" name: ") - cells.Cells("worktree") - 1; n > 0 {
-		want.WriteString(p.RailBG.BG() + strings.Repeat(" ", n))
+		want.WriteString(p.RailBG.BG())
+		want.WriteString(strings.Repeat(" ", n))
 	}
 	want.WriteString("\x1b[0m")
 
