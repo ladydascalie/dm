@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -614,12 +615,21 @@ func (s *server) serve(c net.Conn) {
 			s.mu.Unlock()
 			s.attach(cl, m)
 		case "keys":
+			// The keys go to the pane the message names: that is the row the
+			// dashboard's footer, preview and paste frame describe. An empty
+			// target is the pane the active window has focus.
 			s.mu.Lock()
-			pc := s.panes[s.st.ActiveWindow().Focus]
-			s.mu.Unlock()
-			if pc != nil {
-				_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
+			id := m.Target
+			if id == "" {
+				id = s.st.ActiveWindow().Focus
 			}
+			pc := s.panes[id]
+			s.mu.Unlock()
+			if pc == nil {
+				s.reply(cl, m, nil, fmt.Errorf("no pane %q", id))
+				break
+			}
+			_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
 		case "resize":
 			s.mu.Lock()
 			if m.Cols > 20 && m.Rows > 5 {
