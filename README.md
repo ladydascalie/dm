@@ -293,6 +293,7 @@ The whole shape, at the built-in values:
 palette {
     "rail-bg"       "#14131a"
     "rail-focus-bg" "#1f1e27"
+    "rail-hover-bg" "#191820"
     "rail-text"     "#e9eaf1"
     "rail-dim"      "#8f93a8"
     "rail-header"   "#a6a9bd"

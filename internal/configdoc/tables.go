@@ -348,6 +348,7 @@ func ThemeKeys() []ThemeKey {
 	keys := []ThemeKey{
 		{"palette", "rail-bg", rgbHex(d.Palette.RailBG), "Rail background."},
 		{"palette", "rail-focus-bg", rgbHex(d.Palette.RailFocusBG), "Focused rail row background."},
+		{"palette", "rail-hover-bg", rgbHex(d.Palette.RailHoverBG), "Hovered rail row background."},
 		{"palette", "rail-text", rgbHex(d.Palette.RailText), "Primary rail text."},
 		{"palette", "rail-dim", rgbHex(d.Palette.RailDim), "Dim rail text and secondary rows."},
 		{"palette", "rail-header", rgbHex(d.Palette.RailHeader), "Workspace header text."},
@@ -401,6 +402,7 @@ func rgbHex(c theme.RGB) string {
 const ThemeSampleKDL = `palette {
     "rail-bg"       "#14131a"
     "rail-focus-bg" "#1f1e27"
+    "rail-hover-bg" "#191820"
     "rail-text"     "#e9eaf1"
     "rail-dim"      "#8f93a8"
     "rail-header"   "#a6a9bd"

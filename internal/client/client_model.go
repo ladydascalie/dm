@@ -157,6 +157,15 @@ type tui struct {
 	dragSpace  int
 	dragAt     time.Time
 
+	// railHover remembers the rail row the pointer last lit, so a motion
+	// that moves it marks the frame dirty. The paint derives the row from
+	// mouseX/mouseY, so this is a cache, never the source.
+	railHover int
+	// mouseSeen turns false until the first pointer event. A tui that never
+	// saw the pointer lights no hover: the zero cell is a rail row, and a
+	// highlight before the pointer moved would point at nothing.
+	mouseSeen bool
+
 	// padZone is the divider under the pointer and padAxis its orientation.
 	// A zero zone draws no hover affordance. mouseX/mouseY remember the last
 	// pointer cell, so a snapshot can re-resolve the hover.
@@ -633,6 +642,7 @@ func (t *tui) apply(m wire.Msg) {
 		t.snap = m.Snap
 		t.snap.WindowLabel = t.km().WindowLabel()
 		t.updatePadHover(t.mouseX, t.mouseY)
+		t.updateRailHover()
 		// railWant remembers the last expanded width only, so a collapse or a
 		// hide does not replace it with the thin width or zero.
 		switch {

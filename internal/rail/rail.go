@@ -798,8 +798,10 @@ func RailControlSegs(th theme.Theme, compact bool, set theme.GlyphSet) []segment
 // screen are clipped, and every row is written into at most Rail columns. The
 // last column above the control row is the grip strip, so no row paints there.
 // A left run is elided with an ellipsis before the right-aligned stats give up
-// a cell, so the stats survive a narrow rail.
-func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) {
+// a cell, so the stats survive a narrow rail. hover is the row the pointer
+// rests on, -1 when none: it paints RailHoverBG, with the focused pane row
+// keeping its stronger ground.
+func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, hover int) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
@@ -807,6 +809,9 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 	w := snap.Rail
 	rows := snap.Rows - 1
 	items := RailItems(snap)
+	if hover < 0 || hover >= len(items) {
+		hover = -1
+	}
 	compact := layout.RailCompact(snap.Rail)
 	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
 	// in rows 0..Rows-3 and clip there. Nothing overwrites the control row.
@@ -839,8 +844,13 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			left = append(left, l...)
 			right, tail = r, t
 			// A focused pane row paints its own background and every run bold.
-			if it.Kind == Pane && it.Focus {
+			// A hovered row lights lightly; the gap row never lights, so a
+			// highlight always means the row answers a click.
+			switch {
+			case it.Kind == Pane && it.Focus:
 				bg, bold = p.RailFocusBG, true
+			case y == hover && it.Kind != Gap:
+				bg = p.RailHoverBG
 			}
 		}
 		leftCells := segment.SegCells(left) + segment.SegCells(tail)

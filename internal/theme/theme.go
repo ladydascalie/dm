@@ -68,8 +68,8 @@ type RailMarks struct {
 
 // Palette is the rail and status bar RGB set.
 type Palette struct {
-	RailBG, RailFocusBG, RailText, RailDim, RailHeader, RailWindow RGB
-	RailDiffAdd, RailDiffDel, RailWorking, BarAccent               RGB
+	RailBG, RailFocusBG, RailHoverBG, RailText, RailDim, RailHeader, RailWindow RGB
+	RailDiffAdd, RailDiffDel, RailWorking, BarAccent                            RGB
 }
 
 // Glyphs are the structural decorators: the drag grip, the divider hover
@@ -116,6 +116,7 @@ func DefaultTheme() Theme {
 		Palette: Palette{
 			RailBG:      RGB{20, 19, 26},    // #14131a
 			RailFocusBG: RGB{31, 30, 39},    // #1f1e27
+			RailHoverBG: RGB{25, 24, 32},    // #191820
 			RailText:    RGB{233, 234, 241}, // #e9eaf1
 			RailDim:     RGB{143, 147, 168}, // #8f93a8
 			RailHeader:  RGB{166, 169, 189}, // #a6a9bd
@@ -361,6 +362,8 @@ func (p *Palette) set(key string, c RGB) bool {
 		p.RailBG = c
 	case "rail-focus-bg":
 		p.RailFocusBG = c
+	case "rail-hover-bg":
+		p.RailHoverBG = c
 	case "rail-text":
 		p.RailText = c
 	case "rail-dim":

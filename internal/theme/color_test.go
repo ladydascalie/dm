@@ -153,7 +153,7 @@ func bundledThemes(t *testing.T) map[string]Theme {
 func themeColours(th Theme) []RGB {
 	p := th.Palette
 	out := []RGB{
-		p.RailBG, p.RailFocusBG, p.RailText, p.RailDim, p.RailHeader,
+		p.RailBG, p.RailFocusBG, p.RailHoverBG, p.RailText, p.RailDim, p.RailHeader,
 		p.RailWindow, p.RailDiffAdd, p.RailDiffDel, p.RailWorking, p.BarAccent,
 	}
 	out = append(out, th.Accents[:]...)

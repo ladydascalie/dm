@@ -314,7 +314,7 @@ A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, named by the `theme` no
 
 | Block | Keys and built-in defaults | What it carries |
 | --- | --- | --- |
-| `palette` | `rail-bg` #14131a, `rail-focus-bg` #1f1e27, `rail-text` #e9eaf1, `rail-dim` #8f93a8, `rail-header` #a6a9bd, `rail-window` #9599ae, `rail-diff-add` #78dc82, `rail-diff-del` #ff7d7d, `rail-working` #f5be50, `bar-accent` #7ac0eb | Rail and status bar colours. |
+| `palette` | `rail-bg` #14131a, `rail-focus-bg` #1f1e27, `rail-hover-bg` #191820, `rail-text` #e9eaf1, `rail-dim` #8f93a8, `rail-header` #a6a9bd, `rail-window` #9599ae, `rail-diff-add` #78dc82, `rail-diff-del` #ff7d7d, `rail-working` #f5be50, `bar-accent` #7ac0eb | Rail and status bar colours. |
 | `accents` | `accent-1` #bb9af7, `accent-2` #6edceb, `accent-3` #f08cd7, `accent-4` #7ea9ff, `accent-5` #f0a05a, `accent-6` #8cd79b | Workspace accent colours, assigned in order. |
 | `glyphs` | `grip` •, `divider-row` ━, `divider-col` ┃, `border-top-left` ┌, `border-top-right` ┐, `border-bottom-left` └, `border-bottom-right` ┘, `border-horizontal` ─, `border-vertical` │, `border-tee-left` ├, `border-tee-right` ┤, `fold-open` ▾, `fold-closed` ▸, `active-mark` ▸, `workspace-bar` ▌, `dirty` ● | Box, divider, fold and mark glyphs. |
 | `states` | `working.glyph` ●, `working.colour` #f5be50, `idle.glyph` ○, `idle.colour` #78c8e1, `blocked.glyph` ▲, `blocked.colour` #ff6e6e, `done.glyph` ✓, `done.colour` #6ee191, `error.glyph` ✕, `error.colour` #ff82a0, `unknown.glyph` ?, `unknown.colour` #8f93a8, `shell.glyph` ▶, `shell.colour` #8f93a8 | Glyph and colour per pane state: working, idle, blocked, done, error, unknown, shell. |
