@@ -1719,8 +1719,10 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	}
 	x, y := ev.x-1, ev.y-1
 	t.mouseX, t.mouseY = x, y
+	t.mouseSeen = true
 	t.updateLinkHover(x, y, ev.btn&16 != 0)
 	t.updatePadHover(x, y)
+	t.updateRailHover()
 	if t.mode == "menu" {
 		if t.menu == nil {
 			t.closeMenu()
@@ -1961,6 +1963,31 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		t.scrollBy(3)
 	} else {
 		t.scrollBy(-3)
+	}
+}
+
+// railHoverRow resolves the rail row the pointer lights, -1 when none. A row
+// lights only after the pointer moved at least once, and only while it could
+// act on the rail: no menu, modal, drag or selection press in flight, and
+// never a gap row.
+func (t *tui) railHoverRow() int {
+	if !t.mouseSeen || t.mode != "" || t.dragging || t.railDragging ||
+		t.press != nil || t.snap == nil || t.snap.Rail <= 0 {
+		return -1
+	}
+	if it, ok := rail.RailItemAt(t.snap, t.mouseX, t.mouseY); ok && it.Kind != rail.Gap {
+		return t.mouseY
+	}
+	return -1
+}
+
+// updateRailHover re-resolves the hover and marks the frame dirty when the
+// lit row moved. The paint reads the pointer state directly, so a snapshot
+// that relayouts the rail re-lights without a new pointer event.
+func (t *tui) updateRailHover() {
+	if h := t.railHoverRow(); h != t.railHover {
+		t.railHover = h
+		t.dirty = true
 	}
 }
 

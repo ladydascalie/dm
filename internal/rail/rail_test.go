@@ -257,7 +257,7 @@ func TestRailRowSegments(t *testing.T) {
 	// the focused pane row paints the focus fill bold, and every other row the
 	// rail fill plain.
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1)
 	out := b.String()
 	focusRow := -1
 	for y := 0; y < snap.Rows-1; y++ {
@@ -418,7 +418,7 @@ type railSeg = segment.Seg
 func railRows(t *testing.T, snap *wire.Snapshot, set theme.GlyphSet) []string {
 	t.Helper()
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme().For(set), snap, set)
+	DrawRail(&b, theme.DefaultTheme().For(set), snap, set, -1)
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()
@@ -657,7 +657,7 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 func TestRailASCIIGlyphs(t *testing.T) {
 	snap := railRowSnap(layout.DefaultRail)
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII)
+	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII, -1)
 	out := b.String()
 	for _, glyph := range []string{"▾", "▸", "•", "·", "●", "○", "▲", "✓", "✕", "▶", "▌"} {
 		if strings.Contains(out, glyph) {
@@ -795,7 +795,7 @@ func TestRailProjectGroup(t *testing.T) {
 	}
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	var b bytes.Buffer
-	DrawRail(&b, th, snap, theme.GlyphUnicode)
+	DrawRail(&b, th, snap, theme.GlyphUnicode, -1)
 	term.Write(b.Bytes())
 	term.Flush()
 	for y, it := range items {
@@ -837,7 +837,7 @@ func TestRailUntaggedWorkspaceHasNoProject(t *testing.T) {
 	}
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1)
 	term.Write(b.Bytes())
 	term.Flush()
 	for y := 0; y < snap.Rows-2; y++ {
@@ -992,5 +992,52 @@ func TestRailFoldedProjectHidesGroup(t *testing.T) {
 	left, _, _ := RailRow(th, *alpha, layout.DefaultRail, false, theme.GlyphUnicode)
 	if len(left) == 0 || left[0].Text != th.Glyphs.FoldClosed {
 		t.Fatalf("project caret = %+v, want the closed glyph", left)
+	}
+}
+
+// TestRailHoverBackground paints the hovered row with RailHoverBG. The
+// focused pane row keeps its stronger ground, a gap row never lights, and a
+// hover past the last item changes nothing.
+func TestRailHoverBackground(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	snap := railRowSnap(layout.DefaultRail)
+	items := RailItems(snap)
+	windowAt, focusAt, gapAt := -1, -1, -1
+	for y, it := range items {
+		switch {
+		case it.Kind == Window && windowAt < 0:
+			windowAt = y
+		case it.Kind == Pane && it.Focus:
+			focusAt = y
+		case it.Kind == Gap:
+			gapAt = y
+		}
+	}
+	if windowAt < 0 || focusAt < 0 || gapAt < 0 {
+		t.Fatalf("fixture lost a row: window %d focus %d gap %d", windowAt, focusAt, gapAt)
+	}
+	draw := func(hover int) string {
+		var b bytes.Buffer
+		DrawRail(&b, th, snap, theme.GlyphUnicode, hover)
+		return b.String()
+	}
+	rowStart := fmt.Sprintf("\x1b[%d;1H\x1b[0m", windowAt+1) + th.Palette.RailHoverBG.BG()
+	if out := draw(windowAt); !strings.Contains(out, rowStart) {
+		t.Fatalf("hovered window row is not on the hover fill: %q", out)
+	}
+	// The focused pane row wins over the hover.
+	focusStart := fmt.Sprintf("\x1b[%d;1H\x1b[0m", focusAt+1) + th.Palette.RailFocusBG.BG()
+	if out := draw(focusAt); !strings.Contains(out, focusStart) {
+		t.Fatalf("hovered focused row lost the focus fill: %q", out)
+	}
+	// A gap row stays on the rail fill.
+	gapStart := fmt.Sprintf("\x1b[%d;1H\x1b[0m", gapAt+1) + th.Palette.RailBG.BG()
+	if out := draw(gapAt); !strings.Contains(out, gapStart) {
+		t.Fatalf("hovered gap row left the rail fill: %q", out)
+	}
+	// A hover past the last item paints the plain rail.
+	if draw(len(items)+3) != draw(-1) {
+		t.Fatal("an out-of-range hover changed the paint")
 	}
 }

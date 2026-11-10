@@ -293,7 +293,8 @@ The whole shape, at the built-in values:
 ```kdl
 palette {
     "rail-bg"       "#14131a"
-    "rail-focus-bg" "#1f1e27"
+    "rail-focus-bg" "#2c2a38"
+    "rail-hover-bg" "#21202d"
     "rail-text"     "#e9eaf1"
     "rail-dim"      "#8f93a8"
     "rail-header"   "#a6a9bd"
@@ -620,13 +621,14 @@ per window, the focus chip, then the pinned right block.
 
 Colours are explicit RGB, never terminal palette slots. The built-in theme
 paints them only on grounds it checks: railBG (#14131a) for the ground and the
-gutter, railFocusBG (#1f1e27) for the active window chip and the focus chip,
-railText (#e9eaf1), railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb)
+gutter, railFocusBG (#2c2a38) for the active window chip and the focus chip,
+railHoverBG (#21202d) for the row the pointer rests on, railText (#e9eaf1),
+railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb)
 for the active mark, and the state colours of the `states` block in Themes. A
 user theme names its own RGB, so it chooses its own grounds and answers for its
 own contrast. Every footer foreground of the built-in theme reaches WCAG AA,
-4.5:1 or better, on both grounds it is painted on: railDim on railFocusBG is the
-tightest at 5.42:1, and the barAccent mark reaches 8.30:1 on the focus fill it
+4.5:1 or better, on every ground it is painted on: railDim on railFocusBG is the
+tightest at 4.62:1, and the barAccent mark reaches 7.07:1 on the focus fill it
 sits on, 9.29:1 on the ground.
 
 At 80 columns, with the session `pi-footer-2026`, the workspace `main`, three

@@ -56,7 +56,7 @@ func TestThemeReachesPainters(t *testing.T) {
 	th.States["working"] = theme.StateStyle{Glyph: "W", NerdGlyph: "W", Colour: theme.RGB{R: 22, G: 23, B: 24}}
 	// The palette reaches the rail ground and the bar accent.
 	var railBuf bytes.Buffer
-	rail.DrawRail(&railBuf, th, testutil.AgentRail("working"), theme.GlyphUnicode)
+	rail.DrawRail(&railBuf, th, testutil.AgentRail("working"), theme.GlyphUnicode, -1)
 	if !strings.Contains(railBuf.String(), (theme.RGB{R: 1, G: 2, B: 3}).BG()) {
 		t.Fatalf("rail does not paint the themed ground: %q", railBuf.String())
 	}
@@ -187,7 +187,7 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	}
 
 	var b bytes.Buffer
-	rail.DrawRail(&b, th, testutil.AgentRail("working"), theme.GlyphUnicode)
+	rail.DrawRail(&b, th, testutil.AgentRail("working"), theme.GlyphUnicode, -1)
 	// The glyph's colour rides inside the row's combined escape.
 	param := ";" + (theme.RGB{R: 1, G: 2, B: 3}).SGR(false) + ";"
 	if !strings.Contains(b.String(), "W") || !strings.Contains(b.String(), param) {

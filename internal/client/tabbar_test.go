@@ -145,7 +145,7 @@ func TestDrawTabBarHighlightsActive(t *testing.T) {
 		t.Fatalf("tab names missing: %q", out)
 	}
 	const (
-		active   = "\x1b[0;38;2;233;234;241;48;2;31;30;39m"
+		active   = "\x1b[0;38;2;233;234;241;48;2;44;42;56m"
 		inactive = "\x1b[0;38;2;143;147;168;48;2;20;19;26m"
 	)
 	if !strings.Contains(out, active) {
@@ -168,7 +168,7 @@ func TestDrawTabBarRowBytes(t *testing.T) {
 		"\x1b[0;39;48;2;20;19;26m" + // reset, default fg, rail ground
 		"                              " + // the bar is 30 cells wide
 		"\x1b[0m" +
-		"\x1b[0;38;2;233;234;241;48;2;31;30;39m" + // the active tab's paint
+		"\x1b[0;38;2;233;234;241;48;2;44;42;56m" + // the active tab's paint
 		"\x1b[1;11H" +
 		"  one   " + // the label centered in its 8 cells
 		"\x1b[0m"
