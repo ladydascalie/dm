@@ -62,7 +62,8 @@ func drawBar(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, armed bool,
 	}
 	if n := snap.Cols - segment.SegCells(segs); n > 0 {
 		// The bar's ground is the rail's: there is no second background.
-		buf.WriteString(groundSGR(th.Palette.RailBG) + strings.Repeat(" ", n))
+		buf.WriteString(groundSGR(th.Palette.RailBG))
+		buf.WriteString(strings.Repeat(" ", n))
 	}
 	for _, s := range pinned {
 		segment.Write(buf, s)

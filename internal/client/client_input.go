@@ -1337,7 +1337,7 @@ func (t *tui) copySelection() {
 		return
 	}
 	text := extractSelection(term, p.Rect.W, s.anchor, s.focus)
-	os.Stdout.WriteString(osc52(text))
+	_, _ = os.Stdout.WriteString(osc52(text))
 	t.notify(fmt.Sprintf("copied %d chars", len(text)))
 }
 
@@ -1444,7 +1444,7 @@ func (t *tui) takeYank(m wire.Msg) {
 
 // writeClipboard sends text to the terminal's clipboard with OSC 52.
 func (t *tui) writeClipboard(text string) {
-	os.Stdout.WriteString(osc52(text))
+	_, _ = os.Stdout.WriteString(osc52(text))
 }
 
 // screenText returns the visible rows joined by a newline, trailing blanks
@@ -2224,7 +2224,7 @@ func sgrMouse(btn, x, y int, release bool) []byte {
 	if release {
 		end = 'm'
 	}
-	return []byte(fmt.Sprintf("\x1b[<%d;%d;%d%c", btn, x, y, end))
+	return fmt.Appendf(nil, "\x1b[<%d;%d;%d%c", btn, x, y, end)
 }
 
 // parseMouse reads an SGR mouse sequence: ESC [ < b ; x ; y M|m. n is the bytes

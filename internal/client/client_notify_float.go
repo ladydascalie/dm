@@ -83,7 +83,8 @@ func (c *notifyCentre) paint(th theme.Theme) {
 		if i == c.sel {
 			buf.WriteString("\x1b[0m")
 		} else {
-			buf.WriteString("\x1b[0m" + th.Palette.RailDim.FG())
+			buf.WriteString("\x1b[0m")
+			buf.WriteString(th.Palette.RailDim.FG())
 		}
 		buf.WriteString(cells.Clip(notifyRowText(c.entries[i], mark), r.W))
 	}
@@ -242,7 +243,7 @@ func (t *tui) notifyCentreRequest() {
 	t.notifyRouteTag(t.notifyID, notifyRouteCentre)
 	_ = t.conn.Send(wire.Msg{
 		Type: "req", Action: "msg-list", ID: t.notifyID,
-		Res: []byte(fmt.Sprintf(`{"keyPrefix":"notify/","limit":%d}`, notifyCentreLimit)),
+		Res: fmt.Appendf(nil, `{"keyPrefix":"notify/","limit":%d}`, notifyCentreLimit),
 	})
 }
 
