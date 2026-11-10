@@ -578,6 +578,9 @@ func boxSubExec(t *testing.T, h *harness, env []string, args ...string) *boxSubP
 		for sc.Scan() {
 			p.news <- sc.Text()
 		}
+		if err := sc.Err(); err != nil {
+			p.t.Errorf("sub stdout scan: %v", err)
+		}
 		close(p.news)
 		p.done <- p.cmd.Wait()
 	}()
