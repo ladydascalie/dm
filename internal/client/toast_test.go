@@ -101,7 +101,8 @@ func toastRow(t *testing.T, out, text string) (row, col int) {
 	return row, col
 }
 
-// The stack draws both texts, newest nearest the bar.
+// The stack draws both texts, newest nearest the bar, one row apart between
+// the boxes.
 func TestDrawToastsStack(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 40, Rows: 12}
 	tui := &tui{}
@@ -115,8 +116,8 @@ func TestDrawToastsStack(t *testing.T) {
 	if !(oldRow < newRow) {
 		t.Fatalf("rows older=%d newest=%d, want newest below", oldRow, newRow)
 	}
-	if newRow != snap.Rows-1 {
-		t.Fatalf("newest row = %d, want %d just above the bar", newRow, snap.Rows-1)
+	if newRow != snap.Rows-2 {
+		t.Fatalf("newest row = %d, want %d inside the box just above the bar", newRow, snap.Rows-2)
 	}
 }
 
@@ -130,8 +131,8 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
 	out := b.String()
 	row, col := toastRow(t, out, "a toast m"+cells.Ellipsis)
-	if row != snap.Rows-1 {
-		t.Fatalf("row = %d, want %d", row, snap.Rows-1)
+	if row != snap.Rows-2 {
+		t.Fatalf("row = %d, want %d", row, snap.Rows-2)
 	}
 	// Left border, cols-2 inner cells, right border.
 	if col != 1 {
@@ -219,8 +220,8 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 			drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
 			out := b.String()
 			row, col := toastRow(t, out, c.text)
-			if row != snap.Rows-1 {
-				t.Fatalf("row = %d, want %d", row, snap.Rows-1)
+			if row != snap.Rows-2 {
+				t.Fatalf("row = %d, want %d", row, snap.Rows-2)
 			}
 			// The cursor sits on the left border, so the box is Cols-col+1
 			// cells wide: the text's cells plus its two border cells.
@@ -305,6 +306,107 @@ func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
 	for _, r := range got {
 		if r != '日' && r != '…' {
 			t.Fatalf("interior %q holds a split rune %q", got, string(r))
+		}
+	}
+}
+
+// A toast renders as a closed box: a border on all four sides from the theme
+// glyphs, the text row inside, no padding row.
+func TestDrawToastsPaintsClosedBox(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 40, Rows: 9}
+	th := theme.DefaultTheme()
+	g := th.Glyphs
+	tui := &tui{}
+	tui.notify("saved 3 files")
+	var b bytes.Buffer
+	drawToasts(&b, th, snap, tui.toasts)
+	out := b.String()
+	w := cells.Cells("saved 3 files") + 2
+	edge := strings.Repeat(g.BorderHorizontal, w-2)
+	if !strings.Contains(out, g.BorderTopLeft+edge+g.BorderTopRight) {
+		t.Fatalf("the box has no closed top border: %q", out)
+	}
+	if !strings.Contains(out, g.BorderBottomLeft+edge+g.BorderBottomRight) {
+		t.Fatalf("the box has no closed bottom border: %q", out)
+	}
+	want := "\x1b[0m\x1b[90m" + g.BorderVertical + "\x1b[97msaved 3 files\x1b[0m\x1b[90m" + g.BorderVertical + "\x1b[0m"
+	if !strings.Contains(out, want) {
+		t.Fatalf("the text row is not framed on both sides: %q", out)
+	}
+	// The three rows are consecutive and share one column: the box is tight.
+	rows := map[int]bool{}
+	col := -1
+	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
+		r, _ := strconv.Atoi(out[m[2]:m[3]])
+		c, _ := strconv.Atoi(out[m[4]:m[5]])
+		rows[r] = true
+		if col < 0 {
+			col = c
+		} else if c != col {
+			t.Fatalf("box rows do not share column %d: found %d", col, c)
+		}
+	}
+	if len(rows) != 3 {
+		t.Fatalf("the box paints %d rows, want the top, the text and the bottom: %v", len(rows), rows)
+	}
+	_, textCol := toastRow(t, out, "saved 3 files")
+	if textCol != col {
+		t.Fatalf("text row does not start at the border column %d", col)
+	}
+}
+
+// The stack separates the boxes by one row, so the boxes read as separate
+// popups, not one tall block.
+func TestDrawToastsSeparatesBoxes(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 40, Rows: 14}
+	tui := &tui{}
+	tui.notify("older")
+	tui.notify("newer")
+	var b bytes.Buffer
+	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
+	out := b.String()
+	oldRow, _ := toastRow(t, out, "older")
+	newRow, _ := toastRow(t, out, "newer")
+	if newRow-oldRow != 4 {
+		t.Fatalf("text rows %d and %d, want one box, one gap and one box between", oldRow, newRow)
+	}
+	// The gap row between the boxes carries no glyph.
+	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
+		r, _ := strconv.Atoi(out[m[2]:m[3]])
+		if r != oldRow+2 {
+			continue
+		}
+		t.Fatalf("a cursor paints on the gap row %d", r)
+	}
+	if strings.Count(out, theme.DefaultTheme().Glyphs.BorderHorizontal) != 2*(cells.Cells("older")+2-2)+2*(cells.Cells("newer")+2-2) {
+		t.Fatalf("the horizontal border count does not match two closed boxes: %q", out)
+	}
+}
+
+// A stack taller than the space above the bar drops the oldest boxes instead
+// of painting over the bar.
+func TestDrawToastsDropsBoxesThatDoNotFit(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 40, Rows: 6} // room for one box above the bar
+	tui := &tui{}
+	tui.notify("oldest")
+	tui.notify("middle")
+	tui.notify("newest")
+	var b bytes.Buffer
+	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
+	out := b.String()
+	if !strings.Contains(out, "newest") {
+		t.Fatalf("the newest box is missing: %q", out)
+	}
+	for _, gone := range []string{"middle", "oldest"} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("box %q overflowed the space above the bar: %q", gone, out)
+		}
+	}
+	// The bar row is never painted.
+	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
+		r, _ := strconv.Atoi(out[m[2]:m[3]])
+		if r > snap.Rows-1 {
+			t.Fatalf("a box painted on the bar row %d", r)
 		}
 	}
 }
