@@ -3,95 +3,84 @@ package switcher
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"dm/internal/layout"
 	"dm/internal/rail"
 	"dm/internal/wire"
 )
 
-// switcherSnap is a session for the switcher: two workspaces, three windows and
-// five panes. Every window is folded and w1's pane carries a status message, so
-// a rail note row would appear if the switcher kept one. w1 sits in the folder
-// api with the branch dm-api, w2 in the folder web, and w2p2 works in a
-// subfolder, so a query can match a window without matching one of its panes.
+// switcherTestNow is the second the fixture's status stamps are measured from.
+// The clock is frozen to it, so every age column reads the same in every run.
+const switcherTestNow = int64(1_700_000_000)
+
+// freezeSwitcherClock stops the table's clock at a fixed second.
+func freezeSwitcherClock(t *testing.T) {
+	t.Helper()
+	old := switcherNow
+	switcherNow = func() time.Time { return time.Unix(switcherTestNow, 0) }
+	t.Cleanup(func() { switcherNow = old })
+}
+
+// switcherSnap is a session for the dashboard: five panes across two projects
+// and one outside any project. The stamps, projects and states are shuffled so
+// each sort mode gives its own order, and every column has something to show:
+// a name, an app in place of a name, an id in place of both, a dirty tree, a
+// clean one, a pane outside git, and a long title.
 func switcherSnap() *wire.Snapshot {
-	snap := &wire.Snapshot{
-		Cols: 100, Rows: 20, Rail: layout.DefaultRail,
-		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
+	now := switcherTestNow
+	return &wire.Snapshot{
+		Cols: 160, Rows: 30, Focus: "w1p1",
+		All: []wire.AllPane{
+			{
+				ID: "w1p1", Name: "serve", Project: "dm", App: "pi",
+				Title: "dm server", Status: "working", Agent: true,
+				StatusChangedAt: now - 30,
+				Workspace:       "s1", Window: "w1", Focus: true,
+				Cwd: "/work/dm/api", Root: "/work/dm", Branch: "dm-api", InRepo: true,
+				Added: 3, Deleted: 12,
+			},
+			{
+				ID: "w2p1", Name: "build", Project: "web", App: "make",
+				Title: "make all", Status: "blocked", Agent: true,
+				StatusChangedAt: now - 270,
+				Workspace:       "s1", Window: "w2",
+				Cwd: "/work/dm/web", Root: "/work/dm", Branch: "web-work", Worktree: "web",
+				InRepo: true,
+			},
+			{
+				ID: "w2p2", Project: "dm", App: "nvim",
+				Title: "api.go", Status: "done", Agent: true,
+				StatusChangedAt: now - 7800,
+				Workspace:       "s1", Window: "w2",
+				Cwd: "/work/web", Root: "/work/web", Worktree: "web", InRepo: true,
+				Added: 7,
+			},
+			{
+				ID: "w3p1", Name: "docs", Project: "web",
+				Status: "idle", Agent: true, StatusChangedAt: now - 3*86400 - 3600,
+				Workspace: "s2", Window: "w3", Cwd: "/work/docs", Root: "/work/docs",
+			},
+			{
+				ID: "w4p1", Title: "notes", Workspace: "s2", Window: "w4",
+				Cwd: "/tmp",
+			},
+		},
 	}
-	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Status: "working"}}
-	snap.All = []wire.AllPane{
-		{
-			ID: "w1p1", Name: "serve", Status: "working", Agent: true,
-			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
-			Focus: true, WorkspaceActive: true, WindowActive: true,
-			Cwd: "/work/dm/api", Root: "/work/dm", Branch: "dm-api", InRepo: true,
-			Dirty: true, Added: 3, Message: "building",
-		},
-		{
-			ID: "w1p2", Name: "build", Workspace: "s1", WorkspaceName: "main",
-			Window: "w1", WindowName: "one", Cwd: "/work/dm/api2", Root: "/work/dm",
-		},
-		{
-			ID: "w2p1", Name: "footer", Workspace: "s1", WorkspaceName: "main",
-			Window: "w2", WindowName: "two", Cwd: "/work/dm/web", Root: "/work/dm",
-			Branch: "web-work",
-		},
-		{
-			ID: "w2p2", Name: "shell", Workspace: "s1", WorkspaceName: "main",
-			Window: "w2", WindowName: "two", Cwd: "/work/dm/tools/capped",
-			Root: "/work/dm",
-		},
-		{
-			ID: "w3p1", Name: "notes", Workspace: "s2", WorkspaceName: "docs",
-			Window: "w3", WindowName: "three", Cwd: "/work/dm/docs",
-			Root: "/work/dm",
-		},
-	}
-	return snap
 }
 
-// switcherSnapWithout is the fixture with panes removed.
-func switcherSnapWithout(snap *wire.Snapshot, ids ...string) *wire.Snapshot {
-	drop := map[string]bool{}
-	for _, id := range ids {
-		drop[id] = true
-	}
-	cp := *snap
-	cp.All = nil
-	for _, p := range snap.All {
-		if !drop[p.ID] {
-			cp.All = append(cp.All, p)
-		}
-	}
-	return &cp
+// switcherFull is the dashboard opened over the whole screen.
+func switcherFull(cols, rows int) *Switcher {
+	snap := switcherSnap()
+	snap.Cols, snap.Rows = cols, rows
+	return NewSwitcher(layout.Rect{W: cols, H: rows}, snap)
 }
 
-// switcherKindName names a row kind for an expectation.
-func switcherKindName(k rail.RailKind) string {
-	switch k {
-	case rail.Workspace:
-		return "ws"
-	case rail.Window:
-		return "win"
-	case rail.Pane:
-		return "pane"
-	case rail.Gap:
-		return "gap"
-	}
-	return "note"
-}
-
-// switcherRowNames is one "kind id" label per surviving row, in tree order.
-func switcherRowNames(s *Switcher) []string {
+// switcherRowIDs lists the row panes in table order.
+func switcherRowIDs(s *Switcher) []string {
 	out := make([]string, len(s.rows))
-	for i, row := range s.rows {
-		it := s.tree[row]
-		name := switcherKindName(it.Kind)
-		if id := switcherTarget(it); id != "" {
-			name += " " + id
-		}
-		out[i] = name
+	for i, p := range s.rows {
+		out[i] = p.ID
 	}
 	return out
 }
@@ -103,236 +92,224 @@ func switcherType(s *Switcher, q string) {
 	}
 }
 
-// TestSwitcherTree checks the tree the float shows: workspaces, windows and
-// panes in the rail's order, a gap between the blocks, no note row, and every
-// pane of a folded window listed.
-func TestSwitcherTree(t *testing.T) {
-	snap := switcherSnap()
-	s := NewSwitcher(layout.Rect{X: 10, Y: 4, W: 80, H: 24}, snap)
-	if s.Rect.W != 80 || s.Rect.H != 24 {
-		t.Fatalf("rect = %+v, want the one it opened with", s.Rect)
+// TestSwitcherRows checks the dashboard lists every pane of the snapshot, in
+// the snapshot's order under the default sort, and that the selected row is a
+// pane item the client can pick.
+func TestSwitcherRows(t *testing.T) {
+	s := switcherFull(160, 30)
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p1", "w2p2", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want %v", got, want)
 	}
-	want := []string{
-		"ws s1", "win w1", "pane w1p1", "pane w1p2",
-		"win w2", "pane w2p1", "pane w2p2",
-		"gap", "ws s2", "win w3", "pane w3p1",
+	if s.RowCount() != 5 {
+		t.Fatalf("RowCount = %d, want 5", s.RowCount())
 	}
-	if got := switcherRowNames(s); !reflect.DeepEqual(got, want) {
-		t.Fatalf("tree = %v, want %v", got, want)
-	}
-	gaps := 0
-	for _, it := range s.tree {
-		if it.Kind == rail.WindowNote {
-			t.Fatalf("tree kept a note row: %+v", it)
-		}
-		if it.Kind == rail.Gap {
-			gaps++
-		}
-	}
-	if gaps != 1 {
-		t.Fatalf("tree has %d gap rows, want one", gaps)
-	}
-	// Every window of the fixture is folded, and its panes are still there.
-	for _, p := range snap.All {
-		if p.WindowUnfolded {
-			t.Fatalf("pane %s is not folded in the fixture", p.ID)
-		}
-	}
-	for _, id := range []string{"w1p1", "w1p2", "w2p1", "w2p2", "w3p1"} {
-		if !s.hasPane(id) {
-			t.Fatalf("folded window hid pane %s", id)
-		}
-	}
-	// An empty query selects the first pane row.
 	it, ok := s.Selected()
 	if !ok || it.Kind != rail.Pane || it.Pane != "w1p1" {
-		t.Fatalf("empty query selects %+v, %v, want pane w1p1", it, ok)
+		t.Fatalf("selected = %+v, %v, want the pane w1p1", it, ok)
+	}
+	if it.Text != "serve" || s.Target() != "w1p1" {
+		t.Fatalf("selected label %q target %q, want serve and w1p1", it.Text, s.Target())
+	}
+	// The label falls back to the app, then to the pane id.
+	s.Jump(3)
+	if it, _ := s.Selected(); it.Text != "nvim" {
+		t.Fatalf("label of a pane with only an app = %q, want nvim", it.Text)
+	}
+	s.Jump(5)
+	if it, _ := s.Selected(); it.Text != "w4p1" {
+		t.Fatalf("label of a pane with no name = %q, want the pane id", it.Text)
+	}
+	// An empty snapshot has no rows and no selection.
+	s.Sync(&wire.Snapshot{})
+	if s.RowCount() != 0 || s.Target() != "" {
+		t.Fatalf("empty snapshot keeps %d rows, target %q", s.RowCount(), s.Target())
+	}
+	if _, ok := s.Selected(); ok {
+		t.Fatal("an empty snapshot still selects a row")
 	}
 }
 
-// TestSwitcherFilter holds the query to the tree: rows survive by their own
-// match, headers survive what is under them, and order is the tree's order.
+// TestSwitcherFilter holds the query to the pane's own fields and lands the
+// selection on the best match.
 func TestSwitcherFilter(t *testing.T) {
 	cases := []struct {
 		query string
 		want  []string
 		pick  string
 	}{
-		{
-			// The folder api is a prefix of api and of api2, and a substring of
-			// tools/capped, so the prefix wins the selection.
-			query: "ap",
-			want:  []string{"ws s1", "win w1", "pane w1p1", "pane w1p2", "win w2", "pane w2p2"},
-			pick:  "w1p1",
-		},
-		{
-			// One pane matches: its window and workspace stay, every other pane
-			// goes, and the gap goes with the block it separated.
-			query: "footer",
-			want:  []string{"ws s1", "win w2", "pane w2p1"},
-			pick:  "w2p1",
-		},
-		{
-			// The window line matches on its folder, so the pane that works in
-			// another folder stays under it.
-			query: "web",
-			want:  []string{"ws s1", "win w2", "pane w2p1", "pane w2p2"},
-			pick:  "w2p1",
-		},
-		{
-			// A workspace id keeps its whole subtree.
-			query: "s2",
-			want:  []string{"ws s2", "win w3", "pane w3p1"},
-			pick:  "w3p1",
-		},
-		{
-			// A window branch keeps every pane under that window.
-			query: "dm-api",
-			want:  []string{"ws s1", "win w1", "pane w1p1", "pane w1p2"},
-			pick:  "w1p1",
-		},
-		{
-			// A workspace name keeps its whole subtree.
-			query: "docs",
-			want:  []string{"ws s2", "win w3", "pane w3p1"},
-			pick:  "w3p1",
-		},
-		{
-			// A window name keeps every pane under that window.
-			query: "two",
-			want:  []string{"ws s1", "win w2", "pane w2p1", "pane w2p2"},
-			pick:  "w2p1",
-		},
+		{query: "serve", want: []string{"w1p1"}, pick: "w1p1"},
+		{query: "nvim", want: []string{"w2p2"}, pick: "w2p2"},
+		{query: "api.go", want: []string{"w2p2"}, pick: "w2p2"},
+		{query: "dm-api", want: []string{"w1p1"}, pick: "w1p1"},
+		{query: "web-work", want: []string{"w2p1"}, pick: "w2p1"},
+		{query: "/work/docs", want: []string{"w3p1"}, pick: "w3p1"},
+		// The project, the branch and the folder all count.
+		{query: "dm", want: []string{"w1p1", "w2p1", "w2p2"}, pick: "w1p1"},
+		// A subsequence finds a pane too.
+		{query: "mk", want: []string{"w2p1"}, pick: "w2p1"},
+		// Nothing matches: no rows, no selection.
+		{query: "zzz", want: nil, pick: ""},
 	}
 	for _, c := range cases {
-		s := NewSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
+		s := switcherFull(160, 30)
 		switcherType(s, c.query)
-		if got := switcherRowNames(s); !reflect.DeepEqual(got, c.want) {
+		got := switcherRowIDs(s)
+		if len(got) == 0 {
+			got = nil
+		}
+		if !reflect.DeepEqual(got, c.want) {
 			t.Fatalf("query %q keeps %v, want %v", c.query, got, c.want)
 		}
-		it, ok := s.Selected()
-		if !ok || it.Pane != c.pick {
-			t.Fatalf("query %q selects %+v, %v, want pane %s", c.query, it, ok, c.pick)
+		if s.Target() != c.pick {
+			t.Fatalf("query %q selects %q, want %q", c.query, s.Target(), c.pick)
 		}
+	}
+	// The case of the query and of the field do not matter.
+	s := switcherFull(160, 30)
+	switcherType(s, "SERVE")
+	if got := switcherRowIDs(s); !reflect.DeepEqual(got, []string{"w1p1"}) {
+		t.Fatalf("upper-case query keeps %v", got)
+	}
+	if s.Query() != "serve" {
+		t.Fatalf("Query = %q, want the lower-case form", s.Query())
 	}
 }
 
 // TestSwitcherBackspace drops rows with the query and gets them back when the
 // query shrinks to nothing.
 func TestSwitcherBackspace(t *testing.T) {
-	s := NewSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
-	all := switcherRowNames(s)
-	switcherType(s, "s2")
-	if got := switcherRowNames(s); !reflect.DeepEqual(got, []string{"ws s2", "win w3", "pane w3p1"}) {
-		t.Fatalf("query s2 keeps %v", got)
+	s := switcherFull(160, 30)
+	all := switcherRowIDs(s)
+	switcherType(s, "dm")
+	if got := switcherRowIDs(s); !reflect.DeepEqual(got, []string{"w1p1", "w2p1", "w2p2"}) {
+		t.Fatalf("query dm keeps %v", got)
 	}
 	s.Backspace()
-	if n := len(s.rows); n <= 3 {
-		t.Fatalf("query s keeps %d rows, want more than 3: %v", n, switcherRowNames(s))
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p1", "w2p2", "w3p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("backspace to d keeps %v, want %v", got, want)
 	}
 	s.Backspace()
-	if got := switcherRowNames(s); !reflect.DeepEqual(got, all) {
-		t.Fatalf("backspace to empty keeps %v, want %v", got, all)
-	}
-	if it, ok := s.Selected(); !ok || it.Kind != rail.Pane {
-		t.Fatalf("empty query selects %+v, %v, want a pane row", it, ok)
-	}
-	// A backspace on an empty query changes nothing.
-	s.Backspace()
-	if got := switcherRowNames(s); !reflect.DeepEqual(got, all) {
+	if got := switcherRowIDs(s); !reflect.DeepEqual(got, all) {
 		t.Fatalf("backspace on an empty query keeps %v, want %v", got, all)
 	}
-	switcherType(s, "s2")
+	switcherType(s, "zzz")
 	s.ClearQuery()
-	if got := switcherRowNames(s); !reflect.DeepEqual(got, all) {
+	if got := switcherRowIDs(s); !reflect.DeepEqual(got, all) {
 		t.Fatalf("clearQuery keeps %v, want %v", got, all)
 	}
 }
 
-// TestSwitcherMove walks the selection and never lands on a gap.
+// TestSwitcherMove walks the selection and holds at both ends.
 func TestSwitcherMove(t *testing.T) {
-	s := NewSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
+	s := switcherFull(160, 30)
 	var walked []string
-	for i := 0; i < len(s.rows)+2; i++ {
-		it, ok := s.Selected()
-		if !ok {
-			t.Fatalf("step %d has no selection", i)
-		}
-		if it.Kind == rail.Gap {
-			t.Fatalf("step %d selected a gap row", i)
-		}
-		walked = append(walked, switcherTarget(it))
+	for i := 0; i < s.RowCount()+2; i++ {
+		walked = append(walked, s.Target())
 		s.Move(1)
 	}
-	want := []string{
-		"w1p1", "w1p2", "w2", "w2p1", "w2p2", "s2", "w3", "w3p1",
-		"w3p1", "w3p1", "w3p1", "w3p1", "w3p1",
-	}
+	want := []string{"w1p1", "w2p1", "w2p2", "w3p1", "w4p1", "w4p1", "w4p1"}
 	if !reflect.DeepEqual(walked, want) {
 		t.Fatalf("walked %v, want %v", walked, want)
 	}
-	// Up again skips the gap from the other side.
-	s.Move(-1)
-	if it, _ := s.Selected(); switcherTarget(it) != "w3" {
-		t.Fatalf("up from w3p1 = %q, want w3", switcherTarget(it))
+	s.Move(-2)
+	if s.Target() != "w2p2" {
+		t.Fatalf("two rows up = %q, want w2p2", s.Target())
 	}
-	s.Move(-1)
-	if it, _ := s.Selected(); switcherTarget(it) != "s2" {
-		t.Fatalf("up from w3 = %q, want s2", switcherTarget(it))
-	}
-	s.Move(-1)
-	if it, _ := s.Selected(); switcherTarget(it) != "w2p2" {
-		t.Fatalf("up over the gap = %q, want w2p2", switcherTarget(it))
-	}
-	// The top of the list holds.
 	s.Move(-30)
-	if it, _ := s.Selected(); switcherTarget(it) != "s1" {
-		t.Fatalf("up past the top = %q, want s1", switcherTarget(it))
+	if s.Target() != "w1p1" {
+		t.Fatalf("up past the top = %q, want w1p1", s.Target())
 	}
 }
 
-// TestSwitcherSync keeps the selection on its row across a snapshot and falls
-// back when that row is gone.
+// TestSwitcherJump checks the 1-9 jump keys select the n'th row.
+func TestSwitcherJump(t *testing.T) {
+	s := switcherFull(160, 30)
+	if !s.Jump(2) || s.Target() != "w2p1" {
+		t.Fatalf("jump 2 selects %q, want w2p1", s.Target())
+	}
+	if !s.Jump(5) || s.Target() != "w4p1" {
+		t.Fatalf("jump 5 selects %q, want w4p1", s.Target())
+	}
+	for _, n := range []int{0, -1, 6, 9} {
+		if s.Jump(n) {
+			t.Fatalf("jump %d found a row", n)
+		}
+	}
+	if s.Target() != "w4p1" {
+		t.Fatalf("a refused jump moved the selection to %q", s.Target())
+	}
+	// A query shortens the table, and the jump numbers follow it.
+	switcherType(s, "dm")
+	if !s.Jump(3) || s.Target() != "w2p2" {
+		t.Fatalf("jump 3 over three rows selects %q, want w2p2", s.Target())
+	}
+	if s.Jump(4) {
+		t.Fatal("jump 4 found a row in a three-row table")
+	}
+}
+
+// TestSwitcherSort walks the three orderings and keeps the selected pane.
+func TestSwitcherSort(t *testing.T) {
+	s := switcherFull(160, 30)
+	if s.SortMode() != SortRecent {
+		t.Fatalf("default sort = %v, want recent", s.SortMode())
+	}
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p1", "w2p2", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("recent order = %v, want %v", got, want)
+	}
+	s.Jump(3)
+	if s.CycleSort() != SortProject {
+		t.Fatalf("first cycle = %v, want project", s.SortMode())
+	}
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p2", "w2p1", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("project order = %v, want %v", got, want)
+	}
+	if s.Target() != "w2p2" {
+		t.Fatalf("project sort moved the selection to %q, want w2p2", s.Target())
+	}
+	if s.CycleSort() != SortStatus {
+		t.Fatalf("second cycle = %v, want status", s.SortMode())
+	}
+	if got, want := switcherRowIDs(s), []string{"w2p1", "w1p1", "w2p2", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("status order = %v, want %v", got, want)
+	}
+	if s.CycleSort() != SortRecent {
+		t.Fatalf("third cycle = %v, want recent", s.SortMode())
+	}
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p1", "w2p2", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("recent order again = %v, want %v", got, want)
+	}
+}
+
+// TestSwitcherSync keeps the selection on its pane across a snapshot and picks
+// the nearest row when the pane is gone.
 func TestSwitcherSync(t *testing.T) {
 	snap := switcherSnap()
-	s := NewSwitcher(layout.Rect{W: 80, H: 24}, snap)
-	switcherType(s, "footer")
-	if it, _ := s.Selected(); it.Pane != "w2p1" {
-		t.Fatalf("query footer selects %+v, want w2p1", it)
+	s := NewSwitcher(layout.Rect{W: 160, H: 30}, snap)
+	s.Jump(3)
+	if s.Target() != "w2p2" {
+		t.Fatalf("jump 3 selects %q", s.Target())
 	}
-	// The pane survives: so does the selection, query and all.
 	s.Sync(switcherSnap())
-	if it, ok := s.Selected(); !ok || it.Pane != "w2p1" {
-		t.Fatalf("sync moved the selection to %+v, %v", it, ok)
+	if s.Target() != "w2p2" {
+		t.Fatalf("sync moved the selection to %q", s.Target())
 	}
-	// An empty query keeps the nearest pane row, which is the one selected.
-	s.ClearQuery()
-	if it, _ := s.Selected(); it.Pane != "w2p1" {
-		t.Fatalf("clearQuery selects %+v, want w2p1", it)
+	// The pane is gone: the row that took its place is selected.
+	cp := *snap
+	cp.All = append(append([]wire.AllPane{}, snap.All[:2]...), snap.All[3:]...)
+	s.Sync(&cp)
+	if s.Target() != "w3p1" {
+		t.Fatalf("sync without the selected pane selects %q, want w3p1", s.Target())
 	}
-	// The pane is gone: the first pane row takes over.
-	s.Sync(switcherSnapWithout(snap, "w2p1", "w2p2"))
-	if it, ok := s.Selected(); !ok || it.Pane != "w1p1" {
-		t.Fatalf("sync without the selected pane selects %+v, %v, want w1p1", it, ok)
-	}
-	// Nothing selectable: no selection at all.
-	switcherType(s, "footer")
-	s.Sync(switcherSnapWithout(snap, "w2p1", "w2p2"))
-	if got := switcherRowNames(s); len(got) != 0 {
-		t.Fatalf("query footer keeps %v after the pane went", got)
-	}
-	if _, ok := s.Selected(); ok {
-		t.Fatal("selected reports a row while nothing survives")
-	}
-	if s.sel != -1 || s.Target() != "" {
-		t.Fatalf("sel = %d, target = %q, want -1 and no target", s.sel, s.Target())
+	if s.RowCount() != 4 {
+		t.Fatalf("rows after the pane went = %d, want 4", s.RowCount())
 	}
 }
 
-// TestSwitcherPreview takes only the reply to the newest request and asks again
-// when the selection moves to another pane.
+// TestSwitcherPreview takes only the reply to the newest request, asks again
+// when the selection moves, and starts a new pane at its newest row.
 func TestSwitcherPreview(t *testing.T) {
-	s := NewSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
+	s := switcherFull(160, 30)
 	if !s.PreviewDue() {
 		t.Fatal("the preview is not due before anything was asked for")
 	}
@@ -343,24 +320,31 @@ func TestSwitcherPreview(t *testing.T) {
 	if s.AcceptPreview(6, []string{"stale"}) {
 		t.Fatal("a reply to an older request was accepted")
 	}
-	if s.lines != nil {
-		t.Fatalf("stale reply left lines: %v", s.lines)
+	if s.PreviewLines() != nil {
+		t.Fatalf("stale reply left lines: %v", s.PreviewLines())
 	}
-	if !s.AcceptPreview(7, []string{"live", "screen"}) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	if !s.AcceptPreview(7, lines) {
 		t.Fatal("the reply to the newest request was refused")
 	}
-	if got := s.lines; !reflect.DeepEqual(got, []string{"live", "screen"}) {
+	if got := s.PreviewLines(); !reflect.DeepEqual(got, lines) {
 		t.Fatalf("lines = %v, want the accepted reply", got)
 	}
-	// Another pane is selected: the preview is due, and asking again drops the
-	// lines that belonged to the pane before.
-	switcherType(s, "footer")
+	// Scrolling the pane's screen and then moving to another pane resets it.
+	s.ScrollPreview(10)
+	if s.PreviewOffset() == 0 {
+		t.Fatal("the preview did not scroll on a long screen")
+	}
+	s.Move(1)
 	if !s.PreviewDue() {
 		t.Fatal("the preview is not due for a new pane")
 	}
 	s.SetPreview(8, "w2p1")
-	if s.lines != nil {
-		t.Fatalf("a new request kept the old lines: %v", s.lines)
+	if s.PreviewLines() != nil || s.PreviewOffset() != 0 {
+		t.Fatalf("a new request kept lines %v or offset %d", s.PreviewLines(), s.PreviewOffset())
 	}
 	if s.AcceptPreview(7, []string{"late"}) {
 		t.Fatal("a reply to the replaced request was accepted")
@@ -368,51 +352,116 @@ func TestSwitcherPreview(t *testing.T) {
 	if s.PreviewDue() {
 		t.Fatal("the preview is due for the pane just asked for")
 	}
-	// Only a pane row has a screen to preview.
-	s.Move(-1)
-	if it, _ := s.Selected(); it.Kind != rail.Window {
-		t.Fatalf("row above the pane = kind %d, want the window line", it.Kind)
+	// A pane that leaves the snapshot takes its preview with it.
+	cp := *switcherSnap()
+	cp.All = append(append([]wire.AllPane{}, cp.All[:1]...), cp.All[2:]...)
+	s.Sync(&cp)
+	if s.PreviewLines() != nil {
+		t.Fatalf("a gone pane kept the preview lines: %v", s.PreviewLines())
 	}
-	if s.PreviewDue() {
-		t.Fatal("the preview is due on a window line")
-	}
-}
-
-// TestSwitcherTarget maps a row to the id a pick dispatches.
-func TestSwitcherTarget(t *testing.T) {
-	s := NewSwitcher(layout.Rect{W: 80, H: 24}, switcherSnap())
-	if got := s.Target(); got != "w1p1" {
-		t.Fatalf("target on the first pane row = %q, want w1p1", got)
-	}
-	s.Move(-1)
-	if it, _ := s.Selected(); it.Kind != rail.Window || s.Target() != "w1" {
-		t.Fatalf("target on the window line = %q (kind %d), want w1", s.Target(), it.Kind)
-	}
-	s.Move(-1)
-	if it, _ := s.Selected(); it.Kind != rail.Workspace || s.Target() != "s1" {
-		t.Fatalf("target on the workspace header = %q (kind %d), want s1", s.Target(), it.Kind)
+	if !s.PreviewDue() {
+		t.Fatal("the preview is not due after its pane went")
 	}
 }
 
-// TestSwitcherDropsProjectRows proves a tagged session keeps the same switcher
-// rows: the rail's project header is dropped, the way a note row is.
-func TestSwitcherDropsProjectRows(t *testing.T) {
-	snap := switcherSnap()
-	for i := range snap.All {
-		snap.All[i].Project = "dm"
+// TestSwitcherPreviewRatio checks the band's default share and its bounds.
+func TestSwitcherPreviewRatio(t *testing.T) {
+	s := switcherFull(160, 30)
+	if s.PreviewRatio() != previewRatioDefault {
+		t.Fatalf("default ratio = %d, want %d", s.PreviewRatio(), previewRatioDefault)
 	}
-	s := NewSwitcher(layout.Rect{X: 10, Y: 4, W: 80, H: 24}, snap)
-	want := []string{
-		"ws s1", "win w1", "pane w1p1", "pane w1p2",
-		"win w2", "pane w2p1", "pane w2p2",
-		"gap", "ws s2", "win w3", "pane w3p1",
+	if got := s.ResizePreview(100); got != previewRatioMax {
+		t.Fatalf("a wide resize = %d, want the %d cap", got, previewRatioMax)
 	}
-	if got := switcherRowNames(s); !reflect.DeepEqual(got, want) {
-		t.Fatalf("tree = %v, want %v", got, want)
+	if got := s.ResizePreview(-100); got != previewRatioMin {
+		t.Fatalf("a narrow resize = %d, want the %d floor", got, previewRatioMin)
 	}
-	for _, it := range s.tree {
-		if it.Kind == rail.Project {
-			t.Fatalf("tree kept a project row: %+v", it)
+	s.ResizePreview(10)
+	if got := s.PreviewRatio(); got != previewRatioMin+10 {
+		t.Fatalf("ratio after a step = %d, want %d", got, previewRatioMin+10)
+	}
+}
+
+// TestSwitcherPreviewToggle checks the peek key and the small-float rule that
+// hides the band whatever the toggle says.
+func TestSwitcherPreviewToggle(t *testing.T) {
+	s := switcherFull(160, 30)
+	if !s.PreviewOn() {
+		t.Fatal("the preview is off by default")
+	}
+	if s.TogglePreview() || s.PreviewOn() {
+		t.Fatal("the peek key did not turn the preview off")
+	}
+	if !s.TogglePreview() || !s.PreviewOn() {
+		t.Fatal("the peek key did not turn the preview back on")
+	}
+	// A screen shorter than ten rows drops the band, and so does one narrower
+	// than sixty columns. The dashboard owns the whole screen, so a small
+	// screen is what makes a small float.
+	for _, size := range [][2]int{{160, 9}, {59, 30}} {
+		snap := switcherSnap()
+		snap.Cols, snap.Rows = size[0], size[1]
+		small := NewSwitcher(layout.Rect{W: size[0], H: size[1]}, snap)
+		if small.PreviewOn() {
+			t.Fatalf("a %dx%d screen keeps the preview", size[0], size[1])
+		}
+	}
+}
+
+// TestSwitcherScrollPreview checks the scroll clamps to the lines the model
+// holds and to the bottom of them.
+func TestSwitcherScrollPreview(t *testing.T) {
+	s := switcherFull(160, 30)
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	s.SetPreview(1, "w1p1")
+	s.AcceptPreview(1, lines)
+	// The body holds rows minus the border, the query, the header and the
+	// footer: 25 rows on a 30-row float, so 75 rows can scroll.
+	body := s.bodyRows()
+	if body != 25 {
+		t.Fatalf("body rows = %d, want 25", body)
+	}
+	if got := s.ScrollPreview(1000); got != len(lines)-body {
+		t.Fatalf("scroll up = %d, want %d", got, len(lines)-body)
+	}
+	if got := s.ScrollPreview(1); got != len(lines)-body {
+		t.Fatalf("scroll past the top = %d, want it to hold at %d", got, len(lines)-body)
+	}
+	if got := s.ScrollPreview(-1000); got != 0 {
+		t.Fatalf("scroll down = %d, want the newest row", got)
+	}
+	// No lines at all, no scroll.
+	s.SetPreview(2, "w2p1")
+	if got := s.ScrollPreview(10); got != 0 {
+		t.Fatalf("scroll with no preview = %d, want 0", got)
+	}
+}
+
+// TestSwitcherClock pins the age column's buckets.
+func TestSwitcherClock(t *testing.T) {
+	now := switcherTestNow
+	cases := []struct {
+		at   int64
+		want string
+	}{
+		{at: now, want: "0s"},
+		{at: now - 5, want: "5s"},
+		{at: now - 59, want: "59s"},
+		{at: now - 60, want: "1m"},
+		{at: now - 4*60 - 30, want: "4m"},
+		{at: now - 3600, want: "1h"},
+		{at: now - 2*3600 - 600, want: "2h"},
+		{at: now - 86400, want: "1d"},
+		{at: now - 3*86400 - 3600, want: "3d"},
+		{at: now + 5, want: "0s"},
+		{at: 0, want: "-"},
+	}
+	for _, c := range cases {
+		if got := switcherClock(c.at, now); got != c.want {
+			t.Fatalf("clock(%d) = %q, want %q", now-c.at, got, c.want)
 		}
 	}
 }

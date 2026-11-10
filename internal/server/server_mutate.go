@@ -800,6 +800,19 @@ func (s *server) setPaneCwd(id, cwd string) {
 	s.pushSnapshot()
 }
 
+// setPaneTitle records a pane's OSC window title. A title is the shell's
+// name, so it repaints the rail at most once a titlePushEvery.
+func (s *server) setPaneTitle(id, title string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pc := s.panes[id]
+	if pc == nil || pc.title == title {
+		return
+	}
+	pc.title = title
+	s.pushTitleLocked()
+}
+
 // liveCwd is where a pane's shell stands now. It asks the pane, because the
 // recorded cwd is the folder the pane was born in and a cd never rewrites it.
 // The recorded cwd answers when the pane daemon cannot: a dead daemon, or one

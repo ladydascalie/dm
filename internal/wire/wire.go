@@ -101,6 +101,13 @@ type AllPane struct {
 	Agent   bool   `json:"agent"`
 	App     string `json:"app,omitempty"`
 	Branch  string `json:"branch,omitempty"`
+	// Title is the pane program's OSC window title, empty when it never set
+	// one. It is the shell's name, not the user's: a rename does not touch it.
+	Title string `json:"title,omitempty"`
+	// StatusChangedAt is when the agent status last moved, in unix seconds. It
+	// is zero when the server has seen no change, so a rail can tell a fresh
+	// pane from a long-idle one.
+	StatusChangedAt int64 `json:"statusChangedAt,omitempty"`
 	// Cwd is the pane's working directory. Root is the repository's toplevel
 	// for that directory, empty outside git.
 	Cwd  string `json:"cwd,omitempty"`
