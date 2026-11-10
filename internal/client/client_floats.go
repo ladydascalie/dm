@@ -12,6 +12,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/boxview"
+	"dm/internal/browser"
 	"dm/internal/keymap"
 	"dm/internal/keymapview"
 	"dm/internal/wire"
@@ -148,7 +149,7 @@ func (t *tui) boxWheel(ev mouseEvent) {
 		x, y := ev.x-1, ev.y-1
 		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
 			if u := urlAtRow(t.box.Float.VT, r.W, y-r.Y, x-r.X); u != "" {
-				if err := openURL(u); err != nil {
+				if err := browser.Open(u); err != nil {
 					t.notify("open: " + err.Error())
 				} else {
 					t.notify("opened " + u)

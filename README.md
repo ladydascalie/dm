@@ -41,9 +41,10 @@ go build -o dm .
 The command table in `internal/clidoc/clidoc.go` is the source. `dm man`
 renders it as a man page and `dm llms` renders it as a one-pass teaching
 document. `dm html` renders the whole surface, config, keymaps and themes
-included, as one self-contained page. The committed files `docs/dm.1`,
-`docs/llms.txt` and `docs/dm.html` are snapshots, and the gate fails when one is
-stale.
+included, as one self-contained page, and opens it in the browser. The page
+paints itself from the built-in theme's palette. The committed files
+`docs/dm.1`, `docs/llms.txt` and `docs/dm.html` are snapshots, and the gate
+fails when one is stale.
 
 ## Code layout
 
@@ -92,6 +93,8 @@ dm purge                # remove dead sessions whose panes are gone
 dm reset -s work --force  # discard a session and its panes for a full restart
 dm man                  # the man page, docs/dm.1
 dm llms                 # the one-pass teaching document, docs/llms.txt
+dm html                 # the same surface as a page, opened in the browser
+dm html -o - > dm.html  # or write the page to stdout
 ```
 
 Keys inside the TUI. `ctrl+b` arms the prefix and shows the action box,
@@ -195,8 +198,9 @@ dm reads these environment variables:
 | `TMUX` | Set inside tmux; dm uses it to pick its terminal behaviour. |
 | `ESCTEST_DIR` | Test only: the esctest2 directory the conformance harness searches. |
 
-`dm html` prints every table here, with the keymaps and the theme keys, as one
-page.
+`dm html` opens every table here, with the keymaps and the theme keys, as one
+page in the browser. `dm html -o -` prints it instead, and `dm html -o path`
+writes it.
 
 ## Keybindings
 

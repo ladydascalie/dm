@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/configdoc"
 	"dm/internal/keymap"
+	"dm/internal/theme"
 )
 
 // HTMLPage renders the whole dm surface as one self-contained HTML page. It
@@ -65,6 +66,50 @@ func htmlSlug(text string) string {
 // text is untrusted as HTML whatever its table says.
 func htmlEscape(s string) string { return html.EscapeString(s) }
 
+// htmlThemeVars spells the built-in theme as CSS custom properties, so the
+// page paints the palette the terminal paints. A colour change in the theme
+// package moves the page with it, and the page has no second palette to keep.
+func htmlThemeVars() string {
+	t := theme.DefaultTheme()
+	p := t.Palette
+	rows := []struct{ name, value string }{
+		{"--bg", htmlRGB(p.RailBG)},
+		{"--panel", htmlRGB(p.RailFocusBG)},
+		{"--panel-2", htmlRGB(p.RailBG)},
+		{"--text", htmlRGB(p.RailText)},
+		{"--dim", htmlRGB(p.RailDim)},
+		{"--header", htmlRGB(p.RailHeader)},
+		{"--accent", htmlRGB(t.Accents[0])},
+		{"--accent-2", htmlRGB(t.Accents[1])},
+		{"--link", htmlRGB(p.BarAccent)},
+		{"--add", htmlRGB(p.RailDiffAdd)},
+		{"--del", htmlRGB(p.RailDiffDel)},
+		{"--warn", htmlRGB(p.RailWorking)},
+		{"--border", htmlRGBA(p.RailDim, 0x40)},
+		{"--code-bg", htmlRGBA(p.RailFocusBG, 0x80)},
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, fmt.Sprintf("  %s: %s;", r.name, r.value))
+	}
+	return strings.Join(out, "\n")
+}
+
+// htmlRGB spells a theme colour as a CSS #rrggbb.
+func htmlRGB(c theme.RGB) string {
+	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+}
+
+// htmlRGBA adds an alpha byte, so a rule or a surface can be a theme colour at
+// less than full strength.
+func htmlRGBA(c theme.RGB, a int) string {
+	return fmt.Sprintf("%s%02x", htmlRGB(c), a)
+}
+
+// htmlThemeVarsMark is the placeholder htmlPageHead leaves for the :root
+// block. The palette is rendered from the theme package, not spelled twice.
+const htmlThemeVarsMark = "%THEME-VARS%"
+
 // htmlPageHead opens the document and carries the whole style sheet. The page
 // has no external resource: no link, no script src, no image, no web font.
 const htmlPageHead = `<!doctype html>
@@ -75,38 +120,7 @@ const htmlPageHead = `<!doctype html>
 <title>dm - durable terminal multiplexer</title>
 <style>
 :root {
-  --bg: #14131a;
-  --panel: #1f1e27;
-  --panel-2: #191820;
-  --text: #e9eaf1;
-  --dim: #8f93a8;
-  --header: #a6a9bd;
-  --accent: #bb9af7;
-  --accent-2: #6edceb;
-  --link: #7ac0eb;
-  --add: #78dc82;
-  --del: #ff7d7d;
-  --warn: #f5be50;
-  --border: #2c2b38;
-  --code-bg: #191820;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f7f6fb;
-    --panel: #efedf7;
-    --panel-2: #f1f0f8;
-    --text: #1b1a22;
-    --dim: #5d6072;
-    --header: #3f4152;
-    --accent: #6a48c9;
-    --accent-2: #0f7a90;
-    --link: #1d6fa5;
-    --add: #1d7a36;
-    --del: #b3261e;
-    --warn: #8a5a00;
-    --border: #d9d6e6;
-    --code-bg: #f0eef8;
-  }
+%THEME-VARS%
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -279,7 +293,7 @@ const htmlPageScript = `</main>
 func HTMLPage() string {
 	ids := newIDGen()
 	var b strings.Builder
-	b.WriteString(htmlPageHead)
+	b.WriteString(strings.Replace(htmlPageHead, htmlThemeVarsMark, htmlThemeVars(), 1))
 
 	b.WriteString(`<section class="sec" id="sec-introduction">`)
 	b.WriteString(`<h2 id="introduction">Introduction</h2>`)
@@ -432,7 +446,7 @@ func htmlThemes(ids *idGen) string {
 	var b strings.Builder
 	b.WriteString(`<section class="sec" id="sec-themes">`)
 	b.WriteString(`<h2 id="themes">Themes</h2>`)
-	b.WriteString(`<p>A theme file is <code>$XDG_CONFIG_HOME/dm/themes/&lt;name&gt;.kdl</code>. The <code>theme</code> node in config.kdl names one, and no theme node keeps the built-in theme. Every block and every key is optional: the file reads over the built-in theme, so it carries only what it changes. A block or key given twice, an unknown block or key, a colour that is not <code>#rrggbb</code>, or a glyph that is not one cell wide is an error.</p>`)
+	b.WriteString(`<p>A theme file is <code>$XDG_CONFIG_HOME/dm/themes/&lt;name&gt;.kdl</code>. The <code>theme</code> node in config.kdl names one, and no theme node keeps the built-in theme. Every block and every key is optional: the file reads over the built-in theme, so it carries only what it changes. A block or key given twice, an unknown block or key, a colour that is not <code>#rrggbb</code>, or a glyph that is not one cell wide is an error. This page paints itself from the built-in theme's palette, so the page and the terminal agree.</p>`)
 	b.WriteString("<table><thead><tr><th>Block</th><th>Key</th><th>Built-in</th><th>What it paints</th></tr></thead><tbody>")
 	for _, k := range configdoc.ThemeKeys() {
 		fmt.Fprintf(&b, `<tr id="%s" data-row><td><code>%s</code></td><td><code>%s</code></td><td><code>%s</code></td><td>%s</td></tr>`,

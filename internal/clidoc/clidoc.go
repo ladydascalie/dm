@@ -355,8 +355,9 @@ var cliCommands = []cliCommand{
 	{
 		name:    "html",
 		args:    "[-o path]",
-		summary: "print this page as HTML, or write it to a file",
-		flags:   []cliFlag{{"o", "path", "write the page to this path"}},
+		summary: "open this page as HTML in a browser, or write it to a file",
+		flags:   []cliFlag{{"o", "path", "write the page to this path, or - for stdout"}},
+		example: "dm html -o dm.html",
 		group:   groupDocs,
 	},
 }

@@ -176,14 +176,9 @@ func Run(argv []string) error {
 
 	case "html":
 		fs := flag.NewFlagSet("html", flag.ExitOnError)
-		out := fs.String("o", "", "write the page to this path")
+		out := fs.String("o", "", "write the page to this path, or - for stdout")
 		_ = fs.Parse(argv[1:])
-		page := clidoc.HTMLPage()
-		if *out == "" {
-			fmt.Print(page)
-			return nil
-		}
-		return os.WriteFile(*out, []byte(page), 0o644)
+		return runHTML(*out)
 
 	case "exec":
 		c := newFlags("exec")

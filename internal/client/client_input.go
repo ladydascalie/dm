@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"dm/internal/browser"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/rail"
@@ -1529,21 +1528,6 @@ func osc52(text string) string {
 // or a character that commonly delimits a URL in prose.
 var urlPattern = regexp.MustCompile(`https?://[^\s"'<>()\[\]{}]+`)
 
-// openURL launches the system's default browser for url. It returns an error
-// when no opener is available; the caller reports it as a toast.
-func openURL(url string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	return cmd.Start()
-}
-
 // rowText reads one row of term as text. Trailing blanks go.
 func rowText(term *vt.Term, w, row int) string {
 	if term == nil || w < 1 {
@@ -1841,7 +1825,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		if p := t.paneAtBox(x, y); p != nil {
 			if _, ok := cellAt(p, x, y); ok {
 				if u := t.urlAt(p, x, y); u != "" {
-					if err := openURL(u); err != nil {
+					if err := browser.Open(u); err != nil {
 						t.notify("open: " + err.Error())
 					} else {
 						t.notify("opened " + u)
