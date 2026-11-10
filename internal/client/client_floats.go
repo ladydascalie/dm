@@ -34,6 +34,9 @@ func openBoxView(t *tui) {
 	t.AddFloatingPane(t.box.Float)
 	t.mode = "box"
 	t.armed = false
+	t.boxLog = nil
+	t.boxTop = 0
+	t.boxPage = false
 	t.boxRequest()
 	t.boxWatchers(time.Now())
 	t.dirty = true
@@ -44,9 +47,13 @@ func closeBoxView(t *tui) {
 	if t.box == nil {
 		return
 	}
+	closeBodyReader(t)
 	t.RemoveFloatingPane(t.box.Float.ID)
 	t.box = nil
 	t.mode = ""
+	t.boxLog = nil
+	t.boxTop = 0
+	t.boxPage = false
 	// The close key stays in the buffer while the pending timer waits. Drop
 	// the whole buffer here, so a later keypress cannot forward a stray escape
 	// to a pane.
@@ -110,7 +117,9 @@ func (t *tui) takeBoxList(m wire.Msg) {
 		t.notify("box: " + err.Error())
 		return
 	}
+	t.boxMirrorSet(rep.Entries)
 	t.box.Set(rep.Entries, t.theme())
+	t.boxBodyHint()
 	t.dirty = true
 }
 
@@ -132,6 +141,7 @@ func (t *tui) takeBoxWatchers(m wire.Msg) {
 		return
 	}
 	t.box.SetWatchers(rep.Watchers, t.theme())
+	t.boxBodyHint()
 	t.dirty = true
 }
 
@@ -165,7 +175,12 @@ func (t *tui) boxWheel(ev mouseEvent) {
 	if ev.btn&1 == 0 {
 		step = 3
 	}
-	t.box.Scroll(step, t.theme())
+	if t.reader != nil {
+		t.reader.Scroll(step)
+	} else {
+		t.boxScroll(step)
+		t.boxBodyHint()
+	}
 	t.dirty = true
 }
 
@@ -177,10 +192,33 @@ func (t *tui) boxKey() bool {
 		return true
 	}
 	if p := t.km().PrefixBytes(); len(p) > 0 && bytes.HasPrefix(t.inbuf, p) {
-		// The prefix key closes the view.
+		// The prefix key closes the reader when it is up, else the view.
 		t.inbuf = append([]byte(nil), t.inbuf[len(p):]...)
 		t.pending = false
+		if t.reader != nil {
+			closeBodyReader(t)
+			return true
+		}
 		closeBoxView(t)
+		return true
+	}
+	if t.reader != nil && len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+		// A lone esc closes the reader at once: the reader binds no escape
+		// sequences of its own beyond the page keys it shares, so waiting for
+		// the pending-escape timeout buys nothing.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		closeBodyReader(t)
+		t.dirty = true
+		return true
+	}
+	if !t.boxPage && t.reader == nil && t.inbuf[0] == 'v' {
+		// v opens the reader for the entry at the top of the window; an
+		// entry without a body opens nothing.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		openBodyReader(t)
+		t.dirty = true
 		return true
 	}
 	action, n, state := t.km().Match("box", t.inbuf)
@@ -201,25 +239,52 @@ func (t *tui) boxKey() bool {
 		closeBoxView(t)
 		return true
 	}
+	if t.reader != nil {
+		// The reader takes the scroll keys and gives the close keys back to
+		// the list page; anything else closes it too.
+		switch action {
+		case "up", "up-arrow":
+			t.reader.Scroll(-1)
+		case "down", "down-arrow":
+			t.reader.Scroll(1)
+		case "page-up":
+			t.reader.Scroll(-t.reader.Float.Rect.H)
+		case "page-down":
+			t.reader.Scroll(t.reader.Float.Rect.H)
+		case "top":
+			t.reader.Scroll(-t.reader.off - 1)
+		case "bottom":
+			t.reader.Scroll(len(t.reader.lines))
+		case "close", "close-esc", "close-ctrl-c", "close-m", "toggle-page":
+			closeBodyReader(t)
+		default:
+			closeBodyReader(t)
+			return true
+		}
+		t.dirty = true
+		return true
+	}
 	switch action {
 	case "up", "up-arrow":
-		t.box.Scroll(-1, t.theme())
+		t.boxScroll(-1)
 	case "down", "down-arrow":
-		t.box.Scroll(1, t.theme())
+		t.boxScroll(1)
 	case "page-up":
-		t.box.Scroll(-t.box.Float.Rect.H, t.theme())
+		t.boxScroll(-t.box.Float.Rect.H)
 	case "page-down":
-		t.box.Scroll(t.box.Float.Rect.H, t.theme())
+		t.boxScroll(t.box.Float.Rect.H)
 	case "top":
-		t.box.Scroll(-t.box.ListLen(), t.theme())
+		t.boxScroll(-t.box.ListLen())
 	case "bottom":
-		t.box.Scroll(t.box.ListLen(), t.theme())
+		t.boxScroll(t.box.ListLen())
 	case "toggle-page":
 		t.box.TogglePage(t.theme())
+		t.boxPage = !t.boxPage
 	default:
 		closeBoxView(t)
 		return true
 	}
+	t.boxBodyHint()
 	t.dirty = true
 	return true
 }

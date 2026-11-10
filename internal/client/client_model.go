@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/boxview"
 	"dm/internal/keymap"
 	"dm/internal/keymapview"
@@ -228,6 +229,27 @@ type tui struct {
 	// about even if focus moved before it landed.
 	yankID   int
 	yankPane string
+
+	// boxLog mirrors the entries the box view holds and boxTop is the list
+	// row at the top of its window, so the client can open the body reader on
+	// the entry the operator sees without reaching into the view. reader is
+	// the open reader overlay, nil when closed.
+	boxLog  []box.Entry
+	boxTop  int
+	boxPage bool
+	reader  *bodyReader
+
+	// notifyCursor is the highest notify/ seq the client has seen, and
+	// notifySeen says it has caught up at least once since attach, so the
+	// first catch-up toasts the newest notifyFetch entries instead of the
+	// whole backlog. notifyID numbers the catch-up request, notifyPending
+	// says one is in flight, and notifyWant holds a broadcast that landed
+	// while it was.
+	notifyCursor  int
+	notifySeen    bool
+	notifyID      int
+	notifyPending bool
+	notifyWant    bool
 
 	// rowsig holds one fingerprint per pane content row, so a steady frame
 	// repaints only the rows that moved. laysig is the shape of the picture:
@@ -728,6 +750,11 @@ func (t *tui) apply(m wire.Msg) {
 		}
 		if t.box != nil {
 			t.box.Sync(m.Snap, t.theme())
+			t.boxClampTop()
+			if t.reader != nil {
+				t.reader.Sync(t.box.Float.Rect)
+			}
+			t.boxBodyHint()
 			t.dirty = true
 		}
 		if t.keys != nil {
@@ -799,6 +826,11 @@ func (t *tui) apply(m wire.Msg) {
 			if m.Action == "read" && t.sw != nil && t.sw.AcceptPreview(m.ID, previewLines(m)) {
 				t.dirty = true
 			}
+			// A notify catch-up asks for the entries past the cursor; its
+			// reply is the only id'd msg-list the client sends.
+			if m.Action == "msg-list" && m.ID == t.notifyID {
+				t.takeNotifyList(m)
+			}
 			break
 		}
 		if m.Action == "msg-list" {
@@ -821,6 +853,9 @@ func (t *tui) apply(m wire.Msg) {
 		if t.box != nil {
 			t.boxRequest()
 		}
+		// Either way the notify branch catches up, so a toast finds the new
+		// entries whether or not the log view is open.
+		t.notifyCatchUp()
 	case "watch":
 		// A watch appeared, advanced, unparked or went. An open view asks for
 		// the list again, at most once per boxview.WatchInterval.

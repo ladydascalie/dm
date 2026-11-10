@@ -110,23 +110,27 @@ func TestBoxListReplyFillsView(t *testing.T) {
 }
 
 // TestBoxPushRefreshesOpenView: a post or a clear asks an open view for the log
-// again, and a closed view asks for nothing.
+// again and drives the notify catch-up, and a closed view asks for nothing but
+// its catch-up.
 func TestBoxPushRefreshesOpenView(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02m")
 	nextBoxMsg(t, got) // the log the open asked for
 	nextBoxMsg(t, got) // the watcher list the open asked for
 	tui.apply(wire.Msg{Type: "box"})
-	if m := nextBoxMsg(t, got); m.Action != "msg-list" {
-		t.Fatalf("push asked for %q, want msg-list", m.Action)
+	if m := nextBoxMsg(t, got); m.Action != "msg-list" || m.ID != 0 {
+		t.Fatalf("push asked for %+v, want the view's msg-list", m)
 	}
+	if m := nextBoxMsg(t, got); m.Action != "msg-list" || m.ID != 1 {
+		t.Fatalf("push asked for %+v, want the notify catch-up", m)
+	}
+	tui.apply(notifyReply(1, nil)) // the catch-up completes
 	feed(tui, "q")
 	tui.apply(wire.Msg{Type: "box"})
-	select {
-	case m := <-got:
-		t.Fatalf("a closed view sent %q", m.Action)
-	case <-time.After(50 * time.Millisecond):
+	if m := nextBoxMsg(t, got); m.Action != "msg-list" || m.ID != 2 {
+		t.Fatalf("push asked for %+v, want the notify catch-up", m)
 	}
+	testutil.NoMsg(t, got)
 }
 
 // TestBoxViewRequestsWatchers: the open asks for the log and the watcher list.
