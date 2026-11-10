@@ -202,3 +202,25 @@ func (t *tui) boxBodyHint() {
 	}
 	t.box.Float.Hint = h
 }
+
+// readerAction runs one box-keymap action on the reader, whichever float
+// opened it: the scroll keys scroll, and the close keys hand the keyboard
+// back to the float beneath.
+func (t *tui) readerAction(action string) {
+	switch action {
+	case "up", "up-arrow":
+		t.reader.Scroll(-1)
+	case "down", "down-arrow":
+		t.reader.Scroll(1)
+	case "page-up":
+		t.reader.Scroll(-t.reader.Float.Rect.H)
+	case "page-down":
+		t.reader.Scroll(t.reader.Float.Rect.H)
+	case "top":
+		t.reader.Scroll(-t.reader.off - 1)
+	case "bottom":
+		t.reader.Scroll(len(t.reader.lines))
+	default:
+		closeBodyReader(t)
+	}
+}

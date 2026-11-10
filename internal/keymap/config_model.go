@@ -353,6 +353,7 @@ var helpRows = []helpRow{
 	{[]string{"rename-workspace"}, "rename workspace"},
 	{[]string{"set-project"}, "set project"},
 	{[]string{"message-box"}, "message box"},
+	{[]string{"notification-centre"}, "notifications"},
 	{[]string{"toggle-rail"}, "cycle rail: full, thin, hidden"},
 	{[]string{"detach", "detach-alt"}, "detach"},
 	{[]string{"send-prefix"}, "send prefix"},

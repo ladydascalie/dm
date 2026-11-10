@@ -390,6 +390,39 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
+		if t.mode == "notif" {
+			// While the centre is up every key belongs to it: nothing reaches
+			// a pane. A lone esc is the close key, so it skips the paste
+			// marker check: a bare esc is not the start of one. A mouse event
+			// scrolls and a paste is swallowed whole.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.notifKey() {
+					return
+				}
+				continue
+			}
+			if ev, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				t.notifWheel(ev)
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if seq, n, started := t.takePaste(); started {
+				if n == 0 {
+					t.holdPaste(time.Now())
+					return
+				}
+				// A pasted block is text for nobody: the view is read-only.
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				_ = seq
+				continue
+			}
+			if !t.notifKey() {
+				return
+			}
+			continue
+		}
 		if t.mode == "float" {
 			// The float owns the keyboard: the bytes go to the command, and
 			// the prefix alone is the client's. A lone esc is the esc key, so
@@ -652,6 +685,8 @@ func (t *tui) expireMode(now time.Time) bool {
 		t.exitScroll()
 	case "box":
 		closeBoxView(t)
+	case "notif":
+		closeNotifyCentre(t)
 	case "help":
 		closeKeymapView(t)
 	case "rename":

@@ -238,6 +238,16 @@ type tui struct {
 	boxTop  int
 	boxPage bool
 	reader  *bodyReader
+	// boxJumpSeq asks the next list reply to land with that entry at the top
+	// of the window; zero means no jump is waiting.
+	boxJumpSeq int
+
+	// ncentre is the open notification centre, nil when closed. notifyRead
+	// is the seq below which every notify/ entry is read, and nID numbers
+	// the centre's list requests.
+	ncentre    *notifyCentre
+	notifyRead int
+	nID        int
 
 	// notifyCursor is the highest notify/ seq the client has seen, and
 	// notifySeen says it has caught up at least once since attach, so the
@@ -761,6 +771,10 @@ func (t *tui) apply(m wire.Msg) {
 			t.keys.Sync(m.Snap)
 			t.dirty = true
 		}
+		if t.ncentre != nil {
+			t.ncentre.Sync(m.Snap)
+			t.dirty = true
+		}
 		t.dirty = true
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
@@ -826,10 +840,14 @@ func (t *tui) apply(m wire.Msg) {
 			if m.Action == "read" && t.sw != nil && t.sw.AcceptPreview(m.ID, previewLines(m)) {
 				t.dirty = true
 			}
-			// A notify catch-up asks for the entries past the cursor; its
-			// reply is the only id'd msg-list the client sends.
+			// A notify catch-up asks for the entries past the cursor; the
+			// centre asks for the recent notify/ list. Each reply names its
+			// own request id.
 			if m.Action == "msg-list" && m.ID == t.notifyID {
 				t.takeNotifyList(m)
+			}
+			if m.Action == "msg-list" && m.ID == t.nID {
+				t.takeNotifyCentreList(m)
 			}
 			break
 		}
@@ -854,8 +872,12 @@ func (t *tui) apply(m wire.Msg) {
 			t.boxRequest()
 		}
 		// Either way the notify branch catches up, so a toast finds the new
-		// entries whether or not the log view is open.
+		// entries whether or not the log view is open. An open centre asks
+		// for its list again.
 		t.notifyCatchUp()
+		if t.ncentre != nil {
+			t.notifyCentreRequest()
+		}
 	case "watch":
 		// A watch appeared, advanced, unparked or went. An open view asks for
 		// the list again, at most once per boxview.WatchInterval.

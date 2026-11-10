@@ -117,8 +117,31 @@ func (t *tui) takeBoxList(m wire.Msg) {
 		t.notify("box: " + err.Error())
 		return
 	}
+	// A jump from the notification centre asks the reply to land with that
+	// entry at the top of the window; the view opens at the top, so the
+	// mirror's row moves it once.
+	jump := 0
+	if t.boxJumpSeq != 0 {
+		for i, e := range rep.Entries {
+			if e.Seq == t.boxJumpSeq {
+				jump = i
+				break
+			}
+		}
+		t.boxJumpSeq = 0
+	}
 	t.boxMirrorSet(rep.Entries)
 	t.box.Set(rep.Entries, t.theme())
+	if jump > 0 {
+		// The reply refit the float, so the clamp now knows the real window;
+		// move the mirror and the view to the jumped row, as far as the clamp
+		// lets the window go.
+		t.boxTop = jump
+		t.boxClampTop()
+		if t.boxTop > 0 {
+			t.box.Scroll(t.boxTop, t.theme())
+		}
+	}
 	t.boxBodyHint()
 	t.dirty = true
 }
@@ -242,25 +265,7 @@ func (t *tui) boxKey() bool {
 	if t.reader != nil {
 		// The reader takes the scroll keys and gives the close keys back to
 		// the list page; anything else closes it too.
-		switch action {
-		case "up", "up-arrow":
-			t.reader.Scroll(-1)
-		case "down", "down-arrow":
-			t.reader.Scroll(1)
-		case "page-up":
-			t.reader.Scroll(-t.reader.Float.Rect.H)
-		case "page-down":
-			t.reader.Scroll(t.reader.Float.Rect.H)
-		case "top":
-			t.reader.Scroll(-t.reader.off - 1)
-		case "bottom":
-			t.reader.Scroll(len(t.reader.lines))
-		case "close", "close-esc", "close-ctrl-c", "close-m", "toggle-page":
-			closeBodyReader(t)
-		default:
-			closeBodyReader(t)
-			return true
-		}
+		t.readerAction(action)
 		t.dirty = true
 		return true
 	}

@@ -140,6 +140,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `r` | `rename-workspace` | rename workspace |
 | `P` | `set-project` | set project |
 | `m` | `message-box` | message box |
+| `N` | `notification-centre` | notifications |
 | `b` | `toggle-rail` | cycle rail: full, thin, hidden |
 | `d / q` | `detach / detach-alt` | detach |
 | `ctrl+b` | `send-prefix` | send prefix |
@@ -205,6 +206,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `set-project` | `P` |
 | `main` | `toggle-rail` | `b` |
 | `main` | `message-box` | `m` |
+| `main` | `notification-centre` | `N` |
 | `main` | `detach` | `d` |
 | `main` | `detach-alt` | `q` |
 | `main` | `window-1` | `1` |
