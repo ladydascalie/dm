@@ -121,6 +121,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `s` | switch session (picker: j/k, enter, esc) |
 | `a` | dashboard: every pane in a full-screen table |
 | `m` | message box: the session's log as a floating pane |
+| `N` | notification centre: the recent `notify/` entries |
 | `?` | all keymaps, in a floating pane |
 | `)` | next workspace |
 | `r` | rename the active workspace |
@@ -811,14 +812,19 @@ right just above the bar, newest at the bottom: one row of bright text inside a
 dim border, as wide as the longest text plus its two border cells, clamped to
 the screen. A repeat of the newest text within one second is the same toast,
 and every toast expires after three seconds. Copying raises one, as does a
-failed request, an unknown key, an empty scrollback and a pane exit.
+failed request, an unknown key, an empty scrollback and a pane exit. An entry
+posted under `notify/` raises one too, unless it names the focused pane.
 
 System notifications are for the events worth interrupting for. A pane that
-enters `blocked`, `done` or `error`, or that exits,
-reaches the desktop through `notify-send` when the pane is not the focused pane
-of an attached client, because the operator is not looking at it. A focused
-pane with a client attached stays quiet, `DM_NOTIFY=0` turns notifications off,
-and a host without `notify-send` gets none.
+enters `blocked`, `done` or `error`, or that exits, is posted to the box under
+its reserved topic `notify/<pane id>`: the entered state as the entry's state,
+the message or the exit note as its text. The popups are subscribers of that
+log, not side effects of the transition. A headless session renders each entry
+through `notify-send`; an attached client raises a toast for the entries it has
+not seen and lists the recent ones in the notification centre, under `N`. An
+entry for the pane the operator is looking at is still logged but pops nothing,
+so a focused pane with a client attached stays quiet. `DM_NOTIFY=0` turns
+desktop notifications off, and a host without `notify-send` gets none.
 
 ## Rendering
 
@@ -932,7 +938,7 @@ into and any caller can wait on. It is where a lane reports `blocked` and a
 driver waits for `done`, with no screen polling.
 
 An entry is
-`{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green"}`.
+`{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green","body":""}`.
 Every field is always present.
 
 - `seq` starts at 1, only grows, and never repeats. A clear does not reset it.
@@ -946,9 +952,12 @@ Every field is always present.
   finished well, and `error` means it finished badly. `clear` is an OSC 7501
   pane status, not a box state, and post rejects it.
 - `msg` is the text. The cap is 2000 bytes.
+- `body` is the long text under the message line. Post leaves it out and the
+  entry still carries it, empty. The cap is 16 KiB.
 
 Key and message must be valid UTF-8 with no control characters, because an
-entry prints on one row.
+entry prints on one row. The body follows the same rule with one exception: it
+may carry newlines.
 
 The box is bounded at 1000 entries and 256 KiB. Past either bound the oldest
 entries go. The log lives in `state.json`, so a restart keeps every entry, its
@@ -958,7 +967,7 @@ Seven actions. Each takes its request in the `res` field of the envelope.
 
 | action | request | reply |
 | --- | --- | --- |
-| `msg-post` | `key`, `state`, `msg`, `from` | `{"entry":{...}}` |
+| `msg-post` | `key`, `state`, `msg`, `from`, `body` | `{"entry":{...}}` |
 | `msg-list` | `key` or `keyPrefix`, `afterSeq`, `limit`, `from` | `{"entries":[...],"trimmed":false}`, newest first |
 | `msg-wait` | `key` or `keyPrefix`, `state`, `afterSeq`, `timeoutMs`, `from` | `{"entry":{...},"trimmed":false}` |
 | `msg-sub` | `key` or `keyPrefix`, `state`, `afterSeq`, `from` | one `{"entry":{...},"trimmed":false}` frame per matching entry, until the connection ends |
@@ -1001,6 +1010,8 @@ The CLI:
 
 ```sh
 dm msg post --state blocked --key lane/a --msg "ready for review"
+dm msg post --key lane/a --state note --msg "log is long" --body-file notes.md
+dm msg show --key lane/a [--seq N | --from PANE]
 dm msg list [--key lane/a | --prefix lane/] [--after SEQ] [--limit 20] [--json]
 dm msg wait [--key lane/a | --prefix lane/] [--state done] [--after SEQ] [--timeout 5m]
 dm msg sub [--key K | --prefix P] [--state S] [--after N] [--json]

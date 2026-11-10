@@ -37,7 +37,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm list` | `-` | print panes as a table, or the raw tree with --json | `dm list` |
 | `dm dash` | `[-s name]` | print the palette rows | `dm dash` |
 | `dm peek` | `<id> [--lines N]` | print the screen a palette row lands on | `dm peek w1p1 --lines 10` |
-| `dm msg post` | `--state S [--key K] [--msg T]` | post one entry to the box | `dm msg post --key build --state done --msg 'all green'` |
+| `dm msg post` | `--state S [--key K] [--msg T] [--body T \| --body-file P]` | post one entry to the box | `dm msg post --key build --state done --msg 'all green'` |
 | `dm msg list` | `[--key K \| --prefix P] [--after SEQ] [--limit N] [--json]` | print the box newest first | `dm msg list --key build --limit 20` |
 | `dm msg show` | `--key K [--seq N \| --from PANE]` | print one entry's body, or its summary line | `dm msg show --key build --seq 12` |
 | `dm msg wait` | `[--key K \| --prefix P] [--state S] [--after SEQ] [--timeout 5m]` | block until an entry matches | `dm msg wait --key build --state done --timeout 10m` |
