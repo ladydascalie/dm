@@ -150,9 +150,6 @@ func TestSwitcherFilterHoldsBoundLetters(t *testing.T) {
 	if tui.sw == nil {
 		t.Fatal("a bound letter closed the dashboard")
 	}
-	if tui.swInput {
-		t.Fatal("i entered input mode from the query")
-	}
 	if tui.float != nil {
 		t.Fatal("d opened the float from the query")
 	}
@@ -428,78 +425,26 @@ func TestSwitcherPreviewKeys(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
-// TestSwitcherInputForwards: i sends every key to the selected pane, esc leaves
-// input mode without closing the dashboard, and the query stays untouched.
-func TestSwitcherInputForwards(t *testing.T) {
+// TestSwitcherCopyPaneID: i copies the selected row's pane id and leaves the
+// dashboard up, so the id can name the pane in the next command.
+func TestSwitcherCopyPaneID(t *testing.T) {
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
-	feed(tui, "i")
-	if !tui.swInput {
-		t.Fatal("i did not enter input mode")
-	}
-	if q := tui.sw.Query(); q != "" {
-		t.Fatalf("input mode edited the query: %q", q)
-	}
-	feed(tui, "x")
-	select {
-	case m := <-got:
-		if m.Type != "keys" || m.Target != "w1p1" || string(m.Keys) != "x" {
-			t.Fatalf("input mode sent %+v, want keys x to w1p1", m)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("input mode forwarded nothing")
-	}
-	// The key also asks for the selected pane's screen, so its answer appears
-	// without waiting for the preview cadence.
-	if req := screenRequest(t, got); req.Target != "w1p1" {
-		t.Fatalf("screen request = %+v, want w1p1", req)
-	}
-	// A lone esc waits for the rest of a possible sequence; the pending timer
-	// then leaves input mode and closes nothing.
-	feed(tui, "\x1b")
-	if !tui.pending {
-		t.Fatal("a bare esc did not wait for the rest of a sequence")
-	}
-	tui.escAt = time.Now().Add(-time.Second)
-	tui.expireSwitcher(time.Now())
-	if tui.swInput || tui.sw == nil {
-		t.Fatalf("esc left input %v with the dashboard %v", tui.swInput, tui.sw != nil)
-	}
-	if q := tui.sw.Query(); q != "" {
-		t.Fatalf("esc in input mode touched the query: %q", q)
-	}
-	testutil.NoMsg(t, got)
-	// The dashboard still takes the keys its own way after the mode ends, and
-	// a printable byte is query text again rather than a key for the pane.
 	feed(tui, "j")
 	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p2" {
-		t.Fatalf("after input mode j selects %+v, want w1p2", it)
+		t.Fatalf("j selects %+v, want w1p2", it)
 	}
-	if q := tui.sw.Query(); q != "" {
-		t.Fatalf("after input mode the query is %q, want it empty", q)
+	out := testutil.CaptureStdout(t, func() { feed(tui, "i") })
+	if !strings.Contains(out, osc52("w1p2")) {
+		t.Fatalf("clipboard = %q, want w1p2", out)
 	}
-	feed(tui, "/z")
-	if q := tui.sw.Query(); q != "z" {
-		t.Fatalf("after input mode /z typed %q, want z", q)
+	if tui.sw == nil {
+		t.Fatal("the copy closed the dashboard")
+	}
+	if len(tui.toasts) != 1 || tui.toasts[0].text != "copied w1p2" {
+		t.Fatalf("toasts = %+v, want copied w1p2", tui.toasts)
 	}
 	testutil.NoMsg(t, got)
-}
-
-// TestSwitcherInputFooter: the footer names input mode while it is on.
-func TestSwitcherInputFooter(t *testing.T) {
-	tui, _ := switcherTUI(t)
-	out := tui.out.(*bytes.Buffer)
-	feed(tui, "\x02a")
-	tui.draw()
-	if strings.Contains(out.String(), "keys go to") {
-		t.Fatal("the footer names input mode before it is on")
-	}
-	feed(tui, "i")
-	out.Reset()
-	tui.draw()
-	if got := out.String(); !strings.Contains(got, "keys go to w1p1") {
-		t.Fatal("the footer does not name input mode")
-	}
 }
 
 // TestSwitcherPickDigit: a digit goes to that row and picks it.

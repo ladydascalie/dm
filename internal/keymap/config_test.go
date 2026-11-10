@@ -18,6 +18,7 @@ var configTestDefaultActions = map[string][]string{
 	"main": {
 		"send-prefix", "reload", "split-right", "split-down", "split-down-alt",
 		"split-left", "split-up", "scrollback", "copy-output", "copy-screen",
+		"copy-pane-id",
 		"focus-left", "focus-down",
 		"focus-up", "focus-right", "next-pane", "prev-pane", "close-pane",
 		"zoom-pane", "new-window", "next-window", "prev-window", "new-workspace",
@@ -42,7 +43,7 @@ var configTestDefaultActions = map[string][]string{
 	"switcher": {
 		"close", "close-ctrl-c", "close-esc", "pick", "filter", "clear-query",
 		"backspace", "sort", "preview-up", "preview-down",
-		"preview-bigger", "preview-smaller", "peek", "input", "diff",
+		"preview-bigger", "preview-smaller", "peek", "copy-pane-id", "diff",
 		"down-ctrl-n", "down", "down-arrow",
 		"up-ctrl-p", "up", "up-arrow",
 		"pick-1", "pick-2", "pick-3", "pick-4", "pick-5",
@@ -371,6 +372,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"< / ^", "split left / up"},
 		{"[", "scrollback"},
 		{"y / Y", "copy output / screen"},
+		{"i", "copy pane id"},
 		{"h j k l", "focus pane"},
 		{"n / p", "next/prev pane"},
 		{"x", "close pane"},

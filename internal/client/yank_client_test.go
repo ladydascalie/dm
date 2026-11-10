@@ -91,3 +91,17 @@ func TestCopyOutputWithoutAnchorFallsBackToScreen(t *testing.T) {
 		t.Fatalf("toasts = %+v, want the no-Enter fallback", tui.toasts)
 	}
 }
+
+// The i key copies the focused pane's id, the handle every other dm surface
+// names a pane by.
+func TestCopyPaneIDKeyCopiesTheFocus(t *testing.T) {
+	tui, _ := clientTUI(t, nil)
+	tui.armed = true
+	out := testutil.CaptureStdout(t, func() { tui.key('i') })
+	if !strings.Contains(out, osc52("a")) {
+		t.Fatalf("clipboard = %q, want the pane id a", out)
+	}
+	if len(tui.toasts) != 1 || tui.toasts[0].text != "copied a" {
+		t.Fatalf("toasts = %+v, want copied a", tui.toasts)
+	}
+}

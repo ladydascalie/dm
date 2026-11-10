@@ -138,31 +138,6 @@ func TestDashboardPreviewCadenceStops(t *testing.T) {
 	}
 }
 
-// TestDashboardInputAsksOnce proves one key in input mode sends the key and one
-// screen request, so an answer appears without waiting for the cadence.
-func TestDashboardInputAsksOnce(t *testing.T) {
-	tui, got := switcherWithFar(t)
-	feed(tui, "\x02a")
-	tui.sw.Jump(3)
-	feed(tui, "i")
-	if !tui.swInput {
-		t.Fatal("i did not enter input mode")
-	}
-	feed(tui, "x")
-	select {
-	case m := <-got:
-		if m.Type != "keys" || m.Target != farPane || string(m.Keys) != "x" {
-			t.Fatalf("input mode sent %+v, want keys x to %s", m, farPane)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("input mode sent nothing")
-	}
-	if req := screenRequest(t, got); req.Target != farPane {
-		t.Fatalf("screen request = %+v, want %s", req, farPane)
-	}
-	testutil.NoMsg(t, got)
-}
-
 // TestDashboardPreviewReadOnlyIds proves the band takes a read reply and never
 // a screen reply, even when the two request spaces hand out the same id.
 // Otherwise a screen reply lands as the read reply and blanks the band until
@@ -203,45 +178,5 @@ func TestDashboardPreviewReadOnlyIds(t *testing.T) {
 	}
 	if got := tui.sw.PreviewLines(); len(got) != 1 || got[0] != "live" {
 		t.Fatalf("a failed screen reply changed the band to %q", got)
-	}
-}
-
-// TestDashboardInputCoalescesScreens proves a burst of typing in input mode
-// costs one screen request: the first byte asks at once, the rest ride the
-// cadence. Every byte still reaches the pane as its own keys message.
-func TestDashboardInputCoalescesScreens(t *testing.T) {
-	tui, got := switcherWithFar(t)
-	feed(tui, "\x02a")
-	tui.sw.Jump(3)
-	feed(tui, "i")
-	if !tui.swInput {
-		t.Fatal("i did not enter input mode")
-	}
-
-	feed(tui, "x")
-	feed(tui, "y")
-	feed(tui, "z")
-
-	var keys, screens []string
-	deadline := time.After(300 * time.Millisecond)
-collect:
-	for {
-		select {
-		case m := <-got:
-			switch {
-			case m.Type == "keys":
-				keys = append(keys, string(m.Keys))
-			case m.Type == "req" && m.Action == "screen":
-				screens = append(screens, m.Target)
-			}
-		case <-deadline:
-			break collect
-		}
-	}
-	if len(keys) != 3 || keys[0] != "x" || keys[1] != "y" || keys[2] != "z" {
-		t.Fatalf("keys sent = %q, want one message per byte", keys)
-	}
-	if len(screens) != 1 || screens[0] != farPane {
-		t.Fatalf("screen requests = %q, want one for %s", screens, farPane)
 	}
 }

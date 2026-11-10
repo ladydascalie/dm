@@ -108,6 +108,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `\|` / `-` | split right / down |
 | `<` / `^` | split left / up |
 | `[` | scrollback (also the mouse wheel) |
+| `i` | copy the focused pane's id |
 | `h j k l` or arrows | focus pane left / down / up / right |
 | `n` / `p` | next / previous pane |
 | `x` | close pane |
@@ -441,9 +442,9 @@ drops the band whatever the toggle says. The `dashboard-preview` config node
 sets the share the band opens at, from 0 for the table alone to 100; the band
 keeps its own 20 to 85 range, and the peek key uses the configured share.
 
-`i` sends every key to the selected pane until esc. The dashboard stays up and
-the answer shows in the preview, and the footer says `input` while the mode is
-on. `d` runs the diff command, `git diff` by default, in a floating terminal
+`i` copies the selected pane's id and leaves the dashboard up, so the next
+command can name the pane. The footer says `i copy id`. `d` runs the diff
+command, `git diff` by default, in a floating terminal
 over the panes, in the selected pane's folder, through `sh -c`. The float takes
 every key while the command runs, except the prefix: one press of it kills the
 float and the command under it, so there is no need to quit the program first.
@@ -764,8 +765,10 @@ scroll leaves it alone. A geometry change drops the selection. An
 alternate-screen pane has no scrollback, so the wheel keeps the selection
 clamped and says why.
 
-`prefix y` copies what the focused pane produced since the last Enter you sent
-it, and `dm yank <pane>` prints the same rows. The anchor is local: dm records
+`prefix i` copies the focused pane's id, the handle every other dm surface
+names a pane by: `dm exec`, `dm msg post` and a shell all take it. `prefix y`
+copies what the focused pane produced since the last Enter you sent it, and
+`dm yank <pane>` prints the same rows. The anchor is local: dm records
 the output stream position when it forwards an Enter, so a remote shell needs no
 setup. A pane that has never been sent an Enter has no anchor: the copy falls
 back to the visible screen with a toast that says so, and `dm yank` reports that
@@ -791,10 +794,10 @@ proposal:
 
 dm enables bracketed paste (2004) on attach and disables it again on detach, so
 ctrl+shift+v inserts newlines literally. The client sends a paste to the focused
-pane as one chunk, or to the selected pane while the dashboard's input mode is
-on, and never reads a byte inside it as a dm key: an embedded ctrl+b does not
-arm the prefix, and newlines do not submit. A paste also closes an open menu,
-picker or scrollback first.
+pane as one chunk and never reads a byte inside it as a dm key: an embedded
+ctrl+b does not arm the prefix, and newlines do not submit. A paste also closes
+an open menu, picker or scrollback first, and a paste over the dashboard is
+swallowed whole.
 
 The 200~ and 201~ markers go only to a program that asked for bracketed paste.
 A program that never asked, such as a line editor without 2004, gets the text

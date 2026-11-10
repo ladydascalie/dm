@@ -64,9 +64,6 @@ func (t *tui) draw() {
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
 		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.previewTerms(), paintPaneFrom, t.glyphSet())
-		if t.swInput {
-			drawSwitcherMode(&pal, th, t.sw.Rect, switcherInputLine(t))
-		}
 		t.askPreview()
 	}
 	if t.armed {
@@ -475,10 +472,9 @@ func (t *tui) previewTerms() map[string]*vt.Term {
 // is empty when the frame leaves the cursor alone.
 func (t *tui) cursorBlock() string {
 	if t.sw != nil {
-		if t.swInput || !t.sw.Filtering() {
-			// Only the query takes typing. Input mode types into the pane, and
-			// outside filter mode every key acts on the table, so neither puts
-			// the cursor on the query row.
+		if !t.sw.Filtering() {
+			// Only the query takes typing. Outside filter mode every key acts
+			// on the table, so the cursor stays hidden.
 			return "\x1b[?25l"
 		}
 		// The dashboard owns the cursor while it filters: the query cell.

@@ -163,6 +163,7 @@ var ActionDesc = map[string]string{
 	"scrollback":        "Open the focused pane's scrollback.",
 	"copy-output":       "Copy the focused pane's output since the last Enter.",
 	"copy-screen":       "Copy the focused pane's visible screen.",
+	"copy-pane-id":      "Copy a pane's id to the clipboard: the focused pane, or the selected row in the dashboard.",
 	"focus-left":        "Move focus to the pane left of the focused pane.",
 	"focus-down":        "Move focus to the pane below the focused pane.",
 	"focus-up":          "Move focus to the pane above the focused pane.",
@@ -238,7 +239,6 @@ var ActionDesc = map[string]string{
 	"preview-bigger":  "Widen the preview band.",
 	"preview-smaller": "Narrow the preview band.",
 	"peek":            "Hide or show the preview band.",
-	"input":           "Send every key to the selected pane until esc.",
 	"diff":            "Run the diff command on the selected pane in a floating pane.",
 
 	// scroll and box

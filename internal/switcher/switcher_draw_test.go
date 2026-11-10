@@ -256,7 +256,7 @@ func TestSwitcherDrawFrame(t *testing.T) {
 	}
 	// The footer names every key the dashboard takes, then the ordering and the
 	// preview's share at the right edge.
-	wantLeft := "enter pick  esc close  1-9 jump  i input  d diff  " +
+	wantLeft := "enter pick  esc close  1-9 jump  i copy id  d diff  " +
 		"/ filter  s sort  p peek  +/- size  ^u/^d scroll"
 	wantRight := "recent 20%"
 	wantFoot := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
@@ -336,13 +336,13 @@ func TestSwitcherDrawFootDropsHints(t *testing.T) {
 	l := switcherLayoutOf(s, snap)
 	_, _, _, screen := drawFloat(t, s, snap, nil)
 	foot := switcherText(screen, l.inner.X, l.footY, l.inner.W)
-	wantLeft := "enter pick  esc close  1-9 jump  i input  d diff  / filter  s sort"
+	wantLeft := "enter pick  esc close  1-9 jump  i copy id  d diff  / filter"
 	wantRight := "recent 60%"
 	want := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
 	if foot != want {
 		t.Fatalf("footer = %q, want %q", foot, want)
 	}
-	for _, gone := range []string{"p peek", "+/- size", "^u/^d scroll"} {
+	for _, gone := range []string{"s sort", "p peek", "+/- size", "^u/^d scroll"} {
 		if strings.Contains(foot, gone) {
 			t.Fatalf("footer kept %q: %q", gone, foot)
 		}

@@ -124,6 +124,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `< / ^` | `split-left / split-up` | split left / up |
 | `[` | `scrollback` | scrollback |
 | `y / Y` | `copy-output / copy-screen` | copy output / screen |
+| `i` | `copy-pane-id` | copy pane id |
 | `h j k l` | `focus-left / focus-down / focus-up / focus-right` | focus pane |
 | `n / p` | `next-pane / prev-pane` | next/prev pane |
 | `x` | `close-pane` | close pane |
@@ -182,6 +183,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `scrollback` | `[` |
 | `main` | `copy-output` | `y` |
 | `main` | `copy-screen` | `Y` |
+| `main` | `copy-pane-id` | `i` |
 | `main` | `focus-left` | `h` |
 | `main` | `focus-down` | `j` |
 | `main` | `focus-up` | `k` |
@@ -252,7 +254,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `switcher` | `preview-bigger` | `+` |
 | `switcher` | `preview-smaller` | `-` |
 | `switcher` | `peek` | `p` |
-| `switcher` | `input` | `i` |
+| `switcher` | `copy-pane-id` | `i` |
 | `switcher` | `diff` | `d` |
 | `switcher` | `down-ctrl-n` | `ctrl+n` |
 | `switcher` | `down` | `j` |

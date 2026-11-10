@@ -2,13 +2,11 @@ package client
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/switcher"
-	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -46,7 +44,6 @@ func openSwitcher(t *tui) {
 		// table. A palette leaves the panes live under it, so it claims nothing.
 		t.mode = "dashboard"
 	}
-	t.swInput = false
 	t.disarm()
 	t.dirty = true
 }
@@ -58,7 +55,6 @@ func closeSwitcher(t *tui) {
 		return
 	}
 	t.sw = nil
-	t.swInput = false
 	// The preview terminals belong to the dashboard: closed, they are dead
 	// weight, and the cadence that refreshed them stops with it.
 	t.swVT = nil
@@ -68,41 +64,6 @@ func closeSwitcher(t *tui) {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
-}
-
-// switcherInputLine is the dashboard's footer while input mode is on: it names
-// the pane that takes the keys and the key that leaves.
-func switcherInputLine(t *tui) string {
-	if t.sw == nil {
-		return ""
-	}
-	pane := t.sw.Target()
-	if pane == "" {
-		return " input  no pane selected "
-	}
-	return " input  keys go to " + pane + "  esc leaves "
-}
-
-// drawSwitcherMode repaints the dashboard's footer row for a mode that changes
-// what the keys do, so the hints beneath the table never lie.
-func drawSwitcherMode(buf *bytes.Buffer, th theme.Theme, r layout.Rect, line string) {
-	if r.W < 4 || r.H < 8 || line == "" {
-		return
-	}
-	x, y, w := r.X+1, r.Y+r.H-2, r.W-2
-	if x < 0 || y < 0 || w <= 0 {
-		return
-	}
-	text := cells.Clip(line, w)
-	if text == "" {
-		return
-	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m%s%s%s", y+1, x+1,
-		th.Palette.RailFocusBG.BG(), th.Palette.RailText.FG(), text)
-	if n := w - cells.Cells(text); n > 0 {
-		buf.WriteString(strings.Repeat(" ", n))
-	}
-	buf.WriteString("\x1b[0m")
 }
 
 // dispatchPick turns a switcher row target into the action that goes there.

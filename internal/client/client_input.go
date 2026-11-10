@@ -309,22 +309,14 @@ func (t *tui) processInput() {
 			} else if n == 0 {
 				return // partial sequence, wait for the rest
 			}
-			if seq, n, started := t.takePaste(); started {
+			if _, n, started := t.takePaste(); started {
 				if n == 0 {
 					t.holdPaste(time.Now())
 					return
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
-				// Input mode forwards the block as text for the pane; a paste
-				// over the dashboard is otherwise swallowed whole.
-				if t.swInput {
-					if pane := t.sw.Target(); pane != "" && t.conn != nil {
-						// The block is framed for the pane the dashboard sends
-						// to, not for the focused pane of the window behind it.
-						_ = t.conn.Send(wire.Msg{Type: "keys", Target: pane, Keys: t.pasteKeys(seq, pane)})
-						t.previewNow()
-					}
-				}
+				// A paste over the dashboard is swallowed whole: the table and
+				// its query take typing, not a block, and no pane owns the keys.
 				continue
 			}
 			if !t.switcherKey() {
@@ -743,15 +735,6 @@ func (t *tui) askScreen(pane string, now time.Time) {
 	t.swScreen++
 	t.swScreenAt = now
 	_ = t.conn.Send(wire.Msg{Type: "req", Action: "screen", Target: pane, ID: t.swScreen})
-}
-
-// previewNow asks for the selected pane's screen at once, so a key sent in
-// input mode shows its answer without waiting for the cadence. It rides the
-// same interval as the cadence: one ask inside previewEvery, however many keys
-// arrive, so a burst of typing costs one request and the next tick fills in
-// the rest.
-func (t *tui) previewNow() {
-	t.previewTick(time.Now())
 }
 
 // applyPreviewScreen restores one pane's screen into the dashboard's terminal.
@@ -1344,6 +1327,20 @@ func (t *tui) copyOutput() {
 	t.yankID++
 	t.yankPane = p.ID
 	_ = t.conn.Send(wire.Msg{Type: "req", Action: "yank", Target: p.ID, ID: t.yankID})
+	t.disarm()
+}
+
+// copyPaneID writes the focused pane's id to the clipboard. The id is the
+// handle the shell, dm exec and every other dm surface names a pane by.
+func (t *tui) copyPaneID() {
+	p := t.focusedPane()
+	if p == nil {
+		t.notify("no pane")
+		t.disarm()
+		return
+	}
+	t.writeClipboard(p.ID)
+	t.notify("copied " + p.ID)
 	t.disarm()
 }
 

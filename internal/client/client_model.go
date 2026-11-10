@@ -205,10 +205,6 @@ type tui struct {
 	swAt   time.Time
 	swPane string
 	swID   int
-	// swInput is true while the dashboard forwards every key to the selected
-	// pane. Esc leaves it; the dashboard stays up.
-	swInput bool
-
 	// float is the floating command, nil when closed. floatID numbers the
 	// request, so a reply to an older one opens nothing. floatGone is the id
 	// of the float last closed, so its late frames are the child's last words
