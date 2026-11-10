@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,6 +39,10 @@ type cmdFlags struct {
 	key        string
 	keyPrefix  string
 	state      string
+	body       string
+	bodyFile   string
+	seq        int
+	from       string
 	limit      int
 	after      int
 	timeout    time.Duration
@@ -64,6 +69,10 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.StringVar(&c.key, "key", "", "box key")
 	c.fs.StringVar(&c.keyPrefix, "prefix", "", "box key prefix")
 	c.fs.StringVar(&c.state, "state", "", "box state: note working blocked done error")
+	c.fs.StringVar(&c.body, "body", "", "long body text under the message line")
+	c.fs.StringVar(&c.bodyFile, "body-file", "", "read the body from a path, - for stdin")
+	c.fs.IntVar(&c.seq, "seq", -1, "the entry's seq")
+	c.fs.StringVar(&c.from, "from", "", "the posting pane")
 	c.fs.IntVar(&c.limit, "limit", 0, "list rows, 0 for the whole box")
 	c.fs.IntVar(&c.after, "after", -1, "box seq cursor: entries after this one")
 	c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, "wait timeout")
@@ -81,6 +90,8 @@ func reorder(args []string) []string {
 		"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
 		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true,
 		"-key": true, "--key": true, "-state": true, "--state": true,
+		"-body": true, "--body": true, "-body-file": true, "--body-file": true,
+		"-seq": true, "--seq": true, "-from": true, "--from": true,
 		"-prefix": true, "--prefix": true, "-after": true, "--after": true,
 		"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
 	}
@@ -408,6 +419,8 @@ func runBox(c *cmdFlags) error {
 		return boxPostVerb(c)
 	case "list":
 		return boxListVerb(c)
+	case "show":
+		return boxShowVerb(c)
 	case "wait":
 		return boxWaitVerb(c)
 	case "sub":
@@ -422,13 +435,40 @@ func runBox(c *cmdFlags) error {
 	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, sub, clear, watchers or schema", c.args[0])
 }
 
+// boxBody resolves the body the post carries: --body wins, --body-file reads
+// a path or stdin, and naming both is ambiguous.
+func boxBody(c *cmdFlags) (string, error) {
+	if c.body != "" && c.bodyFile != "" {
+		return "", fmt.Errorf("msg: --body and --body-file are exclusive")
+	}
+	if c.bodyFile == "" {
+		return c.body, nil
+	}
+	if c.bodyFile == "-" {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("msg: read body: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := os.ReadFile(c.bodyFile)
+	if err != nil {
+		return "", fmt.Errorf("msg: read body: %w", err)
+	}
+	return string(b), nil
+}
+
 // boxPostVerb posts one entry and prints it as the server stored it.
 func boxPostVerb(c *cmdFlags) error {
 	st, err := box.ParseState(c.state)
 	if err != nil {
 		return err
 	}
-	raw, err := json.Marshal(box.PostReq{Key: c.key, State: st, Msg: c.msg, From: boxFrom(c.session)})
+	body, err := boxBody(c)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(box.PostReq{Key: c.key, State: st, Msg: c.msg, Body: body, From: boxFrom(c.session)})
 	if err != nil {
 		return err
 	}
@@ -478,6 +518,75 @@ func boxListVerb(c *cmdFlags) error {
 		fmt.Fprintln(os.Stderr, "dm: entries between the cursor and the oldest kept row are gone")
 	}
 	return nil
+}
+
+// boxShowVerb prints one entry's body to stdout, raw, or the entry's summary
+// line when it carries no body. The pick is deterministic: the topic's newest
+// entry, or the one --seq names, or the newest one --from posted. Naming both
+// a seq and a pane is ambiguous, so it is refused.
+func boxShowVerb(c *cmdFlags) error {
+	if c.key == "" {
+		return fmt.Errorf("msg show needs --key")
+	}
+	if c.seq >= 0 && c.from != "" {
+		return fmt.Errorf("msg: --seq and --from are exclusive")
+	}
+	raw, err := json.Marshal(box.ListReq{Key: c.key, Limit: box.ClampLimit(c.limit)})
+	if err != nil {
+		return err
+	}
+	m, err := transport.RPC(c.session, wire.Msg{Action: "msg-list", Res: raw})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var rep box.ListReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	e, found := pickShowEntry(rep.Entries, c.seq, c.from)
+	if !found {
+		switch {
+		case c.seq >= 0:
+			return fmt.Errorf("box: key %q has no entry at seq %d", c.key, c.seq)
+		case c.from != "":
+			return fmt.Errorf("box: key %q has no entry from %q", c.key, c.from)
+		default:
+			return fmt.Errorf("box: key %q has no entry", c.key)
+		}
+	}
+	text := showText(e)
+	fmt.Print(text)
+	if !strings.HasSuffix(text, "\n") {
+		fmt.Println()
+	}
+	return nil
+}
+
+// showText is the text a show prints: the body raw, or the summary line when
+// the entry carries no body.
+func showText(e box.Entry) string {
+	if e.Body != "" {
+		return e.Body
+	}
+	return e.Msg
+}
+
+// pickShowEntry chooses the entry a show prints: the seq's row, the newest row
+// the pane posted, or the topic's newest row. Entries arrive newest first.
+func pickShowEntry(entries []box.Entry, seq int, from string) (box.Entry, bool) {
+	for _, e := range entries {
+		if seq >= 0 && e.Seq != seq {
+			continue
+		}
+		if from != "" && e.From != from {
+			continue
+		}
+		return e, true
+	}
+	return box.Entry{}, false
 }
 
 // boxWaitVerb blocks until the read finds an entry and prints it. Without

@@ -58,7 +58,7 @@ func sameStrings(a, b []string) bool {
 
 // TestMessageBoxGoldenEntry pins the frozen entry JSON, field order included.
 func TestMessageBoxGoldenEntry(t *testing.T) {
-	want := `{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green"}`
+	want := `{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green","body":""}`
 	e := Entry{
 		Seq:   7,
 		At:    time.Date(2026, time.November, 3, 14, 40, 12, 0, time.UTC),
@@ -79,7 +79,7 @@ func TestMessageBoxGoldenEntry(t *testing.T) {
 		t.Fatalf("decode entry: %v", err)
 	}
 	if back.Seq != e.Seq || !back.At.Equal(e.At) || back.From != e.From ||
-		back.Key != e.Key || back.State != e.State || back.Msg != e.Msg {
+		back.Key != e.Key || back.State != e.State || back.Msg != e.Msg || back.Body != e.Body {
 		t.Fatalf("entry round trip = %+v", back)
 	}
 	if err := e.Validate(); err != nil {
@@ -250,7 +250,7 @@ func TestMessageBoxSchemaMatchesEnum(t *testing.T) {
 	if e.Type != "object" {
 		t.Fatalf("entry schema type = %q", e.Type)
 	}
-	if want := []string{"seq", "at", "from", "key", "state", "msg"}; !sameStrings(e.Required, want) {
+	if want := []string{"seq", "at", "from", "key", "state", "msg", "body"}; !sameStrings(e.Required, want) {
 		t.Fatalf("entry required = %v, want %v", e.Required, want)
 	}
 	if got := e.Properties["state"].Enum; !sameStrings(got, want) {
@@ -625,7 +625,7 @@ func TestMessageBoxGoldenSubFrame(t *testing.T) {
 		State: StateDone,
 		Msg:   "gate green",
 	}
-	want := `{"entry":{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green"},"trimmed":true}`
+	want := `{"entry":{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green","body":""},"trimmed":true}`
 	b, err := json.Marshal(SubFrame{Entry: e, Trimmed: true})
 	if err != nil {
 		t.Fatalf("marshal sub frame: %v", err)
@@ -680,7 +680,7 @@ func TestMessageBoxSchemaSub(t *testing.T) {
 	if e.Type != "object" {
 		t.Fatalf("sub entry type = %q", e.Type)
 	}
-	if want := []string{"seq", "at", "from", "key", "state", "msg"}; !sameStrings(e.Required, want) {
+	if want := []string{"seq", "at", "from", "key", "state", "msg", "body"}; !sameStrings(e.Required, want) {
 		t.Fatalf("sub entry required = %v, want %v", e.Required, want)
 	}
 	if got := e.Properties["state"].Enum; !sameStrings(got, StateNames()) {
