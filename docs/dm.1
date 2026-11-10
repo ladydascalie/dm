@@ -172,7 +172,7 @@ print the screen a palette row lands on
 .br
 \fB--lines N\fP number of screen lines
 .TP
-\fBdm msg post --state S [--key K] [--msg T]\fP
+\fBdm msg post --state S [--key K] [--msg T] [--body T | --body-file P]\fP
 post one entry to the box
 .br
 \fB--s name\fP session name
@@ -182,6 +182,10 @@ post one entry to the box
 \fB--key K\fP box key
 .br
 \fB--msg\fP message text
+.br
+\fB--body\fP long body text under the message line
+.br
+\fB--body-file P\fP read the body from a path, - for stdin
 .br
 Example: \fBdm msg post --key build --state done --msg 'all green'\fP
 .TP

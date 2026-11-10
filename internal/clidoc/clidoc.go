@@ -255,13 +255,15 @@ var cliCommands = []cliCommand{
 	// The box, under dm msg.
 	{
 		name:    "msg post",
-		args:    "--state S [--key K] [--msg T]",
+		args:    "--state S [--key K] [--msg T] [--body T | --body-file P]",
 		summary: "post one entry to the box",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"state", "S", "box state: note working blocked done error"},
 			{"key", "K", "box key"},
 			{"msg", "", "message text"},
+			{"body", "", "long body text under the message line"},
+			{"body-file", "P", "read the body from a path, - for stdin"},
 		},
 		example: `dm msg post --key build --state done --msg 'all green'`,
 		group:   groupBox,
