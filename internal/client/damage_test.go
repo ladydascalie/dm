@@ -135,7 +135,7 @@ func TestFrameSyncMarkers(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
 	vt := f.tui.vts[f.snap.Panes[0].ID]
 	for i := 0; i < 3; i++ {
-		vt.Write([]byte(fmt.Sprintf("\x1b[2;1HSTEP-%d", i)))
+		vt.Write(fmt.Appendf(nil, "\x1b[2;1HSTEP-%d", i))
 		got := f.frame()
 		if got == "" {
 			t.Fatalf("frame %d wrote nothing", i)
@@ -211,7 +211,7 @@ func TestFrameLeaveScrollback(t *testing.T) {
 	p := f.snap.Panes[0]
 	term := f.tui.vts[p.ID]
 	for i := 0; i < 80; i++ {
-		term.Write([]byte(fmt.Sprintf("LINE-%03d\r\n", i)))
+		term.Write(fmt.Appendf(nil, "LINE-%03d\r\n", i))
 	}
 	f.frame()
 
@@ -490,7 +490,7 @@ func TestOracleDividerHover(t *testing.T) {
 	for _, p := range snap.Panes {
 		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		tr.vts[p.ID] = vt
-		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s", p.ID)))
+		vt.Write(fmt.Appendf(nil, "\x1b[2;1H%s", p.ID))
 	}
 	live := vt.NewTerm(100, 20)
 	step := func(label string) {
@@ -517,7 +517,7 @@ func TestOracleScrollback(t *testing.T) {
 	p := f.snap.Panes[0]
 	term := f.tui.vts[p.ID]
 	for i := 0; i < 80; i++ {
-		term.Write([]byte(fmt.Sprintf("LINE-%03d\r\n", i)))
+		term.Write(fmt.Appendf(nil, "LINE-%03d\r\n", i))
 	}
 	live := vt.NewTerm(100, 20)
 	step := func(label string) {
@@ -590,7 +590,7 @@ func TestOracleOverlayOverGap(t *testing.T) {
 	for _, p := range snap.Panes {
 		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		tr.vts[p.ID] = vt
-		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s-content", p.ID)))
+		vt.Write(fmt.Appendf(nil, "\x1b[2;1H%s-content", p.ID))
 	}
 	live := vt.NewTerm(100, 20)
 	step := func(label string) {
@@ -680,7 +680,7 @@ func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *wire.Snapshot) {
 	for _, p := range snap.Panes {
 		vt := vt.NewTerm(p.Rect.W, p.Rect.H)
 		tr.vts[p.ID] = vt
-		vt.Write([]byte(fmt.Sprintf("\x1b[2;1H%s-content", p.ID)))
+		vt.Write(fmt.Appendf(nil, "\x1b[2;1H%s-content", p.ID))
 	}
 	return tr, out, snap
 }
@@ -845,7 +845,7 @@ func TestOracleBrackets(t *testing.T) {
 	f := newFrameTUI(t, 100, 20, 34)
 	vt := f.tui.vts[f.snap.Panes[0].ID]
 	for i := 0; i < 5; i++ {
-		vt.Write([]byte(fmt.Sprintf("\x1b[%d;1HSTEP-%d", i+1, i)))
+		vt.Write(fmt.Appendf(nil, "\x1b[%d;1HSTEP-%d", i+1, i))
 		raw := f.frame()
 		if raw == "" {
 			t.Fatalf("step %d wrote nothing", i)

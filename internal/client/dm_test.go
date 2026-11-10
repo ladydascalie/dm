@@ -2359,7 +2359,7 @@ func TestBarPadsToWidth(t *testing.T) {
 	}
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	// A previous frame leaves stale glyphs on the bar row.
-	term.Write([]byte(fmt.Sprintf("\x1b[%d;1H%s", snap.Rows, strings.Repeat("X", snap.Cols))))
+	term.Write(fmt.Appendf(nil, "\x1b[%d;1H%s", snap.Rows, strings.Repeat("X", snap.Cols)))
 	term.Flush()
 	var b bytes.Buffer
 	drawBar(&b, theme.DefaultTheme(), snap, false, "", theme.GlyphNerd)
