@@ -99,7 +99,7 @@ func Rasterise(g *Grid, opts Options) (*Raster, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer face.Close()
+	defer func() { _ = face.Close() }()
 
 	img := image.NewRGBA(image.Rect(0, 0, g.W*opts.CellW, g.H*opts.CellH))
 	base := baseline(face, opts.CellH)

@@ -881,7 +881,8 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 		leftCells := segment.SegCells(left) + segment.SegCells(tail)
 		rightCells := segment.SegCells(right)
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
-		buf.WriteString("\x1b[0m" + bg.BG())
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(bg.BG())
 		for _, s := range left {
 			WriteRailSeg(buf, s, bg, bold)
 		}
@@ -896,9 +897,11 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 		}
 		if y < controlAt {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, w)
-			buf.WriteString("\x1b[0m" + bg.BG())
+			buf.WriteString("\x1b[0m")
+			buf.WriteString(bg.BG())
 			if y == gripAt {
-				buf.WriteString(p.RailDim.FG() + th.Glyphs.Grip)
+				buf.WriteString(p.RailDim.FG())
+				buf.WriteString(th.Glyphs.Grip)
 			} else {
 				buf.WriteString(" ")
 			}

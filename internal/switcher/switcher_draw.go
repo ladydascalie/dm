@@ -248,7 +248,10 @@ func paintSwitcherTitle(buf *bytes.Buffer, th theme.Theme, l switcherLayout) {
 		return
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH", l.r.Y+1, l.r.X+3)
-	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailText.FG() + "\x1b[1m")
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(th.Palette.RailBG.BG())
+	buf.WriteString(th.Palette.RailText.FG())
+	buf.WriteString("\x1b[1m")
 	buf.WriteString(title)
 	buf.WriteString("\x1b[0m")
 }
@@ -270,13 +273,17 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 	cx = x
 	if w <= 0 {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-		buf.WriteString("\x1b[0m" + ground.BG())
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(ground.BG())
 	} else {
 		prompt := "> "
 		if !s.Filtering() {
 			hint := cells.Clip(switcherIdleHint, w)
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-			buf.WriteString("\x1b[0m" + ground.BG() + dim.FG() + hint)
+			buf.WriteString("\x1b[0m")
+			buf.WriteString(ground.BG())
+			buf.WriteString(dim.FG())
+			buf.WriteString(hint)
 			if n := w - cells.Cells(hint); n > 0 {
 				buf.WriteString(strings.Repeat(" ", n))
 			}
@@ -289,9 +296,15 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 		}
 		q := cells.Clip(string(s.query), w-len(prompt))
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-		buf.WriteString("\x1b[0m" + ground.BG() + dim.FG() + prompt)
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(ground.BG())
+		buf.WriteString(dim.FG())
+		buf.WriteString(prompt)
 		if q != "" {
-			buf.WriteString("\x1b[0m" + ground.BG() + text.FG() + q)
+			buf.WriteString("\x1b[0m")
+			buf.WriteString(ground.BG())
+			buf.WriteString(text.FG())
+			buf.WriteString(q)
 		}
 		used := len(prompt) + cells.Cells(q)
 		if n := w - used; n > 0 {
@@ -313,7 +326,10 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 	if l.preview {
 		paintRuleCell(buf, th, l.ruleX, y)
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.prevX+1)
-		buf.WriteString("\x1b[0m" + ground.BG() + strings.Repeat(" ", l.prevW) + "\x1b[0m")
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(ground.BG())
+		buf.WriteString(strings.Repeat(" ", l.prevW))
+		buf.WriteString("\x1b[0m")
 	}
 	return cx, cy
 }
@@ -325,7 +341,8 @@ func paintSwitcherHead(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols
 	}
 	ground := th.Palette.RailBG
 	fmt.Fprintf(buf, "\x1b[%d;%dH", l.headY+1, l.inner.X+1)
-	buf.WriteString("\x1b[0m" + ground.BG())
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(ground.BG())
 	used := 0
 	for i, name := range switcherHead {
 		if i > 0 {
@@ -385,7 +402,8 @@ func paintSwitcherRow(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols 
 	}
 	cellsOf := switcherRowCells(th, set, p, jump, now)
 	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.inner.X+1)
-	buf.WriteString("\x1b[0m" + ground.BG())
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(ground.BG())
 	used := 0
 	for i := 0; i < len(cols); i++ {
 		if i > 0 {
@@ -477,14 +495,21 @@ func paintSwitcherBlankRow(buf *bytes.Buffer, th theme.Theme, y, x, w int) {
 		return
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", w) + "\x1b[0m")
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(th.Palette.RailBG.BG())
+	buf.WriteString(strings.Repeat(" ", w))
+	buf.WriteString("\x1b[0m")
 }
 
 // paintRuleCell paints one cell of the vertical rule between the table and the
 // preview.
 func paintRuleCell(buf *bytes.Buffer, th theme.Theme, x, y int) {
 	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
-	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailDim.FG() + th.Glyphs.BorderVertical + "\x1b[0m")
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(th.Palette.RailBG.BG())
+	buf.WriteString(th.Palette.RailDim.FG())
+	buf.WriteString(th.Glyphs.BorderVertical)
+	buf.WriteString("\x1b[0m")
 }
 
 // switcherHints is the footer's key hints in the order they are worth cells.
@@ -534,11 +559,16 @@ func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switche
 		pad = 0
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH", l.footY+1, l.inner.X+1)
-	buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailDim.FG())
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(th.Palette.RailBG.BG())
+	buf.WriteString(th.Palette.RailDim.FG())
 	buf.WriteString(left)
 	buf.WriteString(strings.Repeat(" ", pad))
 	if right != "" {
-		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailDim.FG() + right)
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(th.Palette.RailBG.BG())
+		buf.WriteString(th.Palette.RailDim.FG())
+		buf.WriteString(right)
 	}
 	buf.WriteString("\x1b[0m")
 }
@@ -626,7 +656,9 @@ func paintSwitcherPreview(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts ma
 	paintBlankRows(buf, th, band, band.Y, start)
 	for i := 0; i < h; i++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", start+i+1, band.X+1)
-		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + th.Palette.RailText.FG())
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(th.Palette.RailBG.BG())
+		buf.WriteString(th.Palette.RailText.FG())
 		text := cells.Clip(s.lines[row0+i], band.W)
 		buf.WriteString(text)
 		if n := band.W - cells.Cells(text); n > 0 {
@@ -643,6 +675,9 @@ func paintBlankRows(buf *bytes.Buffer, th theme.Theme, band layout.Rect, from, t
 			continue
 		}
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, band.X+1)
-		buf.WriteString("\x1b[0m" + th.Palette.RailBG.BG() + strings.Repeat(" ", band.W) + "\x1b[0m")
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(th.Palette.RailBG.BG())
+		buf.WriteString(strings.Repeat(" ", band.W))
+		buf.WriteString("\x1b[0m")
 	}
 }

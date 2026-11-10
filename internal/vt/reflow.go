@@ -319,10 +319,10 @@ func scanPrintable(b []byte, text func(i int) bool) {
 				state = scanGround
 			}
 		case scanString:
-			switch {
-			case c == 0x1b: // ST is ESC \, re-entered as an escape
+			switch c {
+			case 0x1b: // ST is ESC \, re-entered as an escape
 				state = scanEscape
-			case c == 0x9c || c == 0x07 || c == 0x18 || c == 0x1a:
+			case 0x9c, 0x07, 0x18, 0x1a:
 				state = scanGround
 			}
 		case scanCharset:

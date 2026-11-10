@@ -105,9 +105,9 @@ func Run(ctx context.Context, opts Options) (int, error) {
 		return 1, err
 	}
 	logPath := logFile.Name()
-	logFile.Close()
-	os.Remove(logPath)
-	defer os.Remove(logPath)
+	_ = logFile.Close()
+	_ = os.Remove(logPath)
+	defer func() { _ = os.Remove(logPath) }()
 
 	args := append(fixedArgs(logPath), opts.Args...)
 
@@ -119,7 +119,7 @@ func Run(ctx context.Context, opts Options) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	defer ptmx.Close()
+	defer func() { _ = ptmx.Close() }()
 
 	h := newHarness(ptmx, opts)
 	runErr := h.run()
@@ -238,14 +238,14 @@ func (h *harness) writeVT(b []byte) {
 
 func (h *harness) reply(s, name string) {
 	if h.verbose {
-		fmt.Fprintf(h.errw, "answer %s -> %q\n", name, s)
+		_, _ = fmt.Fprintf(h.errw, "answer %s -> %q\n", name, s)
 	}
 	_, _ = h.ptmx.Write([]byte(s))
 }
 
 func (h *harness) logf(format string, args ...any) {
 	if h.verbose {
-		fmt.Fprintf(h.errw, format+"\n", args...)
+		_, _ = fmt.Fprintf(h.errw, format+"\n", args...)
 	}
 }
 
