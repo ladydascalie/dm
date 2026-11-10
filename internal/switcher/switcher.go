@@ -95,9 +95,16 @@ func NewSwitcher(rect layout.Rect, snap *wire.Snapshot) *Switcher {
 // Sync rebuilds the rows after a snapshot. The selection stays on its own pane
 // when that pane survives, and falls back to the nearest row when it is gone. A
 // preview of a pane that is gone is stale, so its request and lines go with it.
+//
+// The dashboard owns the whole screen, so a snapshot whose size differs moves
+// the rect with it: a grow and a shrink both land here, and the painter keeps
+// its clamp only as a guard.
 func (s *Switcher) Sync(snap *wire.Snapshot) {
 	s.all = s.all[:0]
 	if snap != nil {
+		if snap.Cols != s.Rect.W || snap.Rows != s.Rect.H {
+			s.Rect = layout.Rect{W: snap.Cols, H: snap.Rows}
+		}
 		s.all = append(s.all, snap.All...)
 	}
 	if s.asked && !s.hasPane(s.pane) {

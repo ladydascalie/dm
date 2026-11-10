@@ -395,12 +395,15 @@ func TestSwitcherPreviewToggle(t *testing.T) {
 	if !s.TogglePreview() || !s.PreviewOn() {
 		t.Fatal("the peek key did not turn the preview back on")
 	}
-	// A shorter float than ten rows drops the band, and so does one narrower
-	// than sixty columns.
-	for _, r := range []layout.Rect{{W: 160, H: 9}, {W: 59, H: 30}} {
-		small := NewSwitcher(r, switcherSnap())
+	// A screen shorter than ten rows drops the band, and so does one narrower
+	// than sixty columns. The dashboard owns the whole screen, so a small
+	// screen is what makes a small float.
+	for _, size := range [][2]int{{160, 9}, {59, 30}} {
+		snap := switcherSnap()
+		snap.Cols, snap.Rows = size[0], size[1]
+		small := NewSwitcher(layout.Rect{W: size[0], H: size[1]}, snap)
 		if small.PreviewOn() {
-			t.Fatalf("float %+v keeps the preview", r)
+			t.Fatalf("a %dx%d screen keeps the preview", size[0], size[1])
 		}
 	}
 }

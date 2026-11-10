@@ -265,6 +265,38 @@ func TestSwitcherDrawFrame(t *testing.T) {
 	}
 }
 
+// TestSwitcherSyncFollowsScreen syncs the dashboard through a grow and a
+// shrink and checks the rect and the drawn frame take the new size each time.
+func TestSwitcherSyncFollowsScreen(t *testing.T) {
+	s, snap := switcherOn(80, 24)
+	for _, size := range [][2]int{{80, 24}, {120, 40}, {60, 20}} {
+		cols, rows := size[0], size[1]
+		snap.Cols, snap.Rows = cols, rows
+		s.Sync(snap)
+		if want := (layout.Rect{W: cols, H: rows}); s.Rect != want {
+			t.Fatalf("after a sync at %dx%d rect = %+v, want %+v", cols, rows, s.Rect, want)
+		}
+		l := switcherLayoutOf(s, snap)
+		if l.r != s.Rect {
+			t.Fatalf("%dx%d: layout rect %+v, want the screen %+v", cols, rows, l.r, s.Rect)
+		}
+		_, _, _, screen := drawFloat(t, s, snap, nil)
+		// The box corners sit on the screen corners, so the frame took the
+		// whole screen rather than a leftover size.
+		if c := switcherCell(screen, 0, 0); c != "+" {
+			t.Fatalf("%dx%d: top left = %q, want the box corner", cols, rows, c)
+		}
+		if c := switcherCell(screen, cols-1, rows-1); c != "+" {
+			t.Fatalf("%dx%d: bottom right = %q, want the box corner", cols, rows, c)
+		}
+		// The footer keeps to the new width.
+		foot := switcherText(screen, 1, rows-2, cols-2)
+		if !strings.HasSuffix(foot, "recent 60%") {
+			t.Fatalf("%dx%d: footer = %q, want the ordering at its end", cols, rows, foot)
+		}
+	}
+}
+
 // TestSwitcherDrawFootDropsHints checks a narrow float keeps the hints that
 // fit and drops the rest whole: it loses the scroll reminder before it loses
 // the jump keys, and it never names half a key.
