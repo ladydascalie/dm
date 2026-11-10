@@ -88,13 +88,13 @@ func TestBoxNotifyPostDispatches(t *testing.T) {
 	focus := s.st.ActiveWindow().Focus
 
 	postQuiet(t, s, "notify/"+focus, "blocked", "needs review")
-	postQuiet(t, s, "notify/", "note", "free post")
+	postQuiet(t, s, "notify/", "error", "free post")
 	// The two renders race onto the log, so the test matches the pair, not
 	// the order.
 	lines := waitNotifySend(t, log, 2)
 	joined := strings.Join(lines, "\n")
 	for _, want := range []string{
-		"notify/" + focus + " blocked", "needs review", "notify/ note", "free post",
+		"notify/" + focus + " blocked", "needs review", "notify/ error", "free post",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("dispatches = %q, want %q in them", joined, want)
@@ -119,7 +119,7 @@ func TestBoxNotifyPostSuppressedWhenFocused(t *testing.T) {
 
 	postQuiet(t, s, "notify/"+focus, "blocked", "needs review")
 	noNotifySend(t, log, 0)
-	postQuiet(t, s, "notify/ghost", "done", "finished")
+	postQuiet(t, s, "notify/ghost", "error", "finished")
 	waitNotifySend(t, log, 1)
 
 	entries, _, err := s.boxList(&box.ListReq{KeyPrefix: "notify/", Limit: 10})
@@ -152,4 +152,30 @@ func TestBoxNotifyPostGatedByEnv(t *testing.T) {
 
 	postQuiet(t, s, "notify/"+focus, "blocked", "needs review")
 	noNotifySend(t, log, 0)
+}
+
+// Urgency is the second gate: a done notify/ entry logs and pops nothing even
+// for a pane nobody is looking at, while an error on the same topic pops. The
+// log is never gated.
+func TestBoxNotifyPostGatedByUrgency(t *testing.T) {
+	dir, log := fakeNotifySend(t)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DM_NOTIFY", "")
+	s := boxServer(t)
+
+	postQuiet(t, s, "notify/ghost", "done", "built ok")
+	noNotifySend(t, log, 0)
+	postQuiet(t, s, "notify/ghost", "error", "build failed")
+	lines := waitNotifySend(t, log, 1)
+	if !strings.Contains(lines[0], "notify/ghost error") || !strings.Contains(lines[0], "build failed") {
+		t.Fatalf("dispatch = %q, want the topic, state and msg", lines[0])
+	}
+
+	entries, _, err := s.boxList(&box.ListReq{KeyPrefix: "notify/", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("logged = %d entries, want both the done and the error", len(entries))
+	}
 }

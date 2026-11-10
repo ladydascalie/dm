@@ -28,6 +28,19 @@ func StateChange(from, to string) bool {
 	return false
 }
 
+// Urgent reports whether a notify entry's state deserves a desktop
+// notification: blocked and error are urgent, everything else is not.
+// StateChange stays the transition filter; urgency is a second, independent
+// gate the renderers apply, so an entry that passes one can still fail the
+// other.
+func Urgent(state string) bool {
+	switch state {
+	case "blocked", "error":
+		return true
+	}
+	return false
+}
+
 // SystemNotify hands a title and a body to the desktop notifier. It is a
 // no-op when DM_NOTIFY is "0" or notify-send is not on PATH. The process is
 // started here and reaped in the background under notifyTimeout, so a caller

@@ -151,6 +151,31 @@ func notifyEntry(t *testing.T, h *harness, session, key, state, msg string) {
 	t.Fatalf("box log = %v, want an entry under %s with state %s and msg %q", entries, key, state, msg)
 }
 
+// waitNotifyEntry polls the box log until an entry under key with the state
+// and the message lands, bounded. A path with no desktop pop has no log line
+// to wait on, so the box itself says when the post went through.
+func waitNotifyEntry(t *testing.T, h *harness, session, key, state, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		res := h.rpc(session, map[string]any{"action": "msg-list", "keyPrefix": "notify/", "limit": 100})
+		entries, _ := res["entries"].([]any)
+		for _, e := range entries {
+			m, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			if m["key"] == key && m["state"] == state && strings.Contains(m["msg"].(string), msg) {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("box log = %v, never held an entry under %s with state %s and msg %q", entries, key, state, msg)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // A blocked pane the operator is not looking at lands in the box under its
 // notify topic with the entered state, and the headless renderer pops the
 // topic, the state and the message.
@@ -209,14 +234,15 @@ func TestNotifySuppressedForAttachedFocus(t *testing.T) {
 	stillNotify(t, log, 0, 400*time.Millisecond)
 	notifyEntry(t, h, "n", "notify/"+p2, "blocked", "hidden")
 
-	// The same pane in the background, entering another state, does notify.
+	// The same pane in the background, entering an urgent state, does notify:
+	// the silence above was the focus suppression, not urgency.
 	h.run("focus", root, "-s", "n")
-	writeStatus(t, h, "n", p2, "done", "seen")
+	writeStatus(t, h, "n", p2, "error", "seen")
 	lines := waitNotify(t, log, 1)
 	if len(lines) != 1 || !strings.Contains(lines[0], "seen") {
 		t.Fatalf("notifications = %q, want one carrying seen", lines)
 	}
-	notifyEntry(t, h, "n", "notify/"+p2, "done", "seen")
+	notifyEntry(t, h, "n", "notify/"+p2, "error", "seen")
 }
 
 // DM_NOTIFY=0 turns the desktop notifications off, and the box log still
@@ -234,8 +260,8 @@ func TestNotifyDisabledByEnv(t *testing.T) {
 }
 
 // A pane exit lands in the box under the pane's notify topic, rides the note
-// state with the exit in its message, and pops when the operator is not
-// looking at it.
+// state with the exit in its message, and pops nothing: note is not urgent,
+// whatever the focus. The entry is logged either way.
 func TestNotifyPaneExit(t *testing.T) {
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
@@ -245,14 +271,52 @@ func TestNotifyPaneExit(t *testing.T) {
 	h.run("focus", root, "-s", "n")
 
 	h.run("write-to", p2, "-s", "n", "--msg", "exit", "--enter")
-	lines := waitNotify(t, log, 1)
-	if len(lines) != 1 {
-		t.Fatalf("notifications = %q, want one", lines)
-	}
-	for _, want := range []string{"notify/" + p2 + " note", "exited"} {
-		if !strings.Contains(lines[0], want) {
-			t.Fatalf("notification %q missing %q", lines[0], want)
-		}
-	}
+	waitNotifyEntry(t, h, "n", "notify/"+p2, "note", "exited")
+	stillNotify(t, log, 0, 400*time.Millisecond)
 	notifyEntry(t, h, "n", "notify/"+p2, "note", "exited")
+}
+
+// Urgency is the desktop gate: a done entry in a background pane produces no
+// notification, error and blocked still do, and every entry lands in the box
+// whatever its urgency.
+func TestNotifyUrgencyGatesDesktopPops(t *testing.T) {
+	h, log := notifyHarness(t)
+	h.run("new", "-s", "n")
+	root := h.focus("n")
+	p2 := h.split("n", root, "right")
+	h.run("focus", root, "-s", "n")
+
+	writeStatus(t, h, "n", p2, "done", "built ok")
+	stillNotify(t, log, 0, 400*time.Millisecond)
+	waitNotifyEntry(t, h, "n", "notify/"+p2, "done", "built ok")
+
+	writeStatus(t, h, "n", p2, "error", "build failed")
+	lines := waitNotify(t, log, 1)
+	if !strings.Contains(lines[0], "notify/"+p2+" error") || !strings.Contains(lines[0], "build failed") {
+		t.Fatalf("notification %q missing the error pop", lines[0])
+	}
+	waitNotifyEntry(t, h, "n", "notify/"+p2, "error", "build failed")
+
+	writeStatus(t, h, "n", p2, "blocked", "needs review")
+	lines = waitNotify(t, log, 2)
+	waitNotifyEntry(t, h, "n", "notify/"+p2, "blocked", "needs review")
+
+	h.run("write-to", p2, "-s", "n", "--msg", "exit", "--enter")
+	waitNotifyEntry(t, h, "n", "notify/"+p2, "note", "exited")
+	stillNotify(t, log, 2, 400*time.Millisecond)
+}
+
+// A last-pane exit rides note too: no desktop notification. The session ends
+// with the exit and takes its state file with it, so the entry's landing in
+// the box is proven by TestLastPaneExitPostsEntry in internal/server.
+func TestNotifyLastPaneExitDoesNotPop(t *testing.T) {
+	h, log := notifyHarness(t)
+	h.run("new", "-s", "n")
+	only := h.focus("n")
+
+	h.run("write-to", only, "-s", "n", "--msg", "exit", "--enter")
+	stillNotify(t, log, 0, 1*time.Second)
+	if _, err := os.Stat(filepath.Join(h.stateDir(), "sessions", "n", "state.json")); !os.IsNotExist(err) {
+		t.Fatalf("the last pane's exit left the session state behind: %v", err)
+	}
 }
