@@ -341,9 +341,14 @@ func themeFileFromKeys(keys []ThemeKey) string {
 	}
 	var b strings.Builder
 	writeBlock := func(block string, ks []ThemeKey) {
-		b.WriteString(block + " {\n")
+		b.WriteString(block)
+		b.WriteString(" {\n")
 		for _, k := range ks {
-			b.WriteString("\t\"" + k.Name + "\" \"" + k.Default + "\"\n")
+			b.WriteString("\t\"")
+			b.WriteString(k.Name)
+			b.WriteString("\" \"")
+			b.WriteString(k.Default)
+			b.WriteString("\"\n")
 		}
 		b.WriteString("}\n\n")
 	}
@@ -356,9 +361,15 @@ func themeFileFromKeys(keys []ThemeKey) string {
 		if !ok {
 			panic("theme keys are missing state " + name)
 		}
-		b.WriteString("\t\"" + name + "\" {\n")
+		b.WriteString("\t\"")
+		b.WriteString(name)
+		b.WriteString("\" {\n")
 		for _, k := range ks {
-			b.WriteString("\t\t\"" + k.Name + "\" \"" + k.Default + "\"\n")
+			b.WriteString("\t\t\"")
+			b.WriteString(k.Name)
+			b.WriteString("\" \"")
+			b.WriteString(k.Default)
+			b.WriteString("\"\n")
 		}
 		b.WriteString("\t}\n")
 	}
