@@ -14,6 +14,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/theme"
 	"dm/internal/vt"
 )
 
@@ -31,7 +32,7 @@ type bodyReader struct {
 // summary line comes first and the body renders inline below it; a summary
 // the entry does not carry is skipped, and one trailing empty line from the
 // body's final newline is dropped.
-func newBodyReader(e box.Entry, r layout.Rect) *bodyReader {
+func newBodyReader(e box.Entry, r layout.Rect, th theme.Theme) *bodyReader {
 	lines := make([]string, 0, strings.Count(e.Body, "\n")+2)
 	if e.Msg != "" {
 		lines = append(lines, e.Msg)
@@ -51,13 +52,14 @@ func newBodyReader(e box.Entry, r layout.Rect) *bodyReader {
 			Hint:   " j/k scroll  esc back ",
 		},
 	}
-	b.paint()
+	b.paint(th)
 	return b
 }
 
 // paint rewrites the overlay's terminal from the window of lines. Every row
-// is placed absolutely, so a scrolled reader paints its window whole.
-func (r *bodyReader) paint() {
+// is placed absolutely, so a scrolled reader paints its window whole. The
+// text sits in the theme's dim colour, the way the box paints its rows.
+func (r *bodyReader) paint(th theme.Theme) {
 	rect := r.Float.Rect
 	if rect.W < 1 || rect.H < 1 {
 		r.Float.VT = vt.NewTerm(1, 1)
@@ -70,7 +72,7 @@ func (r *bodyReader) paint() {
 		if i >= len(r.lines) {
 			break
 		}
-		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[0m\x1b[90m %s", row+1, cells.Clip(r.lines[i], rect.W-2))
+		fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[0m%s %s", row+1, th.Palette.RailDim.FG(), cells.Clip(r.lines[i], rect.W-2))
 	}
 	term.Write(buf.Bytes())
 	term.Flush()
@@ -78,17 +80,17 @@ func (r *bodyReader) paint() {
 }
 
 // Scroll moves the window by n rows, positive toward later lines.
-func (r *bodyReader) Scroll(n int) {
+func (r *bodyReader) Scroll(n int, th theme.Theme) {
 	r.off += n
 	r.clamp()
-	r.paint()
+	r.paint(th)
 }
 
 // Sync fits the overlay to the float's rect after a resize and repaints.
-func (r *bodyReader) Sync(rect layout.Rect) {
+func (r *bodyReader) Sync(rect layout.Rect, th theme.Theme) {
 	r.Float.Rect = rect
 	r.clamp()
-	r.paint()
+	r.paint(th)
 }
 
 // clamp keeps the window on the lines: the offset never passes the last row
@@ -118,7 +120,7 @@ func openBodyReader(t *tui) {
 	if !ok || e.Body == "" {
 		return
 	}
-	t.reader = newBodyReader(e, t.box.Float.Rect)
+	t.reader = newBodyReader(e, t.box.Float.Rect, t.theme())
 	t.AddFloatingPane(t.reader.Float)
 }
 
@@ -207,19 +209,20 @@ func (t *tui) boxBodyHint() {
 // opened it: the scroll keys scroll, and the close keys hand the keyboard
 // back to the float beneath.
 func (t *tui) readerAction(action string) {
+	th := t.theme()
 	switch action {
 	case "up", "up-arrow":
-		t.reader.Scroll(-1)
+		t.reader.Scroll(-1, th)
 	case "down", "down-arrow":
-		t.reader.Scroll(1)
+		t.reader.Scroll(1, th)
 	case "page-up":
-		t.reader.Scroll(-t.reader.Float.Rect.H)
+		t.reader.Scroll(-t.reader.Float.Rect.H, th)
 	case "page-down":
-		t.reader.Scroll(t.reader.Float.Rect.H)
+		t.reader.Scroll(t.reader.Float.Rect.H, th)
 	case "top":
-		t.reader.Scroll(-t.reader.off - 1)
+		t.reader.Scroll(-t.reader.off-1, th)
 	case "bottom":
-		t.reader.Scroll(len(t.reader.lines))
+		t.reader.Scroll(len(t.reader.lines), th)
 	default:
 		closeBodyReader(t)
 	}

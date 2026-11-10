@@ -16,6 +16,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/panel"
+	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -36,14 +37,14 @@ type notifyCentre struct {
 
 // newNotifyCentre opens the float on a screen. The list stays empty until the
 // reply lands.
-func newNotifyCentre(snap *wire.Snapshot) *notifyCentre {
+func newNotifyCentre(snap *wire.Snapshot, th theme.Theme) *notifyCentre {
 	c := &notifyCentre{Float: &panel.FloatingPane{ID: "notif", Active: true}}
-	c.Sync(snap)
+	c.Sync(snap, th)
 	return c
 }
 
 // Sync fits the float to the screen after a snapshot or a rail change.
-func (c *notifyCentre) Sync(snap *wire.Snapshot) {
+func (c *notifyCentre) Sync(snap *wire.Snapshot, th theme.Theme) {
 	c.Float.Rect = boxview.BoxViewRect(snap, len(c.entries))
 	if c.sel >= len(c.entries) {
 		c.sel = len(c.entries) - 1
@@ -51,12 +52,13 @@ func (c *notifyCentre) Sync(snap *wire.Snapshot) {
 	if c.sel < 0 {
 		c.sel = 0
 	}
-	c.paint()
+	c.paint(th)
 }
 
 // paint rewrites the float's terminal from the rows. Every row is placed
-// absolutely, so a moved selection repaints the window whole.
-func (c *notifyCentre) paint() {
+// absolutely, so a moved selection repaints the window whole. Unselected rows
+// sit in the theme's dim colour, the way the box paints its rows.
+func (c *notifyCentre) paint(th theme.Theme) {
 	r := c.Float.Rect
 	c.Float.Title = c.title()
 	c.Float.Hint = " j/k move  enter body  g pane  m box  esc close "
@@ -81,7 +83,7 @@ func (c *notifyCentre) paint() {
 		if i == c.sel {
 			buf.WriteString("\x1b[0m")
 		} else {
-			buf.WriteString("\x1b[0m\x1b[90m")
+			buf.WriteString("\x1b[0m" + th.Palette.RailDim.FG())
 		}
 		buf.WriteString(cells.Clip(notifyRowText(c.entries[i], mark), r.W))
 	}
@@ -164,12 +166,12 @@ func (t *tui) notifPaint() {
 		return
 	}
 	t.ncentre.read = t.notifyRead
-	t.ncentre.paint()
+	t.ncentre.paint(t.theme())
 	t.dirty = true
 }
 
 // Move moves the selection by n rows and repaints.
-func (c *notifyCentre) Move(n int) {
+func (c *notifyCentre) Move(n int, th theme.Theme) {
 	c.sel += n
 	if c.sel >= len(c.entries) {
 		c.sel = len(c.entries) - 1
@@ -177,7 +179,7 @@ func (c *notifyCentre) Move(n int) {
 	if c.sel < 0 {
 		c.sel = 0
 	}
-	c.paint()
+	c.paint(th)
 }
 
 // selected is the entry the operator acts on.
@@ -199,7 +201,7 @@ func openNotifyCentre(t *tui) {
 		closeNotifyCentre(t)
 		return
 	}
-	t.ncentre = newNotifyCentre(t.snap)
+	t.ncentre = newNotifyCentre(t.snap, t.theme())
 	t.AddFloatingPane(t.ncentre.Float)
 	t.mode = "notif"
 	t.armed = false
@@ -235,9 +237,10 @@ func (t *tui) notifyCentreRequest() {
 	if t.conn == nil {
 		return
 	}
-	t.nID++
+	t.notifyID++
+	t.notifyRouteTag(t.notifyID, notifyRouteCentre)
 	_ = t.conn.Send(wire.Msg{
-		Type: "req", Action: "msg-list", ID: t.nID,
+		Type: "req", Action: "msg-list", ID: t.notifyID,
 		Res: []byte(fmt.Sprintf(`{"keyPrefix":"notify/","limit":%d}`, notifyCentreLimit)),
 	})
 }
@@ -264,7 +267,7 @@ func (t *tui) takeNotifyCentreList(m wire.Msg) {
 	if t.ncentre.sel < 0 {
 		t.ncentre.sel = 0
 	}
-	t.ncentre.Sync(t.snap)
+	t.ncentre.Sync(t.snap, t.theme())
 	t.notifPaint()
 }
 
@@ -325,7 +328,7 @@ func (t *tui) notifKey() bool {
 	case 'G':
 		t.inbuf = t.inbuf[1:]
 		t.pending = false
-		t.ncentre.Move(len(t.ncentre.entries))
+		t.ncentre.Move(len(t.ncentre.entries), t.theme())
 		t.dirty = true
 		return true
 	case 'm':
@@ -362,13 +365,13 @@ func (t *tui) notifKey() bool {
 	}
 	switch action {
 	case "up", "up-arrow":
-		t.ncentre.Move(-1)
+		t.ncentre.Move(-1, t.theme())
 	case "down", "down-arrow":
-		t.ncentre.Move(1)
+		t.ncentre.Move(1, t.theme())
 	case "page-up":
-		t.ncentre.Move(-t.ncentre.Float.Rect.H)
+		t.ncentre.Move(-t.ncentre.Float.Rect.H, t.theme())
 	case "page-down":
-		t.ncentre.Move(t.ncentre.Float.Rect.H)
+		t.ncentre.Move(t.ncentre.Float.Rect.H, t.theme())
 	case "close", "close-esc", "close-ctrl-c":
 		closeNotifyCentre(t)
 	default:
@@ -392,9 +395,9 @@ func (t *tui) notifWheel(ev mouseEvent) {
 		step = 3
 	}
 	if t.reader != nil {
-		t.reader.Scroll(step)
+		t.reader.Scroll(step, t.theme())
 	} else {
-		t.ncentre.Move(step)
+		t.ncentre.Move(step, t.theme())
 	}
 	t.dirty = true
 }
@@ -412,7 +415,7 @@ func (t *tui) notifOpenBody() {
 	if e.Seq > t.notifyRead {
 		t.notifyRead = e.Seq
 	}
-	t.reader = newBodyReader(e, t.ncentre.Float.Rect)
+	t.reader = newBodyReader(e, t.ncentre.Float.Rect, t.theme())
 	t.AddFloatingPane(t.reader.Float)
 }
 

@@ -16,6 +16,23 @@ import (
 // most its three newest entries, and the toast stack itself holds toastMax.
 const notifyFetch = 3
 
+// The two reads an id'd msg-list can serve; the reply carries only the id,
+// so the route rides in the client's map.
+const (
+	notifyRouteCatchUp = "catchup"
+	notifyRouteCentre  = "centre"
+)
+
+// notifyRouteTag tags an outstanding id'd msg-list with the read it serves.
+// The map builds itself: a tui constructed by hand has no map until the first
+// request goes out.
+func (t *tui) notifyRouteTag(id int, route string) {
+	if t.notifyRoute == nil {
+		t.notifyRoute = map[int]string{}
+	}
+	t.notifyRoute[id] = route
+}
+
 // notifyToastText is the one line a toast shows: topic, state, message, in the
 // server renderer's order.
 func notifyToastText(e box.Entry) string {
@@ -60,6 +77,7 @@ func (t *tui) notifyCatchUp() {
 	}
 	t.notifyPending = true
 	t.notifyID++
+	t.notifyRouteTag(t.notifyID, notifyRouteCatchUp)
 	_ = t.conn.Send(wire.Msg{Type: "req", Action: "msg-list", ID: t.notifyID, Res: body})
 }
 

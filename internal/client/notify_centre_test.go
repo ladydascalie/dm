@@ -121,7 +121,7 @@ func TestCentreUnreadClearsOnOpen(t *testing.T) {
 		t.Fatal("esc left the reader up")
 	}
 	tui.ncentre.read = tui.notifyRead
-	tui.ncentre.paint()
+	tui.ncentre.paint(theme.DefaultTheme())
 	r := tui.ncentre.Float.Rect
 	screen := centreScreen(t, tui)
 	for row := 0; row < r.H; row++ {
@@ -135,9 +135,13 @@ func TestCentreUnreadClearsOnOpen(t *testing.T) {
 		t.Fatal("q left the centre up")
 	}
 	feed(tui, "\x02N")
-	tui.apply(centreReply(t, tui.nID, centreEntries()))
+	m := nextBoxMsg(t, got)
+	if m.Action != "msg-list" || m.ID == 0 {
+		t.Fatalf("centre request = %+v, want an id'd msg-list", m)
+	}
+	tui.apply(centreReply(t, m.ID, centreEntries()))
 	tui.ncentre.read = tui.notifyRead
-	tui.ncentre.paint()
+	tui.ncentre.paint(theme.DefaultTheme())
 	if got := tui.ncentre.title(); strings.Contains(got, "unread") {
 		t.Fatalf("title = %q, want no unread after the sweep", got)
 	}

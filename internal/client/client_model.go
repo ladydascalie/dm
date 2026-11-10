@@ -243,21 +243,22 @@ type tui struct {
 	boxJumpSeq int
 
 	// ncentre is the open notification centre, nil when closed. notifyRead
-	// is the seq below which every notify/ entry is read, and nID numbers
-	// the centre's list requests.
-	ncentre    *notifyCentre
-	notifyRead int
-	nID        int
+	// is the seq below which every notify/ entry is read. notifyID numbers
+	// every id'd msg-list the notify work sends, and notifyRoute remembers
+	// which of the two reads each outstanding id belongs to, so a reply
+	// never lands in the other's handler.
+	ncentre     *notifyCentre
+	notifyRead  int
+	notifyID    int
+	notifyRoute map[int]string
 
 	// notifyCursor is the highest notify/ seq the client has seen, and
 	// notifySeen says it has caught up at least once since attach, so the
 	// first catch-up toasts the newest notifyFetch entries instead of the
-	// whole backlog. notifyID numbers the catch-up request, notifyPending
-	// says one is in flight, and notifyWant holds a broadcast that landed
-	// while it was.
+	// whole backlog. notifyPending says one is in flight, and notifyWant
+	// holds a broadcast that landed while it was.
 	notifyCursor  int
 	notifySeen    bool
-	notifyID      int
 	notifyPending bool
 	notifyWant    bool
 
@@ -762,7 +763,7 @@ func (t *tui) apply(m wire.Msg) {
 			t.box.Sync(m.Snap, t.theme())
 			t.boxClampTop()
 			if t.reader != nil {
-				t.reader.Sync(t.box.Float.Rect)
+				t.reader.Sync(t.box.Float.Rect, t.theme())
 			}
 			t.boxBodyHint()
 			t.dirty = true
@@ -772,7 +773,7 @@ func (t *tui) apply(m wire.Msg) {
 			t.dirty = true
 		}
 		if t.ncentre != nil {
-			t.ncentre.Sync(m.Snap)
+			t.ncentre.Sync(m.Snap, t.theme())
 			t.dirty = true
 		}
 		t.dirty = true
@@ -841,13 +842,17 @@ func (t *tui) apply(m wire.Msg) {
 				t.dirty = true
 			}
 			// A notify catch-up asks for the entries past the cursor; the
-			// centre asks for the recent notify/ list. Each reply names its
-			// own request id.
-			if m.Action == "msg-list" && m.ID == t.notifyID {
-				t.takeNotifyList(m)
-			}
-			if m.Action == "msg-list" && m.ID == t.nID {
-				t.takeNotifyCentreList(m)
+			// centre asks for the recent notify/ list. The route map says
+			// which read the id belongs to, so one counter serves both and
+			// a reply never lands in the other's handler.
+			if m.Action == "msg-list" {
+				switch t.notifyRoute[m.ID] {
+				case notifyRouteCatchUp:
+					t.takeNotifyList(m)
+				case notifyRouteCentre:
+					t.takeNotifyCentreList(m)
+				}
+				delete(t.notifyRoute, m.ID)
 			}
 			break
 		}

@@ -531,7 +531,9 @@ func boxShowVerb(c *cmdFlags) error {
 	if c.seq >= 0 && c.from != "" {
 		return fmt.Errorf("msg: --seq and --from are exclusive")
 	}
-	raw, err := json.Marshal(box.ListReq{Key: c.key, Limit: box.ClampLimit(c.limit)})
+	// The whole topic, always: a show picks one entry, so an explicit
+	// --limit must not be able to hide the row --seq or --from is after.
+	raw, err := json.Marshal(box.ListReq{Key: c.key})
 	if err != nil {
 		return err
 	}

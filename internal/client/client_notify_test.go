@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/theme"
 	"dm/internal/wire"
 )
 
@@ -25,9 +26,11 @@ func notifyReply(id int, entries []box.Entry) wire.Msg {
 // notifyTUI builds a bare client with the focused pane set, so a reply tests
 // the suppression and the cursor without a server. notifyID starts at one:
 // the request always numbers itself before it sends, so a reply the client
-// never asked for carries no id.
+// never asked for carries no id. The route map says the id names a catch-up.
 func notifyTUI(focus string) *tui {
-	return &tui{snap: &wire.Snapshot{Focus: focus}, notifyID: 1}
+	tui := &tui{snap: &wire.Snapshot{Focus: focus}, notifyID: 1}
+	tui.notifyRouteTag(1, notifyRouteCatchUp)
+	return tui
 }
 
 // expectRequest waits for the next message the client sends, timing out like
@@ -170,5 +173,51 @@ func TestNotifyReplyWantsRearm(t *testing.T) {
 	tui.apply(notifyReply(1, []box.Entry{{Seq: 5, Key: "notify/b", State: box.StateDone, Msg: "kept"}}))
 	if got := toastTexts(tui); len(got) != 1 {
 		t.Fatalf("toasts = %q, want one", got)
+	}
+}
+
+// The catch-up and the centre share one id counter; a reply routes by the tag
+// its request left, so an open centre's list never runs through the toast
+// handler and a late reply lands nowhere.
+func TestNotifyRoutesSharedIds(t *testing.T) {
+	tui, got := clientTUI(t, nil)
+	tui.ncentre = newNotifyCentre(tui.snap, theme.DefaultTheme())
+	tui.notifyCatchUp()
+	tui.notifyCentreRequest()
+	first := expectRequest(t, got)
+	second := expectRequest(t, got)
+	if first.ID != 1 || second.ID != 2 {
+		t.Fatalf("request ids = %d, %d, want the shared counter 1, 2", first.ID, second.ID)
+	}
+	// The centre's reply carries entries past the cursor; misrouted, they
+	// would toast. Routed, they fill the centre.
+	tui.apply(centreReply(t, 2, []box.Entry{
+		{Seq: 21, Key: "notify/b", State: box.StateDone, Msg: "centre one"},
+		{Seq: 20, Key: "notify/b", State: box.StateDone, Msg: "centre two"},
+	}))
+	if got := toastTexts(tui); len(got) != 0 {
+		t.Fatalf("toasts = %q, want none from the centre's reply", got)
+	}
+	if got := len(tui.ncentre.entries); got != 2 {
+		t.Fatalf("centre entries = %d, want 2", got)
+	}
+	// The catch-up's own reply raises its toasts and moves the cursor.
+	tui.apply(notifyReply(1, []box.Entry{
+		{Seq: 11, Key: "notify/b", State: box.StateDone, Msg: "catch-up"},
+	}))
+	if got := toastTexts(tui); len(got) != 1 {
+		t.Fatalf("toasts = %q, want the catch-up's", got)
+	}
+	if tui.notifyCursor != 11 {
+		t.Fatalf("cursor = %d, want 11", tui.notifyCursor)
+	}
+	// A third round trip: the centre's next refresh routes too.
+	tui.notifyCentreRequest()
+	third := expectRequest(t, got)
+	tui.apply(centreReply(t, third.ID, []box.Entry{
+		{Seq: 22, Key: "notify/b", State: box.StateDone, Msg: "centre three"},
+	}))
+	if got := len(tui.ncentre.entries); got != 1 {
+		t.Fatalf("centre entries = %d, want the newest reply alone", got)
 	}
 }

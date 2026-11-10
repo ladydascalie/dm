@@ -199,7 +199,7 @@ func (t *tui) boxWheel(ev mouseEvent) {
 		step = 3
 	}
 	if t.reader != nil {
-		t.reader.Scroll(step)
+		t.reader.Scroll(step, t.theme())
 	} else {
 		t.boxScroll(step)
 		t.boxBodyHint()
