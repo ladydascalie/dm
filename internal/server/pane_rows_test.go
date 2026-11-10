@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/layout"
 	"dm/internal/session"
 	"dm/internal/testutil"
 	"dm/internal/wire"
@@ -49,6 +50,34 @@ func newRowsFixture(t *testing.T, name string) *rowsFixture {
 			select {
 			case f.snaps <- *m.Snap:
 			default:
+			}
+		}
+	}()
+	return f
+}
+
+// newRowsExitFixture is the rows fixture with a neighbour pane in the same
+// window. An exit is the one event these tests cannot take on a lone pane: the
+// last pane ends the session, which exits the process. The neighbour also gets
+// a pane connection, drained so a broadcast cannot block.
+func newRowsExitFixture(t *testing.T, name string) *rowsFixture {
+	t.Helper()
+	// An exit notification belongs to the operator's desktop, not to a test.
+	t.Setenv("DM_NOTIFY", "0")
+	f := newRowsFixture(t, name)
+	w := f.s.st.ActiveWindow()
+	other := w.NewPaneID()
+	w.Root = &layout.Node{Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*layout.Node{{Pane: f.id}, {Pane: other}}}
+	w.Focus = f.id
+	f.s.st.Panes[other] = &session.PaneState{}
+	srv, cli := net.Pipe()
+	f.s.panes[other] = &paneConn{id: other, c: srv, st: wire.Status{State: "unknown"}}
+	t.Cleanup(func() { _ = srv.Close(); _ = cli.Close() })
+	go func() {
+		for {
+			if _, err := wire.ReadMsg(cli); err != nil {
+				return
 			}
 		}
 	}()
@@ -143,4 +172,39 @@ func TestAllPaneTitleCap(t *testing.T) {
 	f.waitSnapshot(t, "the trailing title", func(s wire.Snapshot) bool {
 		return len(s.All) == 1 && s.All[0].Title == "two"
 	})
+}
+
+// TestAllPaneStatusStampDroppedOnExit proves the server forgets a pane's status
+// stamp when the pane exits, so nothing keeps a stamp for an id that is gone.
+func TestAllPaneStatusStampDroppedOnExit(t *testing.T) {
+	f := newRowsExitFixture(t, "exit")
+	f.send(t, wire.Msg{Type: "status", St: &wire.Status{State: "working"}})
+	f.waitSnapshot(t, "the state", func(s wire.Snapshot) bool {
+		return len(s.All) == 2 && s.All[0].ID == f.id && s.All[0].Status == "working"
+	})
+	f.s.mu.Lock()
+	stamp, ok := f.s.statusChangedAt[f.id]
+	f.s.mu.Unlock()
+	if !ok || stamp <= 0 {
+		t.Fatalf("stamp for %s = %d, %v, want a unix second", f.id, stamp, ok)
+	}
+
+	f.send(t, wire.Msg{Type: "exit"})
+
+	// The pane's watch goroutine removes the pane and its stamp. The map is
+	// what this test is about: the server stops reporting a pane it dropped.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		f.s.mu.Lock()
+		_, stampLeft := f.s.statusChangedAt[f.id]
+		_, paneLeft := f.s.panes[f.id]
+		f.s.mu.Unlock()
+		if !stampLeft && !paneLeft {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("after exit: stamp %v, pane %v, want both gone", stampLeft, paneLeft)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
