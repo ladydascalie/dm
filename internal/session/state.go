@@ -99,6 +99,10 @@ type State struct {
 	// A name absent from the map is unfolded.
 	ProjectFold map[string]bool `json:"projectFold,omitempty"`
 
+	// root is the state tree this session lives under. It is fixed at
+	// construction, so a State never consults the environment afterwards.
+	root string
+
 	// Box is the session's message box: an append-only log any pane can post
 	// into. BoxSeq is the last seq handed out. It never resets, so a clear
 	// leaves a gap instead of reusing a number. A state file written before the
@@ -121,7 +125,9 @@ func numericName(name string) bool {
 	return true
 }
 
-func NewState(name string) *State {
+// NewStateAt builds a fresh state for name under the state tree rooted at
+// root. Save and every path the session derives later come from root.
+func NewStateAt(root, name string) *State {
 	cwd, _ := os.Getwd()
 	defWin := paths.FolderName(cwd)
 	if defWin == "" {
@@ -137,6 +143,7 @@ func NewState(name string) *State {
 		IDVersion:     2,
 		Rail:          layout.DefaultRail,
 		RailSet:       true,
+		root:          root,
 		Workspaces: []*Workspace{{
 			ID:       "s1",
 			Name:     "main",
@@ -150,8 +157,37 @@ func NewState(name string) *State {
 	return st
 }
 
+// NewState builds a fresh state under the default state tree.
+func NewState(name string) *State { return NewStateAt(paths.StateDir(), name) }
+
+// tree is the state tree the state's paths come from. A state built through
+// NewStateAt carries its root and never consults the environment. A state
+// assembled by hand, as a zero-value literal, has no root and keeps the old
+// behaviour: its paths follow the environment at call time.
+func (st *State) tree() string {
+	if st.root == "" {
+		return paths.StateDir()
+	}
+	return st.root
+}
+
+// Dir is the state tree root the state was built with.
+func (st *State) Dir() string { return st.tree() }
+
+// SessionDir is the directory that holds this session's state and sockets.
+func (st *State) SessionDir() string { return paths.SessionDirAt(st.tree(), st.Name) }
+
+// ServerSock is the unix socket the session's server listens on.
+func (st *State) ServerSock() string { return paths.ServerSockAt(st.tree(), st.Name) }
+
+// PaneSock is the unix socket one pane's mux listens on.
+func (st *State) PaneSock(id string) string { return paths.PaneSockAt(st.tree(), st.Name, id) }
+
+// StatePath is the session's state file.
+func (st *State) StatePath() string { return paths.StatePathAt(st.tree(), st.Name) }
+
 func (st *State) Save() error {
-	if err := os.MkdirAll(paths.SessionDir(st.Name), 0o700); err != nil {
+	if err := os.MkdirAll(st.SessionDir(), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(st, "", "  ")
@@ -162,7 +198,7 @@ func (st *State) Save() error {
 	// separate paths, so the last rename wins instead of one failing with
 	// ENOENT on a temp file another save already moved. CreateTemp makes the
 	// file 0600, so the state stays private while it is written.
-	f, err := os.CreateTemp(paths.SessionDir(st.Name), "state-*.tmp")
+	f, err := os.CreateTemp(st.SessionDir(), "state-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -176,19 +212,22 @@ func (st *State) Save() error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, paths.StatePath(st.Name)); err != nil {
+	if err := os.Rename(tmp, st.StatePath()); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
 	return nil
 }
 
-func LoadState(name string) (*State, error) {
-	b, err := os.ReadFile(paths.StatePath(name))
+// LoadStateAt reads the state file for name from the state tree rooted at
+// root. The returned state carries root, so its own Save and path methods
+// stay inside that tree.
+func LoadStateAt(root, name string) (*State, error) {
+	st := &State{root: root, Name: name}
+	b, err := os.ReadFile(st.StatePath())
 	if err != nil {
 		return nil, err
 	}
-	st := &State{}
 	if err := json.Unmarshal(b, st); err != nil {
 		return nil, err
 	}
@@ -241,6 +280,9 @@ func LoadState(name string) (*State, error) {
 	}
 	return st, nil
 }
+
+// LoadState reads the state file for name from the default state tree.
+func LoadState(name string) (*State, error) { return LoadStateAt(paths.StateDir(), name) }
 
 // GroupWorkspaces stable-sorts st.Workspaces so workspaces that share a project
 // are contiguous. The first appearance of a project decides the group's

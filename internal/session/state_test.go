@@ -12,7 +12,8 @@ import (
 )
 
 func TestIDsAreAddressable(t *testing.T) {
-	st := NewState("x")
+	t.Parallel()
+	st := NewStateAt(t.TempDir(), "x")
 	ws := st.ActiveWorkspace()
 	w := st.ActiveWindow()
 	if ws.ID != "s1" || w.ID != "w1" {
@@ -56,8 +57,8 @@ func TestIDsAreAddressable(t *testing.T) {
 
 // TestWindowNameMigration renames the old positional window labels on load.
 func TestWindowNameMigration(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := NewState("mig")
+	t.Parallel()
+	st := NewStateAt(t.TempDir(), "mig")
 	w := st.Workspaces[0].Windows[0]
 	w.Name = "1"
 	w.Focus = "w1p1"
@@ -65,7 +66,7 @@ func TestWindowNameMigration(t *testing.T) {
 	if err := st.Save(); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadState("mig")
+	got, err := LoadStateAt(st.Dir(), "mig")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +79,7 @@ func TestWindowNameMigration(t *testing.T) {
 	if err := got.Save(); err != nil {
 		t.Fatal(err)
 	}
-	again, err := LoadState("mig")
+	again, err := LoadStateAt(st.Dir(), "mig")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,12 +91,13 @@ func TestWindowNameMigration(t *testing.T) {
 // TestWorkspaceFoldDefault proves a workspace starts unfolded and an older
 // state file with no workspace fold key loads unfolded.
 func TestWorkspaceFoldDefault(t *testing.T) {
-	st := NewState("fold")
+	t.Parallel()
+	root := t.TempDir()
+	st := NewStateAt(root, "fold")
 	if !st.Workspaces[0].Unfolded {
 		t.Fatal("new workspace is folded, want unfolded")
 	}
 
-	t.Setenv("DM_STATE", t.TempDir())
 	const raw = `{
   "name": "absent",
   "workspaces": [
@@ -111,13 +113,13 @@ func TestWorkspaceFoldDefault(t *testing.T) {
   "rail": 30,
   "railSet": true
 }`
-	if err := os.MkdirAll(paths.SessionDir("absent"), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDirAt(root, "absent"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(paths.StatePath("absent"), []byte(raw), 0o600); err != nil {
+	if err := os.WriteFile(paths.StatePathAt(root, "absent"), []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadState("absent")
+	got, err := LoadStateAt(root, "absent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,13 +131,13 @@ func TestWorkspaceFoldDefault(t *testing.T) {
 // TestWorkspaceFoldRoundTrip proves a folded workspace stays folded across a
 // save and load, and an unfolded one stays unfolded.
 func TestWorkspaceFoldRoundTrip(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := NewState("fold")
+	t.Parallel()
+	st := NewStateAt(t.TempDir(), "fold")
 	st.Workspaces[0].Unfolded = false
 	if err := st.Save(); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadState("fold")
+	got, err := LoadStateAt(st.Dir(), "fold")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +149,7 @@ func TestWorkspaceFoldRoundTrip(t *testing.T) {
 	if err := got.Save(); err != nil {
 		t.Fatal(err)
 	}
-	again, err := LoadState("fold")
+	again, err := LoadStateAt(st.Dir(), "fold")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,8 +163,8 @@ func TestWorkspaceFoldRoundTrip(t *testing.T) {
 // overlap window is real but the scheduler decides whether it trips. It
 // requires every save to succeed and the file to hold the saved content after.
 func TestSaveConcurrent(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := NewState("race")
+	t.Parallel()
+	st := NewStateAt(t.TempDir(), "race")
 	// Enough content that the write window is real, so the saves overlap.
 	for i := 0; i < 200; i++ {
 		st.Workspaces = append(st.Workspaces, &Workspace{
@@ -194,7 +196,7 @@ func TestSaveConcurrent(t *testing.T) {
 			t.Fatalf("concurrent save: %v", err)
 		}
 	}
-	got, err := LoadState("race")
+	got, err := LoadStateAt(st.Dir(), "race")
 	if err != nil {
 		t.Fatalf("load after concurrent saves: %v", err)
 	}
@@ -205,7 +207,7 @@ func TestSaveConcurrent(t *testing.T) {
 	if last := got.Workspaces[len(got.Workspaces)-1]; last.Name != "ws199" {
 		t.Fatalf("last workspace %q, want ws199", last.Name)
 	}
-	if tmp, _ := filepath.Glob(filepath.Join(paths.SessionDir("race"), "*.tmp")); len(tmp) != 0 {
+	if tmp, _ := filepath.Glob(filepath.Join(st.SessionDir(), "*.tmp")); len(tmp) != 0 {
 		t.Fatalf("temp files left behind: %v", tmp)
 	}
 }
@@ -213,15 +215,15 @@ func TestSaveConcurrent(t *testing.T) {
 // TestSaveFailureLeavesNoTemp makes the write fail with a read-only session
 // directory and requires the error to surface with no temp file behind it.
 func TestSaveFailureLeavesNoTemp(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
-	t.Setenv("DM_STATE", t.TempDir())
-	dir := paths.SessionDir("ro")
+	st := NewStateAt(t.TempDir(), "ro")
+	dir := st.SessionDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	st := NewState("ro")
 	if err := os.Chmod(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
@@ -255,6 +257,7 @@ func workspace(id, name, project string) *Workspace {
 // TestGroupWorkspaces proves a stable sort by project: first appearance
 // decides the group's position and the order inside a group holds.
 func TestGroupWorkspaces(t *testing.T) {
+	t.Parallel()
 	st := &State{Workspaces: []*Workspace{
 		workspace("s1", "a1", "alpha"),
 		workspace("s2", "b1", "beta"),
@@ -271,6 +274,7 @@ func TestGroupWorkspaces(t *testing.T) {
 
 // TestGroupWorkspacesIdempotent proves a second call changes nothing.
 func TestGroupWorkspacesIdempotent(t *testing.T) {
+	t.Parallel()
 	st := &State{Workspaces: []*Workspace{
 		workspace("s1", "b1", "beta"),
 		workspace("s2", "a1", "alpha"),
@@ -287,6 +291,7 @@ func TestGroupWorkspacesIdempotent(t *testing.T) {
 // TestGroupWorkspacesKeepsUntaggedApart proves untagged workspaces never merge
 // into one group.
 func TestGroupWorkspacesKeepsUntaggedApart(t *testing.T) {
+	t.Parallel()
 	st := &State{Workspaces: []*Workspace{
 		workspace("s1", "loose1", ""),
 		workspace("s2", "p1", "alpha"),
@@ -307,7 +312,8 @@ func TestGroupWorkspacesKeepsUntaggedApart(t *testing.T) {
 // TestLoadStateGroupsInterleaved proves a hand-edited, interleaved state file
 // loads grouped.
 func TestLoadStateGroupsInterleaved(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
+	t.Parallel()
+	root := t.TempDir()
 	const raw = `{
   "name": "grouped",
   "workspaces": [
@@ -326,13 +332,13 @@ func TestLoadStateGroupsInterleaved(t *testing.T) {
   "rail": 30,
   "railSet": true
 }`
-	if err := os.MkdirAll(paths.SessionDir("grouped"), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDirAt(root, "grouped"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(paths.StatePath("grouped"), []byte(raw), 0o600); err != nil {
+	if err := os.WriteFile(paths.StatePathAt(root, "grouped"), []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadState("grouped")
+	got, err := LoadStateAt(root, "grouped")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +366,8 @@ func equalStrings(a, b []string) bool {
 // TestGroupWorkspacesKeepsActive proves a load of an interleaved file leaves the
 // active workspace the same workspace, not the same index.
 func TestGroupWorkspacesKeepsActive(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
+	t.Parallel()
+	root := t.TempDir()
 	const raw = `{
   "name": "active",
   "workspaces": [
@@ -378,13 +385,13 @@ func TestGroupWorkspacesKeepsActive(t *testing.T) {
   "rail": 30,
   "railSet": true
 }`
-	if err := os.MkdirAll(paths.SessionDir("active"), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDirAt(root, "active"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(paths.StatePath("active"), []byte(raw), 0o600); err != nil {
+	if err := os.WriteFile(paths.StatePathAt(root, "active"), []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadState("active")
+	got, err := LoadStateAt(root, "active")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,6 +407,7 @@ func TestGroupWorkspacesKeepsActive(t *testing.T) {
 // TestGroupWorkspacesOutOfRangeActive proves grouping leaves an out-of-range
 // Active out of range instead of panicking or inventing a workspace.
 func TestGroupWorkspacesOutOfRangeActive(t *testing.T) {
+	t.Parallel()
 	for _, active := range []int{5, -1} {
 		st := &State{
 			Active: active,
@@ -413,5 +421,55 @@ func TestGroupWorkspacesOutOfRangeActive(t *testing.T) {
 		if st.Active != active {
 			t.Fatalf("active = %d, want %d left alone", st.Active, active)
 		}
+	}
+}
+
+// TestStatePathsAt proves the state's path methods come from the root it was
+// built with, not from the environment.
+func TestStatePathsAt(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	st := NewStateAt(root, "paths")
+	if st.Dir() != root {
+		t.Fatalf("dir = %q, want %q", st.Dir(), root)
+	}
+	if got, want := st.SessionDir(), filepath.Join(root, "sessions", "paths"); got != want {
+		t.Fatalf("session dir = %q, want %q", got, want)
+	}
+	if got, want := st.ServerSock(), filepath.Join(root, "sessions", "paths", "server.sock"); got != want {
+		t.Fatalf("server sock = %q, want %q", got, want)
+	}
+	if got, want := st.PaneSock("w1p1"), filepath.Join(root, "sessions", "paths", "panes", "w1p1.sock"); got != want {
+		t.Fatalf("pane sock = %q, want %q", got, want)
+	}
+	if got, want := st.StatePath(), filepath.Join(root, "sessions", "paths", "state.json"); got != want {
+		t.Fatalf("state path = %q, want %q", got, want)
+	}
+}
+
+// TestEnvFallback is the one serial test. Its subject is the environment
+// fallback: NewState and LoadState with no explicit root must follow DM_STATE.
+// t.Setenv mutates process env, so the test cannot run in parallel with the
+// others.
+func TestEnvFallback(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DM_STATE", root)
+	st := NewState("fb")
+	if st.Dir() != root {
+		t.Fatalf("new state dir = %q, want %q", st.Dir(), root)
+	}
+	st.Workspaces[0].Unfolded = false
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadState("fb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Dir() != root {
+		t.Fatalf("loaded state dir = %q, want %q", got.Dir(), root)
+	}
+	if got.Workspaces[0].Unfolded {
+		t.Fatal("env-loaded workspace is unfolded, want folded")
 	}
 }
