@@ -290,31 +290,31 @@ func TestConfigMissingPathDefaults(t *testing.T) {
 	}
 }
 
-// TestConfigMissingDefaultWrites proves a missing default path writes nothing
+// TestConfigMissingDefaultWrites proves a missing explicit path writes nothing
 // without the write flag and creates the directory and file with it. The file
 // parses back to the defaults.
 func TestConfigMissingDefaultWrites(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
 	path := filepath.Join(dir, "dm", "config.kdl")
 
-	cfg, err := LoadDefaultPath(false)
+	cfg, err := LoadDefaultFrom(path, false)
 	if err != nil {
-		t.Fatalf("LoadDefaultPath(false): %v", err)
+		t.Fatalf("LoadDefaultFrom(path, false): %v", err)
 	}
 	if !reflect.DeepEqual(cfg, LoadDefault()) {
-		t.Fatal("LoadDefaultPath(false) did not return the defaults")
+		t.Fatal("LoadDefaultFrom(path, false) did not return the defaults")
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("LoadDefaultPath(false) created %q", path)
+		t.Fatalf("LoadDefaultFrom(path, false) created %q", path)
 	}
 
-	cfg, err = LoadDefaultPath(true)
+	cfg, err = LoadDefaultFrom(path, true)
 	if err != nil {
-		t.Fatalf("LoadDefaultPath(true): %v", err)
+		t.Fatalf("LoadDefaultFrom(path, true): %v", err)
 	}
 	if !reflect.DeepEqual(cfg, LoadDefault()) {
-		t.Fatal("LoadDefaultPath(true) did not return the defaults")
+		t.Fatal("LoadDefaultFrom(path, true) did not return the defaults")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -587,33 +587,34 @@ func TestConfigBadKeyError(t *testing.T) {
 	}
 }
 
-// TestConfigLoadPathMergesLikeDefaultPath proves both loaders merge the same
-// file to the same keymap.
-func TestConfigLoadPathMergesLikeDefaultPath(t *testing.T) {
+// TestConfigLoadDefaultFromMergesLikeLoadPath proves both loaders merge the
+// same file to the same keymap.
+func TestConfigLoadDefaultFromMergesLikeLoadPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
 	src := "keymap \"main\" {\n\t\"close-window\" \"Q\"\n}\n"
 	cfgDir := filepath.Join(dir, "dm")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.kdl"), []byte(src), 0o600); err != nil {
+	defaultPath := filepath.Join(cfgDir, "config.kdl")
+	if err := os.WriteFile(defaultPath, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	explicitDir := filepath.Join(dir, "explicit")
 	if err := os.MkdirAll(explicitDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	fromDefault, err := LoadDefaultPath(false)
+	fromDefault, err := LoadDefaultFrom(defaultPath, false)
 	if err != nil {
-		t.Fatalf("LoadDefaultPath: %v", err)
+		t.Fatalf("LoadDefaultFrom: %v", err)
 	}
 	fromPath, err := LoadPath(writeConfigFile(t, explicitDir, src))
 	if err != nil {
 		t.Fatalf("LoadPath: %v", err)
 	}
 	if !reflect.DeepEqual(fromPath, fromDefault) {
-		t.Fatalf("LoadPath and LoadDefaultPath merged differently:\nLoadPath: %#v\nLoadDefaultPath: %#v", fromPath, fromDefault)
+		t.Fatalf("LoadPath and LoadDefaultFrom merged differently:\nLoadPath: %#v\nLoadDefaultFrom: %#v", fromPath, fromDefault)
 	}
 	for _, cfg := range []*Config{fromPath, fromDefault} {
 		if got := cfg.Key("main", "close-window"); got != "Q" {
@@ -909,11 +910,11 @@ func TestConfigThemeMalformedFallsBack(t *testing.T) {
 	}
 }
 
-// TestConfigThemeDefaultPath proves LoadDefaultPath resolves the theme next to
-// the default config file.
-func TestConfigThemeDefaultPath(t *testing.T) {
+// TestConfigThemeLoadDefaultFrom proves LoadDefaultFrom resolves the theme next
+// to the explicit config file.
+func TestConfigThemeLoadDefaultFrom(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
 	cfgDir := filepath.Join(dir, "dm")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -924,9 +925,9 @@ func TestConfigThemeDefaultPath(t *testing.T) {
 	}
 	writeTheme(t, cfgDir, "night", `accents { "accent-2" "#0a0b0c" }`)
 
-	cfg, err := LoadDefaultPath(false)
+	cfg, err := LoadDefaultFrom(path, false)
 	if err != nil {
-		t.Fatalf("LoadDefaultPath: %v", err)
+		t.Fatalf("LoadDefaultFrom: %v", err)
 	}
 	want := theme.DefaultTheme()
 	want.Accents[1] = theme.RGB{R: 10, G: 11, B: 12}
@@ -937,6 +938,53 @@ func TestConfigThemeDefaultPath(t *testing.T) {
 
 // TestConfigDashboardLayout reads the dashboard's shape: the node, its default
 // of the full screen, and the two words it accepts.
+// TestConfigDefaultPathEnvFallback proves LoadDefaultPath still delegates to
+// the env-based path: XDG_CONFIG_HOME wins, then $HOME/.config. It keeps
+// t.Setenv and stays serial because t.Setenv mutates process env and so cannot
+// run in parallel.
+func TestConfigDefaultPathEnvFallback(t *testing.T) {
+	src := "keymap \"main\" {\n\t\"close-window\" \"Q\"\n}\n"
+
+	t.Run("xdg", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		cfgDir := filepath.Join(dir, "dm")
+		if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.kdl"), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadDefaultPath(false)
+		if err != nil {
+			t.Fatalf("LoadDefaultPath: %v", err)
+		}
+		if got := cfg.Key("main", "close-window"); got != "Q" {
+			t.Fatalf("Key(main, close-window) = %q, want Q", got)
+		}
+	})
+
+	t.Run("home", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", "")
+		t.Setenv("HOME", dir)
+		cfgDir := filepath.Join(dir, ".config", "dm")
+		if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.kdl"), []byte(src), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadDefaultPath(false)
+		if err != nil {
+			t.Fatalf("LoadDefaultPath: %v", err)
+		}
+		if got := cfg.Key("main", "close-window"); got != "Q" {
+			t.Fatalf("Key(main, close-window) = %q, want Q", got)
+		}
+	})
+}
+
 func TestConfigDashboardLayout(t *testing.T) {
 	cases := []struct {
 		name string
