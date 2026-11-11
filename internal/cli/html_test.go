@@ -14,6 +14,7 @@ import (
 
 // TestHTMLPageMatchesSnapshot proves docs/dm.html is the current output.
 func TestHTMLPageMatchesSnapshot(t *testing.T) {
+	t.Parallel()
 	want := clidoc.HTMLPage()
 	got, err := os.ReadFile(filepath.Join("../../docs", "dm.html"))
 	if err != nil {
@@ -27,6 +28,7 @@ func TestHTMLPageMatchesSnapshot(t *testing.T) {
 // TestHTMLCommandWritesFile proves dm html -o writes the same bytes the page
 // renders, and prints nothing.
 func TestHTMLCommandWritesFile(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "dm.html")
 	if err := Run([]string{"html", "-o", path}); err != nil {
 		t.Fatalf("dm html -o: %v", err)
@@ -42,6 +44,8 @@ func TestHTMLCommandWritesFile(t *testing.T) {
 
 // TestHTMLCommandPrintsToStdout proves dm html -o - prints the page, so a pipe
 // and a redirect still work without the browser.
+// Stays serial: the test swaps the process stdout, which belongs to every
+// test at once.
 func TestHTMLCommandPrintsToStdout(t *testing.T) {
 	// The page is bigger than a pipe buffer, so stdout is a file here: a
 	// CaptureStdout pipe would fill and block the writer.
@@ -71,6 +75,8 @@ func TestHTMLCommandPrintsToStdout(t *testing.T) {
 
 // TestHTMLCommandFallsBackToAPathWhenNoOpenerStarts proves a headless box
 // still gets the page: the command prints the temp file path and returns nil.
+// Stays serial: the test's subject is env behaviour (an empty PATH), and
+// t.Setenv cannot run in a parallel test.
 func TestHTMLCommandFallsBackToAPathWhenNoOpenerStarts(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	var runErr error
@@ -91,6 +97,7 @@ func TestHTMLCommandFallsBackToAPathWhenNoOpenerStarts(t *testing.T) {
 // TestHTMLTempFileCarriesThePage proves the browser gets a complete file with
 // an .html suffix, so it renders the page instead of downloading it.
 func TestHTMLTempFileCarriesThePage(t *testing.T) {
+	t.Parallel()
 	path, err := writeHTMLTemp("page")
 	if err != nil {
 		t.Fatalf("write temp page: %v", err)
@@ -111,6 +118,7 @@ func TestHTMLTempFileCarriesThePage(t *testing.T) {
 // TestHTMLPagePaintsTheBuiltInTheme proves the page's :root block carries the
 // theme package's palette, so the page and the terminal cannot drift.
 func TestHTMLPagePaintsTheBuiltInTheme(t *testing.T) {
+	t.Parallel()
 	page := clidoc.HTMLPage()
 	th := theme.DefaultTheme()
 	for _, c := range []theme.RGB{
@@ -139,6 +147,7 @@ func TestHTMLPagePaintsTheBuiltInTheme(t *testing.T) {
 // TestHTMLPageHasNoExternalResource proves the page carries no resource that
 // would need the network or a file beside it.
 func TestHTMLPageHasNoExternalResource(t *testing.T) {
+	t.Parallel()
 	page := strings.ToLower(clidoc.HTMLPage())
 	for _, bad := range []string{"<link", "<script src", "<img", "@import"} {
 		if strings.Contains(page, bad) {
@@ -155,6 +164,7 @@ func TestHTMLPageHasNoExternalResource(t *testing.T) {
 
 // TestHTMLPageNamesEveryCommand proves the page renders the whole command table.
 func TestHTMLPageNamesEveryCommand(t *testing.T) {
+	t.Parallel()
 	page := clidoc.HTMLPage()
 	for _, argv := range []string{"dm ls", "dm msg post", "dm man", "dm html"} {
 		if !strings.Contains(page, argv) {

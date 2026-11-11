@@ -2,6 +2,10 @@ package cli
 
 // The reset and purge maintenance verbs: what they refuse, what they remove,
 // and what they leave alone.
+//
+// Every test here stays serial: reset and purge reach the session tree
+// through transport (ResetSession and ListSessions), which resolves DM_STATE
+// per call, and t.Setenv cannot run in a parallel test.
 
 import (
 	"os"

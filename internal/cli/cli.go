@@ -51,10 +51,12 @@ type cmdFlags struct {
 	all        bool
 	force      bool
 	args       []string
+	root       string
 }
 
-func newFlags(name string) *cmdFlags {
-	c := &cmdFlags{fs: flag.NewFlagSet(name, flag.ExitOnError)}
+// newFlagsAt builds the flag set for one verb, rooted at the given state dir.
+func newFlagsAt(root, name string) *cmdFlags {
+	c := &cmdFlags{fs: flag.NewFlagSet(name, flag.ExitOnError), root: root}
 	// A pane exports its session, so a command from inside it targets that
 	// session without -s. Outside dm the default stays main.
 	if def := os.Getenv("DM_SESSION"); def != "" {
@@ -65,6 +67,10 @@ func newFlags(name string) *cmdFlags {
 	c.fs.StringVar(&c.session, "s", c.session, "session name")
 	return c
 }
+
+// newFlags builds the flag set for one verb, rooted where paths.StateDir
+// resolves: DM_STATE wins, then the XDG and home defaults.
+func newFlags(name string) *cmdFlags { return newFlagsAt(paths.StateDir(), name) }
 
 func (c *cmdFlags) parse(args []string) {
 	c.fs.StringVar(&c.msg, "msg", "", "message text")
@@ -119,13 +125,17 @@ func reorder(args []string) []string {
 	return append(flags, pos...)
 }
 
+// Run parses argv and runs one verb. The state root comes from
+// paths.StateDir, so the environment decides where sessions live. A test
+// moves the whole state tree by building its flags with newFlagsAt instead.
 func Run(argv []string) error {
+	root := paths.StateDir()
 	if len(argv) == 0 {
 		return client.Run("main")
 	}
 	switch argv[0] {
 	case "attach", "a":
-		c := newFlags("attach")
+		c := newFlagsAt(root, "attach")
 		c.parse(argv[1:])
 		name := c.session
 		if len(c.args) > 0 {
@@ -134,7 +144,7 @@ func Run(argv []string) error {
 		return client.Run(name)
 
 	case "new":
-		c := newFlags("new")
+		c := newFlagsAt(root, "new")
 		c.parse(argv[1:])
 		m, err := transport.RPC(c.session, wire.Msg{Action: "ping"})
 		if err != nil {
@@ -148,12 +158,12 @@ func Run(argv []string) error {
 		return nil
 
 	case "ls", "list-sessions":
-		c := newFlags("ls")
+		c := newFlagsAt(root, "ls")
 		c.parse(argv[1:])
 		return runLs(c)
 
 	case "kill":
-		c := newFlags("kill")
+		c := newFlagsAt(root, "kill")
 		c.parse(argv[1:])
 		name := c.session
 		if len(c.args) > 0 {
@@ -162,12 +172,12 @@ func Run(argv []string) error {
 		return transport.KillSession(name)
 
 	case "reset":
-		c := newFlags("reset")
+		c := newFlagsAt(root, "reset")
 		c.parse(argv[1:])
 		return runReset(c)
 
 	case "purge":
-		c := newFlags("purge")
+		c := newFlagsAt(root, "purge")
 		c.parse(argv[1:])
 		return runPurge(c)
 
@@ -200,7 +210,7 @@ func Run(argv []string) error {
 		return runHTML(*out)
 
 	case "exec":
-		c := newFlags("exec")
+		c := newFlagsAt(root, "exec")
 		c.parse(argv[1:])
 		raw := c.msgJSON
 		if raw == "" && len(c.args) > 0 {
@@ -216,7 +226,7 @@ func Run(argv []string) error {
 		return printRPC(c.session, req)
 
 	case "write-to", "write":
-		c := newFlags("write-to")
+		c := newFlagsAt(root, "write-to")
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("write-to needs a pane id")
@@ -224,7 +234,7 @@ func Run(argv []string) error {
 		return printRPC(c.session, wire.Msg{Action: "write-to", Target: c.args[0], Msg: c.msg, Enter: c.enter})
 
 	case "read":
-		c := newFlags("read")
+		c := newFlagsAt(root, "read")
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("read needs a pane id")
@@ -253,7 +263,7 @@ func Run(argv []string) error {
 		return nil
 
 	case "yank":
-		c := newFlags("yank")
+		c := newFlagsAt(root, "yank")
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("yank needs a pane id")
@@ -269,7 +279,7 @@ func Run(argv []string) error {
 		return nil
 
 	case "wait":
-		c := newFlags("wait")
+		c := newFlagsAt(root, "wait")
 		c.parse(argv[1:])
 		code, err := runWait(c)
 		if err != nil {
@@ -284,7 +294,7 @@ func Run(argv []string) error {
 		return nil
 
 	case "split":
-		c := newFlags("split")
+		c := newFlagsAt(root, "split")
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("split needs a pane id")
@@ -307,7 +317,7 @@ func Run(argv []string) error {
 		return nil
 
 	case "focus":
-		c := newFlags("focus")
+		c := newFlagsAt(root, "focus")
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("focus needs a pane id")
@@ -315,7 +325,7 @@ func Run(argv []string) error {
 		return printRPC(c.session, wire.Msg{Action: "focus", Target: c.args[0]})
 
 	case "rename-workspace":
-		c := newFlags("rename-workspace")
+		c := newFlagsAt(root, "rename-workspace")
 		c.parse(argv[1:])
 		if len(c.args) < 2 {
 			return fmt.Errorf("rename-workspace needs a workspace id and a name")
@@ -323,7 +333,7 @@ func Run(argv []string) error {
 		return printRPC(c.session, wire.Msg{Action: "rename-workspace", Target: c.args[0], Name: c.args[1]})
 
 	case "set-project":
-		c := newFlags("set-project")
+		c := newFlagsAt(root, "set-project")
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("set-project needs a workspace id and a project name")
@@ -335,12 +345,12 @@ func Run(argv []string) error {
 		return printRPC(c.session, wire.Msg{Action: "set-project", Target: c.args[0], Name: name})
 
 	case "next-pane", "prev-pane", "new-window", "next-window", "prev-window":
-		c := newFlags(argv[0])
+		c := newFlagsAt(root, argv[0])
 		c.parse(argv[1:])
 		return printRPC(c.session, wire.Msg{Action: argv[0]})
 
 	case "status":
-		c := newFlags("status")
+		c := newFlagsAt(root, "status")
 		c.parse(argv[1:])
 		target := ""
 		if len(c.args) > 0 {
@@ -380,12 +390,12 @@ func Run(argv []string) error {
 		return nil
 
 	case "dash":
-		c := newFlags("dash")
+		c := newFlagsAt(root, "dash")
 		c.parse(argv[1:])
 		return dash(c.session)
 
 	case "peek":
-		c := newFlags("peek")
+		c := newFlagsAt(root, "peek")
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("peek needs a target")
@@ -393,18 +403,18 @@ func Run(argv []string) error {
 		return peek(c.session, c.args[0], c.lines)
 
 	case "msg":
-		c := newFlags("msg")
+		c := newFlagsAt(root, "msg")
 		c.parse(argv[1:])
 		return runBox(c)
 
 	case "list":
-		c := newFlags("list")
+		c := newFlagsAt(root, "list")
 		c.parse(argv[1:])
 		return runList(c)
 
 	default:
 		// A bare word is a session name; leading flags are attach flags.
-		c := newFlags("attach")
+		c := newFlagsAt(root, "attach")
 		c.parse(argv)
 		name := c.session
 		if len(c.args) > 0 {
@@ -1002,7 +1012,7 @@ func runPurge(c *cmdFlags) error {
 		if s.Live {
 			continue
 		}
-		dir := paths.SessionDir(s.Name)
+		dir := paths.SessionDirAt(c.root, s.Name)
 		if pidAlive(filepath.Join(dir, "server.pid")) {
 			fmt.Printf("skip %s: server pid alive\n", s.Name)
 			continue
@@ -1367,11 +1377,29 @@ type waitResult struct {
 // ending. The timeout is a quiet-idle deadline: every frame that arrives
 // extends it, so a streaming command is not cut off mid-stream for exceeding
 // the total, and only real silence ends it with 124.
-func runWait(c *cmdFlags) (int, error) {
+func runWait(c *cmdFlags) (int, error) { return runWaitAt(nil, nil, c) }
+
+// runWaitAt is runWait with explicit streams, so a test captures the stream
+// without touching the process ones. A nil stream falls back to the process
+// one at the first write, so a test that passes buffers never reads the
+// globals and cannot race the tests that swap them.
+func runWaitAt(out, errOut io.Writer, c *cmdFlags) (int, error) {
+	stdout := func() io.Writer {
+		if out == nil {
+			return os.Stdout
+		}
+		return out
+	}
+	stderr := func() io.Writer {
+		if errOut == nil {
+			return os.Stderr
+		}
+		return errOut
+	}
 	if len(c.args) < 1 {
 		return 0, fmt.Errorf("wait needs a pane id")
 	}
-	conn, err := net.DialTimeout("unix", paths.PaneSock(c.session, c.args[0]), time.Second)
+	conn, err := net.DialTimeout("unix", paths.PaneSockAt(c.root, c.session, c.args[0]), time.Second)
 	if err != nil {
 		return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
 	}
@@ -1388,7 +1416,7 @@ func runWait(c *cmdFlags) (int, error) {
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
-				return waitExit(nil, true), waitReport(c, waitResult{Reason: "timeout", TimedOut: true})
+				return waitExit(nil, true), waitReport(stdout(), stderr(), c, waitResult{Reason: "timeout", TimedOut: true})
 			}
 			return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
 		}
@@ -1399,7 +1427,7 @@ func runWait(c *cmdFlags) (int, error) {
 			if m.WaitReason != "" {
 				// The final reply names how the wait ended.
 				res := waitResult{Exit: m.Exit, Reason: m.WaitReason}
-				return waitExit(m.Exit, false), waitReport(c, res)
+				return waitExit(m.Exit, false), waitReport(stdout(), stderr(), c, res)
 			}
 			// Every other resp is the yank-shaped tail the wait opens with:
 			// the output between the Enter anchor and the wait's connect.
@@ -1414,7 +1442,7 @@ func runWait(c *cmdFlags) (int, error) {
 			if err := json.Unmarshal(m.Res, &tail); err != nil {
 				return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
 			}
-			if err := printTail(tail.Lines, tail.Start, tail.Rows); err != nil {
+			if err := printTail(stdout(), tail.Lines, tail.Start, tail.Rows); err != nil {
 				return 0, err
 			}
 			tailed = true
@@ -1423,7 +1451,7 @@ func runWait(c *cmdFlags) (int, error) {
 		}
 		extend()
 		if tailed && m.Type == "bytes" {
-			if _, err := os.Stdout.Write(m.Data); err != nil {
+			if _, err := stdout().Write(m.Data); err != nil {
 				return 0, err
 			}
 		}
@@ -1433,16 +1461,16 @@ func runWait(c *cmdFlags) (int, error) {
 // printTail prints the tail's window of screen rows, trimming the trailing
 // empty rows a prompt leaves behind. It refuses a window that does not fit,
 // the way yank refuses one.
-func printTail(lines []string, start, rows int) error {
+func printTail(out io.Writer, lines []string, start, rows int) error {
 	if start < 0 || start > rows || rows > len(lines) {
 		return fmt.Errorf("tail reply out of range")
 	}
-	out := lines[start:rows]
-	for len(out) > 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
+	shown := lines[start:rows]
+	for len(shown) > 0 && shown[len(shown)-1] == "" {
+		shown = shown[:len(shown)-1]
 	}
-	if len(out) > 0 {
-		fmt.Println(strings.Join(out, "\n"))
+	if len(shown) > 0 {
+		fmt.Fprintln(out, strings.Join(shown, "\n"))
 	}
 	return nil
 }
@@ -1478,16 +1506,16 @@ func waitExit(exit *int, timedOut bool) int {
 
 // waitReport prints the final answer: one JSON object on stdout with --json,
 // one status line on stderr without.
-func waitReport(c *cmdFlags, res waitResult) error {
+func waitReport(out, errOut io.Writer, c *cmdFlags, res waitResult) error {
 	if c.jsonOut {
 		b, err := json.Marshal(res)
 		if err != nil {
 			return err
 		}
-		fmt.Println(string(b))
+		fmt.Fprintln(out, string(b))
 		return nil
 	}
-	fmt.Fprintln(os.Stderr, waitStatus(res))
+	fmt.Fprintln(errOut, waitStatus(res))
 	return nil
 }
 

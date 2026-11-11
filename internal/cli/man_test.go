@@ -10,6 +10,7 @@ import (
 
 // TestManPageMatchesSnapshot proves docs/dm.1 is the current output.
 func TestManPageMatchesSnapshot(t *testing.T) {
+	t.Parallel()
 	want := clidoc.ManPage()
 	got, err := os.ReadFile(filepath.Join("../../docs", "dm.1"))
 	if err != nil {
@@ -23,6 +24,7 @@ func TestManPageMatchesSnapshot(t *testing.T) {
 // TestManCommandWritesFile proves dm man -o writes the same bytes the page
 // renders, and prints nothing.
 func TestManCommandWritesFile(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "dm.1")
 	if err := Run([]string{"man", "-o", path}); err != nil {
 		t.Fatalf("dm man -o: %v", err)

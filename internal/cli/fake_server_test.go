@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"dm/internal/paths"
+	"dm/internal/testutil"
 	"dm/internal/wire"
 )
 
@@ -23,6 +24,11 @@ type fakeHandler func(c net.Conn, req wire.Msg) (wire.Msg, bool)
 // startFakeServer listens on the session's socket and serves every connection
 // with the handler. DM_STATE moves the whole state tree into a temp directory,
 // so a test never touches a real session.
+//
+// Stays with t.Setenv, and so keeps every test that calls it serial: the verbs
+// under test reach the socket through transport, which resolves DM_STATE per
+// call. A test that drives runWait holds its root in cmdFlags and never comes
+// through here.
 func startFakeServer(t *testing.T, name string, h fakeHandler) {
 	t.Helper()
 	t.Setenv("DM_STATE", t.TempDir())
@@ -108,10 +114,27 @@ func (r *recorder) last() wire.Msg {
 	return r.got[len(r.got)-1]
 }
 
+// captureMu serializes the tests that redirect a process stream: stdout and
+// stderr belong to the whole process, so two tests swapping them at once
+// would read each other's output.
+var captureMu sync.Mutex
+
+// captureStdout is testutil.CaptureStdout under the stream mutex, so parallel
+// tests queue for the swap instead of tearing down each other's pipe.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	captureMu.Lock()
+	defer captureMu.Unlock()
+	return testutil.CaptureStdout(t, fn)
+}
+
 // captureStderr runs fn with os.Stderr on a pipe and returns what it wrote.
-// Stdout stays untouched, so a test wraps this in testutil.CaptureStdout.
+// Stdout stays untouched, so a test wraps this in captureStdout. The stream
+// mutex guards the swap, so parallel tests queue for it.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
+	captureMu.Lock()
+	defer captureMu.Unlock()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
