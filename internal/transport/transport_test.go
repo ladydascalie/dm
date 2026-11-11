@@ -70,6 +70,8 @@ func flagValue(args []string, name string) string {
 // fakeServer is the stand-in the spawned test binary runs: it listens on the
 // session socket, writes the pid file the real server owns, echoes each
 // request as a response, and exits when the socket or the process goes away.
+// It runs in a spawned child, so it resolves its state root from the child
+// env's DM_STATE, which EnsureAt or the spawning test pins to the root.
 func fakeServer(name string) {
 	sock := paths.ServerSock(name)
 	ln, err := net.Listen("unix", sock)
@@ -119,11 +121,24 @@ func serve(c net.Conn) {
 	}
 }
 
-// listenSession creates a live session socket under DM_STATE and returns the
+// envWithRoot returns the current environment with DM_STATE set to root, so
+// a spawned child resolves its paths under the test's state root. This is
+// child env only, never t.Setenv, so tests using it stay parallel.
+func envWithRoot(root string) []string {
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "DM_STATE=") {
+			env = append(env, e)
+		}
+	}
+	return append(env, "DM_STATE="+root)
+}
+
+// listenSessionAt creates a live session socket under root and returns the
 // listener.
-func listenSession(t *testing.T, name string) net.Listener {
+func listenSessionAt(t *testing.T, root, name string) net.Listener {
 	t.Helper()
-	sock := paths.ServerSock(name)
+	sock := paths.ServerSockAt(root, name)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -151,15 +166,15 @@ func awaitSubcommand(t *testing.T, pid int, subcommand string) {
 	}
 }
 
-// dropSession removes a session's directory at cleanup, which is how the
+// dropSessionAt removes a session's directory at cleanup, which is how the
 // fake server notices it should exit: no socket, no daemon.
-func dropSession(t *testing.T, name string) {
-	t.Cleanup(func() { _ = os.RemoveAll(paths.SessionDir(name)) })
+func dropSessionAt(t *testing.T, root, name string) {
+	t.Cleanup(func() { _ = os.RemoveAll(paths.SessionDirAt(root, name)) })
 }
 
 func TestSendReadsBackWhatThePeerFramed(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	ln := listenSession(t, "x")
+	t.Parallel()
+	ln := listenSessionAt(t, t.TempDir(), "x")
 	c, err := net.Dial("unix", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
@@ -210,8 +225,8 @@ func TestSendReadsBackWhatThePeerFramed(t *testing.T) {
 // TestSendSerialisesWriters proves the mutex keeps concurrent Send calls from
 // interleaving their frames: every frame the peer reads must still parse.
 func TestSendSerialisesWriters(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	ln := listenSession(t, "x")
+	t.Parallel()
+	ln := listenSessionAt(t, t.TempDir(), "x")
 	c, err := net.Dial("unix", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
@@ -251,6 +266,7 @@ func TestSendSerialisesWriters(t *testing.T) {
 
 // TestSendOnClosedConn reports the write instead of swallowing it.
 func TestSendOnClosedConn(t *testing.T) {
+	t.Parallel()
 	a, b := net.Pipe()
 	defer func() { _ = b.Close() }()
 	conn := &Conn{Conn: a}
@@ -261,9 +277,10 @@ func TestSendOnClosedConn(t *testing.T) {
 }
 
 func TestDialConnectsToALiveSocket(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	listenSession(t, "live")
-	conn, err := Dial("live")
+	t.Parallel()
+	root := t.TempDir()
+	listenSessionAt(t, root, "live")
+	conn, err := DialAt(root, "live")
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -276,17 +293,18 @@ func TestDialConnectsToALiveSocket(t *testing.T) {
 // TestEnsureSpawnsAndReuses covers the full cold start: no socket, so Ensure
 // spawns the executable, and the second call reuses the socket it created.
 func TestEnsureSpawnsAndReuses(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	dropSession(t, "cold")
-	c1, err := Ensure("cold")
+	t.Parallel()
+	root := t.TempDir()
+	dropSessionAt(t, root, "cold")
+	c1, err := EnsureAt(root, "cold")
 	if err != nil {
 		t.Fatalf("Ensure cold start: %v", err)
 	}
 	defer func() { _ = c1.Close() }()
-	if _, err := os.Stat(paths.ServerSock("cold")); err != nil {
+	if _, err := os.Stat(paths.ServerSockAt(root, "cold")); err != nil {
 		t.Fatalf("spawn did not create the socket: %v", err)
 	}
-	c2, err := Ensure("cold")
+	c2, err := EnsureAt(root, "cold")
 	if err != nil {
 		t.Fatalf("Ensure warm: %v", err)
 	}
@@ -294,9 +312,10 @@ func TestEnsureSpawnsAndReuses(t *testing.T) {
 }
 
 func TestRPCSkipsInterleavedFrames(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	dropSession(t, "rpc")
-	got, err := RPC("rpc", wire.Msg{Action: "ping"})
+	t.Parallel()
+	root := t.TempDir()
+	dropSessionAt(t, root, "rpc")
+	got, err := RPCAt(root, "rpc", wire.Msg{Action: "ping"})
 	if err != nil {
 		t.Fatalf("RPC: %v", err)
 	}
@@ -309,8 +328,9 @@ func TestRPCSkipsInterleavedFrames(t *testing.T) {
 // that accepts and then closes without reading makes the 4 MiB request block
 // in the socket buffer until the close turns it into EPIPE.
 func TestRPCFailsWhenThePeerNeverReads(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	ln := listenSession(t, "stalled")
+	t.Parallel()
+	root := t.TempDir()
+	ln := listenSessionAt(t, root, "stalled")
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -323,7 +343,7 @@ func TestRPCFailsWhenThePeerNeverReads(t *testing.T) {
 			}()
 		}
 	}()
-	if _, err := RPC("stalled", wire.Msg{Data: make([]byte, 4<<20)}); err == nil {
+	if _, err := RPCAt(root, "stalled", wire.Msg{Data: make([]byte, 4<<20)}); err == nil {
 		t.Fatal("RPC returned a response from a server that never read")
 	}
 }
@@ -332,18 +352,20 @@ func TestRPCFailsWhenThePeerNeverReads(t *testing.T) {
 // a session path that cannot be created, and a log file that cannot be
 // opened.
 func TestEnsureSurfacesSetupErrors(t *testing.T) {
-	cases := map[string]func(t *testing.T) string{
-		"session path is a file": func(t *testing.T) string {
-			if err := os.MkdirAll(filepath.Dir(paths.SessionDir("busy")), 0o700); err != nil {
+	t.Parallel()
+	root := t.TempDir()
+	cases := map[string]func(t *testing.T, root string) string{
+		"session path is a file": func(t *testing.T, root string) string {
+			if err := os.MkdirAll(filepath.Dir(paths.SessionDirAt(root, "busy")), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(paths.SessionDir("busy"), []byte("x"), 0o600); err != nil {
+			if err := os.WriteFile(paths.SessionDirAt(root, "busy"), []byte("x"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			return "busy"
 		},
-		"server log is a directory": func(t *testing.T) string {
-			if err := os.MkdirAll(filepath.Join(paths.SessionDir("badlog"), "server.log"), 0o700); err != nil {
+		"server log is a directory": func(t *testing.T, root string) string {
+			if err := os.MkdirAll(filepath.Join(paths.SessionDirAt(root, "badlog"), "server.log"), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			return "badlog"
@@ -351,18 +373,18 @@ func TestEnsureSurfacesSetupErrors(t *testing.T) {
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("DM_STATE", t.TempDir())
-			session := setup(t)
-			if _, err := Ensure(session); err == nil {
+			t.Parallel()
+			session := setup(t, root)
+			if _, err := EnsureAt(root, session); err == nil {
 				t.Fatal("Ensure succeeded where setup made it impossible")
 			}
-			if _, err := Dial(session); err == nil {
+			if _, err := DialAt(root, session); err == nil {
 				t.Fatal("Dial succeeded where setup made it impossible")
 			}
-			if _, err := RPC(session, wire.Msg{Action: "ping"}); err == nil {
+			if _, err := RPCAt(root, session, wire.Msg{Action: "ping"}); err == nil {
 				t.Fatal("RPC succeeded where setup made it impossible")
 			}
-			if err := KillSession(session); err == nil {
+			if err := KillSessionAt(root, session); err == nil {
 				t.Fatal("KillSession succeeded where setup made it impossible")
 			}
 		})
@@ -380,24 +402,26 @@ func TestListSessions(t *testing.T) {
 			{Name: "a", Live: true}, {Name: "b", Live: false},
 		}},
 	}
+	t.Parallel()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("DM_STATE", t.TempDir())
+			t.Parallel()
+			root := t.TempDir()
 			if tc.want != nil {
 				for _, n := range append(tc.live, "b") {
-					if err := os.MkdirAll(paths.SessionDir(n), 0o700); err != nil {
+					if err := os.MkdirAll(paths.SessionDirAt(root, n), 0o700); err != nil {
 						t.Fatal(err)
 					}
 				}
 				for _, n := range tc.live {
-					listenSession(t, n)
+					listenSessionAt(t, root, n)
 				}
-				if err := os.WriteFile(filepath.Join(paths.StateDir(), "sessions", "z"),
+				if err := os.WriteFile(filepath.Join(root, "sessions", "z"),
 					[]byte("x"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
-			got, err := ListSessions()
+			got, err := ListSessionsAt(root)
 			if err != nil {
 				t.Fatalf("ListSessions: %v", err)
 			}
@@ -414,19 +438,20 @@ func TestListSessions(t *testing.T) {
 }
 
 func TestKillSessionStopsTheServer(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	if _, err := Ensure("k"); err != nil {
+	t.Parallel()
+	root := t.TempDir()
+	if _, err := EnsureAt(root, "k"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	pid, ok := readPID(filepath.Join(paths.SessionDir("k"), "server.pid"))
+	pid, ok := readPID(filepath.Join(paths.SessionDirAt(root, "k"), "server.pid"))
 	if !ok {
 		t.Fatal("spawned server left no pid file")
 	}
-	dropSession(t, "k")
-	if err := KillSession("k"); err != nil {
+	dropSessionAt(t, root, "k")
+	if err := KillSessionAt(root, "k"); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}
-	if _, err := os.Stat(paths.ServerSock("k")); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.ServerSockAt(root, "k")); !os.IsNotExist(err) {
 		t.Fatalf("socket survived the kill: %v", err)
 	}
 	if !waitGone(pid, 2*time.Second) {
@@ -437,17 +462,19 @@ func TestKillSessionStopsTheServer(t *testing.T) {
 // TestKillSessionWithoutPidFile covers a live socket whose server never
 // wrote its pid: the kill must fail loudly, not silently do nothing.
 func TestKillSessionWithoutPidFile(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	listenSession(t, "npid")
-	if err := KillSession("npid"); err == nil || !strings.Contains(err.Error(), "no server pid") {
+	t.Parallel()
+	root := t.TempDir()
+	listenSessionAt(t, root, "npid")
+	if err := KillSessionAt(root, "npid"); err == nil || !strings.Contains(err.Error(), "no server pid") {
 		t.Fatalf("KillSession = %v, want a no-server-pid error", err)
 	}
 }
 
 func TestResetSessionStopsEverythingAndRemovesTheDir(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	dropSession(t, "reset")
-	if _, err := Ensure("reset"); err != nil {
+	t.Parallel()
+	root := t.TempDir()
+	dropSessionAt(t, root, "reset")
+	if _, err := EnsureAt(root, "reset"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
 	exe, err := os.Executable()
@@ -461,7 +488,7 @@ func TestResetSessionStopsEverythingAndRemovesTheDir(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = pane.Process.Kill() })
 	awaitSubcommand(t, pane.Process.Pid, "__pane")
-	panes := filepath.Join(paths.SessionDir("reset"), "panes")
+	panes := filepath.Join(paths.SessionDirAt(root, "reset"), "panes")
 	if err := os.MkdirAll(panes, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -478,13 +505,13 @@ func TestResetSessionStopsEverythingAndRemovesTheDir(t *testing.T) {
 		grandchildren = childPIDs(pane.Process.Pid)
 		time.Sleep(10 * time.Millisecond)
 	}
-	if err := ResetSession("reset"); err != nil {
+	if err := ResetSessionAt(root, "reset"); err != nil {
 		t.Fatalf("ResetSession: %v", err)
 	}
-	if _, err := os.Stat(paths.SessionDir("reset")); !os.IsNotExist(err) {
+	if _, err := os.Stat(paths.SessionDirAt(root, "reset")); !os.IsNotExist(err) {
 		t.Fatalf("session directory survived the reset: %v", err)
 	}
-	if pid, ok := readPID(filepath.Join(paths.SessionDir("reset"), "server.pid")); ok && processAlive(pid) {
+	if pid, ok := readPID(filepath.Join(paths.SessionDirAt(root, "reset"), "server.pid")); ok && processAlive(pid) {
 		t.Fatal("the server survived the reset")
 	}
 	if !waitGone(pane.Process.Pid, time.Second) {
@@ -495,12 +522,13 @@ func TestResetSessionStopsEverythingAndRemovesTheDir(t *testing.T) {
 			t.Fatalf("the pane's child %d survived the reset", grand)
 		}
 	}
-	if err := ResetSession("nosuch"); err == nil || !strings.Contains(err.Error(), "no session") {
+	if err := ResetSessionAt(root, "nosuch"); err == nil || !strings.Contains(err.Error(), "no session") {
 		t.Fatalf("ResetSession on a missing session = %v, want a no-session error", err)
 	}
 }
 
 func TestStopServerKillsItsOwnAndSparesForeignPids(t *testing.T) {
+	t.Parallel()
 	sleep := exec.Command("sleep", "30")
 	if err := sleep.Start(); err != nil {
 		t.Fatal(err)
@@ -522,13 +550,13 @@ func TestStopServerKillsItsOwnAndSparesForeignPids(t *testing.T) {
 	}
 
 	// The real thing: a pid whose cmdline runs the server subcommand.
-	t.Setenv("DM_STATE", t.TempDir())
-	if _, err := Ensure("stop"); err != nil {
+	root := t.TempDir()
+	if _, err := EnsureAt(root, "stop"); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
-	dropSession(t, "stop")
-	stopServer(paths.SessionDir("stop"))
-	pid, ok := readPID(filepath.Join(paths.SessionDir("stop"), "server.pid"))
+	dropSessionAt(t, root, "stop")
+	stopServer(paths.SessionDirAt(root, "stop"))
+	pid, ok := readPID(filepath.Join(paths.SessionDirAt(root, "stop"), "server.pid"))
 	if !ok {
 		t.Fatal("no pid file to check")
 	}
@@ -540,9 +568,10 @@ func TestStopServerKillsItsOwnAndSparesForeignPids(t *testing.T) {
 // TestStopServerEscalatesToSigkill pins the hard path: a server that
 // ignores SIGTERM is killed with SIGKILL within the escalation window.
 func TestStopServerEscalatesToSigkill(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	dropSession(t, "hard")
-	if err := os.MkdirAll(paths.SessionDir("hard"), 0o700); err != nil {
+	t.Parallel()
+	root := t.TempDir()
+	dropSessionAt(t, root, "hard")
+	if err := os.MkdirAll(paths.SessionDirAt(root, "hard"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	exe, err := os.Executable()
@@ -550,6 +579,9 @@ func TestStopServerEscalatesToSigkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	hard := exec.Command(exe, "__server", "-s", "hard", "--hard")
+	// The child fakeServer resolves its paths from DM_STATE; pin the child's
+	// copy to root. Child env, not t.Setenv, so this test stays parallel.
+	hard.Env = envWithRoot(root)
 	hard.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := hard.Start(); err != nil {
 		t.Fatal(err)
@@ -559,7 +591,7 @@ func TestStopServerEscalatesToSigkill(t *testing.T) {
 	// handler before Listen, so a pid file means SIGTERM will be ignored.
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, ok := readPID(filepath.Join(paths.SessionDir("hard"), "server.pid")); ok {
+		if _, ok := readPID(filepath.Join(paths.SessionDirAt(root, "hard"), "server.pid")); ok {
 			break
 		}
 		if !processAlive(hard.Process.Pid) {
@@ -570,7 +602,7 @@ func TestStopServerEscalatesToSigkill(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	stopServer(paths.SessionDir("hard"))
+	stopServer(paths.SessionDirAt(root, "hard"))
 	_ = hard.Wait()
 	if processAlive(hard.Process.Pid) {
 		t.Fatal("stopServer left a server that ignored SIGTERM")
@@ -578,6 +610,7 @@ func TestStopServerEscalatesToSigkill(t *testing.T) {
 }
 
 func TestReapPanesSparesForeignProcesses(t *testing.T) {
+	t.Parallel()
 	sleep := exec.Command("sleep", "30")
 	if err := sleep.Start(); err != nil {
 		t.Fatal(err)
@@ -636,6 +669,7 @@ func TestReapPanesSparesForeignProcesses(t *testing.T) {
 // transport caller meets on the session socket. If internal/wire grows its
 // own frame tests, move this table there.
 func TestReadMsgRejectsBrokenFrames(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		write func(w net.Conn)
 		want  string
@@ -672,6 +706,7 @@ func TestReadMsgRejectsBrokenFrames(t *testing.T) {
 }
 
 func TestReadPID(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cases := map[string]struct {
 		content string
@@ -702,6 +737,7 @@ func TestReadPID(t *testing.T) {
 }
 
 func TestProcessAliveAndWaitGone(t *testing.T) {
+	t.Parallel()
 	if !processAlive(os.Getpid()) {
 		t.Fatal("the test process reads as dead")
 	}
@@ -738,6 +774,7 @@ func TestProcessAliveAndWaitGone(t *testing.T) {
 }
 
 func TestIsDMProcess(t *testing.T) {
+	t.Parallel()
 	if !isDMProcess(os.Getpid(), "transport.test") {
 		t.Fatal("the test binary's own pid was not recognised")
 	}

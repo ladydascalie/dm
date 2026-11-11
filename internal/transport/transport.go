@@ -34,8 +34,11 @@ func (c *Conn) Send(m wire.Msg) error {
 }
 
 // Dial returns a live connection to the session server, starting it if needed.
-func Dial(name string) (*Conn, error) {
-	nc, err := Ensure(name)
+func Dial(name string) (*Conn, error) { return DialAt(paths.StateDir(), name) }
+
+// DialAt is Dial with an explicit state root instead of paths.StateDir().
+func DialAt(root, name string) (*Conn, error) {
+	nc, err := EnsureAt(root, name)
 	if err != nil {
 		return nil, err
 	}
@@ -44,8 +47,11 @@ func Dial(name string) (*Conn, error) {
 
 // Ensure returns a live connection to the session server, starting it if
 // needed.
-func Ensure(name string) (net.Conn, error) {
-	sock := paths.ServerSock(name)
+func Ensure(name string) (net.Conn, error) { return EnsureAt(paths.StateDir(), name) }
+
+// EnsureAt is Ensure with an explicit state root instead of paths.StateDir().
+func EnsureAt(root, name string) (net.Conn, error) {
+	sock := paths.ServerSockAt(root, name)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
 		return c, nil
 	}
@@ -53,16 +59,25 @@ func Ensure(name string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDirAt(root, name), 0o700); err != nil {
 		return nil, err
 	}
-	logPath := filepath.Join(paths.SessionDir(name), "server.log")
+	logPath := filepath.Join(paths.SessionDirAt(root, name), "server.log")
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = lf.Close() }()
 	cmd := exec.Command(exe, "__server", "-s", name)
+	// The spawned server resolves its own paths from DM_STATE. Pin the
+	// child's copy to root so an explicit root survives the spawn.
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "DM_STATE=") {
+			env = append(env, e)
+		}
+	}
+	cmd.Env = append(env, "DM_STATE="+root)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdout, cmd.Stderr = lf, lf
 	if err := cmd.Start(); err != nil {
@@ -79,8 +94,11 @@ func Ensure(name string) (net.Conn, error) {
 }
 
 // RPC sends one request and returns the first response.
-func RPC(name string, m wire.Msg) (wire.Msg, error) {
-	c, err := Ensure(name)
+func RPC(name string, m wire.Msg) (wire.Msg, error) { return RPCAt(paths.StateDir(), name, m) }
+
+// RPCAt is RPC with an explicit state root instead of paths.StateDir().
+func RPCAt(root, name string, m wire.Msg) (wire.Msg, error) {
+	c, err := EnsureAt(root, name)
 	if err != nil {
 		return wire.Msg{}, err
 	}
@@ -109,8 +127,12 @@ type SessionInfo struct {
 }
 
 // ListSessions returns every session on disk, sorted by name.
-func ListSessions() ([]SessionInfo, error) {
-	entries, err := os.ReadDir(filepath.Join(paths.StateDir(), "sessions"))
+func ListSessions() ([]SessionInfo, error) { return ListSessionsAt(paths.StateDir()) }
+
+// ListSessionsAt is ListSessions with an explicit state root instead of
+// paths.StateDir().
+func ListSessionsAt(root string) ([]SessionInfo, error) {
+	entries, err := os.ReadDir(filepath.Join(root, "sessions"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -124,7 +146,7 @@ func ListSessions() ([]SessionInfo, error) {
 		}
 		name := e.Name()
 		info := SessionInfo{Name: name}
-		if c, err := net.DialTimeout("unix", paths.ServerSock(name), 100*time.Millisecond); err == nil {
+		if c, err := net.DialTimeout("unix", paths.ServerSockAt(root, name), 100*time.Millisecond); err == nil {
 			_ = c.Close()
 			info.Live = true
 		}
@@ -135,13 +157,17 @@ func ListSessions() ([]SessionInfo, error) {
 }
 
 // KillSession stops the daemon for a session and removes its socket.
-func KillSession(name string) error {
-	c, err := Ensure(name)
+func KillSession(name string) error { return KillSessionAt(paths.StateDir(), name) }
+
+// KillSessionAt is KillSession with an explicit state root instead of
+// paths.StateDir().
+func KillSessionAt(root, name string) error {
+	c, err := EnsureAt(root, name)
 	if err != nil {
 		return err
 	}
 	_ = c.Close()
-	pid, ok := readPID(filepath.Join(paths.SessionDir(name), "server.pid"))
+	pid, ok := readPID(filepath.Join(paths.SessionDirAt(root, name), "server.pid"))
 	if !ok {
 		return fmt.Errorf("session %q has no server pid", name)
 	}
@@ -152,15 +178,19 @@ func KillSession(name string) error {
 	if err := p.Signal(syscall.SIGTERM); err != nil {
 		return err
 	}
-	_ = os.Remove(paths.ServerSock(name))
+	_ = os.Remove(paths.ServerSockAt(root, name))
 	return nil
 }
 
 // ResetSession discards a session for a full restart: it stops the server,
 // reaps every pane and its shell, and removes the session directory. Kill
 // leaves panes alive and purge skips them, so neither can do this.
-func ResetSession(name string) error {
-	dir := paths.SessionDir(name)
+func ResetSession(name string) error { return ResetSessionAt(paths.StateDir(), name) }
+
+// ResetSessionAt is ResetSession with an explicit state root instead of
+// paths.StateDir().
+func ResetSessionAt(root, name string) error {
+	dir := paths.SessionDirAt(root, name)
 	if _, err := os.Stat(dir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("no session %q", name)
