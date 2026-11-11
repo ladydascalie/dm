@@ -34,8 +34,6 @@ func openBoxView(t *tui) {
 	t.AddFloatingPane(t.box.Float)
 	t.mode = "box"
 	t.armed = false
-	t.boxLog = nil
-	t.boxTop = 0
 	t.boxPage = false
 	t.boxRequest()
 	t.boxWatchers(time.Now())
@@ -51,8 +49,6 @@ func closeBoxView(t *tui) {
 	t.RemoveFloatingPane(t.box.Float.ID)
 	t.box = nil
 	t.mode = ""
-	t.boxLog = nil
-	t.boxTop = 0
 	t.boxPage = false
 	// The close key stays in the buffer while the pending timer waits. Drop
 	// the whole buffer here, so a later keypress cannot forward a stray escape
@@ -118,29 +114,15 @@ func (t *tui) takeBoxList(m wire.Msg) {
 		return
 	}
 	// A jump from the notification centre asks the reply to land with that
-	// entry at the top of the window; the view opens at the top, so the
-	// mirror's row moves it once.
+	// entry selected; the view opens at the top, so the select moves it once.
 	jump := 0
 	if t.boxJumpSeq != 0 {
-		for i, e := range rep.Entries {
-			if e.Seq == t.boxJumpSeq {
-				jump = i
-				break
-			}
-		}
+		jump = t.boxJumpSeq
 		t.boxJumpSeq = 0
 	}
-	t.boxMirrorSet(rep.Entries)
 	t.box.Set(rep.Entries, t.theme())
-	if jump > 0 {
-		// The reply refit the float, so the clamp now knows the real window;
-		// move the mirror and the view to the jumped row, as far as the clamp
-		// lets the window go.
-		t.boxTop = jump
-		t.boxClampTop()
-		if t.boxTop > 0 {
-			t.box.Scroll(t.boxTop, t.theme())
-		}
+	if jump != 0 {
+		t.box.Select(jump, t.theme())
 	}
 	t.boxBodyHint()
 	t.dirty = true
@@ -201,7 +183,7 @@ func (t *tui) boxWheel(ev mouseEvent) {
 	if t.reader != nil {
 		t.reader.Scroll(step, t.theme())
 	} else {
-		t.boxScroll(step)
+		t.box.Scroll(step, t.theme())
 		t.boxBodyHint()
 	}
 	t.dirty = true
@@ -235,9 +217,10 @@ func (t *tui) boxKey() bool {
 		t.dirty = true
 		return true
 	}
-	if !t.boxPage && t.reader == nil && t.inbuf[0] == 'v' {
-		// v opens the reader for the entry at the top of the window; an
-		// entry without a body opens nothing.
+	if !t.boxPage && t.reader == nil && len(t.inbuf) == 1 &&
+		(t.inbuf[0] == 'v' || t.inbuf[0] == '\r') {
+		// v and enter open the reader for the selected entry; an entry
+		// without a body opens nothing.
 		t.inbuf = t.inbuf[1:]
 		t.pending = false
 		openBodyReader(t)
@@ -271,17 +254,17 @@ func (t *tui) boxKey() bool {
 	}
 	switch action {
 	case "up", "up-arrow":
-		t.boxScroll(-1)
+		t.box.Scroll(-1, t.theme())
 	case "down", "down-arrow":
-		t.boxScroll(1)
+		t.box.Scroll(1, t.theme())
 	case "page-up":
-		t.boxScroll(-t.box.Float.Rect.H)
+		t.box.Scroll(-t.box.Float.Rect.H, t.theme())
 	case "page-down":
-		t.boxScroll(t.box.Float.Rect.H)
+		t.box.Scroll(t.box.Float.Rect.H, t.theme())
 	case "top":
-		t.boxScroll(-t.box.ListLen())
+		t.box.Scroll(-t.box.ListLen(), t.theme())
 	case "bottom":
-		t.boxScroll(t.box.ListLen())
+		t.box.Scroll(t.box.ListLen(), t.theme())
 	case "toggle-page":
 		t.box.TogglePage(t.theme())
 		t.boxPage = !t.boxPage

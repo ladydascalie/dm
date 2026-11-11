@@ -211,12 +211,12 @@ func TestCentreToBox(t *testing.T) {
 	if wantTop > len(entries)-h {
 		wantTop = len(entries) - h
 	}
-	if tui.boxTop != wantTop {
-		t.Fatalf("box top = %d, want the clamped row %d", tui.boxTop, wantTop)
+	if top := tui.box.Top(); top != wantTop {
+		t.Fatalf("box top = %d, want the clamped row %d", top, wantTop)
 	}
 	screen := boxScreen(t, tui.box, tui.snap.Cols, tui.snap.Rows)
 	r := tui.box.Float.Rect
-	if row := boxScreenRow(screen, r.Y+20-tui.boxTop, r.X, r.W); !strings.Contains(row, "jump target") {
+	if row := boxScreenRow(screen, r.Y+20-wantTop, r.X, r.W); !strings.Contains(row, "jump target") {
 		t.Fatalf("entry row = %q, want the handed-over entry in the window", row)
 	}
 }

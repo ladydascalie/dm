@@ -55,11 +55,11 @@ func readerScreen(t *testing.T, r *bodyReader, cols, rows int) *vt.Term {
 	return screen
 }
 
-// v opens the reader on the entry at the top of the window, and the overlay
-// carries the body below the summary line.
+// v opens the reader on the selected entry, and the overlay carries the body
+// below the summary line.
 func TestBodyReaderOpensOnV(t *testing.T) {
 	tui := openBoxWith(t, bodyEntries())
-	if !strings.Contains(tui.box.Float.Hint, "v body") {
+	if !strings.Contains(tui.box.Float.Hint, "enter body") {
 		t.Fatalf("hint = %q, want the affordance", tui.box.Float.Hint)
 	}
 	feed(tui, "v")
@@ -112,8 +112,8 @@ func TestBodyReaderScrolls(t *testing.T) {
 		t.Fatalf("offset = %d, want the top", tui.reader.off)
 	}
 	// The list window did not move while the reader scrolled.
-	if tui.boxTop != 0 {
-		t.Fatalf("list top = %d, want 0", tui.boxTop)
+	if tui.box.Top() != 0 {
+		t.Fatalf("list top = %d, want 0", tui.box.Top())
 	}
 	// esc hands the keyboard back to the list page.
 	feed(tui, "\x1b")
@@ -139,12 +139,38 @@ func TestBodylessEntryHasNoAffordance(t *testing.T) {
 		{Seq: 9, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "with body", Body: "text"},
 	}
 	tui := openBoxWith(t, entries)
-	if strings.Contains(tui.box.Float.Hint, "v body") {
+	if strings.Contains(tui.box.Float.Hint, "enter body") {
 		t.Fatalf("hint = %q, want no reader affordance", tui.box.Float.Hint)
 	}
 	feed(tui, "v")
 	if tui.reader != nil {
 		t.Fatal("v opened a reader for an entry without a body")
+	}
+}
+
+// The selection moves with j and enter opens the reader on it. The hint
+// follows the selection: an entry without a body names no reader.
+func TestBodyReaderOpensOnEnter(t *testing.T) {
+	tui := openBoxWith(t, bodyEntries())
+	feed(tui, "jj")
+	e, ok := tui.box.Selected()
+	if !ok || e.Seq != 7 {
+		t.Fatalf("selected = %+v ok %v, want seq 7", e, ok)
+	}
+	if strings.Contains(tui.box.Float.Hint, "enter body") {
+		t.Fatalf("hint = %q, want no reader affordance for a bodyless entry", tui.box.Float.Hint)
+	}
+	// Back on the bodied entry, enter opens the reader on it.
+	feed(tui, "kk")
+	if e, ok := tui.box.Selected(); !ok || e.Seq != 9 {
+		t.Fatalf("selected = %+v ok %v, want seq 9", e, ok)
+	}
+	feed(tui, "\r")
+	if tui.reader == nil {
+		t.Fatal("enter did not open the reader")
+	}
+	if tui.reader.e.Seq != 9 {
+		t.Fatalf("reader entry seq = %d, want 9", tui.reader.e.Seq)
 	}
 }
 

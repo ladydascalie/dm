@@ -160,7 +160,9 @@ func TestBoxViewFitsLog(t *testing.T) {
 	if b.Float.Rect.H != 22 {
 		t.Fatalf("height = %d, want the cap of 22 rows", b.Float.Rect.H)
 	}
-	b.Scroll(3, theme.DefaultTheme())
+	// Twenty-four js put the selection on the window's last row and the
+	// window top three rows down, so the title names rows 4 to 25.
+	b.Scroll(24, theme.DefaultTheme())
 	if got := b.title(); !strings.Contains(got, "4-25") {
 		t.Fatalf("title = %q, want the rows in view", got)
 	}
@@ -262,10 +264,10 @@ func TestBoxViewAnchor(t *testing.T) {
 		entries[i] = box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"}
 	}
 	b.Set(entries, theme.DefaultTheme())
-	b.Scroll(5, theme.DefaultTheme())
+	b.Scroll(100, theme.DefaultTheme())
 	top := b.entries[b.off].Seq
-	if top != 35 {
-		t.Fatalf("top = %d, want 35", top)
+	if b.entries[b.sel].Seq != 1 || b.off != len(entries)-b.Float.Rect.H {
+		t.Fatalf("selection = %d off = %d, want the oldest row in the window's last row", b.entries[b.sel].Seq, b.off)
 	}
 
 	// Two pushes, one entry each: the count must add up, not restart from the
@@ -288,10 +290,136 @@ func TestBoxViewAnchor(t *testing.T) {
 		t.Fatalf("title = %q, want the arrival count", got)
 	}
 
-	b.Scroll(-b.off, theme.DefaultTheme())
+	b.Scroll(-b.ListLen(), theme.DefaultTheme())
 	b.Set(append([]box.Entry{{Seq: 44, State: box.StateNote, Msg: "note"}}, b.entries...), theme.DefaultTheme())
 	if b.off != 0 || b.new != 0 || strings.Contains(b.title(), "+") {
 		t.Fatalf("off = %d, new = %d, title = %q, want the newest entry", b.off, b.new, b.title())
+	}
+}
+
+// TestBoxViewSelectionFollows: j and k move the selection, the window
+// follows once the selection would leave the view, and the clamps hold.
+func TestBoxViewSelectionFollows(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	b := NewBoxView(snap, theme.DefaultTheme())
+	entries := make([]box.Entry, 0, 30)
+	for i := 0; i < 30; i++ {
+		entries = append(entries, box.Entry{Seq: 30 - i, State: box.StateNote, Msg: "note"})
+	}
+	b.Set(entries, theme.DefaultTheme())
+	if e, ok := b.Selected(); !ok || e.Seq != 30 {
+		t.Fatalf("selected = %+v ok %v, want the newest entry", e, ok)
+	}
+	h := b.Float.Rect.H
+	// h moves down put the selection on the window's last row, so the window
+	// top moved with it.
+	b.Scroll(h, theme.DefaultTheme())
+	if e, _ := b.Selected(); e.Seq != 30-h {
+		t.Fatalf("selection sat still at %d, want %d", e.Seq, 30-h)
+	}
+	if b.off != 1 {
+		t.Fatalf("off = %d, want 1", b.off)
+	}
+	// A move inside the window leaves the window alone.
+	b.Scroll(-1, theme.DefaultTheme())
+	if e, _ := b.Selected(); e.Seq != 30-h+1 {
+		t.Fatalf("selection = %d, want %d", e.Seq, 30-h+1)
+	}
+	if b.off != 1 {
+		t.Fatalf("off = %d, want it still at 1", b.off)
+	}
+	// The clamps hold at both ends.
+	b.Scroll(1000, theme.DefaultTheme())
+	if b.off != len(entries)-h || b.sel != len(entries)-1 {
+		t.Fatalf("off = %d sel = %d, want the oldest full window and the last row", b.off, b.sel)
+	}
+	b.Scroll(-1000, theme.DefaultTheme())
+	if b.off != 0 || b.sel != 0 {
+		t.Fatalf("off = %d sel = %d, want the newest row", b.off, b.sel)
+	}
+}
+
+// TestBoxViewSelectionKeepsBySeq: a refill that arrives over a scrolled-back
+// window keeps the selection on its entry; a window at the top keeps it on
+// the newest entry.
+func TestBoxViewSelectionKeepsBySeq(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	b := NewBoxView(snap, theme.DefaultTheme())
+	entries := make([]box.Entry, 0, 40)
+	for i := 0; i < 40; i++ {
+		entries = append(entries, box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"})
+	}
+	b.Set(entries, theme.DefaultTheme())
+
+	// Scrolled back: the selection rides its entry through the arrival.
+	b.Scroll(1000, theme.DefaultTheme())
+	top := b.entries[b.off].Seq
+	b.Set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), theme.DefaultTheme())
+	if b.entries[b.sel].Seq != 1 {
+		t.Fatalf("selection seq = %d, want 1", b.entries[b.sel].Seq)
+	}
+	if b.entries[b.off].Seq != top {
+		t.Fatalf("top seq = %d, want %d", b.entries[b.off].Seq, top)
+	}
+	if b.new != 1 {
+		t.Fatalf("new = %d, want 1", b.new)
+	}
+
+	// At the top: the selection rides the newest entry instead.
+	b = NewBoxView(snap, theme.DefaultTheme())
+	b.Set(entries, theme.DefaultTheme())
+	b.Set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), theme.DefaultTheme())
+	if e, _ := b.Selected(); e.Seq != 41 {
+		t.Fatalf("selection seq = %d, want the newest entry 41", e.Seq)
+	}
+	if b.off != 0 || b.new != 0 {
+		t.Fatalf("off = %d new = %d, want the window still at the top", b.off, b.new)
+	}
+}
+
+// TestBoxViewSelect: Select puts the selection on the entry and the window
+// on the selection, as far toward the top as the clamp allows, and a seq the
+// log does not carry changes nothing.
+func TestBoxViewSelect(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	b := NewBoxView(snap, theme.DefaultTheme())
+	entries := make([]box.Entry, 0, 40)
+	for i := 0; i < 40; i++ {
+		entries = append(entries, box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"})
+	}
+	b.Set(entries, theme.DefaultTheme())
+	b.Select(20, theme.DefaultTheme())
+	if e, ok := b.Selected(); !ok || e.Seq != 20 {
+		t.Fatalf("selected = %+v ok %v, want seq 20", e, ok)
+	}
+	if want := len(entries) - b.Float.Rect.H; b.off != want {
+		t.Fatalf("off = %d, want the clamp's oldest full window %d", b.off, want)
+	}
+	before := b.off
+	b.Select(999, theme.DefaultTheme())
+	if b.off != before {
+		t.Fatalf("off = %d, want Select to leave an unknown seq alone", b.off)
+	}
+}
+
+// TestBoxViewPaintsSelectionBright: the selected row sits at full intensity
+// and the bright cell moves with the selection.
+func TestBoxViewPaintsSelectionBright(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	b := NewBoxView(snap, theme.DefaultTheme())
+	b.Set(boxEntries(), theme.DefaultTheme())
+	screen := boxScreen(t, b, snap.Cols, snap.Rows)
+	r := b.Float.Rect
+	seqStyle := func(screen *vt.Term, y int) vt.Style {
+		return screen.Grid().Cell(r.X+boxReceiptW+boxSeqW-1, y).Style
+	}
+	if seqStyle(screen, r.Y) == seqStyle(screen, r.Y+1) {
+		t.Fatalf("row styles match, want the selected row brighter")
+	}
+	b.Scroll(1, theme.DefaultTheme())
+	screen = boxScreen(t, b, snap.Cols, snap.Rows)
+	if seqStyle(screen, r.Y) == seqStyle(screen, r.Y+1) {
+		t.Fatalf("row styles still match after the selection moved down")
 	}
 }
 

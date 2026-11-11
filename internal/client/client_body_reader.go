@@ -158,14 +158,13 @@ func (r *bodyReader) clamp() {
 	}
 }
 
-// The client side of the reader: the window mirror the list keeps, the key
-// that opens the overlay, and the affordance the hint carries.
+// The client side of the reader: the key that opens the overlay on the box view, and the affordance the hint carries.
 
-// openBodyReader opens the overlay for the entry at the top of the list
-// window. An entry without a body opens nothing, which is why the hint only
-// offers the key when the entry carries one.
+// openBodyReader opens the overlay for the entry the selection sits on. An
+// entry without a body opens nothing, which is why the hint only offers the
+// key when the selected entry carries one.
 func openBodyReader(t *tui) {
-	e, ok := t.boxTopEntry()
+	e, ok := t.box.Selected()
 	if !ok || e.Body == "" {
 		return
 	}
@@ -183,72 +182,17 @@ func closeBodyReader(t *tui) {
 	t.reader = nil
 }
 
-// boxTopEntry is the entry the list page's window shows at its top row: the
-// one the reader opens on. The watcher page has no entry.
-func (t *tui) boxTopEntry() (box.Entry, bool) {
-	if t.box == nil || t.boxPage || t.boxTop < 0 || t.boxTop >= len(t.boxLog) {
-		return box.Entry{}, false
-	}
-	return t.boxLog[t.boxTop], true
-}
-
-// boxScroll moves the list window and mirrors the move, so the mirror's top
-// row is the view's top row.
-func (t *tui) boxScroll(n int) {
-	t.box.Scroll(n, t.theme())
-	if t.boxPage {
-		return
-	}
-	t.boxTop += n
-	t.boxClampTop()
-}
-
-// boxClampTop keeps the mirror's top row where the view's clamp would hold
-// it: inside the log, never past the oldest row that still fills the pane.
-func (t *tui) boxClampTop() {
-	max := len(t.boxLog) - t.box.Float.Rect.H
-	if max < 0 {
-		max = 0
-	}
-	if t.boxTop > max {
-		t.boxTop = max
-	}
-	if t.boxTop < 0 {
-		t.boxTop = 0
-	}
-}
-
-// boxMirrorSet replaces the mirrored log the way the view's Set keeps a
-// scrolled-back window: the top entry stays by seq, and a window at the top
-// follows the newest entry.
-func (t *tui) boxMirrorSet(entries []box.Entry) {
-	top := 0
-	if t.boxTop > 0 && t.boxTop < len(t.boxLog) {
-		top = t.boxLog[t.boxTop].Seq
-	}
-	t.boxLog = entries
-	if top != 0 {
-		for i, e := range entries {
-			if e.Seq == top {
-				t.boxTop = i
-				break
-			}
-		}
-	}
-	t.boxClampTop()
-}
-
 // boxBodyHint amends the hint the view painted with the reader key when the
-// entry at the top of the window carries a body. An entry without a body
-// leaves the hint as the view wrote it, so the affordance names nothing.
+// selected entry carries a body. An entry without a body leaves the hint as
+// the view wrote it, so the affordance names nothing.
 func (t *tui) boxBodyHint() {
 	if t.box == nil {
 		return
 	}
-	h := strings.Replace(t.box.Float.Hint, "  v body", "", 1)
+	h := strings.Replace(t.box.Float.Hint, "  enter body", "", 1)
 	if !t.boxPage {
-		if _, ok := t.boxTopEntry(); ok && t.boxLog[t.boxTop].Body != "" {
-			h += "  v body"
+		if e, ok := t.box.Selected(); ok && e.Body != "" {
+			h += "  enter body"
 		}
 	}
 	t.box.Float.Hint = h

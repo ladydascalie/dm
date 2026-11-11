@@ -230,16 +230,12 @@ type tui struct {
 	yankID   int
 	yankPane string
 
-	// boxLog mirrors the entries the box view holds and boxTop is the list
-	// row at the top of its window, so the client can open the body reader on
-	// the entry the operator sees without reaching into the view. reader is
-	// the open reader overlay, nil when closed.
-	boxLog  []box.Entry
-	boxTop  int
+	// reader is the open body reader overlay, nil when closed. The box view
+	// owns its window and selection, so the client reads them off the view.
 	boxPage bool
 	reader  *bodyReader
-	// boxJumpSeq asks the next list reply to land with that entry at the top
-	// of the window; zero means no jump is waiting.
+	// boxJumpSeq asks the next list reply to land with that entry selected;
+	// zero means no jump is waiting.
 	boxJumpSeq int
 
 	// ncentre is the open notification centre, nil when closed. notifyRead
@@ -769,7 +765,6 @@ func (t *tui) apply(m wire.Msg) {
 		}
 		if t.box != nil {
 			t.box.Sync(m.Snap, t.theme())
-			t.boxClampTop()
 			if t.reader != nil {
 				t.reader.Sync(t.box.Float.Rect, t.theme())
 			}

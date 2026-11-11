@@ -57,7 +57,10 @@ const (
 // and the float that draws them.
 type BoxView struct {
 	entries []box.Entry
-	off     int
+	// sel is the row the selection sits on, an index into entries. The
+	// window follows it, the way the notification centre's cursor works.
+	sel int
+	off int
 	// new counts the entries that arrived above a scrolled-back window. It is
 	// zero while the window follows the newest entry.
 	new int
@@ -175,6 +178,7 @@ func (b *BoxView) Sync(snap *wire.Snapshot, th theme.Theme) {
 	}
 	b.Float.Rect = r
 	b.clamp()
+	b.clampSel()
 	b.pageClamp()
 	b.paint(th)
 }
@@ -196,6 +200,14 @@ func (b *BoxView) Set(entries []box.Entry, th theme.Theme) {
 	if b.off > 0 && b.off < len(b.entries) {
 		top = b.entries[b.off].Seq
 	}
+	// A window at the top follows the newest entry, and the selection rides
+	// with it. A scrolled-back window keeps the selection by seq, the way it
+	// keeps the top row.
+	follow := b.off == 0
+	selSeq := 0
+	if !follow && b.sel > 0 && b.sel < len(b.entries) {
+		selSeq = b.entries[b.sel].Seq
+	}
 	b.entries = entries
 	b.Float.Rect = BoxViewRect(b.snap, b.rows())
 	if top != 0 {
@@ -209,7 +221,15 @@ func (b *BoxView) Set(entries []box.Entry, th theme.Theme) {
 			b.off = i
 		}
 	}
+	if follow {
+		b.sel = 0
+	} else if selSeq != 0 {
+		if i := boxSeqIndex(entries, selSeq); i >= 0 {
+			b.sel = i
+		}
+	}
 	b.clamp()
+	b.clampSel()
 	b.pageClamp()
 	b.paint(th)
 }
@@ -234,15 +254,16 @@ func boxSeqIndex(entries []box.Entry, seq int) int {
 	return -1
 }
 
-// Scroll moves the window by n rows, positive toward older rows. The page and
-// the log keep their own offsets, so a toggle leaves each where it was.
+// Scroll moves the selection by n rows, positive toward older rows, and the
+// window follows so the selection stays in view. The watcher page keeps its
+// own offset and scrolls, so a toggle leaves each where it was.
 func (b *BoxView) Scroll(n int, th theme.Theme) {
 	if b.page {
 		b.pOff += n
 		b.pageClamp()
 	} else {
-		b.off += n
-		b.clamp()
+		b.sel += n
+		b.clampSel()
 	}
 	b.paint(th)
 }
@@ -286,6 +307,54 @@ func (b *BoxView) clamp() {
 	if b.off == 0 {
 		b.new = 0
 	}
+}
+
+// clampSel keeps the selection on the log and the window on the selection:
+// the selection never leaves the entries and the window never hides it.
+func (b *BoxView) clampSel() {
+	if b.sel > len(b.entries)-1 {
+		b.sel = len(b.entries) - 1
+	}
+	if b.sel < 0 {
+		b.sel = 0
+	}
+	if b.sel < b.off {
+		b.off = b.sel
+	}
+	if b.sel >= b.off+b.Float.Rect.H {
+		b.off = b.sel - b.Float.Rect.H + 1
+	}
+	b.clamp()
+}
+
+// Selected is the entry the selection sits on: the one the body reader opens.
+// The watcher page has no selection.
+func (b *BoxView) Selected() (box.Entry, bool) {
+	if b.page || b.sel < 0 || b.sel >= len(b.entries) {
+		return box.Entry{}, false
+	}
+	return b.entries[b.sel], true
+}
+
+// Top is the index of the window's first row. The view owns the window; a
+// caller reads it here instead of keeping its own mirror.
+func (b *BoxView) Top() int {
+	return b.off
+}
+
+// Select selects the entry with the seq and lands it at the top of the
+// window, the way the notification centre's handover asks. A seq the log
+// does not carry changes nothing.
+func (b *BoxView) Select(seq int, th theme.Theme) {
+	i := boxSeqIndex(b.entries, seq)
+	if i < 0 {
+		return
+	}
+	b.sel = i
+	b.off = i
+	b.clamp()
+	b.clampSel()
+	b.paint(th)
 }
 
 // TogglePage swaps the float between the entry list and the watcher page.
@@ -334,7 +403,7 @@ func (b *BoxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th theme.Theme)
 		if r.W >= boxReceiptMinW {
 			receipt = b.received(b.entries[i])
 		}
-		boxPaintRow(buf, th, b.entries[i], r.W, receipt)
+		boxPaintRow(buf, th, b.entries[i], r.W, receipt, i == b.sel)
 	}
 }
 
@@ -466,7 +535,7 @@ func boxPaintWatch(buf *bytes.Buffer, w box.Watch, width int) {
 // colour the rail gives that state. A receipt of zero or more prefixes a
 // two-cell count; a negative receipt drops the marker. The row is clipped to
 // w cells.
-func boxPaintRow(buf *bytes.Buffer, th theme.Theme, e box.Entry, w int, receipt int) {
+func boxPaintRow(buf *bytes.Buffer, th theme.Theme, e box.Entry, w int, receipt int, sel bool) {
 	row := boxRowText(e, w, receipt)
 	start := boxSeqW + 1
 	if receipt >= 0 {
@@ -477,12 +546,19 @@ func boxPaintRow(buf *bytes.Buffer, th theme.Theme, e box.Entry, w int, receipt 
 		buf.WriteString(row)
 		return
 	}
-	buf.WriteString("\x1b[0m\x1b[90m")
+	// The selected row keeps its full intensity; the rest sit dim, the way
+	// the notification centre paints its rows.
+	text := "\x1b[0m\x1b[90m"
+	if sel {
+		text = "\x1b[0m"
+	}
+	buf.WriteString(text)
 	buf.WriteString(row[:start])
 	buf.WriteString("\x1b[0m")
 	buf.WriteString(boxStateColour(th, e.State).FG())
 	buf.WriteString(state)
-	buf.WriteString("\x1b[0m\x1b[90m")
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(text)
 	buf.WriteString(row[start+len(state):])
 }
 
