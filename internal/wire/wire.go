@@ -51,12 +51,13 @@ type Msg struct {
 	OK    bool   `json:"ok,omitempty"`
 	Error string `json:"error,omitempty"`
 	// Exit is the pane wait reply's exit code. Nil when no code could be
-	// observed: the children fallback, an idle pane or a dead shell.
+	// observed: the children fallback or a dead shell.
 	Exit *int `json:"exit,omitempty"`
 	// WaitReason is how the pane's wait action ended: mark (the OSC 133 D
 	// mark carried the code), children (the shell's foreground child went
-	// away), idle (nothing was running at wait start) or dead (the pane's
-	// shell exited). Empty on every other frame.
+	// away) or dead (the pane's shell exited). A pane older than the wait
+	// that starts on the next command also reports idle, its one answer for
+	// a markless pane with nothing running. Empty on every other frame.
 	WaitReason string    `json:"waitReason,omitempty"`
 	Snap       *Snapshot `json:"snap,omitempty"`
 	// Lines is the pane read reply. It stays in the envelope because pane

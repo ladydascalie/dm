@@ -740,7 +740,7 @@ func (p *paneProc) serve(c net.Conn) {
 		case "wait":
 			// The children sample runs before the lock: a /proc read must not
 			// stall publishes, and it must be settled before the tail reply
-			// goes out so the idle decision lands with the registration it
+			// goes out so the start decision lands with the registration it
 			// belongs to. A marked pane never uses it.
 			kids := p.childrenAt(p.shellPID())
 			p.mu.Lock()
@@ -755,17 +755,32 @@ func (p *paneProc) serve(c net.Conn) {
 					Error: "a wait is already running"})
 				continue
 			}
-			// The wait streams from the last command's start: the Enter's
-			// anchor, or the stream's current end when no Enter was recorded.
+			// A pane at a prompt has no command to report: its wait belongs to
+			// the next command, so it streams from now and answers that
+			// command's end. With no mark to read, an empty child sample says
+			// the same.
+			atPrompt := p.vt.AtPrompt()
+			_, marked := p.vt.CommandEnd()
+			idle := atPrompt || (!marked && len(kids) == 0)
+			// A prompt mark proves shell integration, so the next command's
+			// end mark can end the wait even before any D mark arrived.
+			marked = marked || atPrompt
+			// Otherwise the wait streams from the last command's start: the
+			// Enter's anchor, or the stream's current end when none was
+			// recorded.
 			anchor := p.produced
-			if p.anchorSet {
+			if p.anchorSet && !idle {
 				anchor = p.anchor
 			}
-			_, marked := p.vt.CommandEnd()
 			w := &waitReq{sc: sc, id: m.ID, anchor: anchor, mark: marked,
 				done: make(chan struct{})}
 			p.waiter = w
 			tail, cols, h, tailOK := p.yankTailLocked()
+			if idle {
+				// The bytes between the last Enter and the prompt belong to the
+				// command that already returned, not to this wait.
+				tail, tailOK = nil, false
+			}
 			// The tail is rendered and sent under the pane lock, the way
 			// broadcasts are: every bytes frame and the final reply on this
 			// connection must land after it. Frames the waiter received
@@ -790,26 +805,13 @@ func (p *paneProc) serve(c net.Conn) {
 			}
 			p.mu.Unlock()
 			if !marked {
-				if len(kids) == 0 {
-					// A markless pane with nothing running has no observable
-					// end, so its wait finishes at once instead of blocking
-					// forever.
-					p.mu.Lock()
-					mine := p.waiter == w
-					if mine {
-						p.waiter = nil
-						close(w.done)
-					}
-					p.mu.Unlock()
-					if mine {
-						_ = sc.send(waitReply(m.ID, nil, "idle"))
-					}
-					continue
-				}
-				// The start sample counts as having seen a child, so a
-				// command that returns before the first tick still ends the
-				// wait.
-				w.childSeen = true
+				// A markless pane sees a command only through the shell's
+				// foreground children, so the poll runs either way: with a
+				// child already there it ends when that child leaves, and
+				// with none it waits for the command it was asked about to
+				// start and then return. The waiter's quiet-idle timeout
+				// bounds a pane where nothing ever starts.
+				w.childSeen = len(kids) > 0
 				go p.pollWaitChildren(w)
 			}
 		case "kill":

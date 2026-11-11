@@ -62,10 +62,13 @@ func (t *Term) oscPrompt(rest string) {
 	}
 	switch kind {
 	case "A":
+		t.mark = "A"
 		t.promptPos, t.promptSet = t.markStart, true
 	case "C":
+		t.mark = "C"
 		t.startPos, t.startSet = t.markStart, true
 	case "D":
+		t.mark = "D"
 		t.endPos, t.endSet = t.markStart, true
 		code, ok := parseExitCode(params)
 		t.endCode, t.endCodeSet = code, ok
@@ -88,6 +91,11 @@ func parseExitCode(params string) (int, bool) {
 	}
 	return n, true
 }
+
+// AtPrompt reports whether the shell's most recent OSC 133 mark is the prompt
+// start, which is where the shell sits once a command has returned. A wait
+// that arrives there belongs to the next command, not the one already done.
+func (t *Term) AtPrompt() bool { return t.mark == "A" }
 
 // PromptStart returns the most recent OSC 133 prompt start as a stream byte
 // offset, and whether one has been seen.

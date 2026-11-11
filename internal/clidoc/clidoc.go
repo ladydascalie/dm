@@ -158,7 +158,7 @@ var cliCommands = []cliCommand{
 	{
 		name:    "wait",
 		args:    "<pane> [--timeout D]",
-		summary: "stream a pane's output until its command ends, then name the exit code",
+		summary: "stream a pane's output until a command ends, the next one when nothing runs, then name the exit code",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"timeout", "D", "quiet-idle limit, not total"},

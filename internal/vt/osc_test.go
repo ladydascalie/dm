@@ -161,6 +161,32 @@ func TestOSCPromptMarks(t *testing.T) {
 	}
 }
 
+// TestOSCPromptMarksTrackTheLatestMark proves the terminal remembers which
+// mark came last, which is how a wait tells a prompt from a command in
+// flight.
+func TestOSCPromptMarksTrackTheLatestMark(t *testing.T) {
+	term := NewTerm(20, 4)
+	if term.AtPrompt() {
+		t.Fatal("a fresh terminal claimed a prompt")
+	}
+	writeTerm(term, "\x1b]133;A\x1b\\")
+	if !term.AtPrompt() {
+		t.Fatal("the A mark did not put the shell at a prompt")
+	}
+	writeTerm(term, "\x1b]133;C\x1b\\")
+	if term.AtPrompt() {
+		t.Fatal("the C mark did not leave the prompt")
+	}
+	writeTerm(term, "\x1b]133;D;2\x1b\\")
+	if term.AtPrompt() {
+		t.Fatal("the D mark did not leave the prompt")
+	}
+	writeTerm(term, "\x1b]133;A\x1b\\")
+	if !term.AtPrompt() {
+		t.Fatal("the next A mark did not put the shell back at a prompt")
+	}
+}
+
 // The D mark of OSC 133 may carry the exit status the command ended with, as
 // "D;130" or in the unsigned format "D;0;130". A bare D reports no status.
 func TestOSCCommandExit(t *testing.T) {

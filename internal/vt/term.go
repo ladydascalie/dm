@@ -38,6 +38,9 @@ type Term struct {
 	// its body carried one.
 	endCode    int
 	endCodeSet bool
+	// mark is the kind of the most recent A, C or D mark, empty before the
+	// first one. A wait reads it to tell a prompt from a command in flight.
+	mark string
 
 	// streamPos counts the bytes this terminal has parsed. markStart is where
 	// the OSC currently being parsed began, so a mark names the start of its

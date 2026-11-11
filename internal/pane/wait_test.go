@@ -188,29 +188,48 @@ func TestWaitChildrenFallbackEndsWhenTheChildLeaves(t *testing.T) {
 	}
 }
 
-// TestWaitIdleMarklessPaneEndsAtOnce proves a wait on a pane with no marks
-// and no foreground child answers immediately instead of blocking forever.
-func TestWaitIdleMarklessPaneEndsAtOnce(t *testing.T) {
+// TestWaitIdleMarklessPaneWaitsForACommand proves a wait on a pane with no
+// marks and no foreground child keeps running until a command starts and
+// returns, instead of answering at once with nothing to report.
+func TestWaitIdleMarklessPaneWaitsForACommand(t *testing.T) {
 	t.Parallel()
 	p, cli, msgs := yankPane(t, 40, 6)
-	waitChildren(t, p, nil)
+	kids := waitChildren(t, p, nil)
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "write", Msg: "true", Enter: true, ID: 1})
 	paneSync(t, cli, msgs)
-
-	start := time.Now()
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
 	readTail(t, msgs)
-	_, final := waitFinal(t, msgs)
-	if took := time.Since(start); took > 3*time.Second {
-		t.Fatalf("idle wait took %s", took)
+
+	// No child and no mark: several empty samples leave the wait running.
+	quiet := time.After(3 * waitPollEvery)
+	for parked := false; !parked; {
+		select {
+		case m := <-msgs:
+			if m.Type == "resp" && m.WaitReason != "" {
+				t.Fatalf("wait answered %+v before a command ran", m)
+			}
+		case <-quiet:
+			parked = true
+		}
 	}
-	if final.WaitReason != "idle" || final.Exit != nil {
-		t.Fatalf("final reply = %+v, want reason idle and no exit code", final)
+
+	// The command starts, then returns.
+	kids.Store([]int{4242})
+	waitFor(t, 3*time.Second, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.waiter != nil && p.waiter.childSeen
+	}, "the poll to see the command's child")
+	kids.Store([]int{})
+
+	_, final := waitFinal(t, msgs)
+	if final.WaitReason != "children" || final.Exit != nil {
+		t.Fatalf("final reply = %+v, want reason children and no exit code", final)
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.waiter != nil {
-		t.Fatal("the idle wait stayed registered")
+		t.Fatal("the wait stayed registered after the command returned")
 	}
 }
 
@@ -274,6 +293,40 @@ func TestWaiterDisconnectCancelsTheWait(t *testing.T) {
 	defer p.mu.Unlock()
 	if p.waiter != nil {
 		t.Fatal("the wait came back after the waiter disconnected")
+	}
+}
+
+// TestWaitAtAPromptWaitsForTheNextCommand proves a wait on a pane sitting at
+// a prompt ignores the exit code the finished command left behind: it waits
+// for the next command to start and end, and streams nothing of the one that
+// already returned.
+func TestWaitAtAPromptWaitsForTheNextCommand(t *testing.T) {
+	t.Parallel()
+	p, cli, msgs := yankPane(t, 40, 6)
+	feedPane(p, []byte("\x1b]133;A\x1b\\prompt$\x1b]133;C\x1b\\old out\r\n\x1b]133;D;7\x1b\\\x1b]133;A\x1b\\prompt$ "))
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "write", Msg: "cmd2", Enter: true, ID: 1})
+	paneSync(t, cli, msgs)
+
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
+	tail := readTail(t, msgs)
+	if res := decodeYank(t, tail); res.Anchor || len(res.Lines) != 0 {
+		t.Fatalf("tail reply = %+v, want no tail at a prompt", res)
+	}
+
+	// Only the next command's end mark ends the wait.
+	feedPane(p, []byte("\x1b]133;C\x1b\\new out\r\n"))
+	feedPane(p, []byte("\x1b]133;D;130\x1b\\"))
+	data, final := waitFinal(t, msgs)
+	if final.WaitReason != "mark" || final.Exit == nil || *final.Exit != 130 {
+		t.Fatalf("final reply = %+v, want reason mark and exit 130", final)
+	}
+	if len(data) != 2 || string(data[0]) != "\x1b]133;C\x1b\\new out\r\n" {
+		t.Fatalf("bytes frames = %q, want the next command's output", data)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.waiter != nil {
+		t.Fatal("the wait stayed registered after the next command ended")
 	}
 }
 
