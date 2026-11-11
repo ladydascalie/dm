@@ -661,7 +661,19 @@ func (p *paneProc) serve(c net.Conn) {
 			// no scrollback ever returns to it.
 			snap := p.vt.Snapshot()
 			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
+			// A reflow takes the in-flight wait's mark path away: the fallback
+			// poll takes over, and there an empty child sample alone ends the
+			// wait. Both goroutines hold p.mu around this field. A marked wait
+			// started no poll, so the demotion starts one now.
+			var demoted *waitReq
+			if w := p.waiter; w != nil && !w.looseStart {
+				w.looseStart = true
+				demoted = w
+			}
 			p.mu.Unlock()
+			if demoted != nil {
+				go p.pollWaitChildren(demoted)
+			}
 			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)})
 		case "yank":
 			p.mu.Lock()
