@@ -513,10 +513,10 @@ func (s *server) stopReflow() {
 }
 
 // settleReflow runs reflowSettle after the last width change. It asks every
-// affected pane to rebuild its screen from its ring at the recorded size and
-// broadcasts each answer, the same screen frame sendScreens sends. The
-// requests run concurrently, so one pane that does not answer cannot hold the
-// rest; a pane that fails is skipped.
+// affected pane for its re-wrapped screen at the recorded size and broadcasts
+// each answer, the same screen frame sendScreens sends. The requests run
+// concurrently, so one pane that does not answer cannot hold the rest; a pane
+// that fails is skipped.
 func (s *server) settleReflow() {
 	s.mu.Lock()
 	wait := s.reflowWait

@@ -583,7 +583,16 @@ func (p *paneProc) serve(c net.Conn) {
 			// The anchor is a stream byte offset, so a geometry change only
 			// changes how a later yank replays those bytes. It is rebased, not
 			// dropped.
-			p.vt.Grid().Resize(m.Cols, m.Rows)
+			//
+			// A width change re-wraps the screen instead of clipping it: the
+			// rows join into logical lines and wrap again at the new width.
+			// Rewrap refuses the alternate screen and an application scroll
+			// region, and those keep the plain resize. A height change alone
+			// has nothing to re-wrap.
+			oc, _ := p.vt.Grid().Size()
+			if m.Cols != oc && !p.vt.Grid().Rewrap(m.Cols, m.Rows) {
+				p.vt.Grid().Resize(m.Cols, m.Rows)
+			}
 			p.mu.Unlock()
 			_ = pty.Setsize(p.ptmx, &pty.Winsize{Cols: uint16(m.Cols), Rows: uint16(m.Rows)})
 		case "read":
@@ -607,20 +616,11 @@ func (p *paneProc) serve(c net.Conn) {
 				continue
 			}
 			p.mu.Lock()
-			// A pane whose app is on the alternate screen is not reflowed: the
-			// app repaints itself on SIGWINCH and that screen is not history.
-			// Its grid stays as it is, and the snapshot answers with it.
-			if !p.vt.Grid().Modes().AltScreen {
-				// The PTY was already sized by the resize action, and a reflow
-				// is a picture, not output: leave the PTY size and the ring
-				// alone. Only the screen is rebuilt, from the ring's stream.
-				p.vt = vt.Reflow(p.ring.Bytes(), m.Cols, m.Rows)
-				// The rebuilt terminal parsed a window of the ring, so its
-				// stream position and marks are not absolute. The anchor is a
-				// byte offset and survives the reflow; future marks start from
-				// the pane's real stream position.
-				p.vt.ResetStream(p.produced)
-			}
+			// The rewrap already happened in the resize action, so this is the
+			// picture handshake: the server asks once per drag gesture, after
+			// the last width change, and broadcasts the answer to the clients.
+			// No output is replayed, so the screen is what the app painted and
+			// no scrollback ever returns to it.
 			snap := p.vt.Snapshot()
 			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 	"dm/internal/wire"
 )
 
-// newReflowPane is a paneProc with the fields the reflow path touches and
+// newReflowPane is a paneProc with the fields the resize path touches and
 // nothing that needs a PTY. The socket path is driven directly, as the other
 // pane tests do, so no shell is spawned.
 func newReflowPane(cols, rows int) *paneProc {
@@ -53,10 +54,28 @@ func restoreSnapshot(t *testing.T, msg wire.Msg) *vt.Term {
 	return term
 }
 
-// TestReflowWidensScreen feeds a pane a stream wider than its 10-column screen,
-// reflows it to 20 columns, and checks the reply carries the full text and the
-// cursor a direct replay at the new width produces.
-func TestReflowWidensScreen(t *testing.T) {
+// resizePane sends one resize request and waits for the answer to the screen
+// request that follows it, so a test never races the resize.
+func resizePane(t *testing.T, cli net.Conn, p *paneProc, cols, rows int) *vt.Term {
+	t.Helper()
+	if err := wire.WriteMsg(cli, wire.Msg{Type: "req", Action: "resize", Cols: cols, Rows: rows}); err != nil {
+		t.Fatalf("send resize request: %v", err)
+	}
+	if err := wire.WriteMsg(cli, wire.Msg{Type: "req", Action: "screen", ID: 1}); err != nil {
+		t.Fatalf("send screen request: %v", err)
+	}
+	reply, err := wire.ReadMsg(cli)
+	if err != nil {
+		t.Fatalf("read screen reply: %v", err)
+	}
+	return restoreSnapshot(t, reply)
+}
+
+// TestResizeRewrapsScreen feeds a pane a stream wider than its 10-column
+// screen, resizes it to 20 columns, and checks the screen the resize built:
+// the same content re-wrapped, with the cursor a direct write at the new width
+// produces.
+func TestResizeRewrapsScreen(t *testing.T) {
 	p := newReflowPane(10, 6)
 	feedReflow(p, "0123456789abcdefghij0123456789abcdefghij")
 	ringBefore := string(p.ring.Bytes())
@@ -64,19 +83,11 @@ func TestReflowWidensScreen(t *testing.T) {
 	serve, cli := net.Pipe()
 	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
-
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
-	if err := wire.WriteMsg(cli, wire.Msg{Type: "req", Action: "reflow", Cols: 20, Rows: 6}); err != nil {
-		t.Fatalf("send reflow request: %v", err)
-	}
-	reply, err := wire.ReadMsg(cli)
-	if err != nil {
-		t.Fatalf("read reflow reply: %v", err)
-	}
 
-	term := restoreSnapshot(t, reply)
+	term := resizePane(t, cli, p, 20, 6)
 	if cols, rows := term.Grid().Size(); cols != 20 || rows != 6 {
-		t.Fatalf("reflowed size %dx%d, want 20x6", cols, rows)
+		t.Fatalf("resized size %dx%d, want 20x6", cols, rows)
 	}
 	for _, y := range []int{0, 1} {
 		if got := term.Grid().Text(y); got != "0123456789abcdefghij" {
@@ -89,15 +100,42 @@ func TestReflowWidensScreen(t *testing.T) {
 	if got := term.Grid().Cursor(); got.X != 19 || got.Y != 1 || !got.WrapNext {
 		t.Errorf("cursor = %+v, want col 19 row 1 with wrap pending", got)
 	}
-	// A reflow is a picture, not output: the ring is not touched.
+	// A resize is a geometry change, not output: the ring is not touched.
 	if got := string(p.ring.Bytes()); got != ringBefore {
-		t.Errorf("ring changed by reflow: %d bytes, want the original %d", len(got), len(ringBefore))
+		t.Errorf("ring changed by resize: %d bytes, want the original %d", len(got), len(ringBefore))
 	}
 }
 
-// TestReflowAltScreenUnchanged leaves an alternate-screen pane alone: the reply
-// is the same screen and the alternate flag, so the caller can refuse it.
-func TestReflowAltScreenUnchanged(t *testing.T) {
+// TestResizeNeverResurrectsHistory pins the rule the ring replay broke: a pane
+// whose screen the app cleared holds only what the app painted, and a wider
+// screen brings none of the scrolled output back.
+func TestResizeNeverResurrectsHistory(t *testing.T) {
+	p := newReflowPane(10, 6)
+	feedReflow(p, strings.Repeat("old line\r\n", 20))
+	feedReflow(p, "\x1b[2J\x1b[Hprompt only")
+
+	serve, cli := net.Pipe()
+	defer func() { _ = cli.Close() }()
+	go p.serve(serve)
+	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
+
+	term := resizePane(t, cli, p, 30, 10)
+	joined := ""
+	for y := 0; y < 10; y++ {
+		joined += term.Grid().Text(y) + "\n"
+	}
+	if strings.Contains(joined, "old line") {
+		t.Errorf("scrollback leaked onto the screen:\n%s", joined)
+	}
+	if got := term.Grid().Text(0); got != "prompt only" {
+		t.Errorf("row 0 = %q, want the prompt alone", got)
+	}
+}
+
+// TestResizeAltScreenKeepsGrid leaves an alternate-screen pane to the app: the
+// plain resize keeps the content it had, and the screen request reports the
+// alternate flag so the caller knows the app repaints itself.
+func TestResizeAltScreenKeepsGrid(t *testing.T) {
 	p := newReflowPane(10, 6)
 	feedReflow(p, "0123456789abcdefghij0123456789abcdefghij")
 	p.mu.Lock()
@@ -108,8 +146,50 @@ func TestReflowAltScreenUnchanged(t *testing.T) {
 	serve, cli := net.Pipe()
 	defer func() { _ = cli.Close() }()
 	go p.serve(serve)
-
 	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
+
+	term := resizePane(t, cli, p, 20, 6)
+	if got := term.Grid().Text(0); got != "app" {
+		t.Fatalf("alt-screen row 0 = %q, want %q", got, "app")
+	}
+	if got := term.Grid().Text(1); got != "" {
+		t.Errorf("alt-screen row 1 = %q, want blank", got)
+	}
+	var res struct {
+		Alt bool `json:"alt"`
+	}
+	// The screen reply above is the one resizePane read; ask again for the
+	// modes the reply carries.
+	if err := wire.WriteMsg(cli, wire.Msg{Type: "req", Action: "screen", ID: 2}); err != nil {
+		t.Fatalf("send second screen request: %v", err)
+	}
+	reply, err := wire.ReadMsg(cli)
+	if err != nil {
+		t.Fatalf("read second screen reply: %v", err)
+	}
+	if err := json.Unmarshal(reply.Res, &res); err != nil {
+		t.Fatalf("decode Res: %v", err)
+	}
+	if !res.Alt {
+		t.Error("reply did not report the alternate screen")
+	}
+}
+
+// TestReflowAnswersCurrentPicture pins the handshake: after the resize did the
+// rewrap, a reflow request answers with the screen as it is and changes
+// nothing.
+func TestReflowAnswersCurrentPicture(t *testing.T) {
+	p := newReflowPane(10, 6)
+	feedReflow(p, "0123456789abcdefghij0123456789abcdefghij")
+
+	serve, cli := net.Pipe()
+	defer func() { _ = cli.Close() }()
+	go p.serve(serve)
+	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
+
+	first := resizePane(t, cli, p, 20, 6)
+	ringBefore := string(p.ring.Bytes())
+
 	if err := wire.WriteMsg(cli, wire.Msg{Type: "req", Action: "reflow", Cols: 20, Rows: 6}); err != nil {
 		t.Fatalf("send reflow request: %v", err)
 	}
@@ -117,22 +197,20 @@ func TestReflowAltScreenUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read reflow reply: %v", err)
 	}
-
-	term := restoreSnapshot(t, reply)
-	if cols, rows := term.Grid().Size(); cols != 10 || rows != 6 {
-		t.Fatalf("alt-screen size %dx%d, want the unchanged 10x6", cols, rows)
+	second := restoreSnapshot(t, reply)
+	if cols, rows := second.Grid().Size(); cols != 20 || rows != 6 {
+		t.Fatalf("reflow size %dx%d, want 20x6", cols, rows)
 	}
-	if got := term.Grid().Text(0); got != "app" {
-		t.Fatalf("alt-screen row 0 = %q, want %q", got, "app")
+	for y := 0; y < 3; y++ {
+		if got, want := second.Grid().Text(y), first.Grid().Text(y); got != want {
+			t.Errorf("row %d = %q, want the resize answer %q", y, got, want)
+		}
 	}
-	var res struct {
-		Alt bool `json:"alt"`
+	if got, want := second.Grid().Cursor(), first.Grid().Cursor(); got != want {
+		t.Errorf("cursor = %+v, want the resize answer %+v", got, want)
 	}
-	if err := json.Unmarshal(reply.Res, &res); err != nil {
-		t.Fatalf("decode Res: %v", err)
-	}
-	if !res.Alt {
-		t.Error("reply did not report the alternate screen")
+	if got := string(p.ring.Bytes()); got != ringBefore {
+		t.Errorf("ring changed by reflow: %d bytes, want the original %d", len(got), len(ringBefore))
 	}
 }
 

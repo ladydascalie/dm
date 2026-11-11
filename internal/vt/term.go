@@ -75,18 +75,6 @@ func (t *Term) Write(b []byte) {
 	t.parser.write(t, b)
 }
 
-// ResetStream sets the stream position and drops the prompt marks. A pane that
-// rebuilds its terminal from a window of the ring uses it: the marks the window
-// replayed do not describe the whole stream, and the next output is appended to
-// the pane's real position.
-func (t *Term) ResetStream(pos int64) {
-	t.streamPos = pos
-	t.markStart = 0
-	t.promptPos, t.promptSet = 0, false
-	t.startPos, t.startSet = 0, false
-	t.endPos, t.endSet = 0, false
-}
-
 // Flush places the cluster under construction. A cluster is complete only when
 // the next rune proves it cannot extend it, so the last cluster of a Write
 // stays pending, exactly as a snapshot must carry it.
