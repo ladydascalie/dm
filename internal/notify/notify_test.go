@@ -9,8 +9,7 @@ import (
 )
 
 // fakeNotify puts a notify-send on a fresh directory and returns that directory
-// and the log it appends its arguments to. The PATH put in front of the real
-// one makes the server and every pane see this binary.
+// and the log it appends its arguments to.
 func fakeNotify(t *testing.T) (dir, log string) {
 	t.Helper()
 	dir = t.TempDir()
@@ -108,9 +107,48 @@ func TestNotifyUrgent(t *testing.T) {
 	}
 }
 
-// systemNotify runs notify-send with the pinned arguments, and DM_NOTIFY=0
-// stops it.
-func TestSystemNotifyRunsNotifySend(t *testing.T) {
+// Send runs the configured binary with the pinned arguments, and every test
+// here owns its own fake and log, so the suite runs in parallel.
+func TestSendRunsNotifySend(t *testing.T) {
+	t.Parallel()
+	dir, log := fakeNotify(t)
+	Send(Config{Enabled: true, BinPath: filepath.Join(dir, "notify-send")},
+		"dm main w1p1 pi blocked", "needs review")
+	lines := waitNotify(t, log, 1)
+	line := lines[0]
+	for _, want := range []string{"-a dm", "-t 10000", "-u normal",
+		"dm main w1p1 pi blocked", "needs review"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("notify-send got %q, want %q in it", line, want)
+		}
+	}
+}
+
+// An off switch or an empty binary path is a silent no-op: nothing runs,
+// nothing breaks.
+func TestSendDisabled(t *testing.T) {
+	t.Parallel()
+	_, log := fakeNotify(t)
+	Send(Config{}, "dm main w1p1 blocked", "needs review")
+	Send(Config{Enabled: true}, "dm main w1p1 blocked", "needs review")
+	stillNotify(t, log, 0, 400*time.Millisecond)
+}
+
+// A binary path that does not exist is a silent no-op: nothing runs, nothing
+// breaks.
+func TestSendWithoutBinary(t *testing.T) {
+	t.Parallel()
+	_, log := fakeNotify(t)
+	Send(Config{Enabled: true, BinPath: filepath.Join(t.TempDir(), "notify-send")},
+		"dm main w1p1 blocked", "needs review")
+	stillNotify(t, log, 0, 400*time.Millisecond)
+}
+
+// SystemNotify runs notify-send from PATH when DM_NOTIFY is not "0", and
+// DM_NOTIFY=0 stops it. These tests keep t.Setenv and stay serial: t.Setenv
+// forbids t.Parallel, and the env fallback behaviour of the exported wrapper
+// cannot be exercised with explicit configuration.
+func TestSystemNotifyEnvFallback(t *testing.T) {
 	dir, log := fakeNotify(t)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
@@ -130,8 +168,9 @@ func TestSystemNotifyRunsNotifySend(t *testing.T) {
 	stillNotify(t, log, 1, 400*time.Millisecond)
 }
 
-// A PATH without notify-send is a silent no-op: nothing runs, nothing breaks.
-func TestSystemNotifyWithoutBinary(t *testing.T) {
+// A PATH without notify-send is a silent no-op for the env-defaults wrapper:
+// nothing runs, nothing breaks. Same serial t.Setenv constraint as above.
+func TestSystemNotifyEnvWithoutBinary(t *testing.T) {
 	_, log := fakeNotify(t)
 	t.Setenv("PATH", t.TempDir()) // a PATH that does not hold the fake
 	t.Setenv("DM_NOTIFY", "")
