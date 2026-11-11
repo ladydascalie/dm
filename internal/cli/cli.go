@@ -1375,6 +1375,7 @@ func runWait(c *cmdFlags) (int, error) {
 	}
 	extend := func() { _ = conn.SetReadDeadline(time.Now().Add(c.timeout)) }
 	extend()
+	tailed := false
 	for {
 		m, err := wire.ReadMsg(conn)
 		if err != nil {
@@ -1394,9 +1395,10 @@ func runWait(c *cmdFlags) (int, error) {
 				return waitExit(m.Exit, false), waitReport(c, res)
 			}
 			// Every other resp is the yank-shaped tail the wait opens with:
-			// the output between the Enter anchor and the wait's connect,
-			// which no bytes frame replays. The pane guarantees it lands
-			// before the first post-connect byte.
+			// the output between the Enter anchor and the wait's connect.
+			// The pane also broadcasts that window as bytes frames, so
+			// nothing prints from the stream until the tail lands; after it
+			// the guarantee is strict ordering.
 			var tail struct {
 				Lines []string `json:"lines"`
 				Start int      `json:"start"`
@@ -1408,11 +1410,12 @@ func runWait(c *cmdFlags) (int, error) {
 			if err := printTail(tail.Lines, tail.Start, tail.Rows); err != nil {
 				return 0, err
 			}
+			tailed = true
 			extend()
 			continue
 		}
 		extend()
-		if m.Type == "bytes" {
+		if tailed && m.Type == "bytes" {
 			if _, err := os.Stdout.Write(m.Data); err != nil {
 				return 0, err
 			}

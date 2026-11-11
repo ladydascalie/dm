@@ -200,6 +200,51 @@ func TestWaitPrintsTheTailBeforeTheBytes(t *testing.T) {
 	}
 }
 
+// TestWaitDiscardsPreTailBytes proves the pre-connect window prints once:
+// the pane broadcasts bytes frames before the tail resp lands and carries the
+// same window in the tail, so the stream stays silent until the tail is on
+// stdout, then prints every byte that follows.
+func TestWaitDiscardsPreTailBytes(t *testing.T) {
+	startFakePane(t, "main", "w1p1", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		// The window the tail resp carries also went out as broadcast bytes
+		// frames ahead of it, the shape review found.
+		for _, b := range [][]byte{[]byte("early line\n"), []byte("early too\n")} {
+			if err := wire.WriteMsg(c, wire.Msg{Type: "bytes", Data: b}); err != nil {
+				return wire.Msg{}, false
+			}
+		}
+		tail := wire.Msg{Type: "resp", ID: req.ID, OK: true,
+			Res: json.RawMessage(`{"lines":["early line","early too"],"start":0,"rows":2,"anchor":true}`)}
+		if err := wire.WriteMsg(c, tail); err != nil {
+			return wire.Msg{}, false
+		}
+		if err := wire.WriteMsg(c, wire.Msg{Type: "bytes", Data: []byte("late line\n")}); err != nil {
+			return wire.Msg{}, false
+		}
+		final := wire.Msg{Type: "resp", ID: req.ID, OK: true, Exit: exitOf(0), WaitReason: "mark"}
+		if err := wire.WriteMsg(c, final); err != nil {
+			return wire.Msg{}, false
+		}
+		return wire.Msg{}, false
+	})
+	var code int
+	var err error
+	captureStderr(t, func() {
+		out := testutil.CaptureStdout(t, func() {
+			code, err = runWait(waitFlags("w1p1"))
+		})
+		if want := "early line\nearly too\nlate line\n"; out != want {
+			t.Errorf("wait printed %q, want %q: the window once, not twice", out, want)
+		}
+	})
+	if err != nil {
+		t.Fatalf("dm wait: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("wait returned %d, want 0", code)
+	}
+}
+
 // TestWaitRefusesAMalformedTail proves a tail whose window does not fit the
 // lines fails the wait instead of printing whatever slice out of range.
 func TestWaitRefusesAMalformedTail(t *testing.T) {
