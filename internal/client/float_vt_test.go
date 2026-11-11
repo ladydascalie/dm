@@ -13,6 +13,7 @@ import (
 )
 
 func TestFloatingPaneInBands(t *testing.T) {
+	t.Parallel()
 	tui := &tui{
 		snap:   &wire.Snapshot{Cols: 80, Rows: 24},
 		vts:    map[string]*vt.Term{},
@@ -37,6 +38,7 @@ func TestFloatingPaneInBands(t *testing.T) {
 // TestHelpBoxFloatVTPath proves a float with a terminal paints the terminal's
 // cells through the caller's painter and its border through the panel.
 func TestHelpBoxFloatVTPath(t *testing.T) {
+	t.Parallel()
 	vt := vt.NewTerm(8, 2)
 	vt.Write([]byte("VT-CELLS"))
 	vt.Flush()

@@ -29,6 +29,7 @@ func renameTargetTUI(t *testing.T) (*tui, chan wire.Msg) {
 // A window prompt opens with the window's current name and submits
 // rename-window with the window's id, not the active window's.
 func TestRenameWindowPromptSendsWindowID(t *testing.T) {
+	t.Parallel()
 	tr, got := renameTargetTUI(t)
 	tr.openRenamePromptFor("window", "w2", "two")
 	if tr.mode != "rename" {
@@ -62,6 +63,7 @@ func TestRenameWindowPromptSendsWindowID(t *testing.T) {
 // A workspace prompt still sends rename-workspace, and the kind is cleared
 // when the prompt closes.
 func TestRenameWorkspacePromptStillSendsWorkspace(t *testing.T) {
+	t.Parallel()
 	tr, got := renameTargetTUI(t)
 	tr.openRenamePrompt()
 	if tr.renameKind != "workspace" {
@@ -87,6 +89,7 @@ func TestRenameWorkspacePromptStillSendsWorkspace(t *testing.T) {
 // The float title names the kind and the id it renames, and its input row
 // names the draft.
 func TestRenamePromptLabelsTheKind(t *testing.T) {
+	t.Parallel()
 	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 60, 8, nil)
 
 	var wb bytes.Buffer
@@ -113,6 +116,7 @@ func TestRenamePromptLabelsTheKind(t *testing.T) {
 // The normal draw path paints the prompt with the id the prompt carries, not
 // the active workspace's name. A window prompt therefore names the window.
 func TestRenameWindowPromptPaintsWindowID(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 60, 12, 20)
 	f.snap.Workspace = "main"
 	f.snap.All = []wire.AllPane{
@@ -140,6 +144,7 @@ func TestRenameWindowPromptPaintsWindowID(t *testing.T) {
 // The normal draw path paints a workspace prompt with the workspace id and its
 // current name.
 func TestRenameWorkspacePromptPaintsWorkspaceID(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 60, 12, 20)
 	f.snap.Workspace = "s1"
 	f.snap.All = []wire.AllPane{
@@ -164,6 +169,7 @@ func TestRenameWorkspacePromptPaintsWorkspaceID(t *testing.T) {
 // A pane prompt opens with the pane's current name and submits set-pane-name
 // with the pane's id and the edited draft.
 func TestRenamePanePromptSendsPaneName(t *testing.T) {
+	t.Parallel()
 	tr, got := renameTargetTUI(t)
 	tr.openRenamePromptFor("pane", "a", "alpha")
 	if tr.mode != "rename" {
@@ -197,6 +203,7 @@ func TestRenamePanePromptSendsPaneName(t *testing.T) {
 
 // Esc cancels a pane rename prompt without sending a request.
 func TestRenamePanePromptEscCancels(t *testing.T) {
+	t.Parallel()
 	tr, got := renameTargetTUI(t)
 	tr.openRenamePromptFor("pane", "a", "alpha")
 	renamePromptKeys(tr, "\x1b")
@@ -212,6 +219,7 @@ func TestRenamePanePromptEscCancels(t *testing.T) {
 
 // An empty draft cancels a pane rename prompt without sending a request.
 func TestRenamePanePromptEmptyDraftCancels(t *testing.T) {
+	t.Parallel()
 	tr, got := renameTargetTUI(t)
 	tr.openRenamePromptFor("pane", "a", "alpha")
 	renamePromptKeys(tr, "\x15\r")

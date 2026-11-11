@@ -113,6 +113,7 @@ func TestWheelPastTheTopEdgeKeepsExtending(t *testing.T) {
 // A selection made over a scrolled pane is painted on the scrollback rows the
 // window shows, not on the live screen behind it.
 func TestSelectionPaintsScrollbackRows(t *testing.T) {
+	t.Parallel()
 	tui, p := scrollbackTUI(t, 100)
 	out := &bytes.Buffer{}
 	tui.out = out
@@ -174,6 +175,7 @@ func TestScrollbackSelectionCopiesAndLeaves(t *testing.T) {
 // A geometry change drops a selection anchored in scrollback, the same way it
 // drops one anchored in the live screen.
 func TestScrollbackSelectionClearsOnResize(t *testing.T) {
+	t.Parallel()
 	tui, p := scrollbackTUI(t, 100)
 	tui.startScrollOnFocus()
 	pressDrag(tui, p, 0, 0, 6, 0)
@@ -192,6 +194,7 @@ func TestScrollbackSelectionClearsOnResize(t *testing.T) {
 // An alternate-screen pane has no scrollback: the wheel keeps the focus
 // clamped and says why.
 func TestWheelOnAlternateScreenKeepsTheClamp(t *testing.T) {
+	t.Parallel()
 	tui, p := scrollbackTUI(t, 100)
 	p.Alt = true
 	pressDrag(tui, p, 0, 0, 6, 0)
@@ -264,6 +267,7 @@ func TestWheelDuringDragWaitsForTheRing(t *testing.T) {
 // keeps it but does not paint it on the live screen, and leaving that pane
 // does not drop it.
 func TestScrollSelectionBelongsToItsPane(t *testing.T) {
+	t.Parallel()
 	tui, a, _ := twoPaneScrollbackTUI(t, 100)
 	tui.startScrollOnFocus()
 	pressDrag(tui, a, 6, 0, 0, 0)
@@ -344,6 +348,7 @@ func twoPaneScrollbackTUI(t *testing.T, rows int) (*tui, *wire.PaneInfo, *wire.P
 // New output that scrolls the live screen drops a live selection, because the
 // text under it has moved.
 func TestNewOutputDropsLiveSelectionOnScroll(t *testing.T) {
+	t.Parallel()
 	tui, _ := clientTUI(t, nil)
 	p := tui.paneByID("a")
 	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "")
@@ -364,6 +369,7 @@ func TestNewOutputDropsLiveSelectionOnScroll(t *testing.T) {
 // New output that does not scroll the live screen leaves a live selection
 // alone.
 func TestNewOutputKeepsLiveSelectionWithoutScroll(t *testing.T) {
+	t.Parallel()
 	tui, _ := clientTUI(t, nil)
 	p := tui.paneByID("a")
 	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "")
@@ -378,6 +384,7 @@ func TestNewOutputKeepsLiveSelectionWithoutScroll(t *testing.T) {
 // A wheel down before the ring lands leaves scrollback instead of sitting in
 // scroll mode on the live row, and keeps the live selection.
 func TestWheelDownBeforeRingStaysLive(t *testing.T) {
+	t.Parallel()
 	tui, _ := clientTUI(t, nil)
 	p := tui.paneByID("a")
 	pressDrag(tui, p, 6, 0, 0, 0)

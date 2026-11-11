@@ -67,6 +67,7 @@ func renamePromptVisible(s string) string {
 // Prefix r opens the prompt with the active workspace's label in the draft and
 // sends nothing. The sibling workspace's label must not leak in.
 func TestRenamePromptOpensOnPrefixR(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	renamePromptKeys(tr, "\x02r")
 	if tr.mode != "rename" {
@@ -90,6 +91,7 @@ func TestRenamePromptOpensOnPrefixR(t *testing.T) {
 
 // The workspace row's menu offers the same prompt and closes itself first.
 func TestRenamePromptMenuRow(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	tr.openRailMenu(rail.RailItem{Kind: rail.Workspace, Text: "main", Workspace: "s1"}, 10, 10)
 	found := false
@@ -117,6 +119,7 @@ func TestRenamePromptMenuRow(t *testing.T) {
 
 // Prefix b cycles the rail and prefix r no longer does.
 func TestRenamePromptRailMovedToB(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	tr.snap.Rail = 0
 	renamePromptKeys(tr, "\x02b")
@@ -135,6 +138,7 @@ func TestRenamePromptRailMovedToB(t *testing.T) {
 
 // Typing appends, both delete bytes drop one rune, and ctrl+u clears.
 func TestRenamePromptEditsDraft(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	renamePromptKeys(tr, "\x02r")
 
@@ -166,6 +170,7 @@ func TestRenamePromptEditsDraft(t *testing.T) {
 // Enter sends one req with the trimmed draft and the active workspace id, and
 // closes the prompt.
 func TestRenamePromptEnterSendsReq(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	renamePromptKeys(tr, "\x02r")
 	tr.renameDraft = ""
@@ -188,6 +193,7 @@ func TestRenamePromptEnterSendsReq(t *testing.T) {
 
 // An empty or spaces-only draft cancels: the prompt closes and nothing is sent.
 func TestRenamePromptEmptyDraftCancels(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	for _, keys := range []string{"\x15\r", "\x15   \r", "\x15\r"} {
 		renamePromptKeys(tr, "\x02r")
@@ -202,6 +208,7 @@ func TestRenamePromptEmptyDraftCancels(t *testing.T) {
 // Esc, an arrow key and a bracketed paste each close the prompt and send
 // nothing. A paste never reaches the draft.
 func TestRenamePromptEscArrowAndPasteCancel(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 
 	// A lone esc is held for a moment as a possible paste start, like every
@@ -245,6 +252,7 @@ func TestRenamePromptEscArrowAndPasteCancel(t *testing.T) {
 // No byte reaches the pane while the prompt is open, and a stray click leaves
 // the draft and the prompt alone.
 func TestRenamePromptShieldsPane(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	renamePromptKeys(tr, "\x02r")
 	renamePromptKeys(tr, "hello")
@@ -296,6 +304,7 @@ func renameFloatRow(p helpBoxPainted, y, x, w int) string {
 // The prompt is a float of three rows: the title names the kind and the id, the
 // input row names the draft and holds the caret, and nothing lands outside it.
 func TestRenamePromptDrawsTheBox(t *testing.T) {
+	t.Parallel()
 	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 80, 12, nil)
 	box, p := renameFloatPaint(t, snap, "s1", "main")
 	if box.H != 1 {
@@ -334,6 +343,7 @@ func TestRenamePromptDrawsTheBox(t *testing.T) {
 // A narrow box keeps every painted cell inside it, cuts a wide rune whole and
 // keeps the caret on screen.
 func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
+	t.Parallel()
 	wide := strings.Repeat("名前", 12)
 	for _, cols := range []int{80, 30, 20, 12} {
 		snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, cols, 8, nil)
@@ -348,6 +358,7 @@ func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
 // A long draft drops its head and says so, so the end of the name stays
 // readable beside the caret.
 func TestRenamePromptElidesLongDraftHead(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("a very long workspace name ", 4)
 	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 30, 8, nil)
 	box, p := renameFloatPaint(t, snap, "s1", long)
@@ -368,6 +379,7 @@ func TestRenamePromptElidesLongDraftHead(t *testing.T) {
 
 // A screen too small to hold the box paints nothing.
 func TestRenamePromptDrawsNothingWhenTooSmall(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ cols, rows int }{{1, 8}, {20, 4}} {
 		snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, c.cols, c.rows, nil)
 		var b bytes.Buffer
@@ -381,6 +393,7 @@ func TestRenamePromptDrawsNothingWhenTooSmall(t *testing.T) {
 // The prompt is a paint band: a steady frame writes nothing, the band records
 // the float's rows, and closing the prompt repaints the rows it covered.
 func TestRenamePromptBandRepaints(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 60, 12, 20)
 	f.snap.Workspace = "s1"
 	f.tui.openRenamePrompt()
@@ -437,6 +450,7 @@ func TestRenamePromptBandRepaints(t *testing.T) {
 // prompt opens on the workspace's current project and sends set-project, not a
 // rename, when it submits.
 func TestRenamePromptSetProjectMenuRow(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	tr.openRailMenu(rail.RailItem{
 		Kind: rail.Workspace, Text: "main", Workspace: "s1", Project: "dm",
@@ -473,6 +487,7 @@ func TestRenamePromptSetProjectMenuRow(t *testing.T) {
 // An empty draft clears the project instead of cancelling: set-project goes out
 // with an empty name.
 func TestRenamePromptSetProjectEmptyDraftClears(t *testing.T) {
+	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	tr.openRenamePromptFor("project", "s1", "dm")
 	renamePromptKeys(tr, "\x15\r")
@@ -489,6 +504,7 @@ func TestRenamePromptSetProjectEmptyDraftClears(t *testing.T) {
 // The project prompt names its kind in the title and labels the input row
 // "project: ".
 func TestRenamePromptProjectLabel(t *testing.T) {
+	t.Parallel()
 	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 80, 12, nil)
 	box, p := renameFloatPaint(t, snap, "s1", "dm", "project")
 	renameFloatInside(t, box, p)
@@ -507,6 +523,7 @@ func TestRenamePromptProjectLabel(t *testing.T) {
 // TestSetProjectKeyOpensPrompt proves the P key opens the project prompt for
 // the active workspace with its current project as the draft.
 func TestSetProjectKeyOpensPrompt(t *testing.T) {
+	t.Parallel()
 	tr, _ := renamePromptTUI(t)
 	tr.snap.All[0].Project = "dm"
 	renamePromptKeys(tr, "\x02P")

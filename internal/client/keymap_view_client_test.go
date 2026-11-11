@@ -47,6 +47,7 @@ func keymapHint(t *testing.T, k *keymapview.KeymapView, cols, rows int) string {
 // TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n
 // moves to the next match, and esc clears it.
 func TestKeymapSearchInput(t *testing.T) {
+	t.Parallel()
 	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
 	tui.runAction("help")
 	feed(tui, "/")
@@ -90,6 +91,7 @@ func TestKeymapSearchInput(t *testing.T) {
 // TestHelpKeyFallback: a config without a help mode still scrolls and closes
 // with the built-in help bindings.
 func TestHelpKeyFallback(t *testing.T) {
+	t.Parallel()
 	// The screen is short enough that the listed rows do not fit.
 	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 12, nil)}
 	tui.keymap = testutil.KeymapTestLoad(t, `

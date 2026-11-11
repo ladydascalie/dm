@@ -60,6 +60,7 @@ func expectNothing(t *testing.T, got chan wire.Msg) {
 // first sight. A snapshot attach and a box broadcast drive the same ask; a
 // broadcast that lands while one is in flight waits for the reply.
 func TestNotifyCatchUpAsksForNotifyBranch(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.apply(wire.Msg{Type: "box"})
 	m := expectRequest(t, got)
@@ -94,6 +95,7 @@ func TestNotifyCatchUpAsksForNotifyBranch(t *testing.T) {
 // The first catch-up after attach toasts the newest entries it got, not the
 // backlog behind them, and the cursor lands on the newest seq.
 func TestNotifyFirstCatchUpToastsBacklogCap(t *testing.T) {
+	t.Parallel()
 	tui := notifyTUI("")
 	entries := []box.Entry{
 		{Seq: 10, Key: "notify/b", State: box.StateDone, Msg: "third"},
@@ -115,6 +117,7 @@ func TestNotifyFirstCatchUpToastsBacklogCap(t *testing.T) {
 // An entry about the focused pane raises no toast but still moves the cursor,
 // so it never comes back; an entry about another pane in the same reply does.
 func TestNotifyFocusedPaneSkipsToast(t *testing.T) {
+	t.Parallel()
 	tui := notifyTUI("a")
 	entries := []box.Entry{
 		{Seq: 6, Key: "notify/b", State: box.StateDone, Msg: "gate green"},
@@ -132,6 +135,7 @@ func TestNotifyFocusedPaneSkipsToast(t *testing.T) {
 // A repeat of the same entry text inside the dedupe window joins the last
 // toast instead of stacking a second one.
 func TestNotifyRepeatDoesNotStack(t *testing.T) {
+	t.Parallel()
 	tui := notifyTUI("")
 	first := []box.Entry{{Seq: 5, Key: "notify/b", State: box.StateWorking, Msg: "running tests"}}
 	tui.apply(notifyReply(tui.notifyID, first))
@@ -145,6 +149,7 @@ func TestNotifyRepeatDoesNotStack(t *testing.T) {
 // The cursor skips entries the client has already seen, so a late reply that
 // overlaps the cursor toasts only the newcomer.
 func TestNotifyCursorSkipsSeen(t *testing.T) {
+	t.Parallel()
 	tui := notifyTUI("")
 	tui.notifyCursor = 10
 	tui.notifySeen = true
@@ -163,6 +168,7 @@ func TestNotifyCursorSkipsSeen(t *testing.T) {
 
 // The reply only counts when its id names the catch-up request.
 func TestNotifyReplyWantsRearm(t *testing.T) {
+	t.Parallel()
 	tui := notifyTUI("")
 	tui.notifySeen = true
 	tui.notifyCursor = 4
@@ -180,6 +186,7 @@ func TestNotifyReplyWantsRearm(t *testing.T) {
 // its request left, so an open centre's list never runs through the toast
 // handler and a late reply lands nowhere.
 func TestNotifyRoutesSharedIds(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.ncentre = newNotifyCentre(tui.snap, theme.DefaultTheme())
 	tui.notifyCatchUp()

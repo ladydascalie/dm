@@ -43,6 +43,7 @@ func drainMsg(t *testing.T, got chan wire.Msg) []wire.Msg {
 // TestRailGripHit pins the grip cell: the rail's last column, above the row
 // the rail keeps free for its bottom control.
 func TestRailGripHit(t *testing.T) {
+	t.Parallel()
 	snap := testutil.RailTestSnapshot(20)
 	if !railGripAt(snap, snap.Rail-1, 0) || !railGripAt(snap, snap.Rail-1, snap.Rows-3) {
 		t.Fatal("grip missing a row it owns")
@@ -78,6 +79,7 @@ func TestRailGripMark(t *testing.T) {
 // TestRailGripDrag drives one drag: the press sends nothing, motion sends the
 // width at most every 30 ms, and the release sends the final width once.
 func TestRailGripDrag(t *testing.T) {
+	t.Parallel()
 	tui, got := gripTUI(t)
 	// The grip is zero-based 19,3, so the one-based mouse cell is 20,4.
 	tui.handleMouse(mouseEvent{btn: 0, x: 20, y: 4})
@@ -111,6 +113,7 @@ func TestRailGripDrag(t *testing.T) {
 // TestRailGripClamps keeps a drag inside the widths a rail may take: the thin
 // rail at the left, maxRail at the right, never hidden.
 func TestRailGripClamps(t *testing.T) {
+	t.Parallel()
 	tui, got := gripTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 20, y: 4})
 	tui.handleMouse(mouseEvent{btn: 32, x: 1, y: 4})
@@ -137,6 +140,7 @@ func TestRailGripClamps(t *testing.T) {
 
 // TestRailGripStrayClick sends nothing for a click that never moves.
 func TestRailGripStrayClick(t *testing.T) {
+	t.Parallel()
 	tui, got := gripTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 20, y: 4})
 	testutil.NoMsg(t, got)
@@ -150,6 +154,7 @@ func TestRailGripStrayClick(t *testing.T) {
 // TestRailGripSwallows keeps motion and release off a pane whatever the
 // pointer does, and never sends a split resize or a focus.
 func TestRailGripSwallows(t *testing.T) {
+	t.Parallel()
 	tui, got := gripTUI(t)
 	p := tui.paneByID("w1p2")
 	tui.handleMouse(mouseEvent{btn: 0, x: 20, y: 4})
@@ -169,6 +174,7 @@ func TestRailGripSwallows(t *testing.T) {
 
 // TestRailGripHover shows the resize hint over the grip and paints the strip.
 func TestRailGripHover(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 30, 20)
 	f.tui.handleMouse(mouseEvent{btn: 35, x: 20, y: 5})
 	if f.tui.padAxis != railPadAxis {
@@ -197,6 +203,7 @@ func TestRailGripHover(t *testing.T) {
 // TestPanePressStillFocuses keeps the grip from stealing a pane click: a press
 // on a pane row still focuses its pane.
 func TestPanePressStillFocuses(t *testing.T) {
+	t.Parallel()
 	tui, got := gripTUI(t)
 	p := tui.paneByID("w1p2")
 	tui.handleMouse(mouseEvent{btn: 0, x: p.Rect.X + 1, y: p.Rect.Y + 1})
@@ -226,6 +233,7 @@ func railRowText(screen *vt.Term, y, w int) string {
 // the strip owns the rail's last column, so hovering it and leaving it leaves
 // the row's right-aligned stats whole.
 func TestRailGripHoverKeepsStats(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 30, 20)
 	f.snap.All[0].InRepo = true
 	f.snap.All[0].Branch = "main"

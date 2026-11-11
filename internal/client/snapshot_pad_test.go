@@ -35,6 +35,7 @@ func padFrame(t *testing.T, keypad, snappad int) *frameTUI {
 // padding, not its keymap's. A keymap that says 1 and a snapshot that says 0
 // paints a box with no padding ring, and the reverse paints one.
 func TestFrameDrawsWithSnapshotPad(t *testing.T) {
+	t.Parallel()
 	// Keymap 1, server 0: the border sits next to the content.
 	f := padFrame(t, 1, 0)
 	painted := paintFrame(t, f)
@@ -69,6 +70,7 @@ func TestFrameDrawsWithSnapshotPad(t *testing.T) {
 // grab rect of a pane whose border touches the divider moves with snap.Pad. The
 // keymap here says 0, so a client reading it would miss the cell.
 func TestPaneAtBoxUsesSnapshotPad(t *testing.T) {
+	t.Parallel()
 	root := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
@@ -93,6 +95,7 @@ func TestPaneAtBoxUsesSnapshotPad(t *testing.T) {
 // TestPadNilSnapshotIsZero guards the nil snapshot: padding 0 is a real value,
 // so a missing snapshot must not silently fall back to 1.
 func TestPadNilSnapshotIsZero(t *testing.T) {
+	t.Parallel()
 	tu := &tui{keymap: testutil.KeymapTestLoad(t, "padding 1\n")}
 	if got := tu.pad(); got != 0 {
 		t.Fatalf("pad() with no snapshot = %d, want 0", got)

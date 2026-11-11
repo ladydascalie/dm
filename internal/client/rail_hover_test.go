@@ -11,6 +11,7 @@ import (
 // item row lights it, a motion off the rail clears it, and a row past the
 // last item never lights.
 func TestRailRowHoverTracks(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 10, 20)
 	// x,y are one-based: x 5 is inside the rail, y 2 is the window row.
 	f.tui.handleMouse(mouseEvent{btn: 35, x: 5, y: 2})
@@ -39,6 +40,7 @@ func TestRailRowHoverTracks(t *testing.T) {
 // TestRailRowHoverGates keeps the hover off while a menu is open: a highlight
 // under a modal would promise an interaction the modal owns.
 func TestRailRowHoverGates(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 10, 20)
 	f.tui.handleMouse(mouseEvent{btn: 35, x: 5, y: 2})
 	if f.tui.railHover != 1 {

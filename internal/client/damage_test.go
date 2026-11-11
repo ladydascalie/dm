@@ -74,6 +74,7 @@ func relayout(snap *wire.Snapshot) {
 // TestFrameSteadyStateWritesNothing pins the biggest win: a frame with no
 // change on screen costs nothing.
 func TestFrameSteadyStateWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	first := f.frame()
 	if first == "" {
@@ -99,6 +100,7 @@ func TestFrameSteadyStateWritesNothing(t *testing.T) {
 // TestFrameRepaintsOneRow checks that one changed line costs one line, and
 // that a steady frame never clears the screen.
 func TestFrameRepaintsOneRow(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	f.frame()
 	p := f.snap.Panes[0]
@@ -132,6 +134,7 @@ func TestFrameRepaintsOneRow(t *testing.T) {
 // TestFrameSyncMarkers checks every written frame is bracketed, so the
 // terminal swaps the frame in whole and never shows a half-painted screen.
 func TestFrameSyncMarkers(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	vt := f.tui.vts[f.snap.Panes[0].ID]
 	for i := 0; i < 3; i++ {
@@ -154,6 +157,7 @@ func TestFrameSyncMarkers(t *testing.T) {
 
 // TestFrameResizeRepaints checks a size change repaints the whole picture.
 func TestFrameResizeRepaints(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	f.frame()
 
@@ -177,6 +181,7 @@ func TestFrameResizeRepaints(t *testing.T) {
 // TestFrameRailOnly keeps a rail label change inside the rail: no pane row and
 // no bar row is written.
 func TestFrameRailOnly(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	f.frame()
 
@@ -207,6 +212,7 @@ func TestFrameRailOnly(t *testing.T) {
 // TestFrameLeaveScrollback checks leaving scrollback repaints the whole
 // screen: the scrollback rows are not the live pane's rows.
 func TestFrameLeaveScrollback(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := f.snap.Panes[0]
 	term := f.tui.vts[p.ID]
@@ -240,6 +246,7 @@ func TestFrameLeaveScrollback(t *testing.T) {
 // with it: the row under it is painted again, by the bands when it is a border
 // row and by the panes when it is a content row.
 func TestFrameToastLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	f.frame()
 
@@ -267,6 +274,7 @@ func TestFrameToastLeavesNothingBehind(t *testing.T) {
 // TestFrameHelpLeavesContentBehind checks the content under an overlay comes
 // back when the overlay closes.
 func TestFrameHelpLeavesContentBehind(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := f.snap.Panes[0]
 	vt := f.tui.vts[p.ID]
@@ -293,6 +301,7 @@ func TestFrameHelpLeavesContentBehind(t *testing.T) {
 // TestFrameSelectionRepaintsRows checks a selection moves only the rows it
 // covers.
 func TestFrameSelectionRepaintsRows(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	f.frame()
 	p := f.snap.Panes[0]
@@ -447,12 +456,14 @@ func scene(t *testing.T, f *frameTUI, live *vt.Term) {
 }
 
 func TestOracleOnePane(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	live := vt.NewTerm(100, 20)
 	scene(t, f, live)
 }
 
 func TestOracleResize(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	live := vt.NewTerm(100, 20)
 	f.frame()
@@ -476,6 +487,7 @@ func TestOracleResize(t *testing.T) {
 }
 
 func TestOracleDividerHover(t *testing.T) {
+	t.Parallel()
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
@@ -513,6 +525,7 @@ func TestOracleDividerHover(t *testing.T) {
 }
 
 func TestOracleScrollback(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := f.snap.Panes[0]
 	term := f.tui.vts[p.ID]
@@ -544,6 +557,7 @@ func TestOracleScrollback(t *testing.T) {
 }
 
 func TestOracleModes(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 24, 34)
 	live := vt.NewTerm(100, 24)
 	step := func(label string) {
@@ -576,6 +590,7 @@ func TestOracleModes(t *testing.T) {
 }
 
 func TestOracleOverlayOverGap(t *testing.T) {
+	t.Parallel()
 	root := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}}}
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Root: root, Focus: "a"}
 	rects := map[string]layout.Rect{}
@@ -612,6 +627,7 @@ func TestOracleOverlayOverGap(t *testing.T) {
 }
 
 func TestOracleToastsShrink(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	live := vt.NewTerm(100, 20)
 	step := func(label string) {
@@ -639,6 +655,7 @@ func TestOracleToastsShrink(t *testing.T) {
 }
 
 func TestOracleResizeLive(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	live := vt.NewTerm(100, 20)
 	raw := f.frame()
@@ -688,6 +705,7 @@ func twoPaneTUI(cols, rows, rail int) (*tui, *bytes.Buffer, *wire.Snapshot) {
 // A toast is up, then the divider is hovered: the divider band paints after
 // the toasts band, so the toast must be painted again.
 func TestOracleDividerOverToast(t *testing.T) {
+	t.Parallel()
 	tr, out, snap := twoPaneTUI(100, 20, 0)
 	live := vt.NewTerm(100, 20)
 	step := func(label string) {
@@ -708,6 +726,7 @@ func TestOracleDividerOverToast(t *testing.T) {
 
 // A help box over the rail on a narrow screen, then a rail label change.
 func TestOracleRailUnderHelp(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 40, 14, 13)
 	live := vt.NewTerm(40, 14)
 	step := func(label string) {
@@ -729,6 +748,7 @@ func TestOracleRailUnderHelp(t *testing.T) {
 
 // A wide toast over the rail on a narrow screen, then a rail label change.
 func TestOracleRailUnderToast(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 40, 14, 13)
 	live := vt.NewTerm(40, 14)
 	step := func(label string) {
@@ -747,6 +767,7 @@ func TestOracleRailUnderToast(t *testing.T) {
 }
 
 func TestOraclePalette(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	live := vt.NewTerm(100, 20)
 	step := func(label string) {
@@ -773,6 +794,7 @@ func TestOraclePalette(t *testing.T) {
 
 // The palette floats over the rail columns; a rail change must not eat it.
 func TestOracleRailUnderPalette(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 30, 34)
 	live := vt.NewTerm(100, 30)
 	step := func(label string) {
@@ -791,6 +813,7 @@ func TestOracleRailUnderPalette(t *testing.T) {
 
 // A toast up, then a divider hover, with the default rail.
 func TestOracleDefaultRailDividerOverToast(t *testing.T) {
+	t.Parallel()
 	tr, out, snap := twoPaneTUI(120, 30, 34)
 	live := vt.NewTerm(120, 30)
 	step := func(label string) {
@@ -810,6 +833,7 @@ func TestOracleDefaultRailDividerOverToast(t *testing.T) {
 // A split changes the layout with the same screen size: it must clear and
 // paint everything.
 func TestOracleSplit(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	live := vt.NewTerm(100, 20)
 	raw := f.frame()
@@ -842,6 +866,7 @@ func TestOracleSplit(t *testing.T) {
 
 // Every written frame is bracketed exactly once.
 func TestOracleBrackets(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	vt := f.tui.vts[f.snap.Panes[0].ID]
 	for i := 0; i < 5; i++ {
@@ -865,6 +890,7 @@ func TestOracleBrackets(t *testing.T) {
 // A band is tracked by the cursor moves its bytes carry, so bandRows must read
 // every absolute form: row;col, a bare row and a bare home.
 func TestBandRowsReadsEveryCursorForm(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		buf  string
@@ -897,6 +923,7 @@ func TestBandRowsReadsEveryCursorForm(t *testing.T) {
 // kind. A band that switched to a relative move would leave stale cells under
 // a standing overlay with no test to catch it, so scan every frame instead.
 func TestBandsUseAbsoluteCursorMoves(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 24, 34)
 	steps := []struct {
 		name string

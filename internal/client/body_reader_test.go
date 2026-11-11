@@ -58,6 +58,7 @@ func readerScreen(t *testing.T, r *bodyReader, cols, rows int) *vt.Term {
 // v opens the reader on the selected entry, and the overlay carries the body
 // below the summary line.
 func TestBodyReaderOpensOnV(t *testing.T) {
+	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	if !strings.Contains(tui.box.Float.Hint, "enter body") {
 		t.Fatalf("hint = %q, want the affordance", tui.box.Float.Hint)
@@ -83,6 +84,7 @@ func TestBodyReaderOpensOnV(t *testing.T) {
 
 // The painted overlay shows the summary line and the body below it.
 func TestBodyReaderPaintsBodyBelowTheLine(t *testing.T) {
+	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "v")
 	r := tui.reader.Float.Rect
@@ -97,6 +99,7 @@ func TestBodyReaderPaintsBodyBelowTheLine(t *testing.T) {
 
 // The reader scrolls and the list page keeps the reader's place separate.
 func TestBodyReaderScrolls(t *testing.T) {
+	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "v")
 	feed(tui, "j")
@@ -124,6 +127,7 @@ func TestBodyReaderScrolls(t *testing.T) {
 
 // A repeat inside the window and the close keys put the list page back.
 func TestBodyReaderClosesOnQ(t *testing.T) {
+	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "v")
 	feed(tui, "q")
@@ -134,6 +138,7 @@ func TestBodyReaderClosesOnQ(t *testing.T) {
 
 // An entry without a body shows no reader affordance and v opens nothing.
 func TestBodylessEntryHasNoAffordance(t *testing.T) {
+	t.Parallel()
 	entries := []box.Entry{
 		{Seq: 10, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "plain"},
 		{Seq: 9, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "with body", Body: "text"},
@@ -151,6 +156,7 @@ func TestBodylessEntryHasNoAffordance(t *testing.T) {
 // The selection moves with j and enter opens the reader on it. The hint
 // follows the selection: an entry without a body names no reader.
 func TestBodyReaderOpensOnEnter(t *testing.T) {
+	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "jj")
 	e, ok := tui.box.Selected()
@@ -177,6 +183,7 @@ func TestBodyReaderOpensOnEnter(t *testing.T) {
 // The reader follows a resize: a snapshot refits the float and the reader
 // rides the same rect.
 func TestBodyReaderFollowsResize(t *testing.T) {
+	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "v")
 	big := *tui.snap
@@ -197,6 +204,7 @@ func wrapRect() layout.Rect { return layout.Rect{X: 2, Y: 2, W: 40, H: 6} }
 // A body line longer than the inner width wraps, and no wrapped row paints
 // more cells than the width.
 func TestBodyReaderWrapsLongLine(t *testing.T) {
+	t.Parallel()
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
 		Body: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo"}
 	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
@@ -216,6 +224,7 @@ func TestBodyReaderWrapsLongLine(t *testing.T) {
 
 // A run with no break opportunity hard-breaks at the inner width.
 func TestBodyReaderHardBreaksUnbrokenRun(t *testing.T) {
+	t.Parallel()
 	body := strings.Repeat("a", 100)
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1", Body: body}
 	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
@@ -236,6 +245,7 @@ func TestBodyReaderHardBreaksUnbrokenRun(t *testing.T) {
 // Wide runes wrap on cell boundaries: no row splits a rune and no row passes
 // the inner width.
 func TestBodyReaderWrapsWideRunes(t *testing.T) {
+	t.Parallel()
 	body := strings.Repeat("日", 30) // 60 cells, wider than the 38-cell row
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1", Body: body}
 	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
@@ -260,6 +270,7 @@ func TestBodyReaderWrapsWideRunes(t *testing.T) {
 // Scrolling runs over wrapped rows: the bottom key rests on the last wrapped
 // row and the screen shows it.
 func TestBodyReaderScrollsWrappedRows(t *testing.T) {
+	t.Parallel()
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
 		Body: strings.Repeat("word ", 40)}
 	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
@@ -280,6 +291,7 @@ func TestBodyReaderScrollsWrappedRows(t *testing.T) {
 
 // A body of short lines keeps one row per line, exactly as before the wrap.
 func TestBodyReaderKeepsShortLines(t *testing.T) {
+	t.Parallel()
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
 		Msg: "summary", Body: "one\ntwo\nthree"}
 	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())

@@ -25,6 +25,7 @@ func newPaceTUI(t *testing.T) (*frameTUI, *pacer, *frameSink, *bytes.Buffer) {
 // TestTickDirtyDrawsOneFrame proves a dirty tick draws exactly one frame and
 // counts it.
 func TestTickDirtyDrawsOneFrame(t *testing.T) {
+	t.Parallel()
 	f, pace, sink, out := newPaceTUI(t)
 	now := time.Unix(1000, 0)
 
@@ -59,6 +60,7 @@ func TestTickDirtyDrawsOneFrame(t *testing.T) {
 // TestTickCleanCountsNoFrame proves a clean tick draws nothing, counts no
 // frame and decays the interval.
 func TestTickCleanCountsNoFrame(t *testing.T) {
+	t.Parallel()
 	f, pace, sink, out := newPaceTUI(t)
 	now := time.Unix(1000, 0)
 
@@ -89,6 +91,7 @@ func TestTickCleanCountsNoFrame(t *testing.T) {
 // ceiling. It is the typing-latency guard: the wake draws, and the loop's
 // re-arm rule pulls the ticker back to the floor for the frame after it.
 func TestWakeAfterIdleDrawsAtOnce(t *testing.T) {
+	t.Parallel()
 	f, pace, sink, out := newPaceTUI(t)
 	now := time.Unix(1000, 0)
 
@@ -143,6 +146,7 @@ func TestWakeAfterIdleDrawsAtOnce(t *testing.T) {
 // draws, so the renderer is never starved. The expiry timers run on the same
 // tick: a toast expires and a pending cluster is flushed.
 func TestTickMessageStreamStillDraws(t *testing.T) {
+	t.Parallel()
 	f, pace, sink, out := newPaceTUI(t)
 	base := time.Now()
 	term := f.tui.vts["w1p1"]

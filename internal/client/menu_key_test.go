@@ -23,6 +23,7 @@ func menuHintTUI(t *testing.T) (*tui, chan wire.Msg) {
 // TestMenuHintClosesPane: the close-pane hint dispatches close pane on the
 // clicked pane and closes the menu.
 func TestMenuHintClosesPane(t *testing.T) {
+	t.Parallel()
 	tui, got := menuHintTUI(t)
 	feed(tui, "x")
 	m := testutil.NextMsg(t, got)
@@ -41,6 +42,7 @@ func TestMenuHintClosesPane(t *testing.T) {
 // TestMenuHintNewWindow: the new-window hint in a rail window menu dispatches
 // new window.
 func TestMenuHintNewWindow(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 0)
 	if tui.menu == nil {
@@ -61,6 +63,7 @@ func TestMenuHintNewWindow(t *testing.T) {
 // TestMenuBindingBeatsHint: q closes the menu and runs no item, so the menu
 // mode's own binding wins over any hint.
 func TestMenuBindingBeatsHint(t *testing.T) {
+	t.Parallel()
 	tui, got := menuHintTUI(t)
 	feed(tui, "q")
 	testutil.NoMsg(t, got)
@@ -72,6 +75,7 @@ func TestMenuBindingBeatsHint(t *testing.T) {
 // TestMenuHintUnboundCloses: a key that is neither a menu binding nor a hint
 // closes the menu and dispatches nothing.
 func TestMenuHintUnboundCloses(t *testing.T) {
+	t.Parallel()
 	tui, got := menuHintTUI(t)
 	feed(tui, "y")
 	testutil.NoMsg(t, got)
@@ -86,6 +90,7 @@ func TestMenuHintUnboundCloses(t *testing.T) {
 // TestMenuHintSkipsBadLabel: a label that names no key is skipped, not fatal,
 // and the next row's hint still dispatches.
 func TestMenuHintSkipsBadLabel(t *testing.T) {
+	t.Parallel()
 	picked := false
 	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
 	tui.menu = &menu{x: 1, y: 1, w: 20, title: "t", items: []menuItem{
@@ -107,6 +112,7 @@ func TestMenuHintSkipsBadLabel(t *testing.T) {
 // completing read. The test keymap leaves esc and the arrows unbound in menu
 // mode, so the hint alone decides.
 func TestMenuHintSpansReads(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+b"

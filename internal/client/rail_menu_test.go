@@ -67,6 +67,7 @@ func railMenuPick(t *testing.T, tui *tui, prefix string) {
 // control row, the status row, a point outside the rail and a point past the
 // last item do not.
 func TestRailItemAt(t *testing.T) {
+	t.Parallel()
 	snap := railRowSnap(20)
 	if it, ok := rail.RailItemAt(snap, 2, 0); !ok || it.Kind != rail.Workspace {
 		t.Fatalf("row 0 = %+v, %v, want the workspace row", it, ok)
@@ -86,6 +87,7 @@ func TestRailItemAt(t *testing.T) {
 // TestRailMenuWorkspaceRow opens the workspace menu on a right press and sends
 // nothing. The release of the opening press is swallowed and leaves it up.
 func TestRailMenuWorkspaceRow(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 0)
 	if tui.mode != "menu" || tui.menu == nil {
@@ -107,6 +109,7 @@ func TestRailMenuWorkspaceRow(t *testing.T) {
 // TestRailMenuPaneRow opens the pane menu on a pane row. A pane row offers its
 // own rename between Focus and the split actions.
 func TestRailMenuPaneRow(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 3)
 	if tui.mode != "menu" || tui.menu == nil {
@@ -124,6 +127,7 @@ func TestRailMenuPaneRow(t *testing.T) {
 // TestRailMenuWindowRow opens the window menu on a window row and on its note
 // row. Both name the window and offer its own actions.
 func TestRailMenuWindowRow(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 1)
 	if tui.mode != "menu" || tui.menu == nil {
@@ -153,6 +157,7 @@ func TestRailMenuWindowRow(t *testing.T) {
 // TestRailMenuRenameTargetsRow picks Rename on each row kind and holds the
 // prompt to that row's kind, id and current label.
 func TestRailMenuRenameTargetsRow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		row   int
 		kind  string
@@ -187,6 +192,7 @@ func TestRailMenuRenameTargetsRow(t *testing.T) {
 // request to the right action and target. A window row closes its window, a
 // pane row closes its pane and a workspace row closes the workspace.
 func TestRailMenuCloseTargetsRow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		row    int
 		action string
@@ -215,6 +221,7 @@ func TestRailMenuCloseTargetsRow(t *testing.T) {
 // TestRailMenuFocusTargetsPane picks Focus on each pane row and holds the
 // request to that row's pane.
 func TestRailMenuFocusTargetsPane(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		row    int
 		target string
@@ -237,6 +244,7 @@ func TestRailMenuFocusTargetsPane(t *testing.T) {
 // TestRailMenuFocusTargetsWindow picks Focus on a window row and holds the
 // request to that window's first available pane.
 func TestRailMenuFocusTargetsWindow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		row    int
 		target string
@@ -260,6 +268,7 @@ func TestRailMenuFocusTargetsWindow(t *testing.T) {
 // workspace row sends the workspace id and no cwd, so the server inherits from
 // the active pane.
 func TestRailMenuNewWindowTargetsRow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		row int
 		ws  string
@@ -281,6 +290,7 @@ func TestRailMenuNewWindowTargetsRow(t *testing.T) {
 // TestRailMenuNewWorkspace picks New workspace in the session menu, where the
 // rail keeps it now.
 func TestRailMenuNewWorkspace(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, tui.snap.Rows-2)
 	railMenuPick(t, tui, "New workspace")
@@ -294,6 +304,7 @@ func TestRailMenuNewWorkspace(t *testing.T) {
 // menu: a right press there opens it, sends nothing, and its release is
 // swallowed.
 func TestRailMenuControlRowOpensSessionMenu(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.snap.Session = "dev"
 	railRightPress(tui, tui.snap.Rows-2)
@@ -315,6 +326,7 @@ func TestRailMenuControlRowOpensSessionMenu(t *testing.T) {
 // TestRailLeftPressFocusesPane holds the left press to its pane-row
 // behaviour: a pane row focuses its pane.
 func TestRailLeftPressFocusesPane(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
 	m := testutil.NextMsg(t, got)
@@ -329,6 +341,7 @@ func TestRailLeftPressFocusesPane(t *testing.T) {
 // row to focusing the first pane in that workspace. A press on the caret cell
 // toggles the workspace's fold instead.
 func TestRailLeftPressFocusesWorkspacePane(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 4, y: 1})
 	m := testutil.NextMsg(t, got)
@@ -353,6 +366,7 @@ func TestRailLeftPressFocusesWorkspacePane(t *testing.T) {
 // row within the double click window opens the pane rename prompt instead of
 // focusing again.
 func TestRailDoubleClickRenamesPane(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
 	if m := testutil.NextMsg(t, got); m.Action != "focus" {
@@ -377,6 +391,7 @@ func TestRailDoubleClickRenamesPane(t *testing.T) {
 // window row within the double click window opens the window rename prompt
 // instead of focusing again.
 func TestRailDoubleClickRenamesWindow(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	// The window caret is zero-based column 2, so the name starts at column 4
 	// and the mouse column is 5.
@@ -403,6 +418,7 @@ func TestRailDoubleClickRenamesWindow(t *testing.T) {
 // workspace row within the double click window opens the workspace rename
 // prompt instead of focusing again.
 func TestRailDoubleClickRenamesWorkspace(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	// The project bar owns column 0, so the workspace caret is zero-based
 	// column 1 and the name starts at column 3. The mouse column is 4.
@@ -428,6 +444,7 @@ func TestRailDoubleClickRenamesWorkspace(t *testing.T) {
 // TestRailMenuKeyHints holds each item to the main keymap's hint for its
 // action. An unbound action shows no key.
 func TestRailMenuKeyHints(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		row  int
 		want map[string]string

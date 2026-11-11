@@ -38,6 +38,7 @@ func barSessionLabel(th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) (s
 // ends it with `…`. The row is resolved before drawing, as the live client
 // resolves its theme once at load.
 func TestBarElisionFollowsTheGlyphSet(t *testing.T) {
+	t.Parallel()
 	snap := elidedBarSnapshot()
 
 	t.Run("ascii", func(t *testing.T) {
