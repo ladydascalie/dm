@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"dm/internal/keymap"
 	"dm/internal/layout"
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -17,6 +17,7 @@ import (
 // TestApplyDefaultFold proves an explicit default-fold node overrides saved
 // window folds, while an absent node leaves them alone.
 func TestApplyDefaultFold(t *testing.T) {
+	t.Parallel()
 	st := session.NewState("fold")
 	w := st.Workspaces[0].Windows[0]
 	w.Unfolded = false
@@ -45,6 +46,7 @@ func TestApplyDefaultFold(t *testing.T) {
 // config's default-fold setting. It starts a fake pane daemon so ensurePane
 // adopts instead of spawning a real shell.
 func TestNewWindowTakesDefaultFold(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		src  string
@@ -55,12 +57,12 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("DM_STATE", t.TempDir())
+			t.Parallel()
 			cfg, err := keymap.ParseConfig(c.src)
 			if err != nil {
 				t.Fatalf("ParseConfig: %v", err)
 			}
-			st := session.NewState("fold")
+			st := session.NewStateAt(t.TempDir(), "fold")
 			// Keep a live pane in w1 so closing the fake pane in w2 does not
 			// end the session in the middle of the test.
 			w1 := st.Workspaces[0].Windows[0]
@@ -71,7 +73,7 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 			s.cfg = cfg
 
 			const paneID = "w2p1"
-			sock := paths.PaneSock(st.Name, paneID)
+			sock := st.PaneSock(paneID)
 			if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -83,7 +85,7 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 			var mu sync.Mutex
 			var conns []net.Conn
 			done := make(chan struct{})
-			go func() {
+			go func() { // fake pane daemon
 				defer close(done)
 				for {
 					conn, err := ln.Accept()
@@ -107,17 +109,6 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 					}(conn)
 				}
 			}()
-			defer func() {
-				_ = ln.Close()
-				<-done
-				mu.Lock()
-				for _, c := range conns {
-					_ = c.Close()
-				}
-				conns = nil
-				mu.Unlock()
-			}()
-
 			wid, pid, err := s.newWindow("", "test", "/tmp", false)
 			if err != nil {
 				t.Fatalf("newWindow: %v", err)
@@ -125,20 +116,48 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 			if wid != "w2" || pid != paneID {
 				t.Fatalf("newWindow ids = %q/%q, want w2/%s", wid, pid, paneID)
 			}
+			// The state is the server's: the pane watcher mutates it under
+			// s.mu, so the assertions read it under the lock too.
+			s.mu.Lock()
 			ws := st.Workspaces[0]
 			if len(ws.Windows) != 2 {
+				s.mu.Unlock()
 				t.Fatalf("windows = %d, want 2", len(ws.Windows))
 			}
-			if got := ws.Windows[1].Unfolded; got != c.want {
+			got := ws.Windows[1].Unfolded
+			s.mu.Unlock()
+			if got != c.want {
 				t.Fatalf("Unfolded = %v, want %v", got, c.want)
+			}
+
+			// The pane's watcher saves the state when the pane exits. Close
+			// the pane here and wait for that save, so no write lands after
+			// the test returns and its temp dir is removed.
+			_ = ln.Close()
+			mu.Lock()
+			for _, c := range conns {
+				_ = c.Close()
+			}
+			conns = nil
+			mu.Unlock()
+			<-done
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				if _, err := os.Stat(st.StatePath()); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("the server never saved the state after the pane exited")
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
 		})
 	}
 }
 
 func TestToggleWorkspaceFold(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("fold")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "fold")
 	s := railServer(st)
 
 	ws := st.Workspaces[0]
@@ -185,8 +204,8 @@ func TestToggleWorkspaceFold(t *testing.T) {
 // TestToggleProjectFold proves a project target flips the project's fold in
 // the state and reaches the snapshot.
 func TestToggleProjectFold(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("fold")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "fold")
 	st.Workspaces[0].Project = "dm"
 	st.Workspaces[0].Windows[0].Root = &layout.Node{Pane: "w1p1"}
 	st.Workspaces[0].Windows[0].Focus = "w1p1"

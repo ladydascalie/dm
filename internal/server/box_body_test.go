@@ -14,6 +14,7 @@ import (
 // TestBoxBodyRoundTrip: a post with a body echoes it, and the list and the
 // wait carry the same body back.
 func TestBoxBodyRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 
@@ -54,6 +55,7 @@ func TestBoxBodyRoundTrip(t *testing.T) {
 // TestBoxBodyCaps: a body over the cap and a body with a control character
 // are refused at the wire; a multi-line body goes through.
 func TestBoxBodyCaps(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 
@@ -82,6 +84,7 @@ func TestBoxBodyCaps(t *testing.T) {
 // and the entry JSON still names the field, so a reader can tell an empty
 // body from a missing one.
 func TestBoxBodyEmptyKeepsShape(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 

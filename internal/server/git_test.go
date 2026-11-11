@@ -15,15 +15,15 @@ import (
 // TestGitStateReachesAll runs the git check off the snapshot path and confirms
 // every field lands on the AllPane for the pane's working directory.
 func TestGitStateReachesAll(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("gitstate")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "gitstate")
 	id := testutil.RootPane(st)
 	st.Panes[id].Cwd = "/work/dm"
 
 	var mu sync.Mutex
 	var seen []string
-	old := detectGit
-	detectGit = func(cwd string) gitInfo {
+	s := railServer(st)
+	s.detect = func(cwd string) gitInfo {
 		mu.Lock()
 		seen = append(seen, cwd)
 		mu.Unlock()
@@ -36,12 +36,9 @@ func TestGitStateReachesAll(t *testing.T) {
 		}
 		return gitInfo{}
 	}
-	defer func() { detectGit = old }()
-
-	s := railServer(st)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		snap := s.snapshotLocked()
+		snap := snapshot(s)
 		if len(snap.All) == 1 && snap.All[0].Added == 7 {
 			got := snap.All[0]
 			if got.Branch != "dm-git" || got.Worktree != "dm-git-w1" ||
@@ -70,6 +67,7 @@ func TestGitStateReachesAll(t *testing.T) {
 // TestGitStateOutsideRepo checks that a directory outside git reports the zero
 // value, so the rail has nothing to show there.
 func TestGitStateOutsideRepo(t *testing.T) {
+	t.Parallel()
 	got := detectGit(t.TempDir())
 	if got != (gitInfo{}) {
 		t.Fatalf("non-repo git info = %+v, want zero", got)
@@ -79,6 +77,7 @@ func TestGitStateOutsideRepo(t *testing.T) {
 // TestParseNumstat sums a normal line, counts nothing for a binary file's dash
 // counts, and skips a blank line.
 func TestParseNumstat(t *testing.T) {
+	t.Parallel()
 	out := []byte("12\t4\tserver.go\n-\t-\tlogo.png\n\n3\t0\tproto.go\n")
 	added, deleted := parseNumstat(out)
 	if added != 15 || deleted != 4 {
@@ -143,6 +142,7 @@ func newGitRepo(t *testing.T) string {
 // TestDetectGitReal drives the production detectGit against real git: a clean
 // repo, a dirty file, a linked worktree, a detached HEAD and a plain directory.
 func TestDetectGitReal(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}

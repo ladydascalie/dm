@@ -18,12 +18,12 @@ import (
 )
 
 func TestRailGeometry(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("rail")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "rail")
 	id := testutil.RootPane(st)
 	s := railServer(st)
 
-	snap := s.snapshotLocked()
+	snap := snapshot(s)
 	want := layout.EffectiveRail(80, layout.DefaultRail)
 	if snap.Rail != want {
 		t.Fatalf("new session rail = %d, want %d", snap.Rail, want)
@@ -42,7 +42,7 @@ func TestRailGeometry(t *testing.T) {
 	if rail := s.setRail(0); rail != 0 {
 		t.Fatalf("set-rail 0 effective = %d", rail)
 	}
-	snap = s.snapshotLocked()
+	snap = snapshot(s)
 	if snap.Rail != 0 || boxX(snap.Panes[0]) != 0 {
 		t.Fatalf("hidden rail: rail=%d box x=%d", snap.Rail, boxX(snap.Panes[0]))
 	}
@@ -51,7 +51,7 @@ func TestRailGeometry(t *testing.T) {
 	if rail := s.setRail(layout.CollapsedRail); rail != layout.CollapsedRail {
 		t.Fatalf("set-rail %d effective = %d", layout.CollapsedRail, rail)
 	}
-	snap = s.snapshotLocked()
+	snap = snapshot(s)
 	if snap.Rail != layout.CollapsedRail || boxX(snap.Panes[0]) != layout.CollapsedRail {
 		t.Fatalf("thin rail: rail=%d box x=%d", snap.Rail, boxX(snap.Panes[0]))
 	}
@@ -62,7 +62,7 @@ func TestRailGeometry(t *testing.T) {
 	if rail := s.setRail(50); rail != 40 {
 		t.Fatalf("set-rail 50 at 120 cols effective = %d, want 40", rail)
 	}
-	snap = s.snapshotLocked()
+	snap = snapshot(s)
 	if snap.Rail != 40 || boxX(snap.Panes[0]) != 40 {
 		t.Fatalf("clamped rail: rail=%d box x=%d", snap.Rail, boxX(snap.Panes[0]))
 	}
@@ -86,24 +86,21 @@ func TestRailGeometry(t *testing.T) {
 // TestRailBranch runs the branch check off the snapshot path and labels the
 // workspace with the focused pane's branch.
 func TestRailBranch(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	old := detectGit
-	detectGit = func(cwd string) gitInfo {
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "branch")
+	id := testutil.RootPane(st)
+	st.Panes[id].Cwd = "/work/dm"
+	s := railServer(st)
+	s.detect = func(cwd string) gitInfo {
 		if cwd == "/work/dm" {
 			return gitInfo{branch: "dm-rail"}
 		}
 		return gitInfo{}
 	}
-	defer func() { detectGit = old }()
-
-	st := session.NewState("branch")
-	id := testutil.RootPane(st)
-	st.Panes[id].Cwd = "/work/dm"
-	s := railServer(st)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		snap := s.snapshotLocked()
+		snap := snapshot(s)
 		if len(snap.All) == 1 && snap.All[0].Branch == "dm-rail" {
 			break
 		}
@@ -112,14 +109,15 @@ func TestRailBranch(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	items := rail.RailItems(s.snapshotLocked())
+	snap := snapshot(s)
+	items := rail.RailItems(snap)
 	if len(items) < 2 || items[1].Branch != "dm-rail" || items[1].Folder != "dm" {
 		t.Fatalf("window line = %+v, want folder dm and branch dm-rail", items)
 	}
 }
 func TestSessionSizeIsLargestClient(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("sizes")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "sizes")
 	s := railServer(st)
 	big := &client{cols: 133, rows: 43}
 	small := &client{cols: 77, rows: 7}
@@ -150,15 +148,16 @@ func TestSessionSizeIsLargestClient(t *testing.T) {
 	}
 }
 func TestRailState(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("rr")
+	t.Parallel()
+	root := t.TempDir()
+	st := session.NewStateAt(root, "rr")
 	s := railServer(st)
 	s.cols = 100
 	if rail := s.setRail(30); rail != 30 {
 		t.Fatalf("set-rail 30 effective = %d", rail)
 	}
 
-	got, err := session.LoadState("rr")
+	got, err := session.LoadStateAt(root, "rr")
 	if err != nil {
 		t.Fatalf("loadState: %v", err)
 	}
@@ -174,10 +173,17 @@ func TestRailState(t *testing.T) {
 		Workspaces: []*session.Workspace{{ID: "s1", Name: "main"}},
 		IDVersion:  2,
 	}
-	if err := old.Save(); err != nil {
+	b0, err := json.Marshal(old)
+	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(paths.StatePath("old"))
+	if err := os.MkdirAll(paths.SessionDirAt(root, "old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePathAt(root, "old"), b0, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(paths.StatePathAt(root, "old"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,17 +194,17 @@ func TestRailState(t *testing.T) {
 	delete(raw, "rail")
 	delete(raw, "railSet")
 	b, _ = json.Marshal(raw)
-	if err := os.WriteFile(paths.StatePath("old"), b, 0o600); err != nil {
+	if err := os.WriteFile(paths.StatePathAt(root, "old"), b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err = session.LoadState("old")
+	got, err = session.LoadStateAt(root, "old")
 	if err != nil {
 		t.Fatalf("loadState old: %v", err)
 	}
 	if got.Rail != layout.DefaultRail || !got.RailSet {
 		t.Fatalf("state without railSet = %d set=%v, want %d true", got.Rail, got.RailSet, layout.DefaultRail)
 	}
-	saved, err := os.ReadFile(paths.StatePath("old"))
+	saved, err := os.ReadFile(paths.StatePathAt(root, "old"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,8 +214,8 @@ func TestRailState(t *testing.T) {
 	}
 }
 func TestRailAllPanes(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("all")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "all")
 	st.Workspaces = []*session.Workspace{
 		{ID: "s1", Name: "main", Active: 0, Windows: []*session.Window{{
 			ID: "w1", Name: "one", Focus: "w1p1",
@@ -238,7 +244,7 @@ func TestRailAllPanes(t *testing.T) {
 	s.panes["w1p2"] = &paneConn{st: wire.Status{State: "working", Message: "working hard"}}
 	s.panes["w2p1"] = &paneConn{st: wire.Status{State: "unknown", Message: "unreported"}}
 
-	snap := s.snapshotLocked()
+	snap := snapshot(s)
 	if len(snap.Panes) != 2 {
 		t.Fatalf("active window panes = %d, want 2", len(snap.Panes))
 	}
@@ -296,8 +302,7 @@ type zoomFixture struct {
 
 func newZoomFixture(t *testing.T) *zoomFixture {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("zoom")
+	st := session.NewStateAt(t.TempDir(), "zoom")
 	w := st.ActiveWindow()
 	left := testutil.RootPane(st)
 	right := w.NewPaneID()
@@ -345,6 +350,7 @@ func (f *zoomFixture) drain() map[string][]wire.Msg {
 // TestZoomSyncSizes pins the PTY side: the zoomed pane is resized to the single
 // pane box, and a hidden sibling's PTY stays at its split rect.
 func TestZoomSyncSizes(t *testing.T) {
+	t.Parallel()
 	f := newZoomFixture(t)
 	f.s.mu.Lock()
 	area := layout.PaneAreaForWithTabBar(f.s.cols, f.s.rows, f.s.railLocked())
@@ -372,6 +378,7 @@ func TestZoomSyncSizes(t *testing.T) {
 // TestZoomKeepsOnTerminalResize pins the resize exception: a bigger client
 // resizes the session, keeps the zoom, and the zoomed pane takes the new area.
 func TestZoomKeepsOnTerminalResize(t *testing.T) {
+	t.Parallel()
 	f := newZoomFixture(t)
 	f.s.mu.Lock()
 	f.s.zoom = f.right
@@ -416,6 +423,7 @@ func TestZoomKeepsOnTerminalResize(t *testing.T) {
 // TestZoomStalePaneNotSent pins the validation: a zoom that names a pane of
 // another window is dropped, so the snapshot and the PTYs stay unzoomed.
 func TestZoomStalePaneNotSent(t *testing.T) {
+	t.Parallel()
 	f := newZoomFixture(t)
 	f.s.st.Workspaces[0].Windows = append(f.s.st.Workspaces[0].Windows,
 		&session.Window{ID: "w2", Name: "two", Root: &layout.Node{Pane: "w2p1"}})
@@ -448,23 +456,20 @@ func TestZoomStalePaneNotSent(t *testing.T) {
 // TestAllPaneInRepo carries the in-repo flag onto the wire row, so a directory
 // git never saw cannot look clean.
 func TestAllPaneInRepo(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	old := detectGit
-	detectGit = func(cwd string) gitInfo {
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "inrepo")
+	id := testutil.RootPane(st)
+	st.Panes[id].Cwd = "/work/dm"
+	s := railServer(st)
+	s.detect = func(cwd string) gitInfo {
 		if cwd == "/work/dm" {
 			return gitInfo{branch: "dm-rail", inRepo: true}
 		}
 		return gitInfo{}
 	}
-	defer func() { detectGit = old }()
-
-	st := session.NewState("inrepo")
-	id := testutil.RootPane(st)
-	st.Panes[id].Cwd = "/work/dm"
-	s := railServer(st)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		snap := s.snapshotLocked()
+		snap := snapshot(s)
 		if len(snap.All) == 1 && snap.All[0].Branch == "dm-rail" {
 			if !snap.All[0].InRepo {
 				t.Fatalf("AllPane.InRepo = false, want true")

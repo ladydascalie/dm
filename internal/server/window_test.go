@@ -15,8 +15,7 @@ import (
 // the state and the pane table.
 func windowServer(t *testing.T) (*server, *session.State) {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("win")
+	st := session.NewStateAt(t.TempDir(), "win")
 	return railServer(st), st
 }
 
@@ -89,6 +88,7 @@ func (p *paneProbe) waitKill(t *testing.T) []wire.Msg {
 }
 
 func TestCloseWindowKillsPanesAndKeepsTheRest(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
@@ -135,6 +135,7 @@ func TestCloseWindowKillsPanesAndKeepsTheRest(t *testing.T) {
 }
 
 func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
@@ -171,6 +172,7 @@ func TestCloseWindowRefusesTheLastWindow(t *testing.T) {
 // workspace in the background goes away with its window, leaving the active
 // workspace and its panes untouched.
 func TestCloseWindowLastWindowDropsBackgroundWorkspace(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
@@ -218,6 +220,7 @@ func TestCloseWindowLastWindowDropsBackgroundWorkspace(t *testing.T) {
 // TestCloseWindowLastWindowDropsActiveWorkspace proves removing the active
 // workspace leaves the active index and its window on a real one.
 func TestCloseWindowLastWindowDropsActiveWorkspace(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
@@ -269,6 +272,7 @@ func TestCloseWindowLastWindowDropsActiveWorkspace(t *testing.T) {
 }
 
 func TestCloseWindowUnknownID(t *testing.T) {
+	t.Parallel()
 	s, _ := windowServer(t)
 	err := s.closeWindow("nope")
 	if err == nil || err.Error() != `no window "nope"` {
@@ -277,6 +281,7 @@ func TestCloseWindowUnknownID(t *testing.T) {
 }
 
 func TestCloseWindowBackgroundKeepsActive(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
@@ -297,6 +302,7 @@ func TestCloseWindowBackgroundKeepsActive(t *testing.T) {
 }
 
 func TestCloseWindowBelowActiveDecrements(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
@@ -317,6 +323,7 @@ func TestCloseWindowBelowActiveDecrements(t *testing.T) {
 }
 
 func TestCloseWindowActiveClampsToLast(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]

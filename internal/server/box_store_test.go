@@ -23,8 +23,7 @@ import (
 // tree, so a post can name a pane that exists.
 func boxServer(t *testing.T) *server {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("boxstore")
+	st := session.NewStateAt(t.TempDir(), "boxstore")
 	testutil.RootPane(st)
 	s := railServer(st)
 	// The registry is built with the server, never loaded from state.
@@ -71,6 +70,7 @@ func boxPost(t *testing.T, s *server, cl *client, conn net.Conn, key, state, msg
 }
 
 func TestBoxSeqStartsAtOneAndNeverRepeats(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 
@@ -111,6 +111,7 @@ func TestBoxSeqStartsAtOneAndNeverRepeats(t *testing.T) {
 }
 
 func TestBoxRestartKeepsEveryEntryInOrder(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	posted := []box.Entry{
@@ -119,7 +120,7 @@ func TestBoxRestartKeepsEveryEntryInOrder(t *testing.T) {
 		boxPost(t, s, cl, conn, "lane/a", "done", "third"),
 	}
 
-	st, err := session.LoadState("boxstore")
+	st, err := session.LoadStateAt(s.st.Dir(), "boxstore")
 	if err != nil {
 		t.Fatalf("load state: %v", err)
 	}
@@ -139,6 +140,7 @@ func TestBoxRestartKeepsEveryEntryInOrder(t *testing.T) {
 }
 
 func TestBoxEntryCapDropsOldest(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 
@@ -171,6 +173,7 @@ func TestBoxEntryCapDropsOldest(t *testing.T) {
 }
 
 func TestBoxByteCapDropsOldest(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 
@@ -212,6 +215,7 @@ func boxJSONBytes(kept []box.Entry) int {
 }
 
 func TestBoxClearCounts(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	boxPost(t, s, cl, conn, "lane/a", "working", "one")
@@ -248,6 +252,7 @@ func TestBoxClearCounts(t *testing.T) {
 }
 
 func TestBoxListNewestFirstAndFiltered(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	boxPost(t, s, cl, conn, "lane/a", "note", "one")
@@ -312,6 +317,7 @@ func TestBoxListNewestFirstAndFiltered(t *testing.T) {
 // TestBoxPubSubRead proves the cursor read: entries come back in order, once
 // each, so a subscriber sees the whole topic stream.
 func TestBoxPubSubRead(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	boxPost(t, s, cl, conn, "msg/broadcast", "note", "read tasklist.md")
@@ -351,29 +357,29 @@ func TestBoxPubSubRead(t *testing.T) {
 	if got := wait(`{"key":"msg/broadcast","afterSeq":1,"timeoutMs":1000}`); got.Entry.Seq != 2 {
 		t.Fatalf("exact read = %+v, want seq 2", got.Entry)
 	}
-	// A parked cursor read wakes on the next post and returns it.
-	done := make(chan box.WaitReply, 1)
-	go func() {
-		m := boxCall(t, s, cl, conn, "msg-wait", `{"keyPrefix":"msg/","afterSeq":3,"timeoutMs":2000}`)
-		var rep box.WaitReply
-		_ = json.Unmarshal(m.Res, &rep)
-		done <- rep
-	}()
+	// A parked cursor read wakes on the next post and returns it. The wait
+	// runs on its own connection, the way a real subscriber does, so its
+	// reply cannot interleave with the post's reply on the main pipe.
+	read := boxPark(t, s, `{"keyPrefix":"msg/","afterSeq":3,"timeoutMs":2000}`)
 	time.Sleep(20 * time.Millisecond)
 	boxPost(t, s, cl, conn, "msg/integration", "done", "integration green")
-	select {
-	case rep := <-done:
-		if rep.Entry.Seq != 4 || rep.Entry.Key != "msg/integration" {
-			t.Fatalf("woken read = %+v, want seq 4 on integration", rep.Entry)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("the parked read never returned")
+	m := read(t)
+	if !m.OK {
+		t.Fatalf("woken read: %s", m.Error)
+	}
+	var rep box.WaitReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		t.Fatalf("woken reply: %v", err)
+	}
+	if rep.Entry.Seq != 4 || rep.Entry.Key != "msg/integration" {
+		t.Fatalf("woken read = %+v, want seq 4 on integration", rep.Entry)
 	}
 }
 
 // TestBoxTrimmedCursor proves a cursor behind the retained log reports the gap
 // instead of silently starting at the oldest kept row.
 func TestBoxTrimmedCursor(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	boxPost(t, s, cl, conn, "msg/a", "note", "one")
@@ -414,6 +420,7 @@ func TestBoxTrimmedCursor(t *testing.T) {
 // TestBoxTopicFieldsExclusive proves a read names an exact topic or a branch,
 // not both, and that a negative cursor is refused.
 func TestBoxTopicFieldsExclusive(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	for _, c := range []struct {
@@ -437,6 +444,7 @@ func TestBoxTopicFieldsExclusive(t *testing.T) {
 }
 
 func TestBoxPostFromPane(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 
@@ -467,6 +475,7 @@ func TestBoxPostFromPane(t *testing.T) {
 }
 
 func TestBoxSchemaActionAnswers(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	m := boxCall(t, s, cl, conn, "msg-schema", `{}`)
@@ -498,15 +507,16 @@ func TestBoxSchemaActionAnswers(t *testing.T) {
 }
 
 func TestBoxStateFileWithoutBoxLoadsEmpty(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	if err := os.MkdirAll(paths.SessionDir("oldbox"), 0o700); err != nil {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(paths.SessionDirAt(root, "oldbox"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	old := `{"name":"oldbox","workspaces":[{"id":"s1","name":"main","windows":[{"id":"w1","name":"main","root":{"pane":"w1p1"},"focus":"w1p1","nextPane":1}],"active":0}],"active":0,"cols":80,"rows":24,"panes":{"w1p1":{}},"nextWorkspace":1,"nextWindow":1,"idVersion":2,"rail":34,"railSet":true}`
-	if err := os.WriteFile(paths.StatePath("oldbox"), []byte(old), 0o600); err != nil {
+	if err := os.WriteFile(paths.StatePathAt(root, "oldbox"), []byte(old), 0o600); err != nil {
 		t.Fatalf("write state: %v", err)
 	}
-	st, err := session.LoadState("oldbox")
+	st, err := session.LoadStateAt(root, "oldbox")
 	if err != nil {
 		t.Fatalf("load state: %v", err)
 	}
@@ -516,8 +526,9 @@ func TestBoxStateFileWithoutBoxLoadsEmpty(t *testing.T) {
 }
 
 func TestBoxLoadDropsBadEntryAndKeepsSeq(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("badbox")
+	t.Parallel()
+	root := t.TempDir()
+	st := session.NewStateAt(root, "badbox")
 	good := box.Entry{Seq: 1, At: time.Now().UTC().Truncate(time.Second), Key: "lane/a", State: box.StateDone, Msg: "ok"}
 	bad := good
 	bad.Seq = 2
@@ -531,7 +542,7 @@ func TestBoxLoadDropsBadEntryAndKeepsSeq(t *testing.T) {
 	old := log.Writer()
 	var buf bytes.Buffer
 	log.SetOutput(&buf)
-	got, err := session.LoadState("badbox")
+	got, err := session.LoadStateAt(root, "badbox")
 	log.SetOutput(old)
 	if err != nil {
 		t.Fatalf("load state: %v", err)
@@ -670,6 +681,7 @@ func boxNoPush(t *testing.T, conn net.Conn, why string) {
 // TestBoxWatchParkedWaitAppears: a wait that names its pane is a watch the
 // server lists, parked at cursor 0, before any post exists.
 func TestBoxWatchParkedWaitAppears(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	pane := boxPane(t, s)
@@ -696,6 +708,7 @@ func TestBoxWatchParkedWaitAppears(t *testing.T) {
 // TestBoxWatchServedWaitAdvancesAndUnparks: the post that serves a parked wait
 // leaves the watch at the seq it served and no longer parked.
 func TestBoxWatchServedWaitAdvancesAndUnparks(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	pane := boxPane(t, s)
@@ -726,6 +739,7 @@ func TestBoxWatchServedWaitAdvancesAndUnparks(t *testing.T) {
 // TestBoxWatchListAdvances: a list that names its pane roots a watch at the
 // highest seq it served, and a later read never lowers it.
 func TestBoxWatchListAdvances(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	pane := boxPane(t, s)
@@ -763,6 +777,7 @@ func TestBoxWatchListAdvances(t *testing.T) {
 // TestBoxWatchClosedPaneDrops: a watch whose pane left the tree is dropped
 // before the next watcher reply.
 func TestBoxWatchClosedPaneDrops(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	pane := boxPane(t, s)
@@ -786,6 +801,7 @@ func TestBoxWatchClosedPaneDrops(t *testing.T) {
 // TestBoxWatchStaleUnparkedDrops: an unparked watch older than the ttl goes,
 // and a parked one of the same age stays.
 func TestBoxWatchStaleUnparkedDrops(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	pane := boxPane(t, s)
@@ -815,6 +831,7 @@ func TestBoxWatchStaleUnparkedDrops(t *testing.T) {
 
 // TestBoxWatchersOrder: the reply is sorted by pane, key and keyPrefix.
 func TestBoxWatchersOrder(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	at := time.Now().UTC().Truncate(time.Second)
@@ -849,6 +866,7 @@ func TestBoxWatchersOrder(t *testing.T) {
 // TestBoxWatchPush: one watch push on appear, advance, park, unpark and drop,
 // and none on a read that changes nothing.
 func TestBoxWatchPush(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	pane := boxPane(t, s)
@@ -886,6 +904,7 @@ func TestBoxWatchPush(t *testing.T) {
 // TestBoxWatchNoPaneFails: a read that names a pane outside the tree fails in
 // post's wording and records nothing.
 func TestBoxWatchNoPaneFails(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	for _, c := range []struct{ action, res string }{
@@ -1006,6 +1025,7 @@ func boxUnixConn(t *testing.T) (*client, net.Conn) {
 // TestBoxSubBlocksAndStreams: the handler parks on an empty box, then streams
 // the two entries that land, in order, and parks again.
 func TestBoxSubBlocksAndStreams(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	sub, conn := boxUnixConn(t)
 	done := boxSubStart(t, s, sub, `{"keyPrefix":"lane/","afterSeq":0}`)
@@ -1040,6 +1060,7 @@ func TestBoxSubBlocksAndStreams(t *testing.T) {
 // TestBoxSubStateFilterAdvancesCursor: a state filter ships only the matching
 // entry, and the cursor still walks over the one it skipped.
 func TestBoxSubStateFilterAdvancesCursor(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	pane := boxPane(t, s)
 	sub, conn := boxUnixConn(t)
@@ -1069,6 +1090,7 @@ func TestBoxSubStateFilterAdvancesCursor(t *testing.T) {
 // TestBoxSubGapTrimsOnce: a cursor behind the oldest kept entry starts there and
 // says so on the first frame only.
 func TestBoxSubGapTrimsOnce(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	poster, pconn := boxConn(t)
 	boxPost(t, s, poster, pconn, "lane/a", "note", "one")
@@ -1095,6 +1117,7 @@ func TestBoxSubGapTrimsOnce(t *testing.T) {
 // TestBoxSubEmptyLogNoGap: a cursor on an empty log has no gap, so the first
 // entry that arrives later carries trimmed false.
 func TestBoxSubEmptyLogNoGap(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	sub, conn := boxUnixConn(t)
 	boxSubStart(t, s, sub, `{"key":"lane/a","afterSeq":0}`)
@@ -1111,6 +1134,7 @@ func TestBoxSubEmptyLogNoGap(t *testing.T) {
 // TestBoxSubWatchParkedForLife: the watch is parked from the first frame to the
 // last and its cursor follows the stream.
 func TestBoxSubWatchParkedForLife(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	pane := boxPane(t, s)
 	poster, pconn := boxConn(t)
@@ -1142,6 +1166,7 @@ func TestBoxSubWatchParkedForLife(t *testing.T) {
 // TestBoxSubDisconnectUnparksAndStops: the handler notices a gone connection
 // through boxPollWait, unparks its watch and returns.
 func TestBoxSubDisconnectUnparksAndStops(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	pane := boxPane(t, s)
 	sub, peer := boxUnixConn(t)
@@ -1167,6 +1192,7 @@ func TestBoxSubDisconnectUnparksAndStops(t *testing.T) {
 // carrying the error and sends no frame. A from outside the tree records no
 // watch.
 func TestBoxSubBadRequestRepliesWithError(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxUnixConn(t)
 	cases := []struct{ res, want string }{

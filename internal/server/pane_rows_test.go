@@ -25,8 +25,7 @@ type rowsFixture struct {
 
 func newRowsFixture(t *testing.T, name string) *rowsFixture {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState(name)
+	st := session.NewStateAt(t.TempDir(), name)
 	id := testutil.RootPane(st)
 	s := railServer(st)
 	srv, pane := net.Pipe()
@@ -63,6 +62,8 @@ func newRowsFixture(t *testing.T, name string) *rowsFixture {
 func newRowsExitFixture(t *testing.T, name string) *rowsFixture {
 	t.Helper()
 	// An exit notification belongs to the operator's desktop, not to a test.
+	// Serial: the notify gate reads DM_NOTIFY, which t.Setenv cannot
+	// parallelise.
 	t.Setenv("DM_NOTIFY", "0")
 	f := newRowsFixture(t, name)
 	w := f.s.st.ActiveWindow()
@@ -112,6 +113,7 @@ func (f *rowsFixture) waitSnapshot(t *testing.T, what string, ok func(wire.Snaps
 // TestAllPaneTitle proves a title the pane reports reaches the row the rail
 // reads, through the server's own snapshot.
 func TestAllPaneTitle(t *testing.T) {
+	t.Parallel()
 	f := newRowsFixture(t, "title")
 	f.send(t, wire.Msg{Type: "title", Res: json.RawMessage(`{"title":"build log"}`)})
 	snap := f.waitSnapshot(t, "the title", func(s wire.Snapshot) bool {
@@ -126,6 +128,7 @@ func TestAllPaneTitle(t *testing.T) {
 // of the same state does not. The second half uses a sentinel stamp, so it
 // cannot pass by two stamps landing in the same second.
 func TestAllPaneStatusChangedAt(t *testing.T) {
+	t.Parallel()
 	f := newRowsFixture(t, "changed")
 	f.send(t, wire.Msg{Type: "status", St: &wire.Status{State: "working"}})
 	snap := f.waitSnapshot(t, "the first state", func(s wire.Snapshot) bool {
@@ -155,6 +158,7 @@ func TestAllPaneStatusChangedAt(t *testing.T) {
 // TestAllPaneTitleCap proves two title changes in a row cost one repaint, and
 // the trailing change still lands once the cap allows it.
 func TestAllPaneTitleCap(t *testing.T) {
+	t.Parallel()
 	f := newRowsFixture(t, "cap")
 	f.send(t, wire.Msg{Type: "title", Res: json.RawMessage(`{"title":"one"}`)})
 	f.waitSnapshot(t, "the first title", func(s wire.Snapshot) bool {
@@ -177,6 +181,8 @@ func TestAllPaneTitleCap(t *testing.T) {
 // TestAllPaneStatusStampDroppedOnExit proves the server forgets a pane's status
 // stamp when the pane exits, so nothing keeps a stamp for an id that is gone.
 func TestAllPaneStatusStampDroppedOnExit(t *testing.T) {
+	// Serial: the notify gate reads DM_NOTIFY, env t.Setenv cannot
+	// parallelise.
 	f := newRowsExitFixture(t, "exit")
 	f.send(t, wire.Msg{Type: "status", St: &wire.Status{State: "working"}})
 	f.waitSnapshot(t, "the state", func(s wire.Snapshot) bool {
@@ -191,8 +197,15 @@ func TestAllPaneStatusStampDroppedOnExit(t *testing.T) {
 
 	f.send(t, wire.Msg{Type: "exit"})
 
-	// The pane's watch goroutine removes the pane and its stamp. The map is
-	// what this test is about: the server stops reporting a pane it dropped.
+	// The pane's watch goroutine removes the pane, saves and broadcasts. The
+	// broadcast follows the save, so this snapshot proves the save landed
+	// before the test leaves and its temp dir goes away.
+	f.waitSnapshot(t, "the exited pane dropped", func(s wire.Snapshot) bool {
+		return len(s.All) == 1
+	})
+
+	// The map is what this test is about: the server stops reporting a pane
+	// it dropped.
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		f.s.mu.Lock()

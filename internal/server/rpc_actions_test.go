@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"dm/internal/layout"
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/testutil"
 	"dm/internal/wire"
@@ -115,9 +114,9 @@ func spyEmpty(t *testing.T, ch chan wire.Msg) {
 
 // talkPane answers one action on the pane socket with a fixed reply, the way a
 // real pane daemon answers a read or a cwd request.
-func talkPane(t *testing.T, sess, id string, reply wire.Msg) {
+func talkPane(t *testing.T, sess *session.State, id string, reply wire.Msg) {
 	t.Helper()
-	sock := paths.PaneSock(sess, id)
+	sock := sess.PaneSock(id)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +152,7 @@ func talkPane(t *testing.T, sess, id string, reply wire.Msg) {
 // cannot take and a target that names no pane both fail without touching the
 // tree.
 func TestSplitActionErrors(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpcsplit")
 
 	wantErr(t, "split", "dir must be", rpcCall(t, s, cl, conn,
@@ -176,9 +176,10 @@ func TestSplitActionErrors(t *testing.T) {
 // beside the target, the new pane takes the focus, and a no-focus split leaves
 // the focus alone.
 func TestSplitActionSplitsAndFocuses(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, b := rpcServer(t, "rpcsplitwin")
-	screenPane(t, "rpcsplitwin", "w1p3")
-	screenPane(t, "rpcsplitwin", "w1p4")
+	screenPane(t, s.st, "w1p3")
+	screenPane(t, s.st, "w1p4")
 
 	m := rpcCall(t, s, cl, conn,
 		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", ID: 1})
@@ -219,8 +220,9 @@ func TestSplitActionSplitsAndFocuses(t *testing.T) {
 // TestSplitActionEmptyTargetUsesFocus pins the default target: a split with no
 // target opens beside the focused pane.
 func TestSplitActionEmptyTargetUsesFocus(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcsplitfocus")
-	screenPane(t, "rpcsplitfocus", "w1p3")
+	screenPane(t, s.st, "w1p3")
 
 	m := rpcCall(t, s, cl, conn,
 		wire.Msg{Type: "req", Action: "split", Dir: "down", ID: 1})
@@ -242,6 +244,7 @@ func TestSplitActionEmptyTargetUsesFocus(t *testing.T) {
 // clamps so both panes keep their floor, and panes without a common split are
 // refused.
 func TestResizeSplitAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, b := rpcServer(t, "rpcresize")
 
 	wantErr(t, "resize-split", "bad ratio", rpcCall(t, s, cl, conn,
@@ -294,6 +297,7 @@ func TestResizeSplitAction(t *testing.T) {
 // name fails, focus-dir walks to the neighbour and refuses when there is none,
 // and next-pane and prev-pane wrap around the window.
 func TestFocusActions(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, b := rpcServer(t, "rpcfocus")
 
 	if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "focus", Target: b, ID: 1}); !m.OK {
@@ -345,6 +349,7 @@ func TestFocusActions(t *testing.T) {
 // tree and the session with a kill on its socket, the last pane of a window is
 // killed but stays until its shell exits, and an unknown target fails.
 func TestClosePaneAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, b := rpcServer(t, "rpcclosepane")
 	spyB := spyPane(t, s, b)
 	spyA := spyPane(t, s, a)
@@ -393,8 +398,8 @@ func TestClosePaneAction(t *testing.T) {
 // TestClosePaneLastPaneUnknownFails pins the guard on an unadopted last pane:
 // there is nothing to kill, so the request fails instead of pretending.
 func TestClosePaneLastPaneUnknownFails(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("rpccloselast")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "rpccloselast")
 	id := testutil.RootPane(st)
 	st.Workspaces[0].Windows[0].Root = &layout.Node{Pane: id}
 	s := railServer(st)
@@ -408,6 +413,7 @@ func TestClosePaneLastPaneUnknownFails(t *testing.T) {
 // stale-focus repair: focusing a window whose saved focus names no pane puts
 // the focus on a real pane.
 func TestWindowActions(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcwindows")
 	s.mu.Lock()
 	s.st.Workspaces[0].Windows = append(s.st.Workspaces[0].Windows,
@@ -465,6 +471,7 @@ func TestWindowActions(t *testing.T) {
 // TestRenameWindowAction pins the rename: the name and the named flag change,
 // nothing else, and an empty name or an unknown window fails.
 func TestRenameWindowAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcrename")
 
 	wantErr(t, "rename-window", "name required", rpcCall(t, s, cl, conn,
@@ -489,9 +496,10 @@ func TestRenameWindowAction(t *testing.T) {
 // workspace with the asked name, the pane adopts through its socket, and a
 // no-focus window leaves the active window alone.
 func TestNewWindowAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcnewwin")
-	screenPane(t, "rpcnewwin", "w2p1")
-	screenPane(t, "rpcnewwin", "w3p1")
+	screenPane(t, s.st, "w2p1")
+	screenPane(t, s.st, "w3p1")
 
 	m := rpcCall(t, s, cl, conn,
 		wire.Msg{Type: "req", Action: "new-window", Name: "test", Cwd: "/tmp", ID: 1})
@@ -547,6 +555,7 @@ func TestNewWindowAction(t *testing.T) {
 // panes, the last window of the last workspace is refused, and an unknown
 // window fails.
 func TestCloseWindowAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcclosewin")
 	s.mu.Lock()
 	s.st.Workspaces[0].Windows = append(s.st.Workspaces[0].Windows,
@@ -581,6 +590,7 @@ func TestCloseWindowAction(t *testing.T) {
 // workspace takes the workspace with it, and the active index lands on a real
 // workspace.
 func TestCloseWindowTakesWorkspace(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcclosewswin")
 	s.mu.Lock()
 	s.st.Workspaces = append(s.st.Workspaces, &session.Workspace{
@@ -605,8 +615,9 @@ func TestCloseWindowTakesWorkspace(t *testing.T) {
 // TestWorkspaceActions pins workspace creation, cycling, focusing, renaming,
 // closing and listing.
 func TestWorkspaceActions(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcws")
-	screenPane(t, "rpcws", "w2p1")
+	screenPane(t, s.st, "w2p1")
 
 	m := rpcCall(t, s, cl, conn,
 		wire.Msg{Type: "req", Action: "new-workspace", Cwd: "/tmp", ID: 1})
@@ -709,6 +720,7 @@ func TestWorkspaceActions(t *testing.T) {
 // and moves to the end of its project block, an empty name clears the tag, and
 // an unknown workspace fails.
 func TestSetProjectAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcproject")
 	s.mu.Lock()
 	s.st.Workspaces = append(s.st.Workspaces, &session.Workspace{
@@ -751,6 +763,7 @@ func TestSetProjectAction(t *testing.T) {
 // whole fleet, pane locates one anywhere, status answers one or all, and every
 // miss fails with the name.
 func TestPaneQueries(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpcquery")
 	s.mu.Lock()
 	s.st.Panes[a].Name = "alpha"
@@ -827,6 +840,7 @@ func TestPaneQueries(t *testing.T) {
 // TestSetPaneNameAction pins the rename through the rpc path: the name lands
 // in the state and an unknown pane fails.
 func TestSetPaneNameAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpcpanename")
 
 	if m := rpcCall(t, s, cl, conn,
@@ -846,6 +860,7 @@ func TestSetPaneNameAction(t *testing.T) {
 // TestToggleFoldAction pins the fold toggle through the rpc path: the reply
 // carries the target and the new state.
 func TestToggleFoldAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcfold")
 
 	m := rpcCall(t, s, cl, conn,
@@ -874,6 +889,7 @@ func TestToggleFoldAction(t *testing.T) {
 // TestWriteAndKeys pins the keyboard paths: write-to and exec land on the
 // pane, exec adds the Enter, keys carry the bytes, and an unknown pane fails.
 func TestWriteAndKeys(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpcwrite")
 	spy := spyPane(t, s, a)
 
@@ -912,6 +928,7 @@ func TestWriteAndKeys(t *testing.T) {
 // TestWriteToAdoptsPane pins the adoption: a write to a pane the server has no
 // conn for dials the daemon, and the write lands.
 func TestWriteToAdoptsPane(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpcadopt")
 
 	if m := rpcCall(t, s, cl, conn,
@@ -929,6 +946,7 @@ func TestWriteToAdoptsPane(t *testing.T) {
 // TestKeysUnknownPaneFails pins the keys guard: keys for a pane the server
 // does not know fail instead of vanishing.
 func TestKeysUnknownPaneFails(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpckeys")
 	wantErr(t, "keys", "no pane", rpcCall(t, s, cl, conn,
 		wire.Msg{Type: "req", Action: "keys", Target: "ghost", ID: 1}))
@@ -937,8 +955,9 @@ func TestKeysUnknownPaneFails(t *testing.T) {
 // TestReadAction pins the read: the pane's lines and its status ride the
 // reply.
 func TestReadAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcread")
-	talkPane(t, "rpcread", "w1p3", wire.Msg{
+	talkPane(t, s.st, "w1p3", wire.Msg{
 		Type: "resp", OK: true, Lines: []string{"hello", "world"},
 		St: &wire.Status{State: "idle"},
 	})
@@ -964,6 +983,7 @@ func TestReadAction(t *testing.T) {
 // on the alternate screen all fail with the reason, and a real ring answers
 // with rows that fit the count.
 func TestHistoryAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpchistory")
 
 	wantErr(t, "history", "history needs lines > 0", rpcCall(t, s, cl, conn,
@@ -982,7 +1002,7 @@ func TestHistoryAction(t *testing.T) {
 	s.mu.Lock()
 	s.st.Panes["w1p8"] = &session.PaneState{Cols: 80, Rows: 24}
 	s.mu.Unlock()
-	talkPane(t, "rpchistory", "w1p8", wire.Msg{
+	talkPane(t, s.st, "w1p8", wire.Msg{
 		Type: "replay", Data: []byte("alt screen"),
 		Res: json.RawMessage(`{"alt":true}`),
 	})
@@ -1012,6 +1032,7 @@ func TestHistoryAction(t *testing.T) {
 // TestListAction pins the listing: the reply carries the snapshot and the
 // active window's tree.
 func TestListAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpclist")
 
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "list", ID: 1})
@@ -1038,6 +1059,7 @@ func TestListAction(t *testing.T) {
 // TestZoomPaneAction pins the zoom toggle through the rpc path: two panes
 // toggle the zoom on and off.
 func TestZoomPaneAction(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, a, _ := rpcServer(t, "rpczoom")
 
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "zoom-pane", ID: 1})
@@ -1072,8 +1094,8 @@ func TestZoomPaneAction(t *testing.T) {
 // TestZoomPaneSinglePaneIsNoop pins the no-op: a window with one pane already
 // fills the area, so the reply names no zoom.
 func TestZoomPaneSinglePaneIsNoop(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("rpczoomone")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "rpczoomone")
 	id := testutil.RootPane(st)
 	st.Workspaces[0].Windows[0].Root = &layout.Node{Pane: id}
 	s := railServer(st)
@@ -1097,6 +1119,7 @@ func TestZoomPaneSinglePaneIsNoop(t *testing.T) {
 // TestUnknownActionFails pins the default arm: an action the server does not
 // know is named in the error.
 func TestUnknownActionFails(t *testing.T) {
+	t.Parallel()
 	s, cl, conn, _, _ := rpcServer(t, "rpcunknown")
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "bogus", ID: 1})
 	wantErr(t, "bogus", "unknown action", m)

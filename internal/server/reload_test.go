@@ -27,7 +27,8 @@ type reloadFixture struct {
 
 func newReloadFixture(t *testing.T, name string) *reloadFixture {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
+	// Serial: the config load reads XDG_CONFIG_HOME, which t.Setenv cannot
+	// parallelise. The state itself is explicit, no DM_STATE needed.
 	xdg := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 	path := filepath.Join(xdg, "dm", "config.kdl")
@@ -36,7 +37,7 @@ func newReloadFixture(t *testing.T, name string) *reloadFixture {
 	}
 	writeReloadConfig(t, path, 0)
 
-	st := session.NewState(name)
+	st := session.NewStateAt(t.TempDir(), name)
 	w := st.ActiveWindow()
 	w.Root = &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
@@ -126,9 +127,7 @@ func (f *reloadFixture) rects() map[string]layout.Rect {
 }
 
 func (f *reloadFixture) snap() *wire.Snapshot {
-	f.s.mu.Lock()
-	defer f.s.mu.Unlock()
-	return f.s.snapshotLocked()
+	return snapshot(f.s)
 }
 
 // TestReloadConfigChangesPadding proves a reload re-reads the file, resyncs

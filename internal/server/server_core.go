@@ -307,6 +307,18 @@ type server struct {
 	// command line without starting a process; nil means exec's Start.
 	spawn func(*exec.Cmd) error
 
+	// detect reports git labels for a cwd. It is a field so a test can stub
+	// git without touching the package global; nil means detectGit.
+	detect func(string) gitInfo
+
+	// reflowSettle overrides the package settle when a test shortens it.
+	// Zero keeps the default.
+	reflowSettle time.Duration
+
+	// exit ends the process. It is a field so a test can stub the shutdown
+	// exit without touching the package global; nil means os.Exit.
+	exit func(int)
+
 	// statusChangedAt is when each pane's agent state last moved, in unix
 	// seconds. It is memory only: a restart has no baseline, and a stale
 	// stamp from disk would claim a change nobody saw.
@@ -335,10 +347,11 @@ func Run(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Join(paths.SessionDir(*name), "panes"), 0o700); err != nil {
+	root := paths.StateDir()
+	if err := os.MkdirAll(filepath.Join(paths.SessionDirAt(root, *name), "panes"), 0o700); err != nil {
 		return err
 	}
-	lockPath := filepath.Join(paths.SessionDir(*name), "server.lock")
+	lockPath := filepath.Join(paths.SessionDirAt(root, *name), "server.lock")
 	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
@@ -348,13 +361,13 @@ func Run(args []string) error {
 	}
 	defer func() { _ = lf.Close() }()
 
-	st, err := session.LoadState(*name)
+	st, err := session.LoadStateAt(root, *name)
 	fromDisk := err == nil
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if st == nil {
-		st = session.NewState(*name)
+		st = session.NewStateAt(root, *name)
 	}
 	adopt := map[string]bool{}
 	if fromDisk {
@@ -408,7 +421,7 @@ func Run(args []string) error {
 		}
 		// A pane outlives the server: seed its status and modes from the pane
 		// itself, or a restart would show every agent as unknown.
-		rp := readPaneReplay(s.st.Name, id)
+		rp := readPaneReplay(s.st, id)
 		if rp.ok {
 			s.mu.Lock()
 			if pc := s.panes[id]; pc != nil {
@@ -423,7 +436,7 @@ func Run(args []string) error {
 		return err
 	}
 
-	sock := paths.ServerSock(*name)
+	sock := st.ServerSock()
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -431,7 +444,7 @@ func Run(args []string) error {
 	}
 	s.ln = ln
 	_ = os.Chmod(sock, 0o600)
-	writePID(filepath.Join(paths.SessionDir(*name), "server.pid"))
+	writePID(filepath.Join(st.SessionDir(), "server.pid"))
 
 	log.Printf("session %q listening on %s", *name, sock)
 	for {
@@ -517,7 +530,7 @@ func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours) *
 
 // ensurePane dials the pane's socket and adopts it, or spawns a fresh daemon.
 func (s *server) ensurePane(id string) error {
-	sock := paths.PaneSock(s.st.Name, id)
+	sock := s.st.PaneSock(id)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
 		pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
 		s.mu.Lock()
@@ -555,7 +568,7 @@ func (s *server) ensurePane(id string) error {
 	}
 	cmd := paneCommand(exe, s.st.Name, id, ps, tc)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	logPath := filepath.Join(paths.SessionDir(s.st.Name), "panes", id+".log")
+	logPath := filepath.Join(s.st.SessionDir(), "panes", id+".log")
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err

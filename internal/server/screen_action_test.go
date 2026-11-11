@@ -52,6 +52,7 @@ func requestScreen(t *testing.T, s *server, target string, id int) []wire.Msg {
 // TestScreenRequestReachesTheClient: a screen request for a live pane answers
 // with a screen message carrying the pane's grid, then the request's reply.
 func TestScreenRequestReachesTheClient(t *testing.T) {
+	t.Parallel()
 	s, a, _ := screenReqServer(t, "screenreq")
 	frames := requestScreen(t, s, a, 7)
 	if len(frames) != 2 {
@@ -78,6 +79,7 @@ func TestScreenRequestReachesTheClient(t *testing.T) {
 // TestScreenRequestErrors: an unknown pane and a pane that does not answer both
 // reply with an error and send no screen.
 func TestScreenRequestErrors(t *testing.T) {
+	t.Parallel()
 	s, _, _ := screenReqServer(t, "screenerr")
 
 	// A pane the server does not know.

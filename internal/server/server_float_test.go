@@ -16,8 +16,7 @@ import (
 // paneServer is an in-process server with one pane whose shell stands in dir.
 func paneServer(t *testing.T, name, dir string) (*server, string) {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState(name)
+	st := session.NewStateAt(t.TempDir(), name)
 	id := testutil.RootPane(st)
 	st.Panes[id].Cwd = dir
 	return railServer(st), id
@@ -111,6 +110,7 @@ func waitPidGone(t *testing.T, pid int) {
 // TestFloatOpenEchoesToOwner: `echo hi` reaches the owning client as bytes and
 // one exit frame follows, naming the float.
 func TestFloatOpenEchoesToOwner(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s, pane := floatServer(t, "floatecho", dir, "echo hi")
 	cl, cli := floatClient(t, s)
@@ -157,6 +157,7 @@ func TestFloatOpenEchoesToOwner(t *testing.T) {
 // TestFloatOpenNeedsCwd: a pane with no folder is refused with the pane named,
 // and no process starts.
 func TestFloatOpenNeedsCwd(t *testing.T) {
+	t.Parallel()
 	s, pane := paneServer(t, "floatnocwd", "")
 	cl, cli := floatClient(t, s)
 	reply := openFloatAt(t, s, cl, cli, pane, "f1")
@@ -171,6 +172,7 @@ func TestFloatOpenNeedsCwd(t *testing.T) {
 // TestFloatDuplicateId: the client picks the id, so a second float on the same
 // id is refused instead of replacing the first.
 func TestFloatDuplicateId(t *testing.T) {
+	t.Parallel()
 	s, pane := floatServer(t, "floatdup", t.TempDir(), "sleep 30")
 	cl, cli := floatClient(t, s)
 	if reply := openFloatAt(t, s, cl, cli, pane, "f1"); !reply.OK {
@@ -186,6 +188,7 @@ func TestFloatDuplicateId(t *testing.T) {
 // TestFloatKeysReachChild: a keys frame whose target is a float goes to the
 // child's pty rather than to a pane. `cat` echoes it back.
 func TestFloatKeysReachChild(t *testing.T) {
+	t.Parallel()
 	s, pane := floatServer(t, "floatkeys", t.TempDir(), "cat")
 	srv, cli := net.Pipe()
 	go s.serve(srv)
@@ -213,6 +216,7 @@ func TestFloatKeysReachChild(t *testing.T) {
 // TestFloatCloseKillsChild: float-close ends the child and the exit frame names
 // the float.
 func TestFloatCloseKillsChild(t *testing.T) {
+	t.Parallel()
 	s, pane := floatServer(t, "floatclose", t.TempDir(), "sleep 30")
 	cl, cli := floatClient(t, s)
 	if reply := openFloatAt(t, s, cl, cli, pane, "f1"); !reply.OK {
@@ -225,22 +229,25 @@ func TestFloatCloseKillsChild(t *testing.T) {
 	pid := f.cmd.Process.Pid
 
 	s.handleReq(cl, wire.Msg{Type: "req", Action: "float-close", ID: 2, Float: "f1"})
-	var closeReply *wire.Msg
-	exit := readFloatFrame(t, cli, func(m wire.Msg) bool {
+	// The resp and the child's exit frame come from two goroutines, so either
+	// can arrive first. Read until both are in.
+	var closeReply, exitFrame *wire.Msg
+	readFloatFrame(t, cli, func(m wire.Msg) bool {
 		switch m.Type {
 		case "resp":
 			got := m
 			closeReply = &got
 		case "exit":
-			return true
+			got := m
+			exitFrame = &got
 		}
-		return false
+		return closeReply != nil && exitFrame != nil
 	})
 	if closeReply == nil || !closeReply.OK || closeReply.Float != "f1" {
 		t.Fatalf("float-close reply = %+v, want OK for f1", closeReply)
 	}
-	if exit.Target != "f1" {
-		t.Fatalf("exit target = %q, want f1", exit.Target)
+	if exitFrame.Target != "f1" {
+		t.Fatalf("exit target = %q, want f1", exitFrame.Target)
 	}
 	waitFloatGone(t, s, "f1")
 	waitPidGone(t, pid)
@@ -249,6 +256,7 @@ func TestFloatCloseKillsChild(t *testing.T) {
 // TestFloatCloseWrongOwner: a client cannot close another client's float, and
 // the owner still can.
 func TestFloatCloseWrongOwner(t *testing.T) {
+	t.Parallel()
 	s, pane := floatServer(t, "floatowner", t.TempDir(), "sleep 30")
 	owner, ownerConn := floatClient(t, s)
 	other, otherConn := floatClient(t, s)
@@ -280,6 +288,7 @@ func TestFloatCloseWrongOwner(t *testing.T) {
 
 // TestFloatCloseUnknownIsOK: an id the server never saw is not an error.
 func TestFloatCloseUnknownIsOK(t *testing.T) {
+	t.Parallel()
 	s, _ := floatServer(t, "floatnoid", t.TempDir(), "sleep 30")
 	cl, cli := floatClient(t, s)
 	s.handleReq(cl, wire.Msg{Type: "req", Action: "float-close", ID: 4, Float: "nope"})
@@ -292,6 +301,7 @@ func TestFloatCloseUnknownIsOK(t *testing.T) {
 // TestFloatDieWithClient: a client that goes away takes its float child with
 // it, and no other client's float is touched.
 func TestFloatDieWithClient(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s, pane := floatServer(t, "floatgone", dir, "sleep 30")
 	goClient, goConn := floatClient(t, s)

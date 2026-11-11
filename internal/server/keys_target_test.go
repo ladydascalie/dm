@@ -16,8 +16,7 @@ import (
 // the server sends to a pane.
 func keysServer(t *testing.T) (*server, string, string, map[string]chan string) {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("keystarget")
+	st := session.NewStateAt(t.TempDir(), "keystarget")
 	w := st.ActiveWindow()
 	a := w.NewPaneID()
 	b := w.NewPaneID()
@@ -57,6 +56,7 @@ func keysServer(t *testing.T) (*server, string, string, map[string]chan string) 
 // focus of the active window. An empty target falls back to the focus, and an
 // unknown target replies with an error and writes nothing.
 func TestKeysHonourTarget(t *testing.T) {
+	t.Parallel()
 	s, focus, other, got := keysServer(t)
 	srv, cli := net.Pipe()
 	t.Cleanup(func() {

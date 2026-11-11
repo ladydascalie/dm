@@ -19,6 +19,7 @@ type yankResult struct {
 // The yank action passes the pane's replayed rows and their row coordinates
 // back to the client, which owns the clipboard.
 func TestYankActionReturnsPaneRows(t *testing.T) {
+	t.Parallel()
 	s, ids := histServer(t, "yankrows", 1)
 	cl, conn := boxConn(t)
 	s.handleReq(cl, wire.Msg{Type: "req", Action: "yank", Target: ids[0], ID: 1})
@@ -48,6 +49,7 @@ func TestYankActionReturnsPaneRows(t *testing.T) {
 // A yank for a pane that is not there fails instead of returning an empty
 // copy.
 func TestYankActionMissingPaneFails(t *testing.T) {
+	t.Parallel()
 	s, _ := histServer(t, "yankmissing", 1)
 	cl, conn := boxConn(t)
 	s.handleReq(cl, wire.Msg{Type: "req", Action: "yank", Target: "ghost", ID: 2})

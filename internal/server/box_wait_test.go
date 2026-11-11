@@ -18,8 +18,7 @@ import (
 func boxSession(t *testing.T) (*server, string) {
 	t.Helper()
 	dir := t.TempDir()
-	t.Setenv("DM_STATE", dir)
-	st := session.NewState("boxwait")
+	st := session.NewStateAt(dir, "boxwait")
 	testutil.RootPane(st)
 	s := railServer(st)
 	sock := filepath.Join(dir, "s.sock")
@@ -123,6 +122,7 @@ func waitReplyOf(t *testing.T, m wire.Msg) box.Entry {
 // TestBoxWaitForDone is the driver and lane case: the driver waits on lane/a
 // while a second connection posts blocked, then done.
 func TestBoxWaitForDone(t *testing.T) {
+	t.Parallel()
 	s, sock := boxSession(t)
 	driver := dialBox(t, sock)
 	lane := dialBox(t, sock)
@@ -141,6 +141,7 @@ func TestBoxWaitForDone(t *testing.T) {
 
 // TestBoxWaitAlreadyDone is the lane that posted done before the driver waited.
 func TestBoxWaitAlreadyDone(t *testing.T) {
+	t.Parallel()
 	s, sock := boxSession(t)
 	done := postEntry(t, dialBox(t, sock), "lane/a", "done")
 
@@ -161,6 +162,7 @@ func TestBoxWaitAlreadyDone(t *testing.T) {
 
 // TestBoxWaitTimeout checks the timeout error and the last entry the wait saw.
 func TestBoxWaitTimeout(t *testing.T) {
+	t.Parallel()
 	s, sock := boxSession(t)
 	lane := dialBox(t, sock)
 	postEntry(t, lane, "lane/a", "blocked")
@@ -188,6 +190,7 @@ func TestBoxWaitTimeout(t *testing.T) {
 
 // TestBoxWaitOtherKey checks an entry for another key never satisfies a wait.
 func TestBoxWaitOtherKey(t *testing.T) {
+	t.Parallel()
 	s, sock := boxSession(t)
 	lane := dialBox(t, sock)
 	postEntry(t, lane, "lane/b", "done")
@@ -214,6 +217,7 @@ func TestBoxWaitOtherKey(t *testing.T) {
 // TestBoxWaitDisconnectReleases closes the waiting client and checks the
 // waiter does not outlive it.
 func TestBoxWaitDisconnectReleases(t *testing.T) {
+	t.Parallel()
 	s, sock := boxSession(t)
 	driver := dialBox(t, sock)
 	driver.send("msg-wait", `{"key":"lane/a","state":"done","timeoutMs":60000}`)
@@ -229,6 +233,7 @@ func TestBoxWaitDisconnectReleases(t *testing.T) {
 // its state with its own pane id, and the driver waits for the match, both over
 // the session socket.
 func TestBoxWaitShellInPane(t *testing.T) {
+	t.Parallel()
 	s, sock := boxSession(t)
 	s.mu.Lock()
 	pane := s.st.ActiveWindow().Focus

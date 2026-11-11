@@ -9,20 +9,10 @@ import (
 	"time"
 
 	"dm/internal/layout"
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
-
-// shortenReflowSettle makes the settle short enough for a test and restores it
-// afterwards.
-func shortenReflowSettle(t *testing.T) {
-	t.Helper()
-	old := reflowSettle
-	reflowSettle = 20 * time.Millisecond
-	t.Cleanup(func() { reflowSettle = old })
-}
 
 // fakeReflowPane answers a pane socket the way a pane daemon does: a "screen"
 // request gets the current picture, a "reflow" request gets a picture at the
@@ -37,10 +27,10 @@ type fakeReflowPane struct {
 	conns []net.Conn
 }
 
-func newFakeReflowPane(t *testing.T, session, id string, silent bool) *fakeReflowPane {
+func newFakeReflowPane(t *testing.T, st *session.State, id string, silent bool) *fakeReflowPane {
 	t.Helper()
 	f := &fakeReflowPane{id: id, silent: silent}
-	sock := paths.PaneSock(session, id)
+	sock := st.PaneSock(id)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -145,8 +135,7 @@ type reflowFixture struct {
 
 func newReflowFixture(t *testing.T, name string, ids ...string) *reflowFixture {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState(name)
+	st := session.NewStateAt(t.TempDir(), name)
 	w := st.ActiveWindow()
 	kids := make([]*layout.Node, 0, len(ids))
 	for _, id := range ids {
@@ -158,9 +147,12 @@ func newReflowFixture(t *testing.T, name string, ids ...string) *reflowFixture {
 
 	f := &reflowFixture{name: name, ids: ids, panes: map[string]*fakeReflowPane{}}
 	for _, id := range ids {
-		f.panes[id] = newFakeReflowPane(t, name, id, false)
+		f.panes[id] = newFakeReflowPane(t, st, id, false)
 	}
 	f.s = railServer(st)
+	// A short settle keeps the fixture's waits quick. The server carries its
+	// own settle, so parallel tests never share the package default.
+	f.s.reflowSettle = 20 * time.Millisecond
 	for _, id := range ids {
 		srv, cli := net.Pipe()
 		f.s.panes[id] = &paneConn{id: id, c: srv}
@@ -253,7 +245,7 @@ func (f *reflowFixture) expectNoScreen(t *testing.T, wait time.Duration) {
 // asks each affected pane once, at its recorded size, and broadcasts one screen
 // per answer.
 func TestReflowOnWidthChange(t *testing.T) {
-	shortenReflowSettle(t)
+	t.Parallel()
 	f := newReflowFixture(t, "reflowsize", "w1p1", "w1p2")
 	f.resize(120, 40)
 
@@ -302,7 +294,7 @@ func TestReflowOnWidthChange(t *testing.T) {
 // TestReflowHeightOnlyDoesNotArm proves a height change never re-wraps, so it
 // arms nothing.
 func TestReflowHeightOnlyDoesNotArm(t *testing.T) {
-	shortenReflowSettle(t)
+	t.Parallel()
 	f := newReflowFixture(t, "reflowheight", "w1p1")
 	f.s.mu.Lock()
 	cols := f.s.cols
@@ -320,7 +312,7 @@ func TestReflowHeightOnlyDoesNotArm(t *testing.T) {
 // TestReflowDragCoalesces proves two width changes inside one settle produce
 // exactly one request, at the final size.
 func TestReflowDragCoalesces(t *testing.T) {
-	shortenReflowSettle(t)
+	t.Parallel()
 	f := newReflowFixture(t, "reflowdrag", "w1p1")
 	f.resize(100, 40)
 	f.resize(130, 40)
@@ -346,7 +338,7 @@ func TestReflowDragCoalesces(t *testing.T) {
 // TestReflowSilentPaneDoesNotBlockOthers proves a pane that does not answer is
 // skipped while the rest still get their picture.
 func TestReflowSilentPaneDoesNotBlockOthers(t *testing.T) {
-	shortenReflowSettle(t)
+	t.Parallel()
 	f := newReflowFixture(t, "reflowsilent", "w1p1", "w1p2")
 	f.panes["w1p2"].mu.Lock()
 	f.panes["w1p2"].silent = true
