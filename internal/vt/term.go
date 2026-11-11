@@ -34,6 +34,10 @@ type Term struct {
 	startSet  bool
 	endPos    int64
 	endSet    bool
+	// endCode carries the exit status the most recent D mark reported, when
+	// its body carried one.
+	endCode    int
+	endCodeSet bool
 
 	// streamPos counts the bytes this terminal has parsed. markStart is where
 	// the OSC currently being parsed began, so a mark names the start of its

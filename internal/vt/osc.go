@@ -45,11 +45,15 @@ func (t *Term) oscCommand(body string) {
 // oscPrompt handles OSC 133: the shell integration prompt marks. A is the
 // prompt start, B the end of the prompt, C the command start and D the command
 // end. The mark records the stream byte offset where its sequence began, the
-// same coordinate space the yank anchor uses. Unknown or malformed bodies are
-// ignored, as every other unknown OSC command is.
+// same coordinate space the yank anchor uses. The D body may carry the exit
+// status, either as a bare number or prefixed with 0 for the unsigned format,
+// as in "D;0;130". Unknown or malformed bodies are ignored, as every other
+// unknown OSC command is.
 func (t *Term) oscPrompt(rest string) {
 	kind := rest
+	params := ""
 	if i := strings.IndexByte(kind, ';'); i >= 0 {
+		params = kind[i+1:]
 		kind = kind[:i]
 	}
 	kind = strings.TrimSpace(kind)
@@ -63,7 +67,26 @@ func (t *Term) oscPrompt(rest string) {
 		t.startPos, t.startSet = t.markStart, true
 	case "D":
 		t.endPos, t.endSet = t.markStart, true
+		code, ok := parseExitCode(params)
+		t.endCode, t.endCodeSet = code, ok
 	}
+}
+
+// parseExitCode reads the exit status of a D body. A bare D has no status, so
+// the empty body reports false.
+func parseExitCode(params string) (int, bool) {
+	fields := strings.Split(params, ";")
+	code := fields[0]
+	// The canonical shell integration form prefixes a 0 for the unsigned
+	// format, as in "0;130"; the 0 is padding, not the status.
+	if code == "0" && len(fields) > 1 {
+		code = fields[1]
+	}
+	n, err := strconv.Atoi(code)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // PromptStart returns the most recent OSC 133 prompt start as a stream byte
@@ -82,6 +105,12 @@ func (t *Term) CommandStart() (pos int64, ok bool) {
 // and whether one has been seen. It is where the command's output ends.
 func (t *Term) CommandEnd() (pos int64, ok bool) {
 	return t.endPos, t.endSet
+}
+
+// CommandExit returns the exit status the most recent OSC 133 D mark carried,
+// and whether that mark carried one. A bare D reports false.
+func (t *Term) CommandExit() (code int, ok bool) {
+	return t.endCode, t.endCodeSet
 }
 
 // oscPalette handles OSC 4: index;colour pairs.

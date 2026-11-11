@@ -160,3 +160,46 @@ func TestOSCPromptMarks(t *testing.T) {
 		t.Fatalf("junk moved the command start to %d", pos)
 	}
 }
+
+// The D mark of OSC 133 may carry the exit status the command ended with, as
+// "D;130" or in the unsigned format "D;0;130". A bare D reports no status.
+func TestOSCCommandExit(t *testing.T) {
+	term := NewTerm(20, 4)
+	if _, ok := term.CommandExit(); ok {
+		t.Fatal("a fresh terminal reports an exit status")
+	}
+	writeTerm(term, "\x1b]133;D;130\x1b\\")
+	if pos, ok := term.CommandEnd(); !ok || pos != 0 {
+		t.Fatalf("command end = %d, %v, want 0, true", pos, ok)
+	}
+	if code, ok := term.CommandExit(); !ok || code != 130 {
+		t.Fatalf("exit = %d, %v, want 130, true", code, ok)
+	}
+	// The unsigned format prefixes a 0 that is padding, not the status.
+	writeTerm(term, "\x1b]133;D;0;129\x1b\\")
+	if code, ok := term.CommandExit(); !ok || code != 129 {
+		t.Fatalf("exit = %d, %v, want 129, true", code, ok)
+	}
+	// Exit 0 parses too.
+	writeTerm(term, "\x1b]133;D;0\x1b\\")
+	if code, ok := term.CommandExit(); !ok || code != 0 {
+		t.Fatalf("exit = %d, %v, want 0, true", code, ok)
+	}
+	// A bare D drops the status and keeps the mark.
+	writeTerm(term, "\x1b]133;D\x1b\\")
+	if _, ok := term.CommandExit(); ok {
+		t.Fatal("a bare D reports an exit status")
+	}
+	if _, ok := term.CommandEnd(); !ok {
+		t.Fatal("a bare D lost the mark")
+	}
+	// A later D replaces an earlier one.
+	writeTerm(term, "\x1b]133;D;7\x1b\\")
+	if code, ok := term.CommandExit(); !ok || code != 7 {
+		t.Fatalf("exit = %d, %v, want 7, true", code, ok)
+	}
+	writeTerm(term, "\x1b]133;D;3\x1b\\")
+	if code, ok := term.CommandExit(); !ok || code != 3 {
+		t.Fatalf("exit = %d, %v, want 3, true", code, ok)
+	}
+}
