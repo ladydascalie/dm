@@ -1,0 +1,8 @@
+# Mutation testing settings for this repo.
+# Go's test cache deflates the coverage timing, so mutants need a large
+# timeout coefficient. Two workers keeps parallel go test builds from
+# thrashing the machine; higher worker counts kill almost nothing.
+unleash:
+  workers: 2
+  test-cpu: 4
+  timeout-coefficient: 30
