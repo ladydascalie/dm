@@ -41,10 +41,35 @@ func Urgent(state string) bool {
 	return false
 }
 
-// SystemNotify hands a title and a body to the desktop notifier. It is a
-// no-op when DM_NOTIFY is "0" or notify-send is not on PATH. The process is
-// started here and reaped in the background under notifyTimeout, so a caller
-// never waits for the notifier.
+// Config is the explicit notifier configuration: the on/off switch and the
+// path to the notify-send binary.
+type Config struct {
+	Enabled bool
+	BinPath string
+}
+
+// Send hands a title and a body to the desktop notifier under explicit
+// configuration. It is a no-op when cfg.Enabled is false, cfg.BinPath is
+// empty or the title is empty. The process is started here and reaped in the
+// background under notifyTimeout, so a caller never waits for the notifier.
+func Send(cfg Config, title, body string) {
+	if !cfg.Enabled || cfg.BinPath == "" || title == "" {
+		return
+	}
+	// The fork happens in the goroutine: the caller is the pane watch loop,
+	// and a loaded host must not stall status handling.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, cfg.BinPath, "-a", "dm", "-t", "10000", "-u", "normal", title, body)
+		_ = cmd.Run()
+	}()
+}
+
+// SystemNotify hands a title and a body to the desktop notifier. It is the
+// env-defaults wrapper around Send: it is a no-op when DM_NOTIFY is "0" and
+// resolves notify-send from PATH. The lookup and the fork happen in the
+// goroutine, so a caller never waits for the notifier.
 func SystemNotify(title, body string) {
 	if title == "" || os.Getenv("DM_NOTIFY") == "0" {
 		return
@@ -56,9 +81,6 @@ func SystemNotify(title, body string) {
 		if err != nil {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, path, "-a", "dm", "-t", "10000", "-u", "normal", title, body)
-		_ = cmd.Run()
+		Send(Config{Enabled: true, BinPath: path}, title, body)
 	}()
 }
