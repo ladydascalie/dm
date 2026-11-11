@@ -55,7 +55,14 @@ type cmdFlags struct {
 
 func newFlags(name string) *cmdFlags {
 	c := &cmdFlags{fs: flag.NewFlagSet(name, flag.ExitOnError)}
-	c.fs.StringVar(&c.session, "s", "main", "session name")
+	// A pane exports its session, so a command from inside it targets that
+	// session without -s. Outside dm the default stays main.
+	if def := os.Getenv("DM_SESSION"); def != "" {
+		c.session = def
+	} else {
+		c.session = "main"
+	}
+	c.fs.StringVar(&c.session, "s", c.session, "session name")
 	return c
 }
 

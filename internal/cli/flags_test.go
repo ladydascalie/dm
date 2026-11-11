@@ -41,6 +41,29 @@ func TestReorderKeepsADash(t *testing.T) {
 	}
 }
 
+// TestSessionDefaultsToThePaneEnv proves a command from inside a pane targets
+// that pane's session without -s, and stays main outside dm.
+func TestSessionDefaultsToThePaneEnv(t *testing.T) {
+	t.Setenv("DM_SESSION", "waiter")
+	if got := newFlags("wait").session; got != "waiter" {
+		t.Fatalf("session with DM_SESSION set = %q, want waiter", got)
+	}
+	os.Unsetenv("DM_SESSION")
+	if got := newFlags("wait").session; got != "main" {
+		t.Fatalf("session without DM_SESSION = %q, want main", got)
+	}
+}
+
+// TestSessionFlagBeatsThePaneEnv proves -s still selects another session.
+func TestSessionFlagBeatsThePaneEnv(t *testing.T) {
+	t.Setenv("DM_SESSION", "waiter")
+	c := newFlags("wait")
+	c.parse([]string{"-s", "other"})
+	if got := c.session; got != "other" {
+		t.Fatalf("session with -s other = %q, want other", got)
+	}
+}
+
 // TestBoxCursor proves -after turns into the request cursor, and that the
 // default -1 sends no cursor at all.
 func TestBoxCursor(t *testing.T) {
