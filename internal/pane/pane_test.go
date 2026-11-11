@@ -10,6 +10,7 @@ import (
 // TestShellCwd reads a process's directory through /proc and survives a pid
 // that has none.
 func TestShellCwd(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	want, err := filepath.EvalSymlinks(dir)
 	if err != nil {

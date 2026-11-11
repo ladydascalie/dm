@@ -14,6 +14,7 @@ import (
 // terminal state as a versioned snapshot, not an ANSI replay, and that the
 // snapshot decodes and restores.
 func TestScreenReplyCarriesSnapshot(t *testing.T) {
+	t.Parallel()
 	p := &paneProc{
 		id:   "w1p1",
 		vt:   vt.NewTerm(20, 3),

@@ -11,6 +11,7 @@ import (
 // cluster once its output stops, so the read action shows a program's last
 // character without waiting for the next chunk.
 func TestPaneFlushesQuietCluster(t *testing.T) {
+	t.Parallel()
 	p := &paneProc{vt: vt.NewTerm(20, 3), ring: &scrollRing{}, subs: map[*subConn]bool{}}
 	p.mu.Lock()
 	p.publishLocked([]byte("日"))

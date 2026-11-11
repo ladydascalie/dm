@@ -143,6 +143,7 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool, what string) {
 // TestRunRefusesMissingIdentity proves Run validates the pane's identity
 // before it touches a pty or a socket.
 func TestRunRefusesMissingIdentity(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		args []string
@@ -154,6 +155,7 @@ func TestRunRefusesMissingIdentity(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			err := Run(tc.args)
 			if err == nil {
 				t.Fatalf("Run(%v) started without an identity", tc.args)
@@ -169,6 +171,9 @@ func TestRunRefusesMissingIdentity(t *testing.T) {
 // and the cwd from the process's directory: the defaults reach the command it
 // tries to start, and a shell that does not exist stops Run with the start
 // error instead of half a daemon.
+//
+// Serial, not parallel: this test verifies env behaviour, and t.Setenv cannot
+// run alongside other tests because it mutates the process environment.
 func TestRunDefaultsResolveToABadShell(t *testing.T) {
 	t.Setenv("SHELL", "/nonexistent-dm-test-shell")
 	err := Run([]string{"--id", "p1", "--session", "s1"})
@@ -182,6 +187,7 @@ func TestRunDefaultsResolveToABadShell(t *testing.T) {
 
 // TestRunRejectsBadFlags proves an unknown flag is an argument error.
 func TestRunRejectsBadFlags(t *testing.T) {
+	t.Parallel()
 	if err := Run([]string{"--definitely-not-a-flag"}); err == nil {
 		t.Fatal("Run accepted an unknown flag")
 	}
@@ -190,6 +196,7 @@ func TestRunRejectsBadFlags(t *testing.T) {
 // TestReadLoopPublishesAndReportsExit proves the pane's read loop turns the
 // pty's bytes into broadcasts, and the pty's end into a dead pane.
 func TestReadLoopPublishesAndReportsExit(t *testing.T) {
+	t.Parallel()
 	r, w := ptyPipe(t)
 	p := &paneProc{
 		id: "w1p1", vt: vt.NewTerm(20, 5), ring: &scrollRing{},
@@ -234,6 +241,7 @@ func TestReadLoopPublishesAndReportsExit(t *testing.T) {
 // TestReplyTerminalWritesIntoThePty proves a terminal reply travels to the
 // application through the pty's input side.
 func TestReplyTerminalWritesIntoThePty(t *testing.T) {
+	t.Parallel()
 	r, w := ptyPipe(t)
 	p := &paneProc{ptmx: w}
 	p.replyTerminal("\x1b[?25h")
@@ -251,6 +259,7 @@ func TestReplyTerminalWritesIntoThePty(t *testing.T) {
 // TestReplyQueryAnswersTheProbe proves the OSC 7501 probe is echoed back
 // into the pty, which is the channel the asking program reads.
 func TestReplyQueryAnswersTheProbe(t *testing.T) {
+	t.Parallel()
 	r, w := ptyPipe(t)
 	p := &paneProc{ptmx: w}
 	p.replyQuery()
@@ -267,6 +276,7 @@ func TestReplyQueryAnswersTheProbe(t *testing.T) {
 // TestCursorPosReportsTheScreenCursor proves the zero-based cursor the pane
 // reports is the one on its screen.
 func TestCursorPosReportsTheScreenCursor(t *testing.T) {
+	t.Parallel()
 	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, subs: map[*subConn]bool{}}
 	p.vt.Write([]byte("hello\r\nworld"))
 	p.vt.Flush()
@@ -279,6 +289,7 @@ func TestCursorPosReportsTheScreenCursor(t *testing.T) {
 // TestSetStatusBroadcastsChangeOnly proves a pane fans a status out once: a
 // sample that repeats the state sends nothing.
 func TestSetStatusBroadcastsChangeOnly(t *testing.T) {
+	t.Parallel()
 	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, subs: map[*subConn]bool{}}
 	msgs := subscriber(p)
 
@@ -295,6 +306,7 @@ func TestSetStatusBroadcastsChangeOnly(t *testing.T) {
 // TestSampleCwdReportsMoves proves a pane reports the shell's directory when
 // it moved and nothing when it stands still or the shell is gone.
 func TestSampleCwdReportsMoves(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	want, err := filepath.EvalSymlinks(dir)
 	if err != nil {
@@ -325,6 +337,7 @@ func TestSampleCwdReportsMoves(t *testing.T) {
 // TestSampleTitleReportsChanges proves a pane reports the window title when
 // it changed and nothing when the program never set one.
 func TestSampleTitleReportsChanges(t *testing.T) {
+	t.Parallel()
 	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, subs: map[*subConn]bool{}}
 	msgs := subscriber(p)
 
@@ -348,6 +361,7 @@ func TestSampleTitleReportsChanges(t *testing.T) {
 // TestWatchShellSamplesTheCwd proves the watcher reports the shell's
 // directory on its own, without a request.
 func TestWatchShellSamplesTheCwd(t *testing.T) {
+	t.Parallel()
 	cmd := sleepingShell(t, "sleep 30")
 	p := &paneProc{
 		id: "w1p1", vt: vt.NewTerm(20, 5), ring: &scrollRing{},
@@ -365,6 +379,7 @@ func TestWatchShellSamplesTheCwd(t *testing.T) {
 // TestWatchShellWithoutAShellReturns proves a pane with no command does not
 // watch anything.
 func TestWatchShellWithoutAShellReturns(t *testing.T) {
+	t.Parallel()
 	p := &paneProc{subs: map[*subConn]bool{}}
 	done := make(chan struct{})
 	go func() { p.watchShell(); close(done) }()
@@ -378,6 +393,7 @@ func TestWatchShellWithoutAShellReturns(t *testing.T) {
 // TestShutdownClosesThePtyAndHupsTheShell proves a pane's shutdown closes
 // the pty, so attached readers see the end, and hangs the shell up.
 func TestShutdownClosesThePtyAndHupsTheShell(t *testing.T) {
+	t.Parallel()
 	r, w := ptyPipe(t)
 	cmd := sleepingShell(t, "sleep 30")
 	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, ptmx: w, cmd: cmd}
@@ -399,6 +415,7 @@ func TestShutdownClosesThePtyAndHupsTheShell(t *testing.T) {
 
 // TestWritePIDRecordsTheDaemon proves the pid file names this process.
 func TestWritePIDRecordsTheDaemon(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "pane.pid")
 	writePID(path)
 	b, err := os.ReadFile(path)
@@ -413,6 +430,7 @@ func TestWritePIDRecordsTheDaemon(t *testing.T) {
 // TestSplitLinesTrimsAndDropsTrailingBlanks proves the read reply keeps every
 // row with content, trims the padding and drops the trailing blank rows.
 func TestSplitLines(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want []string
@@ -439,6 +457,7 @@ func TestSplitLines(t *testing.T) {
 // TestReadActionServesTheScreen proves the read action answers with the
 // visible rows, the pane's status and whether the shell has died.
 func TestReadActionServesTheScreen(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("one\r\ntwo\r\n"))
@@ -481,6 +500,7 @@ func TestReadActionServesTheScreen(t *testing.T) {
 // TestStatusAndCwdActionsServeState proves the status and cwd actions answer
 // with the pane's sampled state.
 func TestStatusAndCwdActionsServeState(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 
 	reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "status", ID: 1})
@@ -500,6 +520,7 @@ func TestStatusAndCwdActionsServeState(t *testing.T) {
 // TestResizeRejectsTinyGeometry proves a size below two columns or rows is
 // refused and leaves the screen as it was.
 func TestResizeRejectsTinyGeometry(t *testing.T) {
+	t.Parallel()
 	_, cli, msgs := yankPane(t, 20, 5)
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "resize", Cols: 1, Rows: 0})
 	paneSync(t, cli, msgs)
@@ -517,6 +538,7 @@ func TestResizeRejectsTinyGeometry(t *testing.T) {
 // TestResizeAppliesTheGeometry proves a real resize changes the screen the
 // next read and snapshot report.
 func TestResizeAppliesTheGeometry(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("hello\r\nworld\r\n"))
@@ -535,6 +557,7 @@ func TestResizeAppliesTheGeometry(t *testing.T) {
 // block, not a command: its echo is dropped, and the next yank keeps the
 // output the previous command's echo would have masked.
 func TestBulkPasteClearsTheEcho(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -559,6 +582,7 @@ func TestBulkPasteClearsTheEcho(t *testing.T) {
 // anchor fell out of the ring copies from the oldest history the pane still
 // holds, not nothing and not a panic.
 func TestYankStartsAtTheOldestHeldByteWhenTheRingWrapped(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 80, 24)
 	stream := ringStream(t, ringMax+ringMax/2)
 	feedPane(p, stream)
@@ -582,6 +606,7 @@ func TestYankStartsAtTheOldestHeldByteWhenTheRingWrapped(t *testing.T) {
 // TestYankCutsAtThePromptMarkWithoutACommandEnd proves an unmarked pane still
 // ends its copy at the prompt-start mark, so the prompt is not copied.
 func TestYankCutsAtThePromptMarkWithoutACommandEnd(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -601,6 +626,7 @@ func TestYankCutsAtThePromptMarkWithoutACommandEnd(t *testing.T) {
 // TestRingSliceAndIndexByteEdges proves the ring's slice and indexByte hold
 // at the edges: clamped ranges, empty ranges and a slice across the wrap.
 func TestRingSliceAndIndexByteEdges(t *testing.T) {
+	t.Parallel()
 	r := &scrollRing{}
 	r.Write([]byte("hello world"))
 

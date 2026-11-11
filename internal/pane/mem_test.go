@@ -41,6 +41,8 @@ func writeChunks(b []byte, write func([]byte)) {
 // TestScrollRingFixed fills the ring past its bound in small writes and holds
 // it to three properties: no write below the bound allocates, the length never
 // passes ringMax, and the bytes are exactly the newest tail of the stream.
+// Serial, not parallel: the zero-allocation claim is a process-wide
+// measurement, and a concurrent test's allocations would pollute it.
 func TestScrollRingFixed(t *testing.T) {
 	r := &scrollRing{}
 	chunk := bytes.Repeat([]byte("0123456789abcdef"), 2<<10)
@@ -106,6 +108,7 @@ func firstDiff(a, b []byte) int {
 // TestReplayAfterWrap asks a real pane connection for the replay once the ring
 // has wrapped, which is the path a client uses when it attaches late.
 func TestReplayAfterWrap(t *testing.T) {
+	t.Parallel()
 	stream := ringStream(t, 3*ringMax)
 	r := &scrollRing{}
 	writeChunks(stream, r.Write)
@@ -141,6 +144,8 @@ func TestReplayAfterWrap(t *testing.T) {
 
 // TestPaneHeapAfterBurst runs a few MiB through the pane's ring and VT and
 // requires the retained heap to stay under memBound once garbage is collected.
+// Serial, not parallel: the retained-heap delta reads process-wide MemStats,
+// and a concurrent test's allocations would land in the measurement.
 func TestPaneHeapAfterBurst(t *testing.T) {
 	const burstSize = 4 << 20
 	burst := ringStream(t, burstSize)

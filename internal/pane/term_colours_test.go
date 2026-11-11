@@ -45,6 +45,7 @@ func feed(f *osc.Filter, b string) {
 // pair under the pane lock and that the long-lived filter answers OSC 11 with
 // the stored value on the next read.
 func TestTermColoursActionReachesFilter(t *testing.T) {
+	t.Parallel()
 	p := newTestPane(osc.TermFG, osc.TermBG)
 	filter, replies := captureReplies(p)
 
@@ -99,6 +100,7 @@ func TestTermColoursActionReachesFilter(t *testing.T) {
 // TestTermColoursFromStart proves a pane that started with --fg and --bg
 // answers those values before any term-colours action arrives.
 func TestTermColoursFromStart(t *testing.T) {
+	t.Parallel()
 	p := newTestPane("rgb:aaaa/bbbb/cccc", "rgb:dddd/eeee/ffff")
 	filter, replies := captureReplies(p)
 	feed(filter, "\x1b]11;?\x1b\\")
@@ -113,6 +115,7 @@ func TestTermColoursFromStart(t *testing.T) {
 // TestTermColoursEmptyIsNoOp proves an empty field leaves the other half and
 // the pane's current value alone rather than erroring or blanking it.
 func TestTermColoursEmptyIsNoOp(t *testing.T) {
+	t.Parallel()
 	p := newTestPane(osc.TermFG, osc.TermBG)
 	serve, cli := net.Pipe()
 	defer func() { _ = cli.Close() }()
@@ -145,6 +148,7 @@ func TestTermColoursEmptyIsNoOp(t *testing.T) {
 // TestRunRefusesEmptyTermColour proves Run rejects an empty colour before it
 // starts a shell.
 func TestRunRefusesEmptyTermColour(t *testing.T) {
+	t.Parallel()
 	err := Run([]string{"--id", "p1", "--session", "s1", "--fg", ""})
 	if err == nil {
 		t.Fatal("Run accepted an empty --fg")
