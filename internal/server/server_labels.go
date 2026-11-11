@@ -102,6 +102,16 @@ var detectGit = func(cwd string) gitInfo {
 	return info
 }
 
+// gitDetect returns the server's git detector: the field a test stubs, or
+// the production detectGit. A field keeps a stub from touching the package
+// global while tests run in parallel.
+func (s *server) gitDetect() func(string) gitInfo {
+	if s.detect != nil {
+		return s.detect
+	}
+	return detectGit
+}
+
 // gitFor returns the cached git labels for a working directory and starts a
 // background check when the entry is missing or stale. It never runs git on
 // the caller's goroutine, because snapshots hold s.mu.
@@ -134,7 +144,7 @@ func (s *server) gitFor(cwd string) gitInfo {
 }
 
 func (s *server) loadGit(cwd string) {
-	info := detectGit(cwd)
+	info := s.gitDetect()(cwd)
 	s.branchMu.Lock()
 	e := s.branches[cwd]
 	if e == nil {

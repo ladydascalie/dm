@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/testutil"
 	"dm/internal/wire"
@@ -19,6 +18,7 @@ import (
 // TestNormaliseTermColour accepts the two forms a terminal answers with and
 // rejects everything else, naming the value it refused.
 func TestNormaliseTermColour(t *testing.T) {
+	t.Parallel()
 	ok := []struct{ in, want string }{
 		{"rgb:ffff/0000/1234", "rgb:ffff/0000/1234"},
 		{"rgb:FFFF/0000/ABCD", "rgb:ffff/0000/abcd"},
@@ -59,6 +59,7 @@ func TestNormaliseTermColour(t *testing.T) {
 // TestTermColoursFansOut proves a report reaches every live pane conn with the
 // normalised pair and that the client gets an OK reply.
 func TestTermColoursFansOut(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	p1 := probePane(t, s, "w1p1")
@@ -94,6 +95,7 @@ func TestTermColoursFansOut(t *testing.T) {
 // TestTermColoursSecondReportReplaces proves a later report overwrites the
 // stored pair and fans the new one out.
 func TestTermColoursSecondReportReplaces(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	p := probePane(t, s, "w1p1")
@@ -128,6 +130,7 @@ func TestTermColoursSecondReportReplaces(t *testing.T) {
 // TestTermColoursBadValueChangesNothing proves a bad value replies with the
 // error, leaves the stored pair alone and fans nothing out.
 func TestTermColoursBadValueChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	p := probePane(t, s, "w1p1")
@@ -167,11 +170,11 @@ func TestTermColoursBadValueChangesNothing(t *testing.T) {
 // TestTermColoursSpawnCarriesFlags proves a spawn after a report builds the
 // command line with both flags. The spawn is captured, not started.
 func TestTermColoursSpawnCarriesFlags(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("spawn")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "spawn")
 	id := testutil.RootPane(st)
 	s := railServer(st)
-	if err := os.MkdirAll(filepath.Join(paths.SessionDir("spawn"), "panes"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(st.SessionDir(), "panes"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -199,13 +202,13 @@ func TestTermColoursSpawnCarriesFlags(t *testing.T) {
 // TestTermColoursAdoptedPaneGetsAction proves a pane that outlived a server is
 // sent the stored pair after the dial succeeds.
 func TestTermColoursAdoptedPaneGetsAction(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("adopt")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "adopt")
 	id := testutil.RootPane(st)
 	s := railServer(st)
 	s.termColours = &termColours{fg: "rgb:1111/2222/3333", bg: "rgb:4444/5555/6666"}
 
-	sock := paths.PaneSock("adopt", id)
+	sock := st.PaneSock(id)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}

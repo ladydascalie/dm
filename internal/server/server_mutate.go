@@ -88,7 +88,7 @@ func (s *server) statuses() map[string]wire.Status {
 
 // paneLines reads the pane VT through a short-lived socket connection.
 func (s *server) paneLines(id string) ([]string, wire.Status, error) {
-	m, err := paneRequest(s.st.Name, id, wire.Msg{Type: "req", Action: "read"})
+	m, err := paneRequest(s.st, id, wire.Msg{Type: "req", Action: "read"})
 	if err != nil {
 		return nil, wire.Status{}, err
 	}
@@ -125,7 +125,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 		return nil, fmt.Errorf("no pane %q", id)
 	}
 	r := layout.Rect{W: ps.Cols, H: ps.Rows}
-	rp := readPaneReplay(s.st.Name, id)
+	rp := readPaneReplay(s.st, id)
 	if !rp.ok {
 		return nil, fmt.Errorf("no pane %q", id)
 	}
@@ -171,7 +171,7 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 // trailing blank rows and owns the clipboard. The anchor flag is false when the
 // pane has never been sent an Enter.
 func (s *server) paneYank(id string) ([]string, int, int, bool, error) {
-	m, err := paneRequest(s.st.Name, id, wire.Msg{Type: "req", Action: "yank"})
+	m, err := paneRequest(s.st, id, wire.Msg{Type: "req", Action: "yank"})
 	if err != nil {
 		return nil, 0, 0, false, err
 	}
@@ -250,7 +250,7 @@ func (s *server) resync() {
 	s.mu.Unlock()
 	s.broadcastScreens(ids)
 	for _, id := range ids {
-		rp := readPaneReplay(s.st.Name, id)
+		rp := readPaneReplay(s.st, id)
 		if !rp.ok {
 			continue
 		}
@@ -812,7 +812,7 @@ func (s *server) setPaneTitle(id, title string) {
 // spawned by an older binary.
 func (s *server) liveCwd(id string) string {
 	if id != "" {
-		if m, err := paneRequest(s.st.Name, id, wire.Msg{Type: "req", Action: "cwd"}); err == nil && m.Cwd != "" {
+		if m, err := paneRequest(s.st, id, wire.Msg{Type: "req", Action: "cwd"}); err == nil && m.Cwd != "" {
 			return m.Cwd
 		}
 	}

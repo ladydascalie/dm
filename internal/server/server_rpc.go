@@ -94,7 +94,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
 			return
 		}
-		got, err := paneRequest(s.st.Name, m.Target, wire.Msg{Type: "req", Action: "screen"})
+		got, err := paneRequest(s.st, m.Target, wire.Msg{Type: "req", Action: "screen"})
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
@@ -166,7 +166,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 
 	case "replay":
 		// The pane's history ring, on demand. Attach no longer pushes it.
-		rp := readPaneReplay(s.st.Name, m.Target)
+		rp := readPaneReplay(s.st, m.Target)
 		if !rp.ok {
 			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
 			return

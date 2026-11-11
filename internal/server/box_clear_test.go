@@ -11,6 +11,7 @@ import (
 // TestBoxClearSaveErrorReplies: a failed state save rides out on the clear
 // reply, and the count reports what the in-memory log lost.
 func TestBoxClearSaveErrorReplies(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	boxPost(t, s, cl, conn, "lane/a", "done", "gate green")
@@ -40,6 +41,7 @@ func TestBoxClearSaveErrorReplies(t *testing.T) {
 // TestBoxClearErrorRepliesWithCount calls the clear under a failing save
 // directly, so the count still reports the removal that the reply drops.
 func TestBoxClearErrorRepliesWithCount(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	boxPost(t, s, cl, conn, "lane/a", "done", "gate green")
@@ -58,6 +60,7 @@ func TestBoxClearErrorRepliesWithCount(t *testing.T) {
 // A prefix clear drops only the keys under the prefix and reports how many
 // went; the rest of the log stays.
 func TestBoxClearPrefixDropsOnlyPrefixed(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	boxPost(t, s, cl, conn, "notify/w1p1", "done", "one")
@@ -95,6 +98,7 @@ func TestBoxClearPrefixDropsOnlyPrefixed(t *testing.T) {
 
 // A clear naming both the key and the prefix is refused.
 func TestBoxClearRefusesKeyAndPrefix(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	reply := boxCall(t, s, cl, conn, "msg-clear", `{"key":"a","keyPrefix":"b"}`)

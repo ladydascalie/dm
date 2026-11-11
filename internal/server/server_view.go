@@ -11,7 +11,6 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/layout"
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -318,7 +317,7 @@ func (s *server) paneExited(id string) {
 	if pc != nil {
 		_ = pc.c.Close()
 	}
-	old := paths.PaneSock(s.st.Name, id)
+	old := s.st.PaneSock(id)
 	_ = os.Remove(old)
 	_ = os.Remove(old + ".pid")
 
@@ -332,7 +331,7 @@ func (s *server) paneExited(id string) {
 
 	s.broadcastScreens(ids)
 	for _, pid := range ids {
-		rp := readPaneReplay(s.st.Name, pid)
+		rp := readPaneReplay(s.st, pid)
 		if !rp.ok {
 			continue
 		}
@@ -393,6 +392,25 @@ func (s *server) countPanes() int {
 	return n
 }
 
+// settleWait is the quiet period before a reflow settles: the server's own
+// override, or the default.
+func (s *server) settleWait() time.Duration {
+	if s.reflowSettle > 0 {
+		return s.reflowSettle
+	}
+	return reflowSettle
+}
+
+// exitFunc is the process exit the server uses: the field a test stubs, or
+// os.Exit. A field keeps a stub from touching the package global while tests
+// run in parallel.
+func (s *server) exitFunc() func(int) {
+	if s.exit != nil {
+		return s.exit
+	}
+	return os.Exit
+}
+
 // endSessionExit terminates the process. It is a variable so a test can
 // survive a last-pane exit's shutdown and assert on what came before it.
 var endSessionExit = os.Exit
@@ -412,17 +430,17 @@ func (s *server) endSession() {
 
 	// Remove the session before closing the listener: accepting goroutine wakes
 	// on the closed listener and may exit the process immediately.
-	name := s.st.Name
-	_ = os.Remove(paths.ServerSock(name))
-	_ = os.Remove(filepath.Join(paths.SessionDir(name), "server.pid"))
-	_ = os.RemoveAll(paths.SessionDir(name))
+	st := s.st
+	_ = os.Remove(st.ServerSock())
+	_ = os.Remove(filepath.Join(st.SessionDir(), "server.pid"))
+	_ = os.RemoveAll(st.SessionDir())
 	for _, c := range clients {
 		_ = c.c.Close()
 	}
 	if s.ln != nil {
 		_ = s.ln.Close()
 	}
-	endSessionExit(0)
+	s.exitFunc()(0)
 }
 
 func (s *server) pushSnapshot() {
@@ -490,10 +508,10 @@ func (s *server) armReflowLocked(ids []string) {
 		s.reflowWait[id] = true
 	}
 	if s.reflowTimer == nil {
-		s.reflowTimer = time.AfterFunc(reflowSettle, s.settleReflow)
+		s.reflowTimer = time.AfterFunc(s.settleWait(), s.settleReflow)
 		return
 	}
-	s.reflowTimer.Reset(reflowSettle)
+	s.reflowTimer.Reset(s.settleWait())
 }
 
 // stopReflowLocked cancels a pending settle and forgets the panes waiting on
@@ -527,7 +545,7 @@ func (s *server) settleReflow() {
 			sizes[id] = [2]int{ps.Cols, ps.Rows}
 		}
 	}
-	name := s.st.Name
+	st := s.st
 	s.mu.Unlock()
 
 	type answer struct {
@@ -541,7 +559,7 @@ func (s *server) settleReflow() {
 		go func(id string, cols, rows int) {
 			defer wg.Done()
 			m := wire.Msg{Type: "req", Action: "reflow", Cols: cols, Rows: rows}
-			answers <- answer{id: id, ps: paneScreenRequest(name, id, m)}
+			answers <- answer{id: id, ps: paneScreenRequest(st, id, m)}
 		}(id, sz[0], sz[1])
 	}
 	go func() {
@@ -590,11 +608,13 @@ func (s *server) syncSizes() {
 		})
 	}
 	s.armReflowLocked(widened)
+	// The save holds the lock: st is mutated under it, so a marshal outside
+	// it races a pane exit that deletes its state.
+	_ = s.st.Save()
 	s.mu.Unlock()
 	for _, f := range calls {
 		f()
 	}
-	_ = s.st.Save()
 }
 
 func (s *server) serve(c net.Conn) {
@@ -720,9 +740,9 @@ type paneScreen struct {
 // paneScreenRequest dials the pane, sends one request and reads the screen
 // reply. A fresh connection is a subscriber, so a busy pane can deliver bytes,
 // status or cwd before the screen. Take the screen, not the first frame.
-func paneScreenRequest(session, id string, m wire.Msg) paneScreen {
+func paneScreenRequest(st *session.State, id string, m wire.Msg) paneScreen {
 	var ps paneScreen
-	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
+	c, err := net.DialTimeout("unix", st.PaneSock(id), time.Second)
 	if err != nil {
 		return ps
 	}
@@ -755,15 +775,15 @@ func paneScreenRequest(session, id string, m wire.Msg) paneScreen {
 }
 
 // readPaneScreen asks a pane for its visible screen.
-func readPaneScreen(session, id string) paneScreen {
-	return paneScreenRequest(session, id, wire.Msg{Type: "req", Action: "screen"})
+func readPaneScreen(st *session.State, id string) paneScreen {
+	return paneScreenRequest(st, id, wire.Msg{Type: "req", Action: "screen"})
 }
 
 // sendScreens asks each pane for its visible screen and hands it to send. It
 // runs after a resize so the pane serialises at its new size.
 func (s *server) sendScreens(ids []string, send func(wire.Msg)) (changed bool) {
 	for _, id := range ids {
-		ps := readPaneScreen(s.st.Name, id)
+		ps := readPaneScreen(s.st, id)
 		if !ps.ok {
 			continue
 		}
@@ -810,9 +830,9 @@ type paneReplay struct {
 	ok    bool
 }
 
-func readPaneReplay(session, id string) paneReplay {
+func readPaneReplay(st *session.State, id string) paneReplay {
 	var rp paneReplay
-	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
+	c, err := net.DialTimeout("unix", st.PaneSock(id), time.Second)
 	if err != nil {
 		return rp
 	}
@@ -848,9 +868,9 @@ func readPaneReplay(session, id string) paneReplay {
 	}
 }
 
-func paneRequest(session, id string, m wire.Msg) (wire.Msg, error) {
+func paneRequest(st *session.State, id string, m wire.Msg) (wire.Msg, error) {
 	var out wire.Msg
-	c, err := net.DialTimeout("unix", paths.PaneSock(session, id), time.Second)
+	c, err := net.DialTimeout("unix", st.PaneSock(id), time.Second)
 	if err != nil {
 		return out, err
 	}

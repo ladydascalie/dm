@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"dm/internal/layout"
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -16,8 +15,7 @@ import (
 // s2 in project b. The slice is interleaved on purpose.
 func projectState(t *testing.T) *session.State {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("project")
+	st := session.NewStateAt(t.TempDir(), "project")
 	st.Workspaces = []*session.Workspace{
 		{ID: "s1", Name: "one", Project: "a", Unfolded: true, Windows: []*session.Window{{ID: "w1", Name: "1"}}},
 		{ID: "s2", Name: "two", Project: "b", Unfolded: true, Windows: []*session.Window{{ID: "w2", Name: "2"}}},
@@ -52,6 +50,7 @@ func wantIDs(t *testing.T, st *session.State, want ...string) {
 // TestSetProjectTagsAndMoves proves set-project tags a workspace and moves it
 // to the end of its new project's block.
 func TestSetProjectTagsAndMoves(t *testing.T) {
+	t.Parallel()
 	st := projectState(t)
 	s := railServer(st)
 
@@ -67,6 +66,7 @@ func TestSetProjectTagsAndMoves(t *testing.T) {
 // TestSetProjectClears proves an empty name clears the project and moves the
 // workspace out of its old block.
 func TestSetProjectClears(t *testing.T) {
+	t.Parallel()
 	st := projectState(t)
 	s := railServer(st)
 
@@ -82,6 +82,7 @@ func TestSetProjectClears(t *testing.T) {
 // TestSetProjectKeepsActive proves moving a workspace does not change which
 // workspace is active.
 func TestSetProjectKeepsActive(t *testing.T) {
+	t.Parallel()
 	st := projectState(t)
 	st.Active = 2 // s3
 	s := railServer(st)
@@ -97,6 +98,7 @@ func TestSetProjectKeepsActive(t *testing.T) {
 // TestNewWorkspaceInheritsProject proves a new workspace takes the active
 // workspace's project and lands at the end of that project's block.
 func TestNewWorkspaceInheritsProject(t *testing.T) {
+	t.Parallel()
 	st := projectState(t)
 	st.Active = 2 // s3, project a
 	s := railServer(st)
@@ -121,6 +123,7 @@ func TestNewWorkspaceInheritsProject(t *testing.T) {
 // TestNewWorkspaceExplicitProject proves an explicit project wins over the
 // active workspace's project and lands at the end of that block.
 func TestNewWorkspaceExplicitProject(t *testing.T) {
+	t.Parallel()
 	st := projectState(t)
 	st.Active = 2 // s3, project a
 	s := railServer(st)
@@ -138,6 +141,7 @@ func TestNewWorkspaceExplicitProject(t *testing.T) {
 // TestNewWorkspaceNoFocusKeepsActive proves an insert before the active
 // workspace shifts the active index with it.
 func TestNewWorkspaceNoFocusKeepsActive(t *testing.T) {
+	t.Parallel()
 	st := projectState(t)
 	// Grouped order, so the insert lands before the active workspace.
 	st.Workspaces = []*session.Workspace{st.Workspaces[0], st.Workspaces[2], st.Workspaces[1]}
@@ -157,6 +161,7 @@ func TestNewWorkspaceNoFocusKeepsActive(t *testing.T) {
 // TestSnapshotCarriesProject proves the snapshot's pane entries carry the
 // project of their workspace.
 func TestSnapshotCarriesProject(t *testing.T) {
+	t.Parallel()
 	st := projectState(t)
 	ws := st.Workspaces[0]
 	ws.Windows[0].Root = &layout.Node{Pane: "w1p1"}
@@ -164,7 +169,7 @@ func TestSnapshotCarriesProject(t *testing.T) {
 	st.Panes["w1p1"] = &session.PaneState{Cwd: "/tmp"}
 	s := railServer(st)
 
-	snap := s.snapshotLocked()
+	snap := snapshot(s)
 	if len(snap.All) != 1 {
 		t.Fatalf("panes = %d, want 1", len(snap.All))
 	}
@@ -182,7 +187,7 @@ func TestSnapshotCarriesProject(t *testing.T) {
 // newWorkspace adopts a pane instead of spawning a shell.
 func fakePane(t *testing.T, st *session.State, paneID string) {
 	t.Helper()
-	sock := paths.PaneSock(st.Name, paneID)
+	sock := st.PaneSock(paneID)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}

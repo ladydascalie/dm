@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"dm/internal/layout"
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -20,9 +19,9 @@ import (
 
 // screenPane answers the pane socket with a screen and a replay, so the
 // server's resync path runs without a real pane daemon.
-func screenPane(t *testing.T, session, id string) {
+func screenPane(t *testing.T, st *session.State, id string) {
 	t.Helper()
-	sock := paths.PaneSock(session, id)
+	sock := st.PaneSock(id)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +65,7 @@ func screenPane(t *testing.T, session, id string) {
 // panes are answered by fake pane sockets; nothing spawns a process.
 func queueServer(t *testing.T, name string) (*server, string, string) {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState(name)
+	st := session.NewStateAt(t.TempDir(), name)
 	w := st.ActiveWindow()
 	a := w.NewPaneID()
 	b := w.NewPaneID()
@@ -75,11 +73,11 @@ func queueServer(t *testing.T, name string) (*server, string, string) {
 	w.Focus = a
 	st.Panes[a] = &session.PaneState{}
 	st.Panes[b] = &session.PaneState{}
-	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
+	if err := os.MkdirAll(st.SessionDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	screenPane(t, name, a)
-	screenPane(t, name, b)
+	screenPane(t, st, a)
+	screenPane(t, st, b)
 	s := railServer(st)
 	return s, a, b
 }
@@ -118,6 +116,7 @@ func readFrame(c net.Conn, wait time.Duration) (wire.Msg, error) {
 // An overflowed client then owes a picture, not a backlog: it refuses output,
 // still takes every other frame, and resyncs from a snapshot once it drains.
 func TestBroadcastWhileClientStalled(t *testing.T) {
+	t.Parallel()
 	s, a, b := queueServer(t, "stall")
 	cl, cli := stalledClient(t, s)
 	data := make([]byte, 8<<10)
@@ -193,6 +192,7 @@ func TestBroadcastWhileClientStalled(t *testing.T) {
 // TestStalledClientResyncsFromScreens proves a stalled client gets a picture,
 // not a backlog: once it drains, a snapshot then one screen per pane arrives.
 func TestStalledClientResyncsFromScreens(t *testing.T) {
+	t.Parallel()
 	s, a, b := queueServer(t, "resync")
 	cl, cli := stalledClient(t, s)
 	data := make([]byte, 8<<10)
@@ -259,6 +259,7 @@ func TestStalledClientResyncsFromScreens(t *testing.T) {
 // TestMutationRepliesWhileClientStalled proves a layout change still completes
 // and answers its request while a client is not reading its socket.
 func TestMutationRepliesWhileClientStalled(t *testing.T) {
+	t.Parallel()
 	s, a, b := queueServer(t, "mutate")
 	cl, cli := stalledClient(t, s)
 

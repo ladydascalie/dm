@@ -7,6 +7,7 @@ import (
 
 // The server renames the named window and leaves the active window alone.
 func TestRenameWindowHonoursTarget(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]
@@ -30,6 +31,7 @@ func TestRenameWindowHonoursTarget(t *testing.T) {
 // An unknown window and an empty name each return the error and change
 // nothing.
 func TestRenameWindowRefusals(t *testing.T) {
+	t.Parallel()
 	s, st := windowServer(t)
 	ws := st.ActiveWorkspace()
 	w1 := ws.Windows[0]

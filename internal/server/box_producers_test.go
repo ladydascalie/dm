@@ -51,6 +51,8 @@ func notifyEntries(t *testing.T, s *server) []box.Entry {
 // entry under the pane's notify topic and, with no client attached, pops.
 func TestNotifyPaneStatePostsAndDispatches(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
@@ -74,6 +76,8 @@ func TestNotifyPaneStatePostsAndDispatches(t *testing.T) {
 // still logs.
 func TestNotifyPaneStateSuppressedWhenFocused(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
@@ -97,6 +101,8 @@ func TestNotifyPaneStateSuppressedWhenFocused(t *testing.T) {
 // nothing; the entry is logged either way.
 func TestPaneExitPostsEntry(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
@@ -122,12 +128,13 @@ func TestPaneExitPostsEntry(t *testing.T) {
 // shutdown it runs.
 func TestLastPaneExitPostsEntry(t *testing.T) {
 	exitCode := make(chan int, 1)
-	endSessionExit = func(code int) { exitCode <- code }
-	t.Cleanup(func() { endSessionExit = os.Exit })
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
+	s.exit = func(code int) { exitCode <- code }
 	id := s.st.ActiveWindow().Focus
 	paneConnFor(t, s, id, "done for now")
 
@@ -159,6 +166,8 @@ func TestLastPaneExitPostsEntry(t *testing.T) {
 // An exit the operator watched pops nothing; the entry still logs.
 func TestPaneExitSuppressedWhenFocused(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)

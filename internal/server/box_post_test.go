@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"dm/internal/box"
-	"dm/internal/paths"
 	"dm/internal/wire"
 )
 
 // TestBoxPostPushesAndEchoes: a post pushes one box frame to every attached
 // client and the reply names the action it answers.
 func TestBoxPostPushesAndEchoes(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	s.mu.Lock()
@@ -58,7 +58,7 @@ func readOnlySession(t *testing.T, s *server) {
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
-	dir := paths.SessionDir(s.st.Name)
+	dir := s.st.SessionDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +71,7 @@ func readOnlySession(t *testing.T, s *server) {
 // TestBoxPostSaveErrorReplies: a failed state save rides out on the reply,
 // and the entry it appended is still in the in-memory log.
 func TestBoxPostSaveErrorReplies(t *testing.T) {
+	t.Parallel()
 	s := boxServer(t)
 	cl, conn := boxConn(t)
 	readOnlySession(t, s)

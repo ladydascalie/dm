@@ -9,8 +9,8 @@ import (
 )
 
 func TestAllPanesWorkspaceUnfolded(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("unfolded")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "unfolded")
 	s := railServer(st)
 	ws := st.Workspaces[0]
 	w := ws.Windows[0]
@@ -42,8 +42,8 @@ func TestAllPanesWorkspaceUnfolded(t *testing.T) {
 // active-window pane box starts below the tab bar row and stops above the
 // status bar row. The zoomed pane fills the reserved area.
 func TestPaneRectsReserveTabBarRow(t *testing.T) {
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState("tabbar")
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "tabbar")
 	id := testutil.RootPane(st)
 	s := railServer(st)
 

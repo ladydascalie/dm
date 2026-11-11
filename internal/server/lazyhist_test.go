@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"dm/internal/layout"
-	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -29,9 +28,9 @@ func ringFor(id string) []byte {
 // ringPane answers a pane socket with a small screen and a large ring. It
 // reports the alternate screen and mouse modes, so the client's pane facts can
 // be checked without a replay frame.
-func ringPane(t *testing.T, session, id string) {
+func ringPane(t *testing.T, st *session.State, id string) {
 	t.Helper()
-	sock := paths.PaneSock(session, id)
+	sock := st.PaneSock(id)
 	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +84,8 @@ func ringPane(t *testing.T, session, id string) {
 // ring pane socket and an adopted paneConn, so attach runs the real path.
 func histServer(t *testing.T, name string, panes int) (*server, []string) {
 	t.Helper()
-	t.Setenv("DM_STATE", t.TempDir())
-	st := session.NewState(name)
+	root := t.TempDir()
+	st := session.NewStateAt(root, name)
 	w := st.ActiveWindow()
 	ids := make([]string, 0, panes)
 	kids := make([]*layout.Node, 0, panes)
@@ -98,11 +97,11 @@ func histServer(t *testing.T, name string, panes int) (*server, []string) {
 	}
 	w.Root = &layout.Node{Dir: "row", Kids: kids}
 	w.Focus = ids[0]
-	if err := os.MkdirAll(paths.SessionDir(name), 0o700); err != nil {
+	if err := os.MkdirAll(st.SessionDir(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range ids {
-		ringPane(t, name, id)
+		ringPane(t, st, id)
 	}
 	s := railServer(st)
 	adoptPanes(t, s, ids)
@@ -148,7 +147,7 @@ func (w *countingConn) Read(p []byte) (int, error) {
 // returns a client socket that counts what it reads.
 func dialTestServer(t *testing.T, s *server) *countingConn {
 	t.Helper()
-	sock := paths.ServerSock(s.st.Name)
+	sock := s.st.ServerSock()
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -191,6 +190,7 @@ func readUntil(t *testing.T, c net.Conn, wait time.Duration, match func(wire.Msg
 // TestAttachDoesNotPushHistory proves attach sends a picture, not the ring: no
 // replay frame, a small byte total, and the pane facts still correct.
 func TestAttachDoesNotPushHistory(t *testing.T) {
+	t.Parallel()
 	s, ids := histServer(t, "lazy", 4)
 	cl := dialTestServer(t, s)
 	if err := wire.WriteMsg(cl, wire.Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
@@ -261,6 +261,7 @@ func TestAttachDoesNotPushHistory(t *testing.T) {
 // answers with one replay frame carrying the ring and the pane status, ahead
 // of its reply.
 func TestReplayRequestReturnsTheRing(t *testing.T) {
+	t.Parallel()
 	s, ids := histServer(t, "ask", 3)
 	cl := dialTestServer(t, s)
 	if err := wire.WriteMsg(cl, wire.Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
@@ -305,6 +306,7 @@ func TestReplayRequestReturnsTheRing(t *testing.T) {
 // TestReplayRequestForMissingPaneFails proves a bad target is an error and not
 // a panic: the server answers and keeps serving.
 func TestReplayRequestForMissingPaneFails(t *testing.T) {
+	t.Parallel()
 	s, ids := histServer(t, "miss", 2)
 	cl := dialTestServer(t, s)
 	if err := wire.WriteMsg(cl, wire.Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {

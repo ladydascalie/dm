@@ -82,6 +82,8 @@ func postQuiet(t *testing.T, s *server, key, state, msg string) {
 // pane and pops too.
 func TestBoxNotifyPostDispatches(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
@@ -107,6 +109,8 @@ func TestBoxNotifyPostDispatches(t *testing.T) {
 // either way.
 func TestBoxNotifyPostSuppressedWhenFocused(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
@@ -134,6 +138,8 @@ func TestBoxNotifyPostSuppressedWhenFocused(t *testing.T) {
 // A normal topic never renders, whatever the attachment.
 func TestBoxNotifyPostNormalTopicSilent(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
@@ -145,6 +151,8 @@ func TestBoxNotifyPostNormalTopicSilent(t *testing.T) {
 // DM_NOTIFY=0 gates the renderer: a notify/ entry logs and never pops.
 func TestBoxNotifyPostGatedByEnv(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "0")
 	s := boxServer(t)
@@ -159,6 +167,8 @@ func TestBoxNotifyPostGatedByEnv(t *testing.T) {
 // log is never gated.
 func TestBoxNotifyPostGatedByUrgency(t *testing.T) {
 	dir, log := fakeNotifySend(t)
+	// Serial: the notifier stub rides on PATH and the gate reads DM_NOTIFY,
+	// env t.Setenv cannot parallelise.
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("DM_NOTIFY", "")
 	s := boxServer(t)
