@@ -10,22 +10,29 @@ import (
 	"dm/internal/wire"
 )
 
-// readTail blocks for a wait's first reply, the tail frame. Its arrival
-// proves the wait is registered, so the test can produce output afterwards.
+// readTail blocks for a wait's tail reply, skipping broadcasts the pane sent
+// before the wait arrived. Its arrival proves the wait is registered, so the
+// test can produce output afterwards.
 func readTail(t *testing.T, msgs chan wire.Msg) wire.Msg {
 	t.Helper()
-	select {
-	case m, ok := <-msgs:
-		if !ok {
-			t.Fatal("socket closed before the tail reply")
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case m, ok := <-msgs:
+			if !ok {
+				t.Fatal("socket closed before the tail reply")
+			}
+			if m.Type == "bytes" {
+				continue
+			}
+			if m.Type != "resp" || m.WaitReason != "" {
+				t.Fatalf("reply = %+v, want the tail reply", m)
+			}
+			return m
+		case <-deadline:
+			t.Fatal("no tail reply")
+			return wire.Msg{}
 		}
-		if m.Type != "resp" || m.WaitReason != "" {
-			t.Fatalf("first reply = %+v, want the tail reply", m)
-		}
-		return m
-	case <-time.After(5 * time.Second):
-		t.Fatal("no tail reply")
-		return wire.Msg{}
 	}
 }
 
@@ -260,5 +267,82 @@ func TestWaiterDisconnectCancelsTheWait(t *testing.T) {
 	defer p.mu.Unlock()
 	if p.waiter != nil {
 		t.Fatal("the wait came back after the waiter disconnected")
+	}
+}
+
+// TestWaitAnswersAFinishedCommandAtOnce proves a wait that arrives after the
+// command already returned answers from the D mark the pane still holds,
+// instead of hanging until unrelated output moves the pane.
+func TestWaitAnswersAFinishedCommandAtOnce(t *testing.T) {
+	p, cli, msgs := markedPane(t, 40, 6)
+
+	// The command runs and returns before the wait request is read.
+	feedPane(p, []byte("out\r\n\x1b]133;D;130\x1b\\"))
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
+
+	start := time.Now()
+	tail := readTail(t, msgs)
+	_, final := waitFinal(t, msgs)
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("finished-command wait took %s", took)
+	}
+	if res := decodeYank(t, tail); !res.Anchor {
+		t.Fatalf("tail reply = %+v, want an anchored tail", res)
+	}
+	found := false
+	for _, l := range decodeYank(t, tail).Lines {
+		if strings.Contains(l, "out") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tail lines = %#v, want the command's output", decodeYank(t, tail).Lines)
+	}
+	if final.WaitReason != "mark" || final.Exit == nil || *final.Exit != 130 {
+		t.Fatalf("final reply = %+v, want reason mark and exit 130", final)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.waiter != nil {
+		t.Fatal("the finished-command wait stayed registered")
+	}
+}
+
+// TestReflowHandsARunningWaitToTheChildren proves a wait in flight across a
+// reflow loses its mark path and finishes through the children fallback.
+func TestReflowHandsARunningWaitToTheChildren(t *testing.T) {
+	p, cli, msgs := markedPane(t, 40, 6)
+	kids := waitChildren(t, []int{4242})
+
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
+	readTail(t, msgs)
+	paneReply(t, cli, msgs, wire.Msg{Type: "req", Action: "reflow", Cols: 10, Rows: 4}, "screen")
+
+	kids.Store([]int{})
+	_, final := waitFinal(t, msgs)
+	if final.WaitReason != "children" || final.Exit != nil {
+		t.Fatalf("final reply = %+v, want reason children and no exit code", final)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.waiter != nil {
+		t.Fatal("the wait survived the reflow unchanged")
+	}
+}
+
+// TestReflowEndsAWaitWithNoRunningChild proves the fallback a reflow starts
+// ends the wait when no child is running, so a command that died with its
+// terminal never hangs the wait.
+func TestReflowEndsAWaitWithNoRunningChild(t *testing.T) {
+	_, cli, msgs := markedPane(t, 40, 6)
+	waitChildren(t, nil)
+
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
+	readTail(t, msgs)
+	paneReply(t, cli, msgs, wire.Msg{Type: "req", Action: "reflow", Cols: 10, Rows: 4}, "screen")
+
+	_, final := waitFinal(t, msgs)
+	if final.WaitReason != "children" || final.Exit != nil {
+		t.Fatalf("final reply = %+v, want reason children and no exit code", final)
 	}
 }

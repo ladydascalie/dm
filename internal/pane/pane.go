@@ -74,15 +74,19 @@ type paneProc struct {
 // request id, the stream position the wait's output starts at and whether the
 // shell has integration marks, which decides between the mark and the
 // foreground-children completion. done closes when the wait ends or the
-// waiter disconnects, which stops the children poll. childSeen belongs to the
-// poll goroutine: it records that a sample found a foreground child.
+// waiter disconnects, which stops the children poll. childSeen and looseStart
+// belong to the poll goroutine: the spawner sets them before it starts, and
+// childSeen then records that a sample found a foreground child. looseStart
+// marks a wait whose mark path a reflow took away, where an empty child
+// sample alone ends the wait.
 type waitReq struct {
-	sc        *subConn
-	id        int
-	anchor    int64
-	mark      bool
-	childSeen bool
-	done      chan struct{}
+	sc         *subConn
+	id         int
+	anchor     int64
+	mark       bool
+	childSeen  bool
+	looseStart bool
+	done       chan struct{}
 }
 
 // echoMax is the longest command text a pane keeps to drop its echo from a
@@ -708,6 +712,11 @@ func (p *paneProc) serve(c net.Conn) {
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "wait":
+			// The children sample runs before the lock: a /proc read must not
+			// stall publishes, and it must be settled before the tail reply
+			// goes out so the idle decision lands with the registration it
+			// belongs to. A marked pane never uses it.
+			kids := shellChildren(p.shellPID())
 			p.mu.Lock()
 			if p.dead {
 				p.mu.Unlock()
@@ -731,22 +740,11 @@ func (p *paneProc) serve(c net.Conn) {
 				done: make(chan struct{})}
 			p.waiter = w
 			tail, cols, h, tailOK := p.yankTailLocked()
-			// The fallback samples the shell's foreground children once at the
-			// start: a markless pane with none running has no observable end,
-			// so its wait finishes at once instead of blocking forever.
-			idle := false
-			if !marked {
-				idle = len(shellChildren(p.shellPID())) == 0
-				// The start sample counts as having seen a child, so a
-				// command that returns before the first tick still ends the
-				// wait.
-				w.childSeen = !idle
-			}
-			p.mu.Unlock()
-
-			// The tail is one yank-shaped reply, taken under the lock so
-			// nothing can slip between it and the broadcast stream the waiter
-			// already sits on.
+			// The tail is rendered and sent under the pane lock, the way
+			// broadcasts are: every bytes frame and the final reply on this
+			// connection must land after it. Frames the waiter received
+			// before it repeat what the tail renders, so a client treats the
+			// tail as authoritative and discards those.
 			var lines []string
 			start, rows := 0, 0
 			if tailOK {
@@ -756,21 +754,36 @@ func (p *paneProc) serve(c net.Conn) {
 				Res: jsonRaw(map[string]any{
 					"lines": lines, "start": start, "rows": rows, "anchor": tailOK,
 				})})
-
-			if !marked && idle {
-				p.mu.Lock()
-				mine := p.waiter == w
-				if mine {
-					p.waiter = nil
-					close(w.done)
-				}
+			// A command that already returned has its D mark behind the
+			// request and no further publish may come: run the same check
+			// every publish runs, right here.
+			if s, reply, ok := p.waitEndLocked(); ok {
 				p.mu.Unlock()
-				if mine {
-					_ = sc.send(waitReply(m.ID, nil, "idle"))
-				}
+				_ = s.send(reply)
 				continue
 			}
+			p.mu.Unlock()
 			if !marked {
+				if len(kids) == 0 {
+					// A markless pane with nothing running has no observable
+					// end, so its wait finishes at once instead of blocking
+					// forever.
+					p.mu.Lock()
+					mine := p.waiter == w
+					if mine {
+						p.waiter = nil
+						close(w.done)
+					}
+					p.mu.Unlock()
+					if mine {
+						_ = sc.send(waitReply(m.ID, nil, "idle"))
+					}
+					continue
+				}
+				// The start sample counts as having seen a child, so a
+				// command that returns before the first tick still ends the
+				// wait.
+				w.childSeen = true
 				go p.pollWaitChildren(w)
 			}
 		case "kill":
@@ -961,7 +974,10 @@ func (p *paneProc) pollWaitChildren(w *waitReq) {
 		}
 		if len(kids) > 0 {
 			w.childSeen = true
-		} else if w.childSeen {
+		} else if w.childSeen || w.looseStart {
+			// The child set emptied after holding children, or the wait lost
+			// its marks to a reflow and no child is running: the command came
+			// back and nothing observed its exit code.
 			// The child set emptied after holding children: the command came
 			// back and nothing observed its exit code.
 			p.waiter = nil
