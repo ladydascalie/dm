@@ -11,6 +11,9 @@ func TestFolderName(t *testing.T) {
 	}
 }
 
+// These tests pin StateDir's env precedence: DM_STATE, then
+// XDG_STATE_HOME, then home fallback. They mutate process env via
+// t.Setenv, so they cannot run in parallel; keep them serial.
 func TestStateDirDMStateWins(t *testing.T) {
 	t.Setenv("DM_STATE", "/data/dm-state")
 	t.Setenv("XDG_STATE_HOME", "/xdg")
@@ -57,6 +60,40 @@ func TestFolderNameSeparators(t *testing.T) {
 	for dir, want := range cases {
 		if got := FolderName(dir); got != want {
 			t.Fatalf("FolderName(%q) = %q, want %q", dir, got, want)
+		}
+	}
+}
+
+func TestSessionPathsAt(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		root, name, id string
+		want           map[string]string
+	}{
+		{
+			root: "/st", name: "s", id: "7",
+			want: map[string]string{
+				SessionDirAt("/st", "s"):    "/st/sessions/s",
+				ServerSockAt("/st", "s"):    "/st/sessions/s/server.sock",
+				PaneSockAt("/st", "s", "7"): "/st/sessions/s/panes/7.sock",
+				StatePathAt("/st", "s"):     "/st/sessions/s/state.json",
+			},
+		},
+		{
+			root: "/other/root", name: "session-one", id: "pane-1",
+			want: map[string]string{
+				SessionDirAt("/other/root", "session-one"):         "/other/root/sessions/session-one",
+				ServerSockAt("/other/root", "session-one"):         "/other/root/sessions/session-one/server.sock",
+				PaneSockAt("/other/root", "session-one", "pane-1"): "/other/root/sessions/session-one/panes/pane-1.sock",
+				StatePathAt("/other/root", "session-one"):          "/other/root/sessions/session-one/state.json",
+			},
+		},
+	}
+	for _, tc := range cases {
+		for got, exp := range tc.want {
+			if got != exp {
+				t.Fatalf("root %q: got %q, want %q", tc.root, got, exp)
+			}
 		}
 	}
 }

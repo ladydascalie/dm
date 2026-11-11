@@ -20,19 +20,40 @@ func StateDir() string {
 	return filepath.Join(home, ".local", "state", "dm")
 }
 
+// SessionDirAt is the directory that holds one session's state and
+// sockets, rooted at the given state dir.
+func SessionDirAt(root, name string) string {
+	return filepath.Join(root, "sessions", name)
+}
+
 // SessionDir is the directory that holds one session's state and sockets.
-func SessionDir(name string) string { return filepath.Join(StateDir(), "sessions", name) }
+func SessionDir(name string) string { return SessionDirAt(StateDir(), name) }
+
+// ServerSockAt is the unix socket the session's server listens on,
+// rooted at the given state dir.
+func ServerSockAt(root, name string) string {
+	return filepath.Join(SessionDirAt(root, name), "server.sock")
+}
 
 // ServerSock is the unix socket the session's server listens on.
-func ServerSock(name string) string { return filepath.Join(SessionDir(name), "server.sock") }
+func ServerSock(name string) string { return ServerSockAt(StateDir(), name) }
+
+// PaneSockAt is the unix socket one pane's mux listens on, rooted at the
+// given state dir.
+func PaneSockAt(root, name, id string) string {
+	return filepath.Join(SessionDirAt(root, name), "panes", id+".sock")
+}
 
 // PaneSock is the unix socket one pane's mux listens on.
-func PaneSock(name, id string) string {
-	return filepath.Join(SessionDir(name), "panes", id+".sock")
+func PaneSock(name, id string) string { return PaneSockAt(StateDir(), name, id) }
+
+// StatePathAt is the session's state file, rooted at the given state dir.
+func StatePathAt(root, name string) string {
+	return filepath.Join(SessionDirAt(root, name), "state.json")
 }
 
 // StatePath is the session's state file.
-func StatePath(name string) string { return filepath.Join(SessionDir(name), "state.json") }
+func StatePath(name string) string { return StatePathAt(StateDir(), name) }
 
 // FolderName is the default window label for a directory: its last path
 // element, with the filesystem root spelled out.
