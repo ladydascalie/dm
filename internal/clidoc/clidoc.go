@@ -156,6 +156,18 @@ var cliCommands = []cliCommand{
 		group:   groupPane,
 	},
 	{
+		name:    "wait",
+		args:    "<pane> [--timeout D]",
+		summary: "stream a pane's output until its command ends, then name the exit code",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"timeout", "D", "quiet-idle limit, not total"},
+			{"json", "", "print JSON"},
+		},
+		example: `dm wait w1p1 --timeout 10m`,
+		group:   groupPane,
+	},
+	{
 		name:    "split",
 		args:    "<pane> --dir D",
 		summary: "split a pane: left right up down",

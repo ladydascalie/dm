@@ -97,6 +97,17 @@ print a pane's output since the last Enter
 .br
 Example: \fBdm yank w1p1\fP
 .TP
+\fBdm wait <pane> [--timeout D]\fP
+stream a pane's output until its command ends, then name the exit code
+.br
+\fB--s name\fP session name
+.br
+\fB--timeout D\fP quiet-idle limit, not total
+.br
+\fB--json\fP print JSON
+.br
+Example: \fBdm wait w1p1 --timeout 10m\fP
+.TP
 \fBdm split <pane> --dir D\fP
 split a pane: left right up down
 .br

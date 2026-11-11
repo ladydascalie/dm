@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -258,6 +259,21 @@ func Run(argv []string) error {
 			lines = lines[len(lines)-c.lines:]
 		}
 		fmt.Println(strings.Join(lines, "\n"))
+		return nil
+
+	case "wait":
+		c := newFlags("wait")
+		c.parse(argv[1:])
+		code, err := runWait(c)
+		if err != nil {
+			return err
+		}
+		// The CLI's own exit code mirrors the command's. The nonzero code
+		// leaves through os.Exit, so main keeps its one error exit for a
+		// failed wait, not a command that reported a code.
+		if code != 0 {
+			os.Exit(code)
+		}
 		return nil
 
 	case "split":
@@ -1328,6 +1344,106 @@ func yankLines(session, target string) ([]string, error) {
 		lines = lines[:len(lines)-1]
 	}
 	return lines, nil
+}
+
+// waitResult is a wait's ending: the command's exit code when the pane could
+// observe one, the reason the wait ended, and whether the quiet-idle timeout
+// fired first.
+type waitResult struct {
+	Exit     *int   `json:"exit"`
+	Reason   string `json:"reason"`
+	TimedOut bool   `json:"timed_out"`
+}
+
+// runWait dials the pane socket directly, sends one wait request, writes the
+// bytes frames to stdout as they arrive and returns the CLI exit code for the
+// ending. The timeout is a quiet-idle deadline: every frame that arrives
+// extends it, so a streaming command is not cut off mid-stream for exceeding
+// the total, and only real silence ends it with 124.
+func runWait(c *cmdFlags) (int, error) {
+	if len(c.args) < 1 {
+		return 0, fmt.Errorf("wait needs a pane id")
+	}
+	conn, err := net.DialTimeout("unix", paths.PaneSock(c.session, c.args[0]), time.Second)
+	if err != nil {
+		return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
+	}
+	defer func() { _ = conn.Close() }()
+	req := wire.Msg{Type: "req", Action: "wait", ID: 1}
+	if err := wire.WriteMsg(conn, req); err != nil {
+		return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
+	}
+	extend := func() { _ = conn.SetReadDeadline(time.Now().Add(c.timeout)) }
+	extend()
+	for {
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			var ne net.Error
+			if errors.As(err, &ne) && ne.Timeout() {
+				return waitExit(nil, true), waitReport(c, waitResult{Reason: "timeout", TimedOut: true})
+			}
+			return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
+		}
+		// The final reply is a resp that names how the wait ended; every
+		// other frame is stream traffic and pushes the deadline out.
+		if m.Type == "resp" && (!m.OK || m.WaitReason != "") {
+			if !m.OK {
+				return 0, fmt.Errorf("%s", m.Error)
+			}
+			res := waitResult{Exit: m.Exit, Reason: m.WaitReason}
+			return waitExit(m.Exit, false), waitReport(c, res)
+		}
+		extend()
+		if m.Type == "bytes" {
+			if _, err := os.Stdout.Write(m.Data); err != nil {
+				return 0, err
+			}
+		}
+	}
+}
+
+// waitStatus renders the status line a wait ends on. Dead and unknown stand
+// apart from done so a caller skimming the line sees the shape at once.
+func waitStatus(res waitResult) string {
+	switch {
+	case res.TimedOut:
+		return "* timeout"
+	case res.Reason == "dead":
+		return "* dead"
+	case res.Exit != nil:
+		return fmt.Sprintf("* done, exit %d", *res.Exit)
+	default:
+		return fmt.Sprintf("* done, exit unknown (%s)", res.Reason)
+	}
+}
+
+// waitExit maps a wait's ending to the CLI's own exit code: the command's
+// code, 124 after the quiet-idle timeout, and 0 when no code was observed, so
+// a caller distinguishes a command that gave no code from a failed wait; the
+// status line carries the reason.
+func waitExit(exit *int, timedOut bool) int {
+	switch {
+	case timedOut:
+		return 124
+	case exit != nil:
+		return *exit
+	}
+	return 0
+}
+
+// waitReport prints the final answer: one JSON object on stdout with --json,
+// one status line on stderr without.
+func waitReport(c *cmdFlags, res waitResult) error {
+	if c.jsonOut {
+		b, err := json.Marshal(res)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+	fmt.Fprintln(os.Stderr, waitStatus(res))
+	return nil
 }
 
 // peek prints the screen a palette row shows.

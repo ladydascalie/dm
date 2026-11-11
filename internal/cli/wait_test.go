@@ -1,0 +1,329 @@
+package cli
+
+// The wait verb: the request it dials the pane socket with, the bytes it
+// streams to stdout, the status line it ends on and the exit code it maps to.
+// The tests drive runWait directly wherever the ending is nonzero, because
+// Run hands a nonzero code to os.Exit.
+
+import (
+	"encoding/json"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"dm/internal/paths"
+	"dm/internal/testutil"
+	"dm/internal/wire"
+)
+
+// startFakePane listens on one pane's socket, so a wait dials the test
+// instead of a real pane daemon. DM_STATE moves the state tree into a temp
+// directory, so a test never touches a real session.
+func startFakePane(t *testing.T, session, id string, h fakeHandler) {
+	t.Helper()
+	t.Setenv("DM_STATE", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(paths.PaneSock(session, id)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sock := paths.PaneSock(session, id)
+	_ = os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go serveFake(c, h)
+		}
+	}()
+}
+
+// waitStream is the frame sequence one wait test plays: the tail resp, any
+// bytes frames in order, then the final reply. Holding keeps the connection
+// open and silent, so a read deadline runs out instead of hitting an end of
+// file.
+type waitStream struct {
+	tail    bool
+	bytes   [][]byte
+	final   wire.Msg
+	holding time.Duration
+}
+
+// waitPlayer turns a waitStream into a fakeHandler. It writes its frames
+// itself and leaves the framing to the pane's own serving shape.
+func waitPlayer(s waitStream) fakeHandler {
+	return func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		if s.tail {
+			tail := wire.Msg{Type: "resp", ID: req.ID, OK: true,
+				Res: json.RawMessage(`{"lines":[],"start":0,"rows":0,"anchor":true}`)}
+			if err := wire.WriteMsg(c, tail); err != nil {
+				return wire.Msg{}, false
+			}
+		}
+		for _, b := range s.bytes {
+			if err := wire.WriteMsg(c, wire.Msg{Type: "bytes", Data: b}); err != nil {
+				return wire.Msg{}, false
+			}
+		}
+		if s.holding > 0 {
+			time.Sleep(s.holding)
+			return wire.Msg{}, false
+		}
+		if s.final.Type == "" && s.final.OK {
+			final := s.final
+			final.Type, final.ID = "resp", req.ID
+			if err := wire.WriteMsg(c, final); err != nil {
+				return wire.Msg{}, false
+			}
+		}
+		return wire.Msg{}, false
+	}
+}
+
+// exitOf lifts an int into the pointer the wire carries.
+func exitOf(n int) *int { return &n }
+
+// waitFlags parses the argv a test drives runWait with.
+func waitFlags(argv ...string) *cmdFlags {
+	c := newFlags("wait")
+	c.parse(argv)
+	return c
+}
+
+// TestWaitNeedsAPane proves wait checks its argument before anything dials.
+func TestWaitNeedsAPane(t *testing.T) {
+	if err := Run([]string{"wait"}); err == nil || !strings.Contains(err.Error(), "wait needs a pane id") {
+		t.Fatalf("dm wait without arguments = %v", err)
+	}
+}
+
+// TestWaitDialsThePaneSocket proves wait sends its request straight to the
+// pane socket, honouring -s for the session, and ends on the exit line.
+func TestWaitDialsThePaneSocket(t *testing.T) {
+	startFakePane(t, "other", "w1p1", waitPlayer(waitStream{
+		final: wire.Msg{OK: true, Exit: exitOf(0), WaitReason: "mark"},
+	}))
+	var err error
+	stderr := captureStderr(t, func() {
+		out := testutil.CaptureStdout(t, func() {
+			err = Run([]string{"wait", "w1p1", "-s", "other"})
+		})
+		if out != "" {
+			t.Errorf("plain wait printed %q to stdout, want nothing", out)
+		}
+	})
+	if err != nil {
+		t.Fatalf("dm wait: %v", err)
+	}
+	if stderr != "* done, exit 0\n" {
+		t.Fatalf("wait printed %q to stderr, want '* done, exit 0'", stderr)
+	}
+}
+
+// TestWaitStreamsAndNamesTheExit proves the bytes reach stdout in order, raw,
+// and the final resp ends the wait with the command's exit code.
+func TestWaitStreamsAndNamesTheExit(t *testing.T) {
+	startFakePane(t, "main", "w1p1", waitPlayer(waitStream{
+		tail:  true,
+		bytes: [][]byte{[]byte("buil"), []byte("ding\n")},
+		final: wire.Msg{OK: true, Exit: exitOf(3), WaitReason: "mark"},
+	}))
+	var code int
+	var err error
+	stderr := captureStderr(t, func() {
+		out := testutil.CaptureStdout(t, func() {
+			code, err = runWait(waitFlags("w1p1"))
+		})
+		if out != "building\n" {
+			t.Errorf("wait streamed %q, want the raw bytes in order", out)
+		}
+	})
+	if err != nil {
+		t.Fatalf("dm wait: %v", err)
+	}
+	if code != 3 {
+		t.Fatalf("wait returned %d, want the command's exit 3", code)
+	}
+	if stderr != "* done, exit 3\n" {
+		t.Fatalf("wait printed %q, want '* done, exit 3'", stderr)
+	}
+}
+
+// TestWaitSurvivesALongStream proves the deadline extends on every frame: the
+// total stream runs past --timeout, yet the quiet-idle wait reaches the final
+// resp instead of cutting the stream off.
+func TestWaitSurvivesALongStream(t *testing.T) {
+	player := waitPlayer(waitStream{final: wire.Msg{OK: true, Exit: exitOf(0), WaitReason: "mark"}})
+	streaming := func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		for i := 0; i < 12; i++ {
+			if err := wire.WriteMsg(c, wire.Msg{Type: "bytes", Data: []byte("tick\n")}); err != nil {
+				return wire.Msg{}, false
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		return player(c, req)
+	}
+	startFakePane(t, "main", "w1p1", streaming)
+	var code int
+	var err error
+	captureStderr(t, func() {
+		testutil.CaptureStdout(t, func() {
+			code, err = runWait(waitFlags("w1p1", "--timeout", "200ms"))
+		})
+	})
+	if err != nil {
+		t.Fatalf("dm wait: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("a stream that outlasted --timeout returned %d, want 0", code)
+	}
+}
+
+// TestWaitTimesOutOnSilence proves a quiet socket past --timeout ends the
+// wait with 124 and the timeout status line.
+func TestWaitTimesOutOnSilence(t *testing.T) {
+	startFakePane(t, "main", "w1p1", waitPlayer(waitStream{holding: 250 * time.Millisecond}))
+	var code int
+	var err error
+	stderr := captureStderr(t, func() {
+		testutil.CaptureStdout(t, func() {
+			code, err = runWait(waitFlags("w1p1", "--timeout", "30ms"))
+		})
+	})
+	if err != nil {
+		t.Fatalf("dm wait: %v", err)
+	}
+	if code != 124 {
+		t.Fatalf("timed-out wait returned %d, want 124", code)
+	}
+	if stderr != "* timeout\n" {
+		t.Fatalf("timed-out wait printed %q, want '* timeout'", stderr)
+	}
+}
+
+// TestWaitUnknownExitIsZero proves the fallback endings keep the CLI exit at
+// zero: the status line carries the reason, the code carries nothing.
+func TestWaitUnknownExitIsZero(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		want   string
+	}{
+		{"children", "* done, exit unknown (children)\n"},
+		{"idle", "* done, exit unknown (idle)\n"},
+		{"dead", "* dead\n"},
+	} {
+		t.Run(tc.reason, func(t *testing.T) {
+			startFakePane(t, "main", "w1p1", waitPlayer(waitStream{
+				final: wire.Msg{OK: true, WaitReason: tc.reason},
+			}))
+			var code int
+			var err error
+			stderr := captureStderr(t, func() {
+				testutil.CaptureStdout(t, func() {
+					code, err = runWait(waitFlags("w1p1"))
+				})
+			})
+			if err != nil {
+				t.Fatalf("dm wait: %v", err)
+			}
+			if code != 0 {
+				t.Fatalf("reason %q returned %d, want 0", tc.reason, code)
+			}
+			if stderr != tc.want {
+				t.Fatalf("wait printed %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+// TestWaitJsonPrintsTheAnswer proves --json swaps the status line for one
+// JSON object with the exit, the reason and the timeout flag.
+func TestWaitJsonPrintsTheAnswer(t *testing.T) {
+	startFakePane(t, "main", "w1p1", waitPlayer(waitStream{
+		final: wire.Msg{OK: true, Exit: exitOf(3), WaitReason: "children"},
+	}))
+	var code int
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		code, err = runWait(waitFlags("w1p1", "--json"))
+	})
+	if err != nil {
+		t.Fatalf("dm wait --json: %v", err)
+	}
+	if code != 3 {
+		t.Fatalf("wait returned %d, want 3", code)
+	}
+	if out != `{"exit":3,"reason":"children","timed_out":false}`+"\n" {
+		t.Fatalf("--json printed %q, want the wait answer object", out)
+	}
+}
+
+// TestWaitStatusShapes proves the status line renders each ending: a known
+// code, an unknown one, the quiet-idle timeout and a dead pane.
+func TestWaitStatusShapes(t *testing.T) {
+	for _, tc := range []struct {
+		res  waitResult
+		want string
+	}{
+		{waitResult{Exit: exitOf(0), Reason: "mark"}, "* done, exit 0"},
+		{waitResult{Exit: exitOf(130), Reason: "mark"}, "* done, exit 130"},
+		{waitResult{Reason: "children"}, "* done, exit unknown (children)"},
+		{waitResult{Reason: "idle"}, "* done, exit unknown (idle)"},
+		{waitResult{Reason: "timeout", TimedOut: true}, "* timeout"},
+		{waitResult{Reason: "dead"}, "* dead"},
+	} {
+		if got := waitStatus(tc.res); got != tc.want {
+			t.Errorf("waitStatus(%+v) = %q, want %q", tc.res, got, tc.want)
+		}
+	}
+}
+
+// TestWaitExitMapping proves the CLI exit code: the command's code, 124 after
+// the timeout, and 0 when no code was observed.
+func TestWaitExitMapping(t *testing.T) {
+	for _, tc := range []struct {
+		exit     *int
+		timedOut bool
+		want     int
+	}{
+		{exitOf(0), false, 0},
+		{exitOf(3), false, 3},
+		{exitOf(130), false, 130},
+		{nil, false, 0},
+		{nil, true, 124},
+		{exitOf(3), true, 124},
+	} {
+		if got := waitExit(tc.exit, tc.timedOut); got != tc.want {
+			t.Errorf("waitExit(%v, %v) = %d, want %d", tc.exit, tc.timedOut, got, tc.want)
+		}
+	}
+}
+
+// TestWaitRefusesASecondWait proves the pane's refusal surfaces as an error,
+// so the CLI exits nonzero on a failed wait.
+func TestWaitRefusesASecondWait(t *testing.T) {
+	startFakePane(t, "main", "w1p1", refuseHandler("a wait is already running"))
+	if err := Run([]string{"wait", "w1p1"}); err == nil || err.Error() != "a wait is already running" {
+		t.Fatalf("dm wait refused = %v, want the pane's refusal", err)
+	}
+}
+
+// TestWaitWithoutASocket proves a missing pane socket refuses cleanly.
+func TestWaitWithoutASocket(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	err := Run([]string{"wait", "nosuch"})
+	if err == nil {
+		t.Fatal("dm wait without a pane socket was accepted")
+	}
+	if !strings.Contains(err.Error(), "nosuch") {
+		t.Fatalf("dm wait without a socket = %v, want the pane named", err)
+	}
+}
