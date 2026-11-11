@@ -1384,14 +1384,32 @@ func runWait(c *cmdFlags) (int, error) {
 			}
 			return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
 		}
-		// The final reply is a resp that names how the wait ended; every
-		// other frame is stream traffic and pushes the deadline out.
-		if m.Type == "resp" && (!m.OK || m.WaitReason != "") {
+		if m.Type == "resp" {
 			if !m.OK {
 				return 0, fmt.Errorf("%s", m.Error)
 			}
-			res := waitResult{Exit: m.Exit, Reason: m.WaitReason}
-			return waitExit(m.Exit, false), waitReport(c, res)
+			if m.WaitReason != "" {
+				// The final reply names how the wait ended.
+				res := waitResult{Exit: m.Exit, Reason: m.WaitReason}
+				return waitExit(m.Exit, false), waitReport(c, res)
+			}
+			// Every other resp is the yank-shaped tail the wait opens with:
+			// the output between the Enter anchor and the wait's connect,
+			// which no bytes frame replays. The pane guarantees it lands
+			// before the first post-connect byte.
+			var tail struct {
+				Lines []string `json:"lines"`
+				Start int      `json:"start"`
+				Rows  int      `json:"rows"`
+			}
+			if err := json.Unmarshal(m.Res, &tail); err != nil {
+				return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
+			}
+			if err := printTail(tail.Lines, tail.Start, tail.Rows); err != nil {
+				return 0, err
+			}
+			extend()
+			continue
 		}
 		extend()
 		if m.Type == "bytes" {
@@ -1400,6 +1418,23 @@ func runWait(c *cmdFlags) (int, error) {
 			}
 		}
 	}
+}
+
+// printTail prints the tail's window of screen rows, trimming the trailing
+// empty rows a prompt leaves behind. It refuses a window that does not fit,
+// the way yank refuses one.
+func printTail(lines []string, start, rows int) error {
+	if start < 0 || start > rows || rows > len(lines) {
+		return fmt.Errorf("tail reply out of range")
+	}
+	out := lines[start:rows]
+	for len(out) > 0 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	if len(out) > 0 {
+		fmt.Println(strings.Join(out, "\n"))
+	}
+	return nil
 }
 
 // waitStatus renders the status line a wait ends on. Dead and unknown stand

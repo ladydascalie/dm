@@ -157,6 +157,69 @@ func TestWaitStreamsAndNamesTheExit(t *testing.T) {
 	}
 }
 
+// TestWaitPrintsTheTailBeforeTheBytes proves the tail resp reaches stdout:
+// the output between the Enter anchor and the wait's connect, printed before
+// the first bytes frame, so a fast command observed late prints its output
+// and the status line in one call.
+func TestWaitPrintsTheTailBeforeTheBytes(t *testing.T) {
+	startFakePane(t, "main", "w1p1", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		tail := wire.Msg{Type: "resp", ID: req.ID, OK: true,
+			Res: json.RawMessage(`{"lines":["$ go build","error: nope","",""],"start":1,"rows":3,"anchor":true}`)}
+		if err := wire.WriteMsg(c, tail); err != nil {
+			return wire.Msg{}, false
+		}
+		if err := wire.WriteMsg(c, wire.Msg{Type: "bytes", Data: []byte("more\n")}); err != nil {
+			return wire.Msg{}, false
+		}
+		final := wire.Msg{Type: "resp", ID: req.ID, OK: true, Exit: exitOf(1), WaitReason: "mark"}
+		if err := wire.WriteMsg(c, final); err != nil {
+			return wire.Msg{}, false
+		}
+		return wire.Msg{}, false
+	})
+	var code int
+	var err error
+	stderr := captureStderr(t, func() {
+		out := testutil.CaptureStdout(t, func() {
+			code, err = runWait(waitFlags("w1p1"))
+		})
+		// start 1 puts the echoed command line before the anchor: the tail
+		// is the output the command produced, not the echo of it.
+		if want := "error: nope\nmore\n"; out != want {
+			t.Errorf("wait printed %q, want %q: the tail ahead of the bytes", out, want)
+		}
+	})
+	if err != nil {
+		t.Fatalf("dm wait: %v", err)
+	}
+	if code != 1 {
+		t.Fatalf("wait returned %d, want 1", code)
+	}
+	if stderr != "* done, exit 1\n" {
+		t.Fatalf("wait printed %q, want '* done, exit 1'", stderr)
+	}
+}
+
+// TestWaitRefusesAMalformedTail proves a tail whose window does not fit the
+// lines fails the wait instead of printing whatever slice out of range.
+func TestWaitRefusesAMalformedTail(t *testing.T) {
+	startFakePane(t, "main", "w1p1", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		tail := wire.Msg{Type: "resp", ID: req.ID, OK: true,
+			Res: json.RawMessage(`{"lines":["one"],"start":0,"rows":5,"anchor":true}`)}
+		_ = wire.WriteMsg(c, tail)
+		return wire.Msg{}, false
+	})
+	var err error
+	captureStderr(t, func() {
+		testutil.CaptureStdout(t, func() {
+			_, err = runWait(waitFlags("w1p1"))
+		})
+	})
+	if err == nil || !strings.Contains(err.Error(), "tail reply out of range") {
+		t.Fatalf("malformed tail = %v, want a range error", err)
+	}
+}
+
 // TestWaitSurvivesALongStream proves the deadline extends on every frame: the
 // total stream runs past --timeout, yet the quiet-idle wait reaches the final
 // resp instead of cutting the stream off.
