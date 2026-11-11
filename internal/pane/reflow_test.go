@@ -76,6 +76,7 @@ func resizePane(t *testing.T, cli net.Conn, p *paneProc, cols, rows int) *vt.Ter
 // the same content re-wrapped, with the cursor a direct write at the new width
 // produces.
 func TestResizeRewrapsScreen(t *testing.T) {
+	t.Parallel()
 	p := newReflowPane(10, 6)
 	feedReflow(p, "0123456789abcdefghij0123456789abcdefghij")
 	ringBefore := string(p.ring.Bytes())
@@ -110,6 +111,7 @@ func TestResizeRewrapsScreen(t *testing.T) {
 // whose screen the app cleared holds only what the app painted, and a wider
 // screen brings none of the scrolled output back.
 func TestResizeNeverResurrectsHistory(t *testing.T) {
+	t.Parallel()
 	p := newReflowPane(10, 6)
 	feedReflow(p, strings.Repeat("old line\r\n", 20))
 	feedReflow(p, "\x1b[2J\x1b[Hprompt only")
@@ -136,6 +138,7 @@ func TestResizeNeverResurrectsHistory(t *testing.T) {
 // plain resize keeps the content it had, and the screen request reports the
 // alternate flag so the caller knows the app repaints itself.
 func TestResizeAltScreenKeepsGrid(t *testing.T) {
+	t.Parallel()
 	p := newReflowPane(10, 6)
 	feedReflow(p, "0123456789abcdefghij0123456789abcdefghij")
 	p.mu.Lock()
@@ -179,6 +182,7 @@ func TestResizeAltScreenKeepsGrid(t *testing.T) {
 // rewrap, a reflow request answers with the screen as it is and changes
 // nothing.
 func TestReflowAnswersCurrentPicture(t *testing.T) {
+	t.Parallel()
 	p := newReflowPane(10, 6)
 	feedReflow(p, "0123456789abcdefghij0123456789abcdefghij")
 
@@ -217,6 +221,7 @@ func TestReflowAnswersCurrentPicture(t *testing.T) {
 // TestReflowBadSizeIgnored sends a size below 2: the pane answers nothing and
 // keeps its grid.
 func TestReflowBadSizeIgnored(t *testing.T) {
+	t.Parallel()
 	p := newReflowPane(10, 6)
 	feedReflow(p, "hello")
 

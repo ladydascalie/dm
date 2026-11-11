@@ -68,6 +68,25 @@ type paneProc struct {
 	// waiter is the pane's one in-flight wait action, nil when none runs. A
 	// second wait request is refused until it ends. Guarded by mu.
 	waiter *waitReq
+
+	// children samples a pid's foreground children for the wait fallback; nil
+	// uses the real /proc read. It is a field, not a package var, so a test's
+	// stand-in lives on its own pane and parallel tests share no global.
+	// Set once before the serve loop runs; read-only afterwards.
+	children func(int) []int
+}
+
+// resolveShell picks the shell a pane runs: the caller's explicit value when
+// it gave one, else $SHELL, else /bin/sh. The explicit argument keeps tests
+// off $SHELL, which t.Setenv would force serial.
+func resolveShell(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if s := os.Getenv("SHELL"); s != "" {
+		return s
+	}
+	return "/bin/sh"
 }
 
 // waitReq is one wait action: the connection the frames stream to, the
@@ -242,12 +261,7 @@ func Run(args []string) error {
 	if *fg == "" || *bg == "" {
 		return fmt.Errorf("pane needs a non-empty --fg and --bg")
 	}
-	if *shell == "" {
-		*shell = os.Getenv("SHELL")
-		if *shell == "" {
-			*shell = "/bin/sh"
-		}
-	}
+	*shell = resolveShell(*shell)
 	if *cwd == "" {
 		*cwd, _ = os.Getwd()
 	}
@@ -661,7 +675,19 @@ func (p *paneProc) serve(c net.Conn) {
 			// no scrollback ever returns to it.
 			snap := p.vt.Snapshot()
 			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
+			// A reflow takes the in-flight wait's mark path away: the fallback
+			// poll takes over, and there an empty child sample alone ends the
+			// wait. Both goroutines hold p.mu around this field. A marked wait
+			// started no poll, so the demotion starts one now.
+			var demoted *waitReq
+			if w := p.waiter; w != nil && !w.looseStart {
+				w.looseStart = true
+				demoted = w
+			}
 			p.mu.Unlock()
+			if demoted != nil {
+				go p.pollWaitChildren(demoted)
+			}
 			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)})
 		case "yank":
 			p.mu.Lock()
@@ -716,7 +742,7 @@ func (p *paneProc) serve(c net.Conn) {
 			// stall publishes, and it must be settled before the tail reply
 			// goes out so the idle decision lands with the registration it
 			// belongs to. A marked pane never uses it.
-			kids := shellChildren(p.shellPID())
+			kids := p.childrenAt(p.shellPID())
 			p.mu.Lock()
 			if p.dead {
 				p.mu.Unlock()
@@ -884,6 +910,15 @@ func yankRows(tail []byte, cols, h int) (lines []string, start, rows int) {
 	return lines, start, rows
 }
 
+// childrenAt samples a pid's foreground children through the pane's sampler:
+// the test's stand-in when one is set, else the real /proc read.
+func (p *paneProc) childrenAt(pid int) []int {
+	if p.children != nil {
+		return p.children(pid)
+	}
+	return shellChildren(pid)
+}
+
 // shellPID is the pane shell's pid, or 0 when the pane has no command.
 func (p *paneProc) shellPID() int {
 	if p.cmd == nil || p.cmd.Process == nil {
@@ -893,9 +928,8 @@ func (p *paneProc) shellPID() int {
 }
 
 // shellChildren reads the shell's direct child pids from /proc, the file
-// watchShell's shell runs by. It is a variable so tests stand in for the
-// kernel.
-var shellChildren = func(pid int) []int {
+// watchShell's shell runs by.
+func shellChildren(pid int) []int {
 	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
 	if err != nil {
 		return nil
@@ -961,7 +995,7 @@ func (p *paneProc) pollWaitChildren(w *waitReq) {
 			return
 		case <-ticker.C:
 		}
-		kids := shellChildren(pid)
+		kids := p.childrenAt(pid)
 		p.mu.Lock()
 		if p.waiter != w {
 			p.mu.Unlock()

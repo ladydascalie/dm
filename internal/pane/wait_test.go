@@ -62,16 +62,15 @@ func waitFinal(t *testing.T, msgs chan wire.Msg) (data [][]byte, final wire.Msg)
 	}
 }
 
-// waitChildren stands in for /proc's children file, backed by an atomic value
-// so the poll goroutine and the test never race. The returned value moves the
-// child set mid-test.
-func waitChildren(t *testing.T, start []int) *atomic.Value {
+// waitChildren stands in for /proc's children file on one pane, backed by an
+// atomic value so the poll goroutine and the test never race. The returned
+// value moves the child set mid-test. The stand-in hangs off the pane, not a
+// package var, so parallel tests share no global.
+func waitChildren(t *testing.T, p *paneProc, start []int) *atomic.Value {
 	t.Helper()
 	kids := &atomic.Value{}
 	kids.Store(start)
-	old := shellChildren
-	shellChildren = func(int) []int { return kids.Load().([]int) }
-	t.Cleanup(func() { shellChildren = old })
+	p.children = func(int) []int { return kids.Load().([]int) }
 	return kids
 }
 
@@ -90,6 +89,7 @@ func markedPane(t *testing.T, cols, rows int) (*paneProc, net.Conn, chan wire.Ms
 // TestWaitMarkCarriesTheExitCode proves a wait on a pane with shell
 // integration ends at the D mark and reports the exit code the mark carried.
 func TestWaitMarkCarriesTheExitCode(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := markedPane(t, 40, 6)
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
@@ -121,6 +121,7 @@ func TestWaitMarkCarriesTheExitCode(t *testing.T) {
 // TestWaitMarkWithoutAnExitCodeLeavesItUnknown proves a bare D mark ends the
 // wait with the reason mark and no exit code.
 func TestWaitMarkWithoutAnExitCodeLeavesItUnknown(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := markedPane(t, 40, 6)
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
@@ -137,6 +138,7 @@ func TestWaitMarkWithoutAnExitCodeLeavesItUnknown(t *testing.T) {
 // frames together carry the command's output once, in order, across several
 // publishes.
 func TestWaitStreamHasNoGapAndNoDuplicate(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := markedPane(t, 40, 6)
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
@@ -164,8 +166,9 @@ func TestWaitStreamHasNoGapAndNoDuplicate(t *testing.T) {
 // wait ends when the shell's foreground children empty after holding some,
 // and that the exit code stays unknown.
 func TestWaitChildrenFallbackEndsWhenTheChildLeaves(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 40, 6)
-	kids := waitChildren(t, []int{4242})
+	kids := waitChildren(t, p, []int{4242})
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "write", Msg: "sleep 5", Enter: true, ID: 1})
 	paneSync(t, cli, msgs)
@@ -188,8 +191,9 @@ func TestWaitChildrenFallbackEndsWhenTheChildLeaves(t *testing.T) {
 // TestWaitIdleMarklessPaneEndsAtOnce proves a wait on a pane with no marks
 // and no foreground child answers immediately instead of blocking forever.
 func TestWaitIdleMarklessPaneEndsAtOnce(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 40, 6)
-	waitChildren(t, nil)
+	waitChildren(t, p, nil)
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "write", Msg: "true", Enter: true, ID: 1})
 	paneSync(t, cli, msgs)
 
@@ -212,6 +216,7 @@ func TestWaitIdleMarklessPaneEndsAtOnce(t *testing.T) {
 
 // TestSecondWaitIsRefused proves one pane waits on one command at a time.
 func TestSecondWaitIsRefused(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := markedPane(t, 40, 6)
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 1})
@@ -233,6 +238,7 @@ func TestSecondWaitIsRefused(t *testing.T) {
 // TestWaitDeadPaneAnswersAtOnce proves a dead pane's wait answers with the
 // reason dead instead of waiting for an end that will not come.
 func TestWaitDeadPaneAnswersAtOnce(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 40, 6)
 	p.mu.Lock()
 	p.dead = true
@@ -247,8 +253,9 @@ func TestWaitDeadPaneAnswersAtOnce(t *testing.T) {
 // TestWaiterDisconnectCancelsTheWait proves the wait ends and the children
 // poll stops when the waiting connection goes away.
 func TestWaiterDisconnectCancelsTheWait(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 40, 6)
-	kids := waitChildren(t, []int{4242})
+	kids := waitChildren(t, p, []int{4242})
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 1})
 	readTail(t, msgs)
@@ -274,6 +281,7 @@ func TestWaiterDisconnectCancelsTheWait(t *testing.T) {
 // command already returned answers from the D mark the pane still holds,
 // instead of hanging until unrelated output moves the pane.
 func TestWaitAnswersAFinishedCommandAtOnce(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := markedPane(t, 40, 6)
 
 	// The command runs and returns before the wait request is read.
@@ -311,8 +319,9 @@ func TestWaitAnswersAFinishedCommandAtOnce(t *testing.T) {
 // TestReflowHandsARunningWaitToTheChildren proves a wait in flight across a
 // reflow loses its mark path and finishes through the children fallback.
 func TestReflowHandsARunningWaitToTheChildren(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := markedPane(t, 40, 6)
-	kids := waitChildren(t, []int{4242})
+	kids := waitChildren(t, p, []int{4242})
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
 	readTail(t, msgs)
@@ -334,8 +343,9 @@ func TestReflowHandsARunningWaitToTheChildren(t *testing.T) {
 // ends the wait when no child is running, so a command that died with its
 // terminal never hangs the wait.
 func TestReflowEndsAWaitWithNoRunningChild(t *testing.T) {
-	_, cli, msgs := markedPane(t, 40, 6)
-	waitChildren(t, nil)
+	t.Parallel()
+	p, cli, msgs := markedPane(t, 40, 6)
+	waitChildren(t, p, nil)
 
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
 	readTail(t, msgs)

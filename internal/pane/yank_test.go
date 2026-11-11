@@ -108,6 +108,7 @@ func decodeYank(t *testing.T, m wire.Msg) yankReply {
 // An Enter records the output row the next output starts on, and a second
 // Enter moves it.
 func TestAnchorRecordsOnEnter(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("one\r\ntwo\r\n"))
@@ -138,6 +139,7 @@ func TestAnchorRecordsOnEnter(t *testing.T) {
 // The yank reply starts at the anchor, so the rows before the last Enter are
 // not copied.
 func TestYankStartsAfterTheAnchor(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("one\r\ntwo\r\n"))
@@ -166,6 +168,7 @@ func TestYankStartsAfterTheAnchor(t *testing.T) {
 // A pane that has never been sent an Enter reports no anchor, so the client
 // can fall back to the visible screen.
 func TestYankWithoutEnterHasNoAnchor(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("one\r\ntwo\r\n"))
@@ -182,6 +185,7 @@ func TestYankWithoutEnterHasNoAnchor(t *testing.T) {
 // The shell echoes the command dm wrote, then ends the line. The copy starts
 // on the output, not on that echoed command line.
 func TestYankDropsTheWrittenEcho(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -202,6 +206,7 @@ func TestYankDropsTheWrittenEcho(t *testing.T) {
 // A prompt that repaints the line on Enter puts bytes between the anchor and
 // the output. The command start mark beats them: the copy begins at the output.
 func TestYankStartsAtTheCommandMark(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -222,6 +227,7 @@ func TestYankStartsAtTheCommandMark(t *testing.T) {
 // A command end mark cuts the copy exactly, so no prompt and no trailing blank
 // rows follow the last line of output.
 func TestYankEndsAtTheCommandEnd(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -242,6 +248,7 @@ func TestYankEndsAtTheCommandEnd(t *testing.T) {
 // A marked pane ends the copy at the prompt that follows the command, so the
 // trailing prompt is not copied.
 func TestYankDropsTheMarkedPrompt(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("one\r\ntwo\r\n"))
@@ -260,6 +267,7 @@ func TestYankDropsTheMarkedPrompt(t *testing.T) {
 
 // An unmarked pane keeps the last row with content, prompt and all.
 func TestYankKeepsTheUnmarkedPrompt(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("one\r\ntwo\r\n"))
@@ -292,6 +300,7 @@ func yankCopy(res yankReply) []string {
 // An alternate-screen excursion between the command line and the next command
 // does not move the anchor: the copy starts on the next command's output.
 func TestYankStartsAfterAnAltScreenExcursion(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("one\r\ntwo\r\n"))
@@ -318,6 +327,7 @@ func TestYankStartsAfterAnAltScreenExcursion(t *testing.T) {
 // drops the anchor: the mode at the chunk boundaries is the same, so only the
 // transition count can see the excursion.
 func TestYankDropsTheAnchorWhenAltFitsOneRead(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -340,6 +350,7 @@ func TestYankDropsTheAnchorWhenAltFitsOneRead(t *testing.T) {
 // A pane whose Enter is not echoed keeps its first output row. The output
 // starts at the anchor, with no newline for the pty to have echoed.
 func TestYankKeepsTheFirstRowWithoutAnEcho(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -360,6 +371,7 @@ func TestYankKeepsTheFirstRowWithoutAnEcho(t *testing.T) {
 // after it is close to the anchor but has text before it, so it is output and
 // not the echo.
 func TestYankKeepsAShortFirstRowWithoutAnEcho(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -379,6 +391,7 @@ func TestYankKeepsAShortFirstRowWithoutAnEcho(t *testing.T) {
 // A command that clears the screen copies the output it printed afterwards,
 // not the rows the clear wiped and not nothing.
 func TestYankCopiesOutputAfterAClear(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\nrows\r\n"))
@@ -398,6 +411,7 @@ func TestYankCopiesOutputAfterAClear(t *testing.T) {
 // A pane resize re-maps the anchor's bytes onto the new screen; it neither
 // empties the copy nor loses its first row.
 func TestYankSurvivesAPaneResize(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
@@ -420,6 +434,7 @@ func TestYankSurvivesAPaneResize(t *testing.T) {
 // A last line with no trailing newline is still copied: the prompt sharing its
 // row must not drop it.
 func TestYankKeepsTheLastLineWithoutANewline(t *testing.T) {
+	t.Parallel()
 	p, cli, msgs := yankPane(t, 20, 5)
 	p.mu.Lock()
 	p.publishLocked([]byte("old\r\n"))
