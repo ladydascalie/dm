@@ -112,6 +112,7 @@ func printLine(t *testing.T, h *harness, session, pane string, n int) {
 // and returns to one row when the rail gives the width back. Without the
 // settle the grid only clips the line, so the character total would shrink.
 func TestReflowOnResize(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	const session = "wrap"
 	h.run("new", "-s", session)
@@ -168,6 +169,7 @@ func TestReflowOnResize(t *testing.T) {
 // at the final width, not the intermediate one. The first row of the wrapped
 // line must be exactly as wide as the final rail allows.
 func TestReflowEndsAtFinalWidth(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	const session = "drag"
 	h.run("new", "-s", session)

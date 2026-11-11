@@ -49,6 +49,7 @@ func paneShellPIDs(t *testing.T, panePID int) []int {
 // pane daemon and every shell go, and the state directory is removed. Without
 // --force it prints the plan and refuses.
 func TestResetSession(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "reset")
 	root := h.focus("reset")
@@ -99,6 +100,7 @@ func TestResetSession(t *testing.T) {
 // The old path gave every pane a six second grace period, so six panes took
 // half a minute.
 func TestResetManyPanesIsFast(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "many")
 	root := h.focus("many")
@@ -114,6 +116,7 @@ func TestResetManyPanesIsFast(t *testing.T) {
 
 // TestResetAll proves --all discards every session on disk.
 func TestResetAll(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "one")
 	h.run("new", "-s", "two")
@@ -134,6 +137,7 @@ func TestResetAll(t *testing.T) {
 
 // TestResetMissingSession proves reset names a session that is not there.
 func TestResetMissingSession(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	out, err := h.try("reset", "-s", "ghost", "--force")
 	if err == nil {

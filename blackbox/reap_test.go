@@ -71,6 +71,7 @@ func panePID(t *testing.T, h *harness, session, pane string) int {
 // again, so it and its shell must go, while the pane whose socket is intact
 // outlives the reaper pass: an unattached path is the normal state.
 func TestReapOrphans(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "reap")
 	orphan := h.focus("reap")

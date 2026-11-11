@@ -401,9 +401,9 @@ type paneMsg struct {
 
 // paneRequest asks one pane daemon for its screen bytes. It mirrors
 // readPaneScreen in server.go.
-func paneRequest(session, id string, m paneMsg) (paneMsg, error) {
+func paneRequest(state, session, id string, m paneMsg) (paneMsg, error) {
 	var out paneMsg
-	sock := filepath.Join(os.Getenv("DM_STATE"), "sessions", session, "panes", id+".sock")
+	sock := filepath.Join(state, "sessions", session, "panes", id+".sock")
 	c, err := net.DialTimeout("unix", sock, time.Second)
 	if err != nil {
 		return out, err

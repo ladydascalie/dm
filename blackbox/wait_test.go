@@ -13,6 +13,7 @@ import (
 // per test, as the harness does: every test runs in its own DM_STATE
 // directory, so the same name never meets another session.
 func TestPaneWaitEndToEnd(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "waite2e"
 	h.run("new", "-s", s)

@@ -167,6 +167,7 @@ func markerOffset(t *testing.T, out string) int {
 // rectangle, persisted PTY size and text position all follow. A malformed file
 // changes nothing, and putting the old padding back restores the first rect.
 func TestReloadPaddingMovesPanesWithoutRestart(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	cfg := reloadConfigPath(t, h)
 	writeReloadPadding(t, cfg, 0)

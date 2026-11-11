@@ -118,6 +118,7 @@ func boxLines(out string) []string {
 // first, key filter, limit, --json), wait (match and timeout), clear (one key
 // then the whole box) and the rejection of a bad state.
 func TestBoxCLI(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxcli"
 	env := h.env
@@ -241,6 +242,7 @@ func TestBoxCLI(t *testing.T) {
 // TestBoxCLISchema prints the schema the running server serves and finds the
 // frozen state enum in it.
 func TestBoxCLISchema(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	out := boxRun(t, h, h.env, "msg", "schema", "-s", "boxschema")
 	var got map[string]any
@@ -279,6 +281,7 @@ func TestBoxCLISchema(t *testing.T) {
 // TestBoxCLIStream proves the topic stream reads through the binary: a branch
 // filter, a cursor, and a wait that takes no state.
 func TestBoxCLIStream(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxstream"
 	env := h.env
@@ -323,6 +326,7 @@ func TestBoxCLIStream(t *testing.T) {
 // session. A pane id that is not in the session's tree is rejected, which shows
 // the value was sent; a shell in another session sends an empty from.
 func TestBoxCLIFromPane(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxfrom"
 	h.run("new", "-s", s)
@@ -368,6 +372,7 @@ func TestBoxCLIFromPane(t *testing.T) {
 // TestBoxCLIWaitBlocks posts after a wait has parked, so the wrapper holds the
 // socket open for a reply that arrives later.
 func TestBoxCLIWaitBlocks(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxwait"
 	type result struct {
@@ -431,6 +436,7 @@ func boxAwaitWatcherRows(t *testing.T, h *harness, session, why string, done fun
 // inside one pane shows as parked, the post that serves it clears the mark, and
 // a read from the other pane leaves a second row.
 func TestBoxCLIWatchers(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxwatch"
 	h.run("new", "-s", s)
@@ -675,6 +681,7 @@ func boxKillServer(t *testing.T, h *harness, session string) int {
 // a server restart: the entry posted to the new server prints on the same
 // process, after the cursor the first entry left.
 func TestBoxCLISub(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxsub"
 	h.run("new", "-s", s)
@@ -705,6 +712,7 @@ func TestBoxCLISub(t *testing.T) {
 // TestBoxCLISubJSON proves --json prints the entry object alone, one per line,
 // so a reader can parse NDJSON.
 func TestBoxCLISubJSON(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxsubjson"
 	h.run("new", "-s", s)
@@ -732,6 +740,7 @@ func TestBoxCLISubJSON(t *testing.T) {
 // TestBoxCLISubStateFilter proves a state filter skips a row: the note prints
 // nothing and the done entry is the first and only line.
 func TestBoxCLISubStateFilter(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxsubstate"
 	h.run("new", "-s", s)
@@ -750,6 +759,7 @@ func TestBoxCLISubStateFilter(t *testing.T) {
 // TestBoxCLISubBadRequest proves a refused subscription exits nonzero with the
 // server's own words, rather than redialling a request that stays refused.
 func TestBoxCLISubBadRequest(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxsubbad"
 	h.run("new", "-s", s)
@@ -765,6 +775,7 @@ func TestBoxCLISubBadRequest(t *testing.T) {
 // TestBoxCLISubGapNote proves a cursor behind the oldest kept row prints the
 // gap note once, on the first frame, and not again for the entries after it.
 func TestBoxCLISubGapNote(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	s := "boxsubgap"
 	h.run("new", "-s", s)

@@ -30,6 +30,7 @@ func renameWSShape(st *stateFile) string {
 
 // A rename stores the trimmed name in the state file and leaves the id alone.
 func TestRenameWorkspaceKeepsIDAndTrimsName(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "rwid")
 	before := h.sessionState("rwid")
@@ -63,6 +64,7 @@ func TestRenameWorkspaceKeepsIDAndTrimsName(t *testing.T) {
 // A background workspace renames by id, and neither the active index nor the
 // focus pane follows it.
 func TestRenameWorkspaceBackgroundWorkspace(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "rwbg")
 	res := h.rpc("rwbg", map[string]any{
@@ -118,6 +120,7 @@ func TestRenameWorkspaceBackgroundWorkspace(t *testing.T) {
 
 // Both an empty and a spaces-only name are refused and change nothing.
 func TestRenameWorkspaceRefusesEmptyName(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "rwempty")
 	shape := renameWSShape(h.sessionState("rwempty"))
@@ -141,6 +144,7 @@ func TestRenameWorkspaceRefusesEmptyName(t *testing.T) {
 
 // An id that names no workspace is refused, and nothing changes.
 func TestRenameWorkspaceUnknownID(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "rwunk")
 	shape := renameWSShape(h.sessionState("rwunk"))
@@ -160,6 +164,7 @@ func TestRenameWorkspaceUnknownID(t *testing.T) {
 // The CLI verb prints the reply as JSON and exits 0; a missing argument exits
 // non-zero.
 func TestRenameWorkspaceCLI(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "rwcli")
 
@@ -190,6 +195,7 @@ func TestRenameWorkspaceCLI(t *testing.T) {
 
 // A client asking for panes or workspaces sees the new label.
 func TestRenameWorkspaceLabelReachesClients(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "rwlbl")
 	h.run("rename-workspace", "s1", "api work", "-s", "rwlbl")

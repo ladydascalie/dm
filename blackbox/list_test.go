@@ -8,6 +8,7 @@ import (
 // TestListTable proves dm list prints a human table by default and keeps the
 // raw tree behind --json.
 func TestListTable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "table")
 	root := h.focus("table")
@@ -33,6 +34,7 @@ func TestListTable(t *testing.T) {
 // TestLsTable proves dm ls prints counts and the active project for a live
 // session, and reads the same facts from state.json once the server is gone.
 func TestLsTable(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "one")
 	h.run("new", "-s", "two")

@@ -28,8 +28,13 @@ func fakeNotify(t *testing.T) (dir, log string) {
 func notifyHarness(t *testing.T, extra ...string) (*harness, string) {
 	t.Helper()
 	dir, log := fakeNotify(t)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	h := newHarness(t)
+	for i, e := range h.env {
+		if strings.HasPrefix(e, "PATH=") {
+			h.env[i] = "PATH=" + dir + string(os.PathListSeparator) + strings.TrimPrefix(e, "PATH=")
+			break
+		}
+	}
 	h.env = append(h.env, extra...)
 	return h, log
 }
@@ -180,6 +185,7 @@ func waitNotifyEntry(t *testing.T, h *harness, session, key, state, msg string) 
 // notify topic with the entered state, and the headless renderer pops the
 // topic, the state and the message.
 func TestNotifyBlockedInBackgroundPane(t *testing.T) {
+	t.Parallel()
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
 	root := h.focus("n")
@@ -205,6 +211,7 @@ func TestNotifyBlockedInBackgroundPane(t *testing.T) {
 // The same state twice is one notification: a second report for a pane already
 // blocked does not interrupt again.
 func TestNotifyOncePerState(t *testing.T) {
+	t.Parallel()
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
 	root := h.focus("n")
@@ -224,6 +231,7 @@ func TestNotifyOncePerState(t *testing.T) {
 // A focused pane with a client attached is the operator's business, so it does
 // not notify; the same pane in the background does.
 func TestNotifySuppressedForAttachedFocus(t *testing.T) {
+	t.Parallel()
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
 	root := h.focus("n")
@@ -248,6 +256,7 @@ func TestNotifySuppressedForAttachedFocus(t *testing.T) {
 // DM_NOTIFY=0 turns the desktop notifications off, and the box log still
 // carries the event.
 func TestNotifyDisabledByEnv(t *testing.T) {
+	t.Parallel()
 	h, log := notifyHarness(t, "DM_NOTIFY=0")
 	h.run("new", "-s", "n")
 	root := h.focus("n")
@@ -263,6 +272,7 @@ func TestNotifyDisabledByEnv(t *testing.T) {
 // state with the exit in its message, and pops nothing: note is not urgent,
 // whatever the focus. The entry is logged either way.
 func TestNotifyPaneExit(t *testing.T) {
+	t.Parallel()
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
 	root := h.focus("n")
@@ -280,6 +290,7 @@ func TestNotifyPaneExit(t *testing.T) {
 // notification, error and blocked still do, and every entry lands in the box
 // whatever its urgency.
 func TestNotifyUrgencyGatesDesktopPops(t *testing.T) {
+	t.Parallel()
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
 	root := h.focus("n")
@@ -310,13 +321,22 @@ func TestNotifyUrgencyGatesDesktopPops(t *testing.T) {
 // with the exit and takes its state file with it, so the entry's landing in
 // the box is proven by TestLastPaneExitPostsEntry in internal/server.
 func TestNotifyLastPaneExitDoesNotPop(t *testing.T) {
+	t.Parallel()
 	h, log := notifyHarness(t)
 	h.run("new", "-s", "n")
 	only := h.focus("n")
 
 	h.run("write-to", only, "-s", "n", "--msg", "exit", "--enter")
-	stillNotify(t, log, 0, 1*time.Second)
-	if _, err := os.Stat(filepath.Join(h.stateDir(), "sessions", "n", "state.json")); !os.IsNotExist(err) {
-		t.Fatalf("the last pane's exit left the session state behind: %v", err)
+	state := filepath.Join(h.stateDir(), "sessions", "n", "state.json")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(state); os.IsNotExist(err) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the last pane's exit left the session state behind")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
+	stillNotify(t, log, 0, 1*time.Second)
 }

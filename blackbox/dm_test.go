@@ -15,6 +15,7 @@ import (
 
 // The pane answers an application's feature query and publishes its status.
 func TestOSC7501EndToEnd(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "probe")
 	root := h.focus("probe")
@@ -45,6 +46,7 @@ func TestOSC7501EndToEnd(t *testing.T) {
 // tell the server, because the client's replay ring may not reach back to the
 // enabling sequences. The client uses that to forward the wheel to the app.
 func TestAltScreenAndMouseMode(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "m")
 	root := h.focus("m")
@@ -57,6 +59,7 @@ func TestAltScreenAndMouseMode(t *testing.T) {
 
 // TestToggleFold drives the fold action through a live session.
 func TestToggleFold(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "fold")
 	unfolded := func() bool {
@@ -84,6 +87,7 @@ func TestToggleFold(t *testing.T) {
 }
 
 func TestSetRailAction(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "ra")
 	tree := h.rpc("ra", map[string]any{"action": "list"})
@@ -121,6 +125,7 @@ func TestSetRailAction(t *testing.T) {
 // and the pane's own persisted size must both follow the rail, so a skipped
 // syncSizes fails even though the snapshot alone would look right.
 func TestRailReflow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "reflow")
 	pane := h.focus("reflow")
@@ -177,6 +182,7 @@ func TestRailReflow(t *testing.T) {
 // TestZoomSplitWindow pins the snapshot: the zoomed pane fills the pane area,
 // every sibling keeps its layout rect, and Zoom names the pane.
 func TestZoomSplitWindow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zwin")
 	left := h.focus("zwin")
@@ -208,6 +214,7 @@ func TestZoomSplitWindow(t *testing.T) {
 // TestZoomSinglePaneNoop pins the one-pane guard: the action replies ok, sets
 // no zoom, and leaves the rect alone.
 func TestZoomSinglePaneNoop(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zsolo")
 	pane := h.focus("zsolo")
@@ -223,6 +230,7 @@ func TestZoomSinglePaneNoop(t *testing.T) {
 // TestZoomToggleRestores pins the toggle: a second zoom-pane clears the zoom
 // and the split rects come back.
 func TestZoomToggleRestores(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "ztoggle")
 	left := h.focus("ztoggle")
@@ -247,6 +255,7 @@ func TestZoomToggleRestores(t *testing.T) {
 // TestZoomClearsOnFocusChange pins the focus guard: a focus move ends the zoom
 // and the split rects return.
 func TestZoomClearsOnFocusChange(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zfocus")
 	left := h.focus("zfocus")
@@ -268,6 +277,7 @@ func TestZoomClearsOnFocusChange(t *testing.T) {
 // TestZoomClearsOnSplit pins the split guard: the new pane is visible, so the
 // zoom ends and the split pane stops filling the area.
 func TestZoomClearsOnSplit(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zsplit")
 	left := h.focus("zsplit")
@@ -288,6 +298,7 @@ func TestZoomClearsOnSplit(t *testing.T) {
 // TestZoomClearsOnClosePane pins the close guard: closing a sibling ends the
 // zoom, so the zoomed pane returns to its split rect.
 func TestZoomClearsOnClosePane(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zclose")
 	a := h.focus("zclose")
@@ -309,6 +320,7 @@ func TestZoomClearsOnClosePane(t *testing.T) {
 // TestZoomClearsOnResizeSplit pins the resize-split guard: the drag is a layout
 // change, so the zoom ends even though the handler skips afterMutation.
 func TestZoomClearsOnResizeSplit(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zdrag")
 	left := h.focus("zdrag")
@@ -317,8 +329,10 @@ func TestZoomClearsOnResizeSplit(t *testing.T) {
 	if got := h.toggleZoom("zdrag"); got != right {
 		t.Fatalf("zoom-pane = %q, want %q", got, right)
 	}
-	h.rpc("zdrag", map[string]any{"action": "resize-split",
-		"target": left, "other": right, "ratio": 0.3})
+	h.rpc("zdrag", map[string]any{
+		"action": "resize-split",
+		"target": left, "other": right, "ratio": 0.3,
+	})
 	if got := h.zoom("zdrag"); got != "" {
 		t.Fatalf("zoom survived resize-split: %q", got)
 	}
@@ -330,6 +344,7 @@ func TestZoomClearsOnResizeSplit(t *testing.T) {
 // TestZoomKeepsOnSetRail pins the rail exception: a rail width change keeps the
 // zoom and the zoomed pane takes the new area.
 func TestZoomKeepsOnSetRail(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zrail")
 	left := h.focus("zrail")
@@ -354,6 +369,7 @@ func TestZoomKeepsOnSetRail(t *testing.T) {
 // TestZoomClearsOnPaneExit pins the death guard: when the zoomed pane's daemon
 // dies, the pane leaves the layout and the zoom goes with it.
 func TestZoomClearsOnPaneExit(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zdead")
 	left := h.focus("zdead")
@@ -380,6 +396,7 @@ func TestZoomClearsOnPaneExit(t *testing.T) {
 }
 
 func TestDurabilityAcrossServerKill(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "durable")
 	root := h.focus("durable")
@@ -415,6 +432,7 @@ func TestDurabilityAcrossServerKill(t *testing.T) {
 }
 
 func TestSplitStatusAndRPC(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "s1")
 	root := h.focus("s1")
@@ -470,6 +488,7 @@ func TestSplitStatusAndRPC(t *testing.T) {
 // A pane that spoke the status protocol stays an agent after state=clear. The
 // mark persists, so a restart cannot demote it back to a shell either.
 func TestAgentStaysAfterClear(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "sticky")
 	pane := h.focus("sticky")
@@ -543,6 +562,7 @@ func TestAgentStaysAfterClear(t *testing.T) {
 // TestCloseLastPaneDropsWindow closes a window's only pane. The window goes
 // away and the session falls back to its other workspace instead of refusing.
 func TestCloseLastPaneDropsWindow(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "last")
 	h.run("exec", `{"action":"new-workspace","name":"two"}`, "-s", "last")
@@ -565,6 +585,7 @@ func TestCloseLastPaneDropsWindow(t *testing.T) {
 // A shell that exits must take its split with it and leave focus on a live
 // pane. Leaving a dead rect behind makes the whole client unusable.
 func TestPaneExitPrunesSplit(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "x")
 	root := h.focus("x")
@@ -611,6 +632,7 @@ func TestPaneExitPrunesSplit(t *testing.T) {
 
 // TestWindowAutoName labels a window after the folder it was created in.
 func TestWindowAutoName(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "auto")
 	cwd, _ := os.Getwd()
@@ -667,6 +689,7 @@ func TestWindowAutoName(t *testing.T) {
 // now, not where that pane was born: dm launched from /a, the pane cd'd to /b,
 // so a new window, workspace or split belongs to /b.
 func TestNewPaneFollowsShellCwd(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "cwd")
 	root := h.focus("cwd")
@@ -712,6 +735,7 @@ func TestNewPaneFollowsShellCwd(t *testing.T) {
 }
 
 func TestWindowsAndWorkspaces(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "w1")
 	h.run("exec", `{"action":"new-window"}`, "-s", "w1")
@@ -732,6 +756,7 @@ func TestWindowsAndWorkspaces(t *testing.T) {
 // History returns the rows above the live screen, oldest first, using the
 // same reachable window as the client's scrollback.
 func TestPaneHistory(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 
 	h.run("new", "-s", "hist")
@@ -857,6 +882,7 @@ func TestPaneHistory(t *testing.T) {
 
 // A nested drag resizes the outer split, not the inner one, and clamps.
 func TestResizeSplit(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "rs")
 	// This test measures the pane area exactly. Hide the rail, which a new
@@ -953,14 +979,14 @@ func TestResizeSplit(t *testing.T) {
 
 // The pane action returns canonical ANSI for a live shell pane, not the ring.
 func TestScreenAction(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "snap")
 	pane := h.focus("snap")
 	h.run("write-to", pane, "-s", "snap", "--msg", "echo SNAP-MARK", "--enter")
 	h.waitFor("snap", pane, "SNAP-MARK")
-	t.Setenv("DM_STATE", h.stateDir())
 
-	m, err := paneRequest("snap", pane, paneMsg{Type: "req", Action: "screen"})
+	m, err := paneRequest(h.stateDir(), "snap", pane, paneMsg{Type: "req", Action: "screen"})
 	if err != nil {
 		t.Fatalf("screen: %v", err)
 	}
@@ -991,6 +1017,7 @@ func TestScreenAction(t *testing.T) {
 // TestZoomExecReachesTheServer drives the zoom-pane action the client sends
 // through dm exec, so the CLI path and the handler agree.
 func TestZoomExecReachesTheServer(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.run("new", "-s", "zx")
 	left := h.focus("zx")
