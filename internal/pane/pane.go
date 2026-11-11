@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -63,6 +64,25 @@ type paneProc struct {
 	anchor    int64
 	anchorSet bool
 	echo      []byte
+
+	// waiter is the pane's one in-flight wait action, nil when none runs. A
+	// second wait request is refused until it ends. Guarded by mu.
+	waiter *waitReq
+}
+
+// waitReq is one wait action: the connection the frames stream to, the
+// request id, the stream position the wait's output starts at and whether the
+// shell has integration marks, which decides between the mark and the
+// foreground-children completion. done closes when the wait ends or the
+// waiter disconnects, which stops the children poll. childSeen belongs to the
+// poll goroutine: it records that a sample found a foreground child.
+type waitReq struct {
+	sc        *subConn
+	id        int
+	anchor    int64
+	mark      bool
+	childSeen bool
+	done      chan struct{}
 }
 
 // echoMax is the longest command text a pane keeps to drop its echo from a
@@ -351,6 +371,9 @@ func (p *paneProc) readLoop() {
 		if err != nil {
 			p.mu.Lock()
 			p.dead = true
+			if sc, reply, ok := p.waitEndLocked(); ok {
+				_ = sc.send(reply)
+			}
 			p.broadcastLocked(wire.Msg{Type: "exit"})
 			p.mu.Unlock()
 			return
@@ -404,6 +427,12 @@ func (p *paneProc) publishLocked(b []byte) {
 		p.mode = m
 		alt, mouse, paste := modeInfo(m)
 		p.broadcastLocked(wire.Msg{Type: "mode", Res: modeRes(alt, mouse, paste)})
+	}
+	// A publish that completed the wait sends its final reply here, under the
+	// pane lock like every broadcast, so it lands after the bytes this
+	// publish delivered and before anything produced later.
+	if sc, reply, ok := p.waitEndLocked(); ok {
+		_ = sc.send(reply)
 	}
 }
 
@@ -540,6 +569,11 @@ func (p *paneProc) serve(c net.Conn) {
 	defer func() {
 		p.mu.Lock()
 		delete(p.subs, sc)
+		// The waiter going away ends its wait and stops its children poll.
+		if p.waiter != nil && p.waiter.sc == sc {
+			close(p.waiter.done)
+			p.waiter = nil
+		}
 		p.mu.Unlock()
 	}()
 
@@ -673,6 +707,72 @@ func (p *paneProc) serve(c net.Conn) {
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
+		case "wait":
+			p.mu.Lock()
+			if p.dead {
+				p.mu.Unlock()
+				_ = sc.send(waitReply(m.ID, nil, "dead"))
+				continue
+			}
+			if p.waiter != nil {
+				p.mu.Unlock()
+				_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: false,
+					Error: "a wait is already running"})
+				continue
+			}
+			// The wait streams from the last command's start: the Enter's
+			// anchor, or the stream's current end when no Enter was recorded.
+			anchor := p.produced
+			if p.anchorSet {
+				anchor = p.anchor
+			}
+			_, marked := p.vt.CommandEnd()
+			w := &waitReq{sc: sc, id: m.ID, anchor: anchor, mark: marked,
+				done: make(chan struct{})}
+			p.waiter = w
+			tail, cols, h, tailOK := p.yankTailLocked()
+			// The fallback samples the shell's foreground children once at the
+			// start: a markless pane with none running has no observable end,
+			// so its wait finishes at once instead of blocking forever.
+			idle := false
+			if !marked {
+				idle = len(shellChildren(p.shellPID())) == 0
+				// The start sample counts as having seen a child, so a
+				// command that returns before the first tick still ends the
+				// wait.
+				w.childSeen = !idle
+			}
+			p.mu.Unlock()
+
+			// The tail is one yank-shaped reply, taken under the lock so
+			// nothing can slip between it and the broadcast stream the waiter
+			// already sits on.
+			var lines []string
+			start, rows := 0, 0
+			if tailOK {
+				lines, start, rows = yankRows(tail, cols, h)
+			}
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true,
+				Res: jsonRaw(map[string]any{
+					"lines": lines, "start": start, "rows": rows, "anchor": tailOK,
+				})})
+
+			if !marked && idle {
+				p.mu.Lock()
+				mine := p.waiter == w
+				if mine {
+					p.waiter = nil
+					close(w.done)
+				}
+				p.mu.Unlock()
+				if mine {
+					_ = sc.send(waitReply(m.ID, nil, "idle"))
+				}
+				continue
+			}
+			if !marked {
+				go p.pollWaitChildren(w)
+			}
 		case "kill":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 			p.shutdown()
@@ -769,6 +869,108 @@ func yankRows(tail []byte, cols, h int) (lines []string, start, rows int) {
 		lines[y] = vt.PlainRow(all[y])
 	}
 	return lines, start, rows
+}
+
+// shellPID is the pane shell's pid, or 0 when the pane has no command.
+func (p *paneProc) shellPID() int {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
+}
+
+// shellChildren reads the shell's direct child pids from /proc, the file
+// watchShell's shell runs by. It is a variable so tests stand in for the
+// kernel.
+var shellChildren = func(pid int) []int {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", pid, pid))
+	if err != nil {
+		return nil
+	}
+	var kids []int
+	for _, f := range strings.Fields(string(b)) {
+		if n, err := strconv.Atoi(f); err == nil {
+			kids = append(kids, n)
+		}
+	}
+	return kids
+}
+
+// waitReply is a wait's final frame: the exit code when one was observed and
+// the reason the wait ended.
+func waitReply(id int, exit *int, reason string) wire.Msg {
+	return wire.Msg{Type: "resp", ID: id, OK: true, Exit: exit, WaitReason: reason}
+}
+
+// waitEndLocked ends the pane's wait when it is finished: the shell died, or
+// a command end mark at or after the wait's start anchor arrived. The caller
+// holds p.mu. ok is false while the wait keeps running; otherwise the wait is
+// cleared and the returned reply goes to the waiting connection.
+func (p *paneProc) waitEndLocked() (sc *subConn, reply wire.Msg, ok bool) {
+	w := p.waiter
+	if w == nil {
+		return nil, wire.Msg{}, false
+	}
+	if p.dead {
+		p.waiter = nil
+		close(w.done)
+		return w.sc, waitReply(w.id, nil, "dead"), true
+	}
+	if w.mark {
+		if end, marked := p.vt.CommandEnd(); marked && end >= w.anchor {
+			p.waiter = nil
+			close(w.done)
+			var exit *int
+			if code, coded := p.vt.CommandExit(); coded {
+				exit = &code
+			}
+			return w.sc, waitReply(w.id, exit, "mark"), true
+		}
+	}
+	return nil, wire.Msg{}, false
+}
+
+// waitPollEvery is how often the children fallback samples the shell, the
+// same cadence the shell watcher runs on.
+const waitPollEvery = cwdEvery
+
+// pollWaitChildren runs the wait's no-marks fallback: it samples the shell's
+// foreground children until one sample finds some and the next finds none,
+// which is the command returning with an unobservable exit code. It returns
+// when the wait ends for another reason or the waiter disconnects.
+func (p *paneProc) pollWaitChildren(w *waitReq) {
+	pid := p.shellPID()
+	ticker := time.NewTicker(waitPollEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-w.done:
+			return
+		case <-ticker.C:
+		}
+		kids := shellChildren(pid)
+		p.mu.Lock()
+		if p.waiter != w {
+			p.mu.Unlock()
+			return
+		}
+		if sc, reply, ok := p.waitEndLocked(); ok {
+			p.mu.Unlock()
+			_ = sc.send(reply)
+			return
+		}
+		if len(kids) > 0 {
+			w.childSeen = true
+		} else if w.childSeen {
+			// The child set emptied after holding children: the command came
+			// back and nothing observed its exit code.
+			p.waiter = nil
+			p.mu.Unlock()
+			_ = w.sc.send(waitReply(w.id, nil, "children"))
+			return
+		}
+		p.mu.Unlock()
+	}
 }
 
 func splitLines(s string) []string {
