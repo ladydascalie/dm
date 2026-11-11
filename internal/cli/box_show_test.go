@@ -19,6 +19,7 @@ func showFlags(args ...string) *cmdFlags {
 }
 
 func TestShowFlagContract(t *testing.T) {
+	t.Parallel()
 	c := showFlags("--key", "lane/a", "--seq", "3", "--from", "w1p1")
 	if err := boxShowVerb(c); err == nil {
 		t.Fatal("naming both a seq and a pane was accepted")
@@ -32,6 +33,7 @@ func TestShowFlagContract(t *testing.T) {
 // The pick: the seq's row, else the newest row the pane posted, else the
 // topic's newest row.
 func TestShowPickEntry(t *testing.T) {
+	t.Parallel()
 	entries := []box.Entry{
 		{Seq: 3, Key: "lane/a", State: box.StateDone, From: "w1p1", Msg: "newest", Body: "long\nbody"},
 		{Seq: 2, Key: "lane/a", State: box.StateWorking, From: "w2p1", Msg: "from other pane"},
@@ -62,6 +64,7 @@ func TestShowPickEntry(t *testing.T) {
 // The text a show prints: the body when the entry carries one, the summary
 // line when it does not.
 func TestShowText(t *testing.T) {
+	t.Parallel()
 	withBody := box.Entry{Seq: 1, Key: "k", State: box.StateDone, Msg: "summary", Body: "line one\nline two"}
 	if text, want := showText(withBody), "line one\nline two"; text != want {
 		t.Fatalf("show text = %q, want the body", text)

@@ -14,6 +14,7 @@ import (
 // TestReorderMovesFlagsBeforePositionals proves -s may follow a pane id: the
 // reordered argv puts the flags first, so flag.Parse sees them.
 func TestReorderMovesFlagsBeforePositionals(t *testing.T) {
+	t.Parallel()
 	got := reorder([]string{"w1p1", "-s", "other", "hello"})
 	want := []string{"-s", "other", "w1p1", "hello"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -24,6 +25,7 @@ func TestReorderMovesFlagsBeforePositionals(t *testing.T) {
 // TestReorderKeepsAValuelessFlag proves a boolean flag stays alone and does
 // not swallow the next argument.
 func TestReorderKeepsAValuelessFlag(t *testing.T) {
+	t.Parallel()
 	got := reorder([]string{"--enter", "w1p1"})
 	want := []string{"--enter", "w1p1"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -34,6 +36,7 @@ func TestReorderKeepsAValuelessFlag(t *testing.T) {
 // TestReorderKeepsADash proves a bare "-" stays positional: it is stdin,
 // never a flag.
 func TestReorderKeepsADash(t *testing.T) {
+	t.Parallel()
 	got := reorder([]string{"-", "w1p1"})
 	want := []string{"-", "w1p1"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -44,6 +47,7 @@ func TestReorderKeepsADash(t *testing.T) {
 // TestBoxCursor proves -after turns into the request cursor, and that the
 // default -1 sends no cursor at all.
 func TestBoxCursor(t *testing.T) {
+	t.Parallel()
 	c := newFlags("msg")
 	c.parse([]string{"--after", "7"})
 	if got := c.boxCursor(); got == nil || *got != 7 {
@@ -58,6 +62,8 @@ func TestBoxCursor(t *testing.T) {
 
 // TestBoxFromNeedsTheSessionEnv proves the sender id only travels when the
 // shell exports the session it is writing to.
+// Stays serial: the test's subject is env behaviour, and t.Setenv cannot run
+// in a parallel test.
 func TestBoxFromNeedsTheSessionEnv(t *testing.T) {
 	t.Setenv("DM_SESSION", "main")
 	t.Setenv("DM_PANE", "w1p1")
@@ -71,6 +77,8 @@ func TestBoxFromNeedsTheSessionEnv(t *testing.T) {
 
 // TestBoxTermWidthUsesColumns proves $COLUMNS caps the row width when stdout
 // is not a terminal.
+// Stays serial: the test's subject is env behaviour, and t.Setenv cannot run
+// in a parallel test.
 func TestBoxTermWidthUsesColumns(t *testing.T) {
 	t.Setenv("COLUMNS", "80")
 	if w := boxTermWidth(); w != 80 {
@@ -85,6 +93,7 @@ func TestBoxTermWidthUsesColumns(t *testing.T) {
 // TestPidAliveMissingAndGarbage proves a pid file that names nothing is not
 // alive, so purge treats it as a dead session.
 func TestPidAliveMissingAndGarbage(t *testing.T) {
+	t.Parallel()
 	if pidAlive(filepath.Join(t.TempDir(), "gone")) {
 		t.Fatal("a missing pid file was alive")
 	}
@@ -107,6 +116,7 @@ func TestPidAliveMissingAndGarbage(t *testing.T) {
 // TestPidAliveSelf proves a pid file naming a live process is alive, so purge
 // skips the session.
 func TestPidAliveSelf(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "server.pid")
 	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		t.Fatal(err)
@@ -119,6 +129,7 @@ func TestPidAliveSelf(t *testing.T) {
 // TestPidAliveAny proves the pane scan looks only at pid files and stops at
 // the first live one.
 func TestPidAliveAny(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if pidAliveAny(dir) {
 		t.Fatal("an empty pane directory was alive")

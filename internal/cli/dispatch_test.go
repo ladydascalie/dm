@@ -31,6 +31,7 @@ func TestNewPrintsTheSession(t *testing.T) {
 // TestExecValidation proves exec refuses a missing and a malformed action
 // before anything leaves the process.
 func TestExecValidation(t *testing.T) {
+	t.Parallel()
 	if err := Run([]string{"exec"}); err == nil || !strings.Contains(err.Error(), "needs a JSON action") {
 		t.Fatalf("dm exec without JSON = %v", err)
 	}
@@ -71,6 +72,7 @@ func TestExecRefusal(t *testing.T) {
 // TestWriteToNeedsAPane proves the pane argument is checked before any
 // request goes out, so the validation needs no server.
 func TestWriteToNeedsAPane(t *testing.T) {
+	t.Parallel()
 	for _, argv := range [][]string{
 		{"write-to"}, {"write"}, {"read"}, {"yank"}, {"split"}, {"focus"},
 		{"rename-workspace", "w1"}, {"set-project"}, {"peek"}, {"msg"},
@@ -350,6 +352,7 @@ func TestKillWithoutAPidFile(t *testing.T) {
 // TestManWriteError proves a bad output path is an error, not a silent
 // success.
 func TestManWriteError(t *testing.T) {
+	t.Parallel()
 	if err := Run([]string{"man", "-o", "/dev/null/no-such-dir/page"}); err == nil {
 		t.Fatal("dm man -o to an unwritable path was accepted")
 	}

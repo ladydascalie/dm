@@ -23,6 +23,7 @@ func bodyFlags(t *testing.T, args ...string) *cmdFlags {
 
 // --body carries the text through.
 func TestBodyFlagWins(t *testing.T) {
+	t.Parallel()
 	c := bodyFlags(t, "--body", "long\ntext")
 	body, err := boxBody(c)
 	if err != nil {
@@ -35,6 +36,7 @@ func TestBodyFlagWins(t *testing.T) {
 
 // --body-file reads the file verbatim, newlines included.
 func TestBodyFileReadsThePath(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "body.txt")
 	if err := os.WriteFile(path, []byte("first\nsecond\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -50,6 +52,8 @@ func TestBodyFileReadsThePath(t *testing.T) {
 }
 
 // --body-file - reads stdin, so an agent can pipe the long text.
+// Stays serial: the test swaps the process stdin, which belongs to every test
+// at once.
 func TestBodyFileDashReadsStdin(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -75,6 +79,7 @@ func TestBodyFileDashReadsStdin(t *testing.T) {
 
 // Naming both sources is refused, and naming neither is an empty body.
 func TestBodySourcesAreExclusive(t *testing.T) {
+	t.Parallel()
 	c := bodyFlags(t, "--body", "a", "--body-file", "/tmp/x")
 	if _, err := boxBody(c); err == nil || !strings.Contains(err.Error(), "exclusive") {
 		t.Fatalf("boxBody = %v, want the exclusivity error", err)
@@ -87,6 +92,7 @@ func TestBodySourcesAreExclusive(t *testing.T) {
 
 // A missing file is a clean error, not a panic.
 func TestBodyFileMissingIsAnError(t *testing.T) {
+	t.Parallel()
 	c := bodyFlags(t, "--body-file", filepath.Join(t.TempDir(), "gone"))
 	if _, err := boxBody(c); err == nil {
 		t.Fatal("a missing body file was accepted")

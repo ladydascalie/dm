@@ -57,7 +57,9 @@ func listHandler(entries []box.Entry, trimmed bool) fakeHandler {
 // sender into the request, and prints the stored row.
 func TestMsgPostSendsTheEntry(t *testing.T) {
 	// The shell exports DM_SESSION and DM_PANE, so a post from inside a pane
-	// of the target session carries the pane id as its sender.
+	// of the target session carries the pane id as its sender. Stays serial:
+	// the test's subject is env behaviour, and t.Setenv cannot run in a
+	// parallel test.
 	t.Setenv("DM_SESSION", "main")
 	t.Setenv("DM_PANE", "w1p1")
 	var got box.PostReq
@@ -89,7 +91,8 @@ func TestMsgPostRefusesABadState(t *testing.T) {
 }
 
 // TestMsgListTable proves list prints the rows newest first and honours the
-// COLUMNS cap.
+// COLUMNS cap. Stays serial: the test's subject is env behaviour, and
+// t.Setenv cannot run in a parallel test.
 func TestMsgListTable(t *testing.T) {
 	t.Setenv("COLUMNS", "60")
 	startFakeServer(t, "main", listHandler([]box.Entry{msgEntry}, false))

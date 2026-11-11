@@ -13,7 +13,6 @@ import (
 
 	"dm/internal/paths"
 	"dm/internal/session"
-	"dm/internal/testutil"
 	"dm/internal/transport"
 	"dm/internal/wire"
 )
@@ -21,7 +20,8 @@ import (
 // TestBoxPrintEmptyPrintsNothing proves an empty list prints no rows and no
 // header.
 func TestBoxPrintEmptyPrintsNothing(t *testing.T) {
-	out := testutil.CaptureStdout(t, func() { boxPrint(nil, 80) })
+	t.Parallel()
+	out := captureStdout(t, func() { boxPrint(nil, 80) })
 	if out != "" {
 		t.Fatalf("boxPrint of no entries printed %q", out)
 	}
@@ -30,11 +30,12 @@ func TestBoxPrintEmptyPrintsNothing(t *testing.T) {
 // TestBoxPrintRows proves a list prints one row per entry, padded to the
 // widest column, with no trailing spaces.
 func TestBoxPrintRows(t *testing.T) {
+	t.Parallel()
 	entries := []box.Entry{
 		{Seq: 1, Key: "lane/a", State: box.StateNote, From: "w1p1", Msg: "first"},
 		{Seq: 10, Key: "lane/b", State: box.StateDone, From: "w2p1", Msg: "second"},
 	}
-	out := testutil.CaptureStdout(t, func() { boxPrint(entries, 0) })
+	out := captureStdout(t, func() { boxPrint(entries, 0) })
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("boxPrint wrote %d rows: %q", len(lines), out)
@@ -50,8 +51,9 @@ func TestBoxPrintRows(t *testing.T) {
 // TestBoxPrintElides proves a width cuts the message to the row budget and
 // leaves an ellipsis where the text was cut.
 func TestBoxPrintElides(t *testing.T) {
+	t.Parallel()
 	e := box.Entry{Seq: 1, Key: "k", State: box.StateNote, Msg: strings.Repeat("x", 60)}
-	out := testutil.CaptureStdout(t, func() { boxPrint([]box.Entry{e}, 30) })
+	out := captureStdout(t, func() { boxPrint([]box.Entry{e}, 30) })
 	if !strings.Contains(out, "…") {
 		t.Fatalf("elided row has no ellipsis: %q", out)
 	}
@@ -63,7 +65,8 @@ func TestBoxPrintElides(t *testing.T) {
 // TestBoxPrintWatchersEmptyPrintsNothing proves an empty watch list prints
 // nothing.
 func TestBoxPrintWatchersEmptyPrintsNothing(t *testing.T) {
-	if out := testutil.CaptureStdout(t, func() { boxPrintWatchers(nil) }); out != "" {
+	t.Parallel()
+	if out := captureStdout(t, func() { boxPrintWatchers(nil) }); out != "" {
 		t.Fatalf("boxPrintWatchers of no watches printed %q", out)
 	}
 }
@@ -71,11 +74,12 @@ func TestBoxPrintWatchersEmptyPrintsNothing(t *testing.T) {
 // TestBoxPrintWatchersRows proves each row names the pane, the filter, the
 // cursor and the parked state, padded to the widest column.
 func TestBoxPrintWatchersRows(t *testing.T) {
+	t.Parallel()
 	ws := []box.Watch{
 		{Pane: "w1p1", Key: "lane/a", Cursor: 3},
 		{Pane: "w10p1", KeyPrefix: "lane", Cursor: 120, Parked: true},
 	}
-	out := testutil.CaptureStdout(t, func() { boxPrintWatchers(ws) })
+	out := captureStdout(t, func() { boxPrintWatchers(ws) })
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("boxPrintWatchers wrote %q", out)
@@ -94,6 +98,7 @@ func TestBoxPrintWatchersRows(t *testing.T) {
 // TestBoxFilter proves a prefix filter prints as the branch with a star, and
 // an exact key prints bare.
 func TestBoxFilter(t *testing.T) {
+	t.Parallel()
 	if got := boxFilter(box.Watch{KeyPrefix: "lane"}); got != "lane*" {
 		t.Fatalf("boxFilter = %q, want lane*", got)
 	}
@@ -105,7 +110,8 @@ func TestBoxFilter(t *testing.T) {
 // TestPrintTableLastColumnUnpadded proves the last column carries no padding
 // and no row carries trailing spaces.
 func TestPrintTableLastColumnUnpadded(t *testing.T) {
-	out := testutil.CaptureStdout(t, func() {
+	t.Parallel()
+	out := captureStdout(t, func() {
 		printTable([]string{"NAME", "STATE"}, [][]string{
 			{"longname", "live"},
 			{"a", "dead"},
@@ -125,12 +131,13 @@ func TestPrintTableLastColumnUnpadded(t *testing.T) {
 // TestPrintPaneTableProvesTheFallbacks proves the pane table stars the focus,
 // names an unnamed pane shell or agent, and dashes empty cells.
 func TestPrintPaneTableProvesTheFallbacks(t *testing.T) {
+	t.Parallel()
 	panes := []wire.AllPane{
 		{ID: "w1p1", Agent: true, Workspace: "s1", Window: "w1", Focus: true},
 		{ID: "w1p2", Status: "unknown", Workspace: "s1", Window: "w1",
 			Cwd: "/tmp", Branch: "main"},
 	}
-	out := testutil.CaptureStdout(t, func() { printPaneTable(panes) })
+	out := captureStdout(t, func() { printPaneTable(panes) })
 	for _, want := range []string{"w1p1*", "agent", "shell", "-", "/tmp", "main"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("pane table misses %q: %q", want, out)
@@ -141,7 +148,8 @@ func TestPrintPaneTableProvesTheFallbacks(t *testing.T) {
 // TestPrintPaneTableNoPanes proves an empty tree says so instead of printing
 // a bare header.
 func TestPrintPaneTableNoPanes(t *testing.T) {
-	out := testutil.CaptureStdout(t, func() { printPaneTable(nil) })
+	t.Parallel()
+	out := captureStdout(t, func() { printPaneTable(nil) })
 	if strings.TrimSpace(out) != "no panes" {
 		t.Fatalf("printPaneTable of no panes printed %q", out)
 	}
@@ -150,6 +158,7 @@ func TestPrintPaneTableNoPanes(t *testing.T) {
 // TestPaneLabelFallsBack proves the label chain: name, then app, then agent
 // id, then "(shell)".
 func TestPaneLabelFallsBack(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		p    wire.AllPane
 		want string
@@ -169,6 +178,7 @@ func TestPaneLabelFallsBack(t *testing.T) {
 // TestPaneLabelAppendsDetails proves the label carries status, message,
 // branch, worktree and the workspace-path suffix when they exist.
 func TestPaneLabelAppendsDetails(t *testing.T) {
+	t.Parallel()
 	p := wire.AllPane{
 		ID: "w1p1", Name: "alpha", Status: "working", Message: "on it",
 		Branch: "main", Worktree: "w-cli",
@@ -184,6 +194,7 @@ func TestPaneLabelAppendsDetails(t *testing.T) {
 
 // TestDashIfEmpty proves an empty cell prints as a dash, so a gap is visible.
 func TestDashIfEmpty(t *testing.T) {
+	t.Parallel()
 	if got := dashIfEmpty(""); got != "-" {
 		t.Fatalf("dashIfEmpty = %q", got)
 	}
@@ -194,6 +205,8 @@ func TestDashIfEmpty(t *testing.T) {
 
 // TestSessionSummaryDeadFromState proves a dead session's row is read from
 // its state file: counts, project and the focused pane's cwd.
+// Stays serial: the row is read through session.LoadState, which resolves
+// DM_STATE per call, and t.Setenv cannot run in a parallel test.
 func TestSessionSummaryDeadFromState(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("DM_STATE", dir)
@@ -227,6 +240,7 @@ func TestSessionSummaryDeadFromState(t *testing.T) {
 // TestSessionSummaryDeadWithoutState proves a session with no state file
 // still prints a row of zeros and dashes.
 func TestSessionSummaryDeadWithoutState(t *testing.T) {
+	t.Parallel()
 	row := sessionSummary(transport.SessionInfo{Name: "ghost", Live: false})
 	want := "ghost dead 0 0 0 - -"
 	if got := strings.Join(row, " "); got != want {
