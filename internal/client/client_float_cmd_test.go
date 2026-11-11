@@ -60,6 +60,7 @@ func openFloat(t *testing.T, tui *tui, got chan wire.Msg, command string) wire.M
 // selected pane's folder, at the box's inner size, under an id the client
 // picked.
 func TestFloatKeyRequests(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	r := floatRect(tui.snap)
 	req := askFloat(t, tui, got)
@@ -84,6 +85,7 @@ func TestFloatKeyRequests(t *testing.T) {
 // TestFloatReplyOpens: the reply puts the float on screen in mode "float" with
 // the command in its title, and a reply to an older request opens nothing.
 func TestFloatReplyOpens(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := askFloat(t, tui, got)
 
@@ -112,6 +114,7 @@ func TestFloatReplyOpens(t *testing.T) {
 // TestFloatBytesPaint: the child's bytes land in the float's own terminal, and
 // no other target touches it.
 func TestFloatBytesPaint(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "git diff")
 	tui.apply(wire.Msg{Type: "bytes", Target: req.Float, Data: []byte("+added line")})
@@ -128,6 +131,7 @@ func TestFloatBytesPaint(t *testing.T) {
 // TestFloatForwardsKeys: a printable key and enter go to the float target as
 // raw bytes, and the client keeps the mode.
 func TestFloatForwardsKeys(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "cat")
 	feed(tui, "a")
@@ -150,6 +154,7 @@ func TestFloatForwardsKeys(t *testing.T) {
 // under it in one press, with no chord and no clock, and the command never sees
 // the prefix byte, so a prefix followed by any key kills it as well.
 func TestFloatPrefixCloses(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "cat")
 
@@ -183,6 +188,7 @@ func TestFloatPrefixCloses(t *testing.T) {
 // TestFloatExitKeepsScreen: the exit frame keeps the last screen and says so;
 // the next key closes the float and forwards nothing.
 func TestFloatExitKeepsScreen(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "echo hi")
 	tui.apply(wire.Msg{Type: "bytes", Target: req.Float, Data: []byte("hi")})
@@ -210,6 +216,7 @@ func TestFloatExitKeepsScreen(t *testing.T) {
 
 // TestFloatRefusedReply: a refusal toasts and opens nothing.
 func TestFloatRefusedReply(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := askFloat(t, tui, got)
 	tui.apply(wire.Msg{
@@ -228,6 +235,7 @@ func TestFloatRefusedReply(t *testing.T) {
 // TestFloatResizeFollowsScreen: a snapshot that changes the float's rect resizes
 // the terminal and tells the server.
 func TestFloatResizeFollowsScreen(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "git diff")
 	before := tui.float.float.Rect
@@ -264,6 +272,7 @@ func TestFloatResizeFollowsScreen(t *testing.T) {
 // TestFloatPendingHoldsKeys: keys typed while the open reply is in flight go to
 // neither the pane nor the child, and the reply then lets them through.
 func TestFloatPendingHoldsKeys(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := askFloat(t, tui, got)
 	if tui.mode != "float" {
@@ -285,6 +294,7 @@ func TestFloatPendingHoldsKeys(t *testing.T) {
 // TestFloatExitBeatsReply: an exit frame that lands before the open reply still
 // ends in a float that says the command exited, and any key closes it.
 func TestFloatExitBeatsReply(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := askFloat(t, tui, got)
 	tui.apply(wire.Msg{Type: "exit", Target: req.Float})
@@ -308,6 +318,7 @@ func TestFloatExitBeatsReply(t *testing.T) {
 // TestFloatClosedFloatSwallowsExit: the exit frame that follows a client close
 // does not come back as a pane toast naming the float.
 func TestFloatClosedFloatSwallowsExit(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "sleep 30")
 	feed(tui, "\x02")
@@ -326,6 +337,7 @@ func TestFloatClosedFloatSwallowsExit(t *testing.T) {
 // key that raced the child's exit, not pane news, both while the float is up
 // and after the client closed it. A pane error still toasts.
 func TestFloatErrorRacingExitIsSwallowed(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	req := openFloat(t, tui, got, "sleep 30")
 	tui.apply(wire.Msg{Type: "resp", Action: "keys", Error: `no pane "` + req.Float + `"`})

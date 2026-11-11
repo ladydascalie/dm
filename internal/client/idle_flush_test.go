@@ -12,6 +12,7 @@ import (
 // its last grapheme cluster, and that a pane still receiving bytes is left
 // alone.
 func TestFlushIdlePlacesLastCluster(t *testing.T) {
+	t.Parallel()
 	term := vt.NewTerm(20, 3)
 	tui := &tui{vts: map[string]*vt.Term{"a": term}}
 	now := time.Now()
@@ -38,6 +39,7 @@ func TestFlushIdlePlacesLastCluster(t *testing.T) {
 // TestFlushIdleKeepsSplitCluster proves the idle rule does not break a cluster
 // whose chunks arrive inside one tick.
 func TestFlushIdleKeepsSplitCluster(t *testing.T) {
+	t.Parallel()
 	term := vt.NewTerm(20, 3)
 	tui := &tui{vts: map[string]*vt.Term{"a": term}}
 	now := time.Now()
@@ -58,6 +60,7 @@ func TestFlushIdleKeepsSplitCluster(t *testing.T) {
 // TestApplyNotesBytes proves the bytes case records the pane's last output, so
 // the ticker's flushIdle can tell a quiet pane from a busy one.
 func TestApplyNotesBytes(t *testing.T) {
+	t.Parallel()
 	term := vt.NewTerm(20, 3)
 	tui := &tui{vts: map[string]*vt.Term{"a": term}}
 	tui.apply(wire.Msg{Type: "bytes", Target: "a", Data: []byte("x")})

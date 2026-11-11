@@ -89,6 +89,7 @@ func samePaneCells(t *testing.T, got, want *vt.Term, label string) {
 // prints a 30-cell row, and only the first 10 cells reach the screen. The
 // padding, the box borders, the next pane and the rail keep their own cells.
 func TestPaneRowClipsToContentRect(t *testing.T) {
+	t.Parallel()
 	f := clipFrame(t, 30, strings.Repeat("A", 30), "BBBB")
 	a := f.snap.Panes[0].Rect
 	if a.W != 10 {
@@ -124,6 +125,7 @@ func TestPaneRowClipsToContentRect(t *testing.T) {
 // second cell would fall outside the rect is not painted, and the cell it
 // would have started in is blanked.
 func TestPaneRowDropsWideGlyphAtEdge(t *testing.T) {
+	t.Parallel()
 	term := vt.NewTerm(30, 1)
 	term.Write([]byte("abcdefghi世"))
 	term.Flush()
@@ -153,6 +155,7 @@ func TestPaneRowDropsWideGlyphAtEdge(t *testing.T) {
 // not trusted with: a row that ended on a wide cluster with no room stores it in
 // one slot, but it still paints two cells, so the clip measures the content.
 func TestPaneRowDropsClusterWiderThanItsSlot(t *testing.T) {
+	t.Parallel()
 	term := vt.NewTerm(10, 1)
 	term.Write([]byte("\x1b[?7labcdefghi世"))
 	term.Flush()
@@ -181,6 +184,7 @@ func TestPaneRowDropsClusterWiderThanItsSlot(t *testing.T) {
 // TestPaneRowFittingIsUnchanged pins that the clip leaves a row that fits
 // alone: it paints the same bytes, and a wider row clips down to them.
 func TestPaneRowFittingIsUnchanged(t *testing.T) {
+	t.Parallel()
 	row := "abcdefgh世"
 	fits := vt.NewTerm(10, 1)
 	fits.Write([]byte(row))

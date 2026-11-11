@@ -11,6 +11,7 @@ import (
 // TestCloseWindowActionSendsWindowID proves X resolves the focused pane to its
 // window and never sends the pane id.
 func TestCloseWindowActionSendsWindowID(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap.Focus = "w1p1"
 	tui.snap.All = []wire.AllPane{
@@ -36,6 +37,7 @@ func TestCloseWindowActionSendsWindowID(t *testing.T) {
 // TestCloseWindowActionUnknownPaneSendsNothing proves a focused pane outside
 // the snapshot sends no request and raises a toast.
 func TestCloseWindowActionUnknownPaneSendsNothing(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap.Focus = "w9p9"
 	tui.snap.All = []wire.AllPane{{ID: "w1p1", Window: "w1"}}

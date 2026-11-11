@@ -13,6 +13,7 @@ import (
 // TestURLMatchAtRow checks the cell range the hover underline uses: the range
 // covers the URL and leaves its trailing punctuation outside.
 func TestURLMatchAtRow(t *testing.T) {
+	t.Parallel()
 	vt := vt.NewTerm(20, 2)
 	vt.Write([]byte("see https://x.y/a."))
 	vt.Flush()
@@ -32,6 +33,7 @@ func TestURLMatchAtRow(t *testing.T) {
 // covers. The hover paint carries SGR 4 on the URL run; the plain paint does
 // not, and a nil hover paints like the plain one.
 func TestHoverUnderline(t *testing.T) {
+	t.Parallel()
 	vt := vt.NewTerm(20, 2)
 	vt.Write([]byte("see https://x.y/a."))
 	vt.Flush()

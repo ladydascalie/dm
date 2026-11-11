@@ -26,6 +26,7 @@ func toastTexts(t *tui) []string {
 // A repeat of the newest text inside the dedupe window is one toast; the same
 // text after the window is a second one.
 func TestToastDedupesRepeats(t *testing.T) {
+	t.Parallel()
 	tui := &tui{}
 	tui.notify("busy")
 	tui.notify("busy")
@@ -48,6 +49,7 @@ func TestToastDedupesRepeats(t *testing.T) {
 
 // The stack keeps the newest three and drops the oldest.
 func TestToastCapsAtThree(t *testing.T) {
+	t.Parallel()
 	tui := &tui{}
 	for _, s := range []string{"one", "two", "three", "four"} {
 		tui.notify(s)
@@ -60,6 +62,7 @@ func TestToastCapsAtThree(t *testing.T) {
 
 // A toast lives three seconds and no longer.
 func TestToastExpires(t *testing.T) {
+	t.Parallel()
 	tui := &tui{}
 	tui.notify("short")
 	raised := tui.toasts[0].at
@@ -104,6 +107,7 @@ func toastRow(t *testing.T, out, text string) (row, col int) {
 // The stack draws both texts, newest nearest the bar, one row apart between
 // the boxes.
 func TestDrawToastsStack(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 40, Rows: 12}
 	tui := &tui{}
 	tui.notify("older")
@@ -123,6 +127,7 @@ func TestDrawToastsStack(t *testing.T) {
 
 // A text wider than the screen is clamped and truncated, not wrapped.
 func TestDrawToastsClampsToScreen(t *testing.T) {
+	t.Parallel()
 	cols := 12
 	snap := &wire.Snapshot{Cols: cols, Rows: 6}
 	tui := &tui{}
@@ -145,6 +150,7 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 
 // The bar keeps its content and no longer carries the toast suffix.
 func TestBarDropsToastSuffix(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{
 		Session: "main", Workspace: "main", Windows: testWindows("1"), Focus: "w1p1",
 		Cols: 60, Rows: 24,
@@ -204,6 +210,7 @@ func TestCopySelectionRaisesToast(t *testing.T) {
 // A toast with wide runes or a joined glyph sizes its box in cells, so the
 // interior is exactly the text and no glyph is dropped or doubled.
 func TestDrawToastsSizesByCells(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		text string
@@ -242,6 +249,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 // A toast longer than the cap is cut to the cap with an ellipsis, and the box
 // never grows past the cap.
 func TestDrawToastsCapsWidth(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 8}
 	tui := &tui{}
 	tui.notify(strings.Repeat("x", 60))
@@ -264,6 +272,7 @@ func TestDrawToastsCapsWidth(t *testing.T) {
 
 // A toast under the cap renders whole, and its box is the text plus borders.
 func TestDrawToastsKeepsShortToastWhole(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 8}
 	tui := &tui{}
 	tui.notify("saved 3 files")
@@ -285,6 +294,7 @@ func TestDrawToastsKeepsShortToastWhole(t *testing.T) {
 // A wide-rune toast is cut on a cluster boundary: every painted rune is whole
 // and the interior never passes the cap.
 func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 8}
 	tui := &tui{}
 	tui.notify(strings.Repeat("日", 30)) // 60 cells, twice the cap
@@ -313,6 +323,7 @@ func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
 // A toast renders as a closed box: a border on all four sides from the theme
 // glyphs, the text row inside, no padding row.
 func TestDrawToastsPaintsClosedBox(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 40, Rows: 9}
 	th := theme.DefaultTheme()
 	g := th.Glyphs
@@ -358,6 +369,7 @@ func TestDrawToastsPaintsClosedBox(t *testing.T) {
 // The stack separates the boxes by one row, so the boxes read as separate
 // popups, not one tall block.
 func TestDrawToastsSeparatesBoxes(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 40, Rows: 14}
 	tui := &tui{}
 	tui.notify("older")
@@ -386,6 +398,7 @@ func TestDrawToastsSeparatesBoxes(t *testing.T) {
 // A stack taller than the space above the bar drops the oldest boxes instead
 // of painting over the bar.
 func TestDrawToastsDropsBoxesThatDoNotFit(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 40, Rows: 6} // room for one box above the bar
 	tui := &tui{}
 	tui.notify("oldest")

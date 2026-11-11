@@ -26,6 +26,7 @@ func testTabWidth() tabWidth {
 }
 
 func TestTabBarRect(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26}
 	bar := tabBarRect(snap)
 	want := layout.Rect{X: 26, Y: 0, W: 74, H: layout.TabBarRows}
@@ -35,6 +36,7 @@ func TestTabBarRect(t *testing.T) {
 }
 
 func TestTabBarRectShortScreen(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 2, Rail: 26}
 	if got := tabBarRect(snap); got != (layout.Rect{}) {
 		t.Fatalf("short screen tab bar rect = %+v, want empty", got)
@@ -42,6 +44,7 @@ func TestTabBarRectShortScreen(t *testing.T) {
 }
 
 func TestTabBarItems(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two")}
 	items := tabBarItems(snap, testTabWidth())
 	if len(items) != 2 {
@@ -56,6 +59,7 @@ func TestTabBarItems(t *testing.T) {
 }
 
 func TestTabBarItemsDropsOverflow(t *testing.T) {
+	t.Parallel()
 	// A tab bar too narrow for both names keeps only the first tab.
 	snap := &wire.Snapshot{Cols: 30, Rows: 20, Rail: 26, Windows: testWindows("long-one", "two")}
 	items := tabBarItems(snap, testTabWidth())
@@ -65,6 +69,7 @@ func TestTabBarItemsDropsOverflow(t *testing.T) {
 }
 
 func TestTabBarAt(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two")}
 	it, ok := tabBarAt(snap, 26, 0, testTabWidth())
 	if !ok || it.Name != "one" {
@@ -79,6 +84,7 @@ func TestTabBarAt(t *testing.T) {
 }
 
 func TestTabBarClickSendsSelectWindow(t *testing.T) {
+	t.Parallel()
 	tr, got := clientTUI(t, nil)
 	tr.snap.Windows = testWindows("one", "two")
 	tr.snap.ActiveWindow = 0
@@ -94,6 +100,7 @@ func TestTabBarClickSendsSelectWindow(t *testing.T) {
 }
 
 func TestTabBarDoubleClickOpensRename(t *testing.T) {
+	t.Parallel()
 	tr, got := clientTUI(t, nil)
 	tr.snap.Windows = testWindows("one", "two")
 	tr.snap.ActiveWindow = 0
@@ -119,6 +126,7 @@ func TestTabBarDoubleClickOpensRename(t *testing.T) {
 // TestTabBarActiveItem pins the active tab: the tab whose index matches the
 // snapshot's active window is the one the painter highlights.
 func TestTabBarActiveItem(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two"), ActiveWindow: 1}
 	items := tabBarItems(snap, testTabWidth())
 	if len(items) != 2 {
@@ -137,6 +145,7 @@ func TestTabBarActiveItem(t *testing.T) {
 // theme's complete cached escapes, leading ESC included: a fragment would pass
 // on any escape that happens to contain it.
 func TestDrawTabBarHighlightsActive(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26, Windows: testWindows("one", "two"), ActiveWindow: 1}
 	var buf bytes.Buffer
 	DrawTabBar(&buf, theme.DefaultTheme(), snap, testTabWidth())
@@ -161,6 +170,7 @@ func TestDrawTabBarHighlightsActive(t *testing.T) {
 // if the paint changes deliberately, this literal is the diff. The escapes are
 // complete, never a fragment.
 func TestDrawTabBarRowBytes(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 40, Rows: 20, Rail: 10, Windows: testWindows("one"), ActiveWindow: 0}
 	var buf bytes.Buffer
 	DrawTabBar(&buf, theme.DefaultTheme(), snap, testTabWidth())
@@ -180,6 +190,7 @@ func TestDrawTabBarRowBytes(t *testing.T) {
 // TestTabBarUsesWindowLabelTemplate proves the tab bar renders the configured
 // template from the window and its source pane.
 func TestTabBarUsesWindowLabelTemplate(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{
 		Cols: 100, Rows: 20, Rail: 0,
 		Windows:     testWindows("one"),
@@ -201,6 +212,7 @@ func TestTabBarUsesWindowLabelTemplate(t *testing.T) {
 // TestTabBarRowSitsAbovePaneArea proves the tab bar row and the pane area do not
 // overlap: the bar is row 0 and the pane boxes start on row 1.
 func TestTabBarRowSitsAbovePaneArea(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 26}
 	bar := tabBarRect(snap)
 	area := layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail)
@@ -215,6 +227,7 @@ func TestTabBarRowSitsAbovePaneArea(t *testing.T) {
 // TestTabCellsClamps proves a tab is its name plus padding, clamped to the
 // configured bounds.
 func TestTabCellsClamps(t *testing.T) {
+	t.Parallel()
 	tw := tabWidth{Min: 8, Max: 10}
 	cases := []struct {
 		name string
@@ -237,6 +250,7 @@ func TestTabCellsClamps(t *testing.T) {
 // TestTabBarItemsClampedWidth proves every tab takes the clamped width, so the
 // bar has a known size.
 func TestTabBarItemsClampedWidth(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Windows: testWindows("a", "abcdefgh", "averylongwindowname")}
 	items := tabBarItems(snap, tabWidth{Min: 8, Max: 10})
 	if len(items) != 3 {
@@ -253,6 +267,7 @@ func TestTabBarItemsClampedWidth(t *testing.T) {
 // TestDrawTabBarElidesLongName proves a name wider than the tab is cut with an
 // ellipsis and the tab keeps its width.
 func TestDrawTabBarElidesLongName(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 20, Rail: 0, Windows: testWindows("averylongwindowname")}
 	var buf bytes.Buffer
 	DrawTabBar(&buf, theme.DefaultTheme(), snap, tabWidth{Min: 8, Max: 10})

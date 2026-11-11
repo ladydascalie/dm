@@ -32,6 +32,7 @@ func menuHasLabel(tui *tui, label string) bool {
 // TestScreenRightClickOpensPaneMenuOnly holds the on-screen pane menu to the
 // pane's own actions: no window, workspace or session row appears.
 func TestScreenRightClickOpensPaneMenuOnly(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	p := tui.paneByID("a")
 	tui.handleMouse(mouseEvent{btn: 2, x: p.Rect.X + 2, y: p.Rect.Y + 2})
@@ -57,6 +58,7 @@ func TestScreenRightClickOpensPaneMenuOnly(t *testing.T) {
 // TestRailPaneRowMenuOffersPaneActions holds a rail pane row to the pane
 // actions with Focus first, and Close pane to that row's pane.
 func TestRailPaneRowMenuOffersPaneActions(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 3)
 	if tui.mode != "menu" || tui.menu == nil {
@@ -77,6 +79,7 @@ func TestRailPaneRowMenuOffersPaneActions(t *testing.T) {
 // TestRailWorkspaceRowMenuOffersWorkspaceActions holds a workspace row to the
 // workspace actions, and Close workspace to that workspace.
 func TestRailWorkspaceRowMenuOffersWorkspaceActions(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 0)
 	if tui.mode != "menu" || tui.menu == nil {
@@ -142,6 +145,7 @@ func TestRailControlRowMenuOffersSessionActions(t *testing.T) {
 
 // TestRailGapRowMenuOpensNothing holds the gap row clear of every menu.
 func TestRailGapRowMenuOpensNothing(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	railRightPress(tui, 6)
 	if tui.mode != "" || tui.menu != nil {
@@ -153,6 +157,7 @@ func TestRailGapRowMenuOpensNothing(t *testing.T) {
 // TestMenuScopeHints holds each menu row to the main keymap's key for its
 // action. An action the main keymap leaves unbound shows no hint.
 func TestMenuScopeHints(t *testing.T) {
+	t.Parallel()
 	pane := map[string]string{
 		"Split right": "|", "Split down": "-", "Split left": "<",
 		"Split up": "^", "Zoom": "z", "Close pane": "x", "Scrollback": "[",

@@ -49,6 +49,7 @@ func TestFrameEmitsNoDeepColour(t *testing.T) {
 // TestFrameASCIIGlyphs proves the ascii set reaches a whole frame: no glyph
 // from the Unicode set survives in the chrome.
 func TestFrameASCIIGlyphs(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	f.tui.glyphs = theme.GlyphASCII
 	frame := f.frame()

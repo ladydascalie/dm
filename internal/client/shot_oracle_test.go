@@ -41,6 +41,7 @@ const shotData = "../shot/testdata"
 // TestGoldenMatrix renders every scene under every theme and compares the
 // result with internal/shot/testdata/golden/<scene>-<theme>.png.
 func TestGoldenMatrix(t *testing.T) {
+	t.Parallel()
 	scenes, err := shot.LoadScenes(filepath.Join(shotData, "scenes.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		t.Skipf("no scene data at %s", shotData)

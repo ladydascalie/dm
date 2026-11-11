@@ -16,6 +16,7 @@ import (
 // the grid is not painted and carries no row fingerprint, so a change in its
 // scrollback never reaches the frame.
 func TestFrameOffscreenPaneWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := &f.snap.Panes[0]
 	p.Rect = layout.Rect{X: 140, Y: 4, W: 10, H: 5}
@@ -37,6 +38,7 @@ func TestFrameOffscreenPaneWritesNothing(t *testing.T) {
 // the grid paint its on-screen rows and nothing else. The y clip in the row
 // loop is unchanged; the cull only drops a pane that misses the grid whole.
 func TestFramePartialPanePaintsOnScreenRowsOnly(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := &f.snap.Panes[0]
 	// Rows 15..24: the last five rows of the rect fall below a 20-row grid.
@@ -72,6 +74,7 @@ func TestFramePartialPanePaintsOnScreenRowsOnly(t *testing.T) {
 // pane writes no cursor position, so the cursor stays hidden instead of being
 // placed at a row outside the grid.
 func TestFrameCursorHiddenWhenFocusPaneOffscreen(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := &f.snap.Panes[0]
 	p.Rect = layout.Rect{X: 120, Y: 2, W: 10, H: 6}
@@ -91,6 +94,7 @@ func TestFrameCursorHiddenWhenFocusPaneOffscreen(t *testing.T) {
 // layout with a pane wholly outside the grid must write no cursor move past
 // win.Cols or win.Rows for it, on a full repaint.
 func TestFrameOffscreenPaneWritesNoOffGridMove(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := &f.snap.Panes[0]
 	p.Rect = layout.Rect{X: 140, Y: 4, W: 10, H: 5}
@@ -152,6 +156,7 @@ func newQuadTUI(t *testing.T, cols, rows, rail int) *frameTUI {
 // grid. Pre-fix this test fails at row 6, column 4. The pad itself overlaps the
 // grid, so the fix clips the cell, it does not drop the pad.
 func TestGripsStayOnGrid(t *testing.T) {
+	t.Parallel()
 	snap := quadSession(t, 3, 10, 0)
 	var grips bytes.Buffer
 	drawGrips(&grips, theme.DefaultTheme(), snap)
@@ -185,6 +190,7 @@ func TestGripsStayOnGrid(t *testing.T) {
 // the right border still paints on the last visible row, at the border column
 // the configured padding puts it at.
 func TestFramePartialPaneWritesNoOffGridMove(t *testing.T) {
+	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	p := &f.snap.Panes[0]
 	p.Rect = layout.Rect{X: 2, Y: 15, W: 10, H: 10}

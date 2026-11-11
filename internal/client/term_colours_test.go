@@ -10,6 +10,7 @@ import (
 // TestTermColoursBothRepliesOneRequest proves the two replies coalesce into one
 // request and that no byte of either reply reaches a pane.
 func TestTermColoursBothRepliesOneRequest(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
 	testutil.NoMsg(t, got)
@@ -27,6 +28,7 @@ func TestTermColoursBothRepliesOneRequest(t *testing.T) {
 
 // TestTermColoursBELReplies proves the BEL-terminated form is consumed too.
 func TestTermColoursBELReplies(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "\x1b]10;rgb:aaaa/bbbb/cccc\x07")
 	feed(tui, "\x1b]11;rgb:dddd/eeee/ffff\x07")
@@ -41,6 +43,7 @@ func TestTermColoursBELReplies(t *testing.T) {
 // TestTermColoursOneReplyAfterGrace proves a lone reply is sent once the grace
 // for the second passes, with the other half left empty.
 func TestTermColoursOneReplyAfterGrace(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
 	testutil.NoMsg(t, got)
@@ -58,6 +61,7 @@ func TestTermColoursOneReplyAfterGrace(t *testing.T) {
 // TestTermColoursPartialStallsThenReachesPane proves a partial reply is held,
 // then flushed as ordinary input after the escape deadline.
 func TestTermColoursPartialStallsThenReachesPane(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	partial := "\x1b]10;rgb:ffff"
 	feed(tui, partial)
@@ -79,6 +83,7 @@ func TestTermColoursPartialStallsThenReachesPane(t *testing.T) {
 // TestTermColoursKeystrokeUntouched proves an ordinary keystroke is forwarded
 // unchanged and starts no colour state.
 func TestTermColoursKeystrokeUntouched(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "x")
 
@@ -96,6 +101,7 @@ func TestTermColoursKeystrokeUntouched(t *testing.T) {
 // that shares a read with a keystroke and splits inside the OSC prefix must
 // not leak to the pane, and the pair must still be sent.
 func TestTermColoursSplitPrefixAfterKeystroke(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "x\x1b]1")
 	m := testutil.NextMsg(t, got)
@@ -121,6 +127,7 @@ func TestTermColoursSplitPrefixAfterKeystroke(t *testing.T) {
 // TestTermColoursSplitTailStallsThenReachesPane proves a tail that never
 // completes is flushed to the pane as ordinary input after the deadline.
 func TestTermColoursSplitTailStallsThenReachesPane(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "x\x1b]1")
 	m := testutil.NextMsg(t, got)

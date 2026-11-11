@@ -79,6 +79,7 @@ func openCentre(t *testing.T, tui *tui, got chan wire.Msg, entries []box.Entry) 
 
 // N opens the float and the reply lands newest first with the unread marks.
 func TestCentreOpensOnN(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	if len(tui.floats) != 1 {
@@ -106,6 +107,7 @@ func TestCentreOpensOnN(t *testing.T) {
 // The marks clear as the operator opens entries, and a swept centre opens
 // clean.
 func TestCentreUnreadClearsOnOpen(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	// enter opens the newest entry's body and clears its mark.
@@ -149,6 +151,7 @@ func TestCentreUnreadClearsOnOpen(t *testing.T) {
 
 // g focuses the pane the entry is about and closes the centre.
 func TestCentreJumpPane(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "g")
@@ -163,6 +166,7 @@ func TestCentreJumpPane(t *testing.T) {
 
 // A topic that names no pane or an unknown pane does not jump.
 func TestCentreJumpPaneRefuses(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "G") // the free post under the bare topic names no pane
@@ -181,6 +185,7 @@ func TestCentreJumpPaneRefuses(t *testing.T) {
 
 // m hands the entry to the box view, which lands with it at the top.
 func TestCentreToBox(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "m")
@@ -223,6 +228,7 @@ func TestCentreToBox(t *testing.T) {
 
 // esc, q and N close the centre and hand the keyboard back.
 func TestCentreCloseKeys(t *testing.T) {
+	t.Parallel()
 	for _, key := range []string{"\x1b", "q", "N"} {
 		tui, got := switcherTUI(t)
 		openCentre(t, tui, got, centreEntries())
@@ -236,6 +242,7 @@ func TestCentreCloseKeys(t *testing.T) {
 // x clears the selected entry's key through msg-clear, and the reply
 // refetches the list without the cleared entry.
 func TestCentreXClearsSelectedKey(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "j") // select notify/w1p2
@@ -273,6 +280,7 @@ func TestCentreXClearsSelectedKey(t *testing.T) {
 // X clears the whole notify/ branch with the prefix clear, and the reply
 // refetches the list empty.
 func TestCentreXClearsWholeBranch(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "X")
@@ -308,6 +316,7 @@ func TestCentreXClearsWholeBranch(t *testing.T) {
 // x with the reader up fires the clear once and closes nothing: the reader
 // keeps the body and the centre stays up for the refetch.
 func TestCentreXWithReaderFiresOnce(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "\r") // open the body reader on the selected entry
@@ -336,6 +345,7 @@ func TestCentreXWithReaderFiresOnce(t *testing.T) {
 // The read cursor stays monotonic across a clear: entries the centre has
 // shown keep their mark even when the list refetches shorter.
 func TestCentreClearKeepsCursorMonotonic(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "\r") // open the newest entry's body, which marks it read

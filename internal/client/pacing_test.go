@@ -8,6 +8,7 @@ import (
 // TestPacerBurstDrawsOnce proves a burst of dirty frames inside one floor
 // interval coalesces into a single draw.
 func TestPacerBurstDrawsOnce(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 
@@ -33,6 +34,7 @@ func TestPacerBurstDrawsOnce(t *testing.T) {
 // TestPacerShouldDrawBoundary pins the boundary: exactly one floor interval
 // after the last frame is due, one nanosecond less is not.
 func TestPacerShouldDrawBoundary(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 	p.drew(now)
@@ -48,6 +50,7 @@ func TestPacerShouldDrawBoundary(t *testing.T) {
 // TestPacerIdleDecay proves an idle run doubles the interval up to the ceiling
 // and stops there.
 func TestPacerIdleDecay(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 
@@ -72,6 +75,7 @@ func TestPacerIdleDecay(t *testing.T) {
 // TestPacerDecayCountsNoFrame proves an empty frame advances the decay without
 // counting a frame.
 func TestPacerDecayCountsNoFrame(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 
@@ -88,6 +92,7 @@ func TestPacerDecayCountsNoFrame(t *testing.T) {
 // TestPacerWriteResets proves a frame that wrote bytes returns the interval to
 // the floor.
 func TestPacerWriteResets(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 
@@ -109,6 +114,7 @@ func TestPacerWriteResets(t *testing.T) {
 // TestPacerResetDrawsAtFloor proves a wake after an idle run draws at the
 // floor again.
 func TestPacerResetDrawsAtFloor(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 
@@ -140,6 +146,7 @@ func TestPacerResetDrawsAtFloor(t *testing.T) {
 // and a ticker already at the floor is left alone so a message stream cannot
 // push the frame out forever.
 func TestPacerRearmPullsADecayedTickerToTheFloor(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 
@@ -164,6 +171,7 @@ func TestPacerRearmPullsADecayedTickerToTheFloor(t *testing.T) {
 
 // TestPacerStatsCount proves the tally reports what the test did.
 func TestPacerStatsCount(t *testing.T) {
+	t.Parallel()
 	var p pacer
 	now := time.Unix(1000, 0)
 

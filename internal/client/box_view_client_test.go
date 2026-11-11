@@ -68,6 +68,7 @@ func nextBoxMsg(t *testing.T, got chan wire.Msg) wire.Msg {
 // TestBoxPrefixOpensView: prefix m opens the float and asks for the whole log;
 // q closes it and the float stack empties.
 func TestBoxPrefixOpensView(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02m")
 	if tui.box == nil || tui.mode != "box" || len(tui.floats) != 1 {
@@ -92,6 +93,7 @@ func TestBoxPrefixOpensView(t *testing.T) {
 
 // TestBoxListReplyFillsView: the reply lands in the float, newest first.
 func TestBoxListReplyFillsView(t *testing.T) {
+	t.Parallel()
 	tui, _ := switcherTUI(t)
 	feed(tui, "\x02m")
 	res, err := json.Marshal(box.ListReply{Entries: boxEntries()})
@@ -113,6 +115,7 @@ func TestBoxListReplyFillsView(t *testing.T) {
 // again and drives the notify catch-up, and a closed view asks for nothing but
 // its catch-up.
 func TestBoxPushRefreshesOpenView(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02m")
 	nextBoxMsg(t, got) // the log the open asked for
@@ -137,6 +140,7 @@ func TestBoxPushRefreshesOpenView(t *testing.T) {
 // A watch push inside the 100 ms window is held back; once the window passes
 // the push asks again, and a closed view asks for nothing.
 func TestBoxViewRequestsWatchers(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02m")
 	if m := nextBoxMsg(t, got); m.Action != "msg-list" {
@@ -170,6 +174,7 @@ func TestBoxViewRequestsWatchers(t *testing.T) {
 
 // TestBoxViewWatchFlush: the ticker sends the ask that the window held back.
 func TestBoxViewWatchFlush(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02m")
 	nextBoxMsg(t, got)
@@ -187,6 +192,7 @@ func TestBoxViewWatchFlush(t *testing.T) {
 // page, and w swaps the log for the page and back. The page rows carry pane,
 // filter, cursor and the wait mark, and the hint names the key.
 func TestBoxViewWatcherPage(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02m")
 	nextBoxMsg(t, got) // msg-list

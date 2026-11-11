@@ -24,6 +24,7 @@ func badgeEntry(seq int, state box.State) box.Entry {
 // pinned span, after every existing segment, in the state colour of the
 // newest unread entry.
 func TestBarBadgeRendersRightAligned(t *testing.T) {
+	t.Parallel()
 	th := theme.DefaultTheme()
 	snap := &wire.Snapshot{Cols: 60, Rows: 24}
 	set := theme.GlyphNerd
@@ -64,6 +65,7 @@ func TestBarBadgeRendersRightAligned(t *testing.T) {
 // Zero unread renders nothing: the bar is byte for byte the bar without a
 // badge.
 func TestBarBadgeHiddenAtZero(t *testing.T) {
+	t.Parallel()
 	th := theme.DefaultTheme()
 	snap := &wire.Snapshot{Cols: 60, Rows: 24}
 	set := theme.GlyphNerd
@@ -91,6 +93,7 @@ func TestBarBadgeHiddenAtZero(t *testing.T) {
 // A tui fed by the notify replies computes its badge from the entries past
 // the read mark, so the bar and the centre's unread marks agree.
 func TestBarBadgeAgreesWithCentre(t *testing.T) {
+	t.Parallel()
 	tui := &tui{}
 	tui.notifyRecent = []box.Entry{
 		badgeEntry(9, box.StateBlocked),
@@ -132,6 +135,7 @@ func TestBarBadgeAgreesWithCentre(t *testing.T) {
 // Clearing entries moves the badge: a cleared key and a cleared topic leave
 // the cache, so the badge follows the centre's list.
 func TestBarBadgeClearMoves(t *testing.T) {
+	t.Parallel()
 	tui := &tui{}
 	tui.notifyRecent = []box.Entry{
 		{Seq: 9, Key: "notify/w1p1", State: box.StateBlocked, Msg: "m"},
@@ -156,6 +160,7 @@ func TestBarBadgeClearMoves(t *testing.T) {
 // The catch-up reply feeds the badge: the merged entries stay newest first
 // and only the unseen seqs join.
 func TestBarBadgeFeedFromCatchUp(t *testing.T) {
+	t.Parallel()
 	tui := &tui{}
 	tui.notifyRecent = []box.Entry{badgeEntry(7, box.StateNote)}
 	rep := box.ListReply{Entries: []box.Entry{
@@ -185,6 +190,7 @@ func TestBarBadgeFeedFromCatchUp(t *testing.T) {
 // The centre's reply is the truth while the centre is open: it replaces the
 // cache, so the badge matches the rows the float shows.
 func TestBarBadgeFeedFromCentre(t *testing.T) {
+	t.Parallel()
 	tui := &tui{snap: &wire.Snapshot{Cols: 60, Rows: 24}, ncentre: &notifyCentre{
 		Float: &panel.FloatingPane{ID: "notif", Active: true},
 	}}

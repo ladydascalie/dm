@@ -12,6 +12,7 @@ import (
 // order in RailTestSnapshot(10) is workspace, w1p1, w1p2, so row 0 is the
 // workspace header and its first pane is w1p1.
 func TestRailWorkspaceClickFocusesFirstPane(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap = testutil.RailTestSnapshot(10)
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
@@ -25,6 +26,7 @@ func TestRailWorkspaceClickFocusesFirstPane(t *testing.T) {
 // that pane. Row 3 is w1p2's row in RailTestSnapshot(10), so the one-based
 // mouse row is 4.
 func TestRailPaneClickFocusesPane(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap = testutil.RailTestSnapshot(10)
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 4})
@@ -40,6 +42,7 @@ func TestRailPaneClickFocusesPane(t *testing.T) {
 // caret is zero-based column 2, so the name starts at column 4 and the mouse
 // column is 5.
 func TestRailWindowClickFocusesFirstPane(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 5, y: 2})
 	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p1" {
@@ -53,6 +56,7 @@ func TestRailWindowClickFocusesFirstPane(t *testing.T) {
 // another window focuses that window's first pane, so the active window
 // switches. Row 4 is window two, whose first pane is w1p2.
 func TestRailWindowClickSwitchesWindow(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 5, y: 5})
 	if m := testutil.NextMsg(t, got); m.Action != "focus" || m.Target != "w1p2" {
@@ -83,6 +87,7 @@ func projectRailSnap() *wire.Snapshot {
 // header focuses the first pane of the group's first workspace, not the row
 // that follows it.
 func TestRailProjectClickFocusesGroupFirstPane(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap = projectRailSnap()
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
@@ -96,6 +101,7 @@ func TestRailProjectClickFocusesGroupFirstPane(t *testing.T) {
 // TestRailProjectDoubleClickDoesNothing proves a second press on the same
 // project row sends nothing and opens no prompt or menu.
 func TestRailProjectDoubleClickDoesNothing(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap = projectRailSnap()
 	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: 1})
@@ -115,6 +121,7 @@ func TestRailProjectDoubleClickDoesNothing(t *testing.T) {
 
 // TestRailProjectRightPressOpensNoMenu proves a project row offers no menu.
 func TestRailProjectRightPressOpensNoMenu(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap = projectRailSnap()
 	tui.handleMouse(mouseEvent{btn: 2, x: 3, y: 1})

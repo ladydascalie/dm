@@ -14,6 +14,7 @@ import (
 // client must restore at the snapshot's size and reflow to the rect. Refusing
 // the mismatch left the pane blank until the program redrew.
 func TestApplySnapshotReflowsAMismatchedSize(t *testing.T) {
+	t.Parallel()
 	// The pane daemon serialised at 40x10, before the layout's resize.
 	src := vt.NewTerm(40, 10)
 	src.Write([]byte("REATTACH-MARK"))
@@ -42,6 +43,7 @@ func TestApplySnapshotReflowsAMismatchedSize(t *testing.T) {
 // TestApplySnapshotRefusesNil pins the one case that must still be refused: a
 // screen message with no snapshot carries nothing to draw.
 func TestApplySnapshotRefusesNil(t *testing.T) {
+	t.Parallel()
 	vts := map[string]*vt.Term{}
 	if applySnapshot(vts, "w1p1", layout.Rect{W: 10, H: 5}, nil) {
 		t.Fatal("applySnapshot accepted a nil snapshot")
@@ -54,6 +56,7 @@ func TestApplySnapshotRefusesNil(t *testing.T) {
 // TestScreenMessageRestoresThePane drives the wire path: a screen message with
 // a snapshot of a different size fills the pane and reflows it.
 func TestScreenMessageRestoresThePane(t *testing.T) {
+	t.Parallel()
 	src := vt.NewTerm(40, 10)
 	src.Write([]byte("WIRE-MARK"))
 	src.Flush()

@@ -13,6 +13,7 @@ import (
 // column 1 and the mouse column is 2. Row 0 is the first workspace, so the
 // mouse row is 1.
 func TestRailCaretToggleDoesNotChangeFocus(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 2, y: 1})
 	m := testutil.NextMsg(t, got)
@@ -30,6 +31,7 @@ func TestRailCaretToggleDoesNotChangeFocus(t *testing.T) {
 // column 3 and the mouse column is 4. Row 1 is window one, so the mouse row is
 // 2.
 func TestRailWindowCaretToggleDoesNotChangeFocus(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.handleMouse(mouseEvent{btn: 0, x: 4, y: 2})
 	m := testutil.NextMsg(t, got)
@@ -46,6 +48,7 @@ func TestRailWindowCaretToggleDoesNotChangeFocus(t *testing.T) {
 // project bar owns column 0, so the caret is zero-based column 1 and the mouse
 // column is 2. Row 0 is the project header, so the mouse row is 1.
 func TestRailProjectCaretToggle(t *testing.T) {
+	t.Parallel()
 	tui, got := railMenuTUI(t)
 	tui.snap = projectRailSnap()
 	tui.handleMouse(mouseEvent{btn: 0, x: 2, y: 1})

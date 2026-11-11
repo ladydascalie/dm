@@ -129,6 +129,7 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 // whole, that both border rows own a row, and that the frame carries its title
 // and hint.
 func TestHelpBoxSizesToWidestRowAt100x30(t *testing.T) {
+	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
 	g, ok := helpBoxGeometry(100, 30, keys)
 	if !ok {
@@ -180,6 +181,7 @@ func TestHelpBoxSizesToWidestRowAt100x30(t *testing.T) {
 // TestHelpBoxStaysInBoundsOnNarrowScreens proves a small screen keeps the box
 // off the rail, the toast row and the bar, and inside the screen.
 func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ cols, rows int }{{40, 15}, {26, 12}} {
 		keys := keymap.LoadDefault().HelpEntries()
 		rows := categorizeHelpRows(keys)
@@ -213,6 +215,7 @@ func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 // TestHelpBoxNarrowDropsActionColumn proves a narrow box shows the key column
 // alone, with no action label bleeding in.
 func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
+	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
 	rows := categorizeHelpRows(keys)
 	keyW, actionW := helpBoxWidths(keys)
@@ -241,6 +244,7 @@ func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 // TestHelpBoxEllipsisMarksCutLabel proves a box too narrow for its key column
 // cuts a label and says so.
 func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
+	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
 	keyW, _ := helpBoxWidths(keys)
 	p := helpBoxParse(t, helpBoxDraw(t, 12, 12, keys))
@@ -268,6 +272,7 @@ func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 // TestHelpBoxRowsShareColumns is the misalignment the operator saw: every
 // content row must paint the same columns, once each.
 func TestHelpBoxRowsShareColumns(t *testing.T) {
+	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
 	p := helpBoxParse(t, helpBoxDraw(t, 100, 30, keys))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
@@ -305,6 +310,7 @@ func helpBoxSectionHeaders(categories [][]displayRow, section string) int {
 // TestHelpBoxTagMovesRowToNamedSection proves a tagged row leaves its heuristic
 // section for the named one, and that an untagged row keeps the heuristic.
 func TestHelpBoxTagMovesRowToNamedSection(t *testing.T) {
+	t.Parallel()
 	cfg, err := keymap.ParseConfig(`prefix "ctrl+a"
 keymap "main" {
 	"split-right" "|"
@@ -332,6 +338,7 @@ keymap "main" {
 // TestHelpBoxTagJoinsEarlierSection proves a row tagged into a section that
 // already opened joins it, with one header, instead of opening a second one.
 func TestHelpBoxTagJoinsEarlierSection(t *testing.T) {
+	t.Parallel()
 	cfg, err := keymap.ParseConfig(`prefix "ctrl+a"
 keymap "main" {
 	"split-right" "|"
@@ -359,6 +366,7 @@ keymap "main" {
 // TestHelpBoxCustomSectionTakesUtilityColour proves a section name outside the
 // five built-ins paints with the Utility colour, header and rows alike.
 func TestHelpBoxCustomSectionTakesUtilityColour(t *testing.T) {
+	t.Parallel()
 	cfg, err := keymap.ParseConfig(`prefix "ctrl+a"
 keymap "main" {
 	"split-right" "|"
@@ -392,6 +400,7 @@ const helpBoxDefaultSHA256 = "21d3e3703d4c65b518f717210ff5839c9e822fa2f2556f596a
 // TestHelpBoxDefaultBytesFrozen proves the default config, which carries no
 // tags, paints the same bytes as the box did before help tags.
 func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
+	t.Parallel()
 	entries := keymap.LoadDefault().HelpEntries()
 	for _, e := range entries {
 		if e.Section != "" {

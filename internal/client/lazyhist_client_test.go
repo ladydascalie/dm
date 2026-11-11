@@ -16,6 +16,7 @@ import (
 // TestBytesDoNotGrowHistory pins the lazy side: live output reaches the VT and
 // nothing else.
 func TestBytesDoNotGrowHistory(t *testing.T) {
+	t.Parallel()
 	tui, _ := clientTUI(t, nil)
 	tui.vts["a"] = vt.NewTerm(20, 5)
 	tui.apply(wire.Msg{Type: "bytes", Target: "a", Data: []byte("live output")})
@@ -27,6 +28,7 @@ func TestBytesDoNotGrowHistory(t *testing.T) {
 // TestScrollAsksForHistoryOnce checks the first entry sends exactly one
 // request and a second entry sends none.
 func TestScrollAsksForHistoryOnce(t *testing.T) {
+	t.Parallel()
 	tui, sent := clientTUI(t, nil)
 	tui.startScrollOnFocus()
 
@@ -53,6 +55,7 @@ func TestScrollAsksForHistoryOnce(t *testing.T) {
 // TestReplayFillsScrollback checks a reply fills the history and the scroll
 // then works.
 func TestReplayFillsScrollback(t *testing.T) {
+	t.Parallel()
 	tui, sent := clientTUI(t, nil)
 	tui.startScrollOnFocus()
 	if m := testutil.NextMsg(t, sent); m.Action != "replay" {
@@ -84,6 +87,7 @@ func TestReplayFillsScrollback(t *testing.T) {
 // TestScrollUnknownPaneIsQuiet checks an unknown pane id sends nothing and
 // leaves the client working.
 func TestScrollUnknownPaneIsQuiet(t *testing.T) {
+	t.Parallel()
 	tui, sent := clientTUI(t, nil)
 	tui.snap.Focus = "ghost"
 	tui.startScrollOnFocus()
@@ -115,6 +119,7 @@ func TestScrollUnknownPaneIsQuiet(t *testing.T) {
 // TestScrollDropsHistoryOnGeometry checks a snapshot that moves the pane drops
 // the ring, so the next entry asks again.
 func TestScrollDropsHistoryOnGeometry(t *testing.T) {
+	t.Parallel()
 	tui, sent := clientTUI(t, nil)
 	tui.startScrollOnFocus()
 	testutil.NextMsg(t, sent)

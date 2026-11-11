@@ -69,6 +69,7 @@ func frameHas(t *testing.T, tui *tui, want string) bool {
 // TestDashboardPreviewScreenLands proves the dashboard asks for a pane outside
 // the active window, restores the reply into its own terminal, and paints it.
 func TestDashboardPreviewScreenLands(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherWithFar(t)
 	feed(tui, "\x02a")
 	if !tui.sw.Jump(3) {
@@ -117,6 +118,7 @@ func TestDashboardPreviewScreenLands(t *testing.T) {
 // TestDashboardPreviewCadenceStops proves the refresh rides on the cadence and
 // stops when the dashboard closes.
 func TestDashboardPreviewCadenceStops(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherWithFar(t)
 	feed(tui, "\x02a")
 	tui.sw.Jump(3)
@@ -143,6 +145,7 @@ func TestDashboardPreviewCadenceStops(t *testing.T) {
 // Otherwise a screen reply lands as the read reply and blanks the band until
 // the read arrives.
 func TestDashboardPreviewReadOnlyIds(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherWithFar(t)
 	feed(tui, "\x02a")
 	tui.sw.Jump(3)

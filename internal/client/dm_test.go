@@ -27,6 +27,7 @@ import (
 )
 
 func TestPadHitFindsThePair(t *testing.T) {
+	t.Parallel()
 	a, b, c := "a", "b", "c"
 	flat := &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: a}, {Pane: b}}, Sizes: []float64{0.5, 0.5}}
 	area := layout.Rect{X: 0, Y: 0, W: 80, H: 24}
@@ -58,6 +59,7 @@ func TestPadHitFindsThePair(t *testing.T) {
 }
 
 func TestDrawPaneColors(t *testing.T) {
+	t.Parallel()
 	vt := vt.NewTerm(24, 2)
 	vt.Write([]byte(
 		"\x1b[38;2;30;144;255mTRUE" +
@@ -81,6 +83,7 @@ func TestDrawPaneColors(t *testing.T) {
 }
 
 func TestDrawSessionsWidth(t *testing.T) {
+	t.Parallel()
 	const cols, rows = 100, 30
 	sessions := []transport.SessionInfo{{Name: "alpha", Live: true}, {Name: "beta"}}
 	var buf bytes.Buffer
@@ -128,6 +131,7 @@ func TestDrawSessionsWidth(t *testing.T) {
 
 // A pane daemon outlives the server, so the read reply must keep its shape.
 func TestParseMouse(t *testing.T) {
+	t.Parallel()
 	ev, n, ok := parseMouse([]byte("\x1b[<64;12;7Mrest"))
 	if !ok || n != 11 || ev.btn != 64 || ev.x != 12 || ev.y != 7 || ev.release {
 		t.Fatalf("wheel up: %+v n=%d ok=%v", ev, n, ok)
@@ -145,6 +149,7 @@ func TestParseMouse(t *testing.T) {
 }
 
 func TestScrollStart(t *testing.T) {
+	t.Parallel()
 	vt := vt.NewTerm(40, 100)
 	var b strings.Builder
 	for i := 1; i <= 60; i++ {
@@ -170,6 +175,7 @@ func TestScrollStart(t *testing.T) {
 }
 
 func TestFocusForClick(t *testing.T) {
+	t.Parallel()
 	p := &wire.PaneInfo{ID: "w1p2", Mouse: true}
 	if got := focusForClick(p, "w1p1", mouseEvent{btn: 0}); got != "w1p2" {
 		t.Fatalf("left press on a mouse-claiming pane = %q", got)
@@ -205,6 +211,7 @@ func TestSameSessionAttachRefused(t *testing.T) {
 }
 
 func TestRailItemsGrouping(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{All: []wire.AllPane{
 		{
 			ID: "w1p1", Name: "alpha", Workspace: "s1", WorkspaceName: "main",
@@ -321,6 +328,7 @@ func TestRailGlyphPerState(t *testing.T) {
 
 // TestRailContrast holds the rail to WCAG AA on every background it paints.
 func TestRailContrast(t *testing.T) {
+	t.Parallel()
 	foregrounds := map[string]theme.RGB{
 		"text":    theme.DefaultTheme().Palette.RailText,
 		"dim":     theme.DefaultTheme().Palette.RailDim,
@@ -358,6 +366,7 @@ func TestRailContrast(t *testing.T) {
 // The built-in palette's six hues are distinct, so two slots never paint the
 // same colour. Giving two live workspaces different slots is rail.RailItems' job.
 func TestRailAccent(t *testing.T) {
+	t.Parallel()
 	for _, ws := range []string{"main", "work", "dm-git-w1", ""} {
 		first, second := rail.RailAccentSlot(ws), rail.RailAccentSlot(ws)
 		if first != second {
@@ -455,6 +464,7 @@ func TestRailAgentMarker(t *testing.T) {
 }
 
 func TestRailHit(t *testing.T) {
+	t.Parallel()
 	snap := testutil.RailTestSnapshot(10)
 	// Rows: workspace, window, w1p1, w1p2.
 	cases := []struct {
@@ -495,6 +505,7 @@ func TestRailHit(t *testing.T) {
 }
 
 func TestRailClickFocusesPane(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.snap = testutil.RailTestSnapshot(10)
 	// Left press on w1p2's row focuses w1p2, not the focused w1p1. The row is
@@ -688,6 +699,7 @@ func TestRailAccentDistinct(t *testing.T) {
 }
 
 func TestRailToggle(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	// A client that has only seen a hidden rail asks for the default.
 	tui.apply(wire.Msg{Type: "snapshot", Snap: &wire.Snapshot{Rail: 0, Cols: 100, Rows: 30}})
@@ -822,6 +834,7 @@ func TestRailNeverWritesPastWidth(t *testing.T) {
 }
 
 func TestBarNeverWritesPastWidth(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{
 		Session:   strings.Repeat("日本語", 10),
 		Workspace: strings.Repeat("作業", 6),
@@ -895,6 +908,7 @@ func barElideStage(segs []segment.Seg) string {
 // TestBarSegmentOrder pins the footer's left block order, its colours, and the
 // single gutter cell between segments, with the pinned right block last.
 func TestBarSegmentOrder(t *testing.T) {
+	t.Parallel()
 	snap := testutil.BarTestSnap(80)
 	glyph, colour := rail.RailGlyph(theme.DefaultTheme(), "idle", theme.GlyphNerd)
 	segs := barSegments(theme.DefaultTheme(), snap, true, "READY", theme.GlyphNerd)
@@ -1002,6 +1016,7 @@ func TestBarSegmentOrder(t *testing.T) {
 // TestBarElide walks the elision ladder: each width stops at the rung it needs
 // and never paints past the column count.
 func TestBarElide(t *testing.T) {
+	t.Parallel()
 	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "idle", theme.GlyphNerd)
 	cases := []struct {
 		cols int
@@ -1080,6 +1095,7 @@ func TestBarElide(t *testing.T) {
 // TestBarPinned keeps the pinned block whole while the left block gives way:
 // both segments survive at 34 columns, and info survives alone at 20.
 func TestBarPinned(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{
 		Session:      "long-session-name",
 		Workspace:    "a-very-long-workspace-name",
@@ -1141,6 +1157,7 @@ func TestBarPinned(t *testing.T) {
 // TestBarPinnedGutter leaves room for the ground cell between the blocks, even
 // when the left block would otherwise fill the row exactly.
 func TestBarPinnedGutter(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		cols  int
 		armed bool
@@ -1182,6 +1199,7 @@ func TestBarPinnedGutter(t *testing.T) {
 // TestBarPinnedAnchored pins the paint: the right block ends on the last
 // column, and one ground cell separates it from the left block.
 func TestBarPinnedAnchored(t *testing.T) {
+	t.Parallel()
 	info := "SCROLL w1p2 +1/9"
 	for _, cols := range []int{60, 50, 34} {
 		snap := testutil.BarTestSnap(cols)
@@ -1231,6 +1249,7 @@ func TestBarPinnedAnchored(t *testing.T) {
 
 // TestBarWideRunes keeps wide runes whole and inside the column count.
 func TestBarWideRunes(t *testing.T) {
+	t.Parallel()
 	glyph, _ := rail.RailGlyph(theme.DefaultTheme(), "working", theme.GlyphNerd)
 	sources := []string{
 		"日本語セッション", "作業ディレクトリ", "▸ ", "1 一二三",
@@ -1279,6 +1298,7 @@ func TestBarWideRunes(t *testing.T) {
 // TestBarFocusChip reads the focus chip from the focused pane: an agent shows
 // its state glyph and colour on the focus fill, a shell shows the prompt marker.
 func TestBarFocusChip(t *testing.T) {
+	t.Parallel()
 	nerd := theme.GlyphNerd
 	snap := &wire.Snapshot{
 		Session: "s",
@@ -1346,6 +1366,7 @@ func TestBarFocusChip(t *testing.T) {
 // divider is grabbable even when the pointer sits over the vertical divider of
 // the split below it.
 func TestPadHitCrossesChildBorders(t *testing.T) {
+	t.Parallel()
 	inner := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "b"}, {Pane: "c"}},
@@ -1381,6 +1402,7 @@ func TestPadHitCrossesChildBorders(t *testing.T) {
 // TestDividerGripsAlwaysVisible keeps a handle on every divider even before the
 // pointer arrives, so the affordance does not depend on hover working.
 func TestDividerGripsAlwaysVisible(t *testing.T) {
+	t.Parallel()
 	inner := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "b"}, {Pane: "c"}},
@@ -1413,6 +1435,7 @@ func TestDividerGripsAlwaysVisible(t *testing.T) {
 }
 
 func TestDividerHover(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
@@ -1453,6 +1476,7 @@ func TestDividerHover(t *testing.T) {
 // TestHoverMotionNotForwarded keeps no-button motion from reaching a pane that
 // asked only for button motion.
 func TestHoverMotionNotForwarded(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
 	tui.handleMouse(mouseEvent{
@@ -1463,6 +1487,7 @@ func TestHoverMotionNotForwarded(t *testing.T) {
 }
 
 func TestRailDragUsesOffset(t *testing.T) {
+	t.Parallel()
 	root := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
@@ -1482,6 +1507,7 @@ func TestRailDragUsesOffset(t *testing.T) {
 }
 
 func TestDrawPaneBox(t *testing.T) {
+	t.Parallel()
 	var b bytes.Buffer
 	panel.DrawPaneBox(&b, theme.DefaultTheme(), layout.Rect{X: 10, Y: 5, W: 20, H: 8}, true)
 	out := b.String()
@@ -1501,6 +1527,7 @@ func TestDrawPaneBox(t *testing.T) {
 }
 
 func TestMenuClampsAndHits(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
@@ -1527,6 +1554,7 @@ func TestMenuClampsAndHits(t *testing.T) {
 }
 
 func TestRightPressOpensMenuOverMousePane(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
@@ -1559,6 +1587,7 @@ func TestRightPressOpensMenuOverMousePane(t *testing.T) {
 }
 
 func TestPaneAtBoxIncludesBorder(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
@@ -1585,6 +1614,7 @@ func TestPaneAtBoxIncludesBorder(t *testing.T) {
 }
 
 func TestMenuOutsideClickFocusesPane(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
@@ -1618,6 +1648,7 @@ func TestMenuOutsideClickFocusesPane(t *testing.T) {
 }
 
 func TestMenuHoverHighlights(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{Pane: "a"}
 	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	tui.openMenu(tui.paneByID("a"), 10, 5)
@@ -1641,6 +1672,7 @@ func TestMenuHoverHighlights(t *testing.T) {
 // A wheel event is not a left press: it must not start a selection, a divider
 // drag or a menu item.
 func TestWheelIsNotAPress(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
@@ -1667,6 +1699,7 @@ func TestWheelIsNotAPress(t *testing.T) {
 }
 
 func TestMenuRightDragPicks(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{Pane: "a"}
 	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	tui.openMenu(tui.paneByID("a"), 10, 5)
@@ -1692,6 +1725,7 @@ func TestMenuRightDragPicks(t *testing.T) {
 }
 
 func TestMenuKeyboard(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{Pane: "a"}
 	tui := &tui{snap: testutil.TestSnapshot(row, 100, 30, nil)}
 	tui.openMenu(tui.paneByID("a"), 10, 10)
@@ -1732,6 +1766,7 @@ func pasteTUIOn(t *testing.T, paste bool) (*tui, chan wire.Msg) {
 
 // whole buffer, or armed on its contents, fails here.
 func TestPasteIsOneKeysMessage(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	paste := "\x1b[200~line one\nline two\n\x1b[201~"
 	tui.inbuf = append(tui.inbuf, []byte(paste+"tail")...)
@@ -1757,6 +1792,7 @@ func TestPasteIsOneKeysMessage(t *testing.T) {
 // line editor without 2004 reads the markers as keys and leaves their tail on
 // the line, which is how a pasted mysql statement showed as "0~...1~".
 func TestPasteUnframedWithoutBracketedPaste(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUIOn(t, false)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[200~SET GLOBAL x = 1;\x1b[201~")...)
 	tui.processInput()
@@ -1769,6 +1805,7 @@ func TestPasteUnframedWithoutBracketedPaste(t *testing.T) {
 
 // A ctrl+b inside a paste is text, not a prefix arm.
 func TestPasteCtrlBDoesNotArm(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	paste := "\x1b[200~a\x02b\x1b[201~"
 	tui.inbuf = append(tui.inbuf, []byte(paste)...)
@@ -1785,6 +1822,7 @@ func TestPasteCtrlBDoesNotArm(t *testing.T) {
 
 // A paste split across two reads is buffered and forwarded once, intact.
 func TestPasteSpansReads(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	head := "\x1b[200~first\n"
 	tail := "second\n\x1b[201~"
@@ -1805,6 +1843,7 @@ func TestPasteSpansReads(t *testing.T) {
 
 // A paste closes an open menu and reaches the pane instead of a menu item.
 func TestPasteClosesMenu(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.openMenu(tui.paneByID("a"), 10, 5)
 	if tui.menu == nil {
@@ -1825,6 +1864,7 @@ func TestPasteClosesMenu(t *testing.T) {
 // A read that splits right after the escape still yields one paste: the lone
 // escape is held as a possible marker instead of going to the pane.
 func TestPasteSplitAtLoneEscape(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, 0x1b)
 	tui.processInput()
@@ -1844,6 +1884,7 @@ func TestPasteSplitAtLoneEscape(t *testing.T) {
 
 // A real lone escape waits for the deadline and then reaches the pane.
 func TestLoneEscapeFlushedAfterDeadline(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	start := time.Now()
 	tui.inbuf = append(tui.inbuf, 0x1b)
@@ -1866,6 +1907,7 @@ func TestLoneEscapeFlushedAfterDeadline(t *testing.T) {
 // Bytes that cannot start a paste disprove the partial marker, so its deadline
 // cannot flush a later, genuine paste early.
 func TestPartialMarkerDisprovedClearsDeadline(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[2")...)
 	tui.processInput()
@@ -1890,6 +1932,7 @@ func TestPartialMarkerDisprovedClearsDeadline(t *testing.T) {
 // A start marker that never completes is not a paste. The stall path sends
 // the bytes down the normal input path instead of holding them forever.
 func TestPasteStallFallsBack(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[")...)
 	tui.processInput()
@@ -1906,6 +1949,7 @@ func TestPasteStallFallsBack(t *testing.T) {
 // first piece to the pane, and the rest of the marker then arrived as literal
 // text: the block was torn and its newlines executed.
 func TestPasteMarkerSurvivesAGap(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[2")...)
 	tui.processInput()
@@ -1931,6 +1975,7 @@ func TestPasteMarkerSurvivesAGap(t *testing.T) {
 
 // A lone escape keeps the short window: it is the dismiss key, not a paste.
 func TestPasteLoneEscapeKeepsTheShortWindow(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, 0x1b)
 	tui.processInput()
@@ -1947,6 +1992,7 @@ func TestPasteLoneEscapeKeepsTheShortWindow(t *testing.T) {
 // Each piece of a split marker slides the deadline, so a paste that keeps
 // arriving is never flushed between two reads.
 func TestPasteMarkerDeadlineSlidesPerRead(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[")...)
 	tui.processInput()
@@ -1966,6 +2012,7 @@ func TestPasteMarkerDeadlineSlidesPerRead(t *testing.T) {
 // A completed paste clears the held-prefix bookkeeping, so the next lone
 // escape gets the short window again.
 func TestPasteCompletionResetsTheHold(t *testing.T) {
+	t.Parallel()
 	tui, got := pasteTUI(t)
 	tui.inbuf = append(tui.inbuf, []byte("\x1b[2")...)
 	tui.processInput()
@@ -1986,6 +2033,7 @@ func TestPasteCompletionResetsTheHold(t *testing.T) {
 
 // A backwards drag covers the same row-major range as the forward one.
 func TestSelectionRangeNormalizes(t *testing.T) {
+	t.Parallel()
 	s := &selection{pane: "a", anchor: 24, focus: 1}
 	r := s.rangeIn()
 	if r.lo != 1 || r.hi != 24 {
@@ -2001,6 +2049,7 @@ func TestSelectionRangeNormalizes(t *testing.T) {
 }
 
 func TestExtractSelection(t *testing.T) {
+	t.Parallel()
 	vt := testutil.TestVT(t, 12, 3, "ab  cd\r\nsecond line\r\n")
 	cases := []struct {
 		name   string
@@ -2036,6 +2085,7 @@ func TestOSC52Clipboard(t *testing.T) {
 // A click that never moves is not a selection: the app that claims the mouse
 // gets the press and the release.
 func TestClickForwardsToMouseApp(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
 	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello")
@@ -2069,6 +2119,7 @@ func TestClickForwardsToMouseApp(t *testing.T) {
 // origin used to get points outside its own grid, and its wheel and its
 // clicks landed nowhere.
 func TestMouseIsPaneRelative(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
 	p.Rect = layout.Rect{X: 51, Y: 3, W: 42, H: 44}
@@ -2099,6 +2150,7 @@ func TestMouseIsPaneRelative(t *testing.T) {
 // A left press held on a pane must not survive a right press and a menu pick.
 // Otherwise the later left release forwards a click the app never asked for.
 func TestRightPressCancelsHeldClick(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
 	x, y := p.Rect.X+2, p.Rect.Y+2
@@ -2138,6 +2190,7 @@ func TestRightPressCancelsHeldClick(t *testing.T) {
 // A snapshot that changes the starting pane's rect drops the selection: its
 // cells belong to the old geometry.
 func TestSelectionClearsOnResize(t *testing.T) {
+	t.Parallel()
 	tui, _ := clientTUI(t, nil)
 	p := tui.paneByID("a")
 	tui.handleMouse(mouseEvent{
@@ -2171,6 +2224,7 @@ func TestSelectionClearsOnResize(t *testing.T) {
 // A one-cell jitter is not a drag: the app that owns the mouse still gets the
 // click.
 func TestClickJitterStaysAClick(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, map[string]bool{"a": true})
 	p := tui.paneByID("a")
 	tui.vts["a"] = testutil.TestVT(t, p.Rect.W, p.Rect.H, "hello")
@@ -2266,6 +2320,7 @@ func TestDragCopiesSelection(t *testing.T) {
 
 // A drag past the pane's edge stops at its content rect.
 func TestSelectionClampsToStartingPane(t *testing.T) {
+	t.Parallel()
 	tui, _ := clientTUI(t, nil)
 	p := tui.paneByID("a")
 	tui.handleMouse(mouseEvent{
@@ -2287,6 +2342,7 @@ func TestSelectionClampsToStartingPane(t *testing.T) {
 
 // than count sequences: an off-by-one paints the cell after the selection.
 func TestSelectionHighlight(t *testing.T) {
+	t.Parallel()
 	vt := testutil.TestVT(t, 10, 2, "abcdef\r\nghijkl")
 	plain := &bytes.Buffer{}
 	drawPane(plain, vt, layout.Rect{X: 0, Y: 0, W: 10, H: 2})
@@ -2333,6 +2389,7 @@ func reversedCells(s string) map[rune]bool {
 }
 
 func TestDrawMenu(t *testing.T) {
+	t.Parallel()
 	m := &menu{x: 2, y: 3, w: 30, title: "w1p2 pi", items: []menuItem{
 		{label: "Split right", key: "|"},
 		{label: "Close pane", key: "x"},
@@ -2350,6 +2407,7 @@ func TestDrawMenu(t *testing.T) {
 // TestBarPadsToWidth paints the whole last row on the bar ground, so no cell of
 // the previous frame survives and the row reaches its final column.
 func TestBarPadsToWidth(t *testing.T) {
+	t.Parallel()
 	snap := &wire.Snapshot{
 		Session: "dev", Workspace: "work", Windows: testWindows("one", "two"),
 		ActiveWindow: 0, Focus: "w1p1",
@@ -2385,6 +2443,7 @@ func TestBarPadsToWidth(t *testing.T) {
 
 // TestBarUnarmed paints no prefix flag.
 func TestBarUnarmed(t *testing.T) {
+	t.Parallel()
 	snap := testutil.BarTestSnap(80)
 	if out := testutil.BarTexts(barSegments(theme.DefaultTheme(), snap, false, "12 rows above", theme.GlyphNerd)); strings.Contains(strings.Join(out, ""), "PREFIX") {
 		t.Fatalf("unarmed spans carry PREFIX: %q", out)
@@ -2404,6 +2463,7 @@ func TestBarUnarmed(t *testing.T) {
 // TestBarContrast holds every footer foreground to WCAG AA on both grounds it
 // paints: the gutter and the focus fill.
 func TestBarContrast(t *testing.T) {
+	t.Parallel()
 	foregrounds := map[string]theme.RGB{
 		"text":   theme.DefaultTheme().Palette.RailText,
 		"header": theme.DefaultTheme().Palette.RailHeader,
@@ -2432,6 +2492,7 @@ func TestBarContrast(t *testing.T) {
 }
 
 func TestDragPress(t *testing.T) {
+	t.Parallel()
 	row := &layout.Node{
 		Dir: "row", Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
 		Sizes: []float64{0.5, 0.5},
@@ -2524,6 +2585,7 @@ func compareScreens(t *testing.T, want, got *vt.Term) {
 // Plain text, every colour class, reverse video, an alternate screen, a moved
 // cursor and the mode flags all have to survive; dropping any one fails.
 func TestScreenSnapshotRoundTrip(t *testing.T) {
+	t.Parallel()
 	src := vt.NewTerm(24, 6)
 	content := "\x1b[?1049h" + // alternate screen, the harder buffer
 		"PLAIN\r\n" +
@@ -2556,6 +2618,7 @@ func TestScreenSnapshotRoundTrip(t *testing.T) {
 
 // A screen replaces the live VT; a later replay only replaces history.
 func TestClientScreenThenReplay(t *testing.T) {
+	t.Parallel()
 	src := vt.NewTerm(12, 3)
 	src.Write([]byte("\x1b[33mLIVE-SCREEN\x1b[0m\x1b[2;4H"))
 	src.Flush()
@@ -2601,6 +2664,7 @@ func TestClientScreenThenReplay(t *testing.T) {
 
 // actions and the old keys do not.
 func TestKeymapDispatchRemapsPrefixSplitAndDetach(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+a"
@@ -2668,6 +2732,7 @@ keymap "main" {
 // its action, or nothing when the action is unbound. The menu's own keys come
 // from the menu mode.
 func TestKeymapDispatchMenuLabels(t *testing.T) {
+	t.Parallel()
 	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil)}
 	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+b"
@@ -2723,6 +2788,7 @@ keymap "menu" {
 // TestKeymapDispatchUnboundNotifiesAndDisarms: a key with no binding raises the
 // notify toast and leaves the armed state.
 func TestKeymapDispatchUnboundNotifiesAndDisarms(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "\x02")
 	if !tui.armed {
@@ -2742,6 +2808,7 @@ func TestKeymapDispatchUnboundNotifiesAndDisarms(t *testing.T) {
 // waits for its remaining bytes, a stalled esc resolves to dismiss, and a
 // complete arrow still runs its action.
 func TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "\x02")
 	if !tui.armed {
@@ -2788,6 +2855,7 @@ func TestKeymapDispatchPartialEscapeWaitsAndLoneEscDismisses(t *testing.T) {
 // Alt+key is a two-byte sequence, so its letter is part of the unknown key and
 // not the pane's text.
 func TestKeymapDispatchUnboundEscapeKeepsItsTail(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	seqs := []string{"\x1bOP", "\x1b[1;5A", "\x1b[H", "\x1ba", "\x1bZ", "\x1b1", "\x1b\u00e9"}
 	for _, seq := range seqs {
@@ -2812,6 +2880,7 @@ func TestKeymapDispatchUnboundEscapeKeepsItsTail(t *testing.T) {
 // nothing to the pane. The esc waits only when some key starts with it, so the
 // test keymap binds an arrow and leaves esc itself unbound.
 func TestKeymapDispatchLoneEscapeTimesOutDismisses(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+b"
@@ -2849,6 +2918,7 @@ keymap "main" {
 // resolves to its action, so treating an Alt+key as one sequence does not
 // swallow the keys that have a binding.
 func TestKeymapDispatchBoundSequenceStillMatches(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.arm()
 	feed(tui, "\x1b[A")
@@ -2868,6 +2938,7 @@ func TestKeymapDispatchBoundSequenceStillMatches(t *testing.T) {
 // TestKeymapDispatchSplitPrefixStaysArmed: a multi-byte prefix that arrives in
 // two reads arms and stays armed past the esc deadline.
 func TestKeymapDispatchSplitPrefixStaysArmed(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "up"
@@ -2903,6 +2974,7 @@ keymap "main" {
 // TestKeymapDispatchSendPrefixSendsConfiguredBytes: the armed send-prefix action
 // sends the configured prefix bytes, not a literal ctrl+b.
 func TestKeymapDispatchSendPrefixSendsConfiguredBytes(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.keymap = testutil.KeymapTestLoad(t, `
 prefix "ctrl+a"
@@ -3102,6 +3174,7 @@ keymap "main" {
 // TestKeymapDispatchPartialEscapeInMenu: a menu arrow split across two reads
 // waits for its remaining bytes and then moves the selection.
 func TestKeymapDispatchPartialEscapeInMenu(t *testing.T) {
+	t.Parallel()
 	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
 	tui.openMenu(tui.paneByID("a"), 5, 3)
 	if tui.menu == nil {
@@ -3127,6 +3200,7 @@ func TestKeymapDispatchPartialEscapeInMenu(t *testing.T) {
 // meaning in the switcher list. They neither close it nor type into the query,
 // and an unbound escape sequence is not text either.
 func TestKeymapDispatchSwitcherLeftRightAreNoOps(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	if tui.sw == nil {
@@ -3156,6 +3230,7 @@ func TestKeymapDispatchSwitcherLeftRightAreNoOps(t *testing.T) {
 // TestHelpOpensAndCloses: the help action adds the keymap float and the help
 // mode, and esc takes both down again. A second press toggles it closed.
 func TestHelpOpensAndCloses(t *testing.T) {
+	t.Parallel()
 	tui, _ := clientTUI(t, nil)
 	tui.runAction("help")
 	if tui.keys == nil {
@@ -3288,6 +3363,7 @@ func screenGlyphsIn(vt *vt.Term, ch rune, r layout.Rect) int {
 // pane alone, with no sibling box and no grip, and clearing the zoom brings the
 // unzoomed picture back byte for byte.
 func TestZoomFrameFilter(t *testing.T) {
+	t.Parallel()
 	f := newZoomFrameTUI(t)
 	first := f.frame()
 	if !strings.Contains(first, "A-MARK") || !strings.Contains(first, "B-MARK") {
@@ -3344,6 +3420,7 @@ func TestZoomFrameFilter(t *testing.T) {
 // sibling's old rectangle lands on the zoomed pane, and a point outside the
 // pane area keeps its present answer.
 func TestZoomHitsFollowTheZoomedPane(t *testing.T) {
+	t.Parallel()
 	f := newZoomFrameTUI(t)
 	a := f.tui.paneByID("a").Rect
 	x, y := a.X+2, a.Y+2
@@ -3376,6 +3453,7 @@ func TestZoomHitsFollowTheZoomedPane(t *testing.T) {
 // TestZoomDragPressGuard pins the divider guard: the same cell starts a drag
 // while unzoomed and cannot start one while zoomed.
 func TestZoomDragPressGuard(t *testing.T) {
+	t.Parallel()
 	f := newZoomFrameTUI(t)
 	root := f.snap.Root
 	boxes := layout.ChildBoxRects(root, layout.PaneAreaFor(f.snap.Cols, f.snap.Rows, f.snap.Rail))
@@ -3404,6 +3482,7 @@ func TestZoomDragPressGuard(t *testing.T) {
 // TestZoomLayoutSig pins the repaint trigger: the signature differs when only
 // the zoom differs, even with every rectangle the same.
 func TestZoomLayoutSig(t *testing.T) {
+	t.Parallel()
 	f := newZoomFrameTUI(t)
 	plain := f.tui.layoutSig(f.snap)
 	if f.snap.Zoom != "" {
@@ -3423,6 +3502,7 @@ func TestZoomLayoutSig(t *testing.T) {
 // while zoomed, and the elision ladder drops it with the status word and the
 // name.
 func TestZoomBarMark(t *testing.T) {
+	t.Parallel()
 	f := newZoomFrameTUI(t)
 	chipTexts := func(l *barLeft) []string {
 		var out []string
@@ -3498,6 +3578,7 @@ func TestZoomBarMark(t *testing.T) {
 // action carries the server's own name. The dm exec side, which needs the
 // built binary, is TestZoomExecReachesTheServer in the blackbox package.
 func TestZoomExecReachesTheHandler(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.armed = true
 	tui.runAction("zoom-pane")

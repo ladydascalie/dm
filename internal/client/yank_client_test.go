@@ -12,6 +12,7 @@ import (
 
 // The default main keymap binds both copy actions.
 func TestCopyKeysAreBound(t *testing.T) {
+	t.Parallel()
 	cfg := keymap.LoadDefault()
 	if got := cfg.Key("main", "copy-output"); got != "y" {
 		t.Fatalf("copy-output key = %q, want y", got)
@@ -23,6 +24,7 @@ func TestCopyKeysAreBound(t *testing.T) {
 
 // The y key reaches copy-output and sends a yank request for the focused pane.
 func TestCopyOutputKeySendsYank(t *testing.T) {
+	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	tui.armed = true
 	tui.key('y')

@@ -17,6 +17,7 @@ import (
 // TestThemeDefaultNerdGlyphs pins every built-in Nerd Font glyph and keeps the
 // error and unknown marks distinct, so Nerd Font users keep a readable error.
 func TestThemeDefaultNerdGlyphs(t *testing.T) {
+	t.Parallel()
 	want := map[string]string{
 		"working": "\uf013",
 		"idle":    "\uf111",
@@ -43,6 +44,7 @@ func TestThemeDefaultNerdGlyphs(t *testing.T) {
 // palette, the accents, the glyphs and the states all paint from the value the
 // caller passes, and no call changes the built-in theme.
 func TestThemeReachesPainters(t *testing.T) {
+	t.Parallel()
 	th := theme.DefaultTheme()
 	th.Palette.RailBG = theme.RGB{R: 1, G: 2, B: 3}
 	th.Palette.RailFocusBG = theme.RGB{R: 4, G: 5, B: 6}
@@ -105,6 +107,7 @@ func TestThemeReachesPainters(t *testing.T) {
 // for the glyph set, so the built-in theme is compared after the same
 // resolution.
 func TestTuiTheme(t *testing.T) {
+	t.Parallel()
 	c0 := &tui{}
 	if got, want := c0.theme(), theme.DefaultTheme().For(c0.glyphSet()); !reflect.DeepEqual(got, want) {
 		t.Fatalf("nil theme = %+v, want the built-in theme", got)
@@ -123,6 +126,7 @@ func TestTuiTheme(t *testing.T) {
 // TestThemeDrawGrips proves drawGrips paints the themed grip, not the built-in
 // dot.
 func TestThemeDrawGrips(t *testing.T) {
+	t.Parallel()
 	th := theme.DefaultTheme()
 	th.Glyphs.Grip = "@"
 	root := &layout.Node{

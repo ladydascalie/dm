@@ -76,6 +76,7 @@ func feed(t *tui, b string) {
 // TestSwitcherPrefixToggles: prefix a opens the float and a second prefix press
 // closes it. Neither sends a request.
 func TestSwitcherPrefixToggles(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	if tui.sw == nil {
@@ -92,6 +93,7 @@ func TestSwitcherPrefixToggles(t *testing.T) {
 // walk through selectable rows. The arrows are covered by the move tests; this
 // holds the ctrl keys to the same step.
 func TestSwitcherCtrlNPMoves(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	if it, ok := tui.sw.Selected(); !ok || it.Pane != "w1p1" {
@@ -111,6 +113,7 @@ func TestSwitcherCtrlNPMoves(t *testing.T) {
 // TestSwitcherTypeAndEnter: typing narrows the rows and enter sends a focus
 // request for the selected pane, then closes the float.
 func TestSwitcherTypeAndEnter(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	full := tui.sw.RowCount()
@@ -140,6 +143,7 @@ func TestSwitcherTypeAndEnter(t *testing.T) {
 // that holds a letter the table binds is text, so it neither opens the float,
 // nor sorts, nor enters input mode, nor jumps.
 func TestSwitcherFilterHoldsBoundLetters(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	feed(tui, "/")
@@ -165,6 +169,7 @@ func TestSwitcherFilterHoldsBoundLetters(t *testing.T) {
 // TestSwitcherEscUnwindsFilter: esc clears the query, then leaves the mode, then
 // closes. Outside the mode a letter is a key again.
 func TestSwitcherEscUnwindsFilter(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	feed(tui, "/beta")
@@ -202,6 +207,7 @@ func TestSwitcherEscUnwindsFilter(t *testing.T) {
 
 // TestSwitcherEscSendsNothing: esc closes the float without a request.
 func TestSwitcherEscSendsNothing(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	feed(tui, "\x1b")
@@ -218,6 +224,7 @@ func TestSwitcherEscSendsNothing(t *testing.T) {
 
 // TestSwitcherCtrlLRestores: ctrl+l clears the query and brings the rows back.
 func TestSwitcherCtrlLRestores(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	full := tui.sw.RowCount()
@@ -239,6 +246,7 @@ func TestSwitcherCtrlLRestores(t *testing.T) {
 // opens the table alone, and the peek key still shows the band at the default
 // share.
 func TestSwitcherPreviewShare(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		node  string
@@ -293,6 +301,7 @@ func TestSwitcherPreviewShare(t *testing.T) {
 // leaves the panes live under it, so it claims no screen mode and the frame
 // keeps its tab bar and hover.
 func TestSwitcherFloatLayout(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.kdl")
 	if err := os.WriteFile(path, []byte("dashboard-layout \"float\"\n"), 0o600); err != nil {
@@ -336,6 +345,7 @@ func TestSwitcherFloatLayout(t *testing.T) {
 // TestSwitcherFullScreen: prefix a opens the dashboard over the whole screen in
 // its own mode, and the close key gives the screen back.
 func TestSwitcherFullScreen(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	if tui.sw == nil {
@@ -356,6 +366,7 @@ func TestSwitcherFullScreen(t *testing.T) {
 
 // TestSwitcherSortKey: s cycles the ordering recent, project, status.
 func TestSwitcherSortKey(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	if m := tui.sw.SortMode(); m != switcher.SortRecent {
@@ -379,6 +390,7 @@ func TestSwitcherSortKey(t *testing.T) {
 // TestSwitcherPreviewKeys: ctrl+u and ctrl+d scroll the preview, +/- resize it
 // and p hides it.
 func TestSwitcherPreviewKeys(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	lines := make([]string, 60)
@@ -449,6 +461,7 @@ func TestSwitcherCopyPaneID(t *testing.T) {
 
 // TestSwitcherPickDigit: a digit goes to that row and picks it.
 func TestSwitcherPickDigit(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	feed(tui, "2")
@@ -468,6 +481,7 @@ func TestSwitcherPickDigit(t *testing.T) {
 // TestSwitcherPreviewReplies: a read reply with the wrong id is dropped, one
 // with the current id fills the preview, and a failure stays silent.
 func TestSwitcherPreviewReplies(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	feed(tui, "/beta")
@@ -512,6 +526,7 @@ func TestSwitcherPreviewReplies(t *testing.T) {
 // TestSwitcherMouseSwallowed: a mouse press while the float is open sends no
 // keys to the pane and leaves the float up.
 func TestSwitcherMouseSwallowed(t *testing.T) {
+	t.Parallel()
 	tui, got := switcherTUI(t)
 	feed(tui, "\x02a")
 	feed(tui, "\x1b[<0;10;5M")

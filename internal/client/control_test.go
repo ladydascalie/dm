@@ -220,6 +220,7 @@ func TestRailControlOwnsItsRow(t *testing.T) {
 // TestRailControlClickCollapses clicks every column of the control row of a
 // 20 column rail. Each click asks for the thin rail and nothing else.
 func TestRailControlClickCollapses(t *testing.T) {
+	t.Parallel()
 	tui, got := ctlTUI(t, 20)
 	// The control is zero-based row 8, so the one-based mouse row is 9.
 	for x := 1; x <= 20; x++ {
@@ -236,6 +237,7 @@ func TestRailControlClickCollapses(t *testing.T) {
 // TestRailControlClickExpands expands the thin rail to the last full width,
 // and to the default when nothing was remembered.
 func TestRailControlClickExpands(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ want, railWant int }{
 		{34, 34},
 		{20, 20},
@@ -255,6 +257,7 @@ func TestRailControlClickExpands(t *testing.T) {
 // TestRailControlClickSendsNoPaneGesture holds the control row clear of every
 // other rail gesture: no focus, no fold, no split, no rail drag.
 func TestRailControlClickSendsNoPaneGesture(t *testing.T) {
+	t.Parallel()
 	tui, got := ctlTUI(t, 20)
 	for x := 1; x <= 20; x++ {
 		tui.handleMouse(mouseEvent{btn: 0, x: x, y: 9})
@@ -273,6 +276,7 @@ func TestRailControlClickSendsNoPaneGesture(t *testing.T) {
 // TestRailControlMatchesPrefix pins the two routes together: both collapse a
 // full rail to the same width, and only `prefix r` hides a thin one.
 func TestRailControlMatchesPrefix(t *testing.T) {
+	t.Parallel()
 	tui, got := ctlTUI(t, 20)
 	tui.toggleRail()
 	if m := testutil.NextMsg(t, got); m.Action != "set-rail" || m.Index != layout.CollapsedRail {
@@ -299,6 +303,7 @@ func TestRailControlMatchesPrefix(t *testing.T) {
 // TestRailControlHidden draws no control when the rail is hidden, and leaves
 // that screen row to the panes.
 func TestRailControlHidden(t *testing.T) {
+	t.Parallel()
 	snap := ctlSnapshot(0)
 	row := snap.Rows - 2
 	for x := 0; x < snap.Cols; x++ {
