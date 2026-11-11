@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -23,6 +24,16 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "__server":
+			if hasFlag(os.Args, "--hard") {
+				// A server that ignores SIGTERM forces stopServer down its
+				// SIGKILL escalation.
+				term := make(chan os.Signal, 1)
+				signal.Notify(term, syscall.SIGTERM)
+				go func() {
+					for range term {
+					}
+				}()
+			}
 			fakeServer(flagValue(os.Args, "-s"))
 		case "__pane":
 			// Hold a child of our own so a reaper has a grandchild to take.
@@ -34,6 +45,16 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Exit(m.Run())
+}
+
+// hasFlag reports whether name appears in args as a bare flag.
+func hasFlag(args []string, name string) bool {
+	for _, a := range args {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }
 
 // flagValue returns the value that follows name in args, or "".
@@ -284,6 +305,29 @@ func TestRPCSkipsInterleavedFrames(t *testing.T) {
 	}
 }
 
+// TestRPCFailsWhenThePeerNeverReads pins the write-failure return: a server
+// that accepts and then closes without reading makes the 4 MiB request block
+// in the socket buffer until the close turns it into EPIPE.
+func TestRPCFailsWhenThePeerNeverReads(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	ln := listenSession(t, "stalled")
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				_ = c.Close()
+			}()
+		}
+	}()
+	if _, err := RPC("stalled", wire.Msg{Data: make([]byte, 4<<20)}); err == nil {
+		t.Fatal("RPC returned a response from a server that never read")
+	}
+}
+
 // TestEnsureSurfacesSetupErrors pins the two early exits before the spawn:
 // a session path that cannot be created, and a log file that cannot be
 // opened.
@@ -317,6 +361,9 @@ func TestEnsureSurfacesSetupErrors(t *testing.T) {
 			}
 			if _, err := RPC(session, wire.Msg{Action: "ping"}); err == nil {
 				t.Fatal("RPC succeeded where setup made it impossible")
+			}
+			if err := KillSession(session); err == nil {
+				t.Fatal("KillSession succeeded where setup made it impossible")
 			}
 		})
 	}
@@ -490,6 +537,46 @@ func TestStopServerKillsItsOwnAndSparesForeignPids(t *testing.T) {
 	}
 }
 
+// TestStopServerEscalatesToSigkill pins the hard path: a server that
+// ignores SIGTERM is killed with SIGKILL within the escalation window.
+func TestStopServerEscalatesToSigkill(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	dropSession(t, "hard")
+	if err := os.MkdirAll(paths.SessionDir("hard"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hard := exec.Command(exe, "__server", "-s", "hard", "--hard")
+	hard.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := hard.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hard.Process.Kill() })
+	// The pid file appears after Listen, and the child registers its SIGTERM
+	// handler before Listen, so a pid file means SIGTERM will be ignored.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := readPID(filepath.Join(paths.SessionDir("hard"), "server.pid")); ok {
+			break
+		}
+		if !processAlive(hard.Process.Pid) {
+			t.Fatal("the hard server exited before it could listen")
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hard server never wrote its pid file")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stopServer(paths.SessionDir("hard"))
+	_ = hard.Wait()
+	if processAlive(hard.Process.Pid) {
+		t.Fatal("stopServer left a server that ignored SIGTERM")
+	}
+}
+
 func TestReapPanesSparesForeignProcesses(t *testing.T) {
 	sleep := exec.Command("sleep", "30")
 	if err := sleep.Start(); err != nil {
@@ -526,6 +613,12 @@ func TestReapPanesSparesForeignProcesses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A file without the .sock.pid suffix is not a pane record, even when it
+	// carries a dm pane's pid.
+	if err := os.WriteFile(filepath.Join(dir, "panes", "p4.sock"),
+		[]byte(strconv.Itoa(pane.Process.Pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	reapPanes(t.TempDir())
 	reapPanes(dir)
 	if !waitGone(pane.Process.Pid, time.Second) {
@@ -539,7 +632,9 @@ func TestReapPanesSparesForeignProcesses(t *testing.T) {
 }
 
 // TestReadMsgRejectsBrokenFrames pins what a client sees when the peer sends
-// a truncated or malformed frame.
+// a truncated or malformed frame. wire owns ReadMsg; these are the errors a
+// transport caller meets on the session socket. If internal/wire grows its
+// own frame tests, move this table there.
 func TestReadMsgRejectsBrokenFrames(t *testing.T) {
 	cases := map[string]struct {
 		write func(w net.Conn)
