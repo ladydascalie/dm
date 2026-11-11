@@ -37,12 +37,21 @@ func defaultConfigPath() (string, error) {
 // LoadDefaultPath loads the default path. A missing file returns the built-in
 // defaults. When write is true and the file is missing, it writes the default
 // file first. A write or parse failure returns the defaults and the error, so
-// the caller can toast it and keep running.
+// the caller can toast it and keep running. It resolves the path from
+// XDG_CONFIG_HOME and $HOME and delegates to LoadDefaultFrom.
 func LoadDefaultPath(write bool) (*Config, error) {
 	path, err := defaultConfigPath()
 	if err != nil {
 		return LoadDefault(), err
 	}
+	return LoadDefaultFrom(path, write)
+}
+
+// LoadDefaultFrom loads the keymap at an explicit path. A missing file returns
+// the built-in defaults. When write is true and the file is missing, it writes
+// the default file first. A write or parse failure returns the defaults and the
+// error, so the caller can toast it and keep running.
+func LoadDefaultFrom(path string, write bool) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -75,24 +84,7 @@ func LoadDefaultPath(write bool) (*Config, error) {
 // theme read or parse failure returns the parsed keymap with the built-in
 // theme and the error.
 func LoadPath(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return LoadDefault(), nil
-		}
-		return LoadDefault(), err
-	}
-	cfg, err := ParseConfig(string(data))
-	if err != nil {
-		return LoadDefault(), err
-	}
-	mergeDefaults(cfg)
-	th, err := theme.LoadThemeFile(filepath.Dir(path), cfg.themeName)
-	if err != nil {
-		return cfg, err
-	}
-	cfg.theme = th
-	return cfg, nil
+	return LoadDefaultFrom(path, false)
 }
 
 // writeDefaultConfig writes the default keymap text. It creates the directory
