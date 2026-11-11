@@ -2,10 +2,12 @@ package blackbox
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -120,7 +122,25 @@ func TestReapOrphans(t *testing.T) {
 			time.Since(start).Round(time.Millisecond), keepDaemon, !gone(keepDaemon),
 			keepShell, !gone(keepShell))
 	}
-	if out := h.waitFor("reap", keep, "REAP-SHELL="); out == "" {
-		t.Fatalf("live pane stopped answering")
+	deadline2 := time.Now().Add(30 * time.Second)
+	var out string
+	for {
+		out, _ = h.try("read", keep, "-s", "reap")
+		if strings.Contains(out, "REAP-SHELL=") {
+			break
+		}
+		if time.Now().After(deadline2) {
+			scb, _ := h.try("read", keep, "-s", "reap", "--scrollback", "30")
+			tree, _ := h.try("list", "-s", "reap", "--json")
+			raw, _ := json.Marshal(map[string]any{"action": "yank", "target": keep})
+			execOut, _ := h.try("exec", string(raw), "-s", "reap")
+			raw2, _ := json.Marshal(map[string]any{"action": "screen", "target": keep})
+			execOut2, _ := h.try("exec", string(raw2), "-s", "reap")
+			keepPID := readPID(t, filepath.Join(h.stateDir(), "sessions", "reap", "panes", keep+".sock.pid"))
+			t.Logf("DIAG daemon at probe=%d alive=%v / now=%d", keepDaemon, gone(keepDaemon), keepPID)
+			logb, _ := os.ReadFile(filepath.Join(h.stateDir(), "sessions", "reap", "panes", keep+".log"))
+			t.Fatalf("keep lost its marker; screen:\n%s\n--- yank ---\n%s\n--- vt snapshot ---\n%s\n--- keep daemon pid %v gone=%v ---\n--- keep log ---\n%s\n--- scrollback ---\n%s\n--- tree ---\n%s", out, execOut, execOut2, keepPID, gone(keepPID), logb, scb, tree)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
