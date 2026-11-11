@@ -128,3 +128,17 @@ func captureStderr(t *testing.T, fn func()) string {
 	}
 	return string(out)
 }
+
+// TestMain keeps a spawned server child from running the test suite. Ensure
+// starts os.Executable with __server when no daemon answers, and in a test
+// binary that would run the tests again and spawn again. The child exits at
+// once, so the caller's dial retries fail into the did-not-start error the
+// no-server test asserts.
+func TestMain(m *testing.M) {
+	for _, a := range os.Args[1:] {
+		if a == "__server" {
+			os.Exit(3)
+		}
+	}
+	os.Exit(m.Run())
+}

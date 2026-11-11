@@ -386,3 +386,22 @@ func TestLsTablePrintsDeadSessions(t *testing.T) {
 		}
 	}
 }
+
+// TestSplitRefusal surfaces the server's error text instead of the pane id.
+func TestSplitRefusal(t *testing.T) {
+	startFakeServer(t, "main", refuseHandler("no room to split"))
+	if err := Run([]string{"split", "w1p1"}); err == nil || err.Error() != "no room to split" {
+		t.Fatalf("dm split refused = %v, want the server error", err)
+	}
+}
+
+// TestDashWithoutAServer proves the most common failure a user meets: no
+// session running. The verb errors cleanly after the spawn retries give up,
+// instead of hanging or panicking.
+func TestDashWithoutAServer(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	err := Run([]string{"dash"})
+	if err == nil || !strings.Contains(err.Error(), "did not start") {
+		t.Fatalf("dm dash with no server = %v, want the did-not-start error", err)
+	}
+}
