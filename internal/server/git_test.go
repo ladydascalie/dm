@@ -200,3 +200,26 @@ func TestDetectGitReal(t *testing.T) {
 		t.Fatalf("plain directory = %+v, want zero and no root", got)
 	}
 }
+
+// TestDetectGitTimeout pins the timeout classification: a git that hangs until
+// the one second limit cuts it off is an inconclusive probe, not a real
+// not-a-repository answer.
+func TestDetectGitTimeout(t *testing.T) {
+	bin := t.TempDir()
+	// exec makes the script the git process itself, so the context kill ends
+	// the sleep and nothing lingers.
+	script := "#!/bin/sh\nexec sleep 30\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	start := time.Now()
+	got := detectGit(t.TempDir())
+	if !got.timeout || got.inRepo {
+		t.Fatalf("hanging git = %+v, want an inconclusive probe outside a repo", got)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("hanging git took %s, want the one second cut", d)
+	}
+}
