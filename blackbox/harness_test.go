@@ -299,6 +299,15 @@ func waitMode(t *testing.T, h *harness, session string, alt, mouse bool) {
 	}
 }
 
+// activeLayout reads the active window's stored preset layout, so a test can
+// prove a manual tree change cleared it after the server saved.
+func (h *harness) activeLayout(session string) string {
+	h.t.Helper()
+	st := h.sessionState(session)
+	ws := st.Workspaces[st.Active]
+	return ws.Windows[ws.Active].Layout
+}
+
 // stateFile is the part of the session state file these tests read back. It is
 // local on purpose: the harness proves what the file records without naming a
 // production type.
@@ -325,6 +334,7 @@ type stateWindow struct {
 	Name     string `json:"name"`
 	Focus    string `json:"focus"`
 	Unfolded bool   `json:"unfolded"`
+	Layout   string `json:"layout,omitempty"`
 }
 
 type statePane struct {

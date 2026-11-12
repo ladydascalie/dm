@@ -656,7 +656,8 @@ func validateArgv(argv []string) error {
 // swapPanes exchanges the ids of two leaves of the same tree. The panes trade
 // ids in place, so every rectangle keeps its shape and both ids stay leaves.
 // Focus is untouched: the focused pane's id survives the swap, so it keeps
-// focus wherever the swap leaves it.
+// focus wherever the swap leaves it. A swap is a manual tree change, so it
+// forgets the window's stored preset layout.
 func (s *server) swapPanes(a, b string) error {
 	if a == "" || b == "" || a == b {
 		return fmt.Errorf("swap-panes needs two panes")
@@ -671,10 +672,36 @@ func (s *server) swapPanes(a, b string) error {
 			if !layout.Swap(win.Root, a, b) {
 				return fmt.Errorf("no pane %q or %q", a, b)
 			}
+			win.Layout = ""
 			return nil
 		}
 	}
 	return fmt.Errorf("no pane %q", a)
+}
+
+// swapByDir swaps the active window's focused pane with the neighbour
+// focus-dir would reach in dir. It reuses activeNeighbor, so the pane it
+// swaps is exactly the one focus-dir would focus. No neighbour fails with the
+// same error focus-dir gives, naming the direction and the pane. A swap is a
+// manual tree change, so it forgets the window's stored preset layout.
+func (s *server) swapByDir(dir string) error {
+	switch dir {
+	case "left", "right", "up", "down":
+	default:
+		return fmt.Errorf("dir must be left, right, up or down")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	win := s.st.ActiveWindow()
+	n, err := s.activeNeighbor(dir)
+	if err != nil {
+		return err
+	}
+	if !layout.Swap(win.Root, win.Focus, n) {
+		return fmt.Errorf("no pane %q or %q", win.Focus, n)
+	}
+	win.Layout = ""
+	return nil
 }
 
 // movePane moves the leaf pane id to the edge of target in dir. Both ids must
@@ -699,6 +726,7 @@ func (s *server) movePane(id, target, dir string) error {
 				return fmt.Errorf("no pane %q", id)
 			}
 			win.Focus = id
+			win.Layout = ""
 			return nil
 		}
 	}
@@ -738,6 +766,7 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool, arg
 	}
 	id := win.NewPaneID()
 	layout.SplitLeaf(win.Root, target, dir, id, ratio)
+	win.Layout = ""
 	s.addPaneStateAt(id, cwd, argv)
 	if !noFocus {
 		for i, cand := range s.st.Workspaces {
@@ -839,17 +868,29 @@ func (s *server) setFocus(id string) error {
 	return fmt.Errorf("no pane %q", id)
 }
 
-func (s *server) focusDir(dir string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// activeNeighbor is the pane focus-dir would reach from the active window's
+// focused pane in dir. It is the one resolution swap-by-dir reuses, so a swap
+// key moves a window exactly where its focus-dir twin would. No neighbour
+// fails and names the direction and the focused pane.
+func (s *server) activeNeighbor(dir string) (string, error) {
 	win := s.st.ActiveWindow()
 	rects := map[string]layout.Rect{}
 	layout.Layout(win.Root, layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()), s.cfg.Padding(), rects)
 	n := layout.Neighbor(rects, win.Focus, dir)
 	if n == "" {
-		return fmt.Errorf("no pane %s of %s", dir, win.Focus)
+		return "", fmt.Errorf("no pane %s of %s", dir, win.Focus)
 	}
-	win.Focus = n
+	return n, nil
+}
+
+func (s *server) focusDir(dir string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, err := s.activeNeighbor(dir)
+	if err != nil {
+		return err
+	}
+	s.st.ActiveWindow().Focus = n
 	return nil
 }
 
@@ -871,10 +912,18 @@ func (s *server) cyclePane(step int) error {
 	return nil
 }
 
+// presetOrder is the fixed cycle select-layout next walks. It wraps: the name
+// after tiled is even-horizontal again.
+var presetOrder = []string{"even-horizontal", "even-vertical", "main-horizontal", "main-vertical", "tiled"}
+
 // selectLayout rebuilds the active window's tree as one of the preset
 // layouts, over the window's pane ids in tree order. The pane set is exactly
 // preserved, so the focus survives untouched. A window with fewer than two
-// panes refuses: there is nothing to arrange.
+// panes refuses: there is nothing to arrange. An explicit name is stored on
+// the window and returned; the name "next" applies the name after the stored
+// one around presetOrder, or the first name when nothing is stored, and stores
+// it. A manual tree change clears the stored name, so next starts over after
+// one.
 func (s *server) selectLayout(name string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -883,12 +932,22 @@ func (s *server) selectLayout(name string) (string, error) {
 	if len(ids) < 2 {
 		return name, fmt.Errorf("select-layout needs at least two panes, window %s has %d", win.ID, len(ids))
 	}
+	if name == "next" {
+		idx := -1
+		for i, p := range presetOrder {
+			if p == win.Layout {
+				idx = i
+			}
+		}
+		name = presetOrder[(idx+1)%len(presetOrder)]
+	}
 	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked())
 	root, ok := layout.ApplyPreset(win.Root, name, ids, area.W, area.H)
 	if !ok {
 		return name, fmt.Errorf("no layout %q", name)
 	}
 	win.Root = root
+	win.Layout = name
 	return name, nil
 }
 
@@ -923,6 +982,7 @@ func (s *server) closePane(target string) error {
 		return fmt.Errorf("no pane %q", target)
 	}
 	win.Root = root
+	win.Layout = ""
 	if win.Focus == target {
 		rest := layout.AllPanes(root)
 		if len(rest) > 0 {

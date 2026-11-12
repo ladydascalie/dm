@@ -2935,6 +2935,48 @@ func TestKeymapDispatchBoundSequenceStillMatches(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
+// TestKeymapDispatchSwapLayoutSyncKeys proves the four new built-in keys send
+// the request shapes the server semantics expects: swap-next / swap-prev swap
+// by direction, next-layout selects the next preset, and synchronize-panes
+// toggles with no on field. Each acts on the focused pane with the normal
+// action envelope, and the armed state clears after the key runs.
+func TestKeymapDispatchSwapLayoutSyncKeys(t *testing.T) {
+	t.Parallel()
+	tui, got := clientTUI(t, nil)
+
+	tui.arm()
+	feed(tui, "o")
+	m := testutil.NextMsg(t, got)
+	if m.Action != "swap-panes" || m.Dir != "right" || m.Other != "" {
+		t.Fatalf("swap-next sent %+v, want swap-panes dir right", m)
+	}
+	if m.Target != "a" || tui.armed {
+		t.Fatalf("swap-next: target=%q armed=%v, want the focused pane and armed off", m.Target, tui.armed)
+	}
+
+	tui.arm()
+	feed(tui, "O")
+	m = testutil.NextMsg(t, got)
+	if m.Action != "swap-panes" || m.Dir != "left" || m.Other != "" {
+		t.Fatalf("swap-prev sent %+v, want swap-panes dir left", m)
+	}
+
+	tui.arm()
+	feed(tui, "u")
+	m = testutil.NextMsg(t, got)
+	if m.Action != "select-layout" || m.Layout != "next" {
+		t.Fatalf("next-layout sent %+v, want select-layout next", m)
+	}
+
+	tui.arm()
+	feed(tui, "S")
+	m = testutil.NextMsg(t, got)
+	if m.Action != "synchronize-panes" || m.On != nil {
+		t.Fatalf("synchronize-panes sent %+v, want no on field", m)
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestKeymapDispatchSplitPrefixStaysArmed: a multi-byte prefix that arrives in
 // two reads arms and stays armed past the esc deadline.
 func TestKeymapDispatchSplitPrefixStaysArmed(t *testing.T) {

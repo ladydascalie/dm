@@ -27,6 +27,11 @@ type Window struct {
 	// Sync mirrors every write to one pane of the window to every live pane of
 	// it. It is a window flag: zero (off) is the default for older state files.
 	Sync bool `json:"sync,omitempty"`
+	// Layout is the preset select-layout last applied to this window: one of
+	// even-horizontal, even-vertical, main-horizontal, main-vertical or tiled.
+	// Empty means manual edits own the tree; select-layout next starts at the
+	// first preset then. It survives a restart because state persists it.
+	Layout string `json:"layout,omitempty"`
 }
 
 type Workspace struct {

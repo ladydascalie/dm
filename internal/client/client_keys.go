@@ -707,6 +707,14 @@ func (t *tui) runAction(name string) {
 		t.action("next-window", nil)
 	case "prev-window":
 		t.action("prev-window", nil)
+	case "swap-next":
+		t.action("swap-panes", func(m *wire.Msg) { m.Dir = "right" })
+	case "swap-prev":
+		t.action("swap-panes", func(m *wire.Msg) { m.Dir = "left" })
+	case "next-layout":
+		t.action("select-layout", func(m *wire.Msg) { m.Layout = "next" })
+	case "synchronize-panes":
+		t.action("synchronize-panes", nil)
 	case "new-workspace":
 		t.action("new-workspace", nil)
 	case "next-workspace":
