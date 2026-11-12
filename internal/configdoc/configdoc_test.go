@@ -114,6 +114,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"tab-min-width":     `tab-min-width 10`,
 		"tab-max-width":     `tab-max-width 30`,
 		"padding":           `padding 3`,
+		"history-lines":     `history-lines 4000`,
 		"glyphs":            `glyphs "nerd"`,
 		"window-label":      `window-label "{{.ID}}"`,
 		"dashboard-preview": `dashboard-preview 25`,
@@ -154,6 +155,9 @@ func TestConfigNodesParse(t *testing.T) {
 	}
 	if got := cfg.Padding(); got != 3 {
 		t.Errorf("Padding = %d, want 3", got)
+	}
+	if got := cfg.HistoryLines(); got != 4000 {
+		t.Errorf("HistoryLines = %d, want 4000", got)
 	}
 	if got := cfg.GlyphSet(); got != theme.GlyphNerd {
 		t.Errorf("GlyphSet = %v, want nerd", got)
@@ -201,6 +205,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"tab-min-width":     "8",
 		"tab-max-width":     "20",
 		"padding":           "0",
+		"history-lines":     "2000",
 		"glyphs":            `"auto"`,
 		"window-label":      `"` + wlabel.Default + `"`,
 		"dashboard-preview": "60",
