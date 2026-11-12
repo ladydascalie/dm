@@ -162,6 +162,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below tab-min-width | `20` | Set the largest tab width before the label is cut. |
 | `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A reload resizes every pane. |
+| `history-lines` | an integer from 100 to 32768 lines | `2000` | Set the scrollback window and the pane ring budget: about 256 bytes per line, capped at 8 MiB. |
 | `glyphs` | "auto", "ascii", "unicode" or "nerd" | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | `"{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"` | Set the template that renders a window label. |
 | `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band. |
@@ -267,6 +268,9 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `switcher` | `up` | `k` |
 | `switcher` | `up-arrow` | `up` |
 | `switcher` | `pick-1..pick-9` | `1-9` |
+| `scroll` | `search` | `/` |
+| `scroll` | `next-match` | `n` |
+| `scroll` | `prev-match` | `N` |
 | `scroll` | `up` | `k` |
 | `scroll` | `up-arrow` | `up` |
 | `scroll` | `down` | `j` |
