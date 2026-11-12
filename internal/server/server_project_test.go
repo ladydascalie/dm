@@ -104,7 +104,7 @@ func TestNewWorkspaceInheritsProject(t *testing.T) {
 	s := railServer(st)
 	fakePane(t, st, "w4p1")
 
-	wsid, _, _, err := s.newWorkspace("", "", "/tmp", "", false)
+	wsid, _, _, err := s.newWorkspace("", "", "/tmp", "", false, nil)
 	if err != nil {
 		t.Fatalf("newWorkspace: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestNewWorkspaceExplicitProject(t *testing.T) {
 	s := railServer(st)
 	fakePane(t, st, "w4p1")
 
-	if _, _, _, err := s.newWorkspace("", "", "/tmp", "b", false); err != nil {
+	if _, _, _, err := s.newWorkspace("", "", "/tmp", "b", false, nil); err != nil {
 		t.Fatalf("newWorkspace: %v", err)
 	}
 	if got := st.Workspaces[2].Project; got != "b" {
@@ -149,7 +149,7 @@ func TestNewWorkspaceNoFocusKeepsActive(t *testing.T) {
 	s := railServer(st)
 	fakePane(t, st, "w4p1")
 
-	if _, _, _, err := s.newWorkspace("", "", "/tmp", "a", true); err != nil {
+	if _, _, _, err := s.newWorkspace("", "", "/tmp", "a", true, nil); err != nil {
 		t.Fatalf("newWorkspace: %v", err)
 	}
 	wantIDs(t, st, "s1", "s3", "s4", "s2")

@@ -298,6 +298,10 @@ func (r *scrollRing) slice(from, to int) []byte {
 type paneOpts struct {
 	id, session, cwd, shell, fg, bg string
 	cols, rows, history             int
+	// argv is the parsed --argv program and arguments, nil when the pane runs
+	// a shell. argvRaw is the comma separated flag it came from.
+	argvRaw string
+	argv    []string
 }
 
 // historyBudget is the one rule the pane flag and the set-history action share:
@@ -309,6 +313,42 @@ func historyBudget(budget int) error {
 	return nil
 }
 
+// splitArgv parses a pane's --argv value: a comma separated program and
+// arguments. Every element must be non-empty and free of NUL bytes, the two
+// values exec and the state round trip cannot carry. An empty value means no
+// program: the pane runs its shell.
+func splitArgv(s string) ([]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for i, p := range parts {
+		if p == "" {
+			return nil, fmt.Errorf("--argv element %d is empty", i+1)
+		}
+		if strings.ContainsRune(p, '\x00') {
+			return nil, fmt.Errorf("--argv element %d contains a NUL byte", i+1)
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// paneCmd builds the command a pane runs: the --argv program when one was
+// given, else the shell. Either way the pane is told its own session through
+// DM_PANE and DM_SESSION, so a program started direct still posts to the pane
+// and the session it belongs to.
+func paneCmd(o *paneOpts) *exec.Cmd {
+	cmd := exec.Command(o.shell, "-l")
+	if len(o.argv) > 0 {
+		cmd = exec.Command(o.argv[0], o.argv[1:]...)
+	}
+	cmd.Dir = o.cwd
+	cmd.Env = append(os.Environ(), "DM_PANE="+o.id, "DM_SESSION="+o.session)
+	return cmd
+}
+
 // parsePaneArgs parses and validates the pane's command line before Run touches
 // a pty or a socket.
 func parsePaneArgs(args []string) (*paneOpts, error) {
@@ -318,6 +358,7 @@ func parsePaneArgs(args []string) (*paneOpts, error) {
 	fs.StringVar(&o.session, "session", "", "session name")
 	fs.StringVar(&o.cwd, "cwd", "", "working directory")
 	fs.StringVar(&o.shell, "shell", "", "shell")
+	fs.StringVar(&o.argvRaw, "argv", "", "program and arguments, comma separated")
 	fs.IntVar(&o.cols, "cols", 80, "columns")
 	fs.IntVar(&o.rows, "rows", 24, "rows")
 	fs.StringVar(&o.fg, "fg", osc.TermFG, "terminal foreground colour")
@@ -335,6 +376,11 @@ func parsePaneArgs(args []string) (*paneOpts, error) {
 	if err := historyBudget(o.history); err != nil {
 		return nil, err
 	}
+	argv, err := splitArgv(o.argvRaw)
+	if err != nil {
+		return nil, err
+	}
+	o.argv = argv
 	return o, nil
 }
 
@@ -363,9 +409,7 @@ func Run(args []string) error {
 		fg:   o.fg, bg: o.bg,
 	}
 
-	cmd := exec.Command(p.shell, "-l")
-	cmd.Dir = o.cwd
-	cmd.Env = append(os.Environ(), "DM_PANE="+p.id, "DM_SESSION="+p.session)
+	cmd := paneCmd(o)
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(o.cols), Rows: uint16(o.rows)})
 	if err != nil {
 		return fmt.Errorf("start shell: %w", err)

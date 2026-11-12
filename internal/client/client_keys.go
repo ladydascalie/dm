@@ -743,6 +743,10 @@ func (t *tui) runAction(name string) {
 		}
 		t.disarm()
 	default:
+		if strings.HasPrefix(name, "command:") {
+			t.runCommand(strings.TrimPrefix(name, "command:"))
+			return
+		}
 		if strings.HasPrefix(name, "window-") {
 			if n, err := strconv.Atoi(strings.TrimPrefix(name, "window-")); err == nil &&
 				n >= 1 && n <= 10 {
@@ -754,6 +758,30 @@ func (t *tui) runAction(name string) {
 		t.notify(fmt.Sprintf("no binding for %q", name))
 		t.disarm()
 	}
+}
+
+// runCommand opens a user command in a floating pane on the focused pane's
+// folder, with the command's name as the panel label. The server resolves the
+// folder and runs the text. A name the config does not define toasts and opens
+// nothing.
+func (t *tui) runCommand(name string) {
+	run := ""
+	for _, c := range t.km().Commands() {
+		if c.Name == name {
+			run = c.Run
+			break
+		}
+	}
+	if run == "" {
+		t.notify("no command " + name)
+		t.disarm()
+		return
+	}
+	if t.conn == nil || t.snap == nil {
+		t.disarm()
+		return
+	}
+	t.openFloatFor(t.snap.Focus, run, name)
 }
 
 // arm shows the action box. It stays up until an action runs or esc

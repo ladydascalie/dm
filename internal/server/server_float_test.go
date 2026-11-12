@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"net"
 	"strings"
 	"syscall"
@@ -324,5 +325,125 @@ func TestFloatDieWithClient(t *testing.T) {
 	waitPidGone(t, pid)
 	if s.floatFor("theirs") == nil {
 		t.Fatal("another client's float was killed")
+	}
+}
+
+// TestFloatOpenCommandRuns: a request that carries a command runs that command
+// instead of the config's diff-command, and the reply echoes the command and
+// the label, defaulted to the command's first word.
+func TestFloatOpenCommandRuns(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, pane := floatServer(t, "floatcmd", dir, "echo diff")
+	cl, cli := floatClient(t, s)
+
+	s.handleReq(cl, wire.Msg{
+		Type: "req", Action: "float-open", ID: 5, Target: pane, Float: "f1",
+		Cols: 80, Rows: 24,
+		Res: json.RawMessage(`{"command":"echo run"}`),
+	})
+	var reply *wire.Msg
+	var out []byte
+	readFloatFrame(t, cli, func(m wire.Msg) bool {
+		switch m.Type {
+		case "resp":
+			got := m
+			reply = &got
+		case "bytes":
+			if m.Target != "f1" {
+				t.Fatalf("bytes target = %q, want f1", m.Target)
+			}
+			out = append(out, m.Data...)
+		case "exit":
+			return true
+		}
+		return false
+	})
+	if reply == nil || !reply.OK {
+		t.Fatalf("reply = %+v, want OK", reply)
+	}
+	if !strings.Contains(string(reply.Res), "echo run") {
+		t.Fatalf("reply res = %s, want the request's command", reply.Res)
+	}
+	if !strings.Contains(string(reply.Res), `"label":"echo"`) {
+		t.Fatalf("reply res = %s, want a label defaulted to the command's first word", reply.Res)
+	}
+	if !strings.Contains(string(out), "run") {
+		t.Fatalf("output = %q, want the request's command, not the diff-command", out)
+	}
+	waitFloatGone(t, s, "f1")
+}
+
+// TestFloatOpenDashboardStillDiff: a request without a command still runs the
+// config's diff-command, as the dashboard diff key sends one today.
+func TestFloatOpenDashboardStillDiff(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, pane := floatServer(t, "floatdashboard", dir, "echo dash")
+	cl, cli := floatClient(t, s)
+	s.handleReq(cl, wire.Msg{
+		Type: "req", Action: "float-open", ID: 9, Target: pane, Float: "f1",
+		Cols: 80, Rows: 24,
+	})
+	reply := readFloatFrame(t, cli, func(m wire.Msg) bool { return m.Type == "resp" })
+	if !reply.OK || !strings.Contains(string(reply.Res), "echo dash") {
+		t.Fatalf("reply = %+v, want the diff-command", reply)
+	}
+	if !strings.Contains(string(reply.Res), `"label":"echo"`) {
+		t.Fatalf("reply res = %s, want the diff-command's first word as label", reply.Res)
+	}
+	waitFloatGone(t, s, "f1")
+}
+
+// TestFloatOpenLabelWithoutCommand: a label with no command is an error, and
+// the diff-command is not run.
+func TestFloatOpenLabelWithoutCommand(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, pane := floatServer(t, "floatlabel", dir, "echo diff")
+	cl, cli := floatClient(t, s)
+	s.handleReq(cl, wire.Msg{
+		Type: "req", Action: "float-open", ID: 6, Target: pane, Float: "f1",
+		Cols: 80, Rows: 24,
+		Res: json.RawMessage(`{"label":"diff"}`),
+	})
+	reply := readFloatFrame(t, cli, func(m wire.Msg) bool { return m.Type == "resp" })
+	if reply.OK || !strings.Contains(reply.Error, "label needs a command") {
+		t.Fatalf("reply = %+v, want a label-without-command error", reply)
+	}
+	if s.floatFor("f1") != nil {
+		t.Fatal("a float opened for a label without a command")
+	}
+}
+
+// TestFloatOpenValidatesCommand: an empty request command and one carrying a
+// NUL byte are both refused before anything starts.
+func TestFloatOpenValidatesCommand(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	s, pane := floatServer(t, "floatbad", dir, "echo diff")
+	cl, cli := floatClient(t, s)
+	payloads := []json.RawMessage{
+		json.RawMessage(`{"command":""}`),
+		func() json.RawMessage {
+			b, err := json.Marshal(map[string]string{"command": "a\x00b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return b
+		}(),
+	}
+	for _, res := range payloads {
+		s.handleReq(cl, wire.Msg{
+			Type: "req", Action: "float-open", ID: 8, Target: pane, Float: "f1",
+			Cols: 80, Rows: 24, Res: res,
+		})
+		reply := readFloatFrame(t, cli, func(m wire.Msg) bool { return m.Type == "resp" })
+		if reply.OK {
+			t.Fatalf("float-open %s = %+v, want an error", res, reply)
+		}
+		if s.floatFor("f1") != nil {
+			t.Fatalf("float-open %s started a float", res)
+		}
 	}
 }
