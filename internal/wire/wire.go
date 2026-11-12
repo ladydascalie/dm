@@ -169,12 +169,16 @@ type AllPane struct {
 	WindowActive    bool `json:"windowActive,omitempty"`
 }
 
-// WindowInfo is one window in the active workspace: its id, its name and
-// whether the user named it.
+// WindowInfo is one window in the active workspace: its id, its name, whether
+// the user named it, and the preset layout the client draws it with.
 type WindowInfo struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Named bool   `json:"named,omitempty"`
+	// Layout is the preset select-layout last applied to this window: one of
+	// even-horizontal, even-vertical, main-horizontal, main-vertical or
+	// tiled. Empty means manual edits own the tree.
+	Layout string `json:"layout,omitempty"`
 }
 
 type Snapshot struct {

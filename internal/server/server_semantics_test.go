@@ -305,3 +305,54 @@ func TestManualTreeChangesClearStoredLayout(t *testing.T) {
 	}
 	cleared("close-pane")
 }
+
+// snapshotLayouts reads the layout name each snapshot window row carries.
+func snapshotLayouts(t *testing.T, s *server) map[string]string {
+	t.Helper()
+	snap := snapshot(s)
+	out := map[string]string{}
+	for _, w := range snap.Windows {
+		out[w.ID] = w.Layout
+	}
+	return out
+}
+
+// TestSnapshotCarriesWindowLayout pins the carried name: the snapshot's
+// window rows name the preset select-layout stored on each window, the active
+// window included, and a split that clears the stored name empties the row.
+func TestSnapshotCarriesWindowLayout(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, _, _ := rpcServer(t, "snaplayout")
+	// The split's new pane adopts this socket instead of spawning a daemon.
+	screenPane(t, s.st, "w1p3")
+
+	if m := rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "select-layout", Layout: "main-vertical", ID: 1}); !m.OK {
+		t.Fatalf("select-layout: %s", m.Error)
+	}
+	got := snapshotLayouts(t, s)
+	if got["w1"] != "main-vertical" {
+		t.Fatalf("active window row layout = %q, want main-vertical", got["w1"])
+	}
+
+	// A second window starts custom: it carries an empty name beside the
+	// stored one.
+	s.mu.Lock()
+	s.st.ActiveWorkspace().Windows = append(s.st.ActiveWorkspace().Windows,
+		&session.Window{ID: "w2", Name: "two"})
+	s.mu.Unlock()
+	got = snapshotLayouts(t, s)
+	if got["w2"] != "" {
+		t.Fatalf("custom window row layout = %q, want empty", got["w2"])
+	}
+
+	// A split clears the stored name and the row follows.
+	if m := rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "split", Dir: "down", ID: 2}); !m.OK {
+		t.Fatalf("split: %s", m.Error)
+	}
+	got = snapshotLayouts(t, s)
+	if got["w1"] != "" {
+		t.Fatalf("row after a split = %q, want empty", got["w1"])
+	}
+}
