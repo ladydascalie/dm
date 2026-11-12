@@ -41,6 +41,7 @@ var asciiGlyphs = map[string]string{
 	"─": "-", "│": "|", "├": "+", "┤": "+",
 	"▾": "v", "▸": ">", "▌": "|", "●": "*", "○": "o",
 	"▲": "!", "✓": "+", "✕": "x", "▶": ">",
+	"⧉": "S",
 	"…": ">",
 }
 
@@ -81,6 +82,7 @@ func (g Glyphs) For(set GlyphSet) Glyphs {
 	g.ActiveMark = ASCII(g.ActiveMark)
 	g.WorkspaceBar = ASCII(g.WorkspaceBar)
 	g.Dirty = ASCII(g.Dirty)
+	g.SyncMark = ASCII(g.SyncMark)
 	return g
 }
 
@@ -123,6 +125,9 @@ func (t Theme) For(set GlyphSet) Theme {
 		}
 		if t.Glyphs.NerdFoldClosed != "" {
 			t.Glyphs.FoldClosed = t.Glyphs.NerdFoldClosed
+		}
+		if t.Glyphs.NerdSyncMark != "" {
+			t.Glyphs.SyncMark = t.Glyphs.NerdSyncMark
 		}
 	}
 	states := make(map[string]StateStyle, len(t.States))

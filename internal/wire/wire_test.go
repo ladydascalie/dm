@@ -158,3 +158,90 @@ func TestSetHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("unset history kept the key: %s", b)
 	}
 }
+
+// TestSelectLayoutRoundTrip proves the preset name survives the frame and that
+// an unset name leaves the key out.
+func TestSelectLayoutRoundTrip(t *testing.T) {
+	in := wire.Msg{Type: "req", Action: "select-layout", Layout: "main-vertical"}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Action != "select-layout" || out.Layout != "main-vertical" {
+		t.Fatalf("round trip = %q/%q, want select-layout/main-vertical", out.Action, out.Layout)
+	}
+
+	b, err := json.Marshal(wire.Msg{Type: "req", Action: "select-layout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["layout"]; ok {
+		t.Fatalf("unset layout kept the key: %s", b)
+	}
+}
+
+// TestSynchronizeOnRoundTrip proves the optional on field travels true and
+// false as real values, and that an absent value leaves the key out so nil
+// can toggle.
+func TestSynchronizeOnRoundTrip(t *testing.T) {
+	for _, v := range []bool{true, false} {
+		on := v
+		in := wire.Msg{Type: "req", Action: "synchronize-panes", On: &on}
+		var buf bytes.Buffer
+		if err := wire.WriteMsg(&buf, in); err != nil {
+			t.Fatal(err)
+		}
+		out, err := wire.ReadMsg(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.On == nil || *out.On != v {
+			t.Fatalf("on %v round trip = %+v, want %v", v, out.On, v)
+		}
+	}
+
+	b, err := json.Marshal(wire.Msg{Type: "req", Action: "synchronize-panes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["on"]; ok {
+		t.Fatalf("absent on kept the key: %s", b)
+	}
+}
+
+// TestSnapshotSyncRoundTrip proves the active window's sync flag survives the
+// frame when set and stays out of the JSON when off.
+func TestSnapshotSyncRoundTrip(t *testing.T) {
+	in := wire.Snapshot{Session: "s", Cols: 80, Rows: 24, Sync: true}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, wire.Msg{Type: "snapshot", Snap: &in}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Snap == nil || !out.Snap.Sync {
+		t.Fatalf("sync round trip = %+v, want on", out.Snap)
+	}
+
+	b, err := json.Marshal(wire.Snapshot{Session: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte("sync")) {
+		t.Fatalf("unset sync kept the key: %s", b)
+	}
+}

@@ -131,6 +131,11 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `ctrl+r` | reload config.kdl and its theme |
 | `d` / `q` | detach |
 
+The layout actions have no keys in the built-in keymap: `swap-panes`,
+`move-pane`, `select-layout` and `synchronize-panes` are RPC-only, reached
+through `dm exec` as shown in the RPC section. The client cannot dispatch
+them from a key, so a `config.kdl` row for one toasts `no binding`.
+
 `prefix r` opens the rename prompt as a line above the status bar. It starts
 from the workspace's current name, so typing appends to it. Backspace deletes
 one character and `ctrl+u` clears the line. `enter` commits, `esc` cancels, and
@@ -669,6 +674,8 @@ per window, the focus chip, then the pinned right block.
   pane name and the status word in railDim. A missing status reads `unknown`; a
   shell reports no state at all, so it shows `▶` in railDim instead of a glyph.
   The focused pane is the entry in the window's pane list whose id is the focus.
+  When the window is synced, the chip paints the sync mark `⧉` in barAccent
+  right after the pane id, before the pane name and status word.
 
 Colours are explicit RGB, never terminal palette slots. The built-in theme
 paints them only on grounds it checks: railBG (#14131a) for the ground and the
@@ -711,9 +718,9 @@ the ground, so no cell of the previous frame shows through.
 
 At 34 columns, with the session `work-2026`, the prefix armed and no scroll
 position, the ladder runs through five rungs: the chips lose their names, the
-outer chips go, both names shrink to `…`, and the focus chip drops its status
-word but keeps its name. `PREFIX ` stays pinned at the right, seven cells clear
-of the last chip:
+outer chips go, both names shrink to `…`, and the focus chip drops its sync
+mark, then its status word, but keeps its name. `PREFIX ` stays pinned at the
+right, seven cells clear of the last chip:
 
 ```
 … … ▸ 2 ▲ w1p2 shell       PREFIX 
@@ -729,7 +736,8 @@ The left block elides in a fixed order, stopping as soon as the line fits:
 2. trailing window chips go, never the active one
 3. the workspace name shrinks with a trailing `…`
 4. the session name shrinks with a trailing `…`
-5. the focus chip drops the status word, then the pane name
+5. the focus chip drops the sync mark, then the status word, then the pane
+   name
 6. the focus chip keeps its glyph and its pane id last
 
 Width is cells, not runes. A wide rune takes two cells, and a wide rune that
@@ -941,6 +949,10 @@ so anything one CLI verb does, an agent can do with one action.
 dm exec '{"action":"split","target":"w1p1","dir":"left"}'
 dm exec '{"action":"focus-dir","dir":"right"}'
 dm exec '{"action":"new-window","name":"tests"}'
+dm exec '{"action":"swap-panes","target":"w1p1","other":"w1p2"}'
+dm exec '{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}'
+dm exec '{"action":"select-layout","layout":"tiled"}'
+dm exec '{"action":"synchronize-panes","on":true}'
 dm rename-workspace s1 api-work
 dm write-to w1p1 --msg "go test ./..." --enter
 dm read w1p1 --lines 20
@@ -964,6 +976,7 @@ a shell exit.
 Actions: `ping`, `list` (alias `ls`), `read`, `history`, `yank`, `replay`,
 `status`,
 `write-to`, `exec`, `keys`, `split`, `zoom-pane`, `set-rail`, `resize-split`,
+`swap-panes`, `move-pane`, `select-layout`, `synchronize-panes`,
 `focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `close-window`,
 `new-window`, `next-window`, `prev-window`, `select-window`, `new-workspace`,
 `next-workspace`, `prev-workspace`, `list-workspaces`, `list-panes`, `pane`,
@@ -971,6 +984,41 @@ Actions: `ping`, `list` (alias `ls`), `read`, `history`, `yank`, `replay`,
 `close-workspace`, `rename-window`, `rename-workspace`, and the seven box
 actions `msg-post`, `msg-list`, `msg-wait`, `msg-sub`, `msg-clear`,
 `msg-watchers` and `msg-schema` below.
+
+`swap-panes` trades two pane ids in place: `target` and `other` swap
+positions, every rectangle keeps its shape, and focus stays on the focused
+pane. A swap naming a pane that is not a leaf of the tree is refused.
+
+`move-pane` moves a leaf pane to the edge of another: `target` names the pane
+that moves, `other` the pane it lands beside, and `dir` the side (`left`,
+`right`, `up` or `down`). The moved pane takes the focus, and a split left
+with a single child collapses, so no split ever holds exactly one pane. Both
+ids must be leaves of the same window: moving across windows is out of scope
+and a target outside the pane's own window is refused with an error.
+
+`select-layout` rebuilds the active window's panes as one of the five preset
+layouts, over the pane ids in tree order. The pane set is preserved exactly,
+so the focus survives:
+
+- `even-horizontal`: one row split by width
+- `even-vertical`: one column split by height
+- `main-vertical`: one wide pane on the left, the rest stacked to its right
+- `main-horizontal`: the transpose, one tall pane on top
+- `tiled`: the balanced grid, as close to square as the area allows, filled
+  row-major
+
+A window with fewer than two panes refuses with an error naming the reason.
+
+`synchronize-panes` is tmux's sync for the active window, and only the active
+window: other windows keep their panes independent. A request with no `on`
+field toggles, `"on":true` and `"on":false` set, and the reply carries the new
+value as `sync`. The flag lives in the window state, so it survives a server restart.
+When sync is on, every `write-to`, `exec`, `keys` and paste frame aimed at a
+pane of that window reaches every live pane of the window, in tree order, and
+the target pane is part of the sync: tmux's echo rule, the pane that owns the
+input gets its own keys back. A write aimed at a pane of an unsynced window
+goes nowhere but that pane, exactly as it does today.
+
 `toggle-fold` takes a window id as `target` and replies with the new `unfolded`
 state.
 

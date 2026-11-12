@@ -38,6 +38,12 @@ type Msg struct {
 	// The split, new-window and new-workspace actions carry it. Empty means
 	// $SHELL -l.
 	Argv []string `json:"argv,omitempty"`
+	// Layout is the select-layout preset name: even-horizontal, even-vertical,
+	// main-horizontal, main-vertical or tiled.
+	Layout string `json:"layout,omitempty"`
+	// On is the optional value of a switch action: synchronize-panes. Nil
+	// toggles, true and false set the flag.
+	On *bool `json:"on,omitempty"`
 
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`
@@ -197,6 +203,9 @@ type Snapshot struct {
 	// value and the client draws and hit-tests with it.
 	Pad  int          `json:"pad"`
 	Root *layout.Node `json:"root"`
+	// Sync is the active window's synchronize-panes flag, so the client can
+	// paint the focus chip's sync mark.
+	Sync bool `json:"sync,omitempty"`
 }
 
 // MaxFrame is the largest frame the socket accepts, four bytes of length plus

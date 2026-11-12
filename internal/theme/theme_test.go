@@ -53,6 +53,8 @@ func TestThemeDefaults(t *testing.T) {
 		ActiveMark:        "▸",
 		WorkspaceBar:      "▌",
 		Dirty:             "●",
+		SyncMark:          "⧉",
+		NerdSyncMark:      "\uf0e2",
 		Ellipsis:          "…",
 	}
 	if th.Glyphs != wantGlyphs {
