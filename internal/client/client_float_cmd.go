@@ -15,11 +15,13 @@ import (
 )
 
 // floatView is one floating command pane: the terminal the child's bytes paint
-// into, the panel the client draws around it, and the command the server named.
-// The client keeps one at a time.
+// into, the panel the client draws around it, and the command and label the
+// server named. The label is what the panel title paints, the command's first
+// word when the server named none. The client keeps one at a time.
 type floatView struct {
 	id      string
 	command string
+	label   string
 	prefix  string
 	vt      *vt.Term
 	float   *panel.FloatingPane
@@ -29,6 +31,15 @@ type floatView struct {
 	// that are dropped: the child does not exist yet, and forwarding them
 	// would either miss it or answer with a phantom error.
 	opened bool
+}
+
+// floatLabelDefault is the panel title when the reply names no label: the
+// command's first word, the way the server defaults it.
+func floatLabelDefault(command string) string {
+	if f := strings.Fields(command); len(f) > 0 {
+		return f[0]
+	}
+	return ""
 }
 
 // floatRect is where the floating command sits: centred, eight cells clear of
@@ -65,9 +76,8 @@ func floatRect(snap *wire.Snapshot) layout.Rect {
 }
 
 // openFloatCommand closes the dashboard and asks the server to run the diff
-// command on the selected pane's folder. The client picks the id and builds the
-// terminal at the size it will draw first, so the child's first bytes cannot
-// arrive before there is a terminal to hold them.
+// command on the selected pane's folder. It sends no command of its own, so the
+// server runs the config's diff-command as today.
 func (t *tui) openFloatCommand() {
 	if t.sw == nil || t.conn == nil || t.snap == nil {
 		return
@@ -76,19 +86,37 @@ func (t *tui) openFloatCommand() {
 	if pane == "" {
 		return
 	}
+	t.openFloatFor(pane, "", "")
+}
+
+// openFloatFor asks the server to run command on pane's folder and shows it in
+// a floating pane. command may be empty, meaning the server's diff-command;
+// label is what the panel title paints, defaulting to the command's first
+// word. The client picks the id and builds the terminal at the size it will
+// draw first, so the child's first bytes cannot arrive before there is a
+// terminal to hold them.
+func (t *tui) openFloatFor(pane, command, label string) {
+	if t.conn == nil || t.snap == nil || pane == "" {
+		return
+	}
 	closeSwitcher(t)
 	r := floatRect(t.snap)
 	id := "float-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 	t.float = &floatView{
 		id:     id,
+		label:  label,
 		prefix: t.km().PrefixName(),
 		vt:     vt.NewTerm(r.W, r.H),
 		float:  &panel.FloatingPane{ID: id, Rect: r, Active: true},
 	}
 	t.floatID++
+	var res json.RawMessage
+	if command != "" {
+		res, _ = json.Marshal(map[string]string{"command": command, "label": label})
+	}
 	_ = t.conn.Send(wire.Msg{
 		Type: "req", Action: "float-open", ID: t.floatID, Target: pane,
-		Float: id, Cols: r.W, Rows: r.H,
+		Float: id, Cols: r.W, Rows: r.H, Res: res,
 	})
 	// The mode goes on before the reply, so a key typed during the round trip
 	// waits instead of reaching the pane behind the coming float.
@@ -115,9 +143,15 @@ func (t *tui) takeFloatOpen(m wire.Msg) {
 	}
 	var res struct {
 		Command string `json:"command"`
+		Label   string `json:"label"`
 	}
 	_ = json.Unmarshal(m.Res, &res)
 	f.command = res.Command
+	if res.Label != "" {
+		f.label = res.Label
+	} else if res.Command != "" {
+		f.label = floatLabelDefault(res.Command)
+	}
 	f.opened = true
 	f.setBorders()
 	f.float.VT = f.vt
@@ -128,12 +162,12 @@ func (t *tui) takeFloatOpen(m wire.Msg) {
 	t.dirty = true
 }
 
-// setBorders writes the border title and hint from the command and whether the
+// setBorders writes the border title and hint from the label and whether the
 // child is still running.
 func (f *floatView) setBorders() {
-	title := " diff · " + f.command + " "
+	title := " " + f.label + " "
 	if f.exited {
-		title = " diff · " + f.command + " · exited "
+		title = " " + f.label + " · exited "
 	}
 	f.float.Title = cells.Clip(title, f.float.Rect.W-2)
 	if f.exited {

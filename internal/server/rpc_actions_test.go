@@ -2,9 +2,11 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1272,4 +1274,132 @@ func TestMovePaneAction(t *testing.T) {
 	s.mu.Unlock()
 	wantErr(t, "move-pane", "no pane", rpcCall(t, s, cl, conn,
 		wire.Msg{Type: "req", Action: "move-pane", Target: "w1p3", Other: "w2p1", Dir: "right", ID: 5}))
+}
+
+// TestSplitActionArgvPersists pins the argv path of a split: the request's
+// argv lands in the new pane's state, a split without one keeps the shell, and
+// an empty element or a NUL byte is refused before it touches the tree.
+func TestSplitActionArgvPersists(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, a, _ := rpcServer(t, "rpcargv")
+	screenPane(t, s.st, "w1p3")
+	screenPane(t, s.st, "w1p4")
+
+	m := rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"htop", "-d", "5"}, ID: 1})
+	if !m.OK {
+		t.Fatalf("split with argv: %s", m.Error)
+	}
+	s.mu.Lock()
+	ps := s.st.Panes["w1p3"]
+	s.mu.Unlock()
+	if ps == nil || len(ps.Argv) != 3 || ps.Argv[0] != "htop" || ps.Argv[1] != "-d" || ps.Argv[2] != "5" {
+		t.Fatalf("split pane state = %+v argv, want [htop -d 5]", argvOf(ps))
+	}
+
+	// A split without argv stays a shell pane: the state carries no program.
+	if m := rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "down", ID: 2}); !m.OK {
+		t.Fatalf("plain split: %s", m.Error)
+	}
+	s.mu.Lock()
+	ps = s.st.Panes["w1p4"]
+	s.mu.Unlock()
+	if ps == nil || len(ps.Argv) != 0 {
+		t.Fatalf("plain split argv = %v, want empty", argvOf(ps))
+	}
+
+	wantErr(t, "split", "argv", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"htop", ""}, ID: 3}))
+	wantErr(t, "split", "NUL", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"htop\x00"}, ID: 4}))
+	// A comma inside one element is the flag separator: it would split on the
+	// respawn and run a different program, so it is refused.
+	wantErr(t, "split", "comma", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"a,b"}, ID: 5}))
+}
+
+// TestSplitActionArgvRespawnsAfterRestart proves the restart contract: a pane
+// whose saved state carries argv is respawned with the same program, never a
+// shell. A fresh server over a saved state dir with a dead pane socket is
+// exactly what a restart loads after the split action persisted the program,
+// and ensurePane's start-or-adopt loop takes the spawn branch.
+func TestSplitActionArgvRespawnsAfterRestart(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	st := session.NewStateAt(root, "respawn")
+	id := testutil.RootPane(st)
+	st.Panes[id] = &session.PaneState{Shell: "/bin/sh", Cwd: "/tmp", Cols: 80, Rows: 24,
+		Argv: []string{"htop", "-d", "5"}}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := session.LoadStateAt(root, "respawn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pane's socket is dead: nothing ever listened on it, so ensurePane
+	// cannot adopt a daemon and takes the spawn branch. The panes directory
+	// must exist for the pane's log, the way the server's own startup makes
+	// it.
+	s := railServer(got)
+	if err := os.MkdirAll(filepath.Join(got.SessionDir(), "panes"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	s.spawn = func(c *exec.Cmd) error {
+		args = append([]string(nil), c.Args...)
+		return errors.New("captured")
+	}
+	if err := s.ensurePane(id); err == nil {
+		t.Fatal("ensurePane returned nil, want the captured spawn error")
+	}
+	if !hasFlag(args, "--argv", "htop,-d,5") {
+		t.Fatalf("respawn args = %v, want --argv htop,-d,5", args)
+	}
+}
+
+// TestPaneCreationArgvPersists proves new-window and new-workspace carry argv
+// the way split does: the program lands in the new pane's state and a bad
+// element is refused.
+func TestPaneCreationArgvPersists(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, _, _ := rpcServer(t, "rpcargvwin")
+	screenPane(t, s.st, "w2p1")
+	screenPane(t, s.st, "w3p1")
+
+	m := rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "new-window", Name: "mon", Argv: []string{"htop"}, ID: 1})
+	if !m.OK {
+		t.Fatalf("new-window with argv: %s", m.Error)
+	}
+	s.mu.Lock()
+	ps := s.st.Panes["w2p1"]
+	s.mu.Unlock()
+	if ps == nil || len(ps.Argv) != 1 || ps.Argv[0] != "htop" {
+		t.Fatalf("new-window argv = %v, want [htop]", argvOf(ps))
+	}
+
+	m = rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "new-workspace", Name: "mon", Argv: []string{"watch", "-n", "1", "ps"}, ID: 2})
+	if !m.OK {
+		t.Fatalf("new-workspace with argv: %s", m.Error)
+	}
+	s.mu.Lock()
+	ps = s.st.Panes["w3p1"]
+	s.mu.Unlock()
+	if ps == nil || len(ps.Argv) != 4 || ps.Argv[0] != "watch" || ps.Argv[3] != "ps" {
+		t.Fatalf("new-workspace argv = %v, want [watch -n 1 ps]", argvOf(ps))
+	}
+
+	wantErr(t, "new-window", "NUL", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "new-window", Name: "mon", Argv: []string{"a\x00b"}, ID: 3}))
+}
+
+// argvOf is the pane's argv, nil-safe for an error message.
+func argvOf(ps *session.PaneState) []string {
+	if ps == nil {
+		return nil
+	}
+	return ps.Argv
 }

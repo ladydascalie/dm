@@ -109,7 +109,7 @@ func TestNewWindowTakesDefaultFold(t *testing.T) {
 					}(conn)
 				}
 			}()
-			wid, pid, err := s.newWindow("", "test", "/tmp", false)
+			wid, pid, err := s.newWindow("", "test", "/tmp", false, nil)
 			if err != nil {
 				t.Fatalf("newWindow: %v", err)
 			}

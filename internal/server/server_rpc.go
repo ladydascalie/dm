@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -115,28 +116,61 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.reply(cl, m, map[string]any{"lines": lines}, nil)
 
 	case "float-open":
-		// The dashboard diff key opens a floating command on the selected
-		// pane's folder. The client picks the id and the size; the server
-		// supplies the folder and the command, and echoes the id in the
-		// reply so the client can match the process to its view.
+		// The request opens a floating command on a pane's folder. The client
+		// picks the id and the size; the server supplies the folder. A request
+		// may carry its own command and label, and those run instead of the
+		// config's diff-command. The dashboard diff key sends neither and gets
+		// the diff command as always.
 		if m.Float == "" {
 			s.reply(cl, m, nil, fmt.Errorf("float-open needs a float id"))
 			return
+		}
+		var req struct {
+			Command *string `json:"command"`
+			Label   *string `json:"label"`
+		}
+		if len(m.Res) > 0 {
+			if err := json.Unmarshal(m.Res, &req); err != nil {
+				s.reply(cl, m, nil, fmt.Errorf("float-open: %w", err))
+				return
+			}
 		}
 		cwd := s.liveCwd(m.Target)
 		if cwd == "" {
 			s.reply(cl, m, nil, fmt.Errorf("pane %s has no working directory", m.Target))
 			return
 		}
-		s.mu.Lock()
-		command := s.cfg.DiffCommand()
-		s.mu.Unlock()
-		if command == "" {
-			s.reply(cl, m, nil, fmt.Errorf("diff-command is empty"))
-			return
+		command := ""
+		if req.Command != nil {
+			command = *req.Command
+			if command == "" {
+				s.reply(cl, m, nil, fmt.Errorf("float command must not be empty"))
+				return
+			}
+			if strings.ContainsRune(command, '\x00') {
+				s.reply(cl, m, nil, fmt.Errorf("float command contains a NUL byte"))
+				return
+			}
+		} else {
+			if req.Label != nil {
+				s.reply(cl, m, nil, fmt.Errorf("float label needs a command"))
+				return
+			}
+			s.mu.Lock()
+			command = s.cfg.DiffCommand()
+			s.mu.Unlock()
+			if command == "" {
+				s.reply(cl, m, nil, fmt.Errorf("diff-command is empty"))
+				return
+			}
 		}
+		label := ""
+		if req.Label != nil {
+			label = *req.Label
+		}
+		label = floatLabel(command, label)
 		err := s.openFloat(cl, floatSpec{
-			id: m.Float, target: m.Target, cwd: cwd, command: command,
+			id: m.Float, target: m.Target, cwd: cwd, command: command, label: label,
 			cols: m.Cols, rows: m.Rows,
 		})
 		if err != nil {
@@ -145,7 +179,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		cl.deliver(wire.Msg{
 			Type: "resp", Action: m.Action, ID: m.ID, Float: m.Float, OK: true,
-			Res: jsonRaw(map[string]any{"command": command}),
+			Res: jsonRaw(map[string]any{"command": command, "label": label}),
 		})
 
 	case "float-close":
@@ -218,7 +252,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var id string
 		err := s.mutation(func() error {
 			var e error
-			id, e = s.split(m.Target, m.Dir, m.Cwd, m.Ratio, m.NoFocus)
+			id, e = s.split(m.Target, m.Dir, m.Cwd, m.Ratio, m.NoFocus, m.Argv)
 			return e
 		})
 		s.afterMutation()
@@ -322,7 +356,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var wid, pid string
 		err := s.mutation(func() error {
 			var e error
-			wid, pid, e = s.newWindow(m.Target, m.Name, m.Cwd, m.NoFocus)
+			wid, pid, e = s.newWindow(m.Target, m.Name, m.Cwd, m.NoFocus, m.Argv)
 			return e
 		})
 		s.afterMutation()
@@ -346,7 +380,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var wsid, wid, pid string
 		err := s.mutation(func() error {
 			var e error
-			wsid, wid, pid, e = s.newWorkspace(m.Name, m.Window, m.Cwd, m.Project, m.NoFocus)
+			wsid, wid, pid, e = s.newWorkspace(m.Name, m.Window, m.Cwd, m.Project, m.NoFocus, m.Argv)
 			return e
 		})
 		s.afterMutation()

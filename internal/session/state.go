@@ -74,6 +74,9 @@ type PaneState struct {
 	// App is the last app= a status report named. It survives state=clear so
 	// the rail can keep labelling a pi pane pi.
 	App string `json:"app,omitempty"`
+	// Argv is the program the pane runs instead of a shell, program first.
+	// Empty means $SHELL -l, a pane as it has always been.
+	Argv []string `json:"argv,omitempty"`
 }
 
 type State struct {

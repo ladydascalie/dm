@@ -102,3 +102,24 @@ func TestPaneCommandPassesHistory(t *testing.T) {
 		t.Fatalf("pane command = %q, want --history 1048576", args)
 	}
 }
+
+// TestPaneCommandPassesArgv proves a respawned pane is born with the --argv it
+// ran before: paneCommand reads the program from the pane's state, which is
+// what a server restart's start-or-adopt loop runs after the split action
+// persisted it. A shell pane carries no --argv flag at all.
+func TestPaneCommandPassesArgv(t *testing.T) {
+	t.Parallel()
+	ps := &session.PaneState{Cwd: "/tmp", Shell: "/bin/sh", Cols: 80, Rows: 24,
+		Argv: []string{"htop", "-d", "5"}}
+	cmd := paneCommand("/usr/bin/dm", "s1", "w1p1", ps, nil, 1<<20)
+	args := strings.Join(cmd.Args, " ")
+	if !strings.Contains(args, "--argv htop,-d,5") {
+		t.Fatalf("pane command = %q, want --argv htop,-d,5", args)
+	}
+
+	cmd = paneCommand("/usr/bin/dm", "s1", "w1p2",
+		&session.PaneState{Cwd: "/tmp", Shell: "/bin/sh", Cols: 80, Rows: 24}, nil, 1<<20)
+	if strings.Contains(strings.Join(cmd.Args, " "), "--argv") {
+		t.Fatalf("shell pane command = %q, want no --argv", strings.Join(cmd.Args, " "))
+	}
+}

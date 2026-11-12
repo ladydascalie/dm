@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -509,20 +510,17 @@ func applyDefaultFold(st *session.State, cfg *keymap.Config) {
 }
 
 func (s *server) addPaneState(id string) {
-	s.addPaneStateAt(id, "", "")
+	s.addPaneStateAt(id, "", nil)
 }
 
-func (s *server) addPaneStateAt(id, cwd, shell string) {
+func (s *server) addPaneStateAt(id, cwd string, argv []string) {
 	if s.st.Panes[id] != nil {
 		return
 	}
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	if shell == "" {
-		shell = os.Getenv("SHELL")
-	}
-	s.st.Panes[id] = &session.PaneState{Shell: shell, Cwd: cwd, Cols: 80, Rows: 24}
+	s.st.Panes[id] = &session.PaneState{Shell: os.Getenv("SHELL"), Cwd: cwd, Cols: 80, Rows: 24, Argv: argv}
 }
 
 // paneCommand builds the __pane command for a fresh daemon. A known colour
@@ -534,6 +532,12 @@ func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours, h
 		"--cwd", ps.Cwd, "--shell", ps.Shell,
 		"--cols", strconv.Itoa(ps.Cols), "--rows", strconv.Itoa(ps.Rows),
 		"--history", strconv.Itoa(history)}
+	if len(ps.Argv) > 0 {
+		// The pane flag is comma separated, the shape the state file holds.
+		// The server validated every element before it stored it, so the join
+		// is the exact program the restart must run.
+		args = append(args, "--argv", strings.Join(ps.Argv, ","))
+	}
 	if tc != nil {
 		if tc.fg != "" {
 			args = append(args, "--fg", tc.fg)

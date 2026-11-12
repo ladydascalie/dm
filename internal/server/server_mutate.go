@@ -563,6 +563,30 @@ func (s *server) closeWindow(id string) error {
 	return nil
 }
 
+// validateArgv refuses an argv the pane flag cannot carry back: every element
+// must be non-empty and free of NUL bytes, the rules the __pane --argv flag
+// enforces, plus commas, which are the flag's separator. A comma inside an
+// element would split on the way back to the daemon and respawn a different
+// program, so it is refused here; what the server stores is exactly what the
+// restart runs.
+func validateArgv(argv []string) error {
+	if len(argv) == 0 {
+		return nil
+	}
+	for _, a := range argv {
+		if a == "" {
+			return fmt.Errorf("argv has an empty element")
+		}
+		if strings.ContainsRune(a, ',') {
+			return fmt.Errorf("argv element %q contains a comma", a)
+		}
+		if strings.ContainsRune(a, '\x00') {
+			return fmt.Errorf("argv element contains a NUL byte")
+		}
+	}
+	return nil
+}
+
 // swapPanes exchanges the ids of two leaves of the same tree. The panes trade
 // ids in place, so every rectangle keeps its shape and both ids stay leaves.
 // Focus is untouched: the focused pane's id survives the swap, so it keeps
@@ -615,7 +639,7 @@ func (s *server) movePane(id, target, dir string) error {
 	return fmt.Errorf("no pane %q", id)
 }
 
-func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (string, error) {
+func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool, argv []string) (string, error) {
 	// A split opens in the folder its source pane stands in now. Ask before
 	// taking the lock, for the same reason a window asks.
 	if cwd == "" {
@@ -625,6 +649,9 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 	case "left", "right", "up", "down":
 	default:
 		return "", fmt.Errorf("dir must be left, right, up or down")
+	}
+	if err := validateArgv(argv); err != nil {
+		return "", err
 	}
 	s.mu.Lock()
 	if target == "" {
@@ -645,7 +672,7 @@ func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (st
 	}
 	id := win.NewPaneID()
 	layout.SplitLeaf(win.Root, target, dir, id, ratio)
-	s.addPaneStateAt(id, cwd, "")
+	s.addPaneStateAt(id, cwd, argv)
 	if !noFocus {
 		for i, cand := range s.st.Workspaces {
 			if cand == ws {
@@ -921,11 +948,14 @@ func (s *server) windowCwdLocked(ws *session.Workspace) string {
 	return cwd
 }
 
-func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, string, error) {
+func (s *server) newWindow(wsID, label, cwd string, noFocus bool, argv []string) (string, string, error) {
 	// The new pane opens where its source pane stands now, so the window's
 	// folder name and its shell agree. Ask before taking the lock.
 	if cwd == "" {
 		cwd = s.inheritedCwd(wsID)
+	}
+	if err := validateArgv(argv); err != nil {
+		return "", "", err
 	}
 	s.mu.Lock()
 	ws := s.st.ActiveWorkspace()
@@ -976,7 +1006,7 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool) (string, strin
 		w.Name = label
 	}
 	ws.Windows = append(ws.Windows, w)
-	s.addPaneStateAt(id, cwd, "")
+	s.addPaneStateAt(id, cwd, argv)
 	if !noFocus {
 		for i, cand := range s.st.Workspaces {
 			if cand == ws {
@@ -1019,11 +1049,14 @@ func (s *server) selectWindow(i int) error {
 	return nil
 }
 
-func (s *server) newWorkspace(name, tabLabel, cwd, project string, noFocus bool) (string, string, string, error) {
+func (s *server) newWorkspace(name, tabLabel, cwd, project string, noFocus bool, argv []string) (string, string, string, error) {
 	// Ask the pane before taking the lock: the folder is where the user is now,
 	// and asking is a socket round trip.
 	if cwd == "" {
 		cwd = s.inheritedCwd("")
+	}
+	if err := validateArgv(argv); err != nil {
+		return "", "", "", err
 	}
 	s.mu.Lock()
 	activeID := ""
@@ -1070,7 +1103,7 @@ func (s *server) newWorkspace(name, tabLabel, cwd, project string, noFocus bool)
 			}
 		}
 	}
-	s.addPaneStateAt(id, cwd, "")
+	s.addPaneStateAt(id, cwd, argv)
 	s.mu.Unlock()
 	if err := s.ensurePane(id); err != nil {
 		return wsid, wid, id, err
