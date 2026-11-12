@@ -48,7 +48,7 @@ func (t *tui) draw() {
 	// frame and written only when its bytes differ from the last frame's.
 	th := t.theme()
 	panes := onScreenPanes(win)
-	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename, prompt bytes.Buffer
+	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename, prompt, lswBuf bytes.Buffer
 	for _, p := range panes {
 		boxRect := layout.BoxRect(p.Rect, t.pad())
 		panel.DrawPaneBoxOnGrid(&box, th, boxRect, p.ID == win.Focus, win.Cols, win.Rows)
@@ -74,6 +74,12 @@ func (t *tui) draw() {
 	}
 	if t.mode == "menu" && t.menu != nil {
 		drawMenu(&menu, th, t.menu)
+	}
+	if t.mode == "layout" && t.lsw != nil {
+		// The palette re-reads the window's panes every frame, so a pane
+		// that exits while it is open updates the preview.
+		t.lsw.refresh(win)
+		drawLayoutSwitcher(&lswBuf, th, win, t.lsw)
 	}
 	if t.mode == "rename" {
 		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.renameKind)
@@ -146,6 +152,7 @@ func (t *tui) draw() {
 		{p: &t.last.menu, buf: &menu, overlay: true},
 		{p: &t.last.rename, buf: &rename, overlay: true},
 		{p: &t.last.prompt, buf: &prompt, overlay: true},
+		{p: &t.last.lsw, buf: &lswBuf, overlay: true},
 	}
 	for i := range t.floats {
 		bands = append(bands, band{p: floatPaints[i], buf: &floatBufs[i], overlay: true})

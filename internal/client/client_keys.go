@@ -713,6 +713,8 @@ func (t *tui) runAction(name string) {
 		t.action("swap-panes", func(m *wire.Msg) { m.Dir = "left" })
 	case "next-layout":
 		t.action("select-layout", func(m *wire.Msg) { m.Layout = "next" })
+	case "layout-picker":
+		openLayoutSwitcher(t)
 	case "synchronize-panes":
 		t.action("synchronize-panes", nil)
 	case "new-workspace":

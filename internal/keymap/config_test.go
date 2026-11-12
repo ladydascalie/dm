@@ -1448,7 +1448,7 @@ func TestConfigScrollSearchBindings(t *testing.T) {
 	if len(modes) != len(keymapOrder) {
 		t.Fatalf("Keymaps() = %v, want every mode", modes)
 	}
-	scroll := cfg.Keymaps()[4]
+	scroll := cfg.Keymaps()[5]
 	if scroll.Name != "scroll" {
 		t.Fatalf("mode 4 = %q, want scroll", scroll.Name)
 	}
@@ -1663,5 +1663,74 @@ keymap "main" {
 	}
 	if got := cfg.Key("main", "split-right"); got != "|" {
 		t.Fatalf("Key(main, split-right) = %q, want | from the defaults", got)
+	}
+}
+
+// TestLayoutModeDefaults pins the layout mode: the keymap view lists it after
+// the switcher, and the defaults bind the walk, the pick and the three closes.
+func TestLayoutModeDefaults(t *testing.T) {
+	cfg := LoadDefault()
+	var modes []string
+	for _, m := range cfg.Keymaps() {
+		modes = append(modes, m.Name)
+	}
+	i := -1
+	for j, name := range modes {
+		if name == "layout" {
+			i = j
+		}
+	}
+	if i < 1 || modes[i-1] != "switcher" {
+		t.Fatalf("layout mode sits at %d in %v, want right after switcher", i, modes)
+	}
+	want := map[string]string{
+		"down": "j", "up": "k", "next-arrow": "down", "prev-arrow": "up",
+		"pick": "enter", "close": "q", "close-esc": "esc", "close-prefix": cfg.PrefixName(),
+	}
+	for action, key := range want {
+		if got := cfg.Key("layout", action); got != key {
+			t.Errorf("Key(layout, %q) = %q, want %q", action, got, key)
+		}
+	}
+	if got := len(cfg.Keymaps()[i].Actions); got != len(want) {
+		t.Errorf("layout mode binds %d actions, want %d", got, len(want))
+	}
+}
+
+// TestLayoutPickerKeyFree proves L was free in the built-in main table before
+// the layout-picker took it: no other action answers L, so the picker key
+// displaced nothing.
+func TestLayoutPickerKeyFree(t *testing.T) {
+	cfg := LoadDefault()
+	for _, a := range cfg.Keymaps()[0].Actions {
+		if a.Key != "L" {
+			continue
+		}
+		if a.Action != "layout-picker" {
+			t.Errorf("main binds %q on L, want only layout-picker", a.Action)
+		}
+	}
+}
+
+// TestLayoutModePatchable: a config.kdl keymap "layout" block patches the
+// built-in mode, and an action the block leaves out keeps its built-in key.
+func TestLayoutModePatchable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.kdl")
+	src := "keymap \"layout\" {\n    \"down\" \"n\"\n    \"close\" \"none\"\n}\n"
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("layout", "down"); got != "n" {
+		t.Errorf("Key(layout, down) = %q, want n", got)
+	}
+	if got := cfg.Key("layout", "pick"); got != "enter" {
+		t.Errorf("Key(layout, pick) = %q, want the built-in enter", got)
+	}
+	if got := cfg.Key("layout", "close"); got != "" {
+		t.Errorf("Key(layout, close) = %q, want unbound", got)
 	}
 }

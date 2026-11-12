@@ -191,6 +191,7 @@ var ActionDesc = map[string]string{
 	"swap-next":           "Swap the focused pane with the neighbour to its right.",
 	"swap-prev":           "Swap the focused pane with the neighbour to its left.",
 	"next-layout":         "Cycle the active window to the next preset layout.",
+	"layout-picker":       "Open the layout palette over the active window's panes.",
 	"synchronize-panes":   "Toggle synchronization of panes in the active window; on and false set, absent toggles.",
 	"new-workspace":       "Create a workspace.",
 	"next-workspace":      "Select the next workspace.",
@@ -243,6 +244,10 @@ var ActionDesc = map[string]string{
 	"close-left":  "Close the picker without choosing; left is an alternative close key.",
 	"close-right": "Close the picker without choosing; right is an alternative close key.",
 
+	// layout
+	"next-arrow": "Move the selection down one row; the down arrow is an alternative key.",
+	"prev-arrow": "Move the selection up one row; the up arrow is an alternative key.",
+
 	// switcher
 	"close-ctrl-c":    "Close the overlay without choosing; ctrl+c is an alternative close key.",
 	"filter":          "Start filtering; in filter mode every printable key edits the query and esc leaves it.",
@@ -280,7 +285,7 @@ var ActionDesc = map[string]string{
 
 	// box
 	"close-m":      "Close the message box; m is an alternative close key.",
-	"close-prefix": "Close the message box; the prefix key is an alternative close key.",
+	"close-prefix": "Close the overlay without choosing anything; the prefix key is an alternative close key.",
 
 	// help
 	"search":         "Start a search in the open view.",
@@ -295,6 +300,7 @@ var modeDesc = map[string]string{
 	"menu":     "The right-click menu.",
 	"picker":   "The session picker.",
 	"switcher": "The dashboard, a full-screen pane table.",
+	"layout":   "The layout palette over the active window.",
 	"scroll":   "The scrollback view.",
 	"rename":   "The rename prompt.",
 	"box":      "The message box.",

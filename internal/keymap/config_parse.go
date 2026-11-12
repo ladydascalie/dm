@@ -654,6 +654,7 @@ keymap "main" {
     "swap-next" "o" help "Layout"
     "swap-prev" "O" help "Layout"
     "next-layout" "u" help "Layout"
+    "layout-picker" "L" help "Layout"
     "new-workspace" "t"
     "next-workspace" ")"
     "synchronize-panes" "S" help "Session"
@@ -756,6 +757,17 @@ keymap "switcher" {
     "pick-7" "7"
     "pick-8" "8"
     "pick-9" "9"
+}
+
+keymap "layout" {
+    "down" "j"
+    "up" "k"
+    "next-arrow" "down"
+    "prev-arrow" "up"
+    "pick" "enter"
+    "close" "q"
+    "close-esc" "esc"
+    "close-prefix" "prefix"
 }
 
 keymap "scroll" {
