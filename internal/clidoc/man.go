@@ -26,7 +26,7 @@ type manField struct {
 var manActionFields = []manField{
 	{"action", "the action name, required"},
 	{"target", "the pane, window or workspace id the action acts on"},
-	{"dir", "split or focus direction: left, right, up or down"},
+	{"dir", "split or focus direction: left, right, up or down; swap-panes swaps by direction instead of other"},
 	{"other", "the second pane: resize-split, swap-panes and move-pane"},
 	{"msg", "text to type into a pane"},
 	{"enter", "press enter after msg"},
@@ -37,7 +37,7 @@ var manActionFields = []manField{
 	{"cwd", "working directory for a new pane, window or workspace"},
 	{"ratio", "split ratio, 0 to 1"},
 	{"nofocus", "do not move focus to the new pane"},
-	{"layout", "select-layout: even-horizontal, even-vertical, main-horizontal, main-vertical or tiled"},
+	{"layout", "select-layout: even-horizontal, even-vertical, main-horizontal, main-vertical or tiled; next cycles the stored preset forward"},
 	{"on", "synchronize-panes: true or false; absent toggles"},
 	{"float", "float-open and float-close: the client-chosen float id"},
 	{"command", "float-open: the command to run instead of the diff command"},

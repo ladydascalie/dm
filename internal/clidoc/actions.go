@@ -58,9 +58,9 @@ var actionExamples = []actionExample{
 	{"close-workspace", `{"action":"close-workspace","target":"s1"}`},
 
 	{"rename-window", `{"action":"rename-window","target":"w1","name":"build"}`},
-	{"swap-panes", `{"action":"swap-panes","target":"w1p1","other":"w1p2"}`},
+	{"swap-panes", `{"action":"swap-panes","target":"w1p1","dir":"left"}`},
 	{"move-pane", `{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}`},
-	{"select-layout", `{"action":"select-layout","layout":"tiled"}`},
+	{"select-layout", `{"action":"select-layout","layout":"next"}`},
 	{"synchronize-panes", `{"action":"synchronize-panes","on":true}`},
 	{"float-open", `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`},
 	{"float-close", `{"action":"float-close","float":"f1"}`},

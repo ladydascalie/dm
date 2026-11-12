@@ -382,8 +382,11 @@ func TestConfigHelpRows(t *testing.T) {
 		{"c", "new window"},
 		{"w / W", "next/prev win"},
 		{"0-9", "select window"},
+		{"o / O", "swap with next / prev pane"},
+		{"u", "cycle layout"},
 		{"t", "new workspace"},
 		{")", "next workspace"},
+		{"S", "synchronize panes"},
 		{"s", "switch session"},
 		{"r", "rename workspace"},
 		{"P", "set project"},
@@ -740,17 +743,27 @@ func TestConfigHelpTagMalformed(t *testing.T) {
 	}
 }
 
-// TestConfigHelpEntriesDefault proves the default config has no tags and that
-// HelpRows is HelpEntries without the section.
+// TestConfigHelpEntriesDefault proves the default config tags only the four
+// layout and session actions and that HelpRows is HelpEntries without the
+// section.
 func TestConfigHelpEntriesDefault(t *testing.T) {
 	cfg := LoadDefault()
 	entries := cfg.HelpEntries()
 	if len(entries) == 0 {
 		t.Fatal("HelpEntries() returned no rows")
 	}
+	wantSection := map[string]string{
+		"swap with next / prev pane": "Layout",
+		"cycle layout":               "Layout",
+		"synchronize panes":          "Session",
+	}
 	for _, e := range entries {
-		if e.Section != "" {
-			t.Errorf("default entry %#v carries a section", e)
+		want, tagged := wantSection[e.Action]
+		if e.Section != "" && (!tagged || e.Section != want) {
+			t.Errorf("default entry %#v carries an unexpected section", e)
+		}
+		if e.Section == "" && tagged {
+			t.Errorf("default entry %#v owes section %q", e, want)
 		}
 	}
 	rows := cfg.HelpRows()
