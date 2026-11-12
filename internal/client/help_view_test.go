@@ -269,8 +269,10 @@ func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 	}
 }
 
-// TestHelpBoxRowsShareColumns is the misalignment the operator saw: every
-// content row must paint the same columns, once each.
+// TestHelpBoxRowsShareColumns is the misalignment the operator saw: beyond
+// the panel's ground fill, every content cell must paint once. The fill
+// writes one space on the ground per interior cell, so a cell carries at
+// most two writes and the second is never a bare fill.
 func TestHelpBoxRowsShareColumns(t *testing.T) {
 	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
@@ -279,8 +281,12 @@ func TestHelpBoxRowsShareColumns(t *testing.T) {
 
 	for row := y0 + 1; row <= y1-1; row++ {
 		for col := x0 + 1; col <= x1-1; col++ {
-			if writes := p.writes[[2]int{row, col}]; len(writes) != 1 {
+			writes := p.writes[[2]int{row, col}]
+			if len(writes) > 2 {
 				t.Fatalf("content cell %d,%d painted %d times", row, col, len(writes))
+			}
+			if len(writes) == 2 && writes[0] != ' ' {
+				t.Fatalf("content cell %d,%d's first write is %q, want the fill's space", row, col, writes[0])
 			}
 		}
 	}
@@ -395,7 +401,7 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value.
-const helpBoxDefaultSHA256 = "f76229406757f21eaf519073b37d78dc9da9d162dbccaf333fba9d9c19b740de"
+const helpBoxDefaultSHA256 = "7bb1e16cbaf789fbc90e17cf4e55f02cbba1b225b6a3f06eb7cb6ee5ba2fb7f0"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The four layout and session actions carry their section tags; the

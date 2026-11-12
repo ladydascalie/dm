@@ -154,7 +154,8 @@ func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 		Fill:  theme.DefaultTheme().Glyphs.BorderHorizontal,
 	}, "", false, nil)
 	out := b.String()
-	if want := "\x1b[0m\x1b[90m\x1b[3;4H┌ title ───┐"; !strings.HasPrefix(out, want) {
+	// The style carries the panel ground, so the fill glyphs are opaque too.
+	if want := "\x1b[0m\x1b[90m" + theme.DefaultTheme().Palette.RailBG.BG() + "\x1b[3;4H┌ title ───┐"; !strings.HasPrefix(out, want) {
 		t.Fatalf("band starts %q, want the row in one write %q", out, want)
 	}
 	if n := strings.Count(out, "\x1b[3;"); n != 1 {

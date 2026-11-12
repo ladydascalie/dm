@@ -397,9 +397,8 @@ func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l
 		Style: "\x1b[0m\x1b[90m" + groundSGR(th.Palette.RailBG),
 		Fill:  th.Glyphs.BorderHorizontal,
 	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
-		// The palette carries a solid ground, or the panes under it bleed
-		// through every cell its content does not paint.
-		fillRect(b, r, groundSGR(th.Palette.RailBG))
+		// PaintPanel fills the interior with the rail ground; the boxes and
+		// rows paint their own grounds on top of it.
 		if g.preview.W > 0 {
 			rects, ok := layout.MiniRects(win.Root, g.preview, l.panes, layoutRowName(l.sel))
 			if ok {

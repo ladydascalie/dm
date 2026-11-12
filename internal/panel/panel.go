@@ -51,6 +51,11 @@ func PaintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title Panel
 	if titled {
 		paintTitleRow(buf, th, rect, title)
 	}
+	// The panel owns a solid ground: the interior fills before the content
+	// paints, so a cell the painter leaves alone shows the panel's ground
+	// and never the frame behind it. A panel that reads through is a bug in
+	// the panel, never in the caller's painter.
+	fillRect(buf, rect, groundSGR(th))
 	if paint != nil {
 		var inside bytes.Buffer
 		paint(&inside, rect)
@@ -73,7 +78,7 @@ func paintTitleRow(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, t PanelT
 	if n := rect.W - cells.Cells(row); n > 0 {
 		row += strings.Repeat(t.Fill, n)
 	}
-	fmt.Fprintf(buf, "%s\x1b[%d;%dH%s%s%s", t.Style, rect.Y, rect.X,
+	fmt.Fprintf(buf, "%s%s\x1b[%d;%dH%s%s%s", t.Style, groundSGR(th), rect.Y, rect.X,
 		th.Glyphs.BorderTopLeft, row, th.Glyphs.BorderTopRight)
 }
 
@@ -353,4 +358,21 @@ func putClipped(buf *bytes.Buffer, x, y, cols, rows int, s string) {
 		return
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s", y+1, lo+1, s)
+}
+
+// groundSGR is the panel's ground: the rail background every float shares.
+func groundSGR(th theme.Theme) string {
+	return th.Palette.RailBG.BG()
+}
+
+// fillRect writes every cell of r as a space on the ground, one row at a
+// time. Content painted after it replaces those cells, so the fill is the
+// floor a painter builds on, never a ceiling.
+func fillRect(buf *bytes.Buffer, r layout.Rect, ground string) {
+	if r.W <= 0 || r.H <= 0 {
+		return
+	}
+	for y := 0; y < r.H; y++ {
+		fmt.Fprintf(buf, "%s\x1b[%d;%dH%s\x1b[0m", ground, r.Y+y+1, r.X+1, strings.Repeat(" ", r.W))
+	}
 }
