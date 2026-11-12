@@ -758,6 +758,10 @@ Select a theme from the themes directory beside config.kdl; no node keeps the bu
 \fBkeymap\fP
 Value: \fIa quoted mode name and a { "action" "key" } block\fP. Default: \fIthe built-in table\fP.
 Patch one keymap mode; an action the file leaves out keeps its built-in key.
+.TP
+\fBcommand\fP
+Value: \fIa quoted name matching [A-Za-z0-9_-]+ and a { run "..." } block\fP. Default: \fInone\fP.
+Define a command a keymap can run: bind "command:<name>" to a key and it runs the run text through sh -c in the window's folder.
 .SH THEME
 A theme file is $XDG_CONFIG_HOME/dm/themes/<name>.kdl. The theme node in config.kdl names one, and no theme node keeps the built-in theme. Every block and every key is optional: the file reads over the built-in theme, so it carries only what it changes. A block or key given twice, an unknown block or key, a colour that is not #rrggbb, or a glyph that is not one cell wide is an error. The keys are:
 .PP
@@ -948,7 +952,7 @@ Unix socket one pane's mux listens on.
 Pane output log.
 .TP
 \fB$XDG_CONFIG_HOME/dm/config.kdl\fP
-Prefix, keymaps, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run.
+Prefix, keymaps, commands, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run.
 .TP
 \fB$XDG_CONFIG_HOME/dm/themes/<name>.kdl\fP
 Theme palette, accents, glyphs and state styles.

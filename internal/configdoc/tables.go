@@ -88,6 +88,12 @@ var ConfigNodes = []ConfigNode{
 		Default: "the built-in table",
 		Desc:    "Patch one keymap mode; an action the file leaves out keeps its built-in key.",
 	},
+	{
+		Name:    "command",
+		Value:   `a quoted name matching [A-Za-z0-9_-]+ and a { run "..." } block`,
+		Default: "none",
+		Desc:    `Define a command a keymap can run: bind "command:<name>" to a key and it runs the run text through sh -c in the window's folder.`,
+	},
 }
 
 // EnvVars lists every environment variable dm reads. The source comment names
@@ -145,7 +151,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Prefix, keymaps, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run.",
+		Desc:  "Prefix, keymaps, commands, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run.",
 		Write: true,
 	},
 	{

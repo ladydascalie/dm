@@ -1446,3 +1446,209 @@ func TestConfigScrollSearchBindings(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigCommand parses one command block: the Commands() list, a binding
+// that names it, and the help tag on the row.
+func TestConfigCommand(t *testing.T) {
+	src := `command "tests" {
+	run "go test ./..."
+}
+keymap "main" {
+	"command:tests" "t" help "Run"
+}`
+	cfg, err := parseConfig(src)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	want := []Command{{Name: "tests", Run: "go test ./..."}}
+	if got := cfg.Commands(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Commands() = %#v, want %#v", got, want)
+	}
+	if got := cfg.Key("main", "command:tests"); got != "t" {
+		t.Fatalf("Key(main, command:tests) = %q, want t", got)
+	}
+	if got := cfg.HelpSection("main", "command:tests"); got != "Run" {
+		t.Fatalf("HelpSection(main, command:tests) = %q, want Run", got)
+	}
+}
+
+// TestConfigCommandSorted proves Commands() sorts by name no matter the file
+// order.
+func TestConfigCommandSorted(t *testing.T) {
+	src := `command "zebra" {
+	run "echo z"
+}
+command "alpha" {
+	run "echo a"
+}`
+	cfg, err := parseConfig(src)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	want := []Command{{Name: "alpha", Run: "echo a"}, {Name: "zebra", Run: "echo z"}}
+	if got := cfg.Commands(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Commands() = %#v, want %#v", got, want)
+	}
+}
+
+// TestConfigCommandDuplicateName proves a second command with the same name
+// fails with its line.
+func TestConfigCommandDuplicateName(t *testing.T) {
+	_, err := parseConfig("command \"x\" { run \"a\" }\ncommand \"x\" { run \"b\" }")
+	if err == nil {
+		t.Fatal("parseConfig accepted two commands with the same name")
+	}
+	if !strings.Contains(err.Error(), "duplicate command") || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("error = %q, want a duplicate command on line 2", err)
+	}
+}
+
+// TestConfigCommandCollides proves a command whose name is also a built-in
+// action name fails with its line.
+func TestConfigCommandCollides(t *testing.T) {
+	for _, name := range []string{"reload", "split-right", "down", "close"} {
+		src := "command " + strconvQuote(name) + " {\n\trun \"x\"\n}"
+		_, err := parseConfig(src)
+		if err == nil {
+			t.Fatalf("parseConfig accepted command %q colliding with a built-in action", name)
+		}
+		if !strings.Contains(err.Error(), "collides with a built-in action") || !strings.Contains(err.Error(), "line 1") {
+			t.Fatalf("name %q: error = %q, want a collision on line 1", name, err)
+		}
+	}
+}
+
+// TestConfigCommandMalformed proves each malformed command block fails with
+// its line.
+func TestConfigCommandMalformed(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"duplicate run", "command \"x\" {\n\trun \"a\"\n\trun \"b\"\n}", `line 3: duplicate run in command "x"`},
+		{"missing run", "command \"x\" {\n}", `line 1: command "x" needs a run key`},
+		{"empty run", "command \"x\" {\n\trun \"\"\n}", `line 2: run in command "x" must not be empty`},
+		{"run without value", "command \"x\" {\n\trun\n}", "line 2: expected a quoted command after run"},
+		{"unknown key", "command \"x\" {\n\trun \"a\"\n\tbogus \"b\"\n}", `line 3: unknown key "bogus" in command "x"`},
+		{"missing name", "command {\n\trun \"a\"\n}", "line 1: expected a quoted name after command"},
+		{"missing brace", "command \"x\" run \"a\"", `line 1: expected '{' after command "x"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parseConfig(c.src)
+			if err == nil {
+				t.Fatal("parseConfig accepted a malformed command block")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("error = %q, want %q", err, c.want)
+			}
+		})
+	}
+}
+
+// TestConfigCommandName proves the name charset: letters, digits, _ and -,
+// 1 to 32 bytes, and nothing else.
+func TestConfigCommandName(t *testing.T) {
+	for _, name := range []string{"tests", "go_test", "go-test", "A9z", "a", "x", strings.Repeat("b", 32)} {
+		cfg, err := parseConfig("command " + strconvQuote(name) + " { run \"x\" }")
+		if err != nil {
+			t.Fatalf("parseConfig rejected command name %q: %v", name, err)
+		}
+		if got := cfg.Commands(); len(got) != 1 || got[0].Name != name {
+			t.Fatalf("Commands() = %#v, want one command named %q", got, name)
+		}
+	}
+	for _, name := range []string{"", "a b", "a/b", "a.b", "ä", strings.Repeat("b", 33)} {
+		_, err := parseConfig("command " + strconvQuote(name) + " { run \"x\" }")
+		if err == nil {
+			t.Fatalf("parseConfig accepted command name %q", name)
+		}
+		if !strings.Contains(err.Error(), "line 1") {
+			t.Fatalf("name %q: error = %q, want line 1", name, err)
+		}
+	}
+}
+
+// TestConfigCommandBindingUnknown proves a keymap action with the command:
+// prefix fails when the file defines no such command, and that a bound
+// command still parses when its block comes later in the file.
+func TestConfigCommandBindingUnknown(t *testing.T) {
+	_, err := parseConfig("keymap \"main\" {\n\t\"command:nope\" \"x\"\n}")
+	if err == nil {
+		t.Fatal("parseConfig accepted a binding to an unknown command")
+	}
+	if !strings.Contains(err.Error(), "names no command") || !strings.Contains(err.Error(), "nope") || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("error = %q, want the action and line 2", err)
+	}
+	_, err = parseConfig("keymap \"main\" {\n\t\"command:nope\" \"none\"\n}")
+	if err == nil {
+		t.Fatal("parseConfig accepted an unbound unknown command")
+	}
+	cfg, err := parseConfig("keymap \"main\" {\n\t\"command:tests\" \"t\"\n}\ncommand \"tests\" {\n\trun \"go test ./...\"\n}")
+	if err != nil {
+		t.Fatalf("parseConfig rejected a binding to a later command: %v", err)
+	}
+	if got := cfg.Key("main", "command:tests"); got != "t" {
+		t.Fatalf("Key(main, command:tests) = %q, want t", got)
+	}
+}
+
+// TestConfigCommandKeymaps proves Keymaps() lists a command action with its
+// key alongside the built-in actions.
+func TestConfigCommandKeymaps(t *testing.T) {
+	src := `command "tests" {
+	run "go test ./..."
+}
+keymap "main" {
+	"command:tests" "t"
+}`
+	cfg, err := parseConfig(src)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	for _, m := range cfg.Keymaps() {
+		if m.Name != "main" {
+			continue
+		}
+		for _, a := range m.Actions {
+			if a.Action == "command:tests" {
+				if a.Key != "t" {
+					t.Fatalf("command:tests key = %q, want t", a.Key)
+				}
+				return
+			}
+		}
+		t.Fatalf("main Keymaps() has no command:tests action: %#v", m.Actions)
+	}
+	t.Fatal("Keymaps() has no main mode")
+}
+
+// TestConfigCommandDefaultDefinesNone proves the built-in config defines no
+// commands and that its text stays a comment, so a file that names a command
+// still merges to the defaults.
+func TestConfigCommandDefaultDefinesNone(t *testing.T) {
+	if got := LoadDefault().Commands(); len(got) != 0 {
+		t.Fatalf("LoadDefault().Commands() = %#v, want none", got)
+	}
+	if !strings.Contains(defaultConfigKDL, "command \"tests\"") {
+		t.Fatal("defaultConfigKDL does not show the command shape")
+	}
+	dir := t.TempDir()
+	cfg, err := LoadPath(writeConfigFile(t, dir, `command "tests" {
+	run "go test ./..."
+}
+keymap "main" {
+	"command:tests" "t"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "command:tests"); got != "t" {
+		t.Fatalf("Key(main, command:tests) = %q, want t", got)
+	}
+	if got := cfg.Key("main", "split-right"); got != "|" {
+		t.Fatalf("Key(main, split-right) = %q, want | from the defaults", got)
+	}
+}
