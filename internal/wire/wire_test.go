@@ -245,3 +245,41 @@ func TestSnapshotSyncRoundTrip(t *testing.T) {
 		t.Fatalf("unset sync kept the key: %s", b)
 	}
 }
+
+// TestWindowInfoLayoutRoundTrip proves the stored preset name survives the
+// frame and that an empty name, the custom-tree case, leaves the key out.
+func TestWindowInfoLayoutRoundTrip(t *testing.T) {
+	in := wire.Snapshot{Session: "s", Windows: []wire.WindowInfo{
+		{ID: "w1", Name: "one", Layout: "main-vertical"},
+		{ID: "w2", Name: "two"},
+	}}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, wire.Msg{Type: "snapshot", Snap: &in}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Snap == nil || len(out.Snap.Windows) != 2 {
+		t.Fatalf("windows round trip = %+v", out.Snap)
+	}
+	if got := out.Snap.Windows[0].Layout; got != "main-vertical" {
+		t.Fatalf("layout round trip = %q, want main-vertical", got)
+	}
+	if got := out.Snap.Windows[1].Layout; got != "" {
+		t.Fatalf("empty layout = %q, want empty", got)
+	}
+
+	b, err := json.Marshal(wire.WindowInfo{ID: "w2", Name: "two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["layout"]; ok {
+		t.Fatalf("empty layout kept the key: %s", b)
+	}
+}
