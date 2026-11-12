@@ -20,6 +20,9 @@ type Filter struct {
 	Reply  func(string)
 	Cursor func() (row, col int)
 	FG, BG string
+	// CursorFG is the cursor colour OSC 12 reports. Empty falls back to
+	// TermCursor, so a future cursor-colour track only fills this field.
+	CursorFG string
 }
 
 // Terminal queries an application makes at startup and then waits on. termenv
@@ -30,10 +33,14 @@ type Filter struct {
 // define, until a client reports the outer terminal's colours. A pane that has
 // not been told the pair answers these, and termenv parses them.
 const (
-	TermFG   = "rgb:ffff/ffff/ffff"
-	TermBG   = "rgb:0000/0000/0000"
-	replyDA1 = "\x1b[?1;2c"
-	replyDA2 = "\x1b[>0;10;1c"
+	TermFG = "rgb:ffff/ffff/ffff"
+	TermBG = "rgb:0000/0000/0000"
+	// TermCursor is the fallback cursor colour OSC 12 reports. The pane does
+	// not track a cursor colour, so the query answers this default until one
+	// does.
+	TermCursor = "rgb:ffff/ffff/ffff"
+	replyDA1   = "\x1b[?1;2c"
+	replyDA2   = "\x1b[>0;10;1c"
 )
 
 var oscPrefix = []byte("\x1b]7501;")
@@ -109,7 +116,11 @@ func (f *Filter) handleOSC(seq []byte) bool {
 		return true
 	}
 	if strings.HasPrefix(text, "12;?") {
-		f.send("\x1b]12;" + f.FG + "\x1b\\")
+		colour := f.CursorFG
+		if colour == "" {
+			colour = TermCursor
+		}
+		f.send("\x1b]12;" + colour + "\x1b\\")
 		return true
 	}
 	if strings.HasPrefix(text, "4;") && strings.HasSuffix(text, ";?") {
@@ -203,7 +214,8 @@ func xtermColor(n int) string {
 		v := 8 + (n-232)*10
 		r, g, b = v, v, v
 	}
-	return fmt.Sprintf("theme.RGB:%02x%02x/%02x%02x/%02x%02x", r, r, g, g, b, b)
+	// The 16-bit xterm form: each channel doubled, as OSC 4 expects.
+	return fmt.Sprintf("rgb:%02x%02x/%02x%02x/%02x%02x", r, r, g, g, b, b)
 }
 
 // oscEnd returns the byte length of the sequence starting at ESC ] and whether
