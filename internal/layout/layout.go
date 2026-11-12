@@ -85,6 +85,57 @@ func SplitLeaf(root *Node, target, dir, newID string, ratio float64) bool {
 	return false
 }
 
+// Swap exchanges the two leaf panes' ids in place: the panes trade ids and
+// nothing else, so every rectangle keeps its shape. It returns false when
+// either id is not a leaf in the tree. Swapping a leaf with itself is a
+// no-op that returns true.
+func Swap(root *Node, a, b string) bool {
+	if root == nil {
+		return false
+	}
+	pa := AncestorPath(root, a, nil)
+	pb := AncestorPath(root, b, nil)
+	if pa == nil || pb == nil {
+		return false
+	}
+	na, nb := pa[len(pa)-1], pb[len(pb)-1]
+	if na.Pane != a || nb.Pane != b {
+		return false
+	}
+	na.Pane, nb.Pane = b, a
+	return true
+}
+
+// Move moves the leaf pane id to the edge of target in dir: it prunes id out
+// of the tree, then splits target with a fresh sibling in dir holding id, so
+// the tree re-balances the way SplitLeaf does. A parent left with one kid by
+// the prune collapses, and the split never has one, so no node ends up
+// holding exactly one kid. Both ids must be leaves of the same tree; a target
+// outside the tree, a missing id, or a nil tree returns false. Moving a pane
+// to its own edge is a no-op that returns true.
+func Move(root *Node, id, target, dir string) bool {
+	if root == nil {
+		return false
+	}
+	if id == target {
+		return FindLeaf(root, id)
+	}
+	if !FindLeaf(root, target) {
+		return false
+	}
+	nr, ok := PruneLeaf(root, id)
+	if !ok || nr == nil {
+		return false
+	}
+	if !SplitLeaf(nr, target, dir, id, 0) {
+		return false
+	}
+	// PruneLeaf may return a different node than root when the root collapses;
+	// the final tree hangs off nr, so copy it back onto the caller's root.
+	*root = *nr
+	return true
+}
+
 // PruneLeaf removes a leaf and collapses its parent split.
 func PruneLeaf(root *Node, target string) (*Node, bool) {
 	if root == nil {

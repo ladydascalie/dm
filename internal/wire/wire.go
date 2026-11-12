@@ -19,7 +19,7 @@ type Msg struct {
 	Action string `json:"action,omitempty"` // req action
 	Target string `json:"target,omitempty"` // pane id
 	Dir    string `json:"dir,omitempty"`    // left right up down
-	Other  string `json:"other,omitempty"`  // resize-split: pane on the other side
+	Other  string `json:"other,omitempty"`  // resize-split, swap-panes, move-pane: the other pane id
 	Msg    string `json:"msg,omitempty"`
 	// Project is the explicit project name on new-workspace. Empty means the
 	// new workspace inherits the project of the one it was created from.
