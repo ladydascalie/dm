@@ -148,18 +148,34 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 	f.Draw(buf, th)
 }
 
-// renameInputRow paints the float's one input row: the dim label, the draft and
-// the caret on the rail ground, padded to the full inner width so the row owns
-// every cell inside the box. The label names the kind: a project prompt reads
-// "project: ", every other kind " name: ". The draft keeps its tail and drops
-// its head when it runs out of room, and a wide rune is cut whole.
+// renameInputRow paints the rename float's one input row: the dim label, the
+// draft and the caret. The label names the kind: a project prompt reads
+// "project: ", every other kind " name: ".
 func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, kind, draft string) {
-	p := th.Palette
-	const caret = "▏"
 	label := " name: "
 	if kind == "project" {
 		label = "project: "
 	}
+	promptRow(buf, th, r, label, draft)
+}
+
+// drawSearchPrompt paints the scrollback query row, on the row above the status
+// bar. It reads like the rename prompt's input row: the dim label, the draft
+// and the caret, on the rail ground across the whole row.
+func drawSearchPrompt(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, draft string) {
+	if snap == nil || snap.Rows < 3 || snap.Cols < 1 {
+		return
+	}
+	promptRow(buf, th, layout.Rect{X: 0, Y: snap.Rows - 2, W: snap.Cols, H: 1}, " search: ", draft)
+}
+
+// promptRow paints one input row: the dim label, the draft and the caret on the
+// rail ground, padded to the full width so the row owns every cell. The draft
+// keeps its tail and drops its head when it runs out of room, and a wide rune
+// is cut whole.
+func promptRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, label, draft string) {
+	p := th.Palette
+	const caret = "▏"
 	labelRoom := r.W - cells.Cells(caret)
 	if labelRoom < 0 {
 		labelRoom = 0

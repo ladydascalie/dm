@@ -221,7 +221,7 @@ func TestFrameLeaveScrollback(t *testing.T) {
 	}
 	f.frame()
 
-	f.tui.scrollVT = vt.NewTerm(p.Rect.W, p.Rect.H+histRows)
+	f.tui.scrollVT = vt.NewTerm(p.Rect.W, p.Rect.H+f.tui.histWindow())
 	f.tui.scrollVT.Write([]byte("HIST-ONE\r\nHIST-TWO"))
 	f.tui.scroll = p.ID
 	f.tui.mode = "scroll"
@@ -540,7 +540,7 @@ func TestOracleScrollback(t *testing.T) {
 	}
 	step("first")
 	// Enter scrollback the way exitScroll/enterScroll do it.
-	f.tui.scrollVT = vt.NewTerm(p.Rect.W, p.Rect.H+histRows)
+	f.tui.scrollVT = vt.NewTerm(p.Rect.W, p.Rect.H+f.tui.histWindow())
 	f.tui.scrollVT.Write([]byte("HIST-ONE\r\nHIST-TWO"))
 	f.tui.scroll = p.ID
 	f.tui.mode = "scroll"

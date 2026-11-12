@@ -32,11 +32,56 @@ func drawPane(buf *bytes.Buffer, term *vt.Term, r layout.Rect) {
 	drawPaneFrom(buf, term, r, 0, nil, nil)
 }
 
-// drawPaneFrom paints rows [row0, row0+r.H) of term into r. row0 > 0 shows
-// scrollback kept in a taller terminal. Cells inside sel get reverse video on
-// top of the pane's own colours; cells inside hover get an underline. A wide
-// cluster is written once and the cursor advances over its continuation slot.
+// searchMark is the search highlight over one pane's band: the accepted query,
+// the tall row the band starts at, and the background a matching row takes. The
+// current match is reverse video instead. A nil mark paints nothing.
+type searchMark struct {
+	model *ScrollSearch
+	row0  int
+	bg    vt.Color
+}
+
+// markTint is how one tall row paints: the highlight background of a match, or
+// reverse video for the current one.
+type markTint struct {
+	bg      vt.Color
+	reverse bool
+}
+
+// at reports how a tall row paints, false when the row holds no match.
+func (m *searchMark) at(row int) (markTint, bool) {
+	if !m.has(row) {
+		return markTint{}, false
+	}
+	if m.current(row) {
+		return markTint{reverse: true}, true
+	}
+	return markTint{bg: m.bg}, true
+}
+
+// has reports whether a tall row holds a match.
+func (m *searchMark) has(row int) bool {
+	return m != nil && m.model != nil && m.model.HasMatch(row)
+}
+
+// current reports whether a tall row holds the current match. The current match
+// paints reverse video, every other one the highlight background.
+func (m *searchMark) current(row int) bool {
+	return m != nil && m.model != nil && m.model.CurrentRow() == row
+}
+
+// drawPaneFrom paints rows [row0, row0+r.H) of term into r with no search
+// highlight.
 func drawPaneFrom(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int, sel, hover *selRange) {
+	drawPaneFromMarked(buf, term, r, row0, sel, hover, nil)
+}
+
+// drawPaneFromMarked paints rows [row0, row0+r.H) of term into r. row0 > 0
+// shows scrollback kept in a taller terminal. Cells inside sel get reverse
+// video on top of the pane's own colours; cells inside hover get an underline;
+// rows the search marks take its highlight. A wide cluster is written once and
+// the cursor advances over its continuation slot.
+func drawPaneFromMarked(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int, sel, hover *selRange, mark *searchMark) {
 	if term == nil || r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -45,6 +90,7 @@ func drawPaneFrom(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int, sel
 	blank := vt.NewCell(" ", vt.DefaultStyle())
 	for y := 0; y < r.H; y++ {
 		fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
+		tint, marked := mark.at(row0 + y)
 		var cur *vt.Style
 		for x := 0; x < r.W; {
 			c := blank
@@ -57,6 +103,13 @@ func drawPaneFrom(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int, sel
 				}
 			}
 			style := c.Style
+			if marked {
+				if tint.reverse {
+					style.Attrs |= vt.Reverse
+				} else {
+					style.Bg = tint.bg
+				}
+			}
 			hovered := hover.has(y*r.W + x)
 			selected := sel.has(y*r.W + x)
 			if hovered && style.Underline == vt.UnderlineNone {
@@ -117,8 +170,8 @@ func clusterSpan(c vt.Cell) int {
 
 // drawPaneRow paints one row of a pane's content: the same bytes a full pane
 // paint writes for that row.
-func drawPaneRow(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row, row0 int, sel, hover *selRange) {
-	drawPaneFrom(buf, term, layout.Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W), selRow(hover, row, r.W))
+func drawPaneRow(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row, row0 int, sel, hover *selRange, mark *searchMark) {
+	drawPaneFromMarked(buf, term, layout.Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W), selRow(hover, row, r.W), mark)
 }
 
 // cellSGR returns the escape sequence that moves a terminal from cur to st.
