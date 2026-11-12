@@ -1067,3 +1067,72 @@ func TestRailHoverBackground(t *testing.T) {
 		t.Fatal("an out-of-range hover changed the paint")
 	}
 }
+
+// TestRailProjectAccentCarried proves the painter paints the slot the
+// snapshot carries and falls back to the live allocator for a snapshot that
+// carries none.
+func TestRailProjectAccentCarried(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	slots := len(theme.DefaultTheme().Accents)
+	base := []wire.AllPane{
+		{ID: "a1", Workspace: "s1", WorkspaceName: "one", Project: "alpha", Window: "w1", WindowName: "one", WorkspaceUnfolded: true, WindowUnfolded: true},
+		{ID: "b1", Workspace: "s2", WorkspaceName: "two", Project: "beta", Window: "w2", WindowName: "two", WorkspaceUnfolded: true, WindowUnfolded: true},
+	}
+	// carried is what a server pinned: one slot past each name's preference,
+	// so it disagrees with the live walk and the test can tell trust from
+	// fallback.
+	carried := map[string]int{
+		"alpha": (RailAccentSlot("alpha") + 1) % slots,
+		"beta":  (RailAccentSlot("beta") + 1) % slots,
+	}
+	// live is what the fallback must produce for these names: the
+	// preferred-then-free walk over the snapshot's own names.
+	used := map[int]bool{}
+	live := map[string]int{}
+	for _, name := range []string{"alpha", "beta"} {
+		pref := RailAccentSlot(name)
+		for i := 0; i < slots; i++ {
+			slot := (pref + i) % slots
+			if !used[slot] {
+				used[slot] = true
+				live[name] = slot
+				break
+			}
+		}
+	}
+	snapOf := func(set bool) *wire.Snapshot {
+		snap := &wire.Snapshot{Cols: 100, Rows: 8, Rail: layout.DefaultRail}
+		snap.All = append([]wire.AllPane(nil), base...)
+		if set {
+			for i := range snap.All {
+				snap.All[i].ProjectAccent = carried[snap.All[i].Project]
+				snap.All[i].ProjectAccentSet = true
+			}
+		}
+		return snap
+	}
+	slotOf := func(snap *wire.Snapshot) map[string]int {
+		out := map[string]int{}
+		for _, it := range RailItems(snap) {
+			if it.Kind == Project {
+				out[it.Text] = it.ProjectAccent
+			}
+		}
+		return out
+	}
+	got := slotOf(snapOf(true))
+	for name, want := range carried {
+		if got[name] != want {
+			t.Fatalf("carried snapshot paints %q in slot %d, want the carried %d", name, got[name], want)
+		}
+	}
+	if got["alpha"] == live["alpha"] && got["beta"] == live["beta"] {
+		t.Fatalf("carried slots %v match the live walk, so the test cannot tell trust from fallback", got)
+	}
+	got = slotOf(snapOf(false))
+	for name, want := range live {
+		if got[name] != want {
+			t.Fatalf("bare snapshot paints %q in slot %d, want the live walk's %d", name, got[name], want)
+		}
+	}
+}

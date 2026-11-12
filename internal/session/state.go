@@ -110,6 +110,13 @@ type State struct {
 	// A name absent from the map is unfolded.
 	ProjectFold map[string]bool `json:"projectFold,omitempty"`
 
+	// ProjectAccent pins a rail accent slot to a project name. The server
+	// fills it the first time it sees a project and never reassigns a placed
+	// name, so a project keeps its hue while neighbours come and go and
+	// across a restart. A name leaves the map when its last workspace
+	// closes, which frees the slot for the next project that prefers it.
+	ProjectAccent map[string]int `json:"projectAccent,omitempty"`
+
 	// root is the state tree this session lives under. It is fixed at
 	// construction, so a State never consults the environment afterwards.
 	root string

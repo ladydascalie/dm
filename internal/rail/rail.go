@@ -144,7 +144,27 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 			return pref
 		}
 	}
-	projectAccent := allocator()
+	// The server pins a slot to a project name and carries it in the
+	// snapshot, so a project keeps its hue when its neighbours join and
+	// leave. The painter trusts the carried slot. A snapshot that predates
+	// the field carries none, and those names fall back to the live
+	// allocator over the snapshot's own names.
+	carried := map[string]int{}
+	for _, p := range snap.All {
+		if p.Project == "" || !p.ProjectAccentSet {
+			continue
+		}
+		if _, ok := carried[p.Project]; !ok {
+			carried[p.Project] = p.ProjectAccent
+		}
+	}
+	live := allocator()
+	projectAccent := func(name string) int {
+		if slot, ok := carried[name]; ok {
+			return slot
+		}
+		return live(name)
+	}
 	if layout.RailCompact(snap.Rail) {
 		seen := map[string]int{}
 		out := make([]RailItem, 0, len(snap.All))
