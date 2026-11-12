@@ -27,9 +27,6 @@ import (
 )
 
 const (
-	// histRows is how many rows of scrollback the tall terminal keeps.
-	histRows = 2000
-
 	// escTimeout bounds how long a lone escape or a partial escape sequence
 	// waits for the rest of its bytes.
 	escTimeout = 40 * time.Millisecond
@@ -113,6 +110,10 @@ type tui struct {
 	// It picks the action the prompt sends and the float title it paints.
 	renameKind string
 
+	// histRows is the scrollback window in lines: the config's history-lines.
+	// It sizes the tall terminal and the replay the client asks for. Zero means
+	// the config default, which is what a bare tui in a test carries.
+	histRows int
 	// hist is each pane's replay ring. It is not filled as output arrives:
 	// the first scrollback entry asks the server for one replay and caches it
 	// here. histMeta records the rect a ring was asked for and whether it has
@@ -121,6 +122,10 @@ type tui struct {
 	hist     map[string][]byte
 	histMeta map[string]histCache
 	scroll   string // pane id shown from scrollback
+	// search is the scrollback search: the query row's draft and the accepted
+	// query. It is nil when no query is open and none is accepted, and leaving
+	// scrollback drops it.
+	search   *scrollSearch
 	offset   int
 	maxOff   int
 	scrollVT *vt.Term
@@ -293,6 +298,16 @@ func (t *tui) km() *keymap.Config {
 	return builtinKeymap()
 }
 
+// histWindow is the scrollback window in lines. A tui that never loaded a
+// config, like a test tui, reports the built-in default, so a zero field and a
+// field set from a default config mean the same window.
+func (t *tui) histWindow() int {
+	if t.histRows > 0 {
+		return t.histRows
+	}
+	return t.km().HistoryLines()
+}
+
 // theme is the client's theme. A client with no config file has none, and gets
 // the built-in theme.
 func (t *tui) theme() theme.Theme {
@@ -325,6 +340,7 @@ type lastFrame struct {
 	sess   paint
 	menu   paint
 	rename paint
+	prompt paint
 
 	// floats holds each float's last bytes, keyed by float ID. The widget
 	// keeps no frame state of its own.
@@ -367,7 +383,8 @@ type linkHover struct {
 }
 
 // panePaint is one pane's content for one frame: the terminal to read, the
-// first row to show from it, the selection to mark and the hover to underline.
+// first row to show from it, the selection to mark, the hover to underline and
+// the search highlight over its rows.
 type panePaint struct {
 	id    string
 	rect  layout.Rect
@@ -375,6 +392,7 @@ type panePaint struct {
 	row0  int
 	sel   *selRange
 	hover *selRange
+	mark  *searchMark
 }
 
 // toast is one short message for the operator. Its time is when it was raised,
@@ -588,6 +606,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 	// built-in defaults carry the session.
 	cfg, err := keymap.LoadDefaultPath(true)
 	t.keymap = cfg
+	t.histRows = cfg.HistoryLines()
 	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())
 	th := cfg.Theme()
 	t.th = &th
@@ -693,7 +712,7 @@ func (t *tui) apply(m wire.Msg) {
 				t.exitScroll()
 			} else if t.scrollVT != nil {
 				c, r := t.scrollVT.Grid().Size()
-				if c != p.Rect.W || r != p.Rect.H+histRows {
+				if c != p.Rect.W || r != p.Rect.H+t.histWindow() {
 					t.exitScroll()
 				}
 			}

@@ -627,6 +627,19 @@ func (t *tui) reload() error {
 		return err
 	}
 	t.keymap = cfg
+	// A new scrollback window is a new replay height, so a cached ring and the
+	// tall terminal built from it no longer match the pane. Drop both; the next
+	// scroll enters scrollback and asks for a fresh replay at the new height.
+	// A reload that keeps the value keeps the ring.
+	lines := cfg.HistoryLines()
+	if lines != t.histWindow() {
+		t.hist = nil
+		t.histMeta = nil
+		if t.scroll != "" {
+			t.exitScroll()
+		}
+	}
+	t.histRows = lines
 	// The glyph set is resolved once at attach and cached, so a reload has to
 	// resolve it again or a change from auto to ascii would only take effect on
 	// the next attach.

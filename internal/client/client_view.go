@@ -48,7 +48,7 @@ func (t *tui) draw() {
 	// frame and written only when its bytes differ from the last frame's.
 	th := t.theme()
 	panes := onScreenPanes(win)
-	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename bytes.Buffer
+	var box, grip, div, railBuf, tabBar, bar, toasts, pal, help, sess, menu, rename, prompt bytes.Buffer
 	for _, p := range panes {
 		boxRect := layout.BoxRect(p.Rect, t.pad())
 		panel.DrawPaneBoxOnGrid(&box, th, boxRect, p.ID == win.Focus, win.Cols, win.Rows)
@@ -77,6 +77,9 @@ func (t *tui) draw() {
 	}
 	if t.mode == "rename" {
 		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.renameKind)
+	}
+	if t.mode == "search" && t.search != nil {
+		drawSearchPrompt(&prompt, th, win, t.search.draft)
 	}
 
 	// A picture that is not stable repaints whole and may clear: a size, a
@@ -142,6 +145,7 @@ func (t *tui) draw() {
 		{p: &t.last.sess, buf: &sess, overlay: true},
 		{p: &t.last.menu, buf: &menu, overlay: true},
 		{p: &t.last.rename, buf: &rename, overlay: true},
+		{p: &t.last.prompt, buf: &prompt, overlay: true},
 	}
 	for i := range t.floats {
 		bands = append(bands, band{p: floatPaints[i], buf: &floatBufs[i], overlay: true})
@@ -205,7 +209,7 @@ func (t *tui) draw() {
 			if y < pp.rect.Y || y >= pp.rect.Y+pp.rect.H {
 				continue
 			}
-			drawPaneRow(&body, pp.vt, pp.rect, y-pp.rect.Y, pp.row0, pp.sel, pp.hover)
+			drawPaneRow(&body, pp.vt, pp.rect, y-pp.rect.Y, pp.row0, pp.sel, pp.hover, pp.mark)
 		}
 	}
 	if padFreed {
@@ -314,6 +318,11 @@ func (t *tui) panePaints(panes []wire.PaneInfo) []panePaint {
 		if p.ID == t.scroll && t.scrollVT != nil {
 			pp.vt = t.scrollVT
 			pp.row0, _ = scrollStart(t.scrollVT, p.Rect.H, t.offset)
+			if t.search != nil && t.search.model != nil {
+				// The search runs over the tall terminal's rows, so the band
+				// highlights the rows it shows, live rows included.
+				pp.mark = &searchMark{model: t.search.model, row0: pp.row0, bg: t.searchBG()}
+			}
 		} else {
 			pp.vt = t.vts[p.ID]
 		}
@@ -354,6 +363,12 @@ func paneRowSigs(pp panePaint) []uint64 {
 				c = vt.NewCell(" ", vt.DefaultStyle())
 			}
 			h = mixCell(h, c)
+			if pp.mark.has(pp.row0 + row) {
+				h = mix(h, 5)
+				if pp.mark.current(pp.row0 + row) {
+					h = mix(h, 6)
+				}
+			}
 			if pp.sel.has(row*pp.rect.W+x) || pp.hover.has(row*pp.rect.W+x) {
 				h = mix(h, 1)
 				if pp.hover.has(row*pp.rect.W + x) {

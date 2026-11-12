@@ -3,6 +3,8 @@ package client
 import (
 	"sort"
 	"strings"
+
+	"dm/internal/vt"
 )
 
 // ScrollSearch finds one literal, case-insensitive substring in the text rows
@@ -148,4 +150,27 @@ func (s *ScrollSearch) OffsetFor(row, bandH, maxOff int) int {
 		off = maxOff
 	}
 	return off
+}
+
+// scrollSearch is the client's scrollback search. The draft is the query row's
+// text while the prompt is open; the model is the accepted query over the tall
+// terminal's rows, nil while no query is accepted.
+type scrollSearch struct {
+	draft string
+	model *ScrollSearch
+}
+
+// termRows reads a tall terminal's rows as text, one string per row, trailing
+// blanks dropped, so a search looks at the same rows the pane paints, live
+// rows included.
+func termRows(term *vt.Term) []string {
+	if term == nil {
+		return nil
+	}
+	_, rows := term.Grid().Size()
+	out := make([]string, rows)
+	for y := range out {
+		out[y] = strings.TrimRight(term.Grid().Text(y), " ")
+	}
+	return out
 }
