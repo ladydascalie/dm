@@ -10,10 +10,16 @@ import (
 	"dm/internal/wlabel"
 )
 
-// parseKeymaps walks the top-level tokens and fills cfg.modes. It rejects
-// unknown nodes, duplicate actions in one mode, empty keys and malformed
-// blocks. Multiple keymap nodes for one mode merge.
+// parseKeymaps walks the top-level tokens and fills cfg.modes and cfg.commands.
+// It rejects unknown nodes, duplicate actions in one mode, empty keys,
+// malformed blocks and bindings to commands the file does not define. Multiple
+// keymap nodes for one mode merge.
 func parseKeymaps(toks []kdl.Token, cfg *Config) error {
+	commands, err := findCommands(toks)
+	if err != nil {
+		return err
+	}
+	cfg.commands = commands
 	i := 0
 	for i < len(toks) {
 		t := toks[i]
@@ -273,6 +279,12 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 				if _, exists := m.actions[action]; exists || m.unbound[action] {
 					return fmt.Errorf("line %d: duplicate action %q in mode %q", actionLine, action, modeName)
 				}
+				if strings.HasPrefix(action, "command:") {
+					name := action[len("command:"):]
+					if _, ok := cfg.commands[name]; !ok {
+						return fmt.Errorf("line %d: action %q names no command in this file", actionLine, action)
+					}
+				}
 				if key == "none" {
 					m.unbound[action] = true
 					continue
@@ -289,11 +301,162 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 					m.bindings = append(m.bindings, binding{bytes: seq, action: action})
 				}
 			}
+		case "command":
+			// findCommands parsed and validated this block; consume its
+			// tokens so the body is not read as nodes.
+			if i+1 < len(toks) && toks[i+1].Kind == kdl.String {
+				i += 2
+			} else {
+				i++
+			}
+			if i < len(toks) && toks[i].Kind == kdl.LBrace {
+				i++
+				depth := 1
+				for i < len(toks) && depth > 0 {
+					switch toks[i].Kind {
+					case kdl.LBrace:
+						depth++
+					case kdl.RBrace:
+						depth--
+					}
+					i++
+				}
+			}
 		default:
 			return fmt.Errorf("line %d: unknown node %q", t.Line, t.Value)
 		}
 	}
 	return nil
+}
+
+// commandNameMax is the longest command name the config accepts, in bytes.
+const commandNameMax = 32
+
+// checkCommandName holds a command name to letters, digits, _ and -, 1 to 32
+// bytes.
+func checkCommandName(name string) error {
+	if name == "" {
+		return fmt.Errorf("command name must not be empty")
+	}
+	if len(name) > commandNameMax {
+		return fmt.Errorf("command name %q is longer than %d bytes", name, commandNameMax)
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-':
+		default:
+			return fmt.Errorf("command name %q must match [A-Za-z0-9_-]+", name)
+		}
+	}
+	return nil
+}
+
+// builtinActionNames returns the action names the built-in keymap binds,
+// read from the built-in text. That text defines no commands, so this never
+// recurses into itself. A command sharing one of these names would blur the
+// line between a built-in action and a user command, so the config rejects it.
+func builtinActionNames() map[string]bool {
+	names := make(map[string]bool)
+	for _, m := range LoadDefault().Keymaps() {
+		for _, a := range m.Actions {
+			names[a.Action] = true
+		}
+	}
+	return names
+}
+
+// findCommands walks the top-level tokens for command blocks and returns the
+// commands they define. It rejects a malformed block, a duplicate command
+// name, a duplicate, missing or empty run, an unknown key inside the block,
+// and a name that collides with a built-in action.
+func findCommands(toks []kdl.Token) (map[string]string, error) {
+	commands := make(map[string]string)
+	var builtin map[string]bool
+	depth := 0
+	for i := 0; i < len(toks); i++ {
+		t := toks[i]
+		if t.Kind == kdl.LBrace {
+			depth++
+			continue
+		}
+		if t.Kind == kdl.RBrace {
+			depth--
+			continue
+		}
+		if t.Kind != kdl.Ident || depth != 0 || t.Value != "command" {
+			continue
+		}
+		cmd, next, err := parseCommandBlock(toks, i)
+		if err != nil {
+			return nil, err
+		}
+		if builtin == nil {
+			builtin = builtinActionNames()
+		}
+		if _, dup := commands[cmd.Name]; dup {
+			return nil, fmt.Errorf("line %d: duplicate command %q", t.Line, cmd.Name)
+		}
+		if builtin[cmd.Name] {
+			return nil, fmt.Errorf("line %d: command name %q collides with a built-in action", t.Line, cmd.Name)
+		}
+		commands[cmd.Name] = cmd.Run
+		i = next - 1
+	}
+	return commands, nil
+}
+
+// parseCommandBlock reads one top-level command block: command <quoted name>
+// { run <quoted text> }. toks[i] is the command ident. It returns the command
+// and the index past the closing brace.
+func parseCommandBlock(toks []kdl.Token, i int) (Command, int, error) {
+	line := toks[i].Line
+	if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+		return Command{}, i, fmt.Errorf("line %d: expected a quoted name after command", line)
+	}
+	name := toks[i+1].Value
+	nameLine := toks[i+1].Line
+	if err := checkCommandName(name); err != nil {
+		return Command{}, i, fmt.Errorf("line %d: %w", nameLine, err)
+	}
+	i += 2
+	if i >= len(toks) || toks[i].Kind != kdl.LBrace {
+		return Command{}, i, fmt.Errorf("line %d: expected '{' after command %q", line, name)
+	}
+	i++
+	run := ""
+	runSet := false
+	for {
+		if i >= len(toks) {
+			return Command{}, i, fmt.Errorf("line %d: command %q needs a run key", nameLine, name)
+		}
+		if toks[i].Kind == kdl.RBrace {
+			i++
+			break
+		}
+		if toks[i].Kind != kdl.Ident || toks[i].Value != "run" {
+			return Command{}, i, fmt.Errorf("line %d: unknown key %q in command %q", toks[i].Line, toks[i].Value, name)
+		}
+		if runSet {
+			return Command{}, i, fmt.Errorf("line %d: duplicate run in command %q", toks[i].Line, name)
+		}
+		i++
+		if i >= len(toks) || toks[i].Kind != kdl.String {
+			return Command{}, i, fmt.Errorf("line %d: expected a quoted command after run", toks[i-1].Line)
+		}
+		if toks[i].Value == "" {
+			return Command{}, i, fmt.Errorf("line %d: run in command %q must not be empty", toks[i].Line, name)
+		}
+		run = toks[i].Value
+		runSet = true
+		i++
+	}
+	if !runSet {
+		return Command{}, i, fmt.Errorf("line %d: command %q needs a run key", nameLine, name)
+	}
+	return Command{Name: name, Run: run}, i, nil
 }
 
 // findPrefix scans the top-level tokens for the prefix node. It returns the
@@ -458,6 +621,11 @@ dashboard-preview 60
 // The diff key runs this in a floating pane through sh -c, in the selected pane folder.
 diff-command "git diff"
 dashboard-layout "full"
+// A command: define it here, then bind "command:<name>" to a key in a keymap.
+// The run text goes through sh -c in the window's folder.
+// command "tests" {
+//     run "go test ./..."
+// }
 
 keymap "main" {
     "send-prefix" "prefix"

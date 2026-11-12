@@ -122,6 +122,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"dashboard-layout":  `dashboard-layout "float"`,
 		"theme":             `theme "probe"`,
 		"keymap":            `keymap "main" { "detach" "D" }`,
+		"command":           `command "check" { run "go test ./..." }`,
 	}
 	if len(samples) != len(ConfigNodes) {
 		t.Fatalf("table has %d nodes, test has %d samples", len(ConfigNodes), len(samples))
@@ -213,6 +214,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"dashboard-layout":  `"full"`,
 		"theme":             "",
 		"keymap":            "the built-in table",
+		"command":           "none",
 	}
 	for _, n := range ConfigNodes {
 		if got, ok := want[n.Name]; !ok {
