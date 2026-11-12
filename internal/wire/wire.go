@@ -34,6 +34,10 @@ type Msg struct {
 	BG      string  `json:"bg,omitempty"` // terminal background the client detected
 	Ratio   float64 `json:"ratio,omitempty"`
 	NoFocus bool    `json:"nofocus,omitempty"`
+	// Argv is the program a new pane runs instead of a shell, program first.
+	// The split, new-window and new-workspace actions carry it. Empty means
+	// $SHELL -l.
+	Argv []string `json:"argv,omitempty"`
 
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`

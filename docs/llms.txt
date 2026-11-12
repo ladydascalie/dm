@@ -170,6 +170,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `dashboard-layout` | "full" or "float" | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. |
 | `theme` | a quoted theme name matching [A-Za-z0-9_-]+ | none | Select a theme from the themes directory beside config.kdl; no node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a { "action" "key" } block | `the built-in table` | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
+| `command` | a quoted name matching [A-Za-z0-9_-]+ and a { run "..." } block | `none` | Define a command a keymap can run: bind "command:<name>" to a key and it runs the run text through sh -c in the window's folder. |
 
 ## Keymaps
 
@@ -368,7 +369,7 @@ The marks are defined by the semantic prompts proposal: https://gitlab.freedeskt
 | `$DM_STATE/sessions/<name>/server.sock` | Unix socket the session server listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.sock` | Unix socket one pane's mux listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.log` | Pane output log. |
-| `$XDG_CONFIG_HOME/dm/config.kdl` | Prefix, keymaps, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run. |
+| `$XDG_CONFIG_HOME/dm/config.kdl` | Prefix, keymaps, commands, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run. |
 | `$XDG_CONFIG_HOME/dm/themes/<name>.kdl` | Theme palette, accents, glyphs and state styles. |
 
 ## Recipes

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/keymap"
 	"dm/internal/testutil"
 	"dm/internal/wire"
 )
@@ -32,10 +33,11 @@ func askFloat(t *testing.T, tui *tui, got chan wire.Msg) wire.Msg {
 	return wire.Msg{}
 }
 
-// floatReply is the server's answer to a float-open request.
+// floatReply is the server's answer to a float-open request, with the label
+// defaulted to the command's first word the way the server does.
 func floatReply(t *testing.T, req wire.Msg, command string) wire.Msg {
 	t.Helper()
-	res, err := json.Marshal(map[string]string{"command": command})
+	res, err := json.Marshal(map[string]string{"command": command, "label": floatLabelDefault(command)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +45,24 @@ func floatReply(t *testing.T, req wire.Msg, command string) wire.Msg {
 		Type: "resp", Action: "float-open", ID: req.ID, Float: req.Float,
 		OK: true, Res: res,
 	}
+}
+
+// commandTUI is a client whose main keymap binds t to the user command tests,
+// so a keypress dispatches it.
+func commandTUI(t *testing.T) (*tui, chan wire.Msg) {
+	t.Helper()
+	tui, got := switcherTUI(t)
+	cfg, err := keymap.ParseConfig(`command "tests" {
+	run "go test ./..."
+}
+keymap "main" {
+	"command:tests" "t"
+}`)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	tui.keymap = cfg
+	return tui, got
 }
 
 // openFloat opens the float and proves it came up, for the tests that need one.
@@ -79,11 +99,14 @@ func TestFloatKeyRequests(t *testing.T) {
 	if c, rw := tui.float.vt.Grid().Size(); c != r.W || rw != r.H {
 		t.Fatalf("terminal = %dx%d, want %dx%d", c, rw, r.W, r.H)
 	}
+	if len(req.Res) != 0 {
+		t.Fatalf("the dashboard diff request carries %s, want nothing so the server runs the diff-command", req.Res)
+	}
 	testutil.NoMsg(t, got)
 }
 
 // TestFloatReplyOpens: the reply puts the float on screen in mode "float" with
-// the command in its title, and a reply to an older request opens nothing.
+// the label in its title, and a reply to an older request opens nothing.
 func TestFloatReplyOpens(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
@@ -103,8 +126,8 @@ func TestFloatReplyOpens(t *testing.T) {
 	if len(tui.floats) != 1 {
 		t.Fatalf("floats = %d, want the one float", len(tui.floats))
 	}
-	if got := tui.float.float.Title; !strings.Contains(got, "git diff --stat") {
-		t.Fatalf("title = %q, want the command", got)
+	if got := tui.float.float.Title; !strings.Contains(got, " git ") {
+		t.Fatalf("title = %q, want the label, the command's first word", got)
 	}
 	if got := tui.float.float.Hint; !strings.Contains(got, "ctrl+b kills the float") {
 		t.Fatalf("hint = %q, want the kill key", got)
@@ -355,4 +378,65 @@ func TestFloatErrorRacingExitIsSwallowed(t *testing.T) {
 	if len(texts) == 0 || !strings.Contains(texts[len(texts)-1], "w1p1") {
 		t.Fatalf("toasts = %q, want the pane error", texts)
 	}
+}
+
+// TestCommandKeyOpensFloat: a command: action opens a float for the focused
+// pane with the command's text and the name as its label, and the reply's
+// label lands in the panel title.
+func TestCommandKeyOpensFloat(t *testing.T) {
+	t.Parallel()
+	tui, got := commandTUI(t)
+	// The prefix arms the main keymap; t then dispatches the command.
+	feed(tui, "\x02t")
+	var req wire.Msg
+	select {
+	case m := <-got:
+		req = m
+	case <-time.After(time.Second):
+		t.Fatal("t sent no float-open request")
+	}
+	if req.Type != "req" || req.Action != "float-open" || req.Target != "w1p1" {
+		t.Fatalf("t sent %+v, want a float-open request for the focused pane w1p1", req)
+	}
+	var res struct {
+		Command string `json:"command"`
+		Label   string `json:"label"`
+	}
+	if err := json.Unmarshal(req.Res, &res); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	if res.Command != "go test ./..." || res.Label != "tests" {
+		t.Fatalf("payload = %q/%q, want the command text and the name as label", res.Command, res.Label)
+	}
+	reply, err := json.Marshal(map[string]string{"command": "go test ./...", "label": "tests"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "float-open", ID: req.ID, Float: req.Float, OK: true, Res: reply})
+	if tui.float == nil || tui.mode != "float" {
+		t.Fatalf("the reply left float %v and mode %q", tui.float, tui.mode)
+	}
+	if got := tui.float.float.Title; !strings.Contains(got, " tests ") {
+		t.Fatalf("title = %q, want the label", got)
+	}
+	if got := tui.float.label; got != "tests" {
+		t.Fatalf("label = %q, want tests", got)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// TestCommandKeyUnknownToasts: a command: action that names no command in the
+// config toasts and opens nothing.
+func TestCommandKeyUnknownToasts(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	tui.runCommand("nope")
+	if tui.float != nil || tui.mode != "" {
+		t.Fatalf("runCommand left float %v and mode %q", tui.float, tui.mode)
+	}
+	texts := toastTexts(tui)
+	if len(texts) == 0 || texts[len(texts)-1] != "no command nope" {
+		t.Fatalf("toasts = %q, want %q", texts, "no command nope")
+	}
+	testutil.NoMsg(t, got)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -30,14 +31,27 @@ type floatProc struct {
 }
 
 // floatSpec is what the client asks for on float-open. The client picks the id
-// and the size; the server supplies the folder and the command.
+// and the size; the server supplies the folder, the command and the label.
 type floatSpec struct {
 	id      string
 	target  string
 	cwd     string
 	command string
+	label   string
 	cols    int
 	rows    int
+}
+
+// floatLabel is the text the float's panel title paints: the label the caller
+// named, else the command's first word.
+func floatLabel(command, label string) string {
+	if label != "" {
+		return label
+	}
+	if f := strings.Fields(command); len(f) > 0 {
+		return f[0]
+	}
+	return ""
 }
 
 // floatEnv is the child's environment: the server's own, plus the pane and
