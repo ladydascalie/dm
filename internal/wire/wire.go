@@ -34,6 +34,9 @@ type Msg struct {
 	BG      string  `json:"bg,omitempty"` // terminal background the client detected
 	Ratio   float64 `json:"ratio,omitempty"`
 	NoFocus bool    `json:"nofocus,omitempty"`
+	// Layout is the select-layout preset name: even-horizontal, even-vertical,
+	// main-horizontal, main-vertical or tiled.
+	Layout string `json:"layout,omitempty"`
 	// On is the optional value of a switch action: synchronize-panes. Nil
 	// toggles, true and false set the flag.
 	On *bool `json:"on,omitempty"`

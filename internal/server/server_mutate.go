@@ -844,6 +844,27 @@ func (s *server) cyclePane(step int) error {
 	return nil
 }
 
+// selectLayout rebuilds the active window's tree as one of the preset
+// layouts, over the window's pane ids in tree order. The pane set is exactly
+// preserved, so the focus survives untouched. A window with fewer than two
+// panes refuses: there is nothing to arrange.
+func (s *server) selectLayout(name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	win := s.st.ActiveWindow()
+	ids := layout.AllPanes(win.Root)
+	if len(ids) < 2 {
+		return name, fmt.Errorf("select-layout needs at least two panes, window %s has %d", win.ID, len(ids))
+	}
+	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked())
+	root, ok := layout.ApplyPreset(win.Root, name, ids, area.W, area.H)
+	if !ok {
+		return name, fmt.Errorf("no layout %q", name)
+	}
+	win.Root = root
+	return name, nil
+}
+
 func (s *server) closePane(target string) error {
 	s.mu.Lock()
 	win := s.st.ActiveWindow()

@@ -2,6 +2,8 @@
 // reads the tree and returns rectangles, and it imports nothing but stdlib.
 package layout
 
+import "math"
+
 // Node is a pane leaf or a split. Dir "row" means children side by side.
 // Sizes gives each child its share of the split, so a caller can keep the
 // existing pane at a ratio instead of always halving. Absent means equal.
@@ -163,6 +165,106 @@ func PruneLeaf(root *Node, target string) (*Node, bool) {
 		return root, true
 	}
 	return root, false
+}
+
+// ApplyPreset rebuilds the tree as one of tmux's five preset layouts over the
+// given pane ids, in order. It replaces the tree rather than reshaping it.
+// even-horizontal is one row split by width, even-vertical one column split by
+// height, main-vertical one wide pane on the left with the rest stacked to its
+// right, main-horizontal the transpose, and tiled the balanced grid: as close
+// to square as the area's aspect allows, filled row-major. Sizes split the same
+// way SplitSizes splits, so no pane ever gets zero cells. The pane set must
+// match the old tree exactly: the function refuses a set that drops, duplicates
+// or names a pane the tree does not hold, so it can never lose a pane. An
+// unknown name returns nil, false. w and h are the area's dimensions; tiled
+// reads only their aspect.
+func ApplyPreset(root *Node, name string, panes []string, w, h int) (*Node, bool) {
+	old := AllPanes(root)
+	if len(old) != len(panes) || len(panes) == 0 {
+		return nil, false
+	}
+	seen := make(map[string]bool, len(panes))
+	for _, id := range panes {
+		if seen[id] || !FindLeaf(root, id) {
+			return nil, false
+		}
+		seen[id] = true
+	}
+	switch name {
+	case "even-horizontal":
+		return &Node{Dir: "row", Kids: presetLeaves(panes)}, true
+	case "even-vertical":
+		return &Node{Dir: "col", Kids: presetLeaves(panes)}, true
+	case "main-horizontal":
+		return presetMain(panes, "col"), true
+	case "main-vertical":
+		return presetMain(panes, "row"), true
+	case "tiled":
+		return presetTiled(panes, w, h), true
+	}
+	return nil, false
+}
+
+// presetLeaves wraps the ids in fresh leaf nodes, in order.
+func presetLeaves(ids []string) []*Node {
+	kids := make([]*Node, len(ids))
+	for i, id := range ids {
+		kids[i] = &Node{Pane: id}
+	}
+	return kids
+}
+
+// presetMain builds the main-* shapes: panes[0] is the main pane and holds
+// half the area, and the rest stack in the other direction. dir is the split
+// between main and rest: "row" puts the main pane on the left, which is
+// main-vertical; "col" puts it on top, which is main-horizontal.
+func presetMain(panes []string, dir string) *Node {
+	if len(panes) == 1 {
+		return &Node{Pane: panes[0]}
+	}
+	rest := &Node{Dir: otherDir(dir), Kids: presetLeaves(panes[1:])}
+	return &Node{
+		Dir:   dir,
+		Kids:  []*Node{{Pane: panes[0]}, rest},
+		Sizes: []float64{1, 1},
+	}
+}
+
+// presetTiled builds the balanced grid: rows follow the area's aspect so the
+// cells land as close to square as it allows, and each row spans the full width
+// split into its cells, so a partial last row keeps full-width cells. Panes
+// fill the grid row-major; every cell holds a pane.
+func presetTiled(panes []string, w, h int) *Node {
+	n := len(panes)
+	rows := 1
+	if n > 1 && w > 0 && h > 0 {
+		rows = int(math.Ceil(math.Sqrt(float64(n) * float64(h) / float64(w))))
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	if rows > n {
+		rows = n
+	}
+	cols := (n + rows - 1) / rows
+	root := &Node{Dir: "col"}
+	for r := 0; r < rows; r++ {
+		start := r * cols
+		end := start + cols
+		if end > n {
+			end = n
+		}
+		root.Kids = append(root.Kids, &Node{Dir: "row", Kids: presetLeaves(panes[start:end])})
+	}
+	return root
+}
+
+// otherDir is the perpendicular direction: row's opposite is col.
+func otherDir(d string) string {
+	if d == "row" {
+		return "col"
+	}
+	return "row"
 }
 
 // ChildBoxRects divides a split's area into its children's boxes. The boxes

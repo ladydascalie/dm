@@ -300,6 +300,16 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		s.reply(cl, m, nil, err)
 
+	case "select-layout":
+		var name string
+		err := s.mutation(func() error {
+			var e error
+			name, e = s.selectLayout(m.Layout)
+			return e
+		})
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"layout": name}, err)
+
 	case "focus":
 		err := s.mutation(func() error { return s.setFocus(m.Target) })
 		s.afterMutation()

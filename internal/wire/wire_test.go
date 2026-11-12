@@ -159,6 +159,35 @@ func TestSetHistoryRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSelectLayoutRoundTrip proves the preset name survives the frame and that
+// an unset name leaves the key out.
+func TestSelectLayoutRoundTrip(t *testing.T) {
+	in := wire.Msg{Type: "req", Action: "select-layout", Layout: "main-vertical"}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Action != "select-layout" || out.Layout != "main-vertical" {
+		t.Fatalf("round trip = %q/%q, want select-layout/main-vertical", out.Action, out.Layout)
+	}
+
+	b, err := json.Marshal(wire.Msg{Type: "req", Action: "select-layout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["layout"]; ok {
+		t.Fatalf("unset layout kept the key: %s", b)
+	}
+}
+
 // TestSynchronizeOnRoundTrip proves the optional on field travels true and
 // false as real values, and that an absent value leaves the key out so nil
 // can toggle.

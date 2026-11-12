@@ -1,6 +1,9 @@
 package layout
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestLayout(t *testing.T) {
 	root := &Node{Dir: "row", Kids: []*Node{
@@ -753,5 +756,149 @@ func TestMoveUnknown(t *testing.T) {
 	}
 	if got := AllPanes(root); got[0] != "a" || got[1] != "b" {
 		t.Fatalf("a no-op move changed the tree: %v", got)
+	}
+}
+
+// presetNames are the five layouts ApplyPreset builds.
+var presetNames = []string{
+	"even-horizontal", "even-vertical",
+	"main-horizontal", "main-vertical", "tiled",
+}
+
+// TestApplyPreset runs every preset on 2, 3, 5 and 7 panes and asserts the
+// contract: the tree returns the ids in the exact order given, the rectangles
+// tile the area without an overlap or an empty pane, and the pane set never
+// gains or loses an id.
+func TestApplyPreset(t *testing.T) {
+	for _, n := range []int{2, 3, 5, 7} {
+		ids := make([]string, n)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("p%d", i)
+		}
+		kids := make([]*Node, n)
+		for i, id := range ids {
+			kids[i] = &Node{Pane: id}
+		}
+		old := &Node{Dir: "col", Kids: kids}
+		for _, name := range presetNames {
+			root, ok := ApplyPreset(old, name, ids, 80, 24)
+			if !ok {
+				t.Fatalf("%s on %d panes failed", name, n)
+			}
+			got := AllPanes(root)
+			if len(got) != len(ids) {
+				t.Fatalf("%s on %d panes holds %v, want exactly %v", name, n, got, ids)
+			}
+			for i := range got {
+				if got[i] != ids[i] {
+					t.Fatalf("%s on %d panes order = %v, want %v", name, n, got, ids)
+				}
+			}
+			area := Rect{X: 0, Y: 0, W: 80, H: 24}
+			rects := map[string]Rect{}
+			Layout(root, area, 0, rects)
+			if len(rects) != n {
+				t.Fatalf("%s on %d panes laid out %d rects", name, n, len(rects))
+			}
+			seen := map[[2]int]string{}
+			for id, r := range rects {
+				if r.W <= 0 || r.H <= 0 {
+					t.Fatalf("%s on %d panes: %s has empty rect %+v", name, n, id, r)
+				}
+				if !within(r, area) {
+					t.Fatalf("%s on %d panes: %s rect %+v escapes %+v", name, n, id, r, area)
+				}
+				for y := r.Y; y < r.Y+r.H; y++ {
+					for x := r.X; x < r.X+r.W; x++ {
+						if prev, ok := seen[[2]int{x, y}]; ok {
+							t.Fatalf("%s on %d panes: %s and %s overlap at %d,%d", name, n, prev, id, x, y)
+						}
+						seen[[2]int{x, y}] = id
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestApplyPresetUnknownName pins the one false case the brief names: a name
+// outside the five is refused without touching anything.
+func TestApplyPresetUnknownName(t *testing.T) {
+	old := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	if root, ok := ApplyPreset(old, "diagonal", []string{"a", "b"}, 80, 24); ok || root != nil {
+		t.Fatalf("unknown name = %+v, %v, want nil, false", root, ok)
+	}
+}
+
+// TestApplyPresetPaneSet pins the preservation rule: a set that drops a pane,
+// duplicates one, or names a pane the tree does not hold is refused, so
+// ApplyPreset can never lose or gain a pane.
+func TestApplyPresetPaneSet(t *testing.T) {
+	old := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}, {Pane: "c"}}}
+	for _, name := range presetNames {
+		if root, ok := ApplyPreset(old, name, []string{"a", "b"}, 80, 24); ok || root != nil {
+			t.Fatalf("%s dropped a pane = %+v, %v, want nil, false", name, root, ok)
+		}
+		if root, ok := ApplyPreset(old, name, []string{"a", "b", "b"}, 80, 24); ok || root != nil {
+			t.Fatalf("%s duplicated a pane = %+v, %v, want nil, false", name, root, ok)
+		}
+		if root, ok := ApplyPreset(old, name, []string{"a", "b", "ghost"}, 80, 24); ok || root != nil {
+			t.Fatalf("%s added a pane = %+v, %v, want nil, false", name, root, ok)
+		}
+	}
+}
+
+// TestApplyPresetMainShape pins the main geometries: the main pane holds half
+// the split's space and the rest stack in the perpendicular direction, so the
+// main pane is strictly larger than any stacked sibling once the stack has
+// more than one pane.
+func TestApplyPresetMainShape(t *testing.T) {
+	ids := []string{"m", "a", "b", "c"}
+	old := &Node{Dir: "row", Kids: []*Node{{Pane: "m"}, {Pane: "a"}, {Pane: "b"}, {Pane: "c"}}}
+	vertical, ok := ApplyPreset(old, "main-vertical", ids, 80, 24)
+	if !ok {
+		t.Fatal("main-vertical failed")
+	}
+	if vertical.Dir != "row" || len(vertical.Kids) != 2 || vertical.Kids[0].Pane != "m" {
+		t.Fatalf("main-vertical root %+v, want row {main, rest}", vertical)
+	}
+	if rest := vertical.Kids[1]; rest.Dir != "col" || len(rest.Kids) != 3 {
+		t.Fatalf("main-vertical rest %+v, want a column of three", rest)
+	}
+	horizontal, ok := ApplyPreset(old, "main-horizontal", ids, 80, 24)
+	if !ok {
+		t.Fatal("main-horizontal failed")
+	}
+	if horizontal.Dir != "col" || len(horizontal.Kids) != 2 || horizontal.Kids[0].Pane != "m" {
+		t.Fatalf("main-horizontal root %+v, want col {main, rest}", horizontal)
+	}
+	if rest := horizontal.Kids[1]; rest.Dir != "row" || len(rest.Kids) != 3 {
+		t.Fatalf("main-horizontal rest %+v, want a row of three", rest)
+	}
+	rects := map[string]Rect{}
+	Layout(vertical, Rect{X: 0, Y: 0, W: 80, H: 24}, 0, rects)
+	// The main pane owns the whole split's height; every stacked pane shares
+	// the right column, so the main pane is strictly the larger rectangle.
+	if rects["m"].H <= rects["a"].H || rects["m"].W*rects["m"].H <= rects["a"].W*rects["a"].H {
+		t.Fatalf("main pane %+v is not larger than a stacked pane %+v", rects["m"], rects["a"])
+	}
+}
+
+// TestApplyPresetTiledGrid pins the balanced grid on an unfactorable count:
+// the panes fill row-major, the last row keeps full-width cells, and every
+// cell holds a pane.
+func TestApplyPresetTiledGrid(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e"}
+	old := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}, {Pane: "c"}, {Pane: "d"}, {Pane: "e"}}}
+	root, ok := ApplyPreset(old, "tiled", ids, 80, 24)
+	if !ok {
+		t.Fatal("tiled failed")
+	}
+	// 80x24 is 3.3:1, so five panes want two rows of three and two.
+	if len(root.Kids) != 2 || root.Kids[0].Dir != "row" || len(root.Kids[0].Kids) != 3 || len(root.Kids[1].Kids) != 2 {
+		t.Fatalf("tiled root %+v, want a column of a 3-row and a 2-row", root)
+	}
+	if got := AllPanes(root); len(got) != 5 || got[0] != "a" || got[4] != "e" {
+		t.Fatalf("tiled order = %v, want row-major a..e", got)
 	}
 }
