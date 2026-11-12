@@ -562,6 +562,59 @@ func (s *server) closeWindow(id string) error {
 	s.mu.Unlock()
 	return nil
 }
+
+// swapPanes exchanges the ids of two leaves of the same tree. The panes trade
+// ids in place, so every rectangle keeps its shape and both ids stay leaves.
+// Focus is untouched: the focused pane's id survives the swap, so it keeps
+// focus wherever the swap leaves it.
+func (s *server) swapPanes(a, b string) error {
+	if a == "" || b == "" || a == b {
+		return fmt.Errorf("swap-panes needs two panes")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, win := range ws.Windows {
+			if !layout.FindLeaf(win.Root, a) || !layout.FindLeaf(win.Root, b) {
+				continue
+			}
+			if !layout.Swap(win.Root, a, b) {
+				return fmt.Errorf("no pane %q or %q", a, b)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no pane %q", a)
+}
+
+// movePane moves the leaf pane id to the edge of target in dir. Both ids must
+// be leaves of the same window; the moved pane takes the focus.
+func (s *server) movePane(id, target, dir string) error {
+	switch dir {
+	case "left", "right", "up", "down":
+	default:
+		return fmt.Errorf("dir must be left, right, up or down")
+	}
+	if id == "" || target == "" {
+		return fmt.Errorf("move-pane needs a pane and a target")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for _, win := range ws.Windows {
+			if !layout.FindLeaf(win.Root, id) || !layout.FindLeaf(win.Root, target) {
+				continue
+			}
+			if !layout.Move(win.Root, id, target, dir) {
+				return fmt.Errorf("no pane %q", id)
+			}
+			win.Focus = id
+			return nil
+		}
+	}
+	return fmt.Errorf("no pane %q", id)
+}
+
 func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool) (string, error) {
 	// A split opens in the folder its source pane stands in now. Ask before
 	// taking the lock, for the same reason a window asks.

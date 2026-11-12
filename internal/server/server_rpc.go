@@ -266,6 +266,20 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.pushSnapshot()
 		s.reply(cl, m, map[string]any{"rail": rail}, nil)
 
+	case "swap-panes":
+		// The two pane ids swap in place, so the rectangles keep their shapes
+		// and the focused pane keeps its id and its focus.
+		err := s.mutation(func() error { return s.swapPanes(m.Target, m.Other) })
+		s.afterMutation()
+		s.reply(cl, m, nil, err)
+
+	case "move-pane":
+		// The pane named by target moves to the edge of the pane named by
+		// other in dir and takes the focus.
+		err := s.mutation(func() error { return s.movePane(m.Target, m.Other, m.Dir) })
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"pane": m.Target}, err)
+
 	case "resize-split":
 		err := s.mutation(func() error { return s.resizeSplit(m.Target, m.Other, m.Ratio) })
 		if err == nil {

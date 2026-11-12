@@ -514,3 +514,244 @@ func TestLayoutChildrenInsideParent(t *testing.T) {
 		}
 	}
 }
+
+// noSingleKidNode reports whether every split in the tree holds at least two
+// kids, so no node ever holds exactly one.
+func noSingleKidNode(n *Node) bool {
+	if n == nil {
+		return true
+	}
+	if n.Pane != "" {
+		return true
+	}
+	if len(n.Kids) < 2 {
+		return false
+	}
+	for _, k := range n.Kids {
+		if !noSingleKidNode(k) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameSet reports whether two id lists hold exactly the same multisets.
+func sameSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	m := map[string]int{}
+	for _, id := range a {
+		m[id]++
+	}
+	for _, id := range b {
+		m[id]--
+		if m[id] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// parentSplit returns the split node whose Kids directly hold the leaf id.
+func parentSplit(n *Node, id string) *Node {
+	if n == nil || n.Pane != "" {
+		return nil
+	}
+	for _, k := range n.Kids {
+		if k.Pane == id {
+			return n
+		}
+	}
+	for _, k := range n.Kids {
+		if p := parentSplit(k, id); p != nil {
+			return p
+		}
+	}
+	return nil
+}
+
+// TestSwapKeepsRects proves a swap trades the two ids in place: every pane
+// keeps its rectangle and the tree shape is untouched.
+func TestSwapKeepsRects(t *testing.T) {
+	root := &Node{Dir: "row", Sizes: []float64{0.2, 0.8}, Kids: []*Node{
+		{Pane: "a"},
+		{Dir: "col", Sizes: []float64{0.25, 0.75}, Kids: []*Node{
+			{Pane: "b"}, {Pane: "c"},
+		}},
+	}}
+	area := Rect{X: 0, Y: 0, W: 100, H: 24}
+	before := map[string]Rect{}
+	Layout(root, area, 0, before)
+	sorted := AllPanes(root)
+
+	if !Swap(root, "b", "c") {
+		t.Fatal("swap failed")
+	}
+	if !noSingleKidNode(root) {
+		t.Fatal("a swap created a single-kid split")
+	}
+	if !sameSet(AllPanes(root), sorted) {
+		t.Fatalf("a swap changed the pane set: %v", AllPanes(root))
+	}
+	afterRects := map[string]Rect{}
+	Layout(root, area, 0, afterRects)
+	for id, r := range before {
+		got := afterRects[id]
+		switch id {
+		case "b":
+			if got != before["c"] {
+				t.Fatalf("after the swap b took rect %v, want c's %v", got, before["c"])
+			}
+		case "c":
+			if got != before["b"] {
+				t.Fatalf("after the swap c took rect %v, want b's %v", got, before["b"])
+			}
+		default:
+			if got != r {
+				t.Fatalf("%s rect moved: %v -> %v", id, r, got)
+			}
+		}
+	}
+}
+
+// TestSwapSelfAndBack pins the no-op edges: swapping a leaf with itself
+// leaves the tree alone, and two swaps restore the original ids.
+func TestSwapSelfAndBack(t *testing.T) {
+	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	if !Swap(root, "a", "a") {
+		t.Fatal("swapping a leaf with itself returned false")
+	}
+	if got := AllPanes(root); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("a self-swap changed the tree: %v", got)
+	}
+	if !Swap(root, "a", "b") || !Swap(root, "a", "b") {
+		t.Fatal("a round-trip swap failed")
+	}
+	if got := AllPanes(root); got[0] != "a" || got[1] != "b" {
+		t.Fatalf("a round-trip swap changed the tree: %v", got)
+	}
+}
+
+// TestSwapUnknown pins the false cases: an id that is not a leaf in the tree
+// refuses the swap and leaves the tree alone.
+func TestSwapUnknown(t *testing.T) {
+	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	if Swap(root, "a", "ghost") || Swap(root, "ghost", "b") || Swap(root, "ghost", "ghost2") {
+		t.Fatal("a swap naming a missing pane returned true")
+	}
+	if got := AllPanes(root); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("a refused swap changed the tree: %v", got)
+	}
+	if Swap(nil, "a", "b") {
+		t.Fatal("a swap on a nil tree returned true")
+	}
+}
+
+// TestMoveFromDeepLeaf moves a top-level leaf to the edge of a pane deep in
+// the tree, in all four directions, and pins where the moved pane lands.
+func TestMoveFromDeepLeaf(t *testing.T) {
+	mk := func() *Node {
+		return &Node{Dir: "row", Kids: []*Node{
+			{Pane: "a"},
+			{Dir: "col", Kids: []*Node{
+				{Pane: "b"},
+				{Dir: "col", Kids: []*Node{{Pane: "c"}, {Pane: "t"}}},
+			}},
+		}}
+	}
+	cases := []struct {
+		dir     string
+		wantDir string
+		side    int // 1 = moved pane after target, -1 = before
+	}{
+		{"right", "row", 1},
+		{"left", "row", -1},
+		{"down", "col", 1},
+		{"up", "col", -1},
+	}
+	for _, c := range cases {
+		root := mk()
+		if !Move(root, "a", "t", c.dir) {
+			t.Fatalf("move %s failed", c.dir)
+		}
+		if !noSingleKidNode(root) {
+			t.Fatalf("move %s left a single-kid split", c.dir)
+		}
+		if !sameSet(AllPanes(root), []string{"a", "b", "c", "t"}) {
+			t.Fatalf("move %s changed the pane set: %v", c.dir, AllPanes(root))
+		}
+		p := parentSplit(root, "t")
+		if p == nil || p.Dir != c.wantDir {
+			t.Fatalf("move %s: target's parent = %+v, want a %s split", c.dir, p, c.wantDir)
+		}
+		at := -1
+		for i, k := range p.Kids {
+			if k.Pane == "t" {
+				at = i
+			}
+		}
+		if at < 0 || at+c.side < 0 || at+c.side >= len(p.Kids) || p.Kids[at+c.side].Pane != "a" {
+			t.Fatalf("move %s: %q is not %s of %q in %+v", c.dir, "a", c.dir, "t", p.Kids)
+		}
+	}
+}
+
+// TestMoveCollapse proves the collapse rule after every move: moving a pane
+// never leaves a node holding exactly one kid, for the shapes the prune
+// creates.
+func TestMoveCollapse(t *testing.T) {
+	leaf := func(id string) *Node { return &Node{Pane: id} }
+	row := func(kids ...*Node) *Node { return &Node{Dir: "row", Kids: kids} }
+	col := func(kids ...*Node) *Node { return &Node{Dir: "col", Kids: kids} }
+	cases := []struct {
+		name string
+		root *Node
+		id   string
+		tgt  string
+		dir  string
+		want []string
+	}{
+		{"siblings collapse the root", col(leaf("a"), leaf("t")), "a", "t", "right", []string{"t", "a"}},
+		{"row sibling", row(leaf("a"), leaf("t")), "a", "t", "down", []string{"t", "a"}},
+		{"target under the chain", row(leaf("a"), col(leaf("b"), leaf("t"))), "a", "t", "right", []string{"b", "t", "a"}},
+		{"moved pane's parent collapses", row(col(leaf("a"), leaf("b")), leaf("t")), "b", "t", "right", []string{"a", "t", "b"}},
+		{"deep target keeps its split", col(row(leaf("a"), leaf("b")), col(leaf("t"), leaf("c"))), "a", "t", "left", []string{"b", "a", "t", "c"}},
+	}
+	for _, c := range cases {
+		if !Move(c.root, c.id, c.tgt, c.dir) {
+			t.Fatalf("%s: move failed", c.name)
+		}
+		if !noSingleKidNode(c.root) {
+			t.Fatalf("%s: a move left a single-kid split", c.name)
+		}
+		if got := AllPanes(c.root); !sameSet(got, c.want) || len(got) != len(c.want) {
+			t.Fatalf("%s: panes %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestMoveUnknown pins the false cases: a missing id, a target outside the
+// tree and a nil tree all refuse the move without touching it. Moving a pane
+// to its own edge is a no-op.
+func TestMoveUnknown(t *testing.T) {
+	root := &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}}
+	if Move(root, "a", "ghost", "right") {
+		t.Fatal("a move to a missing target returned true")
+	}
+	if Move(root, "ghost", "b", "right") {
+		t.Fatal("a move of a missing pane returned true")
+	}
+	if Move(nil, "a", "b", "right") {
+		t.Fatal("a move on a nil tree returned true")
+	}
+	if got := AllPanes(root); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("a refused move changed the tree: %v", got)
+	}
+	if !Move(root, "a", "a", "right") {
+		t.Fatal("a move to its own edge returned false")
+	}
+	if got := AllPanes(root); got[0] != "a" || got[1] != "b" {
+		t.Fatalf("a no-op move changed the tree: %v", got)
+	}
+}
