@@ -218,7 +218,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var id string
 		err := s.mutation(func() error {
 			var e error
-			id, e = s.split(m.Target, m.Dir, m.Cwd, m.Ratio, m.NoFocus)
+			id, e = s.split(m.Target, m.Dir, m.Cwd, m.Ratio, m.NoFocus, m.Argv)
 			return e
 		})
 		s.afterMutation()
@@ -308,7 +308,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var wid, pid string
 		err := s.mutation(func() error {
 			var e error
-			wid, pid, e = s.newWindow(m.Target, m.Name, m.Cwd, m.NoFocus)
+			wid, pid, e = s.newWindow(m.Target, m.Name, m.Cwd, m.NoFocus, m.Argv)
 			return e
 		})
 		s.afterMutation()
@@ -332,7 +332,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var wsid, wid, pid string
 		err := s.mutation(func() error {
 			var e error
-			wsid, wid, pid, e = s.newWorkspace(m.Name, m.Window, m.Cwd, m.Project, m.NoFocus)
+			wsid, wid, pid, e = s.newWorkspace(m.Name, m.Window, m.Cwd, m.Project, m.NoFocus, m.Argv)
 			return e
 		})
 		s.afterMutation()

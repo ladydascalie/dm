@@ -158,6 +158,34 @@ func TestWorkspaceFoldRoundTrip(t *testing.T) {
 	}
 }
 
+// TestArgvRoundTrip proves a pane's argv survives the state file: a server
+// restart reads the same program the pane was born with, and a pane without
+// one stays a shell.
+func TestArgvRoundTrip(t *testing.T) {
+	t.Parallel()
+	st := NewStateAt(t.TempDir(), "argv")
+	st.Panes["w1p1"] = &PaneState{Cwd: "/tmp", Shell: "/bin/sh", Cols: 80, Rows: 24,
+		Argv: []string{"htop", "-d", "5"}}
+	st.Panes["w1p2"] = &PaneState{Cwd: "/tmp", Shell: "/bin/sh", Cols: 80, Rows: 24}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(st.Dir(), "argv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := got.Panes["w1p1"]
+	if ps == nil {
+		t.Fatal("the argv pane did not load")
+	}
+	if len(ps.Argv) != 3 || ps.Argv[0] != "htop" || ps.Argv[1] != "-d" || ps.Argv[2] != "5" {
+		t.Fatalf("argv = %v, want [htop -d 5]", ps.Argv)
+	}
+	if got := got.Panes["w1p2"].Argv; len(got) != 0 {
+		t.Fatalf("shell pane argv = %v, want empty", got)
+	}
+}
+
 // TestSaveConcurrent runs many saves over one state at once. It is a
 // regression guard, not a reliable red on the old fixed-name temp file: the
 // overlap window is real but the scheduler decides whether it trips. It
