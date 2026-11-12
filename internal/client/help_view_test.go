@@ -125,24 +125,24 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 	return b.String()
 }
 
-// TestHelpBoxSizesToWidestRowAt100x30 proves the box holds the default layout
+// TestHelpBoxSizesToWidestRowAt100x34 proves the box holds the default layout
 // whole, that both border rows own a row, and that the frame carries its title
 // and hint.
-func TestHelpBoxSizesToWidestRowAt100x30(t *testing.T) {
+func TestHelpBoxSizesToWidestRowAt100x34(t *testing.T) {
 	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
-	g, ok := helpBoxGeometry(100, 30, keys)
+	g, ok := helpBoxGeometry(100, 34, keys)
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
 	}
-	p := helpBoxParse(t, helpBoxDraw(t, 100, 30, keys))
+	p := helpBoxParse(t, helpBoxDraw(t, 100, 34, keys))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
 	if want := g.inner + 2; x1-x0+1 != want {
 		t.Fatalf("box width = %d, want %d", x1-x0+1, want)
 	}
-	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 29 {
-		t.Fatalf("box %d,%d..%d,%d is not inside 100x30", x0, y0, x1, y1)
+	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 33 {
+		t.Fatalf("box %d,%d..%d,%d is not inside 100x34", x0, y0, x1, y1)
 	}
 	if want := g.h + 2; y1-y0+1 != want {
 		t.Fatalf("box height = %d, want %d", y1-y0+1, want)
@@ -395,16 +395,26 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value.
-const helpBoxDefaultSHA256 = "21d3e3703d4c65b518f717210ff5839c9e822fa2f2556f596a16c501c95f98d4"
+const helpBoxDefaultSHA256 = "f76229406757f21eaf519073b37d78dc9da9d162dbccaf333fba9d9c19b740de"
 
-// TestHelpBoxDefaultBytesFrozen proves the default config, which carries no
-// tags, paints the same bytes as the box did before help tags.
+// TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
+// help box. The four layout and session actions carry their section tags; the
+// rest of the default config is untagged.
 func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
 	t.Parallel()
 	entries := keymap.LoadDefault().HelpEntries()
+	want := map[string]string{
+		"swap with next / prev pane": "Layout",
+		"cycle layout":               "Layout",
+		"synchronize panes":          "Session",
+	}
 	for _, e := range entries {
-		if e.Section != "" {
-			t.Fatalf("default entry %q carries section %q, want none", e.Action, e.Section)
+		s, tagged := want[e.Action]
+		if e.Section == "" && tagged {
+			t.Fatalf("default entry %q owes section %q", e.Action, s)
+		}
+		if e.Section != "" && (!tagged || e.Section != s) {
+			t.Fatalf("default entry %q carries section %q", e.Action, e.Section)
 		}
 	}
 	sum := sha256.Sum256([]byte(helpBoxDraw(t, 100, 30, entries)))

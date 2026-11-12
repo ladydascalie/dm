@@ -118,9 +118,12 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `z` | zoom pane |
 | `c` | new window |
 | `w` / `W` | next / previous window |
+| `o` / `O` | swap with the next / previous pane |
+| `u` | cycle the window to the next preset layout |
 | `0-9` | select window |
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
+| `S` | synchronize panes |
 | `a` | dashboard: every pane in a full-screen table |
 | `m` | message box: the session's log as a floating pane |
 | `N` | notification centre: the recent `notify/` entries |
@@ -131,10 +134,11 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `ctrl+r` | reload config.kdl and its theme |
 | `d` / `q` | detach |
 
-The layout actions have no keys in the built-in keymap: `swap-panes`,
-`move-pane`, `select-layout` and `synchronize-panes` are RPC-only, reached
-through `dm exec` as shown in the RPC section. The client cannot dispatch
-them from a key, so a `config.kdl` row for one toasts `no binding`.
+The swap and layout actions are reachable from keys too: `o` / `O` swap the
+focused pane with the next / previous pane, `u` cycles the window to the next
+preset layout, and `S` synchronizes panes. A swap that names two panes
+(`swap-panes` with `other`), a `move-pane`, or an explicit preset layout are
+RPC-only, reached through `dm exec` as shown in the RPC section.
 
 `prefix r` opens the rename prompt as a line above the status bar. It starts
 from the workspace's current name, so typing appends to it. Backspace deletes
@@ -950,8 +954,10 @@ dm exec '{"action":"split","target":"w1p1","dir":"left"}'
 dm exec '{"action":"focus-dir","dir":"right"}'
 dm exec '{"action":"new-window","name":"tests"}'
 dm exec '{"action":"swap-panes","target":"w1p1","other":"w1p2"}'
+dm exec '{"action":"swap-panes","target":"w1p1","dir":"right"}'
 dm exec '{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}'
 dm exec '{"action":"select-layout","layout":"tiled"}'
+dm exec '{"action":"select-layout","layout":"next"}'
 dm exec '{"action":"synchronize-panes","on":true}'
 dm rename-workspace s1 api-work
 dm write-to w1p1 --msg "go test ./..." --enter
@@ -987,7 +993,10 @@ actions `msg-post`, `msg-list`, `msg-wait`, `msg-sub`, `msg-clear`,
 
 `swap-panes` trades two pane ids in place: `target` and `other` swap
 positions, every rectangle keeps its shape, and focus stays on the focused
-pane. A swap naming a pane that is not a leaf of the tree is refused.
+pane. A swap naming a pane that is not a leaf of the tree is refused. As an
+alternative to `other`, a `dir` field with no `other` swaps the focused pane
+with the pane it faces in that direction, the same neighbour `focus-dir`
+would reach, and focus stays on the focused pane.
 
 `move-pane` moves a leaf pane to the edge of another: `target` names the pane
 that moves, `other` the pane it lands beside, and `dir` the side (`left`,
@@ -1007,7 +1016,11 @@ so the focus survives:
 - `tiled`: the balanced grid, as close to square as the area allows, filled
   row-major
 
-A window with fewer than two panes refuses with an error naming the reason.
+A layout value of `next` cycles the presets forward from the stored name,
+wrapping to the first. The applied preset is stored on the window, and a
+manual tree change (a split, a move, a close or a swap) clears the stored
+name, so `next` restarts at the first preset. A window with fewer than two
+panes refuses with an error naming the reason.
 
 `synchronize-panes` is tmux's sync for the active window, and only the active
 window: other windows keep their panes independent. A request with no `on`
