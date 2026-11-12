@@ -394,9 +394,12 @@ func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l
 	inner := layout.Rect{X: g.rect.X + 1, Y: g.rect.Y + 1, W: g.rect.W - 2, H: g.rect.H - 2}
 	panel.PaintPanel(buf, th, inner, panel.PanelTitle{
 		Text:  th.Glyphs.BorderHorizontal + " layout ",
-		Style: "\x1b[0m\x1b[90m",
+		Style: "\x1b[0m\x1b[90m" + groundSGR(th.Palette.RailBG),
 		Fill:  th.Glyphs.BorderHorizontal,
 	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
+		// The palette carries a solid ground, or the panes under it bleed
+		// through every cell its content does not paint.
+		fillRect(b, r, groundSGR(th.Palette.RailBG))
 		if g.preview.W > 0 {
 			rects, ok := layout.MiniRects(win.Root, g.preview, l.panes, layoutRowName(l.sel))
 			if ok {
@@ -419,17 +422,20 @@ func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l
 				name = layoutPresetNames[i]
 			}
 			line := cells.Pad(" "+mark+" "+cells.Pad(name, 16)+" "+cells.Pad(now, 3), r.W)
-			colour := "\x1b[0m"
+			// The ground rides on every row, or the padded cells erase the
+			// interior fill and the panes show through the list.
+			colour := "\x1b[0m" + groundSGR(th.Palette.RailBG)
 			switch {
 			case i == l.sel:
 				colour = "\x1b[0m\x1b[30;46m"
 			case one && i < layoutCustomRow:
-				colour = "\x1b[0m\x1b[90m"
+				colour = "\x1b[0m\x1b[90m" + groundSGR(th.Palette.RailBG)
 			}
 			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", g.listY+i+1, r.X+1, colour, line)
 		}
 		foot := layoutFooterText(g.preview.W > 0, len(l.panes))
-		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s", g.footY+1, r.X+1, cells.Pad(foot, r.W))
+		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s%s", g.footY+1, r.X+1,
+			groundSGR(th.Palette.RailBG), cells.Pad(foot, r.W))
 	})
 	buf.WriteString("\x1b[0m")
 }
@@ -449,13 +455,23 @@ func paintLayoutPreview(buf *bytes.Buffer, th theme.Theme, rects map[string]layo
 	accent := theme.Style{Fg: styleColor(th.Palette.BarAccent), Attrs: theme.AttrBold}.SGR()
 	for id, r := range rects {
 		style := dim
+		ground := groundSGR(th.Palette.RailHoverBG)
+		textStyle := "\x1b[0m" + groundSGR(th.Palette.RailHoverBG) + "\x1b[37m"
 		if id == focus {
 			style = accent
+			ground = groundSGR(th.Palette.RailFocusBG)
+			textStyle = theme.Style{Fg: styleColor(th.Palette.BarAccent),
+				Bg: styleColor(th.Palette.RailFocusBG), Attrs: theme.AttrBold}.SGR()
 		}
 		if r.W < 2 || r.H < 2 {
 			continue
 		}
 		g := th.Glyphs
+		if r.W > 2 && r.H > 2 {
+			// A box carries its own ground, so the boxes read against the
+			// palette and against each other.
+			fillRect(buf, layout.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2}, ground)
+		}
 		fmt.Fprintf(buf, "%s\x1b[%d;%dH%s%s%s", style, r.Y+1, r.X+1,
 			g.BorderTopLeft, strings.Repeat(g.BorderHorizontal, r.W-2), g.BorderTopRight)
 		fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", r.Y+r.H, r.X+1,
@@ -467,8 +483,19 @@ func paintLayoutPreview(buf *bytes.Buffer, th theme.Theme, rects map[string]layo
 			}
 		}
 		if r.W >= 4 && r.H >= 3 {
-			fmt.Fprintf(buf, "\x1b[0m\x1b[%d;%dH%s", r.Y+2, r.X+2, cells.Elide(id, r.W-2))
+			fmt.Fprintf(buf, "%s\x1b[%d;%dH%s", textStyle, r.Y+2, r.X+2, cells.Elide(id, r.W-2))
 		}
 	}
 	buf.WriteString("\x1b[0m")
+}
+
+// fillRect paints every cell of r with the given ground, one row at a time.
+// It writes spaces, so whatever a later painter puts on a cell wins.
+func fillRect(buf *bytes.Buffer, r layout.Rect, ground string) {
+	if r.W <= 0 || r.H <= 0 {
+		return
+	}
+	for y := 0; y < r.H; y++ {
+		fmt.Fprintf(buf, "%s\x1b[%d;%dH%s\x1b[0m", ground, r.Y+y+1, r.X+1, strings.Repeat(" ", r.W))
+	}
 }
