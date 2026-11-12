@@ -108,8 +108,9 @@ func TestCellSGRSuppressesUnchanged(t *testing.T) {
 
 // TestFrameStyleCacheHitRate proves the cache earns its place on a real frame:
 // every scene asks for the same styles again and again, so most asks hit.
+// The style cache is process-global, so this measurement must not run beside
+// another test that renders or resets it. Keep it sequential.
 func TestFrameStyleCacheHitRate(t *testing.T) {
-	t.Parallel()
 	scenes, err := shot.LoadScenes(filepath.Join(shotData, "scenes.json"))
 	if errors.Is(err, fs.ErrNotExist) {
 		t.Skipf("no scene data at %s", shotData)
@@ -143,8 +144,9 @@ func TestFrameStyleCacheHitRate(t *testing.T) {
 
 // TestStyledFrameHitRateWarms proves a frame full of a coloured style hits on
 // every cell after the first: the cache is warm for the next frame.
+// The style cache is process-global, so this measurement must not run beside
+// another test that renders or resets it. Keep it sequential.
 func TestStyledFrameHitRateWarms(t *testing.T) {
-	t.Parallel()
 	f := newFrameTUI(t, 100, 20, 34)
 	term := f.tui.vts["w1p1"]
 	for i := 0; i < 20; i++ {
