@@ -18,7 +18,7 @@ func newTestPane(fg, bg string) *paneProc {
 	return &paneProc{
 		id:   "w1p1",
 		vt:   vt.NewTerm(20, 3),
-		ring: &scrollRing{},
+		ring: NewRing(ringDefault),
 		subs: map[*subConn]bool{},
 		st:   wire.Status{State: "idle"},
 		fg:   fg,

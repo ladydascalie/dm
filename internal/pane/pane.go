@@ -147,8 +147,17 @@ func (s *subConn) send(m wire.Msg) error {
 	return wire.WriteMsg(s.c, m)
 }
 
-// ringMax is the scrollback a pane keeps: a fixed 512 KiB, allocated once.
-const ringMax = 512 << 10
+// The ring budget bounds. ringDefault is the 512 KiB scrollback a pane has
+// always carried; the config may ask for anything from ringMin to ringMax.
+const (
+	ringDefault = 512 << 10
+	ringMin     = 64 << 10
+	ringMax     = 8 << 20
+)
+
+// memHeadroom is the heap a pane may use above its ring: one screen, the VT
+// parser and a shell's output.
+const memHeadroom = 32 << 20
 
 // flushIdle is how long a pane's output must be quiet before the parser's
 // pending grapheme cluster is placed. The parser holds a cluster until the
@@ -156,32 +165,69 @@ const ringMax = 512 << 10
 // otherwise leave the last character off the grid until it writes again.
 const flushIdle = 16 * time.Millisecond
 
-// scrollRing is the pane's history: a circular buffer over one fixed array.
-// Writing wraps in place, so a burst never grows the daemon's heap and no
-// trim leaves a larger backing array behind.
+// scrollRing is the pane's history: a circular buffer over a fixed budget.
+// Writing wraps in place, so a burst never grows the daemon's heap and no trim
+// leaves a larger backing array behind. A resize copies the newest bytes into a
+// fresh buffer, so the ring never holds more than its budget.
 //
 // Locking is the caller's: paneProc.mu guards the ring.
 type scrollRing struct {
-	buf [ringMax]byte
-	n   int // bytes held, at most ringMax
+	buf []byte
+	n   int // bytes held, at most len(buf)
 	w   int // next byte to overwrite
+}
+
+// NewRing returns a ring that holds at most budget bytes.
+func NewRing(budget int) *scrollRing {
+	return &scrollRing{buf: make([]byte, budget)}
+}
+
+// Budget is the number of bytes the ring may hold.
+func (r *scrollRing) Budget() int { return len(r.buf) }
+
+// Resize gives the ring a new budget. The newest min(held, budget) bytes survive
+// in a fresh buffer, oldest first: a shrink keeps the tail, a grow keeps
+// everything. A budget of zero or less is refused and leaves the ring alone.
+func (r *scrollRing) Resize(budget int) {
+	if budget <= 0 {
+		return
+	}
+	keep := min(r.n, budget)
+	next := make([]byte, budget)
+	if keep > 0 {
+		size := len(r.buf)
+		start := (r.w - r.n + size) % size
+		start = (start + r.n - keep) % size
+		end := start + keep
+		if end <= size {
+			copy(next, r.buf[start:end])
+		} else {
+			n := copy(next, r.buf[start:])
+			copy(next[n:], r.buf[:end-size])
+		}
+	}
+	r.buf, r.n, r.w = next, keep, keep%budget
 }
 
 // Write appends b, dropping the oldest bytes once the ring is full.
 func (r *scrollRing) Write(b []byte) {
-	if len(b) >= ringMax {
-		copy(r.buf[:], b[len(b)-ringMax:])
-		r.n, r.w = ringMax, 0
+	size := len(r.buf)
+	if size == 0 {
+		return
+	}
+	if len(b) >= size {
+		copy(r.buf, b[len(b)-size:])
+		r.n, r.w = size, 0
 		return
 	}
 	n := copy(r.buf[r.w:], b)
-	r.w = (r.w + n) % ringMax
+	r.w = (r.w + n) % size
 	if rest := b[n:]; len(rest) > 0 {
 		n = copy(r.buf[r.w:], rest)
-		r.w = (r.w + n) % ringMax
+		r.w = (r.w + n) % size
 	}
-	if r.n += len(b); r.n > ringMax {
-		r.n = ringMax
+	if r.n += len(b); r.n > size {
+		r.n = size
 	}
 }
 
@@ -198,18 +244,23 @@ func (r *scrollRing) Bytes() []byte {
 // scratch slice reuses it instead of allocating the ring again.
 func (r *scrollRing) appendTo(dst []byte) []byte {
 	dst = dst[:0]
-	start := (r.w - r.n + ringMax) % ringMax
+	if r.n == 0 {
+		return dst
+	}
+	size := len(r.buf)
+	start := (r.w - r.n + size) % size
 	end := start + r.n
-	if end <= ringMax {
+	if end <= size {
 		return append(dst, r.buf[start:end]...)
 	}
 	dst = append(dst, r.buf[start:]...)
-	return append(dst, r.buf[:end-ringMax]...)
+	return append(dst, r.buf[:end-size]...)
 }
 
 // at returns the byte at logical index i, where 0 is the oldest byte held.
 func (r *scrollRing) at(i int) byte {
-	return r.buf[(r.w-r.n+i+ringMax)%ringMax]
+	size := len(r.buf)
+	return r.buf[(r.w-r.n+i+size)%size]
 }
 
 // indexByte returns the logical index of the first c at or after from, or -1.
@@ -233,7 +284,8 @@ func (r *scrollRing) slice(from, to int) []byte {
 	if from >= to {
 		return []byte{}
 	}
-	start := (r.w - r.n + from + ringMax) % ringMax
+	size := len(r.buf)
+	start := (r.w - r.n + from + size) % size
 	out := make([]byte, to-from)
 	n := copy(out, r.buf[start:])
 	if n < len(out) {
@@ -242,55 +294,85 @@ func (r *scrollRing) slice(from, to int) []byte {
 	return out
 }
 
-func Run(args []string) error {
+// paneOpts is the parsed command line of a pane daemon.
+type paneOpts struct {
+	id, session, cwd, shell, fg, bg string
+	cols, rows, history             int
+}
+
+// historyBudget is the one rule the pane flag and the set-history action share:
+// the config may ask for a ring between ringMin and ringMax, and nothing else.
+func historyBudget(budget int) error {
+	if budget < ringMin || budget > ringMax {
+		return fmt.Errorf("history budget %d bytes is outside %d..%d", budget, ringMin, ringMax)
+	}
+	return nil
+}
+
+// parsePaneArgs parses and validates the pane's command line before Run touches
+// a pty or a socket.
+func parsePaneArgs(args []string) (*paneOpts, error) {
 	fs := flag.NewFlagSet("__pane", flag.ContinueOnError)
-	id := fs.String("id", "", "pane id")
-	session := fs.String("session", "", "session name")
-	cwd := fs.String("cwd", "", "working directory")
-	shell := fs.String("shell", "", "shell")
-	cols := fs.Int("cols", 80, "columns")
-	rows := fs.Int("rows", 24, "rows")
-	fg := fs.String("fg", osc.TermFG, "terminal foreground colour")
-	bg := fs.String("bg", osc.TermBG, "terminal background colour")
+	o := &paneOpts{}
+	fs.StringVar(&o.id, "id", "", "pane id")
+	fs.StringVar(&o.session, "session", "", "session name")
+	fs.StringVar(&o.cwd, "cwd", "", "working directory")
+	fs.StringVar(&o.shell, "shell", "", "shell")
+	fs.IntVar(&o.cols, "cols", 80, "columns")
+	fs.IntVar(&o.rows, "rows", 24, "rows")
+	fs.StringVar(&o.fg, "fg", osc.TermFG, "terminal foreground colour")
+	fs.StringVar(&o.bg, "bg", osc.TermBG, "terminal background colour")
+	fs.IntVar(&o.history, "history", ringDefault, "scrollback ring budget in bytes")
 	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if o.id == "" || o.session == "" {
+		return nil, fmt.Errorf("pane needs --id and --session")
+	}
+	if o.fg == "" || o.bg == "" {
+		return nil, fmt.Errorf("pane needs a non-empty --fg and --bg")
+	}
+	if err := historyBudget(o.history); err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+
+func Run(args []string) error {
+	o, err := parsePaneArgs(args)
+	if err != nil {
 		return err
 	}
-	if *id == "" || *session == "" {
-		return fmt.Errorf("pane needs --id and --session")
-	}
-	if *fg == "" || *bg == "" {
-		return fmt.Errorf("pane needs a non-empty --fg and --bg")
-	}
-	*shell = resolveShell(*shell)
-	if *cwd == "" {
-		*cwd, _ = os.Getwd()
+	shell := resolveShell(o.shell)
+	if o.cwd == "" {
+		o.cwd, _ = os.Getwd()
 	}
 
-	// A pane holds one screen, one 512 KiB ring and a shell's output. 32 MiB
-	// is plenty and makes the GC return a burst's pages instead of keeping
-	// them. GOGC stays at its default: lowering it raised the idle figure.
-	debug.SetMemoryLimit(32 << 20)
+	// A pane holds one screen, its ring and a shell's output. The budget's
+	// headroom makes the GC return a burst's pages instead of keeping them.
+	// GOGC stays at its default: lowering it raised the idle figure.
+	debug.SetMemoryLimit(int64(o.history) + memHeadroom)
 
 	p := &paneProc{
-		id: *id, session: *session, sock: paths.PaneSock(*session, *id),
-		shell: *shell, cwd: *cwd,
-		vt:   vt.NewTerm(*cols, *rows),
-		ring: &scrollRing{},
+		id: o.id, session: o.session, sock: paths.PaneSock(o.session, o.id),
+		shell: shell, cwd: o.cwd,
+		vt:   vt.NewTerm(o.cols, o.rows),
+		ring: NewRing(o.history),
 		subs: map[*subConn]bool{},
 		st:   wire.Status{State: "unknown"},
-		fg:   *fg, bg: *bg,
+		fg:   o.fg, bg: o.bg,
 	}
 
 	cmd := exec.Command(p.shell, "-l")
-	cmd.Dir = *cwd
+	cmd.Dir = o.cwd
 	cmd.Env = append(os.Environ(), "DM_PANE="+p.id, "DM_SESSION="+p.session)
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(*cols), Rows: uint16(*rows)})
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(o.cols), Rows: uint16(o.rows)})
 	if err != nil {
 		return fmt.Errorf("start shell: %w", err)
 	}
 	p.ptmx, p.cmd = ptmx, cmd
 
-	if err := os.MkdirAll(paths.SessionDir(*session)+"/panes", 0o700); err != nil {
+	if err := os.MkdirAll(paths.SessionDir(o.session)+"/panes", 0o700); err != nil {
 		return err
 	}
 	_ = os.Remove(p.sock)
@@ -734,6 +816,19 @@ func (p *paneProc) serve(c net.Conn) {
 				p.bg = m.BG
 			}
 			p.mu.Unlock()
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
+		case "set-history":
+			// The server pushes the config's ring budget after a reload. A
+			// budget the config could not have asked for is refused, so a bad
+			// frame cannot grow the pane past its limit.
+			if err := historyBudget(m.History); err != nil {
+				_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: false, Error: err.Error()})
+				continue
+			}
+			p.mu.Lock()
+			p.ring.Resize(m.History)
+			p.mu.Unlock()
+			debug.SetMemoryLimit(int64(m.History) + memHeadroom)
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
