@@ -32,6 +32,31 @@ func buildOnce(t *testing.T) string {
 	return bin
 }
 
+// testEnv is the parent environment with every dm and XDG override removed,
+// so a test owns its state and config roots. A duplicate key is a trap: exec
+// keeps the last value while a reader that scans the slice finds the first.
+func testEnv(base []string, extra ...string) []string {
+	drop := map[string]bool{
+		"DM_STATE":        true,
+		"DM_SESSION":      true,
+		"DM_PANE":         true,
+		"DM_NOTIFY":       true,
+		"DM_NERD":         true,
+		"DM_STATS":        true,
+		"DM_COLOR":        true,
+		"XDG_STATE_HOME":  true,
+		"XDG_CONFIG_HOME": true,
+	}
+	env := make([]string, 0, len(base)+len(extra))
+	for _, e := range base {
+		if k, _, ok := strings.Cut(e, "="); ok && drop[k] {
+			continue
+		}
+		env = append(env, e)
+	}
+	return append(env, extra...)
+}
+
 type harness struct {
 	t   *testing.T
 	bin string
@@ -67,7 +92,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(cfgDir) })
-	return &harness{t: t, bin: buildOnce(t), env: append(os.Environ(), "DM_STATE="+state, "XDG_CONFIG_HOME="+cfgDir)}
+	return &harness{t: t, bin: buildOnce(t), env: testEnv(os.Environ(), "DM_STATE="+state, "XDG_CONFIG_HOME="+cfgDir)}
 }
 
 func (h *harness) run(args ...string) string {
