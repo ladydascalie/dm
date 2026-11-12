@@ -157,6 +157,12 @@ type AllPane struct {
 	WorkspaceName     string `json:"workspaceName"`
 	// Project is the pane's workspace project name. Empty means no project.
 	Project string `json:"project,omitempty"`
+	// ProjectAccent is the accent slot the server pinned for the pane's
+	// project. ProjectAccentSet marks a carried slot, because zero is a
+	// valid slot and the flag is what tells it from a snapshot that predates
+	// the field.
+	ProjectAccent    int  `json:"projectAccent,omitempty"`
+	ProjectAccentSet bool `json:"projectAccentSet,omitempty"`
 	// ProjectFolded is true when the rail folds the whole project group.
 	ProjectFolded bool   `json:"projectFolded,omitempty"`
 	Window        string `json:"window"`
