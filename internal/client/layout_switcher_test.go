@@ -166,6 +166,9 @@ func TestLayoutPickerOnePaneRefuses(t *testing.T) {
 	t.Parallel()
 	root := &layout.Node{Pane: "w1p1"}
 	snap := testutil.TestSnapshot(root, 100, 30, nil)
+	// A rail keeps the pane area's aspect inside the preview band, so the
+	// one-pane dim state and its footer are what this test asserts.
+	snap.Rail = 34
 	snap.Windows = []wire.WindowInfo{{ID: "w1"}}
 	tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: &bytes.Buffer{}}
 	a, b := net.Pipe()
@@ -295,6 +298,92 @@ func TestLayoutPreviewBandDropsOnSmallScreen(t *testing.T) {
 	drawLayoutSwitcher(&out, theme.DefaultTheme(), snap, l)
 	if s := out.String(); !strings.Contains(s, "no room here for the preview") {
 		t.Fatalf("footer = %q, want the dropped-preview note", s)
+	}
+}
+
+// seamPanes builds a window root holding n fresh panes split side by side,
+// so MiniRects can build tiled over them.
+func seamPanes(n int) *layout.Node {
+	kids := make([]*layout.Node, n)
+	for i := range kids {
+		kids[i] = &layout.Node{Pane: fmt.Sprintf("p%d", i+1)}
+	}
+	return &layout.Node{Dir: "row", Kids: kids}
+}
+
+// seamTiledRows walks tiled over area the way the server and the preview walk
+// it and reports the number of rows it builds, so the tests compare the real
+// walks rather than a hand-reproduced formula.
+func seamTiledRows(t *testing.T, root *layout.Node, area layout.Rect) int {
+	t.Helper()
+	rects, ok := layout.MiniRects(root, area, layout.AllPanes(root), "tiled")
+	if !ok {
+		t.Fatalf("MiniRects(tiled) over %+v failed", area)
+	}
+	rows := map[int]bool{}
+	for _, r := range rects {
+		rows[r.Y] = true
+	}
+	return len(rows)
+}
+
+// TestLayoutSeamTiledRowsMatchPaneArea drives a real 200x30 screen, the
+// review's live-lie repro, through layoutPaletteGeom and the server's
+// pane-area walk. The extreme-wide aspect (rail 20 leaves area 180x28) cannot
+// sit inside the 24x12 to 40x20 band without stretching one axis, so the fix
+// drops the band; the stretched 40x12 band the review rejected is gone. On a
+// screen whose area fits the band, the preview keeps the pane area's aspect,
+// so the tiled row count it shows is the server's over the pane area for 4, 5
+// and 6 panes.
+func TestLayoutSeamTiledRowsMatchPaneArea(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{4, 5, 6} {
+		root := seamPanes(n)
+		snap := testutil.TestSnapshot(root, 200, 30, nil)
+		snap.Rail = 20
+		g := layoutPaletteGeom(snap, n)
+		if g.preview.W != 0 || g.preview.H != 0 {
+			t.Fatalf("%d panes on 200x30 kept a %+v preview, want it dropped", n, g.preview)
+		}
+	}
+	for _, n := range []int{4, 5, 6} {
+		root := seamPanes(n)
+		snap := testutil.TestSnapshot(root, 100, 30, nil)
+		snap.Rail = 34
+		area := layout.PaneAreaForWithTabBar(100, 30, 34)
+		g := layoutPaletteGeom(snap, n)
+		if g.preview.W == 0 {
+			t.Fatalf("%d panes on 100x30 dropped the preview: %+v", n, g)
+		}
+		serverRows := seamTiledRows(t, root, area)
+		if got := seamTiledRows(t, root, g.preview); got != serverRows {
+			t.Fatalf("%d panes on 100x30: preview tiled rows=%d, server area rows=%d", n, got, serverRows)
+		}
+	}
+}
+
+// TestLayoutPaletteGeomLiftsToMinimum pins the lift-to-minimum on an extreme
+// aspect. A wide 86x22 screen, rail 20, leaves area 66x20; lifting to the
+// band's minimums by the larger scale factor lands the band at its maximum
+// width and minimum height (40x12) while keeping the area's aspect, never by
+// stretching one axis alone. The tiled row count it shows stays the server's
+// over the pane area for 4, 5 and 6 panes.
+func TestLayoutPaletteGeomLiftsToMinimum(t *testing.T) {
+	t.Parallel()
+	root := seamPanes(6)
+	snap := testutil.TestSnapshot(root, 86, 22, nil)
+	snap.Rail = 20
+	area := layout.PaneAreaForWithTabBar(86, 22, 20)
+	g := layoutPaletteGeom(snap, 6)
+	if g.preview.W != layoutPreviewMaxW || g.preview.H != layoutPreviewMinH {
+		t.Fatalf("extreme band = %dx%d, want the lift to %dx%d", g.preview.W, g.preview.H, layoutPreviewMaxW, layoutPreviewMinH)
+	}
+	for _, n := range []int{4, 5, 6} {
+		r := seamPanes(n)
+		serverRows := seamTiledRows(t, r, area)
+		if got := seamTiledRows(t, r, g.preview); got != serverRows {
+			t.Fatalf("%d panes: preview tiled rows=%d, server area rows=%d", n, got, serverRows)
+		}
 	}
 }
 
