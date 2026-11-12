@@ -25,7 +25,8 @@ type cliExtra struct {
 
 // cliCommand is one row of the CLI surface. name is the word after dm; an
 // empty name is the bare invocation, which attaches. args is the argument
-// shape after the name. group orders the rows in the usage text.
+// shape after the name. group is the section the verb renders under, both in
+// the top-level help and in the html page.
 type cliCommand struct {
 	name    string
 	aliases []string
@@ -38,13 +39,30 @@ type cliCommand struct {
 }
 
 const (
-	groupSession = "session"
-	groupPane    = "pane"
-	groupBox     = "box"
-	groupDocs    = "docs"
+	groupSessions = "sessions"
+	groupPanes    = "panes"
+	groupWindows  = "windows and workspaces"
+	groupObserve  = "observe"
+	groupBox      = "message box"
+	groupDocs     = "docs"
 )
 
-// cliCommands is the whole CLI, in the order the usage text prints it.
+// cliGroups is every group in the order the sections render, with the header
+// each section prints.
+var cliGroups = []struct {
+	id    string
+	title string
+}{
+	{groupSessions, "Sessions"},
+	{groupPanes, "Panes"},
+	{groupWindows, "Windows and workspaces"},
+	{groupObserve, "Observe"},
+	{groupBox, "Message box"},
+	{groupDocs, "Docs"},
+}
+
+// cliCommands is the whole CLI, in the order the usage text prints it: rows
+// of one group sit together, and the groups follow cliGroups.
 var cliCommands = []cliCommand{
 	// Sessions.
 	{
@@ -52,7 +70,7 @@ var cliCommands = []cliCommand{
 		args:    "[-s name]",
 		summary: "attach to a session, creating it if needed",
 		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupSession,
+		group:   groupSessions,
 	},
 	{
 		name:    "attach",
@@ -60,14 +78,14 @@ var cliCommands = []cliCommand{
 		args:    "[-s name]",
 		summary: "attach to a session, creating it if needed",
 		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupSession,
+		group:   groupSessions,
 	},
 	{
 		name:    "new",
 		args:    "[-s name]",
 		summary: "start a session without attaching",
 		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupSession,
+		group:   groupSessions,
 	},
 	{
 		name:    "ls",
@@ -77,21 +95,21 @@ var cliCommands = []cliCommand{
 			{"s", "name", "session name"},
 			{"json", "", "print JSON"},
 		},
-		group: groupSession,
+		group: groupSessions,
 	},
 	{
 		name:    "kill",
 		args:    "[-s name]",
 		summary: "stop a session's server (panes survive)",
 		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupSession,
+		group:   groupSessions,
 	},
 	{
 		name:    "purge",
 		args:    "[--dry-run]",
 		summary: "remove dead sessions whose panes are gone",
 		flags:   []cliFlag{{"dry-run", "", "print what would be removed"}},
-		group:   groupSession,
+		group:   groupSessions,
 	},
 	{
 		name:    "reset",
@@ -102,7 +120,7 @@ var cliCommands = []cliCommand{
 			{"all", "", "reset every session"},
 			{"force", "", "confirm the discard"},
 		},
-		group: groupSession,
+		group: groupSessions,
 	},
 	{
 		name:    "exec",
@@ -113,10 +131,10 @@ var cliCommands = []cliCommand{
 			{"action-json", "", "action JSON"},
 		},
 		example: `dm exec '{"action":"split","target":"w1p1","dir":"right"}'`,
-		group:   groupSession,
+		group:   groupSessions,
 	},
 
-	// Panes and windows.
+	// Panes.
 	{
 		name:    "write-to",
 		aliases: []string{"write"},
@@ -128,7 +146,119 @@ var cliCommands = []cliCommand{
 			{"enter", "", "press enter after the message"},
 		},
 		example: `dm write-to w1p1 --msg 'ls -la' --enter`,
-		group:   groupPane,
+		group:   groupPanes,
+	},
+	{
+		name:    "split",
+		args:    "<pane> --dir D",
+		summary: "split a pane: left right up down",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"dir", "D", "split direction: left right up down"},
+			{"json", "", "print JSON"},
+		},
+		group: groupPanes,
+	},
+	{
+		name:    "focus",
+		args:    "<pane>",
+		summary: "focus a pane",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupPanes,
+	},
+	{
+		name:    "next-pane",
+		summary: "focus the next pane",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupPanes,
+	},
+	{
+		name:    "prev-pane",
+		summary: "focus the previous pane",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupPanes,
+	},
+
+	// Windows and workspaces.
+	{
+		name:    "rename-workspace",
+		args:    "<ws> <name>",
+		summary: "rename a workspace",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupWindows,
+	},
+	{
+		name:    "set-project",
+		args:    "<ws> [name]",
+		summary: "set a workspace's project, or clear it with no name",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		example: "dm set-project s1 dm",
+		group:   groupWindows,
+	},
+	{
+		name:    "new-window",
+		summary: "open a new window",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupWindows,
+	},
+	{
+		name:    "next-window",
+		summary: "focus the next window",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupWindows,
+	},
+	{
+		name:    "prev-window",
+		summary: "focus the previous window",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupWindows,
+	},
+
+	// Observe: read a pane or the tree without touching it.
+	{
+		name:    "status",
+		args:    "[pane]",
+		summary: "show OSC 7501 agent status",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupObserve,
+	},
+	{
+		name:    "list",
+		summary: "print panes as a table, or the raw tree with --json",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"json", "", "print JSON"},
+		},
+		group: groupObserve,
+	},
+	{
+		name:    "dash",
+		args:    "[-s name]",
+		summary: "print the palette rows",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupObserve,
+	},
+	{
+		name:    "peek",
+		args:    "<id> [--lines N]",
+		summary: "print the screen a palette row lands on",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"lines", "N", "number of screen lines"},
+		},
+		group: groupObserve,
+	},
+	{
+		name:    "wait",
+		args:    "<pane> [--timeout D]",
+		summary: "stream a pane's output until a command ends, the next one when nothing runs, then name the exit code",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"timeout", "D", "quiet-idle limit, not total"},
+			{"json", "", "print JSON"},
+		},
+		example: `dm wait w1p1 --timeout 10m`,
+		group:   groupObserve,
 	},
 	{
 		name:    "read",
@@ -142,7 +272,7 @@ var cliCommands = []cliCommand{
 		extra: []cliExtra{
 			{args: "<pane> --scrollback N", summary: "print N rows above the screen"},
 		},
-		group: groupPane,
+		group: groupObserve,
 	},
 	{
 		name:    "yank",
@@ -153,115 +283,7 @@ var cliCommands = []cliCommand{
 			{"lines", "N", "number of output lines"},
 		},
 		example: `dm yank w1p1`,
-		group:   groupPane,
-	},
-	{
-		name:    "wait",
-		args:    "<pane> [--timeout D]",
-		summary: "stream a pane's output until a command ends, the next one when nothing runs, then name the exit code",
-		flags: []cliFlag{
-			{"s", "name", "session name"},
-			{"timeout", "D", "quiet-idle limit, not total"},
-			{"json", "", "print JSON"},
-		},
-		example: `dm wait w1p1 --timeout 10m`,
-		group:   groupPane,
-	},
-	{
-		name:    "split",
-		args:    "<pane> --dir D",
-		summary: "split a pane: left right up down",
-		flags: []cliFlag{
-			{"s", "name", "session name"},
-			{"dir", "D", "split direction: left right up down"},
-			{"json", "", "print JSON"},
-		},
-		group: groupPane,
-	},
-	{
-		name:    "focus",
-		args:    "<pane>",
-		summary: "focus a pane",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "rename-workspace",
-		args:    "<ws> <name>",
-		summary: "rename a workspace",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "set-project",
-		args:    "<ws> [name]",
-		summary: "set a workspace's project, or clear it with no name",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		example: "dm set-project s1 dm",
-		group:   groupPane,
-	},
-	{
-		name:    "next-pane",
-		summary: "focus the next pane",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "prev-pane",
-		summary: "focus the previous pane",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "new-window",
-		summary: "open a new window",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "next-window",
-		summary: "focus the next window",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "prev-window",
-		summary: "focus the previous window",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "status",
-		args:    "[pane]",
-		summary: "show OSC 7501 agent status",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "list",
-		summary: "print panes as a table, or the raw tree with --json",
-		flags: []cliFlag{
-			{"s", "name", "session name"},
-			{"json", "", "print JSON"},
-		},
-		group: groupPane,
-	},
-	{
-		name:    "dash",
-		args:    "[-s name]",
-		summary: "print the palette rows",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupPane,
-	},
-	{
-		name:    "peek",
-		args:    "<id> [--lines N]",
-		summary: "print the screen a palette row lands on",
-		flags: []cliFlag{
-			{"s", "name", "session name"},
-			{"lines", "N", "number of screen lines"},
-		},
-		group: groupPane,
+		group:   groupObserve,
 	},
 
 	// The box, under dm msg.
@@ -309,7 +331,7 @@ var cliCommands = []cliCommand{
 	},
 	{
 		name:    "msg wait",
-		args:    "[--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]",
+		args:    "[--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m] [--json]",
 		summary: "block until an entry matches",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
@@ -318,6 +340,7 @@ var cliCommands = []cliCommand{
 			{"state", "S", "box state: note working blocked done error"},
 			{"after", "SEQ", "box seq cursor: entries after this one"},
 			{"timeout", "D", "wait timeout"},
+			{"json", "", "print JSON"},
 		},
 		example: `dm msg wait --key build --state done --timeout 10m`,
 		group:   groupBox,
@@ -415,29 +438,21 @@ func (c cliCommand) line() string {
 	return s
 }
 
-// UsageText renders the help text from cliCommands. Rows print in table order,
-// grouped the way the table groups them, with the command column aligned.
-func UsageText() string {
-	type row struct {
-		line    string
-		summary string
-	}
-	var rows []row
-	for _, c := range cliCommands {
-		rows = append(rows, row{c.line(), c.summary})
-		for _, e := range c.extra {
-			rows = append(rows, row{"dm " + c.name + " " + e.args, e.summary})
-		}
-	}
+// usageRow is one line of a help block: the left column and its summary.
+type usageRow struct {
+	line    string
+	summary string
+}
+
+// writeRows renders rows in the table's two-column style: the left column
+// aligned, a summary only when the line fits the width.
+func writeRows(b *strings.Builder, rows []usageRow) {
 	width := 0
 	for _, r := range rows {
 		if r.summary != "" && len(r.line) <= usageMaxWidth {
 			width = max(width, len(r.line))
 		}
 	}
-	var b strings.Builder
-	b.WriteString(usageHeader)
-	b.WriteString("\n\n")
 	for _, r := range rows {
 		b.WriteString("  ")
 		b.WriteString(r.line)
@@ -447,8 +462,136 @@ func UsageText() string {
 		}
 		b.WriteString("\n")
 	}
+}
+
+// Flag is one flag a verb accepts, as the table declares it. Arg is empty for
+// a boolean flag.
+type Flag struct {
+	Name string
+	Arg  string
+	Desc string
+}
+
+// Verbs lists every verb name the table carries, in table order, including
+// the msg subcommands. The bare attach row has no name and is not listed.
+func Verbs() []string {
+	var names []string
+	for _, c := range cliCommands {
+		if c.name != "" {
+			names = append(names, c.name)
+		}
+	}
+	return names
+}
+
+// VerbFlags returns the flags one verb's row declares, or nil when the table
+// has no row for the name.
+func VerbFlags(verb string) []Flag {
+	c, ok := verbRow(verb)
+	if !ok {
+		return nil
+	}
+	flags := make([]Flag, 0, len(c.flags))
+	for _, f := range c.flags {
+		flags = append(flags, Flag{Name: f.name, Arg: f.arg, Desc: f.desc})
+	}
+	return flags
+}
+
+// verbRow finds one row by name or alias.
+func verbRow(verb string) (cliCommand, bool) {
+	for _, c := range cliCommands {
+		if c.name == verb {
+			return c, true
+		}
+		for _, a := range c.aliases {
+			if a == verb {
+				return c, true
+			}
+		}
+	}
+	return cliCommand{}, false
+}
+
+// UsageText renders the top-level help: one section per group, in table
+// order, with a two-line gap between sections.
+func UsageText() string {
+	sections := make([]string, 0, len(cliGroups))
+	for _, g := range cliGroups {
+		var rows []usageRow
+		for _, c := range cliCommands {
+			if c.group != g.id {
+				continue
+			}
+			rows = append(rows, usageRow{c.line(), c.summary})
+			for _, e := range c.extra {
+				rows = append(rows, usageRow{"dm " + c.name + " " + e.args, e.summary})
+			}
+		}
+		var b strings.Builder
+		b.WriteString(g.title)
+		b.WriteString("\n")
+		writeRows(&b, rows)
+		sections = append(sections, b.String())
+	}
+	var out strings.Builder
+	out.WriteString(usageHeader)
+	out.WriteString("\n\n")
+	out.WriteString(strings.Join(sections, "\n\n"))
+	out.WriteString("\n")
+	out.WriteString(usageFooter)
+	return out.String()
+}
+
+// VerbHelp renders one verb's help: the summary line from the table, its
+// alternate forms, its flags in the table's two-column style, then a hint
+// naming dm help and dm <verb> -h.
+func VerbHelp(verb string) string {
+	c, ok := verbRow(verb)
+	if !ok {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(c.line())
 	b.WriteString("\n")
-	b.WriteString(usageFooter)
+	b.WriteString("  ")
+	b.WriteString(c.summary)
+	b.WriteString("\n")
+	for _, e := range c.extra {
+		b.WriteString("dm ")
+		b.WriteString(c.name)
+		b.WriteString(" ")
+		b.WriteString(e.args)
+		b.WriteString("\n")
+		b.WriteString("  ")
+		b.WriteString(e.summary)
+		b.WriteString("\n")
+	}
+	if len(c.flags) > 0 {
+		b.WriteString("\n")
+		rows := make([]usageRow, 0, len(c.flags))
+		for _, f := range c.flags {
+			rows = append(rows, usageRow{f.text(), f.desc})
+		}
+		writeRows(&b, rows)
+	}
+	fmt.Fprintf(&b, "\n  run dm help for every command, or dm %s -h for this help.\n", verb)
+	return b.String()
+}
+
+// MsgSubcommands renders the list dm msg prints with no subcommand: one row
+// per msg verb, in table order.
+func MsgSubcommands() string {
+	var b strings.Builder
+	b.WriteString("dm msg\n")
+	var rows []usageRow
+	for _, c := range cliCommands {
+		if strings.HasPrefix(c.name, "msg ") {
+			rows = append(rows, usageRow{c.line(), c.summary})
+		}
+	}
+	writeRows(&b, rows)
+	b.WriteString("\n  run dm help for every command, or dm msg <verb> -h for one verb.\n")
 	return b.String()
 }
 

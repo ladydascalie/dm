@@ -155,3 +155,59 @@ func TestEveryRowHasSummary(t *testing.T) {
 		}
 	}
 }
+
+// TestGroupsAreCompleteAndOrdered proves every row carries a group the table
+// knows, each group's rows sit together in table order, no group is empty,
+// and UsageText renders the sections in that order.
+func TestGroupsAreCompleteAndOrdered(t *testing.T) {
+	ids := map[string]int{}
+	for i, g := range cliGroups {
+		ids[g.id] = i
+	}
+	last := map[string]int{}
+	for i, c := range cliCommands {
+		if _, ok := ids[c.group]; !ok {
+			t.Errorf("row %q carries unknown group %q", c.name, c.group)
+			continue
+		}
+		if prev, ok := last[c.group]; ok && prev != i-1 {
+			t.Errorf("row %q sits outside its group's run: %q was row %d, this is row %d", c.name, c.group, prev, i)
+		}
+		last[c.group] = i
+	}
+	for _, g := range cliGroups {
+		if _, ok := last[g.id]; !ok {
+			t.Errorf("group %q has no rows", g.title)
+		}
+	}
+	text := UsageText()
+	pos := -1
+	for _, g := range cliGroups {
+		p := strings.Index(text, g.title+"\n")
+		if p < 0 {
+			t.Errorf("usage text does not carry the %q section", g.title)
+			continue
+		}
+		if p < pos {
+			t.Errorf("usage text renders %q out of order", g.title)
+		}
+		pos = p
+	}
+}
+
+// TestVerbHelpCarriesTheRow proves VerbHelp renders a verb's summary and its
+// flags, and returns nothing for a name the table does not carry.
+func TestVerbHelpCarriesTheRow(t *testing.T) {
+	text := VerbHelp("split")
+	for _, want := range []string{"dm split <pane> --dir D", "split a pane: left right up down", "--dir D", "dm split -h"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("VerbHelp(split) does not carry %q", want)
+		}
+	}
+	if !strings.Contains(VerbHelp("read"), "print N rows above the screen") {
+		t.Error("VerbHelp(read) does not carry the scrollback form")
+	}
+	if got := VerbHelp("no-such-verb"); got != "" {
+		t.Errorf("VerbHelp(unknown) = %q, want empty", got)
+	}
+}

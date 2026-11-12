@@ -72,12 +72,12 @@ func TestSessionFlagBeatsThePaneEnv(t *testing.T) {
 func TestBoxCursor(t *testing.T) {
 	t.Parallel()
 	c := newFlags("msg")
-	c.parse([]string{"--after", "7"})
+	c.parse([]string{"wait", "--after", "7"})
 	if got := c.boxCursor(); got == nil || *got != 7 {
 		t.Fatalf("boxCursor = %v, want 7", got)
 	}
 	c = newFlags("msg")
-	c.parse(nil)
+	c.parse([]string{"wait"})
 	if got := c.boxCursor(); got != nil {
 		t.Fatalf("boxCursor = %v, want nil", got)
 	}
