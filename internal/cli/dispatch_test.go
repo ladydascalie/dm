@@ -75,7 +75,7 @@ func TestWriteToNeedsAPane(t *testing.T) {
 	t.Parallel()
 	for _, argv := range [][]string{
 		{"write-to"}, {"write"}, {"read"}, {"yank"}, {"split"}, {"focus"},
-		{"rename-workspace", "w1"}, {"set-project"}, {"peek"}, {"msg"},
+		{"rename-workspace", "w1"}, {"set-project"}, {"peek"},
 	} {
 		if err := Run(argv); err == nil {
 			t.Fatalf("dm %v without arguments was accepted", argv)

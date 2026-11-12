@@ -52,19 +52,30 @@ type cmdFlags struct {
 	force      bool
 	args       []string
 	root       string
+	// usage overrides the flag set's usage printer. The bare-word fallback
+	// sets it, because a bad flag there is a top-level mistake, not one
+	// verb's.
+	usage func() string
+
+	sessionEnv  string // DM_SESSION when the shell exported one, else empty
+	sessionFlag bool   // -s appeared on the command line
+	resolved    bool   // the env default has been checked against a live session
 }
 
 // newFlagsAt builds the flag set for one verb, rooted at the given state dir.
 func newFlagsAt(root, name string) *cmdFlags {
 	c := &cmdFlags{fs: flag.NewFlagSet(name, flag.ExitOnError), root: root}
 	// A pane exports its session, so a command from inside it targets that
-	// session without -s. Outside dm the default stays main.
-	if def := os.Getenv("DM_SESSION"); def != "" {
-		c.session = def
-	} else {
-		c.session = "main"
+	// session without -s. Outside dm the default stays main. A dead
+	// DM_SESSION falls back to main at resolveSession, after the parse.
+	c.sessionEnv = os.Getenv("DM_SESSION")
+	def := c.sessionEnv
+	if def == "" {
+		def = "main"
 	}
-	c.fs.StringVar(&c.session, "s", c.session, "session name")
+	// The -s flag itself comes from the verb's table row via register, so a
+	// verb that does not take -s never parses one.
+	c.session = def
 	return c
 }
 
@@ -72,43 +83,169 @@ func newFlagsAt(root, name string) *cmdFlags {
 // resolves: DM_STATE wins, then the XDG and home defaults.
 func newFlags(name string) *cmdFlags { return newFlagsAt(paths.StateDir(), name) }
 
+// parse registers the verb's table flags and parses argv. The clidoc table
+// is the parse-time source of truth: a verb gets exactly the flags its row
+// declares, so -h and a bad flag print that verb's flags alone. A flag the
+// row does not declare is refused, as it is not one the verb reads.
 func (c *cmdFlags) parse(args []string) {
-	c.fs.StringVar(&c.msg, "msg", "", "message text")
-	c.fs.StringVar(&c.msgJSON, "action-json", "", "action JSON")
-	c.fs.BoolVar(&c.enter, "enter", false, "press enter after the message")
-	c.fs.StringVar(&c.dir, "dir", "right", "split direction: left right up down")
-	c.fs.IntVar(&c.lines, "lines", 0, "number of screen lines")
-	c.fs.IntVar(&c.scrollback, "scrollback", -1, "history rows above the screen")
-	c.fs.BoolVar(&c.jsonOut, "json", false, "print JSON")
-	c.fs.StringVar(&c.key, "key", "", "box key")
-	c.fs.StringVar(&c.keyPrefix, "prefix", "", "box key prefix")
-	c.fs.StringVar(&c.state, "state", "", "box state: note working blocked done error")
-	c.fs.StringVar(&c.body, "body", "", "long body text under the message line")
-	c.fs.StringVar(&c.bodyFile, "body-file", "", "read the body from a path, - for stdin")
-	c.fs.IntVar(&c.seq, "seq", -1, "the entry's seq")
-	c.fs.StringVar(&c.from, "from", "", "the posting pane")
-	c.fs.IntVar(&c.limit, "limit", 0, "list rows, 0 for the whole box")
-	c.fs.IntVar(&c.after, "after", -1, "box seq cursor: entries after this one")
-	c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, "wait timeout")
-	c.fs.BoolVar(&c.dry, "dry-run", false, "print what would be removed")
-	c.fs.BoolVar(&c.all, "all", false, "reset every session")
-	c.fs.BoolVar(&c.force, "force", false, "confirm the discard")
-	_ = c.fs.Parse(reorder(args))
+	ordered := reorder(args)
+	verb := c.fs.Name()
+	if verb == "msg" {
+		// The msg subverb is the first positional: reorder has already
+		// moved every flag in front of it. An unknown or missing subverb
+		// registers nothing, and the usage printer shows the list.
+		if sub := firstArg(ordered); sub != "" && clidoc.VerbFlags("msg "+sub) != nil {
+			verb = "msg " + sub
+		}
+	}
+	for _, f := range clidoc.VerbFlags(verb) {
+		c.register(f.Name, f.Desc)
+	}
+	c.fs.Usage = func() {
+		out := c.fs.Output()
+		if out == nil {
+			out = os.Stderr
+		}
+		if c.usage != nil {
+			fmt.Fprint(out, c.usage())
+			return
+		}
+		if verb == "msg" {
+			fmt.Fprint(out, clidoc.MsgSubcommands())
+			return
+		}
+		fmt.Fprint(out, clidoc.VerbHelp(verb))
+	}
+	_ = c.fs.Parse(ordered)
 	c.args = c.fs.Args()
+	c.resolveSession()
+}
+
+// resolveSession pins the target session: -s wins, then DM_SESSION when it
+// names a live session, else main. The liveness check is the ls path's socket
+// dial in transport, and the verdict is cached on the flags, so one verb run
+// checks once. A dead DM_SESSION falls back to main with one stderr line, so
+// a verb typed inside a dead pane is never silently retargeted.
+func (c *cmdFlags) resolveSession() {
+	if c.resolved {
+		return
+	}
+	c.resolved = true
+	c.fs.Visit(func(f *flag.Flag) {
+		if f.Name == "s" {
+			c.sessionFlag = true
+		}
+	})
+	// An explicit -s never consults the environment. Without one the env
+	// names the target, except main: there the fallback is the same session,
+	// so the liveness check would decide nothing.
+	if c.sessionFlag || c.sessionEnv == "" || c.sessionEnv == "main" {
+		return
+	}
+	if envSessionLive(c.root, c.sessionEnv) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "dm: session %q from DM_SESSION is not live; using main\n", c.sessionEnv)
+	c.session = "main"
+}
+
+// envSessionLive reuses the ls liveness check: the session's socket answers.
+func envSessionLive(root, name string) bool {
+	sessions, err := transport.ListSessionsAt(root)
+	if err != nil {
+		return false
+	}
+	for _, s := range sessions {
+		if s.Name == name {
+			return s.Live
+		}
+	}
+	return false
+}
+
+// firstArg returns the first positional of reordered argv, skipping the flags
+// and the values the withValue flags take.
+func firstArg(args []string) string {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") && a != "-" {
+			if withValue[a] && i+1 < len(args) {
+				i++
+			}
+			continue
+		}
+		return a
+	}
+	return ""
+}
+
+// register adds one table flag to the set, bound to the field the verb's Run
+// path reads. The defaults are the ones the shared set carried, so parsing
+// semantics do not move.
+func (c *cmdFlags) register(name, desc string) {
+	switch name {
+	case "s":
+		c.fs.StringVar(&c.session, "s", c.session, desc)
+	case "msg":
+		c.fs.StringVar(&c.msg, "msg", "", desc)
+	case "enter":
+		c.fs.BoolVar(&c.enter, "enter", false, desc)
+	case "dir":
+		c.fs.StringVar(&c.dir, "dir", "right", desc)
+	case "lines":
+		c.fs.IntVar(&c.lines, "lines", 0, desc)
+	case "scrollback":
+		c.fs.IntVar(&c.scrollback, "scrollback", -1, desc)
+	case "json":
+		c.fs.BoolVar(&c.jsonOut, "json", false, desc)
+	case "key":
+		c.fs.StringVar(&c.key, "key", "", desc)
+	case "prefix":
+		c.fs.StringVar(&c.keyPrefix, "prefix", "", desc)
+	case "state":
+		c.fs.StringVar(&c.state, "state", "", desc)
+	case "body":
+		c.fs.StringVar(&c.body, "body", "", desc)
+	case "body-file":
+		c.fs.StringVar(&c.bodyFile, "body-file", "", desc)
+	case "seq":
+		c.fs.IntVar(&c.seq, "seq", -1, desc)
+	case "from":
+		c.fs.StringVar(&c.from, "from", "", desc)
+	case "limit":
+		c.fs.IntVar(&c.limit, "limit", 0, desc)
+	case "after":
+		c.fs.IntVar(&c.after, "after", -1, desc)
+	case "timeout":
+		c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, desc)
+	case "dry-run":
+		c.fs.BoolVar(&c.dry, "dry-run", false, desc)
+	case "all":
+		c.fs.BoolVar(&c.all, "all", false, desc)
+	case "force":
+		c.fs.BoolVar(&c.force, "force", false, desc)
+	case "action-json":
+		c.fs.StringVar(&c.msgJSON, "action-json", "", desc)
+	default:
+		panic("cli: no field binding for flag " + name)
+	}
+}
+
+// withValue names the flags that take a value, so reorder and firstArg know
+// where a flag ends and the next argument begins.
+var withValue = map[string]bool{
+	"-s": true, "--s": true, "-msg": true, "--msg": true,
+	"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
+	"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true,
+	"-key": true, "--key": true, "-state": true, "--state": true,
+	"-body": true, "--body": true, "-body-file": true, "--body-file": true,
+	"-seq": true, "--seq": true, "-from": true, "--from": true,
+	"-prefix": true, "--prefix": true, "-after": true, "--after": true,
+	"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
 }
 
 // reorder moves flags before positionals, so -s may follow a pane id.
 func reorder(args []string) []string {
-	withValue := map[string]bool{
-		"-s": true, "--s": true, "-msg": true, "--msg": true,
-		"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
-		"-lines": true, "--lines": true, "-scrollback": true, "--scrollback": true,
-		"-key": true, "--key": true, "-state": true, "--state": true,
-		"-body": true, "--body": true, "-body-file": true, "--body-file": true,
-		"-seq": true, "--seq": true, "-from": true, "--from": true,
-		"-prefix": true, "--prefix": true, "-after": true, "--after": true,
-		"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
-	}
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -183,6 +320,7 @@ func Run(argv []string) error {
 
 	case "man":
 		fs := flag.NewFlagSet("man", flag.ExitOnError)
+		fs.Usage = func() { fmt.Fprint(os.Stderr, clidoc.VerbHelp("man")) }
 		out := fs.String("o", "", "write the page to this path")
 		_ = fs.Parse(argv[1:])
 		page := clidoc.ManPage()
@@ -194,6 +332,7 @@ func Run(argv []string) error {
 
 	case "llms":
 		fs := flag.NewFlagSet("llms", flag.ExitOnError)
+		fs.Usage = func() { fmt.Fprint(os.Stderr, clidoc.VerbHelp("llms")) }
 		out := fs.String("o", "", "write the document to this path")
 		_ = fs.Parse(argv[1:])
 		doc := clidoc.LLMsText()
@@ -205,6 +344,7 @@ func Run(argv []string) error {
 
 	case "html":
 		fs := flag.NewFlagSet("html", flag.ExitOnError)
+		fs.Usage = func() { fmt.Fprint(os.Stderr, clidoc.VerbHelp("html")) }
 		out := fs.String("o", "", "write the page to this path, or - for stdout")
 		_ = fs.Parse(argv[1:])
 		return runHTML(*out)
@@ -414,7 +554,10 @@ func Run(argv []string) error {
 
 	default:
 		// A bare word is a session name; leading flags are attach flags.
+		// A bad flag there is a top-level mistake, so the usage it
+		// raises carries the whole grouped surface.
 		c := newFlagsAt(root, "attach")
+		c.usage = clidoc.UsageText
 		c.parse(argv)
 		name := c.session
 		if len(c.args) > 0 {
@@ -445,7 +588,8 @@ func printRPC(name string, req wire.Msg) error {
 // action: the shapes come from box.go, so the CLI carries no wire of its own.
 func runBox(c *cmdFlags) error {
 	if len(c.args) == 0 {
-		return fmt.Errorf("msg needs a verb: post, list, wait, sub, clear, watchers or schema")
+		fmt.Print(clidoc.MsgSubcommands())
+		return nil
 	}
 	switch c.args[0] {
 	case "post":
