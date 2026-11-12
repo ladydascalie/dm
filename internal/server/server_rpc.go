@@ -312,9 +312,22 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.reply(cl, m, map[string]any{"rail": rail}, nil)
 
 	case "swap-panes":
-		// The two pane ids swap in place, so the rectangles keep their shapes
-		// and the focused pane keeps its id and its focus.
-		err := s.mutation(func() error { return s.swapPanes(m.Target, m.Other) })
+		// The two named panes swap in place, or a request carrying a dir and
+		// no other pane swaps the focused pane with the neighbour focus-dir
+		// would reach in that direction. Either way the rectangles keep their
+		// shapes and the focused pane keeps its id and its focus.
+		err := s.mutation(func() error {
+			if m.Dir != "" && m.Other != "" {
+				return fmt.Errorf("swap-panes takes dir or other, not both")
+			}
+			if m.Dir == "" && m.Other == "" {
+				return fmt.Errorf("swap-panes needs a dir or an other pane")
+			}
+			if m.Dir != "" {
+				return s.swapByDir(m.Dir)
+			}
+			return s.swapPanes(m.Target, m.Other)
+		})
 		s.afterMutation()
 		s.reply(cl, m, nil, err)
 
