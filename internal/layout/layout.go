@@ -654,3 +654,41 @@ func TieLess(a, b Rect, dir string) bool {
 	}
 	return a.Y < b.Y
 }
+
+// MiniRects lays panes out at a miniature scale over area. A preset name runs
+// ApplyPreset over panes at area's size; an empty name walks root as it
+// stands, so a custom tree previews itself. The result maps every pane id it
+// placed to its rectangle, and reports false when the shape cannot be built:
+// an unknown preset name, or a pane set that drops, duplicates or names a pane
+// the tree does not hold. The helper is pure: it reads and returns, and never
+// edits root.
+func MiniRects(root *Node, area Rect, panes []string, name string) (map[string]Rect, bool) {
+	if root == nil || area.W < 1 || area.H < 1 || len(panes) == 0 {
+		return nil, false
+	}
+	tree := root
+	if name != "" {
+		built, ok := ApplyPreset(root, name, panes, area.W, area.H)
+		if !ok {
+			return nil, false
+		}
+		tree = built
+	} else {
+		// A custom tree must hold exactly the panes the caller named, the way
+		// ApplyPreset demands, so a stale id previews nothing.
+		old := AllPanes(root)
+		if len(old) != len(panes) {
+			return nil, false
+		}
+		seen := make(map[string]bool, len(panes))
+		for _, id := range panes {
+			if seen[id] || !FindLeaf(root, id) {
+				return nil, false
+			}
+			seen[id] = true
+		}
+	}
+	out := make(map[string]Rect, len(panes))
+	Layout(tree, area, 0, out)
+	return out, true
+}

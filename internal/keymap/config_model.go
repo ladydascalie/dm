@@ -337,7 +337,8 @@ type KeymapAction struct {
 // keymapOrder is the order the keymap view lists modes in. A mode outside the
 // list is not shown.
 var keymapOrder = []string{
-	"main", "menu", "picker", "switcher", "scroll", "rename", "box", "help",
+	"main", "menu", "picker", "switcher", "layout", "scroll", "rename", "box",
+	"help",
 }
 
 // Keymaps returns every mode the config carries, in the fixed order the keymap

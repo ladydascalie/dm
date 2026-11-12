@@ -45,10 +45,10 @@ func TestActionDesc(t *testing.T) {
 	}
 }
 
-// TestKeymapModes proves the table carries the eight modes in the keymap
+// TestKeymapModes proves the table carries the nine modes in the keymap
 // view's order and that each action has a key and a description.
 func TestKeymapModes(t *testing.T) {
-	want := []string{"main", "menu", "picker", "switcher", "scroll", "rename", "box", "help"}
+	want := []string{"main", "menu", "picker", "switcher", "layout", "scroll", "rename", "box", "help"}
 	modes := KeymapModes()
 	if len(modes) != len(want) {
 		t.Fatalf("got %d modes, want %d", len(modes), len(want))

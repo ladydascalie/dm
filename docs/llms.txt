@@ -218,6 +218,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `swap-next` | `o` |
 | `main` | `swap-prev` | `O` |
 | `main` | `next-layout` | `u` |
+| `main` | `layout-picker` | `L` |
 | `main` | `new-workspace` | `t` |
 | `main` | `next-workspace` | `)` |
 | `main` | `synchronize-panes` | `S` |
@@ -287,6 +288,14 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `switcher` | `up` | `k` |
 | `switcher` | `up-arrow` | `up` |
 | `switcher` | `pick-1..pick-9` | `1-9` |
+| `layout` | `down` | `j` |
+| `layout` | `up` | `k` |
+| `layout` | `next-arrow` | `down` |
+| `layout` | `prev-arrow` | `up` |
+| `layout` | `pick` | `enter` |
+| `layout` | `close` | `q` |
+| `layout` | `close-esc` | `esc` |
+| `layout` | `close-prefix` | `ctrl+b` |
 | `scroll` | `search` | `/` |
 | `scroll` | `next-match` | `n` |
 | `scroll` | `prev-match` | `N` |

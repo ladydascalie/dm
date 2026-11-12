@@ -117,7 +117,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		Sync:         win.Sync,
 	}
 	for _, w := range s.st.ActiveWorkspace().Windows {
-		snap.Windows = append(snap.Windows, wire.WindowInfo{ID: w.ID, Name: w.Name, Named: w.Named})
+		snap.Windows = append(snap.Windows, wire.WindowInfo{ID: w.ID, Name: w.Name, Named: w.Named, Layout: w.Layout})
 	}
 	for _, id := range layout.AllPanes(win.Root) {
 		pc := s.panes[id]
