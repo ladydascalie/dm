@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-09" "dm" "User Commands"
+.TH DM 1 "2026-11-12" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -77,37 +77,6 @@ Aliases: write.
 .br
 Example: \fBdm write-to w1p1 --msg 'ls -la' --enter\fP
 .TP
-\fBdm read <pane> [--lines N]\fP
-print a pane's screen
-.br
-\fB--s name\fP session name
-.br
-\fB--lines N\fP number of screen lines
-.br
-\fB--scrollback N\fP history rows above the screen
-.br
-\fBdm read <pane> --scrollback N\fP print N rows above the screen
-.TP
-\fBdm yank <pane> [--lines N]\fP
-print a pane's output since the last Enter
-.br
-\fB--s name\fP session name
-.br
-\fB--lines N\fP number of output lines
-.br
-Example: \fBdm yank w1p1\fP
-.TP
-\fBdm wait <pane> [--timeout D]\fP
-stream a pane's output until a command ends, the next one when nothing runs, then name the exit code
-.br
-\fB--s name\fP session name
-.br
-\fB--timeout D\fP quiet-idle limit, not total
-.br
-\fB--json\fP print JSON
-.br
-Example: \fBdm wait w1p1 --timeout 10m\fP
-.TP
 \fBdm split <pane> --dir D\fP
 split a pane: left right up down
 .br
@@ -122,6 +91,16 @@ focus a pane
 .br
 \fB--s name\fP session name
 .TP
+\fBdm next-pane\fP
+focus the next pane
+.br
+\fB--s name\fP session name
+.TP
+\fBdm prev-pane\fP
+focus the previous pane
+.br
+\fB--s name\fP session name
+.TP
 \fBdm rename-workspace <ws> <name>\fP
 rename a workspace
 .br
@@ -133,16 +112,6 @@ set a workspace's project, or clear it with no name
 \fB--s name\fP session name
 .br
 Example: \fBdm set-project s1 dm\fP
-.TP
-\fBdm next-pane\fP
-focus the next pane
-.br
-\fB--s name\fP session name
-.TP
-\fBdm prev-pane\fP
-focus the previous pane
-.br
-\fB--s name\fP session name
 .TP
 \fBdm new-window\fP
 open a new window
@@ -182,6 +151,37 @@ print the screen a palette row lands on
 \fB--s name\fP session name
 .br
 \fB--lines N\fP number of screen lines
+.TP
+\fBdm wait <pane> [--timeout D]\fP
+stream a pane's output until a command ends, the next one when nothing runs, then name the exit code
+.br
+\fB--s name\fP session name
+.br
+\fB--timeout D\fP quiet-idle limit, not total
+.br
+\fB--json\fP print JSON
+.br
+Example: \fBdm wait w1p1 --timeout 10m\fP
+.TP
+\fBdm read <pane> [--lines N]\fP
+print a pane's screen
+.br
+\fB--s name\fP session name
+.br
+\fB--lines N\fP number of screen lines
+.br
+\fB--scrollback N\fP history rows above the screen
+.br
+\fBdm read <pane> --scrollback N\fP print N rows above the screen
+.TP
+\fBdm yank <pane> [--lines N]\fP
+print a pane's output since the last Enter
+.br
+\fB--s name\fP session name
+.br
+\fB--lines N\fP number of output lines
+.br
+Example: \fBdm yank w1p1\fP
 .TP
 \fBdm msg post --state S [--key K] [--msg T] [--body T | --body-file P]\fP
 post one entry to the box
@@ -228,7 +228,7 @@ print one entry's body, or its summary line
 .br
 Example: \fBdm msg show --key build --seq 12\fP
 .TP
-\fBdm msg wait [--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m]\fP
+\fBdm msg wait [--key K | --prefix P] [--state S] [--after SEQ] [--timeout 5m] [--json]\fP
 block until an entry matches
 .br
 \fB--s name\fP session name
@@ -242,6 +242,8 @@ block until an entry matches
 \fB--after SEQ\fP box seq cursor: entries after this one
 .br
 \fB--timeout D\fP wait timeout
+.br
+\fB--json\fP print JSON
 .br
 Example: \fBdm msg wait --key build --state done --timeout 10m\fP
 .TP

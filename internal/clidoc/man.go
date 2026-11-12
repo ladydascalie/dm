@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-09"
+const manDate = "2026-11-12"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
