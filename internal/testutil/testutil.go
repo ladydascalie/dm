@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,8 +65,15 @@ func TestVT(t *testing.T, w, h int, data string) *vt.Term {
 }
 
 // CaptureStdout runs fn with os.Stdout on a pipe and returns what it printed.
+// stdoutMu serializes CaptureStdout. os.Stdout is a process global, so two
+// parallel captures each save the other's pipe as "old" and the reads come up
+// empty or crossed. The swap, the body and the restore hold the lock together.
+var stdoutMu sync.Mutex
+
 func CaptureStdout(t *testing.T, fn func()) string {
 	t.Helper()
+	stdoutMu.Lock()
+	defer stdoutMu.Unlock()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
