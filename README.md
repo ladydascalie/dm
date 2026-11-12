@@ -120,6 +120,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `w` / `W` | next / previous window |
 | `o` / `O` | swap with the next / previous pane |
 | `u` | cycle the window to the next preset layout |
+| `L` | layout palette over the window's panes |
 | `0-9` | select window |
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
@@ -658,6 +659,29 @@ window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{en
 An unnamed window in `.../dm` reads `w1 dm`. A window the user renamed to
 `api` reads `api`. A template that does not parse, or that names an unknown
 field or function, is a config error.
+
+## Layout palette
+
+`prefix L` opens the layout palette: a panel centred over the live panes. Five
+rows name the presets in cycle order (even-horizontal, even-vertical,
+main-horizontal, main-vertical, tiled) and a last row names the window's
+custom tree. The row matching the window's stored layout name carries a
+`now` mark; an unnamed tree marks the custom row. `j` / `k` or the arrows move
+the selection and wrap, `enter` picks, `q` and `esc` close, and the prefix key
+closes too. All of it lives in the `layout` keymap mode, so `config.kdl` can
+patch it like the others.
+
+The panel previews the row the selection sits on: each preset renders as real
+rectangles from `ApplyPreset`, the same geometry the server runs, drawn at a
+miniature scale that keeps the pane area's aspect. The focused pane's box
+carries the accent. On a window with fewer than two panes every preset row
+dims, the footer reads "one pane: every layout is this", and picking a preset
+does nothing. Picking a preset sends `select-layout` with its name; picking
+the custom row closes with nothing sent. A pane that exits while the palette
+is open is gone from the next frame's preview. The palette never enters the
+session tree and never survives a detach. Hovering highlights a row, a click
+on a row runs it, and a click outside the palette closes it. A terminal too
+small for the preview shows the list alone with a footer note.
 
 ## Status bar
 

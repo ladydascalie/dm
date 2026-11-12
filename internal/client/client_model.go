@@ -85,7 +85,10 @@ type tui struct {
 	// box is the message-box float, nil when closed.
 	box *boxview.BoxView
 	// keys is the keymap view float, nil when closed.
-	keys  *keymapview.KeymapView
+	keys *keymapview.KeymapView
+	// lsw is the open layout palette, nil when closed. It lives in mode
+	// "layout" and owns the keyboard while it is up.
+	lsw   *layoutSwitcher
 	dirty bool
 
 	// out is the frame sink: a counting wrapper over os.Stdout in a session,
@@ -341,6 +344,7 @@ type lastFrame struct {
 	menu   paint
 	rename paint
 	prompt paint
+	lsw    paint
 
 	// floats holds each float's last bytes, keyed by float ID. The widget
 	// keeps no frame state of its own.

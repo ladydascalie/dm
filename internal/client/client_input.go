@@ -226,6 +226,8 @@ func (t *tui) forwardPaste(seq []byte) {
 		return
 	case "menu":
 		t.closeMenu()
+	case "layout":
+		closeLayoutSwitcher(t)
 	case "sessions":
 		t.closePicker()
 	case "scroll":
@@ -511,6 +513,12 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
+		if t.mode == "layout" {
+			if !t.layoutKey() {
+				return
+			}
+			continue
+		}
 		if t.mode == "scroll" {
 			if !t.scrollKey() {
 				return
@@ -690,6 +698,8 @@ func (t *tui) expireMode(now time.Time) bool {
 	switch t.mode {
 	case "menu":
 		t.closeMenu()
+	case "layout":
+		closeLayoutSwitcher(t)
 	case "sessions":
 		t.closePicker()
 	case "scroll":
@@ -1948,6 +1958,10 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	t.updateLinkHover(x, y, ev.btn&16 != 0)
 	t.updatePadHover(x, y)
 	t.updateRailHover()
+	if t.mode == "layout" {
+		t.layoutMouse(ev, x, y)
+		return
+	}
 	if t.mode == "menu" {
 		if t.menu == nil {
 			t.closeMenu()

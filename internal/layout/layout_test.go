@@ -902,3 +902,58 @@ func TestApplyPresetTiledGrid(t *testing.T) {
 		t.Fatalf("tiled order = %v, want row-major a..e", got)
 	}
 }
+
+// TestMiniRectsMatchesApplyPreset pins the miniature preview to the real
+// geometry: at a known size, the rects two named presets produce are the rects
+// ApplyPreset walked to over the same ids, at the same area and no padding.
+func TestMiniRectsMatchesApplyPreset(t *testing.T) {
+	ids := []string{"a", "b", "c"}
+	root := &Node{Dir: "col", Kids: []*Node{{Pane: "a"}, {Pane: "b"}, {Pane: "c"}}}
+	area := Rect{X: 0, Y: 0, W: 40, H: 14}
+	for _, name := range []string{"even-horizontal", "tiled"} {
+		got, ok := MiniRects(root, area, ids, name)
+		if !ok {
+			t.Fatalf("MiniRects %s failed", name)
+		}
+		tree, ok := ApplyPreset(root, name, ids, area.W, area.H)
+		if !ok {
+			t.Fatalf("ApplyPreset %s failed", name)
+		}
+		want := map[string]Rect{}
+		Layout(tree, area, 0, want)
+		for id, r := range want {
+			if got[id] != r {
+				t.Fatalf("%s pane %s = %+v, want %+v", name, id, got[id], r)
+			}
+		}
+		if len(got) != len(want) {
+			t.Fatalf("%s placed %d panes, want %d", name, len(got), len(want))
+		}
+	}
+}
+
+// TestMiniRectsCustomWalksTheTree proves an empty name previews the tree as it
+// stands, and that a pane the tree does not hold refuses.
+func TestMiniRectsCustomWalksTheTree(t *testing.T) {
+	root := &Node{Dir: "row", Kids: []*Node{
+		{Pane: "a"},
+		{Dir: "col", Sizes: []float64{2, 1}, Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
+	}}
+	got, ok := MiniRects(root, Rect{W: 30, H: 10}, []string{"a", "b", "c"}, "")
+	if !ok {
+		t.Fatal("custom MiniRects failed")
+	}
+	want := map[string]Rect{}
+	Layout(root, Rect{W: 30, H: 10}, 0, want)
+	if got["a"] != want["a"] || got["c"] != want["c"] {
+		t.Fatalf("custom rects = %+v, want %+v", got, want)
+	}
+	// The caller names the ids; a stale id refuses rather than previewing a
+	// pane the window no longer holds.
+	if _, ok := MiniRects(root, Rect{W: 30, H: 10}, []string{"a", "b", "z"}, ""); ok {
+		t.Fatal("a pane outside the tree did not refuse")
+	}
+	if _, ok := MiniRects(root, Rect{W: 30, H: 10}, []string{"a"}, ""); ok {
+		t.Fatal("a short pane list did not refuse")
+	}
+}
