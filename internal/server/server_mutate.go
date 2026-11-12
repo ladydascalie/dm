@@ -564,8 +564,11 @@ func (s *server) closeWindow(id string) error {
 }
 
 // validateArgv refuses an argv the pane flag cannot carry back: every element
-// must be non-empty and free of NUL bytes, the same rules the __pane --argv
-// flag enforces, so what the server stores is what the respawn runs.
+// must be non-empty and free of NUL bytes, the rules the __pane --argv flag
+// enforces, plus commas, which are the flag's separator. A comma inside an
+// element would split on the way back to the daemon and respawn a different
+// program, so it is refused here; what the server stores is exactly what the
+// restart runs.
 func validateArgv(argv []string) error {
 	if len(argv) == 0 {
 		return nil
@@ -573,6 +576,9 @@ func validateArgv(argv []string) error {
 	for _, a := range argv {
 		if a == "" {
 			return fmt.Errorf("argv has an empty element")
+		}
+		if strings.ContainsRune(a, ',') {
+			return fmt.Errorf("argv element %q contains a comma", a)
 		}
 		if strings.ContainsRune(a, '\x00') {
 			return fmt.Errorf("argv element contains a NUL byte")

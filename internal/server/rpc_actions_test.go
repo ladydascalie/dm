@@ -1164,45 +1164,49 @@ func TestSplitActionArgvPersists(t *testing.T) {
 		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"htop", ""}, ID: 3}))
 	wantErr(t, "split", "NUL", rpcCall(t, s, cl, conn,
 		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"htop\x00"}, ID: 4}))
+	// A comma inside one element is the flag separator: it would split on the
+	// respawn and run a different program, so it is refused.
+	wantErr(t, "split", "comma", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"a,b"}, ID: 5}))
 }
 
 // TestSplitActionArgvRespawnsAfterRestart proves the restart contract: a pane
-// split with argv is persisted, and the next spawn of that pane, the way a
-// server restart spawns every pane, is born with the same program.
+// whose saved state carries argv is respawned with the same program, never a
+// shell. A fresh server over a saved state dir with a dead pane socket is
+// exactly what a restart loads after the split action persisted the program,
+// and ensurePane's start-or-adopt loop takes the spawn branch.
 func TestSplitActionArgvRespawnsAfterRestart(t *testing.T) {
 	t.Parallel()
-	s, cl, conn, a, _ := rpcServer(t, "rpcrespawn")
-	screenPane(t, s.st, "w1p3")
-
-	m := rpcCall(t, s, cl, conn,
-		wire.Msg{Type: "req", Action: "split", Target: a, Dir: "right", Argv: []string{"htop"}, ID: 1})
-	if !m.OK {
-		t.Fatalf("split with argv: %s", m.Error)
-	}
-
-	// Take the adopted daemon away and remove its socket, so the next
-	// ensurePane cannot dial a live daemon and takes the spawn branch, the
-	// same branch a restart's start-or-adopt loop takes.
-	s.mu.Lock()
-	if pc := s.panes["w1p3"]; pc != nil {
-		_ = pc.c.Close()
-		delete(s.panes, "w1p3")
-	}
-	s.mu.Unlock()
-	if err := os.Remove(s.st.PaneSock("w1p3")); err != nil {
+	root := t.TempDir()
+	st := session.NewStateAt(root, "respawn")
+	id := testutil.RootPane(st)
+	st.Panes[id] = &session.PaneState{Shell: "/bin/sh", Cwd: "/tmp", Cols: 80, Rows: 24,
+		Argv: []string{"htop", "-d", "5"}}
+	if err := st.Save(); err != nil {
 		t.Fatal(err)
 	}
-
-	var got []string
+	got, err := session.LoadStateAt(root, "respawn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pane's socket is dead: nothing ever listened on it, so ensurePane
+	// cannot adopt a daemon and takes the spawn branch. The panes directory
+	// must exist for the pane's log, the way the server's own startup makes
+	// it.
+	s := railServer(got)
+	if err := os.MkdirAll(filepath.Join(got.SessionDir(), "panes"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var args []string
 	s.spawn = func(c *exec.Cmd) error {
-		got = append([]string(nil), c.Args...)
+		args = append([]string(nil), c.Args...)
 		return errors.New("captured")
 	}
-	if err := s.ensurePane("w1p3"); err == nil {
+	if err := s.ensurePane(id); err == nil {
 		t.Fatal("ensurePane returned nil, want the captured spawn error")
 	}
-	if !hasFlag(got, "--argv", "htop") {
-		t.Fatalf("respawn args = %v, want --argv htop", got)
+	if !hasFlag(args, "--argv", "htop,-d,5") {
+		t.Fatalf("respawn args = %v, want --argv htop,-d,5", args)
 	}
 }
 
