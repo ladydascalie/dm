@@ -1124,3 +1124,152 @@ func TestUnknownActionFails(t *testing.T) {
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "bogus", ID: 1})
 	wantErr(t, "bogus", "unknown action", m)
 }
+
+// splitHolding returns the split node whose Kids directly hold the leaf id.
+func splitHolding(n *layout.Node, id string) *layout.Node {
+	if n == nil || n.Pane != "" {
+		return nil
+	}
+	for _, k := range n.Kids {
+		if k.Pane == id {
+			return n
+		}
+	}
+	for _, k := range n.Kids {
+		if p := splitHolding(k, id); p != nil {
+			return p
+		}
+	}
+	return nil
+}
+
+// noSingleKid walks the tree and fails when any split holds exactly one kid.
+func noSingleKid(t *testing.T, n *layout.Node) {
+	t.Helper()
+	if n == nil || n.Pane != "" {
+		return
+	}
+	if len(n.Kids) < 2 {
+		t.Fatalf("a split holds %d kid", len(n.Kids))
+	}
+	for _, k := range n.Kids {
+		noSingleKid(t, k)
+	}
+}
+
+// paneRects lays the window out with the server's own geometry.
+func paneRects(t *testing.T, s *server, win *session.Window) map[string]layout.Rect {
+	t.Helper()
+	out := map[string]layout.Rect{}
+	layout.Layout(win.Root, layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked()), s.cfg.Padding(), out)
+	return out
+}
+
+// TestSwapPanesAction pins the swap: the ids trade places, every rectangle
+// keeps its shape, focus stays on the focused pane, and a pair that is not
+// in the same tree fails without touching it.
+func TestSwapPanesAction(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, a, b := rpcServer(t, "rpcswap")
+	screenPane(t, s.st, "w1p3")
+
+	// Deepen the tree to row(a, col(b, c)) with focus on a.
+	s.mu.Lock()
+	s.st.Workspaces[0].Windows[0].Root = &layout.Node{Dir: "row", Kids: []*layout.Node{
+		{Pane: a},
+		{Dir: "col", Kids: []*layout.Node{{Pane: b}, {Pane: "w1p3"}}},
+	}}
+	s.st.Panes["w1p3"] = &session.PaneState{}
+	win := s.st.Workspaces[0].Windows[0]
+	before := paneRects(t, s, win)
+	s.mu.Unlock()
+
+	if m := rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "swap-panes", Target: b, Other: "w1p3", ID: 1}); !m.OK {
+		t.Fatalf("swap-panes: %s", m.Error)
+	}
+	s.mu.Lock()
+	win = s.st.Workspaces[0].Windows[0]
+	ids := layout.AllPanes(win.Root)
+	focus := win.Focus
+	after := paneRects(t, s, win)
+	s.mu.Unlock()
+	if len(ids) != 3 || focus != a {
+		t.Fatalf("after swap panes = %v focus = %q, want three panes focused on %q", ids, focus, a)
+	}
+	if after["w1p3"] != before[b] || after[b] != before["w1p3"] {
+		t.Fatalf("a swap moved rectangles: before %v after %v", before, after)
+	}
+	if after[a] != before[a] {
+		t.Fatalf("the untouched pane moved: %v -> %v", before[a], after[a])
+	}
+
+	// A swap naming a pane outside the tree fails and leaves it alone.
+	wantErr(t, "swap-panes", "no pane", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "swap-panes", Target: a, Other: "ghost", ID: 2}))
+	s.mu.Lock()
+	ids = layout.AllPanes(s.st.ActiveWindow().Root)
+	s.mu.Unlock()
+	if len(ids) != 3 {
+		t.Fatalf("a refused swap changed the tree: %v", ids)
+	}
+}
+
+// TestMovePaneAction pins the move: the leaf lands on the asked edge of the
+// target, the collapse leaves no single-kid split, the moved pane takes the
+// focus, and a pane outside the tree or a bad dir is refused.
+func TestMovePaneAction(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, a, b := rpcServer(t, "rpcmove")
+	screenPane(t, s.st, "w1p3")
+
+	// Deep tree row(a, col(b, c)); move the deep leaf c right of a.
+	s.mu.Lock()
+	s.st.Workspaces[0].Windows[0].Root = &layout.Node{Dir: "row", Kids: []*layout.Node{
+		{Pane: a},
+		{Dir: "col", Kids: []*layout.Node{{Pane: b}, {Pane: "w1p3"}}},
+	}}
+	s.st.Panes["w1p3"] = &session.PaneState{}
+	s.mu.Unlock()
+
+	m := rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "move-pane", Target: "w1p3", Other: a, Dir: "right", ID: 1})
+	if !m.OK {
+		t.Fatalf("move-pane: %s", m.Error)
+	}
+	s.mu.Lock()
+	win := s.st.Workspaces[0].Windows[0]
+	ids := layout.AllPanes(win.Root)
+	focus := win.Focus
+	root := win.Root
+	s.mu.Unlock()
+	if len(ids) != 3 {
+		t.Fatalf("after move panes = %v, want three", ids)
+	}
+	if focus != "w1p3" {
+		t.Fatalf("move-pane left focus on %q, want the moved pane %q", focus, "w1p3")
+	}
+	noSingleKid(t, root)
+	p := splitHolding(root, "w1p3")
+	if p == nil || p.Dir != "row" || len(p.Kids) != 2 ||
+		p.Kids[0].Pane != a || p.Kids[1].Pane != "w1p3" {
+		t.Fatalf("the moved pane did not land right of %q: %+v", a, p)
+	}
+
+	// A bad direction and a pane outside the tree both fail.
+	wantErr(t, "move-pane", "dir must be", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "move-pane", Target: "w1p3", Other: a, Dir: "sideways", ID: 2}))
+	wantErr(t, "move-pane", "no pane", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "move-pane", Target: "ghost", Other: a, Dir: "right", ID: 3}))
+	wantErr(t, "move-pane", "no pane", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "move-pane", Target: "w1p3", Other: "ghost", Dir: "right", ID: 4}))
+
+	// A target in another window is out of scope.
+	s.mu.Lock()
+	s.st.Workspaces[0].Windows = append(s.st.Workspaces[0].Windows,
+		&session.Window{ID: "w2", Name: "two", Root: &layout.Node{Pane: "w2p1"}})
+	s.st.Panes["w2p1"] = &session.PaneState{}
+	s.mu.Unlock()
+	wantErr(t, "move-pane", "no pane", rpcCall(t, s, cl, conn,
+		wire.Msg{Type: "req", Action: "move-pane", Target: "w1p3", Other: "w2p1", Dir: "right", ID: 5}))
+}
