@@ -4,8 +4,8 @@ A small, durable terminal multiplexer. One static Go binary that carries the
 server, the pane harness, the TUI client and the CLI.
 
 Prototype status: M1 works end to end. Splits, windows, workspaces, OSC 7501
-agent status, durable sessions and a JSON RPC are implemented. Scrollback search
-is not implemented.
+agent status, durable sessions, a JSON RPC and scrollback search are
+implemented.
 
 ## Identifiers
 
@@ -108,6 +108,8 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `\|` / `-` | split right / down |
 | `<` / `^` | split left / up |
 | `[` | scrollback (also the mouse wheel) |
+| `[` then `/` | search the scrollback, live screen included |
+| `[` then `n` / `N` | older / newer search match, wrapping |
 | `i` | copy the focused pane's id |
 | `h j k l` or arrows | focus pane left / down / up / right |
 | `n` / `p` | next / previous pane |
@@ -164,6 +166,7 @@ optional and each one overrides its built-in value.
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below `tab-min-width` | `20` | Set the largest tab width before the label is cut. |
 | `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A change resizes every pane on reload. |
+| `history-lines` | an integer from 100 to 32768 lines | `2000` | Set the scrollback window in rows and the pane ring budget: about 256 bytes per line, at least 512 KiB and at most 8 MiB. |
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
 | `dashboard-layout` | `"full"` or `"float"` | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
@@ -177,7 +180,9 @@ optional and each one overrides its built-in value.
 `ctrl+r` re-reads `config.kdl` and the theme file it names, and applies every
 node. It also asks the server to re-read the same file, so the server's layout
 follows `padding` and `default-fold` too. A failed read on either side keeps the
-previous values. A padding change resizes every pane, so a reflow follows.
+previous values. A padding change resizes every pane, so a reflow follows. A
+`history-lines` change resizes every pane's ring in place and drops the cached
+scrollback, so the next scroll replays at the new height.
 
 A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, or
 `$HOME/.config/dm/themes/<name>.kdl` when `XDG_CONFIG_HOME` is unset. That is
@@ -655,7 +660,8 @@ padding on the ground, 65-80 the pinned scroll info.
 
 The pinned right block holds `PREFIX ` while `armed` is set, then the
 transient info text when there is one: `SCROLL <pane> +<offset>/<max>` while
-scrolling, or `drag to resize` while the pointer rests on a divider. It is
+scrolling, with ` SEARCH <query> <i>/<n>` appended while a query is accepted,
+or `drag to resize` while the pointer rests on a divider. It is
 anchored to the last column, and one cell of ground always separates it from the
 left block, even when the left block would otherwise fill the row. When the
 pinned block cannot fit, its leftmost segment goes whole, `PREFIX ` first and
@@ -739,11 +745,41 @@ reports `alt` and `mouse` in every snapshot, so a client that attached late
 still knows even when the enabling escape sequence has left the replay ring.
 
 Scrollback is built on demand: the first time you scroll a pane, the client asks
-the server for that pane's output ring, replays it into a tall terminal (2000
-rows), and draws a window into it at the current offset. The ring is cached per
-pane for that layout, so a second scroll asks for nothing. It is a frozen
-snapshot taken when you scroll, so new output does not move the view. The replay
-is approximate for full-screen programs; for streamed output it is exact.
+the server for that pane's output ring, replays it into a tall terminal, and
+draws a window into it at the current offset. The tall terminal is
+`history-lines` rows plus the pane's own height, so 2000 rows by default. The
+ring is cached per pane for that layout, so a second scroll asks for nothing. It
+is a frozen snapshot taken when you scroll, so new output does not move the
+view. The replay is approximate for full-screen programs; for streamed output
+it is exact.
+
+The window is a row count and the ring is a byte budget. A row is budgeted at
+about 256 bytes, the ring is capped at 8 MiB and every pane keeps at least
+512 KiB. A row can take more than 256 bytes, so a wide pane holds fewer rows
+than `history-lines` and a narrow one holds more. A pane reads its budget when
+it starts. A reload sends the new budget to every pane, resizes the ring in
+place, and keeps the newest bytes.
+
+### Scrollback search
+
+`/` opens a query row above the status bar. It reads `search:` and the draft,
+and it takes every key: printable bytes append, backspace deletes one
+character, `ctrl+u` clears the line, `enter` accepts and `esc` cancels. No byte
+reaches the pane while the row is open.
+
+A match is a literal substring, case-insensitive. There is no regex. The search
+reads the tall terminal's rows, so the live screen is part of it. Matching rows
+take the theme's hover ground, and the current match paints reverse video.
+
+On accept, the view jumps to the nearest match at or above the top of the band,
+and that row lands at the top. `n` moves to the next older match and `N` to the
+next newer one; both wrap. A query with no match raises `no match: <q>` and
+leaves the offset alone. While a query is accepted, the status bar's right block
+reads `SCROLL <pane> +<offset>/<max> SEARCH <query> <i>/<n>`.
+
+Esc order: with an accepted query, the first `esc` clears the search and keeps
+scrollback open, and the next `esc` leaves. With no query, `esc` leaves at once.
+Leaving scrollback clears the query, its matches and its highlights.
 
 Mouse reporting means normal drag no longer selects text. Hold Shift while
 dragging to use the terminal's own selection.
@@ -807,14 +843,15 @@ alone: it would read the markers as keys and leave their tail on the line, which
 is how a pasted mysql statement showed up as `0~SET GLOBAL ...;1~`.
 
 Small actions answer with a toast, not text in the status bar: the bar's right
-block is reserved for the scroll position and the divider hint. The client
-keeps up to three, each with the time it was raised, and draws them bottom
-right just above the bar, newest at the bottom: one row of bright text inside a
-dim border, as wide as the longest text plus its two border cells, clamped to
-the screen. A repeat of the newest text within one second is the same toast,
-and every toast expires after three seconds. Copying raises one, as does a
-failed request, an unknown key, an empty scrollback and a pane exit. An entry
-posted under `notify/` raises one too, unless it names the focused pane.
+block is reserved for the scroll position, the search match and the divider
+hint. The client keeps up to three, each with the time it was raised, and
+draws them bottom right just above the bar, newest at the bottom: one row of
+bright text inside a dim border, as wide as the longest text plus its two
+border cells, clamped to the screen. A repeat of the newest text within one
+second is the same toast, and every toast expires after three seconds. Copying
+raises one, as does a failed request, an unknown key, an empty scrollback and a
+pane exit. An entry posted under `notify/` raises one too, unless it names the
+focused pane.
 
 System notifications are for the events worth interrupting for. A pane that
 enters `blocked`, `done` or `error`, or that exits, is posted to the box under
@@ -1158,7 +1195,7 @@ Two processes per session:
 
 ```
 dm __server   owns layout, focus, clients; persists state.json on every change
-dm __pane     one per pane; owns the PTY, VT screen, status and a fixed 512 KiB ring
+dm __pane     one per pane; owns the PTY, VT screen, status and a byte-budgeted ring
 ```
 
 Each pane daemon has its own unix socket and is started with `setsid`, so it
@@ -1170,9 +1207,10 @@ different file, no client can reach that daemon, so it stops its shell and
 exits. An intact path is the normal state while the server restarts, so the
 daemon stays.
 
-A pane daemon holds a fixed 512 KiB output ring, allocated once, and runs with
-a 32 MiB memory ceiling. A pane is still its own Go process, and that process is
-the floor: the ceiling bounds a burst, it does not lower the floor.
+A pane daemon holds an output ring sized from `history-lines`: about 256 bytes
+per line, at least 512 KiB and at most 8 MiB. It runs with a memory ceiling
+32 MiB above that budget. A pane is still its own Go process, and that process
+is the floor: the ceiling bounds a burst, it does not lower the floor.
 
 - Kill the client: nothing is lost, reattach.
 - More than one client may attach. They share one layout: the largest attached
