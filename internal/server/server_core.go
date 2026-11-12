@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -473,7 +474,22 @@ func (s *server) reloadConfig() error {
 	}
 	s.mu.Lock()
 	s.cfg = cfg
+	ids := make([]string, 0, len(s.st.Panes))
+	for id := range s.st.Panes {
+		ids = append(ids, id)
+	}
 	s.mu.Unlock()
+	sort.Strings(ids)
+
+	// Hand every pane the new ring budget. A pane that does not answer keeps
+	// the budget it was born with and is logged: a dead or wedged pane never
+	// fails the reload, so the rest of the config still takes effect.
+	budget := cfg.HistoryBytes()
+	for _, id := range ids {
+		if _, err := paneRequest(s.st, id, wire.Msg{Type: "req", Action: "set-history", History: budget}); err != nil {
+			log.Printf("pane %s: set-history: %v", id, err)
+		}
+	}
 	return nil
 }
 
@@ -513,10 +529,11 @@ func (s *server) addPaneStateAt(id, cwd, shell string) {
 // rides as --fg or --bg, so the pane answers OSC 10 and OSC 11 with the
 // client's terminal instead of the compiled-in default. A half-known pair
 // passes only the half it has and leaves the other at its default.
-func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours) *exec.Cmd {
+func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours, history int) *exec.Cmd {
 	args := []string{"__pane", "--id", id, "--session", sess,
 		"--cwd", ps.Cwd, "--shell", ps.Shell,
-		"--cols", strconv.Itoa(ps.Cols), "--rows", strconv.Itoa(ps.Rows)}
+		"--cols", strconv.Itoa(ps.Cols), "--rows", strconv.Itoa(ps.Rows),
+		"--history", strconv.Itoa(history)}
 	if tc != nil {
 		if tc.fg != "" {
 			args = append(args, "--fg", tc.fg)
@@ -560,13 +577,14 @@ func (s *server) ensurePane(id string) error {
 		delete(s.adopt, id)
 	}
 	tc := s.termColours
+	history := s.cfg.HistoryBytes()
 	spawn := s.spawn
 	s.mu.Unlock()
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cmd := paneCommand(exe, s.st.Name, id, ps, tc)
+	cmd := paneCommand(exe, s.st.Name, id, ps, tc, history)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	logPath := filepath.Join(s.st.SessionDir(), "panes", id+".log")
 	lf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)

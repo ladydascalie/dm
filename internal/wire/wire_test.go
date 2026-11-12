@@ -129,3 +129,32 @@ func TestFloatRoundTrip(t *testing.T) {
 		t.Fatalf("unset float kept the key: %s", b)
 	}
 }
+
+// TestSetHistoryRoundTrip proves the ring budget survives the frame and that an
+// unset budget leaves the key out, so a zero never reaches a pane as a size.
+func TestSetHistoryRoundTrip(t *testing.T) {
+	in := wire.Msg{Type: "req", Action: "set-history", History: 2 << 20}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Action != "set-history" || out.History != 2<<20 {
+		t.Fatalf("round trip = %q/%d, want set-history/%d", out.Action, out.History, 2<<20)
+	}
+
+	b, err := json.Marshal(wire.Msg{Type: "req", Action: "set-history"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["history"]; ok {
+		t.Fatalf("unset history kept the key: %s", b)
+	}
+}

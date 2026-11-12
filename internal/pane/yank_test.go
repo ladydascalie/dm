@@ -29,7 +29,7 @@ func yankPane(t *testing.T, cols, rows int) (*paneProc, net.Conn, chan wire.Msg)
 	})
 	go func() { _, _ = io.Copy(io.Discard, r) }()
 	p := &paneProc{
-		id: "w1p1", vt: vt.NewTerm(cols, rows), ring: &scrollRing{},
+		id: "w1p1", vt: vt.NewTerm(cols, rows), ring: NewRing(ringDefault),
 		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, ptmx: w,
 	}
 	serve, cli := net.Pipe()

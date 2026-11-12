@@ -199,7 +199,7 @@ func TestReadLoopPublishesAndReportsExit(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
 	p := &paneProc{
-		id: "w1p1", vt: vt.NewTerm(20, 5), ring: &scrollRing{},
+		id: "w1p1", vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault),
 		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, ptmx: r,
 	}
 	msgs := subscriber(p)
@@ -277,7 +277,7 @@ func TestReplyQueryAnswersTheProbe(t *testing.T) {
 // reports is the one on its screen.
 func TestCursorPosReportsTheScreenCursor(t *testing.T) {
 	t.Parallel()
-	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, subs: map[*subConn]bool{}}
+	p := &paneProc{vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault), subs: map[*subConn]bool{}}
 	p.vt.Write([]byte("hello\r\nworld"))
 	p.vt.Flush()
 	row, col := p.cursorPos()
@@ -290,7 +290,7 @@ func TestCursorPosReportsTheScreenCursor(t *testing.T) {
 // sample that repeats the state sends nothing.
 func TestSetStatusBroadcastsChangeOnly(t *testing.T) {
 	t.Parallel()
-	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, subs: map[*subConn]bool{}}
+	p := &paneProc{vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault), subs: map[*subConn]bool{}}
 	msgs := subscriber(p)
 
 	p.setStatus(wire.Status{State: "working", Message: "building"})
@@ -316,7 +316,7 @@ func TestSampleCwdReportsMoves(t *testing.T) {
 	waitFor(t, 5*time.Second, func() bool { return shellCwd(cmd.Process.Pid) == want },
 		"the shell to reach its directory")
 
-	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, subs: map[*subConn]bool{}}
+	p := &paneProc{vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault), subs: map[*subConn]bool{}}
 	msgs := subscriber(p)
 
 	p.sampleCwd(cmd.Process.Pid)
@@ -338,7 +338,7 @@ func TestSampleCwdReportsMoves(t *testing.T) {
 // it changed and nothing when the program never set one.
 func TestSampleTitleReportsChanges(t *testing.T) {
 	t.Parallel()
-	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, subs: map[*subConn]bool{}}
+	p := &paneProc{vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault), subs: map[*subConn]bool{}}
 	msgs := subscriber(p)
 
 	// A program that never set a title reports nothing.
@@ -364,7 +364,7 @@ func TestWatchShellSamplesTheCwd(t *testing.T) {
 	t.Parallel()
 	cmd := sleepingShell(t, "sleep 30")
 	p := &paneProc{
-		id: "w1p1", vt: vt.NewTerm(20, 5), ring: &scrollRing{},
+		id: "w1p1", vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault),
 		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, cmd: cmd,
 	}
 	msgs := subscriber(p)
@@ -396,7 +396,7 @@ func TestShutdownClosesThePtyAndHupsTheShell(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
 	cmd := sleepingShell(t, "sleep 30")
-	p := &paneProc{vt: vt.NewTerm(20, 5), ring: &scrollRing{}, ptmx: w, cmd: cmd}
+	p := &paneProc{vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault), ptmx: w, cmd: cmd}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -584,7 +584,7 @@ func TestBulkPasteClearsTheEcho(t *testing.T) {
 func TestYankStartsAtTheOldestHeldByteWhenTheRingWrapped(t *testing.T) {
 	t.Parallel()
 	p, cli, msgs := yankPane(t, 80, 24)
-	stream := ringStream(t, ringMax+ringMax/2)
+	stream := ringStream(t, ringDefault+ringDefault/2)
 	feedPane(p, stream)
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "write", Keys: []byte("\r"), ID: 1})
 	paneSync(t, cli, msgs)
@@ -627,7 +627,7 @@ func TestYankCutsAtThePromptMarkWithoutACommandEnd(t *testing.T) {
 // at the edges: clamped ranges, empty ranges and a slice across the wrap.
 func TestRingSliceAndIndexByteEdges(t *testing.T) {
 	t.Parallel()
-	r := &scrollRing{}
+	r := NewRing(ringDefault)
 	r.Write([]byte("hello world"))
 
 	if i := r.indexByte('w', 0); i != 6 {
@@ -657,8 +657,8 @@ func TestRingSliceAndIndexByteEdges(t *testing.T) {
 	}
 
 	// A slice across the buffer end comes back oldest first.
-	wrapped := &scrollRing{}
-	wrapped.Write(ringStream(t, ringMax-3))
+	wrapped := NewRing(ringDefault)
+	wrapped.Write(ringStream(t, ringDefault-3))
 	wrapped.Write([]byte("0123456789"))
 	if got := wrapped.slice(0, wrapped.Len()); !bytes.Equal(got, wrapped.Bytes()) {
 		t.Fatal("a slice across the wrap differs from Bytes()")
