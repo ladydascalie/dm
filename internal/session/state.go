@@ -24,6 +24,9 @@ type Window struct {
 	// Unfolded shows the window's pane rows in the rail. It is inverted so the
 	// zero value, which older state files carry, means the default: folded.
 	Unfolded bool `json:"unfolded,omitempty"`
+	// Sync mirrors every write to one pane of the window to every live pane of
+	// it. It is a window flag: zero (off) is the default for older state files.
+	Sync bool `json:"sync,omitempty"`
 }
 
 type Workspace struct {

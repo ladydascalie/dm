@@ -30,6 +30,7 @@ func TestGlyphSetsAreOneCell(t *testing.T) {
 			"tee-left": g.BorderTeeLeft, "tee-right": g.BorderTeeRight,
 			"fold-open": g.FoldOpen, "fold-closed": g.FoldClosed,
 			"active-mark": g.ActiveMark, "workspace-bar": g.WorkspaceBar, "dirty": g.Dirty,
+			"sync-mark": g.SyncMark,
 		}
 		for name, glyph := range structural {
 			if glyph == "" {
@@ -70,7 +71,7 @@ func TestASCIIGlyphSetIsASCII(t *testing.T) {
 		g.BorderTopLeft, g.BorderTopRight, g.BorderBottomLeft, g.BorderBottomRight,
 		g.BorderHorizontal, g.BorderVertical, g.BorderTeeLeft, g.BorderTeeRight,
 		g.FoldOpen, g.FoldClosed, g.ActiveMark, g.WorkspaceBar, g.Dirty,
-		g.Ellipsis,
+		g.SyncMark, g.Ellipsis,
 	}
 	for _, style := range th.States {
 		all = append(all, style.For(GlyphASCII).Glyph)
