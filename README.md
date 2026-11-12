@@ -596,9 +596,15 @@ it starts in the folder of the pane it was created from; `rename-window`
 overrides the name. A window whose label is still the old positional number is
 renamed from its pane's folder when the session loads.
 
-A long label is cut with `…` so the right-aligned stats fit, and the branch is
-dropped first. When even that cannot, the rail draws no tail at all, never half
-a pair. The rail paints its own dark background. The built-in theme uses
+A long label is cut with `…` so the right-aligned stats fit. The stats tail
+pays rent in label: it renders while the label fits beside it, and when the
+label must elide, only while the elided label still keeps at least half the
+row. A tail that fails the rent stands down whole, before the branch and the
+label: a dirty row shows nothing, because "clean" would lie, and `clean`
+itself obeys the same rent, so a narrow rail ends at the label alone. The tail
+never renders truncated, never `+1 -`. The smallest dirty pair (`● +1 -1`)
+keeps its cells from about twenty rail columns with a usual label, and no tail
+renders below thirteen. The rail paints its own dark background. The built-in theme uses
 explicit RGB colours, not palette slots, and every label and glyph of it
 reaches WCAG AA contrast on both the rail and the focused row. Icons use Nerd
 Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces them and

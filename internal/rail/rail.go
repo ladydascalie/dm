@@ -530,6 +530,11 @@ func RailBar(th theme.Theme, it RailItem) segment.Seg {
 	return segment.Seg{Text: th.Glyphs.WorkspaceBar, FG: th.Accents[it.ProjectAccent]}
 }
 
+// windowChrome is the cells a window row spends before its label: the
+// two-space indent, the fold caret and the space after it. The stats tail's
+// rent is measured against them.
+const windowChrome = 4
+
 // RailRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and set are the rail's own switches.
@@ -608,6 +613,23 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				}
 			}
 			right = RailStats(th, it, set)
+			// The stats tail pays rent in label. It renders whole while the
+			// label fits beside it, and when the label must elide, only
+			// while the elided label still keeps half the row. A tail that
+			// fails the rent stands down whole, so the rail never renders a
+			// truncated pair such as "+1 -": a dirty row shows nothing,
+			// because "clean" would lie, and a clean row's "clean" sits
+			// under the same rent, so a narrow rail ends at the label alone.
+			// The tail drops before the branch, which the ladder below drops
+			// before the label elides.
+			if pair := segment.SegCells(right); pair > 0 {
+				label := segment.SegCells(left)
+				// One more cell goes to the separation before the right edge.
+				budget := w - pair - 1
+				if label > budget && budget-windowChrome < (w+1)/2 {
+					right = nil
+				}
+			}
 		}
 	case WindowNote:
 		if !compact {
