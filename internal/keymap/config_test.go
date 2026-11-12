@@ -50,6 +50,7 @@ var configTestDefaultActions = map[string][]string{
 		"pick-6", "pick-7", "pick-8", "pick-9",
 	},
 	"scroll": {
+		"search", "next-match", "prev-match",
 		"up", "up-arrow", "down", "down-arrow", "page-up",
 		"page-down", "top", "close", "close-q", "close-bracket",
 		"close-esc",
@@ -1317,6 +1318,131 @@ func TestConfigGlyphs(t *testing.T) {
 	for _, src := range []string{`glyphs "emoji"`, `glyphs nerd`, `glyphs "nerd"` + "\n" + `glyphs "ascii"`} {
 		if _, err := parseConfig(src); err == nil {
 			t.Fatalf("parseConfig(%q) accepted a bad glyph set", src)
+		}
+	}
+}
+
+// TestConfigHistoryLines proves the history window: absent means the built-in
+// default, a bare or quoted number is kept, both bounds are accepted, and a
+// value outside them fails with its node and line.
+func TestConfigHistoryLines(t *testing.T) {
+	if got := LoadDefault().HistoryLines(); got != defaultHistoryLines {
+		t.Fatalf("LoadDefault().HistoryLines() = %d, want %d", got, defaultHistoryLines)
+	}
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultHistoryLines},
+		{"default", "history-lines 2000", 2000},
+		{"min", "history-lines 100", minHistoryLines},
+		{"max", "history-lines 32768", maxHistoryLines},
+		{"quoted", `history-lines "5000"`, 5000},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.HistoryLines(); got != c.want {
+				t.Fatalf("HistoryLines() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	bad := []struct {
+		src  string
+		want string
+	}{
+		{"history-lines 99", "line 1: history-lines must be 100 to 32768, got 99"},
+		{"history-lines 32769", "line 1: history-lines must be 100 to 32768, got 32769"},
+		{"history-lines wide", `line 1: history-lines must be a number, got "wide"`},
+		{"history-lines", "line 1: expected a number after history-lines"},
+		{"history-lines 2000\nhistory-lines 3000", "line 2: duplicate history-lines node"},
+	}
+	for _, c := range bad {
+		_, err := parseConfig(c.src)
+		if err == nil {
+			t.Fatalf("parseConfig(%q) accepted a bad history-lines", c.src)
+		}
+		if err.Error() != c.want {
+			t.Fatalf("parseConfig(%q) error = %q, want %q", c.src, err, c.want)
+		}
+	}
+}
+
+// TestConfigHistoryBytes proves the pane ring budget: a small window keeps the
+// 512 KiB floor, the default stays at 512 KiB, a large window grows above it,
+// the 32768 line maximum reaches the 8 MiB cap, and a nil config reports the
+// floor.
+func TestConfigHistoryBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *Config
+		want int
+	}{
+		{"nil", nil, 512 << 10},
+		{"default", LoadDefault(), 512 << 10},
+		{"floor", &Config{historyLines: minHistoryLines}, 512 << 10},
+		{"default lines", &Config{historyLines: 2000}, 512 << 10},
+		{"above floor", &Config{historyLines: 4000}, 4000 * 256},
+		{"cap", &Config{historyLines: maxHistoryLines}, 8 << 20},
+		{"over cap", &Config{historyLines: 40000}, 8 << 20},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.cfg.HistoryBytes(); got != c.want {
+				t.Fatalf("HistoryBytes() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	parsed, err := parseConfig("history-lines 2000")
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if got := parsed.HistoryBytes(); got != 512<<10 {
+		t.Fatalf("parsed HistoryBytes() = %d, want the 512 KiB ring 2000 lines buys", got)
+	}
+	parsed, err = parseConfig("history-lines 32768")
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if got := parsed.HistoryBytes(); got != 8<<20 {
+		t.Fatalf("parsed HistoryBytes() at the maximum = %d, want the 8 MiB cap", got)
+	}
+}
+
+// TestConfigScrollSearchBindings proves the scroll keymap binds the history
+// search keys and the keymap view lists them first.
+func TestConfigScrollSearchBindings(t *testing.T) {
+	cfg := LoadDefault()
+	for action, want := range map[string]string{"search": "/", "next-match": "n", "prev-match": "N"} {
+		if got := cfg.Key("scroll", action); got != want {
+			t.Errorf("Key(scroll, %q) = %q, want %q", action, got, want)
+		}
+	}
+	for key, want := range map[byte]string{'/': "search", 'n': "next-match", 'N': "prev-match"} {
+		action, n, state := cfg.Match("scroll", []byte{key})
+		if state != Match || action != want || n != 1 {
+			t.Errorf("Match(scroll, %q) = %q, %d, %v; want %q, 1, Match", key, action, n, state, want)
+		}
+	}
+	var modes []string
+	for _, m := range cfg.Keymaps() {
+		modes = append(modes, m.Name)
+	}
+	if len(modes) != len(keymapOrder) {
+		t.Fatalf("Keymaps() = %v, want every mode", modes)
+	}
+	scroll := cfg.Keymaps()[4]
+	if scroll.Name != "scroll" {
+		t.Fatalf("mode 4 = %q, want scroll", scroll.Name)
+	}
+	want := []string{"search", "next-match", "prev-match"}
+	for i, name := range want {
+		if scroll.Actions[i].Action != name {
+			t.Errorf("scroll row %d = %q, want %q", i, scroll.Actions[i].Action, name)
 		}
 	}
 }

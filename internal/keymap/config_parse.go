@@ -85,6 +85,23 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.padding = n
 			cfg.paddingSet = true
 			i += 2
+		case "history-lines":
+			if cfg.historyLines != 0 {
+				return fmt.Errorf("line %d: duplicate history-lines node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after history-lines", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: history-lines must be a number, got %q", v.Line, v.Value)
+			}
+			if n < minHistoryLines || n > maxHistoryLines {
+				return fmt.Errorf("line %d: history-lines must be %d to %d, got %d", v.Line, minHistoryLines, maxHistoryLines, n)
+			}
+			cfg.historyLines = n
+			i += 2
 		case "glyphs":
 			if cfg.glyphSetSet {
 				return fmt.Errorf("line %d: duplicate glyphs node", t.Line)
@@ -359,6 +376,20 @@ const (
 	maxPadding     = 4
 )
 
+// The history window bounds in lines, the bytes a line is budgeted, and the
+// pane ring bounds. historyLineBytes is the average a terminal row costs, so
+// the default 2000 lines is 500 KiB and historyFloorBytes keeps every pane at
+// today's 512 KiB ring. The 32768 line maximum is the 8 MiB cap exactly.
+const (
+	defaultHistoryLines = 2000
+	minHistoryLines     = 100
+	maxHistoryLines     = 32768
+	historyLineBytes    = 256
+	historyFloorBytes   = 512 << 10
+	historyMinBytes     = 64 << 10
+	historyMaxBytes     = 8 << 20
+)
+
 // parseTabWidth reads the integer value of a tab width node. It accepts a bare
 // number or a quoted one and rejects a value below the floor.
 func parseTabWidth(toks []kdl.Token, i int, name string) (int, int, error) {
@@ -419,6 +450,8 @@ default-fold "fold"
 tab-min-width 8
 tab-max-width 20
 padding 0
+// Set the scrollback window in lines; the pane ring budget is about 256 bytes per line, capped at 8 MiB.
+history-lines 2000
 glyphs "auto"
 window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 dashboard-preview 60
@@ -554,6 +587,9 @@ keymap "switcher" {
 }
 
 keymap "scroll" {
+    "search" "/"
+    "next-match" "n"
+    "prev-match" "N"
     "up" "k"
     "up-arrow" "up"
     "down" "j"

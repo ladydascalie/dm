@@ -53,6 +53,9 @@ type Config struct {
 	tabMax         int
 	padding        int
 	paddingSet     bool
+	// historyLines is the scrollback window in lines. Zero means the config
+	// never named the node.
+	historyLines   int
 	glyphSet       theme.GlyphSet
 	glyphSetSet    bool
 	windowLabel    string
@@ -130,6 +133,24 @@ func (c *Config) Padding() int {
 		return maxPadding
 	}
 	return c.padding
+}
+
+// HistoryLines returns the scrollback window in lines. A config without the
+// node reports the built-in default.
+func (c *Config) HistoryLines() int {
+	if c == nil || c.historyLines < minHistoryLines {
+		return defaultHistoryLines
+	}
+	return c.historyLines
+}
+
+// HistoryBytes returns the pane ring budget in bytes: the larger of the default
+// 512 KiB ring and the history window at about 256 bytes per line, so a window
+// under 2000 lines keeps today's ring and a larger one buys more scrollback.
+// The result is clamped to 64 KiB..8 MiB.
+func (c *Config) HistoryBytes() int {
+	lines := c.HistoryLines() * historyLineBytes
+	return max(historyMinBytes, min(historyMaxBytes, max(historyFloorBytes, lines)))
 }
 
 // DashboardPreview returns the dashboard's starting preview share of the body,

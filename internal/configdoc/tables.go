@@ -41,6 +41,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the blank cells between a pane's border and its content. A reload resizes every pane.",
 	},
 	{
+		Name:    "history-lines",
+		Value:   "an integer from 100 to 32768 lines",
+		Default: "2000",
+		Desc:    "Set the scrollback window and the pane ring budget: about 256 bytes per line, capped at 8 MiB.",
+	},
+	{
 		Name:    "glyphs",
 		Value:   `"auto", "ascii", "unicode" or "nerd"`,
 		Default: `"auto"`,
@@ -267,7 +273,7 @@ var ActionDesc = map[string]string{
 	"close-prefix": "Close the message box; the prefix key is an alternative close key.",
 
 	// help
-	"search":         "Start a help search.",
+	"search":         "Start a search in the open view.",
 	"next-match":     "Jump to the next search match.",
 	"prev-match":     "Jump to the previous search match.",
 	"close-question": "Close help; ? is an alternative close key.",

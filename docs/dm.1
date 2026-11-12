@@ -688,7 +688,7 @@ The dashboard, a full-screen pane table.
 \fBscroll\fP
 The scrollback view.
 .br
-\fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP, \fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBpage-up\fP \fIpgup\fP, \fBpage-down\fP \fIpgdn\fP, \fBtop\fP \fIg\fP, \fBclose\fP \fIG\fP, \fBclose-q\fP \fIq\fP, \fBclose-bracket\fP \fI[\fP, \fBclose-esc\fP \fIesc\fP
+\fBsearch\fP \fI/\fP, \fBnext-match\fP \fIn\fP, \fBprev-match\fP \fIN\fP, \fBup\fP \fIk\fP, \fBup-arrow\fP \fIup\fP, \fBdown\fP \fIj\fP, \fBdown-arrow\fP \fIdown\fP, \fBpage-up\fP \fIpgup\fP, \fBpage-down\fP \fIpgdn\fP, \fBtop\fP \fIg\fP, \fBclose\fP \fIG\fP, \fBclose-q\fP \fIq\fP, \fBclose-bracket\fP \fI[\fP, \fBclose-esc\fP \fIesc\fP
 .TP
 \fBrename\fP
 The rename prompt.
@@ -726,6 +726,10 @@ Set the largest tab width before the label is cut.
 \fBpadding\fP
 Value: \fIan integer from 0 to 4 cells\fP. Default: \fI0\fP.
 Set the blank cells between a pane's border and its content. A reload resizes every pane.
+.TP
+\fBhistory-lines\fP
+Value: \fIan integer from 100 to 32768 lines\fP. Default: \fI2000\fP.
+Set the scrollback window and the pane ring budget: about 256 bytes per line, capped at 8 MiB.
 .TP
 \fBglyphs\fP
 Value: \fI"auto", "ascii", "unicode" or "nerd"\fP. Default: \fI"auto"\fP.
