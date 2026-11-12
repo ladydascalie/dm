@@ -115,6 +115,7 @@ func TestRailBranch(t *testing.T) {
 		t.Fatalf("window line = %+v, want folder dm and branch dm-rail", items)
 	}
 }
+
 func TestSessionSizeIsLargestClient(t *testing.T) {
 	t.Parallel()
 	st := session.NewStateAt(t.TempDir(), "sizes")
@@ -147,6 +148,7 @@ func TestSessionSizeIsLargestClient(t *testing.T) {
 		t.Fatalf("size after big detach = %dx%d", s.cols, s.rows)
 	}
 }
+
 func TestRailState(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -213,6 +215,7 @@ func TestRailState(t *testing.T) {
 		t.Fatalf("state without railSet was not saved: %s", saved)
 	}
 }
+
 func TestRailAllPanes(t *testing.T) {
 	t.Parallel()
 	st := session.NewStateAt(t.TempDir(), "all")
@@ -307,12 +310,16 @@ func newZoomFixture(t *testing.T) *zoomFixture {
 	left := testutil.RootPane(st)
 	right := w.NewPaneID()
 	st.Panes[right] = &session.PaneState{}
-	w.Root = &layout.Node{Dir: "row", Sizes: []float64{0.5, 0.5},
-		Kids: []*layout.Node{{Pane: left}, {Pane: right}}}
+	w.Root = &layout.Node{
+		Dir: "row", Sizes: []float64{0.5, 0.5},
+		Kids: []*layout.Node{{Pane: left}, {Pane: right}},
+	}
 	w.Focus = right
 
-	f := &zoomFixture{s: railServer(st), left: left, right: right,
-		inbox: make(chan paneMsg, 64)}
+	f := &zoomFixture{
+		s: railServer(st), left: left, right: right,
+		inbox: make(chan paneMsg, 64),
+	}
 	for _, id := range []string{left, right} {
 		srv, cli := net.Pipe()
 		t.Cleanup(func() { _ = srv.Close(); _ = cli.Close() })
@@ -425,11 +432,12 @@ func TestZoomKeepsOnTerminalResize(t *testing.T) {
 func TestZoomStalePaneNotSent(t *testing.T) {
 	t.Parallel()
 	f := newZoomFixture(t)
+	// The fixture's label sampler reads st behind s.mu, so the setup mutates
+	// under the same lock instead of racing it.
+	f.s.mu.Lock()
 	f.s.st.Workspaces[0].Windows = append(f.s.st.Workspaces[0].Windows,
 		&session.Window{ID: "w2", Name: "two", Root: &layout.Node{Pane: "w2p1"}})
 	f.s.st.Panes["w2p1"] = &session.PaneState{}
-
-	f.s.mu.Lock()
 	f.s.zoom = "w2p1"
 	snap := f.s.snapshotLocked()
 	held := f.s.zoom
