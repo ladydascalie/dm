@@ -201,6 +201,12 @@ func (s *server) allPanesLocked() []wire.AllPane {
 				info.WindowUnfolded = w.Unfolded
 				info.WorkspaceUnfolded = ws.Unfolded
 				info.ProjectFolded = s.st.ProjectFold[ws.Project]
+				if ws.Project != "" {
+					if slot, ok := s.st.ProjectAccent[ws.Project]; ok {
+						info.ProjectAccent = slot
+						info.ProjectAccentSet = true
+					}
+				}
 				ps := s.st.Panes[id]
 				if ps != nil {
 					info.Name = ps.Name
@@ -287,6 +293,9 @@ func (s *server) paneExited(id string) {
 	if emptyWindow {
 		s.dropEmptyWindows()
 	}
+	// The exit may have closed a project's last workspace, so its slot frees
+	// before the state saves further down.
+	s.refreshProjectAccentsLocked()
 	// The exit joins the box before the teardown, so the entry names the pane
 	// while the suppression decision is still the one on screen. The entry is
 	// logged whatever the decision; the renderer pops it unless the operator

@@ -491,6 +491,9 @@ func (s *server) setProject(id, project string) error {
 			break
 		}
 	}
+	// The tag may name a project the server never met, or orphan the one it
+	// leaves, so the slot map follows before the caller saves.
+	s.refreshProjectAccentsLocked()
 	return nil
 }
 
@@ -573,6 +576,8 @@ func (s *server) closeWorkspace(id string) error {
 		return fmt.Errorf("cannot close the last workspace")
 	}
 	s.removeWorkspaceLocked(idx)
+	// The workspace may have been the project's last one, so its slot frees.
+	s.refreshProjectAccentsLocked()
 	s.mu.Unlock()
 	return nil
 }
@@ -602,6 +607,9 @@ func (s *server) closeWindow(id string) error {
 			return fmt.Errorf("cannot close the last window")
 		}
 		s.removeWorkspaceLocked(wsIdx)
+		// The workspace may have been the project's last one, so its slot
+		// frees.
+		s.refreshProjectAccentsLocked()
 		s.mu.Unlock()
 		return nil
 	}
@@ -1251,6 +1259,9 @@ func (s *server) newWorkspace(name, tabLabel, cwd, project string, noFocus bool,
 		}
 	}
 	s.addPaneStateAt(id, cwd, argv)
+	// The new workspace may be the first sighting of a project, so it gets
+	// its slot before the caller saves.
+	s.refreshProjectAccentsLocked()
 	s.mu.Unlock()
 	if err := s.ensurePane(id); err != nil {
 		return wsid, wid, id, err

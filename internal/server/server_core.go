@@ -434,6 +434,11 @@ func Run(args []string) error {
 		s.watchPane(id)
 	}
 	s.syncSizes()
+	// Pin the projects a loaded state already carries before the first save,
+	// so a restart hands every client the hues the last run chose.
+	s.mu.Lock()
+	s.refreshProjectAccentsLocked()
+	s.mu.Unlock()
 	if err := st.Save(); err != nil {
 		return err
 	}
