@@ -473,3 +473,53 @@ func TestEnvFallback(t *testing.T) {
 		t.Fatal("env-loaded workspace is unfolded, want folded")
 	}
 }
+
+// TestWindowSyncRoundTrip proves the window sync flag survives a save and a
+// reload, and that a state file written before the flag existed loads with it
+// off.
+func TestWindowSyncRoundTrip(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	st := NewStateAt(root, "sync")
+	st.ActiveWindow().Sync = true
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(root, "sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.ActiveWindow().Sync {
+		t.Fatal("a synced window loaded unsynced")
+	}
+
+	// An older state file carries no sync key.
+	const raw = `{
+  "name": "oldsync",
+  "workspaces": [
+    {"id": "s1", "name": "main",
+     "windows": [{"id": "w1", "name": "one", "root": {"pane": "w1p1"}, "focus": "w1p1"}],
+     "active": 0}
+  ],
+  "active": 0,
+  "cols": 80,
+  "rows": 24,
+  "panes": {},
+  "nextWorkspace": 1,
+  "nextWindow": 1,
+  "idVersion": 2
+}`
+	if err := os.MkdirAll(paths.SessionDirAt(root, "oldsync"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePathAt(root, "oldsync"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LoadStateAt(root, "oldsync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ActiveWindow().Sync {
+		t.Fatal("a window with no sync key loaded synced")
+	}
+}

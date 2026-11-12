@@ -204,15 +204,26 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.reply(cl, m, map[string]any{"pane": m.Target}, nil)
 
 	case "keys":
-		s.mu.Lock()
-		pc := s.panes[m.Target]
-		s.mu.Unlock()
-		if pc == nil {
-			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
+		if err := s.sendKeys(m.Target, m.Keys); err != nil {
+			s.reply(cl, m, nil, err)
 			return
 		}
-		_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
 		s.reply(cl, m, nil, nil)
+
+	case "synchronize-panes":
+		// The active window's sync flag toggles away, or sets true or false
+		// when the request names on. The snapshot that follows carries it, so
+		// clients can paint the mark.
+		var sync bool
+		err := s.mutation(func() error {
+			var e error
+			sync, e = s.synchronizePanes(m.On)
+			return e
+		})
+		if err == nil {
+			s.pushSnapshot()
+		}
+		s.reply(cl, m, map[string]any{"sync": sync}, err)
 
 	case "split":
 		var id string
@@ -288,6 +299,16 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			s.pushSnapshot()
 		}
 		s.reply(cl, m, nil, err)
+
+	case "select-layout":
+		var name string
+		err := s.mutation(func() error {
+			var e error
+			name, e = s.selectLayout(m.Layout)
+			return e
+		})
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"layout": name}, err)
 
 	case "focus":
 		err := s.mutation(func() error { return s.setFocus(m.Target) })

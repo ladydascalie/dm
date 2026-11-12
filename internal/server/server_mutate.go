@@ -213,7 +213,73 @@ func (s *server) writeTo(id, text string, enter bool) error {
 	if pc == nil {
 		return fmt.Errorf("no pane %q", id)
 	}
-	return pc.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
+	s.mu.Lock()
+	dsts := s.syncPaneIDsLocked(id)
+	s.mu.Unlock()
+	if len(dsts) == 0 {
+		return pc.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
+	}
+	for _, pid := range dsts {
+		if p := s.panes[pid]; p != nil {
+			_ = p.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
+		}
+	}
+	return nil
+}
+
+// syncPaneIDsLocked returns the pane ids a synced write must reach: nil when
+// id's window is not synced, otherwise every pane of that window in tree
+// order. The caller holds s.mu.
+func (s *server) syncPaneIDsLocked(id string) []string {
+	for _, ws := range s.st.Workspaces {
+		for _, win := range ws.Windows {
+			if !layout.FindLeaf(win.Root, id) {
+				continue
+			}
+			if !win.Sync {
+				return nil
+			}
+			return layout.AllPanes(win.Root)
+		}
+	}
+	return nil
+}
+
+// sendKeys delivers a keys frame to the pane named by id, or to every live
+// pane of its window, in tree order, when that window is synced. The target
+// pane must be live, exactly as the single-pane path requires.
+func (s *server) sendKeys(id string, keys []byte) error {
+	s.mu.Lock()
+	pc := s.panes[id]
+	dsts := s.syncPaneIDsLocked(id)
+	s.mu.Unlock()
+	if pc == nil {
+		return fmt.Errorf("no pane %q", id)
+	}
+	if len(dsts) == 0 {
+		return pc.send(wire.Msg{Action: "write", Keys: keys})
+	}
+	for _, pid := range dsts {
+		if p := s.panes[pid]; p != nil {
+			_ = p.send(wire.Msg{Action: "write", Keys: keys})
+		}
+	}
+	return nil
+}
+
+// synchronizePanes toggles the active window's sync flag, or sets it when on
+// names a value. It returns the new value. Sync makes every write to a pane
+// of that window reach every live pane of it; other windows are untouched.
+func (s *server) synchronizePanes(on *bool) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	win := s.st.ActiveWindow()
+	if on == nil {
+		win.Sync = !win.Sync
+	} else {
+		win.Sync = *on
+	}
+	return win.Sync, nil
 }
 
 // mutation runs fn and saves state. fn takes the lock itself, because it may
@@ -776,6 +842,27 @@ func (s *server) cyclePane(step int) error {
 	}
 	win.Focus = ids[(at+step+len(ids))%len(ids)]
 	return nil
+}
+
+// selectLayout rebuilds the active window's tree as one of the preset
+// layouts, over the window's pane ids in tree order. The pane set is exactly
+// preserved, so the focus survives untouched. A window with fewer than two
+// panes refuses: there is nothing to arrange.
+func (s *server) selectLayout(name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	win := s.st.ActiveWindow()
+	ids := layout.AllPanes(win.Root)
+	if len(ids) < 2 {
+		return name, fmt.Errorf("select-layout needs at least two panes, window %s has %d", win.ID, len(ids))
+	}
+	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railLocked())
+	root, ok := layout.ApplyPreset(win.Root, name, ids, area.W, area.H)
+	if !ok {
+		return name, fmt.Errorf("no layout %q", name)
+	}
+	win.Root = root
+	return name, nil
 }
 
 func (s *server) closePane(target string) error {

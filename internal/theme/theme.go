@@ -95,6 +95,11 @@ type Glyphs struct {
 	ActiveMark        string
 	WorkspaceBar      string
 	Dirty             string
+	// SyncMark is the synchronize-panes mark in the status bar's focus chip.
+	// NerdSyncMark is its Nerd Font form, chosen by Theme.For the way a state
+	// mark chooses one.
+	SyncMark     string
+	NerdSyncMark string
 	// Ellipsis marks a cut run. Glyphs.For resolves it per set; it is not a
 	// theme-file key, so Glyphs.set never reads it.
 	Ellipsis string
@@ -153,6 +158,8 @@ func DefaultTheme() Theme {
 			ActiveMark:        "▸",
 			WorkspaceBar:      "▌",
 			Dirty:             "●",
+			SyncMark:          "⧉",
+			NerdSyncMark:      "\uf0e2",
 			Ellipsis:          "…",
 		},
 		States: map[string]StateStyle{

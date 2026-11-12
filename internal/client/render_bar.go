@@ -103,8 +103,9 @@ type barWindow struct {
 }
 
 // barFocusChip is the focus chip of the left block: a state mark, the pane id,
-// and the pane name and status word while they survive elision. The zoom mark
-// sits after the id, so the chip names the zoomed state.
+// and the pane name and status word while they survive elision. The sync mark
+// and the zoom mark sit after the id, so the chip names the synced and zoomed
+// state.
 type barFocusChip struct {
 	glyph  string
 	colour theme.RGB
@@ -123,6 +124,7 @@ type barLeft struct {
 	winNames  bool
 	showName  bool
 	showStat  bool
+	showSync  bool
 	showZoom  bool
 }
 
@@ -173,6 +175,7 @@ func barLeftFor(th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) *barLef
 		winNames:  true,
 		showName:  true,
 		showStat:  true,
+		showSync:  snap.Sync,
 		showZoom:  snap.Zoom != "",
 	}
 	for i, w := range snap.Windows {
@@ -218,6 +221,9 @@ func (l *barLeft) groups(th theme.Theme) [][]segment.Seg {
 			{Text: l.focus.glyph, FG: l.focus.colour, BG: p.RailFocusBG},
 			{Text: " " + l.focus.id, FG: p.RailText, BG: p.RailFocusBG, Bold: true},
 		}
+		if l.showSync {
+			chip = append(chip, segment.Seg{Text: " " + g.SyncMark, FG: p.BarAccent, BG: p.RailFocusBG, Bold: true})
+		}
 		if l.showZoom {
 			chip = append(chip, segment.Seg{Text: " Z", FG: p.BarAccent, BG: p.RailFocusBG, Bold: true})
 		}
@@ -234,8 +240,9 @@ func (l *barLeft) groups(th theme.Theme) [][]segment.Seg {
 
 // fit elides the left block to budget cells in the ladder the footer uses:
 // window names, then trailing window chips, then the workspace name, then the
-// session name, then the focus chip's status word and name. The focus chip
-// keeps its glyph and id last, and the result never exceeds the budget.
+// session name, then the focus chip's sync mark, status word and name. The
+// focus chip keeps its glyph and id last, and the result never exceeds the
+// budget.
 func (l *barLeft) fit(th theme.Theme, budget int) []segment.Seg {
 	if budget <= 0 {
 		return nil
@@ -285,8 +292,13 @@ func (l *barLeft) fit(th theme.Theme, budget int) []segment.Seg {
 		}
 	}
 
-	// 5. The focus chip drops its status word, then the zoom mark, then its
-	// name. The glyph and the id are last, and the clip below cuts them.
+	// 5. The focus chip drops its sync mark first, then its status word, then
+	// the zoom mark, then its name. The glyph and the id are last, and the
+	// clip below cuts them.
+	l.showSync = false
+	if segs := cur(); segment.SegCells(segs) <= budget {
+		return segs
+	}
 	l.showStat = false
 	if segs := cur(); segment.SegCells(segs) <= budget {
 		return segs

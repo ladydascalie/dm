@@ -114,6 +114,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		Zoom:         s.zoom,
 		Pad:          s.cfg.Padding(),
 		Root:         win.Root,
+		Sync:         win.Sync,
 	}
 	for _, w := range s.st.ActiveWorkspace().Windows {
 		snap.Windows = append(snap.Windows, wire.WindowInfo{ID: w.ID, Name: w.Name, Named: w.Named})
@@ -672,7 +673,9 @@ func (s *server) serve(c net.Conn) {
 				s.reply(cl, m, nil, fmt.Errorf("no pane %q", id))
 				break
 			}
-			_ = pc.send(wire.Msg{Action: "write", Keys: m.Keys})
+			// A synced window takes the keys in every live pane of it; the
+			// off path keeps writing to the one named pane.
+			_ = s.sendKeys(id, m.Keys)
 		case "resize":
 			// A float is sized by its own frame and does not change the
 			// client's size, so the panes keep the room they had.
