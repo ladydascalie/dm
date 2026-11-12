@@ -174,6 +174,31 @@ optional and each one overrides its built-in value.
 | `diff-command` | a quoted shell command | `"git diff"` | Set the command the dashboard diff key runs in a floating pane. It runs through `sh -c` in the selected pane's folder. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
+| `command` | a quoted name and a `{ run "..." }` block | none | Define a command a keymap can run; bind `command:<name>` to a key, and the row runs the run text in a floating pane. |
+
+### Commands
+
+A command is a named shell text the config carries. Define it at the top level,
+then bind `command:<name>` to a key in a keymap. The key opens a floating pane
+on the focused pane's folder, runs the run text through `sh -c`, and titles the
+panel with the command's name:
+
+```kdl
+command "tests" {
+    run "go test ./..."
+}
+
+keymap "main" {
+    "command:tests" "t" help "Run"
+}
+```
+
+The help tag works on the row like any other. The name is letters, digits, `_`
+and `-`, 1 to 32 bytes. `run` is required, one quoted string, non-empty. Each
+of these is a config error that names its line: a duplicate command name, a
+second `run` in one block, a missing or empty `run`, an unknown key inside the
+block, and a name that collides with a built-in action. A binding to
+`command:<name>` is an error too when the file defines no command of that name.
 
 ### What a reload picks up
 
@@ -467,6 +492,20 @@ The dashboard is client owned: it starts when the key is pressed and ends when
 the choice is taken, so it never enters the session tree and never survives a
 detach. `dm dash` prints the pane rows outside the TUI, and `dm peek <id>`
 prints the screen a row shows, so the dashboard can be driven from a shell.
+
+## Floats
+
+`float-open` runs a command in a floating pane over the focused pane's folder,
+through `sh -c`. The request carries the command and an optional label: the
+label paints the panel title, and without one the title falls back to the
+command's first word. A label without a command is an error.
+
+The dashboard diff key is one instance of it: the request sends no command, so
+the float runs the `diff-command` config node (`git diff` by default) in the
+selected pane's folder and paints the panel the same way. A `command` binding
+is another: the run text opens on the focused pane's folder, titled with the
+command's name. The float takes every key while the command runs, except the
+prefix: one press of it kills the float and the command under it.
 
 ## Sidebar
 
@@ -909,6 +948,19 @@ dm yank w1p1
 dm status
 ```
 
+A `split` request may carry an `argv` array: the program and its arguments the
+new pane runs instead of a shell:
+
+```sh
+dm exec '{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}'
+```
+
+`new-window` and `new-workspace` take the same field. An empty element or a NUL
+byte is an error. The pane records its argv in the state file, so a server
+restart that spawns the panes fresh respawns the same program. A pane whose argv
+program exits is removed from the layout and its split collapses, exactly like
+a shell exit.
+
 Actions: `ping`, `list` (alias `ls`), `read`, `history`, `yank`, `replay`,
 `status`,
 `write-to`, `exec`, `keys`, `split`, `zoom-pane`, `set-rail`, `resize-split`,
@@ -1224,14 +1276,14 @@ is the floor: the ceiling bounds a burst, it does not lower the floor.
   their shells, because their sockets stay intact. The next CLI call or attach
   restarts the server and reconnects the same pane processes. Content and
   status are still there.
-- A pane whose shell exits is removed from the layout and its split collapses.
-  Focus moves to a live neighbour.
+- A pane whose shell or argv program exits is removed from the layout and its
+  split collapses. Focus moves to a live neighbour.
 - The last pane of a window closes the window. The last window ends the session:
   the server removes its state directory and every attached client returns to
   its shell. This is the tmux behaviour, not a respawn.
-- Reboot: pane processes are gone, but layout, focus, window names and cwd are
-  in `state.json`. The server spawns fresh shells in the same places and marks
-  them `restart: true`.
+- Reboot: pane processes are gone, but layout, focus, window names, cwd and
+  each pane's argv are in `state.json`. The server spawns fresh shells, or the
+  recorded argv program, in the same places and marks them `restart: true`.
 
 State lives in `$DM_STATE`, else `$XDG_STATE_HOME/dm`, else
 `~/.local/state/dm`.

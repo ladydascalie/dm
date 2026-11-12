@@ -5,6 +5,7 @@ package keymap
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 
 	"dm/internal/theme"
@@ -37,6 +38,13 @@ type mode struct {
 	sections map[string]string
 	unbound  map[string]bool
 	bindings []binding
+}
+
+// Command is one user-defined command: the name a keymap action refers to as
+// "command:<name>", and the shell text it runs.
+type Command struct {
+	Name string
+	Run  string
 }
 
 // Config is the loaded keymap. It carries the prefix key and one keymap per
@@ -73,6 +81,9 @@ type Config struct {
 	// diffCommand is the shell command the dashboard diff key runs in a
 	// floating pane. An empty value means the config never named the node.
 	diffCommand string
+	// commands maps a command name to its run text. A config without a
+	// command block carries an empty map.
+	commands map[string]string
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -177,6 +188,21 @@ func (c *Config) DiffCommand() string {
 		return defaultDiffCommand
 	}
 	return c.diffCommand
+}
+
+// Commands returns every command the config defines, sorted by name.
+func (c *Config) Commands() []Command {
+	if c == nil {
+		return nil
+	}
+	out := make([]Command, 0, len(c.commands))
+	for name, run := range c.commands {
+		out = append(out, Command{Name: name, Run: run})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
 
 // DashboardFullScreen reports whether the dashboard takes the whole screen. A
