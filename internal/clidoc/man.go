@@ -27,7 +27,7 @@ var manActionFields = []manField{
 	{"action", "the action name, required"},
 	{"target", "the pane, window or workspace id the action acts on"},
 	{"dir", "split or focus direction: left, right, up or down"},
-	{"other", "resize-split: the pane on the other side of the split"},
+	{"other", "the second pane: resize-split, swap-panes and move-pane"},
 	{"msg", "text to type into a pane"},
 	{"enter", "press enter after msg"},
 	{"name", "a new name for a window, workspace or pane"},
@@ -37,6 +37,12 @@ var manActionFields = []manField{
 	{"cwd", "working directory for a new pane, window or workspace"},
 	{"ratio", "split ratio, 0 to 1"},
 	{"nofocus", "do not move focus to the new pane"},
+	{"layout", "select-layout: even-horizontal, even-vertical, main-horizontal, main-vertical or tiled"},
+	{"on", "synchronize-panes: true or false; absent toggles"},
+	{"float", "float-open and float-close: the client-chosen float id"},
+	{"command", "float-open: the command to run instead of the diff command"},
+	{"label", "float-open: the float title, default the command's first word"},
+	{"argv", "split, new-window and new-workspace: the program and arguments a new pane runs instead of a shell"},
 	{"cols", "terminal columns"},
 	{"rows", "terminal rows"},
 	{"keys", "raw bytes to write to a pane"},
@@ -56,6 +62,8 @@ var manActionNames = []string{
 	"list-panes", "pane", "toggle-fold", "set-pane-name",
 	"focus-window", "focus-workspace", "close-workspace",
 	"rename-window", "rename-workspace", "set-project",
+	"swap-panes", "move-pane", "select-layout", "synchronize-panes",
+	"float-open", "float-close",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",
 	"msg-watchers", "msg-schema",
 }
@@ -114,7 +122,7 @@ func ManPage() string {
 		}
 		for _, e := range c.extra {
 			b.WriteString(".br\n")
-			b.WriteString(roffBold("dm "+c.name+" "+e.args))
+			b.WriteString(roffBold("dm " + c.name + " " + e.args))
 			b.WriteString(" ")
 			b.WriteString(roffEscape(e.summary))
 			b.WriteString("\n")
@@ -219,7 +227,7 @@ func manPromptMarks() string {
 	b.WriteString("dm reads these marks:\n")
 	for _, m := range PromptMarks {
 		b.WriteString(".TP\n")
-		b.WriteString(roffBold("OSC 133;"+m.Letter))
+		b.WriteString(roffBold("OSC 133;" + m.Letter))
 		b.WriteString("\n")
 		b.WriteString(roffEscape(m.Meaning))
 		b.WriteString(".\n")

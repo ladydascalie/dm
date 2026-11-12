@@ -26,7 +26,7 @@ var actionExamples = []actionExample{
 	{"exec", `{"action":"exec","target":"w1p1","msg":"go test ./..."}`},
 	{"keys", `{"action":"keys","target":"w1p1","keys":"Aw=="}`},
 
-	{"split", `{"action":"split","target":"w1p1","dir":"right"}`},
+	{"split", `{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}`},
 	{"zoom-pane", `{"action":"zoom-pane"}`},
 	{"set-rail", `{"action":"set-rail","index":30}`},
 	{"resize-split", `{"action":"resize-split","target":"w1p1","other":"w1p2","ratio":0.7}`},
@@ -58,6 +58,13 @@ var actionExamples = []actionExample{
 	{"close-workspace", `{"action":"close-workspace","target":"s1"}`},
 
 	{"rename-window", `{"action":"rename-window","target":"w1","name":"build"}`},
+	{"swap-panes", `{"action":"swap-panes","target":"w1p1","other":"w1p2"}`},
+	{"move-pane", `{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}`},
+	{"select-layout", `{"action":"select-layout","layout":"tiled"}`},
+	{"synchronize-panes", `{"action":"synchronize-panes","on":true}`},
+	{"float-open", `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`},
+	{"float-close", `{"action":"float-close","float":"f1"}`},
+
 	{"rename-workspace", `{"action":"rename-workspace","target":"s1","name":"build"}`},
 	{"set-project", `{"action":"set-project","target":"s1","name":"dm"}`},
 

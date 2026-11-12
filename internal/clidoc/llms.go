@@ -147,6 +147,8 @@ var llmsActionGroups = [][]string{
 	{"pane"}, {"toggle-fold"}, {"set-pane-name"},
 	{"focus-window", "focus-workspace"},
 	{"rename-window", "rename-workspace", "set-project"},
+	{"swap-panes", "move-pane"}, {"select-layout"}, {"synchronize-panes"},
+	{"float-open"}, {"float-close"},
 	{"msg-post"}, {"msg-list"}, {"msg-clear"}, {"msg-wait"}, {"msg-sub"},
 	{"msg-watchers", "msg-schema"},
 }

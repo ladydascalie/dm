@@ -312,7 +312,7 @@ the pane, window or workspace id the action acts on
 split or focus direction: left, right, up or down
 .TP
 \fBother\fP
-resize-split: the pane on the other side of the split
+the second pane: resize-split, swap-panes and move-pane
 .TP
 \fBmsg\fP
 text to type into a pane
@@ -340,6 +340,24 @@ split ratio, 0 to 1
 .TP
 \fBnofocus\fP
 do not move focus to the new pane
+.TP
+\fBlayout\fP
+select-layout: even-horizontal, even-vertical, main-horizontal, main-vertical or tiled
+.TP
+\fBon\fP
+synchronize-panes: true or false; absent toggles
+.TP
+\fBfloat\fP
+float-open and float-close: the client-chosen float id
+.TP
+\fBcommand\fP
+float-open: the command to run instead of the diff command
+.TP
+\fBlabel\fP
+float-open: the float title, default the command's first word
+.TP
+\fBargv\fP
+split, new-window and new-workspace: the program and arguments a new pane runs instead of a shell
 .TP
 \fBcols\fP
 terminal columns
@@ -413,7 +431,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 .TP
 \fBsplit\fP
 .nf
-{"action":"split","target":"w1p1","dir":"right"}
+{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}
 .fi
 .TP
 \fBzoom-pane\fP
@@ -549,6 +567,36 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBset-project\fP
 .nf
 {"action":"set-project","target":"s1","name":"dm"}
+.fi
+.TP
+\fBswap-panes\fP
+.nf
+{"action":"swap-panes","target":"w1p1","other":"w1p2"}
+.fi
+.TP
+\fBmove-pane\fP
+.nf
+{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}
+.fi
+.TP
+\fBselect-layout\fP
+.nf
+{"action":"select-layout","layout":"tiled"}
+.fi
+.TP
+\fBsynchronize-panes\fP
+.nf
+{"action":"synchronize-panes","on":true}
+.fi
+.TP
+\fBfloat-open\fP
+.nf
+{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}
+.fi
+.TP
+\fBfloat-close\fP
+.nf
+{"action":"float-close","float":"f1"}
 .fi
 .TP
 \fBmsg-post\fP

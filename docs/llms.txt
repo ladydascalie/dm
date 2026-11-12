@@ -59,7 +59,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `action` | the action name, required |
 | `target` | the pane, window or workspace id the action acts on |
 | `dir` | split or focus direction: left, right, up or down |
-| `other` | resize-split: the pane on the other side of the split |
+| `other` | the second pane: resize-split, swap-panes and move-pane |
 | `msg` | text to type into a pane |
 | `enter` | press enter after msg |
 | `name` | a new name for a window, workspace or pane |
@@ -69,6 +69,12 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `cwd` | working directory for a new pane, window or workspace |
 | `ratio` | split ratio, 0 to 1 |
 | `nofocus` | do not move focus to the new pane |
+| `layout` | select-layout: even-horizontal, even-vertical, main-horizontal, main-vertical or tiled |
+| `on` | synchronize-panes: true or false; absent toggles |
+| `float` | float-open and float-close: the client-chosen float id |
+| `command` | float-open: the command to run instead of the diff command |
+| `label` | float-open: the float title, default the command's first word |
+| `argv` | split, new-window and new-workspace: the program and arguments a new pane runs instead of a shell |
 | `cols` | terminal columns |
 | `rows` | terminal rows |
 | `keys` | raw bytes to write to a pane |
@@ -88,7 +94,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `write-to` | `{"action":"write-to","target":"w1p1","msg":"go test ./...","enter":true}` |
 | `exec` | `{"action":"exec","target":"w1p1","msg":"go test ./..."}` |
 | `keys` | `{"action":"keys","target":"w1p1","keys":"Aw=="}` |
-| `split` | `{"action":"split","target":"w1p1","dir":"right"}` |
+| `split` | `{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}` |
 | `zoom-pane` | `{"action":"zoom-pane"}` |
 | `set-rail` | `{"action":"set-rail","index":30}` |
 | `resize-split` | `{"action":"resize-split","target":"w1p1","other":"w1p2","ratio":0.7}` |
@@ -108,6 +114,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `set-pane-name` | `{"action":"set-pane-name","target":"w1p1","name":"tests"}` |
 | `focus-window`, `focus-workspace` | `{"action":"focus-window","target":"w1"}`, `{"action":"focus-workspace","target":"s1"}` |
 | `rename-window`, `rename-workspace`, `set-project` | `{"action":"rename-window","target":"w1","name":"build"}`, `{"action":"rename-workspace","target":"s1","name":"build"}`, `{"action":"set-project","target":"s1","name":"dm"}` |
+| `swap-panes`, `move-pane` | `{"action":"swap-panes","target":"w1p1","other":"w1p2"}`, `{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}` |
+| `select-layout` | `{"action":"select-layout","layout":"tiled"}` |
+| `synchronize-panes` | `{"action":"synchronize-panes","on":true}` |
+| `float-open` | `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}` |
+| `float-close` | `{"action":"float-close","float":"f1"}` |
 | `msg-post` | `{"action":"msg-post","res":{"key":"build","state":"done","msg":"all green"}}` |
 | `msg-list` | `{"action":"msg-list","res":{"key":"build","limit":20}}` |
 | `msg-clear` | `{"action":"msg-clear","res":{"key":"build"}}` |
