@@ -20,8 +20,9 @@ func TestPaletteQueryAnswersXtermColour(t *testing.T) {
 	if len(replies) != 1 {
 		t.Fatalf("replies = %q", replies)
 	}
-	// Index 2 is green: 0, 205, 0, doubled per channel.
-	if want := "\x1b]4;2;theme.RGB:0000/cdcd/0000\x1b\\"; replies[0] != want {
+	// Index 2 is green: 0, 205, 0, doubled per channel, under the rgb: prefix
+	// the xterm OSC 4 form defines.
+	if want := "\x1b]4;2;rgb:0000/cdcd/0000\x1b\\"; replies[0] != want {
 		t.Fatalf("reply = %q, want %q", replies[0], want)
 	}
 }
@@ -68,12 +69,12 @@ func TestParseIndex(t *testing.T) {
 // 256-colour table: the 16 base colours, the 6x6x6 cube, and the grayscale ramp.
 func TestXtermColorRoundsThePalette(t *testing.T) {
 	cases := map[int]string{
-		0:   "theme.RGB:0000/0000/0000", // black
-		1:   "theme.RGB:cdcd/0000/0000", // red, doubled per channel
-		16:  "theme.RGB:0000/0000/0000", // cube corner 0,0,0
-		231: "theme.RGB:ffff/ffff/ffff", // cube corner 5,5,5
-		232: "theme.RGB:0808/0808/0808", // grayscale start
-		255: "theme.RGB:eeee/eeee/eeee", // grayscale end
+		0:   "rgb:0000/0000/0000", // black
+		1:   "rgb:cdcd/0000/0000", // red, doubled per channel
+		16:  "rgb:0000/0000/0000", // cube corner 0,0,0
+		231: "rgb:ffff/ffff/ffff", // cube corner 5,5,5
+		232: "rgb:0808/0808/0808", // grayscale start
+		255: "rgb:eeee/eeee/eeee", // grayscale end
 	}
 	for n, want := range cases {
 		if got := xtermColor(n); got != want {
@@ -115,7 +116,7 @@ func TestAnsweredQueriesNeedNoHandlers(t *testing.T) {
 		"\x1b[0n",
 		"\x1b]10;" + TermFG + "\x1b\\",
 		"\x1b]11;" + TermBG + "\x1b\\",
-		"\x1b]12;" + TermFG + "\x1b\\",
+		"\x1b]12;" + TermCursor + "\x1b\\",
 	}
 	if len(replies) != len(want) {
 		t.Fatalf("replies = %q, want %d", replies, len(want))
@@ -234,5 +235,60 @@ func TestParseStatusJSONForm(t *testing.T) {
 	// clear clears the message too.
 	if st := ParseStatus("state=clear:msg="); st.State != "unknown" || st.Message != "" {
 		t.Fatalf("clear with pairs: %+v", st)
+	}
+}
+
+// TestFGAndBGAnswerThePanePair pins that OSC 10 and OSC 11 reply with the
+// pair the pane holds, not the compiled-in defaults, so a term-colours action
+// reaches the program inside.
+func TestFGAndBGAnswerThePanePair(t *testing.T) {
+	var replies []string
+	f := &Filter{
+		Reply: func(r string) { replies = append(replies, r) },
+		FG:    "rgb:1111/2222/3333",
+		BG:    "rgb:4444/5555/6666",
+	}
+	var out bytes.Buffer
+	f.Feed([]byte("\x1b]10;?\x07\x1b]11;?\x07"), &out)
+	if out.String() != "" {
+		t.Fatalf("queries leaked: %q", out.String())
+	}
+	want := []string{
+		"\x1b]10;rgb:1111/2222/3333\x1b\\",
+		"\x1b]11;rgb:4444/5555/6666\x1b\\",
+	}
+	if len(replies) != len(want) {
+		t.Fatalf("replies = %q, want %d", replies, len(want))
+	}
+	for i := range want {
+		if replies[i] != want[i] {
+			t.Errorf("reply %d = %q, want %q", i, replies[i], want[i])
+		}
+	}
+}
+
+// TestCursorColourHasItsOwnField pins that OSC 12 answers the dedicated cursor
+// colour, not the foreground: a guess pretending to be truth. An unset field
+// falls back to TermCursor, and a set one is answered verbatim, so a future
+// cursor-colour track lands in one place.
+func TestCursorColourHasItsOwnField(t *testing.T) {
+	var replies []string
+	f := &Filter{
+		Reply:    func(r string) { replies = append(replies, r) },
+		FG:       "rgb:1111/2222/3333",
+		CursorFG: "rgb:9999/8888/7777",
+	}
+	var out bytes.Buffer
+	f.Feed([]byte("\x1b]12;?\x07"), &out)
+	if want := "\x1b]12;rgb:9999/8888/7777\x1b\\"; len(replies) != 1 || replies[0] != want {
+		t.Fatalf("set CursorFG reply = %q, want %q", replies, want)
+	}
+
+	replies = nil
+	f = &Filter{Reply: func(r string) { replies = append(replies, r) }, FG: "rgb:1111/2222/3333"}
+	out.Reset()
+	f.Feed([]byte("\x1b]12;?\x07"), &out)
+	if want := "\x1b]12;" + TermCursor + "\x1b\\"; len(replies) != 1 || replies[0] != want {
+		t.Fatalf("unset CursorFG reply = %q, want %q", replies, want)
 	}
 }

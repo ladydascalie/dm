@@ -81,7 +81,9 @@ func TestTermColoursActionReachesFilter(t *testing.T) {
 		t.Fatalf("OSC 11 reply = %q, want %q", (*replies)[0], want)
 	}
 
-	// The foreground pair moves too, on OSC 10 and OSC 12.
+	// The foreground moves on OSC 10. OSC 12 is the cursor colour, which the
+	// pane does not track: it answers the dedicated field's fallback, not the
+	// foreground.
 	feed(filter, "\x1b]10;?\x1b\\")
 	feed(filter, "\x1b]12;?\x1b\\")
 	if len(*replies) != 3 {
@@ -89,10 +91,10 @@ func TestTermColoursActionReachesFilter(t *testing.T) {
 	}
 	for i, want := range []string{
 		"\x1b]10;rgb:1111/2222/3333\x1b\\",
-		"\x1b]12;rgb:1111/2222/3333\x1b\\",
+		"\x1b]12;" + osc.TermCursor + "\x1b\\",
 	} {
 		if got := (*replies)[i+1]; got != want {
-			t.Fatalf("foreground reply %d = %q, want %q", i, got, want)
+			t.Fatalf("reply %d = %q, want %q", i, got, want)
 		}
 	}
 }
