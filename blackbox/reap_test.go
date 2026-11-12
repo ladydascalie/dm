@@ -130,6 +130,13 @@ func TestReapOrphans(t *testing.T) {
 		if strings.Contains(out, "REAP-SHELL=") {
 			break
 		}
+		// A slow login shell can paint its startup banner after the marker and
+		// clear the screen with it. The pane's own ring still holds the line,
+		// so the yank proves the pane answered with its data intact.
+		raw, _ := json.Marshal(map[string]any{"action": "yank", "target": keep})
+		if y, _ := h.try("exec", string(raw), "-s", "reap"); strings.Contains(y, "REAP-SHELL=") {
+			break
+		}
 		if time.Now().After(deadline2) {
 			scb, _ := h.try("read", keep, "-s", "reap", "--scrollback", "30")
 			tree, _ := h.try("list", "-s", "reap", "--json")

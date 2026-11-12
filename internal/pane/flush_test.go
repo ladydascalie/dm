@@ -12,7 +12,7 @@ import (
 // character without waiting for the next chunk.
 func TestPaneFlushesQuietCluster(t *testing.T) {
 	t.Parallel()
-	p := &paneProc{vt: vt.NewTerm(20, 3), ring: &scrollRing{}, subs: map[*subConn]bool{}}
+	p := &paneProc{vt: vt.NewTerm(20, 3), ring: NewRing(ringDefault), subs: map[*subConn]bool{}}
 	p.mu.Lock()
 	p.publishLocked([]byte("日"))
 	p.mu.Unlock()

@@ -40,11 +40,11 @@ func writeChunks(b []byte, write func([]byte)) {
 
 // TestScrollRingFixed fills the ring past its bound in small writes and holds
 // it to three properties: no write below the bound allocates, the length never
-// passes ringMax, and the bytes are exactly the newest tail of the stream.
+// passes ringDefault, and the bytes are exactly the newest tail of the stream.
 // Serial, not parallel: the zero-allocation claim is a process-wide
 // measurement, and a concurrent test's allocations would pollute it.
 func TestScrollRingFixed(t *testing.T) {
-	r := &scrollRing{}
+	r := NewRing(ringDefault)
 	chunk := bytes.Repeat([]byte("0123456789abcdef"), 2<<10)
 	if allocs := testing.AllocsPerRun(64, func() { r.Write(chunk) }); allocs != 0 {
 		t.Fatalf("a write below the ring bound allocated %.1f objects, want 0", allocs)
@@ -52,47 +52,47 @@ func TestScrollRingFixed(t *testing.T) {
 
 	// Below the bound the ring is a plain buffer: the bytes come back in order
 	// and the write index alone does not decide where they start.
-	r = &scrollRing{}
+	r = NewRing(ringDefault)
 	r.Write([]byte("hello"))
 	if got := r.Bytes(); string(got) != "hello" {
 		t.Fatalf("one short write came back as %q", got)
 	}
 
-	stream := ringStream(t, 4*ringMax+12345)
-	r = &scrollRing{}
+	stream := ringStream(t, 4*ringDefault+12345)
+	r = NewRing(ringDefault)
 	writeChunks(stream, func(b []byte) {
 		r.Write(b)
-		if r.Len() > ringMax {
-			t.Fatalf("ring holds %d bytes, over the %d bound", r.Len(), ringMax)
+		if r.Len() > ringDefault {
+			t.Fatalf("ring holds %d bytes, over the %d bound", r.Len(), ringDefault)
 		}
 	})
-	if r.Len() != ringMax {
-		t.Fatalf("ring holds %d bytes after the burst, want %d", r.Len(), ringMax)
+	if r.Len() != ringDefault {
+		t.Fatalf("ring holds %d bytes after the burst, want %d", r.Len(), ringDefault)
 	}
-	want := stream[len(stream)-ringMax:]
+	want := stream[len(stream)-ringDefault:]
 	if got := r.Bytes(); !bytes.Equal(got, want) {
 		t.Fatalf("ring content differs from the newest tail: %d bytes, first difference at %d",
 			len(got), firstDiff(got, want))
 	}
 
 	// A write straddling the buffer end keeps both parts in order.
-	edge := &scrollRing{}
-	edge.Write(stream[:ringMax-3])
-	edge.Write(stream[ringMax-3 : ringMax+7])
-	edgeWant := stream[:ringMax+7]
-	edgeWant = edgeWant[len(edgeWant)-ringMax:]
-	if got := edge.Bytes(); edge.Len() != ringMax || !bytes.Equal(got, edgeWant) {
+	edge := NewRing(ringDefault)
+	edge.Write(stream[:ringDefault-3])
+	edge.Write(stream[ringDefault-3 : ringDefault+7])
+	edgeWant := stream[:ringDefault+7]
+	edgeWant = edgeWant[len(edgeWant)-ringDefault:]
+	if got := edge.Bytes(); edge.Len() != ringDefault || !bytes.Equal(got, edgeWant) {
 		t.Fatalf("write across the buffer end left %d bytes, first difference at %d",
 			len(got), firstDiff(got, edgeWant))
 	}
 
 	// One write larger than the ring keeps only its own tail.
-	huge := bytes.Repeat([]byte("z"), ringMax+4096)
-	big := &scrollRing{}
+	huge := bytes.Repeat([]byte("z"), ringDefault+4096)
+	big := NewRing(ringDefault)
 	big.Write(huge)
-	if big.Len() != ringMax || !bytes.Equal(big.Bytes(), huge[len(huge)-ringMax:]) {
+	if big.Len() != ringDefault || !bytes.Equal(big.Bytes(), huge[len(huge)-ringDefault:]) {
 		t.Fatalf("oversized write left %d bytes, want the last %d of the write",
-			big.Len(), ringMax)
+			big.Len(), ringDefault)
 	}
 }
 
@@ -109,8 +109,8 @@ func firstDiff(a, b []byte) int {
 // has wrapped, which is the path a client uses when it attaches late.
 func TestReplayAfterWrap(t *testing.T) {
 	t.Parallel()
-	stream := ringStream(t, 3*ringMax)
-	r := &scrollRing{}
+	stream := ringStream(t, 3*ringDefault)
+	r := NewRing(ringDefault)
 	writeChunks(stream, r.Write)
 
 	p := &paneProc{
@@ -135,7 +135,7 @@ func TestReplayAfterWrap(t *testing.T) {
 	if reply.Type != "replay" {
 		t.Fatalf("reply type %q, want replay", reply.Type)
 	}
-	want := stream[len(stream)-ringMax:]
+	want := stream[len(stream)-ringDefault:]
 	if !bytes.Equal(reply.Data, want) {
 		t.Fatalf("replay carried %d bytes, want the %d-byte tail; first difference at %d",
 			len(reply.Data), len(want), firstDiff(reply.Data, want))
@@ -157,7 +157,7 @@ func TestPaneHeapAfterBurst(t *testing.T) {
 	p := &paneProc{
 		id:   "w1p1",
 		vt:   vt.NewTerm(80, 24),
-		ring: &scrollRing{},
+		ring: NewRing(ringDefault),
 		st:   wire.Status{State: "unknown"},
 	}
 	writeChunks(burst, func(b []byte) {
@@ -174,10 +174,10 @@ func TestPaneHeapAfterBurst(t *testing.T) {
 		t.Fatalf("retained %d KiB after a %d MiB burst, want at most %d KiB",
 			retained>>10, burstSize>>20, memBound>>10)
 	}
-	if p.ring.Len() != ringMax {
-		t.Fatalf("ring holds %d bytes after the burst, want %d", p.ring.Len(), ringMax)
+	if p.ring.Len() != ringDefault {
+		t.Fatalf("ring holds %d bytes after the burst, want %d", p.ring.Len(), ringDefault)
 	}
-	want := burst[len(burst)-ringMax:]
+	want := burst[len(burst)-ringDefault:]
 	if got := p.ring.Bytes(); !bytes.Equal(got, want) {
 		t.Fatalf("ring after the burst does not hold the newest tail")
 	}

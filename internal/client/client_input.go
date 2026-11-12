@@ -210,7 +210,9 @@ func (t *tui) expireTermColour(now time.Time) bool {
 // A paste closes any open menu, picker, prompt or scrollback first and disarms
 // the prefix: its bytes are text for the pane, never dm commands. A paste into
 // the rename prompt closes it and the bytes go nowhere: a workspace label is
-// typed, not dropped in.
+// typed, not dropped in. A paste over the scrollback query row is query text:
+// the prompt keeps the keyboard, so the block edits the draft and no byte
+// reaches a pane.
 func (t *tui) forwardPaste(seq []byte) {
 	t.pasteDeadline = time.Time{}
 	t.pasteHeld = 0
@@ -228,6 +230,9 @@ func (t *tui) forwardPaste(seq []byte) {
 		t.closePicker()
 	case "scroll":
 		t.exitScroll()
+	case "search":
+		t.searchPaste(seq)
+		return
 	default:
 		t.mode = ""
 	}
@@ -473,9 +478,9 @@ func (t *tui) processInput() {
 		t.pasteHeld = 0
 		if ev, n, ok := parseMouse(t.inbuf); ok {
 			t.inbuf = t.inbuf[n:]
-			// The rename prompt owns the keyboard, not the pointer: a stray
+			// An input prompt owns the keyboard, not the pointer: a stray
 			// click must not move the draft or the focus out from under it.
-			if t.mode != "rename" {
+			if t.mode != "rename" && t.mode != "search" {
 				t.handleMouse(ev)
 			}
 			continue
@@ -484,6 +489,12 @@ func (t *tui) processInput() {
 		}
 		if t.mode == "rename" {
 			if !t.renameKey() {
+				return
+			}
+			continue
+		}
+		if t.mode == "search" {
+			if !t.searchKey() {
 				return
 			}
 			continue
@@ -682,7 +693,14 @@ func (t *tui) expireMode(now time.Time) bool {
 	case "sessions":
 		t.closePicker()
 	case "scroll":
-		t.exitScroll()
+		// A lone esc is the close key. With an accepted query it clears the
+		// search and keeps scrollback, so the esc order holds however the esc
+		// was read; without one it leaves, as it always has.
+		if t.search != nil && t.search.model != nil {
+			t.clearSearch()
+		} else {
+			t.exitScroll()
+		}
 	case "box":
 		closeBoxView(t)
 	case "notif":
@@ -691,6 +709,8 @@ func (t *tui) expireMode(now time.Time) bool {
 		closeKeymapView(t)
 	case "rename":
 		t.closeRename()
+	case "search":
+		t.cancelSearch()
 	}
 	return true
 }
@@ -847,10 +867,175 @@ func (t *tui) scrollKey() bool {
 		t.scrollBy(-t.panHeight())
 	case "top":
 		t.scrollBy(t.maxOff)
+	case "search":
+		t.openSearch()
+	case "next-match":
+		t.stepSearch(true)
+	case "prev-match":
+		t.stepSearch(false)
+	case "close-esc":
+		// An accepted query owns the first esc: it clears the search and keeps
+		// scrollback open. A second esc leaves, as it always has.
+		if t.search != nil && t.search.model != nil {
+			t.clearSearch()
+			return true
+		}
+		t.exitScroll()
 	default:
 		t.exitScroll()
 	}
 	return true
+}
+
+// openSearch opens the query row over the scrollback. A pane still waiting for
+// its ring has no rows to search, so the key does nothing.
+func (t *tui) openSearch() {
+	if t.scroll == "" || t.scrollVT == nil {
+		return
+	}
+	if t.search == nil {
+		t.search = &scrollSearch{}
+	}
+	t.search.draft = ""
+	t.mode = "search"
+	// The bytes after the key that opened the row are the start of the query:
+	// `/ROW-01` in one read opens the prompt with the draft already filled.
+	t.dirty = true
+}
+
+// cancelSearch closes the query row and keeps the accepted query, if any, as it
+// was.
+func (t *tui) cancelSearch() {
+	if t.search != nil {
+		t.search.draft = ""
+	}
+	t.mode = "scroll"
+	t.inbuf = nil
+	t.dirty = true
+}
+
+// clearSearch drops the accepted query with its matches and highlights, and
+// keeps scrollback open.
+func (t *tui) clearSearch() {
+	t.search = nil
+	t.dirty = true
+}
+
+// acceptSearch builds the search over the tall terminal's rows, live rows
+// included, and jumps to the nearest match at or above the top of the band. A
+// query with no match raises a toast and leaves the offset alone.
+func (t *tui) acceptSearch() {
+	q := strings.TrimSpace(t.search.draft)
+	t.search.draft = ""
+	t.search.model = nil
+	t.mode = "scroll"
+	t.inbuf = nil
+	t.dirty = true
+	if q == "" {
+		// An empty query is no query: the old one goes with its highlights.
+		return
+	}
+	model := NewScrollSearch(termRows(t.scrollVT), q)
+	if model.Count() == 0 {
+		t.notify("no match: " + q)
+		return
+	}
+	t.search.model = model
+	row0, _ := t.searchBand()
+	t.jumpSearch(model, model.SelectAtOrAbove(row0))
+}
+
+// searchKey consumes one key while the query row is open. No byte leaves the
+// client: every key edits or ends the draft. Esc cancels the prompt at once, so
+// the prompt never waits for the rest of an escape sequence.
+func (t *tui) searchKey() bool {
+	if len(t.inbuf) == 0 {
+		return true
+	}
+	b := t.inbuf[0]
+	if b == 0x1b {
+		// A lone esc cancels. An arrow key or another escape sequence cancels
+		// too: its remaining bytes are dropped rather than typed into the
+		// draft.
+		t.inbuf = t.inbuf[1:]
+		t.cancelSearch()
+		return true
+	}
+	t.inbuf = t.inbuf[1:]
+	switch b {
+	case '\r', '\n':
+		t.acceptSearch()
+	case 0x7f, 0x08:
+		if r := []rune(t.search.draft); len(r) > 0 {
+			t.search.draft = string(r[:len(r)-1])
+		}
+		t.dirty = true
+	case 0x15: // ctrl+u
+		t.search.draft = ""
+		t.dirty = true
+	default:
+		if b >= 0x20 && b <= 0x7e {
+			t.search.draft += string(rune(b))
+			t.dirty = true
+		}
+	}
+	return true
+}
+
+// searchPaste appends a bracketed paste to the query row. The markers are
+// framing, not query text, and a block is one query: its line breaks go.
+func (t *tui) searchPaste(seq []byte) {
+	if t.search == nil {
+		return
+	}
+	text := seq
+	if bytes.HasPrefix(text, []byte(pasteStart)) && bytes.HasSuffix(text, []byte(pasteEnd)) &&
+		len(text) >= len(pasteStart)+len(pasteEnd) {
+		text = text[len(pasteStart) : len(text)-len(pasteEnd)]
+	}
+	t.search.draft += strings.NewReplacer("\r\n", "", "\n", "", "\r", "").Replace(string(text))
+	t.dirty = true
+}
+
+// searchBand returns the tall row the band starts at and the band's height.
+func (t *tui) searchBand() (row0, h int) {
+	p := t.paneByID(t.scroll)
+	if p == nil || t.scrollVT == nil {
+		return 0, 0
+	}
+	row0, _ = scrollStart(t.scrollVT, p.Rect.H, t.offset)
+	return row0, p.Rect.H
+}
+
+// jumpSearch scrolls the band so row sits at its top.
+func (t *tui) jumpSearch(model *ScrollSearch, row int) {
+	if row < 0 || t.scrollVT == nil {
+		return
+	}
+	_, h := t.searchBand()
+	t.offset = model.OffsetFor(row, h, t.maxOff)
+	t.dirty = true
+}
+
+// stepSearch moves the current match one row older or one newer and scrolls to
+// it, wrapping at both ends. With no accepted query it does nothing.
+func (t *tui) stepSearch(older bool) {
+	if t.search == nil || t.search.model == nil {
+		return
+	}
+	if older {
+		t.search.model.Prev()
+	} else {
+		t.search.model.Next()
+	}
+	t.jumpSearch(t.search.model, t.search.model.CurrentRow())
+}
+
+// searchBG is the background a matching row takes: the rail's hover ground, so
+// the highlight marks the row without hiding its text.
+func (t *tui) searchBG() vt.Color {
+	c := t.theme().Palette.RailHoverBG
+	return vt.RGBColor(uint8(c.R), uint8(c.G), uint8(c.B))
 }
 
 func (t *tui) panHeight() int {
@@ -890,6 +1075,8 @@ func (t *tui) exitScroll() {
 	}
 	t.scroll = ""
 	t.scrollVT = nil
+	// Leaving scrollback drops the query, its matches and its highlights.
+	t.search = nil
 	t.offset = 0
 	t.maxOff = 0
 	t.mode = ""
@@ -904,6 +1091,12 @@ func (t *tui) startScroll(p *wire.PaneInfo) {
 	if p.Alt {
 		t.notify("app is on the alternate screen; use its own scroll")
 		return
+	}
+	// A search belongs to one pane's rows. A wheel to another pane replaces the
+	// target, so the old model would paint and step over the new pane's rows;
+	// drop it and let the operator search the pane they are looking at.
+	if t.scroll != p.ID {
+		t.search = nil
 	}
 	t.mode = "scroll"
 	t.scroll = p.ID
@@ -940,7 +1133,7 @@ func (t *tui) requestHistory(p *wire.PaneInfo) {
 // the ring the server sent for the pane's current rect. The live screen keeps
 // updating behind it; the tall one is a frozen snapshot.
 func (t *tui) buildScroll(p *wire.PaneInfo) {
-	rows := vt.ReplayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, histRows+p.Rect.H)
+	rows := vt.ReplayRows(t.hist[p.ID], p.Rect.W, p.Rect.H, t.histWindow()+p.Rect.H)
 	t.scrollVT = vt.BuildTall(rows, p.Rect.W)
 	_, t.maxOff = scrollStart(t.scrollVT, p.Rect.H, 0)
 	// A selection held on the live screen moves to the tall terminal now that
@@ -2068,7 +2261,11 @@ func dragPress(snap *wire.Snapshot, x, y int) (dragStart, bool) {
 // the divider hint while the pointer rests on one.
 func (t *tui) barInfo() string {
 	if t.scroll != "" {
-		return fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)
+		info := fmt.Sprintf("SCROLL %s +%d/%d", t.scroll, t.offset, t.maxOff)
+		if t.search != nil && t.search.model != nil {
+			info += fmt.Sprintf(" SEARCH %s %d/%d", t.search.model.Query(), t.search.model.Current()+1, t.search.model.Count())
+		}
+		return info
 	}
 	if t.padZone != (layout.Rect{}) {
 		return "drag to resize"

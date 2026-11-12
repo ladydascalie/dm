@@ -20,7 +20,7 @@ func newReflowPane(cols, rows int) *paneProc {
 	return &paneProc{
 		id:   "w1p1",
 		vt:   vt.NewTerm(cols, rows),
-		ring: &scrollRing{},
+		ring: NewRing(ringDefault),
 		subs: map[*subConn]bool{},
 		st:   wire.Status{State: "idle"},
 	}

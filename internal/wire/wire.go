@@ -64,9 +64,13 @@ type Msg struct {
 	// daemons outlive servers, and moving it would break every old pane.
 	Lines []string `json:"lines,omitempty"`
 	// Count is the history request: how many rows above the screen.
-	Count int             `json:"count,omitempty"`
-	St    *Status         `json:"st,omitempty"`
-	Res   json.RawMessage `json:"res,omitempty"`
+	Count int `json:"count,omitempty"`
+	// History is the set-history request: the ring budget in bytes the pane
+	// must resize to. The pane validates it against its own range and refuses
+	// anything outside, so a stale server cannot talk it past the limit.
+	History int             `json:"history,omitempty"`
+	St      *Status         `json:"st,omitempty"`
+	Res     json.RawMessage `json:"res,omitempty"`
 }
 
 type Status struct {
