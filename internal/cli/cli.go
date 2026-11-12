@@ -52,19 +52,25 @@ type cmdFlags struct {
 	force      bool
 	args       []string
 	root       string
+
+	sessionEnv  string // DM_SESSION when the shell exported one, else empty
+	sessionFlag bool   // -s appeared on the command line
+	resolved    bool   // the env default has been checked against a live session
 }
 
 // newFlagsAt builds the flag set for one verb, rooted at the given state dir.
 func newFlagsAt(root, name string) *cmdFlags {
 	c := &cmdFlags{fs: flag.NewFlagSet(name, flag.ExitOnError), root: root}
 	// A pane exports its session, so a command from inside it targets that
-	// session without -s. Outside dm the default stays main.
-	if def := os.Getenv("DM_SESSION"); def != "" {
-		c.session = def
-	} else {
-		c.session = "main"
+	// session without -s. Outside dm the default stays main. A dead
+	// DM_SESSION falls back to main at resolveSession, after the parse.
+	c.sessionEnv = os.Getenv("DM_SESSION")
+	def := c.sessionEnv
+	if def == "" {
+		def = "main"
 	}
-	c.fs.StringVar(&c.session, "s", c.session, "session name")
+	c.session = def
+	c.fs.StringVar(&c.session, "s", def, "session name")
 	return c
 }
 
@@ -95,6 +101,49 @@ func (c *cmdFlags) parse(args []string) {
 	c.fs.BoolVar(&c.force, "force", false, "confirm the discard")
 	_ = c.fs.Parse(reorder(args))
 	c.args = c.fs.Args()
+	c.resolveSession()
+}
+
+// resolveSession pins the target session: -s wins, then DM_SESSION when it
+// names a live session, else main. The liveness check is the ls path's socket
+// dial in transport, and the verdict is cached on the flags, so one verb run
+// checks once. A dead DM_SESSION falls back to main with one stderr line, so
+// a verb typed inside a dead pane is never silently retargeted.
+func (c *cmdFlags) resolveSession() {
+	if c.resolved {
+		return
+	}
+	c.resolved = true
+	c.fs.Visit(func(f *flag.Flag) {
+		if f.Name == "s" {
+			c.sessionFlag = true
+		}
+	})
+	// An explicit -s never consults the environment. Without one the env
+	// names the target, except main: there the fallback is the same session,
+	// so the liveness check would decide nothing.
+	if c.sessionFlag || c.sessionEnv == "" || c.sessionEnv == "main" {
+		return
+	}
+	if envSessionLive(c.root, c.sessionEnv) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "dm: session %q from DM_SESSION is not live; using main\n", c.sessionEnv)
+	c.session = "main"
+}
+
+// envSessionLive reuses the ls liveness check: the session's socket answers.
+func envSessionLive(root, name string) bool {
+	sessions, err := transport.ListSessionsAt(root)
+	if err != nil {
+		return false
+	}
+	for _, s := range sessions {
+		if s.Name == name {
+			return s.Live
+		}
+	}
+	return false
 }
 
 // reorder moves flags before positionals, so -s may follow a pane id.
