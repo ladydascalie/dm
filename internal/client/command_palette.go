@@ -304,7 +304,16 @@ func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, query string, r layout
 		buf.WriteString(strings.Repeat(" ", n))
 	}
 	buf.WriteString("\x1b[0m")
-	return r.X + used, r.Y
+	// The cell is one past the query's last cell, clamped inside the row: a
+	// query as long as the line must not park the cursor on the border.
+	maxX := r.X + r.W - 1
+	if cx > maxX {
+		cx = maxX
+	}
+	if cx < r.X {
+		cx = r.X
+	}
+	return cx, r.Y
 }
 
 // paintPaletteRows paints the body: the filtered rows the viewport holds,

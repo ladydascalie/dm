@@ -112,6 +112,61 @@ func TestConfigCommandPaletteCollision(t *testing.T) {
 	}
 }
 
+// TestConfigMergeSkipsTakenDefaultKey proves a pre-palette user keymap keeps
+// its own k: mergeDefaults leaves command-palette unbound instead of wearing
+// the stolen key, so no help row and no keymap view row advertises a key that
+// never fires.
+func TestConfigMergeSkipsTakenDefaultKey(t *testing.T) {
+	for _, src := range []string{
+		`keymap "main" {
+	"focus-up" "k"
+}
+`,
+		`keymap "main" {
+	"close-pane" "k"
+}
+`,
+	} {
+		cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), src))
+		if err != nil {
+			t.Fatalf("LoadPath: %v", err)
+		}
+		if got := cfg.Key("main", "command-palette"); got != "" {
+			t.Fatalf("Key(main, command-palette) = %q, want unbound when the file holds k", got)
+		}
+		action, n, state := cfg.Match("main", []byte{'k'})
+		if state != Match || action != "focus-up" && action != "close-pane" || n != 1 {
+			t.Fatalf("Match(main, k) = %q, %d, %v; want the file's own action", action, n, state)
+		}
+		for _, e := range cfg.HelpEntries() {
+			if e.Action == "command-palette" {
+				t.Fatalf("the help box advertises command-palette on %q", e.Key)
+			}
+		}
+	}
+}
+
+// TestConfigMergeSkipsTakenDefaultKeyLonger proves a user binding that only
+// extends the default's key also keeps it: the longer sequence owns the key
+// presses, so the default would never fire. An arrow binding starts with esc,
+// so the default esc binding stays out.
+func TestConfigMergeSkipsTakenDefaultKeyLonger(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), `keymap "main" {
+	"focus-up-arrow" "up"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "dismiss-esc"); got != "" {
+		t.Fatalf("Key(main, dismiss-esc) = %q, want unbound under the longer arrow binding", got)
+	}
+	action, n, state := cfg.Match("main", []byte{0x1b, '[', 'A'})
+	if state != Match || action != "focus-up-arrow" || n != 3 {
+		t.Fatalf("Match(main, up) = %q, %d, %v; want focus-up-arrow, 3, Match", action, n, state)
+	}
+}
+
 // TestConfigOverride proves a sample KDL overrides the prefix and one binding
 // in each mode.
 func TestConfigOverride(t *testing.T) {

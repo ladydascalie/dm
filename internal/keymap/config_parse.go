@@ -1,6 +1,7 @@
 package keymap
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -855,6 +856,21 @@ keymap "help" {
 }
 `
 
+// bindingTaken reports whether any binding already holds one of the byte
+// sequences: the same bytes, or bytes one is a prefix of the other, since
+// either way the longer sequence owns the key presses.
+func bindingTaken(bindings []binding, seqs [][]byte) bool {
+	for _, seq := range seqs {
+		for _, b := range bindings {
+			if bytes.Equal(b.bytes, seq) ||
+				bytes.HasPrefix(b.bytes, seq) || bytes.HasPrefix(seq, b.bytes) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // mergeDefaults fills cfg with every default binding cfg does not name. An
 // action the file binds keeps its key, including a remapped prefix. An action
 // the file lists as "none" stays unbound. A mode the file omits is created.
@@ -902,6 +918,13 @@ func mergeDefaults(cfg *Config) {
 			key := defMode.actions[b.action]
 			seqs, err := KeySequences(key, cfg.prefixBytes)
 			if err != nil {
+				continue
+			}
+			// A key an existing binding already holds is dead weight on a
+			// default: the first declared binding wins the equal-length
+			// race, so the help box would advertise a key that never fires.
+			// The action stays unbound instead of wearing a stolen key.
+			if bindingTaken(m.bindings, seqs) {
 				continue
 			}
 			m.actions[b.action] = key

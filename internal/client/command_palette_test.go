@@ -226,6 +226,31 @@ func TestCommandPaletteDraw(t *testing.T) {
 	}
 }
 
+// TestCommandPaletteCursorStaysInsideRow: a query as long as the query line
+// must not park the cursor on the float's border. The switcher clamps, and so
+// does the palette.
+func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
+	t.Parallel()
+	tui, _ := switcherTUI(t)
+	feed(tui, "\x02k")
+	long := make([]byte, 200)
+	for i := range long {
+		long[i] = 'a'
+	}
+	feed(tui, string(long))
+	g := commandPaletteGeom(tui.snap, tui.cp.total)
+	cx, cy := drawCommandPalette(&bytes.Buffer{}, tui.theme(), tui.cp, tui.snap)
+	if cy != g.Y+1 {
+		t.Fatalf("cursor row = %d, want the query line at %d", cy, g.Y+1)
+	}
+	if cx > g.X+g.W-2 {
+		t.Fatalf("cursor column = %d, past the interior edge %d", cx, g.X+g.W-2)
+	}
+	if cx < g.X+1 {
+		t.Fatalf("cursor column = %d, before the interior edge %d", cx, g.X+1)
+	}
+}
+
 // TestCommandPaletteCommandsShareHelpSource: the rows are the main keymap's
 // actions and the configdoc descriptions, so the palette and the help view
 // never drift apart.
