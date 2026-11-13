@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/cells"
 	"dm/internal/configdoc"
 	"dm/internal/keymap"
 	"dm/internal/testutil"
@@ -224,10 +225,17 @@ func TestCommandPaletteDraw(t *testing.T) {
 		t.Fatal("the palette painted no cursor cell")
 	}
 	out := buf.String()
-	for _, want := range []string{"palette", "> ", "send-prefix"} {
+	for _, want := range []string{"palette", "> ", "send-prefix", "? help"} {
 		if !bytes.Contains([]byte(out), []byte(want)) {
 			t.Fatalf("the palette draw misses %q", want)
 		}
+	}
+	// The signpost hides while the float it points at is open.
+	feed(tui, "?")
+	buf.Reset()
+	drawCommandPalette(&buf, tui.theme(), tui.cp, tui.snap)
+	if bytes.Contains(buf.Bytes(), []byte("? help")) {
+		t.Fatal("the ? signpost stayed up under the help float")
 	}
 }
 
@@ -291,6 +299,11 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	}
 	if cx < g.X+1 {
 		t.Fatalf("cursor column = %d, before the interior edge %d", cx, g.X+1)
+	}
+	// The ? signpost reserves the query line's right edge; the cursor must
+	// stop short of it even on a full query.
+	if cx > g.X+g.W-2-cells.Cells(paletteHelpHint)-2 {
+		t.Fatalf("cursor column = %d, under the ? signpost", cx)
 	}
 }
 

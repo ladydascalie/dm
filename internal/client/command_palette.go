@@ -324,7 +324,11 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
 		// PaintPanel fills the interior with the rail ground; the query and
 		// the rows paint their own grounds on top of it.
-		cx, cy = paintPaletteQuery(b, th, cp.pal.Query(), r)
+		hint := ""
+		if !cp.help {
+			hint = paletteHelpHint
+		}
+		cx, cy = paintPaletteQuery(b, th, cp.pal.Query(), r, hint)
 		paintPaletteRows(b, th, rows, cp.pal.SelectedIndex(), r)
 	})
 	if cp.help {
@@ -337,6 +341,10 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 // paletteHelpWidth is the widest line the help float wraps its description
 // to, and the widest box it opens at.
 const paletteHelpWidth = 56
+
+// paletteHelpHint is the query line's right-edge signpost: ? explains the
+// command under the selection.
+const paletteHelpHint = "? help"
 
 // paintPaletteHelp paints the help float for the selected command: a small
 // panel centred over the palette, carrying the command's key, its name and
@@ -434,10 +442,14 @@ func paletteWrap(s string, w int) []string {
 // paintPaletteQuery paints the query line: the prompt, the query text and the
 // ground to the end of the row. It returns the cursor cell, which sits after
 // the last query rune.
-func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, query string, r layout.Rect) (cx, cy int) {
+func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, query string, r layout.Rect, hint string) (cx, cy int) {
 	ground, dim, text := th.Palette.RailBG, th.Palette.RailDim, th.Palette.RailText
 	prompt := "> "
-	w := r.W - cells.Cells(prompt)
+	hintW := 0
+	if hint != "" {
+		hintW = cells.Cells(hint) + 2
+	}
+	w := r.W - cells.Cells(prompt) - hintW
 	if w < 0 {
 		w = 0
 	}
@@ -453,6 +465,17 @@ func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, query string, r layout
 		buf.WriteString(ground.BG())
 		buf.WriteString(text.FG())
 		buf.WriteString(q)
+	}
+	if hint != "" {
+		// The hint sits on the row's right edge, in the dim colour: it
+		// points at ? without competing with the query. The clip budget
+		// above reserves its cells, so the two never meet.
+		buf.WriteString(strings.Repeat(" ", max(1, r.W-used-hintW)))
+		buf.WriteString("\x1b[0m")
+		buf.WriteString(ground.BG())
+		buf.WriteString(dim.FG())
+		buf.WriteString(hint)
+		used += r.W - used
 	}
 	if n := r.W - used; n > 0 {
 		buf.WriteString(strings.Repeat(" ", n))
