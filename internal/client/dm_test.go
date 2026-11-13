@@ -197,16 +197,17 @@ func TestFocusForClick(t *testing.T) {
 // TestSessionSizeIsLargestClient keeps a small client, such as a dm nested in
 // one of the session's own panes, from shrinking every other display.
 // TestSameSessionAttachRefused stops a dm nested in a pane from attaching the
-// session it already lives in.
+// session it already lives in, and from creating one: an attach from inside
+// needs a live target, or dm would nest a fresh session in the pane.
 func TestSameSessionAttachRefused(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
 	t.Setenv("DM_SESSION", "main")
 	if err := Run("main"); err == nil || !strings.Contains(err.Error(), "already inside") {
 		t.Fatalf("same-session attach = %v, want refusal", err)
 	}
 	t.Setenv("DM_SESSION", "work")
-	err := Run("main")
-	if err == nil || strings.Contains(err.Error(), "already inside") {
-		t.Fatalf("other-session attach = %v, want the terminal check", err)
+	if err := Run("main"); err == nil || !strings.Contains(err.Error(), "not live") {
+		t.Fatalf("create-from-inside attach = %v, want refusal", err)
 	}
 }
 

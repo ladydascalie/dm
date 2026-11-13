@@ -232,7 +232,7 @@ dm reads these environment variables:
 | `XDG_STATE_HOME` | State directory base; dm uses `$XDG_STATE_HOME/dm`. |
 | `XDG_CONFIG_HOME` | Config directory base; dm reads `$XDG_CONFIG_HOME/dm/config.kdl`. |
 | `HOME` | Home directory base; the fallback for both XDG paths. |
-| `DM_SESSION` | The session a pane belongs to; dm refuses to attach that session from inside it. |
+| `DM_SESSION` | The session a pane belongs to; dm refuses to attach that session from inside it, and refuses a name with no live session, which would nest a new one in the pane. |
 | `DM_PANE` | The pane id a pane's shell runs in. |
 | `DM_NERD` | `1` forces Nerd Font glyphs, `0` forces the Unicode fallback. |
 | `DM_NOTIFY` | `0` turns desktop notifications off. |
@@ -1371,7 +1371,8 @@ is the floor: the ceiling bounds a burst, it does not lower the floor.
   clipped to its own screen.
 - A pane exports `DM_SESSION` to its shell. `dm` refuses to attach that same
   session from inside one of its own panes, because the mirror is useless and
-  competes for the shared size. Use `-s` for another session.
+    competes for the shared size. `-s` attaches another session, but only a live
+  one; a name with no live session would nest a new one in the pane.
 - Kill the server (`kill -9`, crash, logout): panes keep running, including
   their shells, because their sockets stay intact. The next CLI call or attach
   restarts the server and reconnects the same pane processes. Content and

@@ -468,8 +468,24 @@ func Run(name string) error {
 	}
 	// A pane exports its own session name. Attaching that same session from a
 	// pane makes a mirror that can also fight over the shared screen size.
-	if in := os.Getenv("DM_SESSION"); in != "" && in == name {
-		return fmt.Errorf("already inside session %q; attach to another session with -s", name)
+	// Any other attach from inside must find a live session: a name with no
+	// server would be spawned, nesting a new session inside this pane.
+	if in := os.Getenv("DM_SESSION"); in != "" {
+		if in == name {
+			return fmt.Errorf("already inside session %q; attach to another session with -s", name)
+		}
+		live := false
+		if sessions, err := transport.ListSessions(); err == nil {
+			for _, s := range sessions {
+				if s.Name == name {
+					live = s.Live
+					break
+				}
+			}
+		}
+		if !live {
+			return fmt.Errorf("session %q is not live; attaching it from inside %q would nest it; create it outside dm", name, in)
+		}
 	}
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {

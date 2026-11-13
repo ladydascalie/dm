@@ -1042,7 +1042,7 @@ Config directory base; dm reads $XDG_CONFIG_HOME/dm/config.kdl.
 Home directory base; dm reads $HOME/.config/dm and $HOME/.local/state/dm when the XDG variables are unset.
 .TP
 \fBDM_SESSION\fP
-The session a pane belongs to; dm refuses to attach that session from inside it.
+The session a pane belongs to; dm refuses to attach that session from inside it, and refuses a name with no live session, which would nest a new one in the pane.
 .TP
 \fBDM_PANE\fP
 The pane id a pane's shell runs in.

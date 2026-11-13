@@ -114,7 +114,7 @@ var EnvVars = []EnvVar{
 	// internal/keymap/config_load.go
 	{Name: "HOME", Desc: "Home directory base; dm reads $HOME/.config/dm and $HOME/.local/state/dm when the XDG variables are unset."},
 	// internal/cli/cli.go and internal/client/client_model.go
-	{Name: "DM_SESSION", Desc: "The session a pane belongs to; dm refuses to attach that session from inside it."},
+	{Name: "DM_SESSION", Desc: "The session a pane belongs to; dm refuses to attach that session from inside it, and refuses a name with no live session, which would nest a new one in the pane."},
 	// internal/cli/cli.go
 	{Name: "DM_PANE", Desc: "The pane id a pane's shell runs in."},
 	// internal/rail/rail.go
