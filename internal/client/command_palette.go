@@ -20,8 +20,7 @@ import (
 // the column the command names clip to.
 const (
 	commandPaletteMinW = 40
-	commandPaletteMaxW = 65 // borders, row chrome, the name column and a description
-	commandPaletteName = 24
+	commandPaletteMaxW = 65 // borders, row chrome and the widest command name
 )
 
 // commandPalette is the open command palette. It is client-owned state: it
@@ -37,6 +36,9 @@ type commandPalette struct {
 	// capRows is the visible-row cap the config named when the palette
 	// opened. The float keeps its height while the query filters.
 	capRows int
+	// help is the open help float: ? over a selected command explains it.
+	// The palette stays up under it.
+	help bool
 }
 
 // commandPaletteCommands builds the palette's rows from the source the help
@@ -53,6 +55,7 @@ func commandPaletteCommands(cfg *keymap.Config) []palette.Command {
 				Name:   a.Action,
 				Hint:   configdoc.ActionDesc[a.Action],
 				Action: a.Action,
+				Key:    cfg.Key("main", a.Action),
 			})
 		}
 	}
@@ -164,12 +167,14 @@ func (t *tui) commandPaletteKey() bool {
 	}
 	if n := paletteArrowUp(t.inbuf); n > 0 {
 		t.takePaletteBytes(n)
+		t.closePaletteHelp()
 		t.cp.pal.Cycle(-1)
 		t.dirty = true
 		return true
 	}
 	if n := paletteArrowDown(t.inbuf); n > 0 {
 		t.takePaletteBytes(n)
+		t.closePaletteHelp()
 		t.cp.pal.Cycle(1)
 		t.dirty = true
 		return true
@@ -189,14 +194,18 @@ func (t *tui) commandPaletteKey() bool {
 		}
 		t.takePaletteBytes(n)
 		if n == 1 {
-			// A lone esc closes. A longer sequence carries no key the
+			// A lone esc closes the help float when it is open and the
+			// palette otherwise. A longer sequence carries no key the
 			// palette knows, so it is swallowed whole.
-			closeCommandPalette(t)
+			if !t.closePaletteHelp() {
+				closeCommandPalette(t)
+			}
 		} else {
 			t.dirty = true
 		}
 	case b == 0x7f || b == 0x08:
 		t.takePaletteBytes(1)
+		t.closePaletteHelp()
 		t.cp.pal.Backspace()
 		t.dirty = true
 	case b == 0x0d || b == 0x0a:
@@ -205,15 +214,24 @@ func (t *tui) commandPaletteKey() bool {
 	case b == 0x10:
 		// ctrl+p walks the selection up, the way the arrows do.
 		t.takePaletteBytes(1)
+		t.closePaletteHelp()
 		t.cp.pal.Cycle(-1)
 		t.dirty = true
 	case b == 0x0e:
 		// ctrl+n walks the selection down.
 		t.takePaletteBytes(1)
+		t.closePaletteHelp()
 		t.cp.pal.Cycle(1)
+		t.dirty = true
+	case b == '?':
+		// ? never enters the query: over a selected command it opens the
+		// help float, over the open one it closes it.
+		t.takePaletteBytes(1)
+		t.togglePaletteHelp()
 		t.dirty = true
 	case b >= 0x20 && b < 0x7f:
 		t.takePaletteBytes(1)
+		t.closePaletteHelp()
 		t.cp.pal.AppendRune(rune(b))
 		t.dirty = true
 	default:
@@ -221,8 +239,38 @@ func (t *tui) commandPaletteKey() bool {
 		// multi-byte rune: the switcher takes neither as text, and neither
 		// does the palette.
 		t.takePaletteBytes(1)
+		t.closePaletteHelp()
 	}
 	return true
+}
+
+// closePaletteHelp closes the palette's help float when it is open and
+// reports whether it was. The palette itself stays up.
+func (t *tui) closePaletteHelp() bool {
+	if t.cp == nil || !t.cp.help {
+		return false
+	}
+	t.cp.help = false
+	t.dirty = true
+	return true
+}
+
+// togglePaletteHelp opens the help float for the selected command, or closes
+// the one that is open. With no command under the selection it does nothing:
+// there is nothing to explain.
+func (t *tui) togglePaletteHelp() {
+	if t.cp == nil {
+		return
+	}
+	if t.cp.help {
+		t.cp.help = false
+		t.dirty = true
+		return
+	}
+	if _, ok := t.cp.pal.Selected(); ok {
+		t.cp.help = true
+		t.dirty = true
+	}
 }
 
 // takePaletteBytes consumes n bytes of buffered input and clears the wait for
@@ -279,8 +327,108 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 		cx, cy = paintPaletteQuery(b, th, cp.pal.Query(), r)
 		paintPaletteRows(b, th, rows, cp.pal.SelectedIndex(), r)
 	})
+	if cp.help {
+		paintPaletteHelp(buf, th, cp, g)
+	}
 	buf.WriteString("\x1b[0m")
 	return cx, cy
+}
+
+// paletteHelpWidth is the widest line the help float wraps its description
+// to, and the widest box it opens at.
+const paletteHelpWidth = 56
+
+// paintPaletteHelp paints the help float for the selected command: a small
+// panel centred over the palette, carrying the command's key, its name and
+// its description wrapped to the float's width. A palette too small to hold
+// it paints nothing.
+func paintPaletteHelp(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, g layout.Rect) {
+	cmd, ok := cp.pal.Selected()
+	if !ok {
+		return
+	}
+	lines := paletteWrap(cmd.Hint, paletteHelpWidth)
+	h := len(lines) + 3 // key line, borders, one blank row of air
+	w := paletteHelpWidth + 2
+	if w > g.W-2 {
+		w = g.W - 2
+	}
+	if w < 10 {
+		return
+	}
+	for len(lines) > 0 && h > g.H-2 {
+		lines = lines[:len(lines)-1]
+		h = len(lines) + 3
+	}
+	if h < 3 || len(lines) == 0 {
+		return
+	}
+	r := layout.Rect{
+		X: g.X + (g.W-w)/2,
+		Y: g.Y + (g.H-h)/2,
+		W: w,
+		H: h,
+	}
+	inner := layout.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2}
+	panel.PaintPanel(buf, th, inner, panel.PanelTitle{
+		Text:  th.Glyphs.BorderHorizontal + " " + cmd.Name + " ",
+		Style: "\x1b[0m\x1b[90m" + groundSGR(th.Palette.RailBG),
+		Fill:  th.Glyphs.BorderHorizontal,
+	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
+		fmt.Fprintf(b, "\x1b[%d;%dH", r.Y+1, r.X+1)
+		b.WriteString("\x1b[0m")
+		b.WriteString(th.Palette.RailBG.BG())
+		b.WriteString(th.Palette.RailText.FG())
+		if key := cmd.Key; key != "" {
+			b.WriteString(key + "  ")
+		}
+		b.WriteString("\x1b[0m")
+		for i, line := range lines {
+			fmt.Fprintf(b, "\x1b[%d;%dH", r.Y+2+i, r.X+1)
+			b.WriteString("\x1b[0m")
+			b.WriteString(th.Palette.RailBG.BG())
+			b.WriteString(th.Palette.RailDim.FG())
+			b.WriteString(cells.Pad(line, r.W))
+			b.WriteString("\x1b[0m")
+		}
+	})
+}
+
+// paletteWrap wraps s to w cells, greedy on spaces. A word wider than the
+// budget lands clipped on its own line.
+func paletteWrap(s string, w int) []string {
+	if w < 1 {
+		return []string{cells.Clip(s, 1)}
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	var out []string
+	line := ""
+	for _, word := range words {
+		cand := word
+		if line != "" {
+			cand = line + " " + word
+		}
+		if cells.Cells(cand) <= w {
+			line = cand
+			continue
+		}
+		if line != "" {
+			out = append(out, line)
+			line = ""
+		}
+		if cells.Cells(word) > w {
+			out = append(out, cells.Clip(word, w))
+			continue
+		}
+		line = word
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
 }
 
 // paintPaletteQuery paints the query line: the prompt, the query text and the
@@ -365,23 +513,12 @@ func paintPaletteRows(buf *bytes.Buffer, th theme.Theme, rows []palette.Command,
 		if selected {
 			mark = ">"
 		}
-		name := cells.Pad(cells.Clip(c.Name, commandPaletteName), commandPaletteName)
+		// No hint column: the palette's width cut descriptions mid-word,
+		// and ? explains the selection in a float instead.
+		name := cells.Pad(cells.Clip(c.Name, r.W-4), r.W-4)
 		line := " " + mark + " " + name
-		used := 3 + commandPaletteName
-		hintW := r.W - used - 2
 		buf.WriteString(th.Palette.RailText.FG())
 		buf.WriteString(line)
-		if hintW > 0 {
-			// The hint speaks in the dim colour: it describes, it does not
-			// carry the row.
-			hint := cells.Clip(c.Hint, hintW)
-			buf.WriteString(th.Palette.RailDim.FG())
-			buf.WriteString("  " + hint)
-			used += 2 + cells.Cells(hint)
-		}
-		if n := r.W - used; n > 0 {
-			buf.WriteString(strings.Repeat(" ", n))
-		}
 		buf.WriteString("\x1b[0m")
 	}
 }

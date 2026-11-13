@@ -9,6 +9,9 @@ type Command struct {
 	Name   string
 	Hint   string
 	Action string
+	// Key is the key label that runs the command, the label the help view
+	// prints. Empty when the command has no key.
+	Key string
 }
 
 // Model holds the palette state: the command list, the query buffer, the

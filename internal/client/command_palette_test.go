@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"dm/internal/configdoc"
 	"dm/internal/keymap"
 	"dm/internal/testutil"
 )
@@ -289,6 +291,78 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	}
 	if cx < g.X+1 {
 		t.Fatalf("cursor column = %d, before the interior edge %d", cx, g.X+1)
+	}
+}
+
+// TestCommandPaletteRowsCarryNoHint: the row list holds names alone. The
+// palette's width cut descriptions mid-word, so the hint moved to the help
+// float the ? key opens.
+func TestCommandPaletteRowsCarryNoHint(t *testing.T) {
+	t.Parallel()
+	tui, _ := switcherTUI(t)
+	feed(tui, "\x02k")
+	var buf bytes.Buffer
+	drawCommandPalette(&buf, tui.theme(), tui.cp, tui.snap)
+	out := buf.String()
+	if !bytes.Contains([]byte(out), []byte("send-prefix")) {
+		t.Fatal("the palette draw misses a command name")
+	}
+	hint := configdoc.ActionDesc["send-prefix"]
+	first := strings.Split(hint, " ")[0]
+	if bytes.Contains([]byte(out), []byte(first)) {
+		t.Fatalf("the palette rows still carry the hint word %q", first)
+	}
+}
+
+// TestCommandPaletteHelpFloat: ? over a selected command opens a help float
+// with the command's key and description, esc or a second ? closes it, and
+// with no selection ? opens nothing.
+func TestCommandPaletteHelpFloat(t *testing.T) {
+	t.Parallel()
+	tui, _ := switcherTUI(t)
+	feed(tui, "\x02k")
+	feed(tui, "?")
+	if tui.cp == nil || !tui.cp.help {
+		t.Fatal("? did not open the help float")
+	}
+	var buf bytes.Buffer
+	drawCommandPalette(&buf, tui.theme(), tui.cp, tui.snap)
+	out := buf.String()
+	if !bytes.Contains([]byte(out), []byte("send-prefix")) {
+		t.Fatal("the help float misses the command name")
+	}
+	if !bytes.Contains([]byte(out), []byte("ctrl+b")) {
+		t.Fatal("the help float misses the command key")
+	}
+	desc := configdoc.ActionDesc["send-prefix"]
+	if !bytes.Contains([]byte(out), []byte(strings.Split(desc, " ")[0])) {
+		t.Fatalf("the help float misses the description %q", desc)
+	}
+	// A second ? closes it, and esc closes only the float.
+	feed(tui, "?")
+	if tui.cp == nil || tui.cp.help {
+		t.Fatal("a second ? did not close the help float")
+	}
+	feed(tui, "?")
+	feed(tui, "\x1b")
+	if tui.cp == nil || tui.cp.help {
+		t.Fatal("esc did not close the help float")
+	}
+	// Text keeps filtering, and the float stays closed.
+	feed(tui, "send")
+	if tui.cp == nil || tui.cp.help {
+		t.Fatal("typing re-opened the help float")
+	}
+	if rows := tui.cp.pal.Rows(); len(rows) == 0 || rows[0].Name != "send-prefix" {
+		t.Fatalf("the query stopped filtering: %v", rows)
+	}
+	// With nothing selected there is nothing to explain.
+	tui2, _ := switcherTUI(t)
+	feed(tui2, "\x02k")
+	feed(tui2, "zzzz")
+	feed(tui2, "?")
+	if tui2.cp == nil || tui2.cp.help {
+		t.Fatal("? opened a help float with no command selected")
 	}
 }
 

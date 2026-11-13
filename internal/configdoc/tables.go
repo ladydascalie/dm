@@ -204,7 +204,7 @@ var ActionDesc = map[string]string{
 	"swap-prev":           "Swap the focused pane with the neighbour to its left.",
 	"next-layout":         "Cycle the active window to the next preset layout.",
 	"layout-picker":       "Open the layout palette over the active window's panes.",
-	"command-palette":     "Open the command palette: type to filter every main action, enter runs one.",
+	"command-palette":     "Open the command palette: type to filter every main action, enter runs one, ? explains the selected one.",
 	"synchronize-panes":   "Toggle synchronization of panes in the active window; on and false set, absent toggles.",
 	"new-workspace":       "Create a workspace.",
 	"next-workspace":      "Select the next workspace.",
