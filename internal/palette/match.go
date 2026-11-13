@@ -68,19 +68,19 @@ func score(h, q []rune) (int, bool) {
 	if n < m {
 		return 0, false
 	}
-	// The dynamic program walks the query one rune per row. prev and prevIdx
-	// hold row j-1: prev[i] is the best score matching q[:j-1] with its last
-	// rune at i, prevIdx the index that earned it. cur holds row j.
+	// The dynamic program walks the query one rune per row. prev holds row
+	// j-1: prev[i] is the best score matching q[:j-1] with its last rune at
+	// i. cur holds row j.
 	noScore := math.MinInt32
-	prev, prevIdx := make([]int, n), make([]int, n)
-	cur, curIdx := make([]int, n), make([]int, n)
+	prev := make([]int, n)
+	cur := make([]int, n)
 	for j := 0; j < m; j++ {
 		// best and bestAt fold row j-1 over indices below i: the match for
 		// q[j] must land after the match for q[j-1].
 		best, bestAt := noScore, -1
 		for i := 0; i < n; i++ {
 			if j == 0 {
-				cur[i], curIdx[i] = noScore, -1
+				cur[i] = noScore
 				if unicode.ToLower(h[i]) == q[0] {
 					s := -i
 					if atBoundary(h, i) {
@@ -89,7 +89,7 @@ func score(h, q []rune) (int, bool) {
 					cur[i] = s
 				}
 			} else {
-				cur[i], curIdx[i] = noScore, -1
+				cur[i] = noScore
 				if bestAt >= 0 && unicode.ToLower(h[i]) == q[j] {
 					s := best
 					if i == bestAt+1 {
@@ -100,7 +100,7 @@ func score(h, q []rune) (int, bool) {
 					if atBoundary(h, i) {
 						s += 16
 					}
-					cur[i], curIdx[i] = s, bestAt
+					cur[i] = s
 				}
 			}
 			if j > 0 && prev[i] > best {
@@ -108,7 +108,6 @@ func score(h, q []rune) (int, bool) {
 			}
 		}
 		prev, cur = cur, prev
-		prevIdx, curIdx = curIdx, prevIdx
 	}
 	// The last row holds the full alignment. Strictly greater keeps the
 	// earliest alignment on a tie, because the scan runs left to right.

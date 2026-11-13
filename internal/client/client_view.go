@@ -66,6 +66,9 @@ func (t *tui) draw() {
 		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.previewTerms(), paintPaneFrom, t.glyphSet())
 		t.askPreview()
 	}
+	if t.cp != nil {
+		t.cpX, t.cpY = drawCommandPalette(&pal, th, t.cp, win)
+	}
 	if t.armed {
 		drawHelp(&help, th, win.Cols, win.Rows, t.km().FloatShadow(), t.km().HelpEntries())
 	}
@@ -505,6 +508,10 @@ func (t *tui) cursorBlock() string {
 		}
 		// The dashboard owns the cursor while it filters: the query cell.
 		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.swY+1, t.swX+1)
+	}
+	if t.cp != nil {
+		// The palette owns the cursor while it filters: the query cell.
+		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.cpY+1, t.cpX+1)
 	}
 	if t.float != nil {
 		// No cell of the float takes typing from the client: its keys go to

@@ -814,6 +814,8 @@ func (t *tui) runAction(name string) {
 		t.action("next-workspace", nil)
 	case "switcher":
 		openSwitcher(t)
+	case "command-palette":
+		openCommandPalette(t)
 	case "picker":
 		t.openPicker()
 	case "rename-workspace":

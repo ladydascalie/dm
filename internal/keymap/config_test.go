@@ -22,7 +22,8 @@ var configTestDefaultActions = map[string][]string{
 		"focus-left", "focus-down",
 		"focus-up", "focus-right", "next-pane", "prev-pane", "close-pane",
 		"zoom-pane", "new-window", "next-window", "prev-window", "new-workspace",
-		"next-workspace", "switcher", "picker", "rename-workspace", "set-project",
+		"next-workspace", "switcher", "picker", "command-palette",
+		"rename-workspace", "set-project",
 		"toggle-rail", "message-box", "detach", "detach-alt",
 		"window-1", "window-2", "window-3", "window-4", "window-5",
 		"window-6", "window-7", "window-8", "window-9", "window-10",
@@ -90,6 +91,100 @@ func TestConfigDefaultsParse(t *testing.T) {
 				t.Errorf("mode %q action %q is unbound", mode, action)
 			}
 		}
+	}
+}
+
+// TestConfigCommandPaletteCollision proves the k the command palette takes is
+// free: prefix k matches the palette, focus-up keeps K, and no second main
+// action claims k. The default k belonged to focus-up; the palette took it and
+// focus-up moved to K, so the two never race on one key.
+func TestConfigCommandPaletteCollision(t *testing.T) {
+	cfg := LoadDefault()
+	action, n, state := cfg.Match("main", []byte{'k'})
+	if state != Match || action != "command-palette" || n != 1 {
+		t.Fatalf("Match(main, k) = %q, %d, %v; want command-palette, 1, Match", action, n, state)
+	}
+	if got := cfg.Key("main", "focus-up"); got != "K" {
+		t.Fatalf("Key(main, focus-up) = %q, want K", got)
+	}
+	if got := cfg.Key("main", "command-palette"); got != "k" {
+		t.Fatalf("Key(main, command-palette) = %q, want k", got)
+	}
+}
+
+// TestConfigMergeSkipsTakenDefaultKey proves a pre-palette user keymap keeps
+// its own k: mergeDefaults leaves command-palette unbound instead of wearing
+// the stolen key, so no help row and no keymap view row advertises a key that
+// never fires.
+func TestConfigMergeSkipsTakenDefaultKey(t *testing.T) {
+	for _, src := range []string{
+		`keymap "main" {
+	"focus-up" "k"
+}
+`,
+		`keymap "main" {
+	"close-pane" "k"
+}
+`,
+	} {
+		cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), src))
+		if err != nil {
+			t.Fatalf("LoadPath: %v", err)
+		}
+		if got := cfg.Key("main", "command-palette"); got != "" {
+			t.Fatalf("Key(main, command-palette) = %q, want unbound when the file holds k", got)
+		}
+		action, n, state := cfg.Match("main", []byte{'k'})
+		if state != Match || action != "focus-up" && action != "close-pane" || n != 1 {
+			t.Fatalf("Match(main, k) = %q, %d, %v; want the file's own action", action, n, state)
+		}
+		for _, e := range cfg.HelpEntries() {
+			if e.Action == "command-palette" {
+				t.Fatalf("the help box advertises command-palette on %q", e.Key)
+			}
+		}
+	}
+}
+
+// TestConfigMergeSkipsTakenDefaultKeyLonger proves a user binding that only
+// extends the default's key also keeps it: the longer sequence owns the key
+// presses, so the default would never fire. An arrow binding starts with esc,
+// so the default esc binding stays out.
+func TestConfigMergeSkipsTakenDefaultKeyLonger(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), `keymap "main" {
+	"focus-up-arrow" "up"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "dismiss-esc"); got != "" {
+		t.Fatalf("Key(main, dismiss-esc) = %q, want unbound under the longer arrow binding", got)
+	}
+	action, n, state := cfg.Match("main", []byte{0x1b, '[', 'A'})
+	if state != Match || action != "focus-up-arrow" || n != 3 {
+		t.Fatalf("Match(main, up) = %q, %d, %v; want focus-up-arrow, 3, Match", action, n, state)
+	}
+}
+
+// TestConfigMergeKeepsNestedDefaultKey proves a longer default survives a
+// shorter existing binding: a file that binds esc keeps the arrow defaults,
+// because esc nesting under the arrows is how the prefix table resolves, and
+// Match picks the longer sequence first.
+func TestConfigMergeKeepsNestedDefaultKey(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), `keymap "main" {
+	"dismiss-esc" "esc"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "focus-up-arrow"); got != "up" {
+		t.Fatalf("Key(main, focus-up-arrow) = %q, want up from the defaults", got)
+	}
+	action, n, state := cfg.Match("main", []byte{0x1b, '[', 'A'})
+	if state != Match || action != "focus-up-arrow" || n != 3 {
+		t.Fatalf("Match(main, up) = %q, %d, %v; want focus-up-arrow, 3, Match", action, n, state)
 	}
 }
 
@@ -374,7 +469,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"[", "scrollback"},
 		{"y / Y", "copy output / screen"},
 		{"i", "copy pane id"},
-		{"h j k l", "focus pane"},
+		{"h j K l", "focus pane"},
 		{"n / p", "next/prev pane"},
 		{"x", "close pane"},
 		{"X", "close window"},
@@ -388,6 +483,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{")", "next workspace"},
 		{"S", "synchronize panes"},
 		{"s", "switch session"},
+		{"k", "command palette"},
 		{"r", "rename workspace"},
 		{"P", "set project"},
 		{"m", "message box"},

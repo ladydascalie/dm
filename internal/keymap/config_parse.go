@@ -1,6 +1,7 @@
 package keymap
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -661,7 +662,7 @@ keymap "main" {
     "copy-pane-id" "i"
     "focus-left" "h"
     "focus-down" "j"
-    "focus-up" "k"
+    "focus-up" "K"
     "focus-right" "l"
     "next-pane" "n"
     "prev-pane" "p"
@@ -680,6 +681,7 @@ keymap "main" {
     "synchronize-panes" "S" help "Session"
     "switcher" "a"
     "picker" "s"
+    "command-palette" "k"
     "rename-workspace" "r"
     "set-project" "P"
     "toggle-rail" "b"
@@ -854,6 +856,22 @@ keymap "help" {
 }
 `
 
+// bindingTaken reports whether any binding already starves one of the byte
+// sequences of its press: the same bytes, or a longer binding the sequence
+// would only ever wait inside. A longer default over a shorter existing
+// binding is not taken: that is how a prefix table nests, esc before the
+// arrows, and Match resolves the longer sequence first.
+func bindingTaken(bindings []binding, seqs [][]byte) bool {
+	for _, seq := range seqs {
+		for _, b := range bindings {
+			if bytes.Equal(b.bytes, seq) || bytes.HasPrefix(b.bytes, seq) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // mergeDefaults fills cfg with every default binding cfg does not name. An
 // action the file binds keeps its key, including a remapped prefix. An action
 // the file lists as "none" stays unbound. A mode the file omits is created.
@@ -901,6 +919,13 @@ func mergeDefaults(cfg *Config) {
 			key := defMode.actions[b.action]
 			seqs, err := KeySequences(key, cfg.prefixBytes)
 			if err != nil {
+				continue
+			}
+			// A key an existing binding already holds is dead weight on a
+			// default: the first declared binding wins the equal-length
+			// race, so the help box would advertise a key that never fires.
+			// The action stays unbound instead of wearing a stolen key.
+			if bindingTaken(m.bindings, seqs) {
 				continue
 			}
 			m.actions[b.action] = key

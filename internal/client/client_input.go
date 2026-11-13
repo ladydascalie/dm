@@ -331,6 +331,39 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
+		if t.cp != nil {
+			// While the palette is up every key belongs to it: nothing reaches
+			// a pane. A lone esc is the close key, so it skips the paste marker
+			// check: a bare esc is not the start of one. A mouse event and a
+			// paste are swallowed whole.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.commandPaletteKey() {
+					return
+				}
+				continue
+			}
+			if ev, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				_ = ev
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if _, n, started := t.takePaste(); started {
+				if n == 0 {
+					t.holdPaste(time.Now())
+					return
+				}
+				// A paste over the palette is swallowed whole: the query takes
+				// typing one key at a time, and no pane owns the keys.
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				continue
+			}
+			if !t.commandPaletteKey() {
+				return
+			}
+			continue
+		}
 		if t.mode == "help" {
 			// While the view is up every key belongs to it: nothing reaches a
 			// pane. A lone esc is the close key, so it skips the paste marker
