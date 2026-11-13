@@ -181,7 +181,7 @@ optional and each one overrides its built-in value.
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
 | `dashboard-layout` | `"full"` or `"float"` | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
 | `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
-| `diff-command` | a quoted shell command | `"git diff"` | Set the command the dashboard diff key runs in a floating pane. It runs through `sh -c` in the selected pane's folder. |
+| `diff-command` | a quoted shell command | `"git diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 | `command` | a quoted name and a `{ run "..." }` block | none | Define a command a keymap can run; bind `command:<name>` to a key, and the row runs the run text in a floating pane. |
@@ -498,6 +498,12 @@ backlog: close it and press `d` again. The `diff-command` config node sets the
 command, and a reload picks it up with the rest of `config.kdl`.
 `diff-command "tig"` and `diff-command "hunk diff"` are the two examples.
 
+`D` runs the same command in a pane split off the selected one instead: the
+split lands on the right and takes focus, and the command runs through `sh -c`
+the same way. While a diff float is up, `D` is the split chord: it closes the
+float and reruns the command in the split. Only the diff float owns the chord,
+and a remap of `diff-split` in the switcher keymap moves it.
+
 The dashboard is client owned: it starts when the key is pressed and ends when
 the choice is taken, so it never enters the session tree and never survives a
 detach. `dm dash` prints the pane rows outside the TUI, and `dm peek <id>`
@@ -516,6 +522,8 @@ selected pane's folder and paints the panel the same way. A `command` binding
 is another: the run text opens on the focused pane's folder, titled with the
 command's name. The float takes every key while the command runs, except the
 prefix: one press of it kills the float and the command under it.
+A diff float also answers D: it closes the float and opens the command in a
+pane split off the pane the float sits on.
 
 ## Sidebar
 

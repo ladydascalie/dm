@@ -68,7 +68,7 @@ var ConfigNodes = []ConfigNode{
 		Name:    "diff-command",
 		Value:   "a quoted shell command",
 		Default: `"git diff"`,
-		Desc:    "Set the command the dashboard diff key runs in a floating pane. It runs through sh -c in the selected pane folder.",
+		Desc:    "Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder.",
 	},
 	{
 		Name:    "dashboard-layout",
