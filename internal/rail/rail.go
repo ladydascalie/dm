@@ -113,13 +113,15 @@ func WindowVars(snap *wire.Snapshot, w wire.WindowInfo) wlabel.Vars {
 	return v
 }
 
-// Drop is the live window drag's paint hint: Row is the items row the drop
-// boundary rests above, Lift is the dragged window's id, and Accent is the
-// dragged project's accent slot for the insertion line. A nil Drop paints a
+// Drop is the live drag's paint hint: Row is the items row the drop boundary
+// rests above, Lift is the dragged window's id, LiftWs the dragged
+// workspace's id (one of the two is set), and Accent is the dragged
+// project's accent slot for the insertion line. A nil Drop paints a
 // drag-free rail.
 type Drop struct {
 	Row    int
 	Lift   string
+	LiftWs string
 	Accent int
 }
 
@@ -926,9 +928,10 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			// A focused pane row paints its own background and every run bold.
 			// A hovered row lights lightly; the gap row never lights, so a
 			// highlight always means the row answers a click.
-			// A lifted row drops its fill and its emphasis: the window is in
-			// the air, so nothing under it answers the pointer.
-			lift := drop != nil && drop.Lift != "" && it.Window == drop.Lift && it.Kind != Gap
+			// A lifted row drops its fill and its emphasis: what the pointer
+			// carries is in the air, so nothing under it answers.
+			lift := drop != nil && ((drop.Lift != "" && it.Window == drop.Lift) ||
+				(drop.LiftWs != "" && it.Workspace == drop.LiftWs)) && it.Kind != Gap
 			switch {
 			case lift:
 				bg, bold = p.RailBG, false
@@ -952,8 +955,7 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 		// The drop boundary replaces its row with an insertion line in the
 		// dragged project's accent, so the landing spot sits between the rows
 		// it splits. A boundary past the list paints on the first empty row.
-		if drop != nil && drop.Row >= 0 && y == drop.Row && y < controlAt &&
-			(y >= len(items) || items[y].Kind != Gap) {
+		if drop != nil && drop.Row >= 0 && y == drop.Row && y < controlAt {
 			line := th.Glyphs.BorderHorizontal
 			if set == theme.GlyphASCII {
 				line = "-"

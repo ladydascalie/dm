@@ -83,6 +83,47 @@ func windowRank(snap *wire.Snapshot, workspace, window string) (index, count int
 	return index, count
 }
 
+// workspaceRank reports where a workspace sits inside its project run, read
+// from the snapshot's All list: workspaces in slice order, and a run is the
+// stretch of neighbouring workspaces that share the target's project. Two
+// untagged neighbours form one run; untagged workspaces separated by a
+// project do not. A workspace with no live pane earns no slot and reports
+// count 1, which hides both move items.
+func workspaceRank(snap *wire.Snapshot, workspace string) (index, count int) {
+	if snap == nil {
+		return 0, 1
+	}
+	var order []string
+	proj := map[string]string{}
+	for _, p := range snap.All {
+		if p.Workspace == "" {
+			continue
+		}
+		if _, ok := proj[p.Workspace]; !ok {
+			proj[p.Workspace] = p.Project
+			order = append(order, p.Workspace)
+		}
+	}
+	at := -1
+	for i, id := range order {
+		if id == workspace {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return 0, 1
+	}
+	start, end := at, at+1
+	for start > 0 && proj[order[start-1]] == proj[workspace] {
+		start--
+	}
+	for end < len(order) && proj[order[end]] == proj[workspace] {
+		end++
+	}
+	return at - start, end - start
+}
+
 // windowMenuItems is the item list for a window row or its note row: the
 // actions that act on one window. Focus goes to the window's first available
 // pane, the same pane a left press on the row focuses.
@@ -123,7 +164,7 @@ func (t *tui) windowMenuItems(it rail.RailItem) []menuItem {
 // workspaceMenuItems is the item list for a workspace row: the actions that act
 // on one workspace.
 func (t *tui) workspaceMenuItems(it rail.RailItem) []menuItem {
-	return []menuItem{
+	items := []menuItem{
 		{label: "New window", action: "new-window", run: func() {
 			t.actionOn(it.Workspace, "new-window", nil)
 		}},
@@ -135,10 +176,22 @@ func (t *tui) workspaceMenuItems(it rail.RailItem) []menuItem {
 			t.closeMenu()
 			t.openRenamePromptFor("project", it.Workspace, it.Project)
 		}},
-		{label: "Close workspace", action: "close-workspace", run: func() {
-			t.actionOn(it.Workspace, "close-workspace", nil)
-		}},
 	}
+	idx, count := workspaceRank(t.snap, it.Workspace)
+	if idx > 0 {
+		items = append(items, menuItem{label: "Move workspace up", action: "move-workspace", run: func() {
+			t.actionOn(it.Workspace, "move-workspace", func(m *wire.Msg) { m.Dir = "up" })
+		}})
+	}
+	if idx+1 < count {
+		items = append(items, menuItem{label: "Move workspace down", action: "move-workspace", run: func() {
+			t.actionOn(it.Workspace, "move-workspace", func(m *wire.Msg) { m.Dir = "down" })
+		}})
+	}
+	items = append(items, menuItem{label: "Close workspace", action: "close-workspace", run: func() {
+		t.actionOn(it.Workspace, "close-workspace", nil)
+	}})
+	return items
 }
 
 // sessionMenuItems is the item list for the rail's control row: the actions

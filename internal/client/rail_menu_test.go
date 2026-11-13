@@ -97,7 +97,8 @@ func TestRailMenuWorkspaceRow(t *testing.T) {
 		t.Fatalf("title = %q, want workspace main", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu,
-		"New window", "Rename workspace", "Set project", "Close workspace")
+		"New window", "Rename workspace", "Set project", "Move workspace down",
+		"Close workspace")
 	testutil.NoMsg(t, got)
 	tui.handleMouse(mouseEvent{btn: 2, release: true, x: 4, y: 1})
 	if tui.mode != "menu" {

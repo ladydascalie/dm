@@ -2750,6 +2750,7 @@ type winDragState struct {
 // press still focuses the window; the drag arms only when the pointer moves
 // to another row, so an ordinary click never reorders anything.
 func (t *tui) winDragStart(item rail.RailItem, y int) {
+	t.wsDrag = nil
 	t.winDrag = &winDragState{
 		window: item.Window, workspace: item.Workspace, accent: item.ProjectAccent,
 		project: item.Project, startY: y, dropRow: -1,
@@ -2905,8 +2906,190 @@ func (t *tui) cancelWinDrag() {
 	}
 }
 
-// winDrop is the live drag's paint hint for the rail, nil when none: the
-// boundary row, the window lifted out of place and its project's accent.
+// wsDragState tracks one workspace drag in the rail: the workspace under the
+// press, its project, the row the press landed on, and where the drop
+// boundary rests once the drag has armed.
+type wsDragState struct {
+	workspace string
+	project   string
+	accent    int // the project's accent slot, for the drop line
+	startY    int
+	armed     bool
+	dropRow   int // the items row the drop boundary rests above
+}
+
+// wsDragStart records a left press on a workspace row as a possible drag.
+// The press still focuses the workspace; the drag arms only when the pointer
+// moves to another row. A start forgets any window drag in flight, and the
+// reverse, so one pointer carries one gesture.
+func (t *tui) wsDragStart(item rail.RailItem, y int) {
+	t.winDrag = nil
+	t.wsDrag = &wsDragState{
+		workspace: item.Workspace, project: item.Project, accent: item.ProjectAccent,
+		startY: y, dropRow: -1,
+	}
+}
+
+// wsDragMove follows a held press inside the rail. A workspace block is its
+// header row plus the rows under it; the project run is the stretch of
+// neighbouring blocks that share the dragged workspace's project, which is
+// exactly what a move may not leave. The pointer's half of a block asks for
+// a landing before or after that workspace, a gap between two run blocks
+// asks for the landing between them, and anything past the run asks for the
+// run's end. The marker paints where the dragged block's header would rest.
+func (t *tui) wsDragMove(y int) {
+	d := t.wsDrag
+	if d == nil || t.snap == nil {
+		return
+	}
+	if y < 0 || y >= t.snap.Rows-2 {
+		return
+	}
+	if !d.armed && y == d.startY {
+		return
+	}
+	d.armed = true
+	items := rail.RailItems(t.snap)
+	type block struct {
+		ws, project string
+		lo, hi      int
+	}
+	var blocks []block
+	for i, it := range items {
+		switch it.Kind {
+		case rail.Workspace:
+			blocks = append(blocks, block{it.Workspace, it.Project, i, i + 1})
+		case rail.Window, rail.WindowNote, rail.Pane:
+			if n := len(blocks); n > 0 {
+				blocks[n-1].hi = i + 1
+			}
+		}
+	}
+	at := -1
+	for i, b := range blocks {
+		if b.ws == d.workspace {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		return
+	}
+	runLo, runHi := at, at+1
+	for runLo > 0 && blocks[runLo-1].project == d.project {
+		runLo--
+	}
+	for runHi < len(blocks) && blocks[runHi].project == d.project {
+		runHi++
+	}
+	src := at - runLo
+	runLen := runHi - runLo
+	// The rank the pointer asks for inside the run.
+	k := runLen
+	if y < blocks[runLo].lo {
+		k = 0
+	} else if y < blocks[runHi-1].hi {
+		for j := 0; j < runLen; j++ {
+			b := blocks[runLo+j]
+			if y >= b.hi {
+				continue
+			}
+			if y < b.lo {
+				k = j // a gap between two run blocks splits their landing
+			} else if y <= (b.lo+b.hi)/2 {
+				k = j
+			} else {
+				k = j + 1
+			}
+			break
+		}
+	}
+	// The marker always sits where the dragged block's header would rest.
+	marker := blocks[at].lo
+	switch {
+	case k < src:
+		marker = blocks[runLo+k].lo
+	case k > src+1 && k < runLen:
+		marker = blocks[runLo+k].lo
+	case k > src+1:
+		marker = blocks[runHi-1].hi
+	}
+	if marker != d.dropRow {
+		d.dropRow = marker
+		t.dirty = true
+	}
+}
+
+// wsDragRelease ends the drag: the drop boundary maps to a rank inside the
+// workspace's project run and the client sends that many move-workspace
+// steps. A boundary at or past the run's end lands after the last block, so
+// a drag can never leave the run.
+func (t *tui) wsDragRelease() {
+	d := t.wsDrag
+	t.wsDrag = nil
+	t.dirty = true
+	if d == nil || !d.armed || t.conn == nil || t.snap == nil || d.dropRow < 0 {
+		return
+	}
+	items := rail.RailItems(t.snap)
+	src, count := workspaceRank(t.snap, d.workspace)
+	dst := count
+	if d.dropRow < len(items) {
+		for i := d.dropRow; i < len(items); i++ {
+			if it := items[i]; it.Kind == rail.Workspace {
+				if it.Project == d.project {
+					dst, _ = workspaceRank(t.snap, it.Workspace)
+				}
+				break
+			}
+		}
+	}
+	final := dst - 1
+	if dst <= src {
+		final = dst
+	}
+	if final == src {
+		return
+	}
+	dir, steps := "down", final-src
+	if steps < 0 {
+		dir, steps = "up", -steps
+	}
+	for i := 0; i < steps; i++ {
+		t.actionOn(d.workspace, "move-workspace", func(m *wire.Msg) { m.Dir = dir })
+	}
+}
+
+// cancelWsDrag drops an armed workspace drag without moving anything.
+func (t *tui) cancelWsDrag() {
+	if t.wsDrag != nil {
+		t.wsDrag = nil
+		t.dirty = true
+	}
+}
+
+// wsDrop is the workspace drag's paint hint for the rail, nil when none.
+func (t *tui) wsDrop() *rail.Drop {
+	d := t.wsDrag
+	if d == nil || !d.armed || d.dropRow < 0 {
+		return nil
+	}
+	return &rail.Drop{Row: d.dropRow, LiftWs: d.workspace, Accent: d.accent}
+}
+
+// railDrop is the live drag's paint hint for the rail, nil when none: the
+// boundary row, what the pointer lifted out of place and its project's
+// accent. A window drag answers first; a workspace drag holds the pointer
+// alone while it runs.
+func (t *tui) railDrop() *rail.Drop {
+	if d := t.winDrop(); d != nil {
+		return d
+	}
+	return t.wsDrop()
+}
+
+// winDrop is the window drag's paint hint: the boundary row, the window
+// lifted out of place and its project's accent.
 func (t *tui) winDrop() *rail.Drop {
 	if t.winDrag == nil || !t.winDrag.armed || t.winDrag.dropRow < 0 {
 		return nil
@@ -3008,6 +3191,7 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 		if ev.release {
 			t.railPress = false
 			t.cancelWinDrag() // a drop outside the rail cancels
+			t.cancelWsDrag()
 			return true
 		}
 		if ev.btn&32 != 0 {
@@ -3020,13 +3204,19 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 		t.railPress = false
 		if t.winDrag != nil {
 			t.winDragRelease()
+		} else if t.wsDrag != nil {
+			t.wsDragRelease()
 		}
 		return true
 	}
-	// A held press in the rail belongs to the window drag when one is armed.
-	// The rail keeps owning the pointer, so a pane never sees the motion.
+	// A held press in the rail belongs to a drag when one is armed. The rail
+	// keeps owning the pointer, so a pane never sees the motion.
 	if ev.btn&32 != 0 && t.winDrag != nil {
 		t.winDragMove(y)
+		return true
+	}
+	if ev.btn&32 != 0 && t.wsDrag != nil {
+		t.wsDragMove(y)
 		return true
 	}
 	// A right press on a row opens that row's menu. The control row is the
@@ -3126,6 +3316,11 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 						break
 					}
 				}
+			}
+			// The press arms a possible drag as well: the focus stays, and
+			// the drag arms only when the pointer moves to another row.
+			if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+				t.wsDragStart(it, y)
 			}
 			return true
 		}

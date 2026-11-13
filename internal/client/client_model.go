@@ -204,6 +204,9 @@ type tui struct {
 	// boundary now rests. nil when no drag is in flight; armed turns true at
 	// the first row change, and the release sends the move.
 	winDrag *winDragState
+	// wsDrag tracks a drag of a workspace row, with the same shape and rules
+	// as winDrag: the marker snaps to the project run's own boundaries.
+	wsDrag *wsDragState
 
 	// lastTabClick and lastTabClickPos track the last left press on a tab bar
 	// tab, so a second press in the same cell within the double-click window
