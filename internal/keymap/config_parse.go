@@ -856,14 +856,15 @@ keymap "help" {
 }
 `
 
-// bindingTaken reports whether any binding already holds one of the byte
-// sequences: the same bytes, or bytes one is a prefix of the other, since
-// either way the longer sequence owns the key presses.
+// bindingTaken reports whether any binding already starves one of the byte
+// sequences of its press: the same bytes, or a longer binding the sequence
+// would only ever wait inside. A longer default over a shorter existing
+// binding is not taken: that is how a prefix table nests, esc before the
+// arrows, and Match resolves the longer sequence first.
 func bindingTaken(bindings []binding, seqs [][]byte) bool {
 	for _, seq := range seqs {
 		for _, b := range bindings {
-			if bytes.Equal(b.bytes, seq) ||
-				bytes.HasPrefix(b.bytes, seq) || bytes.HasPrefix(seq, b.bytes) {
+			if bytes.Equal(b.bytes, seq) || bytes.HasPrefix(b.bytes, seq) {
 				return true
 			}
 		}

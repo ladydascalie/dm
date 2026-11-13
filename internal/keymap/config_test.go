@@ -167,6 +167,27 @@ func TestConfigMergeSkipsTakenDefaultKeyLonger(t *testing.T) {
 	}
 }
 
+// TestConfigMergeKeepsNestedDefaultKey proves a longer default survives a
+// shorter existing binding: a file that binds esc keeps the arrow defaults,
+// because esc nesting under the arrows is how the prefix table resolves, and
+// Match picks the longer sequence first.
+func TestConfigMergeKeepsNestedDefaultKey(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), `keymap "main" {
+	"dismiss-esc" "esc"
+}
+`))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "focus-up-arrow"); got != "up" {
+		t.Fatalf("Key(main, focus-up-arrow) = %q, want up from the defaults", got)
+	}
+	action, n, state := cfg.Match("main", []byte{0x1b, '[', 'A'})
+	if state != Match || action != "focus-up-arrow" || n != 3 {
+		t.Fatalf("Match(main, up) = %q, %d, %v; want focus-up-arrow, 3, Match", action, n, state)
+	}
+}
+
 // TestConfigOverride proves a sample KDL overrides the prefix and one binding
 // in each mode.
 func TestConfigOverride(t *testing.T) {
