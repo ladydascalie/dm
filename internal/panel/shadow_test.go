@@ -51,9 +51,9 @@ func shadowAt(cells []shadowCell, row, col int) (string, bool) {
 	return "", false
 }
 
-// TestPaintShadow paints the shadow the sample asks for: a mark beside every
-// border row and a row of marks under the box, clear of both corners, and
-// proves the corner cell beside the bottom-right border stays empty.
+// TestPaintShadow paints the shadow: a mark beside every border row and a row
+// of marks under the box that reaches the right shadow column, so the L
+// connects, while the cell under the bottom-left border corner stays clear.
 func TestPaintShadow(t *testing.T) {
 	th := theme.DefaultTheme()
 	rect := layout.Rect{X: 2, Y: 2, W: 4, H: 2}
@@ -72,15 +72,15 @@ func TestPaintShadow(t *testing.T) {
 			t.Fatalf("shadow beside the right border at row %d = %q, %v", y, g, ok)
 		}
 	}
-	for x := 3; x <= 7; x++ {
+	for x := 3; x <= 8; x++ {
 		if g, ok := shadowAt(cells, 6, x); !ok || g != "░" {
 			t.Fatalf("shadow under the box at col %d = %q, %v", x, g, ok)
 		}
 	}
-	for _, at := range []struct{ row, col int }{{6, 2}, {6, 8}} {
-		if _, ok := shadowAt(cells, at.row, at.col); ok {
-			t.Fatalf("shadow painted the corner cell at %d,%d", at.row, at.col)
-		}
+	// The run reaches the right shadow column, so the L connects, but the
+	// cell under the bottom-left border corner stays clear.
+	if _, ok := shadowAt(cells, 6, 2); ok {
+		t.Fatal("shadow painted the cell under the bottom-left corner")
 	}
 	if _, ok := shadowAt(cells, 2, 2); ok {
 		t.Fatal("shadow painted a border cell")

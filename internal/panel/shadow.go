@@ -26,6 +26,6 @@ func PaintShadow(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, cols, rows
 	for y := y0; y <= y1; y++ {
 		put(x1+1, y, g)
 	}
-	put(x0+1, y1+1, strings.Repeat(g, rect.W+1))
+	put(x0+1, y1+1, strings.Repeat(g, rect.W+2))
 	buf.WriteString("\x1b[0m")
 }
