@@ -257,7 +257,7 @@ func TestSwitcherDrawFrame(t *testing.T) {
 	// The footer names every key the dashboard takes, then the ordering and the
 	// preview's share at the right edge.
 	wantLeft := "enter pick  esc close  1-9 jump  i copy id  d diff  " +
-		"/ filter  s sort  p peek  +/- size  ^u/^d scroll"
+		"/ filter  s sort  p peek  +/- size  ^u/^d scroll  D diff split"
 	wantRight := "recent 20%"
 	wantFoot := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
 	if foot := switcherText(screen, l.inner.X, l.footY, l.inner.W); foot != wantFoot {

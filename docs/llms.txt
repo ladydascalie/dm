@@ -281,6 +281,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `switcher` | `peek` | `p` |
 | `switcher` | `copy-pane-id` | `i` |
 | `switcher` | `diff` | `d` |
+| `switcher` | `diff-split` | `D` |
 | `switcher` | `down-ctrl-n` | `ctrl+n` |
 | `switcher` | `down` | `j` |
 | `switcher` | `down-arrow` | `down` |

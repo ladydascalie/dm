@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/vt"
@@ -25,8 +26,17 @@ type floatView struct {
 	prefix  string
 	vt      *vt.Term
 	float   *panel.FloatingPane
-	exited  bool
-	closed  bool
+	// pane is the pane the float was opened on, the folder the command runs
+	// in. diff marks a float the diff key opened, the only float that owns
+	// the split chord: its keys belong to a pager, so D would be text
+	// anywhere else. splitName and splitSeq are the switcher's diff-split
+	// key, the hint's name and the bytes the float intercepts.
+	pane      string
+	diff      bool
+	splitName string
+	splitSeq  [][]byte
+	exited    bool
+	closed    bool
 	// opened turns true when the float-open reply lands. Keys typed before
 	// that are dropped: the child does not exist yet, and forwarding them
 	// would either miss it or answer with a phantom error.
@@ -87,6 +97,51 @@ func (t *tui) openFloatCommand() {
 		return
 	}
 	t.openFloatFor(pane, "", "")
+	// The float is a diff float: it owns the split chord, and no other
+	// float does. A user command's keys belong to that command alone.
+	if t.float != nil {
+		t.float.diff = true
+	}
+}
+
+// openDiffSplit closes the dashboard and asks the server to run the diff
+// command in a pane split off the selected one. The split lands on the right
+// and takes focus, the way a plain split does. The command runs through
+// sh -c, so the config may carry pipes the way the float's command does.
+func (t *tui) openDiffSplit() {
+	if t.sw == nil || t.conn == nil || t.snap == nil {
+		return
+	}
+	pane := t.sw.Target()
+	if pane == "" {
+		return
+	}
+	command := t.km().DiffCommand()
+	if command == "" {
+		t.notify("diff-command is empty")
+		return
+	}
+	closeSwitcher(t)
+	_ = t.conn.Send(wire.Msg{
+		Type: "req", Action: "split", Target: pane, Dir: "right",
+		Argv: []string{"sh", "-c", command},
+	})
+	t.disarm()
+}
+
+// splitKey resolves the switcher's diff-split binding for the float: the name
+// the hint paints and the byte sequences the float intercepts. An unbound
+// action carries neither.
+func (t *tui) splitKey() (string, [][]byte) {
+	name := t.km().Key("switcher", "diff-split")
+	if name == "" {
+		return "", nil
+	}
+	seqs, err := keymap.KeySequences(name, t.km().PrefixBytes())
+	if err != nil {
+		return "", nil
+	}
+	return name, seqs
 }
 
 // openFloatFor asks the server to run command on pane's folder and shows it in
@@ -102,12 +157,16 @@ func (t *tui) openFloatFor(pane, command, label string) {
 	closeSwitcher(t)
 	r := floatRect(t.snap)
 	id := "float-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	name, seqs := t.splitKey()
 	t.float = &floatView{
-		id:     id,
-		label:  label,
-		prefix: t.km().PrefixName(),
-		vt:     vt.NewTerm(r.W, r.H),
-		float:  &panel.FloatingPane{ID: id, Rect: r, Active: true},
+		id:        id,
+		label:     label,
+		prefix:    t.km().PrefixName(),
+		pane:      pane,
+		splitName: name,
+		splitSeq:  seqs,
+		vt:        vt.NewTerm(r.W, r.H),
+		float:     &panel.FloatingPane{ID: id, Rect: r, Active: true},
 	}
 	t.floatID++
 	var res json.RawMessage
@@ -172,6 +231,10 @@ func (f *floatView) setBorders() {
 	f.float.Title = cells.Clip(title, f.float.Rect.W-2)
 	if f.exited {
 		f.float.Hint = " exited · any key closes "
+		return
+	}
+	if f.diff && f.splitName != "" {
+		f.float.Hint = " " + f.splitName + " opens split · " + f.prefix + " kills the float "
 		return
 	}
 	f.float.Hint = " " + f.prefix + " kills the float · keys go to the command "
@@ -241,6 +304,33 @@ func (t *tui) closeFloat() {
 	t.dirty = true
 }
 
+// splitMatches reports whether buf starts with one of the diff-split key's
+// byte sequences. A float without the binding matches nothing.
+func (f *floatView) splitMatches(buf []byte) bool {
+	for _, seq := range f.splitSeq {
+		if len(seq) > 0 && bytes.HasPrefix(buf, seq) {
+			return true
+		}
+	}
+	return false
+}
+
+// floatDiffSplit closes the float and opens the same command in a pane split
+// off the pane the float was opened on. The server runs the command through
+// sh -c in that pane's folder, so a shell that moved on since the float
+// opened moves the diff with it.
+func (t *tui) floatDiffSplit(f *floatView) {
+	if t.conn == nil || f.pane == "" || f.command == "" {
+		return
+	}
+	t.closeFloat()
+	_ = t.conn.Send(wire.Msg{
+		Type: "req", Action: "split", Target: f.pane, Dir: "right",
+		Argv: []string{"sh", "-c", f.command},
+	})
+	t.disarm()
+}
+
 // syncFloat fits the float to the screen. A changed rect resizes the terminal
 // and tells the server, so the command reflows to the box the client draws.
 func (t *tui) syncFloat(snap *wire.Snapshot) {
@@ -296,6 +386,14 @@ func (t *tui) floatKey() bool {
 		t.inbuf = t.inbuf[:0]
 		t.pending = false
 		t.closeFloat()
+		return true
+	}
+	// A diff float owns the split chord: the key that opens the diff in a
+	// split from the dashboard does the same from the float, rerunning the
+	// same command in a pane split off the pane the float sits on. Any
+	// other key belongs to the command.
+	if f.diff && f.splitMatches(t.inbuf) {
+		t.floatDiffSplit(f)
 		return true
 	}
 	keys := append([]byte(nil), t.inbuf...)

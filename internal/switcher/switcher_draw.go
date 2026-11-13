@@ -517,7 +517,7 @@ func paintRuleCell(buf *bytes.Buffer, th theme.Theme, x, y int) {
 // loses the scroll reminder before it loses the jump keys.
 var switcherHints = []string{
 	"enter pick", "esc close", "1-9 jump", "i copy id", "d diff",
-	"/ filter", "s sort", "p peek", "+/- size", "^u/^d scroll",
+	"/ filter", "s sort", "p peek", "+/- size", "^u/^d scroll", "D diff split",
 }
 
 // switcherHint fits the hints into room cells and drops the ones that do not

@@ -618,6 +618,8 @@ func (t *tui) switcherKey() bool {
 		t.copySelectedPaneID()
 	case "diff":
 		t.openFloatCommand()
+	case "diff-split":
+		t.openDiffSplit()
 	case "down", "down-arrow", "down-ctrl-n":
 		t.sw.Move(1)
 		t.dirty = true

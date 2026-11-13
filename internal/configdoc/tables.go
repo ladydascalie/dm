@@ -262,6 +262,7 @@ var ActionDesc = map[string]string{
 	"preview-smaller": "Narrow the preview band.",
 	"peek":            "Hide or show the preview band.",
 	"diff":            "Run the diff command on the selected pane in a floating pane.",
+	"diff-split":      "Run the diff command on the selected pane in a split pane.",
 
 	// scroll and box
 	"page-up":     "Scroll up one page.",

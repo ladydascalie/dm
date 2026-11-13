@@ -742,6 +742,7 @@ keymap "switcher" {
     "peek" "p"
     "copy-pane-id" "i"
     "diff" "d"
+    "diff-split" "D"
     "down-ctrl-n" "ctrl+n"
     "down" "j"
     "down-arrow" "down"

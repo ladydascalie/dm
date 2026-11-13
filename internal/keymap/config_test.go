@@ -43,7 +43,7 @@ var configTestDefaultActions = map[string][]string{
 	"switcher": {
 		"close", "close-ctrl-c", "close-esc", "pick", "filter", "clear-query",
 		"backspace", "sort", "preview-up", "preview-down",
-		"preview-bigger", "preview-smaller", "peek", "copy-pane-id", "diff",
+		"preview-bigger", "preview-smaller", "peek", "copy-pane-id", "diff", "diff-split",
 		"down-ctrl-n", "down", "down-arrow",
 		"up-ctrl-p", "up", "up-arrow",
 		"pick-1", "pick-2", "pick-3", "pick-4", "pick-5",
