@@ -439,7 +439,7 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value.
-const helpBoxDefaultSHA256 = "b708197e861076d3b3d49f6e26ec4304f6f6ee2441779c86095c434c2886ef3d"
+const helpBoxDefaultSHA256 = "db8abb429232482f4e0f9d13803190433cd404d812830b923923a1106fb2aa1f"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The four layout and session actions carry their section tags; the

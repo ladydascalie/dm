@@ -139,7 +139,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `y / Y` | `copy-output / copy-screen` | copy output / screen |
 | `i` | `copy-pane-id` | copy pane id |
 | `h j k l` | `focus-left / focus-down / focus-up / focus-right` | focus pane |
-| `n / K` | `next-pane / prev-pane` | next/prev pane |
+| `n / p` | `next-pane / prev-pane` | next/prev pane |
 | `x` | `close-pane` | close pane |
 | `X` | `close-window` | close window |
 | `z` | `zoom-pane` | zoom pane |
@@ -152,7 +152,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `)` | `next-workspace` | next workspace |
 | `S` | `synchronize-panes` | synchronize panes |
 | `s` | `picker` | switch session |
-| `p` | `command-palette` | command palette |
+| `K` | `command-palette` | command palette |
 | `r` | `rename-workspace` | rename workspace |
 | `P` | `set-project` | set project |
 | `m` | `message-box` | message box |
@@ -211,7 +211,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `focus-up` | `k` |
 | `main` | `focus-right` | `l` |
 | `main` | `next-pane` | `n` |
-| `main` | `prev-pane` | `K` |
+| `main` | `prev-pane` | `p` |
 | `main` | `close-pane` | `x` |
 | `main` | `close-window` | `X` |
 | `main` | `zoom-pane` | `z` |
@@ -227,7 +227,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `synchronize-panes` | `S` |
 | `main` | `switcher` | `a` |
 | `main` | `picker` | `s` |
-| `main` | `command-palette` | `p` |
+| `main` | `command-palette` | `K` |
 | `main` | `rename-workspace` | `r` |
 | `main` | `set-project` | `P` |
 | `main` | `toggle-rail` | `b` |

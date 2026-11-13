@@ -19,7 +19,7 @@ import (
 func TestCommandPaletteOpens(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	if tui.cp == nil {
 		t.Fatal("prefix k did not open the palette")
 	}
@@ -45,7 +45,7 @@ func TestCommandPaletteOpens(t *testing.T) {
 func TestCommandPaletteHoldsBoundLetters(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "dock")
 	if tui.cp == nil {
 		t.Fatal("a bound letter closed the palette")
@@ -64,7 +64,7 @@ func TestCommandPaletteHoldsBoundLetters(t *testing.T) {
 func TestCommandPaletteTypeFiltersAndBackspace(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	full := len(tui.cp.pal.Rows())
 	feed(tui, "zoom-pane")
 	narrow := len(tui.cp.pal.Rows())
@@ -88,7 +88,7 @@ func TestCommandPaletteTypeFiltersAndBackspace(t *testing.T) {
 func TestCommandPaletteNoMatch(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "zzzzzz")
 	if rows := tui.cp.pal.Rows(); len(rows) != 0 {
 		t.Fatalf("a query nothing matches left %d rows", len(rows))
@@ -106,7 +106,7 @@ func TestCommandPaletteNoMatch(t *testing.T) {
 func TestCommandPaletteMoveAndInvoke(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "next")
 	first := tui.cp.pal.Rows()[0].Action
 	if len(tui.cp.pal.Rows()) < 2 {
@@ -144,7 +144,7 @@ func TestCommandPaletteMoveAndInvoke(t *testing.T) {
 func TestCommandPaletteInvokesModalCommand(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "help")
 	if r := tui.cp.pal.Rows()[0]; r.Action != "help" {
 		t.Fatalf("best row = %q, want help", r.Action)
@@ -163,7 +163,7 @@ func TestCommandPaletteInvokesModalCommand(t *testing.T) {
 func TestCommandPaletteStalledEsc(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "\x1b[")
 	// The half marker takes the paste deadline first; the flush hands the
 	// bytes to the palette, which waits for the sequence tail.
@@ -187,7 +187,7 @@ func TestCommandPaletteStalledEsc(t *testing.T) {
 func TestCommandPaletteSwallowsStrayKeys(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "re")
 	feed(tui, "\x1b[<0;1;1M") // a mouse press
 	feed(tui, "\x1bOP")       // F1
@@ -207,7 +207,7 @@ func TestCommandPaletteTooSmall(t *testing.T) {
 	tui, _ := switcherTUI(t)
 	tui.snap.Cols = 30
 	tui.snap.Rows = 30
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	if tui.cp != nil {
 		t.Fatal("the palette opened on a screen too small for it")
 	}
@@ -218,7 +218,7 @@ func TestCommandPaletteTooSmall(t *testing.T) {
 func TestCommandPaletteDraw(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	var buf bytes.Buffer
 	cx, cy := drawCommandPalette(&buf, tui.theme(), tui.cp, tui.snap)
 	if cx == 0 && cy == 0 {
@@ -244,7 +244,7 @@ func TestCommandPaletteDraw(t *testing.T) {
 func TestCommandPaletteRowCap(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	if tui.cp == nil {
 		t.Fatal("prefix k did not open the palette")
 	}
@@ -267,7 +267,7 @@ func TestCommandPaletteRowCap(t *testing.T) {
 	}
 	tui2, _ := switcherTUI(t)
 	tui2.keymap = cfg
-	feed(tui2, "\x02k")
+	feed(tui2, "\x02K")
 	if tui2.cp == nil {
 		t.Fatal("prefix k did not open the palette")
 	}
@@ -283,7 +283,7 @@ func TestCommandPaletteRowCap(t *testing.T) {
 func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	long := make([]byte, 200)
 	for i := range long {
 		long[i] = 'a'
@@ -313,7 +313,7 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 func TestCommandPaletteRowsCarryNoHint(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	var buf bytes.Buffer
 	drawCommandPalette(&buf, tui.theme(), tui.cp, tui.snap)
 	out := buf.String()
@@ -333,7 +333,7 @@ func TestCommandPaletteRowsCarryNoHint(t *testing.T) {
 func TestCommandPaletteHelpFloat(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "?")
 	if tui.cp == nil || !tui.cp.help {
 		t.Fatal("? did not open the help float")
@@ -371,7 +371,7 @@ func TestCommandPaletteHelpFloat(t *testing.T) {
 	}
 	// With nothing selected there is nothing to explain.
 	tui2, _ := switcherTUI(t)
-	feed(tui2, "\x02k")
+	feed(tui2, "\x02K")
 	feed(tui2, "zzzz")
 	feed(tui2, "?")
 	if tui2.cp == nil || tui2.cp.help {
@@ -411,7 +411,7 @@ func TestCommandPaletteCommandsShareHelpSource(t *testing.T) {
 func TestCommandPalettePrefixInsideIsSwallowed(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
-	feed(tui, "\x02k")
+	feed(tui, "\x02K")
 	feed(tui, "\x02")
 	if tui.cp == nil {
 		t.Fatal("a prefix press closed the palette")

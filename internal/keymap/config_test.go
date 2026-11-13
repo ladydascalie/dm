@@ -94,24 +94,24 @@ func TestConfigDefaultsParse(t *testing.T) {
 	}
 }
 
-// TestConfigCommandPaletteCollision proves the p the command palette takes is
-// free: prefix p matches the palette, prev-pane keeps K, and no second main
-// action claims p. The default p belonged to prev-pane; the palette took it,
-// prev-pane moved to the K focus-up freed, so the three never race on one key.
+// TestConfigCommandPaletteCollision proves the K the command palette takes is
+// free: prefix K matches the palette, focus-up keeps k, prev-pane keeps p, and
+// set-project keeps P. The default K belonged to focus-up; the palette took it
+// and focus-up moved to k, so the two never race on one key.
 func TestConfigCommandPaletteCollision(t *testing.T) {
 	cfg := LoadDefault()
-	action, n, state := cfg.Match("main", []byte{'p'})
+	action, n, state := cfg.Match("main", []byte{'K'})
 	if state != Match || action != "command-palette" || n != 1 {
-		t.Fatalf("Match(main, p) = %q, %d, %v; want command-palette, 1, Match", action, n, state)
+		t.Fatalf("Match(main, K) = %q, %d, %v; want command-palette, 1, Match", action, n, state)
 	}
 	if got := cfg.Key("main", "focus-up"); got != "k" {
 		t.Fatalf("Key(main, focus-up) = %q, want k", got)
 	}
-	if got := cfg.Key("main", "prev-pane"); got != "K" {
-		t.Fatalf("Key(main, prev-pane) = %q, want K", got)
+	if got := cfg.Key("main", "prev-pane"); got != "p" {
+		t.Fatalf("Key(main, prev-pane) = %q, want p", got)
 	}
-	if got := cfg.Key("main", "command-palette"); got != "p" {
-		t.Fatalf("Key(main, command-palette) = %q, want p", got)
+	if got := cfg.Key("main", "command-palette"); got != "K" {
+		t.Fatalf("Key(main, command-palette) = %q, want K", got)
 	}
 	if got := cfg.Key("main", "set-project"); got != "P" {
 		t.Fatalf("Key(main, set-project) = %q, want P", got)
@@ -125,11 +125,11 @@ func TestConfigCommandPaletteCollision(t *testing.T) {
 func TestConfigMergeSkipsTakenDefaultKey(t *testing.T) {
 	for _, src := range []string{
 		`keymap "main" {
-	"prev-pane" "p"
+	"focus-up" "K"
 }
 `,
 		`keymap "main" {
-	"close-pane" "p"
+	"close-pane" "K"
 }
 `,
 	} {
@@ -140,9 +140,9 @@ func TestConfigMergeSkipsTakenDefaultKey(t *testing.T) {
 		if got := cfg.Key("main", "command-palette"); got != "" {
 			t.Fatalf("Key(main, command-palette) = %q, want unbound when the file holds k", got)
 		}
-		action, n, state := cfg.Match("main", []byte{'p'})
-		if state != Match || action != "prev-pane" && action != "close-pane" || n != 1 {
-			t.Fatalf("Match(main, p) = %q, %d, %v; want the file's own action", action, n, state)
+		action, n, state := cfg.Match("main", []byte{'K'})
+		if state != Match || action != "focus-up" && action != "close-pane" || n != 1 {
+			t.Fatalf("Match(main, K) = %q, %d, %v; want the file's own action", action, n, state)
 		}
 		for _, e := range cfg.HelpEntries() {
 			if e.Action == "command-palette" {
@@ -476,7 +476,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"y / Y", "copy output / screen"},
 		{"i", "copy pane id"},
 		{"h j k l", "focus pane"},
-		{"n / K", "next/prev pane"},
+		{"n / p", "next/prev pane"},
 		{"x", "close pane"},
 		{"X", "close window"},
 		{"z", "zoom pane"},
@@ -489,7 +489,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{")", "next workspace"},
 		{"S", "synchronize panes"},
 		{"s", "switch session"},
-		{"p", "command palette"},
+		{"K", "command palette"},
 		{"r", "rename workspace"},
 		{"P", "set project"},
 		{"m", "message box"},
