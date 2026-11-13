@@ -77,6 +77,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Draw the dashboard over the whole screen, or as a palette centred over the panes.",
 	},
 	{
+		Name:    "float-shadow",
+		Value:   `"off" or "on"`,
+		Default: `"off"`,
+		Desc:    "Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane.",
+	},
+	{
 		Name:    "theme",
 		Value:   `a quoted theme name matching [A-Za-z0-9_-]+`,
 		Default: "",
@@ -411,6 +417,7 @@ func ThemeKeys() []ThemeKey {
 		{"glyphs", "active-mark", d.Glyphs.ActiveMark, "Mark beside the active window."},
 		{"glyphs", "workspace-bar", d.Glyphs.WorkspaceBar, "Bar beside the active workspace."},
 		{"glyphs", "dirty", d.Glyphs.Dirty, "Dirty worktree dot."},
+		{"glyphs", "shadow", d.Glyphs.Shadow, "Drop shadow mark beside and under a float."},
 	}
 	for _, name := range stateNames {
 		style := d.States[name]
@@ -469,6 +476,7 @@ glyphs {
     "active-mark"         "▸"
     "workspace-bar"       "▌"
     "dirty"               "●"
+    "shadow"              "▒"
 }
 
 states {

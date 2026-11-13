@@ -120,7 +120,7 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 // long name still shows its end and the caret stays on screen. The kind is
 // optional: a call without it renames a workspace, as the frozen prompt test
 // expects. A screen too small to hold the box paints nothing.
-func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, kind ...string) {
+func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, shadow bool, kind ...string) {
 	if snap == nil {
 		return
 	}
@@ -144,6 +144,11 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 		Paint: func(b *bytes.Buffer, r layout.Rect) {
 			renameInputRow(b, th, r, k, draft)
 		},
+	}
+	// The shadow clips above the toast row and the bar: no float owns those
+	// rows, so its shadow does not paint on them either.
+	if shadow {
+		panel.PaintShadow(buf, th, inner, snap.Cols, snap.Rows-2)
 	}
 	f.Draw(buf, th)
 }
@@ -215,7 +220,7 @@ func promptRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, label, draft st
 // names the key that closes it. The box stays clear of the rail, the toast row
 // and the status bar: it gives up columns, then its trailing rows, before it
 // paints over any of them.
-func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, keys []keymap.HelpEntry) {
+func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, keys []keymap.HelpEntry) {
 	g, ok := helpBoxGeometry(cols, rows, keys)
 	if !ok {
 		return
@@ -227,6 +232,11 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, keys []keymap.H
 		Paint: func(b *bytes.Buffer, inner layout.Rect) {
 			helpBoxRows(b, inner, g)
 		},
+	}
+	// The shadow clips above the toast row and the bar: no float owns those
+	// rows, so its shadow does not paint on them either.
+	if shadow {
+		panel.PaintShadow(buf, th, f.Rect, cols, rows-2)
 	}
 	f.Draw(buf, th)
 }

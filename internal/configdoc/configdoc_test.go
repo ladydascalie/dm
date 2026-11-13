@@ -120,6 +120,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"dashboard-preview": `dashboard-preview 25`,
 		"diff-command":      `diff-command "git diff --stat"`,
 		"dashboard-layout":  `dashboard-layout "float"`,
+		"float-shadow":      `float-shadow "on"`,
 		"theme":             `theme "probe"`,
 		"keymap":            `keymap "main" { "detach" "D" }`,
 		"command":           `command "check" { run "go test ./..." }`,
@@ -172,6 +173,9 @@ func TestConfigNodesParse(t *testing.T) {
 	if got := cfg.DiffCommand(); got != "git diff --stat" {
 		t.Errorf("DiffCommand = %q, want %q", got, "git diff --stat")
 	}
+	if !cfg.FloatShadow() {
+		t.Error("FloatShadow = false, want true")
+	}
 	if cfg.DashboardFullScreen() {
 		t.Error("DashboardFullScreen = true, want the float layout")
 	}
@@ -212,6 +216,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"dashboard-preview": "60",
 		"diff-command":      `"git diff"`,
 		"dashboard-layout":  `"full"`,
+		"float-shadow":      `"off"`,
 		"theme":             "",
 		"keymap":            "the built-in table",
 		"command":           "none",

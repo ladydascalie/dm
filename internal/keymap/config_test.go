@@ -999,6 +999,42 @@ func TestConfigDefaultPathEnvFallback(t *testing.T) {
 	})
 }
 
+// TestConfigFloatShadow reads the float drop shadow switch: the node, the
+// default and the values it rejects.
+func TestConfigFloatShadow(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"absent", `prefix "ctrl+b"`, false},
+		{"off", `float-shadow "off"`, false},
+		{"on", `float-shadow "on"`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.FloatShadow(); got != c.want {
+				t.Fatalf("FloatShadow() = %v, want %v", got, c.want)
+			}
+		})
+	}
+	if LoadDefault().FloatShadow() {
+		t.Fatal("LoadDefault().FloatShadow() = true, want false")
+	}
+	for _, bad := range []string{`float-shadow "maybe"`, `float-shadow 1`} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	if _, err := parseConfig("float-shadow \"off\"\nfloat-shadow \"on\""); err == nil {
+		t.Fatal("parseConfig accepted two float-shadow nodes")
+	}
+}
+
 func TestConfigDashboardLayout(t *testing.T) {
 	cases := []struct {
 		name string

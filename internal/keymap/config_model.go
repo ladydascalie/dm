@@ -76,8 +76,13 @@ type Config struct {
 	// dashFull is the dashboard's shape: true takes the whole screen, false
 	// centres the palette over the panes. dashFullSet separates the default
 	// from a config that never named the node.
-	dashFull    bool
-	dashFullSet bool
+	// floatShadow is the drop shadow the floats paint beside and under their
+	// box. floatShadowSet separates the default from a config that never
+	// named the node.
+	floatShadow    bool
+	floatShadowSet bool
+	dashFull       bool
+	dashFullSet    bool
 	// diffCommand is the shell command the dashboard diff key runs in a
 	// floating pane. An empty value means the config never named the node.
 	diffCommand string
@@ -167,6 +172,15 @@ func (c *Config) HistoryBytes() int {
 // DashboardPreview returns the dashboard's starting preview share of the body,
 // in percent. Zero starts with the band hidden and leaves the peek key to show
 // it. A config without the node reports the built-in default.
+// FloatShadow reports whether the floats paint a drop shadow beside and
+// under their box. A config without the node reports false.
+func (c *Config) FloatShadow() bool {
+	if c == nil || !c.floatShadowSet {
+		return false
+	}
+	return c.floatShadow
+}
+
 func (c *Config) DashboardPreview() int {
 	if c == nil || !c.dashPreviewSet {
 		return defaultDashboardPreview

@@ -28,8 +28,12 @@ func TestThemeDefaults(t *testing.T) {
 		t.Fatalf("default palette = %+v, want %+v", th.Palette, wantPalette)
 	}
 	wantAccents := [6]RGB{
-		{187, 154, 247}, {110, 220, 235}, {240, 140, 215},
-		{126, 169, 255}, {240, 160, 90}, {140, 215, 155},
+		{187, 154, 247},
+		{110, 220, 235},
+		{240, 140, 215},
+		{126, 169, 255},
+		{240, 160, 90},
+		{140, 215, 155},
 	}
 	if th.Accents != wantAccents {
 		t.Fatalf("default accents = %+v, want %+v", th.Accents, wantAccents)
@@ -55,6 +59,7 @@ func TestThemeDefaults(t *testing.T) {
 		Dirty:             "●",
 		SyncMark:          "⧉",
 		NerdSyncMark:      "\uf0e2",
+		Shadow:            "▒",
 		Ellipsis:          "…",
 	}
 	if th.Glyphs != wantGlyphs {

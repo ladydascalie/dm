@@ -75,7 +75,7 @@ type Palette struct {
 // Glyphs are the structural decorators: the drag grip, the divider hover
 // marks, the box, menu, picker and help borders and tees, the rail's fold
 // carets in both forms, the active-window mark, the workspace bar, the dirty
-// dot, and the elision mark.
+// dot, the elision mark and the float's drop shadow.
 type Glyphs struct {
 	Grip              string
 	DividerRow        string
@@ -100,6 +100,10 @@ type Glyphs struct {
 	// mark chooses one.
 	SyncMark     string
 	NerdSyncMark string
+	// Shadow is the mark a float paints beside and under its box: the drop
+	// shadow the float-shadow option turns on.
+	Shadow string
+
 	// Ellipsis marks a cut run. Glyphs.For resolves it per set; it is not a
 	// theme-file key, so Glyphs.set never reads it.
 	Ellipsis string
@@ -160,6 +164,7 @@ func DefaultTheme() Theme {
 			Dirty:             "●",
 			SyncMark:          "⧉",
 			NerdSyncMark:      "\uf0e2",
+			Shadow:            "▒",
 			Ellipsis:          "…",
 		},
 		States: map[string]StateStyle{
@@ -441,6 +446,8 @@ func (g *Glyphs) set(key, val string) bool {
 		g.ActiveMark = val
 	case "workspace-bar":
 		g.WorkspaceBar = val
+	case "shadow":
+		g.Shadow = val
 	case "dirty":
 		g.Dirty = val
 	default:

@@ -43,6 +43,7 @@ var asciiGlyphs = map[string]string{
 	"▲": "!", "✓": "+", "✕": "x", "▶": ">",
 	"⧉": "S",
 	"…": ">",
+	"▒": ":",
 }
 
 // ASCII returns the glyph's ASCII form, or the glyph itself when it has none.
@@ -83,6 +84,7 @@ func (g Glyphs) For(set GlyphSet) Glyphs {
 	g.WorkspaceBar = ASCII(g.WorkspaceBar)
 	g.Dirty = ASCII(g.Dirty)
 	g.SyncMark = ASCII(g.SyncMark)
+	g.Shadow = ASCII(g.Shadow)
 	return g
 }
 

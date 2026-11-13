@@ -179,6 +179,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			}
 			cfg.dashFullSet = true
 			i += 2
+		case "float-shadow":
+			if cfg.floatShadowSet {
+				return fmt.Errorf("line %d: duplicate float-shadow node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted switch after float-shadow", t.Line)
+			}
+			v := toks[i+1]
+			switch v.Value {
+			case "off":
+				cfg.floatShadow = false
+			case "on":
+				cfg.floatShadow = true
+			default:
+				return fmt.Errorf("line %d: float-shadow must be \"off\" or \"on\", got %q", v.Line, v.Value)
+			}
+			cfg.floatShadowSet = true
+			i += 2
 		case "diff-command":
 			if cfg.diffCommand != "" {
 				return fmt.Errorf("line %d: duplicate diff-command node", t.Line)
@@ -620,6 +638,8 @@ window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{en
 dashboard-preview 60
 // The diff key runs this in a floating pane through sh -c, in the selected pane folder.
 diff-command "git diff"
+// Set the drop shadow the floats paint beside and under their box.
+float-shadow "off"
 dashboard-layout "full"
 // A command: define it here, then bind "command:<name>" to a key in a keymap.
 // The run text goes through sh -c in the window's folder.

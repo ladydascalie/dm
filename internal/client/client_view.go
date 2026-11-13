@@ -67,7 +67,7 @@ func (t *tui) draw() {
 		t.askPreview()
 	}
 	if t.armed {
-		drawHelp(&help, th, win.Cols, win.Rows, t.km().HelpEntries())
+		drawHelp(&help, th, win.Cols, win.Rows, t.km().FloatShadow(), t.km().HelpEntries())
 	}
 	if t.mode == "sessions" {
 		drawSessions(&sess, th, win.Cols, win.Rows, t.sessions, t.sel, t.session)
@@ -82,7 +82,7 @@ func (t *tui) draw() {
 		drawLayoutSwitcher(&lswBuf, th, win, t.lsw)
 	}
 	if t.mode == "rename" {
-		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.renameKind)
+		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.km().FloatShadow(), t.renameKind)
 	}
 	if t.mode == "search" && t.search != nil {
 		drawSearchPrompt(&prompt, th, win, t.search.draft)
@@ -107,12 +107,16 @@ func (t *tui) draw() {
 	}
 
 	var floatBufs []bytes.Buffer
+	shadow := t.km().FloatShadow()
 	floatPaints := make([]*paint, 0, len(t.floats))
 	for _, f := range t.floats {
 		if f.VT != nil {
 			f.Paint = floatVTPaint(f.VT, t.hoverFor(f.ID, f.Rect.W))
 		}
 		var fb bytes.Buffer
+		if shadow {
+			panel.PaintShadow(&fb, th, f.Rect, win.Cols, win.Rows)
+		}
 		f.Draw(&fb, th)
 		floatBufs = append(floatBufs, fb)
 		floatPaints = append(floatPaints, t.last.floatPaint(f.ID))

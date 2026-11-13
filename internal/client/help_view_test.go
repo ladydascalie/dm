@@ -19,7 +19,7 @@ import (
 func helpBoxDraw(t *testing.T, cols, rows int, keys []keymap.HelpEntry) string {
 	t.Helper()
 	var buf bytes.Buffer
-	drawHelp(&buf, theme.DefaultTheme(), cols, rows, keys)
+	drawHelp(&buf, theme.DefaultTheme(), cols, rows, false, keys)
 	return buf.String()
 }
 
@@ -175,6 +175,44 @@ func TestHelpBoxSizesToWidestRowAt100x34(t *testing.T) {
 	}
 	if got := helpBoxRowText(p, y1, x0+2, x1-1); !strings.HasPrefix(got, "esc") {
 		t.Fatalf("hint row = %q, want it to read esc", got)
+	}
+}
+
+// TestHelpBoxShadow proves the float shadow switch paints marks beside and
+// under the help box, stops above the toast row and the bar, and that the
+// switch off paints none.
+func TestHelpBoxShadow(t *testing.T) {
+	t.Parallel()
+	keys := keymap.LoadDefault().HelpEntries()
+	cols, rows := 100, 34
+	g, ok := helpBoxGeometry(cols, rows, keys)
+	if !ok {
+		t.Fatal("helpBoxGeometry returned false")
+	}
+	var on bytes.Buffer
+	drawHelp(&on, theme.DefaultTheme(), cols, rows, true, keys)
+	p := helpBoxParse(t, on.String())
+	x1, y1 := g.x+g.inner, g.y+g.h
+	if got := p.writes[[2]int{y1, x1 + 1}]; len(got) == 0 || got[0] != '▒' {
+		t.Fatalf("shadow beside the right border = %v, want ▒", got)
+	}
+	if got := p.writes[[2]int{y1 + 1, x1}]; len(got) == 0 || got[0] != '▒' {
+		t.Fatalf("shadow under the box = %v, want ▒", got)
+	}
+	for row := rows - 2; row < rows; row++ {
+		for col := 0; col < cols; col++ {
+			if got := p.writes[[2]int{row, col}]; len(got) > 0 && got[0] == '▒' {
+				t.Fatalf("shadow painted the toast row or the bar at %d,%d", row, col)
+			}
+		}
+	}
+	var off bytes.Buffer
+	drawHelp(&off, theme.DefaultTheme(), cols, rows, false, keys)
+	p = helpBoxParse(t, off.String())
+	for rc, got := range p.writes {
+		if len(got) > 0 && got[0] == '▒' {
+			t.Fatalf("shadow off painted ▒ at %d,%d", rc[0], rc[1])
+		}
 	}
 }
 
