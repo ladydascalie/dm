@@ -558,11 +558,56 @@ func (s *server) moveWindow(id, dir string) error {
 			if dir == "up" {
 				j = i - 1
 			}
+			// Active indexes the slice, so it follows the window it named
+			// through the swap; a reorder never changes the active window.
+			if ws.Active == i {
+				ws.Active = j
+			} else if ws.Active == j {
+				ws.Active = i
+			}
 			ws.Windows[i], ws.Windows[j] = ws.Windows[j], ws.Windows[i]
 			return nil
 		}
 	}
 	return fmt.Errorf("no window %q", id)
+}
+
+// moveWorkspace swaps the named workspace with its neighbour in the
+// Workspaces slice, which is the order the rail and the workspace cycle
+// read. dir is up or down. Two workspaces only swap when they share a
+// project, so a move never interleaves two groups; GroupWorkspaces would
+// pull an interleaved group apart on the next load, so the edge refuses the
+// same silence a block edge does. Active indexes the slice and follows the
+// workspace it named.
+func (s *server) moveWorkspace(id, dir string) error {
+	if dir != "up" && dir != "down" {
+		return fmt.Errorf("dir must be up or down")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, ws := range s.st.Workspaces {
+		if ws.ID != id {
+			continue
+		}
+		if (dir == "up" && i == 0) || (dir == "down" && i == len(s.st.Workspaces)-1) {
+			return nil
+		}
+		j := i + 1
+		if dir == "up" {
+			j = i - 1
+		}
+		if s.st.Workspaces[j].Project != ws.Project {
+			return nil
+		}
+		s.st.Workspaces[i], s.st.Workspaces[j] = s.st.Workspaces[j], s.st.Workspaces[i]
+		if s.st.Active == i {
+			s.st.Active = j
+		} else if s.st.Active == j {
+			s.st.Active = i
+		}
+		return nil
+	}
+	return fmt.Errorf("no workspace %q", id)
 }
 
 // removeWorkspaceLocked drops the workspace at idx and kills every pane under

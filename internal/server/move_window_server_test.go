@@ -90,3 +90,30 @@ func TestMoveWindowRefusals(t *testing.T) {
 		t.Fatalf("bad dir error = %v, want dir must be up or down", err)
 	}
 }
+
+// Active indexes the Windows slice, so it follows the window it named
+// through a swap. Reordering never changes the active window.
+func TestMoveWindowActiveFollows(t *testing.T) {
+	t.Parallel()
+	s, st := windowServer(t)
+	ws := st.ActiveWorkspace()
+	w1 := ws.Windows[0]
+	w2, _ := addWindow(st, "two")
+	ws.Active = 1
+
+	if err := s.moveWindow(w2.ID, "up"); err != nil {
+		t.Fatalf("moveWindow(up): %v", err)
+	}
+	if ws.Windows[0] != w2 || ws.Windows[1] != w1 {
+		t.Fatalf("windows did not swap: %q %q", ws.Windows[0].Name, ws.Windows[1].Name)
+	}
+	if ws.Active != 0 || st.ActiveWindow().ID != w2.ID {
+		t.Fatalf("active = %d %q, want 0 %q", ws.Active, st.ActiveWindow().ID, w2.ID)
+	}
+	if err := s.moveWindow(w2.ID, "down"); err != nil {
+		t.Fatalf("moveWindow(down): %v", err)
+	}
+	if ws.Active != 1 || st.ActiveWindow().ID != w2.ID {
+		t.Fatalf("active = %d %q, want 1 %q", ws.Active, st.ActiveWindow().ID, w2.ID)
+	}
+}
