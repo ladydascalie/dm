@@ -415,6 +415,7 @@ var helpRows = []helpRow{
 	{[]string{"next-workspace"}, "next workspace"},
 	{[]string{"synchronize-panes"}, "synchronize panes"},
 	{[]string{"picker"}, "switch session"},
+	{[]string{"command-palette"}, "command palette"},
 	{[]string{"rename-workspace"}, "rename workspace"},
 	{[]string{"set-project"}, "set project"},
 	{[]string{"message-box"}, "message box"},

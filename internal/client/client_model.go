@@ -214,6 +214,11 @@ type tui struct {
 	lastTabClick    time.Time
 	lastTabClickPos struct{ X, Y int }
 
+	// cp is the open command palette, nil when closed. cpX and cpY are the
+	// query cursor cell its last paint asked for.
+	cp  *commandPalette
+	cpX int
+	cpY int
 	// sw is the floating native switcher, nil when closed. swX and swY are
 	// the query cursor cell its last paint asked for, swAt and swPane are the
 	// last preview request, and swID numbers the next one.
@@ -573,6 +578,7 @@ func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) {
 	t.expirePaste(now)
 	t.expireTermColour(now)
 	t.expireSwitcher(now)
+	t.expireCommandPalette(now)
 	t.previewTick(now)
 	t.flushBoxWatchers(now)
 	t.expireArmed(now)

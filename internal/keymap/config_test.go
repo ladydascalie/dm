@@ -22,7 +22,8 @@ var configTestDefaultActions = map[string][]string{
 		"focus-left", "focus-down",
 		"focus-up", "focus-right", "next-pane", "prev-pane", "close-pane",
 		"zoom-pane", "new-window", "next-window", "prev-window", "new-workspace",
-		"next-workspace", "switcher", "picker", "rename-workspace", "set-project",
+		"next-workspace", "switcher", "picker", "command-palette",
+		"rename-workspace", "set-project",
 		"toggle-rail", "message-box", "detach", "detach-alt",
 		"window-1", "window-2", "window-3", "window-4", "window-5",
 		"window-6", "window-7", "window-8", "window-9", "window-10",
@@ -90,6 +91,24 @@ func TestConfigDefaultsParse(t *testing.T) {
 				t.Errorf("mode %q action %q is unbound", mode, action)
 			}
 		}
+	}
+}
+
+// TestConfigCommandPaletteCollision proves the k the command palette takes is
+// free: prefix k matches the palette, focus-up keeps K, and no second main
+// action claims k. The default k belonged to focus-up; the palette took it and
+// focus-up moved to K, so the two never race on one key.
+func TestConfigCommandPaletteCollision(t *testing.T) {
+	cfg := LoadDefault()
+	action, n, state := cfg.Match("main", []byte{'k'})
+	if state != Match || action != "command-palette" || n != 1 {
+		t.Fatalf("Match(main, k) = %q, %d, %v; want command-palette, 1, Match", action, n, state)
+	}
+	if got := cfg.Key("main", "focus-up"); got != "K" {
+		t.Fatalf("Key(main, focus-up) = %q, want K", got)
+	}
+	if got := cfg.Key("main", "command-palette"); got != "k" {
+		t.Fatalf("Key(main, command-palette) = %q, want k", got)
 	}
 }
 
@@ -374,7 +393,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"[", "scrollback"},
 		{"y / Y", "copy output / screen"},
 		{"i", "copy pane id"},
-		{"h j k l", "focus pane"},
+		{"h j K l", "focus pane"},
 		{"n / p", "next/prev pane"},
 		{"x", "close pane"},
 		{"X", "close window"},
@@ -388,6 +407,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{")", "next workspace"},
 		{"S", "synchronize panes"},
 		{"s", "switch session"},
+		{"k", "command palette"},
 		{"r", "rename workspace"},
 		{"P", "set project"},
 		{"m", "message box"},
