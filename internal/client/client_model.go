@@ -856,7 +856,6 @@ func (t *tui) apply(m wire.Msg) {
 		if m.Target == t.floatGone {
 			break
 		}
-		t.notify("pane " + m.Target + " exited")
 	case "resp":
 		if m.Action == "yank" && m.ID == t.yankID {
 			t.takeYank(m)
