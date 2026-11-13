@@ -536,6 +536,35 @@ func (s *server) renameWindow(id, name string) error {
 	return fmt.Errorf("no window %q", id)
 }
 
+// moveWindow swaps the named window with its neighbour in its workspace's
+// Windows slice, which is the order the rail, the tab bar and the window
+// cycle read. dir is up or down; a request at the block's edge is a no-op,
+// and everything but the order stays: ids, focus and panes.
+func (s *server) moveWindow(id, dir string) error {
+	if dir != "up" && dir != "down" {
+		return fmt.Errorf("dir must be up or down")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ws := range s.st.Workspaces {
+		for i, w := range ws.Windows {
+			if w.ID != id {
+				continue
+			}
+			if (dir == "up" && i == 0) || (dir == "down" && i == len(ws.Windows)-1) {
+				return nil
+			}
+			j := i + 1
+			if dir == "up" {
+				j = i - 1
+			}
+			ws.Windows[i], ws.Windows[j] = ws.Windows[j], ws.Windows[i]
+			return nil
+		}
+	}
+	return fmt.Errorf("no window %q", id)
+}
+
 // removeWorkspaceLocked drops the workspace at idx and kills every pane under
 // it. The caller holds s.mu and leaves at least one workspace behind, so the
 // active index can be clamped to a real workspace.

@@ -442,8 +442,10 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			return
 		}
 		ps := s.st.Panes[m.Target]
-		res := map[string]any{"id": m.Target, "workspace": ws.ID, "window": w.ID,
-			"workspaceName": ws.Name, "windowName": w.Name}
+		res := map[string]any{
+			"id": m.Target, "workspace": ws.ID, "window": w.ID,
+			"workspaceName": ws.Name, "windowName": w.Name,
+		}
 		if ps != nil {
 			res["name"] = ps.Name
 			res["cwd"] = ps.Cwd
@@ -482,6 +484,16 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 	case "close-workspace":
 		err := s.mutation(func() error { return s.closeWorkspace(m.Target) })
 		s.afterMutation()
+		s.reply(cl, m, nil, err)
+
+	case "move-window":
+		// The named window swaps with its neighbour in its workspace. The
+		// slice order is the rail, tab bar and cycle order, so the snapshot
+		// alone re-renders them.
+		err := s.mutation(func() error { return s.moveWindow(m.Target, m.Dir) })
+		if err == nil {
+			s.pushSnapshot()
+		}
 		s.reply(cl, m, nil, err)
 
 	case "rename-window":
