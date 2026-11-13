@@ -30,6 +30,7 @@ Top level is `{ "scenes": [ ... ] }`. Each scene is flat:
 | `focus` | string | focused pane id |
 | `toast` | string | optional toast text |
 | `float` | object | optional `{id, x, y, w, h, content}` floating pane |
+| `floatShadow` | bool | optional; turn the config's float-shadow node on, so the scene paints the floats' drop shadow |
 | `switcher` | bool | optional; open the switcher |
 | `help` | bool | optional; open the help box |
 | `mode` | string | optional; `"sessions"` opens the session list |
@@ -42,6 +43,9 @@ carry SGR attributes.
 
 - `split` - two panes in a row, rail, tab bar, bar, toast.
 - `float` - split plus a floating pane with its own VT.
+- `float-shadow` - the float scene with `floatShadow` on, so the golden carries
+  the drop shadow over pane text and borders.
+- `help-shadow` - the help scene with `floatShadow` on.
 - `switcher` - split plus the switcher palette.
 - `help` - split plus the help box.
 - `sessions` - split plus the session list.

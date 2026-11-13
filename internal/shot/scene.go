@@ -13,22 +13,25 @@ import (
 // Scene is one picture the oracle renders: a size, a pane tree, the pane
 // content and the optional overlays. It mirrors internal/shot/testdata/scenes.json.
 type Scene struct {
-	Name         string    `json:"name"`
-	Cols         int       `json:"cols"`
-	Rows         int       `json:"rows"`
-	Rail         int       `json:"rail"`
-	Theme        string    `json:"theme"`
-	Root         *Node     `json:"root"`
-	Panes        []Pane    `json:"panes"`
-	Windows      []Window  `json:"windows"`
-	ActiveWindow int       `json:"activeWindow"`
-	Focus        string    `json:"focus"`
-	Toast        string    `json:"toast,omitempty"`
-	Float        *Float    `json:"float,omitempty"`
-	Switcher     bool      `json:"switcher,omitempty"`
-	Help         bool      `json:"help,omitempty"`
-	Mode         string    `json:"mode,omitempty"`
-	Sessions     []Session `json:"sessions,omitempty"`
+	Name         string   `json:"name"`
+	Cols         int      `json:"cols"`
+	Rows         int      `json:"rows"`
+	Rail         int      `json:"rail"`
+	Theme        string   `json:"theme"`
+	Root         *Node    `json:"root"`
+	Panes        []Pane   `json:"panes"`
+	Windows      []Window `json:"windows"`
+	ActiveWindow int      `json:"activeWindow"`
+	Focus        string   `json:"focus"`
+	Toast        string   `json:"toast,omitempty"`
+	Float        *Float   `json:"float,omitempty"`
+	// FloatShadow turns the config's float-shadow node on, so a scene
+	// exercises the drop shadow the floats paint.
+	FloatShadow bool      `json:"floatShadow,omitempty"`
+	Switcher    bool      `json:"switcher,omitempty"`
+	Help        bool      `json:"help,omitempty"`
+	Mode        string    `json:"mode,omitempty"`
+	Sessions    []Session `json:"sessions,omitempty"`
 }
 
 // Node is one node of the pane tree: a pane leaf or a split with kids.

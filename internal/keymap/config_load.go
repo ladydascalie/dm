@@ -7,6 +7,13 @@ import (
 	"path/filepath"
 )
 
+// DefaultKDL returns the built-in default config text, the text a first run
+// writes to config.kdl. Callers that need the defaults with one node changed
+// patch this text and parse it.
+func DefaultKDL() string {
+	return defaultConfigKDL
+}
+
 // LoadDefault returns the built-in default keymap without touching disk. It
 // panics when the built-in text is malformed, which is a programming error.
 func LoadDefault() *Config {

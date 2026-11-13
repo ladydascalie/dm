@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/shot"
@@ -156,6 +157,19 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 	}
 	out := &bytes.Buffer{}
 	tr := &tui{snap: snap, vts: map[string]*vt.Term{}, out: out, th: &th}
+	if sc.FloatShadow {
+		// The default text with the shadow switch flipped on, so the help
+		// scene keeps its built-in rows. The parse proves the patch landed.
+		src := strings.Replace(keymap.DefaultKDL(), `float-shadow "off"`, `float-shadow "on"`, 1)
+		cfg, err := keymap.ParseConfig(src)
+		if err != nil {
+			t.Fatalf("float-shadow config: %v", err)
+		}
+		if !cfg.FloatShadow() {
+			t.Fatal("the patched default config does not turn float-shadow on")
+		}
+		tr.keymap = cfg
+	}
 	for _, p := range sc.Panes {
 		r := rects[p.ID]
 		v := vt.NewTerm(r.W, r.H)
