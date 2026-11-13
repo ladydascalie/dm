@@ -34,6 +34,9 @@ type commandPalette struct {
 	// its height while the query filters, so the body is sized for the
 	// whole list, not the rows left.
 	total int
+	// capRows is the visible-row cap the config named when the palette
+	// opened. The float keeps its height while the query filters.
+	capRows int
 }
 
 // commandPaletteCommands builds the palette's rows from the source the help
@@ -57,10 +60,10 @@ func commandPaletteCommands(cfg *keymap.Config) []palette.Command {
 }
 
 // commandPaletteGeom sizes and centres the float: wide enough for a name and
-// its description, tall enough for the query line and as many rows as the
-// screen holds. A screen too small for the query line and one row returns an
-// empty rect.
-func commandPaletteGeom(win *wire.Snapshot, rows int) layout.Rect {
+// its description, tall enough for the query line and as many rows as the row
+// cap allows and the screen holds. A screen too small for the query line and
+// one row returns an empty rect.
+func commandPaletteGeom(win *wire.Snapshot, rows, cap int) layout.Rect {
 	if win == nil || win.Cols < 1 || win.Rows < 1 {
 		return layout.Rect{}
 	}
@@ -72,6 +75,9 @@ func commandPaletteGeom(win *wire.Snapshot, rows int) layout.Rect {
 		return layout.Rect{}
 	}
 	body := rows
+	if body > cap {
+		body = cap
+	}
 	if body > win.Rows-4 {
 		body = win.Rows - 4
 	}
@@ -102,10 +108,10 @@ func openCommandPalette(t *tui) {
 	if len(commands) == 0 {
 		return
 	}
-	if g := commandPaletteGeom(t.snap, len(commands)); g.W < 1 || g.H < 1 {
+	if g := commandPaletteGeom(t.snap, len(commands), t.km().PaletteRows()); g.W < 1 || g.H < 1 {
 		return
 	}
-	t.cp = &commandPalette{pal: palette.New(commands), total: len(commands)}
+	t.cp = &commandPalette{pal: palette.New(commands), total: len(commands), capRows: t.km().PaletteRows()}
 	t.disarm()
 	t.dirty = true
 }
@@ -258,7 +264,7 @@ func (t *tui) invokeCommandPalette() {
 // the path the switcher draws on.
 func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, win *wire.Snapshot) (cx, cy int) {
 	rows := cp.pal.Rows()
-	g := commandPaletteGeom(win, cp.total)
+	g := commandPaletteGeom(win, cp.total, cp.capRows)
 	if g.W < 3 || g.H < 3 {
 		return 0, 0
 	}

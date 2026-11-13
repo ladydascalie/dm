@@ -118,6 +118,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"glyphs":            `glyphs "nerd"`,
 		"window-label":      `window-label "{{.ID}}"`,
 		"dashboard-preview": `dashboard-preview 25`,
+		"palette-rows":      `palette-rows 12`,
 		"diff-command":      `diff-command "git diff --stat"`,
 		"dashboard-layout":  `dashboard-layout "float"`,
 		"float-shadow":      `float-shadow "on"`,
@@ -170,6 +171,9 @@ func TestConfigNodesParse(t *testing.T) {
 	if got := cfg.DashboardPreview(); got != 25 {
 		t.Errorf("DashboardPreview = %d, want 25", got)
 	}
+	if got := cfg.PaletteRows(); got != 12 {
+		t.Errorf("PaletteRows = %d, want 12", got)
+	}
 	if got := cfg.DiffCommand(); got != "git diff --stat" {
 		t.Errorf("DiffCommand = %q, want %q", got, "git diff --stat")
 	}
@@ -214,6 +218,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"glyphs":            `"auto"`,
 		"window-label":      `"` + wlabel.Default + `"`,
 		"dashboard-preview": "60",
+		"palette-rows":      "10",
 		"diff-command":      `"git diff"`,
 		"dashboard-layout":  `"full"`,
 		"float-shadow":      `"off"`,

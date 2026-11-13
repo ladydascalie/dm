@@ -1165,6 +1165,42 @@ func TestConfigDashboardLayout(t *testing.T) {
 	}
 }
 
+// TestConfigPaletteRows reads the command palette's row cap: the node, the
+// default, and the bounds it rejects.
+func TestConfigPaletteRows(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultPaletteRows},
+		{"one", `palette-rows 1`, 1},
+		{"twelve", `palette-rows 12`, 12},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.PaletteRows(); got != c.want {
+				t.Fatalf("PaletteRows() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().PaletteRows(); got != defaultPaletteRows {
+		t.Fatalf("LoadDefault().PaletteRows() = %d, want %d", got, defaultPaletteRows)
+	}
+	for _, bad := range []string{"palette-rows 0", "palette-rows -3", "palette-rows wide"} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	if _, err := parseConfig("palette-rows 5\npalette-rows 9"); err == nil {
+		t.Fatal("parseConfig accepted a duplicate palette-rows node")
+	}
+}
+
 // TestConfigDashboardPreview reads the dashboard's starting preview share: the
 // node, the default, the zero that hides the band, and the bounds it rejects.
 func TestConfigDashboardPreview(t *testing.T) {

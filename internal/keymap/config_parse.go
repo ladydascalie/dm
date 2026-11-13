@@ -162,6 +162,25 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.dashPreview = n
 			cfg.dashPreviewSet = true
 			i += 2
+		case "palette-rows":
+			if cfg.paletteRowsSet {
+				return fmt.Errorf("line %d: duplicate palette-rows node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after palette-rows", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: palette-rows must be a number, got %q", v.Line, v.Value)
+			}
+			if n < 1 {
+				return fmt.Errorf("line %d: palette-rows must be at least 1, got %d", v.Line, n)
+			}
+			cfg.paletteRows = n
+			cfg.paletteRowsSet = true
+			i += 2
+
 		case "dashboard-layout":
 			if cfg.dashFullSet {
 				return fmt.Errorf("line %d: duplicate dashboard-layout node", t.Line)
@@ -543,6 +562,9 @@ const (
 // preview band takes when it opens.
 const defaultDashboardPreview = 60
 
+// defaultPaletteRows is the built-in command palette row cap.
+const defaultPaletteRows = 10
+
 // defaultDiffCommand is the built-in command the dashboard diff key runs in a
 // floating pane.
 const defaultDiffCommand = "git diff"
@@ -635,8 +657,10 @@ padding 0
 // Set the scrollback window in lines; the pane ring budget is about 256 bytes per line, capped at 8 MiB.
 history-lines 2000
 glyphs "auto"
-window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
 dashboard-preview 60
+// The command palette shows at most this many entries before it scrolls.
+palette-rows 10
+
 // The diff key runs this in a floating pane through sh -c, in the selected pane folder.
 diff-command "git diff"
 // Set the drop shadow the floats paint beside and under their box.

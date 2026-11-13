@@ -810,6 +810,10 @@ Set the template that renders a window label.
 Value: \fIan integer from 0 to 100\fP. Default: \fI60\fP.
 Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.
 .TP
+\fBpalette-rows\fP
+Value: \fIan integer of at least 1\fP. Default: \fI10\fP.
+Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer.
+.TP
 \fBdiff-command\fP
 Value: \fIa quoted shell command\fP. Default: \fI"git diff"\fP.
 Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder.

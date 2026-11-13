@@ -2,9 +2,12 @@ package client
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"dm/internal/keymap"
 	"dm/internal/testutil"
 )
 
@@ -226,6 +229,44 @@ func TestCommandPaletteDraw(t *testing.T) {
 	}
 }
 
+// TestCommandPaletteRowCap: the float shows at most the palette-rows cap,
+// never more, and a config cap shrinks a bigger list.
+func TestCommandPaletteRowCap(t *testing.T) {
+	t.Parallel()
+	tui, _ := switcherTUI(t)
+	feed(tui, "\x02k")
+	if tui.cp == nil {
+		t.Fatal("prefix k did not open the palette")
+	}
+	if tui.cp.total <= tui.cp.capRows {
+		t.Skipf("the built-in keymap binds %d actions, at or under the cap %d", tui.cp.total, tui.cp.capRows)
+	}
+	g := commandPaletteGeom(tui.snap, tui.cp.total, tui.cp.capRows)
+	if want := tui.cp.capRows + 3; g.H != want {
+		t.Fatalf("height = %d, want the cap %d", g.H, want)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.kdl")
+	if err := os.WriteFile(path, []byte("palette-rows 3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := keymap.LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	tui2, _ := switcherTUI(t)
+	tui2.keymap = cfg
+	feed(tui2, "\x02k")
+	if tui2.cp == nil {
+		t.Fatal("prefix k did not open the palette")
+	}
+	g = commandPaletteGeom(tui2.snap, tui2.cp.total, tui2.cp.capRows)
+	if want := 3 + 3; g.H != want {
+		t.Fatalf("height = %d, want the config cap %d", g.H, want)
+	}
+}
+
 // TestCommandPaletteCursorStaysInsideRow: a query as long as the query line
 // must not park the cursor on the float's border. The switcher clamps, and so
 // does the palette.
@@ -238,7 +279,7 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 		long[i] = 'a'
 	}
 	feed(tui, string(long))
-	g := commandPaletteGeom(tui.snap, tui.cp.total)
+	g := commandPaletteGeom(tui.snap, tui.cp.total, tui.cp.capRows)
 	cx, cy := drawCommandPalette(&bytes.Buffer{}, tui.theme(), tui.cp, tui.snap)
 	if cy != g.Y+1 {
 		t.Fatalf("cursor row = %d, want the query line at %d", cy, g.Y+1)

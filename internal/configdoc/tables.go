@@ -65,6 +65,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.",
 	},
 	{
+		Name:    "palette-rows",
+		Value:   "an integer of at least 1",
+		Default: "10",
+		Desc:    "Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer.",
+	},
+	{
 		Name:    "diff-command",
 		Value:   "a quoted shell command",
 		Default: `"git diff"`,

@@ -73,6 +73,10 @@ type Config struct {
 	// from a config that never named the node.
 	dashPreview    int
 	dashPreviewSet bool
+	// paletteRows caps the command palette's visible rows. paletteRowsSet
+	// separates the default from a config that never named the node.
+	paletteRows    int
+	paletteRowsSet bool
 	// dashFull is the dashboard's shape: true takes the whole screen, false
 	// centres the palette over the panes. dashFullSet separates the default
 	// from a config that never named the node.
@@ -179,6 +183,18 @@ func (c *Config) FloatShadow() bool {
 		return false
 	}
 	return c.floatShadow
+}
+
+// PaletteRows returns the command palette's row cap. A config without the
+// node reports the built-in default.
+func (c *Config) PaletteRows() int {
+	if c == nil || !c.paletteRowsSet {
+		return defaultPaletteRows
+	}
+	if c.paletteRows < 1 {
+		return 1
+	}
+	return c.paletteRows
 }
 
 func (c *Config) DashboardPreview() int {
