@@ -260,7 +260,7 @@ func TestRailRowSegments(t *testing.T) {
 	// the focused pane row paints the focus fill bold, and every other row the
 	// rail fill plain.
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, -1)
 	out := b.String()
 	focusRow := -1
 	for y := 0; y < snap.Rows-1; y++ {
@@ -420,7 +420,7 @@ type railSeg = segment.Seg
 func railRows(t *testing.T, snap *wire.Snapshot, set theme.GlyphSet) []string {
 	t.Helper()
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme().For(set), snap, set, -1)
+	DrawRail(&b, theme.DefaultTheme().For(set), snap, set, -1, -1)
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()
@@ -659,7 +659,7 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 func TestRailASCIIGlyphs(t *testing.T) {
 	snap := railRowSnap(layout.DefaultRail)
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII, -1)
+	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII, -1, -1)
 	out := b.String()
 	for _, glyph := range []string{"▾", "▸", "•", "·", "●", "○", "▲", "✓", "✕", "▶", "▌"} {
 		if strings.Contains(out, glyph) {
@@ -797,7 +797,7 @@ func TestRailProjectGroup(t *testing.T) {
 	}
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	var b bytes.Buffer
-	DrawRail(&b, th, snap, theme.GlyphUnicode, -1)
+	DrawRail(&b, th, snap, theme.GlyphUnicode, -1, -1)
 	term.Write(b.Bytes())
 	term.Flush()
 	for y, it := range items {
@@ -839,7 +839,7 @@ func TestRailUntaggedWorkspaceHasNoProject(t *testing.T) {
 	}
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, -1)
 	term.Write(b.Bytes())
 	term.Flush()
 	for y := 0; y < snap.Rows-2; y++ {
@@ -1044,7 +1044,7 @@ func TestRailHoverBackground(t *testing.T) {
 	}
 	draw := func(hover int) string {
 		var b bytes.Buffer
-		DrawRail(&b, th, snap, theme.GlyphUnicode, hover)
+		DrawRail(&b, th, snap, theme.GlyphUnicode, hover, -1)
 		return b.String()
 	}
 	rowStart := fmt.Sprintf("\x1b[%d;1H\x1b[0m", windowAt+1) + th.Palette.RailHoverBG.BG()

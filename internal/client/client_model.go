@@ -199,6 +199,12 @@ type tui struct {
 	railPressAt  time.Time
 	railPressRow int
 
+	// winDrag tracks a drag of a window row in the rail: the window under the
+	// press, its workspace, the row the press landed on, and where the drop
+	// boundary now rests. nil when no drag is in flight; armed turns true at
+	// the first row change, and the release sends the move.
+	winDrag *winDragState
+
 	// lastTabClick and lastTabClickPos track the last left press on a tab bar
 	// tab, so a second press in the same cell within the double-click window
 	// opens the window rename prompt instead of selecting the window.

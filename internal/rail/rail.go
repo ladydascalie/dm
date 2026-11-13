@@ -866,8 +866,10 @@ func RailControlSegs(th theme.Theme, compact bool, set theme.GlyphSet) []segment
 // A left run is elided with an ellipsis before the right-aligned stats give up
 // a cell, so the stats survive a narrow rail. hover is the row the pointer
 // rests on, -1 when none: it paints RailHoverBG, with the focused pane row
-// keeping its stronger ground.
-func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, hover int) {
+// keeping its stronger ground. dropRow is the row the window drag's drop
+// boundary rests above, -1 when none: it paints RailFocusBG, so the drop
+// target reads at a glance.
+func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, hover, dropRow int) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
@@ -877,6 +879,9 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 	items := RailItems(snap)
 	if hover < 0 || hover >= len(items) {
 		hover = -1
+	}
+	if dropRow >= len(items) {
+		dropRow = -1
 	}
 	compact := layout.RailCompact(snap.Rail)
 	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
@@ -915,6 +920,8 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			// highlight always means the row answers a click.
 			switch {
 			case it.Kind == Pane && it.Focus:
+				bg, bold = p.RailFocusBG, true
+			case y == dropRow && it.Kind != Gap:
 				bg, bold = p.RailFocusBG, true
 			case y == hover && it.Kind != Gap:
 				bg = p.RailHoverBG

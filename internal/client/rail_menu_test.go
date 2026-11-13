@@ -137,7 +137,7 @@ func TestRailMenuWindowRow(t *testing.T) {
 		t.Fatalf("title = %q, want window one", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu,
-		"Rename window", "Close window", "Fold/unfold", "Focus")
+		"Rename window", "Move window down", "Close window", "Fold/unfold", "Focus")
 	testutil.NoMsg(t, got)
 
 	// The note row belongs to the same window and opens the same menu.
@@ -150,7 +150,7 @@ func TestRailMenuWindowRow(t *testing.T) {
 		t.Fatalf("note row title = %q, want window one", tui.menu.title)
 	}
 	railWantLabels(t, tui.menu,
-		"Rename window", "Close window", "Fold/unfold", "Focus")
+		"Rename window", "Move window down", "Close window", "Fold/unfold", "Focus")
 	testutil.NoMsg(t, got)
 }
 
