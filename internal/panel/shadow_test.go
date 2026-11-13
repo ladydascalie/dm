@@ -68,12 +68,12 @@ func TestPaintShadow(t *testing.T) {
 	cells := readShadowCells(buf.String())
 	// The border rows run 1-based rows 2..5 and the border columns 2..7.
 	for y := 2; y <= 5; y++ {
-		if g, ok := shadowAt(cells, y, 8); !ok || g != "▒" {
+		if g, ok := shadowAt(cells, y, 8); !ok || g != "░" {
 			t.Fatalf("shadow beside the right border at row %d = %q, %v", y, g, ok)
 		}
 	}
 	for x := 3; x <= 7; x++ {
-		if g, ok := shadowAt(cells, 6, x); !ok || g != "▒" {
+		if g, ok := shadowAt(cells, 6, x); !ok || g != "░" {
 			t.Fatalf("shadow under the box at col %d = %q, %v", x, g, ok)
 		}
 	}

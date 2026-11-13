@@ -193,15 +193,15 @@ func TestHelpBoxShadow(t *testing.T) {
 	drawHelp(&on, theme.DefaultTheme(), cols, rows, true, keys)
 	p := helpBoxParse(t, on.String())
 	x1, y1 := g.x+g.inner, g.y+g.h
-	if got := p.writes[[2]int{y1, x1 + 1}]; len(got) == 0 || got[0] != '▒' {
-		t.Fatalf("shadow beside the right border = %v, want ▒", got)
+	if got := p.writes[[2]int{y1, x1 + 1}]; len(got) == 0 || got[0] != '░' {
+		t.Fatalf("shadow beside the right border = %v, want ░", got)
 	}
-	if got := p.writes[[2]int{y1 + 1, x1}]; len(got) == 0 || got[0] != '▒' {
-		t.Fatalf("shadow under the box = %v, want ▒", got)
+	if got := p.writes[[2]int{y1 + 1, x1}]; len(got) == 0 || got[0] != '░' {
+		t.Fatalf("shadow under the box = %v, want ░", got)
 	}
 	for row := rows - 2; row < rows; row++ {
 		for col := 0; col < cols; col++ {
-			if got := p.writes[[2]int{row, col}]; len(got) > 0 && got[0] == '▒' {
+			if got := p.writes[[2]int{row, col}]; len(got) > 0 && got[0] == '░' {
 				t.Fatalf("shadow painted the toast row or the bar at %d,%d", row, col)
 			}
 		}
@@ -210,8 +210,8 @@ func TestHelpBoxShadow(t *testing.T) {
 	drawHelp(&off, theme.DefaultTheme(), cols, rows, false, keys)
 	p = helpBoxParse(t, off.String())
 	for rc, got := range p.writes {
-		if len(got) > 0 && got[0] == '▒' {
-			t.Fatalf("shadow off painted ▒ at %d,%d", rc[0], rc[1])
+		if len(got) > 0 && got[0] == '░' {
+			t.Fatalf("shadow off painted ░ at %d,%d", rc[0], rc[1])
 		}
 	}
 }

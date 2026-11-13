@@ -164,7 +164,7 @@ func DefaultTheme() Theme {
 			Dirty:             "●",
 			SyncMark:          "⧉",
 			NerdSyncMark:      "\uf0e2",
-			Shadow:            "▒",
+			Shadow:            "░",
 			Ellipsis:          "…",
 		},
 		States: map[string]StateStyle{

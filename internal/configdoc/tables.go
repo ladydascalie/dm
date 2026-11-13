@@ -476,7 +476,7 @@ glyphs {
     "active-mark"         "▸"
     "workspace-bar"       "▌"
     "dirty"               "●"
-    "shadow"              "▒"
+    "shadow"              "░"
 }
 
 states {

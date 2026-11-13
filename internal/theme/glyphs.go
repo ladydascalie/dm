@@ -43,7 +43,7 @@ var asciiGlyphs = map[string]string{
 	"▲": "!", "✓": "+", "✕": "x", "▶": ">",
 	"⧉": "S",
 	"…": ">",
-	"▒": ":",
+	"░": ":",
 }
 
 // ASCII returns the glyph's ASCII form, or the glyph itself when it has none.
