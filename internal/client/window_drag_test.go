@@ -61,8 +61,8 @@ func TestWinDragNeedsMotion(t *testing.T) {
 	}
 	winDragFeed(tr, 10, 1, 0, true) // release on the same row
 	testutil.NoMsg(t, got)
-	if tr.winDropRow() != -1 {
-		t.Fatalf("drop row = %d, want -1", tr.winDropRow())
+	if tr.winDrop() != nil {
+		t.Fatal("a click without motion left a drop hint")
 	}
 }
 

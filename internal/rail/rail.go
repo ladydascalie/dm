@@ -113,6 +113,16 @@ func WindowVars(snap *wire.Snapshot, w wire.WindowInfo) wlabel.Vars {
 	return v
 }
 
+// Drop is the live window drag's paint hint: Row is the items row the drop
+// boundary rests above, Lift is the dragged window's id, and Accent is the
+// dragged project's accent slot for the insertion line. A nil Drop paints a
+// drag-free rail.
+type Drop struct {
+	Row    int
+	Lift   string
+	Accent int
+}
+
 // RailItems flattens a snapshot into sidebar rows in the server's order: a
 // workspace row, then per window a Window row, that window's note row when it
 // has a message and is unfolded, and its pane rows when it is unfolded. A gap
@@ -866,10 +876,11 @@ func RailControlSegs(th theme.Theme, compact bool, set theme.GlyphSet) []segment
 // A left run is elided with an ellipsis before the right-aligned stats give up
 // a cell, so the stats survive a narrow rail. hover is the row the pointer
 // rests on, -1 when none: it paints RailHoverBG, with the focused pane row
-// keeping its stronger ground. dropRow is the row the window drag's drop
-// boundary rests above, -1 when none: it paints RailFocusBG, so the drop
-// target reads at a glance.
-func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, hover, dropRow int) {
+// keeping its stronger ground. drop is the live window drag's hint, nil when
+// none: the rows of drop.Lift dim out of place, and the row drop.Row rests
+// above is replaced by an insertion line in the dragged project's accent, so
+// the landing spot reads between the rows instead of lighting one.
+func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, hover int, drop *Drop) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
@@ -879,9 +890,6 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 	items := RailItems(snap)
 	if hover < 0 || hover >= len(items) {
 		hover = -1
-	}
-	if dropRow >= len(items) {
-		dropRow = -1
 	}
 	compact := layout.RailCompact(snap.Rail)
 	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
@@ -918,13 +926,42 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			// A focused pane row paints its own background and every run bold.
 			// A hovered row lights lightly; the gap row never lights, so a
 			// highlight always means the row answers a click.
+			// A lifted row drops its fill and its emphasis: the window is in
+			// the air, so nothing under it answers the pointer.
+			lift := drop != nil && drop.Lift != "" && it.Window == drop.Lift && it.Kind != Gap
 			switch {
+			case lift:
+				bg, bold = p.RailBG, false
 			case it.Kind == Pane && it.Focus:
-				bg, bold = p.RailFocusBG, true
-			case y == dropRow && it.Kind != Gap:
 				bg, bold = p.RailFocusBG, true
 			case y == hover && it.Kind != Gap:
 				bg = p.RailHoverBG
+			}
+			if lift {
+				for i := range left {
+					left[i].FG = p.RailDim
+				}
+				for i := range right {
+					right[i].FG = p.RailDim
+				}
+				for i := range tail {
+					tail[i].FG = p.RailDim
+				}
+			}
+			// The drop boundary replaces its row with an insertion line in
+			// the dragged project's accent, so the landing spot sits between
+			// the rows it splits.
+			if drop != nil && drop.Row >= 0 && y == drop.Row && it.Kind != Gap {
+				line := th.Glyphs.BorderHorizontal
+				if set == theme.GlyphASCII {
+					line = "-"
+				}
+				left = []segment.Seg{{
+					Text: strings.Repeat(line, rowW),
+					FG:   th.Accents[drop.Accent%len(th.Accents)],
+				}}
+				right, tail = nil, nil
+				bg, bold = p.RailBG, false
 			}
 		}
 		leftCells := segment.SegCells(left) + segment.SegCells(tail)

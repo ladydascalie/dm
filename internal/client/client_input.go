@@ -2740,6 +2740,7 @@ type winDragState struct {
 	window    string
 	workspace string
 	project   string
+	accent    int // the project's accent slot, for the drop line
 	startY    int
 	armed     bool
 	dropRow   int // the items row the drop boundary rests above
@@ -2750,7 +2751,7 @@ type winDragState struct {
 // to another row, so an ordinary click never reorders anything.
 func (t *tui) winDragStart(item rail.RailItem, y int) {
 	t.winDrag = &winDragState{
-		window: item.Window, workspace: item.Workspace,
+		window: item.Window, workspace: item.Workspace, accent: item.ProjectAccent,
 		project: item.Project, startY: y, dropRow: -1,
 	}
 }
@@ -2856,12 +2857,15 @@ func (t *tui) cancelWinDrag() {
 	}
 }
 
-// winDropRow is the drop boundary's items row while a drag is armed, or -1.
-func (t *tui) winDropRow() int {
-	if t.winDrag == nil || !t.winDrag.armed {
-		return -1
+// winDrop is the live drag's paint hint for the rail, nil when none: the
+// boundary row, the window lifted out of place and its project's accent.
+func (t *tui) winDrop() *rail.Drop {
+	if t.winDrag == nil || !t.winDrag.armed || t.winDrag.dropRow < 0 {
+		return nil
 	}
-	return t.winDrag.dropRow
+	return &rail.Drop{
+		Row: t.winDrag.dropRow, Lift: t.winDrag.window, Accent: t.winDrag.accent,
+	}
 }
 
 // clearRailPress forgets the tracked rail press for t, so a later press does
