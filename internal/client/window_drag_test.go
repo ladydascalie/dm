@@ -98,3 +98,62 @@ func TestWinDragOutsideCancel(t *testing.T) {
 		t.Fatal("the drag survived a release outside the rail")
 	}
 }
+
+// The marker skips pane rows entirely. Over the top half of another window's
+// rows it asks for a landing before that window, which for the window right
+// after the dragged one is no move; over the bottom half it asks for a
+// landing after it, which for the last window parks the marker past the
+// block, on the first empty row.
+func TestWinDragMarkerSkipsPanes(t *testing.T) {
+	t.Parallel()
+	tr, got := winDragTUI(t)
+	tr.snap.All = []wire.AllPane{
+		{ID: "a", Workspace: "s1", WorkspaceName: "one", Window: "w1", WindowName: "one", WorkspaceUnfolded: true},
+		{ID: "b", Workspace: "s1", WorkspaceName: "one", Window: "w2", WindowName: "two", WorkspaceUnfolded: true, WindowUnfolded: true},
+		{ID: "c", Workspace: "s1", WorkspaceName: "one", Window: "w2", WindowName: "two", WorkspaceUnfolded: true, WindowUnfolded: true},
+	}
+	// Rows: 0 workspace, 1 w1, 2 w2, 3 pane b, 4 pane c.
+
+	winDragFeed(tr, 10, 1, 0, false) // press on w1
+	testutil.NextMsg(t, got)         // the focus
+
+	winDragFeed(tr, 10, 3, 32, false) // over w2's first pane row
+	if tr.winDrag.dropRow != 1 {
+		t.Fatalf("marker over a pane row = %d, want the dragged block's own top", tr.winDrag.dropRow)
+	}
+
+	winDragFeed(tr, 10, 4, 32, false) // over w2's second pane row
+	if tr.winDrag.dropRow != 5 {
+		t.Fatalf("marker after the block = %d, want the first empty row", tr.winDrag.dropRow)
+	}
+	if tr.winDrag.dropRow == 3 || tr.winDrag.dropRow == 4 {
+		t.Fatal("the marker parked on a pane row")
+	}
+
+	winDragFeed(tr, 10, 4, 0, true) // release: land after the last window
+	if msg := testutil.NextMsg(t, got); msg.Action != "move-window" || msg.Target != "w1" || msg.Dir != "down" {
+		t.Fatalf("drop request = %+v, want move-window w1 down", msg)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// Dropping past the home block still moves the window to the end of its own
+// workspace, never into the one the pointer crossed into.
+func TestWinDragEndFromForeignRows(t *testing.T) {
+	t.Parallel()
+	tr, got := winDragTUI(t)
+	tr.snap.All = append(tr.snap.All,
+		wire.AllPane{ID: "c", Workspace: "s2", WorkspaceName: "two", Window: "w3", WindowName: "three", WorkspaceUnfolded: true})
+
+	winDragFeed(tr, 10, 1, 0, false) // press on w1
+	testutil.NextMsg(t, got)         // the focus
+	winDragFeed(tr, 10, 5, 32, false)
+	if tr.winDrag.dropRow != 3 {
+		t.Fatalf("marker = %d, want the row after the home block", tr.winDrag.dropRow)
+	}
+	winDragFeed(tr, 10, 5, 0, true)
+	if msg := testutil.NextMsg(t, got); msg.Action != "move-window" || msg.Target != "w1" || msg.Dir != "down" {
+		t.Fatalf("drop request = %+v, want move-window w1 down", msg)
+	}
+	testutil.NoMsg(t, got)
+}

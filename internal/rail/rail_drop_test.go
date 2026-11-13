@@ -23,6 +23,7 @@ func TestRailDropInsertionLine(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
 	snap := railRowSnap(layout.DefaultRail)
+	snap.Rows = 16 // room under the list, so an empty row can host the marker
 	items := RailItems(snap)
 	dropAt := -1
 	for y, it := range items {
@@ -49,8 +50,15 @@ func TestRailDropInsertionLine(t *testing.T) {
 		t.Fatal("the drop row left no mark")
 	}
 
+	// The first empty row hosts the end-of-block landing marker.
+	var end bytes.Buffer
+	DrawRail(&end, th, snap, theme.GlyphUnicode, -1, &Drop{Row: len(items), Accent: 2})
+	if !strings.Contains(end.String(), th.Accents[2].SGR(false)) {
+		t.Fatal("the empty-row landing marker drew no accent line")
+	}
+
 	var far bytes.Buffer
-	DrawRail(&far, th, snap, theme.GlyphUnicode, -1, &Drop{Row: len(items) + 3, Accent: 2})
+	DrawRail(&far, th, snap, theme.GlyphUnicode, -1, &Drop{Row: snap.Rows + 3, Accent: 2})
 	if far.String() != plain.String() {
 		t.Fatal("an out-of-range drop row changed the paint")
 	}

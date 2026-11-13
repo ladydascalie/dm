@@ -948,21 +948,22 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 					tail[i].FG = p.RailDim
 				}
 			}
-			// The drop boundary replaces its row with an insertion line in
-			// the dragged project's accent, so the landing spot sits between
-			// the rows it splits.
-			if drop != nil && drop.Row >= 0 && y == drop.Row && it.Kind != Gap {
-				line := th.Glyphs.BorderHorizontal
-				if set == theme.GlyphASCII {
-					line = "-"
-				}
-				left = []segment.Seg{{
-					Text: strings.Repeat(line, rowW),
-					FG:   th.Accents[drop.Accent%len(th.Accents)],
-				}}
-				right, tail = nil, nil
-				bg, bold = p.RailBG, false
+		}
+		// The drop boundary replaces its row with an insertion line in the
+		// dragged project's accent, so the landing spot sits between the rows
+		// it splits. A boundary past the list paints on the first empty row.
+		if drop != nil && drop.Row >= 0 && y == drop.Row && y < controlAt &&
+			(y >= len(items) || items[y].Kind != Gap) {
+			line := th.Glyphs.BorderHorizontal
+			if set == theme.GlyphASCII {
+				line = "-"
 			}
+			left = []segment.Seg{{
+				Text: strings.Repeat(line, rowW),
+				FG:   th.Accents[drop.Accent%len(th.Accents)],
+			}}
+			right, tail = nil, nil
+			bg, bold = p.RailBG, false
 		}
 		leftCells := segment.SegCells(left) + segment.SegCells(tail)
 		rightCells := segment.SegCells(right)

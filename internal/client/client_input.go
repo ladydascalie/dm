@@ -2757,36 +2757,84 @@ func (t *tui) winDragStart(item rail.RailItem, y int) {
 }
 
 // winDragMove follows a held press inside the rail. Motion off the press row
-// arms the drag and parks the drop boundary on the row under the pointer; a
-// boundary on the dragged window's own rows pins to the block's top row, so
-// the marker never promises a move that would change nothing.
+// arms the drag, and the drop boundary snaps to where a window may land: a
+// window row of the home workspace, or the first row past the home block. The
+// pointer never parks the marker on a pane or note row; whichever half of a
+// window's rows it crosses decides a landing before or after that window. A
+// boundary that would change nothing pins to the dragged block's top row.
 func (t *tui) winDragMove(y int) {
 	d := t.winDrag
 	if d == nil || t.snap == nil {
 		return
 	}
+	if y < 0 || y >= t.snap.Rows-2 {
+		return
+	}
+	if !d.armed && y == d.startY {
+		return
+	}
+	d.armed = true
 	items := rail.RailItems(t.snap)
-	drop := -1
-	if y >= 0 && y < len(items) {
-		drop = y
+	// One span per window of the home workspace: its window row and one past
+	// its note and pane rows. Windows keep slice order, so a span's index is
+	// the rank a drop lands against.
+	type span struct {
+		lo, hi int
 	}
-	if !d.armed {
-		if drop == d.startY {
-			return
+	spans := []span{}
+	for i, it := range items {
+		if it.Workspace != d.workspace {
+			continue
 		}
-		d.armed = true
-	}
-	if drop >= 0 && drop < len(items) && items[drop].Window == d.window &&
-		items[drop].Workspace == d.workspace {
-		for i, it := range items {
-			if it.Window == d.window && it.Workspace == d.workspace {
-				drop = i
-				break
+		switch it.Kind {
+		case rail.Window:
+			spans = append(spans, span{i, i + 1})
+		case rail.WindowNote, rail.Pane:
+			if n := len(spans); n > 0 {
+				spans[n-1].hi = i + 1
 			}
 		}
 	}
-	if drop != d.dropRow {
-		d.dropRow = drop
+	src := -1
+	for i, sp := range spans {
+		if items[sp.lo].Window == d.window {
+			src = i
+			break
+		}
+	}
+	if src < 0 {
+		return
+	}
+	// The rank the pointer asks for: before the first window, after the last,
+	// or around whichever window's rows the pointer crosses.
+	k := len(spans)
+	if y < spans[0].lo {
+		k = 0
+	} else if y < spans[len(spans)-1].hi {
+		for i, sp := range spans {
+			if y < sp.lo || y >= sp.hi {
+				continue
+			}
+			if y <= (sp.lo+sp.hi)/2 {
+				k = i
+			} else {
+				k = i + 1
+			}
+			break
+		}
+	}
+	// The marker always sits where the dragged block's top would rest.
+	marker := spans[src].lo
+	switch {
+	case k < src:
+		marker = spans[k].lo
+	case k > src+1 && k < len(spans):
+		marker = spans[k].lo
+	case k > src+1:
+		marker = spans[len(spans)-1].hi
+	}
+	if marker != d.dropRow {
+		d.dropRow = marker
 		t.dirty = true
 	}
 }
@@ -2803,33 +2851,33 @@ func (t *tui) winDragRelease() {
 		return
 	}
 	items := rail.RailItems(t.snap)
-	if d.dropRow >= len(items) {
-		return
-	}
 	// The drop lands before the first window row the boundary reaches inside
-	// the home workspace; count stands for after the last one.
+	// the home workspace; a boundary at or past the list's end lands after
+	// the last one, where the marker parks on the first empty row.
 	src, count := windowRank(t.snap, d.workspace, d.window)
 	dst := count
-	for i := d.dropRow; i < len(items); i++ {
-		it := items[i]
-		if it.Kind == rail.Project && d.project != "" && it.Project == d.project {
-			// Above the home block but under the home project's header is
-			// still the block's top, when the next row re-enters it.
-			if i+1 < len(items) && items[i+1].Workspace == d.workspace {
-				dst = 0
+	if d.dropRow < len(items) {
+		for i := d.dropRow; i < len(items); i++ {
+			it := items[i]
+			if it.Kind == rail.Project && d.project != "" && it.Project == d.project {
+				// Above the home block but under the home project's header is
+				// still the block's top, when the next row re-enters it.
+				if i+1 < len(items) && items[i+1].Workspace == d.workspace {
+					dst = 0
+				}
+				break
 			}
-			break
-		}
-		if it.Workspace != d.workspace {
-			break // the boundary crossed out of the home block
-		}
-		if it.Kind == rail.Workspace {
-			dst = 0
-			break
-		}
-		if it.Kind == rail.Window {
-			dst, _ = windowRank(t.snap, d.workspace, it.Window)
-			break
+			if it.Workspace != d.workspace {
+				break // the boundary crossed out of the home block
+			}
+			if it.Kind == rail.Workspace {
+				dst = 0
+				break
+			}
+			if it.Kind == rail.Window {
+				dst, _ = windowRank(t.snap, d.workspace, it.Window)
+				break
+			}
 		}
 	}
 	final := dst - 1
