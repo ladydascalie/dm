@@ -496,6 +496,16 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		s.reply(cl, m, nil, err)
 
+	case "move-workspace":
+		// The named workspace swaps with its neighbour in its project
+		// group. The slice order is the rail and cycle order, so the
+		// snapshot alone re-renders them.
+		err := s.mutation(func() error { return s.moveWorkspace(m.Target, m.Dir) })
+		if err == nil {
+			s.pushSnapshot()
+		}
+		s.reply(cl, m, nil, err)
+
 	case "rename-window":
 		err := s.mutation(func() error { return s.renameWindow(m.Target, m.Name) })
 		s.afterMutation()
