@@ -111,8 +111,8 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `[` then `/` | search the scrollback, live screen included |
 | `[` then `n` / `N` | older / newer search match, wrapping |
 | `i` | copy the focused pane's id |
-| `h j K l` or arrows | focus pane left / down / up / right |
-| `n` / `p` | next / previous pane |
+| `h j k l` or arrows | focus pane left / down / up / right |
+| `n` / `K` | next / previous pane |
 | `x` | close pane |
 | `X` | close window |
 | `z` | zoom pane |
@@ -124,7 +124,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `0-9` | select window |
 | `t` | new workspace |
 | `s` | switch session (picker: j/k, enter, esc) |
-| `k` | command palette: type to filter every action, enter runs it, esc closes |
+| `p` | command palette: type to filter every action, enter runs it, esc closes, ? explains the selection |
 | `S` | synchronize panes |
 | `a` | dashboard: every pane in a full-screen table |
 | `m` | message box: the session's log as a floating pane |
