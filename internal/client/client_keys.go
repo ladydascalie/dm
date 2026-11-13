@@ -61,27 +61,63 @@ func (t *tui) paneMenuItems(p *wire.PaneInfo, withFocus bool) []menuItem {
 	)
 }
 
+// windowRank reports where a window sits among its workspace's windows, read
+// from the snapshot's All list: workspaces in slice order, windows in slice
+// order, so the first sight of a window id fixes its slot. A window with no
+// live pane earns no slot and reports count 1, which hides both move items.
+func windowRank(snap *wire.Snapshot, workspace, window string) (index, count int) {
+	if snap == nil {
+		return 0, 1
+	}
+	seen := map[string]bool{}
+	for _, p := range snap.All {
+		if p.Workspace != workspace || seen[p.Window] {
+			continue
+		}
+		seen[p.Window] = true
+		if p.Window == window {
+			index = count
+		}
+		count++
+	}
+	return index, count
+}
+
 // windowMenuItems is the item list for a window row or its note row: the
 // actions that act on one window. Focus goes to the window's first available
 // pane, the same pane a left press on the row focuses.
 func (t *tui) windowMenuItems(it rail.RailItem) []menuItem {
-	return []menuItem{
+	items := []menuItem{
 		{label: "Rename window", action: "rename-window", run: func() {
 			t.closeMenu()
 			t.openRenamePromptFor("window", it.Window, it.WindowName)
 		}},
-		{label: "Close window", action: "close-window", run: func() {
+	}
+	idx, count := windowRank(t.snap, it.Workspace, it.Window)
+	if idx > 0 {
+		items = append(items, menuItem{label: "Move window up", action: "move-window", run: func() {
+			t.actionOn(it.Window, "move-window", func(m *wire.Msg) { m.Dir = "up" })
+		}})
+	}
+	if idx+1 < count {
+		items = append(items, menuItem{label: "Move window down", action: "move-window", run: func() {
+			t.actionOn(it.Window, "move-window", func(m *wire.Msg) { m.Dir = "down" })
+		}})
+	}
+	items = append(items,
+		menuItem{label: "Close window", action: "close-window", run: func() {
 			t.actionOn(it.Window, "close-window", nil)
 		}},
-		{label: "Fold/unfold", action: "toggle-fold", run: func() {
+		menuItem{label: "Fold/unfold", action: "toggle-fold", run: func() {
 			t.actionOn(it.Window, "toggle-fold", nil)
 		}},
-		{label: "Focus", action: "focus", run: func() {
+		menuItem{label: "Focus", action: "focus", run: func() {
 			if id := t.firstPaneInWindow(it.Window); id != "" {
 				t.actionOn(id, "focus", nil)
 			}
 		}},
-	}
+	)
+	return items
 }
 
 // workspaceMenuItems is the item list for a workspace row: the actions that act
