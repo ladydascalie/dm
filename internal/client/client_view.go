@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -144,13 +145,16 @@ func (t *tui) draw() {
 		overlay bool
 		force   bool
 		write   bool
+		// over holds the indices of the earlier bands this one paints over:
+		// when one of them rewrites, this band must re-ink the cells it took.
+		over []int
 	}
 	bands := []band{
 		{p: &t.last.box, buf: &box, force: padFreed},
-		{p: &t.last.grip, buf: &grip, force: padFreed},
+		{p: &t.last.grip, buf: &grip, force: padFreed, over: []int{0}},
 		{p: &t.last.rail, buf: &railBuf},
 		{p: &t.last.tabbar, buf: &tabBar},
-		{p: &t.last.div, buf: &div},
+		{p: &t.last.div, buf: &div, over: []int{0, 1}},
 		{p: &t.last.bar, buf: &bar},
 		{p: &t.last.toasts, buf: &toasts, overlay: true},
 		{p: &t.last.pal, buf: &pal, overlay: true},
@@ -164,10 +168,15 @@ func (t *tui) draw() {
 	for i := range t.floats {
 		bands = append(bands, band{p: floatPaints[i], buf: &floatBufs[i], overlay: true})
 	}
+	// paintedRows[i] holds the rows band i laid down this frame, filled in
+	// paint order, so a later band can ask what the bands under it wrote.
+	paintedRows := make([][]int, len(bands))
 	// An overlay paints on top of everything, so the rows it leaves need the
 	// whole picture back: the panes under it and the bands around it. Without a
-	// clear the rows would keep the overlay's glyphs.
-	overlayChanged := false
+	// clear the rows would keep the overlay's glyphs. overlayRows collects the
+	// rows every overlay took or left, so the bands under them re-ink through
+	// the rowsHit test below instead of a blanket repaint.
+	overlayRows := map[int]bool{}
 	for i := range bands {
 		b := &bands[i]
 		b.write = full || b.force || !bytes.Equal(b.p.buf, b.buf.Bytes())
@@ -183,13 +192,14 @@ func (t *tui) draw() {
 		if !b.overlay {
 			continue
 		}
-		overlayChanged = true
 		if !full {
 			for _, y := range old {
 				dirty[y] = true
+				overlayRows[y] = true
 			}
 			for _, y := range b.p.rows {
 				dirty[y] = true
+				overlayRows[y] = true
 			}
 		}
 	}
@@ -241,15 +251,31 @@ func (t *tui) draw() {
 	}
 	for i := range bands {
 		b := &bands[i]
-		// A band that moved an overlay comes back whole, and an overlay goes
-		// back on top whenever a row under it was written.
+		// An overlay goes back on top of every row another layer wrote this
+		// frame. A plain band comes back where an overlay took or left rows
+		// under it, or where a band it paints over rewrote: the pane rows and
+		// the freed divider re-ink their own cells, so a content change under
+		// a band needs no band rewrite.
 		if !b.write {
-			b.write = overlayChanged || (b.overlay && rowsHit(b.p.rows, written))
+			if b.overlay {
+				b.write = rowsHit(b.p.rows, written)
+			} else {
+				b.write = rowsHit(b.p.rows, overlayRows)
+			}
+			if !b.write {
+				for _, j := range b.over {
+					if rowsOverlap(b.p.rows, paintedRows[j]) {
+						b.write = true
+						break
+					}
+				}
+			}
 		}
 		if !b.write {
 			continue
 		}
 		body.Write(b.p.buf)
+		paintedRows[i] = b.p.rows
 		for _, y := range b.p.rows {
 			written[y] = true
 		}
@@ -468,6 +494,16 @@ func bandRows(buf []byte) []int {
 	return rows
 }
 
+// rowsOverlap reports whether the two row sets share a row.
+func rowsOverlap(a, b []int) bool {
+	for _, y := range b {
+		if slices.Contains(a, y) {
+			return true
+		}
+	}
+	return false
+}
+
 // rowsHit reports whether any of rows is in the dirty set.
 func rowsHit(rows []int, dirty map[int]bool) bool {
 	for _, y := range rows {
@@ -518,8 +554,14 @@ func (t *tui) cursorBlock() string {
 		// the command's own cursor.
 		return "\x1b[?25l"
 	}
+	// A screen-owning mode covers the panes, and no cell in it takes typing
+	// from the client: rename and search draw their own carets. Hide the
+	// cursor the last pane frame showed, or it blinks over the mode frame.
+	if t.mode != "" {
+		return "\x1b[?25l"
+	}
 	win := t.snap
-	if win == nil || t.mode != "" {
+	if win == nil {
 		return ""
 	}
 	p := t.paneByID(win.Focus)

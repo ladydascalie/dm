@@ -212,11 +212,13 @@ func openNotifyCentre(t *tui) {
 
 // closeNotifyCentre takes the float down, gives the keyboard back to the
 // panes and marks what the operator saw read, so the list opens clean next
-// time unless something newer arrived.
+// time unless something newer arrived. A body reader over the centre goes
+// with it: no key path reaches the reader once the centre is gone.
 func closeNotifyCentre(t *tui) {
 	if t.ncentre == nil {
 		return
 	}
+	closeBodyReader(t)
 	for _, e := range t.ncentre.entries {
 		if e.Seq > t.notifyRead {
 			t.notifyRead = e.Seq

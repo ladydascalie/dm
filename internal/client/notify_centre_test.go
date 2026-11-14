@@ -366,3 +366,50 @@ func TestCentreClearKeepsCursorMonotonic(t *testing.T) {
 		t.Fatalf("read mark = %d, want it to stay at 3", tui.notifyRead)
 	}
 }
+
+// The reader over the centre follows a resize: a snapshot refits the centre
+// and the reader rides the same rect, the way the box's reader does. Without
+// the sync a shrink leaves the reader's frame past the screen edge.
+func TestCentreReaderFollowsResize(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	feed(tui, "\r")
+	if tui.reader == nil {
+		t.Fatal("enter did not open the reader")
+	}
+	big := *tui.snap
+	big.Cols += 20
+	big.Rows += 10
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &big})
+	if tui.reader == nil {
+		t.Fatal("the snapshot closed the reader")
+	}
+	if tui.reader.Float.Rect != tui.ncentre.Float.Rect {
+		t.Fatalf("reader rect = %+v, want the centre's %+v",
+			tui.reader.Float.Rect, tui.ncentre.Float.Rect)
+	}
+}
+
+// N closes the centre and the reader over it with one key. No key path
+// reaches the reader once the centre is gone, so an orphaned reader float
+// must not survive the close.
+func TestCentreCloseTakesTheReaderDown(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	feed(tui, "\r")
+	if tui.reader == nil {
+		t.Fatal("enter did not open the reader")
+	}
+	feed(tui, "N")
+	if tui.ncentre != nil || tui.mode != "" {
+		t.Fatal("N left the centre up")
+	}
+	if tui.reader != nil {
+		t.Fatal("N left the reader up over a closed centre")
+	}
+	if len(tui.floats) != 0 {
+		t.Fatalf("floats = %d, want none", len(tui.floats))
+	}
+}
