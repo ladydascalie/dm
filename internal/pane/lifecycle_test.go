@@ -2,6 +2,7 @@ package pane
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/osc"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -256,21 +258,50 @@ func TestReplyTerminalWritesIntoThePty(t *testing.T) {
 	}
 }
 
-// TestReplyQueryAnswersTheProbe proves the OSC 7501 probe is echoed back
-// into the pty, which is the channel the asking program reads.
+// TestReplyQueryAnswersTheProbe proves the OSC 7501 probe is answered with a
+// real status reply in the wire format ParseStatus accepts, written into the
+// pty, which is the channel the asking program reads.
 func TestReplyQueryAnswersTheProbe(t *testing.T) {
+	t.Parallel()
+	r, w := ptyPipe(t)
+	p := &paneProc{ptmx: w, st: wire.Status{State: "working", App: "pi", Message: "building"}}
+	p.replyQuery()
+	want := "\x1b]7501;state=working:app=pi:msg=" +
+		base64.StdEncoding.EncodeToString([]byte("building")) + "\x1b\\"
+	got := readReply(t, r, len(want))
+	if string(got) != want {
+		t.Fatalf("pty received %q, want the status reply %q", got, want)
+	}
+	payload := strings.TrimSuffix(strings.TrimPrefix(string(got), "\x1b]7501;"), "\x1b\\")
+	if st := osc.ParseStatus(payload); st.State != "working" || st.App != "pi" || st.Message != "building" {
+		t.Fatalf("ParseStatus(%q) = %+v, want the replied status back", payload, st)
+	}
+}
+
+// TestReplyQueryAnswersWithUnknown proves a pane no program has named yet
+// still answers the probe with a state, the one the rail displays.
+func TestReplyQueryAnswersWithUnknown(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
 	p := &paneProc{ptmx: w}
 	p.replyQuery()
+	want := "\x1b]7501;state=unknown\x1b\\"
+	got := readReply(t, r, len(want))
+	if string(got) != want {
+		t.Fatalf("pty received %q, want the unknown state reply", got)
+	}
+}
+
+// readReply reads exactly n bytes of a pty reply, the whole sequence a probe
+// waits for.
+func readReply(t *testing.T, r *os.File, n int) []byte {
+	t.Helper()
 	_ = r.SetReadDeadline(time.Now().Add(5 * time.Second))
-	got := make([]byte, 10)
+	got := make([]byte, n)
 	if _, err := io.ReadFull(r, got); err != nil {
 		t.Fatalf("read the probe reply: %v", err)
 	}
-	if string(got) != "\x1b]7501;?\x1b\\" {
-		t.Fatalf("pty received %q, want the probe echo", got)
-	}
+	return got
 }
 
 // TestCursorPosReportsTheScreenCursor proves the zero-based cursor the pane

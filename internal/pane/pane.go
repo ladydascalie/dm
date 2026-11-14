@@ -2,6 +2,7 @@ package pane
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -604,12 +605,35 @@ func (p *paneProc) broadcastLocked(m wire.Msg) {
 	}
 }
 
-// replyQuery answers the OSC 7501 feature probe by echoing the body into the
-// PTY, which is the terminal-to-application channel.
+// replyQuery answers the OSC 7501 feature probe with the pane's current
+// status in the wire format ParseStatus accepts, written into the PTY, which
+// is the terminal-to-application channel. The pane is the program's terminal,
+// so the status it displays is the answer.
 func (p *paneProc) replyQuery() {
+	p.mu.Lock()
+	st := p.st
+	p.mu.Unlock()
 	go func() {
-		_, _ = p.ptmx.Write([]byte("\x1b]7501;?\x1b\\"))
+		_, _ = p.ptmx.Write([]byte(formatStatus(st)))
 	}()
+}
+
+// formatStatus renders a status in the OSC 7501 wire format:
+// state=working:app=pi:msg=<b64>. A stateless status reports unknown, the
+// state a pane no program has named yet displays.
+func formatStatus(st wire.Status) string {
+	state := st.State
+	if state == "" {
+		state = "unknown"
+	}
+	s := "state=" + state
+	if st.App != "" {
+		s += ":app=" + st.App
+	}
+	if st.Message != "" {
+		s += ":msg=" + base64.StdEncoding.EncodeToString([]byte(st.Message))
+	}
+	return "\x1b]7501;" + s + "\x1b\\"
 }
 
 // replyTerminal writes a terminal reply into the PTY, which is the app's input.
