@@ -66,3 +66,37 @@ func TestLLMSTextStaysOnePass(t *testing.T) {
 		t.Fatalf("llms.txt is %d lines, want under 449", n)
 	}
 }
+
+// TestLLMSDashWritesStdout proves -o - is stdout, the way html honours it,
+// and never a file named -.
+// Stays serial: the test swaps the process stdout, which belongs to every
+// test at once.
+func TestLLMSDashWritesStdout(t *testing.T) {
+	t.Chdir(t.TempDir())
+	// The document is bigger than a pipe buffer, so stdout is a file here.
+	sink := filepath.Join(t.TempDir(), "stdout")
+	f, err := os.Create(sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = f
+	runErr := Run([]string{"llms", "-o", "-"})
+	os.Stdout = old
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if runErr != nil {
+		t.Fatalf("dm llms -o -: %v", runErr)
+	}
+	got, err := os.ReadFile(sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "## Keys\n") {
+		t.Fatal("dm llms -o - printed no llms.txt")
+	}
+	if _, err := os.Stat("-"); !os.IsNotExist(err) {
+		t.Fatal("dm llms -o - wrote a file named -")
+	}
+}

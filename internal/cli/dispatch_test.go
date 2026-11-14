@@ -443,3 +443,33 @@ func TestWriteToRefusesAnEmptyWrite(t *testing.T) {
 		}
 	}
 }
+
+// TestSurplusPositionalIsRefused proves a verb refuses the positionals it
+// does not take instead of silently dropping them.
+func TestSurplusPositionalIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, argv := range [][]string{
+		{"focus", "w1p1", "w1p2"},
+		{"status", "w1p1", "w1p2"},
+		{"split", "w1p1", "w1p2"},
+		{"rename-workspace", "w1", "a", "b"},
+		{"msg", "list", "extra"},
+		{"ls", "extra"},
+		{"man", "extra"},
+	} {
+		err := Run(argv)
+		if err == nil || !strings.Contains(err.Error(), "unexpected argument") {
+			t.Fatalf("dm %v = %v, want a surplus-positional refusal", argv, err)
+		}
+	}
+}
+
+// TestExecRefusesPositionalAndActionJSON proves the two action carriers are
+// exclusive, the way --body and --body-file are for msg post.
+func TestExecRefusesPositionalAndActionJSON(t *testing.T) {
+	t.Parallel()
+	err := Run([]string{"exec", "--action-json", `{"action":"focus"}`, `{"action":"kill-session"}`})
+	if err == nil || !strings.Contains(err.Error(), "are exclusive") {
+		t.Fatalf("dm exec with both carriers = %v, want an exclusivity refusal", err)
+	}
+}

@@ -170,3 +170,64 @@ func TestPidAliveAny(t *testing.T) {
 		t.Fatal("a live pane pid file was not seen")
 	}
 }
+
+// TestCountValueRefusesNegative proves --lines and --limit refuse a negative
+// count instead of silently meaning the same as absent.
+func TestCountValueRefusesNegative(t *testing.T) {
+	t.Parallel()
+	var n int
+	v := countValue{&n}
+	if err := v.Set("7"); err != nil || n != 7 {
+		t.Fatalf("countValue.Set(\"7\") = %v, n = %d", err, n)
+	}
+	if err := v.Set("-1"); err == nil {
+		t.Fatal("countValue accepted -1")
+	}
+	if err := v.Set("x"); err == nil {
+		t.Fatal("countValue accepted x")
+	}
+	if got := (countValue{}).String(); got != "0" {
+		t.Fatalf("zero countValue.String() = %q, want 0", got)
+	}
+}
+
+// TestCursorValueRefusesBelowAbsent proves --after, --scrollback and --seq
+// refuse anything below -1, the absent mark.
+func TestCursorValueRefusesBelowAbsent(t *testing.T) {
+	t.Parallel()
+	var n int
+	v := cursorValue{&n}
+	if err := v.Set("-1"); err != nil || n != -1 {
+		t.Fatalf("cursorValue.Set(\"-1\") = %v, n = %d", err, n)
+	}
+	if err := v.Set("9"); err != nil || n != 9 {
+		t.Fatalf("cursorValue.Set(\"9\") = %v, n = %d", err, n)
+	}
+	if err := v.Set("-2"); err == nil {
+		t.Fatal("cursorValue accepted -2")
+	}
+	if got := (cursorValue{}).String(); got != "-1" {
+		t.Fatalf("zero cursorValue.String() = %q, want -1", got)
+	}
+}
+
+// TestNumericFlagsKeepTheirKinds proves the numeric flags bind to the
+// validating values and still land in the right fields.
+func TestNumericFlagsKeepTheirKinds(t *testing.T) {
+	t.Parallel()
+	c := newFlagsAt(t.TempDir(), "read")
+	c.parse([]string{"p", "--lines", "3", "--scrollback", "2"})
+	if c.lines != 3 || c.scrollback != 2 {
+		t.Fatalf("read parsed lines %d scrollback %d, want 3 and 2", c.lines, c.scrollback)
+	}
+	c = newFlagsAt(t.TempDir(), "msg")
+	c.parse([]string{"list", "--after", "4", "--limit", "2"})
+	if c.after != 4 || c.limit != 2 {
+		t.Fatalf("msg list parsed after %d limit %d, want 4 and 2", c.after, c.limit)
+	}
+	c = newFlagsAt(t.TempDir(), "msg")
+	c.parse([]string{"show", "--seq", "5"})
+	if c.seq != 5 {
+		t.Fatalf("msg show parsed seq %d, want 5", c.seq)
+	}
+}

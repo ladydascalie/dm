@@ -393,14 +393,14 @@ var cliCommands = []cliCommand{
 		name:    "man",
 		args:    "[-o path]",
 		summary: "print the man page, or write it to a file",
-		flags:   []cliFlag{{"o", "path", "write the page to this path"}},
+		flags:   []cliFlag{{"o", "path", "write the page to this path, or - for stdout"}},
 		group:   groupDocs,
 	},
 	{
 		name:    "llms",
 		args:    "[-o path]",
 		summary: "print llms.txt, or write it to a file",
-		flags:   []cliFlag{{"o", "path", "write the document to this path"}},
+		flags:   []cliFlag{{"o", "path", "write the document to this path, or - for stdout"}},
 		group:   groupDocs,
 	},
 	{
