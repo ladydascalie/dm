@@ -226,6 +226,14 @@ func (st *State) Save() error {
 		_ = os.Remove(tmp)
 		return err
 	}
+	// Flush the payload to the device before the rename. Without the sync a
+	// power loss can leave the renamed state.json empty, and a session whose
+	// state does not parse cannot start.
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
 		return err
@@ -389,17 +397,30 @@ func (st *State) TrimBox() {
 	st.Box = kept
 }
 
+// ActiveWorkspace returns the active workspace. A teardown that has emptied
+// the session drops Workspaces to nil while other goroutines are still
+// serving requests, so an out-of-range or empty slice hands back a throwaway
+// workspace instead of indexing nil and crashing the server.
 func (st *State) ActiveWorkspace() *Workspace {
 	if st.Active < 0 || st.Active >= len(st.Workspaces) {
 		st.Active = 0
 	}
+	if len(st.Workspaces) == 0 {
+		return &Workspace{ID: "s0", Name: st.Name}
+	}
 	return st.Workspaces[st.Active]
 }
 
+// ActiveWindow returns the active window of the active workspace. Like
+// ActiveWorkspace it stays total: an empty workspace hands back a throwaway
+// window rather than an index panic.
 func (st *State) ActiveWindow() *Window {
 	ws := st.ActiveWorkspace()
 	if ws.Active < 0 || ws.Active >= len(ws.Windows) {
 		ws.Active = 0
+	}
+	if len(ws.Windows) == 0 {
+		return &Window{}
 	}
 	return ws.Windows[ws.Active]
 }
