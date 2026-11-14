@@ -3,6 +3,7 @@ package keymap
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -252,6 +253,9 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			if modeName == "" {
 				return fmt.Errorf("line %d: empty keymap mode", toks[i].Line)
 			}
+			if !slices.Contains(keymapOrder, modeName) {
+				return fmt.Errorf("line %d: unknown keymap mode %q; the known modes are %s", toks[i].Line, modeName, strings.Join(keymapOrder, ", "))
+			}
 			i++
 			if i >= len(toks) || toks[i].Kind != kdl.LBrace {
 				return fmt.Errorf("line %d: expected '{' after keymap %q", toks[i-1].Line, modeName)
@@ -333,6 +337,17 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 				}
 				if winner, dup := duplicateBinding(m.bindings, seqs); dup {
 					return fmt.Errorf("line %d: key %q in mode %q is dead: the same bytes already fire action %q", keyLine, key, modeName, winner)
+				}
+				// A main-mode binding on the prefix bytes is dead unarmed:
+				// the prefix arms before main mode sees the key, so the key
+				// opens the command table instead of running the action.
+				// send-prefix is the one action that means the prefix bytes.
+				if modeName == "main" && action != "send-prefix" {
+					for _, seq := range seqs {
+						if bytes.Equal(seq, cfg.prefixBytes) {
+							return fmt.Errorf("line %d: key %q in mode %q is the prefix key; the prefix arms before main mode sees it, so the binding is dead unarmed; bind the action in another mode or change the prefix", keyLine, key, modeName)
+						}
+					}
 				}
 				m.actions[action] = key
 				if section != "" {
@@ -616,8 +631,18 @@ func parseConfig(src string) (*Config, error) {
 	if err := parseKeymaps(toks, cfg); err != nil {
 		return nil, err
 	}
-	if cfg.tabMin != 0 && cfg.tabMax != 0 && cfg.tabMax < cfg.tabMin {
+	// A min above the effective max, the default included, clamps every tab
+	// up to the min and back down to the max, so the node is a silent no-op.
+	// The same holds for a max below the effective min. The default bound is
+	// consulted only for the node the file does not name: a pair that names
+	// both bounds is internally consistent whatever the defaults are.
+	switch {
+	case cfg.tabMin != 0 && cfg.tabMax != 0 && cfg.tabMax < cfg.tabMin:
 		return nil, fmt.Errorf("tab-max-width %d is below tab-min-width %d", cfg.tabMax, cfg.tabMin)
+	case cfg.tabMin != 0 && cfg.tabMax == 0 && cfg.tabMin > defaultTabMax:
+		return nil, fmt.Errorf("tab-min-width %d is above the default tab-max-width %d; set tab-max-width too", cfg.tabMin, defaultTabMax)
+	case cfg.tabMax != 0 && cfg.tabMin == 0 && cfg.tabMax < defaultTabMin:
+		return nil, fmt.Errorf("tab-max-width %d is below the default tab-min-width %d; set tab-min-width too", cfg.tabMax, defaultTabMin)
 	}
 	return cfg, nil
 }
@@ -842,7 +867,7 @@ keymap "box" {
     "toggle-page" "w"
     "close" "q"
     "close-m" "m"
-    "close-prefix" "ctrl+b"
+    "close-prefix" "prefix"
     "close-ctrl-c" "ctrl+c"
     "close-esc" "esc"
 }
@@ -974,6 +999,21 @@ func mergeDefaults(cfg *Config) {
 			// The action stays unbound instead of wearing a stolen key.
 			if bindingTaken(m.bindings, seqs) {
 				continue
+			}
+			// The same holds for a default on the prefix bytes in the main
+			// keymap: the prefix arms before main mode sees the key. Only
+			// send-prefix means the prefix bytes, so it keeps its key.
+			if modeName == "main" && b.action != "send-prefix" {
+				onPrefix := false
+				for _, seq := range seqs {
+					if bytes.Equal(seq, cfg.prefixBytes) {
+						onPrefix = true
+						break
+					}
+				}
+				if onPrefix {
+					continue
+				}
 			}
 			m.actions[b.action] = key
 			if section, ok := defMode.sections[b.action]; ok {

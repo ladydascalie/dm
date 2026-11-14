@@ -163,7 +163,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Prefix, keymaps, commands, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{

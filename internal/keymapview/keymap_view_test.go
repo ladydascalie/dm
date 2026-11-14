@@ -278,3 +278,33 @@ func TestKeymapSearch(t *testing.T) {
 		t.Fatalf("cancel left query %q matches %v", k.query, k.matches)
 	}
 }
+
+// TestKeymapSearchRuneBackspaceAndTypedTitle: backspace cuts one rune, not
+// one byte, and the title shows the query as typed, not lowercased.
+func TestKeymapSearchRuneBackspaceAndTypedTitle(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
+	k := NewKeymapView(snap, keymap.LoadDefault())
+	k.StartSearch()
+	k.AppendQuery("sär")
+	if k.query != "sär" {
+		t.Fatalf("query = %q, want sär", k.query)
+	}
+	k.BackspaceQuery()
+	if k.query != "sä" {
+		t.Fatalf("query after backspace = %q, want sä", k.query)
+	}
+	k.BackspaceQuery()
+	if k.query != "s" {
+		t.Fatalf("query after two backspaces = %q, want s", k.query)
+	}
+
+	// The match test folds case; the title keeps what the operator typed.
+	k.StartSearch()
+	k.AppendQuery("Prefix")
+	if len(k.matches) == 0 {
+		t.Fatal("the case-folded match test found nothing for Prefix")
+	}
+	if got := k.title(); !strings.Contains(got, "/Prefix") {
+		t.Fatalf("title = %q, want the typed query /Prefix", got)
+	}
+}
