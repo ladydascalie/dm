@@ -51,6 +51,9 @@ func Ensure(name string) (net.Conn, error) { return EnsureAt(paths.StateDir(), n
 
 // EnsureAt is Ensure with an explicit state root instead of paths.StateDir().
 func EnsureAt(root, name string) (net.Conn, error) {
+	if !paths.ValidSessionName(name) {
+		return nil, fmt.Errorf("invalid session name %q", name)
+	}
 	sock := paths.ServerSockAt(root, name)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
 		return c, nil
@@ -83,14 +86,53 @@ func EnsureAt(root, name string) (net.Conn, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	_ = cmd.Process.Release()
+	// Wait reaps the child in the background and reports an early exit, so a
+	// server that dies during startup fails the dial loop at once instead of
+	// burning the whole retry budget on a process that is already gone. On a
+	// successful dial the goroutine stays and reaps the server when it exits.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 	for i := 0; i < 100; i++ {
 		if c, err := net.DialTimeout("unix", sock, 100*time.Millisecond); err == nil {
 			return c, nil
 		}
+		select {
+		case err := <-exited:
+			return nil, fmt.Errorf("server for %q exited: %v%s", name, err, logTail(logPath))
+		default:
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return nil, fmt.Errorf("server for %q did not start", name)
+	return nil, fmt.Errorf("server for %q did not start%s", name, logTail(logPath))
+}
+
+// logTail returns the last lines of the server log for an error message. A
+// server that fails during startup names the reason there, and a generic
+// "did not start" is useless without it. A missing or empty log adds nothing.
+func logTail(path string) string {
+	const max = 2048
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return ""
+	}
+	start := int64(0)
+	if info.Size() > max {
+		start = info.Size() - max
+	}
+	b := make([]byte, info.Size()-start)
+	if _, err := f.ReadAt(b, start); err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) > 5 {
+		lines = lines[len(lines)-5:]
+	}
+	return ": server.log: " + strings.Join(lines, " | ")
 }
 
 // RPC sends one request and returns the first response.
@@ -163,6 +205,9 @@ func KillSession(name string) error { return KillSessionAt(paths.StateDir(), nam
 // paths.StateDir(). It never spawns a server: killing a stopped session must
 // not boot it, so the pid file decides and a missing or foreign pid fails.
 func KillSessionAt(root, name string) error {
+	if !paths.ValidSessionName(name) {
+		return fmt.Errorf("invalid session name %q", name)
+	}
 	pid, ok := readPID(filepath.Join(paths.SessionDirAt(root, name), "server.pid"))
 	if !ok || !isDMProcess(pid, "__server") {
 		return fmt.Errorf("session %q has no server pid", name)
@@ -186,6 +231,9 @@ func ResetSession(name string) error { return ResetSessionAt(paths.StateDir(), n
 // ResetSessionAt is ResetSession with an explicit state root instead of
 // paths.StateDir().
 func ResetSessionAt(root, name string) error {
+	if !paths.ValidSessionName(name) {
+		return fmt.Errorf("invalid session name %q", name)
+	}
 	dir := paths.SessionDirAt(root, name)
 	if _, err := os.Stat(dir); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -244,15 +292,24 @@ func reapPanes(dir string) {
 	}
 }
 
-// isDMProcess reports whether pid still runs the named dm subcommand. A
-// stale pid file can name a reused pid, and reset must not kill an unrelated
-// process.
+// isDMProcess reports whether pid still runs the named dm subcommand. It
+// reads procfs argv and matches argv[1] exactly, plus argv[0] against the
+// running dm binary, so a stale pid file naming a reused pid, or a process
+// whose arguments merely mention the subcommand, never matches.
 func isDMProcess(pid int, subcommand string) bool {
 	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(b), subcommand)
+	args := strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
+	if len(args) < 2 || args[1] != subcommand {
+		return false
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return filepath.Base(args[0]) == filepath.Base(exe)
 }
 
 // childPIDs returns the direct children of pid from procfs. A missing file

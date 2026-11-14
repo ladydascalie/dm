@@ -39,7 +39,10 @@ func runProbe(args []string) error {
 			n, err := os.Stdin.Read(buf)
 			if n > 0 {
 				got.Write(buf[:n])
-				if strings.Contains(got.String(), "\x1b]7501;?") {
+				// The verdict rests on the reply shape, not on the echoed
+				// query: a terminal that answers ]7501;state= without echoing
+				// the ? is compliant, and the echo proves nothing.
+				if strings.Contains(got.String(), "]7501;state=") {
 					reply <- got.String()
 					return
 				}
@@ -53,7 +56,7 @@ func runProbe(args []string) error {
 
 	select {
 	case got := <-reply:
-		if strings.Contains(got, "\x1b]7501;?") {
+		if strings.Contains(got, "]7501;state=") {
 			out("PROBE-REPLY=ok\n")
 		} else {
 			out("PROBE-REPLY=bad\n")

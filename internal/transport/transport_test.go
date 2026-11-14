@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -794,13 +795,105 @@ func TestProcessAliveAndWaitGone(t *testing.T) {
 
 func TestIsDMProcess(t *testing.T) {
 	t.Parallel()
-	if !isDMProcess(os.Getpid(), "transport.test") {
-		t.Fatal("the test binary's own pid was not recognised")
-	}
-	if isDMProcess(os.Getpid(), "__server") {
-		t.Fatal("the plain test binary matched the server subcommand")
-	}
-	if isDMProcess(0, "anything") {
+	if isDMProcess(0, "__pane") {
 		t.Fatal("a pid with no procfs entry matched")
+	}
+	if isDMProcess(os.Getpid(), "__pane") {
+		t.Fatal("the plain test binary matched the pane subcommand")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A live dm process: the test binary spawned as its own pane stand-in,
+	// subcommand at argv[1], binary itself at argv[0].
+	pane := exec.Command(exe, "__pane")
+	pane.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := pane.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pane.Process.Kill() })
+	awaitSubcommand(t, pane.Process.Pid, "__pane")
+	if !isDMProcess(pane.Process.Pid, "__pane") {
+		t.Fatal("the spawned pane stand-in was not recognised")
+	}
+	if isDMProcess(pane.Process.Pid, "__server") {
+		t.Fatal("the pane stand-in matched the server subcommand")
+	}
+	// A foreign process whose argv[1] names the subcommand: argv[0] is not
+	// the dm binary, so the identity check must refuse it. This is the
+	// grep __pane shape a substring match used to kill.
+	foreign := exec.Command(exe)
+	foreign.Args = []string{"grep", "__pane"}
+	foreign.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := foreign.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = foreign.Process.Kill() })
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		b, err := os.ReadFile("/proc/" + strconv.Itoa(foreign.Process.Pid) + "/cmdline")
+		if err == nil && strings.Contains(string(b), "__pane") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the foreign stand-in never showed its argv")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if isDMProcess(foreign.Process.Pid, "__pane") {
+		t.Fatal("a foreign argv[0] passed the identity check")
+	}
+}
+
+func TestEnsureRejectsInvalidSessionNames(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, name := range []string{"", "a/b", "..", ".", "a b", "a/b/c"} {
+		if _, err := EnsureAt(root, name); err == nil {
+			t.Fatalf("EnsureAt %q: want an error", name)
+		}
+		if err := KillSessionAt(root, name); err == nil {
+			t.Fatalf("KillSessionAt %q: want an error", name)
+		}
+		if err := ResetSessionAt(root, name); err == nil {
+			t.Fatalf("ResetSessionAt %q: want an error", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "sessions")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a rejected name still created the sessions dir: %v", err)
+	}
+}
+
+func TestEnsureSurfacesTheSpawnedServerExit(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	// A session whose socket path is a directory: the spawned server cannot
+	// listen, exits at once, and EnsureAt must fail fast naming the exit
+	// instead of burning the retry budget on a generic message.
+	if err := os.MkdirAll(paths.ServerSockAt(root, "doomed"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := EnsureAt(root, "doomed")
+	if err == nil {
+		t.Fatal("EnsureAt succeeded against a server that exits at startup")
+	}
+	if !strings.Contains(err.Error(), "exited") {
+		t.Fatalf("EnsureAt = %v, want the child's exit", err)
+	}
+}
+
+func TestLogTail(t *testing.T) {
+	t.Parallel()
+	if logTail(filepath.Join(t.TempDir(), "missing.log")) != "" {
+		t.Fatal("a missing log added nothing, want an empty tail")
+	}
+	path := filepath.Join(t.TempDir(), "server.log")
+	if err := os.WriteFile(path, []byte("old line\nreason: session \"x\" already has a server\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tail := logTail(path)
+	if !strings.Contains(tail, "already has a server") {
+		t.Fatalf("logTail = %q, want the last line", tail)
 	}
 }
