@@ -633,13 +633,15 @@ func parseConfig(src string) (*Config, error) {
 	}
 	// A min above the effective max, the default included, clamps every tab
 	// up to the min and back down to the max, so the node is a silent no-op.
-	// The same holds for a max below the effective min.
+	// The same holds for a max below the effective min. The default bound is
+	// consulted only for the node the file does not name: a pair that names
+	// both bounds is internally consistent whatever the defaults are.
 	switch {
 	case cfg.tabMin != 0 && cfg.tabMax != 0 && cfg.tabMax < cfg.tabMin:
 		return nil, fmt.Errorf("tab-max-width %d is below tab-min-width %d", cfg.tabMax, cfg.tabMin)
-	case cfg.tabMin != 0 && cfg.tabMin > defaultTabMax:
+	case cfg.tabMin != 0 && cfg.tabMax == 0 && cfg.tabMin > defaultTabMax:
 		return nil, fmt.Errorf("tab-min-width %d is above the default tab-max-width %d; set tab-max-width too", cfg.tabMin, defaultTabMax)
-	case cfg.tabMax != 0 && cfg.tabMax < defaultTabMin:
+	case cfg.tabMax != 0 && cfg.tabMin == 0 && cfg.tabMax < defaultTabMin:
 		return nil, fmt.Errorf("tab-max-width %d is below the default tab-min-width %d; set tab-min-width too", cfg.tabMax, defaultTabMin)
 	}
 	return cfg, nil

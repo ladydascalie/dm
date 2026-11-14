@@ -2098,6 +2098,10 @@ func TestConfigTabWidthAgainstDefaultBound(t *testing.T) {
 		{"max below default min", "tab-max-width 5", "tab-max-width 5 is below the default tab-min-width 8"},
 		{"min at default max", "tab-min-width 20", ""},
 		{"max at default min", "tab-max-width 8", ""},
+		// A pair that names both bounds is consistent whatever the defaults
+		// are; the default bound is only for a node the file omits.
+		{"both above default max", "tab-min-width 25\ntab-max-width 30", ""},
+		{"both below default min", "tab-min-width 3\ntab-max-width 5", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
