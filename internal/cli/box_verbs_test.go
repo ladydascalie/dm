@@ -299,7 +299,7 @@ func TestMsgSchemaPrintsJSON(t *testing.T) {
 func TestMsgUnknownVerbIsRefused(t *testing.T) {
 	startFakeServer(t, "main", okHandler(`{}`))
 	err := Run([]string{"msg", "poke"})
-	if err == nil || !strings.Contains(err.Error(), "unknown verb") || !strings.Contains(err.Error(), "post, list, wait, sub, clear, watchers or schema") {
+	if err == nil || !strings.Contains(err.Error(), "unknown verb") || !strings.Contains(err.Error(), "post, list, show, wait, sub, clear, watchers or schema") {
 		t.Fatalf("dm msg poke = %v", err)
 	}
 }

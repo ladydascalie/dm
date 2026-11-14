@@ -138,7 +138,7 @@ var fieldFlag = map[string]string{
 
 // cmdFlagsMethods are the methods the walk recurses into. parse is missing on
 // purpose: it registers flags instead of reading them.
-var cmdFlagsMethods = map[string]bool{"boxCursor": true}
+var cmdFlagsMethods = map[string]bool{"boxCursor": true, "extraArg": true}
 
 // notFlags are the cmdFlags fields no flag sets.
 var notFlags = map[string]bool{"fs": true, "args": true, "root": true, "usage": true}

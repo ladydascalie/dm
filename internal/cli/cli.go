@@ -65,6 +65,9 @@ type cmdFlags struct {
 // newFlagsAt builds the flag set for one verb, rooted at the given state dir.
 func newFlagsAt(root, name string) *cmdFlags {
 	c := &cmdFlags{fs: flag.NewFlagSet(name, flag.ExitOnError), root: root}
+	// The cursor flags default to -1: the absent mark their value refuses to
+	// cross.
+	c.scrollback, c.seq, c.after = -1, -1, -1
 	// A pane exports its session, so a command from inside it targets that
 	// session without -s. Outside dm the default stays main. A dead
 	// DM_SESSION falls back to main at resolveSession, after the parse.
@@ -193,9 +196,9 @@ func (c *cmdFlags) register(name, desc string) {
 	case "dir":
 		c.fs.StringVar(&c.dir, "dir", "right", desc)
 	case "lines":
-		c.fs.IntVar(&c.lines, "lines", 0, desc)
+		c.fs.Var(countValue{&c.lines}, "lines", desc)
 	case "scrollback":
-		c.fs.IntVar(&c.scrollback, "scrollback", -1, desc)
+		c.fs.Var(cursorValue{&c.scrollback}, "scrollback", desc)
 	case "json":
 		c.fs.BoolVar(&c.jsonOut, "json", false, desc)
 	case "key":
@@ -209,13 +212,13 @@ func (c *cmdFlags) register(name, desc string) {
 	case "body-file":
 		c.fs.StringVar(&c.bodyFile, "body-file", "", desc)
 	case "seq":
-		c.fs.IntVar(&c.seq, "seq", -1, desc)
+		c.fs.Var(cursorValue{&c.seq}, "seq", desc)
 	case "from":
 		c.fs.StringVar(&c.from, "from", "", desc)
 	case "limit":
-		c.fs.IntVar(&c.limit, "limit", 0, desc)
+		c.fs.Var(countValue{&c.limit}, "limit", desc)
 	case "after":
-		c.fs.IntVar(&c.after, "after", -1, desc)
+		c.fs.Var(cursorValue{&c.after}, "after", desc)
 	case "timeout":
 		c.fs.DurationVar(&c.timeout, "timeout", 5*time.Minute, desc)
 	case "dry-run":
@@ -229,6 +232,63 @@ func (c *cmdFlags) register(name, desc string) {
 	default:
 		panic("cli: no field binding for flag " + name)
 	}
+}
+
+// countValue is a whole-number flag value: --lines and --limit. Zero means
+// the flag is absent, so a negative count is refused at parse time instead
+// of silently meaning the same thing.
+type countValue struct{ p *int }
+
+func (v countValue) String() string {
+	if v.p == nil {
+		return "0"
+	}
+	return strconv.Itoa(*v.p)
+}
+
+func (v countValue) Set(s string) error {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return errors.New("must be a whole number")
+	}
+	if n < 0 {
+		return errors.New("must not be negative")
+	}
+	*v.p = n
+	return nil
+}
+
+// cursorValue is a sequence-number flag value: --after, --scrollback and
+// --seq. The default -1 means the flag is absent, so anything below it is
+// refused at parse time instead of silently meaning the same thing.
+type cursorValue struct{ p *int }
+
+func (v cursorValue) String() string {
+	if v.p == nil {
+		return "-1"
+	}
+	return strconv.Itoa(*v.p)
+}
+
+func (v cursorValue) Set(s string) error {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return errors.New("must be a whole number")
+	}
+	if n < -1 {
+		return errors.New("must be a sequence number, or -1 for absent")
+	}
+	*v.p = n
+	return nil
+}
+
+// extraArg reports the first positional beyond the n a verb takes, so a
+// surplus argument is refused instead of silently dropped.
+func (c *cmdFlags) extraArg(n int) error {
+	if len(c.args) <= n {
+		return nil
+	}
+	return fmt.Errorf("%s: unexpected argument %q", c.fs.Name(), c.args[n])
 }
 
 // withValue names the flags that take a value, so reorder and firstArg know
@@ -274,6 +334,9 @@ func Run(argv []string) error {
 	case "attach", "a":
 		c := newFlagsAt(root, "attach")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		name := c.session
 		if len(c.args) > 0 {
 			name = c.args[0]
@@ -283,6 +346,9 @@ func Run(argv []string) error {
 	case "new":
 		c := newFlagsAt(root, "new")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		name := c.session
 		if len(c.args) > 0 {
 			name = c.args[0]
@@ -301,11 +367,17 @@ func Run(argv []string) error {
 	case "ls", "list-sessions":
 		c := newFlagsAt(root, "ls")
 		c.parse(argv[1:])
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
 		return runLs(c)
 
 	case "kill":
 		c := newFlagsAt(root, "kill")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		name := c.session
 		if len(c.args) > 0 {
 			name = c.args[0]
@@ -315,20 +387,29 @@ func Run(argv []string) error {
 	case "reset":
 		c := newFlagsAt(root, "reset")
 		c.parse(argv[1:])
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
 		return runReset(c)
 
 	case "purge":
 		c := newFlagsAt(root, "purge")
 		c.parse(argv[1:])
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
 		return runPurge(c)
 
 	case "man":
 		fs := flag.NewFlagSet("man", flag.ExitOnError)
 		fs.Usage = func() { fmt.Fprint(os.Stderr, clidoc.VerbHelp("man")) }
-		out := fs.String("o", "", "write the page to this path")
+		out := fs.String("o", "", "write the page to this path, or - for stdout")
 		_ = fs.Parse(argv[1:])
+		if fs.NArg() > 0 {
+			return fmt.Errorf("man: unexpected argument %q", fs.Arg(0))
+		}
 		page := clidoc.ManPage()
-		if *out == "" {
+		if *out == "" || *out == "-" {
 			fmt.Print(page)
 			return nil
 		}
@@ -337,10 +418,13 @@ func Run(argv []string) error {
 	case "llms":
 		fs := flag.NewFlagSet("llms", flag.ExitOnError)
 		fs.Usage = func() { fmt.Fprint(os.Stderr, clidoc.VerbHelp("llms")) }
-		out := fs.String("o", "", "write the document to this path")
+		out := fs.String("o", "", "write the document to this path, or - for stdout")
 		_ = fs.Parse(argv[1:])
+		if fs.NArg() > 0 {
+			return fmt.Errorf("llms: unexpected argument %q", fs.Arg(0))
+		}
 		doc := clidoc.LLMsText()
-		if *out == "" {
+		if *out == "" || *out == "-" {
 			fmt.Print(doc)
 			return nil
 		}
@@ -351,12 +435,21 @@ func Run(argv []string) error {
 		fs.Usage = func() { fmt.Fprint(os.Stderr, clidoc.VerbHelp("html")) }
 		out := fs.String("o", "", "write the page to this path, or - for stdout")
 		_ = fs.Parse(argv[1:])
+		if fs.NArg() > 0 {
+			return fmt.Errorf("html: unexpected argument %q", fs.Arg(0))
+		}
 		return runHTML(*out)
 
 	case "exec":
 		c := newFlagsAt(root, "exec")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		raw := c.msgJSON
+		if raw != "" && len(c.args) > 0 {
+			return fmt.Errorf("exec: --action-json and the positional JSON are exclusive")
+		}
 		if raw == "" && len(c.args) > 0 {
 			raw = c.args[0]
 		}
@@ -372,6 +465,9 @@ func Run(argv []string) error {
 	case "write-to", "write":
 		c := newFlagsAt(root, "write-to")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		if len(c.args) < 1 {
 			return fmt.Errorf("write-to needs a pane id")
 		}
@@ -383,6 +479,9 @@ func Run(argv []string) error {
 	case "read":
 		c := newFlagsAt(root, "read")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		if len(c.args) < 1 {
 			return fmt.Errorf("read needs a pane id")
 		}
@@ -412,6 +511,9 @@ func Run(argv []string) error {
 	case "yank":
 		c := newFlagsAt(root, "yank")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		if len(c.args) < 1 {
 			return fmt.Errorf("yank needs a pane id")
 		}
@@ -428,6 +530,9 @@ func Run(argv []string) error {
 	case "wait":
 		c := newFlagsAt(root, "wait")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		code, err := runWait(c)
 		if err != nil {
 			return err
@@ -443,6 +548,9 @@ func Run(argv []string) error {
 	case "split":
 		c := newFlagsAt(root, "split")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		if len(c.args) < 1 {
 			return fmt.Errorf("split needs a pane id")
 		}
@@ -466,6 +574,9 @@ func Run(argv []string) error {
 	case "focus":
 		c := newFlagsAt(root, "focus")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		if len(c.args) < 1 {
 			return fmt.Errorf("focus needs a pane id")
 		}
@@ -474,6 +585,9 @@ func Run(argv []string) error {
 	case "rename-workspace":
 		c := newFlagsAt(root, "rename-workspace")
 		c.parse(argv[1:])
+		if err := c.extraArg(2); err != nil {
+			return err
+		}
 		if len(c.args) < 2 {
 			return fmt.Errorf("rename-workspace needs a workspace id and a name")
 		}
@@ -482,6 +596,9 @@ func Run(argv []string) error {
 	case "set-project":
 		c := newFlagsAt(root, "set-project")
 		c.parse(argv[1:])
+		if err := c.extraArg(2); err != nil {
+			return err
+		}
 		if len(c.args) < 1 {
 			return fmt.Errorf("set-project needs a workspace id and a project name")
 		}
@@ -494,11 +611,17 @@ func Run(argv []string) error {
 	case "next-pane", "prev-pane", "new-window", "next-window", "prev-window":
 		c := newFlagsAt(root, argv[0])
 		c.parse(argv[1:])
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
 		return printRPC(c.session, wire.Msg{Action: argv[0]})
 
 	case "status":
 		c := newFlagsAt(root, "status")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		target := ""
 		if len(c.args) > 0 {
 			target = c.args[0]
@@ -539,11 +662,17 @@ func Run(argv []string) error {
 	case "dash":
 		c := newFlagsAt(root, "dash")
 		c.parse(argv[1:])
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
 		return dash(c.session)
 
 	case "peek":
 		c := newFlagsAt(root, "peek")
 		c.parse(argv[1:])
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		if len(c.args) < 1 {
 			return fmt.Errorf("peek needs a target")
 		}
@@ -557,6 +686,9 @@ func Run(argv []string) error {
 	case "list":
 		c := newFlagsAt(root, "list")
 		c.parse(argv[1:])
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
 		return runList(c)
 
 	default:
@@ -566,6 +698,9 @@ func Run(argv []string) error {
 		c := newFlagsAt(root, "attach")
 		c.usage = clidoc.UsageText
 		c.parse(argv)
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
 		name := c.session
 		if len(c.args) > 0 {
 			name = c.args[0]
@@ -598,6 +733,9 @@ func runBox(c *cmdFlags) error {
 		fmt.Print(clidoc.MsgSubcommands())
 		return nil
 	}
+	if len(c.args) > 1 {
+		return fmt.Errorf("msg %s: unexpected argument %q", c.args[0], c.args[1])
+	}
 	switch c.args[0] {
 	case "post":
 		return boxPostVerb(c)
@@ -616,7 +754,7 @@ func runBox(c *cmdFlags) error {
 	case "schema":
 		return boxSchemaVerb(c)
 	}
-	return fmt.Errorf("msg: unknown verb %q: want post, list, wait, sub, clear, watchers or schema", c.args[0])
+	return fmt.Errorf("msg: unknown verb %q: want post, list, show, wait, sub, clear, watchers or schema", c.args[0])
 }
 
 // boxBody resolves the body the post carries: --body wins, --body-file reads

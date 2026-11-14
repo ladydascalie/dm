@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"dm/internal/cli"
 	"dm/internal/clidoc"
@@ -24,7 +25,20 @@ func main() {
 			exit(runProbe(args[1:]))
 			return
 		case "-h", "--help", "help":
-			fmt.Print(clidoc.UsageText())
+			if len(args) == 1 {
+				fmt.Print(clidoc.UsageText())
+				return
+			}
+			topic := strings.Join(args[1:], " ")
+			if topic == "msg" {
+				fmt.Print(clidoc.MsgSubcommands())
+				return
+			}
+			if help := clidoc.VerbHelp(topic); help != "" {
+				fmt.Print(help)
+				return
+			}
+			exit(fmt.Errorf("no help topic %q", topic))
 			return
 		}
 	}
