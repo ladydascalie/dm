@@ -490,6 +490,33 @@ func (s *server) endSession() {
 	s.exitFunc()(0)
 }
 
+// terminate is the SIGTERM handler: it closes the clients, removes the
+// socket and the pid file, and exits. It keeps the session directory, so the
+// panes keep their sockets and stay adoptable, the same panes a crash leaves
+// behind.
+func (s *server) terminate() {
+	s.mu.Lock()
+	s.ending = true
+	s.stopReflowLocked()
+	clients := make([]*client, 0, len(s.clients))
+	for c := range s.clients {
+		clients = append(clients, c)
+	}
+	s.broadcastLocked(wire.Msg{Type: "close"})
+	s.mu.Unlock()
+
+	st := s.st
+	_ = os.Remove(st.ServerSock())
+	_ = os.Remove(filepath.Join(st.SessionDir(), "server.pid"))
+	for _, c := range clients {
+		_ = c.c.Close()
+	}
+	if s.ln != nil {
+		_ = s.ln.Close()
+	}
+	s.exitFunc()(0)
+}
+
 func (s *server) pushSnapshot() {
 	s.mu.Lock()
 	snap := s.snapshotLocked()

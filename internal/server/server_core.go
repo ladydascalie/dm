@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -431,6 +432,23 @@ func Run(args []string) error {
 	// A pending settle must not outlive the accept loop. endSession exits the
 	// process before this defer runs, so it stops the timer itself.
 	defer s.stopReflow()
+
+	// SIGTERM ends the server the way a crash would, minus the mess: the
+	// listener and the clients close, the socket and the pid file go, and the
+	// panes keep running with intact sockets for the next attach to adopt. A
+	// signal that lands during startup waits for it, so the handler never
+	// tears down a half-spawned session.
+	started := make(chan struct{})
+	sigTerm := make(chan os.Signal, 1)
+	signal.Notify(sigTerm, syscall.SIGTERM)
+	go func() {
+		<-sigTerm
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+		}
+		s.terminate()
+	}()
 	if s.cols < 20 {
 		s.cols = 80
 	}
@@ -492,6 +510,7 @@ func Run(args []string) error {
 	s.ln = ln
 	_ = os.Chmod(sock, 0o600)
 	writePID(filepath.Join(st.SessionDir(), "server.pid"))
+	close(started)
 
 	log.Printf("session %q listening on %s", *name, sock)
 	for {
