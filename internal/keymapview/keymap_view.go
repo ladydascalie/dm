@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"dm/internal/cells"
 	"dm/internal/keymap"
@@ -223,25 +224,29 @@ func (k *KeymapView) AppendQuery(s string) {
 	k.SetQuery(k.query + s)
 }
 
-// BackspaceQuery removes the last byte of the query.
+// BackspaceQuery removes the last rune of the query. A multi-byte rune goes
+// whole: cutting one byte would leave a broken prefix that matches nothing.
 func (k *KeymapView) BackspaceQuery() {
 	if k.query == "" {
 		return
 	}
-	k.SetQuery(k.query[:len(k.query)-1])
+	_, size := utf8.DecodeLastRuneInString(k.query)
+	k.SetQuery(k.query[:len(k.query)-size])
 }
 
 // SetQuery replaces the query, recomputes the matching binding rows and puts
-// the first match in view. An empty query clears the highlight.
+// the first match in view. An empty query clears the highlight. The query is
+// kept as typed: the title shows it, and only the match test folds case.
 func (k *KeymapView) SetQuery(q string) {
-	k.query = strings.ToLower(q)
+	k.query = q
+	lower := strings.ToLower(q)
 	k.matches = k.matches[:0]
-	if k.query != "" {
+	if lower != "" {
 		for i, row := range k.rows {
 			if keymapHeader(row) || strings.TrimSpace(row) == "" {
 				continue
 			}
-			if strings.Contains(strings.ToLower(row), k.query) {
+			if strings.Contains(strings.ToLower(row), lower) {
 				k.matches = append(k.matches, i)
 			}
 		}
@@ -305,7 +310,7 @@ func (k *KeymapView) style(i int) string {
 		return "\x1b[0m\x1b[97m"
 	case k.activeMatch(i):
 		return "\x1b[0m\x1b[30;103m"
-	case k.query != "" && strings.Contains(strings.ToLower(k.rows[i]), k.query):
+	case k.query != "" && strings.Contains(strings.ToLower(k.rows[i]), strings.ToLower(k.query)):
 		return "\x1b[0m\x1b[30;107m"
 	default:
 		return "\x1b[0m\x1b[90m"

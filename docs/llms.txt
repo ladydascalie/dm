@@ -402,7 +402,7 @@ The marks are defined by the semantic prompts proposal: https://gitlab.freedeskt
 | `$DM_STATE/sessions/<name>/server.sock` | Unix socket the session server listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.sock` | Unix socket one pane's mux listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.log` | Pane output log. |
-| `$XDG_CONFIG_HOME/dm/config.kdl` | Prefix, keymaps, commands, default-fold, tab widths, padding, glyphs, window label and theme name; written on first run. |
+| `$XDG_CONFIG_HOME/dm/config.kdl` | Holds prefix, keymaps, commands, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run. |
 | `$XDG_CONFIG_HOME/dm/themes/<name>.kdl` | Theme palette, accents, glyphs and state styles. |
 
 ## Recipes

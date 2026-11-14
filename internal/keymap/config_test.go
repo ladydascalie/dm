@@ -2007,3 +2007,177 @@ func TestLoadRejectsUnknownAction(t *testing.T) {
 		t.Errorf("Key(main, close-pane) = %q, want the built-in x on the fallback defaults", got)
 	}
 }
+
+// TestParseRejectsPrefixKeyBinding proves a main-mode binding on the prefix
+// bytes fails the parse: the prefix arms before main mode sees the key, so
+// the binding is dead unarmed and the help box would advertise it anyway.
+// send-prefix is the one action that means the prefix bytes.
+func TestParseRejectsPrefixKeyBinding(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"letter", "prefix \"s\"\nkeymap \"main\" {\n\"picker\" \"s\"\n}\n", "is the prefix key"},
+		{"esc", "prefix \"esc\"\nkeymap \"main\" {\n\"dismiss-esc\" \"esc\"\n}\n", "is the prefix key"},
+		{"enter ctrl m", "prefix \"ctrl+m\"\nkeymap \"main\" {\n\"message-box\" \"enter\"\n}\n", "is the prefix key"},
+		{"other mode is fine", "prefix \"s\"\nkeymap \"picker\" {\n\"close-s\" \"s\"\n}\n", ""},
+		{"send-prefix is fine", "prefix \"s\"\nkeymap \"main\" {\n\"send-prefix\" \"prefix\"\n}\n", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := LoadPath(writeConfigFile(t, t.TempDir(), c.src))
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("LoadPath: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("LoadPath accepted a main-mode binding on the prefix bytes")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error = %q, want %q", err, c.want)
+			}
+		})
+	}
+	if _, err := parseConfig(defaultConfigKDL); err != nil {
+		t.Fatalf("the default config now fails: %v", err)
+	}
+}
+
+// TestMergeSkipsDefaultOnPrefixKey proves a remapped prefix that lands on a
+// default main-mode key leaves that default unbound instead of advertising a
+// key the prefix eats, and that send-prefix keeps the prefix bytes.
+func TestMergeSkipsDefaultOnPrefixKey(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), "prefix \"y\"\n"))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.Key("main", "copy-output"); got != "" {
+		t.Errorf("Key(main, copy-output) = %q, want unbound: y is the prefix key now", got)
+	}
+	// Key prints the prefix key's display name, which the remap moved to y.
+	if got := cfg.Key("main", "send-prefix"); got != "y" {
+		t.Errorf("Key(main, send-prefix) = %q, want the prefix key y", got)
+	}
+	if action, _, state := cfg.Match("main", []byte{'y'}); state != Match || action != "send-prefix" {
+		t.Errorf("Match(main, y) = %q, %v, want send-prefix, Match", action, state)
+	}
+}
+
+// TestConfigBoxClosePrefixFollowsPrefix proves the box and layout close-prefix
+// bindings resolve the live prefix key, not a stale literal, so a remapped
+// prefix still closes the overlays.
+func TestConfigBoxClosePrefixFollowsPrefix(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), "prefix \"ctrl+a\"\n"))
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	for _, mode := range []string{"box", "layout"} {
+		if got := cfg.Key(mode, "close-prefix"); got != "ctrl+a" {
+			t.Errorf("Key(%s, close-prefix) = %q, want the live prefix ctrl+a", mode, got)
+		}
+		if action, _, state := cfg.Match(mode, []byte{0x01}); state != Match || action != "close-prefix" {
+			t.Errorf("Match(%s, ctrl+a) = %q, %v, want close-prefix, Match", mode, action, state)
+		}
+	}
+}
+
+// TestConfigTabWidthAgainstDefaultBound proves a tab width node alone is
+// checked against the effective other bound, the default included: a min
+// above the default max or a max below the default min would clamp every tab
+// into the default and silently ignore the node.
+func TestConfigTabWidthAgainstDefaultBound(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"min above default max", "tab-min-width 30", "tab-min-width 30 is above the default tab-max-width 20"},
+		{"max below default min", "tab-max-width 5", "tab-max-width 5 is below the default tab-min-width 8"},
+		{"min at default max", "tab-min-width 20", ""},
+		{"max at default min", "tab-max-width 8", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parseConfig(c.src)
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("parseConfig: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("parseConfig accepted a min or max the default bound silences")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error = %q, want %q", err, c.want)
+			}
+		})
+	}
+}
+
+// TestConfigUnknownMode proves a keymap mode outside the fixed nine fails the
+// parse instead of binding keys nothing reads.
+func TestConfigUnknownMode(t *testing.T) {
+	_, err := parseConfig("keymap \"float\" {\n\"close\" \"q\"\n}\n")
+	if err == nil {
+		t.Fatal("parseConfig accepted an unknown keymap mode")
+	}
+	if !strings.Contains(err.Error(), `unknown keymap mode "float"`) {
+		t.Errorf("error = %q, want an unknown keymap mode", err)
+	}
+	for _, mode := range keymapOrder {
+		src := "keymap \"" + mode + "\" {\n\"close\" \"q\"\n}\n"
+		if _, err := parseConfig(src); err != nil {
+			t.Errorf("parseConfig(%q): %v", src, err)
+		}
+	}
+}
+
+// TestLoadFallsBackToGoodConfig proves a broken config file runs the last
+// copy that parsed instead of the built-in defaults, and that the error names
+// both the broken line and the fallback.
+func TestLoadFallsBackToGoodConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfigFile(t, dir, "prefix \"ctrl+a\"\n")
+	cfg, err := LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got := cfg.PrefixName(); got != "ctrl+a" {
+		t.Fatalf("PrefixName = %q, want ctrl+a", got)
+	}
+	if _, err := os.Stat(path + ".good"); err != nil {
+		t.Fatalf("the good copy is missing: %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("bogus \"x\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadPath(path)
+	if err == nil {
+		t.Fatal("LoadPath accepted the broken file")
+	}
+	if !strings.Contains(err.Error(), "unknown node") || !strings.Contains(err.Error(), "last good config") {
+		t.Errorf("error = %q, want the broken line and the fallback", err)
+	}
+	if got := cfg.PrefixName(); got != "ctrl+a" {
+		t.Fatalf("the fallback ran the defaults: PrefixName = %q, want ctrl+a", got)
+	}
+
+	if err := os.Remove(path + ".good"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadPath(path)
+	if err == nil {
+		t.Fatal("LoadPath accepted the broken file")
+	}
+	if !reflect.DeepEqual(cfg, LoadDefault()) {
+		t.Fatal("without a good copy the load did not return the defaults")
+	}
+	if strings.Contains(err.Error(), "last good config") {
+		t.Errorf("error = %q, want no fallback note without a good copy", err)
+	}
+}

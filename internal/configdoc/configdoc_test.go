@@ -323,6 +323,44 @@ func TestEnvVars(t *testing.T) {
 	}
 }
 
+// TestFilesConfigKDL proves the config.kdl row names every node the parser
+// accepts, so the prose cannot lag the node table again, and pins the file
+// paths the table lists.
+func TestFilesConfigKDL(t *testing.T) {
+	var desc string
+	paths := make([]string, 0, len(Files))
+	for _, f := range Files {
+		paths = append(paths, f.Path)
+		if f.Path == "$XDG_CONFIG_HOME/dm/config.kdl" {
+			desc = f.Desc
+		}
+	}
+	if desc == "" {
+		t.Fatal("Files has no config.kdl row")
+	}
+	lower := strings.ToLower(desc)
+	var missing []string
+	for _, n := range ConfigNodes {
+		if !strings.Contains(lower, n.Name) {
+			missing = append(missing, n.Name)
+		}
+	}
+	if len(missing) > 0 {
+		t.Errorf("config.kdl description omits the nodes: %s", strings.Join(missing, ", "))
+	}
+	want := []string{
+		"$DM_STATE/sessions/<name>/state.json",
+		"$DM_STATE/sessions/<name>/server.sock",
+		"$DM_STATE/sessions/<name>/panes/<id>.sock",
+		"$DM_STATE/sessions/<name>/panes/<id>.log",
+		"$XDG_CONFIG_HOME/dm/config.kdl",
+		"$XDG_CONFIG_HOME/dm/themes/<name>.kdl",
+	}
+	if !reflect.DeepEqual(paths, want) {
+		t.Errorf("Files paths = %v, want %v", paths, want)
+	}
+}
+
 // sampleDefaultTheme is the theme a file that names every key at its default
 // paints. An explicit fold caret or state glyph also replaces its Nerd Font
 // form.
