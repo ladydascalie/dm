@@ -6,8 +6,18 @@ import (
 )
 
 // maxString bounds an OSC or DCS body so a runaway sequence cannot grow the
-// parser without limit.
-const maxString = 4096
+// parser without limit. maxSeq caps a CSI body and an escape's intermediates
+// the same way, and maxCluster caps one grapheme cluster.
+const (
+	maxString  = 4096
+	maxSeq     = 4096
+	maxCluster = 64
+)
+
+// maxParam is the largest parameter parseParams reports. A longer digit run
+// saturates there instead of overflowing the int and feeding handlers a
+// negative or wrapped count.
+const maxParam = 65535
 
 // parserState is the byte state machine's position.
 type parserState uint8
@@ -130,6 +140,12 @@ func (p *parser) rune(t *Term, r rune) {
 		}
 	}
 	p.cluster = utf8.AppendRune(p.cluster, r)
+	// A cluster past the cap flushes early. The mark that would have joined
+	// it starts a cell of its own, which bounds the accumulator the way
+	// maxString bounds an OSC body.
+	if len(p.cluster) >= maxCluster {
+		p.flush(t)
+	}
 }
 
 // flush places the cluster under construction and clears it.
@@ -145,6 +161,16 @@ func (p *parser) flush(t *Term) {
 func (p *parser) startEscape() {
 	p.esc = p.esc[:0]
 	p.state = stateEscape
+}
+
+// appendCapped appends c to b unless b has reached maxSeq. An accumulator
+// past its cap stops growing and the sequence truncates, the way maxString
+// bounds an OSC body.
+func appendCapped(b []byte, c byte) []byte {
+	if len(b) < maxSeq {
+		b = append(b, c)
+	}
+	return b
 }
 
 // escapeByte consumes one byte of an escape sequence.
@@ -165,7 +191,7 @@ func (p *parser) escapeByte(t *Term, c byte) {
 			p.esc = p.esc[:0]
 			p.state = stateCharset
 		default:
-			p.esc = append(p.esc, c)
+			p.esc = appendCapped(p.esc, c)
 		}
 	case c == '[':
 		p.seq = p.seq[:0]
@@ -201,7 +227,9 @@ func (p *parser) csiByte(t *Term, c byte) {
 		t.csi(p.parseCSI(c))
 		p.state = stateGround
 	default: // parameter and intermediate bytes 0x20..0x3f
-		p.seq = append(p.seq, c)
+		if len(p.seq) < maxSeq {
+			p.seq = append(p.seq, c)
+		}
 	}
 }
 
@@ -240,7 +268,12 @@ func parseParams(b []byte) []int {
 	for i := 0; i < len(b); i++ {
 		switch c := b[i]; {
 		case c >= '0' && c <= '9':
-			n = n*10 + int(c-'0')
+			if n < maxParam {
+				n = n*10 + int(c-'0')
+				if n > maxParam {
+					n = maxParam
+				}
+			}
 		case c == ';':
 			out = append(out, n)
 			n = 0
@@ -300,7 +333,7 @@ func (p *parser) charsetByte(t *Term, c byte) {
 		p.state = stateGround
 	case c >= 0x20 && c <= 0x2f:
 		// An intermediate such as '%' in the UTF-8 designation.
-		p.esc = append(p.esc, c)
+		p.esc = appendCapped(p.esc, c)
 	case c >= 0x30 && c <= 0x7e:
 		p.designate(t, c)
 		p.state = stateGround

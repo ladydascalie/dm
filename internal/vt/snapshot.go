@@ -103,6 +103,9 @@ type SnapshotParser struct {
 	Seq         []byte      `json:"q,omitempty"`
 	Str         []byte      `json:"t,omitempty"`
 	CharsetSlot byte        `json:"d,omitempty"`
+	// StrStart is the stream offset where the OSC or DCS in flight began, so
+	// a mark that lands after a restore names its introducer.
+	StrStart int64 `json:"ss,omitempty"`
 }
 
 // SnapshotState is the terminal state outside the grid: the pen, protection,
@@ -130,6 +133,19 @@ type SnapshotState struct {
 	SevenBit      int            `json:"sb"`
 	DecModeState  map[int]bool   `json:"dm,omitempty"`
 	AnsiModeState map[int]bool   `json:"am,omitempty"`
+	// The OSC 133 marks, all stream byte offsets, and the stream position
+	// they compare against. Without them a restore drops every mark and the
+	// yank anchor reads a different coordinate space.
+	Mark       string `json:"mk,omitempty"`
+	PromptPos  int64  `json:"pp,omitempty"`
+	PromptSet  bool   `json:"ps,omitempty"`
+	StartPos   int64  `json:"sp,omitempty"`
+	StartSet   bool   `json:"ss,omitempty"`
+	EndPos     int64  `json:"ep,omitempty"`
+	EndSet     bool   `json:"es,omitempty"`
+	EndCode    int    `json:"ec,omitempty"`
+	EndCodeSet bool   `json:"ecs,omitempty"`
+	StreamPos  int64  `json:"o,omitempty"`
 }
 
 // SnapshotStyle is the compact wire form of Style. The zero value is the
@@ -395,6 +411,9 @@ func (s *Snapshot) validate() error {
 			}
 		}
 	}
+	if s.Parser.State > stateCharset {
+		return fmt.Errorf("%w: parser state %d", ErrSnapshotShape, s.Parser.State)
+	}
 	return nil
 }
 
@@ -433,6 +452,7 @@ func (t *Term) Snapshot() *Snapshot {
 			Seq:         cloneBytes(t.parser.seq),
 			Str:         cloneBytes(t.parser.str),
 			CharsetSlot: t.parser.charsetSlot,
+			StrStart:    t.parser.strStart,
 		},
 		State: SnapshotState{
 			Style:        encodeStyle(t.style),
@@ -453,6 +473,16 @@ func (t *Term) Snapshot() *Snapshot {
 			ModifierKeys: t.modifierKeys,
 			LinesPerPage: t.linesPerPage,
 			SevenBit:     t.sevenBit,
+			Mark:         t.mark,
+			PromptPos:    t.promptPos,
+			PromptSet:    t.promptSet,
+			StartPos:     t.startPos,
+			StartSet:     t.startSet,
+			EndPos:       t.endPos,
+			EndSet:       t.endSet,
+			EndCode:      t.endCode,
+			EndCodeSet:   t.endCodeSet,
+			StreamPos:    t.streamPos,
 		},
 	}
 	for y := range g.lines {
@@ -591,6 +621,7 @@ func (t *Term) Restore(s *Snapshot) error {
 		seq:         cloneBytes(s.Parser.Seq),
 		str:         cloneBytes(s.Parser.Str),
 		charsetSlot: s.Parser.CharsetSlot,
+		strStart:    s.Parser.StrStart,
 	}
 	t.style = s.State.Style.style()
 	t.protection = decodeProtection(s.State.Protection)
@@ -616,6 +647,15 @@ func (t *Term) Restore(s *Snapshot) error {
 	t.modifierKeys = s.State.ModifierKeys
 	t.linesPerPage = s.State.LinesPerPage
 	t.sevenBit = s.State.SevenBit
+	t.mark = s.State.Mark
+	t.promptPos, t.promptSet = s.State.PromptPos, s.State.PromptSet
+	t.startPos, t.startSet = s.State.StartPos, s.State.StartSet
+	t.endPos, t.endSet = s.State.EndPos, s.State.EndSet
+	t.endCode, t.endCodeSet = s.State.EndCode, s.State.EndCodeSet
+	t.streamPos = s.State.StreamPos
+	// markStart is where the OSC in flight began; the in-flight strStart is
+	// the same offset.
+	t.markStart = s.Parser.StrStart
 	t.colors = nil
 	if len(s.State.Colors) > 0 {
 		t.colors = make(map[int]Color, len(s.State.Colors))
