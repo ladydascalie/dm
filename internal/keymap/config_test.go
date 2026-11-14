@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1906,5 +1907,103 @@ func TestLayoutModePatchable(t *testing.T) {
 	}
 	if got := cfg.Key("layout", "close"); got != "" {
 		t.Errorf("Key(layout, close) = %q, want unbound", got)
+	}
+}
+
+// TestBuiltinActions proves the parser's action whitelist is exactly the set
+// the built-in keymap binds, in both directions. A name on the list that no
+// mode binds would reject a config that binds nothing real; a bound name off
+// the list would reject the built-in text itself.
+func TestBuiltinActions(t *testing.T) {
+	bound := map[string]bool{}
+	for _, m := range LoadDefault().Keymaps() {
+		for _, a := range m.Actions {
+			bound[a.Action] = true
+		}
+	}
+	var missing, extra []string
+	for name := range bound {
+		if !builtinActions[name] {
+			missing = append(missing, name)
+		}
+	}
+	for name := range builtinActions {
+		if !bound[name] {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	if len(missing) > 0 {
+		t.Errorf("actions the built-in binds but the whitelist lacks: %s", strings.Join(missing, ", "))
+	}
+	if len(extra) > 0 {
+		t.Errorf("whitelisted actions no mode binds: %s", strings.Join(extra, ", "))
+	}
+}
+
+// TestParseRejectsDuplicateBytes proves two bindings in one mode that resolve
+// to the same bytes fail the parse: Match gives the equal-length race to the
+// first declaration, so the second would be dead while the help box still
+// advertises it. Different key names for one byte, ctrl+A and ctrl+a, and two
+// encodings of one byte, enter and ctrl+m, both collide.
+func TestParseRejectsDuplicateBytes(t *testing.T) {
+	cases := []struct{ name, src, want string }{
+		{"case-fold", `keymap "main" {
+	"copy-output" "ctrl+a"
+	"new-window" "ctrl+A"
+}`, "copy-output"},
+		{"enter-ctrl-m", `keymap "main" {
+	"copy-output" "enter"
+	"new-window" "ctrl+m"
+}`, "copy-output"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := parseConfig(c.src)
+			if err == nil {
+				t.Fatal("parseConfig accepted two bindings on the same bytes")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error %q does not name the winning action %q", err, c.want)
+			}
+		})
+	}
+}
+
+// TestParseKeepsNestedBindings proves bindings that nest are not duplicates:
+// esc under the arrow escape sequences is how the prefix table resolves, and
+// Match gives the longer sequence the press when it completes.
+func TestParseKeepsNestedBindings(t *testing.T) {
+	src := `keymap "main" {
+	"dismiss-esc" "esc"
+	"focus-up" "up"
+}`
+	cfg, err := parseConfig(src)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	action, n, state := cfg.Match("main", []byte{0x1b, '[', 'A'})
+	if state != Match || action != "focus-up" || n != 3 {
+		t.Errorf("Match(main, up) = %q, %d, %v; want focus-up, 3, Match", action, n, state)
+	}
+}
+
+// TestLoadRejectsUnknownAction proves a typo in an action name fails the
+// load and names the typo, instead of parsing clean, taking the key and
+// leaving the real action silently unbound.
+func TestLoadRejectsUnknownAction(t *testing.T) {
+	cfg, err := LoadPath(writeConfigFile(t, t.TempDir(), `keymap "main" {
+	"cloes-pane" "x"
+}
+`))
+	if err == nil {
+		t.Fatal("LoadPath accepted the typo cloes-pane")
+	}
+	if !strings.Contains(err.Error(), "cloes-pane") {
+		t.Errorf("error %q does not name the typo", err)
+	}
+	if got := cfg.Key("main", "close-pane"); got != "x" {
+		t.Errorf("Key(main, close-pane) = %q, want the built-in x on the fallback defaults", got)
 	}
 }

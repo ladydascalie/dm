@@ -77,6 +77,9 @@ func LoadDefaultFrom(path string, write bool) (*Config, error) {
 	if err != nil {
 		return LoadDefault(), err
 	}
+	if err := cfg.checkActions(); err != nil {
+		return LoadDefault(), err
+	}
 	mergeDefaults(cfg)
 	th, err := theme.LoadThemeFile(filepath.Dir(path), cfg.themeName)
 	if err != nil {
