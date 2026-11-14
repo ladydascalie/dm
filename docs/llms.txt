@@ -58,7 +58,9 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | --- | --- |
 | `action` | the action name, required |
 | `target` | the pane, window or workspace id the action acts on |
-| `dir` | split or focus direction: left, right, up or down; swap-panes swaps by direction instead of other |
+| `dir` | split or focus direction: left, right, up or down; swap-panes, move-window and move-workspace swap by direction instead of other |
+| `fg` | term-colours: the foreground colour the client terminal reported |
+| `bg` | term-colours: the background colour the client terminal reported |
 | `other` | the second pane: resize-split, swap-panes and move-pane |
 | `msg` | text to type into a pane |
 | `enter` | press enter after msg |
@@ -86,27 +88,26 @@ The action field names one of these. Each example is one JSON object, carrying o
 
 | Action | Example |
 | --- | --- |
-| `ping`, `list` | `{"action":"ping"}`, `{"action":"list"}` |
-| `read` | `{"action":"read","target":"w1p1"}` |
+| `ping`, `term-colours` | `{"action":"ping"}`, `{"action":"term-colours","fg":"#c0c0c0","bg":"#101010"}` |
+| `list` | `{"action":"list"}` |
+| `read`, `screen` | `{"action":"read","target":"w1p1"}`, `{"action":"screen","target":"w1p1"}` |
 | `history`, `yank` | `{"action":"history","target":"w1p1","count":200}`, `{"action":"yank","target":"w1p1"}` |
 | `replay` | `{"action":"replay","target":"w1p1"}` |
 | `status` | `{"action":"status","target":"w1p1"}` |
-| `write-to` | `{"action":"write-to","target":"w1p1","msg":"go test ./...","enter":true}` |
-| `exec` | `{"action":"exec","target":"w1p1","msg":"go test ./..."}` |
+| `write-to`, `exec` | `{"action":"write-to","target":"w1p1","msg":"go test ./...","enter":true}`, `{"action":"exec","target":"w1p1","msg":"go test ./..."}` |
 | `keys` | `{"action":"keys","target":"w1p1","keys":"Aw=="}` |
 | `split` | `{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}` |
 | `zoom-pane` | `{"action":"zoom-pane"}` |
-| `set-rail` | `{"action":"set-rail","index":30}` |
+| `set-rail`, `reload` | `{"action":"set-rail","index":30}`, `{"action":"reload"}` |
 | `resize-split` | `{"action":"resize-split","target":"w1p1","other":"w1p2","ratio":0.7}` |
 | `focus` | `{"action":"focus","target":"w1p2"}` |
 | `focus-dir` | `{"action":"focus-dir","dir":"left"}` |
 | `next-pane`, `prev-pane` | `{"action":"next-pane"}`, `{"action":"prev-pane"}` |
 | `close-pane` | `{"action":"close-pane","target":"w1p1"}` |
 | `close-window`, `close-workspace` | `{"action":"close-window","target":"w1"}`, `{"action":"close-workspace","target":"s1"}` |
-| `new-window` | `{"action":"new-window","target":"s1","name":"build"}` |
+| `new-window`, `new-workspace` | `{"action":"new-window","target":"s1","name":"build"}`, `{"action":"new-workspace","name":"build"}` |
 | `next-window`, `prev-window` | `{"action":"next-window"}`, `{"action":"prev-window"}` |
 | `select-window` | `{"action":"select-window","index":2}` |
-| `new-workspace` | `{"action":"new-workspace","name":"build"}` |
 | `next-workspace`, `prev-workspace` | `{"action":"next-workspace"}`, `{"action":"prev-workspace"}` |
 | `list-workspaces`, `list-panes` | `{"action":"list-workspaces"}`, `{"action":"list-panes"}` |
 | `pane` | `{"action":"pane","target":"w1p1"}` |
@@ -115,10 +116,10 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `focus-window`, `focus-workspace` | `{"action":"focus-window","target":"w1"}`, `{"action":"focus-workspace","target":"s1"}` |
 | `rename-window`, `rename-workspace`, `set-project` | `{"action":"rename-window","target":"w1","name":"build"}`, `{"action":"rename-workspace","target":"s1","name":"build"}`, `{"action":"set-project","target":"s1","name":"dm"}` |
 | `swap-panes`, `move-pane` | `{"action":"swap-panes","target":"w1p1","dir":"left"}`, `{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}` |
+| `move-window`, `move-workspace` | `{"action":"move-window","target":"w1","dir":"down"}`, `{"action":"move-workspace","target":"s1","dir":"down"}` |
 | `select-layout` | `{"action":"select-layout","layout":"next"}` |
 | `synchronize-panes` | `{"action":"synchronize-panes","on":true}` |
-| `float-open` | `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}` |
-| `float-close` | `{"action":"float-close","float":"f1"}` |
+| `float-open`, `float-close` | `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`, `{"action":"float-close","float":"f1"}` |
 | `msg-post` | `{"action":"msg-post","res":{"key":"build","state":"done","msg":"all green"}}` |
 | `msg-list` | `{"action":"msg-list","res":{"key":"build","limit":20}}` |
 | `msg-clear` | `{"action":"msg-clear","res":{"key":"build"}}` |

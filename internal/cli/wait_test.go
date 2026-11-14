@@ -309,8 +309,9 @@ func TestWaitTimesOutOnSilence(t *testing.T) {
 	}
 }
 
-// TestWaitUnknownExitIsZero proves the fallback endings keep the CLI exit at
-// zero: the status line carries the reason, the code carries nothing.
+// TestWaitUnknownExitIsZero proves the fallback endings on a live pane keep
+// the CLI exit at zero: the status line carries the reason, the code carries
+// nothing.
 func TestWaitUnknownExitIsZero(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -319,7 +320,6 @@ func TestWaitUnknownExitIsZero(t *testing.T) {
 	}{
 		{"children", "* done, exit unknown (children)\n"},
 		{"idle", "* done, exit unknown (idle)\n"},
-		{"dead", "* dead\n"},
 	} {
 		tc := tc
 		t.Run(tc.reason, func(t *testing.T) {
@@ -340,6 +340,53 @@ func TestWaitUnknownExitIsZero(t *testing.T) {
 				t.Fatalf("wait printed %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestWaitDeadPaneIsNonzero proves a wait that ends on a dead pane exits 1:
+// the watched command never gave a code, so the caller must not read success.
+func TestWaitDeadPaneIsNonzero(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	startFakePane(t, root, "main", "w1p1", waitPlayer(waitStream{
+		final: wire.Msg{OK: true, WaitReason: "dead"},
+	}))
+	w := newWaitRun(root, "w1p1")
+	code, err := w.run()
+	if err != nil {
+		t.Fatalf("dm wait: %v", err)
+	}
+	if code != 1 {
+		t.Fatalf("dead wait returned %d, want 1", code)
+	}
+	if got := w.errOut.String(); got != "* dead\n" {
+		t.Fatalf("wait printed %q, want '* dead'", got)
+	}
+}
+
+// TestWaitJsonKeepsStdoutToTheAnswer proves --json moves the tail window and
+// the bytes frames to stderr, so stdout carries exactly one JSON object.
+func TestWaitJsonKeepsStdoutToTheAnswer(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	startFakePane(t, root, "main", "w1p1", waitPlayer(waitStream{
+		tail:  true,
+		bytes: [][]byte{[]byte("building\n")},
+		final: wire.Msg{OK: true, Exit: exitOf(0), WaitReason: "mark"},
+	}))
+	w := newWaitRun(root, "w1p1", "--json")
+	code, err := w.run()
+	if err != nil {
+		t.Fatalf("dm wait --json: %v", err)
+	}
+	if code != 0 {
+		t.Fatalf("wait returned %d, want 0", code)
+	}
+	if got := w.out.String(); got != `{"exit":0,"reason":"mark","timed_out":false}`+"\n" {
+		t.Fatalf("--json stdout = %q, want the answer object alone", got)
+	}
+	if got := w.errOut.String(); got != "building\n" {
+		t.Fatalf("--json stderr = %q, want the bytes frame", got)
 	}
 }
 
@@ -386,23 +433,27 @@ func TestWaitStatusShapes(t *testing.T) {
 }
 
 // TestWaitExitMapping proves the CLI exit code: the command's code, 124 after
-// the timeout, and 0 when no code was observed.
+// the timeout, 1 on a dead pane, and 0 when no code was observed on a live
+// pane.
 func TestWaitExitMapping(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		exit     *int
 		timedOut bool
+		reason   string
 		want     int
 	}{
-		{exitOf(0), false, 0},
-		{exitOf(3), false, 3},
-		{exitOf(130), false, 130},
-		{nil, false, 0},
-		{nil, true, 124},
-		{exitOf(3), true, 124},
+		{exitOf(0), false, "mark", 0},
+		{exitOf(3), false, "mark", 3},
+		{exitOf(130), false, "mark", 130},
+		{nil, false, "children", 0},
+		{nil, true, "", 124},
+		{exitOf(3), true, "", 124},
+		{nil, false, "dead", 1},
+		{exitOf(3), false, "dead", 1},
 	} {
-		if got := waitExit(tc.exit, tc.timedOut); got != tc.want {
-			t.Errorf("waitExit(%v, %v) = %d, want %d", tc.exit, tc.timedOut, got, tc.want)
+		if got := waitExit(tc.exit, tc.timedOut, tc.reason); got != tc.want {
+			t.Errorf("waitExit(%v, %v, %q) = %d, want %d", tc.exit, tc.timedOut, tc.reason, got, tc.want)
 		}
 	}
 }

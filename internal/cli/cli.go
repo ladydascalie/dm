@@ -283,7 +283,11 @@ func Run(argv []string) error {
 	case "new":
 		c := newFlagsAt(root, "new")
 		c.parse(argv[1:])
-		m, err := transport.RPC(c.session, wire.Msg{Action: "ping"})
+		name := c.session
+		if len(c.args) > 0 {
+			name = c.args[0]
+		}
+		m, err := transport.RPC(name, wire.Msg{Action: "ping"})
 		if err != nil {
 			return err
 		}
@@ -370,6 +374,9 @@ func Run(argv []string) error {
 		c.parse(argv[1:])
 		if len(c.args) < 1 {
 			return fmt.Errorf("write-to needs a pane id")
+		}
+		if c.msg == "" && !c.enter {
+			return fmt.Errorf("write-to needs --msg or --enter")
 		}
 		return printRPC(c.session, wire.Msg{Action: "write-to", Target: c.args[0], Msg: c.msg, Enter: c.enter})
 
@@ -871,7 +878,9 @@ func boxSubStream(session string, req *box.SubReq, jsonOut bool) (bool, error) {
 	}
 	c, err := transport.Dial(session)
 	if err != nil {
-		return false, errBoxSubEnded
+		// A dial that cannot succeed is not a dropped stream: hand the real
+		// error up, so the caller stops instead of redialing forever.
+		return false, err
 	}
 	defer func() { _ = c.Close() }()
 	if err := c.Send(wire.Msg{Type: "req", Action: "msg-sub", ID: 1, Res: raw}); err != nil {
@@ -1552,6 +1561,12 @@ func runWaitAt(out, errOut io.Writer, c *cmdFlags) (int, error) {
 	if err := wire.WriteMsg(conn, req); err != nil {
 		return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
 	}
+	// --json promises one JSON object on stdout, so the stream's own output
+	// moves to stderr: the tail window and every bytes frame after it.
+	frames := stdout()
+	if c.jsonOut {
+		frames = stderr()
+	}
 	extend := func() { _ = conn.SetReadDeadline(time.Now().Add(c.timeout)) }
 	extend()
 	tailed := false
@@ -1560,7 +1575,7 @@ func runWaitAt(out, errOut io.Writer, c *cmdFlags) (int, error) {
 		if err != nil {
 			var ne net.Error
 			if errors.As(err, &ne) && ne.Timeout() {
-				return waitExit(nil, true), waitReport(stdout(), stderr(), c, waitResult{Reason: "timeout", TimedOut: true})
+				return waitExit(nil, true, ""), waitReport(stdout(), stderr(), c, waitResult{Reason: "timeout", TimedOut: true})
 			}
 			return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
 		}
@@ -1571,7 +1586,7 @@ func runWaitAt(out, errOut io.Writer, c *cmdFlags) (int, error) {
 			if m.WaitReason != "" {
 				// The final reply names how the wait ended.
 				res := waitResult{Exit: m.Exit, Reason: m.WaitReason}
-				return waitExit(m.Exit, false), waitReport(stdout(), stderr(), c, res)
+				return waitExit(m.Exit, false, res.Reason), waitReport(stdout(), stderr(), c, res)
 			}
 			// Every other resp is the yank-shaped tail the wait opens with:
 			// the output between the Enter anchor and the wait's connect.
@@ -1586,7 +1601,7 @@ func runWaitAt(out, errOut io.Writer, c *cmdFlags) (int, error) {
 			if err := json.Unmarshal(m.Res, &tail); err != nil {
 				return 0, fmt.Errorf("pane %s: %v", c.args[0], err)
 			}
-			if err := printTail(stdout(), tail.Lines, tail.Start, tail.Rows); err != nil {
+			if err := printTail(frames, tail.Lines, tail.Start, tail.Rows); err != nil {
 				return 0, err
 			}
 			tailed = true
@@ -1595,7 +1610,7 @@ func runWaitAt(out, errOut io.Writer, c *cmdFlags) (int, error) {
 		}
 		extend()
 		if tailed && m.Type == "bytes" {
-			if _, err := stdout().Write(m.Data); err != nil {
+			if _, err := frames.Write(m.Data); err != nil {
 				return 0, err
 			}
 		}
@@ -1635,13 +1650,15 @@ func waitStatus(res waitResult) string {
 }
 
 // waitExit maps a wait's ending to the CLI's own exit code: the command's
-// code, 124 after the quiet-idle timeout, and 0 when no code was observed, so
-// a caller distinguishes a command that gave no code from a failed wait; the
-// status line carries the reason.
-func waitExit(exit *int, timedOut bool) int {
+// code, 124 after the quiet-idle timeout, 1 on a dead pane, and 0 when no
+// code was observed on a live pane, so a caller distinguishes a command that
+// gave no code from a failed wait; the status line carries the reason.
+func waitExit(exit *int, timedOut bool, reason string) int {
 	switch {
 	case timedOut:
 		return 124
+	case reason == "dead":
+		return 1
 	case exit != nil:
 		return *exit
 	}

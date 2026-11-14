@@ -408,3 +408,38 @@ func TestDashWithoutAServer(t *testing.T) {
 		t.Fatalf("dm dash with no server = %v, want the did-not-start error", err)
 	}
 }
+
+// TestNewHonoursThePositionalName proves a positional session name names the
+// session new creates, the way attach and kill read theirs.
+func TestNewHonoursThePositionalName(t *testing.T) {
+	rec := &recorder{}
+	startFakeServer(t, "work", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		rec.handler()(c, req)
+		return wire.Msg{OK: true, Res: json.RawMessage(`{"session":"work"}`)}, true
+	})
+	out := testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"new", "work"}); err != nil {
+			t.Fatalf("dm new work: %v", err)
+		}
+	})
+	if got := rec.last(); got.Action != "ping" {
+		t.Fatalf("new sent %+v, want a ping to work", got)
+	}
+	if strings.TrimSpace(out) != "work" {
+		t.Fatalf("dm new work printed %q, want work", out)
+	}
+}
+
+// TestWriteToRefusesAnEmptyWrite proves write-to with no --msg and no
+// --enter fails before anything dials, so a script with an empty variable
+// cannot send nothing and read success.
+func TestWriteToRefusesAnEmptyWrite(t *testing.T) {
+	t.Parallel()
+	for _, argv := range [][]string{
+		{"write-to", "w1p1"}, {"write", "w1p1"},
+	} {
+		if err := Run(argv); err == nil || !strings.Contains(err.Error(), "--msg or --enter") {
+			t.Fatalf("dm %v with nothing to send = %v, want a refusal", argv, err)
+		}
+	}
+}
