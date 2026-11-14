@@ -317,6 +317,12 @@ type server struct {
 	ending  bool            // session is shutting down; accept errors are expected
 	adopt   map[string]bool // panes loaded from disk: a fresh spawn is a restart
 
+	// paneSpawn serialises ensurePane per pane id, so two clients racing on
+	// one missing pane spawn one daemon and adopt one socket. The map itself
+	// is guarded by mu; each mutex is held across that pane's dial, spawn and
+	// adopt.
+	paneSpawn map[string]*sync.Mutex
+
 	// floats are the floating command processes, keyed by the client chosen
 	// id. They belong to one client and never reach the layout or the
 	// snapshot. Guarded by mu.
@@ -423,7 +429,7 @@ func Run(args []string) error {
 		log.Printf("keymap: %v", cfgErr)
 	}
 	s := &server{
-		st: st, cfg: cfg, panes: map[string]*paneConn{}, clients: map[*client]bool{},
+		st: st, cfg: cfg, panes: map[string]*paneConn{}, paneSpawn: map[string]*sync.Mutex{}, clients: map[*client]bool{},
 		floats: map[string]*floatProc{},
 		cols:   st.Cols, rows: st.Rows, adopt: adopt,
 		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},
@@ -614,25 +620,27 @@ func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours, h
 }
 
 // ensurePane dials the pane's socket and adopts it, or spawns a fresh daemon.
+// Callers racing on the same missing pane serialise on the pane's mutex, so
+// one daemon comes up and one socket is adopted; the loser's dial then finds
+// the winner's registration and closes its own extra connection.
 func (s *server) ensurePane(id string) error {
+	s.mu.Lock()
+	if s.paneSpawn == nil {
+		s.paneSpawn = map[string]*sync.Mutex{}
+	}
+	pm := s.paneSpawn[id]
+	if pm == nil {
+		pm = &sync.Mutex{}
+		s.paneSpawn[id] = pm
+	}
+	s.mu.Unlock()
+
+	pm.Lock()
+	defer pm.Unlock()
+
 	sock := s.st.PaneSock(id)
 	if c, err := net.DialTimeout("unix", sock, 300*time.Millisecond); err == nil {
-		pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
-		s.mu.Lock()
-		s.panes[id] = pc
-		tc := s.termColours
-		s.mu.Unlock()
-		// A daemon that outlived a server keeps the colours it was born with,
-		// so hand it the pair a client reported since.
-		if tc != nil {
-			if err := pc.send(wire.Msg{Action: "term-colours", FG: tc.fg, BG: tc.bg}); err != nil {
-				log.Printf("pane %s: term-colours: %v", id, err)
-			}
-		}
-		// A daemon that outlived a server has gone wherever its shell went, so
-		// ask it where that is instead of trusting the state file.
-		s.setPaneCwd(id, s.liveCwd(id))
-		return nil
+		return s.adoptPane(id, c)
 	}
 	s.mu.Lock()
 	ps := s.st.Panes[id]
@@ -672,15 +680,38 @@ func (s *server) ensurePane(id string) error {
 	for i := 0; i < 100; i++ {
 		c, err := net.DialTimeout("unix", sock, 100*time.Millisecond)
 		if err == nil {
-			pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
-			s.mu.Lock()
-			s.panes[id] = pc
-			s.mu.Unlock()
-			return nil
+			return s.adoptPane(id, c)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("pane %s did not come up", id)
+}
+
+// adoptPane registers a live dial to the pane's daemon and hands it the
+// session's colours and cwd. It never displaces a registered conn: a racing
+// caller's fresh dial closes instead, so the one daemon keeps the one socket.
+func (s *server) adoptPane(id string, c net.Conn) error {
+	s.mu.Lock()
+	if s.panes[id] != nil {
+		s.mu.Unlock()
+		_ = c.Close()
+		return nil
+	}
+	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
+	s.panes[id] = pc
+	tc := s.termColours
+	s.mu.Unlock()
+	// A daemon that outlived a server keeps the colours it was born with,
+	// so hand it the pair a client reported since.
+	if tc != nil {
+		if err := pc.send(wire.Msg{Action: "term-colours", FG: tc.fg, BG: tc.bg}); err != nil {
+			log.Printf("pane %s: term-colours: %v", id, err)
+		}
+	}
+	// A daemon that outlived a server has gone wherever its shell went, so
+	// ask it where that is instead of trusting the state file.
+	s.setPaneCwd(id, s.liveCwd(id))
+	return nil
 }
 
 // watchPane fans pane output out to clients and tracks status.

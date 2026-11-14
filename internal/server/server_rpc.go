@@ -460,6 +460,9 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 
 	case "set-pane-name":
 		err := s.mutation(func() error {
+			if err := checkName(m.Name); err != nil {
+				return err
+			}
 			ps := s.st.Panes[m.Target]
 			if ps == nil {
 				return fmt.Errorf("no pane %q", m.Target)

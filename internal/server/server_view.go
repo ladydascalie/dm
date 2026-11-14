@@ -264,6 +264,7 @@ func (s *server) allPanesLocked() []wire.AllPane {
 // moves to a live neighbour, an empty window closes. When the session has no
 // panes left the server ends the session and every client detaches.
 func (s *server) paneExited(id string) {
+	old := s.st.PaneSock(id)
 	s.mu.Lock()
 	pc := s.panes[id]
 	// An exit interrupts the operator unless a client is attached and the pane
@@ -278,6 +279,7 @@ func (s *server) paneExited(id string) {
 	delete(s.panes, id)
 	delete(s.st.Panes, id)
 	delete(s.statusChangedAt, id)
+	delete(s.paneSpawn, id)
 
 	found, emptyWindow := false, false
 	for _, ws := range s.st.Workspaces {
@@ -311,7 +313,13 @@ func (s *server) paneExited(id string) {
 		}
 	}
 	if !found && pc == nil {
+		// The layout and the map forgot the pane before its daemon died, the
+		// path a close-pane kill takes. The daemon's own cleanup removes only
+		// the socket, so remove the socket and its pid file here: a close must
+		// not leave the pid file in the session dir.
 		s.mu.Unlock()
+		_ = os.Remove(old)
+		_ = os.Remove(old + ".pid")
 		return
 	}
 	if emptyWindow {
@@ -351,7 +359,6 @@ func (s *server) paneExited(id string) {
 	if pc != nil {
 		_ = pc.c.Close()
 	}
-	old := s.st.PaneSock(id)
 	_ = os.Remove(old)
 	_ = os.Remove(old + ".pid")
 
