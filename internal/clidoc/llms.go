@@ -132,23 +132,24 @@ func llmsCell(s string) string {
 
 // llmsActionGroups is how the action table packs its rows. A page that gave
 // every action its own row would push llms.txt past its one-pass line budget,
-// so the actions with no fields of their own share a row with their nearest
-// sibling. Every action in manActionNames appears here exactly once.
+// so near neighbours share a row. Every action in manActionNames appears here
+// exactly once.
 var llmsActionGroups = [][]string{
-	{"ping", "list"},
-	{"read"}, {"history", "yank"}, {"replay"}, {"status"},
-	{"write-to"}, {"exec"}, {"keys"},
-	{"split"}, {"zoom-pane"}, {"set-rail"}, {"resize-split"},
+	{"ping", "term-colours"}, {"list"},
+	{"read", "screen"}, {"history", "yank"}, {"replay"}, {"status"},
+	{"write-to", "exec"}, {"keys"},
+	{"split"}, {"zoom-pane"}, {"set-rail", "reload"}, {"resize-split"},
 	{"focus"}, {"focus-dir"}, {"next-pane", "prev-pane"}, {"close-pane"},
-	{"close-window", "close-workspace"}, {"new-window"},
+	{"close-window", "close-workspace"}, {"new-window", "new-workspace"},
 	{"next-window", "prev-window"}, {"select-window"},
-	{"new-workspace"}, {"next-workspace", "prev-workspace"},
+	{"next-workspace", "prev-workspace"},
 	{"list-workspaces", "list-panes"},
 	{"pane"}, {"toggle-fold"}, {"set-pane-name"},
 	{"focus-window", "focus-workspace"},
 	{"rename-window", "rename-workspace", "set-project"},
-	{"swap-panes", "move-pane"}, {"select-layout"}, {"synchronize-panes"},
-	{"float-open"}, {"float-close"},
+	{"swap-panes", "move-pane"}, {"move-window", "move-workspace"},
+	{"select-layout"}, {"synchronize-panes"},
+	{"float-open", "float-close"},
 	{"msg-post"}, {"msg-list"}, {"msg-clear"}, {"msg-wait"}, {"msg-sub"},
 	{"msg-watchers", "msg-schema"},
 }

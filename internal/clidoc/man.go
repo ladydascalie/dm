@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-12"
+const manDate = "2026-11-14"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -26,7 +26,9 @@ type manField struct {
 var manActionFields = []manField{
 	{"action", "the action name, required"},
 	{"target", "the pane, window or workspace id the action acts on"},
-	{"dir", "split or focus direction: left, right, up or down; swap-panes swaps by direction instead of other"},
+	{"dir", "split or focus direction: left, right, up or down; swap-panes, move-window and move-workspace swap by direction instead of other"},
+	{"fg", "term-colours: the foreground colour the client terminal reported"},
+	{"bg", "term-colours: the background colour the client terminal reported"},
 	{"other", "the second pane: resize-split, swap-panes and move-pane"},
 	{"msg", "text to type into a pane"},
 	{"enter", "press enter after msg"},
@@ -53,16 +55,17 @@ var manActionFields = []manField{
 
 // manActionNames is every action the server accepts through dm exec.
 var manActionNames = []string{
-	"ping", "list", "read", "history", "yank", "replay", "status",
+	"ping", "term-colours", "list", "read", "screen", "history", "yank", "replay", "status",
 	"write-to", "exec", "keys",
-	"split", "zoom-pane", "set-rail", "resize-split",
+	"split", "zoom-pane", "set-rail", "reload", "resize-split",
 	"focus", "focus-dir", "next-pane", "prev-pane", "close-pane",
 	"close-window", "new-window", "next-window", "prev-window", "select-window",
 	"new-workspace", "next-workspace", "prev-workspace", "list-workspaces",
 	"list-panes", "pane", "toggle-fold", "set-pane-name",
 	"focus-window", "focus-workspace", "close-workspace",
 	"rename-window", "rename-workspace", "set-project",
-	"swap-panes", "move-pane", "select-layout", "synchronize-panes",
+	"swap-panes", "move-pane", "move-window", "move-workspace",
+	"select-layout", "synchronize-panes",
 	"float-open", "float-close",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",
 	"msg-watchers", "msg-schema",

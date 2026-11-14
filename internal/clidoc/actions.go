@@ -15,8 +15,10 @@ type actionExample struct {
 // so their JSON is a base64 string: "Aw==" is ctrl+c.
 var actionExamples = []actionExample{
 	{"ping", `{"action":"ping"}`},
+	{"term-colours", `{"action":"term-colours","fg":"#c0c0c0","bg":"#101010"}`},
 	{"list", `{"action":"list"}`},
 	{"read", `{"action":"read","target":"w1p1"}`},
+	{"screen", `{"action":"screen","target":"w1p1"}`},
 	{"history", `{"action":"history","target":"w1p1","count":200}`},
 	{"yank", `{"action":"yank","target":"w1p1"}`},
 	{"replay", `{"action":"replay","target":"w1p1"}`},
@@ -29,6 +31,7 @@ var actionExamples = []actionExample{
 	{"split", `{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}`},
 	{"zoom-pane", `{"action":"zoom-pane"}`},
 	{"set-rail", `{"action":"set-rail","index":30}`},
+	{"reload", `{"action":"reload"}`},
 	{"resize-split", `{"action":"resize-split","target":"w1p1","other":"w1p2","ratio":0.7}`},
 
 	{"focus", `{"action":"focus","target":"w1p2"}`},
@@ -60,6 +63,8 @@ var actionExamples = []actionExample{
 	{"rename-window", `{"action":"rename-window","target":"w1","name":"build"}`},
 	{"swap-panes", `{"action":"swap-panes","target":"w1p1","dir":"left"}`},
 	{"move-pane", `{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}`},
+	{"move-window", `{"action":"move-window","target":"w1","dir":"down"}`},
+	{"move-workspace", `{"action":"move-workspace","target":"s1","dir":"down"}`},
 	{"select-layout", `{"action":"select-layout","layout":"next"}`},
 	{"synchronize-panes", `{"action":"synchronize-panes","on":true}`},
 	{"float-open", `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`},

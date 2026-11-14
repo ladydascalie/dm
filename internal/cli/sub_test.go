@@ -5,6 +5,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -101,5 +102,18 @@ func TestBoxSubVerbRefusesABadFilter(t *testing.T) {
 	}
 	if req.Key != "lane/a" || req.State != box.StateDone || req.AfterSeq == nil || *req.AfterSeq != 4 {
 		t.Fatalf("sub request = %+v, want the key, state and cursor", req)
+	}
+}
+
+// TestBoxSubStreamRefusesADeadDial proves a dial that cannot succeed hands
+// back the real error, so the caller stops instead of redialing forever.
+func TestBoxSubStreamRefusesADeadDial(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	live, err := boxSubStream("nosuch", &box.SubReq{Key: "lane/a"}, false)
+	if live {
+		t.Fatal("boxSubStream reported a live stream for a session that has no socket")
+	}
+	if err == nil || errors.Is(err, errBoxSubEnded) {
+		t.Fatalf("boxSubStream dial failure = %v, want the real error", err)
 	}
 }

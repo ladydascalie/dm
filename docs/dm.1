@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-12" "dm" "User Commands"
+.TH DM 1 "2026-11-14" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -311,7 +311,13 @@ the action name, required
 the pane, window or workspace id the action acts on
 .TP
 \fBdir\fP
-split or focus direction: left, right, up or down; swap-panes swaps by direction instead of other
+split or focus direction: left, right, up or down; swap-panes, move-window and move-workspace swap by direction instead of other
+.TP
+\fBfg\fP
+term-colours: the foreground colour the client terminal reported
+.TP
+\fBbg\fP
+term-colours: the background colour the client terminal reported
 .TP
 \fBother\fP
 the second pane: resize-split, swap-panes and move-pane
@@ -386,6 +392,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 {"action":"ping"}
 .fi
 .TP
+\fBterm-colours\fP
+.nf
+{"action":"term-colours","fg":"#c0c0c0","bg":"#101010"}
+.fi
+.TP
 \fBlist\fP
 .nf
 {"action":"list"}
@@ -394,6 +405,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBread\fP
 .nf
 {"action":"read","target":"w1p1"}
+.fi
+.TP
+\fBscreen\fP
+.nf
+{"action":"screen","target":"w1p1"}
 .fi
 .TP
 \fBhistory\fP
@@ -444,6 +460,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBset-rail\fP
 .nf
 {"action":"set-rail","index":30}
+.fi
+.TP
+\fBreload\fP
+.nf
+{"action":"reload"}
 .fi
 .TP
 \fBresize-split\fP
@@ -579,6 +600,16 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBmove-pane\fP
 .nf
 {"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}
+.fi
+.TP
+\fBmove-window\fP
+.nf
+{"action":"move-window","target":"w1","dir":"down"}
+.fi
+.TP
+\fBmove-workspace\fP
+.nf
+{"action":"move-workspace","target":"s1","dir":"down"}
 .fi
 .TP
 \fBselect-layout\fP
