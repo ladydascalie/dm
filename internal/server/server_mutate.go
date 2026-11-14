@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"dm/internal/box"
 	"dm/internal/layout"
 	"dm/internal/paths"
 	"dm/internal/session"
@@ -445,11 +446,23 @@ func (s *server) focusWorkspace(id string) error {
 	return fmt.Errorf("no workspace %q", id)
 }
 
+// maxName caps every client-supplied pane, window, workspace and project
+// name. A name reaches state.json and every snapshot, so one request cannot
+// plant a giant or binary string there.
+const maxName = 128
+
+// checkName applies the box text rule to a name: the byte cap, valid UTF-8
+// and no control characters.
+func checkName(name string) error { return box.CheckText("name", name, maxName) }
+
 // renameWorkspace sets the workspace name and nothing else: the id, the active
 // index, the windows and the panes stay. A background workspace is fair game.
 func (s *server) renameWorkspace(id, name string) error {
 	if name == "" {
 		return fmt.Errorf("name required")
+	}
+	if err := checkName(name); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -466,6 +479,11 @@ func (s *server) renameWorkspace(id, name string) error {
 // that project's block. An empty name clears the project. The id, the windows
 // and the panes stay; the active workspace stays the same workspace.
 func (s *server) setProject(id, project string) error {
+	if project != "" {
+		if err := checkName(project); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	idx := -1
@@ -522,6 +540,9 @@ func (s *server) insertWorkspaceLocked(ws *session.Workspace) {
 func (s *server) renameWindow(id, name string) error {
 	if name == "" {
 		return fmt.Errorf("name required")
+	}
+	if err := checkName(name); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1202,6 +1223,11 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool, argv []string)
 	if err := validateArgv(argv); err != nil {
 		return "", "", err
 	}
+	if label != "" {
+		if err := checkName(label); err != nil {
+			return "", "", err
+		}
+	}
 	s.mu.Lock()
 	ws := s.st.ActiveWorkspace()
 	src := ""
@@ -1302,6 +1328,21 @@ func (s *server) newWorkspace(name, tabLabel, cwd, project string, noFocus bool,
 	}
 	if err := validateArgv(argv); err != nil {
 		return "", "", "", err
+	}
+	if name != "" {
+		if err := checkName(name); err != nil {
+			return "", "", "", err
+		}
+	}
+	if tabLabel != "" {
+		if err := checkName(tabLabel); err != nil {
+			return "", "", "", err
+		}
+	}
+	if project != "" {
+		if err := checkName(project); err != nil {
+			return "", "", "", err
+		}
 	}
 	s.mu.Lock()
 	activeID := ""

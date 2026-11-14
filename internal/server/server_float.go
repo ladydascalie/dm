@@ -54,6 +54,13 @@ func floatLabel(command, label string) string {
 	return ""
 }
 
+// The pty winsize fields are uint16. Values past this cap would wrap through
+// zero in the cast, so openFloat and resizeFloat clamp to it first.
+const (
+	maxWinCols = 65535
+	maxWinRows = 65535
+)
+
 // floatEnv is the child's environment: the server's own, plus the pane and
 // session it belongs to, plus a TERM when the server has none. A child with no
 // TERM paints with whatever the default is, which is not what a pager wants.
@@ -78,6 +85,14 @@ func (s *server) openFloat(cl *client, spec floatSpec) error {
 	}
 	if rows < 1 {
 		rows = 24
+	}
+	// The pty winsize is uint16. A larger request would wrap through zero and
+	// hand the child a size the client never asked for, so clamp instead.
+	if cols > maxWinCols {
+		cols = maxWinCols
+	}
+	if rows > maxWinRows {
+		rows = maxWinRows
 	}
 	s.mu.Lock()
 	session := s.st.Name
@@ -222,6 +237,14 @@ func (s *server) resizeFloat(id string, cols, rows int) {
 	f := s.floatFor(id)
 	if f == nil || cols < 1 || rows < 1 {
 		return
+	}
+	// Clamp before the uint16 cast: a wrap would resize the child to a size
+	// the client never asked for.
+	if cols > maxWinCols {
+		cols = maxWinCols
+	}
+	if rows > maxWinRows {
+		rows = maxWinRows
 	}
 	f.mu.Lock()
 	f.cols, f.rows = cols, rows
