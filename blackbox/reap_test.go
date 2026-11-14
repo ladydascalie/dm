@@ -14,8 +14,10 @@ import (
 )
 
 // reapWindow bounds how long a lost pane may take to stop: the daemon checks
-// its socket every reapSockEvery.
-const reapWindow = 15 * time.Second
+// its socket every reapSockEvery, and the test allows three passes. The window
+// also keeps the mirror honest: a production interval far above the pinned one
+// blows the window and fails here.
+const reapWindow = 3 * reapSockEvery
 
 // reapSockEvery mirrors pane.go's sockEvery. The test waits for one reaper
 // pass, so it needs the interval the daemon uses.

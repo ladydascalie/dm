@@ -370,11 +370,20 @@ func TestBoxCLIFromPane(t *testing.T) {
 }
 
 // TestBoxCLIWaitBlocks posts after a wait has parked, so the wrapper holds the
-// socket open for a reply that arrives later.
+// socket open for a reply that arrives later. The wait runs inside a pane, so
+// its parked watch shows in msg watchers and the test can prove the post lands
+// after the parking: a post that lands first would satisfy the wait at once,
+// and the blocking in the name would never be exercised.
 func TestBoxCLIWaitBlocks(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	s := "boxwait"
+	h.run("new", "-s", s)
+	panes := h.panes(s)
+	if len(panes) != 1 {
+		t.Fatalf("a new session has %d panes, want 1", len(panes))
+	}
+	inRoot := boxEnv(h.env, "DM_SESSION="+s, "DM_PANE="+panes[0])
 	type result struct {
 		out string
 		err error
@@ -382,14 +391,16 @@ func TestBoxCLIWaitBlocks(t *testing.T) {
 	done := make(chan result, 1)
 	go func() {
 		cmd := exec.Command(h.bin, "msg", "wait", "--key", "lane/a", "--state", "done", "--timeout", "20s", "-s", s)
-		cmd.Env = h.env
+		cmd.Env = inRoot
 		out, err := cmd.CombinedOutput()
 		done <- result{string(out), err}
 	}()
 
-	// The wait may not be parked yet, and that is fine: a post that lands
-	// first still satisfies it.
-	time.Sleep(300 * time.Millisecond)
+	// Poll until the wait is parked, then post.
+	boxAwaitWatcherRows(t, h, s, "the parked wait", func(rows [][]string) bool {
+		return len(rows) == 1 && len(rows[0]) == 4 &&
+			rows[0][0] == panes[0] && rows[0][1] == "lane/a" && rows[0][3] == "wait"
+	})
 	boxRun(t, h, h.env, "msg", "post", "--state", "done", "--key", "lane/a", "--msg", "gate green", "-s", s)
 
 	select {
