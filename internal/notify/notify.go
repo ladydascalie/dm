@@ -5,6 +5,7 @@ package notify
 
 import (
 	"context"
+	"log"
 	"os"
 	"os/exec"
 	"time"
@@ -62,7 +63,11 @@ func Send(cfg Config, title, body string) {
 		ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, cfg.BinPath, "-a", "dm", "-t", "10000", "-u", "normal", title, body)
-		_ = cmd.Run()
+		if err := cmd.Run(); err != nil {
+			// A dead daemon or a missing binary must leave a trace: stderr
+			// lands in the server or pane log, and the caller never blocks.
+			log.Printf("notify: %s: %v", cfg.BinPath, err)
+		}
 	}()
 }
 
@@ -79,6 +84,7 @@ func SystemNotify(title, body string) {
 	go func() {
 		path, err := exec.LookPath("notify-send")
 		if err != nil {
+			log.Printf("notify: notify-send not found: %v", err)
 			return
 		}
 		Send(Config{Enabled: true, BinPath: path}, title, body)

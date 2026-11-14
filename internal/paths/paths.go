@@ -29,6 +29,24 @@ func SessionDirAt(root, name string) string {
 // SessionDir is the directory that holds one session's state and sockets.
 func SessionDir(name string) string { return SessionDirAt(StateDir(), name) }
 
+// ValidSessionName reports whether name is a safe session directory name: a
+// single path component of letters, digits, underscores and hyphens. A
+// session name lands in paths under the state root, so anything else is a
+// filesystem traversal or a phantom ls row waiting to happen.
+func ValidSessionName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // ServerSockAt is the unix socket the session's server listens on,
 // rooted at the given state dir.
 func ServerSockAt(root, name string) string {
