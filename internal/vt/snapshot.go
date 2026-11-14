@@ -136,7 +136,7 @@ type SnapshotState struct {
 	// The OSC 133 marks, all stream byte offsets, and the stream position
 	// they compare against. Without them a restore drops every mark and the
 	// yank anchor reads a different coordinate space.
-	Mark       string `json:"mk,omitempty"`
+	Mark       string `json:"mrk,omitempty"`
 	PromptPos  int64  `json:"pp,omitempty"`
 	PromptSet  bool   `json:"ps,omitempty"`
 	StartPos   int64  `json:"sp,omitempty"`
