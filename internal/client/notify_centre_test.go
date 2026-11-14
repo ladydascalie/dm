@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -411,5 +412,136 @@ func TestCentreCloseTakesTheReaderDown(t *testing.T) {
 	}
 	if len(tui.floats) != 0 {
 		t.Fatalf("floats = %d, want none", len(tui.floats))
+	}
+}
+
+// A snapshot while the centre is up repaints the float, and the float's Term
+// rides through it: Sync reuses the Term while the rect holds and rebuilds it
+// only when the rect moves. A fresh Term every Sync costs an allocation per
+// snapshot for no visible change.
+func TestCentreSyncReusesTheTerm(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	term := tui.ncentre.Float.VT
+	if term == nil {
+		t.Fatal("the centre opened with no Term")
+	}
+	tui.apply(wire.Msg{Type: "snapshot", Snap: tui.snap})
+	if tui.ncentre.Float.VT != term {
+		t.Fatal("a snapshot with the same rect rebuilt the Term")
+	}
+	big := *tui.snap
+	big.Cols += 20
+	big.Rows += 10
+	tui.apply(wire.Msg{Type: "snapshot", Snap: &big})
+	if tui.ncentre.Float.VT == term {
+		t.Fatal("a snapshot with a new rect kept the old Term")
+	}
+	cols, rows := tui.ncentre.Float.VT.Grid().Size()
+	if cols != tui.ncentre.Float.Rect.W || rows != tui.ncentre.Float.Rect.H {
+		t.Fatalf("rebuilt Term is %dx%d, want the rect %dx%d",
+			cols, rows, tui.ncentre.Float.Rect.W, tui.ncentre.Float.Rect.H)
+	}
+}
+
+// A refetch that shrinks the list clears the rows the longer list wrote: the
+// reused Term does not carry stale rows under the shorter one.
+func TestCentreRefetchClearsTheLostRows(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	_ = got
+	tui.ncentre.entries = centreEntries()[:1]
+	tui.ncentre.Sync(tui.snap, theme.DefaultTheme())
+	r := tui.ncentre.Float.Rect
+	screen := centreScreen(t, tui)
+	if row := boxScreenRow(screen, r.Y+1, r.X, r.W); strings.Contains(row, "gate green") {
+		t.Fatalf("second row = %q, want the dropped entry's row gone", row)
+	}
+}
+
+// The centre's keys answer through the keymap: a config that rebinds the
+// toggle, the top binding, the close-pane binding or the close-window binding
+// moves the centre's keys with it.
+func TestCentreKeysFollowTheKeymap(t *testing.T) {
+	t.Parallel()
+	cfg := testutil.KeymapTestLoad(t, `
+keymap "main" {
+    "send-prefix" "prefix"
+    "notification-centre" "n"
+    "close-pane" "Z"
+    "close-window" "z"
+}
+keymap "box" {
+    "up" "k"
+    "down" "j"
+    "top" "T"
+    "bottom" "B"
+    "close" "q"
+    "close-esc" "esc"
+    "close-ctrl-c" "ctrl+c"
+    "page-up" "pgup"
+    "page-down" "pgdn"
+}
+`)
+	tui, got := switcherTUI(t)
+	tui.keymap = cfg
+	feed(tui, "\x02n") // the rebound toggle opens the centre
+	if tui.ncentre == nil || tui.mode != "notif" {
+		t.Fatalf("n opened mode %q centre %v, want the centre", tui.mode, tui.ncentre)
+	}
+	m := nextBoxMsg(t, got)
+	tui.apply(centreReply(t, m.ID, centreEntries()))
+
+	feed(tui, "T") // the rebound top binding jumps to the pane
+	if tui.ncentre != nil || tui.mode != "" {
+		t.Fatal("T left the centre up")
+	}
+	if m := nextBoxMsg(t, got); m.Action != "focus" || m.Target != "w1p1" {
+		t.Fatalf("T sent %+v, want focus for w1p1", m)
+	}
+
+	feed(tui, "\x02n")
+	m = nextBoxMsg(t, got)
+	tui.apply(centreReply(t, m.ID, centreEntries()))
+	feed(tui, "j") // select notify/w1p2
+	feed(tui, "Z") // the rebound close-pane clears the selected entry's key
+	m = nextBoxMsg(t, got)
+	if m.Action != "msg-clear" {
+		t.Fatalf("Z sent %+v, want msg-clear", m)
+	}
+	var req box.ClearReq
+	if err := json.Unmarshal(m.Res, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Key != "notify/w1p2" || req.KeyPrefix != "" {
+		t.Fatalf("clear request = %+v, want the selected entry's key", req)
+	}
+
+	feed(tui, "z") // the rebound close-window clears the whole branch
+	m = nextBoxMsg(t, got)
+	if err := json.Unmarshal(m.Res, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Key != "" || req.KeyPrefix != box.NotifyPrefix {
+		t.Fatalf("clear request = %+v, want the notify/ prefix", req)
+	}
+
+	feed(tui, "n") // the rebound toggle closes the centre
+	if tui.ncentre != nil || tui.mode != "" {
+		t.Fatal("n did not close the centre")
+	}
+}
+
+// The box keymap's bottom binding moves the selection to the last row. With
+// the defaults the centre rides the box keymap, so G is that binding's key.
+func TestCentreBottomMovesToTheLastRow(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	openCentre(t, tui, got, centreEntries())
+	feed(tui, "G")
+	if tui.ncentre.sel != len(centreEntries())-1 {
+		t.Fatalf("selection = %d, want the last row", tui.ncentre.sel)
 	}
 }

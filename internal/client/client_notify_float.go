@@ -31,8 +31,12 @@ type notifyCentre struct {
 	sel     int
 	// read is the client's read mark: the seq below which every entry is
 	// read. The tui owns it; the copy here keeps the paint honest.
-	read  int
-	Float *panel.FloatingPane
+	read int
+	// vtW and vtH are the dims of the Term the float carries, so paint reuses
+	// it across the repaints a snapshot triggers and rebuilds it only when the
+	// rect moves.
+	vtW, vtH int
+	Float    *panel.FloatingPane
 }
 
 // newNotifyCentre opens the float on a screen. The list stays empty until the
@@ -63,11 +67,25 @@ func (c *notifyCentre) paint(th theme.Theme) {
 	c.Float.Title = c.title()
 	c.Float.Hint = " j/k move  enter body  g pane  m box  x clear  X clear all  esc close "
 	if r.W < 1 || r.H < 1 {
-		c.Float.VT = vt.NewTerm(1, 1)
+		if c.vtW != 1 || c.vtH != 1 {
+			c.Float.VT = vt.NewTerm(1, 1)
+			c.vtW, c.vtH = 1, 1
+		}
 		return
 	}
-	term := vt.NewTerm(r.W, r.H)
+	// The term is reused across paints: a snapshot while the centre is up
+	// lands here with the same rect, and a fresh Term every time would cost an
+	// allocation and a rebuild for no visible change.
+	term := c.Float.VT
+	if term == nil || c.vtW != r.W || c.vtH != r.H {
+		term = vt.NewTerm(r.W, r.H)
+		c.Float.VT = term
+		c.vtW, c.vtH = r.W, r.H
+	}
 	var buf bytes.Buffer
+	// The term carries the last paint's rows: clear it first, so rows an
+	// earlier, longer list wrote do not survive under the shorter one.
+	buf.WriteString("\x1b[0m\x1b[2J")
 	for row := 0; row < r.H; row++ {
 		i := row
 		if i >= len(c.entries) {
@@ -158,17 +176,6 @@ func (c *notifyCentre) unread() int {
 // operator has not opened it here yet.
 func (c *notifyCentre) unreadAt(i int) bool {
 	return c.entries[i].Seq > c.read
-}
-
-// notifPaint repaints the centre with the client's read mark and marks the
-// frame dirty.
-func (t *tui) notifPaint() {
-	if t.ncentre == nil {
-		return
-	}
-	t.ncentre.read = t.notifyRead
-	t.ncentre.paint(t.theme())
-	t.dirty = true
 }
 
 // Move moves the selection by n rows and repaints.
@@ -274,8 +281,11 @@ func (t *tui) takeNotifyCentreList(m wire.Msg) {
 	if t.ncentre.sel < 0 {
 		t.ncentre.sel = 0
 	}
+	// Sync paints, so one paint covers the reply: the read mark goes in first,
+	// and notifPaint's second paint would write the same bytes again.
+	t.ncentre.read = t.notifyRead
 	t.ncentre.Sync(t.snap, t.theme())
-	t.notifPaint()
+	t.dirty = true
 }
 
 // notifKey consumes one key while the centre is up. It returns false when it
@@ -312,51 +322,9 @@ func (t *tui) notifKey() bool {
 		t.dirty = true
 		return true
 	}
-	// The keys the centre binds itself: the box keymap owns j/k and the
-	// arrows, so these come off the top before it answers.
-	switch t.inbuf[0] {
-	case 'N':
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		closeNotifyCentre(t)
-		return true
-	case '\r':
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		t.notifOpenBody()
-		t.dirty = true
-		return true
-	case 'g':
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		t.notifJumpPane()
-		t.dirty = true
-		return true
-	case 'G':
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		t.ncentre.Move(len(t.ncentre.entries), t.theme())
-		t.dirty = true
-		return true
-	case 'm':
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		t.notifToBox()
-		t.dirty = true
-		return true
-	case 'x':
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		t.notifClearKey()
-		t.dirty = true
-		return true
-	case 'X':
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		t.notifClearAll()
-		t.dirty = true
-		return true
-	}
+	// The box keymap owns the list keys, so every key answers through it: a
+	// rebind moves the centre with it and no byte is taken from a binding the
+	// keymap already carries.
 	action, n, state := t.km().Match("box", t.inbuf)
 	switch state {
 	case keymap.Partial:
@@ -369,11 +337,7 @@ func (t *tui) notifKey() bool {
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
-		// An unbound key closes the centre.
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		closeNotifyCentre(t)
-		return true
+		return t.notifOwnKey()
 	}
 	if t.reader != nil {
 		// The reader takes the scroll keys and gives the close keys back to
@@ -391,14 +355,86 @@ func (t *tui) notifKey() bool {
 		t.ncentre.Move(-t.ncentre.Float.Rect.H, t.theme())
 	case "page-down":
 		t.ncentre.Move(t.ncentre.Float.Rect.H, t.theme())
+	case "top":
+		// The centre repurposes the box keymap's top binding: g jumps to the
+		// pane the selected entry is about. Rebinding top moves the jump.
+		t.notifJumpPane()
+	case "bottom":
+		t.ncentre.Move(len(t.ncentre.entries), t.theme())
+	case "close-m":
+		// The box view's close-and-open-the-message-box key hands the entry
+		// to the box view here.
+		t.notifToBox()
+	case "pick":
+		// A config that binds pick in the box keymap opens the body with it.
+		t.notifOpenBody()
 	case "close", "close-esc", "close-ctrl-c":
 		closeNotifyCentre(t)
+		return true
 	default:
 		closeNotifyCentre(t)
 		return true
 	}
 	t.dirty = true
 	return true
+}
+
+// notifOwnKey handles the keys the box keymap leaves unbound: the centre's
+// own keys. Each resolves from the keymap so a rebind moves it: the toggle
+// key comes from main's notification-centre, the clear keys from main's
+// close-pane and close-window, the same one-item and whole-set pair those
+// actions mean. Enter opens the body the way the box view's enter opens its
+// reader (boxKey), and the box keymap binds no action to enter, so there is
+// nothing to rebind and nothing to shadow. Anything else closes the centre.
+func (t *tui) notifOwnKey() bool {
+	t.pending = false
+	for _, seq := range t.notifSeqs("main", "notification-centre") {
+		if bytes.HasPrefix(t.inbuf, seq) {
+			t.inbuf = append([]byte(nil), t.inbuf[len(seq):]...)
+			closeNotifyCentre(t)
+			return true
+		}
+	}
+	if t.inbuf[0] == '\r' {
+		t.inbuf = t.inbuf[1:]
+		t.notifOpenBody()
+		t.dirty = true
+		return true
+	}
+	for _, seq := range t.notifSeqs("main", "close-pane") {
+		if bytes.HasPrefix(t.inbuf, seq) {
+			t.inbuf = append([]byte(nil), t.inbuf[len(seq):]...)
+			t.notifClearKey()
+			t.dirty = true
+			return true
+		}
+	}
+	for _, seq := range t.notifSeqs("main", "close-window") {
+		if bytes.HasPrefix(t.inbuf, seq) {
+			t.inbuf = append([]byte(nil), t.inbuf[len(seq):]...)
+			t.notifClearAll()
+			t.dirty = true
+			return true
+		}
+	}
+	// An unbound key closes the centre.
+	t.inbuf = t.inbuf[1:]
+	closeNotifyCentre(t)
+	return true
+}
+
+// notifSeqs resolves the byte sequences the keymap binds for action in mode.
+// An unbound action or a name that does not parse binds nothing.
+func (t *tui) notifSeqs(mode, action string) [][]byte {
+	name := t.km().Key(mode, action)
+	if name == "" {
+		return nil
+	}
+	seqs, err := keymap.KeySequences(name, t.km().PrefixBytes())
+	if err != nil {
+		return nil
+	}
+	return seqs
 }
 
 // notifWheel scrolls the centre, or the reader over it.

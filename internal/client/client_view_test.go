@@ -7,6 +7,9 @@ package client
 import (
 	"strings"
 	"testing"
+
+	"dm/internal/layout"
+	"dm/internal/panel"
 )
 
 // A screen-owning mode hides the cursor the last pane frame showed. No cell
@@ -48,5 +51,26 @@ func TestFrameToastSparesTheChrome(t *testing.T) {
 		if a[0] == f.snap.Rows {
 			t.Fatalf("a toast rewrote the bar row: %v", frameAddrs(got))
 		}
+	}
+}
+
+// A frame that closes one float and opens another keeps the float count
+// equal, so a prune gated on the count would keep the closed float's paint
+// entry forever. The prune runs against the live set every frame.
+func TestFloatSwapDropsTheClosedFloatEntry(t *testing.T) {
+	t.Parallel()
+	f := newFrameTUI(t, 100, 20, 34)
+	a := &panel.FloatingPane{ID: "a", Rect: layout.Rect{X: 2, Y: 2, W: 20, H: 6}, Active: true}
+	f.tui.AddFloatingPane(a)
+	f.frame()
+	b := &panel.FloatingPane{ID: "b", Rect: layout.Rect{X: 4, Y: 4, W: 20, H: 6}, Active: true}
+	f.tui.RemoveFloatingPane("a")
+	f.tui.AddFloatingPane(b)
+	f.frame()
+	if _, ok := f.tui.last.floats["a"]; ok {
+		t.Fatal("the closed float's paint entry survived the even swap")
+	}
+	if _, ok := f.tui.last.floats["b"]; !ok {
+		t.Fatal("the opened float has no paint entry")
 	}
 }
