@@ -72,8 +72,12 @@ func waitNotify(t *testing.T, log string, n int) []string {
 	}
 }
 
-// stillNotify fails when the log does not hold exactly want lines after the
-// wait, so both a missing and a repeated notification are caught.
+// stillNotify is the settle window after the outcome is proven elsewhere: the
+// box entry (waitNotifyEntry) shows the server processed the event and made
+// its suppression decision, so a pop that was ever going to fire has fired by
+// now. It fails when the log holds other than want lines, so both a missing
+// and a late or repeated notification are caught. A test that calls this
+// before proving the outcome is bounding absence with a sleep again.
 func stillNotify(t *testing.T, log string, want int, wait time.Duration) {
 	t.Helper()
 	time.Sleep(wait)
@@ -239,8 +243,10 @@ func TestNotifySuppressedForAttachedFocus(t *testing.T) {
 	attachClient(t, h, "n")
 
 	writeStatus(t, h, "n", p2, "blocked", "hidden")
+	// The box entry proves the server processed the event and decided not to
+	// pop; stillNotify is only the settle window after that.
+	waitNotifyEntry(t, h, "n", "notify/"+p2, "blocked", "hidden")
 	stillNotify(t, log, 0, 400*time.Millisecond)
-	notifyEntry(t, h, "n", "notify/"+p2, "blocked", "hidden")
 
 	// The same pane in the background, entering an urgent state, does notify:
 	// the silence above was the focus suppression, not urgency.
@@ -264,8 +270,8 @@ func TestNotifyDisabledByEnv(t *testing.T) {
 	h.run("focus", root, "-s", "n")
 
 	writeStatus(t, h, "n", p2, "blocked", "needs review")
+	waitNotifyEntry(t, h, "n", "notify/"+p2, "blocked", "needs review")
 	stillNotify(t, log, 0, 400*time.Millisecond)
-	notifyEntry(t, h, "n", "notify/"+p2, "blocked", "needs review")
 }
 
 // A pane exit lands in the box under the pane's notify topic, rides the note
@@ -298,8 +304,8 @@ func TestNotifyUrgencyGatesDesktopPops(t *testing.T) {
 	h.run("focus", root, "-s", "n")
 
 	writeStatus(t, h, "n", p2, "done", "built ok")
-	stillNotify(t, log, 0, 400*time.Millisecond)
 	waitNotifyEntry(t, h, "n", "notify/"+p2, "done", "built ok")
+	stillNotify(t, log, 0, 400*time.Millisecond)
 
 	writeStatus(t, h, "n", p2, "error", "build failed")
 	lines := waitNotify(t, log, 1)
@@ -338,5 +344,7 @@ func TestNotifyLastPaneExitDoesNotPop(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// The session is gone, so no box entry can anchor the outcome: the fixed
+	// wait is the only silence proof left here.
 	stillNotify(t, log, 0, 1*time.Second)
 }

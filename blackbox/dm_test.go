@@ -35,10 +35,20 @@ func TestOSC7501EndToEnd(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	h.waitFor("probe", p2, "PROBE-CLEARED")
-	time.Sleep(200 * time.Millisecond)
-	out := h.run("status", p2, "-s", "probe")
-	if strings.Contains(out, "working") {
-		t.Fatalf("status not cleared: %q", out)
+	// The clear lands as the state the server settled on, not as one
+	// substring: state unknown, message empty. Poll for that exact outcome,
+	// because a suppression bug that fires late passes a fixed sleep.
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		out, err := h.try("status", p2, "-s", "probe")
+		fields := strings.Split(strings.TrimRight(out, "\n"), "\t")
+		if err == nil && len(fields) == 3 && fields[1] == "unknown" && fields[2] == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("status never reached the cleared state: %q", out)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -871,8 +881,21 @@ func TestPaneHistory(t *testing.T) {
 	}
 	lastBg := 0
 	_, _ = fmt.Sscanf(bgHist[len(bgHist)-1], "BG-%d", &lastBg)
-	if lastBg < 30 || lastBg > 45 {
-		t.Fatalf("background history window is not next to the screen: last=%d\n%v", lastBg, bgHist)
+	// The background pane's PTY is its own layout height, recorded in the
+	// state file. Its screen holds that many rows: the loop's last outputs
+	// plus the shell's trailing prompt. The 5-row history window ends just
+	// above the screen's first output line, so the window's last line is
+	// 60 - rows give or take the prompt rows the shell printed.
+	bgRows := 0
+	if ps := h.sessionState("hist").Panes[bg]; ps != nil {
+		bgRows = ps.Rows
+	}
+	if bgRows <= 0 {
+		t.Fatalf("background pane %s has no recorded size", bg)
+	}
+	top := 60 - bgRows
+	if lastBg < top || lastBg > top+3 {
+		t.Fatalf("background history window is not next to the screen: last=%d, pane rows=%d\n%v", lastBg, bgRows, bgHist)
 	}
 
 	// A wide window reaches the first row; -s before the pane id works.
