@@ -331,6 +331,9 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 				if err != nil {
 					return fmt.Errorf("line %d: key %q: %w", keyLine, key, err)
 				}
+				if winner, dup := duplicateBinding(m.bindings, seqs); dup {
+					return fmt.Errorf("line %d: key %q in mode %q is dead: the same bytes already fire action %q", keyLine, key, modeName, winner)
+				}
 				m.actions[action] = key
 				if section != "" {
 					m.sections[action] = section
@@ -392,27 +395,12 @@ func checkCommandName(name string) error {
 	return nil
 }
 
-// builtinActionNames returns the action names the built-in keymap binds,
-// read from the built-in text. That text defines no commands, so this never
-// recurses into itself. A command sharing one of these names would blur the
-// line between a built-in action and a user command, so the config rejects it.
-func builtinActionNames() map[string]bool {
-	names := make(map[string]bool)
-	for _, m := range LoadDefault().Keymaps() {
-		for _, a := range m.Actions {
-			names[a.Action] = true
-		}
-	}
-	return names
-}
-
 // findCommands walks the top-level tokens for command blocks and returns the
 // commands they define. It rejects a malformed block, a duplicate command
 // name, a duplicate, missing or empty run, an unknown key inside the block,
 // and a name that collides with a built-in action.
 func findCommands(toks []kdl.Token) (map[string]string, error) {
 	commands := make(map[string]string)
-	var builtin map[string]bool
 	depth := 0
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
@@ -431,13 +419,10 @@ func findCommands(toks []kdl.Token) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if builtin == nil {
-			builtin = builtinActionNames()
-		}
 		if _, dup := commands[cmd.Name]; dup {
 			return nil, fmt.Errorf("line %d: duplicate command %q", t.Line, cmd.Name)
 		}
-		if builtin[cmd.Name] {
+		if builtinActions[cmd.Name] {
 			return nil, fmt.Errorf("line %d: command name %q collides with a built-in action", t.Line, cmd.Name)
 		}
 		commands[cmd.Name] = cmd.Run
@@ -879,6 +864,44 @@ keymap "help" {
     "close-question" "?"
 }
 `
+
+// duplicateBinding reports the action of the first binding that resolves to
+// the same bytes as one of seqs. Match resolves equal-length collisions by
+// declaration order, so the second of the pair never fires and the help box
+// would advertise it all the same. Bindings that nest, esc before the arrow
+// sequences, are not duplicates: the shorter one still fires when the longer
+// one's continuation never arrives.
+func duplicateBinding(bindings []binding, seqs [][]byte) (string, bool) {
+	for _, seq := range seqs {
+		for _, b := range bindings {
+			if bytes.Equal(b.bytes, seq) {
+				return b.action, true
+			}
+		}
+	}
+	return "", false
+}
+
+// checkActions holds every bound action name to the whitelist. The parser
+// accepts any action name so tests and doc tooling can parse synthetic
+// labels, but a load must not: a typo such as "cloes-pane" parses clean,
+// then mergeDefaults sees its key taken and skips the real close-pane, so
+// the real action runs on no key at all and no parse error ever names it.
+// command:<name> references are already whitelisted against the command
+// block at parse time.
+func (c *Config) checkActions() error {
+	for name, m := range c.modes {
+		for action := range m.actions {
+			if strings.HasPrefix(action, "command:") {
+				continue
+			}
+			if !builtinActions[action] {
+				return fmt.Errorf("unknown action %q in keymap %q", action, name)
+			}
+		}
+	}
+	return nil
+}
 
 // bindingTaken reports whether any binding already starves one of the byte
 // sequences of its press: the same bytes, or a longer binding the sequence
