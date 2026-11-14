@@ -466,8 +466,10 @@ func (t *tui) processInput() {
 		if t.mode == "float" {
 			// The float owns the keyboard: the bytes go to the command, and
 			// the prefix alone is the client's. A lone esc is the esc key, so
-			// it skips the mouse and paste checks. A mouse event and a paste
-			// are swallowed: the command asked for neither.
+			// it skips the mouse and paste checks. A mouse event goes to the
+			// command when the command asked for the mouse; a paste goes over
+			// framed or bare as the command asked. A command that asked for
+			// neither still gets neither, as before.
 			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
 				if !t.floatKey() {
 					return
@@ -476,7 +478,7 @@ func (t *tui) processInput() {
 			}
 			if ev, n, ok := parseMouse(t.inbuf); ok {
 				t.inbuf = t.inbuf[n:]
-				_ = ev
+				t.floatMouse(ev)
 				continue
 			} else if n == 0 {
 				return // partial sequence, wait for the rest
@@ -487,7 +489,7 @@ func (t *tui) processInput() {
 					return
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
-				_ = seq
+				t.floatPaste(seq)
 				continue
 			}
 			if !t.floatKey() {
@@ -513,9 +515,12 @@ func (t *tui) processInput() {
 		t.pasteHeld = 0
 		if ev, n, ok := parseMouse(t.inbuf); ok {
 			t.inbuf = t.inbuf[n:]
-			// An input prompt owns the keyboard, not the pointer: a stray
-			// click must not move the draft or the focus out from under it.
-			if t.mode != "rename" && t.mode != "search" {
+			// An input prompt or the session picker owns the keyboard and the
+			// screen, not the pointer: a stray click must not move the draft,
+			// the focus or a pane under a full-screen picker out from under
+			// it. The picker paints over every rail and pane rect, so a click
+			// there acts on UI the operator cannot see.
+			if t.mode != "rename" && t.mode != "search" && t.mode != "sessions" {
 				t.handleMouse(ev)
 			}
 			continue
@@ -2502,6 +2507,50 @@ func parseMouse(b []byte) (ev mouseEvent, n int, ok bool) {
 	}
 	ev = mouseEvent{btn: btn, x: x, y: y, release: b[end] == 'm', raw: append([]byte(nil), b[:end+1]...)}
 	return ev, end + 1, true
+}
+
+// floatMouse forwards a mouse event to the float's command when the command
+// asked for the mouse. The float's own terminal is the live answer: the client
+// tracks the mode in the command's byte stream, the way a pane daemon answers
+// for a pane. A command that never asked gets nothing, and the pointer stays
+// the client's. Motion with no button is hover, and dm keeps it from apps that
+// asked only for button tracking, so the float sees none either.
+func (t *tui) floatMouse(ev mouseEvent) {
+	f := t.float
+	if f == nil || t.conn == nil || !f.opened || f.exited {
+		return
+	}
+	if f.vt.Grid().Modes().Mouse == vt.MouseOff {
+		return
+	}
+	if ev.btn&32 != 0 && ev.btn&3 == 0 {
+		return
+	}
+	// The command sees its own screen, so the point maps into the float's
+	// rect, the way paneMouse maps a point into a pane's.
+	_ = t.conn.Send(wire.Msg{
+		Type: "keys", Target: f.id,
+		Keys: paneMouse(&wire.PaneInfo{Rect: f.float.Rect}, ev),
+	})
+}
+
+// floatPaste sends a bracketed paste to the float's command. The float's own
+// terminal answers whether the command asked for bracketed paste: a command
+// that did gets the markers, one that did not gets the text alone, the way
+// pasteKeys frames a paste for a pane.
+func (t *tui) floatPaste(seq []byte) {
+	f := t.float
+	if f == nil || t.conn == nil || !f.opened || f.exited {
+		return
+	}
+	keys := seq
+	if !f.vt.Grid().Modes().BracketedPaste {
+		if len(seq) < len(pasteStart)+len(pasteEnd) {
+			return
+		}
+		keys = seq[len(pasteStart) : len(seq)-len(pasteEnd)]
+	}
+	_ = t.conn.Send(wire.Msg{Type: "keys", Target: f.id, Keys: keys})
 }
 
 func (t *tui) moveSel(step int) {
