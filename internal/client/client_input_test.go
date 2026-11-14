@@ -259,23 +259,27 @@ func TestSearchQueryTakesUTF8(t *testing.T) {
 
 // TestTermColourDeadlineSlides proves a partial reply that keeps arriving is
 // not flushed mid-flight: every sighting re-arms the deadline, and only a
-// quiet partial flushes.
+// quiet partial flushes. The test pins the slide and the raw flush, not the
+// stall window's length, so widening the window later does not rewrite it.
 func TestTermColourDeadlineSlides(t *testing.T) {
 	t.Parallel()
 	tui, got := clientTUI(t, nil)
 	feed(tui, "\x1b]10;rgb:ff")
-	// A quiet partial would flush at its first arm's deadline; let that
-	// moment pass before more of the reply arrives.
-	time.Sleep(escTimeout + 5*time.Millisecond)
+	// Age the first arm past its deadline, the way a slow link leaves it
+	// before the rest of the reply shows up.
+	tui.termDeadline = time.Now().Add(-escTimeout - time.Millisecond)
+	// More of the same reply arrives; the deadline moves with it.
 	feed(tui, "ff/ff")
 	// A tick probing between the first arm and the re-arm sees a reply that
-	// is still growing: no flush.
+	// is still growing: no flush. A deadline that never slid would already
+	// be in the past here and would flush.
 	if tui.expireTermColour(time.Now().Add(escTimeout - 5*time.Millisecond)) {
 		t.Fatal("a growing reply was flushed mid-flight")
 	}
 	testutil.NoMsg(t, got)
-	// A quiet partial still flushes as ordinary input.
-	if !tui.expireTermColour(time.Now().Add(escTimeout + time.Millisecond)) {
+	// A quiet partial still flushes as ordinary input, at whatever the
+	// stall window is now.
+	if !tui.expireTermColour(time.Now().Add(pasteTimeout + 10*time.Millisecond)) {
 		t.Fatal("a stalled reply was not flushed")
 	}
 	m := testutil.NextMsg(t, got)
