@@ -283,3 +283,16 @@ func TestWindowInfoLayoutRoundTrip(t *testing.T) {
 		t.Fatalf("empty layout kept the key: %s", b)
 	}
 }
+
+func TestWriteMsgRejectsOversize(t *testing.T) {
+	// MaxFrame is the read-side bound; the writer must refuse a payload the
+	// peer would drop the connection over.
+	m := wire.Msg{Type: "bytes", Data: make([]byte, wire.MaxFrame)}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, m); err == nil {
+		t.Fatal("WriteMsg oversize = nil error, want an error naming MaxFrame")
+	}
+	if buf.Len() != 0 {
+		t.Errorf("WriteMsg oversize wrote %d bytes before failing, want none", buf.Len())
+	}
+}

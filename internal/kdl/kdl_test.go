@@ -281,3 +281,18 @@ states {
 		t.Errorf("closing brace line = %d, want 8", got[14].Line)
 	}
 }
+
+func TestScanEscapedNewlineCountsLine(t *testing.T) {
+	// A backslash before a newline must still count the line: every later
+	// parse error in the file otherwise cites the wrong line.
+	src := "prefix \"ctrl+b\"\nhelp \"a\\\nb\"\nbad-token"
+	got := scanTokens(t, src)
+	eof := got[len(got)-1]
+	if eof.Kind != EOF || eof.Line != 4 {
+		t.Errorf("EOF token = %+v, want line 4", eof)
+	}
+	id := got[len(got)-2]
+	if id.Kind != Ident || id.Value != "bad-token" || id.Line != 4 {
+		t.Errorf("token after escaped newline = %+v, want ident on line 4", id)
+	}
+}
