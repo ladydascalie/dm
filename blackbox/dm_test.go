@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"dm/internal/keymap"
 	"dm/internal/vt"
 )
 
@@ -44,7 +44,9 @@ func TestOSC7501EndToEnd(t *testing.T) {
 
 // A pane that enters the alternate screen and asks for mouse reporting must
 // tell the server, because the client's replay ring may not reach back to the
-// enabling sequences. The client uses that to forward the wheel to the app.
+// enabling sequences. The client uses the flags to decide whether a wheel
+// belongs to the app; TestWheelReachesTheAltScreenApp drives the wheel bytes
+// through the same keys frame.
 func TestAltScreenAndMouseMode(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -55,6 +57,30 @@ func TestAltScreenAndMouseMode(t *testing.T) {
 
 	waitMode(t, h, "m", true, true)
 	waitMode(t, h, "m", false, false)
+}
+
+// TestWheelReachesTheAltScreenApp proves wheel bytes land in an application
+// that claimed the mouse: the app turns on the alternate screen and mouse
+// reporting, echoes every input byte through cat -v, and the wheel's SGR
+// sequence shows up on its screen. The bytes are the ones the client's mouse
+// parser encodes for a wheel event, sent over the same keys frame the client
+// sends when it sees one. What stays untested here is the client's own
+// parse-and-forward step: it needs a real attach TUI, and the unit tests own
+// paneMouse and sgrMouse.
+func TestWheelReachesTheAltScreenApp(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.run("new", "-s", "wheel")
+	root := h.focus("wheel")
+	h.run("write-to", root, "-s", "wheel", "--msg",
+		`printf '\033[?1049h\033[?1000h'; cat -v`, "--enter")
+	waitMode(t, h, "wheel", true, true)
+
+	// A wheel-up press at cell 5,3.
+	wheel := "\x1b[<64;5;3M"
+	h.rpc("wheel", map[string]any{"action": "keys", "target": root, "keys": []byte(wheel)})
+	// cat -v renders ESC as ^[, so the forwarded bytes read as text.
+	h.waitFor("wheel", root, "^[[<64;5;3M")
 }
 
 // TestToggleFold drives the fold action through a live session.
@@ -275,7 +301,9 @@ func TestZoomClearsOnFocusChange(t *testing.T) {
 }
 
 // TestZoomClearsOnSplit pins the split guard: the new pane is visible, so the
-// zoom ends and the split pane stops filling the area.
+// zoom ends. The restored layout must be exact, so a control session runs the
+// same splits with no zoom and the rects must match it cell for cell: any
+// wrong smaller rect fails, not just a leftover full-area inset.
 func TestZoomClearsOnSplit(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -290,13 +318,21 @@ func TestZoomClearsOnSplit(t *testing.T) {
 	if got := h.zoom("zsplit"); got != "" {
 		t.Fatalf("zoom survived a split: %q", got)
 	}
-	if got, want := h.rects("zsplit")[right], insetBox(h.paneAreaOf("zsplit")); got == want {
-		t.Fatalf("pane %q still fills the area %+v after the split", right, want)
+
+	// The control: the same splits with no zoom anywhere.
+	h.run("new", "-s", "zsplitctl")
+	cleft := h.focus("zsplitctl")
+	cright := h.split("zsplitctl", cleft, "right")
+	h.split("zsplitctl", cright, "down")
+
+	if got, want := h.rects("zsplit"), h.rects("zsplitctl"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rects after the split = %v, want the unzoomed layout %v", got, want)
 	}
 }
 
 // TestZoomClearsOnClosePane pins the close guard: closing a sibling ends the
-// zoom, so the zoomed pane returns to its split rect.
+// zoom and the survivors take the exact layout an unzoomed session reaches, so
+// a control session with the same splits and close pins every rect.
 func TestZoomClearsOnClosePane(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -312,13 +348,23 @@ func TestZoomClearsOnClosePane(t *testing.T) {
 	if got := h.zoom("zclose"); got != "" {
 		t.Fatalf("zoom survived a close: %q", got)
 	}
-	if got, want := h.rects("zclose")[c], insetBox(h.paneAreaOf("zclose")); got == want {
-		t.Fatalf("pane %q still fills the area %+v after the close", c, want)
+
+	// The control: the same splits and the same close with no zoom anywhere.
+	h.run("new", "-s", "zclosectl")
+	ca := h.focus("zclosectl")
+	cb := h.split("zclosectl", ca, "right")
+	h.split("zclosectl", cb, "down")
+	h.rpc("zclosectl", map[string]any{"action": "close-pane", "target": ca})
+
+	if got, want := h.rects("zclose"), h.rects("zclosectl"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rects after the close = %v, want the unzoomed layout %v", got, want)
 	}
 }
 
 // TestZoomClearsOnResizeSplit pins the resize-split guard: the drag is a layout
-// change, so the zoom ends even though the handler skips afterMutation.
+// change, so the zoom ends even though the handler skips afterMutation. The
+// dragged layout must be exact, so a control session runs the same drag with no
+// zoom and the rects must match it cell for cell.
 func TestZoomClearsOnResizeSplit(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -336,8 +382,18 @@ func TestZoomClearsOnResizeSplit(t *testing.T) {
 	if got := h.zoom("zdrag"); got != "" {
 		t.Fatalf("zoom survived resize-split: %q", got)
 	}
-	if got, want := h.rects("zdrag")[right], insetBox(h.paneAreaOf("zdrag")); got == want {
-		t.Fatalf("pane %q still fills the area %+v after the drag", right, want)
+
+	// The control: the same drag with no zoom anywhere.
+	h.run("new", "-s", "zdragctl")
+	cleft := h.focus("zdragctl")
+	cright := h.split("zdragctl", cleft, "right")
+	h.rpc("zdragctl", map[string]any{
+		"action": "resize-split",
+		"target": cleft, "other": cright, "ratio": 0.3,
+	})
+
+	if got, want := h.rects("zdrag"), h.rects("zdragctl"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rects after the drag = %v, want the unzoomed layout %v", got, want)
 	}
 }
 
@@ -408,7 +464,6 @@ func TestDurabilityAcrossServerKill(t *testing.T) {
 	if err := syscall.Kill(serverPID, syscall.SIGKILL); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(300 * time.Millisecond)
 
 	// A fresh RPC must restart the server and adopt the same pane process.
 	h.waitFor("durable", root, "MARK-DURABLE")
@@ -420,14 +475,16 @@ func TestDurabilityAcrossServerKill(t *testing.T) {
 	}
 
 	// Layout survives too.
-	h.split("durable", root, "right")
+	right := h.split("durable", root, "right")
+	panes := []string{root, right}
 	serverPID = readPID(t, filepath.Join(h.stateDir(), "sessions", "durable", "server.pid"))
 	_ = syscall.Kill(serverPID, syscall.SIGKILL)
-	time.Sleep(300 * time.Millisecond)
-	tree := h.rpc("durable", map[string]any{"action": "list"})
-	snap := tree["snapshot"].(map[string]any)
-	if n := len(snap["panes"].([]any)); n != 2 {
-		t.Fatalf("panes after restart = %d", n)
+	// A restarted server re-adopts the surviving panes asynchronously. Poll
+	// the adoption instead of sleeping: a slow box answers a single list
+	// before the adoption finished, and the test flaked on it.
+	waitAdopted(t, h, "durable", panes)
+	if got := h.panes("durable"); len(got) != 2 {
+		t.Fatalf("panes after restart = %d, want 2", len(got))
 	}
 }
 
@@ -960,8 +1017,7 @@ func TestResizeSplit(t *testing.T) {
 	q3 := h.split("rs2", q2, "right")
 	tree := h.rpc("rs2", map[string]any{"action": "list"})
 	cols := int(tree["snapshot"].(map[string]any)["cols"].(float64))
-	pad := keymap.LoadDefault().Padding()
-	overhead := 2 + 2*pad // border and padding around one pane's content
+	overhead := 2 + 2*pad() // border and padding around one pane's content
 	h.run("exec", `{"action":"resize-split","target":"`+q1+`","other":"`+q2+`","ratio":0}`, "-s", "rs2")
 	got = h.rects("rs2")
 	if got[q1].W != 3 {

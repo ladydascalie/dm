@@ -14,8 +14,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"dm/internal/keymap"
 )
 
 // buildOnce builds the dm binary under test. The test package lives one
@@ -386,9 +384,42 @@ func paneAreaFor(cols, rows, rail int) paneRect {
 	return paneRect{rail, 1, w, rows - 2}
 }
 
-// pad is the pane padding the default config asks for, so the harness geometry
-// follows the same rule the server lays out with.
-func pad() int { return keymap.LoadDefault().Padding() }
+// testPad is the pane padding the tests pin. It pins the config default, 0
+// when this harness was written. The pin is deliberate: a harness that reads
+// the production default derives its expectations from the code under test, so
+// a padding change would move every expected rect with it and no test could
+// fail. A deliberate padding change edits this pin and the expected rects in
+// the same review.
+const testPad = 0
+
+// pad is the pane padding the tests pin.
+func pad() int { return testPad }
+
+// TestPaneAreaMirrorPinsTheLayoutRule fails when the harness mirror of the
+// server's layout drifts. The expectations are literals: a change to
+// paneAreaFor or its helpers is a conscious re-pin in step with the
+// production change, never a silent move.
+func TestPaneAreaMirrorPinsTheLayoutRule(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name             string
+		cols, rows, rail int
+		want             paneRect
+	}{
+		{"plain", 200, 60, defaultRail, paneRect{34, 1, 166, 58}},
+		{"no rail", 200, 60, 0, paneRect{0, 1, 200, 58}},
+		{"clamped", 90, 30, 999, paneRect{30, 1, 60, 28}},
+		{"tiny", 6, 10, defaultRail, paneRect{2, 1, 4, 8}},
+		{"railless", 2, 5, defaultRail, paneRect{0, 1, 2, 3}},
+		{"negative rail", 80, 24, -5, paneRect{0, 1, 80, 22}},
+	}
+	for _, c := range cases {
+		if got := paneAreaFor(c.cols, c.rows, c.rail); got != c.want {
+			t.Fatalf("%s: paneAreaFor(%d,%d,%d) = %+v, want %+v",
+				c.name, c.cols, c.rows, c.rail, got, c.want)
+		}
+	}
+}
 
 func insetBox(b paneRect) paneRect {
 	if b.W < 3 || b.H < 3 {
