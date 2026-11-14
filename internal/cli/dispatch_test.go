@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"dm/internal/paths"
 	"dm/internal/testutil"
@@ -399,13 +400,21 @@ func TestSplitRefusal(t *testing.T) {
 }
 
 // TestDashWithoutAServer proves the most common failure a user meets: no
-// session running. The verb errors cleanly after the spawn retries give up,
-// instead of hanging or panicking.
+// session running. The verb errors at once with the spawned server's own
+// failure, names the session it could not reach, and neither hangs nor
+// panics.
 func TestDashWithoutAServer(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
+	start := time.Now()
 	err := Run([]string{"dash"})
-	if err == nil || !strings.Contains(err.Error(), "did not start") {
-		t.Fatalf("dm dash with no server = %v, want the did-not-start error", err)
+	if err == nil {
+		t.Fatal("dm dash with no server returned nil")
+	}
+	if !strings.Contains(err.Error(), `server for "main"`) {
+		t.Fatalf("dm dash with no server = %v, want the error to name the session", err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("dm dash with no server took %s, want a prompt failure", took)
 	}
 }
 
