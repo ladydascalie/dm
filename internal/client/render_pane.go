@@ -82,17 +82,26 @@ func drawPaneFrom(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int, sel
 // rows the search marks take its highlight. A wide cluster is written once and
 // the cursor advances over its continuation slot.
 func drawPaneFromMarked(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 int, sel, hover *selRange, mark *searchMark) {
-	if term == nil || r.W <= 0 || r.H <= 0 {
+	drawPaneFromMarkedClip(buf, term, r, 0, r.W, row0, sel, hover, mark)
+}
+
+// drawPaneFromMarkedClip paints the same picture with the columns limited to
+// [xFrom, xTo) of the pane, offsets from the rect's left edge. A rect that
+// runs past the screen paints only the cells inside it, so a frame drawn on a
+// stale snapshot cannot carry cursor moves or cells past the edge. The sel and
+// hover ranges stay row-major over the rect's full width.
+func drawPaneFromMarkedClip(buf *bytes.Buffer, term *vt.Term, r layout.Rect, xFrom, xTo, row0 int, sel, hover *selRange, mark *searchMark) {
+	if term == nil || r.W <= 0 || r.H <= 0 || xFrom < 0 || xTo > r.W || xFrom >= xTo {
 		return
 	}
 	g := term.Grid()
 	cols, rows := g.Size()
 	blank := vt.NewCell(" ", vt.DefaultStyle())
 	for y := 0; y < r.H; y++ {
-		fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+1)
+		fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+y+1, r.X+xFrom+1)
 		tint, marked := mark.at(row0 + y)
 		var cur *vt.Style
-		for x := 0; x < r.W; {
+		for x := xFrom; x < xTo; {
 			c := blank
 			row := row0 + y
 			next := x + 1
@@ -125,11 +134,11 @@ func drawPaneFromMarked(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row0 in
 			if content == "" || c.Width == vt.WidthContinuation {
 				content = " "
 			}
-			// Clip the row to the content rect. A cluster whose last cell would
-			// fall outside is dropped and the slot it leaves is blanked, so a
-			// row never paints past the rect and a wide glyph is never split.
+			// Clip the row to the painted columns. A cluster whose last cell
+			// would fall outside is dropped and the slot it leaves is blanked,
+			// so a row never paints past them and a wide glyph is never split.
 			span := clusterSpan(c)
-			if x+span > r.W {
+			if x+span > xTo {
 				content = " "
 			}
 			buf.WriteString(content)
@@ -169,9 +178,18 @@ func clusterSpan(c vt.Cell) int {
 }
 
 // drawPaneRow paints one row of a pane's content: the same bytes a full pane
-// paint writes for that row.
-func drawPaneRow(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row, row0 int, sel, hover *selRange, mark *searchMark) {
-	drawPaneFromMarked(buf, term, layout.Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, row0+row, selRow(sel, row, r.W), selRow(hover, row, r.W), mark)
+// paint writes for that row. cols is the screen width: the row clips to the
+// columns the pane shares with the screen, so a frame drawn on a stale
+// snapshot after a shrink cannot carry cursor moves or cells past the edge.
+func drawPaneRow(buf *bytes.Buffer, term *vt.Term, r layout.Rect, row, row0 int, sel, hover *selRange, mark *searchMark, cols int) {
+	xFrom, xTo := 0, r.W
+	if r.X < 0 {
+		xFrom = -r.X
+	}
+	if xTo > cols-r.X {
+		xTo = cols - r.X
+	}
+	drawPaneFromMarkedClip(buf, term, layout.Rect{X: r.X, Y: r.Y + row, W: r.W, H: 1}, xFrom, xTo, row0+row, selRow(sel, row, r.W), selRow(hover, row, r.W), mark)
 }
 
 // cellSGR returns the escape sequence that moves a terminal from cur to st.

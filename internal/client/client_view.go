@@ -126,16 +126,17 @@ func (t *tui) draw() {
 		floatPaints = append(floatPaints, t.last.floatPaint(f.ID))
 	}
 	// A float that left the stack drops its last bytes, so a float that comes
-	// back paints whole instead of matching a frame it never wrote.
-	if len(t.last.floats) > len(t.floats) {
-		live := make(map[string]bool, len(t.floats))
-		for _, f := range t.floats {
-			live[f.ID] = true
-		}
-		for id := range t.last.floats {
-			if !live[id] {
-				delete(t.last.floats, id)
-			}
+	// back paints whole instead of matching a frame it never wrote. Prune
+	// against the live set every frame: a frame that closes one float and
+	// opens another keeps the count equal, and a gate on the count would let
+	// the closed float's entry survive forever.
+	live := make(map[string]bool, len(t.floats))
+	for _, f := range t.floats {
+		live[f.ID] = true
+	}
+	for id := range t.last.floats {
+		if !live[id] {
+			delete(t.last.floats, id)
 		}
 	}
 	dirty := map[int]bool{}
@@ -233,7 +234,7 @@ func (t *tui) draw() {
 			if y < pp.rect.Y || y >= pp.rect.Y+pp.rect.H {
 				continue
 			}
-			drawPaneRow(&body, pp.vt, pp.rect, y-pp.rect.Y, pp.row0, pp.sel, pp.hover, pp.mark)
+			drawPaneRow(&body, pp.vt, pp.rect, y-pp.rect.Y, pp.row0, pp.sel, pp.hover, pp.mark, win.Cols)
 		}
 	}
 	if padFreed {
@@ -337,7 +338,8 @@ func paneOnScreen(r layout.Rect, cols, rows int) bool {
 
 // onScreenPanes is the panes a frame paints at all: the visible set, less any
 // pane whose rect misses the grid whole. A pane that overlaps the grid is kept
-// and clipped by the row loop.
+// and clipped to the grid by the row loop, rows by the loop's bounds and
+// columns by drawPaneRow.
 func onScreenPanes(win *wire.Snapshot) []wire.PaneInfo {
 	panes := visiblePanes(win)
 	out := make([]wire.PaneInfo, 0, len(panes))
