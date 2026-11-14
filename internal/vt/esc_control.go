@@ -97,7 +97,13 @@ func csiRepeat(term *Term, seq CSI) {
 	if !ok {
 		return
 	}
-	for i, n := 0, csiParam(seq, 0, 1); i < n; i++ {
+	// A repeat longer than the screen cannot show more than a full screen of
+	// the character, so the count clamps there instead of looping for hours.
+	n := csiParam(seq, 0, 1)
+	if lim := term.grid.cols * term.grid.rows; n > lim {
+		n = lim
+	}
+	for i := 0; i < n; i++ {
 		term.place(c.Content)
 	}
 }

@@ -52,7 +52,13 @@ func csiCursorBack(term *Term, seq CSI) {
 		hi = r.Right
 	}
 	x, y := cur.X, cur.Y
-	for i, n := 0, csiParam(seq, 0, 1); i < n; i++ {
+	// Reverse wrap can cycle the region, so an unclamped count never ends.
+	// No move can travel farther than a full traversal of the screen.
+	n := csiParam(seq, 0, 1)
+	if lim := g.cols * g.rows; n > lim {
+		n = lim
+	}
+	for i := 0; i < n; i++ {
 		if x > lo {
 			x--
 			continue

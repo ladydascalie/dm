@@ -109,6 +109,10 @@ func eraseCellsSelective(g *Grid, x0, x1, y int) {
 // protection rule protects is skipped with the whole cluster, so half of a
 // protected wide cell never goes.
 func eraseRange(g *Grid, x0, x1, y int, selective bool) {
+	// A count ECH hands down can be huge; clamping here bounds the loop no
+	// matter what the caller computed.
+	x0 = clamp(x0, 0, g.cols-1)
+	x1 = clamp(x1, 0, g.cols-1)
 	if x0 > x1 {
 		x0, x1 = x1, x0
 	}
