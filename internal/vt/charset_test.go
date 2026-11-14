@@ -241,3 +241,35 @@ func checkGrid(t *testing.T, term *Term, want []string, x, y int) {
 		t.Errorf("cursor = %d,%d, want %d,%d", cur.X, cur.Y, x, y)
 	}
 }
+
+// TestCharsetDesignatorExecutesC0 pins xterm behavior: a C0 control inside a
+// charset designator executes and the designator stays open.
+func TestCharsetDesignatorExecutesC0(t *testing.T) {
+	term := NewTerm(10, 4)
+	term.Write([]byte("\x1b(\nA"))
+	// The LF moved the cursor and 'A' still designated DECSpecial to G0.
+	if got := term.grid.Cursor().Y; got != 1 {
+		t.Errorf("after ESC ( LF A, cursor Y = %d, want 1", got)
+	}
+	cs := term.grid.Charset()
+	if cs.G0 != CharsetUK {
+		t.Errorf("after ESC ( LF A, G0 = %v, want %v", cs.G0, CharsetUK)
+	}
+
+	term = NewTerm(10, 4)
+	term.Write([]byte("AB\x1b(\x08"))
+	if got := term.grid.Cursor().X; got != 1 {
+		t.Errorf("after AB ESC ( BS, cursor X = %d, want 1", got)
+	}
+
+	// DEL inside a designator is ignored and the designator still completes.
+	term = NewTerm(10, 4)
+	term.Write([]byte("\x1b(\x7f0A"))
+	term.Flush()
+	if cs := term.grid.Charset(); cs.G0 != CharsetDECSpecial {
+		t.Errorf("after ESC ( DEL 0 A, G0 = %v, want %v", cs.G0, CharsetDECSpecial)
+	}
+	if got := term.grid.Text(0); got == "" {
+		t.Error("after ESC ( DEL 0 A, no cell placed")
+	}
+}

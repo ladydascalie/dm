@@ -278,11 +278,17 @@ func parseParams(b []byte) []int {
 			out = append(out, n)
 			n = 0
 		case c == ':':
+			// Skip the sub-parameters. The field's leading number is already
+			// appended here, so the separator that follows must not append a
+			// second, zero, field.
 			for i+1 < len(b) && b[i+1] != ';' {
 				i++
 			}
 			out = append(out, n)
 			n = 0
+			if i+1 < len(b) {
+				i++
+			}
 		}
 	}
 	return append(out, n)
@@ -331,6 +337,11 @@ func (p *parser) charsetByte(t *Term, c byte) {
 		p.startEscape()
 	case c == 0x18 || c == 0x1a:
 		p.state = stateGround
+	case c < 0x20:
+		// C0 controls execute mid-designator, as in xterm. The state stays
+		// in stateCharset so the designator still completes.
+		t.control(c)
+	case c == 0x7f:
 	case c >= 0x20 && c <= 0x2f:
 		// An intermediate such as '%' in the UTF-8 designation.
 		p.esc = appendCapped(p.esc, c)

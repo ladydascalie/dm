@@ -173,6 +173,9 @@ func TestParseParams(t *testing.T) {
 		{"1;31", []int{1, 31}},
 		{";5", []int{0, 5}},
 		{"38:2:255:0:0", []int{38, 0}},
+		// A colon sub-parameter must not add a spurious zero field after it.
+		{"1:2;3", []int{1, 3}},
+		{"1:2:3;4", []int{1, 4}},
 	}
 	for _, tc := range cases {
 		if got := parseParams([]byte(tc.in)); !reflect.DeepEqual(got, tc.want) {
