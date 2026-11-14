@@ -234,10 +234,29 @@ func (t *tui) commandPaletteKey() bool {
 		t.closePaletteHelp()
 		t.cp.pal.AppendRune(rune(b))
 		t.dirty = true
+	case b >= 0x80:
+		// A multi-byte rune is one key. The palette used to drop it byte by
+		// byte in silence, so the query could not hold the operator's
+		// language.
+		r, size, ok, wait := textRune(t.inbuf)
+		if wait {
+			// The rune is still arriving. The expiry closes on a stall, as
+			// it does for a pending escape.
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		t.takePaletteBytes(size)
+		t.closePaletteHelp()
+		if ok {
+			t.cp.pal.AppendRune(r)
+			t.dirty = true
+		}
 	default:
-		// A control byte the palette does not name, or the head byte of a
-		// multi-byte rune: the switcher takes neither as text, and neither
-		// does the palette.
+		// A control byte the palette does not name: the switcher drops it,
+		// and so does the palette.
 		t.takePaletteBytes(1)
 		t.closePaletteHelp()
 	}

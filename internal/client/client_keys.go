@@ -12,6 +12,11 @@ import (
 	"dm/internal/wire"
 )
 
+// defaultPrefixName is the prefix key the shipped config binds. A keymap
+// binding that names it means "the prefix key", and it goes stale when the
+// config moves the prefix elsewhere.
+const defaultPrefixName = "ctrl+b"
+
 // menu is one open context menu: where it sits, its title, its items and the
 // selected row. pane is the pane the right click landed on.
 type menu struct {
@@ -567,22 +572,46 @@ func (t *tui) switcherKey() bool {
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 	default:
-		b := t.inbuf[0]
-		n := escapeRun(t.inbuf)
-		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		if n := escapeRun(t.inbuf); n > 1 {
+			// An escape sequence with no binding is not text: left, right and
+			// shift-tab have no meaning in a list, and neither does F1.
+			t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+			t.pending = false
+			return true
+		}
+		r, size, ok, wait := textRune(t.inbuf)
+		if wait {
+			// A multi-byte rune is still arriving. The expiry closes on a
+			// stall, as it does for a pending escape.
+			if !t.pending {
+				t.pending = true
+				t.escAt = time.Now()
+			}
+			return false
+		}
+		t.inbuf = append([]byte(nil), t.inbuf[size:]...)
 		t.pending = false
-		// An escape sequence with no binding is not text: left, right and
-		// shift-tab have no meaning in a list, and neither does F1. Text only
-		// reaches the query in filter mode, where the letters are not keys.
-		if n == 1 && b >= 0x20 && b < 0x7f && t.sw.Filtering() {
-			t.sw.AppendText(rune(b))
+		// Text only reaches the query in filter mode, where the letters are
+		// not keys; elsewhere an unbound key is dropped.
+		if ok && t.sw.Filtering() {
+			t.sw.AppendText(r)
 			t.dirty = true
 		}
 		return true
 	}
 	switch action {
-	case "close", "close-ctrl-c":
+	case "close-ctrl-c":
 		closeSwitcher(t)
+	case "close":
+		// The shipped keymap binds close to the prefix key itself. Under the
+		// default config the head-of-buffer check above closes first, so the
+		// binding never fires. After a prefix remap the literal goes stale:
+		// a key that is no longer the prefix must not close the dashboard
+		// too, or the config carries two live close keys. A close key the
+		// config chose on purpose still closes.
+		if name := t.km().Key("switcher", "close"); name != defaultPrefixName || t.km().PrefixName() == defaultPrefixName {
+			closeSwitcher(t)
+		}
 	case "close-esc":
 		t.switcherEsc()
 	case "filter":

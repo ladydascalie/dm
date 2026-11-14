@@ -59,6 +59,32 @@ func TestCommandPaletteHoldsBoundLetters(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
+// TestCommandPaletteQueryTakesUTF8 proves the query takes a multi-byte rune
+// whole, in one read or split across two, where the bytes used to be dropped
+// byte by byte in silence.
+func TestCommandPaletteQueryTakesUTF8(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02K")
+	feed(tui, "caf\xc3\xa9")
+	if q := tui.cp.pal.Query(); q != "café" {
+		t.Fatalf("query = %q, want café", q)
+	}
+	// A rune split across reads waits for its tail, and the tail joins it.
+	feed(tui, "\xe2")
+	if q := tui.cp.pal.Query(); q != "café" {
+		t.Fatalf("a split lead byte changed the query: %q", q)
+	}
+	if !tui.pending {
+		t.Fatal("a split rune did not hold the palette")
+	}
+	feed(tui, "\x82\xac")
+	if q := tui.cp.pal.Query(); q != "café€" {
+		t.Fatalf("query = %q, want café€", q)
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestCommandPaletteTypeFiltersAndBackspace: typing narrows the rows, backspace
 // widens them again, and backspace on an empty query does nothing.
 func TestCommandPaletteTypeFiltersAndBackspace(t *testing.T) {
