@@ -831,6 +831,11 @@ func (t *tui) apply(m wire.Msg) {
 		}
 		if t.ncentre != nil {
 			t.ncentre.Sync(m.Snap, t.theme())
+			// A reader over the centre rides the centre's rect: the same sync
+			// the box branch gives its reader.
+			if t.reader != nil {
+				t.reader.Sync(t.ncentre.Float.Rect, t.theme())
+			}
 			t.dirty = true
 		}
 		t.dirty = true
