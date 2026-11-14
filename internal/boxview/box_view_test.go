@@ -214,7 +214,7 @@ func TestBoxViewReceipt(t *testing.T) {
 	}
 	screen = boxScreen(t, narrow, 50, 30)
 	r = narrow.Float.Rect
-	want := boxRowText(boxEntries()[0], r.W, -1)
+	want, _ := boxRowText(boxEntries()[0], r.W, -1)
 	if got := boxScreenRow(screen, r.Y, r.X, r.W); got != want {
 		t.Fatalf("narrow row = %q, want no marker %q", got, want)
 	}
@@ -248,7 +248,7 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 			}
 			continue
 		}
-		if want := boxRowText(entries[0], r.W, -1); row != want {
+		if want, _ := boxRowText(entries[0], r.W, -1); row != want {
 			t.Fatalf("cols %d: row = %q, want no marker %q", tc.cols, row, want)
 		}
 	}
@@ -478,5 +478,51 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	b.Scroll(-100, theme.DefaultTheme())
 	if b.pOff != 0 {
 		t.Fatalf("page offset = %d after scrolling back, want the first watch", b.pOff)
+	}
+}
+
+// TestBoxViewRepaintsOnThemeChange: the float's content is a cached terminal
+// the client blits every frame, so a config reload reaches it only through
+// Sync. A theme that changed repaints even when the rect did not move.
+func TestBoxViewRepaintsOnThemeChange(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	b := NewBoxView(snap, theme.DefaultTheme())
+	b.Set(boxEntries(), theme.DefaultTheme())
+	changed := theme.DefaultTheme()
+	changed.States[string(box.StateDone)] = theme.StateStyle{
+		Glyph: changed.States[string(box.StateDone)].Glyph, Colour: theme.RGB{R: 200, G: 100, B: 50},
+	}
+	b.Sync(snap, changed)
+	screen := boxScreen(t, b, snap.Cols, snap.Rows)
+	r := b.Float.Rect
+	want := boxStateColour(changed, box.StateDone)
+	got := screen.Grid().Cell(r.X+boxReceiptW+boxSeqW+1, r.Y).Style.Fg
+	if got.Kind != vt.ColorRGB || got.R != uint8(want.R) || got.G != uint8(want.G) || got.B != uint8(want.B) {
+		t.Fatalf("done colour after reload = %+v, want %v", got, want)
+	}
+}
+
+// TestBoxViewRowHighlightWideSeq: a seq past the four-cell column prints whole
+// and shifts the later columns right, so the state highlight follows the
+// rendered prefix instead of a fixed offset.
+func TestBoxViewRowHighlightWideSeq(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
+	b := NewBoxView(snap, theme.DefaultTheme())
+	entries := []box.Entry{
+		{Seq: 12345, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "gate green"},
+	}
+	b.Set(entries, theme.DefaultTheme())
+	screen := boxScreen(t, b, snap.Cols, snap.Rows)
+	r := b.Float.Rect
+	row, start := boxRowText(entries[0], r.W, 0)
+	if got := boxScreenRow(screen, r.Y, r.X, r.W); got != row {
+		t.Fatalf("row = %q, want %q", got, row)
+	}
+	want := boxStateColour(theme.DefaultTheme(), box.StateDone)
+	for i, c := range "done" {
+		got := screen.Grid().Cell(r.X+start+i, r.Y).Style.Fg
+		if got.Kind != vt.ColorRGB || got.R != uint8(want.R) || got.G != uint8(want.G) || got.B != uint8(want.B) {
+			t.Fatalf("state cell %d (%q) colour = %+v, want %v", i, string(c), got, want)
+		}
 	}
 }

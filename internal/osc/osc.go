@@ -281,7 +281,9 @@ func ParseStatus(s string) wire.Status {
 		}
 		return st
 	}
-	if s == "" {
+	// The keyed form normalises clear to unknown; the bare form gets the
+	// same treatment, so one state never renders two ways.
+	if s == "" || s == "clear" {
 		s = "unknown"
 	}
 	return wire.Status{State: s}

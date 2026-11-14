@@ -435,7 +435,14 @@ func switcherRowCells(th theme.Theme, set theme.GlyphSet, p wire.AllPane, jump i
 	out[0] = []segment.Seg{{Text: jumpText, FG: pal.RailDim}}
 	project, projectFG := "-", pal.RailDim
 	if p.Project != "" {
-		project, projectFG = p.Project, th.Accents[rail.RailAccentSlot(p.Project)]
+		// The same pinned slot the rail paints, the hash when the snapshot
+		// predates the field. RailAccentColour guards a slot outside the
+		// theme instead of indexing past the accents.
+		slot := rail.RailAccentSlot(p.Project)
+		if p.ProjectAccentSet {
+			slot = p.ProjectAccent
+		}
+		project, projectFG = p.Project, rail.RailAccentColour(th, slot)
 	}
 	out[1] = []segment.Seg{{Text: project, FG: projectFG}}
 	out[2] = []segment.Seg{{Text: paneLabel(p), FG: pal.RailText}}

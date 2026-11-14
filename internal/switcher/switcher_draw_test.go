@@ -11,6 +11,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/layout"
+	"dm/internal/rail"
 	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/vt"
@@ -601,5 +602,19 @@ func TestSwitcherColumns(t *testing.T) {
 	total := sum6([6]int{small[0], small[1], small[2], small[3], small[4], small[5]}) + 6 + small[6]
 	if total != 20 {
 		t.Fatalf("columns at 20 add up to %d, want 20: %v", total, small)
+	}
+}
+
+// TestSwitcherRowPinnedAccentFG: the project column paints the pinned accent
+// slot the server carries, the hash when the snapshot predates the field.
+func TestSwitcherRowPinnedAccentFG(t *testing.T) {
+	th := theme.DefaultTheme()
+	p := wire.AllPane{ID: "w1p1", Project: "a", ProjectAccent: 3, ProjectAccentSet: true}
+	if got := switcherRowCells(th, theme.GlyphASCII, p, 0, 0)[1][0].FG; got != th.Accents[3] {
+		t.Fatalf("pinned project FG = %v, want %v", got, th.Accents[3])
+	}
+	p.ProjectAccentSet = false
+	if got := switcherRowCells(th, theme.GlyphASCII, p, 0, 0)[1][0].FG; got != th.Accents[rail.RailAccentSlot("a")] {
+		t.Fatalf("fallback project FG = %v, want %v", got, th.Accents[rail.RailAccentSlot("a")])
 	}
 }

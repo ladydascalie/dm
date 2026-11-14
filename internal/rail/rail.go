@@ -530,10 +530,11 @@ func RailStats(th theme.Theme, it RailItem, set theme.GlyphSet) []segment.Seg {
 	return out
 }
 
-// accentColour is the theme colour for an accent slot. A slot outside the
-// theme, such as one a hand-edited state file carried, falls back to the dim
-// rail colour instead of indexing past the palette and crashing the painter.
-func accentColour(th theme.Theme, slot int) theme.RGB {
+// RailAccentColour is the theme colour for an accent slot. A slot outside
+// the theme, such as one a hand-edited state file carried, falls back to the
+// dim rail colour instead of indexing past the palette. The switcher paints
+// the same pinned slot, so both painters share the guard.
+func RailAccentColour(th theme.Theme, slot int) theme.RGB {
 	if slot < 0 || slot >= len(th.Accents) {
 		return th.Palette.RailDim
 	}
@@ -549,7 +550,7 @@ func RailBar(th theme.Theme, it RailItem) segment.Seg {
 	if it.Project == "" {
 		return segment.Seg{Text: " ", FG: th.Palette.RailDim}
 	}
-	return segment.Seg{Text: th.Glyphs.WorkspaceBar, FG: accentColour(th, it.ProjectAccent)}
+	return segment.Seg{Text: th.Glyphs.WorkspaceBar, FG: RailAccentColour(th, it.ProjectAccent)}
 }
 
 // windowChrome is the cells a window row spends before its label: the
@@ -568,7 +569,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 		// caret, a space, the project's name in its accent, and the group's
 		// workspace count.
 		if !compact {
-			name := accentColour(th, it.ProjectAccent)
+			name := RailAccentColour(th, it.ProjectAccent)
 			caret := g.FoldOpen
 			if it.Folded {
 				caret = g.FoldClosed
