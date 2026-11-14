@@ -520,3 +520,17 @@ func TestSwitcherClock(t *testing.T) {
 		}
 	}
 }
+
+// TestPaneItemPinnedAccent: the item carries the accent slot the server
+// pinned, the hash only when the snapshot predates the field, so the switcher
+// paints the hue the rail paints.
+func TestPaneItemPinnedAccent(t *testing.T) {
+	p := wire.AllPane{ID: "w1p1", Project: "a", ProjectAccent: 3, ProjectAccentSet: true}
+	if it := paneItem(p); it.ProjectAccent != 3 {
+		t.Fatalf("pinned ProjectAccent = %d, want 3", it.ProjectAccent)
+	}
+	p.ProjectAccentSet = false
+	if it := paneItem(p); it.ProjectAccent != rail.RailAccentSlot("a") {
+		t.Fatalf("fallback ProjectAccent = %d, want %d", it.ProjectAccent, rail.RailAccentSlot("a"))
+	}
+}

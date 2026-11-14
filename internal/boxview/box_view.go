@@ -80,6 +80,9 @@ type BoxView struct {
 	// snap sizes the float: the view fits the log until it reaches its cap,
 	// so a short log reads in a short box and a long one fills the screen.
 	snap *wire.Snapshot
+	// th is the theme the float last painted. Sync compares it, so a reload
+	// that changes the theme repaints a float whose rect did not move.
+	th theme.Theme
 }
 
 // NewBoxView opens the float on a screen. The log stays empty until the reply
@@ -169,11 +172,14 @@ func clampRect(r layout.Rect, cols, rows int) layout.Rect {
 	return r
 }
 
-// Sync fits the float to the screen after a snapshot or a rail change.
+// Sync fits the float to the screen after a snapshot or a rail change. The
+// float's content is a cached terminal the client blits every frame, so a
+// config reload only reaches it here: a theme that changed repaints even when
+// the rect did not move.
 func (b *BoxView) Sync(snap *wire.Snapshot, th theme.Theme) {
 	b.snap = snap
 	r := BoxViewRect(snap, b.rows())
-	if r == b.Float.Rect {
+	if r == b.Float.Rect && themeEqual(b.th, th) {
 		return
 	}
 	b.Float.Rect = r
@@ -181,6 +187,26 @@ func (b *BoxView) Sync(snap *wire.Snapshot, th theme.Theme) {
 	b.clampSel()
 	b.pageClamp()
 	b.paint(th)
+}
+
+// themeEqual reports whether two themes paint the box the same way. Theme
+// carries a map, so it cannot compare with ==; the box reads the palette, the
+// accents, the glyphs, the rail marks and the per-state styles, so it compares
+// those.
+func themeEqual(a, b theme.Theme) bool {
+	if a.Palette != b.Palette || a.Accents != b.Accents ||
+		a.Glyphs != b.Glyphs || a.RailMarks != b.RailMarks {
+		return false
+	}
+	if len(a.States) != len(b.States) {
+		return false
+	}
+	for k, sa := range a.States {
+		if sb, ok := b.States[k]; !ok || sa != sb {
+			return false
+		}
+	}
+	return true
 }
 
 // rows is the number of rows the float fits: the larger list wins, so the
@@ -367,6 +393,7 @@ func (b *BoxView) TogglePage(th theme.Theme) {
 // Every row is placed absolutely, so a view that scrolled paints its new
 // window whole.
 func (b *BoxView) paint(th theme.Theme) {
+	b.th = th
 	r := b.Float.Rect
 	b.Float.Title = b.title()
 	b.Float.Hint = b.hint()
@@ -536,11 +563,7 @@ func boxPaintWatch(buf *bytes.Buffer, w box.Watch, width int) {
 // two-cell count; a negative receipt drops the marker. The row is clipped to
 // w cells.
 func boxPaintRow(buf *bytes.Buffer, th theme.Theme, e box.Entry, w int, receipt int, sel bool) {
-	row := boxRowText(e, w, receipt)
-	start := boxSeqW + 1
-	if receipt >= 0 {
-		start += boxReceiptW
-	}
+	row, start := boxRowText(e, w, receipt)
 	state := string(e.State)
 	if start+len(state) > cells.Cells(row) {
 		buf.WriteString(row)
@@ -563,8 +586,10 @@ func boxPaintRow(buf *bytes.Buffer, th theme.Theme, e box.Entry, w int, receipt 
 }
 
 // boxRowText is the plain text of one entry row, columns padded and the whole
-// clipped to w cells.
-func boxRowText(e box.Entry, w int, receipt int) string {
+// clipped to w cells. It also returns the cell offset of the state column: a
+// seq past the four-cell column prints whole and shifts the later columns
+// right, so the painter derives the highlight from the rendered prefix.
+func boxRowText(e box.Entry, w int, receipt int) (string, int) {
 	key := cells.Pad(cells.Clip(e.Key, boxKeyW), boxKeyW)
 	from := cells.Pad(cells.Clip(e.From, boxFromW), boxFromW)
 	mark := ""
@@ -574,8 +599,10 @@ func boxRowText(e box.Entry, w int, receipt int) string {
 		}
 		mark = fmt.Sprintf("%2d ", receipt)
 	}
-	return cells.Clip(mark+fmt.Sprintf("%*d %s %s %s %s", boxSeqW, e.Seq,
-		cells.Pad(string(e.State), boxStateW), key, from, e.Msg), w)
+	seq := fmt.Sprintf("%*d", boxSeqW, e.Seq)
+	start := cells.Cells(mark) + cells.Cells(seq) + 1
+	return cells.Clip(mark+seq+" "+fmt.Sprintf("%s %s %s %s",
+		cells.Pad(string(e.State), boxStateW), key, from, e.Msg), w), start
 }
 
 // boxStateColour is the state's hue. It is the rail's status colour, so a lane

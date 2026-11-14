@@ -572,7 +572,13 @@ func paneItem(p wire.AllPane) rail.RailItem {
 		Focus: p.Focus, Active: p.WorkspaceActive,
 	}
 	if p.Project != "" {
-		it.ProjectAccent = rail.RailAccentSlot(p.Project)
+		// The server pins the accent slot the rail paints. A snapshot that
+		// predates the field carries none, so the hash is the fallback.
+		if p.ProjectAccentSet {
+			it.ProjectAccent = p.ProjectAccent
+		} else {
+			it.ProjectAccent = rail.RailAccentSlot(p.Project)
+		}
 	}
 	return it
 }

@@ -120,3 +120,12 @@ func TestTermColoursAreLegalOSC(t *testing.T) {
 		}
 	}
 }
+
+func TestParseStatusClearNormalised(t *testing.T) {
+	// One state, one render: the bare form normalises like the keyed form.
+	for _, in := range []string{"clear", "state=clear"} {
+		if got := ParseStatus(in).State; got != "unknown" {
+			t.Fatalf("ParseStatus(%q).State = %q, want unknown", in, got)
+		}
+	}
+}
