@@ -87,6 +87,9 @@ func Scan(src string) ([]Token, error) {
 						b.WriteByte('"')
 					case '\\':
 						b.WriteByte('\\')
+					case '\n':
+						line++
+						b.WriteByte('\n')
 					default:
 						b.WriteByte(src[i])
 					}

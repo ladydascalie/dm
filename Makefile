@@ -5,7 +5,7 @@ ESCTEST_DIR := internal/esctest/testdata/esctest
 ESCTEST_REPO := https://github.com/ThomasDickey/esctest2
 ESCTEST_REF := 2798f12149a19c3295e9b4853ab2da4b2eff1b2b
 
-GREMLINS_PKGS := $(shell go list ./internal/... | grep -vE "/(testutil|e2e)$$" | sed "s|^dm/internal/||")
+GREMLINS_PKGS = $(shell go list ./internal/... | grep -vE "/(testutil|e2e)$$" | sed "s|^dm/internal/||")
 GREMLINS_OUT  := gremlins-results
 
 .PHONY: help

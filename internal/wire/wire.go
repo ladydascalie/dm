@@ -228,6 +228,9 @@ func WriteMsg(w io.Writer, m Msg) error {
 	if err != nil {
 		return err
 	}
+	if len(b) > MaxFrame {
+		return fmt.Errorf("payload %d bytes exceeds MaxFrame %d", len(b), MaxFrame)
+	}
 	var h [4]byte
 	binary.BigEndian.PutUint32(h[:], uint32(len(b)))
 	if _, err := w.Write(h[:]); err != nil {
