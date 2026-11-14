@@ -56,7 +56,7 @@ func runProbe(args []string) error {
 
 	select {
 	case got := <-reply:
-		if strings.Contains(got, "\x1b]7501;?") {
+		if strings.Contains(got, "]7501;state=") {
 			out("PROBE-REPLY=ok\n")
 		} else {
 			out("PROBE-REPLY=bad\n")
