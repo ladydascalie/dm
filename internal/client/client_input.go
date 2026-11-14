@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"dm/internal/browser"
 	"dm/internal/keymap"
@@ -188,8 +189,9 @@ func (t *tui) sendTermColours() {
 }
 
 // expireTermColour sends the one reply that arrived once the grace for the
-// second passes, and flushes a partial reply that stalled as ordinary input,
-// exactly as expirePaste does.
+// second passes, and flushes a partial reply that stalled as ordinary input.
+// The deadline re-arms on every sighting of the partial, so a reply that
+// trickles in piece by piece never flushes mid-flight; only a quiet one does.
 func (t *tui) expireTermColour(now time.Time) bool {
 	changed := false
 	if !t.termGrace.IsZero() && now.Sub(t.termGrace) > termGrace {
@@ -287,9 +289,9 @@ func (t *tui) processInput() {
 				if n == 0 {
 					// The reply is still arriving. Keep buffering; the ticker
 					// sends these bytes down the normal path if they stall.
-					if t.termDeadline.IsZero() {
-						t.termDeadline = time.Now()
-					}
+					// Every sighting re-arms the deadline, so a reply that
+					// trickles in pieces is never flushed mid-flight.
+					t.termDeadline = time.Now()
 					return
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
@@ -611,9 +613,7 @@ func (t *tui) processInput() {
 				// ordinary input if it never completes.
 				_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:at]})
 				t.inbuf = append([]byte(nil), t.inbuf[at:]...)
-				if t.termDeadline.IsZero() {
-					t.termDeadline = time.Now()
-				}
+				t.termDeadline = time.Now()
 				return
 			}
 			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf})
@@ -706,6 +706,49 @@ func escapeRun(buf []byte) int {
 		}
 	}
 	return i
+}
+
+// textRune reports the printable rune at the head of buf for the typed
+// prompts. ok carries a rune the prompt appends and size is how many bytes it
+// occupies. wait reports a multi-byte rune still arriving: the caller keeps
+// the bytes and asks again after the next read. Every other head is one byte
+// of non-text, control or broken, and the caller drops it. The prompts used
+// to filter one byte against 0x20..0x7e, so a multi-byte rune was dropped
+// byte by byte in silence and a workspace could not be named in the
+// operator's language.
+func textRune(buf []byte) (r rune, size int, ok, wait bool) {
+	b := buf[0]
+	if b < 0x80 {
+		return rune(b), 1, b >= 0x20 && b != 0x7f, false
+	}
+	// A multi-byte rune. A lead byte with too few bytes yet is still
+	// arriving; any other high byte is broken and dropped one byte wide.
+	lead := multibyteLen(b)
+	if lead == 0 {
+		return 0, 1, false, false
+	}
+	if len(buf) < lead {
+		return 0, 0, false, true
+	}
+	r, size = utf8.DecodeRune(buf)
+	if r == utf8.RuneError || r < 0x20 || r == 0x7f {
+		return 0, size, false, false
+	}
+	return r, size, true, false
+}
+
+// multibyteLen is how many bytes the UTF-8 lead byte b promises, or 0 when b
+// is a stray continuation byte or a lead the format never defined.
+func multibyteLen(b byte) int {
+	switch {
+	case b >= 0xc2 && b <= 0xdf:
+		return 2
+	case b >= 0xe0 && b <= 0xef:
+		return 3
+	case b >= 0xf0 && b <= 0xf4:
+		return 4
+	}
+	return 0
 }
 
 // expireArmed resolves an armed sequence that never finished arriving. A lone
@@ -995,13 +1038,13 @@ func (t *tui) acceptSearch() {
 
 // searchKey consumes one key while the query row is open. No byte leaves the
 // client: every key edits or ends the draft. Esc cancels the prompt at once, so
-// the prompt never waits for the rest of an escape sequence.
+// the prompt never waits for the rest of an escape sequence. It returns false
+// while a multi-byte rune is still arriving.
 func (t *tui) searchKey() bool {
 	if len(t.inbuf) == 0 {
 		return true
 	}
-	b := t.inbuf[0]
-	if b == 0x1b {
+	if t.inbuf[0] == 0x1b {
 		// A lone esc cancels. An arrow key or another escape sequence cancels
 		// too: its remaining bytes are dropped rather than typed into the
 		// draft.
@@ -1009,8 +1052,19 @@ func (t *tui) searchKey() bool {
 		t.cancelSearch()
 		return true
 	}
-	t.inbuf = t.inbuf[1:]
-	switch b {
+	r, size, ok, wait := textRune(t.inbuf)
+	if wait {
+		// A multi-byte rune is still arriving. The expiry cancels on a
+		// stall, as it does for a pending escape.
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	}
+	t.inbuf = t.inbuf[size:]
+	t.pending = false
+	switch r {
 	case '\r', '\n':
 		t.acceptSearch()
 	case 0x7f, 0x08:
@@ -1022,8 +1076,8 @@ func (t *tui) searchKey() bool {
 		t.search.draft = ""
 		t.dirty = true
 	default:
-		if b >= 0x20 && b <= 0x7e {
-			t.search.draft += string(rune(b))
+		if ok {
+			t.search.draft += string(r)
 			t.dirty = true
 		}
 	}
@@ -2704,30 +2758,43 @@ func (t *tui) submitRename() {
 }
 
 // renameKey consumes one key while the rename prompt is open. No byte leaves
-// the client: every key edits or ends the draft. Esc cancels at once, so the
-// prompt never waits for the rest of an escape sequence. It returns false when
-// it needs more bytes for an escape sequence.
+// the client: every key edits or ends the draft. A lone esc cancels at once; a
+// longer escape sequence waits for the rest, and an unbound one is dropped
+// without cancelling, so Delete keeps a half-typed name. It returns false when
+// it needs more bytes for an escape sequence or a multi-byte rune.
 func (t *tui) renameKey() bool {
 	if len(t.inbuf) == 0 {
 		return true
 	}
 	action, n, state := t.km().Match("rename", t.inbuf)
-	if state == keymap.Partial {
-		if t.inbuf[0] == 0x1b {
-			// A lone esc cancels. An arrow key cancels too: its remaining bytes
-			// are dropped rather than typed into the draft.
+	if state == keymap.Match && escapeRun(t.inbuf) > n {
+		// The match covered only the head of an escape sequence. The
+		// sequence as a whole is unbound, and an unbound escape is not text:
+		// Delete, Home and ctrl+left must not cancel the prompt the way the
+		// one-byte esc binding would and discard a half-typed name.
+		state = keymap.NoMatch
+	}
+	switch state {
+	case keymap.Partial:
+		if len(t.inbuf) == 1 {
+			// A lone esc cancels at once: the prompt never waits for the
+			// rest of an escape sequence. An arrow key fed byte by byte
+			// cancels on its first byte too, as it always has.
 			t.inbuf = t.inbuf[1:]
 			t.pending = false
 			t.closeRename()
 			return true
 		}
+		// A longer partial is the head of a sequence such as Delete, and it
+		// waits for the rest instead of cancelling on its first bytes. A
+		// stall expires to close, the way a pending escape resolves in
+		// every overlay.
 		if !t.pending {
 			t.pending = true
 			t.escAt = time.Now()
 		}
 		return false
-	}
-	if state == keymap.Match {
+	case keymap.Match:
 		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 		t.pending = false
 		switch action {
@@ -2749,11 +2816,26 @@ func (t *tui) renameKey() bool {
 		}
 		return true
 	}
-	b := t.inbuf[0]
-	t.inbuf = t.inbuf[1:]
+	// No match. An escape sequence is not text: drop it whole.
+	if n := escapeRun(t.inbuf); n > 1 {
+		t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+		t.pending = false
+		return true
+	}
+	r, size, ok, wait := textRune(t.inbuf)
+	if wait {
+		// A multi-byte rune is still arriving. The expiry closes on a
+		// stall, as it does for a pending escape.
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	}
+	t.inbuf = append([]byte(nil), t.inbuf[size:]...)
 	t.pending = false
-	if b >= 0x20 && b <= 0x7e {
-		t.renameDraft += string(rune(b))
+	if ok {
+		t.renameDraft += string(r)
 		t.dirty = true
 	}
 	return true

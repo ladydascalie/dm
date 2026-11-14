@@ -2,6 +2,7 @@ package client
 
 import (
 	"testing"
+	"time"
 
 	"dm/internal/testutil"
 )
@@ -128,6 +129,158 @@ func TestPickerPasteClosesCleanly(t *testing.T) {
 	}
 	if tui.mode != "" {
 		t.Fatalf("mode = %q, want the picker closed", tui.mode)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// feedKeys hands bytes to processInput the way a read would, and flushes a
+// paste hold the way the ticker would: a lone esc or the head of a sequence
+// sits in the paste hold first, and the test sees the key the operator pressed.
+func feedKeys(tui *tui, keys string) {
+	tui.inbuf = append(tui.inbuf, keys...)
+	tui.processInput()
+	if !tui.pasteDeadline.IsZero() {
+		tui.expirePaste(time.Now().Add(pasteTimeout))
+	}
+}
+
+// TestRenamePromptTakesUTF8 proves a multi-byte rune appends whole, in one
+// read or split across two, where the byte filter used to drop it silently.
+func TestRenamePromptTakesUTF8(t *testing.T) {
+	t.Parallel()
+	tr, _ := renamePromptTUI(t)
+	feedKeys(tr, "\x02r")
+	feedKeys(tr, "caf\xc3\xa9")
+	if tr.renameDraft != "maincafé" {
+		t.Fatalf("draft = %q, want maincafé", tr.renameDraft)
+	}
+	// A rune split across reads waits for its tail instead of dropping the
+	// lead byte, and the tail joins it whole.
+	feedKeys(tr, "\xe2")
+	if tr.renameDraft != "maincafé" {
+		t.Fatalf("a split lead byte changed the draft: %q", tr.renameDraft)
+	}
+	if !tr.pending {
+		t.Fatal("a split rune did not hold the prompt")
+	}
+	feedKeys(tr, "\x82\xac")
+	if tr.renameDraft != "maincafé€" {
+		t.Fatalf("draft = %q, want maincafé€", tr.renameDraft)
+	}
+	// A control byte and a broken byte are still not text.
+	feedKeys(tr, "\x01\xff")
+	if tr.renameDraft != "maincafé€" {
+		t.Fatalf("draft = %q, want maincafé€", tr.renameDraft)
+	}
+}
+
+// TestRenamePromptUnboundEscapeKeepsDraft proves Delete, Home, ctrl+left and
+// alt+d do not cancel the prompt: they are unbound escape sequences, and the
+// one-byte esc binding for cancel must not eat their head and discard a
+// half-typed name. The arrows still cancel, whole or one byte at a time.
+func TestRenamePromptUnboundEscapeKeepsDraft(t *testing.T) {
+	t.Parallel()
+	tr, _ := renamePromptTUI(t)
+	feedKeys(tr, "\x02r")
+	feedKeys(tr, "keep")
+	for _, seq := range []string{"\x1b[3~", "\x1b[H", "\x1b[1;5D", "\x1bd"} {
+		feedKeys(tr, seq)
+		if tr.mode != "rename" {
+			t.Fatalf("%q left mode %q, want the prompt still open", seq, tr.mode)
+		}
+		if tr.renameDraft != "mainkeep" {
+			t.Fatalf("%q left draft %q, want mainkeep", seq, tr.renameDraft)
+		}
+	}
+	feedKeys(tr, "\x1b[D")
+	if tr.mode != "" {
+		t.Fatalf("an arrow key left mode %q, want the prompt closed", tr.mode)
+	}
+	feedKeys(tr, "\x02r")
+	feedKeys(tr, "\x1b")
+	tr.pasteDeadline = time.Now().Add(-escTimeout)
+	if !tr.expirePaste(time.Now()) {
+		t.Fatal("the stalled escape was not flushed")
+	}
+	if tr.mode != "" {
+		t.Fatalf("a lone esc left mode %q, want the prompt closed", tr.mode)
+	}
+}
+
+// TestRenamePromptPartialEscapeWaits proves the head of an unbound sequence
+// waits for the rest instead of cancelling on its first bytes, and the
+// completed sequence is dropped whole.
+func TestRenamePromptPartialEscapeWaits(t *testing.T) {
+	t.Parallel()
+	tr, _ := renamePromptTUI(t)
+	feedKeys(tr, "\x02r")
+	feedKeys(tr, "keep")
+	feedKeys(tr, "\x1b[")
+	if tr.mode != "rename" {
+		t.Fatal("the head of an escape sequence cancelled the prompt")
+	}
+	if !tr.pending {
+		t.Fatal("the partial escape did not arm the expiry")
+	}
+	feedKeys(tr, "3~")
+	if tr.mode != "rename" {
+		t.Fatalf("mode = %q after the sequence completed, want rename", tr.mode)
+	}
+	if tr.renameDraft != "mainkeep" {
+		t.Fatalf("draft = %q, want mainkeep", tr.renameDraft)
+	}
+}
+
+// TestSearchQueryTakesUTF8 proves the scrollback query takes a multi-byte rune
+// whole, in one read or split across two, where bytes were dropped silently.
+func TestSearchQueryTakesUTF8(t *testing.T) {
+	t.Parallel()
+	tui, _ := searchTUI(t, 60)
+	press(t, tui, "/")
+	press(t, tui, "caf\xc3\xa9")
+	if tui.search.draft != "café" {
+		t.Fatalf("draft = %q, want café", tui.search.draft)
+	}
+	// A rune split across reads waits for its tail, and the tail joins it.
+	tui.inbuf = append(tui.inbuf, "\xe2"...)
+	tui.processInput()
+	if tui.search.draft != "café" {
+		t.Fatalf("a split lead byte changed the draft: %q", tui.search.draft)
+	}
+	if !tui.pending {
+		t.Fatal("a split rune did not hold the query row")
+	}
+	tui.inbuf = append(tui.inbuf, "\x82\xac"...)
+	tui.processInput()
+	if tui.search.draft != "café€" {
+		t.Fatalf("draft = %q, want café€", tui.search.draft)
+	}
+}
+
+// TestTermColourDeadlineSlides proves a partial reply that keeps arriving is
+// not flushed mid-flight: every sighting re-arms the deadline, and only a
+// quiet partial flushes.
+func TestTermColourDeadlineSlides(t *testing.T) {
+	t.Parallel()
+	tui, got := clientTUI(t, nil)
+	feed(tui, "\x1b]10;rgb:ff")
+	// A quiet partial would flush at its first arm's deadline; let that
+	// moment pass before more of the reply arrives.
+	time.Sleep(escTimeout + 5*time.Millisecond)
+	feed(tui, "ff/ff")
+	// A tick probing between the first arm and the re-arm sees a reply that
+	// is still growing: no flush.
+	if tui.expireTermColour(time.Now().Add(escTimeout - 5*time.Millisecond)) {
+		t.Fatal("a growing reply was flushed mid-flight")
+	}
+	testutil.NoMsg(t, got)
+	// A quiet partial still flushes as ordinary input.
+	if !tui.expireTermColour(time.Now().Add(escTimeout + time.Millisecond)) {
+		t.Fatal("a stalled reply was not flushed")
+	}
+	m := testutil.NextMsg(t, got)
+	if m.Type != "keys" || string(m.Keys) != "\x1b]10;rgb:ffff/ff" {
+		t.Fatalf("stalled reply came through as %+v, want the raw bytes", m)
 	}
 	testutil.NoMsg(t, got)
 }
