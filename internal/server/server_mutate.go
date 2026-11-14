@@ -81,7 +81,7 @@ func (s *server) statuses() map[string]wire.Status {
 	defer s.mu.Unlock()
 	out := map[string]wire.Status{}
 	for id, pc := range s.panes {
-		out[id] = pc.st
+		out[id] = pc.status()
 	}
 	return out
 }
@@ -355,8 +355,9 @@ func (s *server) paneList() []paneListInfo {
 					info.App = ps.App
 				}
 				if pc := s.panes[id]; pc != nil {
-					info.Status = pc.st.State
-					info.Message = pc.st.Message
+					st := pc.status()
+					info.Status = st.State
+					info.Message = st.Message
 				}
 				out = append(out, info)
 			}
@@ -610,10 +611,21 @@ func (s *server) moveWorkspace(id, dir string) error {
 	return fmt.Errorf("no workspace %q", id)
 }
 
-// removeWorkspaceLocked drops the workspace at idx and kills every pane under
-// it. The caller holds s.mu and leaves at least one workspace behind, so the
-// active index can be clamped to a real workspace.
-func (s *server) removeWorkspaceLocked(idx int) {
+// killPanes sends the kill frame to every pane and closes the socket. It
+// runs off s.mu: a pane that has stopped reading its socket would hold the
+// write, and with it the whole session, for as long as the send blocks.
+func killPanes(pcs []*paneConn) {
+	for _, pc := range pcs {
+		_ = pc.send(wire.Msg{Action: "kill"})
+		_ = pc.c.Close()
+	}
+}
+
+// removeWorkspaceLocked drops the workspace at idx and takes every pane under
+// it out of the state. The caller holds s.mu and leaves at least one
+// workspace behind, so the active index can be clamped to a real workspace.
+// It returns the panes to kill; the caller calls killPanes after unlocking.
+func (s *server) removeWorkspaceLocked(idx int) []*paneConn {
 	ws := s.st.Workspaces[idx]
 	var ids []string
 	for _, w := range ws.Windows {
@@ -623,14 +635,15 @@ func (s *server) removeWorkspaceLocked(idx int) {
 	if s.st.Active >= len(s.st.Workspaces) {
 		s.st.Active = len(s.st.Workspaces) - 1
 	}
+	var kill []*paneConn
 	for _, pid := range ids {
 		if pc := s.panes[pid]; pc != nil {
-			_ = pc.send(wire.Msg{Action: "kill"})
-			_ = pc.c.Close()
 			delete(s.panes, pid)
+			kill = append(kill, pc)
 		}
 		delete(s.st.Panes, pid)
 	}
+	return kill
 }
 
 func (s *server) closeWorkspace(id string) error {
@@ -649,10 +662,11 @@ func (s *server) closeWorkspace(id string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("cannot close the last workspace")
 	}
-	s.removeWorkspaceLocked(idx)
+	kill := s.removeWorkspaceLocked(idx)
 	// The workspace may have been the project's last one, so its slot frees.
 	s.refreshProjectAccentsLocked()
 	s.mu.Unlock()
+	killPanes(kill)
 	return nil
 }
 
@@ -680,11 +694,12 @@ func (s *server) closeWindow(id string) error {
 			s.mu.Unlock()
 			return fmt.Errorf("cannot close the last window")
 		}
-		s.removeWorkspaceLocked(wsIdx)
+		kill := s.removeWorkspaceLocked(wsIdx)
 		// The workspace may have been the project's last one, so its slot
 		// frees.
 		s.refreshProjectAccentsLocked()
 		s.mu.Unlock()
+		killPanes(kill)
 		return nil
 	}
 	win := ws.Windows[idx]
@@ -699,15 +714,16 @@ func (s *server) closeWindow(id string) error {
 	if ws.Active >= len(ws.Windows) {
 		ws.Active = len(ws.Windows) - 1
 	}
+	var kill []*paneConn
 	for _, pid := range ids {
 		if pc := s.panes[pid]; pc != nil {
-			_ = pc.send(wire.Msg{Action: "kill"})
-			_ = pc.c.Close()
 			delete(s.panes, pid)
+			kill = append(kill, pc)
 		}
 		delete(s.st.Panes, pid)
 	}
 	s.mu.Unlock()
+	killPanes(kill)
 	return nil
 }
 
@@ -1052,7 +1068,8 @@ func (s *server) closePane(target string) error {
 		_ = pc.send(wire.Msg{Action: "kill"})
 		return nil
 	}
-	defer s.mu.Unlock()
+	var kill []*paneConn
+	defer func() { s.mu.Unlock(); killPanes(kill) }()
 	at := 0
 	for i, id := range ids {
 		if id == target {
@@ -1075,9 +1092,8 @@ func (s *server) closePane(target string) error {
 		}
 	}
 	if pc := s.panes[target]; pc != nil {
-		_ = pc.send(wire.Msg{Action: "kill"})
-		_ = pc.c.Close()
 		delete(s.panes, target)
+		kill = append(kill, pc)
 	}
 	delete(s.st.Panes, target)
 	return nil

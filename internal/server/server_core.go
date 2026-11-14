@@ -27,9 +27,13 @@ import (
 )
 
 type paneConn struct {
-	id    string
-	c     net.Conn
-	mu    sync.Mutex
+	id string
+	c  net.Conn
+	mu sync.Mutex
+	// stm guards st. The pane reader goroutine writes it with no other lock
+	// held, so every read goes through status and every write through
+	// setStatus; a torn string read would hand a reply a mismatched header.
+	stm   sync.Mutex
 	st    wire.Status
 	title string
 	alt   bool
@@ -41,6 +45,20 @@ func (p *paneConn) send(m wire.Msg) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return wire.WriteMsg(p.c, m)
+}
+
+// status returns a copy of the pane's last reported status.
+func (p *paneConn) status() wire.Status {
+	p.stm.Lock()
+	defer p.stm.Unlock()
+	return p.st
+}
+
+// setStatus records the pane's last reported status.
+func (p *paneConn) setStatus(st wire.Status) {
+	p.stm.Lock()
+	p.st = st
+	p.stm.Unlock()
 }
 
 // termColours is the terminal colour pair a client detected, in xterm form.
@@ -69,6 +87,7 @@ type client struct {
 	paused bool
 
 	queue  []wire.Msg
+	costs  []int // per-queue-frame price, parallel to queue
 	qbytes int
 	// stale records that the queue overflowed and queued frames were
 	// dropped. The writer resyncs from a picture once the queue drains.
@@ -130,6 +149,7 @@ func (c *client) enqueueLocked(m wire.Msg) bool {
 		}
 	}
 	c.queue = append(c.queue, m)
+	c.costs = append(c.costs, n)
 	c.qbytes += n
 	c.startWriter()
 	c.cond.Broadcast()
@@ -139,14 +159,17 @@ func (c *client) enqueueLocked(m wire.Msg) bool {
 // dropBytesLocked removes every queued "bytes" frame. The caller holds c.mu.
 func (c *client) dropBytesLocked() {
 	kept := c.queue[:0]
-	for _, m := range c.queue {
+	keptCosts := c.costs[:0]
+	for i, m := range c.queue {
 		if m.Type == "bytes" {
-			c.qbytes -= msgBytes(m)
+			c.qbytes -= c.costs[i]
 			continue
 		}
 		kept = append(kept, m)
+		keptCosts = append(keptCosts, c.costs[i])
 	}
 	c.queue = kept
+	c.costs = keptCosts
 }
 
 // popLocked removes the head frame and clears its slot, so a lagging client
@@ -155,7 +178,8 @@ func (c *client) popLocked() wire.Msg {
 	m := c.queue[0]
 	c.queue[0] = wire.Msg{}
 	c.queue = c.queue[1:]
-	c.qbytes -= msgBytes(m)
+	c.qbytes -= c.costs[0]
+	c.costs = c.costs[1:]
 	return m
 }
 
@@ -239,6 +263,7 @@ func (c *client) shutdown() {
 	c.mu.Lock()
 	c.closed = true
 	c.queue = nil
+	c.costs = nil
 	c.qbytes = 0
 	if c.cond != nil {
 		c.cond.Broadcast()
@@ -261,8 +286,22 @@ func (c *client) queuedFrames() int {
 }
 
 // msgBytes counts what a frame costs on the wire, near enough to bound it.
+// A snapshot or screen frame carries its payload in Snap or VTSnap, so both
+// are marshalled here to price them: an unpriced snapshot would queue at 64
+// bytes against the outbound bound no matter how big it sends as.
 func msgBytes(m wire.Msg) int {
-	return 64 + len(m.Data) + len(m.Keys) + len(m.Msg) + len(m.Name) + len(m.Res)
+	n := 64 + len(m.Data) + len(m.Keys) + len(m.Msg) + len(m.Name) + len(m.Res)
+	if m.Snap != nil {
+		if b, err := json.Marshal(m.Snap); err == nil {
+			n += len(b)
+		}
+	}
+	if m.VTSnap != nil {
+		if b, err := json.Marshal(m.VTSnap); err == nil {
+			n += len(b)
+		}
+	}
+	return n
 }
 
 type server struct {
@@ -427,7 +466,8 @@ func Run(args []string) error {
 		if rp.ok {
 			s.mu.Lock()
 			if pc := s.panes[id]; pc != nil {
-				pc.st, pc.title, pc.alt, pc.mouse = rp.st, rp.title, rp.alt, rp.mouse
+				pc.setStatus(rp.st)
+				pc.title, pc.alt, pc.mouse = rp.title, rp.alt, rp.mouse
 			}
 			s.mu.Unlock()
 		}
@@ -646,9 +686,9 @@ func (s *server) watchPane(id string) {
 				s.mu.Unlock()
 			case "status":
 				if m.St != nil {
-					from := pc.st.State
-					pc.st = *m.St
-					to, message := pc.st.State, pc.st.Message
+					from := pc.status().State
+					pc.setStatus(*m.St)
+					to, message := m.St.State, m.St.Message
 					s.noteStatus(id, *m.St)
 					s.noteStatusChange(id, from, to)
 					s.pushSnapshot()

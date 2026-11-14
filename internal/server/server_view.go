@@ -12,6 +12,7 @@ import (
 	"dm/internal/box"
 	"dm/internal/layout"
 	"dm/internal/session"
+	"dm/internal/theme"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -90,6 +91,26 @@ func (s *server) paneRectsLocked() map[string]layout.Rect {
 	return rects
 }
 
+// cloneTree copies a layout tree. A snapshot holds the copy so the client
+// writer's marshal, which runs off s.mu, cannot race a split that rewrites
+// the live tree's Kids slice.
+func cloneTree(n *layout.Node) *layout.Node {
+	if n == nil {
+		return nil
+	}
+	cp := &layout.Node{Pane: n.Pane, Dir: n.Dir}
+	if len(n.Kids) > 0 {
+		cp.Kids = make([]*layout.Node, len(n.Kids))
+		for i, k := range n.Kids {
+			cp.Kids[i] = cloneTree(k)
+		}
+	}
+	if len(n.Sizes) > 0 {
+		cp.Sizes = append([]float64(nil), n.Sizes...)
+	}
+	return cp
+}
+
 // clearZoom drops the zoom. It is one view of one focus, so a focus or layout
 // change ends it.
 func (s *server) clearZoom() {
@@ -113,7 +134,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		RailWant:     s.requestedRailLocked(),
 		Zoom:         s.zoom,
 		Pad:          s.cfg.Padding(),
-		Root:         win.Root,
+		Root:         cloneTree(win.Root),
 		Sync:         win.Sync,
 	}
 	for _, w := range s.st.ActiveWorkspace().Windows {
@@ -123,8 +144,9 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		pc := s.panes[id]
 		info := wire.PaneInfo{ID: id, Rect: rects[id]}
 		if pc != nil {
-			info.Status = pc.st.State
-			info.Message = pc.st.Message
+			st := pc.status()
+			info.Status = st.State
+			info.Message = st.Message
 			info.Alt = pc.alt
 			info.Mouse = pc.mouse
 			info.Paste = pc.paste
@@ -202,7 +224,8 @@ func (s *server) allPanesLocked() []wire.AllPane {
 				info.WorkspaceUnfolded = ws.Unfolded
 				info.ProjectFolded = s.st.ProjectFold[ws.Project]
 				if ws.Project != "" {
-					if slot, ok := s.st.ProjectAccent[ws.Project]; ok {
+					if slot, ok := s.st.ProjectAccent[ws.Project]; ok &&
+						slot >= 0 && slot < len(theme.DefaultTheme().Accents) {
 						info.ProjectAccent = slot
 						info.ProjectAccentSet = true
 					}
@@ -222,8 +245,9 @@ func (s *server) allPanesLocked() []wire.AllPane {
 					info.Deleted = gi.deleted
 				}
 				if pc := s.panes[id]; pc != nil {
-					info.Status = pc.st.State
-					info.Message = pc.st.Message
+					pst := pc.status()
+					info.Status = pst.State
+					info.Message = pst.Message
 					info.Title = pc.title
 					info.StatusChangedAt = s.statusChangedAt[id]
 				}
@@ -249,7 +273,7 @@ func (s *server) paneExited(id string) {
 	notifyExit := !s.operatorSeesLocked(id)
 	exitBody := ""
 	if pc != nil {
-		exitBody = pc.st.Message
+		exitBody = pc.status().Message
 	}
 	delete(s.panes, id)
 	delete(s.st.Panes, id)
@@ -436,7 +460,20 @@ func (s *server) endSession() {
 		clients = append(clients, c)
 	}
 	s.broadcastLocked(wire.Msg{Type: "close"})
+	floats := make([]*floatProc, 0, len(s.floats))
+	for _, f := range s.floats {
+		floats = append(floats, f)
+	}
+	s.floats = map[string]*floatProc{}
 	s.mu.Unlock()
+
+	// Every float dies with the session. Each one leads its own process
+	// group, so one SIGKILL per float takes the child and anything it
+	// started; without this a float outlives the server under init with no
+	// owner and no kill path.
+	for _, f := range floats {
+		s.stopFloat(f)
+	}
 
 	// Remove the session before closing the listener: accepting goroutine wakes
 	// on the closed listener and may exit the process immediately.

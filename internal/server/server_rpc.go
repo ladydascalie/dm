@@ -70,8 +70,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 	case "list", "ls":
 		s.mu.Lock()
 		snap := s.snapshotLocked()
-		win := s.st.ActiveWindow()
-		tree := win.Root
+		tree := cloneTree(s.st.ActiveWindow().Root)
 		s.mu.Unlock()
 		s.reply(cl, m, map[string]any{"snapshot": snap, "tree": tree}, nil)
 
@@ -225,7 +224,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
 			return
 		}
-		s.reply(cl, m, pc.st, nil)
+		s.reply(cl, m, pc.status(), nil)
 
 	case "write-to", "exec":
 		if m.Action == "exec" {
