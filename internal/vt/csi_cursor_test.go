@@ -271,3 +271,14 @@ func TestCUBReverseWraps(t *testing.T) {
 		t.Fatalf("CUB across a wrap: Cursor() = %+v, want 3,0", c)
 	}
 }
+
+// TestCUPSkipsColonSubParameter pins the byte-level effect of a colon
+// sub-parameter: the parameters after it must not shift by a spurious zero.
+func TestCUPSkipsColonSubParameter(t *testing.T) {
+	term := cursorTerm(10, 4, fullRegion(10, 4), false)
+	term.Write([]byte("\x1b[1:2;3H"))
+	cur := term.grid.Cursor()
+	if cur.X != 2 || cur.Y != 0 {
+		t.Errorf("cursor after \\x1b[1:2;3H = %d,%d, want 2,0", cur.X, cur.Y)
+	}
+}

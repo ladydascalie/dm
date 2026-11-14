@@ -216,3 +216,23 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
+
+// TestSnapshotMarkAndModifierKeysRoundTrip pins the encode of the OSC 133
+// mark and DECSMKR. Both used to share the json tag "mk", so encoding/json
+// wrote neither field and a restore lost them.
+func TestSnapshotMarkAndModifierKeysRoundTrip(t *testing.T) {
+	term := NewTerm(40, 10)
+	writeTerm(term, "hi\x1b]133;A\x1b\\")
+	writeTerm(term, "\x1b[3+r")
+
+	restored, decoded := roundTrip(t, term)
+	if got := decoded.State.Mark; got != "A" {
+		t.Errorf("restored State.Mark = %q, want A", got)
+	}
+	if !restored.AtPrompt() {
+		t.Error("restored.AtPrompt() = false, want true")
+	}
+	if got := restored.modifierKeys; got != 3 {
+		t.Errorf("restored modifierKeys = %d, want 3", got)
+	}
+}
