@@ -382,39 +382,46 @@ func (t *tui) keymapKey() bool {
 	return true
 }
 
-// keymapSearchKey consumes one byte of the query. Enter keeps the query, esc
-// clears it, backspace edits and ctrl+u clears. Printable bytes append. Every
-// other control key is swallowed: nothing reaches a pane while the query is
-// typed.
+// keymapSearchKey consumes one key of the query. Enter keeps the query, esc
+// clears it, backspace edits and ctrl+u clears. Printable runes append whole,
+// so the query holds the operator's language; the byte filter used to drop a
+// multi-byte rune one byte at a time in silence. Every other control key is
+// swallowed: nothing reaches a pane while the query is typed. It returns
+// false while a multi-byte rune is still arriving.
 func (t *tui) keymapSearchKey() bool {
 	if len(t.inbuf) == 0 {
 		return true
 	}
-	b := t.inbuf[0]
-	switch {
-	case b == 0x1b:
+	if t.inbuf[0] == 0x1b {
 		t.keys.CancelSearch()
 		t.inbuf = nil
 		t.pending = false
-	case b == '\r' || b == '\n':
+		t.dirty = true
+		return true
+	}
+	r, size, ok, wait := textRune(t.inbuf)
+	if wait {
+		// A multi-byte rune is still arriving. The expiry closes on a
+		// stall, as it does for a pending escape.
+		if !t.pending {
+			t.pending = true
+			t.escAt = time.Now()
+		}
+		return false
+	}
+	t.inbuf = t.inbuf[size:]
+	t.pending = false
+	switch r {
+	case '\r', '\n':
 		t.keys.AcceptSearch()
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-	case b == 0x7f || b == 0x08:
+	case 0x7f, 0x08:
 		t.keys.BackspaceQuery()
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-	case b == 0x15:
+	case 0x15:
 		t.keys.SetQuery("")
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-	case b >= 0x20 && b < 0x7f:
-		t.keys.AppendQuery(string(b))
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
 	default:
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
+		if ok {
+			t.keys.AppendQuery(string(r))
+		}
 	}
 	t.dirty = true
 	return true

@@ -189,23 +189,25 @@ func (t *tui) sendTermColours() {
 }
 
 // expireTermColour sends the one reply that arrived once the grace for the
-// second passes, and flushes a partial reply that stalled as ordinary input.
-// The deadline re-arms on every sighting of the partial, so a reply that
-// trickles in piece by piece never flushes mid-flight; only a quiet one does.
+// second passes, and flushes a partial reply that stalled as ordinary input,
+// exactly as expirePaste does. The deadline is the expiry instant, and it
+// re-arms on every sighting of the partial, so a reply that trickles in piece
+// by piece never flushes mid-flight; only one that goes quiet for a whole
+// paste window does.
 func (t *tui) expireTermColour(now time.Time) bool {
 	changed := false
 	if !t.termGrace.IsZero() && now.Sub(t.termGrace) > termGrace {
 		t.sendTermColours()
 		changed = true
 	}
-	if !t.termDeadline.IsZero() && now.Sub(t.termDeadline) > escTimeout {
-		t.termDeadline = time.Time{}
-		t.termOff = true
-		t.processInput()
-		t.termOff = false
-		changed = true
+	if t.termDeadline.IsZero() || !now.After(t.termDeadline) {
+		return changed
 	}
-	return changed
+	t.termDeadline = time.Time{}
+	t.termOff = true
+	t.processInput()
+	t.termOff = false
+	return true
 }
 
 // forwardPaste sends a bracketed paste to the focused pane as one keys message.
@@ -289,9 +291,13 @@ func (t *tui) processInput() {
 				if n == 0 {
 					// The reply is still arriving. Keep buffering; the ticker
 					// sends these bytes down the normal path if they stall.
-					// Every sighting re-arms the deadline, so a reply that
-					// trickles in pieces is never flushed mid-flight.
-					t.termDeadline = time.Now()
+					// The deadline is the expiry instant, and every sighting
+					// re-arms it, so a reply that trickles in pieces is never
+					// flushed mid-flight. The window is pasteTimeout, the one
+					// a paste gets: the head already proves a machine-written
+					// reply is being assembled, and it arrives in pieces with
+					// a long gap on a slow link.
+					t.termDeadline = time.Now().Add(pasteTimeout)
 					return
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
@@ -613,7 +619,7 @@ func (t *tui) processInput() {
 				// ordinary input if it never completes.
 				_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:at]})
 				t.inbuf = append([]byte(nil), t.inbuf[at:]...)
-				t.termDeadline = time.Now()
+				t.termDeadline = time.Now().Add(pasteTimeout)
 				return
 			}
 			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf})

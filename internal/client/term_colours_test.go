@@ -59,7 +59,10 @@ func TestTermColoursOneReplyAfterGrace(t *testing.T) {
 }
 
 // TestTermColoursPartialStallsThenReachesPane proves a partial reply is held,
-// then flushed as ordinary input after the escape deadline.
+// then flushed as ordinary input once the paste window passes without the
+// rest arriving. The window is the one a paste gets: the head of the buffer
+// already proves a machine-written reply is being assembled, and a reply
+// arrives in pieces with a long gap on a slow link.
 func TestTermColoursPartialStallsThenReachesPane(t *testing.T) {
 	t.Parallel()
 	tui, got := clientTUI(t, nil)
@@ -70,7 +73,7 @@ func TestTermColoursPartialStallsThenReachesPane(t *testing.T) {
 		t.Fatal("partial reply was not buffered")
 	}
 
-	if !tui.expireTermColour(time.Now().Add(escTimeout + time.Millisecond)) {
+	if !tui.expireTermColour(time.Now().Add(pasteTimeout + time.Millisecond)) {
 		t.Fatal("expireTermColour reported no change")
 	}
 	m := testutil.NextMsg(t, got)
@@ -125,7 +128,7 @@ func TestTermColoursSplitPrefixAfterKeystroke(t *testing.T) {
 }
 
 // TestTermColoursSplitTailStallsThenReachesPane proves a tail that never
-// completes is flushed to the pane as ordinary input after the deadline.
+// completes is flushed to the pane as ordinary input after the paste window.
 func TestTermColoursSplitTailStallsThenReachesPane(t *testing.T) {
 	t.Parallel()
 	tui, got := clientTUI(t, nil)
@@ -136,7 +139,7 @@ func TestTermColoursSplitTailStallsThenReachesPane(t *testing.T) {
 	}
 	testutil.NoMsg(t, got)
 
-	if !tui.expireTermColour(time.Now().Add(escTimeout + time.Millisecond)) {
+	if !tui.expireTermColour(time.Now().Add(pasteTimeout + time.Millisecond)) {
 		t.Fatal("expireTermColour reported no change")
 	}
 	m = testutil.NextMsg(t, got)
