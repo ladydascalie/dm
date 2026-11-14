@@ -459,6 +459,25 @@ func TestKillSessionStopsTheServer(t *testing.T) {
 	}
 }
 
+// TestKillSessionDoesNotSpawn covers dm kill on a stopped session: the kill
+// must fail without booting a server, so no pane or shell comes up behind it.
+func TestKillSessionDoesNotSpawn(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(paths.SessionDirAt(root, "dead"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := KillSessionAt(root, "dead"); err == nil {
+		t.Fatal("KillSession killed a session with no server")
+	}
+	if _, err := os.Stat(paths.ServerSockAt(root, "dead")); !os.IsNotExist(err) {
+		t.Fatalf("kill spawned a server socket: %v", err)
+	}
+	if pid, ok := readPID(filepath.Join(paths.SessionDirAt(root, "dead"), "server.pid")); ok && processAlive(pid) {
+		t.Fatalf("kill spawned a server, pid %d", pid)
+	}
+}
+
 // TestKillSessionWithoutPidFile covers a live socket whose server never
 // wrote its pid: the kill must fail loudly, not silently do nothing.
 func TestKillSessionWithoutPidFile(t *testing.T) {

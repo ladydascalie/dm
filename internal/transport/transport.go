@@ -160,15 +160,11 @@ func ListSessionsAt(root string) ([]SessionInfo, error) {
 func KillSession(name string) error { return KillSessionAt(paths.StateDir(), name) }
 
 // KillSessionAt is KillSession with an explicit state root instead of
-// paths.StateDir().
+// paths.StateDir(). It never spawns a server: killing a stopped session must
+// not boot it, so the pid file decides and a missing or foreign pid fails.
 func KillSessionAt(root, name string) error {
-	c, err := EnsureAt(root, name)
-	if err != nil {
-		return err
-	}
-	_ = c.Close()
 	pid, ok := readPID(filepath.Join(paths.SessionDirAt(root, name), "server.pid"))
-	if !ok {
+	if !ok || !isDMProcess(pid, "__server") {
 		return fmt.Errorf("session %q has no server pid", name)
 	}
 	p, err := os.FindProcess(pid)
