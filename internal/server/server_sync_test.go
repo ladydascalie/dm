@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -175,16 +177,16 @@ func TestSecretSyncRegistersAndIngests(t *testing.T) {
 	if names := s.secretFiles[filepath.Join(dir, "creds.env")]; len(names) != 1 || names[0] != name {
 		t.Fatalf("secretFiles %v", s.secretFiles)
 	}
-	// The warnings name the skipped and empty lines, the short value and
-	// the bounds; none of them carries a value.
+	// The warnings name the skipped and empty lines and count the short
+	// value by file; none of them carries a value or a key.
 	if !strings.Contains(res.Warning, "1 lines without =") || !strings.Contains(res.Warning, "1 empty values") {
 		t.Fatalf("warning %q", res.Warning)
 	}
-	if !strings.Contains(res.Warning, "secret "+filepath.Join(dir, "creds.env")+"#SHORT: value is 2 bytes") {
-		t.Fatalf("warning %q names no bounds line", res.Warning)
+	if !strings.Contains(res.Warning, "file "+filepath.Join(dir, "creds.env")+": 1 values are outside the") {
+		t.Fatalf("warning %q names no bounds count", res.Warning)
 	}
-	if strings.Contains(string(m.Res), "supersecretvalue") || strings.Contains(res.Warning, "supersecretvalue") {
-		t.Fatalf("reply leaks the value: %s", m.Res)
+	if strings.Contains(string(m.Res), "supersecretvalue") || strings.Contains(string(m.Res), "SHORT") {
+		t.Fatalf("reply leaks the value or the key: %s", m.Res)
 	}
 }
 
@@ -333,14 +335,17 @@ func TestSecretSyncCountsCollisionsAndEmptyKeys(t *testing.T) {
 		t.Fatalf("files %v", res.Files)
 	}
 	f := res.Files[0]
-	if f.Values != 1 || f.EmptyKey != 2 || f.Bounds != 0 || len(f.Duplicate) != 1 || f.Duplicate[0] != "DUP" {
-		t.Fatalf("file result %+v, want 1 value, 2 empty keys, DUP duplicated", f)
+	if f.Values != 1 || f.EmptyKey != 2 || f.Bounds != 0 || f.Repeated != 1 {
+		t.Fatalf("file result %+v, want 1 value, 2 empty keys, 1 repeated key", f)
 	}
 	if !strings.Contains(res.Warning, "2 empty keys") {
 		t.Fatalf("warning %q names no empty keys", res.Warning)
 	}
-	if !strings.Contains(res.Warning, "key DUP repeats; only its last value redacts") {
-		t.Fatalf("warning %q names no collision", res.Warning)
+	if !strings.Contains(res.Warning, "1 keys repeat; only their last value redacts") {
+		t.Fatalf("warning %q names no collision count", res.Warning)
+	}
+	if strings.Contains(string(m.Res), "DUP") {
+		t.Fatalf("reply names the file key: %s", m.Res)
 	}
 	name := filepath.Join(dir, "creds.env")
 	if v, ok := s.secrets.Get(name + "#DUP"); !ok || v != "secondvalue" {
@@ -639,5 +644,52 @@ func TestSecretSyncFileValuesNeverEvictARegisteredSecret(t *testing.T) {
 	}
 	if second := pushed(); !slices.Equal(first, second) {
 		t.Fatal("the second sync changed which file values fit")
+	}
+}
+
+// TestSecretSyncReplyAndLogCarryNoFileKey proves the review's echo finding is
+// closed: a file key never reaches the reply or the log, even when the key is
+// also its value or falls outside the bounds. The reply keeps counts and the
+// file's path, so the operator can still tell which file to look at.
+func TestSecretSyncReplyAndLogCarryNoFileKey(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	path := writeMapping(t, dir, "file {\n    path \"creds.env\"\n}\n")
+	writeFile(t, dir, "creds.env",
+		"poc-token-keyecho=poc-token-keyecho\n"+
+			"poc-token-keyecho=poc-token-keyecho\n"+
+			"poc-key-short=ab\n")
+
+	w := log.Writer()
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(w) })
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if !m.OK {
+		t.Fatalf("secret sync: %s", m.Error)
+	}
+	var res syncReply
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if len(res.Files) != 1 || res.Files[0].Repeated != 1 || res.Files[0].Bounds != 1 {
+		t.Fatalf("file result %+v, want 1 repeated key and 1 out-of-bounds value", res.Files)
+	}
+	for _, key := range []string{"poc-token-keyecho", "poc-key-short"} {
+		if strings.Contains(string(m.Res), key) {
+			t.Fatalf("the reply names the key %q: %s", key, m.Res)
+		}
+		if strings.Contains(buf.String(), key) {
+			t.Fatalf("the log names the key %q: %s", key, buf.String())
+		}
+	}
+	env := filepath.Join(dir, "creds.env")
+	if !strings.Contains(res.Warning, env) {
+		t.Fatalf("the warning names no file: %q", res.Warning)
+	}
+	// The key that equalled its value still redacts: only the echo went.
+	if v, ok := s.secrets.Get(env + "#poc-token-keyecho"); !ok || v != "poc-token-keyecho" {
+		t.Fatalf("the value did not register: %q=%v", env+"#poc-token-keyecho", v)
 	}
 }

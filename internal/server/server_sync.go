@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -25,7 +24,9 @@ import (
 // answer with. A file block never fetches and never rides the proxy: its
 // values are display protection only. A value read from a file lives in the
 // registry and the redaction push alone; it never reaches argv, the logs,
-// the state file, the box or a reply body.
+// the state file, the box or a reply body. A file key is file data too: the
+// replies and the logs carry counts and the file's path, never a key, because
+// a key can hold any text, a value included.
 
 // mappingSecret is one secret block of a parsed mapping.
 type mappingSecret struct {
@@ -190,23 +191,17 @@ func countStrings(toks []kdl.Token, i int) int {
 }
 
 // fileResult is one file block's answer: the counts the line rule produced
-// and the read error, if any. No value ever appears here; Duplicate names
-// keys, never values.
+// and the read error, if any. No value and no file key ever appears here; a
+// key is untrusted file data and can equal the value beside it.
 type fileResult struct {
-	Path      string   `json:"path"`
-	Values    int      `json:"values"`
-	Skipped   int      `json:"skipped"`
-	Empty     int      `json:"empty"`
-	EmptyKey  int      `json:"emptyKeys,omitempty"`
-	Duplicate []string `json:"duplicateKeys,omitempty"`
-	Bounds    int      `json:"bounds"`
-	Error     string   `json:"error,omitempty"`
-}
-
-// syncValue is one value a file donated, with the name it registers under.
-type syncValue struct {
-	name  string
-	value string
+	Path     string `json:"path"`
+	Values   int    `json:"values"`
+	Skipped  int    `json:"skipped"`
+	Empty    int    `json:"empty"`
+	EmptyKey int    `json:"emptyKeys,omitempty"`
+	Repeated int    `json:"repeatedKeys,omitempty"`
+	Bounds   int    `json:"bounds"`
+	Error    string `json:"error,omitempty"`
 }
 
 // maxSecretFileBytes caps one mapping or file block read. The mapping is
@@ -284,13 +279,10 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 		realDir = resolved
 	}
 	results := make([]fileResult, 0, len(mp.Files))
-	var bounds []syncValue
 	for i := range mp.Files {
-		res, vals := s.ingestSecretFile(fileScan{
+		results = append(results, s.ingestSecretFile(fileScan{
 			dir: dir, realDir: realDir, block: mp.Files[i], trusted: m.Trust,
-		})
-		results = append(results, res)
-		bounds = append(bounds, vals...)
+		}))
 	}
 	failed := s.pushSecretScrub()
 	uncovered := make([]string, 0, len(failed))
@@ -320,13 +312,11 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 		if len(lost) > 0 {
 			warnings = append(warnings, fmt.Sprintf("file %s: %s; they registered nothing", r.Path, strings.Join(lost, ", ")))
 		}
-		for _, key := range r.Duplicate {
-			warnings = append(warnings, fmt.Sprintf("file %s: key %s repeats; only its last value redacts", r.Path, key))
+		if r.Repeated > 0 {
+			warnings = append(warnings, fmt.Sprintf("file %s: %d keys repeat; only their last value redacts", r.Path, r.Repeated))
 		}
-	}
-	for _, v := range bounds {
-		if w := secretBoundsWarning(v.name, v.value); w != "" {
-			warnings = append(warnings, w)
+		if r.Bounds > 0 {
+			warnings = append(warnings, fmt.Sprintf("file %s: %d values are outside the %d..%d byte redaction range; they registered nothing and will echo unredacted", r.Path, r.Bounds, pane.MinSecretLen, pane.MaxSecretLen))
 		}
 	}
 	_, dropped, droppedFiles := s.secretActiveSet()
@@ -364,15 +354,16 @@ type fileScan struct {
 // a line without = registers nothing; an empty value, an empty key and a
 // value outside the scrub bounds register nothing and are counted. A key
 // the file already donated keeps its last in-bounds donation: the earlier
-// ones drop, and every key that dropped one is counted and warned by name,
-// so a collision never shrinks the protected set in silence. The values
-// activate under s.mu with names derived from the path and the key, so a
-// re-run of the same mapping replaces exactly the values it donated before
-// and nothing else. The counts travel out, the values never do.
+// ones drop, and every key that dropped one is counted, so a collision never
+// shrinks the protected set in silence. The count travels out, never the key:
+// a key is file data and can equal the value beside it. The values activate
+// under s.mu with names derived from the path and the key, so a re-run of the
+// same mapping replaces exactly the values it donated before and nothing
+// else. The counts travel out, the values never do.
 //
 // An untrusted block may read only a regular file under the mapping's own
 // directory. A trusted block may read anywhere the operator can, as before.
-func (s *server) ingestSecretFile(scan fileScan) (fileResult, []syncValue) {
+func (s *server) ingestSecretFile(scan fileScan) fileResult {
 	path := scan.block.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(scan.dir, path)
@@ -381,17 +372,16 @@ func (s *server) ingestSecretFile(scan fileScan) (fileResult, []syncValue) {
 	if !scan.trusted {
 		if err := checkFileConfined(scan.realDir, scan.block.Path, path); err != nil {
 			res.Error = err.Error()
-			return res, nil
+			return res
 		}
 	}
 	raw, err := readRegularFile(path, maxSecretFileBytes)
 	if err != nil {
 		res.Error = err.Error()
-		return res, nil
+		return res
 	}
 	values := map[string]string{}
-	var dups []string
-	var bounds []syncValue
+	repeated := map[string]bool{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if strings.TrimSpace(line) == "" {
@@ -412,17 +402,16 @@ func (s *server) ingestSecretFile(scan fileScan) (fileResult, []syncValue) {
 		}
 		if len(value) < pane.MinSecretLen || len(value) > pane.MaxSecretLen {
 			res.Bounds++
-			bounds = append(bounds, syncValue{name: path + "#" + key, value: value})
 			continue
 		}
 		name := path + "#" + key
-		if _, dup := values[name]; dup && !slices.Contains(dups, key) {
-			dups = append(dups, key)
+		if _, dup := values[name]; dup {
+			repeated[key] = true
 		}
 		values[name] = value
 	}
 	res.Values = len(values)
-	res.Duplicate = dups
+	res.Repeated = len(repeated)
 	// The activation is one step under s.mu, so a concurrent push reads
 	// either the old set or the new one, never a half-swapped mixture.
 	s.mu.Lock()
@@ -443,7 +432,7 @@ func (s *server) ingestSecretFile(scan fileScan) (fileResult, []syncValue) {
 	}
 	s.secretFiles[path] = names
 	s.mu.Unlock()
-	return res, bounds
+	return res
 }
 
 // checkFileConfined refuses a file block that resolves outside the mapping's
