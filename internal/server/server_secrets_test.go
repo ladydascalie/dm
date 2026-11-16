@@ -1502,3 +1502,95 @@ func TestWedgeRearmsOnASecretAction(t *testing.T) {
 		t.Fatal("the re-armed pane left the layout")
 	}
 }
+
+// TestRedialCountsOnlyForTheOwner proves two racing redials on one conn
+// count once: the loser of the ownership check commits nothing, so the cap
+// counts three real redials, not two watchers' double-count.
+func TestRedialCountsOnlyForTheOwner(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	id := "w1p2"
+	sock := s.st.PaneSock(id)
+	os.Remove(sock)
+	f := startFakePaneDaemon(t, s.st, id)
+	f.mu.Lock()
+	f.acceptClose = true
+	f.mu.Unlock()
+
+	c, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial the fake daemon: %v", err)
+	}
+	if err := s.adoptPane(id, c); err != nil {
+		t.Fatalf("adoptPane: %v", err)
+	}
+	s.mu.Lock()
+	pc := s.panes[id]
+	s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = s.redialPane(id, pc)
+		}()
+	}
+	wg.Wait()
+	s.mu.Lock()
+	failed := s.paneWatch[id].failed
+	s.mu.Unlock()
+	if failed != 1 {
+		t.Fatalf("failed = %d after two racing redials, want 1", failed)
+	}
+	_ = cl
+	_ = conn
+}
+
+// TestWatchPaneDedupesOnTheWatchingFlag proves a second watchPane call on a
+// pane stacks nothing: one watcher runs, the wedge signal fires once, and the
+// wedge leaves no second loop behind.
+func TestWatchPaneDedupesOnTheWatchingFlag(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	id := "w1p2"
+	sock := s.st.PaneSock(id)
+	os.Remove(sock)
+	f := startFakePaneDaemon(t, s.st, id)
+	f.mu.Lock()
+	f.acceptClose = true
+	f.mu.Unlock()
+
+	c, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial the fake daemon: %v", err)
+	}
+	if err := s.adoptPane(id, c); err != nil {
+		t.Fatalf("adoptPane: %v", err)
+	}
+	s.watchPane(id)
+	s.watchPane(id) // the second caller must dedupe, not stack
+
+	if n := wedgeWait(t, s, id, 1); n != 1 {
+		t.Fatalf("wedge entries = %d, want exactly 1", n)
+	}
+	s.mu.Lock()
+	ws := s.paneWatch[id]
+	watching, wedged := ws.watching, ws.wedged
+	inTree := s.paneInTreeLocked(id)
+	s.mu.Unlock()
+	if watching {
+		t.Fatal("the watcher kept running after the wedge")
+	}
+	if !wedged {
+		t.Fatal("the pane is not marked wedged")
+	}
+	if !inTree {
+		t.Fatal("the wedged pane left the layout")
+	}
+	before := f.connCount()
+	time.Sleep(300 * time.Millisecond)
+	if got := f.connCount(); got > before+1 {
+		t.Fatalf("the dedupe failed: %d conns after the wedge, want at most %d+1", got, before)
+	}
+	_ = cl
+	_ = conn
+}

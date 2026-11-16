@@ -848,7 +848,15 @@ func (s *server) watchPane(id string) {
 		s.mu.Unlock()
 		return
 	}
-	s.paneWatchEntryLocked(id).watching = true
+	// One loop per pane: a second caller dedupes on the watching flag, so
+	// two racing ensures cannot stack two watchers on one conn, double-
+	// count toward the wedge cap or fire the wedge signal twice.
+	ws := s.paneWatchEntryLocked(id)
+	if ws.watching {
+		s.mu.Unlock()
+		return
+	}
+	ws.watching = true
 	s.mu.Unlock()
 	go s.watcherLoop(id, pc)
 }
@@ -998,26 +1006,42 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 	if _, err := os.Stat(sock); err != nil {
 		return nil, errPaneGone
 	}
-	// Count the redial before dialing: a replaced conn that was poisoned or
-	// died younger than the stable window failed to stabilise, and three in
-	// a row mean the daemon is wedged. A conn that lived resets the count.
-	oldFailed := old.isDegraded() || time.Since(old.installedAt) < paneStableWindow
+	// The ownership check wins first, under the lock, so two watchers on
+	// one conn cannot both count the same redial toward the cap.
 	s.mu.Lock()
-	ws := s.paneWatchEntryLocked(id)
-	if oldFailed {
-		ws.failed++
-	} else {
-		ws.failed = 0
+	cur := s.panes[id]
+	if cur != old {
+		// The pane already left the map, or another conn owns it: its
+		// handler ran or runs elsewhere, and this watcher stands down
+		// without a second prune.
+		s.mu.Unlock()
+		_ = old.c.Close()
+		return nil, nil
 	}
-	if ws.failed >= paneWedgeLimit {
+	// A replaced conn that was poisoned or died younger than the stable
+	// window failed to stabilise, and three in a row mean the daemon is
+	// wedged. A conn that lived resets the count. The count is tentative
+	// until the dial wins ownership; the winner commits it after the dial.
+	oldFailed := old.isDegraded() || time.Since(old.installedAt) < paneStableWindow
+	ws := s.paneWatchEntryLocked(id)
+	failed := ws.failed
+	if oldFailed {
+		failed++
+	} else {
+		failed = 0
+	}
+	if failed >= paneWedgeLimit {
 		// The watcher stands down: the pane keeps running and stays
 		// registered with its poisoned conn, so every push reports it, and
 		// the operator learns it once. No push timeout ever reaches
 		// reaping, and the daemon's process is never touched.
+		already := ws.wedged
 		ws.wedged = true
 		s.mu.Unlock()
 		_ = old.c.Close()
-		s.notifyPaneWedge(id)
+		if !already {
+			s.notifyPaneWedge(id)
+		}
 		return nil, errPaneWedged
 	}
 	s.mu.Unlock()
@@ -1040,15 +1064,16 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 		return nil, errPaneGone
 	}
 	s.mu.Lock()
-	cur := s.panes[id]
+	cur = s.panes[id]
 	if cur != old {
-		// The pane already left the map, or another conn owns it: its
-		// handler ran or runs elsewhere, and this watcher stands down
-		// without a second prune.
+		// The dial lost the race for ownership: the winner counts its own
+		// redial, and this watcher stands down without a second prune.
 		s.mu.Unlock()
 		_ = c.Close()
 		return nil, nil
 	}
+	// The count commits here, for the owner alone.
+	s.paneWatchEntryLocked(id).failed = failed
 	nc := &paneConn{
 		id: id, c: c, st: old.status(), title: old.title,
 		alt: old.alt, mouse: old.mouse, paste: old.paste,
@@ -1087,7 +1112,7 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 // remedy, never a value.
 func (s *server) notifyPaneWedge(id string) {
 	s.notifyPaneState(id, "error", fmt.Sprintf(
-		"pane %s stopped taking server pushes; the shell keeps running, and the watcher stands down until the pane is written to or a secret is used again", id))
+		"pane %s stopped taking server pushes; the shell was running when the watcher stood down, and writing to the pane or using a secret again re-arms the watcher", id))
 }
 
 func (s *server) broadcastLocked(m wire.Msg) {
