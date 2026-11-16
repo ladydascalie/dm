@@ -72,6 +72,31 @@ func TestFetchEnvIsExplicitOnly(t *testing.T) {
 	}
 }
 
+func TestFetchEmptyEnvPassesNothing(t *testing.T) {
+	dump := filepath.Join(t.TempDir(), "env.txt")
+	bin := writeTool(t, `printf v; env > "$DUMP"`)
+	t.Setenv("DM_SECRETS_CANARY", "inherited")
+	tool := Tool{Name: "fake", Bin: bin, Env: []string{"DUMP=" + dump}}
+	if _, err := Fetch(tool); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	env := readDump(t, dump)
+	if strings.Contains(env, "DM_SECRETS_CANARY") {
+		t.Fatalf("parent env leaked to child with empty Tool.Env:\n%s", env)
+	}
+	for line := range strings.SplitSeq(env, "\n") {
+		if line == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(line, "DUMP="), strings.HasPrefix(line, "PWD="),
+			strings.HasPrefix(line, "SHLVL="), strings.HasPrefix(line, "_="):
+		default:
+			t.Fatalf("unexpected child env entry from parent: %q\nfull:\n%s", line, env)
+		}
+	}
+}
+
 func TestFetchValueNeverReachesArgv(t *testing.T) {
 	dump := filepath.Join(t.TempDir(), "argv.txt")
 	bin := writeTool(t, `printf 's3cr3t-value'; printf '%s\n' "$@" > "$DUMP"`)
@@ -181,6 +206,45 @@ func TestHydrateTightensExistingPerms(t *testing.T) {
 	}
 	if string(b) != "s3cr3t-value" {
 		t.Fatalf("content: %q", b)
+	}
+}
+
+func TestHydrateReplacesPlantedSymlink(t *testing.T) {
+	root := t.TempDir()
+	victim := filepath.Join(root, "victim")
+	if err := os.WriteFile(victim, []byte("victim-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.Symlink(victim, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := Hydrate(target, "s3cr3t-value"); err != nil {
+		t.Fatalf("Hydrate: %v", err)
+	}
+	b, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "victim-data" {
+		t.Fatalf("symlink was followed, victim now holds %q", b)
+	}
+	fi, err := os.Lstat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("target is still a symlink")
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("target perm: %o", fi.Mode().Perm())
+	}
+	b, err = os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != "s3cr3t-value" {
+		t.Fatalf("target content: %q", b)
 	}
 }
 

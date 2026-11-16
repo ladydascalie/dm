@@ -17,6 +17,7 @@ type upstream struct {
 	paths  []string
 	auths  []string // Authorization header values seen
 	bodies []string
+	conns  []string // Connection header values seen
 }
 
 func newUpstream(t *testing.T, respond func(w http.ResponseWriter)) *upstream {
@@ -28,6 +29,7 @@ func newUpstream(t *testing.T, respond func(w http.ResponseWriter)) *upstream {
 		u.paths = append(u.paths, r.URL.Path)
 		u.auths = append(u.auths, r.Header.Get("Authorization"))
 		u.bodies = append(u.bodies, string(b))
+		u.conns = append(u.conns, r.Header.Get("Connection"))
 		u.mu.Unlock()
 		if respond != nil {
 			respond(w)
@@ -38,6 +40,12 @@ func newUpstream(t *testing.T, respond func(w http.ResponseWriter)) *upstream {
 	}))
 	t.Cleanup(u.Close)
 	return u
+}
+
+func (u *upstream) seenConns() (conns []string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.conns
 }
 
 func (u *upstream) seen() (paths, auths, bodies []string) {
@@ -366,5 +374,93 @@ func TestPrefixesAreUnguessable(t *testing.T) {
 	}
 	if len(pfx) < 32 {
 		t.Fatalf("prefix %q too short", pfx)
+	}
+}
+
+// TestRedirectNeverFollowed: a 302 from the pinned upstream streams back
+// untouched and the steal host receives nothing, least of all the header.
+func TestRedirectNeverFollowed(t *testing.T) {
+	var stealMu sync.Mutex
+	stealSeen := 0
+	steal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stealMu.Lock()
+		stealSeen++
+		stealMu.Unlock()
+	}))
+	t.Cleanup(steal.Close)
+
+	up := newUpstream(t, func(w http.ResponseWriter) {
+		w.Header().Set("Location", steal.URL+"/steal")
+		w.WriteHeader(http.StatusFound)
+	})
+	proxy, base := runProxy(t, nil)
+	pfx, err := proxy.Register("tok", up.URL, "Authorization: Bearer {}", "v3ry-s3cret")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	// A client that does not follow redirects sees the 3xx come straight
+	// back through the proxy.
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Get(base + pfx + "x")
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want 302 streamed back untouched", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != steal.URL+"/steal" {
+		t.Fatalf("Location = %q", loc)
+	}
+
+	stealMu.Lock()
+	defer stealMu.Unlock()
+	if stealSeen != 0 {
+		t.Fatalf("steal host saw %d requests, want 0", stealSeen)
+	}
+	paths, auths, _ := up.seen()
+	if len(paths) != 1 || len(auths) != 1 || auths[0] != "Bearer v3ry-s3cret" {
+		t.Fatalf("upstream saw paths=%v auths=%v", paths, auths)
+	}
+}
+
+func TestRegisterRejectsValueWithCRLF(t *testing.T) {
+	proxy, _ := runProxy(t, nil)
+	for _, value := range []string{"a\r\nX-Evil: 1", "a\nX-Evil: 1", "a\rb"} {
+		if _, err := proxy.Register("tok", "http://127.0.0.1:1", "Authorization: Bearer {}", value); err == nil {
+			t.Fatalf("value %q accepted", value)
+		}
+	}
+}
+
+// TestRequestHopHeadersStripped: hop-by-hop request headers do not reach the
+// upstream, symmetric with the response path.
+func TestRequestHopHeadersStripped(t *testing.T) {
+	up := newUpstream(t, nil)
+	proxy, base := runProxy(t, nil)
+	pfx, err := proxy.Register("tok", up.URL, "Authorization: Bearer {}", "v3ry-s3cret")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, base+pfx+"x", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Connection", "evil-injection")
+	req.Header.Set("Upgrade", "evil-protocol")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	resp.Body.Close()
+
+	for _, c := range up.seenConns() {
+		if strings.Contains(c, "evil-injection") {
+			t.Fatalf("upstream saw Connection %q", c)
+		}
 	}
 }

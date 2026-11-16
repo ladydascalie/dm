@@ -121,7 +121,15 @@ func (p *Proxy) Register(name, upstream, headerTemplate, value string) (string, 
 		upstream: u,
 		header:   header,
 		value:    filled,
-		client:   &http.Client{Transport: &http.Transport{}},
+		client: &http.Client{
+			Transport: &http.Transport{},
+			// Never follow a redirect: the pinned upstream is the only
+			// destination, and the 3xx streams back untouched. The default
+			// policy would carry the injected header to the redirect target.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 	for {
 		prefix, err := randomPrefix()
@@ -191,6 +199,9 @@ func fillTemplate(template, value string) (string, string, error) {
 	}
 	if strings.ContainsAny(rest, "\r\n") {
 		return "", "", fmt.Errorf("proxy: header template must not contain CR or LF")
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return "", "", fmt.Errorf("proxy: value must not contain CR or LF")
 	}
 	return http.CanonicalHeaderKey(name), strings.ReplaceAll(rest, placeholder, value), nil
 }
@@ -282,7 +293,7 @@ func (e *entry) forward(r *http.Request, prefix string) (*http.Response, error) 
 		return nil, err
 	}
 	for k, vs := range r.Header {
-		if k == e.header {
+		if k == e.header || isHopHeader(k) {
 			continue
 		}
 		out.Header[k] = vs
@@ -306,6 +317,15 @@ func joinPath(base, rest string) string {
 var hopHeaders = []string{
 	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
 	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+}
+
+func isHopHeader(name string) bool {
+	for _, h := range hopHeaders {
+		if http.CanonicalHeaderKey(h) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func copyResponseHeaders(w http.ResponseWriter, src http.Header) {

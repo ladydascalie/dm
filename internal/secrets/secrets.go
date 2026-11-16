@@ -23,15 +23,16 @@ type Tool struct {
 
 // Fetch runs the tool and returns its stdout, minus trailing newlines.
 // The child environment is built explicitly: it holds exactly t.Env and
-// nothing else. Nothing is inherited from the parent process. The value
-// never appears in argv. On failure the error carries the exit code, not
-// stdout or stderr, so the value cannot leak through it.
+// nothing else, even when t.Env is empty. Nothing is inherited from the
+// parent process. The value never appears in argv. On failure the error
+// carries the exit code, not stdout or stderr, so the value cannot leak
+// through it.
 func Fetch(t Tool) (string, error) {
 	if t.Bin == "" {
 		return "", fmt.Errorf("secrets: tool %q has no binary", t.Name)
 	}
 	cmd := exec.Command(t.Bin, t.Args...)
-	cmd.Env = append([]string(nil), t.Env...)
+	cmd.Env = append([]string{}, t.Env...)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -82,27 +83,34 @@ func (r *Registry) Drop(name string) bool {
 }
 
 // Hydrate writes value to path with restrictive permissions, creating parent
-// directories as needed. New parents get 0700. The file is truncated and
-// forced to 0600, even when it already exists with laxer permissions.
+// directories as needed. New parents get 0700. The value lands in an O_EXCL
+// temp file at 0600 in the target directory, then rename moves it over the
+// target. Rename replaces a planted symlink at the target instead of
+// following it, and the final file is always a fresh 0600 regular file.
 func Hydrate(path, value string) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("secrets: create %s: %w", dir, err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	f, err := os.CreateTemp(dir, ".secrets-*")
 	if err != nil {
-		return fmt.Errorf("secrets: open %s: %w", path, err)
+		return fmt.Errorf("secrets: temp in %s: %w", dir, err)
 	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
 	if err := f.Chmod(0o600); err != nil {
 		f.Close()
-		return fmt.Errorf("secrets: chmod %s: %w", path, err)
+		return fmt.Errorf("secrets: chmod %s: %w", tmp, err)
 	}
 	if _, err := f.WriteString(value); err != nil {
 		f.Close()
-		return fmt.Errorf("secrets: write %s: %w", path, err)
+		return fmt.Errorf("secrets: write %s: %w", tmp, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("secrets: close %s: %w", path, err)
+		return fmt.Errorf("secrets: close %s: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("secrets: rename to %s: %w", path, err)
 	}
 	return nil
 }
