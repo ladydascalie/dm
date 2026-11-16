@@ -141,13 +141,13 @@ func parseSecretsMapping(src string) (secretsMapping, error) {
 			seenSecret[b.Name] = true
 			mp.Secrets = append(mp.Secrets, b)
 		case "file":
-			if len(args) != 1 {
-				return secretsMapping{}, fmt.Errorf("line %d: file takes exactly one quoted path", t.Line)
+			if len(args) != 0 {
+				return secretsMapping{}, fmt.Errorf("line %d: file takes no node arguments; put the path in a path child", t.Line)
 			}
-			if len(kids) > 0 {
-				return secretsMapping{}, fmt.Errorf("line %d: file takes no children", t.Line)
+			if len(kids) != 2 || kids[0].Value != "path" {
+				return secretsMapping{}, fmt.Errorf("line %d: file takes exactly one path child: path \".env\"", t.Line)
 			}
-			p := args[0].Value
+			p := kids[1].Value
 			if seenFile[p] {
 				return secretsMapping{}, fmt.Errorf("line %d: file %s appears twice", t.Line, p)
 			}

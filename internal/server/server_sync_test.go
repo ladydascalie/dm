@@ -46,8 +46,12 @@ secret "gh-cli" {
     upstream "https://api.github.com"
     header "Authorization: Bearer {}"
 }
-file ".env"
-file "sub/creds.env"
+file {
+    path ".env"
+}
+file {
+    path "sub/creds.env"
+}
 `
 	mp, err := parseSecretsMapping(src)
 	if err != nil {
@@ -77,15 +81,15 @@ func TestParseSecretsMappingRefusesBadShapes(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"unknown node", "file \".env\"\nsecret2 \"x\" {}", "unknown node"},
+		{"unknown node", "file {\n    path \".env\"\n}\nsecret2 \"x\" {}", "unknown node"},
 		{"secret without name", "secret {}", "exactly one quoted name"},
 		{"secret with two names", "secret \"a\" \"b\" {}", "exactly one quoted name"},
 		{"duplicate secret", "secret \"a\" {}\nsecret \"a\" {}", "appears twice"},
-		{"duplicate file", "file \"a\"\nfile \"a\"", "appears twice"},
+		{"duplicate file", "file {\n    path \"a\"\n}\nfile {\n    path \"a\"\n}", "appears twice"},
 		{"unknown child", "secret \"a\" { colour \"red\" }", "unknown colour"},
 		{"child without value", "secret \"a\" { tool }", "takes exactly one quoted value"},
-		{"file with children", "file \"a\" { tool \"op\" }", "takes no children"},
-		{"file with two paths", "file \"a\" \"b\"", "exactly one quoted path"},
+		{"file with extra children", "file {\n    path \"a\"\n    tool \"op\"\n}", "file takes exactly one path child"},
+		{"file with two paths", "file {\n    path \"a\" \"b\"\n}", "file takes exactly one path child"},
 		{"bare value", "secret gh {}", "quoted values only"},
 		{"unclosed block", "secret \"a\" {", "not closed"},
 	}
@@ -133,7 +137,7 @@ func syncServer(t *testing.T) (*server, *client, net.Conn) {
 func TestSecretSyncRegistersAndIngests(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	dir := t.TempDir()
-	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile \"creds.env\"\n")
+	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
 	dotenv := writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\nNOVALUE\nEMPTY=\nSHORT=ab\n\n")
 
 	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
@@ -185,7 +189,7 @@ func TestSecretSyncRegistersAndIngests(t *testing.T) {
 func TestSecretSyncIsIdempotent(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	dir := t.TempDir()
-	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile \"creds.env\"\n")
+	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
 	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\nOTHER=anothervalue\n")
 
 	if m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path}); !m.OK {
@@ -245,7 +249,7 @@ func TestSecretSyncRefusesAMissingMapping(t *testing.T) {
 func TestSecretSyncReportsAMissingFile(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	dir := t.TempDir()
-	path := writeMapping(t, dir, "file \"gone.env\"\n")
+	path := writeMapping(t, dir, "file {\n    path \"gone.env\"\n}\n")
 	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
 	if !m.OK {
 		t.Fatalf("secret sync failed: %s", m.Error)
@@ -310,7 +314,7 @@ func TestParseSecretsMappingKeepsAChildAfterAMultilineString(t *testing.T) {
 func TestSecretSyncCountsCollisionsAndEmptyKeys(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	dir := t.TempDir()
-	path := writeMapping(t, dir, "file \"creds.env\"\n")
+	path := writeMapping(t, dir, "file {\n    path \"creds.env\"\n}\n")
 	writeFile(t, dir, "creds.env", "=tok1\n=tok2\nDUP=firstvalue\nDUP=secondvalue\n")
 
 	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
