@@ -38,6 +38,15 @@ type Term struct {
 	// its body carried one.
 	endCode    int
 	endCodeSet bool
+	// codedEndPos, codedEndCode and codedEndSet are the most recent D mark
+	// that carried an exit status. A bare D moves endPos and clears
+	// endCodeSet, but leaves this record alone: a shell's prompt hook can
+	// print a bare D after the command's own coded mark within one read of
+	// the stream, and a wait that ends on that read must still answer the
+	// code the command reported.
+	codedEndPos  int64
+	codedEndCode int
+	codedEndSet  bool
 	// mark is the kind of the most recent A, C or D mark, empty before the
 	// first one. A wait reads it to tell a prompt from a command in flight.
 	mark string

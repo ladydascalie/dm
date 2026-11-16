@@ -72,6 +72,9 @@ func (t *Term) oscPrompt(rest string) {
 		t.endPos, t.endSet = t.markStart, true
 		code, ok := parseExitCode(params)
 		t.endCode, t.endCodeSet = code, ok
+		if ok {
+			t.codedEndPos, t.codedEndCode, t.codedEndSet = t.markStart, code, true
+		}
 	}
 }
 
@@ -119,6 +122,21 @@ func (t *Term) CommandEnd() (pos int64, ok bool) {
 // and whether that mark carried one. A bare D reports false.
 func (t *Term) CommandExit() (code int, ok bool) {
 	return t.endCode, t.endCodeSet
+}
+
+// CommandExitFrom returns the exit status of the most recent OSC 133 D mark
+// at or after pos that carried one, and whether one did. The latest D may be
+// bare while a coded D sits behind it: a shell's prompt hook prints a bare D
+// after the command's own coded mark, and one read of the stream can hold
+// both, so a wait that ends on that read would otherwise answer an unknown
+// exit for a command that reported one. A pos past every coded mark reports
+// false, which keeps a bare end from inheriting the code of the command
+// before it.
+func (t *Term) CommandExitFrom(pos int64) (code int, ok bool) {
+	if t.codedEndSet && t.codedEndPos >= pos {
+		return t.codedEndCode, true
+	}
+	return 0, false
 }
 
 // oscPalette handles OSC 4: index;colour pairs.
