@@ -1594,3 +1594,220 @@ func TestWatchPaneDedupesOnTheWatchingFlag(t *testing.T) {
 	_ = cl
 	_ = conn
 }
+
+// serveSessionsSocket serves a server on its own socket the way Run does: one
+// accept loop, one goroutine per conn, each conn speaking the plain request
+// loop. A test needs it when one server dials another.
+func serveSessionsSocket(t *testing.T, s *server) {
+	t.Helper()
+	if err := os.MkdirAll(s.st.SessionDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", s.st.ServerSock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go s.serve(c)
+		}
+	}()
+}
+
+func TestSecretHydrateActivatesAndPushes(t *testing.T) {
+	value := "s3cret-hydrate-push"
+	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	path := filepath.Join(t.TempDir(), "token")
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+	if !rep.OK {
+		t.Fatalf("hydrate: %s", rep.Error)
+	}
+	if strings.Contains(string(rep.Res), value) {
+		t.Fatalf("hydrate reply leaks the value: %s", rep.Res)
+	}
+	// A hydrate-only flow leaves every pane scrubbing: the value never rode
+	// an endpoint or a keystroke, and the panes still heard it.
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), value) {
+		t.Fatalf("the pane never heard the value: %s", got.Res)
+	}
+	if !s.secretActive["gh"] {
+		t.Fatal("hydrate left the value inactive")
+	}
+	// The hydrate never starts the proxy: the file is the ride.
+	if s.proxy != nil {
+		t.Fatal("a hydrate started the proxy for a secret without an upstream")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != value {
+		t.Fatalf("file = %q err=%v", b, err)
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("file mode = %v err=%v", st.Mode(), err)
+	}
+}
+
+func TestSecretHydrateStartsNoProxyForAnUpstreamSecret(t *testing.T) {
+	up := newSecretUpstream(t)
+	s, cl, conn, _ := secretServer(t, "secrets", "s3cret-hydrate-up", nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh",
+		Tool: "op", Ref: "op://x/y",
+		Upstream: up.URL, Header: "Authorization: Bearer {}",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-hydrate", Name: "gh", Path: filepath.Join(t.TempDir(), "token"),
+	})
+	if !rep.OK {
+		t.Fatalf("hydrate: %s", rep.Error)
+	}
+	if s.proxy != nil {
+		t.Fatal("a hydrate started the proxy")
+	}
+	if strings.Contains(string(rep.Res), "endpoint") {
+		t.Fatalf("hydrate reply carries endpoint vocabulary: %s", rep.Res)
+	}
+}
+
+func TestSecretUseCoversASiblingSession(t *testing.T) {
+	value := "s3cret-cross-session"
+	root := t.TempDir()
+	s1 := railServer(session.NewStateAt(root, "poc"))
+	s1.fetch = func(sec *session.Secret) (string, error) { return value, nil }
+	s2 := railServer(session.NewStateAt(root, "sibling"))
+	ch := spyPane(t, s2, "w1p1")
+	serveSessionsSocket(t, s2)
+
+	cl, conn := boxConn(t)
+	if rep := secretCall(t, s1, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s1, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	if strings.Contains(string(rep.Res), value) {
+		t.Fatalf("use reply leaks the value: %s", rep.Res)
+	}
+	var res struct {
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 0 {
+		t.Fatalf("use named %v uncovered, want a covered sibling", res.Uncovered)
+	}
+	// The sibling session's pane received the set: it scrubs the value even
+	// though its own server never fetched it.
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), value) {
+		t.Fatalf("the sibling pane never heard the value: %s", got.Res)
+	}
+	// The revoke withdraws: the sibling's panes hear the set is gone.
+	rep = secretCall(t, s1, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("revoke: %s", rep.Error)
+	}
+	got = readSpyUntil(t, ch, "set-secrets")
+	if strings.Contains(string(got.Res), value) {
+		t.Fatalf("the withdrawal left the value on the sibling pane: %s", got.Res)
+	}
+}
+
+func TestSecretCoverMergesAndWithdraws(t *testing.T) {
+	s, cl, conn, ch := secretServer(t, "secrets", "", nil)
+	cover := func(session string, values ...string) wire.Msg {
+		return wire.Msg{
+			Action: "secret-cover",
+			Res:    jsonRaw(map[string]any{"session": session, "values": values}),
+		}
+	}
+	if rep := secretCall(t, s, cl, conn, cover("other", "foreign-value")); !rep.OK {
+		t.Fatalf("cover: %s", rep.Error)
+	}
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), "foreign-value") {
+		t.Fatalf("the pane never heard the foreign value: %s", got.Res)
+	}
+	// A pane adopted later hears the merged set too.
+	ch2 := spyPane(t, s, "w1p2")
+	s.adoptSecretScrub("w1p2")
+	got = readSpyUntil(t, ch2, "set-secrets")
+	if !strings.Contains(string(got.Res), "foreign-value") {
+		t.Fatalf("the adopted pane never heard the foreign value: %s", got.Res)
+	}
+	// The foreign value rides memory only: the state file never sees it.
+	if b, err := os.ReadFile(filepath.Join(s.st.SessionDir(), "state.json")); err == nil && strings.Contains(string(b), "foreign-value") {
+		t.Fatalf("the state file carries a foreign value: %s", b)
+	}
+	// The withdrawal clears the pane's list.
+	if rep := secretCall(t, s, cl, conn, cover("other")); !rep.OK {
+		t.Fatalf("withdraw: %s", rep.Error)
+	}
+	got = readSpyUntil(t, ch, "set-secrets")
+	if strings.Contains(string(got.Res), "foreign-value") {
+		t.Fatalf("the withdrawal left the value on the pane: %s", got.Res)
+	}
+	// A session covers everything but itself, and names must be safe.
+	wantErr(t, "secret-cover", "refuses session", secretCall(t, s, cl, conn, cover("secrets", "v")))
+	wantErr(t, "secret-cover", "refuses session", secretCall(t, s, cl, conn, cover("../x", "v")))
+	wantErr(t, "secret-cover", "needs a session", secretCall(t, s, cl, conn, wire.Msg{Action: "secret-cover"}))
+}
+
+func TestSecretUseNamesAServerlessSibling(t *testing.T) {
+	value := "s3cret-orphan"
+	root := t.TempDir()
+	s := railServer(session.NewStateAt(root, "poc"))
+	s.fetch = func(sec *session.Secret) (string, error) { return value, nil }
+	// A sibling whose panes are live and whose server is gone: the push
+	// cannot reach those panes, so the use names them.
+	orphan := session.NewStateAt(root, "orphan")
+	if err := os.MkdirAll(filepath.Join(orphan.SessionDir(), "panes"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", orphan.PaneSock("w1p1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	// A sibling that is gone altogether: no sockets, no name.
+	if _, err := session.NewStateAt(root, "gone"), error(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	cl, conn := boxConn(t)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "session orphan" {
+		t.Fatalf("uncovered = %v, want the serverless sibling", res.Uncovered)
+	}
+}

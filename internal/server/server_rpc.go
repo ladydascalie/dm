@@ -613,6 +613,9 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 	case "secret-type":
 		s.secretType(cl, m)
 
+	case "secret-cover":
+		s.secretCover(cl, m)
+
 	default:
 		s.reply(cl, m, nil, fmt.Errorf("unknown action %q", m.Action))
 	}

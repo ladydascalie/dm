@@ -455,6 +455,13 @@ type server struct {
 	proxy          *proxy.Proxy
 	fetch          func(*session.Secret) (string, error)
 
+	// secretForeign holds the live values other sessions' servers asked
+	// this one to scrub, by source session name. The source session owns
+	// its values: it pushes every change and the withdrawal, and this
+	// server folds the set into every push its own panes hear. Memory only,
+	// like every secret value; guarded by mu, nil until the first cover.
+	secretForeign map[string][]string
+
 	// afterActivate runs inside a secret use, between the activation and
 	// the reply, so a test can land a revoke in exactly that window. It is
 	// a seam, nil in production.
