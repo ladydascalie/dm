@@ -218,11 +218,17 @@ func (s *server) writeTo(id, text string, enter bool) error {
 	dsts := s.syncPaneIDsLocked(id)
 	s.mu.Unlock()
 	if len(dsts) == 0 {
-		return pc.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
+		err := pc.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
+		if err != nil {
+			s.rearmPaneWatcher(id)
+		}
+		return err
 	}
 	for _, pid := range dsts {
 		if p := s.panes[pid]; p != nil {
-			_ = p.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
+			if err := p.send(wire.Msg{Action: "write", Msg: text, Enter: enter}); err != nil {
+				s.rearmPaneWatcher(pid)
+			}
 		}
 	}
 	return nil
@@ -258,11 +264,17 @@ func (s *server) sendKeys(id string, keys []byte) error {
 		return fmt.Errorf("no pane %q", id)
 	}
 	if len(dsts) == 0 {
-		return pc.send(wire.Msg{Action: "write", Keys: keys})
+		err := pc.send(wire.Msg{Action: "write", Keys: keys})
+		if err != nil {
+			s.rearmPaneWatcher(id)
+		}
+		return err
 	}
 	for _, pid := range dsts {
 		if p := s.panes[pid]; p != nil {
-			_ = p.send(wire.Msg{Action: "write", Keys: keys})
+			if err := p.send(wire.Msg{Action: "write", Keys: keys}); err != nil {
+				s.rearmPaneWatcher(pid)
+			}
 		}
 	}
 	return nil

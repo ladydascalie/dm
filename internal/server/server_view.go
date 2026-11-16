@@ -280,6 +280,7 @@ func (s *server) paneExited(id string) {
 	delete(s.st.Panes, id)
 	delete(s.statusChangedAt, id)
 	delete(s.paneSpawn, id)
+	delete(s.paneWatch, id)
 
 	found, emptyWindow := false, false
 	for _, ws := range s.st.Workspaces {
@@ -684,7 +685,11 @@ func (s *server) syncSizes() {
 		ps.Cols, ps.Rows = r.W, r.H
 		calls = append(calls, func() {
 			if pc != nil {
-				_ = pc.send(wire.Msg{Action: "resize", Cols: r.W, Rows: r.H})
+				if err := pc.send(wire.Msg{Action: "resize", Cols: r.W, Rows: r.H}); err != nil {
+					// A resize is a pane event: it re-arms a wedged
+					// pane's capped watcher.
+					s.rearmPaneWatcher(id)
+				}
 			}
 		})
 	}

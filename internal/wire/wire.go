@@ -23,17 +23,35 @@ type Msg struct {
 	Msg    string `json:"msg,omitempty"`
 	// Project is the explicit project name on new-workspace. Empty means the
 	// new workspace inherits the project of the one it was created from.
-	Project string  `json:"project,omitempty"`
-	Enter   bool    `json:"enter,omitempty"`
-	Name    string  `json:"name,omitempty"`
-	Window  string  `json:"window,omitempty"`
-	Index   int     `json:"index,omitempty"`
-	ID      int     `json:"id,omitempty"`
-	Cwd     string  `json:"cwd,omitempty"`
-	FG      string  `json:"fg,omitempty"` // terminal foreground the client detected
-	BG      string  `json:"bg,omitempty"` // terminal background the client detected
-	Ratio   float64 `json:"ratio,omitempty"`
-	NoFocus bool    `json:"nofocus,omitempty"`
+	Project string `json:"project,omitempty"`
+	Enter   bool   `json:"enter,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Window  string `json:"window,omitempty"`
+	Index   int    `json:"index,omitempty"`
+	ID      int    `json:"id,omitempty"`
+	Cwd     string `json:"cwd,omitempty"`
+	FG      string `json:"fg,omitempty"` // terminal foreground the client detected
+	// Tool is the secret register request: the program that prints the
+	// value on stdout, op or pass.
+	Tool string `json:"tool,omitempty"`
+	// Ref is the secret register request: the reference the tool resolves,
+	// an op:// URI or a store path. A reference is not a value.
+	Ref string `json:"ref,omitempty"`
+	// Upstream is the secret register request: the proxy upstream URL the
+	// secret rides to.
+	Upstream string `json:"upstream,omitempty"`
+	// Header is the secret register request: the proxy header template,
+	// {} marking the value slot.
+	Header string `json:"header,omitempty"`
+	// Path is the secret hydrate request: the file the value is written
+	// to, out of band.
+	Path string `json:"path,omitempty"`
+	// Env is the secret register request: extra environment entries the
+	// fetch tool needs, as KEY=VALUE. Credential-named keys are refused.
+	Env     []string `json:"env,omitempty"`
+	BG      string   `json:"bg,omitempty"` // terminal background the client detected
+	Ratio   float64  `json:"ratio,omitempty"`
+	NoFocus bool     `json:"nofocus,omitempty"`
 	// Argv is the program a new pane runs instead of a shell, program first.
 	// The split, new-window and new-workspace actions carry it. Empty means
 	// $SHELL -l.

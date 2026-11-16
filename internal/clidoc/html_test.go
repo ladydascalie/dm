@@ -141,8 +141,12 @@ func TestHTMLPageIsSelfContained(t *testing.T) {
 	if !strings.Contains(page, PromptMarkSpec) {
 		t.Error("page does not cite the semantic prompts proposal")
 	}
-	if n := strings.Count(page, "http"); n > 1 {
-		t.Errorf("page carries %d URLs, want only the proposal citation", n)
+	// Two http occurrences are allowed: the proposal citation and the one
+	// https URL an example carries, the secret register upstream. Both are
+	// text, not resources; the bad list above covers every way a page could
+	// load one.
+	if n := strings.Count(page, "http"); n > 2 {
+		t.Errorf("page carries %d URLs, want only the proposal citation and the example", n)
 	}
 }
 

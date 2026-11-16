@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-14" "dm" "User Commands"
+.TH DM 1 "2026-11-16" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -285,6 +285,56 @@ print the box schema the server serves
 .br
 \fB--s name\fP session name
 .TP
+\fBdm secret register <name> --tool op --ref R [--upstream URL --header T] [--env K=V]...\fP
+register a secret: how to fetch it and where it rides
+.br
+\fB--s name\fP session name
+.br
+\fB--tool op\fP tool that prints the value: op or pass
+.br
+\fB--ref R\fP reference the tool resolves: an op:// URI or a store path
+.br
+\fB--upstream URL\fP pin the proxy upstream the secret rides to
+.br
+\fB--header T\fP proxy header template, {} marks the value slot
+.br
+\fB--env K=V\fP extra environment entry for the tool; repeatable, credential names refused
+.br
+Example: \fBdm secret register gh-cli --tool op --ref 'op://Personal/github/token' --upstream https://api.github.com --header 'Authorization: Bearer {}'\fP
+.TP
+\fBdm secret list\fP
+print registered secret names and references only
+.br
+\fB--s name\fP session name
+.TP
+\fBdm secret revoke <name>\fP
+remove a secret and drop its value everywhere
+.br
+\fB--s name\fP session name
+.TP
+\fBdm secret use <name>\fP
+fetch a secret, redact it in every pane, and print the proxy endpoint URL when the secret rides one
+.br
+\fB--s name\fP session name
+.br
+Example: \fBdm secret use gh-cli\fP
+.TP
+\fBdm secret hydrate <name> --to P\fP
+fetch a secret and write it to a file at 0600
+.br
+\fB--s name\fP session name
+.br
+\fB--to P\fP file path to write
+.TP
+\fBdm secret type <name> --to PANE\fP
+fetch a secret and type it into a pane
+.br
+\fB--s name\fP session name
+.br
+\fB--to PANE\fP target pane id
+.br
+Example: \fBdm secret type gh-cli --to w1p1\fP
+.TP
 \fBdm man [-o path]\fP
 print the man page, or write it to a file
 .br
@@ -383,7 +433,25 @@ raw bytes
 history rows above the screen
 .TP
 \fBres\fP
-the verb payload for the msg-* actions
+the verb payload for the msg-* actions; set-secrets carries the redaction values
+.TP
+\fBtool\fP
+secret-register: the tool that prints the value, op or pass
+.TP
+\fBref\fP
+secret-register: the op:// URI or store path the tool resolves
+.TP
+\fBupstream\fP
+secret-register: the proxy upstream URL the secret rides to
+.TP
+\fBheader\fP
+secret-register: the proxy header template, {} marks the value slot
+.TP
+\fBpath\fP
+secret-hydrate: the file the value is written to, out of band
+.TP
+\fBenv\fP
+secret-register: extra environment entries for the tool, as KEY=VALUE; credential names are refused
 .PP
 The action field names one of these. Each example is one JSON object, carrying only the fields that action needs.
 .TP
@@ -665,6 +733,36 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBmsg-schema\fP
 .nf
 {"action":"msg-schema","res":{}}
+.fi
+.TP
+\fBsecret-register\fP
+.nf
+{"action":"secret-register","name":"gh-cli","tool":"op","ref":"op://Personal/gh/token"}
+.fi
+.TP
+\fBsecret-list\fP
+.nf
+{"action":"secret-list"}
+.fi
+.TP
+\fBsecret-revoke\fP
+.nf
+{"action":"secret-revoke","name":"gh-cli"}
+.fi
+.TP
+\fBsecret-use\fP
+.nf
+{"action":"secret-use","name":"gh-cli"}
+.fi
+.TP
+\fBsecret-hydrate\fP
+.nf
+{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}
+.fi
+.TP
+\fBsecret-type\fP
+.nf
+{"action":"secret-type","name":"gh-cli","target":"w1p1"}
 .fi
 .SH KEYS
 The default keymap. A key label is the key pressed after the prefix key.

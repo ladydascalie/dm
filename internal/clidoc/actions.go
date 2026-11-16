@@ -80,6 +80,13 @@ var actionExamples = []actionExample{
 	{"msg-sub", `{"action":"msg-sub","res":{"keyPrefix":"lane/","afterSeq":0}}`},
 	{"msg-watchers", `{"action":"msg-watchers","res":{}}`},
 	{"msg-schema", `{"action":"msg-schema","res":{}}`},
+
+	{"secret-register", `{"action":"secret-register","name":"gh-cli","tool":"op","ref":"op://Personal/gh/token"}`},
+	{"secret-list", `{"action":"secret-list"}`},
+	{"secret-revoke", `{"action":"secret-revoke","name":"gh-cli"}`},
+	{"secret-use", `{"action":"secret-use","name":"gh-cli"}`},
+	{"secret-hydrate", `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`},
+	{"secret-type", `{"action":"secret-type","name":"gh-cli","target":"w1p1"}`},
 }
 
 // actionExampleOf returns the example body for an action name.

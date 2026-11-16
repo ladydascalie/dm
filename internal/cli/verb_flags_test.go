@@ -134,6 +134,8 @@ var fieldFlag = map[string]string{
 	"body": "body", "bodyFile": "body-file", "seq": "seq", "from": "from",
 	"limit": "limit", "after": "after", "timeout": "timeout", "dry": "dry-run",
 	"all": "all", "force": "force",
+	"tool": "tool", "ref": "ref", "upstream": "upstream", "header": "header",
+	"to": "to", "envs": "env",
 }
 
 // cmdFlagsMethods are the methods the walk recurses into. parse is missing on
@@ -337,18 +339,22 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 				if skip[verb] {
 					continue // man, llms and html keep their own flag set
 				}
-				if verb == "msg" {
-					// The msg case dispatches on args[0], so each subverb
-					// is checked against its own row, and the case body
-					// itself against the union.
+				if verb == "msg" || verb == "secret" {
+					// The grouped case dispatches on args[0], so each
+					// subverb is checked against its own row, and the case
+					// body itself against the union.
 					reads := map[string]bool{}
-					walk(cc, reads, map[string]bool{"Run": true, "runBox": true})
+					walk(cc, reads, map[string]bool{"Run": true, "runBox": true, "runSecret": true})
 					for name := range reads {
-						if !declaredOf("msg")[name] {
-							t.Errorf("dm msg reads %q, which no msg row declares", name)
+						if !declaredOf(verb)[name] {
+							t.Errorf("dm %s reads %q, which no %s row declares", verb, name, verb)
 						}
 					}
-					found += dispatch(readers["runBox"], "msg ")
+					if verb == "msg" {
+						found += dispatch(readers["runBox"], "msg ")
+					} else {
+						found += dispatch(readers["runSecret"], "secret ")
+					}
 					continue
 				}
 				declared := declaredOf(verb)

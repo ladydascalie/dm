@@ -127,6 +127,11 @@ type State struct {
 	// box existed loads with both zero, an empty box.
 	Box    []box.Entry `json:"box,omitempty"`
 	BoxSeq int         `json:"boxSeq,omitempty"`
+
+	// Secrets is the session's registry of registered secrets: how each value
+	// is fetched and where it rides, never the value itself. A state file
+	// written before the registry existed loads with zero, an empty registry.
+	Secrets []*Secret `json:"secrets,omitempty"`
 }
 
 // numericName reports whether a window label is a plain number, the old
@@ -271,6 +276,10 @@ func LoadStateAt(root, name string) (*State, error) {
 		}
 	}
 	changed := false
+	if n := st.dropBadSecrets(); n > 0 {
+		logDroppedSecrets(n)
+		changed = true
+	}
 	if !st.RailSet {
 		st.Rail = layout.DefaultRail
 		st.RailSet = true
