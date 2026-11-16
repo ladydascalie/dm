@@ -273,3 +273,47 @@ func TestSecretsDropBadEnvOnLoad(t *testing.T) {
 		t.Fatalf("load kept %+v, want only the ok entry", got.Secrets)
 	}
 }
+
+// TestSecretsDropNilOnLoad is the review-session counter-example: a state
+// file containing a JSON null secret entry loads without panic, the nil
+// counts as a dropped bad entry, and the good entries survive.
+func TestSecretsDropNilOnLoad(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	const raw = `{
+  "name": "nulls",
+  "workspaces": [
+    {"id": "s1", "name": "main", "windows": [], "active": 0}
+  ],
+  "active": 0,
+  "cols": 80,
+  "rows": 24,
+  "panes": {},
+  "nextWorkspace": 1,
+  "nextWindow": 1,
+  "idVersion": 2,
+  "rail": 30,
+  "railSet": true,
+  "secrets": [
+    null,
+    {"name": "good", "tool": "pass", "reference": "item"}
+  ]
+}`
+	if err := os.MkdirAll(paths.SessionDirAt(root, "nulls"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePathAt(root, "nulls"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(root, "nulls")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(got.Secrets) != 1 || got.Secrets[0].Name != "good" {
+		t.Fatalf("kept %+v, want only the good entry", got.Secrets)
+	}
+	// The repair is persisted: the second load sees no nil and stays clean.
+	if _, err := LoadStateAt(root, "nulls"); err != nil {
+		t.Fatal(err)
+	}
+}

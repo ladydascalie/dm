@@ -159,7 +159,9 @@ func (st *State) dropBadSecrets() int {
 	kept := st.Secrets[:0]
 	seen := map[string]bool{}
 	for _, s := range st.Secrets {
-		if s.Validate() != nil || seen[s.Name] {
+		// A JSON null in a hand-edited file unmarshals to a nil pointer.
+		// It is a bad entry like any other, not a failed load.
+		if s == nil || s.Validate() != nil || seen[s.Name] {
 			continue
 		}
 		seen[s.Name] = true
