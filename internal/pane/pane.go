@@ -1000,6 +1000,14 @@ func (p *paneProc) serve(c net.Conn) {
 			}
 			p.scrub.set(values)
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
+		case "toggle-secrets":
+			// The operator's redaction switch. The stage flips between
+			// scrubbing and passing the output through; the value list
+			// survives both ways, so a set-secrets push while the switch is
+			// off updates the values without turning the stage back on. The
+			// reply carries the resulting state, so the server can show it.
+			res := jsonRaw(map[string]any{"enabled": p.scrub.toggle()})
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, Res: res})
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "wait":
