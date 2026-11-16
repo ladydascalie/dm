@@ -1,23 +1,32 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"dm/internal/pane"
+	"dm/internal/paths"
 	"dm/internal/proxy"
 	"dm/internal/secrets"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
 
-// The secret actions move a fetched value through exactly four places: the
+// The secret actions move a fetched value through exactly five places: the
 // secrets registry, the proxy's upstream request, the keystroke burst a
-// secret type sends and the redaction registries the panes hold. The value
-// never reaches argv, the logs, the state file, the box or a reply body:
-// every reply names the secret, never the value.
+// secret type sends, the redaction registries the panes hold and the sibling
+// servers a push asks to scrub the value in their own panes. The value never
+// reaches argv, the logs, the state file, the box or a reply body: every
+// reply names the secret, never the value.
 
 // secretEnsure builds the secret state on first use, under s.mu. A server
 // that never touches a secret action allocates nothing.
@@ -30,6 +39,9 @@ func (s *server) secretEnsure() {
 	}
 	if s.secretPrefixes == nil {
 		s.secretPrefixes = map[string]string{}
+	}
+	if s.secretForeign == nil {
+		s.secretForeign = map[string][]string{}
 	}
 }
 
@@ -107,14 +119,30 @@ func (s *server) secretValuesLocked() ([]string, []string) {
 }
 
 // pushSecretScrub sends the live values to every adopted pane, so their
-// output stage redacts each one. Collecting the set and sending it are one
+// output stage redacts each one, and asks every sibling session's server to
+// do the same for its own panes: the endpoint a value rides answers on
+// loopback, so a push that stopped at this session's border would leave the
+// other sessions' panes unscrubbed. Collecting the set and sending it are one
 // step under secretPush: a pane's scrubber replaces its whole list, so two
 // pushes that interleave could leave a pane with the stale one, and the adopt
 // push below races the same way. The returned map names the panes that
-// refused the set; an empty map means every live pane redacts. An empty push
-// is the point of a revoke: the panes must hear the set is gone, not stay
-// with a stale value on their list.
+// refused the set, pane ids and sibling sessions alike; an empty map means
+// every live pane redacts. An empty push is the point of a revoke: the panes
+// must hear the set is gone, not stay with a stale value on their list.
 func (s *server) pushSecretScrub() map[string]error {
+	s.secretPush.Lock()
+	defer s.secretPush.Unlock()
+	failed, _ := s.sendSecretScrub()
+	for name, err := range s.coverSiblings() {
+		failed["session "+name] = err
+	}
+	return failed
+}
+
+// pushLocalScrub sends the merged set to this session's own panes and goes no
+// further: the sessions the foreign values came from push those values
+// themselves, so a cover never rebroadcasts what it was handed.
+func (s *server) pushLocalScrub() (map[string]error, []string) {
 	s.secretPush.Lock()
 	defer s.secretPush.Unlock()
 	return s.sendSecretScrub()
@@ -122,9 +150,9 @@ func (s *server) pushSecretScrub() map[string]error {
 
 // sendSecretScrub collects the current set and sends it to every adopted
 // pane. The caller holds secretPush.
-func (s *server) sendSecretScrub() map[string]error {
+func (s *server) sendSecretScrub() (map[string]error, []string) {
 	s.mu.Lock()
-	values, _ := s.secretValuesLocked()
+	values, _ := s.scrubValuesLocked()
 	panes := make([]*paneConn, 0, len(s.panes))
 	for _, pc := range s.panes {
 		panes = append(panes, pc)
@@ -152,7 +180,7 @@ func (s *server) sendSecretScrub() map[string]error {
 	for _, id := range missed {
 		s.rearmPaneWatcher(id)
 	}
-	return failed
+	return failed, values
 }
 
 // adoptSecretScrub gives a freshly adopted pane the live set. It runs under
@@ -163,7 +191,7 @@ func (s *server) adoptSecretScrub(id string) {
 	s.secretPush.Lock()
 	defer s.secretPush.Unlock()
 	s.mu.Lock()
-	values, _ := s.secretValuesLocked()
+	values, _ := s.scrubValuesLocked()
 	pc := s.panes[id]
 	s.mu.Unlock()
 	if len(values) == 0 || pc == nil {
@@ -177,6 +205,182 @@ func (s *server) adoptSecretScrub(id string) {
 	if err := pc.send(wire.Msg{Action: "set-secrets", Res: jsonRaw(map[string]any{"values": values})}); err != nil {
 		log.Printf("pane %s: set-secrets: %v", id, err)
 	}
+}
+
+// scrubValuesLocked is the set the panes must redact: this session's live
+// values first, in name order, then the values other sessions' servers asked
+// this one to cover, deduplicated against them, capped at the panes' list
+// size. The count of foreign values the cap left off is logged here, once per
+// push: an adopt and a plain push answer to no one, so the drop must not stay
+// silent. The caller holds s.mu.
+func (s *server) scrubValuesLocked() ([]string, int) {
+	values, _ := s.secretValuesLocked()
+	if len(s.secretForeign) == 0 {
+		return values, 0
+	}
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		seen[v] = true
+	}
+	sources := make([]string, 0, len(s.secretForeign))
+	for name := range s.secretForeign {
+		sources = append(sources, name)
+	}
+	sort.Strings(sources)
+	dropped := 0
+	for _, name := range sources {
+		for _, v := range s.secretForeign[name] {
+			if len(values) == pane.MaxSecrets {
+				dropped++
+				continue
+			}
+			if seen[v] {
+				continue
+			}
+			values = append(values, v)
+			seen[v] = true
+		}
+	}
+	switch dropped {
+	case 0:
+	case 1:
+		log.Printf("set-secrets: the panes' cap dropped 1 value another session asked this one to cover")
+	default:
+		log.Printf("set-secrets: the panes' cap dropped %d values other sessions asked this one to cover", dropped)
+	}
+	return values, dropped
+}
+
+// siblingDialTimeout bounds one dial to a sibling session's server or pane
+// socket. A dead socket refuses at once; the timeout only bounds a socket
+// that answers slowly.
+const siblingDialTimeout = 100 * time.Millisecond
+
+// coverRoundtripTimeout bounds one cover request to a sibling server: the
+// write and the wait for its reply.
+const coverRoundtripTimeout = 2 * time.Second
+
+// coverSiblings asks every other session's live server to scrub this
+// session's values in its own panes. A push from here cannot reach a pane
+// another server adopted, and the set must not stop at this session's border:
+// the endpoint a value rides answers on loopback, so a pane in any session
+// can echo it. The origin session owns its values: it pushes every change and
+// the withdrawal, and the sibling folds the set into every push its own
+// panes hear, so one writer stays in charge of each pane's list. The caller
+// holds secretPush, so the covers leave in the same order as the pushes to
+// this session's own panes. A sibling whose server never answers is no
+// failure when nothing of it is live; one with live panes and no server is
+// named instead of pushed, because a push to an orphaned pane has no writer
+// left to keep its list in step.
+func (s *server) coverSiblings() map[string]error {
+	s.mu.Lock()
+	s.secretEnsure()
+	values, _ := s.secretValuesLocked()
+	var root, own string
+	if s.st != nil {
+		root, own = s.st.Dir(), s.st.Name
+	}
+	s.mu.Unlock()
+	if root == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "sessions"))
+	if err != nil {
+		return nil
+	}
+	failed := map[string]error{}
+	for _, e := range entries {
+		name := e.Name()
+		if name == own || !e.IsDir() || !paths.ValidSessionName(name) {
+			continue
+		}
+		if err := s.coverSession(root, own, name, values); err != nil {
+			failed[name] = err
+		}
+	}
+	return failed
+}
+
+// coverSession covers one sibling session: through its live server when it
+// has one, since that server folds the set into every push its panes hear,
+// now and on every later push and adoption.
+func (s *server) coverSession(root, own, name string, values []string) error {
+	c, err := net.DialTimeout("unix", paths.ServerSockAt(root, name), siblingDialTimeout)
+	if err == nil {
+		defer func() { _ = c.Close() }()
+		return coverRoundtrip(c, own, values)
+	}
+	live := livePaneSockets(root, name)
+	if live == 0 {
+		return nil
+	}
+	if live == 1 {
+		return errors.New("no live server; 1 live pane uncovered")
+	}
+	return fmt.Errorf("no live server; %d live panes uncovered", live)
+}
+
+// livePaneSockets counts the pane sockets a session still serves: a socket
+// that dials is a live pane, a stale one answers nothing.
+func livePaneSockets(root, name string) int {
+	panes, err := os.ReadDir(filepath.Join(root, "sessions", name, "panes"))
+	if err != nil {
+		return 0
+	}
+	live := 0
+	for _, pe := range panes {
+		id, ok := strings.CutSuffix(pe.Name(), ".sock")
+		if !ok {
+			continue
+		}
+		c, err := net.DialTimeout("unix", paths.PaneSockAt(root, name, id), siblingDialTimeout)
+		if err != nil {
+			continue
+		}
+		_ = c.Close()
+		live++
+	}
+	return live
+}
+
+// coverRoundtrip sends one secret-cover and waits for the reply. The reply is
+// the confirmation: a sibling that never answers reads as uncovered, never as
+// covered. A cover that deadlocks against a sibling whose own push waits on
+// this server unwinds here, on the deadline, and reads as uncovered, the safe
+// side.
+func coverRoundtrip(c net.Conn, own string, values []string) error {
+	body, err := json.Marshal(map[string]any{"session": own, "values": values})
+	if err != nil {
+		return err
+	}
+	_ = c.SetDeadline(time.Now().Add(coverRoundtripTimeout))
+	if err := wire.WriteMsg(c, wire.Msg{Type: "req", Action: "secret-cover", ID: 1, Res: json.RawMessage(body)}); err != nil {
+		return err
+	}
+	rep, err := wire.ReadMsg(c)
+	if err != nil {
+		return err
+	}
+	if !rep.OK {
+		if rep.Error == "" {
+			return errors.New("cover refused")
+		}
+		return errors.New(rep.Error)
+	}
+	// The reply counts the values the sibling's panes' cap dropped: a cover
+	// that reports success while values fell out of the list would leave the
+	// sender promising coverage it does not have.
+	var res struct {
+		Panes   int `json:"panes"`
+		Dropped int `json:"dropped"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		return fmt.Errorf("cover reply: %w", err)
+	}
+	if res.Dropped > 0 {
+		return fmt.Errorf("covered with %d of %d values dropped at the panes' cap", res.Dropped, len(values))
+	}
+	return nil
 }
 
 // secretBoundsWarning returns one line when the pane stage cannot redact a
@@ -369,6 +573,9 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
 	}
+	if len(uncovered) > 0 {
+		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the value would echo there unredacted", strings.Join(uncovered, ", ")))
+	}
 	warning := strings.Join(warnings, "; ")
 	for _, w := range warnings {
 		log.Print(w)
@@ -380,10 +587,12 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	// under the lock, so a revoke that landed anywhere between the
 	// activation and this reply, during the fetch or during the push,
 	// reads as the refusal it is.
+	// The check tests the record's identity, not just the name: a
+	// revoke-and-re-register must not pass under the new record.
 	s.mu.Lock()
-	gone := s.st.Secret(sec.Name) == nil
+	live := s.st.Secret(sec.Name) == sec
 	s.mu.Unlock()
-	if gone {
+	if !live {
 		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret use again", sec.Name))
 		return
 	}
@@ -463,8 +672,13 @@ func (s *server) secretProxyAddr() string {
 	return s.proxy.Addr()
 }
 
-// secretHydrate fetches the value and writes it to a file at 0600. The file
-// write is out of band: the reply names the path, never the value.
+// secretHydrate fetches the value, activates it, pushes the redaction set and
+// writes the value to a file at 0600. Activation rides the fetch because a
+// hydrate-only flow must still leave every pane scrubbing: the
+// register-before-use rule does not ask how the value will be used. The
+// hydrate never starts the proxy: the file is the ride, and the reply names
+// the path alone. A failed write leaves the value active: the panes already
+// scrub it, and a revoke cleans up what a retry does not.
 func (s *server) secretHydrate(cl *client, m wire.Msg) {
 	if m.Path == "" {
 		s.reply(cl, m, nil, fmt.Errorf("secret hydrate needs --to"))
@@ -480,11 +694,121 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	if err := secrets.Hydrate(m.Path, value); err != nil {
+	// The same identity check a use runs: a revoke that raced the fetch
+	// wins, and a revoke-and-re-register does not pair the old value with
+	// the new record's shape.
+	if err := s.secretActivate(sec, value); err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	s.reply(cl, m, map[string]any{"path": m.Path}, nil)
+	failed := s.pushSecretScrub()
+	for id, err := range failed {
+		log.Printf("pane %s: set-secrets: %v", id, err)
+	}
+	uncovered := make([]string, 0, len(failed))
+	for id := range failed {
+		uncovered = append(uncovered, id)
+	}
+	sort.Strings(uncovered)
+	// The guard, the write, the re-check and the removal are one critical
+	// section under s.mu: two hydrates to one path serialize completely, a
+	// revoke cannot land between the looks, and a refused hydrate never
+	// reaches a removal. The hold costs the session's event loop one small
+	// file write on local disk, the price the serialization needs: a
+	// hydrate is rare and operator-invoked, and no send runs under s.mu,
+	// the push having finished before the section. The check tests the
+	// record's identity, not just the name: a revoke-and-re-register does
+	// not pass under the new record.
+	s.mu.Lock()
+	live := s.st.Secret(sec.Name) == sec
+	if !live {
+		s.mu.Unlock()
+		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret hydrate again", sec.Name))
+		return
+	}
+	err = secrets.Hydrate(m.Path, value)
+	live = s.st.Secret(sec.Name) == sec
+	if err == nil && !live {
+		// Nothing can change the record between the two looks while the
+		// hold lasts, so this branch is a backstop rather than a live
+		// path: it keeps the cleanup correct if a future change releases
+		// the lock mid-write, and the read-back keeps its removal from
+		// destroying a file another writer claimed.
+		if b, rerr := os.ReadFile(m.Path); rerr == nil && bytes.Equal(b, []byte(value)) {
+			_ = os.Remove(m.Path)
+		}
+	}
+	s.mu.Unlock()
+	if err != nil {
+		s.reply(cl, m, nil, err)
+		return
+	}
+	if !live {
+		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being written; run dm secret hydrate again", sec.Name))
+		return
+	}
+	var warnings []string
+	if w := secretBoundsWarning(sec.Name, value); w != "" {
+		warnings = append(warnings, w)
+	}
+	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	if len(uncovered) > 0 {
+		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the value would echo there unredacted", strings.Join(uncovered, ", ")))
+	}
+	warning := strings.Join(warnings, "; ")
+	for _, w := range warnings {
+		log.Print(w)
+	}
+	s.reply(cl, m, map[string]any{"path": m.Path, "warning": warning, "uncovered": uncovered}, nil)
+}
+
+// secretCover stores another session's live values and pushes the merged set
+// to this session's panes. The sender owns the values: it pushes every change
+// and the withdrawal, an empty set, and this server folds them into every
+// push its panes hear. The values ride memory only, like every secret value:
+// never the state file, the logs or a reply. The push runs before the reply,
+// so a sender that heard the count knows the panes already scrub.
+func (s *server) secretCover(cl *client, m wire.Msg) {
+	var body struct {
+		Session string   `json:"session"`
+		Values  []string `json:"values"`
+	}
+	if err := json.Unmarshal(m.Res, &body); err != nil || body.Session == "" {
+		s.reply(cl, m, nil, fmt.Errorf("secret-cover needs a session and a set of values"))
+		return
+	}
+	if !paths.ValidSessionName(body.Session) || body.Session == s.st.Name {
+		s.reply(cl, m, nil, fmt.Errorf("secret-cover refuses session %q", body.Session))
+		return
+	}
+	s.mu.Lock()
+	s.secretEnsure()
+	if len(body.Values) == 0 {
+		delete(s.secretForeign, body.Session)
+	} else {
+		s.secretForeign[body.Session] = body.Values
+	}
+	s.mu.Unlock()
+	failed, merged := s.pushLocalScrub()
+	s.mu.Lock()
+	panes := len(s.panes)
+	s.mu.Unlock()
+	// The merged set is exactly what the panes were pushed: a value of this
+	// sender's that is missing from it fell to the cap, and the reply says
+	// so instead of calling the cover whole.
+	scrubbed := make(map[string]bool, len(merged))
+	for _, v := range merged {
+		scrubbed[v] = true
+	}
+	dropped := 0
+	for _, v := range body.Values {
+		if !scrubbed[v] {
+			dropped++
+		}
+	}
+	s.reply(cl, m, map[string]any{"panes": panes - len(failed), "dropped": dropped}, nil)
 }
 
 // secretType fetches the value and types it into a pane through the existing
