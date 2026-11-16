@@ -229,3 +229,36 @@ func TestOSCCommandExit(t *testing.T) {
 		t.Fatalf("exit = %d, %v, want 3, true", code, ok)
 	}
 }
+
+// TestOSCCommandExitSurvivesABareEndMark proves the exit status a coded D
+// mark carried outlives a bare D mark behind it. A shell's prompt hook prints
+// a bare D after every prompt, so one read of the stream can hold the
+// command's coded mark and the hook's bare mark together: the latest mark
+// reports no status, but a wait anchored before both still answers the code.
+// A coded mark before the anchor stays out of reach, so a later bare end does
+// not inherit the code of the command before it.
+func TestOSCCommandExitSurvivesABareEndMark(t *testing.T) {
+	term := NewTerm(20, 4)
+	if _, ok := term.CommandExitFrom(0); ok {
+		t.Fatal("a fresh terminal reports an exit status")
+	}
+	writeTerm(term, "\x1b]133;C\x1b\\")
+	writeTerm(term, "out\r\n")
+	writeTerm(term, "\x1b]133;D;7\x1b\\")
+	end, _ := term.CommandEnd()
+	if code, ok := term.CommandExitFrom(0); !ok || code != 7 {
+		t.Fatalf("CommandExitFrom(0) = %d, %v, want 7, true", code, ok)
+	}
+	writeTerm(term, "% \x1b]133;D\x1b\\\x1b]133;A\x1b\\")
+	if _, ok := term.CommandExit(); ok {
+		t.Fatal("the bare D left an exit status on the latest mark")
+	}
+	if code, ok := term.CommandExitFrom(0); !ok || code != 7 {
+		t.Fatalf("CommandExitFrom(0) after the bare D = %d, %v, want 7, true", code, ok)
+	}
+	writeTerm(term, "\x1b]133;C\x1b\\")
+	writeTerm(term, "\x1b]133;D\x1b\\")
+	if _, ok := term.CommandExitFrom(end + 1); ok {
+		t.Fatal("a bare end inherited the coded mark before its anchor")
+	}
+}

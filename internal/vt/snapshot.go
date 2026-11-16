@@ -145,7 +145,12 @@ type SnapshotState struct {
 	EndSet     bool   `json:"es,omitempty"`
 	EndCode    int    `json:"ec,omitempty"`
 	EndCodeSet bool   `json:"ecs,omitempty"`
-	StreamPos  int64  `json:"o,omitempty"`
+	// The most recent D mark that carried an exit status. A bare D after it
+	// must not cost a wait the code the command reported.
+	CodedEndPos  int64 `json:"cep,omitempty"`
+	CodedEndCode int   `json:"cec,omitempty"`
+	CodedEndSet  bool  `json:"ces,omitempty"`
+	StreamPos    int64 `json:"o,omitempty"`
 }
 
 // SnapshotStyle is the compact wire form of Style. The zero value is the
@@ -482,6 +487,9 @@ func (t *Term) Snapshot() *Snapshot {
 			EndSet:       t.endSet,
 			EndCode:      t.endCode,
 			EndCodeSet:   t.endCodeSet,
+			CodedEndPos:  t.codedEndPos,
+			CodedEndCode: t.codedEndCode,
+			CodedEndSet:  t.codedEndSet,
 			StreamPos:    t.streamPos,
 		},
 	}
@@ -652,6 +660,7 @@ func (t *Term) Restore(s *Snapshot) error {
 	t.startPos, t.startSet = s.State.StartPos, s.State.StartSet
 	t.endPos, t.endSet = s.State.EndPos, s.State.EndSet
 	t.endCode, t.endCodeSet = s.State.EndCode, s.State.EndCodeSet
+	t.codedEndPos, t.codedEndCode, t.codedEndSet = s.State.CodedEndPos, s.State.CodedEndCode, s.State.CodedEndSet
 	t.streamPos = s.State.StreamPos
 	// markStart is where the OSC in flight began; the in-flight strStart is
 	// the same offset.

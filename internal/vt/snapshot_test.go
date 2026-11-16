@@ -222,7 +222,8 @@ func itoa(n int) string {
 // wrote neither field and a restore lost them.
 func TestSnapshotMarkAndModifierKeysRoundTrip(t *testing.T) {
 	term := NewTerm(40, 10)
-	writeTerm(term, "hi\x1b]133;A\x1b\\")
+	writeTerm(term, "hi\x1b]133;D;7\x1b\\")
+	writeTerm(term, "\x1b]133;A\x1b\\")
 	writeTerm(term, "\x1b[3+r")
 
 	restored, decoded := roundTrip(t, term)
@@ -234,5 +235,8 @@ func TestSnapshotMarkAndModifierKeysRoundTrip(t *testing.T) {
 	}
 	if got := restored.modifierKeys; got != 3 {
 		t.Errorf("restored modifierKeys = %d, want 3", got)
+	}
+	if code, ok := restored.CommandExitFrom(0); !ok || code != 7 {
+		t.Errorf("restored CommandExitFrom(0) = %d, %v, want 7, true", code, ok)
 	}
 }

@@ -409,3 +409,22 @@ func TestReflowEndsAWaitWithNoRunningChild(t *testing.T) {
 		t.Fatalf("final reply = %+v, want reason children and no exit code", final)
 	}
 }
+
+// TestWaitKeepsTheExitCodeBehindABareEndMark proves a wait answers the exit
+// code the command's own D mark carried even when the prompt hook's bare D
+// rides the same read. zsh prints a bare D after every prompt, so the chunk
+// that ends the command can hold the coded mark and the bare mark behind it,
+// and the wait that ends on that chunk must not report an unknown exit.
+func TestWaitKeepsTheExitCodeBehindABareEndMark(t *testing.T) {
+	t.Parallel()
+	p, cli, msgs := markedPane(t, 40, 6)
+
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "wait", ID: 2})
+	readTail(t, msgs)
+	feedPane(p, []byte("out\r\n\x1b]133;D;7\x1b\\% \x1b]133;D\x1b\\\x1b]133;A\x1b\\"))
+
+	_, final := waitFinal(t, msgs)
+	if final.WaitReason != "mark" || final.Exit == nil || *final.Exit != 7 {
+		t.Fatalf("final reply = %+v, want reason mark and exit 7", final)
+	}
+}
