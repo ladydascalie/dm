@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -213,5 +214,43 @@ func TestSecretHelpPrintsTheVerbs(t *testing.T) {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("dm secret -h does not name %q: %q", want, b.String())
 		}
+	}
+}
+
+// TestSecretSyncSendsTheShape proves the sync verb sends an absolute mapping
+// path: --from resolves against the working directory, and with no --from
+// the mapping is the working directory's .dm-secrets.kdl.
+func TestSecretSyncSendsTheShape(t *testing.T) {
+	cases := []struct {
+		argv    []string
+		wantEnd string
+	}{
+		{[]string{"secret", "sync"}, ".dm-secrets.kdl"},
+		{[]string{"secret", "sync", "--from", "cfg/secrets.kdl"}, filepath.Join("cfg", "secrets.kdl")},
+	}
+	for _, tc := range cases {
+		rec := &recorder{}
+		startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+			rec.handler()(c, req)
+			return wire.Msg{OK: true, Res: json.RawMessage(`{"mapping":"/x","registered":[],"kept":[],"files":[],"warning":"","uncovered":[]}`)}, true
+		})
+		if err := Run(tc.argv); err != nil {
+			t.Fatalf("dm %v: %v", tc.argv, err)
+		}
+		got := rec.last()
+		if got.Action != "secret-sync" {
+			t.Fatalf("%v sent %+v", tc.argv, got)
+		}
+		if !filepath.IsAbs(got.Path) || !strings.HasSuffix(got.Path, tc.wantEnd) {
+			t.Fatalf("%v sent path %q, want it to end in %q", tc.argv, got.Path, tc.wantEnd)
+		}
+	}
+}
+
+// TestSecretSyncRefusesExtraArguments proves the verb takes no positional.
+func TestSecretSyncRefusesExtraArguments(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	if err := Run([]string{"secret", "sync", "extra"}); err == nil {
+		t.Fatal("dm secret sync extra succeeded, want a refusal")
 	}
 }

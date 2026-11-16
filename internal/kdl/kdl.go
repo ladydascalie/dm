@@ -18,11 +18,14 @@ const (
 	EOF
 )
 
-// Token is one KDL token with the line it started on.
+// Token is one KDL token with the line it started on. Bol reports whether
+// the token is the first one on its line, so a reader can tell a node name
+// from a bare value on the line above it.
 type Token struct {
 	Kind  Kind
 	Value string
 	Line  int
+	Bol   bool
 }
 
 // Scan splits src into tokens. It accepts comments and blank lines. It is
@@ -31,11 +34,18 @@ func Scan(src string) ([]Token, error) {
 	var toks []Token
 	i := 0
 	line := 1
+	atBOL := true
+	emit := func(t Token) {
+		t.Bol = atBOL
+		atBOL = false
+		toks = append(toks, t)
+	}
 	for i < len(src) {
 		c := src[i]
 		switch {
 		case c == '\n':
 			line++
+			atBOL = true
 			i++
 		case c == ' ' || c == '\t' || c == '\r':
 			i++
@@ -62,10 +72,10 @@ func Scan(src string) ([]Token, error) {
 				return nil, fmt.Errorf("line %d: unterminated block comment", start)
 			}
 		case c == '{':
-			toks = append(toks, Token{Kind: LBrace, Value: "{", Line: line})
+			emit(Token{Kind: LBrace, Value: "{", Line: line})
 			i++
 		case c == '}':
-			toks = append(toks, Token{Kind: RBrace, Value: "}", Line: line})
+			emit(Token{Kind: RBrace, Value: "}", Line: line})
 			i++
 		case c == '"':
 			start := line
@@ -110,7 +120,7 @@ func Scan(src string) ([]Token, error) {
 			if !closed {
 				return nil, fmt.Errorf("line %d: unterminated string", start)
 			}
-			toks = append(toks, Token{Kind: String, Value: b.String(), Line: start})
+			emit(Token{Kind: String, Value: b.String(), Line: start})
 		default:
 			start := i
 			for i < len(src) {
@@ -126,7 +136,7 @@ func Scan(src string) ([]Token, error) {
 			if i == start {
 				return nil, fmt.Errorf("line %d: unexpected character %q", line, c)
 			}
-			toks = append(toks, Token{Kind: Ident, Value: src[start:i], Line: line})
+			emit(Token{Kind: Ident, Value: src[start:i], Line: line})
 		}
 	}
 	toks = append(toks, Token{Kind: EOF, Line: line})

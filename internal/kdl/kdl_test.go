@@ -41,35 +41,35 @@ func TestScanIdents(t *testing.T) {
 		want []Token
 	}{
 		{"single ident", "palette", []Token{
-			{Kind: Ident, Value: "palette", Line: 1},
+			{Kind: Ident, Value: "palette", Line: 1, Bol: true},
 			{Kind: EOF, Line: 1},
 		}},
 		{"idents on one line", "accents  {\n}", []Token{
-			{Kind: Ident, Value: "accents", Line: 1},
+			{Kind: Ident, Value: "accents", Line: 1, Bol: true},
 			{Kind: LBrace, Value: "{", Line: 1},
-			{Kind: RBrace, Value: "}", Line: 2},
+			{Kind: RBrace, Value: "}", Line: 2, Bol: true},
 			{Kind: EOF, Line: 2},
 		}},
 		{"ident stops at brace", "glyphs{", []Token{
-			{Kind: Ident, Value: "glyphs", Line: 1},
+			{Kind: Ident, Value: "glyphs", Line: 1, Bol: true},
 			{Kind: LBrace, Value: "{", Line: 1},
 			{Kind: EOF, Line: 1},
 		}},
 		{"ident stops at quote", "states\"x\"", []Token{
-			{Kind: Ident, Value: "states", Line: 1},
+			{Kind: Ident, Value: "states", Line: 1, Bol: true},
 			{Kind: String, Value: "x", Line: 1},
 			{Kind: EOF, Line: 1},
 		}},
 		{"ident keeps punctuation", "#101014,-", []Token{
-			{Kind: Ident, Value: "#101014,-", Line: 1},
+			{Kind: Ident, Value: "#101014,-", Line: 1, Bol: true},
 			{Kind: EOF, Line: 1},
 		}},
 		{"line numbers across lines", "a\nbb {\nccc\n}", []Token{
-			{Kind: Ident, Value: "a", Line: 1},
-			{Kind: Ident, Value: "bb", Line: 2},
+			{Kind: Ident, Value: "a", Line: 1, Bol: true},
+			{Kind: Ident, Value: "bb", Line: 2, Bol: true},
 			{Kind: LBrace, Value: "{", Line: 2},
-			{Kind: Ident, Value: "ccc", Line: 3},
-			{Kind: RBrace, Value: "}", Line: 4},
+			{Kind: Ident, Value: "ccc", Line: 3, Bol: true},
+			{Kind: RBrace, Value: "}", Line: 4, Bol: true},
 			{Kind: EOF, Line: 4},
 		}},
 	}
@@ -101,7 +101,7 @@ func TestScanStrings(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := scanTokens(t, tt.src)
-			want := []Token{{Kind: String, Value: tt.want, Line: 1}, {Kind: EOF, Line: 1}}
+			want := []Token{{Kind: String, Value: tt.want, Line: 1, Bol: true}, {Kind: EOF, Line: 1}}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("Scan(%q) = %v, want %v", tt.src, got, want)
 			}
@@ -114,11 +114,11 @@ func TestScanStringLines(t *testing.T) {
 	src := "states {\n\"a\nb\" x\n}"
 	got := scanTokens(t, src)
 	want := []Token{
-		{Kind: Ident, Value: "states", Line: 1},
+		{Kind: Ident, Value: "states", Line: 1, Bol: true},
 		{Kind: LBrace, Value: "{", Line: 1},
-		{Kind: String, Value: "a\nb", Line: 2},
+		{Kind: String, Value: "a\nb", Line: 2, Bol: true},
 		{Kind: Ident, Value: "x", Line: 3},
-		{Kind: RBrace, Value: "}", Line: 4},
+		{Kind: RBrace, Value: "}", Line: 4, Bol: true},
 		{Kind: EOF, Line: 4},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -133,16 +133,16 @@ func TestScanLineComments(t *testing.T) {
 		want []Token
 	}{
 		{"comment line then code", "// dark theme\npalette", []Token{
-			{Kind: Ident, Value: "palette", Line: 2},
+			{Kind: Ident, Value: "palette", Line: 2, Bol: true},
 			{Kind: EOF, Line: 2},
 		}},
 		{"comment swallows rest of line", "a// c { \"x\"\nb", []Token{
-			{Kind: Ident, Value: "a", Line: 1},
-			{Kind: Ident, Value: "b", Line: 2},
+			{Kind: Ident, Value: "a", Line: 1, Bol: true},
+			{Kind: Ident, Value: "b", Line: 2, Bol: true},
 			{Kind: EOF, Line: 2},
 		}},
 		{"comment at end without newline", "a// tail", []Token{
-			{Kind: Ident, Value: "a", Line: 1},
+			{Kind: Ident, Value: "a", Line: 1, Bol: true},
 			{Kind: EOF, Line: 1},
 		}},
 		{"comment only file", "// nothing here", []Token{
@@ -166,21 +166,21 @@ func TestScanBlockComments(t *testing.T) {
 		want []Token
 	}{
 		{"single line", "a/* c */b", []Token{
-			{Kind: Ident, Value: "a", Line: 1},
+			{Kind: Ident, Value: "a", Line: 1, Bol: true},
 			{Kind: Ident, Value: "b", Line: 1},
 			{Kind: EOF, Line: 1},
 		}},
 		{"multiline counts lines", "a\n/* x\ny\nz */\nb", []Token{
-			{Kind: Ident, Value: "a", Line: 1},
-			{Kind: Ident, Value: "b", Line: 5},
+			{Kind: Ident, Value: "a", Line: 1, Bol: true},
+			{Kind: Ident, Value: "b", Line: 5, Bol: true},
 			{Kind: EOF, Line: 5},
 		}},
 		{"star slash inside needs no space", "/*x*/a", []Token{
-			{Kind: Ident, Value: "a", Line: 1},
+			{Kind: Ident, Value: "a", Line: 1, Bol: true},
 			{Kind: EOF, Line: 1},
 		}},
 		{"block comment at end without newline", "a/* tail */", []Token{
-			{Kind: Ident, Value: "a", Line: 1},
+			{Kind: Ident, Value: "a", Line: 1, Bol: true},
 			{Kind: EOF, Line: 1},
 		}},
 	}
@@ -294,5 +294,22 @@ func TestScanEscapedNewlineCountsLine(t *testing.T) {
 	id := got[len(got)-2]
 	if id.Kind != Ident || id.Value != "bad-token" || id.Line != 4 {
 		t.Errorf("token after escaped newline = %+v, want ident on line 4", id)
+	}
+}
+
+func TestScanBolMarksLineStarts(t *testing.T) {
+	// Bol marks the token each line starts with, so a reader can tell a
+	// bare value on a node's own line from the next node on a new one.
+	got := scanTokens(t, "a b\n c \"d\"\n\ne")
+	want := []Token{
+		{Kind: Ident, Value: "a", Line: 1, Bol: true},
+		{Kind: Ident, Value: "b", Line: 1},
+		{Kind: Ident, Value: "c", Line: 2, Bol: true},
+		{Kind: String, Value: "d", Line: 2},
+		{Kind: Ident, Value: "e", Line: 4, Bol: true},
+		{Kind: EOF, Line: 4},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Scan bol = %v, want %v", got, want)
 	}
 }

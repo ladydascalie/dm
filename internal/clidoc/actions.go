@@ -87,6 +87,7 @@ var actionExamples = []actionExample{
 	{"secret-use", `{"action":"secret-use","name":"gh-cli"}`},
 	{"secret-hydrate", `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`},
 	{"secret-type", `{"action":"secret-type","name":"gh-cli","target":"w1p1"}`},
+	{"secret-sync", `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl"}`},
 }
 
 // actionExampleOf returns the example body for an action name.

@@ -455,6 +455,13 @@ type server struct {
 	proxy          *proxy.Proxy
 	fetch          func(*session.Secret) (string, error)
 
+	// secretFiles maps one ingested file's absolute path to the value names
+	// its lines donated, in sorted order. A re-run of the same mapping
+	// replaces exactly the names it donated before, so a line a mapping
+	// dropped stops being redacted. Memory only, guarded by mu, nil until
+	// the first sync.
+	secretFiles map[string][]string
+
 	// secretForeign holds the live values other sessions' servers asked
 	// this one to scrub, by source session name. The source session owns
 	// its values: it pushes every change and the withdrawal, and this

@@ -449,6 +449,17 @@ var cliCommands = []cliCommand{
 		example: `dm secret type gh-cli --to w1p1`,
 		group:   groupSecrets,
 	},
+	{
+		name:    "secret sync",
+		args:    "[--from M]",
+		summary: "apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"from", "M", "mapping path, default .dm-secrets.kdl in the working directory"},
+		},
+		example: `dm secret sync`,
+		group:   groupSecrets,
+	},
 
 	// Documentation.
 	{

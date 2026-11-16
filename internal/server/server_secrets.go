@@ -43,6 +43,9 @@ func (s *server) secretEnsure() {
 	if s.secretForeign == nil {
 		s.secretForeign = map[string][]string{}
 	}
+	if s.secretFiles == nil {
+		s.secretFiles = map[string][]string{}
+	}
 }
 
 // secretTool maps a registered secret to the command that prints its value.
@@ -426,21 +429,9 @@ func (s *server) secretRegister(cl *client, m wire.Msg) {
 		Header:    m.Header,
 		Env:       m.Env,
 	}
-	if err := sec.Validate(); err != nil {
+	if err := checkSecretShape(sec); err != nil {
 		s.reply(cl, m, nil, err)
 		return
-	}
-	// The proxy shape is checked here, not at use time: a bad header name or
-	// a one-sided pairing must not cost a fetch first.
-	if (sec.Upstream == "") != (sec.Header == "") {
-		s.reply(cl, m, nil, fmt.Errorf("secret %s: --upstream and --header go together", sec.Name))
-		return
-	}
-	if sec.Upstream != "" {
-		if err := proxy.Validate(sec.Upstream, sec.Header); err != nil {
-			s.reply(cl, m, nil, fmt.Errorf("secret %s: %w", sec.Name, err))
-			return
-		}
 	}
 	err := s.mutation(func() error {
 		s.mu.Lock()
@@ -456,6 +447,27 @@ func (s *server) secretRegister(cl *client, m wire.Msg) {
 		return
 	}
 	s.reply(cl, m, nil, err)
+}
+
+// checkSecretShape validates one secret record the way the register verb
+// does: the tool and reference shape, and the proxy pairing when the record
+// carries one. The proxy shape is checked here, not at use time: a bad
+// header name or a one-sided pairing must not cost a fetch first. The sync
+// mapping answers to the same check, so a block it carries cannot register
+// a shape register would refuse.
+func checkSecretShape(sec *session.Secret) error {
+	if err := sec.Validate(); err != nil {
+		return err
+	}
+	if (sec.Upstream == "") != (sec.Header == "") {
+		return fmt.Errorf("secret %s: --upstream and --header go together", sec.Name)
+	}
+	if sec.Upstream != "" {
+		if err := proxy.Validate(sec.Upstream, sec.Header); err != nil {
+			return fmt.Errorf("secret %s: %w", sec.Name, err)
+		}
+	}
+	return nil
 }
 
 // secretRow is one secret list row: the name and the reference it resolves
