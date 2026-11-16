@@ -131,7 +131,7 @@ func (s *server) secretValuesLocked() ([]string, []string) {
 func (s *server) pushSecretScrub() map[string]error {
 	s.secretPush.Lock()
 	defer s.secretPush.Unlock()
-	failed := s.sendSecretScrub()
+	failed, _ := s.sendSecretScrub()
 	for name, err := range s.coverSiblings() {
 		failed["session "+name] = err
 	}
@@ -141,7 +141,7 @@ func (s *server) pushSecretScrub() map[string]error {
 // pushLocalScrub sends the merged set to this session's own panes and goes no
 // further: the sessions the foreign values came from push those values
 // themselves, so a cover never rebroadcasts what it was handed.
-func (s *server) pushLocalScrub() map[string]error {
+func (s *server) pushLocalScrub() (map[string]error, []string) {
 	s.secretPush.Lock()
 	defer s.secretPush.Unlock()
 	return s.sendSecretScrub()
@@ -149,7 +149,7 @@ func (s *server) pushLocalScrub() map[string]error {
 
 // sendSecretScrub collects the current set and sends it to every adopted
 // pane. The caller holds secretPush.
-func (s *server) sendSecretScrub() map[string]error {
+func (s *server) sendSecretScrub() (map[string]error, []string) {
 	s.mu.Lock()
 	values := s.scrubValuesLocked()
 	panes := make([]*paneConn, 0, len(s.panes))
@@ -179,7 +179,7 @@ func (s *server) sendSecretScrub() map[string]error {
 	for _, id := range missed {
 		s.rearmPaneWatcher(id)
 	}
-	return failed
+	return failed, values
 }
 
 // adoptSecretScrub gives a freshly adopted pane the live set. It runs under
@@ -351,6 +351,19 @@ func coverRoundtrip(c net.Conn, own string, values []string) error {
 			return errors.New("cover refused")
 		}
 		return errors.New(rep.Error)
+	}
+	// The reply counts the values the sibling's panes' cap dropped: a cover
+	// that reports success while values fell out of the list would leave the
+	// sender promising coverage it does not have.
+	var res struct {
+		Panes   int `json:"panes"`
+		Dropped int `json:"dropped"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		return fmt.Errorf("cover reply: %w", err)
+	}
+	if res.Dropped > 0 {
+		return fmt.Errorf("covered with %d of %d values dropped at the panes' cap", res.Dropped, len(values))
 	}
 	return nil
 }
@@ -545,6 +558,9 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
 	}
+	if len(uncovered) > 0 {
+		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the value would echo there unredacted", strings.Join(uncovered, ", ")))
+	}
 	warning := strings.Join(warnings, "; ")
 	for _, w := range warnings {
 		log.Print(w)
@@ -677,6 +693,16 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 		uncovered = append(uncovered, id)
 	}
 	sort.Strings(uncovered)
+	// The same last look a use runs before its reply: a revoke that landed
+	// during the fetch or the push wins, and a revoked secret never leaves
+	// a live copy on disk.
+	s.mu.Lock()
+	gone := s.st.Secret(sec.Name) == nil
+	s.mu.Unlock()
+	if gone {
+		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret hydrate again", sec.Name))
+		return
+	}
 	if err := secrets.Hydrate(m.Path, value); err != nil {
 		s.reply(cl, m, nil, err)
 		return
@@ -725,11 +751,27 @@ func (s *server) secretCover(cl *client, m wire.Msg) {
 		s.secretForeign[body.Session] = body.Values
 	}
 	s.mu.Unlock()
-	failed := s.pushLocalScrub()
+	failed, merged := s.pushLocalScrub()
 	s.mu.Lock()
 	panes := len(s.panes)
 	s.mu.Unlock()
-	s.reply(cl, m, map[string]any{"panes": panes - len(failed)}, nil)
+	// The merged set is exactly what the panes were pushed: a value of this
+	// sender's that is missing from it fell to the cap, and the reply says
+	// so instead of calling the cover whole.
+	scrubbed := make(map[string]bool, len(merged))
+	for _, v := range merged {
+		scrubbed[v] = true
+	}
+	dropped := 0
+	for _, v := range body.Values {
+		if !scrubbed[v] {
+			dropped++
+		}
+	}
+	if dropped > 0 {
+		log.Printf("secret-cover: the panes' cap dropped %d of %d values from %s", dropped, len(body.Values), body.Session)
+	}
+	s.reply(cl, m, map[string]any{"panes": panes - len(failed), "dropped": dropped}, nil)
 }
 
 // secretType fetches the value and types it into a pane through the existing

@@ -1811,3 +1811,243 @@ func TestSecretUseNamesAServerlessSibling(t *testing.T) {
 		t.Fatalf("uncovered = %v, want the serverless sibling", res.Uncovered)
 	}
 }
+
+// gateConn is a conn whose first write blocks until the test opens the gate,
+// so a push can be held mid-flight while the test lands a concurrent action.
+type gateConn struct {
+	ready chan struct{} // closed when the first write starts
+	gate  chan struct{} // closed to release the writes
+	mu    sync.Mutex
+	wrote bool
+}
+
+func newGateConn() *gateConn {
+	return &gateConn{ready: make(chan struct{}), gate: make(chan struct{})}
+}
+
+func (c *gateConn) Write(b []byte) (int, error) {
+	c.mu.Lock()
+	first := !c.wrote
+	c.wrote = true
+	c.mu.Unlock()
+	if first {
+		close(c.ready)
+	}
+	<-c.gate
+	return len(b), nil
+}
+
+func (c *gateConn) Close() error                     { return nil }
+func (c *gateConn) Read(b []byte) (int, error)       { return 0, io.EOF }
+func (c *gateConn) LocalAddr() net.Addr              { return nil }
+func (c *gateConn) RemoteAddr() net.Addr             { return nil }
+func (c *gateConn) SetDeadline(time.Time) error      { return nil }
+func (c *gateConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *gateConn) SetWriteDeadline(time.Time) error { return nil }
+
+// TestSecretHydrateRefusesARevokedWhileFetchingSecret proves a revoke that
+// lands during the fetch or the push reads as a refusal and never leaves the
+// value on disk: the push now includes the sibling covers, so the window is
+// not a sliver.
+func TestSecretHydrateRefusesARevokedWhileFetchingSecret(t *testing.T) {
+	value := "s3cret-hydrate-revoked"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	// A second pane whose push blocks until the gate opens: the hydrate is
+	// stuck mid-push when the revoke lands.
+	gc := newGateConn()
+	s.mu.Lock()
+	s.panes["w1p2"] = &paneConn{id: "w1p2", c: gc}
+	s.mu.Unlock()
+	path := filepath.Join(t.TempDir(), "token")
+	done := make(chan wire.Msg, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			return
+		}
+		done <- m
+	}()
+	<-gc.ready
+	cl2, _ := boxConn(t)
+	go func() { s.handleReq(cl2, wire.Msg{Action: "secret-revoke", Name: "gh"}) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.mu.Lock()
+		gone := s.st.Secret("gh") == nil
+		s.mu.Unlock()
+		if gone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the revoke did not land while the push was in flight")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	close(gc.gate)
+	rep := <-done
+	wantErr(t, "secret-hydrate", "revoked while the value was being fetched or pushed", rep)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the revoked secret left a file behind: %v", err)
+	}
+}
+
+// TestSecretCoverReportsDroppedValues proves the cover reply counts the
+// values the panes' cap dropped, instead of reporting success while the pane
+// never holds them.
+func TestSecretCoverReportsDroppedValues(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	s.fetch = func(sec *session.Secret) (string, error) { return "s3cret-" + sec.Name, nil }
+	// The cap fills with own values; no pane listens during the fill, so
+	// the pushes go nowhere and the spy channel stays clean.
+	s.mu.Lock()
+	delete(s.panes, "w1p1")
+	s.mu.Unlock()
+	for i := 0; i < pane.MaxSecrets; i++ {
+		name := fmt.Sprintf("s%03d", i)
+		if rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: name, Tool: "pass", Ref: "dev/" + name,
+		}); !rep.OK {
+			t.Fatalf("register %s: %s", name, rep.Error)
+		}
+		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: name}); !rep.OK {
+			t.Fatalf("use %s: %s", name, rep.Error)
+		}
+	}
+	ch := spyPane(t, s, "w1p1")
+	cover := func(values ...string) wire.Msg {
+		return wire.Msg{
+			Action: "secret-cover",
+			Res:    jsonRaw(map[string]any{"session": "other", "values": values}),
+		}
+	}
+	rep := secretCall(t, s, cl, conn, cover("foreign-value"))
+	if !rep.OK {
+		t.Fatalf("cover: %s", rep.Error)
+	}
+	var res struct {
+		Panes   int `json:"panes"`
+		Dropped int `json:"dropped"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Dropped != 1 {
+		t.Fatalf("cover reply dropped = %d, want 1", res.Dropped)
+	}
+	// The pane holds the cap and not the foreign value.
+	got := readSpyUntil(t, ch, "set-secrets")
+	var payload struct {
+		Values []string `json:"values"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Values) != pane.MaxSecrets {
+		t.Fatalf("the push carried %d values, want %d", len(payload.Values), pane.MaxSecrets)
+	}
+	for _, v := range payload.Values {
+		if v == "foreign-value" {
+			t.Fatal("the dropped value rode the push")
+		}
+	}
+	// The withdrawal answers dropped zero again.
+	rep = secretCall(t, s, cl, conn, cover())
+	if !rep.OK {
+		t.Fatalf("withdraw: %s", rep.Error)
+	}
+	res.Dropped = -1
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Dropped != 0 {
+		t.Fatalf("withdraw reply dropped = %d, want 0", res.Dropped)
+	}
+}
+
+// TestCoverRoundtripNamesDroppedValues proves the sender turns a nonzero
+// dropped count into a problem report, and a zero count into silence.
+func TestCoverRoundtripNamesDroppedValues(t *testing.T) {
+	for _, c := range []struct {
+		dropped int
+		want    string
+	}{
+		{0, ""},
+		{2, "2 of 5 values dropped"},
+	} {
+		srv, cli := net.Pipe()
+		t.Cleanup(func() { _ = srv.Close(); _ = cli.Close() })
+		go func(dropped int) {
+			m, err := wire.ReadMsg(srv)
+			if err != nil {
+				return
+			}
+			_ = wire.WriteMsg(srv, wire.Msg{Type: "resp", ID: m.ID, OK: true,
+				Res: jsonRaw(map[string]any{"panes": 3, "dropped": dropped})})
+		}(c.dropped)
+		err := coverRoundtrip(cli, "other", []string{"a", "b", "c", "d", "e"})
+		if c.want == "" {
+			if err != nil {
+				t.Fatalf("dropped %d: %v", c.dropped, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("dropped %d: err = %v, want it to name %q", c.dropped, err, c.want)
+		}
+	}
+}
+
+// TestSecretUseWarnsWhenASiblingDropsTheSet proves neither side stays silent
+// when a sibling's cap drops the covered values: the cover reply counts them,
+// the sender names the sibling in uncovered and in the warning.
+func TestSecretUseWarnsWhenASiblingDropsTheSet(t *testing.T) {
+	value := "s3cret-cap-drop"
+	root := t.TempDir()
+	s1 := railServer(session.NewStateAt(root, "poc"))
+	s1.fetch = func(sec *session.Secret) (string, error) { return value, nil }
+	s2 := railServer(session.NewStateAt(root, "sibling"))
+	serveSessionsSocket(t, s2)
+	// The sibling's panes' cap is already full of its own values.
+	s2.mu.Lock()
+	s2.secretEnsure()
+	for i := 0; i < pane.MaxSecrets; i++ {
+		name := fmt.Sprintf("own-%03d", i)
+		s2.secrets.Put(name, "own-"+name)
+		s2.secretActive[name] = true
+	}
+	s2.mu.Unlock()
+
+	cl, conn := boxConn(t)
+	if rep := secretCall(t, s1, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s1, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Warning   string   `json:"warning"`
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "session sibling" {
+		t.Fatalf("uncovered = %v, want the capped sibling", res.Uncovered)
+	}
+	if !strings.Contains(res.Warning, "did not reach") || !strings.Contains(res.Warning, "session sibling") {
+		t.Fatalf("warning = %q, want it to name the uncovered sibling", res.Warning)
+	}
+	if strings.Contains(res.Warning, value) {
+		t.Fatalf("the warning leaks the value: %s", res.Warning)
+	}
+}
