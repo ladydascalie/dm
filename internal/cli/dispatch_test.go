@@ -483,6 +483,43 @@ func TestExecRefusesPositionalAndActionJSON(t *testing.T) {
 	}
 }
 
+// TestUnknownSubverbSurvivesADanglingFlag proves a value-taking flag left
+// dangling at the end of argv does not bury the subverb either: reorder
+// would move the flag in front of the name typed wrong and flag parsing
+// would eat the name as the flag's value, so the known-versus-unknown
+// decision reads the original argv order instead.
+func TestUnknownSubverbSurvivesADanglingFlag(t *testing.T) {
+	t.Parallel()
+	err := Run([]string{"secret", "remove", "-s"})
+	if err == nil || !strings.Contains(err.Error(), `unknown verb "remove"`) {
+		t.Fatalf("dm secret remove -s = %v, want the unknown-verb refusal", err)
+	}
+}
+
+// TestKnownSubverbSurvivesADanglingFlag proves a dangling flag does not
+// bury a known subverb under the flag error either: the subverb reaches the
+// group's dispatcher, which prints its subverb list.
+func TestKnownSubverbSurvivesADanglingFlag(t *testing.T) {
+	t.Setenv("DM_SESSION", "")
+	t.Setenv("DM_STATE", t.TempDir())
+	out := testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"msg", "post", "-s"}); err != nil {
+			t.Fatalf("dm msg post -s: %v", err)
+		}
+	})
+	if !strings.Contains(out, "dm msg post") {
+		t.Fatalf("dm msg post -s printed %q, want the msg subverb list", out)
+	}
+	out = testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"secret", "list", "-s"}); err != nil {
+			t.Fatalf("dm secret list -s: %v", err)
+		}
+	})
+	if !strings.Contains(out, "dm secret type") {
+		t.Fatalf("dm secret list -s printed %q, want the secret subverb list", out)
+	}
+}
+
 // TestUnknownSubverbBeatsFlagParsing proves an unknown subverb under a known
 // group is reported as the command mistake it is, even when flags follow it.
 // The bare group registers no flags, so flag parsing must not run first and
