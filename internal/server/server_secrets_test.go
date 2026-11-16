@@ -954,8 +954,11 @@ func TestSecretUseNamesTheSecretsTheCapDropped(t *testing.T) {
 }
 
 // TestPaneSendTimesOutOnAStalledPane proves a pane that stops reading fails
-// its push within the send timeout and releases the conn, instead of holding
-// a push, and every secret action behind it, forever.
+// its push within the send timeout and releases the caller, instead of
+// holding a push, and every secret action behind it, forever. The conn
+// survives the timeout: the pane stays registered and alive, the redaction
+// pushes skip it while it is degraded, and a send that completes clears the
+// mark.
 func TestPaneSendTimesOutOnAStalledPane(t *testing.T) {
 	srv, cli := net.Pipe()
 	t.Cleanup(func() { _ = cli.Close() })
@@ -975,10 +978,42 @@ func TestPaneSendTimesOutOnAStalledPane(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the send did not time out")
 	}
-	// The timed-out conn is closed: the next send fails at once, not after
-	// another deadline.
-	if err := pc.send(wire.Msg{Action: "set-secrets"}); err == nil {
-		t.Fatal("a send after the timeout succeeded on a dead conn")
+	if !pc.isDegraded() {
+		t.Fatal("the timed-out conn is not marked degraded")
+	}
+	// The conn is not closed: a write deadline still arms on it.
+	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("the timed-out conn was closed: %v", err)
+	}
+	// The redaction push skips a degraded conn and reports it failed.
+	failed := map[string]error{}
+	s := &server{panes: map[string]*paneConn{"stalled": pc}, clients: map[*client]bool{}}
+	for id, err := range s.pushSecretScrub() {
+		failed[id] = err
+	}
+	if !errors.Is(failed["stalled"], errPaneDegraded) {
+		t.Fatalf("the degraded pane failed with %v, want the degraded error", failed["stalled"])
+	}
+	// The pane drains, the next send completes, and the mark clears.
+	go func() {
+		for {
+			if _, err := wire.ReadMsg(cli); err != nil {
+				return
+			}
+		}
+	}()
+	if err := pc.send(wire.Msg{Action: "set-secrets"}); err != nil {
+		t.Fatalf("send after recovery: %v", err)
+	}
+	if pc.isDegraded() {
+		t.Fatal("a completed send did not clear the degraded mark")
+	}
+	failed = map[string]error{}
+	for id, err := range s.pushSecretScrub() {
+		failed[id] = err
+	}
+	if _, ok := failed["stalled"]; ok {
+		t.Fatalf("the recovered pane still failed its push: %v", failed["stalled"])
 	}
 }
 
@@ -1010,14 +1045,25 @@ func TestSecretUseSurvivesAStalledPane(t *testing.T) {
 	if len(res.Uncovered) != 1 || res.Uncovered[0] != "w1p3" {
 		t.Fatalf("uncovered = %v, want the stalled pane", res.Uncovered)
 	}
-	// The live pane still learned the value, and the stalled conn is dead:
-	// a further write fails at once instead of blocking.
+	// The live pane still learned the value, and the stalled conn is alive
+	// but degraded: the next use skips it without another timeout.
 	got := readSpyUntil(t, ch, "set-secrets")
 	if !strings.Contains(string(got.Res), value) {
 		t.Fatalf("the live pane never learned the value: %s", got.Res)
 	}
-	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err == nil {
-		t.Fatal("the stalled conn was not closed after the timeout")
+	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("the stalled conn was closed: %v", err)
+	}
+	rep = secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("second use: %s", rep.Error)
+	}
+	res.Uncovered = nil
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "w1p3" {
+		t.Fatalf("the degraded pane is not reported: %v", res.Uncovered)
 	}
 }
 
@@ -1046,7 +1092,7 @@ func TestSecretUseRefusesARevokedWhileFetchingSecret(t *testing.T) {
 		t.Fatalf("revoke reply: %s", rep.Error)
 	}
 	rep = rpcRead(t, conn, wire.Msg{Action: "secret-use"})
-	wantErr(t, "secret-use", "revoked while the value was being fetched", rep)
+	wantErr(t, "secret-use", "revoked while the value was being fetched or pushed", rep)
 	if strings.Contains(rep.Error, "s3cret-revoked-midflight") {
 		t.Fatalf("the refusal leaks the value: %s", rep.Error)
 	}

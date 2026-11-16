@@ -46,13 +46,31 @@ type paneConn struct {
 	// sendTimeout bounds one control-socket write; zero means the package
 	// default. A test shortens it to prove a stalled pane fails fast.
 	sendTimeout time.Duration
+
+	// degraded marks a conn whose last send timed out: the daemon may be
+	// wedged, or a suspended foreground job may be backpressuring the pty,
+	// and the conn is usually alive. Guarded by mu. The redaction pushes
+	// skip a degraded conn and report it failed; the other pushers keep
+	// trying, and the first send that completes clears the mark.
+	degraded bool
 }
+
+// errPaneDegraded is the failure a redaction push reports for a conn whose
+// last send timed out. It names no pane and no value; the caller wraps the
+// pane id around it.
+var errPaneDegraded = errors.New("conn degraded: the last send timed out")
 
 // paneSendTimeout bounds one write to a pane's control socket. A pane that
 // stops reading must not hold a push, or every secret action and pane
 // adoption serialised behind it, forever.
 const paneSendTimeout = 5 * time.Second
 
+// send writes one frame to the pane's control socket under a write deadline.
+// A timeout leaves the conn open and marks it degraded: a transient stall,
+// a suspended job backpressuring the pty for one, must not cost the pane its
+// life, so the close-cascade through paneExited, socket removal and the
+// daemon's reap never starts. The caller learns the push failed and moves
+// on; a later send that completes clears the mark.
 func (p *paneConn) send(m wire.Msg) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -65,11 +83,20 @@ func (p *paneConn) send(m wire.Msg) error {
 	}
 	err := wire.WriteMsg(p.c, m)
 	if ne, ok := err.(net.Error); ok && ne.Timeout() {
-		// The frame may be torn mid-write, so the conn is dead for framing
-		// either way. Close it and let the pane's reader goroutine reap it.
-		_ = p.c.Close()
+		p.degraded = true
+		return err
+	}
+	if err == nil {
+		p.degraded = false
 	}
 	return err
+}
+
+// isDegraded reports whether the last send timed out.
+func (p *paneConn) isDegraded() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.degraded
 }
 
 // status returns a copy of the pane's last reported status.

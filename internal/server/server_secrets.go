@@ -133,6 +133,14 @@ func (s *server) sendSecretScrub() map[string]error {
 	body := jsonRaw(map[string]any{"values": values})
 	failed := map[string]error{}
 	for _, pc := range panes {
+		// A degraded conn failed its last send: skip it instead of burning
+		// another timeout per push, and report it failed like any other
+		// pane that missed the set. The other pushers keep trying, and a
+		// send that completes clears the mark.
+		if pc.isDegraded() {
+			failed[pc.id] = errPaneDegraded
+			continue
+		}
 		if err := pc.send(wire.Msg{Action: "set-secrets", Res: body}); err != nil {
 			failed[pc.id] = err
 		}
@@ -358,12 +366,13 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	}
 	// The reply must not call a revoked secret a success. One last look
 	// under the lock, so a revoke that landed anywhere between the
-	// activation and this reply reads as the refusal it is.
+	// activation and this reply, during the fetch or during the push,
+	// reads as the refusal it is.
 	s.mu.Lock()
 	gone := s.st.Secret(sec.Name) == nil
 	s.mu.Unlock()
 	if gone {
-		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched; run dm secret use again", sec.Name))
+		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret use again", sec.Name))
 		return
 	}
 	s.reply(cl, m, map[string]any{"name": sec.Name, "endpoint": endpoint, "warning": warning, "uncovered": uncovered}, nil)
