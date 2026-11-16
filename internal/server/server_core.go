@@ -47,18 +47,18 @@ type paneConn struct {
 	// default. A test shortens it to prove a stalled pane fails fast.
 	sendTimeout time.Duration
 
-	// degraded marks a conn whose last send timed out: the daemon may be
-	// wedged, or a suspended foreground job may be backpressuring the pty,
-	// and the conn is usually alive. Guarded by mu. The redaction pushes
-	// skip a degraded conn and report it failed; the other pushers keep
-	// trying, and the first send that completes clears the mark.
+	// degraded marks a conn whose framing tore: a send timed out mid-frame,
+	// and a stream socket has no boundary to recover to. Guarded by mu.
+	// Permanent for this conn: every send refuses at once, the conn is
+	// closed, and the watcher replaces it with a fresh dial to the same
+	// daemon.
 	degraded bool
 }
 
-// errPaneDegraded is the failure a redaction push reports for a conn whose
-// last send timed out. It names no pane and no value; the caller wraps the
-// pane id around it.
-var errPaneDegraded = errors.New("conn degraded: the last send timed out")
+// errPaneDegraded is the failure every push reports for a poisoned conn, one
+// whose framing tore on a timed-out send and which the watcher will replace.
+// It names no pane and no value; the caller wraps the pane id around it.
+var errPaneDegraded = errors.New("conn degraded: the last send tore the framing")
 
 // paneSendTimeout bounds one write to a pane's control socket. A pane that
 // stops reading must not hold a push, or every secret action and pane
@@ -66,14 +66,20 @@ var errPaneDegraded = errors.New("conn degraded: the last send timed out")
 const paneSendTimeout = 5 * time.Second
 
 // send writes one frame to the pane's control socket under a write deadline.
-// A timeout leaves the conn open and marks it degraded: a transient stall,
-// a suspended job backpressuring the pty for one, must not cost the pane its
-// life, so the close-cascade through paneExited, socket removal and the
-// daemon's reap never starts. The caller learns the push failed and moves
-// on; a later send that completes clears the mark.
+// A timeout poisons the conn: a stream socket has no message boundary, so a
+// frame torn mid-write cannot be recovered to, and a server-side write
+// success after the tear would mean nothing. The conn is degraded for good —
+// every later send refuses at once, from any pusher — and the conn closes, so
+// the watcher re-dials the same daemon and hands the pane a fresh conn and a
+// fresh secret set. The pane stays registered and alive: a transient stall, a
+// suspended job backpressuring the pty for one, costs a re-adoption, never
+// the pane.
 func (p *paneConn) send(m wire.Msg) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.degraded {
+		return errPaneDegraded
+	}
 	timeout := p.sendTimeout
 	if timeout == 0 {
 		timeout = paneSendTimeout
@@ -84,10 +90,8 @@ func (p *paneConn) send(m wire.Msg) error {
 	err := wire.WriteMsg(p.c, m)
 	if ne, ok := err.(net.Error); ok && ne.Timeout() {
 		p.degraded = true
+		_ = p.c.Close()
 		return err
-	}
-	if err == nil {
-		p.degraded = false
 	}
 	return err
 }
@@ -807,54 +811,147 @@ func (s *server) watchPane(id string) {
 	}
 	go func() {
 		for {
-			m, err := wire.ReadMsg(pc.c)
+			exit := s.watchConn(id, pc)
+			if exit {
+				s.paneExited(id)
+				return
+			}
+			// The conn died without an exit frame. The daemon survives the
+			// loss of one conn: its serve loop is per conn, so a torn
+			// stream or a dropped socket is a lost connection, not a pane
+			// exit. While the daemon's socket file still exists, replace
+			// the conn and keep watching; only a gone socket or a failed
+			// replacement prunes the pane.
+			next, err := s.redialPane(id, pc)
 			if err != nil {
-				s.paneExited(id)
+				if errors.Is(err, errPaneGone) {
+					s.paneExited(id)
+				}
 				return
 			}
-			switch m.Type {
-			case "bytes":
-				s.mu.Lock()
-				s.broadcastLocked(wire.Msg{Type: "bytes", Target: id, Data: m.Data})
-				s.mu.Unlock()
-			case "status":
-				if m.St != nil {
-					from := pc.status().State
-					pc.setStatus(*m.St)
-					to, message := m.St.State, m.St.Message
-					s.noteStatus(id, *m.St)
-					s.noteStatusChange(id, from, to)
-					s.pushSnapshot()
-					if notify.StateChange(from, to) {
-						s.notifyPaneState(id, to, message)
-					}
-				}
-			case "cwd":
-				s.setPaneCwd(id, m.Cwd)
-			case "title":
-				var ti struct {
-					Title string `json:"title"`
-				}
-				_ = json.Unmarshal(m.Res, &ti)
-				s.setPaneTitle(id, ti.Title)
-			case "mode":
-				var mi struct {
-					Alt   bool `json:"alt"`
-					Mouse bool `json:"mouse"`
-					Paste bool `json:"paste"`
-				}
-				_ = json.Unmarshal(m.Res, &mi)
-				s.mu.Lock()
-				pc.alt, pc.mouse, pc.paste = mi.Alt, mi.Mouse, mi.Paste
-				snap := s.snapshotLocked()
-				s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
-				s.mu.Unlock()
-			case "exit":
-				s.paneExited(id)
+			if next == nil {
+				// Another conn owns the pane now; its watcher watches.
 				return
 			}
+			pc = next
 		}
 	}()
+}
+
+// watchConn reads one conn's frames until the peer goes away or the pane
+// reports its own exit. It reports whether the pane exited.
+func (s *server) watchConn(id string, pc *paneConn) (exit bool) {
+	for {
+		m, err := wire.ReadMsg(pc.c)
+		if err != nil {
+			return false
+		}
+		switch m.Type {
+		case "bytes":
+			s.mu.Lock()
+			s.broadcastLocked(wire.Msg{Type: "bytes", Target: id, Data: m.Data})
+			s.mu.Unlock()
+		case "status":
+			if m.St != nil {
+				from := pc.status().State
+				pc.setStatus(*m.St)
+				to, message := m.St.State, m.St.Message
+				s.noteStatus(id, *m.St)
+				s.noteStatusChange(id, from, to)
+				s.pushSnapshot()
+				if notify.StateChange(from, to) {
+					s.notifyPaneState(id, to, message)
+				}
+			}
+		case "cwd":
+			s.setPaneCwd(id, m.Cwd)
+		case "title":
+			var ti struct {
+				Title string `json:"title"`
+			}
+			_ = json.Unmarshal(m.Res, &ti)
+			s.setPaneTitle(id, ti.Title)
+		case "mode":
+			var mi struct {
+				Alt   bool `json:"alt"`
+				Mouse bool `json:"mouse"`
+				Paste bool `json:"paste"`
+			}
+			_ = json.Unmarshal(m.Res, &mi)
+			s.mu.Lock()
+			pc.alt, pc.mouse, pc.paste = mi.Alt, mi.Mouse, mi.Paste
+			snap := s.snapshotLocked()
+			s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
+			s.mu.Unlock()
+		case "exit":
+			return true
+		}
+	}
+}
+
+// errPaneGone says the daemon's socket is gone or refuses connections, so
+// the pane behind it is dead and the caller prunes.
+var errPaneGone = errors.New("pane socket is gone")
+
+// redialPane replaces a failed conn with a fresh dial to the same daemon,
+// carrying the old conn's view state across. It returns the new conn, or
+// errPaneGone when the socket is gone or refuses connections, or a nil conn
+// with no error when another conn already owns the pane and this watcher
+// stands down.
+func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
+	sock := s.st.PaneSock(id)
+	if _, err := os.Stat(sock); err != nil {
+		return nil, errPaneGone
+	}
+	_ = old.c.Close()
+	var c net.Conn
+	var err error
+	for i := 0; i < 20; i++ {
+		if i > 0 {
+			time.Sleep(100 * time.Millisecond)
+			if _, serr := os.Stat(sock); serr != nil {
+				return nil, errPaneGone
+			}
+		}
+		c, err = net.DialTimeout("unix", sock, time.Second)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return nil, errPaneGone
+	}
+	s.mu.Lock()
+	cur := s.panes[id]
+	if cur != old {
+		// The pane already left the map, or another conn owns it: its
+		// handler ran or runs elsewhere, and this watcher stands down
+		// without a second prune.
+		s.mu.Unlock()
+		_ = c.Close()
+		return nil, nil
+	}
+	nc := &paneConn{
+		id: id, c: c, st: old.status(), title: old.title,
+		alt: old.alt, mouse: old.mouse, paste: old.paste,
+		sendTimeout: paneSendTimeout,
+	}
+	s.panes[id] = nc
+	tc := s.termColours
+	s.mu.Unlock()
+	if tc != nil {
+		if err := nc.send(wire.Msg{Action: "term-colours", FG: tc.fg, BG: tc.bg}); err != nil {
+			log.Printf("pane %s: term-colours: %v", id, err)
+		}
+	}
+	// The fresh conn starts with an empty redaction list, like any adopt.
+	s.adoptSecretScrub(id)
+	// A daemon that outlived a conn has gone wherever its shell went.
+	s.setPaneCwd(id, s.liveCwd(id))
+	// The conn gap may have dropped bytes: give every client the pane's
+	// screen and ring again, so what they draw matches the daemon.
+	s.resync()
+	return nc, nil
 }
 
 func (s *server) broadcastLocked(m wire.Msg) {

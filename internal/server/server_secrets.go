@@ -162,6 +162,11 @@ func (s *server) adoptSecretScrub(id string) {
 	if len(values) == 0 || pc == nil {
 		return
 	}
+	// A poisoned conn refuses every send at once; skipping it here keeps
+	// the adopt under secretPush as short as every other push.
+	if pc.isDegraded() {
+		return
+	}
 	if err := pc.send(wire.Msg{Action: "set-secrets", Res: jsonRaw(map[string]any{"values": values})}); err != nil {
 		log.Printf("pane %s: set-secrets: %v", id, err)
 	}

@@ -955,14 +955,22 @@ func TestSecretUseNamesTheSecretsTheCapDropped(t *testing.T) {
 
 // TestPaneSendTimesOutOnAStalledPane proves a pane that stops reading fails
 // its push within the send timeout and releases the caller, instead of
-// holding a push, and every secret action behind it, forever. The conn
-// survives the timeout: the pane stays registered and alive, the redaction
-// pushes skip it while it is degraded, and a send that completes clears the
-// mark.
+// holding a push, and every secret action behind it, forever. The timeout
+// tears the framing, so the conn is poisoned and closed: every later send
+// refuses at once, nothing further is written into the stream, and the
+// watcher's fresh dial is the pane's way back.
 func TestPaneSendTimesOutOnAStalledPane(t *testing.T) {
 	srv, cli := net.Pipe()
 	t.Cleanup(func() { _ = cli.Close() })
-	// Nobody ever reads srv: the first write blocks until the deadline.
+	// A reader that consumes exactly two of the four header bytes, then
+	// stops: the deadline fires mid-frame, the tear the clean tests cannot
+	// express.
+	torn := make(chan struct{})
+	go func() {
+		defer close(torn)
+		var b [2]byte
+		_, _ = io.ReadFull(cli, b[:])
+	}()
 	pc := &paneConn{id: "stalled", c: srv, sendTimeout: 100 * time.Millisecond}
 	done := make(chan error, 1)
 	go func() { done <- pc.send(wire.Msg{Action: "set-secrets"}) }()
@@ -978,42 +986,33 @@ func TestPaneSendTimesOutOnAStalledPane(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the send did not time out")
 	}
+	<-torn
 	if !pc.isDegraded() {
-		t.Fatal("the timed-out conn is not marked degraded")
+		t.Fatal("the torn conn is not marked degraded")
 	}
-	// The conn is not closed: a write deadline still arms on it.
-	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
-		t.Fatalf("the timed-out conn was closed: %v", err)
+	// The conn is closed: a write deadline no longer arms on it.
+	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err == nil {
+		t.Fatal("the torn conn was not closed")
 	}
-	// The redaction push skips a degraded conn and reports it failed.
-	failed := map[string]error{}
+	// The poisoned conn refuses every later send at once, from any pusher.
+	start := time.Now()
+	if err := pc.send(wire.Msg{Action: "set-secrets"}); !errors.Is(err, errPaneDegraded) {
+		t.Fatalf("send after the tear = %v, want the degraded refusal", err)
+	}
+	if time.Since(start) > 50*time.Millisecond {
+		t.Fatalf("the poisoned send took %s, want an instant refusal", time.Since(start))
+	}
 	s := &server{panes: map[string]*paneConn{"stalled": pc}, clients: map[*client]bool{}}
+	failed := map[string]error{}
 	for id, err := range s.pushSecretScrub() {
 		failed[id] = err
 	}
 	if !errors.Is(failed["stalled"], errPaneDegraded) {
-		t.Fatalf("the degraded pane failed with %v, want the degraded error", failed["stalled"])
+		t.Fatalf("the poisoned pane failed with %v, want the degraded error", failed["stalled"])
 	}
-	// The pane drains, the next send completes, and the mark clears.
-	go func() {
-		for {
-			if _, err := wire.ReadMsg(cli); err != nil {
-				return
-			}
-		}
-	}()
-	if err := pc.send(wire.Msg{Action: "set-secrets"}); err != nil {
-		t.Fatalf("send after recovery: %v", err)
-	}
-	if pc.isDegraded() {
-		t.Fatal("a completed send did not clear the degraded mark")
-	}
-	failed = map[string]error{}
-	for id, err := range s.pushSecretScrub() {
-		failed[id] = err
-	}
-	if _, ok := failed["stalled"]; ok {
-		t.Fatalf("the recovered pane still failed its push: %v", failed["stalled"])
+	// The reader's side is closed too: the tear never reaches a pane.
+	if _, err := cli.Read(make([]byte, 1)); err == nil {
+		t.Fatal("the torn conn still delivers bytes to the peer")
 	}
 }
 
@@ -1045,14 +1044,15 @@ func TestSecretUseSurvivesAStalledPane(t *testing.T) {
 	if len(res.Uncovered) != 1 || res.Uncovered[0] != "w1p3" {
 		t.Fatalf("uncovered = %v, want the stalled pane", res.Uncovered)
 	}
-	// The live pane still learned the value, and the stalled conn is alive
-	// but degraded: the next use skips it without another timeout.
+	// The live pane still learned the value, and the stalled conn is closed
+	// and poisoned: the next use skips it without another timeout, and the
+	// watcher's fresh dial is the pane's way back.
 	got := readSpyUntil(t, ch, "set-secrets")
 	if !strings.Contains(string(got.Res), value) {
 		t.Fatalf("the live pane never learned the value: %s", got.Res)
 	}
-	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
-		t.Fatalf("the stalled conn was closed: %v", err)
+	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err == nil {
+		t.Fatal("the torn conn was not closed")
 	}
 	rep = secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
 	if !rep.OK {
@@ -1098,5 +1098,243 @@ func TestSecretUseRefusesARevokedWhileFetchingSecret(t *testing.T) {
 	}
 	if v, ok := s.secrets.Get("gh"); ok || v != "" {
 		t.Fatalf("the revoked use left a value behind: %q", v)
+	}
+}
+
+// fakePaneDaemon is a stand-in pane daemon on a real unix socket: it accepts
+// like the daemon does, answers requests, records the redaction sets it
+// receives per conn, and can park a conn so a server push backpressures.
+type fakePaneDaemon struct {
+	ln net.Listener
+	mu sync.Mutex
+	// seen lists one record per accepted conn, in accept order: the values
+	// of the first set-secrets the conn carried, nil when none.
+	seen [][]string
+	// resets lists every set-secrets beyond the first conn, in arrival
+	// order: the re-adoptions the watcher performed.
+	resets  [][]string
+	parked  chan struct{} // closed to release the parked first conn
+	parkAck chan struct{} // closed when the first conn is parked
+}
+
+func startFakePaneDaemon(t *testing.T, st *session.State, id string) *fakePaneDaemon {
+	t.Helper()
+	sock := st.PaneSock(id)
+	_ = os.Remove(sock)
+	f := &fakePaneDaemon{parked: make(chan struct{}), parkAck: make(chan struct{})}
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ln = ln
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// The index is accept order, assigned here: handler goroutines
+			// start in any order, and the test addresses conns by index.
+			f.mu.Lock()
+			idx := len(f.seen)
+			f.seen = append(f.seen, nil)
+			f.mu.Unlock()
+			go f.serve(c, idx)
+		}
+	}()
+	return f
+}
+
+func (f *fakePaneDaemon) serve(c net.Conn, idx int) {
+	defer func() { _ = c.Close() }()
+	first := idx == 0
+	for {
+		m, err := wire.ReadMsg(c)
+		if err != nil {
+			return
+		}
+		if m.Type == "req" {
+			_ = wire.WriteMsg(c, wire.Msg{Type: "resp", ID: m.ID, OK: true, Cwd: "/tmp"})
+			continue
+		}
+		f.mu.Lock()
+		f.mu.Unlock()
+		if m.Action == "set-secrets" {
+			var p struct {
+				Values []string `json:"values"`
+			}
+			_ = json.Unmarshal(m.Res, &p)
+			f.mu.Lock()
+			f.seen[idx] = p.Values
+			if idx > 0 {
+				f.resets = append(f.resets, p.Values)
+			}
+			f.mu.Unlock()
+			if first {
+				// Park: stop reading until the test releases, so a large
+				// server push backpressures and tears.
+				close(f.parkAck)
+				<-f.parked
+			}
+		}
+	}
+}
+
+func (f *fakePaneDaemon) connValues(idx int) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.seen[idx]
+}
+
+// resetValues returns the first post-tear set-secrets that carries values,
+// or nil while none has arrived.
+func (f *fakePaneDaemon) resetValues() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, v := range f.resets {
+		if len(v) > 0 {
+			return v
+		}
+	}
+	return nil
+}
+
+func (f *fakePaneDaemon) connCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.seen)
+}
+
+// TestPaneSurvivesATornFrameAndIsReadopted drives the whole tear chain over a
+// real unix socket: a stalled daemon conn, a push that times out mid-frame,
+// the poisoned conn closing, and the watcher re-dialing the same daemon. The
+// pane stays in the layout, the daemon keeps accepting, and the fresh conn
+// carries the secret set again. A real socket death still prunes.
+func TestPaneSurvivesATornFrameAndIsReadopted(t *testing.T) {
+	value := "s3cret-torn-e2e"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	// w1p2 keeps the fixture's w1p1 spy out of the way.
+	id := "w1p2"
+	sock := s.st.PaneSock(id)
+
+	// The fixture's screenPane socket is replaced by the fake daemon.
+	os.Remove(sock)
+	f := startFakePaneDaemon(t, s.st, id)
+
+	c, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial the fake daemon: %v", err)
+	}
+	if err := s.adoptPane(id, c); err != nil {
+		t.Fatalf("adoptPane: %v", err)
+	}
+	s.watchPane(id)
+	s.mu.Lock()
+	pc := s.panes[id]
+	pc.sendTimeout = 200 * time.Millisecond
+	s.mu.Unlock()
+
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"}); !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	select {
+	case <-f.parkAck: // the fake conn parked after its first set-secrets
+	case <-time.After(2 * time.Second):
+		s.mu.Lock()
+		ids := []string{}
+		for k := range s.panes {
+			ids = append(ids, k)
+		}
+		s.mu.Unlock()
+		f.mu.Lock()
+		f.mu.Unlock()
+		t.Fatalf("the fake conn never received the set-secrets; panes=%v connCount=%d", ids, f.connCount())
+	}
+	if got := f.connValues(0); len(got) != 1 || got[0] != value {
+		t.Fatalf("the daemon's first conn got %v", got)
+	}
+
+	// A paste-sized frame into a parked conn: the write tears mid-frame.
+	big := wire.Msg{Action: "write", Data: make([]byte, 512<<10)}
+	err = pc.send(big)
+	var ne net.Error
+	if err == nil || !errors.As(err, &ne) || !ne.Timeout() {
+		t.Fatalf("the big send = %v, want a timeout", err)
+	}
+	if !pc.isDegraded() {
+		t.Fatal("the torn conn is not poisoned")
+	}
+
+	// Release the daemon's conn: it sees the dead stream and drops it. The
+	// watcher must re-dial the same daemon and re-adopt a fresh conn.
+	close(f.parked)
+	deadline := time.Now().Add(5 * time.Second)
+	var fresh *paneConn
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		cur := s.panes[id]
+		s.mu.Unlock()
+		if cur != nil && cur != pc {
+			fresh = cur
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if fresh == nil {
+		t.Fatal("the watcher never re-adopted the pane")
+	}
+	// The fresh conn carries the secret set again.
+	got := []string(nil)
+	for i := 0; i < 40 && got == nil; i++ {
+		got = f.resetValues()
+		time.Sleep(50 * time.Millisecond)
+	}
+	if len(got) != 1 || got[0] != value {
+		t.Fatalf("the fresh conn got %v, want the secret set", got)
+	}
+	// The pane is still in the layout, and the daemon still accepts.
+	s.mu.Lock()
+	inTree := s.paneInTreeLocked(id)
+	s.mu.Unlock()
+	if !inTree {
+		t.Fatal("the surviving pane left the layout")
+	}
+	if f.connCount() < 2 {
+		t.Fatal("the daemon stopped accepting")
+	}
+	if _, err := net.Dial("unix", sock); err != nil {
+		t.Fatalf("the daemon refuses connections: %v", err)
+	}
+
+	// A real socket death still prunes: the daemon goes away, the watcher
+	// finds the socket gone, and the pane leaves the layout.
+	if err := f.ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(sock)
+	s.mu.Lock()
+	fresh.c.Close()
+	s.mu.Unlock()
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		inTree := s.paneInTreeLocked(id)
+		s.mu.Unlock()
+		if !inTree {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.mu.Lock()
+	stillThere := s.paneInTreeLocked(id)
+	s.mu.Unlock()
+	if stillThere {
+		t.Fatal("the pane survived its own daemon's death")
 	}
 }
