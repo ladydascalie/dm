@@ -24,25 +24,42 @@ func waitDead(t *testing.T, pid int) {
 	t.Fatalf("pid %d is still alive", pid)
 }
 
-// paneShellPIDs returns the shells a pane daemon owns, read from procfs.
+// paneShellPIDs returns the shells a pane daemon owns, read from procfs. The
+// daemon comes up before its shell: it starts the shell only once the server
+// has adopted the pane and pushed the value list, so the child appears a few
+// milliseconds after the split returns and the read polls for it. The kernel
+// lists a child under the thread that forked it, not the process, so every
+// thread is read.
 func paneShellPIDs(t *testing.T, panePID int) []int {
 	t.Helper()
-	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/task/%d/children", panePID, panePID))
-	if err != nil {
-		t.Fatalf("children of %d: %v", panePID, err)
-	}
-	var out []int
-	for _, f := range strings.Fields(string(b)) {
-		n, err := strconv.Atoi(f)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		paths, err := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/children", panePID))
 		if err != nil {
-			t.Fatalf("child pid %q: %v", f, err)
+			t.Fatalf("children of %d: %v", panePID, err)
 		}
-		out = append(out, n)
+		var out []int
+		for _, path := range paths {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			for _, f := range strings.Fields(string(b)) {
+				n, err := strconv.Atoi(f)
+				if err != nil {
+					t.Fatalf("child pid %q: %v", f, err)
+				}
+				out = append(out, n)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pane %d never started a shell", panePID)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	if len(out) == 0 {
-		t.Fatalf("pane %d has no shell child", panePID)
-	}
-	return out
 }
 
 // TestResetSession proves reset discards a live session: the server, every

@@ -38,8 +38,24 @@ type paneProc struct {
 	cwd     string // where the shell is now, not where it started; guarded by mu
 	title   string // the last OSC window title reported; guarded by mu
 
-	ptmx *os.File
-	cmd  *exec.Cmd
+	// shellMu guards ptmx and cmd: the daemon starts the shell only after
+	// the server's adopted set arrives, so a serve goroutine can reach the
+	// pane before the pty exists. A leaf lock, never held while taking mu.
+	shellMu sync.Mutex
+	ptmx    *os.File
+	cmd     *exec.Cmd
+
+	// adopted closes on the server's first set-secrets push, the signal
+	// that the scrub list is in place and the shell may start. adoptOnce
+	// closes it once; a later push only updates the values.
+	adopted   chan struct{}
+	adoptOnce sync.Once
+
+	// done stops the background goroutines when Run returns without starting
+	// a shell. A pane whose shell never starts has nothing left to serve, and
+	// a caller that drives Run in-process must not be left with a reaper that
+	// calls os.Exit a socket check later.
+	done chan struct{}
 
 	mu   sync.Mutex
 	vt   *vt.Term
@@ -606,14 +622,10 @@ func Run(args []string) error {
 		subs: map[*subConn]bool{},
 		st:   wire.Status{State: "unknown"},
 		fg:   o.fg, bg: o.bg,
-	}
 
-	cmd := paneCmd(o)
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(o.cols), Rows: uint16(o.rows)})
-	if err != nil {
-		return fmt.Errorf("start shell: %w", err)
+		adopted: make(chan struct{}),
+		done:    make(chan struct{}),
 	}
-	p.ptmx, p.cmd = ptmx, cmd
 
 	if err := os.MkdirAll(paths.SessionDir(o.session)+"/panes", 0o700); err != nil {
 		return err
@@ -639,6 +651,58 @@ func Run(args []string) error {
 		os.Exit(0)
 	}()
 
+	// The shell starts only after the server adopts the pane and pushes the
+	// value list, so a pane's first bytes are scrubbed by construction. The
+	// first connection is the server's, and the wait runs beside the accept
+	// loop: a pane nothing dials still starts its shell on the grace.
+	errc := make(chan error, 1)
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				errc <- err
+				return
+			}
+			go p.serve(c)
+		}
+	}()
+	p.awaitAdopt()
+	if err := p.startShell(o); err != nil {
+		// Nothing can serve this pane. Stop the accept loop and the reaper
+		// before the error leaves Run.
+		_ = ln.Close()
+		close(p.done)
+		return err
+	}
+	return <-errc
+}
+
+// spawnGrace bounds the wait for the server's adopted set before the pane
+// starts its shell anyway. The server pushes set-secrets on every adopt, so
+// the wait normally ends in a few milliseconds; a pane with no server to
+// adopt it still starts on its own.
+const spawnGrace = 250 * time.Millisecond
+
+// awaitAdopt waits for the adopted set, or the grace when nothing adopts.
+func (p *paneProc) awaitAdopt() {
+	select {
+	case <-p.adopted:
+	case <-time.After(spawnGrace):
+	}
+}
+
+// startShell starts the pane's shell and the goroutines that serve it. It
+// runs once, after the adopted set is in place, so the first chunk the pty
+// produces is already scrubbed: a command that prints a value the instant it
+// runs never reaches the screen or the ring unredacted.
+func (p *paneProc) startShell(o *paneOpts) error {
+	cmd := paneCmd(o)
+	cols, rows := p.vt.Grid().Size()
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	if err != nil {
+		return fmt.Errorf("start shell: %w", err)
+	}
+	p.setShell(ptmx, cmd)
 	go p.readLoop()
 	go p.watchShell()
 	go func() {
@@ -648,14 +712,21 @@ func Run(args []string) error {
 		_ = os.Remove(p.sock)
 		os.Exit(0)
 	}()
+	return nil
+}
 
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			return err
-		}
-		go p.serve(c)
-	}
+// shellProc returns the pty and the shell command, nil before the spawn.
+func (p *paneProc) shellProc() (*os.File, *exec.Cmd) {
+	p.shellMu.Lock()
+	defer p.shellMu.Unlock()
+	return p.ptmx, p.cmd
+}
+
+// setShell publishes the spawned pty and command to the serve goroutines.
+func (p *paneProc) setShell(ptmx *os.File, cmd *exec.Cmd) {
+	p.shellMu.Lock()
+	defer p.shellMu.Unlock()
+	p.ptmx, p.cmd = ptmx, cmd
 }
 
 // sockEvery is how often a pane checks that its socket still names this
@@ -669,7 +740,11 @@ const sockEvery = 5 * time.Second
 // restarts, and the pane must survive it.
 func (p *paneProc) reapOrphans(own os.FileInfo) {
 	for {
-		time.Sleep(sockEvery)
+		select {
+		case <-time.After(sockEvery):
+		case <-p.done:
+			return
+		}
 		info, err := os.Stat(p.sock)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -688,8 +763,8 @@ func (p *paneProc) reapOrphans(own os.FileInfo) {
 // with it.
 func (p *paneProc) reap(reason string) {
 	log.Printf("pane %s: %s, stopping", p.id, reason)
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	if _, cmd := p.shellProc(); cmd != nil && cmd.Process != nil {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	os.Exit(0)
 }
@@ -698,8 +773,9 @@ func (p *paneProc) readLoop() {
 	buf := make([]byte, 32<<10)
 	var clean, scrubbed bytes.Buffer
 	filter := p.newFilter()
+	ptmx, _ := p.shellProc()
 	for {
-		n, err := p.ptmx.Read(buf)
+		n, err := ptmx.Read(buf)
 		if n > 0 {
 			p.syncFilter(filter)
 			clean.Reset()
@@ -903,10 +979,37 @@ func (p *paneProc) ptyDrops() int64 { return p.ptyDropped.Load() }
 // it, so the queue never needs a close.
 func (p *paneProc) drainPtyWrites() {
 	for w := range p.writes {
-		_, _ = p.ptmx.Write(w.b)
-		if w.enter {
-			_, _ = p.ptmx.Write([]byte("\r"))
+		ptmx := p.ptyFrame()
+		if ptmx == nil {
+			// The shell never started, so the frame has nowhere to go. It
+			// is dropped and counted like any other frame the pty cannot
+			// take.
+			p.ptyDropped.Add(1)
+			continue
 		}
+		_, _ = ptmx.Write(w.b)
+		if w.enter {
+			_, _ = ptmx.Write([]byte("\r"))
+		}
+	}
+}
+
+// ptyFrame returns the pty for one queued frame, waiting out the spawn when
+// the shell has not started yet. A write can reach the daemon before the
+// shell exists: the server pushes the adopted set and answers the split
+// before the fork returns, so a keystroke sent right after a split would
+// otherwise vanish. The wait is the spawn grace, so a pane with no shell
+// still drains and drops.
+func (p *paneProc) ptyFrame() *os.File {
+	deadline := time.Now().Add(spawnGrace)
+	for {
+		if ptmx, _ := p.shellProc(); ptmx != nil {
+			return ptmx
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -938,10 +1041,11 @@ func shellCwd(pid int) string {
 // window title is. The poll is the coalescer, so a burst of cds costs one cwd
 // report and an animated title costs one title report per sample.
 func (p *paneProc) watchShell() {
-	if p.cmd == nil || p.cmd.Process == nil {
+	_, cmd := p.shellProc()
+	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	pid := p.cmd.Process.Pid
+	pid := cmd.Process.Pid
 	for {
 		time.Sleep(cwdEvery)
 		p.sampleCwd(pid)
@@ -987,11 +1091,12 @@ func (p *paneProc) setStatus(st wire.Status) {
 }
 
 func (p *paneProc) shutdown() {
-	if p.ptmx != nil {
-		_ = p.ptmx.Close()
+	ptmx, cmd := p.shellProc()
+	if ptmx != nil {
+		_ = ptmx.Close()
 	}
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Signal(syscall.SIGHUP)
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Signal(syscall.SIGHUP)
 	}
 }
 
@@ -1062,7 +1167,12 @@ func (p *paneProc) serve(c net.Conn) {
 				p.vt.Grid().Resize(m.Cols, m.Rows)
 			}
 			p.mu.Unlock()
-			_ = pty.Setsize(p.ptmx, &pty.Winsize{Cols: uint16(m.Cols), Rows: uint16(m.Rows)})
+			// The grid above took the new size before the shell starts, so a
+			// spawn that has not run yet picks it up; the pty only takes a
+			// resize once it exists.
+			if ptmx, _ := p.shellProc(); ptmx != nil {
+				_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(m.Cols), Rows: uint16(m.Rows)})
+			}
 		case "read":
 			p.mu.Lock()
 			text := screenText(p.vt)
@@ -1179,6 +1289,10 @@ func (p *paneProc) serve(c net.Conn) {
 				continue
 			}
 			p.scrub.set(values)
+			// The set is in place, so the shell may start: startShell waits
+			// on this close, which is what makes the pane's first byte
+			// scrubbed. A later push only updates the values.
+			p.adoptOnce.Do(func() { close(p.adopted) })
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "toggle-secrets":
 			// The operator's redaction switch, a convenience for human
@@ -1387,10 +1501,11 @@ func (p *paneProc) childrenAt(pid int) []int {
 
 // shellPID is the pane shell's pid, or 0 when the pane has no command.
 func (p *paneProc) shellPID() int {
-	if p.cmd == nil || p.cmd.Process == nil {
+	_, cmd := p.shellProc()
+	if cmd == nil || cmd.Process == nil {
 		return 0
 	}
-	return p.cmd.Process.Pid
+	return cmd.Process.Pid
 }
 
 // shellChildren reads the shell's direct child pids from /proc, the file

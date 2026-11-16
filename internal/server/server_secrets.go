@@ -190,6 +190,11 @@ func (s *server) sendSecretScrub() (map[string]error, []string) {
 // secretPush after the conn is registered, so a concurrent action's push
 // either lands before this one with a set this collection then repeats, or
 // waits and pushes a newer one; the pane can never end on a stale list.
+//
+// The push goes out even when the set is empty: it is the pane daemon's
+// signal that it may start its shell, so the shell's first byte is scrubbed
+// rather than racing this message. A pane left waiting for a list that never
+// arrives would start its shell on a timer instead.
 func (s *server) adoptSecretScrub(id string) {
 	s.secretPush.Lock()
 	defer s.secretPush.Unlock()
@@ -197,7 +202,7 @@ func (s *server) adoptSecretScrub(id string) {
 	values, _ := s.scrubValuesLocked()
 	pc := s.panes[id]
 	s.mu.Unlock()
-	if len(values) == 0 || pc == nil {
+	if pc == nil {
 		return
 	}
 	// A poisoned conn refuses every send at once; skipping it here keeps

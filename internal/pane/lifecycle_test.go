@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"dm/internal/osc"
+	"dm/internal/paths"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -177,14 +178,46 @@ func TestRunRefusesMissingIdentity(t *testing.T) {
 // Serial, not parallel: this test verifies env behaviour, and t.Setenv cannot
 // run alongside other tests because it mutates the process environment.
 func TestRunDefaultsResolveToABadShell(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DM_STATE", root)
 	t.Setenv("SHELL", "/nonexistent-dm-test-shell")
-	err := Run([]string{"--id", "p1", "--session", "s1"})
-	if err == nil {
-		t.Fatal("Run started with a shell that does not exist")
+
+	// The daemon starts its shell only after the server's adopted set, so the
+	// failure surfaces once a connection lands. Connect as the server does,
+	// and leave the shell to the grace: no frame means no adopted set.
+	errc := make(chan error, 1)
+	go func() { errc <- Run([]string{"--id", "p1", "--session", "s1"}) }()
+	sock := paths.PaneSockAt(root, "s1", "p1")
+	c := dialPaneSock(t, sock)
+	defer func() { _ = c.Close() }()
+
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Fatal("Run started with a shell that does not exist")
+		}
+		if !strings.Contains(err.Error(), "start shell") {
+			t.Fatalf("error = %q, want the start shell failure", err.Error())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run never reported the failed shell")
 	}
-	if !strings.Contains(err.Error(), "start shell") {
-		t.Fatalf("error = %q, want the start shell failure", err.Error())
+}
+
+// dialPaneSock waits for a pane socket and connects to it, the way the
+// server does after spawning the daemon.
+func dialPaneSock(t *testing.T, sock string) net.Conn {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		c, err := net.Dial("unix", sock)
+		if err == nil {
+			return c
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("pane socket %s never accepted a connection", sock)
+	return nil
 }
 
 // TestRunRejectsBadFlags proves an unknown flag is an argument error.

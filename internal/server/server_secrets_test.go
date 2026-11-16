@@ -697,8 +697,13 @@ func TestAdoptPushCarriesTheLiveSet(t *testing.T) {
 		t.Fatalf("register: %s", rep.Error)
 	}
 	// Adopt first, activate second: the pane is registered before it can
-	// receive anything, so the use's push reaches it.
+	// receive anything, so the use's push reaches it. The adopt's own push
+	// is the empty set, which is the daemon's release to start its shell; it
+	// is not the value's push, so the test steps past it.
 	ch := adoptSpy(t, s, "w1p2")
+	if m := readSpyUntil(t, ch, "set-secrets"); !strings.Contains(string(m.Res), `"values":[]`) {
+		t.Fatalf("the adopt push should be the empty release set: %s", m.Res)
+	}
 	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"}); !rep.OK {
 		t.Fatalf("use: %s", rep.Error)
 	}
@@ -1181,7 +1186,10 @@ func (f *fakePaneDaemon) serve(c net.Conn, idx int) {
 				f.resets = append(f.resets, p.Values)
 			}
 			f.mu.Unlock()
-			if first {
+			// The adopt's empty set is the release, not a value push: a
+			// daemon that parked on it would leave the value push unread and
+			// hide the tear this test is about.
+			if first && len(p.Values) > 0 {
 				// Park: stop reading until the test releases, so a large
 				// server push backpressures and tears.
 				close(f.parkAck)
