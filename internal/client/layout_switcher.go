@@ -47,14 +47,17 @@ type layoutSwitcher struct {
 	pressY  int
 }
 
-// layoutPaletteGeometry bounds the palette: the list column, the preview band
-// and the smallest screen that shows the preview at all.
+// layoutPaletteGeometry bounds the palette: the list column, the preview's
+// preferred size and its floor. The preferred size is what the preview scales
+// to when the aspect allows; the floor is what it refuses to go under while
+// keeping the pane area's aspect. The screen, not the preferred size, is the
+// hard cap.
 const (
-	layoutListW       = 22 // the list column's inner width
-	layoutPreviewMinW = 24
-	layoutPreviewMinH = 12
-	layoutPreviewMaxW = 40
-	layoutPreviewMaxH = 20
+	layoutListW        = 22 // the list column's inner width
+	layoutPreviewMinW  = 24
+	layoutPreviewMinH  = 12
+	layoutPreviewPrefW = 40
+	layoutPreviewPrefH = 20
 )
 
 // layoutPalette is where the palette paints: the outer rect, the preview band
@@ -218,8 +221,8 @@ func layoutPaneArea(win *wire.Snapshot) layout.Rect {
 }
 
 // layoutFooterText is the palette's footer line: the dropped-preview note on a
-// screen too small for the band, the one-pane line on a window with a single
-// pane, and the key hint otherwise.
+// screen too small for the floor preview, the one-pane line on a window with a
+// single pane, and the key hint otherwise.
 func layoutFooterText(show bool, paneCount int) string {
 	switch {
 	case !show:
@@ -231,24 +234,24 @@ func layoutFooterText(show bool, paneCount int) string {
 }
 
 // layoutPaletteGeom places the palette, centred, sized to the wider of the
-// list column and the preview. The preview keeps the pane area's aspect within
-// the 24x12 to 40x20 band: scale to fit the maximums, then lift to the
-// minimums by choosing the larger scale factor, never by stretching one axis
-// alone. Where the lift that clears the minimums already overruns a maximum,
-// the aspect cannot sit inside the band, so the preview drops and the list
-// shows alone with a footer note. A screen too small for the list alone paints
-// nothing.
+// list column and the preview. The preview keeps the pane area's aspect
+// exactly, never by stretching one axis alone. The band's preferred size is
+// 40x20 and its floor is 24x12: scale to fit the preferred size, then lift to
+// the floor by choosing the larger scale factor, growing past the preferred
+// size where a wide or tall aspect demands it. The screen is the only hard
+// cap: where even the floor cannot sit inside the screen, the preview drops
+// and the list shows alone with a footer note.
 func layoutPaletteGeom(win *wire.Snapshot, paneCount int) layoutPalette {
 	var g layoutPalette
 	if win == nil || win.Cols < 1 || win.Rows < 1 {
 		return g
 	}
 	// The preview keeps the pane area's aspect exactly, never by stretching
-	// one axis alone. Scale to fit the band's maximums, then lift to the
-	// minimums by taking the larger scale: a scale that fits max and a scale
-	// that clears both minimums at the same aspect. When the lift is the
-	// larger, the aspect only clears the minimums by overrunning a maximum,
-	// so the band has no room and the preview drops, leaving the list alone.
+	// one axis alone. Scale to fit the band's preferred size, then lift to
+	// the floor by taking the larger scale: a scale that fits the preferred
+	// size and a scale that clears both minimums at the same aspect. The
+	// screen caps the scale, because the palette floats over the panes: a cap
+	// below the floor drops the preview and the footer says so.
 	area := layoutPaneArea(win)
 	aw, ah := area.W, area.H
 	if aw < 1 {
@@ -257,13 +260,20 @@ func layoutPaletteGeom(win *wire.Snapshot, paneCount int) layoutPalette {
 	if ah < 1 {
 		ah = 1
 	}
-	sFit := math.Min(float64(layoutPreviewMaxW)/float64(aw), float64(layoutPreviewMaxH)/float64(ah))
+	sFit := math.Min(float64(layoutPreviewPrefW)/float64(aw), float64(layoutPreviewPrefH)/float64(ah))
 	sMin := math.Max(float64(layoutPreviewMinW)/float64(aw), float64(layoutPreviewMinH)/float64(ah))
 	s := math.Max(sFit, sMin)
+	maxW := float64(win.Cols-2) / float64(aw)
+	maxH := float64(win.Rows-layoutRowCount-3) / float64(ah)
+	if s > maxW {
+		s = maxW
+	}
+	if s > maxH {
+		s = maxH
+	}
 	pw := int(math.Round(float64(aw) * s))
 	ph := int(math.Round(float64(ah) * s))
-	fits := pw >= layoutPreviewMinW && ph >= layoutPreviewMinH &&
-		pw <= layoutPreviewMaxW && ph <= layoutPreviewMaxH
+	fits := pw >= layoutPreviewMinW && ph >= layoutPreviewMinH
 	if !fits {
 		pw, ph = 0, 0
 	}

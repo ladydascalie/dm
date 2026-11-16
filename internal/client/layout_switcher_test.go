@@ -329,12 +329,11 @@ func seamTiledRows(t *testing.T, root *layout.Node, area layout.Rect) int {
 
 // TestLayoutSeamTiledRowsMatchPaneArea drives a real 200x30 screen, the
 // review's live-lie repro, through layoutPaletteGeom and the server's
-// pane-area walk. The extreme-wide aspect (rail 20 leaves area 180x28) cannot
-// sit inside the 24x12 to 40x20 band without stretching one axis, so the fix
-// drops the band; the stretched 40x12 band the review rejected is gone. On a
-// screen whose area fits the band, the preview keeps the pane area's aspect,
-// so the tiled row count it shows is the server's over the pane area for 4, 5
-// and 6 panes.
+// pane-area walk. The extreme-wide aspect (rail 20 leaves area 180x28)
+// outgrows the 40x20 preferred size: the preview lifts to the 24x12 floor and
+// grows to 77x12 at the area's aspect instead of dropping. On a screen whose
+// area fits the band, the preview keeps the pane area's aspect, so the tiled
+// row count it shows is the server's over the pane area for 4, 5 and 6 panes.
 func TestLayoutSeamTiledRowsMatchPaneArea(t *testing.T) {
 	t.Parallel()
 	for _, n := range []int{4, 5, 6} {
@@ -342,8 +341,11 @@ func TestLayoutSeamTiledRowsMatchPaneArea(t *testing.T) {
 		snap := testutil.TestSnapshot(root, 200, 30, nil)
 		snap.Rail = 20
 		g := layoutPaletteGeom(snap, n)
-		if g.preview.W != 0 || g.preview.H != 0 {
-			t.Fatalf("%d panes on 200x30 kept a %+v preview, want it dropped", n, g.preview)
+		if g.preview.W == 0 {
+			t.Fatalf("%d panes on 200x30 dropped the preview: %+v", n, g)
+		}
+		if got := seamTiledRows(t, root, g.preview); got != seamTiledRows(t, root, layout.PaneAreaForWithTabBar(200, 30, 20)) {
+			t.Fatalf("%d panes on 200x30: preview tiled rows=%d, server area rows differ", n, got)
 		}
 	}
 	for _, n := range []int{4, 5, 6} {
@@ -364,8 +366,8 @@ func TestLayoutSeamTiledRowsMatchPaneArea(t *testing.T) {
 
 // TestLayoutPaletteGeomLiftsToMinimum pins the lift-to-minimum on an extreme
 // aspect. A wide 86x22 screen, rail 20, leaves area 66x20; lifting to the
-// band's minimums by the larger scale factor lands the band at its maximum
-// width and minimum height (40x12) while keeping the area's aspect, never by
+// floor by the larger scale factor lands the preview at the band's preferred
+// width and floor height (40x12) while keeping the area's aspect, never by
 // stretching one axis alone. The tiled row count it shows stays the server's
 // over the pane area for 4, 5 and 6 panes.
 func TestLayoutPaletteGeomLiftsToMinimum(t *testing.T) {
@@ -375,8 +377,8 @@ func TestLayoutPaletteGeomLiftsToMinimum(t *testing.T) {
 	snap.Rail = 20
 	area := layout.PaneAreaForWithTabBar(86, 22, 20)
 	g := layoutPaletteGeom(snap, 6)
-	if g.preview.W != layoutPreviewMaxW || g.preview.H != layoutPreviewMinH {
-		t.Fatalf("extreme band = %dx%d, want the lift to %dx%d", g.preview.W, g.preview.H, layoutPreviewMaxW, layoutPreviewMinH)
+	if g.preview.W != layoutPreviewPrefW || g.preview.H != layoutPreviewMinH {
+		t.Fatalf("extreme band = %dx%d, want the lift to %dx%d", g.preview.W, g.preview.H, layoutPreviewPrefW, layoutPreviewMinH)
 	}
 	for _, n := range []int{4, 5, 6} {
 		r := seamPanes(n)
@@ -384,6 +386,21 @@ func TestLayoutPaletteGeomLiftsToMinimum(t *testing.T) {
 		if got := seamTiledRows(t, r, g.preview); got != serverRows {
 			t.Fatalf("%d panes: preview tiled rows=%d, server area rows=%d", n, got, serverRows)
 		}
+	}
+}
+
+// TestLayoutPreviewShowsOnMaximisedWideScreen pins the operator's repro: a
+// plain maximised 80x24 terminal, rail 0, leaves area 80x22. Its aspect
+// outgrows the 40x20 preferred size, and the preview still shows, lifted to
+// the 24x12 floor at the area's aspect, instead of dropping to the footer
+// note.
+func TestLayoutPreviewShowsOnMaximisedWideScreen(t *testing.T) {
+	t.Parallel()
+	root := seamPanes(2)
+	snap := testutil.TestSnapshot(root, 80, 24, nil)
+	g := layoutPaletteGeom(snap, 2)
+	if g.preview.W != 44 || g.preview.H != layoutPreviewMinH {
+		t.Fatalf("80x24 preview = %+v, want 44x%d", g.preview, layoutPreviewMinH)
 	}
 }
 
