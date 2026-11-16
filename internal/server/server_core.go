@@ -57,28 +57,6 @@ type paneConn struct {
 	// installedAt is when the watcher adopted this conn, so a redial can
 	// tell a conn that never stabilised from one that lived.
 	installedAt time.Time
-
-	// nonce is the secret the daemon presented on this conn at adopt, the
-	// handshake the privileged actions answer to. Empty on a conn that
-	// never handshook; privileged sends then refuse at the daemon. It is
-	// written before the conn is published and read after, so the
-	// publication order carries it and no extra lock is needed.
-	nonce string
-
-	// pendMu guards pending and reqSeq. pending holds the roundtrips waiting
-	// for the resp frame the conn's watcher reads; reqSeq numbers them so a
-	// reply can never land in another request's wait.
-	pendMu  sync.Mutex
-	pending map[int64]chan wire.Msg
-	reqSeq  int64
-}
-
-// privilegedActions are the pane actions that rewrite or switch off the
-// output redaction. They answer only to the conn the daemon presented its
-// nonce to, and every send of one carries that nonce.
-var privilegedActions = map[string]bool{
-	"set-secrets":    true,
-	"toggle-secrets": true,
 }
 
 // paneStableWindow is how long a conn must live for its redial to count as
@@ -135,9 +113,6 @@ func (p *paneConn) send(m wire.Msg) error {
 	if p.degraded {
 		return errPaneDegraded
 	}
-	if privilegedActions[m.Action] {
-		m.Nonce = p.nonce
-	}
 	timeout := p.sendTimeout
 	if timeout == 0 {
 		timeout = paneSendTimeout
@@ -152,42 +127,6 @@ func (p *paneConn) send(m wire.Msg) error {
 		return err
 	}
 	return err
-}
-
-// paneRequestWait bounds one privileged roundtrip over the adopted conn.
-const paneRequestWait = 2 * time.Second
-
-// request sends one privileged request over this conn and waits for the
-// resp frame the conn's watcher reads. The nonce rides in send, so the
-// daemon's guard sees the handshake this conn holds. A request the conn
-// dies under, or one whose reply never comes, fails the wait and frees
-// its pending slot.
-func (p *paneConn) request(m wire.Msg) (wire.Msg, error) {
-	ch := make(chan wire.Msg, 1)
-	p.pendMu.Lock()
-	if p.pending == nil {
-		p.pending = map[int64]chan wire.Msg{}
-	}
-	p.reqSeq++
-	id := p.reqSeq
-	m.ID = int(id)
-	p.pending[id] = ch
-	p.pendMu.Unlock()
-	if err := p.send(m); err != nil {
-		p.pendMu.Lock()
-		delete(p.pending, id)
-		p.pendMu.Unlock()
-		return wire.Msg{}, err
-	}
-	select {
-	case got := <-ch:
-		return got, nil
-	case <-time.After(paneRequestWait):
-		p.pendMu.Lock()
-		delete(p.pending, id)
-		p.pendMu.Unlock()
-		return wire.Msg{}, fmt.Errorf("pane %s: %s timed out", p.id, m.Action)
-	}
 }
 
 // isDegraded reports whether the last send timed out.
@@ -245,9 +184,11 @@ type client struct {
 	// resync is the server's rebuild hook: one snapshot, then one screen per
 	// pane. It is nil until the client attaches.
 	resync func()
-	// attached says the conn sent its attach frame. Only an attached client
-	// may drive the operator-only actions: a toggle a script could send
-	// would let an agent inside dm disable its own redaction.
+	// attached says the conn sent its attach frame. It keeps the toggle and
+	// its like off the dm exec surface, so no script flips a switch meant
+	// for the operator's hand. It is a convenience gate, not a boundary: an
+	// agent attacking the dm socket can send the same frame, as it can
+	// already type keys and read panes. The real boundary is sandboxing.
 	attached bool
 	closed   bool
 	writer   sync.Once
@@ -888,39 +829,6 @@ func (s *server) ensurePane(id string) error {
 // adoptPane registers a live dial to the pane's daemon and hands it the
 // session's colours and cwd. It never displaces a registered conn: a racing
 // caller's fresh dial closes instead, so the one daemon keeps the one socket.
-// paneHelloWait bounds one wait for the nonce frame a live daemon sends on
-// the conn it privileges. paneHelloQuick bounds the same wait when no
-// daemon socket exists behind the conn, a test's pipe or a daemon that died
-// mid-adopt, where no frame will ever come. A conn that adopted without the
-// handshake, a subscriber conn that stole the slot in the gap between a
-// conn dying and the re-dial, self-heals: the daemon refuses the first
-// privileged action, the server drops the conn, and the watcher re-dials
-// into a freed slot.
-const (
-	paneHelloWait  = 250 * time.Millisecond
-	paneHelloQuick = 10 * time.Millisecond
-)
-
-// readPaneHello reads the nonce frame a fresh conn carries when the
-// daemon's privileged slot was empty. A conn that arrived while another
-// conn holds the slot gets no frame, and the read reports an empty nonce.
-// The nonce exists only in memory.
-func readPaneHello(c net.Conn, wait time.Duration) string {
-	_ = c.SetReadDeadline(time.Now().Add(wait))
-	defer func() { _ = c.SetReadDeadline(time.Time{}) }()
-	m, err := wire.ReadMsg(c)
-	if err != nil || m.Type != "nonce" {
-		return ""
-	}
-	var hello struct {
-		Nonce string `json:"nonce"`
-	}
-	if err := json.Unmarshal(m.Res, &hello); err != nil {
-		return ""
-	}
-	return hello.Nonce
-}
-
 func (s *server) adoptPane(id string, c net.Conn) error {
 	s.mu.Lock()
 	if s.panes[id] != nil {
@@ -928,26 +836,7 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 		_ = c.Close()
 		return nil
 	}
-	s.mu.Unlock()
-	// The handshake read runs off the lock. A live daemon answers within
-	// the wait; a conn that arrived while the daemon's slot was taken
-	// adopts without a nonce and self-heals on the first refusal.
-	sock := s.st.PaneSock(id)
-	wait := paneHelloWait
-	if _, err := os.Stat(sock); err != nil {
-		wait = paneHelloQuick
-	}
-	nonce := readPaneHello(c, wait)
-	s.mu.Lock()
-	if s.panes[id] != nil {
-		// Another conn won the pane while the handshake ran. Closing this
-		// conn frees the daemon's slot if the handshake took it, and the
-		// next accept re-handshakes.
-		s.mu.Unlock()
-		_ = c.Close()
-		return nil
-	}
-	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}, sendTimeout: paneSendTimeout, installedAt: time.Now(), nonce: nonce}
+	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}, sendTimeout: paneSendTimeout, installedAt: time.Now()}
 	s.panes[id] = pc
 	delete(s.paneWatch, id)
 	tc := s.termColours
@@ -1117,24 +1006,6 @@ func (s *server) watchConn(id string, pc *paneConn) (exit bool) {
 			snap := s.snapshotLocked()
 			s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 			s.mu.Unlock()
-		case "resp":
-			// A reply to a request this conn's watcher tracks. The pending
-			// map holds the waiter; anything unmatched is a push ack, and
-			// it drops. A refusal naming the nonce means this conn never
-			// handshook or its nonce went stale: end the watch, so the loop
-			// re-dials into the freed slot and the next push lands.
-			pc.pendMu.Lock()
-			ch := pc.pending[int64(m.ID)]
-			delete(pc.pending, int64(m.ID))
-			pc.pendMu.Unlock()
-			if ch != nil {
-				ch <- m
-				break
-			}
-			if !m.OK && strings.Contains(m.Error, "needs the pane's nonce") {
-				log.Printf("pane %s: %s; re-handshaking", id, m.Error)
-				return false
-			}
 		case "exit":
 			return true
 		}
@@ -1212,14 +1083,6 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 	if err != nil {
 		return nil, errPaneGone
 	}
-	// The daemon freed its privileged slot when the old conn died, so the
-	// fresh conn handshakes here. The fresh nonce is the re-handshake: the
-	// old one stops working.
-	wait := paneHelloWait
-	if _, err := os.Stat(sock); err != nil {
-		wait = paneHelloQuick
-	}
-	nonce := readPaneHello(c, wait)
 	s.mu.Lock()
 	cur = s.panes[id]
 	if cur != old {
@@ -1234,7 +1097,7 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 	nc := &paneConn{
 		id: id, c: c, st: old.status(), title: old.title,
 		alt: old.alt, mouse: old.mouse, paste: old.paste,
-		sendTimeout: paneSendTimeout, installedAt: time.Now(), nonce: nonce,
+		sendTimeout: paneSendTimeout, installedAt: time.Now(),
 	}
 	s.panes[id] = nc
 	tc := s.termColours

@@ -259,13 +259,15 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.reply(cl, m, map[string]any{"sync": sync}, err)
 
 	case "toggle-secrets":
-		// The operator's redaction switch. It answers only to an attached
-		// client: a toggle a dm exec script could send would let an agent
-		// running inside dm disable its own redaction. The switch rides the
-		// adopted conn, the one the daemon's nonce handshake privileged, so
-		// a bare conn to the pane socket cannot reach it at all. The reply
-		// carries the state the pane landed on, so the client can show an
-		// unprotected pane as unprotected.
+		// The operator's redaction switch. The attached gate keeps it off
+		// the dm exec surface, so no script flips it by accident; it is a
+		// convenience gate, not a boundary. The toggle is for human editing:
+		// an agent attacking the dm socket can send the same attach frame
+		// and flip it, as it can already type keys and read panes, and the
+		// real boundary is the sandboxing work. The switch rides the same
+		// pane-daemon request path the screen and replay actions use, and
+		// the reply carries the state the pane landed on, so the client can
+		// show an unprotected pane as unprotected.
 		if !cl.attached {
 			s.reply(cl, m, nil, fmt.Errorf("toggle-secrets runs from the interactive client only"))
 			return
@@ -274,31 +276,16 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		if id == "" {
 			id = s.st.ActiveWindow().Focus
 		}
-		// The toggle is an explicit action, so it re-arms a wedged pane's
-		// watcher the way a write does.
-		s.rearmPaneWatcher(id)
 		s.mu.Lock()
-		pc := s.panes[id]
+		_, live := s.panes[id]
 		s.mu.Unlock()
-		if pc == nil {
+		if !live {
 			s.reply(cl, m, nil, fmt.Errorf("no pane %q", id))
 			return
 		}
-		got, err := pc.request(wire.Msg{Type: "req", Action: "toggle-secrets"})
+		got, err := paneRequest(s.st, id, wire.Msg{Type: "req", Action: "toggle-secrets"})
 		if err != nil {
 			s.reply(cl, m, nil, err)
-			return
-		}
-		if !got.OK {
-			// The daemon refused, the nonce guard or anything else: the
-			// operator hears the refusal, and the pane keeps its state. A
-			// refusal naming the nonce means this conn lost the handshake:
-			// dropping it sends the watcher into a fresh handshake, so the
-			// operator's next press works.
-			if strings.Contains(got.Error, "needs the pane's nonce") {
-				_ = pc.c.Close()
-			}
-			s.reply(cl, m, nil, fmt.Errorf("pane %s: %s", id, got.Error))
 			return
 		}
 		var res struct {

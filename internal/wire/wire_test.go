@@ -3,6 +3,7 @@ package wire_test
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"dm/internal/testutil"
@@ -294,5 +295,17 @@ func TestWriteMsgRejectsOversize(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("WriteMsg oversize wrote %d bytes before failing, want none", buf.Len())
+	}
+}
+
+// TestMsgCarriesNoNonce proves the envelope carries no nonce state: the
+// nonce guard came off, and no field may smuggle it back.
+func TestMsgCarriesNoNonce(t *testing.T) {
+	b, err := json.Marshal(wire.Msg{Type: "req", Action: "toggle-secrets", Target: "w1p1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "nonce") {
+		t.Fatalf("envelope carries a nonce field: %s", b)
 	}
 }

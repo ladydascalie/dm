@@ -1119,10 +1119,6 @@ type fakePaneDaemon struct {
 	acceptClose bool
 	parked      chan struct{} // closed to release the parked first conn
 	parkAck     chan struct{} // closed when the first conn is parked
-	// guardConn and guardNonce are the fake's handshake slot: the conn the
-	// last nonce went to and the counter behind it.
-	guardConn  net.Conn
-	guardNonce int
 }
 
 func startFakePaneDaemon(t *testing.T, st *session.State, id string) *fakePaneDaemon {
@@ -1162,19 +1158,6 @@ func (f *fakePaneDaemon) serve(c net.Conn, idx int) {
 		return
 	}
 	defer func() { _ = c.Close() }()
-	// The handshake, the way the real daemon runs it: a conn that arrives
-	// while the slot is free gets a fresh nonce, and the slot frees when
-	// the conn goes away, so a re-adopt re-handshakes.
-	f.hello(c)
-	defer func() {
-		// The privileged conn going away frees the slot, the way the real
-		// daemon's serve exit does.
-		f.mu.Lock()
-		if f.guardConn == c {
-			f.guardConn = nil
-		}
-		f.mu.Unlock()
-	}()
 	first := idx == 0
 	for {
 		m, err := wire.ReadMsg(c)
@@ -1206,21 +1189,6 @@ func (f *fakePaneDaemon) serve(c net.Conn, idx int) {
 			}
 		}
 	}
-}
-
-// hello presents a fresh nonce on c when the fake's privileged slot is
-// free, the adopt conn at spawn and a re-adopt's fresh conn after that.
-func (f *fakePaneDaemon) hello(c net.Conn) {
-	f.mu.Lock()
-	if f.guardConn != nil {
-		f.mu.Unlock()
-		return
-	}
-	f.guardNonce++
-	nonce := fmt.Sprintf("fake-nonce-%d", f.guardNonce)
-	f.guardConn = c
-	f.mu.Unlock()
-	_ = wire.WriteMsg(c, wire.Msg{Type: "nonce", Res: jsonRaw(map[string]any{"nonce": nonce})})
 }
 
 func (f *fakePaneDaemon) connValues(idx int) []string {

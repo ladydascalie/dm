@@ -2,9 +2,7 @@ package pane
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -77,16 +75,6 @@ type paneProc struct {
 	// the screen, the ring or a subscriber. The server pushes the values
 	// with set-secrets. carry belongs to the pty reader goroutine alone.
 	scrub scrubber
-
-	// guardMu guards the privileged conn and the nonce it holds. The daemon
-	// presents a fresh nonce on the first conn it accepts while the slot is
-	// empty, and clears the slot when that conn goes away, so a reconnecting
-	// server re-handshakes. The privileged actions answer only to that conn
-	// carrying the nonce back. The nonce exists only in memory: never in
-	// env, argv, the state file or any output.
-	guardMu    sync.Mutex
-	guardConn  net.Conn
-	guardNonce string
 
 	// children samples a pid's foreground children for the wait fallback; nil
 	// uses the real /proc read. It is a field, not a package var, so a test's
@@ -504,7 +492,6 @@ func Run(args []string) error {
 		if err != nil {
 			return err
 		}
-		p.hello(c)
 		go p.serve(c)
 	}
 }
@@ -830,41 +817,6 @@ func (p *paneProc) shutdown() {
 	}
 }
 
-// hello presents the nonce to a conn that may become the privileged one.
-// The daemon keeps one privileged conn at a time: the first conn accepted
-// while the slot is empty receives a fresh nonce, and every privileged
-// action must come back over that conn carrying it. A conn that arrives
-// while the slot is taken is a subscriber: it gets no nonce, and the
-// privileged actions refuse it. When the privileged conn goes away the
-// slot clears, so the next accept re-handshakes with a fresh nonce and the
-// old one stops working.
-func (p *paneProc) hello(c net.Conn) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		// No randomness, no nonce, no privileged conn: the safe state is
-		// the stage the operator cannot turn off by accident.
-		return
-	}
-	nonce := hex.EncodeToString(b)
-	p.guardMu.Lock()
-	if p.guardConn != nil {
-		p.guardMu.Unlock()
-		return
-	}
-	p.guardConn, p.guardNonce = c, nonce
-	p.guardMu.Unlock()
-	_ = wire.WriteMsg(c, wire.Msg{Type: "nonce", Res: jsonRaw(map[string]any{"nonce": nonce})})
-}
-
-// authorize reports whether c is the privileged conn and the request
-// carries the nonce that conn was presented. A privileged action from any
-// other conn, or one without the nonce, is refused.
-func (p *paneProc) authorize(c net.Conn, nonce string) bool {
-	p.guardMu.Lock()
-	defer p.guardMu.Unlock()
-	return p.guardConn == c && nonce != "" && nonce == p.guardNonce
-}
-
 func (p *paneProc) serve(c net.Conn) {
 	defer func() { _ = c.Close() }()
 	sc := &subConn{c: c}
@@ -880,13 +832,6 @@ func (p *paneProc) serve(c net.Conn) {
 			p.waiter = nil
 		}
 		p.mu.Unlock()
-		// The privileged conn going away frees the slot, so the next
-		// accept re-handshakes with a fresh nonce.
-		p.guardMu.Lock()
-		if p.guardConn == c {
-			p.guardConn, p.guardNonce = nil, ""
-		}
-		p.guardMu.Unlock()
 	}()
 
 	for {
@@ -1044,13 +989,6 @@ func (p *paneProc) serve(c net.Conn) {
 			debug.SetMemoryLimit(int64(m.History) + memHeadroom)
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "set-secrets":
-			// A privileged action: the push rewrites the redaction list, and
-			// an empty list turns the stage into a pass-through. It answers
-			// only to the conn the nonce was presented on, carrying it.
-			if !p.authorize(sc.c, m.Nonce) {
-				_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: false, Error: "set-secrets needs the pane's nonce"})
-				continue
-			}
 			// The server pushes the values this pane's output must never
 			// echo. The stage redacts from the next chunk on; output already
 			// published stays as it was, so the push should follow the spawn
@@ -1063,17 +1001,16 @@ func (p *paneProc) serve(c net.Conn) {
 			p.scrub.set(values)
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "toggle-secrets":
-			// A privileged action, like set-secrets: the switch turns the
-			// stage into a pass-through, the outcome the guard exists for.
-			if !p.authorize(sc.c, m.Nonce) {
-				_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: false, Error: "toggle-secrets needs the pane's nonce"})
-				continue
-			}
-			// The operator's redaction switch. The stage flips between
-			// scrubbing and passing the output through; the value list
-			// survives both ways, so a set-secrets push while the switch is
-			// off updates the values without turning the stage back on. The
-			// reply carries the resulting state, so the server can show it.
+			// The operator's redaction switch, a convenience for human
+			// editing, served from any conn like every other control
+			// action: the pane socket is not a boundary. An agent attacking
+			// the dm socket can flip it, as it can already type keys and
+			// read panes; the real boundary is the sandboxing work. The
+			// stage flips between scrubbing and passing the output through;
+			// the value list survives both ways, so a set-secrets push
+			// while the switch is off updates the values without turning
+			// the stage back on. The reply carries the resulting state, so
+			// the server can show it.
 			res := jsonRaw(map[string]any{"enabled": p.scrub.toggle()})
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, Res: res})
 		case "ping":
