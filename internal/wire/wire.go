@@ -15,7 +15,7 @@ import (
 
 // Msg is the single envelope for every dm socket, in both directions.
 type Msg struct {
-	Type   string `json:"type"`             // req resp attach keys resize snapshot bytes replay status exit
+	Type   string `json:"type"`             // req resp attach keys resize snapshot bytes replay status exit nonce
 	Action string `json:"action,omitempty"` // req action
 	Target string `json:"target,omitempty"` // pane id
 	Dir    string `json:"dir,omitempty"`    // left right up down
@@ -97,9 +97,15 @@ type Msg struct {
 	// History is the set-history request: the ring budget in bytes the pane
 	// must resize to. The pane validates it against its own range and refuses
 	// anything outside, so a stale server cannot talk it past the limit.
-	History int             `json:"history,omitempty"`
-	St      *Status         `json:"st,omitempty"`
-	Res     json.RawMessage `json:"res,omitempty"`
+	History int `json:"history,omitempty"`
+	// Nonce is the pane daemon's handshake secret. The daemon presents it on
+	// the first conn it accepts while its privileged slot is empty, the
+	// server stores it at adopt, and the privileged actions must carry it
+	// back over that conn. It lives in memory on both sides: never in env,
+	// argv, the state file or any output.
+	Nonce string          `json:"nonce,omitempty"`
+	St    *Status         `json:"st,omitempty"`
+	Res   json.RawMessage `json:"res,omitempty"`
 }
 
 type Status struct {

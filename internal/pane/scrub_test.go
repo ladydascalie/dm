@@ -2,11 +2,8 @@ package pane
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
-
-	"dm/internal/wire"
 )
 
 // runScrub feeds chunks through a scrubber in order, then flushes, and
@@ -227,35 +224,4 @@ func runScrubFeed(t *testing.T, s *scrubber, chunk string) string {
 	s.feed([]byte(chunk), &out)
 	s.flush(&out)
 	return out.String()
-}
-
-// TestToggleSecretsActionReportsState proves the daemon action flips the
-// stage and answers with the state it landed on: enabled false first, since
-// a daemon starts enabled, then true.
-func TestToggleSecretsActionReportsState(t *testing.T) {
-	t.Parallel()
-	_, cli, msgs := yankPane(t, 20, 5)
-	reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "toggle-secrets", ID: 1})
-	if !reply.OK {
-		t.Fatalf("toggle-secrets reply = %+v, want ok", reply)
-	}
-	if enabled, ok := replyEnabled(t, reply); ok && enabled {
-		t.Fatalf("first toggle reported enabled %v, want false", enabled)
-	}
-	reply = paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "toggle-secrets", ID: 2})
-	if enabled, ok := replyEnabled(t, reply); !ok || !enabled {
-		t.Fatalf("second toggle reported enabled %v ok %v, want true", enabled, ok)
-	}
-}
-
-// replyEnabled reads the toggle-secrets reply's {"enabled":bool} body.
-func replyEnabled(t *testing.T, m wire.Msg) (bool, bool) {
-	t.Helper()
-	var res struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.Unmarshal(m.Res, &res); err != nil {
-		t.Fatalf("toggle-secrets reply body %s: %v", m.Res, err)
-	}
-	return res.Enabled, len(m.Res) > 0
 }

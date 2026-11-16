@@ -3,78 +3,79 @@ package server
 import (
 	"encoding/json"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"dm/internal/session"
 	"dm/internal/wire"
 )
 
-// togglePaneDaemon answers toggle-secrets the way a real pane daemon does:
-// the reply carries the state the pane landed on. The socket sits where the
-// server's paneRequest dials.
-func togglePaneDaemon(t *testing.T, st *session.State, id string, enabled bool) {
+// togglePane plays the privileged end of one pane conn over a pipe: it
+// records the frames the server sends and answers toggle-secrets the way
+// the guarded daemon does, nonce check included.
+type togglePane struct {
+	pane net.Conn
+	seen chan wire.Msg
+}
+
+// newTogglePane registers the conn as the pane's adopted conn, carrying the
+// nonce an adopt read from the daemon's handshake, and starts the watcher
+// that reads the conn's replies.
+func newTogglePane(t *testing.T, s *server, id, nonce string) *togglePane {
 	t.Helper()
-	sock := st.PaneSock(id)
-	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
-		t.Fatal(err)
+	srv, pane := net.Pipe()
+	s.mu.Lock()
+	s.panes[id] = &paneConn{
+		id: id, c: srv, st: wire.Status{State: "unknown"},
+		sendTimeout: paneSendTimeout, installedAt: time.Now(), nonce: nonce,
 	}
-	_ = os.Remove(sock)
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
+	s.mu.Unlock()
+	s.watchPane(id)
+	t.Cleanup(func() { _ = srv.Close(); _ = pane.Close() })
+	tp := &togglePane{pane: pane, seen: make(chan wire.Msg, 16)}
 	go func() {
 		for {
-			c, err := ln.Accept()
+			m, err := wire.ReadMsg(pane)
 			if err != nil {
 				return
 			}
-			go func(c net.Conn) {
-				defer func() { _ = c.Close() }()
-				for {
-					m, err := wire.ReadMsg(c)
-					if err != nil {
-						return
-					}
-					_ = wire.WriteMsg(c, wire.Msg{Type: "resp", ID: m.ID, OK: true,
-						Res: json.RawMessage(`{"enabled":` + map[bool]string{true: "true", false: "false"}[enabled] + `}`)})
+			select {
+			case tp.seen <- m:
+			default:
+			}
+			if m.Action == "toggle-secrets" {
+				if nonce == "" || m.Nonce != nonce {
+					_ = wire.WriteMsg(pane, wire.Msg{Type: "resp", ID: m.ID, OK: false,
+						Error: "toggle-secrets needs the pane's nonce"})
+					continue
 				}
-			}(c)
+				_ = wire.WriteMsg(pane, wire.Msg{Type: "resp", ID: m.ID, OK: true,
+					Res: json.RawMessage(`{"enabled":false}`)})
+			}
 		}
 	}()
-}
-
-// toggleServer is a histServer whose first pane answers the toggle, plus an
-// attached client for the request path.
-func toggleServer(t *testing.T, name string) (*server, *client, net.Conn, []string) {
-	t.Helper()
-	s, ids := histServer(t, name, 1)
-	togglePaneDaemon(t, s.st, ids[0], false)
-	cl, conn := boxConn(t)
-	cl.attached = true
-	return s, cl, conn, ids
+	return tp
 }
 
 // The toggle answers only to an attached client: a toggle a dm exec script
 // could send would let an agent running inside dm disable its own redaction.
 func TestToggleSecretsRefusesUnattachedConn(t *testing.T) {
 	t.Parallel()
-	s, ids := histServer(t, "toggleguard", 1)
-	togglePaneDaemon(t, s.st, ids[0], false)
+	s, ids := histServer(t, "toggleguard", 2)
+	newTogglePane(t, s, ids[0], "handshake-nonce")
 	cl, conn := boxConn(t)
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "toggle-secrets", Target: ids[0], ID: 1})
 	wantErr(t, "toggle-secrets", "interactive client", m)
 }
 
-// The toggle rides to the named pane's daemon and the reply carries the pane
-// and the state the daemon reports.
+// The toggle rides the adopted conn carrying the nonce, and the reply
+// carries the pane and the state the daemon reports.
 func TestToggleSecretsForwardsAndReports(t *testing.T) {
 	t.Parallel()
-	s, cl, conn, ids := toggleServer(t, "toggleride")
+	s, ids := histServer(t, "toggleride", 2)
+	tp := newTogglePane(t, s, ids[0], "handshake-nonce")
+	cl, conn := boxConn(t)
+	cl.attached = true
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "toggle-secrets", Target: ids[0], ID: 1})
 	if !m.OK {
 		t.Fatalf("toggle-secrets failed: %s", m.Error)
@@ -88,6 +89,31 @@ func TestToggleSecretsForwardsAndReports(t *testing.T) {
 	}
 	if res.Pane != ids[0] || res.Enabled {
 		t.Fatalf("reply = %+v, want pane %q enabled false", res, ids[0])
+	}
+	select {
+	case got := <-tp.seen:
+		if got.Action != "toggle-secrets" || got.Nonce != "handshake-nonce" {
+			t.Fatalf("the pane received %+v, want toggle-secrets carrying the nonce", got)
+		}
+	default:
+		t.Fatal("the pane received no toggle")
+	}
+}
+
+// A conn adopted without the handshake sends an empty nonce and the daemon
+// refuses; the refusal reaches the client as the reply's error.
+func TestToggleSecretsRefusedWithoutNonce(t *testing.T) {
+	t.Parallel()
+	s, ids := histServer(t, "togglenonce", 2)
+	newTogglePane(t, s, ids[0], "")
+	cl, conn := boxConn(t)
+	cl.attached = true
+	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "toggle-secrets", Target: ids[0], ID: 1})
+	if m.OK {
+		t.Fatal("the toggle succeeded without a nonce, want the daemon's refusal")
+	}
+	if !strings.Contains(m.Error, "nonce") {
+		t.Fatalf("error = %q, want it to name the nonce", m.Error)
 	}
 }
 
@@ -111,4 +137,15 @@ func TestToggleSecretsMissingPaneFails(t *testing.T) {
 	s, cl, conn, _ := toggleServer(t, "togglegone")
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "toggle-secrets", Target: "ghost", ID: 1})
 	wantErr(t, "toggle-secrets", "no pane", m)
+}
+
+// toggleServer is a histServer whose first pane speaks the guarded toggle,
+// plus an attached client for the request path.
+func toggleServer(t *testing.T, name string) (*server, *client, net.Conn, []string) {
+	t.Helper()
+	s, ids := histServer(t, name, 2)
+	newTogglePane(t, s, ids[0], "handshake-nonce")
+	cl, conn := boxConn(t)
+	cl.attached = true
+	return s, cl, conn, ids
 }
