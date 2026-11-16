@@ -259,33 +259,35 @@ func TestReplyTerminalWritesIntoThePty(t *testing.T) {
 }
 
 // TestReplyQueryAnswersTheProbe proves the OSC 7501 probe is answered with a
-// real status reply in the wire format ParseStatus accepts, written into the
-// pty, which is the channel the asking program reads.
+// real status reply that echoes the probe's ?, the token a status-aware
+// program matches to enable posting, and carries the status in the wire
+// format ParseStatus accepts, written into the pty.
 func TestReplyQueryAnswersTheProbe(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
 	p := &paneProc{ptmx: w, st: wire.Status{State: "working", App: "pi", Message: "building"}}
 	p.replyQuery()
-	want := "\x1b]7501;state=working:app=pi:msg=" +
+	want := "\x1b]7501;?state=working:app=pi:msg=" +
 		base64.StdEncoding.EncodeToString([]byte("building")) + "\x1b\\"
 	got := readReply(t, r, len(want))
 	if string(got) != want {
 		t.Fatalf("pty received %q, want the status reply %q", got, want)
 	}
-	payload := strings.TrimSuffix(strings.TrimPrefix(string(got), "\x1b]7501;"), "\x1b\\")
+	payload := strings.TrimSuffix(strings.TrimPrefix(string(got), "\x1b]7501;?"), "\x1b\\")
 	if st := osc.ParseStatus(payload); st.State != "working" || st.App != "pi" || st.Message != "building" {
 		t.Fatalf("ParseStatus(%q) = %+v, want the replied status back", payload, st)
 	}
 }
 
 // TestReplyQueryAnswersWithUnknown proves a pane no program has named yet
-// still answers the probe with a state, the one the rail displays.
+// still answers the probe with a state, the one the rail displays, echoing
+// the probe's ? so status-aware programs enable posting.
 func TestReplyQueryAnswersWithUnknown(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
 	p := &paneProc{ptmx: w}
 	p.replyQuery()
-	want := "\x1b]7501;state=unknown\x1b\\"
+	want := "\x1b]7501;?state=unknown\x1b\\"
 	got := readReply(t, r, len(want))
 	if string(got) != want {
 		t.Fatalf("pty received %q, want the unknown state reply", got)

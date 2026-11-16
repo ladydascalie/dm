@@ -636,8 +636,17 @@ func (p *paneProc) replyQuery() {
 	st := p.st
 	p.mu.Unlock()
 	go func() {
-		_, _ = p.ptmx.Write([]byte(formatStatus(st)))
+		_, _ = p.ptmx.Write([]byte(formatStatusQuery(st)))
 	}()
+}
+
+// formatStatusQuery renders the answer to an OSC 7501 feature probe. The
+// leading ? echoes the probe, which is the token a status-aware program
+// matches to decide the terminal speaks the protocol; the pairs that follow
+// are the pane's current status in the wire format ParseStatus accepts.
+func formatStatusQuery(st wire.Status) string {
+	s := formatStatus(st)
+	return "\x1b]7501;?" + s[len("\x1b]7501;"):]
 }
 
 // formatStatus renders a status in the OSC 7501 wire format:
@@ -827,8 +836,10 @@ func (p *paneProc) serve(c net.Conn) {
 			dead := p.dead
 			p.mu.Unlock()
 			lines := splitLines(text)
-			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, St: &st, Lines: lines,
-				Res: jsonRaw(map[string]any{"title": title, "dead": dead})})
+			_ = sc.send(wire.Msg{
+				Type: "resp", ID: m.ID, OK: true, St: &st, Lines: lines,
+				Res: jsonRaw(map[string]any{"title": title, "dead": dead}),
+			})
 		case "screen":
 			p.mu.Lock()
 			snap := p.vt.Snapshot()
@@ -883,8 +894,10 @@ func (p *paneProc) serve(c net.Conn) {
 			title := p.vt.Title()
 			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
-			_ = sc.send(wire.Msg{Type: "replay", Data: data, St: &st,
-				Res: jsonRaw(map[string]any{"title": title, "dead": dead, "alt": alt, "mouse": mouse, "paste": paste})})
+			_ = sc.send(wire.Msg{
+				Type: "replay", Data: data, St: &st,
+				Res: jsonRaw(map[string]any{"title": title, "dead": dead, "alt": alt, "mouse": mouse, "paste": paste}),
+			})
 		case "status":
 			p.mu.Lock()
 			st := p.st
@@ -948,8 +961,10 @@ func (p *paneProc) serve(c net.Conn) {
 			}
 			if p.waiter != nil {
 				p.mu.Unlock()
-				_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: false,
-					Error: "a wait is already running"})
+				_ = sc.send(wire.Msg{
+					Type: "resp", ID: m.ID, OK: false,
+					Error: "a wait is already running",
+				})
 				continue
 			}
 			// A pane at a prompt has no command to report: its wait belongs to
@@ -969,8 +984,10 @@ func (p *paneProc) serve(c net.Conn) {
 			if p.anchorSet && !idle {
 				anchor = p.anchor
 			}
-			w := &waitReq{sc: sc, id: m.ID, anchor: anchor, mark: marked,
-				done: make(chan struct{})}
+			w := &waitReq{
+				sc: sc, id: m.ID, anchor: anchor, mark: marked,
+				done: make(chan struct{}),
+			}
 			p.waiter = w
 			tail, cols, h, tailOK := p.yankTailLocked()
 			if idle {
@@ -988,10 +1005,12 @@ func (p *paneProc) serve(c net.Conn) {
 			if tailOK {
 				lines, start, rows = yankRows(tail, cols, h)
 			}
-			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true,
+			_ = sc.send(wire.Msg{
+				Type: "resp", ID: m.ID, OK: true,
 				Res: jsonRaw(map[string]any{
 					"lines": lines, "start": start, "rows": rows, "anchor": tailOK,
-				})})
+				}),
+			})
 			// A command that already returned has its D mark behind the
 			// request and no further publish may come: run the same check
 			// every publish runs, right here.
