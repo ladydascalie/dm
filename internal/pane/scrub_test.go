@@ -2,8 +2,11 @@ package pane
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"dm/internal/wire"
 )
 
 // runScrub feeds chunks through a scrubber in order, then flushes, and
@@ -147,4 +150,112 @@ func TestScrubEmitsUnmatchedChunkInFull(t *testing.T) {
 	if got := out.String(); got != chunk {
 		t.Fatalf("scrub emitted %q, want the full chunk in one feed", got)
 	}
+}
+
+// TestScrubToggleOffPassesThrough proves the switch off lets matched and
+// unmatched bytes through untouched, in order, and that bytes an earlier
+// feed held back go out first rather than vanishing.
+func TestScrubToggleOffPassesThrough(t *testing.T) {
+	t.Parallel()
+	var s scrubber
+	s.set([]string{"token1234"})
+	// The hold-back takes four bytes; the switch goes off before the rest
+	// of the occurrence arrives, and those bytes must still come out whole.
+	var out bytes.Buffer
+	s.feed([]byte("axtok"), &out)
+	if got := out.String(); got != "ax" {
+		t.Fatalf("pre-toggle feed emitted %q, want %q", got, "ax")
+	}
+	if s.toggle() {
+		t.Fatal("fresh scrubber toggled to enabled, want disabled")
+	}
+	out.Reset()
+	s.feed([]byte("en1234 mid plain\n"), &out)
+	s.flush(&out)
+	if got := out.String(); got != "token1234 mid plain\n" {
+		t.Fatalf("disabled scrubber emitted %q, want the bytes back untouched", got)
+	}
+}
+
+// TestScrubRetainsValuesAcrossToggle proves the switch off keeps the value
+// list: switching back on resumes redaction with no fresh push.
+func TestScrubRetainsValuesAcrossToggle(t *testing.T) {
+	t.Parallel()
+	var s scrubber
+	s.set([]string{"token1234"})
+	s.toggle()
+	if !s.toggle() {
+		t.Fatal("second toggle left the scrubber disabled, want enabled")
+	}
+	got := runScrubFeed(t, &s, "see token1234 here")
+	want := "see ********* here"
+	if got != want {
+		t.Fatalf("re-enabled scrubber emitted %q, want %q", got, want)
+	}
+}
+
+// TestScrubSetWhileDisabledStaysDisabled proves a set-secrets push while the
+// switch is off updates the values and leaves the stage passing through:
+// the human's off outlives a data update.
+func TestScrubSetWhileDisabledStaysDisabled(t *testing.T) {
+	t.Parallel()
+	var s scrubber
+	s.set([]string{"oldsecret"})
+	s.toggle()
+	s.set([]string{"newsecret"})
+	got := runScrubFeed(t, &s, "newsecret plain")
+	if got != "newsecret plain" {
+		t.Fatalf("disabled scrubber after a set emitted %q, want the bytes back", got)
+	}
+	if !s.toggle() {
+		t.Fatal("toggle after a disabled set did not re-enable")
+	}
+	// set replaced the list, so the old value scrubs no more and the new
+	// one does: the push landed while the switch was off.
+	got = runScrubFeed(t, &s, "newsecret oldsecret")
+	want := "********* oldsecret"
+	if got != want {
+		t.Fatalf("re-enabled scrubber emitted %q, want %q", got, want)
+	}
+}
+
+// runScrubFeed feeds one chunk through an existing scrubber and flushes,
+// for tests that drive set and toggle themselves.
+func runScrubFeed(t *testing.T, s *scrubber, chunk string) string {
+	t.Helper()
+	var out bytes.Buffer
+	s.feed([]byte(chunk), &out)
+	s.flush(&out)
+	return out.String()
+}
+
+// TestToggleSecretsActionReportsState proves the daemon action flips the
+// stage and answers with the state it landed on: enabled false first, since
+// a daemon starts enabled, then true.
+func TestToggleSecretsActionReportsState(t *testing.T) {
+	t.Parallel()
+	_, cli, msgs := yankPane(t, 20, 5)
+	reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "toggle-secrets", ID: 1})
+	if !reply.OK {
+		t.Fatalf("toggle-secrets reply = %+v, want ok", reply)
+	}
+	if enabled, ok := replyEnabled(t, reply); ok && enabled {
+		t.Fatalf("first toggle reported enabled %v, want false", enabled)
+	}
+	reply = paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "toggle-secrets", ID: 2})
+	if enabled, ok := replyEnabled(t, reply); !ok || !enabled {
+		t.Fatalf("second toggle reported enabled %v ok %v, want true", enabled, ok)
+	}
+}
+
+// replyEnabled reads the toggle-secrets reply's {"enabled":bool} body.
+func replyEnabled(t *testing.T, m wire.Msg) (bool, bool) {
+	t.Helper()
+	var res struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		t.Fatalf("toggle-secrets reply body %s: %v", m.Res, err)
+	}
+	return res.Enabled, len(m.Res) > 0
 }
