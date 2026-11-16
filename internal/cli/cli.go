@@ -42,6 +42,11 @@ type cmdFlags struct {
 	state      string
 	body       string
 	bodyFile   string
+	tool       string
+	ref        string
+	upstream   string
+	header     string
+	to         string
 	seq        int
 	from       string
 	limit      int
@@ -93,12 +98,13 @@ func newFlags(name string) *cmdFlags { return newFlagsAt(paths.StateDir(), name)
 func (c *cmdFlags) parse(args []string) {
 	ordered := reorder(args)
 	verb := c.fs.Name()
-	if verb == "msg" {
-		// The msg subverb is the first positional: reorder has already
-		// moved every flag in front of it. An unknown or missing subverb
-		// registers nothing, and the usage printer shows the list.
-		if sub := firstArg(ordered); sub != "" && clidoc.VerbFlags("msg "+sub) != nil {
-			verb = "msg " + sub
+	if verb == "msg" || verb == "secret" {
+		// The subverb of a grouped verb is the first positional: reorder
+		// has already moved every flag in front of it. An unknown or
+		// missing subverb registers nothing, and the usage printer shows
+		// the list.
+		if sub := firstArg(ordered); sub != "" && clidoc.VerbFlags(verb+" "+sub) != nil {
+			verb = verb + " " + sub
 		}
 	}
 	for _, f := range clidoc.VerbFlags(verb) {
@@ -229,6 +235,16 @@ func (c *cmdFlags) register(name, desc string) {
 		c.fs.BoolVar(&c.force, "force", false, desc)
 	case "action-json":
 		c.fs.StringVar(&c.msgJSON, "action-json", "", desc)
+	case "tool":
+		c.fs.StringVar(&c.tool, "tool", "", desc)
+	case "ref":
+		c.fs.StringVar(&c.ref, "ref", "", desc)
+	case "upstream":
+		c.fs.StringVar(&c.upstream, "upstream", "", desc)
+	case "header":
+		c.fs.StringVar(&c.header, "header", "", desc)
+	case "to":
+		c.fs.StringVar(&c.to, "to", "", desc)
 	default:
 		panic("cli: no field binding for flag " + name)
 	}
@@ -302,6 +318,9 @@ var withValue = map[string]bool{
 	"-seq": true, "--seq": true, "-from": true, "--from": true,
 	"-prefix": true, "--prefix": true, "-after": true, "--after": true,
 	"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
+	"-tool": true, "--tool": true, "-ref": true, "--ref": true,
+	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
+	"-to": true, "--to": true,
 }
 
 // reorder moves flags before positionals, so -s may follow a pane id.
@@ -691,6 +710,11 @@ func Run(argv []string) error {
 		}
 		return runList(c)
 
+	case "secret":
+		c := newFlagsAt(root, "secret")
+		c.parse(argv[1:])
+		return runSecret(c)
+
 	default:
 		// A bare word is a session name; leading flags are attach flags.
 		// A bad flag there is a top-level mistake, so the usage it
@@ -707,6 +731,159 @@ func Run(argv []string) error {
 		}
 		return client.Run(name)
 	}
+}
+
+// The secret verbs. A fetched value never touches this process: the server
+// fetches, redacts, hydrates and types, and the replies name the secret, the
+// path or the endpoint, never the value.
+
+// The secret verbs. A fetched value never touches this process: the server
+// fetches, redacts, hydrates and types, and the replies name the secret, the
+// path or the endpoint, never the value.
+
+// runSecret dispatches the secret subverbs.
+func runSecret(c *cmdFlags) error {
+	if len(c.args) == 0 {
+		fmt.Print(clidoc.SecretSubcommands())
+		return nil
+	}
+	switch c.args[0] {
+	case "register":
+		return secretRegisterVerb(c)
+	case "list":
+		if len(c.args) > 1 {
+			return fmt.Errorf("secret list: unexpected argument %q", c.args[1])
+		}
+		return secretListVerb(c)
+	case "revoke":
+		return secretNameVerb(c, "secret-revoke")
+	case "use":
+		return secretUseVerb(c)
+	case "hydrate":
+		return secretHydrateVerb(c)
+	case "type":
+		return secretTypeVerb(c)
+	}
+	return fmt.Errorf("secret: unknown verb %q: want register, list, revoke, use, hydrate or type", c.args[0])
+}
+
+// secretName is the registry name: the first positional after the subverb.
+func secretName(c *cmdFlags) string {
+	return c.args[1]
+}
+
+// secretRegisterVerb registers one secret in the session's registry.
+func secretRegisterVerb(c *cmdFlags) error {
+	if len(c.args) < 2 {
+		return fmt.Errorf("secret register needs a name")
+	}
+	if c.tool == "" {
+		return fmt.Errorf("secret register needs --tool")
+	}
+	if c.tool != "op" && c.tool != "pass" {
+		return fmt.Errorf("secret register: unknown tool %q: want op or pass", c.tool)
+	}
+	if c.ref == "" {
+		return fmt.Errorf("secret register needs --ref")
+	}
+	if len(c.args) > 2 {
+		return fmt.Errorf("secret register: unexpected argument %q", c.args[2])
+	}
+	name := secretName(c)
+	return printRPC(c.session, wire.Msg{
+		Action: "secret-register", Name: name,
+		Tool: c.tool, Ref: c.ref, Upstream: c.upstream, Header: c.header,
+	})
+}
+
+// secretListVerb prints names and references only.
+func secretListVerb(c *cmdFlags) error {
+	m, err := transport.RPC(c.session, wire.Msg{Action: "secret-list"})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var res struct {
+		Secrets []struct {
+			Name      string `json:"name"`
+			Reference string `json:"reference"`
+		} `json:"secrets"`
+	}
+	_ = json.Unmarshal(m.Res, &res)
+	for _, r := range res.Secrets {
+		fmt.Printf("%s\t%s\n", r.Name, r.Reference)
+	}
+	return nil
+}
+
+// secretNameVerb runs one action that takes only the secret name.
+func secretNameVerb(c *cmdFlags, action string) error {
+	if len(c.args) < 2 {
+		return fmt.Errorf("secret %s needs a name", c.args[0])
+	}
+	if len(c.args) > 2 {
+		return fmt.Errorf("secret %s: unexpected argument %q", c.args[0], c.args[2])
+	}
+	name := secretName(c)
+	return printRPC(c.session, wire.Msg{Action: action, Name: name})
+}
+
+// secretUseVerb prints only the endpoint URL: the value never reaches stdout.
+func secretUseVerb(c *cmdFlags) error {
+	if len(c.args) < 2 {
+		return fmt.Errorf("secret use needs a name")
+	}
+	if len(c.args) > 2 {
+		return fmt.Errorf("secret use: unexpected argument %q", c.args[2])
+	}
+	name := secretName(c)
+	m, err := transport.RPC(c.session, wire.Msg{Action: "secret-use", Name: name})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var res struct {
+		Endpoint string `json:"endpoint"`
+	}
+	_ = json.Unmarshal(m.Res, &res)
+	if res.Endpoint != "" {
+		fmt.Println(res.Endpoint)
+	}
+	return nil
+}
+
+// secretHydrateVerb writes the value to a file out of band.
+func secretHydrateVerb(c *cmdFlags) error {
+	if len(c.args) < 2 {
+		return fmt.Errorf("secret hydrate needs a name")
+	}
+	if len(c.args) > 2 {
+		return fmt.Errorf("secret hydrate: unexpected argument %q", c.args[2])
+	}
+	if c.to == "" {
+		return fmt.Errorf("secret hydrate needs --to")
+	}
+	name := secretName(c)
+	return printRPC(c.session, wire.Msg{Action: "secret-hydrate", Name: name, Path: c.to})
+}
+
+// secretTypeVerb types the value into a pane.
+func secretTypeVerb(c *cmdFlags) error {
+	if len(c.args) < 2 {
+		return fmt.Errorf("secret type needs a name")
+	}
+	if len(c.args) > 2 {
+		return fmt.Errorf("secret type: unexpected argument %q", c.args[2])
+	}
+	if c.to == "" {
+		return fmt.Errorf("secret type needs --to")
+	}
+	name := secretName(c)
+	return printRPC(c.session, wire.Msg{Action: "secret-type", Name: name, Target: c.to})
 }
 
 func printRPC(name string, req wire.Msg) error {

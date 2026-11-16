@@ -23,6 +23,8 @@ import (
 	"dm/internal/layout"
 	"dm/internal/notify"
 	"dm/internal/paths"
+	"dm/internal/proxy"
+	"dm/internal/secrets"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -345,6 +347,20 @@ type server struct {
 	// zoom is the zoomed pane id, empty when no pane is zoomed. Memory only:
 	// a restart shows the splits, so it never reaches state.json.
 	zoom string
+
+	// secrets holds the fetched secret values, memory only: the registry
+	// never reaches the state file, the logs or a reply. secretActive names
+	// the secrets whose values are live, secretPrefixes maps a name to the
+	// proxy prefix it serves under, and proxy is the loopback listener the
+	// first secret use starts. All four are guarded by mu; nil until the
+	// first secret action, so a server that never touches secrets pays
+	// nothing. fetch is a field so a test can stub the tool call without
+	// putting op on PATH; nil means secrets.Fetch.
+	secrets        *secrets.Registry
+	secretActive   map[string]bool
+	secretPrefixes map[string]string
+	proxy          *proxy.Proxy
+	fetch          func(*session.Secret) (string, error)
 
 	// termColours is the pair a client detected from its own terminal. It is
 	// nil until the first client reports, so a server that never saw one
@@ -706,6 +722,15 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 	if tc != nil {
 		if err := pc.send(wire.Msg{Action: "term-colours", FG: tc.fg, BG: tc.bg}); err != nil {
 			log.Printf("pane %s: term-colours: %v", id, err)
+		}
+	}
+	// A pane that outlived a server, or one born while values were live,
+	// starts with an empty redaction list. Hand it the live set now, so its
+	// first published chunk is already scrubbed.
+	if values := s.secretValues(); len(values) > 0 {
+		body := jsonRaw(map[string]any{"values": values})
+		if err := pc.send(wire.Msg{Action: "set-secrets", Res: body}); err != nil {
+			log.Printf("pane %s: set-secrets: %v", id, err)
 		}
 	}
 	// A daemon that outlived a server has gone wherever its shell went, so

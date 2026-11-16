@@ -70,6 +70,11 @@ type paneProc struct {
 	// second wait request is refused until it ends. Guarded by mu.
 	waiter *waitReq
 
+	// scrub redacts secret values from the pane's output before it reaches
+	// the screen, the ring or a subscriber. The server pushes the values
+	// with set-secrets. carry belongs to the pty reader goroutine alone.
+	scrub scrubber
+
 	// children samples a pid's foreground children for the wait fallback; nil
 	// uses the real /proc read. It is a field, not a package var, so a test's
 	// stand-in lives on its own pane and parallel tests share no global.
@@ -346,7 +351,10 @@ func paneCmd(o *paneOpts) *exec.Cmd {
 		cmd = exec.Command(o.argv[0], o.argv[1:]...)
 	}
 	cmd.Dir = o.cwd
-	cmd.Env = append(os.Environ(), "DM_PANE="+o.id, "DM_SESSION="+o.session)
+	// The env is built by rule, not inherited whole: the daemon holds the
+	// server's environment and none of its credentials may reach the pane.
+	// paneEnv documents the strip rule.
+	cmd.Env = paneEnv(os.Environ(), o.id, o.session)
 	return cmd
 }
 
@@ -498,15 +506,20 @@ func (p *paneProc) reap(reason string) {
 
 func (p *paneProc) readLoop() {
 	buf := make([]byte, 32<<10)
-	var clean bytes.Buffer
+	var clean, scrubbed bytes.Buffer
 	filter := p.newFilter()
 	for {
 		n, err := p.ptmx.Read(buf)
 		if n > 0 {
 			p.syncFilter(filter)
 			clean.Reset()
+			scrubbed.Reset()
 			filter.Feed(buf[:n], &clean)
-			b := append([]byte(nil), clean.Bytes()...)
+			// The scrub stage is the last filter: everything downstream, the
+			// screen, the ring, the broadcasts and every read-back, sees
+			// redacted bytes and no secret lands in scrollback.
+			p.scrub.feed(clean.Bytes(), &scrubbed)
+			b := append([]byte(nil), scrubbed.Bytes()...)
 			if len(b) > 0 {
 				p.mu.Lock()
 				p.publishLocked(b)
@@ -514,6 +527,15 @@ func (p *paneProc) readLoop() {
 			}
 		}
 		if err != nil {
+			// The stream is over, so the scrub stage can let go of the bytes
+			// it held back for a straddled match.
+			scrubbed.Reset()
+			p.scrub.flush(&scrubbed)
+			if b := append([]byte(nil), scrubbed.Bytes()...); len(b) > 0 {
+				p.mu.Lock()
+				p.publishLocked(b)
+				p.mu.Unlock()
+			}
 			p.mu.Lock()
 			p.dead = true
 			if sc, reply, ok := p.waitEndLocked(); ok {
@@ -897,6 +919,18 @@ func (p *paneProc) serve(c net.Conn) {
 			p.ring.Resize(m.History)
 			p.mu.Unlock()
 			debug.SetMemoryLimit(int64(m.History) + memHeadroom)
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
+		case "set-secrets":
+			// The server pushes the values this pane's output must never
+			// echo. The stage redacts from the next chunk on; output already
+			// published stays as it was, so the push should follow the spawn
+			// before the first command runs.
+			values, err := secretValues(m.Res)
+			if err != nil {
+				_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: false, Error: err.Error()})
+				continue
+			}
+			p.scrub.set(values)
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})

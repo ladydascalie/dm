@@ -44,6 +44,7 @@ const (
 	groupWindows  = "windows and workspaces"
 	groupObserve  = "observe"
 	groupBox      = "message box"
+	groupSecrets  = "secrets"
 	groupDocs     = "docs"
 )
 
@@ -58,6 +59,7 @@ var cliGroups = []struct {
 	{groupWindows, "Windows and workspaces"},
 	{groupObserve, "Observe"},
 	{groupBox, "Message box"},
+	{groupSecrets, "Secrets"},
 	{groupDocs, "Docs"},
 }
 
@@ -388,6 +390,65 @@ var cliCommands = []cliCommand{
 		group:   groupBox,
 	},
 
+	// Secrets: the registry, the proxy endpoint and the value's routes. A
+	// fetched value never reaches stdout, argv, a log or the state file.
+	{
+		name:    "secret register",
+		args:    "<name> --tool op --ref R [--upstream URL] [--header T]",
+		summary: "register a secret: how to fetch it and where it rides",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"tool", "op", "tool that prints the value: op or pass"},
+			{"ref", "R", "reference the tool resolves: an op:// URI or a store path"},
+			{"upstream", "URL", "pin the proxy upstream the secret rides to"},
+			{"header", "T", "proxy header template, {} marks the value slot"},
+		},
+		example: `dm secret register gh-cli --tool op --ref 'op://Personal/github/token' --upstream https://api.github.com --header 'Authorization: Bearer {}'`,
+		group:   groupSecrets,
+	},
+	{
+		name:    "secret list",
+		summary: "print registered secret names and references only",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupSecrets,
+	},
+	{
+		name:    "secret revoke",
+		args:    "<name>",
+		summary: "remove a secret and drop its value everywhere",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupSecrets,
+	},
+	{
+		name:    "secret use",
+		args:    "<name>",
+		summary: "fetch a secret, redact it in every pane, serve it on the proxy, print the endpoint URL",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		example: `dm secret use gh-cli`,
+		group:   groupSecrets,
+	},
+	{
+		name:    "secret hydrate",
+		args:    "<name> --to P",
+		summary: "fetch a secret and write it to a file at 0600",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"to", "P", "file path to write"},
+		},
+		group: groupSecrets,
+	},
+	{
+		name:    "secret type",
+		args:    "<name> --to PANE",
+		summary: "fetch a secret and type it into a pane",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"to", "PANE", "target pane id"},
+		},
+		example: `dm secret type gh-cli --to w1p1`,
+		group:   groupSecrets,
+	},
+
 	// Documentation.
 	{
 		name:    "man",
@@ -592,6 +653,21 @@ func MsgSubcommands() string {
 	}
 	writeRows(&b, rows)
 	b.WriteString("\n  run dm help for every command, or dm msg <verb> -h for one verb.\n")
+	return b.String()
+}
+
+// SecretSubcommands is the bare secret verb's help: one row per subverb.
+func SecretSubcommands() string {
+	var b strings.Builder
+	b.WriteString("dm secret\n")
+	var rows []usageRow
+	for _, c := range cliCommands {
+		if strings.HasPrefix(c.name, "secret ") {
+			rows = append(rows, usageRow{c.line(), c.summary})
+		}
+	}
+	writeRows(&b, rows)
+	b.WriteString("\n  run dm help for every command, or dm secret <verb> -h for one verb.\n")
 	return b.String()
 }
 

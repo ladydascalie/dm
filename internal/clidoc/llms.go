@@ -152,6 +152,8 @@ var llmsActionGroups = [][]string{
 	{"float-open", "float-close"},
 	{"msg-post"}, {"msg-list"}, {"msg-clear"}, {"msg-wait"}, {"msg-sub"},
 	{"msg-watchers", "msg-schema"},
+	{"secret-register", "secret-list"}, {"secret-revoke"},
+	{"secret-use", "secret-hydrate", "secret-type"},
 }
 
 // LLMsText renders the whole page.

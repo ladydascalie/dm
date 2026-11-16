@@ -595,6 +595,24 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.afterMutation()
 		s.reply(cl, m, map[string]any{"workspace": m.Target, "name": name}, err)
 
+	case "secret-register":
+		s.secretRegister(cl, m)
+
+	case "secret-list":
+		s.secretList(cl, m)
+
+	case "secret-revoke":
+		s.secretRevoke(cl, m)
+
+	case "secret-use":
+		s.secretUse(cl, m)
+
+	case "secret-hydrate":
+		s.secretHydrate(cl, m)
+
+	case "secret-type":
+		s.secretType(cl, m)
+
 	default:
 		s.reply(cl, m, nil, fmt.Errorf("unknown action %q", m.Action))
 	}

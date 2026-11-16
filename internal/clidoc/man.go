@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-14"
+const manDate = "2026-11-16"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -50,7 +50,12 @@ var manActionFields = []manField{
 	{"keys", "raw bytes to write to a pane"},
 	{"data", "raw bytes"},
 	{"count", "history rows above the screen"},
-	{"res", "the verb payload for the msg-* actions"},
+	{"res", "the verb payload for the msg-* actions; set-secrets carries the redaction values"},
+	{"tool", "secret-register: the tool that prints the value, op or pass"},
+	{"ref", "secret-register: the op:// URI or store path the tool resolves"},
+	{"upstream", "secret-register: the proxy upstream URL the secret rides to"},
+	{"header", "secret-register: the proxy header template, {} marks the value slot"},
+	{"path", "secret-hydrate: the file the value is written to, out of band"},
 }
 
 // manActionNames is every action the server accepts through dm exec.
@@ -69,6 +74,8 @@ var manActionNames = []string{
 	"float-open", "float-close",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",
 	"msg-watchers", "msg-schema",
+	"secret-register", "secret-list", "secret-revoke",
+	"secret-use", "secret-hydrate", "secret-type",
 }
 
 // roffEscape makes text safe for a roff line. A backslash becomes \e, and a
