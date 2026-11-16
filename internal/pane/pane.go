@@ -1253,8 +1253,13 @@ func (p *paneProc) waitEndLocked() (sc *subConn, reply wire.Msg, ok bool) {
 		if end, marked := p.vt.CommandEnd(); marked && end >= w.anchor {
 			p.waiter = nil
 			close(w.done)
+			// The exit comes from the most recent coded D mark at or after
+			// the anchor, not from the latest D mark: one read of the stream
+			// can hold the command's coded mark and the prompt hook's bare D
+			// behind it, and the wait that ends on that read must still
+			// answer the code the command reported.
 			var exit *int
-			if code, coded := p.vt.CommandExit(); coded {
+			if code, coded := p.vt.CommandExitFrom(w.anchor); coded {
 				exit = &code
 			}
 			return w.sc, waitReply(w.id, exit, "mark"), true
