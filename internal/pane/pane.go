@@ -95,6 +95,12 @@ type paneProc struct {
 	writes     chan ptyWrite
 	ptyDropped atomic.Int64
 	writer     sync.Once
+
+	// subEvicted counts the subscribers evicted for not reading: a queue
+	// past its byte bound, or a send that failed or outlived its deadline.
+	// Atomic because the subscriber writers and every serve loop touch it
+	// without the pane lock.
+	subEvicted atomic.Int64
 }
 
 // ptyWrite is one queued pty write: the payload bytes and, for a pane write
@@ -169,16 +175,172 @@ func modeRes(alt, mouse, paste bool) json.RawMessage {
 	return jsonRaw(map[string]any{"alt": alt, "mouse": mouse, "paste": paste})
 }
 
-// subConn serialises frames: the read loop and request handlers both write.
+// subSendTimeout bounds one write to a subscriber. A subscriber that stops
+// reading must not hold a frame, or the broadcasts behind it, forever; the
+// bound matches the server's own paneSendTimeout, its client-side twin.
+const subSendTimeout = 5 * time.Second
+
+// subQueueBytes bounds what one subscriber may have queued, in bytes. A
+// subscriber past the bound is not reading: it is evicted instead of handed a
+// backlog, the same bound and answer the server gives its own clients.
+const subQueueBytes = 1 << 20
+
+// subConn is one connection the pane streams to. Frames queue on a bounded
+// per-connection queue and one writer goroutine owns the socket, so a
+// subscriber that stops reading never blocks the serve loop or the pane lock:
+// the queue takes the frames until its byte bound, and past the bound, or on
+// a write that outlives its deadline, the subscriber is evicted and its conn
+// closes. It may reconnect and starts fresh.
 type subConn struct {
-	c  net.Conn
-	mu sync.Mutex
+	p *paneProc
+	c net.Conn
+
+	mu     sync.Mutex
+	cond   *sync.Cond // wakes the writer; guards the queue with mu
+	q      []wire.Msg
+	qbytes int
+	closed bool
+	writer sync.Once
+
+	// sendTimeout bounds one write to the socket; zero uses subSendTimeout.
+	// A field, not a package var, so a test's stand-in lives on its own conn.
+	sendTimeout time.Duration
 }
 
-func (s *subConn) send(m wire.Msg) error {
+// send queues one frame and reports whether it went into the queue. A frame
+// for a closed or evicted conn returns false. A frame that would push a
+// non-empty queue past its byte bound evicts the subscriber instead: the conn
+// closes, the writer stops and the caller moves on. A single frame bigger
+// than the whole bound still ships on an empty queue, so a full ring replay
+// reaches a fresh subscriber under the write deadline.
+func (s *subConn) send(m wire.Msg) bool {
+	n := msgBytes(m)
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return wire.WriteMsg(s.c, m)
+	if s.closed {
+		s.mu.Unlock()
+		return false
+	}
+	if s.qbytes+n > subQueueBytes && len(s.q) > 0 {
+		s.mu.Unlock()
+		s.evict()
+		return false
+	}
+	if s.cond == nil {
+		s.cond = sync.NewCond(&s.mu)
+	}
+	s.q = append(s.q, m)
+	s.qbytes += n
+	s.writer.Do(func() { go s.writeLoop() })
+	s.cond.Broadcast()
+	s.mu.Unlock()
+	return true
+}
+
+// popLocked removes the head frame and clears its slot, so a lagging
+// subscriber does not pin the buffers of frames it already sent. The caller
+// holds s.mu.
+func (s *subConn) popLocked() wire.Msg {
+	m := s.q[0]
+	s.q[0] = wire.Msg{}
+	s.q = s.q[1:]
+	s.qbytes -= msgBytes(m)
+	return m
+}
+
+// writeLoop is the one goroutine that owns a subscriber's socket. It takes
+// queued frames in order and writes each under a deadline; a write that fails
+// or outlives the deadline evicts the subscriber.
+func (s *subConn) writeLoop() {
+	for {
+		s.mu.Lock()
+		for len(s.q) == 0 && !s.closed {
+			if s.cond == nil {
+				s.cond = sync.NewCond(&s.mu)
+			}
+			s.cond.Wait()
+		}
+		closed := s.closed
+		var m wire.Msg
+		if !closed {
+			m = s.popLocked()
+		}
+		s.mu.Unlock()
+		if closed {
+			return
+		}
+		timeout := s.sendTimeout
+		if timeout == 0 {
+			timeout = subSendTimeout
+		}
+		_ = s.c.SetWriteDeadline(time.Now().Add(timeout))
+		if err := wire.WriteMsg(s.c, m); err != nil {
+			s.mu.Lock()
+			closed = s.closed
+			s.mu.Unlock()
+			// The conn closing is also how a shutdown or an eviction from
+			// another path ends this write; only a failure on a live conn
+			// is an eviction.
+			if !closed {
+				s.evict()
+			}
+			return
+		}
+	}
+}
+
+// evict closes the conn and drops the subscriber from the pane. Idempotent:
+// the first caller wins. The pane bookkeeping runs off the caller's locks, so
+// a broadcast that evicts under the pane lock does not take it again.
+func (s *subConn) evict() {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	if s.cond != nil {
+		s.cond.Broadcast()
+	}
+	s.q = nil
+	s.qbytes = 0
+	s.mu.Unlock()
+	_ = s.c.Close()
+	if s.p == nil {
+		return
+	}
+	go s.p.evictSub(s)
+}
+
+// shutdown marks a subscriber gone after its serve loop ended: the writer
+// wakes, drops its queue and returns. A disconnect is not an eviction, so it
+// counts nothing.
+func (s *subConn) shutdown() {
+	s.mu.Lock()
+	s.closed = true
+	if s.cond != nil {
+		s.cond.Broadcast()
+	}
+	s.q = nil
+	s.qbytes = 0
+	s.mu.Unlock()
+	_ = s.c.Close()
+}
+
+// msgBytes counts what a frame costs on the wire, near enough to bound it. A
+// screen frame carries its payload in VTSnap, so it is marshalled here to
+// price it: an unpriced snapshot would queue at 64 bytes against the bound no
+// matter how big it sends as.
+func msgBytes(m wire.Msg) int {
+	n := 64 + len(m.Data) + len(m.Keys) + len(m.Msg) + len(m.Res)
+	for _, l := range m.Lines {
+		n += len(l) + 1
+	}
+	if m.VTSnap != nil {
+		if b, err := json.Marshal(m.VTSnap); err == nil {
+			n += len(b)
+		}
+	}
+	return n
 }
 
 // The ring budget bounds. ringDefault is the 512 KiB scrollback a pane has
@@ -649,6 +811,22 @@ func (p *paneProc) armFlushLocked() {
 	})
 }
 
+// evictSub counts one eviction and drops the subscriber the way its serve
+// loop's cleanup would: out of the map, and out of a wait it may hold.
+func (p *paneProc) evictSub(s *subConn) {
+	p.subEvicted.Add(1)
+	p.mu.Lock()
+	delete(p.subs, s)
+	if p.waiter != nil && p.waiter.sc == s {
+		close(p.waiter.done)
+		p.waiter = nil
+	}
+	p.mu.Unlock()
+}
+
+// subEvictions reports how many subscribers were evicted for not reading.
+func (p *paneProc) subEvictions() int64 { return p.subEvicted.Load() }
+
 func (p *paneProc) broadcastLocked(m wire.Msg) {
 	for sc := range p.subs {
 		_ = sc.send(m)
@@ -819,11 +997,13 @@ func (p *paneProc) shutdown() {
 
 func (p *paneProc) serve(c net.Conn) {
 	defer func() { _ = c.Close() }()
-	sc := &subConn{c: c}
+	sc := &subConn{p: p, c: c}
 	p.mu.Lock()
 	p.subs[sc] = true
 	p.mu.Unlock()
 	defer func() {
+		// The conn closes here and in shutdown; the writer wakes on either.
+		sc.shutdown()
 		p.mu.Lock()
 		delete(p.subs, sc)
 		// The waiter going away ends its wait and stops its children poll.
