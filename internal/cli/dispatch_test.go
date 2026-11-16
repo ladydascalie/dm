@@ -482,3 +482,21 @@ func TestExecRefusesPositionalAndActionJSON(t *testing.T) {
 		t.Fatalf("dm exec with both carriers = %v, want an exclusivity refusal", err)
 	}
 }
+
+// TestUnknownSubverbBeatsFlagParsing proves an unknown subverb under a known
+// group is reported as the command mistake it is, even when flags follow it.
+// The bare group registers no flags, so flag parsing must not run first and
+// bury the name that was typed wrong under a "flag provided but not defined"
+// error.
+func TestUnknownSubverbBeatsFlagParsing(t *testing.T) {
+	t.Parallel()
+	for _, argv := range [][]string{
+		{"secret", "remove", "-s", "main"},
+		{"msg", "bogus", "-s", "main"},
+	} {
+		err := Run(argv)
+		if err == nil || !strings.Contains(err.Error(), "unknown verb") {
+			t.Fatalf("dm %v = %v, want the unknown-verb refusal", argv, err)
+		}
+	}
+}

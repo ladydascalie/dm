@@ -101,11 +101,21 @@ func (c *cmdFlags) parse(args []string) {
 	verb := c.fs.Name()
 	if verb == "msg" || verb == "secret" {
 		// The subverb of a grouped verb is the first positional: reorder
-		// has already moved every flag in front of it. An unknown or
-		// missing subverb registers nothing, and the usage printer shows
-		// the list.
-		if sub := firstArg(ordered); sub != "" && clidoc.VerbFlags(verb+" "+sub) != nil {
-			verb = verb + " " + sub
+		// has already moved every flag in front of it. A known subverb
+		// promotes the verb, so its row's flags register. An unknown
+		// subverb is a command mistake, not a flag one: the bare group
+		// registers no flags, so parsing would refuse the first flag it
+		// met and bury the name that was typed wrong under "flag
+		// provided but not defined". Skip the parse and hand the
+		// positionals to the group's dispatcher, which reports the
+		// unknown verb.
+		if sub := firstArg(ordered); sub != "" {
+			if clidoc.VerbFlags(verb+" "+sub) != nil {
+				verb = verb + " " + sub
+			} else {
+				c.args = positionals(ordered)
+				return
+			}
 		}
 	}
 	for _, f := range clidoc.VerbFlags(verb) {
@@ -122,6 +132,10 @@ func (c *cmdFlags) parse(args []string) {
 		}
 		if verb == "msg" {
 			fmt.Fprint(out, clidoc.MsgSubcommands())
+			return
+		}
+		if verb == "secret" {
+			fmt.Fprint(out, clidoc.SecretSubcommands())
 			return
 		}
 		fmt.Fprint(out, clidoc.VerbHelp(verb))
@@ -173,9 +187,10 @@ func envSessionLive(root, name string) bool {
 	return false
 }
 
-// firstArg returns the first positional of reordered argv, skipping the flags
+// positionals returns the positionals of reordered argv, skipping the flags
 // and the values the withValue flags take.
-func firstArg(args []string) string {
+func positionals(args []string) []string {
+	var pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") && a != "-" {
@@ -184,9 +199,19 @@ func firstArg(args []string) string {
 			}
 			continue
 		}
-		return a
+		pos = append(pos, a)
 	}
-	return ""
+	return pos
+}
+
+// firstArg returns the first positional of reordered argv, or the empty
+// string when argv carries none.
+func firstArg(args []string) string {
+	pos := positionals(args)
+	if len(pos) == 0 {
+		return ""
+	}
+	return pos[0]
 }
 
 // register adds one table flag to the set, bound to the field the verb's Run
