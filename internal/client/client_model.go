@@ -509,6 +509,11 @@ func Run(name string) error {
 	// alternate screen. The reply arrives on stdin and the detector consumes
 	// it; a terminal that never answers leaves the pane defaults alone.
 	_, _ = os.Stdout.WriteString("\x1b]10;?\x1b\\\x1b]11;?\x1b\\")
+	// The clipboard probe rides the same reply machinery: a terminal that
+	// honours OSC 52 answers the read, one that drops the sequence stays
+	// silent and a write falls to an external carrier instead.
+	_, _ = os.Stdout.WriteString(clipQuery())
+	clipProbeAt = time.Now()
 
 	keys := make(chan []byte, 64)
 	go stdinReader(keys)
@@ -576,7 +581,7 @@ func (s *frameSink) wrote() bool { return s.n > 0 }
 func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) {
 	t.expireToasts(now)
 	t.expirePaste(now)
-	t.expireTermColour(now)
+	t.expireOSCReply(now)
 	t.expireSwitcher(now)
 	t.expireCommandPalette(now)
 	t.previewTick(now)

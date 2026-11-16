@@ -877,7 +877,7 @@ dragging to use the terminal's own selection.
 
 dm selects instead. A left drag inside a pane highlights the row-major range
 in reverse video, clamped to the pane it started in, and the release copies it
-with OSC 52, so the text lands on the terminal's clipboard and a `copied N
+to the clipboard, so the text lands there and a `copied N
 chars` toast confirms it. A press and release in the same cell is a click and
 still reaches the app that claims the mouse; dm only takes the drag. Trailing
 spaces go and lines join with a newline. An app's own drag selection loses to
@@ -902,7 +902,7 @@ the output stream position when it forwards an Enter, so a remote shell needs no
 setup. A pane that has never been sent an Enter has no anchor: the copy falls
 back to the visible screen with a toast that says so, and `dm yank` reports that
 it has nothing to cut at. `prefix Y` copies the visible screen. Both keys write
-OSC 52 and raise one `copied N chars` toast.
+OSC 52 and raise one `copied N chars` toast. At start dm asks the terminal for its clipboard over OSC 52; a terminal that answers keeps the sequence, and one that stays silent gets the copy piped to `pbcopy`, `wl-copy` or `xclip` instead, so a terminal with clipboard access switched off still copies.
 
 The copy holds the command's output only. The command line dm wrote is dropped
 by matching the echoed text, and the line end the pty echoes at the anchor is

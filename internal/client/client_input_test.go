@@ -273,13 +273,13 @@ func TestTermColourDeadlineSlides(t *testing.T) {
 	// A tick probing between the first arm and the re-arm sees a reply that
 	// is still growing: no flush. A deadline that never slid would already
 	// be in the past here and would flush.
-	if tui.expireTermColour(time.Now().Add(escTimeout - 5*time.Millisecond)) {
+	if tui.expireOSCReply(time.Now().Add(escTimeout - 5*time.Millisecond)) {
 		t.Fatal("a growing reply was flushed mid-flight")
 	}
 	testutil.NoMsg(t, got)
 	// A quiet partial still flushes as ordinary input, at whatever the
 	// stall window is now.
-	if !tui.expireTermColour(time.Now().Add(pasteTimeout + 10*time.Millisecond)) {
+	if !tui.expireOSCReply(time.Now().Add(pasteTimeout + 10*time.Millisecond)) {
 		t.Fatal("a stalled reply was not flushed")
 	}
 	m := testutil.NextMsg(t, got)

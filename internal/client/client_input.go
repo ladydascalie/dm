@@ -2,10 +2,8 @@ package client
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +24,13 @@ var (
 	pasteEnd   = []byte("\x1b[201~")
 	oscFG      = []byte("\x1b]10;")
 	oscBG      = []byte("\x1b]11;")
+	oscClip    = []byte("\x1b]52;c;")
+
+	// oscReplies lists the OSC sequences the input path lifts out of the
+	// byte stream before it reads them as keystrokes: the two colour
+	// replies and the OSC 52 clipboard probe reply.
+	oscReplies = [][]byte{oscFG, oscBG, oscClip}
+	osKinds    = []int{10, 11, 52}
 )
 
 // takePaste reports whether the buffer starts with a bracketed paste. When the
@@ -95,23 +100,24 @@ func (t *tui) staleInput() {
 	t.pasteOff = false
 }
 
-// takeTermColour reports whether buf starts with an OSC 10 or OSC 11 reply.
-// A complete reply returns its kind (10 or 11), its value and its length. A
+// takeOSCReply reports whether buf starts with a known OSC reply.
+// A complete reply returns its kind (10, 11 or 52), its value and its length. A
 // partial prefix returns started true and n 0, so the caller keeps buffering.
 // A lone escape is left to the paste and prefix logic: it is not yet a reply.
-func takeTermColour(buf []byte) (kind int, value string, n int, started bool) {
+func takeOSCReply(buf []byte) (kind int, value string, n int, started bool) {
 	if len(buf) < 2 || buf[0] != 0x1b || buf[1] != ']' {
 		return 0, "", 0, false
 	}
 	var prefix []byte
-	switch {
-	case bytes.HasPrefix(buf, oscFG):
-		prefix, kind = oscFG, 10
-	case bytes.HasPrefix(buf, oscBG):
-		prefix, kind = oscBG, 11
-	case bytes.HasPrefix(oscFG, buf) || bytes.HasPrefix(oscBG, buf):
-		return 0, "", 0, true
-	default:
+	for i, p := range oscReplies {
+		switch {
+		case bytes.HasPrefix(buf, p):
+			prefix, kind = p, osKinds[i]
+		case bytes.HasPrefix(p, buf):
+			return 0, "", 0, true
+		}
+	}
+	if prefix == nil {
 		return 0, "", 0, false
 	}
 	rest := buf[len(prefix):]
@@ -126,12 +132,12 @@ func takeTermColour(buf []byte) (kind int, value string, n int, started bool) {
 	return kind, string(rest[:st]), len(prefix) + st + 2, true
 }
 
-// termColourAt is where the first complete OSC 10 or OSC 11 prefix starts, or
+// oscReplyAt is where the first complete OSC reply prefix starts, or
 // -1. It lets the bulk input path stop before a reply that shares a read with
 // a keystroke, so the reply is handled at the head on the next pass.
-func termColourAt(buf []byte) int {
+func oscReplyAt(buf []byte) int {
 	at := -1
-	for _, p := range [][]byte{oscFG, oscBG} {
+	for _, p := range oscReplies {
 		if i := bytes.Index(buf, p); i >= 0 && (at < 0 || i < at) {
 			at = i
 		}
@@ -139,16 +145,16 @@ func termColourAt(buf []byte) int {
 	return at
 }
 
-// termColourTail is where a proper, non-empty prefix of oscFG or oscBG starts
+// oscReplyTail is where a proper, non-empty prefix of a known OSC reply starts
 // and runs to the end of buf, or -1. It lets the bulk path keep a reply that
 // is still arriving after a keystroke instead of forwarding it to a pane.
-func termColourTail(buf []byte) int {
+func oscReplyTail(buf []byte) int {
 	for i := 0; i < len(buf); i++ {
 		if buf[i] != 0x1b {
 			continue
 		}
 		tail := buf[i:]
-		for _, p := range [][]byte{oscFG, oscBG} {
+		for _, p := range oscReplies {
 			if len(tail) < len(p) && bytes.HasPrefix(p, tail) {
 				return i
 			}
@@ -157,9 +163,15 @@ func termColourTail(buf []byte) int {
 	return -1
 }
 
-// noteTermColour records a reply and sends the pair once both are known, or
+// noteOSCReply records a reply and sends the pair once both are known, or
 // the one that arrived after a short grace so the two coalesce.
-func (t *tui) noteTermColour(kind int, value string) {
+func (t *tui) noteOSCReply(kind int, value string) {
+	if kind == 52 {
+		// The clipboard reply carries no tui state: it settles the
+		// package-level clipboard mode.
+		noteClipReply()
+		return
+	}
 	switch kind {
 	case 10:
 		t.termFG = value
@@ -188,13 +200,13 @@ func (t *tui) sendTermColours() {
 	}
 }
 
-// expireTermColour sends the one reply that arrived once the grace for the
+// expireOSCReply sends the one reply that arrived once the grace for the
 // second passes, and flushes a partial reply that stalled as ordinary input,
 // exactly as expirePaste does. The deadline is the expiry instant, and it
 // re-arms on every sighting of the partial, so a reply that trickles in piece
 // by piece never flushes mid-flight; only one that goes quiet for a whole
 // paste window does.
-func (t *tui) expireTermColour(now time.Time) bool {
+func (t *tui) expireOSCReply(now time.Time) bool {
 	changed := false
 	if !t.termGrace.IsZero() && now.Sub(t.termGrace) > termGrace {
 		t.sendTermColours()
@@ -287,7 +299,7 @@ func (t *tui) paneWantsPaste(pane string) bool {
 func (t *tui) processInput() {
 	for len(t.inbuf) > 0 {
 		if !t.termOff {
-			if kind, value, n, started := takeTermColour(t.inbuf); started {
+			if kind, value, n, started := takeOSCReply(t.inbuf); started {
 				if n == 0 {
 					// The reply is still arriving. Keep buffering; the ticker
 					// sends these bytes down the normal path if they stall.
@@ -302,7 +314,7 @@ func (t *tui) processInput() {
 				}
 				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
 				t.termDeadline = time.Time{}
-				t.noteTermColour(kind, value)
+				t.noteOSCReply(kind, value)
 				continue
 			}
 		}
@@ -606,14 +618,14 @@ func (t *tui) processInput() {
 				}
 				return
 			}
-			if at := termColourAt(t.inbuf); at > 0 {
+			if at := oscReplyAt(t.inbuf); at > 0 {
 				// A colour reply shares this read with a keystroke. Send the
 				// keys before it; the reply is handled at the head next pass.
 				_ = t.conn.Send(wire.Msg{Type: "keys", Keys: t.inbuf[:at]})
 				t.inbuf = append([]byte(nil), t.inbuf[at:]...)
 				continue
 			}
-			if at := termColourTail(t.inbuf); at > 0 {
+			if at := oscReplyTail(t.inbuf); at > 0 {
 				// A reply is still arriving after a keystroke. Send the keys
 				// before it and keep the tail; the deadline flushes it as
 				// ordinary input if it never completes.
@@ -1638,7 +1650,7 @@ func (t *tui) copySelection() {
 		return
 	}
 	text := extractSelection(term, p.Rect.W, s.anchor, s.focus)
-	_, _ = os.Stdout.WriteString(osc52(text))
+	t.writeClipboard(text)
 	t.notify(fmt.Sprintf("copied %d chars", len(text)))
 }
 
@@ -1743,11 +1755,6 @@ func (t *tui) takeYank(m wire.Msg) {
 	t.notify(fmt.Sprintf("copied %d chars", len(text)))
 }
 
-// writeClipboard sends text to the terminal's clipboard with OSC 52.
-func (t *tui) writeClipboard(text string) {
-	_, _ = os.Stdout.WriteString(osc52(text))
-}
-
 // screenText returns the visible rows joined by a newline, trailing blanks
 // trimmed and trailing blank rows dropped.
 func screenText(term *vt.Term) string {
@@ -1846,16 +1853,6 @@ func (t *tui) wheelSelect(p *wire.PaneInfo, n int) {
 	if !t.selScrollBy(p, n) {
 		s.pending += n
 	}
-}
-
-// osc52 is the clipboard sequence for text. Under tmux it must ride the
-// passthrough DCS with doubled escapes, or tmux swallows it.
-func osc52(text string) string {
-	seq := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte(text)) + "\x1b\\"
-	if os.Getenv("TMUX") != "" {
-		return "\x1bPtmux;" + strings.ReplaceAll(seq, "\x1b", "\x1b\x1b") + "\x1b\\"
-	}
-	return seq
 }
 
 // urlPattern matches an http or https URL on one row. It stops at whitespace

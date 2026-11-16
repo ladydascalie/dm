@@ -48,8 +48,8 @@ func TestTermColoursOneReplyAfterGrace(t *testing.T) {
 	feed(tui, "\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
 	testutil.NoMsg(t, got)
 
-	if !tui.expireTermColour(time.Now().Add(termGrace + time.Millisecond)) {
-		t.Fatal("expireTermColour reported no change")
+	if !tui.expireOSCReply(time.Now().Add(termGrace + time.Millisecond)) {
+		t.Fatal("expireOSCReply reported no change")
 	}
 	m := testutil.NextMsg(t, got)
 	if m.Action != "term-colours" || m.FG != "rgb:ffff/ffff/ffff" || m.BG != "" {
@@ -73,8 +73,8 @@ func TestTermColoursPartialStallsThenReachesPane(t *testing.T) {
 		t.Fatal("partial reply was not buffered")
 	}
 
-	if !tui.expireTermColour(time.Now().Add(pasteTimeout + time.Millisecond)) {
-		t.Fatal("expireTermColour reported no change")
+	if !tui.expireOSCReply(time.Now().Add(pasteTimeout + time.Millisecond)) {
+		t.Fatal("expireOSCReply reported no change")
 	}
 	m := testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != partial {
@@ -139,8 +139,8 @@ func TestTermColoursSplitTailStallsThenReachesPane(t *testing.T) {
 	}
 	testutil.NoMsg(t, got)
 
-	if !tui.expireTermColour(time.Now().Add(pasteTimeout + time.Millisecond)) {
-		t.Fatal("expireTermColour reported no change")
+	if !tui.expireOSCReply(time.Now().Add(pasteTimeout + time.Millisecond)) {
+		t.Fatal("expireOSCReply reported no change")
 	}
 	m = testutil.NextMsg(t, got)
 	if m.Type != "keys" || string(m.Keys) != "\x1b]1" {
