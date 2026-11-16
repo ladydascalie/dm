@@ -184,8 +184,14 @@ type client struct {
 	// resync is the server's rebuild hook: one snapshot, then one screen per
 	// pane. It is nil until the client attaches.
 	resync func()
-	closed bool
-	writer sync.Once
+	// attached says the conn sent its attach frame. It keeps the toggle and
+	// its like off the dm exec surface, so no script flips a switch meant
+	// for the operator's hand. It is a convenience gate, not a boundary: an
+	// agent attacking the dm socket can send the same frame, as it can
+	// already type keys and read panes. The real boundary is sandboxing.
+	attached bool
+	closed   bool
+	writer   sync.Once
 }
 
 func newClient(c net.Conn) *client {

@@ -259,3 +259,20 @@ func replyEnabled(t *testing.T, m wire.Msg) (bool, bool) {
 	}
 	return res.Enabled, len(m.Res) > 0
 }
+
+// TestToggleSecretsServesAnyConnWithoutHandshake proves the guard is gone:
+// the daemon serves the toggle from a plain conn, and the first frame that
+// conn receives is the reply to its own request. A handshake frame would
+// have arrived first, so no nonce state exists on the daemon side.
+func TestToggleSecretsServesAnyConnWithoutHandshake(t *testing.T) {
+	t.Parallel()
+	_, cli, msgs := yankPane(t, 20, 5)
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "toggle-secrets", ID: 1})
+	m := <-msgs
+	if m.Type != "resp" || m.ID != 1 {
+		t.Fatalf("first frame %+v, want the toggle's own reply: a handshake frame exists", m)
+	}
+	if enabled, ok := replyEnabled(t, m); !ok || enabled {
+		t.Fatalf("plain-conn toggle reported enabled %v ok %v, want false", enabled, ok)
+	}
+}

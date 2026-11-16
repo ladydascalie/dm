@@ -489,6 +489,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"t", "new workspace"},
 		{")", "next workspace"},
 		{"S", "synchronize panes"},
+		{"ctrl+g", "toggle secret redaction"},
 		{"s", "switch session"},
 		{"K", "command palette"},
 		{"r", "rename workspace"},
@@ -846,7 +847,7 @@ func TestConfigHelpTagMalformed(t *testing.T) {
 	}
 }
 
-// TestConfigHelpEntriesDefault proves the default config tags only the four
+// TestConfigHelpEntriesDefault proves the default config tags only the five
 // layout and session actions and that HelpRows is HelpEntries without the
 // section.
 func TestConfigHelpEntriesDefault(t *testing.T) {
@@ -859,6 +860,7 @@ func TestConfigHelpEntriesDefault(t *testing.T) {
 		"swap with next / prev pane": "Layout",
 		"cycle layout":               "Layout",
 		"synchronize panes":          "Session",
+		"toggle secret redaction":    "Session",
 	}
 	for _, e := range entries {
 		want, tagged := wantSection[e.Action]

@@ -105,8 +105,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `list` | `{"action":"list"}` |
 | `read`, `screen` | `{"action":"read","target":"w1p1"}`, `{"action":"screen","target":"w1p1"}` |
 | `history`, `yank` | `{"action":"history","target":"w1p1","count":200}`, `{"action":"yank","target":"w1p1"}` |
-| `replay` | `{"action":"replay","target":"w1p1"}` |
-| `status` | `{"action":"status","target":"w1p1"}` |
+| `replay`, `status` | `{"action":"replay","target":"w1p1"}`, `{"action":"status","target":"w1p1"}` |
 | `write-to`, `exec` | `{"action":"write-to","target":"w1p1","msg":"go test ./...","enter":true}`, `{"action":"exec","target":"w1p1","msg":"go test ./..."}` |
 | `keys` | `{"action":"keys","target":"w1p1","keys":"Aw=="}` |
 | `split` | `{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}` |
@@ -130,8 +129,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `rename-window`, `rename-workspace`, `set-project` | `{"action":"rename-window","target":"w1","name":"build"}`, `{"action":"rename-workspace","target":"s1","name":"build"}`, `{"action":"set-project","target":"s1","name":"dm"}` |
 | `swap-panes`, `move-pane` | `{"action":"swap-panes","target":"w1p1","dir":"left"}`, `{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}` |
 | `move-window`, `move-workspace` | `{"action":"move-window","target":"w1","dir":"down"}`, `{"action":"move-workspace","target":"s1","dir":"down"}` |
-| `select-layout` | `{"action":"select-layout","layout":"next"}` |
-| `synchronize-panes` | `{"action":"synchronize-panes","on":true}` |
+| `select-layout`, `synchronize-panes` | `{"action":"select-layout","layout":"next"}`, `{"action":"synchronize-panes","on":true}` |
 | `float-open`, `float-close` | `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`, `{"action":"float-close","float":"f1"}` |
 | `msg-post` | `{"action":"msg-post","res":{"key":"build","state":"done","msg":"all green"}}` |
 | `msg-list` | `{"action":"msg-list","res":{"key":"build","limit":20}}` |
@@ -139,8 +137,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `msg-wait` | `{"action":"msg-wait","res":{"key":"build","state":"done","timeoutMs":60000}}` |
 | `msg-sub` | `{"action":"msg-sub","res":{"keyPrefix":"lane/","afterSeq":0}}` |
 | `msg-watchers`, `msg-schema` | `{"action":"msg-watchers","res":{}}`, `{"action":"msg-schema","res":{}}` |
-| `secret-register`, `secret-list` | `{"action":"secret-register","name":"gh-cli","tool":"op","ref":"op://Personal/gh/token"}`, `{"action":"secret-list"}` |
-| `secret-revoke` | `{"action":"secret-revoke","name":"gh-cli"}` |
+| `secret-register`, `secret-list`, `secret-revoke` | `{"action":"secret-register","name":"gh-cli","tool":"op","ref":"op://Personal/gh/token"}`, `{"action":"secret-list"}`, `{"action":"secret-revoke","name":"gh-cli"}` |
 | `secret-use`, `secret-hydrate`, `secret-type` | `{"action":"secret-use","name":"gh-cli"}`, `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`, `{"action":"secret-type","name":"gh-cli","target":"w1p1"}` |
 | `secret-sync` | `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl"}` |
 
@@ -169,6 +166,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `t` | `new-workspace` | new workspace |
 | `)` | `next-workspace` | next workspace |
 | `S` | `synchronize-panes` | synchronize panes |
+| `ctrl+g` | `toggle-secrets` | toggle secret redaction |
 | `s` | `picker` | switch session |
 | `K` | `command-palette` | command palette |
 | `r` | `rename-workspace` | rename workspace |
@@ -243,6 +241,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `new-workspace` | `t` |
 | `main` | `next-workspace` | `)` |
 | `main` | `synchronize-panes` | `S` |
+| `main` | `toggle-secrets` | `ctrl+g` |
 | `main` | `switcher` | `a` |
 | `main` | `picker` | `s` |
 | `main` | `command-palette` | `K` |

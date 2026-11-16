@@ -258,6 +258,45 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		s.reply(cl, m, map[string]any{"sync": sync}, err)
 
+	case "toggle-secrets":
+		// The operator's redaction switch. The attached gate keeps it off
+		// the dm exec surface, so no script flips it by accident; it is a
+		// convenience gate, not a boundary. The toggle is for human editing:
+		// an agent attacking the dm socket can send the same attach frame
+		// and flip it, as it can already type keys and read panes, and the
+		// real boundary is the sandboxing work. The switch rides the same
+		// pane-daemon request path the screen and replay actions use, and
+		// the reply carries the state the pane landed on, so the client can
+		// show an unprotected pane as unprotected.
+		if !cl.attached {
+			s.reply(cl, m, nil, fmt.Errorf("toggle-secrets runs from the interactive client only"))
+			return
+		}
+		id := m.Target
+		if id == "" {
+			id = s.st.ActiveWindow().Focus
+		}
+		s.mu.Lock()
+		_, live := s.panes[id]
+		s.mu.Unlock()
+		if !live {
+			s.reply(cl, m, nil, fmt.Errorf("no pane %q", id))
+			return
+		}
+		got, err := paneRequest(s.st, id, wire.Msg{Type: "req", Action: "toggle-secrets"})
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		var res struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.Unmarshal(got.Res, &res); err != nil {
+			s.reply(cl, m, nil, fmt.Errorf("pane %s toggle reply: %w", id, err))
+			return
+		}
+		s.reply(cl, m, map[string]any{"pane": id, "enabled": res.Enabled}, nil)
+
 	case "split":
 		var id string
 		err := s.mutation(func() error {

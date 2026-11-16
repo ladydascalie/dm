@@ -206,6 +206,7 @@ var ActionDesc = map[string]string{
 	"layout-picker":       "Open the layout palette over the active window's panes.",
 	"command-palette":     "Open the command palette: type to filter every main action, enter runs one, ? explains the selected one.",
 	"synchronize-panes":   "Toggle synchronization of panes in the active window; on and false set, absent toggles.",
+	"toggle-secrets":      "Toggle the focused pane's secret redaction. Off passes the pane's output through untouched; on scrubs the secret values again. A convenience for human editing; an agent attacking the dm socket can flip it, as it can already type keys and read panes.",
 	"new-workspace":       "Create a workspace.",
 	"next-workspace":      "Select the next workspace.",
 	"switcher":            "Open the dashboard: a full-screen table of every pane.",

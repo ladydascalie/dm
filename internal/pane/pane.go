@@ -1001,11 +1001,16 @@ func (p *paneProc) serve(c net.Conn) {
 			p.scrub.set(values)
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
 		case "toggle-secrets":
-			// The operator's redaction switch. The stage flips between
-			// scrubbing and passing the output through; the value list
-			// survives both ways, so a set-secrets push while the switch is
-			// off updates the values without turning the stage back on. The
-			// reply carries the resulting state, so the server can show it.
+			// The operator's redaction switch, a convenience for human
+			// editing, served from any conn like every other control
+			// action: the pane socket is not a boundary. An agent attacking
+			// the dm socket can flip it, as it can already type keys and
+			// read panes; the real boundary is the sandboxing work. The
+			// stage flips between scrubbing and passing the output through;
+			// the value list survives both ways, so a set-secrets push
+			// while the switch is off updates the values without turning
+			// the stage back on. The reply carries the resulting state, so
+			// the server can show it.
 			res := jsonRaw(map[string]any{"enabled": p.scrub.toggle()})
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, Res: res})
 		case "ping":
@@ -1248,13 +1253,8 @@ func (p *paneProc) waitEndLocked() (sc *subConn, reply wire.Msg, ok bool) {
 		if end, marked := p.vt.CommandEnd(); marked && end >= w.anchor {
 			p.waiter = nil
 			close(w.done)
-			// The exit comes from the most recent coded D mark at or after
-			// the anchor, not from the latest D mark: one read of the stream
-			// can hold the command's coded mark and the prompt hook's bare D
-			// behind it, and the wait that ends on that read must still
-			// answer the code the command reported.
 			var exit *int
-			if code, coded := p.vt.CommandExitFrom(w.anchor); coded {
+			if code, coded := p.vt.CommandExit(); coded {
 				exit = &code
 			}
 			return w.sc, waitReply(w.id, exit, "mark"), true
