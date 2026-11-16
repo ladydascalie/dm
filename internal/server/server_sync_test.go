@@ -2,13 +2,16 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
 
+	"dm/internal/pane"
 	"dm/internal/wire"
 )
 
@@ -553,5 +556,88 @@ func TestSecretSyncRefusesANonRegularMapping(t *testing.T) {
 	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: filepath.Join(dir, ".dm-secrets.kdl")})
 	if m.OK || !strings.Contains(m.Error, "not a regular file") {
 		t.Fatalf("reply %v, error %q", m.OK, m.Error)
+	}
+}
+
+// TestSecretSyncFileValuesNeverEvictARegisteredSecret proves the eviction the
+// review proved is closed: a mapping with more file values than the panes'
+// list can hold keeps every registered secret first, fills only the room they
+// leave, and reports the overflow as a count.
+func TestSecretSyncFileValuesNeverEvictARegisteredSecret(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	path := writeMapping(t, dir, "file {\n    path \"creds.env\"\n}\n")
+	var env strings.Builder
+	const donated = pane.MaxSecrets + 44
+	for i := 0; i < donated; i++ {
+		fmt.Fprintf(&env, "K%03d=value-%03d\n", i, i)
+	}
+	writeFile(t, dir, "creds.env", env.String())
+
+	// Registered secrets sorts after every file name, which starts with its
+	// absolute path: a single name sort would put all 300 file values first.
+	const registered = 5
+	s.mu.Lock()
+	s.secretEnsure()
+	for i := 0; i < registered; i++ {
+		name := fmt.Sprintf("zzz-live-%d", i)
+		s.secrets.Put(name, "live-value-"+name)
+		s.secretActive[name] = true
+	}
+	s.mu.Unlock()
+	ch := spyPane(t, s, "w1p1")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if !m.OK {
+		t.Fatalf("secret sync: %s", m.Error)
+	}
+	var res syncReply
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	wantDropped := donated - (pane.MaxSecrets - registered)
+	if want := fmt.Sprintf("%d file values did not fit", wantDropped); !strings.Contains(res.Warning, want) {
+		t.Fatalf("warning %q, want it to name %q", res.Warning, want)
+	}
+	for _, key := range []string{"K000", "K299"} {
+		if strings.Contains(res.Warning, key) {
+			t.Fatalf("warning %q names the file key %q", res.Warning, key)
+		}
+	}
+
+	pushed := func() []string {
+		t.Helper()
+		got := readSpyUntil(t, ch, "set-secrets")
+		var payload struct {
+			Values []string `json:"values"`
+		}
+		if err := json.Unmarshal(got.Res, &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.Values
+	}
+	first := pushed()
+	if len(first) != pane.MaxSecrets {
+		t.Fatalf("the push carried %d values, want %d", len(first), pane.MaxSecrets)
+	}
+	for i := 0; i < registered; i++ {
+		want := fmt.Sprintf("live-value-zzz-live-%d", i)
+		if first[i] != want {
+			t.Fatalf("push value %d = %q, want the registered %q", i, first[i], want)
+		}
+	}
+	for i := registered; i < len(first); i++ {
+		if !strings.HasPrefix(first[i], "value-") {
+			t.Fatalf("push value %d = %q, want a file donation after the registered secrets", i, first[i])
+		}
+	}
+
+	// A re-run registers the same subset: the selection depends on the
+	// names, not on the order the mapping was applied in.
+	if m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path}); !m.OK {
+		t.Fatalf("second sync: %s", m.Error)
+	}
+	if second := pushed(); !slices.Equal(first, second) {
+		t.Fatal("the second sync changed which file values fit")
 	}
 }

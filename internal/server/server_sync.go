@@ -329,8 +329,12 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 			warnings = append(warnings, w)
 		}
 	}
-	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+	_, dropped, droppedFiles := s.secretActiveSet()
+	if len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	if w := secretFileCapWarning(droppedFiles); w != "" {
+		warnings = append(warnings, w)
 	}
 	if len(uncovered) > 0 {
 		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the values would echo there unredacted", strings.Join(uncovered, ", ")))
