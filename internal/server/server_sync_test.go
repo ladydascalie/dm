@@ -272,3 +272,78 @@ func TestSecretSyncRegistersTheRegisterShape(t *testing.T) {
 		t.Fatalf("reply %v, error %q", m.OK, m.Error)
 	}
 }
+
+// TestParseSecretsMappingRefusesABareIdentAfterAMultilineString proves the
+// review's counter-example is refused: a multiline string ends mid-line, so
+// an identifier after it is a bare value, not the next node. A line
+// comparison would miss it, because kdl.Scan stamps the string with its
+// opening line.
+func TestParseSecretsMappingRefusesABareIdentAfterAMultilineString(t *testing.T) {
+	src := "secret \"api\" {\n\tref \"op://v\nw\" tool \"op\"\n}\n"
+	_, err := parseSecretsMapping(src)
+	if err == nil {
+		t.Fatal("parse accepted a bare ident after a multiline string")
+	}
+	if !strings.Contains(err.Error(), "quoted values only") {
+		t.Fatalf("error %q, want the bare-value refusal", err)
+	}
+}
+
+// TestParseSecretsMappingKeepsAChildAfterAMultilineString proves the same
+// shape with the child on its own line still parses: the multiline
+// reference is the value and tool is the next child.
+func TestParseSecretsMappingKeepsAChildAfterAMultilineString(t *testing.T) {
+	src := "secret \"api\" {\n\tref \"op://v\nw\"\n\ttool \"op\"\n}\n"
+	mp, err := parseSecretsMapping(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(mp.Secrets) != 1 || mp.Secrets[0].Ref != "op://v\nw" || mp.Secrets[0].Tool != "op" {
+		t.Fatalf("parsed %+v", mp.Secrets)
+	}
+}
+
+// TestSecretSyncCountsCollisionsAndEmptyKeys proves the review's
+// counter-example is counted and warned, never silent: a repeated key keeps
+// its last donation and is named, an empty key registers nothing and is
+// counted, and no dropped value reaches the reply.
+func TestSecretSyncCountsCollisionsAndEmptyKeys(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	path := writeMapping(t, dir, "file \"creds.env\"\n")
+	writeFile(t, dir, "creds.env", "=tok1\n=tok2\nDUP=firstvalue\nDUP=secondvalue\n")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if !m.OK {
+		t.Fatalf("secret sync failed: %s", m.Error)
+	}
+	var res syncReply
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("files %v", res.Files)
+	}
+	f := res.Files[0]
+	if f.Values != 1 || f.EmptyKey != 2 || f.Bounds != 0 || len(f.Duplicate) != 1 || f.Duplicate[0] != "DUP" {
+		t.Fatalf("file result %+v, want 1 value, 2 empty keys, DUP duplicated", f)
+	}
+	if !strings.Contains(res.Warning, "2 empty keys") {
+		t.Fatalf("warning %q names no empty keys", res.Warning)
+	}
+	if !strings.Contains(res.Warning, "key DUP repeats; only its last value redacts") {
+		t.Fatalf("warning %q names no collision", res.Warning)
+	}
+	name := filepath.Join(dir, "creds.env")
+	if v, ok := s.secrets.Get(name + "#DUP"); !ok || v != "secondvalue" {
+		t.Fatalf("registry holds %q=%v", name+"#DUP", v)
+	}
+	if _, ok := s.secrets.Get(name + "#"); ok {
+		t.Fatal("an empty key registered under the degenerate name")
+	}
+	for _, leak := range []string{"tok1", "tok2", "firstvalue", "secondvalue"} {
+		if strings.Contains(string(m.Res), leak) {
+			t.Fatalf("reply leaks %q: %s", leak, m.Res)
+		}
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -72,7 +73,7 @@ func parseSecretsMapping(src string) (secretsMapping, error) {
 			return secretsMapping{}, fmt.Errorf("line %d: expected a node name, got %q", t.Line, t.Value)
 		}
 		i++
-		args, i2, err := scanArgs(toks, i, t.Value, t.Line)
+		args, i2, err := scanArgs(toks, i, t.Value)
 		if err != nil {
 			return secretsMapping{}, err
 		}
@@ -93,7 +94,7 @@ func parseSecretsMapping(src string) (secretsMapping, error) {
 					return secretsMapping{}, fmt.Errorf("line %d: expected a node name inside %s, got %q", kt.Line, t.Value, kt.Value)
 				}
 				i++
-				kargs, i2, err := scanArgs(toks, i, kt.Value, kt.Line)
+				kargs, i2, err := scanArgs(toks, i, kt.Value)
 				if err != nil {
 					return secretsMapping{}, err
 				}
@@ -159,17 +160,19 @@ func parseSecretsMapping(src string) (secretsMapping, error) {
 }
 
 // scanArgs collects the quoted arguments a node carries and returns the
-// index of the first token that is not one. An identifier on the node's own
-// line is a bare value and is refused; one on a later line is the next node
-// or the first child, and the caller reads it.
-func scanArgs(toks []kdl.Token, i int, node string, line int) ([]kdl.Token, int, error) {
+// index of the first token that is not one. An identifier that does not
+// start its line is a bare value and is refused; one that does is the next
+// node or the first child, and the caller reads it. The rule is Bol, not a
+// line comparison: kdl.Scan stamps a multiline string with its opening
+// line, so a line comparison would take an identifier on the closing
+// quote's line for the next node.
+func scanArgs(toks []kdl.Token, i int, node string) ([]kdl.Token, int, error) {
 	var args []kdl.Token
 	for i < len(toks) && toks[i].Kind == kdl.String {
 		args = append(args, toks[i])
-		line = toks[i].Line
 		i++
 	}
-	if i < len(toks) && toks[i].Kind == kdl.Ident && toks[i].Line == line {
+	if i < len(toks) && toks[i].Kind == kdl.Ident && !toks[i].Bol {
 		return nil, i, fmt.Errorf("line %d: %s takes quoted values only, got %q", toks[i].Line, node, toks[i].Value)
 	}
 	return args, i, nil
@@ -186,14 +189,17 @@ func countStrings(toks []kdl.Token, i int) int {
 }
 
 // fileResult is one file block's answer: the counts the line rule produced
-// and the read error, if any. No value ever appears here.
+// and the read error, if any. No value ever appears here; Duplicate names
+// keys, never values.
 type fileResult struct {
-	Path    string `json:"path"`
-	Values  int    `json:"values"`
-	Skipped int    `json:"skipped"`
-	Empty   int    `json:"empty"`
-	Bounds  int    `json:"bounds"`
-	Error   string `json:"error,omitempty"`
+	Path      string   `json:"path"`
+	Values    int      `json:"values"`
+	Skipped   int      `json:"skipped"`
+	Empty     int      `json:"empty"`
+	EmptyKey  int      `json:"emptyKeys,omitempty"`
+	Duplicate []string `json:"duplicateKeys,omitempty"`
+	Bounds    int      `json:"bounds"`
+	Error     string   `json:"error,omitempty"`
 }
 
 // syncValue is one value a file donated, with the name it registers under.
@@ -277,8 +283,21 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 			warnings = append(warnings, fmt.Sprintf("file %s: %s", r.Path, r.Error))
 			continue
 		}
-		if r.Skipped > 0 || r.Empty > 0 {
-			warnings = append(warnings, fmt.Sprintf("file %s: %d lines without =, %d empty values; they registered nothing", r.Path, r.Skipped, r.Empty))
+		var lost []string
+		if r.Skipped > 0 {
+			lost = append(lost, fmt.Sprintf("%d lines without =", r.Skipped))
+		}
+		if r.Empty > 0 {
+			lost = append(lost, fmt.Sprintf("%d empty values", r.Empty))
+		}
+		if r.EmptyKey > 0 {
+			lost = append(lost, fmt.Sprintf("%d empty keys", r.EmptyKey))
+		}
+		if len(lost) > 0 {
+			warnings = append(warnings, fmt.Sprintf("file %s: %s; they registered nothing", r.Path, strings.Join(lost, ", ")))
+		}
+		for _, key := range r.Duplicate {
+			warnings = append(warnings, fmt.Sprintf("file %s: key %s repeats; only its last value redacts", r.Path, key))
 		}
 	}
 	for _, v := range bounds {
@@ -304,11 +323,14 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 
 // ingestSecretFile reads one file block's path and turns its lines into
 // redaction values. A non-empty line donates everything after the first =;
-// a line without = registers nothing; an empty value and a value outside
-// the scrub bounds register nothing and are counted. The values activate
-// under s.mu with names derived from the path and the key, so a re-run of
-// the same mapping replaces exactly the values it donated before and
-// nothing else. The counts travel out, the values never do.
+// a line without = registers nothing; an empty value, an empty key and a
+// value outside the scrub bounds register nothing and are counted. A key
+// the file already donated keeps its last in-bounds donation: the earlier
+// ones drop, and every key that dropped one is counted and warned by name,
+// so a collision never shrinks the protected set in silence. The values
+// activate under s.mu with names derived from the path and the key, so a
+// re-run of the same mapping replaces exactly the values it donated before
+// and nothing else. The counts travel out, the values never do.
 func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
 	res := fileResult{Path: path}
 	raw, err := os.ReadFile(path)
@@ -317,6 +339,8 @@ func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
 		return res, nil
 	}
 	values := map[string]string{}
+	var dups []string
+	var bounds []syncValue
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if strings.TrimSpace(line) == "" {
@@ -327,18 +351,27 @@ func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
 			res.Skipped++
 			continue
 		}
+		if key == "" {
+			res.EmptyKey++
+			continue
+		}
 		if value == "" {
 			res.Empty++
 			continue
 		}
-		name := path + "#" + key
 		if len(value) < pane.MinSecretLen || len(value) > pane.MaxSecretLen {
 			res.Bounds++
+			bounds = append(bounds, syncValue{name: path + "#" + key, value: value})
 			continue
+		}
+		name := path + "#" + key
+		if _, dup := values[name]; dup && !slices.Contains(dups, key) {
+			dups = append(dups, key)
 		}
 		values[name] = value
 	}
 	res.Values = len(values)
+	res.Duplicate = dups
 	// The activation is one step under s.mu, so a concurrent push reads
 	// either the old set or the new one, never a half-swapped mixture.
 	s.mu.Lock()
@@ -359,16 +392,5 @@ func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
 	}
 	s.secretFiles[path] = names
 	s.mu.Unlock()
-	var bounds []syncValue
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSuffix(line, "\r")
-		key, value, found := strings.Cut(line, "=")
-		if !found || value == "" || strings.TrimSpace(line) == "" {
-			continue
-		}
-		if len(value) < pane.MinSecretLen || len(value) > pane.MaxSecretLen {
-			bounds = append(bounds, syncValue{name: path + "#" + key, value: value})
-		}
-	}
 	return res, bounds
 }
