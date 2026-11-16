@@ -72,9 +72,9 @@ func (s *scrubber) set(values []string) {
 }
 
 // feed appends one chunk to the output. It writes every byte it can swear
-// to into out and holds back the trailing maxLen-1 bytes in carry, because
-// an occurrence may straddle the chunk boundary and only a hold-back keeps
-// its first half from already being on the wire.
+// to into out and holds back only the bytes a next chunk could complete in
+// carry, because an occurrence may straddle the chunk boundary and only a
+// hold-back keeps its first half from already being on the wire.
 func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 	s.mu.Lock()
 	vals, maxLen := s.vals, s.maxLen
@@ -103,12 +103,15 @@ func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 		writeRedacted(out, bestLen)
 		pos = best + bestLen
 	}
-	// Bytes within maxLen-1 of the end may begin an occurrence the next
-	// chunk completes, so they wait in carry. A match that reached past the
-	// window already consumed its bytes, and they are redacted on the wire.
-	hold := maxLen - 1
-	if hold < 0 {
-		hold = 0
+	// Only the bytes a next chunk could complete wait in carry: the longest
+	// suffix of the unemitted data that is a proper prefix of some value.
+	// A tail that cannot begin a match flows with zero delay, the same rule
+	// the OSC filter applies to partial sequences. A match that reached past
+	// this point already consumed its bytes, and they are redacted on the
+	// wire.
+	hold := 0
+	if maxLen > 1 {
+		hold = holdBack(vals, maxLen, data[pos:])
 	}
 	cut := len(data) - hold
 	if cut < 0 {
@@ -119,6 +122,25 @@ func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 	}
 	out.Write(data[pos:cut])
 	s.carry = append(s.carry, data[cut:]...)
+}
+
+// holdBack returns the length of the longest suffix of data that is a
+// proper prefix of some value in vals, capped at maxLen-1 because a proper
+// prefix is never a whole value. Zero means nothing is held back.
+func holdBack(vals [][]byte, maxLen int, data []byte) int {
+	lim := len(data)
+	if lim > maxLen-1 {
+		lim = maxLen - 1
+	}
+	for k := lim; k > 0; k-- {
+		tail := data[len(data)-k:]
+		for _, v := range vals {
+			if len(v) > k && bytes.HasPrefix(v, tail) {
+				return k
+			}
+		}
+	}
+	return 0
 }
 
 // flush drains the held-back bytes at the end of the stream. No chunk

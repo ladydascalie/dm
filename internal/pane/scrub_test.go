@@ -2,6 +2,7 @@ package pane
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -123,5 +124,27 @@ func TestSecretValuesReadsBody(t *testing.T) {
 	}
 	if _, err := secretValues([]byte(`{`)); err == nil {
 		t.Fatal("malformed body accepted, want an error")
+	}
+}
+
+// TestScrubEmitsUnmatchedChunkInFull proves a chunk whose tail cannot begin
+// a match leaves the stage in the same feed: the hold-back keeps only the
+// bytes a next chunk could complete, never a fixed window. A 50 byte secret
+// once delayed every chunk by 49 bytes; this test fails on that behaviour.
+func TestScrubEmitsUnmatchedChunkInFull(t *testing.T) {
+	t.Parallel()
+	secret := strings.Repeat("qwerty", 8) + "qr"
+	if len(secret) != 50 {
+		t.Fatalf("secret is %d bytes, want 50", len(secret))
+	}
+	// A prompt redraw: title set, cursor home, erased line, cursor shown,
+	// newline. No suffix of it is a proper prefix of the secret.
+	chunk := "\x1b]0;shell\x07\x1b[1;1H$ \x1b[K\x1b[?25h\r\n"
+	var s scrubber
+	s.set([]string{secret})
+	var out bytes.Buffer
+	s.feed([]byte(chunk), &out)
+	if got := out.String(); got != chunk {
+		t.Fatalf("scrub emitted %q, want the full chunk in one feed", got)
 	}
 }
