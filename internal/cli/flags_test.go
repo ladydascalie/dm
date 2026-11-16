@@ -44,6 +44,28 @@ func TestReorderKeepsADash(t *testing.T) {
 	}
 }
 
+// TestDanglingFlagNamesTheLastToken proves the dangling scan names a
+// value-taking flag left at the end of argv, and stays quiet when argv ends
+// with a value or a positional: any earlier value-taking flag has already
+// taken the token behind it.
+func TestDanglingFlagNamesTheLastToken(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"use", "main", "-s"}, {"list", "--after"}, {"post", "hello", "--msg"},
+	} {
+		if got := danglingFlag(args); got == "" {
+			t.Fatalf("danglingFlag(%v) = %q, want the trailing flag", args, got)
+		}
+	}
+	for _, args := range [][]string{
+		{"-s", "main"}, {"list"}, {"post", "-s", "main", "hello"}, {},
+	} {
+		if got := danglingFlag(args); got != "" {
+			t.Fatalf("danglingFlag(%v) = %q, want empty", args, got)
+		}
+	}
+}
+
 // TestSessionDefaultsToThePaneEnv proves a command from inside a pane targets
 // that pane's session without -s, and stays main outside dm.
 func TestSessionDefaultsToThePaneEnv(t *testing.T) {

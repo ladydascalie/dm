@@ -496,27 +496,25 @@ func TestUnknownSubverbSurvivesADanglingFlag(t *testing.T) {
 	}
 }
 
-// TestKnownSubverbSurvivesADanglingFlag proves a dangling flag does not
-// bury a known subverb under the flag error either: the subverb reaches the
-// group's dispatcher, which prints its subverb list.
-func TestKnownSubverbSurvivesADanglingFlag(t *testing.T) {
-	t.Setenv("DM_SESSION", "")
-	t.Setenv("DM_STATE", t.TempDir())
-	out := testutil.CaptureStdout(t, func() {
-		if err := Run([]string{"msg", "post", "-s"}); err != nil {
-			t.Fatalf("dm msg post -s: %v", err)
+// TestADanglingFlagIsTheMistakeItNames proves a value-taking flag left
+// dangling at the end of argv is refused as the flag mistake it is: reorder
+// would move the flag in front of the positionals and parsing would feed it
+// the subverb or the argument the caller did type. The refusal names the
+// flag and never the token it would have eaten.
+func TestADanglingFlagIsTheMistakeItNames(t *testing.T) {
+	t.Parallel()
+	for _, argv := range [][]string{
+		{"secret", "use", "main", "-s"},
+		{"msg", "post", "hello", "-s"},
+		{"secret", "list", "-s"},
+	} {
+		err := Run(argv)
+		if err == nil || !strings.Contains(err.Error(), "flag -s needs a value") {
+			t.Fatalf("dm %v = %v, want the dangling -s refusal", argv, err)
 		}
-	})
-	if !strings.Contains(out, "dm msg post") {
-		t.Fatalf("dm msg post -s printed %q, want the msg subverb list", out)
-	}
-	out = testutil.CaptureStdout(t, func() {
-		if err := Run([]string{"secret", "list", "-s"}); err != nil {
-			t.Fatalf("dm secret list -s: %v", err)
+		if strings.Contains(err.Error(), "unknown verb") {
+			t.Fatalf("dm %v accuses the verb, not the flag: %v", argv, err)
 		}
-	})
-	if !strings.Contains(out, "dm secret type") {
-		t.Fatalf("dm secret list -s printed %q, want the secret subverb list", out)
 	}
 }
 

@@ -96,8 +96,14 @@ func newFlags(name string) *cmdFlags { return newFlagsAt(paths.StateDir(), name)
 // is the parse-time source of truth: a verb gets exactly the flags its row
 // declares, so -h and a bad flag print that verb's flags alone. A flag the
 // row does not declare is refused, as it is not one the verb reads.
-func (c *cmdFlags) parse(args []string) {
+//
+// The subverb decision and the flag parse both read what a flag consumed
+// from the original argv order, so they cannot disagree: the one value a
+// flag may still steal at parse time, the dangling flag's own missing
+// value, is refused by name before Parse runs.
+func (c *cmdFlags) parse(args []string) error {
 	ordered := reorder(args)
+	pos := positionals(args)
 	verb := c.fs.Name()
 	if verb == "msg" || verb == "secret" {
 		// The subverb of a grouped verb is the first positional, read
@@ -111,12 +117,12 @@ func (c *cmdFlags) parse(args []string) {
 		// typed wrong under "flag provided but not defined". Skip the
 		// parse and hand the positionals to the group's dispatcher,
 		// which reports the unknown verb.
-		if sub := firstArg(args); sub != "" {
-			if clidoc.VerbFlags(verb+" "+sub) != nil {
-				verb = verb + " " + sub
+		if len(pos) > 0 {
+			if clidoc.VerbFlags(verb+" "+pos[0]) != nil {
+				verb = verb + " " + pos[0]
 			} else {
-				c.args = positionals(args)
-				return
+				c.args = pos
+				return nil
 			}
 		}
 	}
@@ -142,9 +148,23 @@ func (c *cmdFlags) parse(args []string) {
 		}
 		fmt.Fprint(out, clidoc.VerbHelp(verb))
 	}
+	// A value-taking flag left dangling at the end of argv has no value of
+	// its own, and reorder has moved it in front of the positionals, so
+	// Parse would feed it the first one: the subverb or the argument the
+	// caller did type. Refuse the flag instead, and name it, never the
+	// token it would have eaten. The verb's own flags are registered here,
+	// so a flag the verb does not read still falls through to Parse, which
+	// reports it as undefined. The check runs after the unknown-subverb
+	// return, so a command mistake keeps precedence over a flag one.
+	if name := danglingFlag(args); name != "" && len(pos) > 0 {
+		if f := c.fs.Lookup(strings.Trim(name, "-")); f != nil {
+			return fmt.Errorf("%s: flag %s needs a value", verb, name)
+		}
+	}
 	_ = c.fs.Parse(ordered)
 	c.args = c.fs.Args()
 	c.resolveSession()
+	return nil
 }
 
 // resolveSession pins the target session: -s wins, then DM_SESSION when it
@@ -190,9 +210,11 @@ func envSessionLive(root, name string) bool {
 }
 
 // split walks argv once and classifies every token: a flag and the value a
-// withValue flag takes go to flags, the rest to positionals. A dangling
-// value-taking flag consumes nothing. reorder and positionals both read
-// split, so the two cannot disagree on what a flag consumed.
+// withValue flag takes go to flags, the rest to positionals. A value-taking
+// flag left dangling at the end of argv consumes nothing, so parse refuses
+// it before the reordered argv reaches Parse: left in, it would eat the
+// first positional there. reorder and positionals both read split, so the
+// two cannot disagree on what a flag consumed.
 func split(args []string) (flags, pos []string) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -222,14 +244,18 @@ func positionals(args []string) []string {
 	return pos
 }
 
-// firstArg returns the first positional of argv, or the empty string when
-// argv carries none.
-func firstArg(args []string) string {
-	pos := positionals(args)
-	if len(pos) == 0 {
+// danglingFlag names the value-taking flag left at the end of argv, or the
+// empty string when argv ends with a value or a positional. split pairs a
+// value-taking flag with the token behind it, so only the last token can
+// dangle: any earlier flag has already taken the token behind it.
+func danglingFlag(args []string) string {
+	if len(args) == 0 {
 		return ""
 	}
-	return pos[0]
+	if last := args[len(args)-1]; withValue[last] {
+		return last
+	}
+	return ""
 }
 
 // register adds one table flag to the set, bound to the field the verb's Run
@@ -392,7 +418,9 @@ func Run(argv []string) error {
 	switch argv[0] {
 	case "attach", "a":
 		c := newFlagsAt(root, "attach")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -404,7 +432,9 @@ func Run(argv []string) error {
 
 	case "new":
 		c := newFlagsAt(root, "new")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -425,7 +455,9 @@ func Run(argv []string) error {
 
 	case "ls", "list-sessions":
 		c := newFlagsAt(root, "ls")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(0); err != nil {
 			return err
 		}
@@ -433,7 +465,9 @@ func Run(argv []string) error {
 
 	case "kill":
 		c := newFlagsAt(root, "kill")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -445,7 +479,9 @@ func Run(argv []string) error {
 
 	case "reset":
 		c := newFlagsAt(root, "reset")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(0); err != nil {
 			return err
 		}
@@ -453,7 +489,9 @@ func Run(argv []string) error {
 
 	case "purge":
 		c := newFlagsAt(root, "purge")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(0); err != nil {
 			return err
 		}
@@ -501,7 +539,9 @@ func Run(argv []string) error {
 
 	case "exec":
 		c := newFlagsAt(root, "exec")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -523,7 +563,9 @@ func Run(argv []string) error {
 
 	case "write-to", "write":
 		c := newFlagsAt(root, "write-to")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -537,7 +579,9 @@ func Run(argv []string) error {
 
 	case "read":
 		c := newFlagsAt(root, "read")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -569,7 +613,9 @@ func Run(argv []string) error {
 
 	case "yank":
 		c := newFlagsAt(root, "yank")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -588,7 +634,9 @@ func Run(argv []string) error {
 
 	case "wait":
 		c := newFlagsAt(root, "wait")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -606,7 +654,9 @@ func Run(argv []string) error {
 
 	case "split":
 		c := newFlagsAt(root, "split")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -632,7 +682,9 @@ func Run(argv []string) error {
 
 	case "focus":
 		c := newFlagsAt(root, "focus")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -643,7 +695,9 @@ func Run(argv []string) error {
 
 	case "rename-workspace":
 		c := newFlagsAt(root, "rename-workspace")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(2); err != nil {
 			return err
 		}
@@ -654,7 +708,9 @@ func Run(argv []string) error {
 
 	case "set-project":
 		c := newFlagsAt(root, "set-project")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(2); err != nil {
 			return err
 		}
@@ -669,7 +725,9 @@ func Run(argv []string) error {
 
 	case "next-pane", "prev-pane", "new-window", "next-window", "prev-window":
 		c := newFlagsAt(root, argv[0])
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(0); err != nil {
 			return err
 		}
@@ -677,7 +735,9 @@ func Run(argv []string) error {
 
 	case "status":
 		c := newFlagsAt(root, "status")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -720,7 +780,9 @@ func Run(argv []string) error {
 
 	case "dash":
 		c := newFlagsAt(root, "dash")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(0); err != nil {
 			return err
 		}
@@ -728,7 +790,9 @@ func Run(argv []string) error {
 
 	case "peek":
 		c := newFlagsAt(root, "peek")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
@@ -739,12 +803,16 @@ func Run(argv []string) error {
 
 	case "msg":
 		c := newFlagsAt(root, "msg")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		return runBox(c)
 
 	case "list":
 		c := newFlagsAt(root, "list")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		if err := c.extraArg(0); err != nil {
 			return err
 		}
@@ -752,7 +820,9 @@ func Run(argv []string) error {
 
 	case "secret":
 		c := newFlagsAt(root, "secret")
-		c.parse(argv[1:])
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
 		return runSecret(c)
 
 	default:
@@ -761,7 +831,9 @@ func Run(argv []string) error {
 		// raises carries the whole grouped surface.
 		c := newFlagsAt(root, "attach")
 		c.usage = clidoc.UsageText
-		c.parse(argv)
+		if err := c.parse(argv); err != nil {
+			return err
+		}
 		if err := c.extraArg(1); err != nil {
 			return err
 		}
