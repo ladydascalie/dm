@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
 	"strings"
@@ -171,5 +172,46 @@ func TestSecretUseSurfacesTheWarning(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "secret pin") {
 		t.Fatalf("stderr = %q, want the warning", errOut)
+	}
+}
+
+// TestSecretBarePrintsTheVerbs proves dm secret with no subverb prints the
+// group's own usage: one row per subverb, so the group explains itself.
+func TestSecretBarePrintsTheVerbs(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	out := testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"secret"}); err != nil {
+			t.Fatalf("dm secret: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"dm secret register", "dm secret list", "dm secret revoke",
+		"dm secret use", "dm secret hydrate", "dm secret type",
+		"dm secret <verb> -h",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dm secret does not name %q: %q", want, out)
+		}
+	}
+}
+
+// TestSecretHelpPrintsTheVerbs proves dm secret -h prints the same subverb
+// list the bare verb prints: the usage printer falls back to the group's
+// list, because the table has no bare secret row of its own.
+func TestSecretHelpPrintsTheVerbs(t *testing.T) {
+	t.Parallel()
+	c := newFlagsAt(t.TempDir(), "secret")
+	c.parse(nil)
+	var b bytes.Buffer
+	c.fs.SetOutput(&b)
+	c.fs.Usage()
+	for _, want := range []string{
+		"dm secret register", "dm secret list", "dm secret revoke",
+		"dm secret use", "dm secret hydrate", "dm secret type",
+		"dm secret <verb> -h",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("dm secret -h does not name %q: %q", want, b.String())
+		}
 	}
 }
