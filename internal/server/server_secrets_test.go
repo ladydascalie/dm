@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1593,4 +1595,745 @@ func TestWatchPaneDedupesOnTheWatchingFlag(t *testing.T) {
 	}
 	_ = cl
 	_ = conn
+}
+
+// serveSessionsSocket serves a server on its own socket the way Run does: one
+// accept loop, one goroutine per conn, each conn speaking the plain request
+// loop. A test needs it when one server dials another.
+func serveSessionsSocket(t *testing.T, s *server) {
+	t.Helper()
+	if err := os.MkdirAll(s.st.SessionDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", s.st.ServerSock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go s.serve(c)
+		}
+	}()
+}
+
+func TestSecretHydrateActivatesAndPushes(t *testing.T) {
+	value := "s3cret-hydrate-push"
+	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	path := filepath.Join(t.TempDir(), "token")
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+	if !rep.OK {
+		t.Fatalf("hydrate: %s", rep.Error)
+	}
+	if strings.Contains(string(rep.Res), value) {
+		t.Fatalf("hydrate reply leaks the value: %s", rep.Res)
+	}
+	// A hydrate-only flow leaves every pane scrubbing: the value never rode
+	// an endpoint or a keystroke, and the panes still heard it.
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), value) {
+		t.Fatalf("the pane never heard the value: %s", got.Res)
+	}
+	if !s.secretActive["gh"] {
+		t.Fatal("hydrate left the value inactive")
+	}
+	// The hydrate never starts the proxy: the file is the ride.
+	if s.proxy != nil {
+		t.Fatal("a hydrate started the proxy for a secret without an upstream")
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != value {
+		t.Fatalf("file = %q err=%v", b, err)
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("file mode = %v err=%v", st.Mode(), err)
+	}
+}
+
+func TestSecretHydrateStartsNoProxyForAnUpstreamSecret(t *testing.T) {
+	up := newSecretUpstream(t)
+	s, cl, conn, _ := secretServer(t, "secrets", "s3cret-hydrate-up", nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh",
+		Tool: "op", Ref: "op://x/y",
+		Upstream: up.URL, Header: "Authorization: Bearer {}",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-hydrate", Name: "gh", Path: filepath.Join(t.TempDir(), "token"),
+	})
+	if !rep.OK {
+		t.Fatalf("hydrate: %s", rep.Error)
+	}
+	if s.proxy != nil {
+		t.Fatal("a hydrate started the proxy")
+	}
+	if strings.Contains(string(rep.Res), "endpoint") {
+		t.Fatalf("hydrate reply carries endpoint vocabulary: %s", rep.Res)
+	}
+}
+
+func TestSecretUseCoversASiblingSession(t *testing.T) {
+	value := "s3cret-cross-session"
+	root := t.TempDir()
+	s1 := railServer(session.NewStateAt(root, "poc"))
+	s1.fetch = func(sec *session.Secret) (string, error) { return value, nil }
+	s2 := railServer(session.NewStateAt(root, "sibling"))
+	ch := spyPane(t, s2, "w1p1")
+	serveSessionsSocket(t, s2)
+
+	cl, conn := boxConn(t)
+	if rep := secretCall(t, s1, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s1, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	if strings.Contains(string(rep.Res), value) {
+		t.Fatalf("use reply leaks the value: %s", rep.Res)
+	}
+	var res struct {
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 0 {
+		t.Fatalf("use named %v uncovered, want a covered sibling", res.Uncovered)
+	}
+	// The sibling session's pane received the set: it scrubs the value even
+	// though its own server never fetched it.
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), value) {
+		t.Fatalf("the sibling pane never heard the value: %s", got.Res)
+	}
+	// The revoke withdraws: the sibling's panes hear the set is gone.
+	rep = secretCall(t, s1, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("revoke: %s", rep.Error)
+	}
+	got = readSpyUntil(t, ch, "set-secrets")
+	if strings.Contains(string(got.Res), value) {
+		t.Fatalf("the withdrawal left the value on the sibling pane: %s", got.Res)
+	}
+}
+
+func TestSecretCoverMergesAndWithdraws(t *testing.T) {
+	s, cl, conn, ch := secretServer(t, "secrets", "", nil)
+	cover := func(session string, values ...string) wire.Msg {
+		return wire.Msg{
+			Action: "secret-cover",
+			Res:    jsonRaw(map[string]any{"session": session, "values": values}),
+		}
+	}
+	if rep := secretCall(t, s, cl, conn, cover("other", "foreign-value")); !rep.OK {
+		t.Fatalf("cover: %s", rep.Error)
+	}
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), "foreign-value") {
+		t.Fatalf("the pane never heard the foreign value: %s", got.Res)
+	}
+	// A pane adopted later hears the merged set too.
+	ch2 := spyPane(t, s, "w1p2")
+	s.adoptSecretScrub("w1p2")
+	got = readSpyUntil(t, ch2, "set-secrets")
+	if !strings.Contains(string(got.Res), "foreign-value") {
+		t.Fatalf("the adopted pane never heard the foreign value: %s", got.Res)
+	}
+	// The foreign value rides memory only: the state file never sees it.
+	if b, err := os.ReadFile(filepath.Join(s.st.SessionDir(), "state.json")); err == nil && strings.Contains(string(b), "foreign-value") {
+		t.Fatalf("the state file carries a foreign value: %s", b)
+	}
+	// The withdrawal clears the pane's list.
+	if rep := secretCall(t, s, cl, conn, cover("other")); !rep.OK {
+		t.Fatalf("withdraw: %s", rep.Error)
+	}
+	got = readSpyUntil(t, ch, "set-secrets")
+	if strings.Contains(string(got.Res), "foreign-value") {
+		t.Fatalf("the withdrawal left the value on the pane: %s", got.Res)
+	}
+	// A session covers everything but itself, and names must be safe.
+	wantErr(t, "secret-cover", "refuses session", secretCall(t, s, cl, conn, cover("secrets", "v")))
+	wantErr(t, "secret-cover", "refuses session", secretCall(t, s, cl, conn, cover("../x", "v")))
+	wantErr(t, "secret-cover", "needs a session", secretCall(t, s, cl, conn, wire.Msg{Action: "secret-cover"}))
+}
+
+func TestSecretUseNamesAServerlessSibling(t *testing.T) {
+	value := "s3cret-orphan"
+	root := t.TempDir()
+	s := railServer(session.NewStateAt(root, "poc"))
+	s.fetch = func(sec *session.Secret) (string, error) { return value, nil }
+	// A sibling whose panes are live and whose server is gone: the push
+	// cannot reach those panes, so the use names them.
+	orphan := session.NewStateAt(root, "orphan")
+	if err := os.MkdirAll(filepath.Join(orphan.SessionDir(), "panes"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", orphan.PaneSock("w1p1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	// A sibling that is gone altogether: no sockets, no name.
+	if _, err := session.NewStateAt(root, "gone"), error(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	cl, conn := boxConn(t)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "session orphan" {
+		t.Fatalf("uncovered = %v, want the serverless sibling", res.Uncovered)
+	}
+}
+
+// gateConn is a conn whose first write blocks until the test opens the gate,
+// so a push can be held mid-flight while the test lands a concurrent action.
+type gateConn struct {
+	ready chan struct{} // closed when the first write starts
+	gate  chan struct{} // closed to release the writes
+	mu    sync.Mutex
+	wrote bool
+}
+
+func newGateConn() *gateConn {
+	return &gateConn{ready: make(chan struct{}), gate: make(chan struct{})}
+}
+
+func (c *gateConn) Write(b []byte) (int, error) {
+	c.mu.Lock()
+	first := !c.wrote
+	c.wrote = true
+	c.mu.Unlock()
+	if first {
+		close(c.ready)
+	}
+	<-c.gate
+	return len(b), nil
+}
+
+func (c *gateConn) Close() error                     { return nil }
+func (c *gateConn) Read(b []byte) (int, error)       { return 0, io.EOF }
+func (c *gateConn) LocalAddr() net.Addr              { return nil }
+func (c *gateConn) RemoteAddr() net.Addr             { return nil }
+func (c *gateConn) SetDeadline(time.Time) error      { return nil }
+func (c *gateConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *gateConn) SetWriteDeadline(time.Time) error { return nil }
+
+// TestSecretHydrateRefusesARevokedWhileFetchingSecret proves a revoke that
+// lands during the fetch or the push reads as a refusal and never leaves the
+// value on disk: the push now includes the sibling covers, so the window is
+// not a sliver.
+func TestSecretHydrateRefusesARevokedWhileFetchingSecret(t *testing.T) {
+	value := "s3cret-hydrate-revoked"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	// A second pane whose push blocks until the gate opens: the hydrate is
+	// stuck mid-push when the revoke lands.
+	gc := newGateConn()
+	s.mu.Lock()
+	s.panes["w1p2"] = &paneConn{id: "w1p2", c: gc}
+	s.mu.Unlock()
+	path := filepath.Join(t.TempDir(), "token")
+	done := make(chan wire.Msg, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			return
+		}
+		done <- m
+	}()
+	<-gc.ready
+	cl2, _ := boxConn(t)
+	go func() { s.handleReq(cl2, wire.Msg{Action: "secret-revoke", Name: "gh"}) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.mu.Lock()
+		gone := s.st.Secret("gh") == nil
+		s.mu.Unlock()
+		if gone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the revoke did not land while the push was in flight")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	close(gc.gate)
+	rep := <-done
+	wantErr(t, "secret-hydrate", "revoked while the value was being fetched or pushed", rep)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the revoked secret left a file behind: %v", err)
+	}
+}
+
+// TestSecretCoverReportsDroppedValues proves the cover reply counts the
+// values the panes' cap dropped, instead of reporting success while the pane
+// never holds them.
+func TestSecretCoverReportsDroppedValues(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	s.fetch = func(sec *session.Secret) (string, error) { return "s3cret-" + sec.Name, nil }
+	// The cap fills with own values; no pane listens during the fill, so
+	// the pushes go nowhere and the spy channel stays clean.
+	s.mu.Lock()
+	delete(s.panes, "w1p1")
+	s.mu.Unlock()
+	for i := 0; i < pane.MaxSecrets; i++ {
+		name := fmt.Sprintf("s%03d", i)
+		if rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: name, Tool: "pass", Ref: "dev/" + name,
+		}); !rep.OK {
+			t.Fatalf("register %s: %s", name, rep.Error)
+		}
+		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: name}); !rep.OK {
+			t.Fatalf("use %s: %s", name, rep.Error)
+		}
+	}
+	ch := spyPane(t, s, "w1p1")
+	cover := func(values ...string) wire.Msg {
+		return wire.Msg{
+			Action: "secret-cover",
+			Res:    jsonRaw(map[string]any{"session": "other", "values": values}),
+		}
+	}
+	rep := secretCall(t, s, cl, conn, cover("foreign-value"))
+	if !rep.OK {
+		t.Fatalf("cover: %s", rep.Error)
+	}
+	var res struct {
+		Panes   int `json:"panes"`
+		Dropped int `json:"dropped"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Dropped != 1 {
+		t.Fatalf("cover reply dropped = %d, want 1", res.Dropped)
+	}
+	// The pane holds the cap and not the foreign value.
+	got := readSpyUntil(t, ch, "set-secrets")
+	var payload struct {
+		Values []string `json:"values"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Values) != pane.MaxSecrets {
+		t.Fatalf("the push carried %d values, want %d", len(payload.Values), pane.MaxSecrets)
+	}
+	for _, v := range payload.Values {
+		if v == "foreign-value" {
+			t.Fatal("the dropped value rode the push")
+		}
+	}
+	// The withdrawal answers dropped zero again.
+	rep = secretCall(t, s, cl, conn, cover())
+	if !rep.OK {
+		t.Fatalf("withdraw: %s", rep.Error)
+	}
+	res.Dropped = -1
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Dropped != 0 {
+		t.Fatalf("withdraw reply dropped = %d, want 0", res.Dropped)
+	}
+}
+
+// TestCoverRoundtripNamesDroppedValues proves the sender turns a nonzero
+// dropped count into a problem report, and a zero count into silence.
+func TestCoverRoundtripNamesDroppedValues(t *testing.T) {
+	for _, c := range []struct {
+		dropped int
+		want    string
+	}{
+		{0, ""},
+		{2, "2 of 5 values dropped"},
+	} {
+		srv, cli := net.Pipe()
+		t.Cleanup(func() { _ = srv.Close(); _ = cli.Close() })
+		go func(dropped int) {
+			m, err := wire.ReadMsg(srv)
+			if err != nil {
+				return
+			}
+			_ = wire.WriteMsg(srv, wire.Msg{Type: "resp", ID: m.ID, OK: true,
+				Res: jsonRaw(map[string]any{"panes": 3, "dropped": dropped})})
+		}(c.dropped)
+		err := coverRoundtrip(cli, "other", []string{"a", "b", "c", "d", "e"})
+		if c.want == "" {
+			if err != nil {
+				t.Fatalf("dropped %d: %v", c.dropped, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("dropped %d: err = %v, want it to name %q", c.dropped, err, c.want)
+		}
+	}
+}
+
+// TestSecretUseWarnsWhenASiblingDropsTheSet proves neither side stays silent
+// when a sibling's cap drops the covered values: the cover reply counts them,
+// the sender names the sibling in uncovered and in the warning.
+func TestSecretUseWarnsWhenASiblingDropsTheSet(t *testing.T) {
+	value := "s3cret-cap-drop"
+	root := t.TempDir()
+	s1 := railServer(session.NewStateAt(root, "poc"))
+	s1.fetch = func(sec *session.Secret) (string, error) { return value, nil }
+	s2 := railServer(session.NewStateAt(root, "sibling"))
+	serveSessionsSocket(t, s2)
+	// The sibling's panes' cap is already full of its own values.
+	s2.mu.Lock()
+	s2.secretEnsure()
+	for i := 0; i < pane.MaxSecrets; i++ {
+		name := fmt.Sprintf("own-%03d", i)
+		s2.secrets.Put(name, "own-"+name)
+		s2.secretActive[name] = true
+	}
+	s2.mu.Unlock()
+
+	cl, conn := boxConn(t)
+	if rep := secretCall(t, s1, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s1, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Warning   string   `json:"warning"`
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "session sibling" {
+		t.Fatalf("uncovered = %v, want the capped sibling", res.Uncovered)
+	}
+	if !strings.Contains(res.Warning, "did not reach") || !strings.Contains(res.Warning, "session sibling") {
+		t.Fatalf("warning = %q, want it to name the uncovered sibling", res.Warning)
+	}
+	if strings.Contains(res.Warning, value) {
+		t.Fatalf("the warning leaks the value: %s", res.Warning)
+	}
+}
+
+// TestSecretHydrateRefusesAReRegisteredRecord proves the hydrate guard checks
+// the record's identity, not just the name: a revoke-and-re-register between
+// the activation and the guard must not land the old value on disk under the
+// new record.
+func TestSecretHydrateRefusesAReRegisteredRecord(t *testing.T) {
+	value := "s3cret-hydrate-reregistered"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	gc := newGateConn()
+	s.mu.Lock()
+	s.panes["w1p2"] = &paneConn{id: "w1p2", c: gc}
+	s.mu.Unlock()
+	path := filepath.Join(t.TempDir(), "token")
+	done := make(chan wire.Msg, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			return
+		}
+		done <- m
+	}()
+	<-gc.ready
+	cl2, _ := boxConn(t)
+	go func() { s.handleReq(cl2, wire.Msg{Action: "secret-revoke", Name: "gh"}) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.mu.Lock()
+		gone := s.st.Secret("gh") == nil
+		s.mu.Unlock()
+		if gone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the revoke did not land while the push was in flight")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	// A fresh record takes the name before the gate opens: the guard must
+	// not mistake it for the record the value was fetched for.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/other",
+	}); !rep.OK {
+		t.Fatalf("re-register: %s", rep.Error)
+	}
+	close(gc.gate)
+	rep := <-done
+	wantErr(t, "secret-hydrate", "revoked while the value was being fetched or pushed", rep)
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the revoked secret left a file behind: %v", err)
+	}
+}
+
+// TestAdoptPushNamesTheDroppedCoverValues proves an adopt push that drops
+// covered values at the cap says so: the pane never holds them, and no reply
+// would ever carry the news.
+func TestAdoptPushNamesTheDroppedCoverValues(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	s.fetch = func(sec *session.Secret) (string, error) { return "s3cret-" + sec.Name, nil }
+	s.mu.Lock()
+	delete(s.panes, "w1p1")
+	s.mu.Unlock()
+	for i := 0; i < pane.MaxSecrets; i++ {
+		name := fmt.Sprintf("s%03d", i)
+		if rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: name, Tool: "pass", Ref: "dev/" + name,
+		}); !rep.OK {
+			t.Fatalf("register %s: %s", name, rep.Error)
+		}
+		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: name}); !rep.OK {
+			t.Fatalf("use %s: %s", name, rep.Error)
+		}
+	}
+	// The cap is full: the cover is stored whole and dropped from the set.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-cover",
+		Res:    jsonRaw(map[string]any{"session": "other", "values": []string{"foreign-value"}}),
+	}); !rep.OK {
+		t.Fatalf("cover: %s", rep.Error)
+	}
+	w := log.Writer()
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(w) })
+	ch := spyPane(t, s, "w1p1")
+	s.adoptSecretScrub("w1p1")
+	got := readSpyUntil(t, ch, "set-secrets")
+	var payload struct {
+		Values []string `json:"values"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Values) != pane.MaxSecrets {
+		t.Fatalf("the adopt push carried %d values, want %d", len(payload.Values), pane.MaxSecrets)
+	}
+	for _, v := range payload.Values {
+		if v == "foreign-value" {
+			t.Fatal("the dropped value rode the adopt push")
+		}
+	}
+	if !strings.Contains(buf.String(), "the panes' cap dropped 1 value another session asked this one to cover") {
+		t.Fatalf("the adopt drop stayed silent: %q", buf.String())
+	}
+}
+
+// TestSecretUseRefusesAReRegisteredAfterTheActivation proves the use guard
+// checks the record's identity too: a revoke-and-re-register after the
+// activation must not report success under the new record.
+func TestSecretUseRefusesAReRegisteredAfterTheActivation(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	s.fetch = func(*session.Secret) (string, error) { return "s3cret-old-value", nil }
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "dev/a",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	entered := make(chan struct{})
+	s.afterActivate = func() {
+		// The revoke-and-re-register lands after the activation, inside
+		// the use flow, before the guard runs.
+		s.handleReq(cl, wire.Msg{Action: "secret-revoke", Name: "gh"})
+		s.handleReq(cl, wire.Msg{Action: "secret-register", Name: "gh", Tool: "pass", Ref: "dev/b"})
+		close(entered)
+	}
+	go func() { s.handleReq(cl, wire.Msg{Action: "secret-use", Name: "gh"}) }()
+	<-entered
+	rep := rpcRead(t, conn, wire.Msg{Action: "secret-revoke"})
+	if !rep.OK {
+		t.Fatalf("revoke reply: %s", rep.Error)
+	}
+	rep = rpcRead(t, conn, wire.Msg{Action: "secret-register"})
+	if !rep.OK {
+		t.Fatalf("register reply: %s", rep.Error)
+	}
+	rep = rpcRead(t, conn, wire.Msg{Action: "secret-use"})
+	wantErr(t, "secret-use", "revoked while the value was being fetched or pushed", rep)
+}
+
+// slowConn is a conn whose writes take their time and succeed: a push to it
+// stalls long enough for the test to land other actions inside the push, and
+// never tears.
+type slowConn struct{ delay time.Duration }
+
+func (c *slowConn) Write(b []byte) (int, error)      { time.Sleep(c.delay); return len(b), nil }
+func (c *slowConn) Close() error                     { return nil }
+func (c *slowConn) Read(b []byte) (int, error)       { return 0, io.EOF }
+func (c *slowConn) LocalAddr() net.Addr              { return nil }
+func (c *slowConn) RemoteAddr() net.Addr             { return nil }
+func (c *slowConn) SetDeadline(time.Time) error      { return nil }
+func (c *slowConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *slowConn) SetWriteDeadline(time.Time) error { return nil }
+
+// TestSecretHydratesSerializeOnAPath proves the write, its guards and the
+// removal are one critical section: a hydrate the revoke catches in its push
+// writes nothing and removes nothing, so a concurrent hydrate to the same
+// path that already replied success keeps its file.
+func TestSecretHydratesSerializeOnAPath(t *testing.T) {
+	ghValue := "s3cret-gh-serialize"
+	awsValue := "s3cret-aws-serialize"
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	s.fetch = func(sec *session.Secret) (string, error) {
+		if sec.Name == "gh" {
+			return ghValue, nil
+		}
+		return awsValue, nil
+	}
+	for _, name := range []string{"gh", "aws"} {
+		if rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: name, Tool: "pass", Ref: "dev/" + name,
+		}); !rep.OK {
+			t.Fatalf("register %s: %s", name, rep.Error)
+		}
+	}
+	// A slow pane holds the gh hydrate inside its push: the write, the
+	// guards and the removal all wait behind it.
+	s.mu.Lock()
+	s.panes["w1p2"] = &paneConn{id: "w1p2", c: &slowConn{delay: 150 * time.Millisecond}}
+	s.mu.Unlock()
+	path := filepath.Join(t.TempDir(), "token")
+	done := make(chan wire.Msg, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			return
+		}
+		done <- m
+	}()
+	// The gh hydrate is now stalled in its push. The revoke lands while it
+	// waits, so its critical section opens on a revoked record.
+	time.Sleep(50 * time.Millisecond)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"}); !rep.OK {
+		t.Fatalf("revoke: %s", rep.Error)
+	}
+	// The aws hydrate completes whole, to the same path, while the gh
+	// hydrate is still finishing its push.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "aws", Path: path}); !rep.OK {
+		t.Fatalf("hydrate aws: %s", rep.Error)
+	}
+	rep := <-done
+	wantErr(t, "secret-hydrate", "revoked while the value was being fetched or pushed", rep)
+	if strings.Contains(rep.Error, ghValue) {
+		t.Fatalf("the refusal leaks the value: %s", rep.Error)
+	}
+	// The survivor's file stands: the refused hydrate wrote nothing and
+	// removed nothing.
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the surviving hydrate's file did not survive: %v", err)
+	}
+	if string(b) != awsValue {
+		t.Fatalf("file = %q, want the surviving hydrate's value", b)
+	}
+}
+
+// TestSecretHydrateRevokeWaitsForTheWrite proves the guard, the write and the
+// re-check are one critical section: a revoke aimed into the write cannot
+// land inside it, so the hydrate succeeds and the file stands. The value is
+// wide on purpose: the temp file is on disk while the bytes are still
+// copying, so ordinary polling aims the revoke into the write. Under separate
+// steps this ordering refused the hydrate and unlinked the file.
+func TestSecretHydrateRevokeWaitsForTheWrite(t *testing.T) {
+	value := strings.Repeat("s3cret-midwrite-", 1<<21)
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	path := filepath.Join(t.TempDir(), "token")
+	done := make(chan wire.Msg, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			return
+		}
+		done <- m
+	}()
+	// The temp file's appearance means the write is in flight, under the
+	// critical section's hold.
+	deadline := time.Now().Add(5 * time.Second)
+	writing := false
+	for !writing {
+		if entries, err := os.ReadDir(filepath.Dir(path)); err == nil {
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), ".secrets-") {
+					writing = true
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hydrate never started writing")
+		}
+		if !writing {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// The revoke is issued inside the write: it waits for s.mu, so it lands
+	// after the re-check, never between the looks.
+	cl2, conn2 := boxConn(t)
+	go func() { s.handleReq(cl2, wire.Msg{Action: "secret-revoke", Name: "gh"}) }()
+	rep := <-done
+	if !rep.OK {
+		t.Fatalf("hydrate = refusal %q, want a success: the revoke landed inside the write", rep.Error)
+	}
+	rep = rpcRead(t, conn2, wire.Msg{Action: "secret-revoke"})
+	if !rep.OK {
+		t.Fatalf("revoke reply: %s", rep.Error)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(b, []byte(value)) {
+		t.Fatalf("file mismatch err=%v, want the hydrate's value", err)
+	}
 }

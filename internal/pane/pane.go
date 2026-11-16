@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -80,7 +81,34 @@ type paneProc struct {
 	// stand-in lives on its own pane and parallel tests share no global.
 	// Set once before the serve loop runs; read-only afterwards.
 	children func(int) []int
+
+	// Outbound pty writes queue on one dedicated writer goroutine, so a pty
+	// nobody reads never blocks the serve loop and the control socket drains
+	// at wire speed whatever the foreground job does. queueWrite creates
+	// writes the first time it runs. The queue holds at most ptyQueueDepth
+	// frames; a write that finds it full is dropped and counted in ptyDropped.
+	// The frames a suspended job cannot take are exactly the frames worth
+	// dropping: keystrokes pile up behind a job that will never read them,
+	// and an unbounded backlog would grow the daemon's heap and delay every
+	// later write. ptyDropped is atomic because the writer goroutine and every
+	// serve loop touch it without the pane lock.
+	writes     chan ptyWrite
+	ptyDropped atomic.Int64
+	writer     sync.Once
 }
+
+// ptyWrite is one queued pty write: the payload bytes and, for a pane write
+// action, whether the Enter key follows them as a carriage return.
+type ptyWrite struct {
+	b     []byte
+	enter bool
+}
+
+// ptyQueueDepth bounds the pty writer's queue. Keystrokes arrive a frame at
+// a time, so a queue this deep never drops on a live terminal; only a pty
+// whose reader is gone or suspended can fill it, and there the drops are
+// the honest answer.
+const ptyQueueDepth = 256
 
 // resolveShell picks the shell a pane runs: the caller's explicit value when
 // it gave one, else $SHELL, else /bin/sh. The explicit argument keeps tests
@@ -635,9 +663,7 @@ func (p *paneProc) replyQuery() {
 	p.mu.Lock()
 	st := p.st
 	p.mu.Unlock()
-	go func() {
-		_, _ = p.ptmx.Write([]byte(formatStatusQuery(st)))
-	}()
+	p.queueWrite([]byte(formatStatusQuery(st)), false)
 }
 
 // formatStatusQuery renders the answer to an OSC 7501 feature probe. The
@@ -669,9 +695,41 @@ func formatStatus(st wire.Status) string {
 
 // replyTerminal writes a terminal reply into the PTY, which is the app's input.
 func (p *paneProc) replyTerminal(s string) {
-	go func() {
-		_, _ = p.ptmx.Write([]byte(s))
-	}()
+	p.queueWrite([]byte(s), false)
+}
+
+// queueWrite hands one pty write to the writer goroutine and never blocks.
+// The queue overflows only while the pty's reader is gone or suspended, and
+// the frame it cannot take is exactly the frame worth dropping: a keystroke
+// a suspended job will never read. The drop is counted so the cost of a
+// stalled pty stays visible.
+func (p *paneProc) queueWrite(b []byte, enter bool) {
+	p.writer.Do(func() {
+		p.writes = make(chan ptyWrite, ptyQueueDepth)
+		go p.drainPtyWrites()
+	})
+	select {
+	case p.writes <- ptyWrite{b: b, enter: enter}:
+	default:
+		p.ptyDropped.Add(1)
+	}
+}
+
+// ptyDrops reports how many queued pty writes were dropped because the queue
+// was full.
+func (p *paneProc) ptyDrops() int64 { return p.ptyDropped.Load() }
+
+// drainPtyWrites is the one goroutine that writes the pty. It takes queued
+// frames in order and ignores write errors the way the serve loop always
+// did: a dead pty shows up as readLoop's exit, and the process leaves with
+// it, so the queue never needs a close.
+func (p *paneProc) drainPtyWrites() {
+	for w := range p.writes {
+		_, _ = p.ptmx.Write(w.b)
+		if w.enter {
+			_, _ = p.ptmx.Write([]byte("\r"))
+		}
+	}
 }
 
 // cursorPos is the VT cursor, zero-based, for a cursor position report.
@@ -804,10 +862,7 @@ func (p *paneProc) serve(c net.Conn) {
 				}
 			}
 			p.mu.Unlock()
-			_, _ = p.ptmx.Write(b)
-			if m.Enter {
-				_, _ = p.ptmx.Write([]byte("\r"))
-			}
+			p.queueWrite(b, m.Enter)
 		case "resize":
 			if m.Cols < 2 || m.Rows < 2 {
 				continue

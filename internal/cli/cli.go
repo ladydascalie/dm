@@ -100,12 +100,24 @@ func (c *cmdFlags) parse(args []string) {
 	ordered := reorder(args)
 	verb := c.fs.Name()
 	if verb == "msg" || verb == "secret" {
-		// The subverb of a grouped verb is the first positional: reorder
-		// has already moved every flag in front of it. An unknown or
-		// missing subverb registers nothing, and the usage printer shows
-		// the list.
-		if sub := firstArg(ordered); sub != "" && clidoc.VerbFlags(verb+" "+sub) != nil {
-			verb = verb + " " + sub
+		// The subverb of a grouped verb is the first positional, read
+		// from the original argv order: reorder has moved a dangling
+		// value-taking flag in front of it, and reading the reordered
+		// slice would consume the subverb as the flag's value and lose
+		// the name. A known subverb promotes the verb, so its row's
+		// flags register. An unknown subverb is a command mistake, not
+		// a flag one: the bare group registers no flags, so parsing
+		// would refuse the first flag it met and bury the name that was
+		// typed wrong under "flag provided but not defined". Skip the
+		// parse and hand the positionals to the group's dispatcher,
+		// which reports the unknown verb.
+		if sub := firstArg(args); sub != "" {
+			if clidoc.VerbFlags(verb+" "+sub) != nil {
+				verb = verb + " " + sub
+			} else {
+				c.args = positionals(args)
+				return
+			}
 		}
 	}
 	for _, f := range clidoc.VerbFlags(verb) {
@@ -122,6 +134,10 @@ func (c *cmdFlags) parse(args []string) {
 		}
 		if verb == "msg" {
 			fmt.Fprint(out, clidoc.MsgSubcommands())
+			return
+		}
+		if verb == "secret" {
+			fmt.Fprint(out, clidoc.SecretSubcommands())
 			return
 		}
 		fmt.Fprint(out, clidoc.VerbHelp(verb))
@@ -173,20 +189,47 @@ func envSessionLive(root, name string) bool {
 	return false
 }
 
-// firstArg returns the first positional of reordered argv, skipping the flags
-// and the values the withValue flags take.
-func firstArg(args []string) string {
+// split walks argv once and classifies every token: a flag and the value a
+// withValue flag takes go to flags, the rest to positionals. A dangling
+// value-taking flag consumes nothing. reorder and positionals both read
+// split, so the two cannot disagree on what a flag consumed.
+func split(args []string) (flags, pos []string) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") && a != "-" {
+			flags = append(flags, a)
 			if withValue[a] && i+1 < len(args) {
 				i++
+				flags = append(flags, args[i])
 			}
 			continue
 		}
-		return a
+		pos = append(pos, a)
 	}
-	return ""
+	return flags, pos
+}
+
+// reorder moves flags before positionals, so -s may follow a pane id.
+func reorder(args []string) []string {
+	flags, pos := split(args)
+	return append(flags, pos...)
+}
+
+// positionals returns the positionals of argv in the order it was typed,
+// skipping the flags and the values the withValue flags take.
+func positionals(args []string) []string {
+	_, pos := split(args)
+	return pos
+}
+
+// firstArg returns the first positional of argv, or the empty string when
+// argv carries none.
+func firstArg(args []string) string {
+	pos := positionals(args)
+	if len(pos) == 0 {
+		return ""
+	}
+	return pos[0]
 }
 
 // register adds one table flag to the set, bound to the field the verb's Run
@@ -321,8 +364,8 @@ func (c *cmdFlags) extraArg(n int) error {
 	return fmt.Errorf("%s: unexpected argument %q", c.fs.Name(), c.args[n])
 }
 
-// withValue names the flags that take a value, so reorder and firstArg know
-// where a flag ends and the next argument begins.
+// withValue names the flags that take a value, so split knows where a flag
+// ends and the next argument begins.
 var withValue = map[string]bool{
 	"-s": true, "--s": true, "-msg": true, "--msg": true,
 	"-action-json": true, "--action-json": true, "-dir": true, "--dir": true,
@@ -336,24 +379,6 @@ var withValue = map[string]bool{
 	"-env": true, "--env": true,
 	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
 	"-to": true, "--to": true,
-}
-
-// reorder moves flags before positionals, so -s may follow a pane id.
-func reorder(args []string) []string {
-	var flags, pos []string
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if strings.HasPrefix(a, "-") && a != "-" {
-			flags = append(flags, a)
-			if withValue[a] && i+1 < len(args) {
-				i++
-				flags = append(flags, args[i])
-			}
-			continue
-		}
-		pos = append(pos, a)
-	}
-	return append(flags, pos...)
 }
 
 // Run parses argv and runs one verb. The state root comes from
