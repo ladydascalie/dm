@@ -1712,6 +1712,29 @@ func (t *tui) copyScreen() {
 	t.disarm()
 }
 
+// takeToggle toasts the toggle-secrets reply: the pane and the state it
+// landed on, so an unprotected pane never reads as protected. A failure
+// toasts the error and the pane keeps the state it had.
+func (t *tui) takeToggle(m wire.Msg) {
+	if !m.OK {
+		t.notify(m.Error)
+		return
+	}
+	var res struct {
+		Pane    string `json:"pane"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		t.notify("toggle-secrets: " + err.Error())
+		return
+	}
+	if res.Enabled {
+		t.notify("redaction on: " + res.Pane)
+		return
+	}
+	t.notify("redaction off: " + res.Pane)
+}
+
 // takeYank writes the clipboard for a yank reply. A pane with no Enter has no
 // anchor, so the copy falls back to the visible screen and the toast says so.
 func (t *tui) takeYank(m wire.Msg) {

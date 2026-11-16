@@ -125,24 +125,25 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 	return b.String()
 }
 
-// TestHelpBoxSizesToWidestRowAt100x34 proves the box holds the default layout
+// TestHelpBoxSizesToWidestRowAt100x40 proves the box holds the default layout
 // whole, that both border rows own a row, and that the frame carries its title
-// and hint.
-func TestHelpBoxSizesToWidestRowAt100x34(t *testing.T) {
+// and hint. The default table grew one toggle-secrets row, so the proof runs
+// on a 40-row screen.
+func TestHelpBoxSizesToWidestRowAt100x40(t *testing.T) {
 	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
-	g, ok := helpBoxGeometry(100, 34, keys)
+	g, ok := helpBoxGeometry(100, 40, keys)
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
 	}
-	p := helpBoxParse(t, helpBoxDraw(t, 100, 34, keys))
+	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, keys))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
 	if want := g.inner + 2; x1-x0+1 != want {
 		t.Fatalf("box width = %d, want %d", x1-x0+1, want)
 	}
-	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 33 {
-		t.Fatalf("box %d,%d..%d,%d is not inside 100x34", x0, y0, x1, y1)
+	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 39 {
+		t.Fatalf("box %d,%d..%d,%d is not inside 100x40", x0, y0, x1, y1)
 	}
 	if want := g.h + 2; y1-y0+1 != want {
 		t.Fatalf("box height = %d, want %d", y1-y0+1, want)
@@ -184,7 +185,7 @@ func TestHelpBoxSizesToWidestRowAt100x34(t *testing.T) {
 func TestHelpBoxShadow(t *testing.T) {
 	t.Parallel()
 	keys := keymap.LoadDefault().HelpEntries()
-	cols, rows := 100, 34
+	cols, rows := 100, 40
 	g, ok := helpBoxGeometry(cols, rows, keys)
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
@@ -439,10 +440,10 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value.
-const helpBoxDefaultSHA256 = "db8abb429232482f4e0f9d13803190433cd404d812830b923923a1106fb2aa1f"
+const helpBoxDefaultSHA256 = "188f77fb8942a5407f3b885239e3f8bb3c5b44382b197790adafef8c21ce4c1f"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
-// help box. The four layout and session actions carry their section tags; the
+// help box. The five layout and session actions carry their section tags; the
 // rest of the default config is untagged.
 func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
 	t.Parallel()
@@ -451,6 +452,7 @@ func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
 		"swap with next / prev pane": "Layout",
 		"cycle layout":               "Layout",
 		"synchronize panes":          "Session",
+		"toggle secret redaction":    "Session",
 	}
 	for _, e := range entries {
 		s, tagged := want[e.Action]

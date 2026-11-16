@@ -732,6 +732,7 @@ func (s *server) serve(c net.Conn) {
 		switch m.Type {
 		case "attach":
 			registered = true
+			cl.attached = true
 			s.mu.Lock()
 			s.clients[cl] = true
 			s.mu.Unlock()

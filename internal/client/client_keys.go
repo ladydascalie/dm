@@ -837,6 +837,16 @@ func (t *tui) runAction(name string) {
 		openLayoutSwitcher(t)
 	case "synchronize-panes":
 		t.action("synchronize-panes", nil)
+	case "toggle-secrets":
+		p := t.focusedPane()
+		if p == nil {
+			t.notify("no pane")
+			t.disarm()
+			return
+		}
+		t.toggleID++
+		_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-secrets", Target: p.ID, ID: t.toggleID})
+		t.disarm()
 	case "new-workspace":
 		t.action("new-workspace", nil)
 	case "next-workspace":

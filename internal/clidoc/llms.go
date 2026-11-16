@@ -136,7 +136,7 @@ func llmsCell(s string) string {
 // exactly once.
 var llmsActionGroups = [][]string{
 	{"ping", "term-colours"}, {"list"},
-	{"read", "screen"}, {"history", "yank"}, {"replay"}, {"status"},
+	{"read", "screen"}, {"history", "yank"}, {"replay", "status"},
 	{"write-to", "exec"}, {"keys"},
 	{"split"}, {"zoom-pane"}, {"set-rail", "reload"}, {"resize-split"},
 	{"focus"}, {"focus-dir"}, {"next-pane", "prev-pane"}, {"close-pane"},
@@ -148,11 +148,11 @@ var llmsActionGroups = [][]string{
 	{"focus-window", "focus-workspace"},
 	{"rename-window", "rename-workspace", "set-project"},
 	{"swap-panes", "move-pane"}, {"move-window", "move-workspace"},
-	{"select-layout"}, {"synchronize-panes"},
+	{"select-layout", "synchronize-panes"},
 	{"float-open", "float-close"},
 	{"msg-post"}, {"msg-list"}, {"msg-clear"}, {"msg-wait"}, {"msg-sub"},
 	{"msg-watchers", "msg-schema"},
-	{"secret-register", "secret-list"}, {"secret-revoke"},
+	{"secret-register", "secret-list", "secret-revoke"},
 	{"secret-use", "secret-hydrate", "secret-type"},
 	{"secret-sync"},
 }

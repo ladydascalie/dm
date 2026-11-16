@@ -252,6 +252,11 @@ type tui struct {
 	yankID   int
 	yankPane string
 
+	// toggleID numbers the next toggle-secrets request, so the reply toast
+	// reports the pane and state this keypress produced and never one from
+	// another window.
+	toggleID int
+
 	// reader is the open body reader overlay, nil when closed. The box view
 	// owns its window and selection, so the client reads them off the view.
 	boxPage bool
@@ -891,6 +896,12 @@ func (t *tui) apply(m wire.Msg) {
 	case "resp":
 		if m.Action == "yank" && m.ID == t.yankID {
 			t.takeYank(m)
+			break
+		}
+		// The toggle reply toasts the state the pane landed on, so an
+		// unprotected pane never reads as protected.
+		if m.Action == "toggle-secrets" && m.ID == t.toggleID {
+			t.takeToggle(m)
 			break
 		}
 		// The float-open reply shows the floating command. A failure toasts

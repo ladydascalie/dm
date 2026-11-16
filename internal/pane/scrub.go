@@ -38,13 +38,18 @@ const (
 )
 
 // scrubber holds the pane's secret values and redacts them from the output
-// stream. set is called from the serve loop; feed and flush run only on the
-// pty reader goroutine, which owns carry. vals is guarded by mu.
+// stream. set and toggle are called from the serve loop; feed and flush run
+// only on the pty reader goroutine, which owns carry. vals and off are
+// guarded by mu.
 type scrubber struct {
 	mu     sync.Mutex
 	vals   [][]byte
 	maxLen int
 	carry  []byte
+	// off is the redaction switch. The zero value keeps the stage scrubbing,
+	// so a respawned daemon and a fresh scrubber start in the safe state:
+	// output already carries secrets the list must catch.
+	off bool
 }
 
 // set replaces the secret list. Empty and too short values are dropped, a
@@ -71,14 +76,35 @@ func (s *scrubber) set(values []string) {
 	s.mu.Unlock()
 }
 
+// toggle flips the redaction switch and reports the new state: true when
+// the stage scrubs again. The value list survives both ways, so a toggle
+// off and back on needs no fresh set-secrets push.
+func (s *scrubber) toggle() bool {
+	s.mu.Lock()
+	s.off = !s.off
+	on := !s.off
+	s.mu.Unlock()
+	return on
+}
+
 // feed appends one chunk to the output. It writes every byte it can swear
 // to into out and holds back only the bytes a next chunk could complete in
 // carry, because an occurrence may straddle the chunk boundary and only a
 // hold-back keeps its first half from already being on the wire.
 func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 	s.mu.Lock()
-	vals, maxLen := s.vals, s.maxLen
+	vals, maxLen, off := s.vals, s.maxLen, s.off
 	s.mu.Unlock()
+
+	// The switch is off: every byte flows through untouched, in order,
+	// while the value list waits for the switch back. Anything an earlier
+	// list held back goes out first, so the stream keeps its order.
+	if off {
+		out.Write(s.carry)
+		s.carry = s.carry[:0]
+		out.Write(b)
+		return
+	}
 
 	// The steady state of a pane with no secrets: nothing held, nothing to
 	// scan, the chunk passes through untouched.
@@ -148,14 +174,14 @@ func holdBack(vals [][]byte, maxLen int, data []byte) int {
 // behind in the stage.
 func (s *scrubber) flush(out *bytes.Buffer) {
 	s.mu.Lock()
-	vals := s.vals
+	vals, off := s.vals, s.off
 	s.mu.Unlock()
 	data := s.carry
 	s.carry = nil
 	if len(data) == 0 {
 		return
 	}
-	if len(vals) == 0 {
+	if off || len(vals) == 0 {
 		out.Write(data)
 		return
 	}

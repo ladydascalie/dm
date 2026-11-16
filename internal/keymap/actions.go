@@ -40,6 +40,7 @@ var builtinActions = map[string]bool{
 	"layout-picker":       true,
 	"command-palette":     true,
 	"synchronize-panes":   true,
+	"toggle-secrets":      true,
 	"new-workspace":       true,
 	"next-workspace":      true,
 	"switcher":            true,

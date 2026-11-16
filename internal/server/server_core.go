@@ -184,8 +184,12 @@ type client struct {
 	// resync is the server's rebuild hook: one snapshot, then one screen per
 	// pane. It is nil until the client attaches.
 	resync func()
-	closed bool
-	writer sync.Once
+	// attached says the conn sent its attach frame. Only an attached client
+	// may drive the operator-only actions: a toggle a script could send
+	// would let an agent inside dm disable its own redaction.
+	attached bool
+	closed   bool
+	writer   sync.Once
 }
 
 func newClient(c net.Conn) *client {

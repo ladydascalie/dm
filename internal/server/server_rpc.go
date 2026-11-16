@@ -258,6 +258,42 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		}
 		s.reply(cl, m, map[string]any{"sync": sync}, err)
 
+	case "toggle-secrets":
+		// The operator's redaction switch. It answers only to an attached
+		// client: a toggle a dm exec script could send would let an agent
+		// running inside dm disable its own redaction. The switch rides the
+		// same pane-daemon request path the screen and replay actions use,
+		// and the reply carries the state the pane landed on, so the client
+		// can show an unprotected pane as unprotected.
+		if !cl.attached {
+			s.reply(cl, m, nil, fmt.Errorf("toggle-secrets runs from the interactive client only"))
+			return
+		}
+		id := m.Target
+		if id == "" {
+			id = s.st.ActiveWindow().Focus
+		}
+		s.mu.Lock()
+		_, live := s.panes[id]
+		s.mu.Unlock()
+		if !live {
+			s.reply(cl, m, nil, fmt.Errorf("no pane %q", id))
+			return
+		}
+		got, err := paneRequest(s.st, id, wire.Msg{Type: "req", Action: "toggle-secrets"})
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		var res struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.Unmarshal(got.Res, &res); err != nil {
+			s.reply(cl, m, nil, fmt.Errorf("pane %s toggle reply: %w", id, err))
+			return
+		}
+		s.reply(cl, m, map[string]any{"pane": id, "enabled": res.Enabled}, nil)
+
 	case "split":
 		var id string
 		err := s.mutation(func() error {

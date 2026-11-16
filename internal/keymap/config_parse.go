@@ -713,6 +713,7 @@ keymap "main" {
     "new-workspace" "t"
     "next-workspace" ")"
     "synchronize-panes" "S" help "Session"
+    "toggle-secrets" "ctrl+g" help "Session"
     "switcher" "a"
     "picker" "s"
     "command-palette" "K"
