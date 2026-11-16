@@ -44,6 +44,28 @@ func TestReorderKeepsADash(t *testing.T) {
 	}
 }
 
+// TestSplitNamesTheDanglingFlag proves split names a value-taking flag left
+// at the end of argv, and stays quiet when the last token is a positional,
+// a valueless flag, or the value split already took for the flag before it.
+func TestSplitNamesTheDanglingFlag(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"use", "main", "-s"}, {"list", "--after"}, {"post", "hello", "--msg"},
+	} {
+		if _, _, d := split(args); d == "" {
+			t.Fatalf("split(%v) names no dangling flag, want the trailing flag", args)
+		}
+	}
+	for _, args := range [][]string{
+		{"-s", "main"}, {"list"}, {"post", "-s", "main", "hello"}, {},
+		{"post", "hello", "-msg", "-s"}, {"post", "-msg", "-s"},
+	} {
+		if _, _, d := split(args); d != "" {
+			t.Fatalf("split(%v) = %q, want no dangling flag", args, d)
+		}
+	}
+}
+
 // TestSessionDefaultsToThePaneEnv proves a command from inside a pane targets
 // that pane's session without -s, and stays main outside dm.
 func TestSessionDefaultsToThePaneEnv(t *testing.T) {

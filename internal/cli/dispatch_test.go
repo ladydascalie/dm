@@ -496,27 +496,48 @@ func TestUnknownSubverbSurvivesADanglingFlag(t *testing.T) {
 	}
 }
 
-// TestKnownSubverbSurvivesADanglingFlag proves a dangling flag does not
-// bury a known subverb under the flag error either: the subverb reaches the
-// group's dispatcher, which prints its subverb list.
-func TestKnownSubverbSurvivesADanglingFlag(t *testing.T) {
-	t.Setenv("DM_SESSION", "")
-	t.Setenv("DM_STATE", t.TempDir())
-	out := testutil.CaptureStdout(t, func() {
-		if err := Run([]string{"msg", "post", "-s"}); err != nil {
-			t.Fatalf("dm msg post -s: %v", err)
+// TestADanglingFlagIsTheMistakeItNames proves a value-taking flag left
+// dangling at the end of argv is refused as the flag mistake it is: reorder
+// would move the flag in front of the positionals and parsing would feed it
+// the subverb or the argument the caller did type. The refusal names the
+// flag and never the token it would have eaten.
+func TestADanglingFlagIsTheMistakeItNames(t *testing.T) {
+	t.Parallel()
+	for _, argv := range [][]string{
+		{"secret", "use", "main", "-s"},
+		{"msg", "post", "hello", "-s"},
+		{"secret", "list", "-s"},
+	} {
+		err := Run(argv)
+		if err == nil || !strings.Contains(err.Error(), "flag -s needs a value") {
+			t.Fatalf("dm %v = %v, want the dangling -s refusal", argv, err)
 		}
-	})
-	if !strings.Contains(out, "dm msg post") {
-		t.Fatalf("dm msg post -s printed %q, want the msg subverb list", out)
+		if strings.Contains(err.Error(), "unknown verb") {
+			t.Fatalf("dm %v accuses the verb, not the flag: %v", argv, err)
+		}
 	}
-	out = testutil.CaptureStdout(t, func() {
-		if err := Run([]string{"secret", "list", "-s"}); err != nil {
-			t.Fatalf("dm secret list -s: %v", err)
+}
+
+// TestAConsumedTrailingTokenDoesNotDangle proves a trailing token that
+// split already took as the previous flag's value is a value, not a
+// dangling flag: the command parses and fails later on its own merits,
+// never with a refusal that accuses the value the flag took.
+func TestAConsumedTrailingTokenDoesNotDangle(t *testing.T) {
+	t.Setenv("DM_SESSION", "")
+	for _, tt := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"msg", "post", "hello", "-msg", "-s"}, `unexpected argument "hello"`},
+		{[]string{"msg", "post", "-msg", "-s"}, "bad state"},
+	} {
+		err := Run(tt.argv)
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("dm %v = %v, want %q", tt.argv, err, tt.want)
 		}
-	})
-	if !strings.Contains(out, "dm secret type") {
-		t.Fatalf("dm secret list -s printed %q, want the secret subverb list", out)
+		if strings.Contains(err.Error(), "needs a value") {
+			t.Fatalf("dm %v accuses -s, the value -msg took: %v", tt.argv, err)
+		}
 	}
 }
 
