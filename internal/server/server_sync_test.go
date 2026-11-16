@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"dm/internal/wire"
@@ -140,7 +141,7 @@ func TestSecretSyncRegistersAndIngests(t *testing.T) {
 	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
 	dotenv := writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\nNOVALUE\nEMPTY=\nSHORT=ab\n\n")
 
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
 	if !m.OK {
 		t.Fatalf("secret sync failed: %s", m.Error)
 	}
@@ -192,12 +193,12 @@ func TestSecretSyncIsIdempotent(t *testing.T) {
 	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
 	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\nOTHER=anothervalue\n")
 
-	if m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path}); !m.OK {
+	if m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true}); !m.OK {
 		t.Fatalf("first sync: %s", m.Error)
 	}
 	// A second run with one line dropped stops redacting exactly that one.
 	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\n")
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
 	if !m.OK {
 		t.Fatalf("second sync: %s", m.Error)
 	}
@@ -222,7 +223,7 @@ func TestSecretSyncIsIdempotent(t *testing.T) {
 func TestSecretSyncRefusesBadShapes(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	path := writeMapping(t, t.TempDir(), "secret \"gh-cli\" {\n  tool \"vault\"\n  ref \"r\"\n}\n")
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
 	if m.OK {
 		t.Fatal("secret sync accepted an unknown tool")
 	}
@@ -271,7 +272,7 @@ func TestSecretSyncReportsAMissingFile(t *testing.T) {
 func TestSecretSyncRegistersTheRegisterShape(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	path := writeMapping(t, t.TempDir(), "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://x/y\"\n  upstream \"https://api.github.com\"\n}\n")
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
 	if m.OK || !strings.Contains(m.Error, "go together") {
 		t.Fatalf("reply %v, error %q", m.OK, m.Error)
 	}
@@ -349,5 +350,208 @@ func TestSecretSyncCountsCollisionsAndEmptyKeys(t *testing.T) {
 		if strings.Contains(string(m.Res), leak) {
 			t.Fatalf("reply leaks %q: %s", leak, m.Res)
 		}
+	}
+}
+
+// TestSecretSyncRefusesAnUntrustedSecretBlock proves the trust hole is
+// closed: a mapping the client did not mark trusted may not pin a secret,
+// and the refusal costs the whole mapping, so nothing registers and nothing
+// is ingested.
+func TestSecretSyncRefusesAnUntrustedSecretBlock(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n  upstream \"http://127.0.0.1:47811\"\n  header \"Authorization: Bearer {}\"\n}\nfile {\n    path \"creds.env\"\n}\n")
+	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\n")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if m.OK {
+		t.Fatal("an untrusted mapping registered a secret block")
+	}
+	for _, want := range []string{path, "$XDG_CONFIG_HOME/dm", "--trust"} {
+		if !strings.Contains(m.Error, want) {
+			t.Fatalf("error %q does not name %q", m.Error, want)
+		}
+	}
+	if s.st.Secret("gh-cli") != nil {
+		t.Fatal("the refused mapping registered a secret")
+	}
+	if len(s.secretFiles) != 0 {
+		t.Fatalf("the refused mapping ingested files: %v", s.secretFiles)
+	}
+	if s.secrets != nil {
+		if _, ok := s.secrets.Get(filepath.Join(dir, "creds.env") + "#GH_TOKEN"); ok {
+			t.Fatal("the refused mapping activated a file value")
+		}
+	}
+	if strings.Contains(string(m.Res), "supersecretvalue") || strings.Contains(m.Error, "supersecretvalue") {
+		t.Fatal("the refusal echoed a value")
+	}
+}
+
+// TestSecretSyncTrustsAFlaggedMapping proves --trust restores today's shape:
+// the same repo mapping registers its secret and ingests its file block.
+func TestSecretSyncTrustsAFlaggedMapping(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
+	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\n")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
+	if !m.OK {
+		t.Fatalf("trusted sync failed: %s", m.Error)
+	}
+	if s.st.Secret("gh-cli") == nil {
+		t.Fatal("the trusted mapping registered nothing")
+	}
+	if v, ok := s.secrets.Get(filepath.Join(dir, "creds.env") + "#GH_TOKEN"); !ok || v != "supersecretvalue" {
+		t.Fatalf("the trusted mapping ingested %q=%v", filepath.Join(dir, "creds.env")+"#GH_TOKEN", v)
+	}
+}
+
+// TestSecretSyncUntrustedFileBlockStillWorks proves the ordinary repo
+// mapping keeps working without --trust: a .env beside the mapping is
+// inside the mapping's own directory, so it reads.
+func TestSecretSyncUntrustedFileBlockStillWorks(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	path := writeMapping(t, dir, "file {\n    path \".env\"\n}\n")
+	writeFile(t, dir, ".env", "API_TOKEN=supersecretvalue\n")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if !m.OK {
+		t.Fatalf("sync failed: %s", m.Error)
+	}
+	var res syncReply
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if res.Warning != "" {
+		t.Fatalf("warning %q, want none", res.Warning)
+	}
+	if v, ok := s.secrets.Get(filepath.Join(dir, ".env") + "#API_TOKEN"); !ok || v != "supersecretvalue" {
+		t.Fatalf("registry holds %q=%v", filepath.Join(dir, ".env")+"#API_TOKEN", v)
+	}
+}
+
+// TestSecretSyncConfinesUntrustedFileBlocks proves a file block may not
+// leave the mapping's directory: a relative .., an absolute path elsewhere
+// and a symlink out are each refused by name, and none registers a value.
+func TestSecretSyncConfinesUntrustedFileBlocks(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := writeFile(t, root, "outside.env", "OUTSIDE=outsidevalue\n")
+	if err := os.Symlink(outside, filepath.Join(repo, "link.env")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	cases := []struct{ name, block string }{
+		{"relative dotdot", "../outside.env"},
+		{"absolute", outside},
+		{"symlink out", "link.env"},
+	}
+	for _, tc := range cases {
+		s, cl, conn := syncServer(t)
+		path := writeMapping(t, repo, "file {\n    path \""+tc.block+"\"\n}\n")
+		m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+		if !m.OK {
+			t.Fatalf("%s: sync failed: %s", tc.name, m.Error)
+		}
+		var res syncReply
+		if err := json.Unmarshal(m.Res, &res); err != nil {
+			t.Fatalf("%s: decode reply: %v", tc.name, err)
+		}
+		if len(res.Files) != 1 || !strings.Contains(res.Files[0].Error, "outside the mapping directory") {
+			t.Fatalf("%s: file result %+v, want an outside-directory refusal", tc.name, res.Files)
+		}
+		if !strings.Contains(res.Warning, "outside.env") && !strings.Contains(res.Warning, "link.env") {
+			t.Fatalf("%s: warning %q names no block", tc.name, res.Warning)
+		}
+		if len(s.secretFiles) != 0 {
+			t.Fatalf("%s: the refused block ingested %v", tc.name, s.secretFiles)
+		}
+	}
+}
+
+// TestSecretSyncRefusesNonRegularFileBlocks proves a directory and a FIFO
+// are refused by name before any read, so neither stalls the sync.
+func TestSecretSyncRefusesNonRegularFileBlocks(t *testing.T) {
+	cases := []struct{ name, block string }{
+		{"directory", "dir"},
+		{"fifo", "pipe"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, cl, conn := syncServer(t)
+			dir := t.TempDir()
+			if tc.name == "directory" {
+				if err := os.MkdirAll(filepath.Join(dir, "dir"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o600); err != nil {
+				t.Skipf("mkfifo: %v", err)
+			}
+			path := writeMapping(t, dir, "file {\n    path \""+tc.block+"\"\n}\n")
+			m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+			if !m.OK {
+				t.Fatalf("sync failed: %s", m.Error)
+			}
+			var res syncReply
+			if err := json.Unmarshal(m.Res, &res); err != nil {
+				t.Fatalf("decode reply: %v", err)
+			}
+			if len(res.Files) != 1 || !strings.Contains(res.Files[0].Error, "is not a regular file") {
+				t.Fatalf("file result %+v, want a non-regular refusal", res.Files)
+			}
+			if !strings.Contains(res.Warning, tc.block) {
+				t.Fatalf("warning %q names no block", res.Warning)
+			}
+			if len(s.secretFiles) != 0 {
+				t.Fatalf("the refused block ingested %v", s.secretFiles)
+			}
+		})
+	}
+}
+
+// TestSecretSyncRefusesAnOversizeFileBlock proves a regular file past the
+// 1 MiB cap is refused by name instead of read into the server.
+func TestSecretSyncRefusesAnOversizeFileBlock(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	path := writeMapping(t, dir, "file {\n    path \"big.env\"\n}\n")
+	writeFile(t, dir, "big.env", "BIG="+strings.Repeat("x", 1<<20)+"\n")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if !m.OK {
+		t.Fatalf("sync failed: %s", m.Error)
+	}
+	var res syncReply
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	if len(res.Files) != 1 || !strings.Contains(res.Files[0].Error, "the limit is") {
+		t.Fatalf("file result %+v, want an oversize refusal", res.Files)
+	}
+	if !strings.Contains(res.Warning, "big.env") {
+		t.Fatalf("warning %q names no block", res.Warning)
+	}
+	if len(s.secretFiles) != 0 {
+		t.Fatalf("the oversize block ingested %v", s.secretFiles)
+	}
+}
+
+// TestSecretSyncRefusesANonRegularMapping proves a mapping path that names
+// a device through a symlink is refused before the read, so the sync cannot
+// be made to grow the server's heap.
+func TestSecretSyncRefusesANonRegularMapping(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	if err := os.Symlink("/dev/zero", filepath.Join(dir, ".dm-secrets.kdl")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: filepath.Join(dir, ".dm-secrets.kdl")})
+	if m.OK || !strings.Contains(m.Error, "not a regular file") {
+		t.Fatalf("reply %v, error %q", m.OK, m.Error)
 	}
 }

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -208,15 +209,27 @@ type syncValue struct {
 	value string
 }
 
+// maxSecretFileBytes caps one mapping or file block read. The mapping is
+// untrusted input: a device, a FIFO or a huge regular file must not grow the
+// server's heap or stall the sync request, so every read asks for at most
+// this much and refuses a regular file bigger than it.
+const maxSecretFileBytes = 1 << 20
+
 // secretSync applies one mapping: register the secret blocks, ingest the
 // file blocks, push the redaction set and answer. The mapping path arrives
 // absolute; the file paths inside it resolve against its directory.
+//
+// The client sends Trust when the mapping lives under the operator's config
+// directory or the operator passed --trust. An untrusted mapping may not
+// register secret blocks and may read only files under its own directory: a
+// repo-local mapping must not pin an upstream for the operator's store value
+// or read the operator's files.
 func (s *server) secretSync(cl *client, m wire.Msg) {
 	if m.Path == "" {
 		s.reply(cl, m, nil, fmt.Errorf("secret sync needs the mapping path"))
 		return
 	}
-	src, err := os.ReadFile(m.Path)
+	src, err := readRegularFile(m.Path, maxSecretFileBytes)
 	if err != nil {
 		s.reply(cl, m, nil, fmt.Errorf("secret sync: %w", err))
 		return
@@ -224,6 +237,12 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 	mp, err := parseSecretsMapping(string(src))
 	if err != nil {
 		s.reply(cl, m, nil, fmt.Errorf("%s: %w", m.Path, err))
+		return
+	}
+	if !m.Trust && len(mp.Secrets) > 0 {
+		s.reply(cl, m, nil, fmt.Errorf(
+			"%s: an untrusted mapping registers no secrets; move it under $XDG_CONFIG_HOME/dm (or ~/.config/dm) or run dm secret sync --trust",
+			m.Path))
 		return
 	}
 	// Every secret block validates before anything mutates, so a bad block
@@ -260,11 +279,16 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 		return
 	}
 	dir := filepath.Dir(m.Path)
+	realDir := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		realDir = resolved
+	}
 	results := make([]fileResult, 0, len(mp.Files))
 	var bounds []syncValue
 	for i := range mp.Files {
-		b := &mp.Files[i]
-		res, vals := s.ingestSecretFile(filepath.Join(dir, b.Path))
+		res, vals := s.ingestSecretFile(fileScan{
+			dir: dir, realDir: realDir, block: mp.Files[i], trusted: m.Trust,
+		})
 		results = append(results, res)
 		bounds = append(bounds, vals...)
 	}
@@ -321,6 +345,16 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 	}, nil)
 }
 
+// fileScan is one file block to read: the mapping directory it resolves
+// against, that directory with symlinks resolved, the block itself and the
+// mapping's trust verdict.
+type fileScan struct {
+	dir     string
+	realDir string
+	block   mappingFile
+	trusted bool
+}
+
 // ingestSecretFile reads one file block's path and turns its lines into
 // redaction values. A non-empty line donates everything after the first =;
 // a line without = registers nothing; an empty value, an empty key and a
@@ -331,9 +365,22 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 // activate under s.mu with names derived from the path and the key, so a
 // re-run of the same mapping replaces exactly the values it donated before
 // and nothing else. The counts travel out, the values never do.
-func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
+//
+// An untrusted block may read only a regular file under the mapping's own
+// directory. A trusted block may read anywhere the operator can, as before.
+func (s *server) ingestSecretFile(scan fileScan) (fileResult, []syncValue) {
+	path := scan.block.Path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(scan.dir, path)
+	}
 	res := fileResult{Path: path}
-	raw, err := os.ReadFile(path)
+	if !scan.trusted {
+		if err := checkFileConfined(scan.realDir, scan.block.Path, path); err != nil {
+			res.Error = err.Error()
+			return res, nil
+		}
+	}
+	raw, err := readRegularFile(path, maxSecretFileBytes)
 	if err != nil {
 		res.Error = err.Error()
 		return res, nil
@@ -393,4 +440,51 @@ func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
 	s.secretFiles[path] = names
 	s.mu.Unlock()
 	return res, bounds
+}
+
+// checkFileConfined refuses a file block that resolves outside the mapping's
+// own directory. Symlinks resolve on both sides, so a link placed in the
+// mapping's directory cannot point the read out of it, and an absolute path
+// inside the directory still passes. The refusal names the block's declared
+// path, the form the mapping's author wrote.
+func checkFileConfined(realDir, declared, path string) error {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(realDir, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path %q resolves outside the mapping directory %s; an untrusted mapping reads only files under its own directory", declared, realDir)
+	}
+	return nil
+}
+
+// readRegularFile reads a regular file of at most limit bytes and refuses
+// anything else by name. The stat runs before the open, so a FIFO, a device
+// or a directory never stalls or grows the read, and the limit reader holds
+// the bytes in case the file grows past the size the stat saw.
+func readRegularFile(path string, limit int64) ([]byte, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if fi.Size() > limit {
+		return nil, fmt.Errorf("%s is %d bytes; the limit is %d", path, fi.Size(), limit)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("%s grew past the %d byte limit", path, limit)
+	}
+	return raw, nil
 }

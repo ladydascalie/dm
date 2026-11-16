@@ -335,12 +335,14 @@ fetch a secret and type it into a pane
 .br
 Example: \fBdm secret type gh-cli --to w1p1\fP
 .TP
-\fBdm secret sync [--from M]\fP
+\fBdm secret sync [--from M] [--trust]\fP
 apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere
 .br
 \fB--s name\fP session name
 .br
 \fB--from M\fP mapping path, default .dm-secrets.kdl in the working directory
+.br
+\fB--trust\fP trust a mapping outside the config directory: allow secret blocks and file paths anywhere
 .br
 Example: \fBdm secret sync\fP
 .TP
