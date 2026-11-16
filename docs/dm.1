@@ -285,7 +285,7 @@ print the box schema the server serves
 .br
 \fB--s name\fP session name
 .TP
-\fBdm secret register <name> --tool op --ref R [--upstream URL] [--header T]\fP
+\fBdm secret register <name> --tool op --ref R [--upstream URL --header T] [--env K=V]...\fP
 register a secret: how to fetch it and where it rides
 .br
 \fB--s name\fP session name
@@ -297,6 +297,8 @@ register a secret: how to fetch it and where it rides
 \fB--upstream URL\fP pin the proxy upstream the secret rides to
 .br
 \fB--header T\fP proxy header template, {} marks the value slot
+.br
+\fB--env K=V\fP extra environment entry for the tool; repeatable, credential names refused
 .br
 Example: \fBdm secret register gh-cli --tool op --ref 'op://Personal/github/token' --upstream https://api.github.com --header 'Authorization: Bearer {}'\fP
 .TP
@@ -311,7 +313,7 @@ remove a secret and drop its value everywhere
 \fB--s name\fP session name
 .TP
 \fBdm secret use <name>\fP
-fetch a secret, redact it in every pane, serve it on the proxy, print the endpoint URL
+fetch a secret, redact it in every pane, and print the proxy endpoint URL when the secret rides one
 .br
 \fB--s name\fP session name
 .br
@@ -447,6 +449,9 @@ secret-register: the proxy header template, {} marks the value slot
 .TP
 \fBpath\fP
 secret-hydrate: the file the value is written to, out of band
+.TP
+\fBenv\fP
+secret-register: extra environment entries for the tool, as KEY=VALUE; credential names are refused
 .PP
 The action field names one of these. Each example is one JSON object, carrying only the fields that action needs.
 .TP

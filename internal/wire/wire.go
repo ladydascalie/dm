@@ -45,10 +45,13 @@ type Msg struct {
 	Header string `json:"header,omitempty"`
 	// Path is the secret hydrate request: the file the value is written
 	// to, out of band.
-	Path    string  `json:"path,omitempty"`
-	BG      string  `json:"bg,omitempty"` // terminal background the client detected
-	Ratio   float64 `json:"ratio,omitempty"`
-	NoFocus bool    `json:"nofocus,omitempty"`
+	Path string `json:"path,omitempty"`
+	// Env is the secret register request: extra environment entries the
+	// fetch tool needs, as KEY=VALUE. Credential-named keys are refused.
+	Env     []string `json:"env,omitempty"`
+	BG      string   `json:"bg,omitempty"` // terminal background the client detected
+	Ratio   float64  `json:"ratio,omitempty"`
+	NoFocus bool     `json:"nofocus,omitempty"`
 	// Argv is the program a new pane runs instead of a shell, program first.
 	// The split, new-window and new-workspace actions carry it. Empty means
 	// $SHELL -l.

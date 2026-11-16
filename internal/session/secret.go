@@ -26,6 +26,12 @@ type Secret struct {
 	// {} as the placeholder, for example "Authorization: Bearer {}".
 	// Empty means the secret does not ride the proxy.
 	Header string `json:"header,omitempty"`
+	// Env holds extra environment entries the fetch tool needs, as
+	// KEY=VALUE: configuration and paths such as PASSWORD_STORE_DIR. A
+	// credential-named key is refused, so the state file never carries a
+	// token; a tool that needs one reads it from its own environment. Keep
+	// the credential words in step with internal/pane/env.go.
+	Env []string `json:"env,omitempty"`
 }
 
 // Valid tools. A tool outside this set cannot be fetched, so load refuses it.
@@ -61,7 +67,75 @@ func (s *Secret) Validate() error {
 	if s.Header != "" && !strings.Contains(s.Header, headerSlot) {
 		return fmt.Errorf("secret %s: header template %q has no %s slot", s.Name, s.Header, headerSlot)
 	}
+	seen := map[string]bool{}
+	for _, kv := range s.Env {
+		key, _, found := strings.Cut(kv, "=")
+		if !found || key == "" {
+			return fmt.Errorf("secret %s: env entry %q is not KEY=VALUE", s.Name, kv)
+		}
+		if strings.ContainsAny(kv, "\r\n") {
+			return fmt.Errorf("secret %s: env entry %q carries a line break", s.Name, kv)
+		}
+		if !pathEnvName(key) && credentialEnvName(key) {
+			return fmt.Errorf("secret %s: env key %s names a credential; the state file never carries one", s.Name, key)
+		}
+		if seen[key] {
+			return fmt.Errorf("secret %s: env key %s appears twice", s.Name, key)
+		}
+		seen[key] = true
+	}
 	return nil
+}
+
+// credentialEnvWords are the words that mark an environment name as a
+// credential. The match runs against the upper-cased name with every run of
+// non-alphanumeric characters turned into one underscore. Keep in step with
+// internal/pane/env.go, which strips by the same words.
+var credentialEnvWords = []string{
+	"TOKEN", "SECRET", "PASSWD", "PASSWORD", "CREDENTIAL",
+	"API_KEY", "PRIVATE_KEY", "AUTH", "COOKIE",
+}
+
+// pathEnvName keeps the variable names that carry filesystem paths, not
+// secrets: a store location such as PASSWORD_STORE_DIR is configuration a
+// tool needs in its record. The shape mirrors the path exemption in
+// internal/pane/env.go.
+func pathEnvName(name string) bool {
+	if name == "XAUTHORITY" {
+		return true
+	}
+	upper := strings.ToUpper(name)
+	last := upper
+	if i := strings.LastIndex(upper, "_"); i >= 0 {
+		last = upper[i+1:]
+	}
+	switch last {
+	case "DIR", "PATH", "HOME", "SOCK":
+		return true
+	}
+	return strings.HasSuffix(name, "_SOCK")
+}
+
+// credentialEnvName reports whether a variable name matches the credential
+// words.
+func credentialEnvName(name string) bool {
+	upper := strings.ToUpper(name)
+	var b strings.Builder
+	b.Grow(len(upper))
+	for _, r := range upper {
+		if r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	s := b.String()
+	for _, w := range credentialEnvWords {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // Secret returns the registered secret named name, or nil.

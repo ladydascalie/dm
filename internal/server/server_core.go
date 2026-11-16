@@ -716,6 +716,7 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
 	s.panes[id] = pc
 	tc := s.termColours
+	secretValues := s.secretValuesLocked()
 	s.mu.Unlock()
 	// A daemon that outlived a server keeps the colours it was born with,
 	// so hand it the pair a client reported since.
@@ -727,8 +728,8 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 	// A pane that outlived a server, or one born while values were live,
 	// starts with an empty redaction list. Hand it the live set now, so its
 	// first published chunk is already scrubbed.
-	if values := s.secretValues(); len(values) > 0 {
-		body := jsonRaw(map[string]any{"values": values})
+	if len(secretValues) > 0 {
+		body := jsonRaw(map[string]any{"values": secretValues})
 		if err := pc.send(wire.Msg{Action: "set-secrets", Res: body}); err != nil {
 			log.Printf("pane %s: set-secrets: %v", id, err)
 		}

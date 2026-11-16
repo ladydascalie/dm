@@ -20,14 +20,21 @@ import (
 const (
 	// redactByte replaces every byte of a matched secret.
 	redactByte = '*'
-	// secretMin keeps a value out of the list when it is too short to
+)
+
+// The scrub bounds are shared policy: the server reads them to warn the
+// operator when a value cannot be redacted, so a short pin never echoes
+// unredacted while the surface reports success.
+const (
+	// MinSecretLen keeps a value out of the list when it is too short to
 	// redact safely: a one or two byte value would blot most of the pane's
 	// ordinary output.
-	secretMin = 4
-	// secretMax bounds one value's length and secretCap bounds the list, so
-	// a bad push cannot make the pane scan unbounded data per chunk.
-	secretMax = 4096
-	secretCap = 256
+	MinSecretLen = 4
+	// MaxSecretLen bounds one value's length, so a bad push cannot make the
+	// pane scan unbounded data per chunk.
+	MaxSecretLen = 4096
+	// MaxSecrets bounds the list.
+	MaxSecrets = 256
 )
 
 // scrubber holds the pane's secret values and redacts them from the output
@@ -48,14 +55,14 @@ func (s *scrubber) set(values []string) {
 	vals := make([][]byte, 0, len(values))
 	maxLen := 0
 	for _, v := range values {
-		if len(v) < secretMin || len(v) > secretMax {
+		if len(v) < MinSecretLen || len(v) > MaxSecretLen {
 			continue
 		}
 		vals = append(vals, []byte(v))
 		if len(v) > maxLen {
 			maxLen = len(v)
 		}
-		if len(vals) == secretCap {
+		if len(vals) == MaxSecrets {
 			break
 		}
 	}

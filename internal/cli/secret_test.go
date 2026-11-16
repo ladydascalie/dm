@@ -111,3 +111,65 @@ func TestSecretBarePrintsSubcommands(t *testing.T) {
 		}
 	}
 }
+
+// TestSecretRegisterForwardsEnv proves each --env occurrence rides the
+// request as one entry.
+func TestSecretRegisterForwardsEnv(t *testing.T) {
+	rec := &recorder{}
+	startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		rec.handler()(c, req)
+		return wire.Msg{OK: true, Res: json.RawMessage(`{"name":"gh"}`)}, true
+	})
+	if err := Run([]string{"secret", "register", "gh", "--tool", "pass", "--ref", "dev/t",
+		"--env", "PASSWORD_STORE_DIR=/p", "--env", "GNUPGHOME=/g"}); err != nil {
+		t.Fatalf("dm secret register: %v", err)
+	}
+	got := rec.last()
+	if len(got.Env) != 2 || got.Env[0] != "PASSWORD_STORE_DIR=/p" || got.Env[1] != "GNUPGHOME=/g" {
+		t.Fatalf("register sent env %v", got.Env)
+	}
+}
+
+// TestSecretUseWithoutUpstreamExplainsItself proves the redaction-only use
+// says so on stderr instead of printing an empty endpoint.
+func TestSecretUseWithoutUpstreamExplainsItself(t *testing.T) {
+	startFakeServer(t, "main", okHandler(`{"name":"gh","endpoint":""}`))
+	var err error
+	var errOut string
+	out := testutil.CaptureStdout(t, func() {
+		errOut = captureStderr(t, func() {
+			err = Run([]string{"secret", "use", "gh"})
+		})
+	})
+	if err != nil {
+		t.Fatalf("dm secret use: %v", err)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want nothing", out)
+	}
+	if !strings.Contains(errOut, "rides no proxy") {
+		t.Fatalf("stderr = %q, want the explanation", errOut)
+	}
+}
+
+// TestSecretUseSurfacesTheWarning proves a scrub warning reaches stderr and
+// never stdout.
+func TestSecretUseSurfacesTheWarning(t *testing.T) {
+	startFakeServer(t, "main", okHandler(`{"name":"pin","endpoint":"http://127.0.0.1:1/x/","warning":"secret pin: value is 3 bytes; panes do not redact values under 4 bytes, so it will echo unredacted"}`))
+	var err error
+	var errOut string
+	out := testutil.CaptureStdout(t, func() {
+		errOut = captureStderr(t, func() {
+			err = Run([]string{"secret", "use", "pin"})
+		})
+	})
+	if err != nil {
+		t.Fatalf("dm secret use: %v", err)
+	}
+	if strings.TrimSpace(out) != "http://127.0.0.1:1/x/" {
+		t.Fatalf("stdout = %q, want the endpoint alone", out)
+	}
+	if !strings.Contains(errOut, "secret pin") {
+		t.Fatalf("stderr = %q, want the warning", errOut)
+	}
+}

@@ -394,7 +394,7 @@ var cliCommands = []cliCommand{
 	// fetched value never reaches stdout, argv, a log or the state file.
 	{
 		name:    "secret register",
-		args:    "<name> --tool op --ref R [--upstream URL] [--header T]",
+		args:    "<name> --tool op --ref R [--upstream URL --header T] [--env K=V]...",
 		summary: "register a secret: how to fetch it and where it rides",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
@@ -402,6 +402,7 @@ var cliCommands = []cliCommand{
 			{"ref", "R", "reference the tool resolves: an op:// URI or a store path"},
 			{"upstream", "URL", "pin the proxy upstream the secret rides to"},
 			{"header", "T", "proxy header template, {} marks the value slot"},
+			{"env", "K=V", "extra environment entry for the tool; repeatable, credential names refused"},
 		},
 		example: `dm secret register gh-cli --tool op --ref 'op://Personal/github/token' --upstream https://api.github.com --header 'Authorization: Bearer {}'`,
 		group:   groupSecrets,
@@ -422,7 +423,7 @@ var cliCommands = []cliCommand{
 	{
 		name:    "secret use",
 		args:    "<name>",
-		summary: "fetch a secret, redact it in every pane, serve it on the proxy, print the endpoint URL",
+		summary: "fetch a secret, redact it in every pane, and print the proxy endpoint URL when the secret rides one",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		example: `dm secret use gh-cli`,
 		group:   groupSecrets,

@@ -18,13 +18,40 @@ type Tool struct {
 	Name string   // registry key, e.g. "op"
 	Bin  string   // executable path or name
 	Args []string // argument template; a secret never goes here
-	Env  []string // env entries the tool requires, as KEY=VALUE
+	// Env holds the entries the tool requires beyond the inheritance, as
+	// KEY=VALUE. An entry wins over an inherited one of the same name.
+	Env []string
+	// Inherit names the variables copied from this process into the child,
+	// when they are set: configuration and paths a tool needs, never a
+	// credential. Empty means the child env holds exactly Env.
+	Inherit []string
+}
+
+// childEnv builds the child's environment: the inherited names this process
+// carries, then the explicit entries, which win. Nothing else passes.
+func childEnv(t Tool) []string {
+	if len(t.Inherit) == 0 && len(t.Env) == 0 {
+		return nil
+	}
+	parent := make(map[string]string, 16)
+	for _, kv := range os.Environ() {
+		if k, _, ok := strings.Cut(kv, "="); ok {
+			parent[k] = kv
+		}
+	}
+	env := make([]string, 0, len(t.Inherit)+len(t.Env))
+	for _, name := range t.Inherit {
+		if kv, ok := parent[name]; ok {
+			env = append(env, kv)
+		}
+	}
+	return append(env, t.Env...)
 }
 
 // Fetch runs the tool and returns its stdout, minus trailing newlines.
 // The child environment is built explicitly: it holds exactly t.Env and
-// nothing else, even when t.Env is empty. Nothing is inherited from the
-// parent process. The value never appears in argv. On failure the error
+// exactly what Inherit and Env name. Nothing else passes from the parent
+// process. The value never appears in argv. On failure the error
 // carries the exit code, not stdout or stderr, so the value cannot leak
 // through it.
 func Fetch(t Tool) (string, error) {
@@ -32,7 +59,7 @@ func Fetch(t Tool) (string, error) {
 		return "", fmt.Errorf("secrets: tool %q has no binary", t.Name)
 	}
 	cmd := exec.Command(t.Bin, t.Args...)
-	cmd.Env = append([]string{}, t.Env...)
+	cmd.Env = childEnv(t)
 	out, err := cmd.Output()
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {

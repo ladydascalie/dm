@@ -135,7 +135,7 @@ var fieldFlag = map[string]string{
 	"limit": "limit", "after": "after", "timeout": "timeout", "dry": "dry-run",
 	"all": "all", "force": "force",
 	"tool": "tool", "ref": "ref", "upstream": "upstream", "header": "header",
-	"to": "to",
+	"to": "to", "envs": "env",
 }
 
 // cmdFlagsMethods are the methods the walk recurses into. parse is missing on

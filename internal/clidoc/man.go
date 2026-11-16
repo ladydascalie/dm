@@ -56,6 +56,7 @@ var manActionFields = []manField{
 	{"upstream", "secret-register: the proxy upstream URL the secret rides to"},
 	{"header", "secret-register: the proxy header template, {} marks the value slot"},
 	{"path", "secret-hydrate: the file the value is written to, out of band"},
+	{"env", "secret-register: extra environment entries for the tool, as KEY=VALUE; credential names are refused"},
 }
 
 // manActionNames is every action the server accepts through dm exec.

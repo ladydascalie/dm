@@ -224,3 +224,52 @@ func TestSecretsNeverCarryValues(t *testing.T) {
 		t.Fatal("a value from a hand-edited file survived a save")
 	}
 }
+
+func TestSecretEnvValidation(t *testing.T) {
+	t.Parallel()
+	good := []*Secret{
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"PASSWORD_STORE_DIR=/home/b/.pass"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"GNUPGHOME=/x", "LANG=C.UTF-8"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"EMPTY="}},
+	}
+	for _, s := range good {
+		if err := s.Validate(); err != nil {
+			t.Errorf("Validate(%+v) = %v, want nil", s, err)
+		}
+	}
+	bad := []*Secret{
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"NOEQUALS"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"=value"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"MY_TOKEN=x"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"api-key=x"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"HOME=/a", "HOME=/b"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"X=1\nY=2"}},
+	}
+	for _, s := range bad {
+		if err := s.Validate(); err == nil {
+			t.Errorf("Validate(%+v) = nil, want error", s)
+		}
+	}
+}
+
+// TestSecretsDropBadEnvOnLoad proves a hand-edited state file costs its bad
+// env entries, not the whole registry.
+func TestSecretsDropBadEnvOnLoad(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	st := NewStateAt(root, "envdrop")
+	st.Secrets = []*Secret{
+		{Name: "ok", Tool: ToolPass, Reference: "dev/t", Env: []string{"PASSWORD_STORE_DIR=/p"}},
+		{Name: "bad", Tool: ToolPass, Reference: "dev/t", Env: []string{"TOKEN=x"}},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(root, "envdrop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Secrets) != 1 || got.Secrets[0].Name != "ok" {
+		t.Fatalf("load kept %+v, want only the ok entry", got.Secrets)
+	}
+}

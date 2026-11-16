@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -387,4 +388,232 @@ func TestSecretTypeRefusesUnknownPaneAndName(t *testing.T) {
 	}
 	rep = secretCall(t, s, cl, conn, wire.Msg{Action: "secret-type", Name: "gh", Target: "nope"})
 	wantErr(t, "secret-type", "no pane", rep)
+}
+
+func TestSecretUseLosesToConcurrentRevoke(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.fetch = func(*session.Secret) (string, error) {
+		close(entered)
+		<-release
+		return "s3cret-race-value", nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-use", Name: "gh"})
+		done <- nil
+	}()
+	<-entered
+	// The revoke completes while the fetch is parked, so the activation
+	// must find the secret gone.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"}); !rep.OK {
+		t.Fatalf("revoke: %s", rep.Error)
+	}
+	close(release)
+	<-done
+	// secretCall already took the revoke's reply; the pipe holds the use's.
+	rep := rpcRead(t, conn, wire.Msg{Action: "secret-use"})
+	wantErr(t, "secret-use", "no secret", rep)
+	if v, ok := s.secrets.Get("gh"); ok || v != "" {
+		t.Fatalf("the raced use left a value behind: %q", v)
+	}
+	s.mu.Lock()
+	active, prefixes, proxy := len(s.secretActive), len(s.secretPrefixes), s.proxy
+	s.mu.Unlock()
+	if active != 0 || prefixes != 0 || proxy != nil {
+		t.Fatalf("the raced use left state: active=%d prefixes=%d proxy=%v", active, prefixes, proxy)
+	}
+}
+
+func TestConcurrentUseAndRevokeLeaveNoOrphans(t *testing.T) {
+	value := "s3cret-concurrent"
+	up := newSecretUpstream(t)
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	s.fetch = func(*session.Secret) (string, error) { return value, nil }
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+		Upstream: up.URL, Header: "Authorization: Bearer {}",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(use bool) {
+			defer wg.Done()
+			if use {
+				s.handleReq(cl, wire.Msg{Action: "secret-use", Name: "gh"})
+				return
+			}
+			s.handleReq(cl, wire.Msg{Action: "secret-revoke", Name: "gh"})
+		}(i%2 == 0)
+	}
+	wg.Wait()
+	// The racing calls answered on the first client's pipe; the checks here
+	// run on their own, so each reply is the one this call provoked.
+	cl2, conn2 := boxConn(t)
+	// Whatever the interleaving was, one final revoke leaves nothing live.
+	if rep := secretCall(t, s, cl2, conn2, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+		Upstream: up.URL, Header: "Authorization: Bearer {}",
+	}); !rep.OK {
+		t.Fatalf("re-register: %s", rep.Error)
+	}
+	if rep := secretCall(t, s, cl2, conn2, wire.Msg{Action: "secret-use", Name: "gh"}); !rep.OK {
+		t.Fatalf("final use: %s", rep.Error)
+	}
+	if rep := secretCall(t, s, cl2, conn2, wire.Msg{Action: "secret-revoke", Name: "gh"}); !rep.OK {
+		t.Fatalf("final revoke: %s", rep.Error)
+	}
+	s.mu.Lock()
+	active, prefixes := len(s.secretActive), len(s.secretPrefixes)
+	p := s.proxy
+	s.mu.Unlock()
+	if active != 0 || prefixes != 0 {
+		t.Fatalf("orphans after revoke: active=%d prefixes=%d", active, prefixes)
+	}
+	// Every prefix the proxy ever minted is dead: a request anywhere under
+	// it answers 404, and the upstream saw nothing since the final use.
+	code, body := secretGet(t, "http://"+p.Addr()+"/x")
+	if code != 404 || body != "" {
+		t.Fatalf("unknown path gave %d %q", code, body)
+	}
+}
+
+func TestSecretTypeRefusesWhenThePaneMissedTheSet(t *testing.T) {
+	value := "s3cret-missed-set"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	// A pane whose socket is already dead: the push fails, so the type must
+	// refuse rather than echo the value unredacted.
+	srv, cli := net.Pipe()
+	t.Cleanup(func() { _ = cli.Close() })
+	_ = srv.Close()
+	s.mu.Lock()
+	s.panes["w1p1"] = &paneConn{id: "w1p1", c: srv}
+	s.mu.Unlock()
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-type", Name: "gh", Target: "w1p1"})
+	wantErr(t, "secret-type", "did not accept the redaction set", rep)
+	if strings.Contains(rep.Error, value) {
+		t.Fatalf("the refusal leaks the value: %s", rep.Error)
+	}
+}
+
+func TestSecretUseWarnsWhenThePanesCannotRedact(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	for _, c := range []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"pin", "123", "under 4 bytes"},
+		{"long", strings.Repeat("x", 5000), "over 4096 bytes"},
+	} {
+		if rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: c.name, Tool: "pass", Ref: "dev/" + c.name,
+		}); !rep.OK {
+			t.Fatalf("register %s: %s", c.name, rep.Error)
+		}
+		s.fetch = func(*session.Secret) (string, error) { return c.value, nil }
+		rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: c.name})
+		if !rep.OK {
+			t.Fatalf("use %s: %s", c.name, rep.Error)
+		}
+		var res struct {
+			Warning string `json:"warning"`
+		}
+		if err := json.Unmarshal(rep.Res, &res); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(res.Warning, c.want) || !strings.Contains(res.Warning, "secret "+c.name) {
+			t.Fatalf("use %s warning = %q, want it to name the secret and %q", c.name, res.Warning, c.want)
+		}
+		if strings.Contains(res.Warning, c.value) {
+			t.Fatalf("the warning leaks the value: %s", res.Warning)
+		}
+	}
+}
+
+func TestSecretRegisterRefusesOneSidedProxyShapes(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	cases := []wire.Msg{
+		{Action: "secret-register", Name: "a", Tool: "op", Ref: "op://x/y", Upstream: "https://api.github.com"},
+		{Action: "secret-register", Name: "b", Tool: "op", Ref: "op://x/y", Header: "Authorization: Bearer {}"},
+		{Action: "secret-register", Name: "c", Tool: "op", Ref: "op://x/y", Upstream: "https://api.github.com", Header: "Bad Name: {}"},
+		{Action: "secret-register", Name: "d", Tool: "op", Ref: "op://x/y", Upstream: "http://example.com", Header: "Authorization: {}"},
+		{Action: "secret-register", Name: "e", Tool: "op", Ref: "op://x/y", Upstream: "https://api.github.com", Header: "Authorization: {} {}", Env: []string{"PATH=/x"}},
+		{Action: "secret-register", Name: "f", Tool: "op", Ref: "op://x/y", Env: []string{"MY_TOKEN=x"}},
+		{Action: "secret-register", Name: "g", Tool: "op", Ref: "op://x/y", Env: []string{"NOEQUALS"}},
+		{Action: "secret-register", Name: "h", Tool: "op", Ref: "op://x/y", Env: []string{"HOME=/a", "HOME=/b"}},
+	}
+	for _, m := range cases {
+		rep := secretCall(t, s, cl, conn, m)
+		if rep.OK {
+			t.Fatalf("%s accepted %+v", m.Action, m)
+		}
+	}
+	if len(s.st.Secrets) != 0 {
+		t.Fatalf("bad shapes left entries: %+v", s.st.Secrets)
+	}
+	// A well-shaped env entry registers and reaches the state file.
+	rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "ok", Tool: "pass", Ref: "dev/t",
+		Env: []string{"PASSWORD_STORE_DIR=/home/b/.pass"},
+	})
+	if !rep.OK {
+		t.Fatalf("register with env: %s", rep.Error)
+	}
+	sec := s.st.Secret("ok")
+	if sec == nil || len(sec.Env) != 1 || sec.Env[0] != "PASSWORD_STORE_DIR=/home/b/.pass" {
+		t.Fatalf("state lost the env: %+v", sec)
+	}
+	tool := secretTool(sec)
+	if len(tool.Inherit) == 0 || len(tool.Env) != 1 {
+		t.Fatalf("tool carries inherit=%v env=%v", tool.Inherit, tool.Env)
+	}
+	opSec := &session.Secret{Name: "o", Tool: "op", Reference: "op://x/y"}
+	if opTool := secretTool(opSec); !slices.Contains(opTool.Inherit, "OP_SERVICE_ACCOUNT_TOKEN") {
+		t.Fatalf("op tool inherits %v", opTool.Inherit)
+	}
+}
+
+func TestSecretUseNamesThePanesThatMissedTheSet(t *testing.T) {
+	value := "s3cret-uncovered"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	// One live pane and one whose socket is gone.
+	spyPane(t, s, "w1p2")
+	srv, cli := net.Pipe()
+	t.Cleanup(func() { _ = cli.Close() })
+	_ = srv.Close()
+	s.mu.Lock()
+	s.panes["w1p3"] = &paneConn{id: "w1p3", c: srv}
+	s.mu.Unlock()
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "w1p3" {
+		t.Fatalf("uncovered = %v, want w1p3", res.Uncovered)
+	}
 }

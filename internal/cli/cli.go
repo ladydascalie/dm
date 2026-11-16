@@ -47,6 +47,7 @@ type cmdFlags struct {
 	upstream   string
 	header     string
 	to         string
+	envs       []string
 	seq        int
 	from       string
 	limit      int
@@ -245,9 +246,22 @@ func (c *cmdFlags) register(name, desc string) {
 		c.fs.StringVar(&c.header, "header", "", desc)
 	case "to":
 		c.fs.StringVar(&c.to, "to", "", desc)
+	case "env":
+		c.fs.Var(envValue{&c.envs}, "env", desc)
 	default:
 		panic("cli: no field binding for flag " + name)
 	}
+}
+
+// envValue is a repeatable flag value: --env KEY=VALUE. Each occurrence
+// appends one entry, so a tool can take several.
+type envValue struct{ p *[]string }
+
+func (v envValue) String() string { return strings.Join(*v.p, ",") }
+
+func (v envValue) Set(s string) error {
+	*v.p = append(*v.p, s)
+	return nil
 }
 
 // countValue is a whole-number flag value: --lines and --limit. Zero means
@@ -319,6 +333,7 @@ var withValue = map[string]bool{
 	"-prefix": true, "--prefix": true, "-after": true, "--after": true,
 	"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
 	"-tool": true, "--tool": true, "-ref": true, "--ref": true,
+	"-env": true, "--env": true,
 	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
 	"-to": true, "--to": true,
 }
@@ -737,10 +752,6 @@ func Run(argv []string) error {
 // fetches, redacts, hydrates and types, and the replies name the secret, the
 // path or the endpoint, never the value.
 
-// The secret verbs. A fetched value never touches this process: the server
-// fetches, redacts, hydrates and types, and the replies name the secret, the
-// path or the endpoint, never the value.
-
 // runSecret dispatches the secret subverbs.
 func runSecret(c *cmdFlags) error {
 	if len(c.args) == 0 {
@@ -793,6 +804,7 @@ func secretRegisterVerb(c *cmdFlags) error {
 	return printRPC(c.session, wire.Msg{
 		Action: "secret-register", Name: name,
 		Tool: c.tool, Ref: c.ref, Upstream: c.upstream, Header: c.header,
+		Env: c.envs,
 	})
 }
 
@@ -847,11 +859,21 @@ func secretUseVerb(c *cmdFlags) error {
 		return fmt.Errorf("%s", m.Error)
 	}
 	var res struct {
-		Endpoint string `json:"endpoint"`
+		Endpoint  string   `json:"endpoint"`
+		Warning   string   `json:"warning"`
+		Uncovered []string `json:"uncovered"`
 	}
 	_ = json.Unmarshal(m.Res, &res)
 	if res.Endpoint != "" {
 		fmt.Println(res.Endpoint)
+	} else {
+		fmt.Fprintf(os.Stderr, "dm: secret %s rides no proxy; the panes redact it and no endpoint serves it\n", name)
+	}
+	if len(res.Uncovered) > 0 {
+		fmt.Fprintf(os.Stderr, "dm: panes %s did not take the redaction set; run dm secret use %s again\n", strings.Join(res.Uncovered, ", "), name)
+	}
+	if res.Warning != "" {
+		fmt.Fprintln(os.Stderr, "dm: "+res.Warning)
 	}
 	return nil
 }
@@ -868,7 +890,7 @@ func secretHydrateVerb(c *cmdFlags) error {
 		return fmt.Errorf("secret hydrate needs --to")
 	}
 	name := secretName(c)
-	return printRPC(c.session, wire.Msg{Action: "secret-hydrate", Name: name, Path: c.to})
+	return printSecretRPC(c.session, wire.Msg{Action: "secret-hydrate", Name: name, Path: c.to})
 }
 
 // secretTypeVerb types the value into a pane.
@@ -883,7 +905,7 @@ func secretTypeVerb(c *cmdFlags) error {
 		return fmt.Errorf("secret type needs --to")
 	}
 	name := secretName(c)
-	return printRPC(c.session, wire.Msg{Action: "secret-type", Name: name, Target: c.to})
+	return printSecretRPC(c.session, wire.Msg{Action: "secret-type", Name: name, Target: c.to})
 }
 
 func printRPC(name string, req wire.Msg) error {
@@ -899,6 +921,34 @@ func printRPC(name string, req wire.Msg) error {
 		_ = json.Unmarshal(m.Res, &pretty)
 		b, _ := json.MarshalIndent(pretty, "", "  ")
 		fmt.Println(string(b))
+	}
+	return nil
+}
+
+// printSecretRPC runs one secret request the way printRPC does, and
+// surfaces the scrub warning on stderr beside the JSON. The warning names
+// the secret and its length, never the value, so both streams stay inside
+// the boundary.
+func printSecretRPC(name string, req wire.Msg) error {
+	m, err := transport.RPC(name, req)
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if len(m.Res) > 0 {
+		var pretty any
+		_ = json.Unmarshal(m.Res, &pretty)
+		b, _ := json.MarshalIndent(pretty, "", "  ")
+		fmt.Println(string(b))
+	}
+	var res struct {
+		Warning string `json:"warning"`
+	}
+	_ = json.Unmarshal(m.Res, &res)
+	if res.Warning != "" {
+		fmt.Fprintln(os.Stderr, "dm: "+res.Warning)
 	}
 	return nil
 }

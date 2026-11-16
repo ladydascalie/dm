@@ -3,8 +3,9 @@ package server
 import (
 	"fmt"
 	"log"
-	"strings"
+	"sort"
 
+	"dm/internal/pane"
 	"dm/internal/proxy"
 	"dm/internal/secrets"
 	"dm/internal/session"
@@ -32,16 +33,38 @@ func (s *server) secretEnsure() {
 }
 
 // secretTool maps a registered secret to the command that prints its value.
-// The reference is an argument, never a value; the child env is exactly what
-// the tool needs and nothing else.
+// The reference is an argument, never a value. The child inherits the
+// configuration and paths the tools need, and nothing else: the entries the
+// secret record carries come on top and a credential name is refused at
+// register time, so a token never reaches the state file. op reads its
+// service-account token from the operator's own environment, which rides
+// process to child and nowhere else.
 func secretTool(sec *session.Secret) secrets.Tool {
 	switch sec.Tool {
 	case session.ToolOp:
-		return secrets.Tool{Name: "op", Bin: "op", Args: []string{"read", sec.Reference}}
+		return secrets.Tool{
+			Name: "op", Bin: "op", Args: []string{"read", sec.Reference},
+			Inherit: append(toolInherit, "OP_SERVICE_ACCOUNT_TOKEN"),
+			Env:     sec.Env,
+		}
 	case session.ToolPass:
-		return secrets.Tool{Name: "pass", Bin: "pass", Args: []string{"show", sec.Reference}}
+		return secrets.Tool{
+			Name: "pass", Bin: "pass", Args: []string{"show", sec.Reference},
+			Inherit: toolInherit,
+			Env:     sec.Env,
+		}
 	}
 	return secrets.Tool{Name: sec.Tool}
+}
+
+// toolInherit names the variables a fetch tool child needs from the server's
+// environment: account paths, the store location and the GnuPG home. All
+// configuration, no credentials.
+var toolInherit = []string{
+	"HOME", "PATH", "USER", "LOGNAME", "LANG", "TMPDIR",
+	"GNUPGHOME", "PASSWORD_STORE_DIR",
+	"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME",
+	"XDG_RUNTIME_DIR",
 }
 
 // fetchSecret runs the secret's tool and returns the value. The stub field
@@ -53,8 +76,9 @@ func (s *server) fetchSecret(sec *session.Secret) (string, error) {
 	return secrets.Fetch(secretTool(sec))
 }
 
-// secretValues returns the live values in registry order, under s.mu.
-func (s *server) secretValues() []string {
+// secretValuesLocked returns the live values. The caller holds s.mu: the
+// active map and the registry are shared with every connection goroutine.
+func (s *server) secretValuesLocked() []string {
 	s.secretEnsure()
 	var values []string
 	for name := range s.secretActive {
@@ -67,23 +91,43 @@ func (s *server) secretValues() []string {
 
 // pushSecretScrub sends the live values to every adopted pane, so their
 // output stage redacts each one. It runs off s.mu: a pane send writes on its
-// own connection and never needs the server lock.
-func (s *server) pushSecretScrub() {
+// own connection and never needs the server lock. The returned map names the
+// panes that refused the set; an empty map means every live pane redacts. An
+// empty push is the point of a revoke: the panes must hear the set is gone,
+// not stay with a stale value on their list.
+func (s *server) pushSecretScrub() map[string]error {
 	s.mu.Lock()
-	values := s.secretValues()
+	values := s.secretValuesLocked()
 	panes := make([]*paneConn, 0, len(s.panes))
 	for _, pc := range s.panes {
 		panes = append(panes, pc)
 	}
 	s.mu.Unlock()
-	// An empty push is the point of a revoke: the panes must hear the set
-	// is gone, not stay with a stale value on their list.
 	body := jsonRaw(map[string]any{"values": values})
+	failed := map[string]error{}
 	for _, pc := range panes {
 		if err := pc.send(wire.Msg{Action: "set-secrets", Res: body}); err != nil {
-			log.Printf("pane %s: set-secrets: %v", pc.id, err)
+			failed[pc.id] = err
 		}
 	}
+	return failed
+}
+
+// secretScrubWarning returns one line when the pane stage cannot redact a
+// value: too short to match safely, too long, or the list full. The line
+// names the secret and its length, never the value. active counts the values
+// the panes will hold once this one joins.
+func secretScrubWarning(name, value string, active int) string {
+	switch {
+	case len(value) < pane.MinSecretLen:
+		return fmt.Sprintf("secret %s: value is %d bytes; panes do not redact values under %d bytes, so it will echo unredacted", name, len(value), pane.MinSecretLen)
+	case len(value) > pane.MaxSecretLen:
+		return fmt.Sprintf("secret %s: value is %d bytes; panes do not redact values over %d bytes, so it will echo unredacted", name, len(value), pane.MaxSecretLen)
+	}
+	if active > pane.MaxSecrets {
+		return fmt.Sprintf("secret %s: the panes hold %d values, over their cap of %d; the oldest may go unredacted", name, active, pane.MaxSecrets)
+	}
+	return ""
 }
 
 // secretRegister adds one secret to the session's registry. The registry
@@ -95,14 +139,23 @@ func (s *server) secretRegister(cl *client, m wire.Msg) {
 		Reference: m.Ref,
 		Upstream:  m.Upstream,
 		Header:    m.Header,
+		Env:       m.Env,
 	}
 	if err := sec.Validate(); err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	if err := checkHeaderTemplate(sec.Header); err != nil {
-		s.reply(cl, m, nil, fmt.Errorf("secret %s: %w", sec.Name, err))
+	// The proxy shape is checked here, not at use time: a bad header name or
+	// a one-sided pairing must not cost a fetch first.
+	if (sec.Upstream == "") != (sec.Header == "") {
+		s.reply(cl, m, nil, fmt.Errorf("secret %s: --upstream and --header go together", sec.Name))
 		return
+	}
+	if sec.Upstream != "" {
+		if err := proxy.Validate(sec.Upstream, sec.Header); err != nil {
+			s.reply(cl, m, nil, fmt.Errorf("secret %s: %w", sec.Name, err))
+			return
+		}
 	}
 	err := s.mutation(func() error {
 		s.mu.Lock()
@@ -126,25 +179,6 @@ func (s *server) secretRegister(cl *client, m wire.Msg) {
 type secretRow struct {
 	Name      string `json:"name"`
 	Reference string `json:"reference"`
-}
-
-// checkHeaderTemplate mirrors the proxy's own template rules early, at
-// register time: exactly one {} slot, a "Name: value" colon, no CR or LF.
-// The proxy validates again with the value in hand.
-func checkHeaderTemplate(template string) error {
-	if template == "" {
-		return nil
-	}
-	if !strings.Contains(template, ":") {
-		return fmt.Errorf("header template %q needs %q form", template, "Name: value with {}")
-	}
-	if strings.Count(template, "{}") != 1 {
-		return fmt.Errorf("header template %q needs exactly one {} slot", template)
-	}
-	if strings.ContainsAny(template, "\r\n") {
-		return fmt.Errorf("header template must not contain CR or LF")
-	}
-	return nil
 }
 
 // secretList prints the registry: names and references only.
@@ -220,23 +254,59 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	s.mu.Lock()
-	s.secretEnsure()
-	s.secrets.Put(sec.Name, value)
-	s.secretActive[sec.Name] = true
-	s.mu.Unlock()
-
+	// The activation re-checks the registry under the lock: a revoke that
+	// raced the fetch wins, and nothing of the fetched value stays behind.
+	if !s.secretActivate(sec.Name, value) {
+		s.reply(cl, m, nil, fmt.Errorf("no secret %q", sec.Name))
+		return
+	}
 	endpoint := ""
-	if sec.Upstream != "" {
-		prefix, err := s.secretProxyRegister(sec, value)
+	// The live record decides the ride: a revoke-and-re-register during the
+	// fetch may have changed the shape under the same name.
+	if now := s.secretLookup(sec.Name); now != nil && now.Upstream != "" {
+		prefix, err := s.secretProxyRegister(sec.Name, value)
 		if err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
 		endpoint = "http://" + s.secretProxyAddr() + prefix
 	}
-	s.pushSecretScrub()
-	s.reply(cl, m, map[string]any{"name": sec.Name, "endpoint": endpoint}, nil)
+	failed := s.pushSecretScrub()
+	uncovered := make([]string, 0, len(failed))
+	for id := range failed {
+		uncovered = append(uncovered, id)
+	}
+	sort.Strings(uncovered)
+	for id, err := range failed {
+		log.Printf("pane %s: set-secrets: %v", id, err)
+	}
+	warning := secretScrubWarning(sec.Name, value, s.secretActiveCount())
+	if warning != "" {
+		log.Print(warning)
+	}
+	s.reply(cl, m, map[string]any{"name": sec.Name, "endpoint": endpoint, "warning": warning, "uncovered": uncovered}, nil)
+}
+
+// secretActivate stores a fetched value and marks it live. It refuses when
+// the secret left the registry while the fetch ran, so a revoke that races a
+// use leaves no orphaned value behind.
+func (s *server) secretActivate(name, value string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.secretEnsure()
+	if s.st.Secret(name) == nil {
+		return false
+	}
+	s.secrets.Put(name, value)
+	s.secretActive[name] = true
+	return true
+}
+
+// secretActiveCount is the number of live values, under s.mu.
+func (s *server) secretActiveCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.secretActive)
 }
 
 // secretLookup returns the registered secret by name.
@@ -247,33 +317,34 @@ func (s *server) secretLookup(name string) *session.Secret {
 }
 
 // secretProxyRegister starts the loopback proxy on first use, mints a fresh
-// prefix for the value and retires the prefix a previous use minted.
-func (s *server) secretProxyRegister(sec *session.Secret, value string) (string, error) {
+// prefix for the value and retires the prefix a previous use minted. It runs
+// wholly under s.mu: the register, the rotation and the map write are one
+// step, so a revoke that races a use can never leave an untracked live
+// prefix. Register is memory only, so the hold is short.
+func (s *server) secretProxyRegister(name, value string) (string, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.secretEnsure()
+	if s.st.Secret(name) == nil {
+		return "", fmt.Errorf("no secret %q", name)
+	}
+	sec := s.st.Secret(name)
 	if s.proxy == nil {
 		p, err := proxy.New(nil)
 		if err != nil {
-			s.mu.Unlock()
 			return "", err
 		}
 		s.proxy = p
 		go func() { _ = p.Serve() }()
 	}
-	p := s.proxy
-	old := s.secretPrefixes[sec.Name]
-	s.mu.Unlock()
-
-	prefix, err := p.Register(sec.Name, sec.Upstream, sec.Header, value)
+	prefix, err := s.proxy.Register(sec.Name, sec.Upstream, sec.Header, value)
 	if err != nil {
 		return "", err
 	}
-	if old != "" && old != prefix {
-		p.Revoke(old)
+	if old := s.secretPrefixes[sec.Name]; old != "" && old != prefix {
+		s.proxy.Revoke(old)
 	}
-	s.mu.Lock()
 	s.secretPrefixes[sec.Name] = prefix
-	s.mu.Unlock()
 	return prefix, nil
 }
 
@@ -312,8 +383,9 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 }
 
 // secretType fetches the value and types it into a pane through the existing
-// write-to path. The redaction push lands first, so the echo the pane prints
-// is scrubbed like any other output that carries the value.
+// write-to path. The redaction push lands first, and the push must reach the
+// target pane: a pane that never learned the value would echo it unredacted
+// to every client and into its ring, so the type refuses instead.
 func (s *server) secretType(cl *client, m wire.Msg) {
 	sec := s.secretLookup(m.Name)
 	if sec == nil {
@@ -325,15 +397,22 @@ func (s *server) secretType(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	s.mu.Lock()
-	s.secretEnsure()
-	s.secrets.Put(sec.Name, value)
-	s.secretActive[sec.Name] = true
-	s.mu.Unlock()
-	s.pushSecretScrub()
+	if !s.secretActivate(sec.Name, value) {
+		s.reply(cl, m, nil, fmt.Errorf("no secret %q", sec.Name))
+		return
+	}
+	failed := s.pushSecretScrub()
+	if err, ok := failed[m.Target]; ok {
+		s.reply(cl, m, nil, fmt.Errorf("pane %s did not accept the redaction set: %v; the value was not typed", m.Target, err))
+		return
+	}
 	if err := s.writeTo(m.Target, value, false); err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	s.reply(cl, m, map[string]any{"pane": m.Target}, nil)
+	warning := secretScrubWarning(sec.Name, value, s.secretActiveCount())
+	if warning != "" {
+		log.Print(warning)
+	}
+	s.reply(cl, m, map[string]any{"pane": m.Target, "warning": warning}, nil)
 }

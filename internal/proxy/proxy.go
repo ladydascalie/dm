@@ -159,6 +159,21 @@ func (p *Proxy) Revoke(prefix string) {
 	}
 }
 
+// Validate checks the upstream and header template a secret carries, with
+// no value in hand. A register-time caller uses it to refuse a shape the
+// proxy would only reject at use time, after the tool already ran.
+func Validate(upstream, headerTemplate string) error {
+	u, err := url.Parse(upstream)
+	if err != nil {
+		return fmt.Errorf("proxy: bad upstream: %w", err)
+	}
+	if err := checkUpstream(u); err != nil {
+		return err
+	}
+	_, _, err = fillTemplate(headerTemplate, "")
+	return err
+}
+
 // checkUpstream pins the upstream: https anywhere, plain http only to the
 // loopback so tests can use httptest without TLS plumbing.
 func checkUpstream(u *url.URL) error {

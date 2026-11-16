@@ -288,3 +288,34 @@ func TestFetchThenRegistryThenHydrate(t *testing.T) {
 		t.Fatalf("hydrated content: %q", b)
 	}
 }
+
+// TestFetchInheritsNamedVars proves the child env holds exactly the names
+// Inherit lists from the parent plus the explicit entries, and that an
+// explicit entry wins over an inherited one.
+func TestFetchInheritsNamedVars(t *testing.T) {
+	dump := filepath.Join(t.TempDir(), "env.txt")
+	bin := writeTool(t, `env > "$DUMP"`)
+	t.Setenv("DM_SECRETS_CANARY", "inherited")
+	t.Setenv("DM_SECRETS_OVERRIDE", "from-parent")
+	tool := Tool{
+		Name: "fake", Bin: bin,
+		Inherit: []string{"DM_SECRETS_CANARY", "DM_SECRETS_OVERRIDE"},
+		Env:     []string{"DUMP=" + dump, "DM_SECRETS_OVERRIDE=explicit"},
+	}
+	if _, err := Fetch(tool); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	env := readDump(t, dump)
+	if !strings.Contains(env, "DM_SECRETS_CANARY=inherited") {
+		t.Fatalf("the inherited name did not reach the child:\n%s", env)
+	}
+	if strings.Contains(env, "DM_SECRETS_OVERRIDE=from-parent") {
+		t.Fatalf("the explicit entry did not win:\n%s", env)
+	}
+	if !strings.Contains(env, "DM_SECRETS_OVERRIDE=explicit") {
+		t.Fatalf("the explicit entry is missing:\n%s", env)
+	}
+	if strings.Contains(env, "HOME=") {
+		t.Fatalf("an uninherited name reached the child:\n%s", env)
+	}
+}
