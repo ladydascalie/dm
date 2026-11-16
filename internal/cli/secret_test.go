@@ -276,8 +276,8 @@ func TestSecretSyncSendsTheTrustVerdict(t *testing.T) {
 		if err := Run(tc.argv); err != nil {
 			t.Fatalf("dm %v: %v", tc.argv, err)
 		}
-		if got := rec.last(); got.Trust != tc.want {
-			t.Fatalf("dm %v sent trust=%v, want %v", tc.argv, got.Trust, tc.want)
+		if got := rec.last(); got.Trust == nil || *got.Trust != tc.want {
+			t.Fatalf("dm %v sent trust=%v, want the explicit verdict %v", tc.argv, got.Trust, tc.want)
 		}
 	}
 }
@@ -303,7 +303,7 @@ func TestSecretSyncTrustsAConfigDirMapping(t *testing.T) {
 	if err := Run([]string{"secret", "sync", "--from", mapping}); err != nil {
 		t.Fatalf("dm secret sync: %v", err)
 	}
-	if !rec.last().Trust {
+	if got := rec.last(); got.Trust == nil || !*got.Trust {
 		t.Fatal("a config-dir mapping was not trusted without --trust")
 	}
 }
@@ -330,7 +330,7 @@ func TestSecretSyncTrustsTheHomeConfigFallback(t *testing.T) {
 	if err := Run([]string{"secret", "sync", "--from", mapping}); err != nil {
 		t.Fatalf("dm secret sync: %v", err)
 	}
-	if !rec.last().Trust {
+	if got := rec.last(); got.Trust == nil || !*got.Trust {
 		t.Fatal("a ~/.config/dm mapping was not trusted without --trust")
 	}
 }
@@ -362,7 +362,7 @@ func TestSecretSyncDoesNotTrustASymlinkOutOfTheConfigDir(t *testing.T) {
 	if err := Run([]string{"secret", "sync", "--from", link}); err != nil {
 		t.Fatalf("dm secret sync: %v", err)
 	}
-	if rec.last().Trust {
+	if got := rec.last(); got.Trust == nil || *got.Trust {
 		t.Fatal("a config-dir symlink out to a repo was trusted")
 	}
 }
@@ -379,5 +379,24 @@ func TestSecretSyncUsageNamesTrust(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("secret sync usage does not carry %q: %q", want, text)
 		}
+	}
+}
+
+// TestExecLeavesTheTrustVerdictToTheServer proves the dm exec route sends no
+// verdict: the raw JSON rarely carries one, and the server now resolves it
+// from the mapping's path. dm secret sync keeps sending its own.
+func TestExecLeavesTheTrustVerdictToTheServer(t *testing.T) {
+	rec := &recorder{}
+	startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		rec.handler()(c, req)
+		return wire.Msg{OK: true, Res: json.RawMessage(`{}`)}, true
+	})
+	body := `{"action":"secret-sync","path":"/tmp/x/.dm-secrets.kdl"}`
+	if err := Run([]string{"exec", body}); err != nil {
+		t.Fatalf("dm exec: %v", err)
+	}
+	got := rec.last()
+	if got.Action != "secret-sync" || got.Trust != nil {
+		t.Fatalf("exec sent %+v, want the trust verdict absent", got)
 	}
 }

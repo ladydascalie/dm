@@ -210,15 +210,62 @@ type fileResult struct {
 // this much and refuses a regular file bigger than it.
 const maxSecretFileBytes = 1 << 20
 
+// configDir is the operator's dm config directory: $XDG_CONFIG_HOME/dm, or
+// ~/.config/dm when XDG_CONFIG_HOME is unset. Empty when the home directory is
+// unknown.
+func configDir() string {
+	home, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "dm")
+}
+
+// mappingUnderConfigDir reports whether path resolves under the config
+// directory, symlinks on both sides included. dm exec sends no trust verdict,
+// so the server answers with this: a mapping the operator keeps in the config
+// tree is trusted, a mapping in a repo is not.
+func mappingUnderConfigDir(path string) bool {
+	dir := configDir()
+	if dir == "" {
+		return false
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		realDir = filepath.Clean(dir)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		realPath = filepath.Clean(path)
+	}
+	rel, err := filepath.Rel(realDir, realPath)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// secretSyncTrusted resolves the mapping's trust verdict: an explicit wire
+// verdict wins, and nil defers to the mapping's path. dm secret sync always
+// sends its verdict; a raw dm exec body carries none.
+func secretSyncTrusted(trust *bool, path string) bool {
+	if trust != nil {
+		return *trust
+	}
+	return mappingUnderConfigDir(path)
+}
+
 // secretSync applies one mapping: register the secret blocks, ingest the
 // file blocks, push the redaction set and answer. The mapping path arrives
 // absolute; the file paths inside it resolve against its directory.
 //
-// The client sends Trust when the mapping lives under the operator's config
-// directory or the operator passed --trust. An untrusted mapping may not
-// register secret blocks and may read only files under its own directory: a
-// repo-local mapping must not pin an upstream for the operator's store value
-// or read the operator's files.
+// The sender may carry a trust verdict: dm secret sync sends true when the
+// mapping lives under the operator's config directory or the operator passed
+// --trust, and false otherwise. A nil verdict, which is what a raw dm exec
+// body carries, makes the server resolve the same question from the mapping's
+// path. An untrusted mapping may not register secret blocks and may read only
+// files under its own directory: a repo-local mapping must not pin an
+// upstream for the operator's store value or read the operator's files.
 func (s *server) secretSync(cl *client, m wire.Msg) {
 	if m.Path == "" {
 		s.reply(cl, m, nil, fmt.Errorf("secret sync needs the mapping path"))
@@ -234,7 +281,8 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, fmt.Errorf("%s: %w", m.Path, err))
 		return
 	}
-	if !m.Trust && len(mp.Secrets) > 0 {
+	trusted := secretSyncTrusted(m.Trust, m.Path)
+	if !trusted && len(mp.Secrets) > 0 {
 		s.reply(cl, m, nil, fmt.Errorf(
 			"%s: an untrusted mapping registers no secrets; move it under $XDG_CONFIG_HOME/dm (or ~/.config/dm) or run dm secret sync --trust",
 			m.Path))
@@ -281,7 +329,7 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 	results := make([]fileResult, 0, len(mp.Files))
 	for i := range mp.Files {
 		results = append(results, s.ingestSecretFile(fileScan{
-			dir: dir, realDir: realDir, block: mp.Files[i], trusted: m.Trust,
+			dir: dir, realDir: realDir, block: mp.Files[i], trusted: trusted,
 		}))
 	}
 	failed := s.pushSecretScrub()

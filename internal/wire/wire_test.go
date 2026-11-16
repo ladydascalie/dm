@@ -309,3 +309,40 @@ func TestMsgCarriesNoNonce(t *testing.T) {
 		t.Fatalf("envelope carries a nonce field: %s", b)
 	}
 }
+
+// TestTrustFieldDistinguishesAbsentFromFalse proves the sync verdict is a
+// pointer on the wire: absent (the dm exec route) is nil, and false is an
+// explicit refusal that must survive the frame.
+func TestTrustFieldDistinguishesAbsentFromFalse(t *testing.T) {
+	cases := []struct {
+		body string
+		want *bool
+	}{
+		{`{"action":"secret-sync","path":"/m"}`, nil},
+		{`{"action":"secret-sync","path":"/m","trust":true}`, boolPtr(true)},
+		{`{"action":"secret-sync","path":"/m","trust":false}`, boolPtr(false)},
+	}
+	for _, tc := range cases {
+		var m wire.Msg
+		if err := json.Unmarshal([]byte(tc.body), &m); err != nil {
+			t.Fatalf("%s: %v", tc.body, err)
+		}
+		switch {
+		case tc.want == nil && m.Trust != nil:
+			t.Fatalf("%s: trust = %v, want absent", tc.body, *m.Trust)
+		case tc.want != nil && (m.Trust == nil || *m.Trust != *tc.want):
+			t.Fatalf("%s: trust = %v, want %v", tc.body, m.Trust, *tc.want)
+		}
+		// The absent verdict stays out of the JSON, so an old peer never
+		// reads a decision the sender did not make.
+		b, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.want == nil && strings.Contains(string(b), `"trust"`) {
+			t.Fatalf("absent trust kept the key: %s", b)
+		}
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }

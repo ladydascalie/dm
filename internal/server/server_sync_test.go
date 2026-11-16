@@ -17,6 +17,9 @@ import (
 	"dm/internal/wire"
 )
 
+// boolPtr is the pointer form of an explicit wire trust verdict.
+func boolPtr(v bool) *bool { return &v }
+
 // writeMapping writes one .dm-secrets.kdl fixture into dir and returns its
 // path.
 func writeMapping(t *testing.T, dir, body string) string {
@@ -146,7 +149,7 @@ func TestSecretSyncRegistersAndIngests(t *testing.T) {
 	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
 	dotenv := writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\nNOVALUE\nEMPTY=\nSHORT=ab\n\n")
 
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)})
 	if !m.OK {
 		t.Fatalf("secret sync failed: %s", m.Error)
 	}
@@ -198,12 +201,12 @@ func TestSecretSyncIsIdempotent(t *testing.T) {
 	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
 	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\nOTHER=anothervalue\n")
 
-	if m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true}); !m.OK {
+	if m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)}); !m.OK {
 		t.Fatalf("first sync: %s", m.Error)
 	}
 	// A second run with one line dropped stops redacting exactly that one.
 	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\n")
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)})
 	if !m.OK {
 		t.Fatalf("second sync: %s", m.Error)
 	}
@@ -228,7 +231,7 @@ func TestSecretSyncIsIdempotent(t *testing.T) {
 func TestSecretSyncRefusesBadShapes(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	path := writeMapping(t, t.TempDir(), "secret \"gh-cli\" {\n  tool \"vault\"\n  ref \"r\"\n}\n")
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)})
 	if m.OK {
 		t.Fatal("secret sync accepted an unknown tool")
 	}
@@ -277,7 +280,7 @@ func TestSecretSyncReportsAMissingFile(t *testing.T) {
 func TestSecretSyncRegistersTheRegisterShape(t *testing.T) {
 	s, cl, conn := syncServer(t)
 	path := writeMapping(t, t.TempDir(), "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://x/y\"\n  upstream \"https://api.github.com\"\n}\n")
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)})
 	if m.OK || !strings.Contains(m.Error, "go together") {
 		t.Fatalf("reply %v, error %q", m.OK, m.Error)
 	}
@@ -404,7 +407,7 @@ func TestSecretSyncTrustsAFlaggedMapping(t *testing.T) {
 	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\nfile {\n    path \"creds.env\"\n}\n")
 	writeFile(t, dir, "creds.env", "GH_TOKEN=supersecretvalue\n")
 
-	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: true})
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)})
 	if !m.OK {
 		t.Fatalf("trusted sync failed: %s", m.Error)
 	}
@@ -691,5 +694,65 @@ func TestSecretSyncReplyAndLogCarryNoFileKey(t *testing.T) {
 	// The key that equalled its value still redacts: only the echo went.
 	if v, ok := s.secrets.Get(env + "#poc-token-keyecho"); !ok || v != "poc-token-keyecho" {
 		t.Fatalf("the value did not register: %q=%v", env+"#poc-token-keyecho", v)
+	}
+}
+
+// TestSecretSyncAbsentVerdictTrustsConfigDir proves the dm
+// exec route: a wire message with no trust field trusts a mapping that lives
+// under the config directory, so the action works without the field.
+func TestSecretSyncAbsentVerdictTrustsConfigDir(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	dir := filepath.Join(cfg, "dm")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\n")
+	s, cl, conn := syncServer(t)
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if !m.OK {
+		t.Fatalf("config-dir sync with no verdict failed: %s", m.Error)
+	}
+	if s.st.Secret("gh-cli") == nil {
+		t.Fatal("the config-dir mapping registered nothing")
+	}
+}
+
+// TestSecretSyncAbsentVerdictRefusesRepoMapping proves the
+// same absent verdict refuses a repo mapping: the path decides.
+func TestSecretSyncAbsentVerdictRefusesRepoMapping(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s, cl, conn := syncServer(t)
+	path := writeMapping(t, t.TempDir(), "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\n")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path})
+	if m.OK || !strings.Contains(m.Error, "untrusted") {
+		t.Fatalf("reply %v, error %q, want the untrusted refusal", m.OK, m.Error)
+	}
+	if s.st.Secret("gh-cli") != nil {
+		t.Fatal("the refused repo mapping registered a secret")
+	}
+}
+
+// TestSecretSyncExplicitFalseRefusesConfigDir proves an explicit wire
+// verdict wins over the path: false enforces the untrusted rule even under
+// the config directory.
+func TestSecretSyncExplicitFalseRefusesConfigDir(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	dir := filepath.Join(cfg, "dm")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := writeMapping(t, dir, "secret \"gh-cli\" {\n  tool \"op\"\n  ref \"op://Personal/gh/token\"\n}\n")
+	s, cl, conn := syncServer(t)
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(false)})
+	if m.OK || !strings.Contains(m.Error, "untrusted") {
+		t.Fatalf("reply %v, error %q, want the untrusted refusal", m.OK, m.Error)
+	}
+	if s.st.Secret("gh-cli") != nil {
+		t.Fatal("the refused mapping registered a secret")
 	}
 }

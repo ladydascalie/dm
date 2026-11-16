@@ -1009,9 +1009,10 @@ func secretTypeVerb(c *cmdFlags) error {
 //
 // The client also sends its trust verdict. A mapping under the operator's
 // config directory is trusted; any other mapping is trusted only with
-// --trust, which the operator types. The server enforces the verdict, so a
-// repo-local mapping cannot register an upstream or read a file outside its
-// own directory unless the operator said so.
+// --trust, which the operator types. The verdict is explicit, so the server
+// never has to guess on this route. The server enforces it, so a repo-local
+// mapping cannot register an upstream or read a file outside its own
+// directory unless the operator said so.
 func secretSyncVerb(c *cmdFlags) error {
 	if len(c.args) > 1 {
 		return fmt.Errorf("secret sync: unexpected argument %q", c.args[1])
@@ -1025,7 +1026,7 @@ func secretSyncVerb(c *cmdFlags) error {
 		return fmt.Errorf("secret sync: %w", err)
 	}
 	trusted := c.trust || mappingTrusted(abs)
-	return printSecretRPC(c.session, wire.Msg{Action: "secret-sync", Path: abs, Trust: trusted})
+	return printSecretRPC(c.session, wire.Msg{Action: "secret-sync", Path: abs, Trust: &trusted})
 }
 
 // configDir is the operator's dm config directory: $XDG_CONFIG_HOME/dm, or
