@@ -348,6 +348,13 @@ type server struct {
 	// a restart shows the splits, so it never reaches state.json.
 	zoom string
 
+	// secretPush serialises the redaction pushes: collecting the set and
+	// sending it are one step, so a push can never interleave between
+	// another push's collection and send and land a stale list on a pane.
+	// Sends run off s.mu under it, so a slow pane write delays secret
+	// pushes, never the server.
+	secretPush sync.Mutex
+
 	// secrets holds the fetched secret values, memory only: the registry
 	// never reaches the state file, the logs or a reply. secretActive names
 	// the secrets whose values are live, secretPrefixes maps a name to the
@@ -716,7 +723,6 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
 	s.panes[id] = pc
 	tc := s.termColours
-	secretValues := s.secretValuesLocked()
 	s.mu.Unlock()
 	// A daemon that outlived a server keeps the colours it was born with,
 	// so hand it the pair a client reported since.
@@ -727,13 +733,10 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 	}
 	// A pane that outlived a server, or one born while values were live,
 	// starts with an empty redaction list. Hand it the live set now, so its
-	// first published chunk is already scrubbed.
-	if len(secretValues) > 0 {
-		body := jsonRaw(map[string]any{"values": secretValues})
-		if err := pc.send(wire.Msg{Action: "set-secrets", Res: body}); err != nil {
-			log.Printf("pane %s: set-secrets: %v", id, err)
-		}
-	}
+	// first published chunk is already scrubbed. The push runs after the
+	// registration and under the same ordering lock as every other push, so
+	// it can never regress the pane to a stale set.
+	s.adoptSecretScrub(id)
 	// A daemon that outlived a server has gone wherever its shell went, so
 	// ask it where that is instead of trusting the state file.
 	s.setPaneCwd(id, s.liveCwd(id))

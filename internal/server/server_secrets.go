@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 
 	"dm/internal/pane"
 	"dm/internal/proxy"
@@ -76,28 +77,54 @@ func (s *server) fetchSecret(sec *session.Secret) (string, error) {
 	return secrets.Fetch(secretTool(sec))
 }
 
-// secretValuesLocked returns the live values. The caller holds s.mu: the
-// active map and the registry are shared with every connection goroutine.
-func (s *server) secretValuesLocked() []string {
+// secretValuesLocked returns the live values in secret-name order, capped at
+// the panes' list size. The caller holds s.mu: the active map and the
+// registry are shared with every connection goroutine. The order and the cap
+// are the survivor policy: the pane keeps the first MaxSecrets values it is
+// pushed, so the server decides deterministically which names make the cut
+// and can name the ones that did not.
+func (s *server) secretValuesLocked() ([]string, []string) {
 	s.secretEnsure()
-	var values []string
+	names := make([]string, 0, len(s.secretActive))
 	for name := range s.secretActive {
-		if v, ok := s.secrets.Get(name); ok {
-			values = append(values, v)
-		}
+		names = append(names, name)
 	}
-	return values
+	sort.Strings(names)
+	values := make([]string, 0, len(names))
+	var dropped []string
+	for _, name := range names {
+		v, ok := s.secrets.Get(name)
+		if !ok {
+			continue
+		}
+		if len(values) == pane.MaxSecrets {
+			dropped = append(dropped, name)
+			continue
+		}
+		values = append(values, v)
+	}
+	return values, dropped
 }
 
 // pushSecretScrub sends the live values to every adopted pane, so their
-// output stage redacts each one. It runs off s.mu: a pane send writes on its
-// own connection and never needs the server lock. The returned map names the
-// panes that refused the set; an empty map means every live pane redacts. An
-// empty push is the point of a revoke: the panes must hear the set is gone,
-// not stay with a stale value on their list.
+// output stage redacts each one. Collecting the set and sending it are one
+// step under secretPush: a pane's scrubber replaces its whole list, so two
+// pushes that interleave could leave a pane with the stale one, and the adopt
+// push below races the same way. The returned map names the panes that
+// refused the set; an empty map means every live pane redacts. An empty push
+// is the point of a revoke: the panes must hear the set is gone, not stay
+// with a stale value on their list.
 func (s *server) pushSecretScrub() map[string]error {
+	s.secretPush.Lock()
+	defer s.secretPush.Unlock()
+	return s.sendSecretScrub()
+}
+
+// sendSecretScrub collects the current set and sends it to every adopted
+// pane. The caller holds secretPush.
+func (s *server) sendSecretScrub() map[string]error {
 	s.mu.Lock()
-	values := s.secretValuesLocked()
+	values, _ := s.secretValuesLocked()
 	panes := make([]*paneConn, 0, len(s.panes))
 	for _, pc := range s.panes {
 		panes = append(panes, pc)
@@ -113,21 +140,55 @@ func (s *server) pushSecretScrub() map[string]error {
 	return failed
 }
 
-// secretScrubWarning returns one line when the pane stage cannot redact a
-// value: too short to match safely, too long, or the list full. The line
-// names the secret and its length, never the value. active counts the values
-// the panes will hold once this one joins.
-func secretScrubWarning(name, value string, active int) string {
+// adoptSecretScrub gives a freshly adopted pane the live set. It runs under
+// secretPush after the conn is registered, so a concurrent action's push
+// either lands before this one with a set this collection then repeats, or
+// waits and pushes a newer one; the pane can never end on a stale list.
+func (s *server) adoptSecretScrub(id string) {
+	s.secretPush.Lock()
+	defer s.secretPush.Unlock()
+	s.mu.Lock()
+	values, _ := s.secretValuesLocked()
+	pc := s.panes[id]
+	s.mu.Unlock()
+	if len(values) == 0 || pc == nil {
+		return
+	}
+	if err := pc.send(wire.Msg{Action: "set-secrets", Res: jsonRaw(map[string]any{"values": values})}); err != nil {
+		log.Printf("pane %s: set-secrets: %v", id, err)
+	}
+}
+
+// secretBoundsWarning returns one line when the pane stage cannot redact a
+// value: too short to match safely, or too long. The line names the secret
+// and its length, never the value.
+func secretBoundsWarning(name, value string) string {
 	switch {
 	case len(value) < pane.MinSecretLen:
 		return fmt.Sprintf("secret %s: value is %d bytes; panes do not redact values under %d bytes, so it will echo unredacted", name, len(value), pane.MinSecretLen)
 	case len(value) > pane.MaxSecretLen:
 		return fmt.Sprintf("secret %s: value is %d bytes; panes do not redact values over %d bytes, so it will echo unredacted", name, len(value), pane.MaxSecretLen)
 	}
-	if active > pane.MaxSecrets {
-		return fmt.Sprintf("secret %s: the panes hold %d values, over their cap of %d; the oldest may go unredacted", name, active, pane.MaxSecrets)
-	}
 	return ""
+}
+
+// secretCapWarning names the secrets the cap left off the panes' lists, so
+// the operator knows exactly which values ride unredacted. The cut is
+// deterministic: the panes keep the first MaxSecrets names in name order.
+func secretCapWarning(dropped []string) string {
+	if len(dropped) == 0 {
+		return ""
+	}
+	shown := dropped
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	more := ""
+	if len(dropped) > 5 {
+		more = fmt.Sprintf(" and %d more", len(dropped)-5)
+	}
+	return fmt.Sprintf("the panes hold %d values; these ride unredacted until some are revoked: %s%s",
+		pane.MaxSecrets, strings.Join(shown, ", "), more)
 }
 
 // secretRegister adds one secret to the session's registry. The registry
@@ -254,10 +315,11 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	// The activation re-checks the registry under the lock: a revoke that
-	// raced the fetch wins, and nothing of the fetched value stays behind.
-	if !s.secretActivate(sec.Name, value) {
-		s.reply(cl, m, nil, fmt.Errorf("no secret %q", sec.Name))
+	// The activation checks identity under the lock: a revoke that raced
+	// the fetch wins, and a revoke-and-re-register does not pair the old
+	// value with the new record. Nothing of the fetched value stays behind.
+	if err := s.secretActivate(sec, value); err != nil {
+		s.reply(cl, m, nil, err)
 		return
 	}
 	endpoint := ""
@@ -280,33 +342,42 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	for id, err := range failed {
 		log.Printf("pane %s: set-secrets: %v", id, err)
 	}
-	warning := secretScrubWarning(sec.Name, value, s.secretActiveCount())
-	if warning != "" {
-		log.Print(warning)
+	var warnings []string
+	if w := secretBoundsWarning(sec.Name, value); w != "" {
+		warnings = append(warnings, w)
+	}
+	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	warning := strings.Join(warnings, "; ")
+	for _, w := range warnings {
+		log.Print(w)
 	}
 	s.reply(cl, m, map[string]any{"name": sec.Name, "endpoint": endpoint, "warning": warning, "uncovered": uncovered}, nil)
 }
 
-// secretActivate stores a fetched value and marks it live. It refuses when
-// the secret left the registry while the fetch ran, so a revoke that races a
-// use leaves no orphaned value behind.
-func (s *server) secretActivate(name, value string) bool {
+// secretActivate stores a fetched value and marks it live. It checks the
+// record's identity, not just the name: a revoke that raced the fetch wins
+// and leaves nothing behind, and a revoke-and-re-register during the fetch
+// refuses to pair the old value with the new record's shape.
+func (s *server) secretActivate(sec *session.Secret, value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secretEnsure()
-	if s.st.Secret(name) == nil {
-		return false
+	if s.st.Secret(sec.Name) != sec {
+		return fmt.Errorf("secret %q changed while the value was being fetched; run dm secret use again", sec.Name)
 	}
-	s.secrets.Put(name, value)
-	s.secretActive[name] = true
-	return true
+	s.secrets.Put(sec.Name, value)
+	s.secretActive[sec.Name] = true
+	return nil
 }
 
-// secretActiveCount is the number of live values, under s.mu.
-func (s *server) secretActiveCount() int {
+// secretActiveSet is the live values with the names the cap dropped, under
+// s.mu.
+func (s *server) secretActiveSet() ([]string, []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.secretActive)
+	return s.secretValuesLocked()
 }
 
 // secretLookup returns the registered secret by name.
@@ -383,9 +454,12 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 }
 
 // secretType fetches the value and types it into a pane through the existing
-// write-to path. The redaction push lands first, and the push must reach the
-// target pane: a pane that never learned the value would echo it unredacted
-// to every client and into its ring, so the type refuses instead.
+// write-to path. The redaction push lands first, and it must reach every pane
+// the keystrokes reach: a synced write fans out to the whole window, and a
+// pane that never learned the value would echo it unredacted to every client
+// and into its ring, so the type refuses instead. The warning is computed
+// before the write, so the operator hears about an unredactable value before
+// it echoes.
 func (s *server) secretType(cl *client, m wire.Msg) {
 	sec := s.secretLookup(m.Name)
 	if sec == nil {
@@ -397,22 +471,44 @@ func (s *server) secretType(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	if !s.secretActivate(sec.Name, value) {
-		s.reply(cl, m, nil, fmt.Errorf("no secret %q", sec.Name))
+	if err := s.secretActivate(sec, value); err != nil {
+		s.reply(cl, m, nil, err)
 		return
 	}
 	failed := s.pushSecretScrub()
-	if err, ok := failed[m.Target]; ok {
-		s.reply(cl, m, nil, fmt.Errorf("pane %s did not accept the redaction set: %v; the value was not typed", m.Target, err))
+	for id, err := range failed {
+		if id != m.Target {
+			log.Printf("pane %s: set-secrets: %v", id, err)
+		}
+	}
+	var missed []string
+	for _, id := range s.secretTypeDests(m.Target) {
+		if err, ok := failed[id]; ok {
+			missed = append(missed, fmt.Sprintf("%s (%v)", id, err))
+		}
+	}
+	if len(missed) > 0 {
+		s.reply(cl, m, nil, fmt.Errorf("panes %s did not accept the redaction set; the value was not typed", strings.Join(missed, ", ")))
 		return
+	}
+	warning := secretBoundsWarning(sec.Name, value)
+	if warning != "" {
+		log.Print(warning)
 	}
 	if err := s.writeTo(m.Target, value, false); err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	warning := secretScrubWarning(sec.Name, value, s.secretActiveCount())
-	if warning != "" {
-		log.Print(warning)
-	}
 	s.reply(cl, m, map[string]any{"pane": m.Target, "warning": warning}, nil)
+}
+
+// secretTypeDests names the panes the keystrokes will reach: the whole
+// window when it is synced, the target alone otherwise.
+func (s *server) secretTypeDests(id string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if dsts := s.syncPaneIDsLocked(id); len(dsts) > 0 {
+		return dsts
+	}
+	return []string{id}
 }

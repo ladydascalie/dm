@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/pane"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -419,7 +421,7 @@ func TestSecretUseLosesToConcurrentRevoke(t *testing.T) {
 	<-done
 	// secretCall already took the revoke's reply; the pipe holds the use's.
 	rep := rpcRead(t, conn, wire.Msg{Action: "secret-use"})
-	wantErr(t, "secret-use", "no secret", rep)
+	wantErr(t, "secret-use", "changed while the value was being fetched", rep)
 	if v, ok := s.secrets.Get("gh"); ok || v != "" {
 		t.Fatalf("the raced use left a value behind: %q", v)
 	}
@@ -615,5 +617,338 @@ func TestSecretUseNamesThePanesThatMissedTheSet(t *testing.T) {
 	}
 	if len(res.Uncovered) != 1 || res.Uncovered[0] != "w1p3" {
 		t.Fatalf("uncovered = %v, want w1p3", res.Uncovered)
+	}
+}
+
+func TestSecretTypeRefusesWhenASyncedSiblingMissedTheSet(t *testing.T) {
+	value := "s3cret-synced"
+	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	// The window is synced: a write to the target fans out to w1p2. The
+	// target's push lands, the sibling's socket is dead.
+	s.mu.Lock()
+	s.st.ActiveWindow().Sync = true
+	s.mu.Unlock()
+	srv, cli := net.Pipe()
+	t.Cleanup(func() { _ = cli.Close() })
+	_ = srv.Close()
+	s.mu.Lock()
+	s.panes["w1p2"] = &paneConn{id: "w1p2", c: srv}
+	s.mu.Unlock()
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-type", Name: "gh", Target: "w1p1"})
+	wantErr(t, "secret-type", "did not accept the redaction set", rep)
+	if !strings.Contains(rep.Error, "w1p2") {
+		t.Fatalf("the refusal does not name the sibling: %s", rep.Error)
+	}
+	if strings.Contains(rep.Error, value) {
+		t.Fatalf("the refusal leaks the value: %s", rep.Error)
+	}
+	// Nothing was typed anywhere: the set-secrets push is expected, a
+	// write is not.
+	deadline := time.After(200 * time.Millisecond)
+	for {
+		select {
+		case m := <-ch:
+			if m.Action == "write" {
+				t.Fatalf("the target received a write after a refused type")
+			}
+			continue
+		case <-deadline:
+		}
+		break
+	}
+}
+
+// adoptSpy adopts one pane through the real adoptPane path over a pipe and
+// returns the frames the pane receives.
+func adoptSpy(t *testing.T, s *server, id string) chan wire.Msg {
+	t.Helper()
+	srv, cli := net.Pipe()
+	ch := make(chan wire.Msg, 16)
+	t.Cleanup(func() { _ = srv.Close(); _ = cli.Close() })
+	go func() {
+		for {
+			m, err := wire.ReadMsg(cli)
+			if err != nil {
+				return
+			}
+			ch <- m
+		}
+	}()
+	if err := s.adoptPane(id, srv); err != nil {
+		t.Fatalf("adoptPane: %v", err)
+	}
+	return ch
+}
+
+func TestAdoptPushCarriesTheLiveSet(t *testing.T) {
+	value := "s3cret-adopt"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	// Adopt first, activate second: the pane is registered before it can
+	// receive anything, so the use's push reaches it.
+	ch := adoptSpy(t, s, "w1p2")
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"}); !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), value) {
+		t.Fatalf("the adopted pane never learned the value: %s", got.Res)
+	}
+
+	// Activate a second secret, then adopt another pane: its first set
+	// carries both values, not the one-value set that was live before.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "second", Tool: "pass", Ref: "dev/x",
+	}); !rep.OK {
+		t.Fatalf("register second: %s", rep.Error)
+	}
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "second"}); !rep.OK {
+		t.Fatalf("use second: %s", rep.Error)
+	}
+	ch2 := adoptSpy(t, s, "w1p3")
+	got = readSpyUntil(t, ch2, "set-secrets")
+	var payload struct {
+		Values []string `json:"values"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Values) != 2 {
+		t.Fatalf("the adopted pane got %d values, want both", len(payload.Values))
+	}
+}
+
+func TestAdoptRacingAUseNeverLandsAStaleSet(t *testing.T) {
+	value := "s3cret-adoprace"
+	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	useStop := make(chan struct{})
+	drainStop := make(chan struct{})
+	drainDone := make(chan struct{})
+	// The pipe has no buffer: a use storm blocks on delivery unless
+	// something drains the replies. The drain owns the read side until the
+	// use loops are done. The w1p1 spy's channel needs the same, or its
+	// reader stalls and the pushes block on its pipe.
+	go func() {
+		for {
+			select {
+			case <-ch:
+			case <-drainStop:
+				return
+			}
+		}
+	}()
+	go func() {
+		defer close(drainDone)
+		for {
+			select {
+			case <-drainStop:
+				return
+			default:
+			}
+			_ = conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			if _, err := wire.ReadMsg(conn); err != nil {
+				var ne net.Error
+				if errors.As(err, &ne) && ne.Timeout() {
+					continue
+				}
+				return
+			}
+		}
+	}()
+	var adoptWG, useWG sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		adoptWG.Add(1)
+		go func(n int) {
+			defer adoptWG.Done()
+			id := fmt.Sprintf("w2p%d", n)
+			for {
+				select {
+				case <-useStop:
+					return
+				default:
+				}
+				srv, cli := net.Pipe()
+				// The pane side must drain, or a send to the unbuffered
+				// pipe blocks the adopt forever.
+				go func() {
+					for {
+						if _, err := wire.ReadMsg(cli); err != nil {
+							return
+						}
+					}
+				}()
+				_ = s.adoptPane(id, srv)
+				// Drop the conn, so the next round adopts again and the
+				// storm keeps exercising the registration path.
+				s.mu.Lock()
+				delete(s.panes, id)
+				s.mu.Unlock()
+				_ = cli.Close()
+				_ = srv.Close()
+			}
+		}(i)
+	}
+	for i := 0; i < 4; i++ {
+		useWG.Add(1)
+		go func() {
+			defer useWG.Done()
+			for {
+				select {
+				case <-useStop:
+					return
+				default:
+				}
+				s.handleReq(cl, wire.Msg{Action: "secret-use", Name: "gh"})
+			}
+		}()
+	}
+	time.Sleep(200 * time.Millisecond)
+	close(useStop)
+	useWG.Wait()
+	adoptWG.Wait()
+	close(drainStop)
+	<-drainDone
+	// Whatever the interleaving, the pane that is adopted now holds the
+	// full live set, never a stale one.
+	ch2 := adoptSpy(t, s, "w2p1")
+	got := readSpyUntil(t, ch2, "set-secrets")
+	var payload struct {
+		Values []string `json:"values"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Values) != 1 || payload.Values[0] != value {
+		t.Fatalf("the adopted pane holds %v", payload.Values)
+	}
+}
+
+func TestSecretUseRefusesAReRegisteredRecord(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "dev/a",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	s.fetch = func(*session.Secret) (string, error) {
+		close(entered)
+		<-release
+		return "s3cret-old-value", nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-use", Name: "gh"})
+		done <- nil
+	}()
+	<-entered
+	// Revoke and re-register under the same name while the fetch holds the
+	// old record: the new shape must not serve the old value.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"}); !rep.OK {
+		t.Fatalf("revoke: %s", rep.Error)
+	}
+	up := newSecretUpstream(t)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "dev/b",
+		Upstream: up.URL, Header: "Authorization: Bearer {}",
+	}); !rep.OK {
+		t.Fatalf("re-register: %s", rep.Error)
+	}
+	close(release)
+	<-done
+	rep := rpcRead(t, conn, wire.Msg{Action: "secret-use"})
+	wantErr(t, "secret-use", "changed while the value was being fetched", rep)
+	if v, ok := s.secrets.Get("gh"); ok || v != "" {
+		t.Fatalf("the old value stayed in the registry: %q", v)
+	}
+	s.mu.Lock()
+	active, prefixes, proxy := len(s.secretActive), len(s.secretPrefixes), s.proxy
+	s.mu.Unlock()
+	if active != 0 || prefixes != 0 || proxy != nil {
+		t.Fatalf("the mismatched activation left state: active=%d prefixes=%d proxy=%v", active, prefixes, proxy)
+	}
+	// The re-registered secret still works on a fresh use, with its own
+	// value.
+	s.fetch = func(*session.Secret) (string, error) { return "s3cret-new-value", nil }
+	rep = secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use after re-register: %s", rep.Error)
+	}
+}
+
+func TestSecretUseNamesTheSecretsTheCapDropped(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	s.fetch = func(sec *session.Secret) (string, error) {
+		return "s3cret-" + sec.Name, nil
+	}
+	// The fixture's spy would fill its channel long before 257 pushes; the
+	// uses run with no pane listening, and a fresh adopt inspects the set.
+	s.mu.Lock()
+	delete(s.panes, "w1p1")
+	s.mu.Unlock()
+	for i := 0; i < pane.MaxSecrets+1; i++ {
+		name := fmt.Sprintf("s%03d", i)
+		if rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: name, Tool: "pass", Ref: "dev/" + name,
+		}); !rep.OK {
+			t.Fatalf("register %s: %s", name, rep.Error)
+		}
+		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: name}); !rep.OK {
+			t.Fatalf("use %s: %s", name, rep.Error)
+		}
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "s256"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Warning string `json:"warning"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Warning, "these ride unredacted until some are revoked: s256") {
+		t.Fatalf("warning = %q, want it to name the dropped secret", res.Warning)
+	}
+	if strings.Contains(res.Warning, "s3cret-") {
+		t.Fatalf("the warning leaks a value: %q", res.Warning)
+	}
+	// The push the pane received carried exactly the cap, in name order,
+	// and the dropped value is not in it.
+	ch := adoptSpy(t, s, "w1p2")
+	got := readSpyUntil(t, ch, "set-secrets")
+	var payload struct {
+		Values []string `json:"values"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Values) != pane.MaxSecrets {
+		t.Fatalf("the push carried %d values, want %d", len(payload.Values), pane.MaxSecrets)
+	}
+	for _, v := range payload.Values {
+		if v == "s3cret-s256" {
+			t.Fatal("the dropped value rode the push")
+		}
+	}
+	for i := 1; i < len(payload.Values); i++ {
+		if payload.Values[i] == payload.Values[i-1] {
+			t.Fatalf("the push carries a duplicate at %d", i)
+		}
 	}
 }
