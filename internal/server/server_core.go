@@ -53,7 +53,40 @@ type paneConn struct {
 	// closed, and the watcher replaces it with a fresh dial to the same
 	// daemon.
 	degraded bool
+
+	// installedAt is when the watcher adopted this conn, so a redial can
+	// tell a conn that never stabilised from one that lived.
+	installedAt time.Time
 }
+
+// paneStableWindow is how long a conn must live for its redial to count as
+// recovered. A conn that dies younger failed to stabilise: a daemon that
+// wedges or drops every conn keeps the count climbing, a pane that ran fine
+// since the last redial resets it.
+const paneStableWindow = 2 * time.Second
+
+// paneWedgeLimit is how many consecutive redials that failed to stabilise a
+// pane's watcher tolerates before it declares the daemon wedged and stops.
+const paneWedgeLimit = 3
+
+// paneWatch is one pane's watcher bookkeeping, guarded by s.mu.
+type paneWatch struct {
+	// failed counts the consecutive redials that replaced a conn which was
+	// poisoned or died younger than the stable window.
+	failed int
+	// wedged says the watcher gave up: the daemon keeps the socket but
+	// every conn dies or poisons. The pane stays registered; a later
+	// secret action or write re-arms the watcher.
+	wedged bool
+	// watching says a watcher loop is running for this pane, so a re-arm
+	// never stacks a second one.
+	watching bool
+}
+
+// errPaneWedged says the watcher gave up on a wedged daemon: the pane stays
+// registered and untouched, the wedge is announced, and an explicit later
+// action re-arms the watcher.
+var errPaneWedged = errors.New("pane daemon wedged: the watcher stands down")
 
 // errPaneDegraded is the failure every push reports for a poisoned conn, one
 // whose framing tore on a timed-out send and which the watcher will replace.
@@ -427,6 +460,11 @@ type server struct {
 	// a seam, nil in production.
 	afterActivate func()
 
+	// paneWatch holds the per-pane watcher bookkeeping: the consecutive
+	// failed redials, the wedge mark and the running-watcher flag. Lazy,
+	// guarded by mu.
+	paneWatch map[string]*paneWatch
+
 	// termColours is the pair a client detected from its own terminal. It is
 	// nil until the first client reports, so a server that never saw one
 	// spawns panes with the compiled-in defaults.
@@ -778,8 +816,9 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 		_ = c.Close()
 		return nil
 	}
-	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}, sendTimeout: paneSendTimeout}
+	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}, sendTimeout: paneSendTimeout, installedAt: time.Now()}
 	s.panes[id] = pc
+	delete(s.paneWatch, id)
 	tc := s.termColours
 	s.mu.Unlock()
 	// A daemon that outlived a server keeps the colours it was born with,
@@ -805,37 +844,93 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 func (s *server) watchPane(id string) {
 	s.mu.Lock()
 	pc := s.panes[id]
-	s.mu.Unlock()
 	if pc == nil {
+		s.mu.Unlock()
 		return
 	}
-	go func() {
-		for {
-			exit := s.watchConn(id, pc)
-			if exit {
-				s.paneExited(id)
-				return
-			}
-			// The conn died without an exit frame. The daemon survives the
-			// loss of one conn: its serve loop is per conn, so a torn
-			// stream or a dropped socket is a lost connection, not a pane
-			// exit. While the daemon's socket file still exists, replace
-			// the conn and keep watching; only a gone socket or a failed
-			// replacement prunes the pane.
-			next, err := s.redialPane(id, pc)
-			if err != nil {
-				if errors.Is(err, errPaneGone) {
-					s.paneExited(id)
-				}
-				return
-			}
-			if next == nil {
-				// Another conn owns the pane now; its watcher watches.
-				return
-			}
-			pc = next
+	s.paneWatchEntryLocked(id).watching = true
+	s.mu.Unlock()
+	go s.watcherLoop(id, pc)
+}
+
+// watcherLoop is one pane's watcher: it reads the conn, and on a lost conn it
+// re-dials the same daemon. A prune or an exit frame ends the pane; a wedge
+// or a stand-down ends the loop and leaves the pane registered, so an
+// explicit later action can re-arm it.
+func (s *server) watcherLoop(id string, pc *paneConn) {
+	for {
+		exit := s.watchConn(id, pc)
+		if exit {
+			s.paneExited(id)
+			s.watchStopped(id)
+			return
 		}
-	}()
+		// The conn died without an exit frame. The daemon survives the
+		// loss of one conn: its serve loop is per conn, so a torn
+		// stream or a dropped socket is a lost connection, not a pane
+		// exit. While the daemon's socket file still exists, replace
+		// the conn and keep watching; only a gone socket or a failed
+		// replacement prunes the pane.
+		next, err := s.redialPane(id, pc)
+		if err != nil {
+			if errors.Is(err, errPaneGone) {
+				s.paneExited(id)
+			}
+			// A wedge stands the watcher down: the pane stays registered,
+			// the signal went out, and an explicit later action re-arms.
+			s.watchStopped(id)
+			return
+		}
+		if next == nil {
+			// Another conn owns the pane now; its watcher watches.
+			s.watchStopped(id)
+			return
+		}
+		pc = next
+	}
+}
+
+// paneWatchEntryLocked returns one pane's watcher bookkeeping, building it on
+// first use. The caller holds s.mu.
+func (s *server) paneWatchEntryLocked(id string) *paneWatch {
+	if s.paneWatch == nil {
+		s.paneWatch = map[string]*paneWatch{}
+	}
+	ws := s.paneWatch[id]
+	if ws == nil {
+		ws = &paneWatch{}
+		s.paneWatch[id] = ws
+	}
+	return ws
+}
+
+// watchStopped marks a pane's watcher loop as ended. The wedge mark, if any,
+// stays until an explicit action re-arms.
+func (s *server) watchStopped(id string) {
+	s.mu.Lock()
+	if ws := s.paneWatch[id]; ws != nil {
+		ws.watching = false
+	}
+	s.mu.Unlock()
+}
+
+// rearmPaneWatcher restarts a wedged pane's capped watcher when an explicit
+// action talks to the pane again: a secret action that reported the pane, a
+// write, a resize. The loop is capped again, so a still-wedged daemon earns
+// one more signal and stops; the pane's process is never touched either way.
+func (s *server) rearmPaneWatcher(id string) {
+	s.mu.Lock()
+	pc := s.panes[id]
+	ws := s.paneWatchEntryLocked(id)
+	if !ws.wedged || ws.watching || pc == nil {
+		s.mu.Unlock()
+		return
+	}
+	ws.wedged = false
+	ws.failed = 0
+	ws.watching = true
+	s.mu.Unlock()
+	go s.watcherLoop(id, pc)
 }
 
 // watchConn reads one conn's frames until the peer goes away or the pane
@@ -903,6 +998,29 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 	if _, err := os.Stat(sock); err != nil {
 		return nil, errPaneGone
 	}
+	// Count the redial before dialing: a replaced conn that was poisoned or
+	// died younger than the stable window failed to stabilise, and three in
+	// a row mean the daemon is wedged. A conn that lived resets the count.
+	oldFailed := old.isDegraded() || time.Since(old.installedAt) < paneStableWindow
+	s.mu.Lock()
+	ws := s.paneWatchEntryLocked(id)
+	if oldFailed {
+		ws.failed++
+	} else {
+		ws.failed = 0
+	}
+	if ws.failed >= paneWedgeLimit {
+		// The watcher stands down: the pane keeps running and stays
+		// registered with its poisoned conn, so every push reports it, and
+		// the operator learns it once. No push timeout ever reaches
+		// reaping, and the daemon's process is never touched.
+		ws.wedged = true
+		s.mu.Unlock()
+		_ = old.c.Close()
+		s.notifyPaneWedge(id)
+		return nil, errPaneWedged
+	}
+	s.mu.Unlock()
 	_ = old.c.Close()
 	var c net.Conn
 	var err error
@@ -934,24 +1052,42 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 	nc := &paneConn{
 		id: id, c: c, st: old.status(), title: old.title,
 		alt: old.alt, mouse: old.mouse, paste: old.paste,
-		sendTimeout: paneSendTimeout,
+		sendTimeout: paneSendTimeout, installedAt: time.Now(),
 	}
 	s.panes[id] = nc
 	tc := s.termColours
 	s.mu.Unlock()
+	healthy := true
 	if tc != nil {
 		if err := nc.send(wire.Msg{Action: "term-colours", FG: tc.fg, BG: tc.bg}); err != nil {
 			log.Printf("pane %s: term-colours: %v", id, err)
+			// A conn poisoned during adoption is dead: skip the rest of
+			// the hand-shake and let the loop re-dial, one count at a
+			// time, until the cap.
+			healthy = !errors.Is(err, errPaneDegraded)
 		}
 	}
-	// The fresh conn starts with an empty redaction list, like any adopt.
-	s.adoptSecretScrub(id)
-	// A daemon that outlived a conn has gone wherever its shell went.
-	s.setPaneCwd(id, s.liveCwd(id))
-	// The conn gap may have dropped bytes: give every client the pane's
-	// screen and ring again, so what they draw matches the daemon.
-	s.resync()
+	if healthy {
+		// The fresh conn starts with an empty redaction list, like any
+		// adopt.
+		s.adoptSecretScrub(id)
+		// A daemon that outlived a conn has gone wherever its shell went.
+		s.setPaneCwd(id, s.liveCwd(id))
+		// The conn gap may have dropped bytes: give every client the
+		// pane's screen and ring again, so what they draw matches the
+		// daemon.
+		s.resync()
+	}
 	return nc, nil
+}
+
+// notifyPaneWedge emits the one operator-visible signal a wedge earns: the
+// pane's notify box entry, the same path a pane's state change takes, which
+// also drives the desktop notification. The message names the pane and the
+// remedy, never a value.
+func (s *server) notifyPaneWedge(id string) {
+	s.notifyPaneState(id, "error", fmt.Sprintf(
+		"pane %s stopped taking server pushes; the shell keeps running, and the watcher stands down until the pane is written to or a secret is used again", id))
 }
 
 func (s *server) broadcastLocked(m wire.Msg) {

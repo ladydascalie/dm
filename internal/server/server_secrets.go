@@ -132,18 +132,25 @@ func (s *server) sendSecretScrub() map[string]error {
 	s.mu.Unlock()
 	body := jsonRaw(map[string]any{"values": values})
 	failed := map[string]error{}
+	missed := []string{}
 	for _, pc := range panes {
-		// A degraded conn failed its last send: skip it instead of burning
-		// another timeout per push, and report it failed like any other
-		// pane that missed the set. The other pushers keep trying, and a
-		// send that completes clears the mark.
+		// A poisoned conn refuses every send at once: skip it instead of
+		// burning another timeout per push, and report it failed like any
+		// other pane that missed the set.
 		if pc.isDegraded() {
 			failed[pc.id] = errPaneDegraded
+			missed = append(missed, pc.id)
 			continue
 		}
 		if err := pc.send(wire.Msg{Action: "set-secrets", Res: body}); err != nil {
 			failed[pc.id] = err
+			missed = append(missed, pc.id)
 		}
+	}
+	// A pane the push reached for is an explicit later action: re-arm its
+	// wedged watcher, so the operator's remedy actually runs.
+	for _, id := range missed {
+		s.rearmPaneWatcher(id)
 	}
 	return failed
 }

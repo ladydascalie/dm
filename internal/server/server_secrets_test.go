@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/pane"
 	"dm/internal/session"
 	"dm/internal/wire"
@@ -1112,9 +1113,10 @@ type fakePaneDaemon struct {
 	seen [][]string
 	// resets lists every set-secrets beyond the first conn, in arrival
 	// order: the re-adoptions the watcher performed.
-	resets  [][]string
-	parked  chan struct{} // closed to release the parked first conn
-	parkAck chan struct{} // closed when the first conn is parked
+	resets      [][]string
+	acceptClose bool
+	parked      chan struct{} // closed to release the parked first conn
+	parkAck     chan struct{} // closed when the first conn is parked
 }
 
 func startFakePaneDaemon(t *testing.T, st *session.State, id string) *fakePaneDaemon {
@@ -1147,6 +1149,12 @@ func startFakePaneDaemon(t *testing.T, st *session.State, id string) *fakePaneDa
 }
 
 func (f *fakePaneDaemon) serve(c net.Conn, idx int) {
+	if f.acceptClose {
+		// A wedged daemon shape: it accepts and kills every conn, so the
+		// watcher's redials never stabilise.
+		_ = c.Close()
+		return
+	}
 	defer func() { _ = c.Close() }()
 	first := idx == 0
 	for {
@@ -1336,5 +1344,161 @@ func TestPaneSurvivesATornFrameAndIsReadopted(t *testing.T) {
 	s.mu.Unlock()
 	if stillThere {
 		t.Fatal("the pane survived its own daemon's death")
+	}
+}
+
+// wedgeWait polls until the pane's wedge signal has landed in the box and
+// returns how many wedge entries name the pane.
+func wedgeWait(t *testing.T, s *server, id string, want int) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	n := 0
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		n = 0
+		for _, e := range s.st.Box {
+			if e.Key == box.NotifyPrefix+id && e.State == box.StateError {
+				n++
+			}
+		}
+		s.mu.Unlock()
+		if n >= want {
+			return n
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return n
+}
+
+func TestWatcherWedgesAfterThreeFailedRedials(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	id := "w1p2"
+	sock := s.st.PaneSock(id)
+	os.Remove(sock)
+	f := startFakePaneDaemon(t, s.st, id)
+	f.mu.Lock()
+	f.acceptClose = true
+	f.mu.Unlock()
+
+	c, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial the fake daemon: %v", err)
+	}
+	if err := s.adoptPane(id, c); err != nil {
+		t.Fatalf("adoptPane: %v", err)
+	}
+	s.watchPane(id)
+
+	// The wedge signal lands once, the pane stays registered and in the
+	// layout, and the watcher stops dialing.
+	if n := wedgeWait(t, s, id, 1); n != 1 {
+		t.Fatalf("wedge entries = %d, want 1", n)
+	}
+	s.mu.Lock()
+	entries := 0
+	for _, e := range s.st.Box {
+		if e.Key == box.NotifyPrefix+id && e.State == box.StateError {
+			entries++
+			if !strings.Contains(e.Msg, "pane "+id) {
+				t.Fatalf("the wedge message does not name the pane: %q", e.Msg)
+			}
+		}
+	}
+	pc := s.panes[id]
+	inTree := s.paneInTreeLocked(id)
+	s.mu.Unlock()
+	if entries != 1 {
+		t.Fatalf("wedge entries = %d, want exactly one", entries)
+	}
+	if pc == nil {
+		t.Fatal("the wedged pane left the registry")
+	}
+	if !inTree {
+		t.Fatal("the wedged pane left the layout")
+	}
+	s.mu.Lock()
+	_, wedged := s.paneWatch[id]
+	wedgedMark := wedged && s.paneWatch[id].wedged
+	s.mu.Unlock()
+	if !wedgedMark {
+		t.Fatal("the pane is not marked wedged")
+	}
+	// The loop's fixed point is the stopped watcher: watching is false,
+	// and at most one in-flight accept lands after the wedge.
+	s.mu.Lock()
+	watching := s.paneWatch[id].watching
+	s.mu.Unlock()
+	if watching {
+		t.Fatal("the wedged pane's watcher is still running")
+	}
+	before := f.connCount()
+	time.Sleep(300 * time.Millisecond)
+	mid := f.connCount()
+	time.Sleep(700 * time.Millisecond)
+	if got := f.connCount(); got != mid || got > before+1 {
+		t.Fatalf("the watcher kept dialing: %d conns after the wedge (was %d, mid %d)", got, before, mid)
+	}
+	_ = cl
+	_ = conn
+}
+
+func TestWedgeRearmsOnASecretAction(t *testing.T) {
+	value := "s3cret-rearm"
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	id := "w1p2"
+	sock := s.st.PaneSock(id)
+	os.Remove(sock)
+	f := startFakePaneDaemon(t, s.st, id)
+	f.mu.Lock()
+	f.acceptClose = true
+	f.mu.Unlock()
+
+	c, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial the fake daemon: %v", err)
+	}
+	if err := s.adoptPane(id, c); err != nil {
+		t.Fatalf("adoptPane: %v", err)
+	}
+	s.watchPane(id)
+	if n := wedgeWait(t, s, id, 1); n != 1 {
+		t.Fatalf("wedge entries = %d, want 1", n)
+	}
+
+	// The explicit secret action re-arms the watcher: the push reports the
+	// pane, the watcher runs its capped loop again, and the wedge signal
+	// fires once more. The pane is never pruned.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, u := range res.Uncovered {
+		if u == id {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("uncovered = %v, want the wedged pane", res.Uncovered)
+	}
+	if n := wedgeWait(t, s, id, 2); n != 2 {
+		t.Fatalf("wedge entries = %d, want 2 after the re-arm", n)
+	}
+	s.mu.Lock()
+	inTree := s.paneInTreeLocked(id)
+	s.mu.Unlock()
+	if !inTree {
+		t.Fatal("the re-armed pane left the layout")
 	}
 }
