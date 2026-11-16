@@ -2124,8 +2124,9 @@ func TestSecretHydrateUnlinksOnARevokeAfterTheGuard(t *testing.T) {
 		t.Fatalf("register: %s", rep.Error)
 	}
 	cl2, _ := boxConn(t)
-	s.afterHydrateGuard = func() {
-		// The revoke lands in exactly the window the guard does not cover.
+	s.afterHydrateWrite = func() {
+		// The revoke lands after the write, inside the window the second
+		// look covers.
 		s.handleReq(cl2, wire.Msg{Action: "secret-revoke", Name: "gh"})
 	}
 	path := filepath.Join(t.TempDir(), "token")
@@ -2220,4 +2221,52 @@ func TestSecretUseRefusesAReRegisteredAfterTheActivation(t *testing.T) {
 	}
 	rep = rpcRead(t, conn, wire.Msg{Action: "secret-use"})
 	wantErr(t, "secret-use", "revoked while the value was being fetched or pushed", rep)
+}
+
+// TestSecretHydrateKeepsAConcurrentHydratesFile proves the refused hydrate's
+// unlink removes only its own value: a concurrent hydrate to the same path
+// that already replied success keeps its file.
+func TestSecretHydrateKeepsAConcurrentHydratesFile(t *testing.T) {
+	ghValue := "s3cret-gh-path-race"
+	awsValue := "s3cret-aws-path-race"
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	s.fetch = func(sec *session.Secret) (string, error) {
+		if sec.Name == "gh" {
+			return ghValue, nil
+		}
+		return awsValue, nil
+	}
+	for _, name := range []string{"gh", "aws"} {
+		if rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: name, Tool: "pass", Ref: "dev/" + name,
+		}); !rep.OK {
+			t.Fatalf("register %s: %s", name, rep.Error)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "token")
+	s.afterHydrateWrite = func() {
+		// The seam arms once: the nested hydrate must run with no seam, or
+		// it would recurse into itself.
+		s.afterHydrateWrite = nil
+		// The second hydrate writes its own value to the same path and
+		// replies success while the first sits between its write and its
+		// guard.
+		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "aws", Path: path}); !rep.OK {
+			t.Fatalf("hydrate aws: %s", rep.Error)
+		}
+		// Then the first hydrate's secret is revoked: its post-write guard
+		// must fail, and its unlink must spare the file.
+		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"}); !rep.OK {
+			t.Fatalf("revoke: %s", rep.Error)
+		}
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+	wantErr(t, "secret-hydrate", "revoked while the value was being written", rep)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the second hydrate's file did not survive: %v", err)
+	}
+	if string(b) != awsValue {
+		t.Fatalf("file = %q, want the surviving hydrate's value", b)
+	}
 }

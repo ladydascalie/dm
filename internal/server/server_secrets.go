@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -720,21 +721,25 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret hydrate again", sec.Name))
 		return
 	}
-	// A revoke can still land between this check and the write, so the write
-	// is followed by the same look: a revoke that won that race costs the
-	// file its value, and the reply is the refusal.
-	if s.afterHydrateGuard != nil {
-		s.afterHydrateGuard()
-	}
 	if err := secrets.Hydrate(m.Path, value); err != nil {
 		s.reply(cl, m, nil, err)
 		return
+	}
+	if s.afterHydrateWrite != nil {
+		s.afterHydrateWrite()
 	}
 	s.mu.Lock()
 	live = s.st.Secret(sec.Name) == sec
 	s.mu.Unlock()
 	if !live {
-		_ = os.Remove(m.Path)
+		// The unlink removes only what this hydrate wrote. Hydrate installs
+		// the file with a rename, so whatever the path names by now may be
+		// another hydrate's value, one that already replied success: the
+		// read-back compare keeps it. An unreadable file stays too, for the
+		// same reason.
+		if b, err := os.ReadFile(m.Path); err == nil && bytes.Equal(b, []byte(value)) {
+			_ = os.Remove(m.Path)
+		}
 		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being written; run dm secret hydrate again", sec.Name))
 		return
 	}

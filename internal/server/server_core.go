@@ -467,10 +467,11 @@ type server struct {
 	// a seam, nil in production.
 	afterActivate func()
 
-	// afterHydrateGuard runs inside a secret hydrate, between the guard and
-	// the file write, so a test can land a revoke in exactly that window.
-	// It is a seam, nil in production.
-	afterHydrateGuard func()
+	// afterHydrateWrite runs inside a secret hydrate, between the file
+	// write and the second identity look, so a test can land a revoke or a
+	// concurrent hydrate in exactly that window. It is a seam, nil in
+	// production.
+	afterHydrateWrite func()
 
 	// paneWatch holds the per-pane watcher bookkeeping: the consecutive
 	// failed redials, the wedge mark and the running-watcher flag. Lazy,
