@@ -52,7 +52,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm secret use` | `<name>` | fetch a secret, redact it in every pane, and print the proxy endpoint URL when the secret rides one | `dm secret use gh-cli` |
 | `dm secret hydrate` | `<name> --to P` | fetch a secret and write it to a file at 0600 | `dm secret hydrate <name> --to P` |
 | `dm secret type` | `<name> --to PANE` | fetch a secret and type it into a pane | `dm secret type gh-cli --to w1p1` |
-| `dm secret sync` | `[--from M]` | apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere | `dm secret sync` |
+| `dm secret sync` | `[--from M] [--trust]` | apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere | `dm secret sync` |
 | `dm man` | `[-o path]` | print the man page, or write it to a file | `dm man -o dm.1` |
 | `dm llms` | `[-o path]` | print llms.txt, or write it to a file | `dm llms -o llms.txt` |
 | `dm html` | `[-o path]` | open this page as HTML in a browser, or write it to a file | `dm html -o dm.html` |
@@ -95,6 +95,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `upstream` | secret-register: the proxy upstream URL the secret rides to |
 | `header` | secret-register: the proxy header template, {} marks the value slot |
 | `path` | secret-hydrate: the file the value is written to, out of band |
+| `trust` | secret-sync: true trusts a mapping outside the config directory, false enforces the untrusted rule; absent resolves it from the mapping's path |
 | `env` | secret-register: extra environment entries for the tool, as KEY=VALUE; credential names are refused |
 
 The action field names one of these. Each example is one JSON object, carrying only the fields that action needs.
@@ -139,7 +140,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `msg-watchers`, `msg-schema` | `{"action":"msg-watchers","res":{}}`, `{"action":"msg-schema","res":{}}` |
 | `secret-register`, `secret-list`, `secret-revoke` | `{"action":"secret-register","name":"gh-cli","tool":"op","ref":"op://Personal/gh/token"}`, `{"action":"secret-list"}`, `{"action":"secret-revoke","name":"gh-cli"}` |
 | `secret-use`, `secret-hydrate`, `secret-type` | `{"action":"secret-use","name":"gh-cli"}`, `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`, `{"action":"secret-type","name":"gh-cli","target":"w1p1"}` |
-| `secret-sync` | `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl"}` |
+| `secret-sync` | `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}` |
 
 ## Keys
 

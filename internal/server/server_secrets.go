@@ -92,33 +92,60 @@ func (s *server) fetchSecret(sec *session.Secret) (string, error) {
 	return secrets.Fetch(secretTool(sec))
 }
 
-// secretValuesLocked returns the live values in secret-name order, capped at
-// the panes' list size. The caller holds s.mu: the active map and the
-// registry are shared with every connection goroutine. The order and the cap
-// are the survivor policy: the pane keeps the first MaxSecrets values it is
-// pushed, so the server decides deterministically which names make the cut
-// and can name the ones that did not.
-func (s *server) secretValuesLocked() ([]string, []string) {
+// secretValuesLocked returns the live values in the order the panes get
+// them: the registered secrets first, the file donations second, each group
+// in name order and the whole capped at the panes' list size. The two groups
+// are kept apart because a file-derived name starts with its path, so one
+// name sort would put every file value ahead of every secret and let a repo
+// mapping evict the operator's live values. A file donation fills only the
+// room the registered secrets leave.
+//
+// The caller holds s.mu: the active map and the registry are shared with
+// every connection goroutine. The return names the registered secrets the cap
+// dropped and counts the file donations that did not fit, so a caller can
+// report what walks unredacted without naming a file key.
+func (s *server) secretValuesLocked() (values, droppedSecrets []string, droppedFiles int) {
 	s.secretEnsure()
-	names := make([]string, 0, len(s.secretActive))
-	for name := range s.secretActive {
-		names = append(names, name)
+	fileNames := make(map[string]bool, len(s.secretFiles))
+	for _, names := range s.secretFiles {
+		for _, name := range names {
+			fileNames[name] = true
+		}
 	}
-	sort.Strings(names)
-	values := make([]string, 0, len(names))
-	var dropped []string
-	for _, name := range names {
+	var registered, donated []string
+	for name := range s.secretActive {
+		if fileNames[name] {
+			donated = append(donated, name)
+		} else {
+			registered = append(registered, name)
+		}
+	}
+	sort.Strings(registered)
+	sort.Strings(donated)
+	values = make([]string, 0, len(registered)+len(donated))
+	for _, name := range registered {
 		v, ok := s.secrets.Get(name)
 		if !ok {
 			continue
 		}
 		if len(values) == pane.MaxSecrets {
-			dropped = append(dropped, name)
+			droppedSecrets = append(droppedSecrets, name)
 			continue
 		}
 		values = append(values, v)
 	}
-	return values, dropped
+	for _, name := range donated {
+		v, ok := s.secrets.Get(name)
+		if !ok {
+			continue
+		}
+		if len(values) == pane.MaxSecrets {
+			droppedFiles++
+			continue
+		}
+		values = append(values, v)
+	}
+	return values, droppedSecrets, droppedFiles
 }
 
 // pushSecretScrub sends the live values to every adopted pane, so their
@@ -222,7 +249,7 @@ func (s *server) adoptSecretScrub(id string) {
 // push: an adopt and a plain push answer to no one, so the drop must not stay
 // silent. The caller holds s.mu.
 func (s *server) scrubValuesLocked() ([]string, int) {
-	values, _ := s.secretValuesLocked()
+	values, _, _ := s.secretValuesLocked()
 	if len(s.secretForeign) == 0 {
 		return values, 0
 	}
@@ -283,7 +310,7 @@ const coverRoundtripTimeout = 2 * time.Second
 func (s *server) coverSiblings() map[string]error {
 	s.mu.Lock()
 	s.secretEnsure()
-	values, _ := s.secretValuesLocked()
+	values, _, _ := s.secretValuesLocked()
 	var root, own string
 	if s.st != nil {
 		root, own = s.st.Dir(), s.st.Name
@@ -406,7 +433,8 @@ func secretBoundsWarning(name, value string) string {
 
 // secretCapWarning names the secrets the cap left off the panes' lists, so
 // the operator knows exactly which values ride unredacted. The cut is
-// deterministic: the panes keep the first MaxSecrets names in name order.
+// deterministic: the panes keep the first MaxSecrets registered names in name
+// order.
 func secretCapWarning(dropped []string) string {
 	if len(dropped) == 0 {
 		return ""
@@ -421,6 +449,17 @@ func secretCapWarning(dropped []string) string {
 	}
 	return fmt.Sprintf("the panes hold %d values; these ride unredacted until some are revoked: %s%s",
 		pane.MaxSecrets, strings.Join(shown, ", "), more)
+}
+
+// secretFileCapWarning counts the file donations the panes' cap left off the
+// list. It names no key: a file key is untrusted input and can equal the
+// value beside it. Registered secrets never lose their place, so this count
+// is the room a file block could not have.
+func secretFileCapWarning(dropped int) string {
+	if dropped == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the panes hold %d values; %d file values did not fit and ride unredacted", pane.MaxSecrets, dropped)
 }
 
 // secretRegister adds one secret to the session's registry. The registry
@@ -587,8 +626,12 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	if w := secretBoundsWarning(sec.Name, value); w != "" {
 		warnings = append(warnings, w)
 	}
-	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+	_, dropped, droppedFiles := s.secretActiveSet()
+	if len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	if w := secretFileCapWarning(droppedFiles); w != "" {
+		warnings = append(warnings, w)
 	}
 	if len(uncovered) > 0 {
 		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the value would echo there unredacted", strings.Join(uncovered, ", ")))
@@ -632,9 +675,9 @@ func (s *server) secretActivate(sec *session.Secret, value string) error {
 	return nil
 }
 
-// secretActiveSet is the live values with the names the cap dropped, under
-// s.mu.
-func (s *server) secretActiveSet() ([]string, []string) {
+// secretActiveSet is the live values, the registered names the cap dropped
+// and the count of file donations that did not fit, under s.mu.
+func (s *server) secretActiveSet() ([]string, []string, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.secretValuesLocked()
@@ -768,8 +811,12 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 	if w := secretBoundsWarning(sec.Name, value); w != "" {
 		warnings = append(warnings, w)
 	}
-	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+	_, dropped, droppedFiles := s.secretActiveSet()
+	if len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	if w := secretFileCapWarning(droppedFiles); w != "" {
+		warnings = append(warnings, w)
 	}
 	if len(uncovered) > 0 {
 		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the value would echo there unredacted", strings.Join(uncovered, ", ")))

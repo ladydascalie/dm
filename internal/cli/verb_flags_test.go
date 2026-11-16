@@ -98,7 +98,7 @@ var flagDefaults = map[string]string{
 	"scrollback": "-1", "json": "false", "key": "", "prefix": "",
 	"state": "", "body": "", "body-file": "", "seq": "-1", "from": "",
 	"limit": "0", "after": "-1", "timeout": "5m0s", "dry-run": "false",
-	"all": "false", "force": "false", "action-json": "",
+	"all": "false", "force": "false", "trust": "false", "action-json": "",
 }
 
 // TestFlagDefaultsSurvivePerVerbRegistration proves the per-verb sets keep
@@ -133,7 +133,7 @@ var fieldFlag = map[string]string{
 	"jsonOut": "json", "key": "key", "keyPrefix": "prefix", "state": "state",
 	"body": "body", "bodyFile": "body-file", "seq": "seq", "from": "from",
 	"limit": "limit", "after": "after", "timeout": "timeout", "dry": "dry-run",
-	"all": "all", "force": "force",
+	"all": "all", "force": "force", "trust": "trust",
 	"tool": "tool", "ref": "ref", "upstream": "upstream", "header": "header",
 	"to": "to", "envs": "env",
 }

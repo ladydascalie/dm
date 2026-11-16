@@ -451,11 +451,12 @@ var cliCommands = []cliCommand{
 	},
 	{
 		name:    "secret sync",
-		args:    "[--from M]",
+		args:    "[--from M] [--trust]",
 		summary: "apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"from", "M", "mapping path, default .dm-secrets.kdl in the working directory"},
+			{"trust", "", "trust a mapping outside the config directory: allow secret blocks and file paths anywhere"},
 		},
 		example: `dm secret sync`,
 		group:   groupSecrets,
