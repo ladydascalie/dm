@@ -2112,31 +2112,6 @@ func TestSecretHydrateRefusesAReRegisteredRecord(t *testing.T) {
 	}
 }
 
-// TestSecretHydrateUnlinksOnARevokeAfterTheGuard proves the check and the
-// write are closed as one step: a revoke that lands between the guard and the
-// write costs the file its value, and the reply is the refusal.
-func TestSecretHydrateUnlinksOnARevokeAfterTheGuard(t *testing.T) {
-	value := "s3cret-hydrate-guard-race"
-	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
-	if rep := secretCall(t, s, cl, conn, wire.Msg{
-		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
-	}); !rep.OK {
-		t.Fatalf("register: %s", rep.Error)
-	}
-	cl2, _ := boxConn(t)
-	s.afterHydrateWrite = func() {
-		// The revoke lands after the write, inside the window the second
-		// look covers.
-		s.handleReq(cl2, wire.Msg{Action: "secret-revoke", Name: "gh"})
-	}
-	path := filepath.Join(t.TempDir(), "token")
-	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
-	wantErr(t, "secret-hydrate", "revoked while the value was being written", rep)
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the file survived the revoke: %v", err)
-	}
-}
-
 // TestAdoptPushNamesTheDroppedCoverValues proves an adopt push that drops
 // covered values at the cap says so: the pane never holds them, and no reply
 // would ever carry the news.
@@ -2223,12 +2198,27 @@ func TestSecretUseRefusesAReRegisteredAfterTheActivation(t *testing.T) {
 	wantErr(t, "secret-use", "revoked while the value was being fetched or pushed", rep)
 }
 
-// TestSecretHydrateKeepsAConcurrentHydratesFile proves the refused hydrate's
-// unlink removes only its own value: a concurrent hydrate to the same path
-// that already replied success keeps its file.
-func TestSecretHydrateKeepsAConcurrentHydratesFile(t *testing.T) {
-	ghValue := "s3cret-gh-path-race"
-	awsValue := "s3cret-aws-path-race"
+// slowConn is a conn whose writes take their time and succeed: a push to it
+// stalls long enough for the test to land other actions inside the push, and
+// never tears.
+type slowConn struct{ delay time.Duration }
+
+func (c *slowConn) Write(b []byte) (int, error)      { time.Sleep(c.delay); return len(b), nil }
+func (c *slowConn) Close() error                     { return nil }
+func (c *slowConn) Read(b []byte) (int, error)       { return 0, io.EOF }
+func (c *slowConn) LocalAddr() net.Addr              { return nil }
+func (c *slowConn) RemoteAddr() net.Addr             { return nil }
+func (c *slowConn) SetDeadline(time.Time) error      { return nil }
+func (c *slowConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *slowConn) SetWriteDeadline(time.Time) error { return nil }
+
+// TestSecretHydratesSerializeOnAPath proves the write, its guards and the
+// removal are one critical section: a hydrate the revoke catches in its push
+// writes nothing and removes nothing, so a concurrent hydrate to the same
+// path that already replied success keeps its file.
+func TestSecretHydratesSerializeOnAPath(t *testing.T) {
+	ghValue := "s3cret-gh-serialize"
+	awsValue := "s3cret-aws-serialize"
 	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
 	s.fetch = func(sec *session.Secret) (string, error) {
 		if sec.Name == "gh" {
@@ -2243,30 +2233,107 @@ func TestSecretHydrateKeepsAConcurrentHydratesFile(t *testing.T) {
 			t.Fatalf("register %s: %s", name, rep.Error)
 		}
 	}
+	// A slow pane holds the gh hydrate inside its push: the write, the
+	// guards and the removal all wait behind it.
+	s.mu.Lock()
+	s.panes["w1p2"] = &paneConn{id: "w1p2", c: &slowConn{delay: 150 * time.Millisecond}}
+	s.mu.Unlock()
 	path := filepath.Join(t.TempDir(), "token")
-	s.afterHydrateWrite = func() {
-		// The seam arms once: the nested hydrate must run with no seam, or
-		// it would recurse into itself.
-		s.afterHydrateWrite = nil
-		// The second hydrate writes its own value to the same path and
-		// replies success while the first sits between its write and its
-		// guard.
-		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "aws", Path: path}); !rep.OK {
-			t.Fatalf("hydrate aws: %s", rep.Error)
+	done := make(chan wire.Msg, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			return
 		}
-		// Then the first hydrate's secret is revoked: its post-write guard
-		// must fail, and its unlink must spare the file.
-		if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"}); !rep.OK {
-			t.Fatalf("revoke: %s", rep.Error)
-		}
+		done <- m
+	}()
+	// The gh hydrate is now stalled in its push. The revoke lands while it
+	// waits, so its critical section opens on a revoked record.
+	time.Sleep(50 * time.Millisecond)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-revoke", Name: "gh"}); !rep.OK {
+		t.Fatalf("revoke: %s", rep.Error)
 	}
-	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
-	wantErr(t, "secret-hydrate", "revoked while the value was being written", rep)
+	// The aws hydrate completes whole, to the same path, while the gh
+	// hydrate is still finishing its push.
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-hydrate", Name: "aws", Path: path}); !rep.OK {
+		t.Fatalf("hydrate aws: %s", rep.Error)
+	}
+	rep := <-done
+	wantErr(t, "secret-hydrate", "revoked while the value was being fetched or pushed", rep)
+	if strings.Contains(rep.Error, ghValue) {
+		t.Fatalf("the refusal leaks the value: %s", rep.Error)
+	}
+	// The survivor's file stands: the refused hydrate wrote nothing and
+	// removed nothing.
 	b, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("the second hydrate's file did not survive: %v", err)
+		t.Fatalf("the surviving hydrate's file did not survive: %v", err)
 	}
 	if string(b) != awsValue {
 		t.Fatalf("file = %q, want the surviving hydrate's value", b)
+	}
+}
+
+// TestSecretHydrateRevokeWaitsForTheWrite proves the guard, the write and the
+// re-check are one critical section: a revoke aimed into the write cannot
+// land inside it, so the hydrate succeeds and the file stands. The value is
+// wide on purpose: the temp file is on disk while the bytes are still
+// copying, so ordinary polling aims the revoke into the write. Under separate
+// steps this ordering refused the hydrate and unlinked the file.
+func TestSecretHydrateRevokeWaitsForTheWrite(t *testing.T) {
+	value := strings.Repeat("s3cret-midwrite-", 1<<21)
+	s, cl, conn, _ := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "gh/token",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	path := filepath.Join(t.TempDir(), "token")
+	done := make(chan wire.Msg, 1)
+	go func() {
+		s.handleReq(cl, wire.Msg{Action: "secret-hydrate", Name: "gh", Path: path})
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		m, err := wire.ReadMsg(conn)
+		if err != nil {
+			return
+		}
+		done <- m
+	}()
+	// The temp file's appearance means the write is in flight, under the
+	// critical section's hold.
+	deadline := time.Now().Add(5 * time.Second)
+	writing := false
+	for !writing {
+		if entries, err := os.ReadDir(filepath.Dir(path)); err == nil {
+			for _, e := range entries {
+				if strings.HasPrefix(e.Name(), ".secrets-") {
+					writing = true
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hydrate never started writing")
+		}
+		if !writing {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	// The revoke is issued inside the write: it waits for s.mu, so it lands
+	// after the re-check, never between the looks.
+	cl2, conn2 := boxConn(t)
+	go func() { s.handleReq(cl2, wire.Msg{Action: "secret-revoke", Name: "gh"}) }()
+	rep := <-done
+	if !rep.OK {
+		t.Fatalf("hydrate = refusal %q, want a success: the revoke landed inside the write", rep.Error)
+	}
+	rep = rpcRead(t, conn2, wire.Msg{Action: "secret-revoke"})
+	if !rep.OK {
+		t.Fatalf("revoke reply: %s", rep.Error)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(b, []byte(value)) {
+		t.Fatalf("file mismatch err=%v, want the hydrate's value", err)
 	}
 }

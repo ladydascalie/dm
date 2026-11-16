@@ -710,36 +710,40 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 		uncovered = append(uncovered, id)
 	}
 	sort.Strings(uncovered)
-	// The same last look a use runs before its reply: a revoke that landed
-	// during the fetch or the push wins, and a revoked secret never leaves
-	// a live copy on disk. The check tests the record's identity, not just
-	// the name: a revoke-and-re-register does not pass under the new record.
+	// The guard, the write, the re-check and the removal are one critical
+	// section under s.mu: two hydrates to one path serialize completely, a
+	// revoke cannot land between the looks, and a refused hydrate never
+	// reaches a removal. The hold costs the session's event loop one small
+	// file write on local disk, the price the serialization needs: a
+	// hydrate is rare and operator-invoked, and no send runs under s.mu,
+	// the push having finished before the section. The check tests the
+	// record's identity, not just the name: a revoke-and-re-register does
+	// not pass under the new record.
 	s.mu.Lock()
 	live := s.st.Secret(sec.Name) == sec
-	s.mu.Unlock()
 	if !live {
+		s.mu.Unlock()
 		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret hydrate again", sec.Name))
 		return
 	}
-	if err := secrets.Hydrate(m.Path, value); err != nil {
+	err = secrets.Hydrate(m.Path, value)
+	live = s.st.Secret(sec.Name) == sec
+	if err == nil && !live {
+		// Nothing can change the record between the two looks while the
+		// hold lasts, so this branch is a backstop rather than a live
+		// path: it keeps the cleanup correct if a future change releases
+		// the lock mid-write, and the read-back keeps its removal from
+		// destroying a file another writer claimed.
+		if b, rerr := os.ReadFile(m.Path); rerr == nil && bytes.Equal(b, []byte(value)) {
+			_ = os.Remove(m.Path)
+		}
+	}
+	s.mu.Unlock()
+	if err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}
-	if s.afterHydrateWrite != nil {
-		s.afterHydrateWrite()
-	}
-	s.mu.Lock()
-	live = s.st.Secret(sec.Name) == sec
-	s.mu.Unlock()
 	if !live {
-		// The unlink removes only what this hydrate wrote. Hydrate installs
-		// the file with a rename, so whatever the path names by now may be
-		// another hydrate's value, one that already replied success: the
-		// read-back compare keeps it. An unreadable file stays too, for the
-		// same reason.
-		if b, err := os.ReadFile(m.Path); err == nil && bytes.Equal(b, []byte(value)) {
-			_ = os.Remove(m.Path)
-		}
 		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being written; run dm secret hydrate again", sec.Name))
 		return
 	}
