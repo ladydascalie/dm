@@ -518,6 +518,29 @@ func TestADanglingFlagIsTheMistakeItNames(t *testing.T) {
 	}
 }
 
+// TestAConsumedTrailingTokenDoesNotDangle proves a trailing token that
+// split already took as the previous flag's value is a value, not a
+// dangling flag: the command parses and fails later on its own merits,
+// never with a refusal that accuses the value the flag took.
+func TestAConsumedTrailingTokenDoesNotDangle(t *testing.T) {
+	t.Setenv("DM_SESSION", "")
+	for _, tt := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"msg", "post", "hello", "-msg", "-s"}, `unexpected argument "hello"`},
+		{[]string{"msg", "post", "-msg", "-s"}, "bad state"},
+	} {
+		err := Run(tt.argv)
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("dm %v = %v, want %q", tt.argv, err, tt.want)
+		}
+		if strings.Contains(err.Error(), "needs a value") {
+			t.Fatalf("dm %v accuses -s, the value -msg took: %v", tt.argv, err)
+		}
+	}
+}
+
 // TestUnknownSubverbBeatsFlagParsing proves an unknown subverb under a known
 // group is reported as the command mistake it is, even when flags follow it.
 // The bare group registers no flags, so flag parsing must not run first and

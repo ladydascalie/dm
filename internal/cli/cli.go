@@ -103,7 +103,7 @@ func newFlags(name string) *cmdFlags { return newFlagsAt(paths.StateDir(), name)
 // value, is refused by name before Parse runs.
 func (c *cmdFlags) parse(args []string) error {
 	ordered := reorder(args)
-	pos := positionals(args)
+	_, pos, dangling := split(args)
 	verb := c.fs.Name()
 	if verb == "msg" || verb == "secret" {
 		// The subverb of a grouped verb is the first positional, read
@@ -156,9 +156,9 @@ func (c *cmdFlags) parse(args []string) error {
 	// so a flag the verb does not read still falls through to Parse, which
 	// reports it as undefined. The check runs after the unknown-subverb
 	// return, so a command mistake keeps precedence over a flag one.
-	if name := danglingFlag(args); name != "" && len(pos) > 0 {
-		if f := c.fs.Lookup(strings.Trim(name, "-")); f != nil {
-			return fmt.Errorf("%s: flag %s needs a value", verb, name)
+	if dangling != "" && len(pos) > 0 {
+		if f := c.fs.Lookup(strings.Trim(dangling, "-")); f != nil {
+			return fmt.Errorf("%s: flag %s needs a value", verb, dangling)
 		}
 	}
 	_ = c.fs.Parse(ordered)
@@ -210,52 +210,44 @@ func envSessionLive(root, name string) bool {
 }
 
 // split walks argv once and classifies every token: a flag and the value a
-// withValue flag takes go to flags, the rest to positionals. A value-taking
-// flag left dangling at the end of argv consumes nothing, so parse refuses
-// it before the reordered argv reaches Parse: left in, it would eat the
-// first positional there. reorder and positionals both read split, so the
-// two cannot disagree on what a flag consumed.
-func split(args []string) (flags, pos []string) {
+// withValue flag takes go to flags, the rest to positionals. The one token
+// split consumes nothing for is a value-taking flag left dangling at the
+// end of argv, and it names that one: parse refuses it before the reordered
+// argv reaches Parse, where left in it would eat the first positional. A
+// trailing token split took as the previous flag's value is a value, never
+// a dangling flag. reorder and positionals both read split, so the two
+// cannot disagree on what a flag consumed.
+func split(args []string) (flags, pos []string, dangling string) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "-") && a != "-" {
 			flags = append(flags, a)
-			if withValue[a] && i+1 < len(args) {
-				i++
-				flags = append(flags, args[i])
+			if withValue[a] {
+				if i+1 < len(args) {
+					i++
+					flags = append(flags, args[i])
+				} else {
+					dangling = a
+				}
 			}
 			continue
 		}
 		pos = append(pos, a)
 	}
-	return flags, pos
+	return flags, pos, dangling
 }
 
 // reorder moves flags before positionals, so -s may follow a pane id.
 func reorder(args []string) []string {
-	flags, pos := split(args)
+	flags, pos, _ := split(args)
 	return append(flags, pos...)
 }
 
 // positionals returns the positionals of argv in the order it was typed,
 // skipping the flags and the values the withValue flags take.
 func positionals(args []string) []string {
-	_, pos := split(args)
+	_, pos, _ := split(args)
 	return pos
-}
-
-// danglingFlag names the value-taking flag left at the end of argv, or the
-// empty string when argv ends with a value or a positional. split pairs a
-// value-taking flag with the token behind it, so only the last token can
-// dangle: any earlier flag has already taken the token behind it.
-func danglingFlag(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	if last := args[len(args)-1]; withValue[last] {
-		return last
-	}
-	return ""
 }
 
 // register adds one table flag to the set, bound to the field the verb's Run

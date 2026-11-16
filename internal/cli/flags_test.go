@@ -44,24 +44,24 @@ func TestReorderKeepsADash(t *testing.T) {
 	}
 }
 
-// TestDanglingFlagNamesTheLastToken proves the dangling scan names a
-// value-taking flag left at the end of argv, and stays quiet when argv ends
-// with a value or a positional: any earlier value-taking flag has already
-// taken the token behind it.
-func TestDanglingFlagNamesTheLastToken(t *testing.T) {
+// TestSplitNamesTheDanglingFlag proves split names a value-taking flag left
+// at the end of argv, and stays quiet when the last token is a positional,
+// a valueless flag, or the value split already took for the flag before it.
+func TestSplitNamesTheDanglingFlag(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{
 		{"use", "main", "-s"}, {"list", "--after"}, {"post", "hello", "--msg"},
 	} {
-		if got := danglingFlag(args); got == "" {
-			t.Fatalf("danglingFlag(%v) = %q, want the trailing flag", args, got)
+		if _, _, d := split(args); d == "" {
+			t.Fatalf("split(%v) names no dangling flag, want the trailing flag", args)
 		}
 	}
 	for _, args := range [][]string{
 		{"-s", "main"}, {"list"}, {"post", "-s", "main", "hello"}, {},
+		{"post", "hello", "-msg", "-s"}, {"post", "-msg", "-s"},
 	} {
-		if got := danglingFlag(args); got != "" {
-			t.Fatalf("danglingFlag(%v) = %q, want empty", args, got)
+		if _, _, d := split(args); d != "" {
+			t.Fatalf("split(%v) = %q, want no dangling flag", args, d)
 		}
 	}
 }
