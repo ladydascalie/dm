@@ -151,7 +151,7 @@ func (s *server) pushLocalScrub() (map[string]error, []string) {
 // pane. The caller holds secretPush.
 func (s *server) sendSecretScrub() (map[string]error, []string) {
 	s.mu.Lock()
-	values := s.scrubValuesLocked()
+	values, _ := s.scrubValuesLocked()
 	panes := make([]*paneConn, 0, len(s.panes))
 	for _, pc := range s.panes {
 		panes = append(panes, pc)
@@ -190,7 +190,7 @@ func (s *server) adoptSecretScrub(id string) {
 	s.secretPush.Lock()
 	defer s.secretPush.Unlock()
 	s.mu.Lock()
-	values := s.scrubValuesLocked()
+	values, _ := s.scrubValuesLocked()
 	pc := s.panes[id]
 	s.mu.Unlock()
 	if len(values) == 0 || pc == nil {
@@ -209,11 +209,13 @@ func (s *server) adoptSecretScrub(id string) {
 // scrubValuesLocked is the set the panes must redact: this session's live
 // values first, in name order, then the values other sessions' servers asked
 // this one to cover, deduplicated against them, capped at the panes' list
-// size. The caller holds s.mu.
-func (s *server) scrubValuesLocked() []string {
+// size. The count of foreign values the cap left off is logged here, once per
+// push: an adopt and a plain push answer to no one, so the drop must not stay
+// silent. The caller holds s.mu.
+func (s *server) scrubValuesLocked() ([]string, int) {
 	values, _ := s.secretValuesLocked()
 	if len(s.secretForeign) == 0 {
-		return values
+		return values, 0
 	}
 	seen := make(map[string]bool, len(values))
 	for _, v := range values {
@@ -224,16 +226,28 @@ func (s *server) scrubValuesLocked() []string {
 		sources = append(sources, name)
 	}
 	sort.Strings(sources)
+	dropped := 0
 	for _, name := range sources {
 		for _, v := range s.secretForeign[name] {
-			if seen[v] || len(values) == pane.MaxSecrets {
+			if len(values) == pane.MaxSecrets {
+				dropped++
+				continue
+			}
+			if seen[v] {
 				continue
 			}
 			values = append(values, v)
 			seen[v] = true
 		}
 	}
-	return values
+	switch dropped {
+	case 0:
+	case 1:
+		log.Printf("set-secrets: the panes' cap dropped 1 value another session asked this one to cover")
+	default:
+		log.Printf("set-secrets: the panes' cap dropped %d values other sessions asked this one to cover", dropped)
+	}
+	return values, dropped
 }
 
 // siblingDialTimeout bounds one dial to a sibling session's server or pane
@@ -572,10 +586,12 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	// under the lock, so a revoke that landed anywhere between the
 	// activation and this reply, during the fetch or during the push,
 	// reads as the refusal it is.
+	// The check tests the record's identity, not just the name: a
+	// revoke-and-re-register must not pass under the new record.
 	s.mu.Lock()
-	gone := s.st.Secret(sec.Name) == nil
+	live := s.st.Secret(sec.Name) == sec
 	s.mu.Unlock()
-	if gone {
+	if !live {
 		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret use again", sec.Name))
 		return
 	}
@@ -695,16 +711,31 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 	sort.Strings(uncovered)
 	// The same last look a use runs before its reply: a revoke that landed
 	// during the fetch or the push wins, and a revoked secret never leaves
-	// a live copy on disk.
+	// a live copy on disk. The check tests the record's identity, not just
+	// the name: a revoke-and-re-register does not pass under the new record.
 	s.mu.Lock()
-	gone := s.st.Secret(sec.Name) == nil
+	live := s.st.Secret(sec.Name) == sec
 	s.mu.Unlock()
-	if gone {
+	if !live {
 		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched or pushed; run dm secret hydrate again", sec.Name))
 		return
 	}
+	// A revoke can still land between this check and the write, so the write
+	// is followed by the same look: a revoke that won that race costs the
+	// file its value, and the reply is the refusal.
+	if s.afterHydrateGuard != nil {
+		s.afterHydrateGuard()
+	}
 	if err := secrets.Hydrate(m.Path, value); err != nil {
 		s.reply(cl, m, nil, err)
+		return
+	}
+	s.mu.Lock()
+	live = s.st.Secret(sec.Name) == sec
+	s.mu.Unlock()
+	if !live {
+		_ = os.Remove(m.Path)
+		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being written; run dm secret hydrate again", sec.Name))
 		return
 	}
 	var warnings []string
@@ -767,9 +798,6 @@ func (s *server) secretCover(cl *client, m wire.Msg) {
 		if !scrubbed[v] {
 			dropped++
 		}
-	}
-	if dropped > 0 {
-		log.Printf("secret-cover: the panes' cap dropped %d of %d values from %s", dropped, len(body.Values), body.Session)
 	}
 	s.reply(cl, m, map[string]any{"panes": panes - len(failed), "dropped": dropped}, nil)
 }
