@@ -44,7 +44,8 @@ type Msg struct {
 	// {} marking the value slot.
 	Header string `json:"header,omitempty"`
 	// Path is the secret hydrate request: the file the value is written
-	// to, out of band.
+	// to, out of band. Secret sync rides it too, with the mapping file to
+	// apply; the file paths inside it resolve against its directory.
 	Path string `json:"path,omitempty"`
 	// Env is the secret register request: extra environment entries the
 	// fetch tool needs, as KEY=VALUE. Credential-named keys are refused.

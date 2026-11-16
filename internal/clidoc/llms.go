@@ -154,6 +154,7 @@ var llmsActionGroups = [][]string{
 	{"msg-watchers", "msg-schema"},
 	{"secret-register", "secret-list"}, {"secret-revoke"},
 	{"secret-use", "secret-hydrate", "secret-type"},
+	{"secret-sync"},
 }
 
 // LLMsText renders the whole page.

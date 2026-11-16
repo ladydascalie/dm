@@ -616,6 +616,9 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 	case "secret-cover":
 		s.secretCover(cl, m)
 
+	case "secret-sync":
+		s.secretSync(cl, m)
+
 	default:
 		s.reply(cl, m, nil, fmt.Errorf("unknown action %q", m.Action))
 	}

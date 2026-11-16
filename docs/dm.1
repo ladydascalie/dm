@@ -335,6 +335,15 @@ fetch a secret and type it into a pane
 .br
 Example: \fBdm secret type gh-cli --to w1p1\fP
 .TP
+\fBdm secret sync [--from M]\fP
+apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere
+.br
+\fB--s name\fP session name
+.br
+\fB--from M\fP mapping path, default .dm-secrets.kdl in the working directory
+.br
+Example: \fBdm secret sync\fP
+.TP
 \fBdm man [-o path]\fP
 print the man page, or write it to a file
 .br
@@ -763,6 +772,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBsecret-type\fP
 .nf
 {"action":"secret-type","name":"gh-cli","target":"w1p1"}
+.fi
+.TP
+\fBsecret-sync\fP
+.nf
+{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl"}
 .fi
 .SH KEYS
 The default keymap. A key label is the key pressed after the prefix key.

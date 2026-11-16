@@ -799,8 +799,10 @@ func runSecret(c *cmdFlags) error {
 		return secretHydrateVerb(c)
 	case "type":
 		return secretTypeVerb(c)
+	case "sync":
+		return secretSyncVerb(c)
 	}
-	return fmt.Errorf("secret: unknown verb %q: want register, list, revoke, use, hydrate or type", c.args[0])
+	return fmt.Errorf("secret: unknown verb %q: want register, list, revoke, use, hydrate, type or sync", c.args[0])
 }
 
 // secretName is the registry name: the first positional after the subverb.
@@ -931,6 +933,25 @@ func secretTypeVerb(c *cmdFlags) error {
 	}
 	name := secretName(c)
 	return printSecretRPC(c.session, wire.Msg{Action: "secret-type", Name: name, Target: c.to})
+}
+
+// secretSyncVerb applies a .dm-secrets.kdl mapping. With no --from the
+// mapping is the working directory's .dm-secrets.kdl. The client sends an
+// absolute mapping path, so the file paths inside it resolve against the
+// mapping's own directory no matter where the server was started.
+func secretSyncVerb(c *cmdFlags) error {
+	if len(c.args) > 1 {
+		return fmt.Errorf("secret sync: unexpected argument %q", c.args[1])
+	}
+	path := c.from
+	if path == "" {
+		path = ".dm-secrets.kdl"
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("secret sync: %w", err)
+	}
+	return printSecretRPC(c.session, wire.Msg{Action: "secret-sync", Path: abs})
 }
 
 func printRPC(name string, req wire.Msg) error {
