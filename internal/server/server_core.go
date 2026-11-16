@@ -42,12 +42,34 @@ type paneConn struct {
 	alt   bool
 	mouse bool
 	paste bool
+
+	// sendTimeout bounds one control-socket write; zero means the package
+	// default. A test shortens it to prove a stalled pane fails fast.
+	sendTimeout time.Duration
 }
+
+// paneSendTimeout bounds one write to a pane's control socket. A pane that
+// stops reading must not hold a push, or every secret action and pane
+// adoption serialised behind it, forever.
+const paneSendTimeout = 5 * time.Second
 
 func (p *paneConn) send(m wire.Msg) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return wire.WriteMsg(p.c, m)
+	timeout := p.sendTimeout
+	if timeout == 0 {
+		timeout = paneSendTimeout
+	}
+	if err := p.c.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	err := wire.WriteMsg(p.c, m)
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		// The frame may be torn mid-write, so the conn is dead for framing
+		// either way. Close it and let the pane's reader goroutine reap it.
+		_ = p.c.Close()
+	}
+	return err
 }
 
 // status returns a copy of the pane's last reported status.
@@ -368,6 +390,11 @@ type server struct {
 	secretPrefixes map[string]string
 	proxy          *proxy.Proxy
 	fetch          func(*session.Secret) (string, error)
+
+	// afterActivate runs inside a secret use, between the activation and
+	// the reply, so a test can land a revoke in exactly that window. It is
+	// a seam, nil in production.
+	afterActivate func()
 
 	// termColours is the pair a client detected from its own terminal. It is
 	// nil until the first client reports, so a server that never saw one
@@ -720,7 +747,7 @@ func (s *server) adoptPane(id string, c net.Conn) error {
 		_ = c.Close()
 		return nil
 	}
-	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}}
+	pc := &paneConn{id: id, c: c, st: wire.Status{State: "unknown"}, sendTimeout: paneSendTimeout}
 	s.panes[id] = pc
 	tc := s.termColours
 	s.mu.Unlock()

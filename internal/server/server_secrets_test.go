@@ -952,3 +952,105 @@ func TestSecretUseNamesTheSecretsTheCapDropped(t *testing.T) {
 		}
 	}
 }
+
+// TestPaneSendTimesOutOnAStalledPane proves a pane that stops reading fails
+// its push within the send timeout and releases the conn, instead of holding
+// a push, and every secret action behind it, forever.
+func TestPaneSendTimesOutOnAStalledPane(t *testing.T) {
+	srv, cli := net.Pipe()
+	t.Cleanup(func() { _ = cli.Close() })
+	// Nobody ever reads srv: the first write blocks until the deadline.
+	pc := &paneConn{id: "stalled", c: srv, sendTimeout: 100 * time.Millisecond}
+	done := make(chan error, 1)
+	go func() { done <- pc.send(wire.Msg{Action: "set-secrets"}) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("the send to a stalled pane succeeded")
+		}
+		var ne net.Error
+		if !errors.As(err, &ne) || !ne.Timeout() {
+			t.Fatalf("the send failed with %v, want a timeout", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the send did not time out")
+	}
+	// The timed-out conn is closed: the next send fails at once, not after
+	// another deadline.
+	if err := pc.send(wire.Msg{Action: "set-secrets"}); err == nil {
+		t.Fatal("a send after the timeout succeeded on a dead conn")
+	}
+}
+
+func TestSecretUseSurvivesAStalledPane(t *testing.T) {
+	value := "s3cret-stalled"
+	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	// One stalled pane next to the live spy: the push fails for it within
+	// the timeout and the use still answers.
+	srv, cli := net.Pipe()
+	t.Cleanup(func() { _ = cli.Close() })
+	s.mu.Lock()
+	s.panes["w1p3"] = &paneConn{id: "w1p3", c: srv, sendTimeout: 100 * time.Millisecond}
+	s.mu.Unlock()
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"})
+	if !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	var res struct {
+		Uncovered []string `json:"uncovered"`
+	}
+	if err := json.Unmarshal(rep.Res, &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Uncovered) != 1 || res.Uncovered[0] != "w1p3" {
+		t.Fatalf("uncovered = %v, want the stalled pane", res.Uncovered)
+	}
+	// The live pane still learned the value, and the stalled conn is dead:
+	// a further write fails at once instead of blocking.
+	got := readSpyUntil(t, ch, "set-secrets")
+	if !strings.Contains(string(got.Res), value) {
+		t.Fatalf("the live pane never learned the value: %s", got.Res)
+	}
+	if err := srv.SetWriteDeadline(time.Now().Add(time.Second)); err == nil {
+		t.Fatal("the stalled conn was not closed after the timeout")
+	}
+}
+
+// TestSecretUseRefusesARevokedWhileFetchingSecret proves a revoke that lands
+// between the activation and the reply reads as a refusal, not as a success
+// with an empty endpoint.
+func TestSecretUseRefusesARevokedWhileFetchingSecret(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "pass", Ref: "dev/t",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	s.fetch = func(*session.Secret) (string, error) { return "s3cret-revoked-midflight", nil }
+	entered := make(chan struct{})
+	s.afterActivate = func() {
+		// The revoke lands after the activation, inside the use flow.
+		s.handleReq(cl, wire.Msg{Action: "secret-revoke", Name: "gh"})
+		close(entered)
+	}
+	go func() { s.handleReq(cl, wire.Msg{Action: "secret-use", Name: "gh"}) }()
+	<-entered
+	// Two replies: the revoke's, then the use's refusal.
+	rep := rpcRead(t, conn, wire.Msg{Action: "secret-revoke"})
+	if !rep.OK {
+		t.Fatalf("revoke reply: %s", rep.Error)
+	}
+	rep = rpcRead(t, conn, wire.Msg{Action: "secret-use"})
+	wantErr(t, "secret-use", "revoked while the value was being fetched", rep)
+	if strings.Contains(rep.Error, "s3cret-revoked-midflight") {
+		t.Fatalf("the refusal leaks the value: %s", rep.Error)
+	}
+	if v, ok := s.secrets.Get("gh"); ok || v != "" {
+		t.Fatalf("the revoked use left a value behind: %q", v)
+	}
+}

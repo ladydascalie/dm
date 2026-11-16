@@ -353,6 +353,19 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	for _, w := range warnings {
 		log.Print(w)
 	}
+	if s.afterActivate != nil {
+		s.afterActivate()
+	}
+	// The reply must not call a revoked secret a success. One last look
+	// under the lock, so a revoke that landed anywhere between the
+	// activation and this reply reads as the refusal it is.
+	s.mu.Lock()
+	gone := s.st.Secret(sec.Name) == nil
+	s.mu.Unlock()
+	if gone {
+		s.reply(cl, m, nil, fmt.Errorf("secret %q was revoked while the value was being fetched; run dm secret use again", sec.Name))
+		return
+	}
 	s.reply(cl, m, map[string]any{"name": sec.Name, "endpoint": endpoint, "warning": warning, "uncovered": uncovered}, nil)
 }
 
