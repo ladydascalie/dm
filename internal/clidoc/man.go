@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-16"
+const manDate = "2026-11-17"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -186,6 +186,9 @@ func ManPage() string {
 		b.WriteString(roffEscape(action))
 		b.WriteString("\n")
 	}
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(ToggleSecretsNote))
+	b.WriteString("\n")
 
 	b.WriteString(manKeymaps())
 

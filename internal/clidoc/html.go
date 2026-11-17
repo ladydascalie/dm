@@ -403,7 +403,9 @@ func htmlKeys(ids *idGen) string {
 			htmlEscape(ids.id("key", e.Key+" "+e.Action)),
 			htmlEscape(e.Key), htmlEscape(e.Action), htmlEscape(section))
 	}
-	b.WriteString("</tbody></table></section>")
+	b.WriteString("</tbody></table>")
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(ToggleSecretsNote))
+	b.WriteString("</section>")
 	return b.String()
 }
 

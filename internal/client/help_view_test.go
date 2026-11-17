@@ -440,7 +440,7 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value.
-const helpBoxDefaultSHA256 = "188f77fb8942a5407f3b885239e3f8bb3c5b44382b197790adafef8c21ce4c1f"
+const helpBoxDefaultSHA256 = "08ad7f1a9fa41a1974d66b9a0b5e06b037e7daf0ec79dc473900fc3e06635431"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the
@@ -452,7 +452,7 @@ func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
 		"swap with next / prev pane": "Layout",
 		"cycle layout":               "Layout",
 		"synchronize panes":          "Session",
-		"toggle secret redaction":    "Session",
+		"toggle secret redaction: edit in place, not a control": "Session",
 	}
 	for _, e := range entries {
 		s, tagged := want[e.Action]

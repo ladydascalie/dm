@@ -430,7 +430,7 @@ var helpRows = []helpRow{
 	{[]string{"new-workspace"}, "new workspace"},
 	{[]string{"next-workspace"}, "next workspace"},
 	{[]string{"synchronize-panes"}, "synchronize panes"},
-	{[]string{"toggle-secrets"}, "toggle secret redaction"},
+	{[]string{"toggle-secrets"}, "toggle secret redaction: edit in place, not a control"},
 	{[]string{"picker"}, "switch session"},
 	{[]string{"command-palette"}, "command palette"},
 	{[]string{"rename-workspace"}, "rename workspace"},
