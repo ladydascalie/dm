@@ -51,10 +51,11 @@ func (s *server) secretEnsure() {
 // secretTool maps a registered secret to the command that prints its value.
 // The reference is an argument, never a value. The child inherits the
 // configuration and paths the tools need, and nothing else: the entries the
-// secret record carries come on top and a credential name is refused at
-// register time, so a token never reaches the state file. op reads its
-// service-account token from the operator's own environment, which rides
-// process to child and nowhere else.
+// secret record carries come on top and each must be on the tool
+// configuration allowlist, refused by name at register and at sync. So a
+// record cannot set LD_PRELOAD, PATH or a credential, and the state file
+// carries only configuration. op reads its service-account token from the
+// operator's own environment, which rides process to child and nowhere else.
 func secretTool(sec *session.Secret) secrets.Tool {
 	switch sec.Tool {
 	case session.ToolOp:

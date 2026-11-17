@@ -697,6 +697,58 @@ func TestSecretSyncReplyAndLogCarryNoFileKey(t *testing.T) {
 	}
 }
 
+// TestSecretSyncEnvRefusalCarriesNoValue proves the reply to a mapping whose
+// env entry is malformed names the entry by index and length, never the value
+// the entry was holding, and registers nothing. The fetch child would run with
+// that environment, so the entry is refused before the record is stored.
+func TestSecretSyncEnvRefusalCarriesNoValue(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	const value = "poc-token-syncval"
+	path := writeMapping(t, dir, "secret \"bad\" {\n  tool \"pass\"\n  ref \"stub\"\n  env \""+value+"\"\n}\n")
+
+	m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)})
+	if m.OK {
+		t.Fatal("sync accepted a malformed env entry")
+	}
+	if strings.Contains(m.Error, value) {
+		t.Fatalf("the reply carries the value: %q", m.Error)
+	}
+	if !strings.Contains(m.Error, "env entry 0") || !strings.Contains(m.Error, "bytes") {
+		t.Fatalf("the reply does not name the entry and its length: %q", m.Error)
+	}
+	if len(s.st.Secrets) != 0 {
+		t.Fatalf("the refused block registered %+v", s.st.Secrets)
+	}
+}
+
+// TestSecretSyncRefusesEnvOutsideTheAllowlist proves a mapping cannot hand the
+// fetch child a code loader, a PATH or a credential: the sync refuses the
+// block by key, and the state file never sees the entry.
+func TestSecretSyncRefusesEnvOutsideTheAllowlist(t *testing.T) {
+	s, cl, conn := syncServer(t)
+	dir := t.TempDir()
+	cases := []string{"LD_PRELOAD=/tmp/evil.so", "PATH=/repo/bin", "DB_PASS=poc-db-pass-1234"}
+	for _, env := range cases {
+		body := "secret \"bad\" {\n  tool \"pass\"\n  ref \"stub\"\n  env \"" + env + "\"\n}\n"
+		path := writeMapping(t, dir, body)
+		m := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-sync", Path: path, Trust: boolPtr(true)})
+		if m.OK {
+			t.Fatalf("sync accepted %q", env)
+		}
+		key, _, _ := strings.Cut(env, "=")
+		if !strings.Contains(m.Error, key) {
+			t.Fatalf("the reply does not name the key %q: %q", key, m.Error)
+		}
+		if _, value, _ := strings.Cut(env, "="); strings.Contains(m.Error, value) {
+			t.Fatalf("the reply carries the value of %q: %q", key, m.Error)
+		}
+		if len(s.st.Secrets) != 0 {
+			t.Fatalf("the refused block registered %+v", s.st.Secrets)
+		}
+	}
+}
+
 // TestSecretSyncAbsentVerdictTrustsConfigDir proves the dm
 // exec route: a wire message with no trust field trusts a mapping that lives
 // under the config directory, so the action works without the field.

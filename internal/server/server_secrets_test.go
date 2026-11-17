@@ -592,6 +592,42 @@ func TestSecretRegisterRefusesOneSidedProxyShapes(t *testing.T) {
 	}
 }
 
+// TestSecretRegisterEnvRefusalCarriesNoValue proves the register reply names
+// the entry by index or key and a length, never the value it holds. The CLI
+// prints this error to stderr, so the value must not ride it.
+func TestSecretRegisterEnvRefusalCarriesNoValue(t *testing.T) {
+	s, cl, conn, _ := secretServer(t, "secrets", "", nil)
+	const value = "poc-token-regval"
+	cases := []struct {
+		name  string
+		entry string
+		want  string
+	}{
+		{"malformed", value, "env entry 0"},
+		{"not allowlisted", "DB_PASS=" + value, "DB_PASS"},
+		{"code loader", "LD_PRELOAD=/tmp/evil.so", "LD_PRELOAD"},
+		{"path", "PATH=/repo/bin", "PATH"},
+	}
+	for _, c := range cases {
+		rep := secretCall(t, s, cl, conn, wire.Msg{
+			Action: "secret-register", Name: c.name, Tool: "pass", Ref: "dev/t",
+			Env: []string{c.entry},
+		})
+		if rep.OK {
+			t.Fatalf("register accepted %q", c.entry)
+		}
+		if strings.Contains(rep.Error, value) {
+			t.Fatalf("%s: the reply carries the value: %q", c.name, rep.Error)
+		}
+		if !strings.Contains(rep.Error, c.want) || !strings.Contains(rep.Error, "bytes") {
+			t.Fatalf("%s: the reply names neither %q nor a length: %q", c.name, c.want, rep.Error)
+		}
+	}
+	if len(s.st.Secrets) != 0 {
+		t.Fatalf("the refused records registered %+v", s.st.Secrets)
+	}
+}
+
 func TestSecretUseNamesThePanesThatMissedTheSet(t *testing.T) {
 	value := "s3cret-uncovered"
 	s, cl, conn, _ := secretServer(t, "secrets", value, nil)

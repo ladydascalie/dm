@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 )
 
@@ -27,10 +28,10 @@ type Secret struct {
 	// Empty means the secret does not ride the proxy.
 	Header string `json:"header,omitempty"`
 	// Env holds extra environment entries the fetch tool needs, as
-	// KEY=VALUE: configuration and paths such as PASSWORD_STORE_DIR. A
-	// credential-named key is refused, so the state file never carries a
-	// token; a tool that needs one reads it from its own environment. Keep
-	// the credential words in step with internal/pane/env.go.
+	// KEY=VALUE. Only the tool configuration names in secretEnvKeys pass:
+	// the fetch child runs with them, so anything else would be code
+	// execution or a credential at rest. A tool that needs a token reads it
+	// from its own environment.
 	Env []string `json:"env,omitempty"`
 }
 
@@ -68,17 +69,23 @@ func (s *Secret) Validate() error {
 		return fmt.Errorf("secret %s: header template %q has no %s slot", s.Name, s.Header, headerSlot)
 	}
 	seen := map[string]bool{}
-	for _, kv := range s.Env {
+	for i, kv := range s.Env {
 		key, _, found := strings.Cut(kv, "=")
 		if !found || key == "" {
-			return fmt.Errorf("secret %s: env entry %q is not KEY=VALUE", s.Name, kv)
+			// The entry is named by index and length only: with no = the
+			// whole entry can be a value.
+			return fmt.Errorf("secret %s: env entry %d is not KEY=VALUE: %d bytes", s.Name, i, len(kv))
 		}
 		if strings.ContainsAny(kv, "\r\n") {
-			return fmt.Errorf("secret %s: env entry %q carries a line break", s.Name, kv)
+			// The key is not named here either: a line break can put the
+			// value in the key position.
+			return fmt.Errorf("secret %s: env entry %d carries a line break: %d bytes", s.Name, i, len(kv))
 		}
-		if !pathEnvName(key) && credentialEnvName(key) {
-			return fmt.Errorf("secret %s: env key %s names a credential; the state file never carries one", s.Name, key)
+		if !allowedEnvName(key) {
+			return fmt.Errorf("secret %s: env entry %d: key %s is not tool configuration; allowed keys: %s; the entry is %d bytes",
+				s.Name, i, envKeyLabel(key), strings.Join(secretEnvKeys, ", "), len(kv))
 		}
+		// The key passed the allowlist, so naming it here is safe.
 		if seen[key] {
 			return fmt.Errorf("secret %s: env key %s appears twice", s.Name, key)
 		}
@@ -87,55 +94,46 @@ func (s *Secret) Validate() error {
 	return nil
 }
 
-// credentialEnvWords are the words that mark an environment name as a
-// credential. The match runs against the upper-cased name with every run of
-// non-alphanumeric characters turned into one underscore. Keep in step with
-// internal/pane/env.go, which strips by the same words.
-var credentialEnvWords = []string{
-	"TOKEN", "SECRET", "PASSWD", "PASSWORD", "CREDENTIAL",
-	"API_KEY", "PRIVATE_KEY", "AUTH", "COOKIE",
+// secretEnvKeys is the whole of what a secret record's env may carry: the
+// configuration a fetch tool reads to find its own store. It is a positive
+// allowlist on purpose. A denylist of credential-shaped words cannot name the
+// routes that matter: LD_PRELOAD and LD_LIBRARY_PATH run code in the fetch
+// child, PATH picks the shell the tool's own shebang resolves, and a
+// credential-shaped name such as DB_PASS or OP_SESSION_x would put a value in
+// the state file. Every entry below is a name a tool reads to locate itself,
+// and no entry is a value. Keep the list small and keep the match exact.
+var secretEnvKeys = []string{
+	"GNUPGHOME",                  // pass: the GnuPG home that holds the store key
+	"HOME",                       // both tools: the user's dotfiles, and the default store
+	"LANG",                       // both tools: message locale
+	"LC_ALL",                     // both tools: message locale
+	"OP_ACCOUNT",                 // op: the account a reference is read from
+	"OP_CONFIG_DIR",              // op: the config directory that holds the account
+	"PASSWORD_STORE_DIR",         // pass: the store root
+	"PASSWORD_STORE_KEY",         // pass: the key id that signs the store
+	"PASSWORD_STORE_SIGNING_KEY", // pass: the key id that verifies the store's signatures
+	"XDG_CONFIG_HOME",            // op: the config root, when OP_CONFIG_DIR is unset
+	"XDG_DATA_HOME",              // op: the session data root
+	"XDG_RUNTIME_DIR",            // op: the session socket directory
 }
 
-// pathEnvName keeps the variable names that carry filesystem paths, not
-// secrets: a store location such as PASSWORD_STORE_DIR is configuration a
-// tool needs in its record. The shape mirrors the path exemption in
-// internal/pane/env.go.
-func pathEnvName(name string) bool {
-	if name == "XAUTHORITY" {
-		return true
-	}
-	upper := strings.ToUpper(name)
-	last := upper
-	if i := strings.LastIndex(upper, "_"); i >= 0 {
-		last = upper[i+1:]
-	}
-	switch last {
-	case "DIR", "PATH", "HOME", "SOCK":
-		return true
-	}
-	return strings.HasSuffix(name, "_SOCK")
+// allowedEnvName reports whether name is one of the tool configuration names a
+// record may carry. The match is exact and case-sensitive: an environment name
+// is case-sensitive, so a near miss such as home or HOME_EXTRA is refused
+// rather than folded onto an allowed key.
+func allowedEnvName(name string) bool {
+	return slices.Contains(secretEnvKeys, name)
 }
 
-// credentialEnvName reports whether a variable name matches the credential
-// words.
-func credentialEnvName(name string) bool {
-	upper := strings.ToUpper(name)
-	var b strings.Builder
-	b.Grow(len(upper))
-	for _, r := range upper {
-		if r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('_')
-		}
+// envKeyLabel renders a refused env key for a message. A key that is not on
+// the allowlist can be any text, a pasted value included, so a long one is cut
+// and its full length kept.
+func envKeyLabel(key string) string {
+	const maxKey = 64
+	if len(key) > maxKey {
+		return fmt.Sprintf("%q (%d bytes)", key[:maxKey], len(key))
 	}
-	s := b.String()
-	for _, w := range credentialEnvWords {
-		if strings.Contains(s, w) {
-			return true
-		}
-	}
-	return false
+	return fmt.Sprintf("%q", key)
 }
 
 // Secret returns the registered secret named name, or nil.
