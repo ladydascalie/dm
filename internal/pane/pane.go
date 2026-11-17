@@ -451,6 +451,14 @@ func (r *scrollRing) Write(b []byte) {
 	}
 }
 
+// Reset drops every byte the ring holds and keeps its budget. Reading the
+// bytes out, rewriting the copy in place and writing it back is how the pane
+// scrubs its history: the rewrite keeps the length, so every anchor into the
+// stream stays aligned.
+func (r *scrollRing) Reset() {
+	r.n, r.w = 0, 0
+}
+
 // Len is the number of bytes held.
 func (r *scrollRing) Len() int { return r.n }
 
@@ -930,6 +938,31 @@ func (p *paneProc) publishLocked(b []byte) {
 	if sc, reply, ok := p.waitEndLocked(); ok {
 		_ = sc.send(reply)
 	}
+}
+
+// scrubPaintedLocked redacts what the pane already shows. The ring is every
+// read-back and the scrollback's only copy, and the grid is the pane's
+// picture; a switch-off reveal wrote the value into both, and the stream stage
+// only rewrites bytes published from now on. Both are repaired here, so the
+// switch toggles the picture and not only the next chunk.
+//
+// The clients repaint from the snapshot the caller broadcasts: their live
+// terminal is their own, and a value it drew never leaves it without a
+// restore. The caller holds p.mu.
+func (p *paneProc) scrubPaintedLocked() {
+	values := p.scrub.screenValues()
+	if len(values) == 0 {
+		return
+	}
+	ring := p.ring.Bytes()
+	p.ring.Reset()
+	p.ring.Write(p.scrub.scrubBytes(ring))
+	// A trailing cluster is not on the grid until the quiet flush places it,
+	// and a scrub that ran before it would leave the tail of a value in the
+	// picture and in the snapshot the clients restore.
+	p.vt.Flush()
+	p.vt.Scrub(values)
+	p.broadcastLocked(wire.Msg{Type: "scrub", Target: p.id, VTSnap: p.vt.Snapshot()})
 }
 
 // armFlushLocked restarts the quiet timer. The caller holds p.mu. A timer that
@@ -1422,9 +1455,19 @@ func (p *paneProc) serve(c net.Conn) {
 			// stage flips between scrubbing and passing the output through;
 			// the value list survives both ways, so a set-secrets push
 			// while the switch is off updates the values without turning
-			// the stage back on. The reply carries the resulting state, so
+			// the stage back on.
+			//
+			// Turning it on repaints. The stage redacts bytes as they are
+			// published, so the output the reveal produced is in the ring
+			// and the grid with no bytes left to re-run; the pane rewrites
+			// both from the same value list and hands the clients the
+			// repaired screen. The reply carries the resulting state, so
 			// the server can show it.
-			res := jsonRaw(map[string]any{"enabled": p.scrub.toggle()})
+			enabled := p.scrub.toggle()
+			if enabled {
+				p.scrubPaintedLocked()
+			}
+			res := jsonRaw(map[string]any{"enabled": enabled})
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true, Res: res})
 		case "ping":
 			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})

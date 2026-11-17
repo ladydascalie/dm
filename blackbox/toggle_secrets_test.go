@@ -63,20 +63,13 @@ func TestToggleSecretsKeybindingEndToEnd(t *testing.T) {
 	a.write("echo " + toggleSecret + "-off\r")
 	waitPaneRaw(t, h, "scrub", root, toggleSecret+"-off")
 
-	// The same key returns the switch on. A clear wipes the raw echo off
-	// the screen first, so the next read proves the fresh echo scrubs.
+	// The same key returns the switch on, and the return repaints. The raw
+	// echo the reveal left on the screen is rewritten to asterisks by the
+	// pane itself: no clear, no new output and no scrollback to hide it.
 	a.write(prefixKey + "\x07")
 	a.waitContains(t, "redaction on: "+root)
-	a.write("clear\r")
-	a.write("echo " + toggleSecret + "-back\r")
-	h.waitFor("scrub", root, strings.Repeat("*", len(toggleSecret))+"-back")
-	screen, err := h.try("read", root, "-s", "scrub")
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if strings.Contains(screen, toggleSecret+"-back") {
-		t.Fatalf("re-enabled pane echoed the raw value:\n%s", screen)
-	}
+	stars := strings.Repeat("*", len(toggleSecret))
+	waitPanePlain(t, h, "scrub", root, stars+"-off", toggleSecret)
 }
 
 // waitPaneRaw polls the pane screen until the raw value shows, failing when
@@ -95,4 +88,23 @@ func waitPaneRaw(t *testing.T, h *harness, session, pane, needle string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("pane %s never echoed %q raw within the wait budget; last read:\n%s", pane, needle, last)
+}
+
+// waitPanePlain polls the pane screen until needle shows and gone is absent,
+// failing when the switch the keybinding flipped did not repaint what the
+// reveal painted.
+func waitPanePlain(t *testing.T, h *harness, session, pane, needle, gone string) {
+	t.Helper()
+	deadline := time.Now().Add(waitBudget)
+	var last string
+	for time.Now().Before(deadline) {
+		out, err := h.try("read", pane, "-s", session)
+		last = out
+		if err == nil && strings.Contains(out, needle) && !strings.Contains(out, gone) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("pane %s never repainted %q and dropped %q within the wait budget; last read:\n%s",
+		pane, needle, gone, last)
 }

@@ -15,7 +15,7 @@ import (
 
 // Msg is the single envelope for every dm socket, in both directions.
 type Msg struct {
-	Type   string `json:"type"`             // req resp attach keys resize snapshot bytes replay status exit
+	Type   string `json:"type"`             // req resp attach keys resize snapshot bytes replay scrub status exit
 	Action string `json:"action,omitempty"` // req action
 	Target string `json:"target,omitempty"` // pane id
 	Dir    string `json:"dir,omitempty"`    // left right up down

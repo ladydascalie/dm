@@ -144,7 +144,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 
 ## Keys
 
-The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use. The toggle-secrets action turns a pane's secret redaction off and on. It exists so a human can edit a secret in place: while it is off the pane's registered values are kept and the pane's output passes through untouched, and turning it back on scrubs those values again. It is not a security control: an agent that can reach the dm socket can flip it, as it can already type keys and read panes. The toast names the state the pane is left in.
+The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use. The toggle-secrets action turns a pane's secret redaction off and on. It exists so a human can edit a secret in place: while it is off the pane's registered values are kept and the pane's output passes through untouched, and turning it back on scrubs those values again and repaints the pane's history and screen, so nothing the reveal drew is left behind for a read-back or a scrollback to serve. It is not a security control: an agent that can reach the dm socket can flip it, as it can already type keys and read panes. The toast names the state the pane is left in.
 
 | Keys | Action | Help label |
 | --- | --- | --- |

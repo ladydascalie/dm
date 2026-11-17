@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/creack/pty"
 
@@ -588,5 +589,87 @@ func TestToggleSecretsServesAnyConnWithoutHandshake(t *testing.T) {
 	}
 	if enabled, ok := replyEnabled(t, m); !ok || enabled {
 		t.Fatalf("plain-conn toggle reported enabled %v ok %v, want false", enabled, ok)
+	}
+}
+
+// TestToggleRepaintsThePaintedHistory proves the switch's on direction is a
+// repaint and not only a change to the next chunk. While the switch is off the
+// read loop publishes the raw bytes, so the value is in the ring and on the
+// grid with no scrub stage in the way; turning the switch back on rewrites
+// both and hands every subscriber the repaired screen.
+func TestToggleRepaintsThePaintedHistory(t *testing.T) {
+	t.Parallel()
+	p, cli, msgs := yankPane(t, 40, 6)
+	// The adopted signal is the daemon's, and this harness builds the pane
+	// by hand: the push would close a nil channel.
+	p.adopted = make(chan struct{})
+	value := "poc-reveal-1234"
+	sub, subCli := subPipe(t, p, 5*time.Second)
+	_ = sub
+	frames := pump(subCli)
+
+	set := jsonRaw(map[string]any{"valuesB64": [][]byte{[]byte(value)}})
+	if reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "set-secrets", ID: 1, Res: set}); !reply.OK {
+		t.Fatalf("set-secrets: %s", reply.Error)
+	}
+	// Off: the stage passes the output through, which is the reveal the
+	// operator asked for.
+	if reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "toggle-secrets", ID: 2}); !reply.OK {
+		t.Fatalf("toggle off: %s", reply.Error)
+	}
+	p.mu.Lock()
+	p.publishLocked([]byte("token: " + value + "\r\n"))
+	p.mu.Unlock()
+	if got := string(p.ring.Bytes()); !strings.Contains(got, value) {
+		t.Fatalf("ring = %q, want the revealed value before the switch returns", got)
+	}
+
+	// On: the same value is scrubbed out of the ring and the grid, and the
+	// clients are told to repaint.
+	reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "toggle-secrets", ID: 3})
+	if enabled, ok := replyEnabled(t, reply); !ok || !enabled {
+		t.Fatalf("toggle on reported enabled %v ok %v, want true", enabled, ok)
+	}
+	stars := strings.Repeat("*", len(value))
+	p.mu.Lock()
+	ring := string(p.ring.Bytes())
+	screen := screenText(p.vt)
+	p.mu.Unlock()
+	if strings.Contains(ring, value) {
+		t.Fatalf("ring kept the revealed value: %q", ring)
+	}
+	if !strings.Contains(ring, stars) {
+		t.Fatalf("ring = %q, want the value redacted", ring)
+	}
+	if strings.Contains(screen, value) {
+		t.Fatalf("screen kept the revealed value: %q", screen)
+	}
+	if !strings.Contains(screen, "token: "+stars) {
+		t.Fatalf("screen = %q, want the value redacted in place", screen)
+	}
+	read := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "read", ID: 4})
+	if drawn := strings.Join(read.Lines, "\n"); strings.Contains(drawn, value) {
+		t.Fatalf("read served the revealed value: %q", drawn)
+	}
+
+	// The subscribers got the repaired picture, which is what repaints a
+	// client's own terminal.
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case m, ok := <-frames:
+			if !ok {
+				t.Fatal("subscriber socket closed before the scrub frame")
+			}
+			if m.Type != "scrub" {
+				continue
+			}
+			if m.Target != "w1p1" || m.VTSnap == nil {
+				t.Fatalf("scrub frame %+v, want the pane and a snapshot", m)
+			}
+			return
+		case <-deadline:
+			t.Fatal("no scrub frame")
+		}
 	}
 }

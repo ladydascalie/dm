@@ -974,6 +974,15 @@ func (s *server) watchConn(id string, pc *paneConn) (exit bool) {
 			s.mu.Lock()
 			s.broadcastLocked(wire.Msg{Type: "bytes", Target: id, Data: m.Data})
 			s.mu.Unlock()
+		case "scrub":
+			// The pane rewrote its ring and its picture after a redaction
+			// toggle came back on. The snapshot is the repaired screen, so
+			// every client repaints from it, and the frame is also the cue
+			// to drop a cached scrollback ring: the pane's copy is the only
+			// one that was scrubbed.
+			s.mu.Lock()
+			s.broadcastLocked(wire.Msg{Type: "scrub", Target: id, VTSnap: m.VTSnap})
+			s.mu.Unlock()
 		case "status":
 			if m.St != nil {
 				from := pc.status().State

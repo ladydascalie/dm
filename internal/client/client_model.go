@@ -863,6 +863,27 @@ func (t *tui) apply(m wire.Msg) {
 		// is the picture, and replaying raw bytes would double-apply them.
 		applyReplay(t.hist, m.Target, m.Data)
 		t.dirty = true
+	case "scrub":
+		// The pane rewrote its ring and its screen after a redaction toggle
+		// came back on: what a switch-off reveal drew is gone from the
+		// pane, and the picture has to follow. The snapshot is the repaired
+		// screen; the cached ring is dropped, so the next scrollback asks
+		// the pane for the scrubbed copy instead of serving the revealed
+		// one. A scrollback already open is rebuilt from that fresh ring.
+		delete(t.hist, m.Target)
+		delete(t.histMeta, m.Target)
+		if t.scroll == m.Target {
+			if p := t.paneByID(m.Target); p != nil {
+				t.scrollVT = nil
+				t.requestHistory(p)
+			}
+		}
+		if p := t.paneByID(m.Target); p != nil {
+			applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+		} else {
+			t.applyPreviewScreen(m.Target, m.VTSnap)
+		}
+		t.dirty = true
 	case "bytes":
 		// A float's bytes belong to its own terminal, never to a pane's.
 		if t.applyFloatBytes(m) {

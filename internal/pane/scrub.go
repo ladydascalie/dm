@@ -85,6 +85,36 @@ func (s *scrubber) set(values []string) {
 	s.mu.Unlock()
 }
 
+// screenValues returns the needles a pane's screen is rewritten with when the
+// switch returns on. They are one value per entry, not the CRLF form the
+// stream stage needs: a newline is a row break in the grid, never a cell run,
+// so a multi-line value is split into the lines the terminal actually drew.
+// A line shorter than MinSecretLen is left out for the reason set drops a
+// short value: it would blot ordinary text without protecting a secret.
+//
+// The list is copied out under the scrubber's lock: the pane takes it while
+// it holds its own lock, and the documented order is the pane then this one.
+func (s *scrubber) screenValues() []string {
+	s.mu.Lock()
+	vals := s.vals
+	s.mu.Unlock()
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		text := string(v)
+		if !strings.Contains(text, "\n") {
+			out = append(out, text)
+			continue
+		}
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSuffix(line, "\r")
+			if len(line) >= MinSecretLen {
+				out = append(out, line)
+			}
+		}
+	}
+	return out
+}
+
 // valueForms lists the spellings a value can take in the output stream. The
 // pty rewrites every LF to CRLF on output, so a value holding a newline is
 // never matched byte for byte by the raw form: the CRLF form is what the
@@ -231,6 +261,31 @@ func (s *scrubber) redactText(text string) string {
 	pos := redactInto(&out, vals, data, true)
 	out.Write(data[pos:])
 	return out.String()
+}
+
+// scrubBytes rewrites the bytes a pane already published. It is the toggle's
+// repair path: while the switch was off the stage passed the value through
+// untouched, so the ring and every read-back built from it hold it. The ring
+// is a whole stream with no next chunk, so every match in it is final and no
+// byte is held back.
+//
+// The switch does not apply. This runs on the way back on, where the caller
+// has already decided that the history the reveal built must not survive.
+func (s *scrubber) scrubBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+	s.mu.Lock()
+	vals, maxLen := s.vals, s.maxLen
+	s.mu.Unlock()
+	if maxLen == 0 || len(vals) == 0 {
+		return data
+	}
+	var out bytes.Buffer
+	out.Grow(len(data))
+	pos := redactInto(&out, vals, data, true)
+	out.Write(data[pos:])
+	return out.Bytes()
 }
 
 // redactInto writes data with every value replaced by the same number of
