@@ -16,23 +16,25 @@ type componentKey struct {
 	action, method, outcome string
 }
 
-// component is one documented UI component. The page is the user-facing page
-// for the component; the spec's contract page stays the design record. The
-// props and state rows are checked against the value's exported fields by
+// component is one documented UI unit. The page is the user-facing page for
+// the unit; the spec's contract page stays the design record. The props and
+// state rows are checked against the value's exported fields by
 // TestComponentPageNamesEveryField, so a field that lands without a row fails
-// the test.
+// the test. Level is the unit's place in the hierarchy: an atom stands alone,
+// a molecule composes atoms and still owns no draw.
 type component struct {
-	id, pkg, name, summary, usage string
-	props, state                  []componentField
-	keys                          []componentKey
-	focus, compose                string
+	id, pkg, name, level, summary, usage string
+	props, state                         []componentField
+	keys                                 []componentKey
+	focus, compose                       string
 }
 
-// components is the page's component list, in the order the section paints it.
+// components is the page's unit list, in the order the section paints it.
 var components = []component{{
-	id:   "input",
-	pkg:  "internal/ui",
-	name: "Input",
+	id:    "input",
+	pkg:   "internal/ui",
+	name:  "Input",
+	level: "atom",
 	summary: "Input is one line of editable text: the runes and the caret. " +
 		"It owns the value and the caret, and nothing else. It does not own a " +
 		"prompt row, a border, a mask or a selection; those arrive with a " +
@@ -83,6 +85,40 @@ ui.DrawInput(buf, th, ui.InputProps{
 		"The mode's key handler is the only dispatcher, so a rebind moves the key and the hint together.",
 	compose: "A row. A box's content func or a float's Paint calls it inside the rect the parent " +
 		"hands it. It never paints a border.",
+}, {
+	id:    "search",
+	pkg:   "internal/ui",
+	name:  "Search",
+	level: "molecule",
+	summary: "Search is one query over a list of rows: the draft query, the accepted query, " +
+		"the match set and the cursor. It composes the Input atom and owns no rows and no " +
+		"matcher; the caller supplies both, and the view draws.",
+	usage: `var s ui.Search
+s.Input.SetValue("auth")
+s.Refilter(len(rows), func(i int) bool {
+    return strings.Contains(rows[i], s.Input.String())
+})
+s.Next()`,
+	state: []componentField{
+		{"Input", "ui.Input", "empty", "The draft query. The atom does the editing; this is the same value the rename prompt edits."},
+		{"Accepted", "string", `""`, "The committed query. Commit stores the draft here; Cancel restores it."},
+		{"Matches", "[]int", "nil", "The source row indices that match, in row order."},
+		{"Cursor", "int", "-1", "The index into Matches, or -1 when nothing matches."},
+	},
+	keys: []componentKey{
+		{"replace the matches", "SetMatches", "The set is copied and the cursor clamps to 0, or -1 when the set is empty."},
+		{"refilter", "Refilter", "The predicate runs over rows 0..n-1, the query is Input.String(), and the set is replaced."},
+		{"commit", "Commit", "Accepted becomes Input.String(). The live consumers never call it."},
+		{"cancel", "Cancel", "Input returns to Accepted."},
+		{"clear", "Clear", "The query, the accepted query and the matches go; the cursor is -1."},
+		{"move the cursor", "SetCursor", "The cursor clamps into the set."},
+		{"next match", "Next", "The cursor moves one match, wrapping past the last."},
+		{"previous match", "Prev", "The cursor moves one match back, wrapping past the first."},
+		{"read the match", "Match", "The source row of the cursor, or -1."},
+		{"count", "Count", "The number of matches."},
+	},
+	focus:   "None. The molecule draws nothing and holds no focus. The view owns the caret, the selection and the viewport.",
+	compose: "The atom is ui.Input. The view supplies the predicate, draws the rows and owns the viewport.",
 }}
 
 // componentDefault renders a default cell: a code run when there is one, and an
@@ -94,45 +130,55 @@ func componentDefault(def string) string {
 	return "<code>" + htmlEscape(def) + "</code>"
 }
 
-// htmlComponents renders the COMPONENTS section: one heading and a props,
-// state and key table per component.
+// htmlComponents renders the COMPONENTS section: one heading, a props table
+// where the unit has props, a state table and a key table.
 func htmlComponents(ids *idGen) string {
 	var b strings.Builder
 	b.WriteString(`<section class="sec" id="sec-components">`)
 	b.WriteString(`<h2 id="components">Components</h2>`)
-	b.WriteString(`<p>The overlay chrome is built from a small vocabulary. A component is a value the app owns, a props struct for one frame, a pure Draw and one method per key. It never reads a keymap, never sees a key byte and never holds a buffer between frames. The page for one is its contract: props, state, keys, focus and composition.</p>`)
+	b.WriteString(`<p>The overlay chrome is built from a small vocabulary. An atom is a value with one job. A molecule composes atoms and still owns no draw. A component adds a props struct for one frame and a Draw. Every level owns its state and answers methods; none reads a keymap or holds a buffer between frames. The page for one is its contract: props, state, keys, focus and composition.</p>`)
 	for _, c := range components {
 		fmt.Fprintf(&b, `<h3 id="%s">%s</h3>`, htmlEscape(ids.id("comp", c.name)), htmlEscape(c.name))
 		fmt.Fprintf(&b, `<p>%s</p>`, htmlEscape(c.summary))
-		fmt.Fprintf(&b, `<p class="provenance">Source: <code>%s</code>.</p>`, htmlEscape(c.pkg))
+		fmt.Fprintf(&b, `<p class="provenance">Source: <code>%s</code> · %s.</p>`, htmlEscape(c.pkg), htmlEscape(c.level))
 		fmt.Fprintf(&b, "<pre><code>%s</code></pre>", htmlEscape(c.usage))
 
-		b.WriteString(`<h4>Props</h4>`)
-		b.WriteString(`<table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead><tbody>`)
-		for _, f := range c.props {
-			fmt.Fprintf(&b, `<tr data-row><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>`,
-				htmlEscape(f.name), htmlEscape(f.typ), componentDefault(f.def), htmlEscape(f.desc))
+		if len(c.props) > 0 {
+			b.WriteString(`<h4>Props</h4>`)
+			b.WriteString(`<table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead><tbody>`)
+			for _, f := range c.props {
+				fmt.Fprintf(&b, `<tr data-row><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>`,
+					htmlEscape(f.name), htmlEscape(f.typ), componentDefault(f.def), htmlEscape(f.desc))
+			}
+			b.WriteString(`</tbody></table>`)
 		}
-		b.WriteString(`</tbody></table>`)
 
-		b.WriteString(`<h4>State</h4>`)
-		b.WriteString(`<table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead><tbody>`)
-		for _, f := range c.state {
-			fmt.Fprintf(&b, `<tr data-row><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>`,
-				htmlEscape(f.name), htmlEscape(f.typ), componentDefault(f.def), htmlEscape(f.desc))
+		if len(c.state) > 0 {
+			b.WriteString(`<h4>State</h4>`)
+			b.WriteString(`<table><thead><tr><th>Field</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead><tbody>`)
+			for _, f := range c.state {
+				fmt.Fprintf(&b, `<tr data-row><td><code>%s</code></td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>`,
+					htmlEscape(f.name), htmlEscape(f.typ), componentDefault(f.def), htmlEscape(f.desc))
+			}
+			b.WriteString(`</tbody></table>`)
 		}
-		b.WriteString(`</tbody></table>`)
 
-		b.WriteString(`<h4>Keys</h4>`)
-		b.WriteString(`<table><thead><tr><th>Action</th><th>Method</th><th>Outcome</th></tr></thead><tbody>`)
-		for _, k := range c.keys {
-			fmt.Fprintf(&b, `<tr data-row><td>%s</td><td><code>%s</code></td><td>%s</td></tr>`,
-				htmlEscape(k.action), htmlEscape(k.method), htmlEscape(k.outcome))
+		if len(c.keys) > 0 {
+			b.WriteString(`<h4>Keys</h4>`)
+			b.WriteString(`<table><thead><tr><th>Action</th><th>Method</th><th>Outcome</th></tr></thead><tbody>`)
+			for _, k := range c.keys {
+				fmt.Fprintf(&b, `<tr data-row><td>%s</td><td><code>%s</code></td><td>%s</td></tr>`,
+					htmlEscape(k.action), htmlEscape(k.method), htmlEscape(k.outcome))
+			}
+			b.WriteString(`</tbody></table>`)
 		}
-		b.WriteString(`</tbody></table>`)
 
-		fmt.Fprintf(&b, `<p><strong>Focus.</strong> %s</p>`, htmlEscape(c.focus))
-		fmt.Fprintf(&b, `<p><strong>Composition.</strong> %s</p>`, htmlEscape(c.compose))
+		if c.focus != "" {
+			fmt.Fprintf(&b, `<p><strong>Focus.</strong> %s</p>`, htmlEscape(c.focus))
+		}
+		if c.compose != "" {
+			fmt.Fprintf(&b, `<p><strong>Composition.</strong> %s</p>`, htmlEscape(c.compose))
+		}
 	}
 	b.WriteString(`</section>`)
 	return b.String()

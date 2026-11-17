@@ -21,6 +21,14 @@ func TestComponentPageNamesEveryField(t *testing.T) {
 				checkFields(t, "state", c.state, reflect.TypeOf(ui.Input{}))
 				checkMethods(t, c.keys, reflect.TypeOf(&ui.Input{}))
 			})
+		case "search":
+			t.Run(c.name, func(t *testing.T) {
+				if len(c.props) != 0 {
+					t.Errorf("search has props; a molecule owns no draw")
+				}
+				checkFields(t, "state", c.state, reflect.TypeOf(ui.Search{}))
+				checkMethods(t, c.keys, reflect.TypeOf(&ui.Search{}))
+			})
 		}
 	}
 }
