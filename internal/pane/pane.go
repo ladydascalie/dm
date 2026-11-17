@@ -51,6 +51,14 @@ type paneProc struct {
 	adopted   chan struct{}
 	adoptOnce sync.Once
 
+	// conned closes when the first connection is accepted, connDone when
+	// that connection ends. The spawn wait reads them: a pane with a live
+	// connection waits for the set it carries, a pane nothing dials starts
+	// on the grace, and a connection that leaves before its set falls back
+	// to the grace.
+	conned   chan struct{}
+	connDone chan struct{}
+
 	// done stops the background goroutines when Run returns without starting
 	// a shell. A pane whose shell never starts has nothing left to serve, and
 	// a caller that drives Run in-process must not be left with a reaper that
@@ -623,8 +631,10 @@ func Run(args []string) error {
 		st:   wire.Status{State: "unknown"},
 		fg:   o.fg, bg: o.bg,
 
-		adopted: make(chan struct{}),
-		done:    make(chan struct{}),
+		adopted:  make(chan struct{}),
+		conned:   make(chan struct{}),
+		connDone: make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 
 	if err := os.MkdirAll(paths.SessionDir(o.session)+"/panes", 0o700); err != nil {
@@ -657,16 +667,30 @@ func Run(args []string) error {
 	// loop: a pane nothing dials still starts its shell on the grace.
 	errc := make(chan error, 1)
 	go func() {
+		first := true
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				errc <- err
 				return
 			}
-			go p.serve(c)
+			// The first connection is the one the spawn wait watches: it is
+			// the server's, and its set is what the shell waits for. A later
+			// connection is an attach or a wait and has no say.
+			lead := first
+			first = false
+			if lead {
+				close(p.conned)
+			}
+			go func() {
+				p.serve(c)
+				if lead {
+					close(p.connDone)
+				}
+			}()
 		}
 	}()
-	p.awaitAdopt()
+	p.awaitAdopt(adoptDeadline)
 	if err := p.startShell(o); err != nil {
 		// Nothing can serve this pane. Stop the accept loop and the reaper
 		// before the error leaves Run.
@@ -677,17 +701,56 @@ func Run(args []string) error {
 	return <-errc
 }
 
-// spawnGrace bounds the wait for the server's adopted set before the pane
-// starts its shell anyway. The server pushes set-secrets on every adopt, so
-// the wait normally ends in a few milliseconds; a pane with no server to
-// adopt it still starts on its own.
+// spawnGrace bounds the wait for the server's adopted set when no connection
+// has ever been accepted. It is the pane-without-a-server case: a daemon that
+// nothing dials still starts its shell, so dm's pane works when the server is
+// gone and a bare `__pane` run works at all.
 const spawnGrace = 250 * time.Millisecond
 
-// awaitAdopt waits for the adopted set, or the grace when nothing adopts.
-func (p *paneProc) awaitAdopt() {
+// adoptDeadline bounds the wait for a live connection's set. It is not a
+// schedule, it is a backstop: a connection that is up, says nothing and never
+// closes cannot hold the shell for ever. The server's adopt push is held across
+// a sibling cover, and each cover request is bounded by coverRoundtripTimeout
+// (2s) in the server, so the backstop sits well past a slow adopt and never on
+// the path of one.
+const adoptDeadline = 30 * time.Second
+
+// awaitAdopt waits for the adopted set. The two waits are different cases: a
+// pane nothing dials gets the grace, and a pane with a connection gets the set
+// that connection carries. The daemon cannot tell a slow adopter from an
+// absent one by time alone, which is why the grace is not applied while a
+// connection is up: the server pushes the set on every adopt, empty list
+// included, so a live server always resolves the wait. The deadline only
+// bounds a connection that never sends and never closes.
+func (p *paneProc) awaitAdopt(deadline time.Duration) {
+	grace := time.NewTimer(spawnGrace)
+	defer grace.Stop()
 	select {
 	case <-p.adopted:
-	case <-time.After(spawnGrace):
+		return
+	case <-grace.C:
+		return
+	case <-p.conned:
+		grace.Stop()
+	}
+	// A connection exists: the server's set is on its way, and the shell waits
+	// for it, however long the push is held.
+	backstop := time.NewTimer(deadline)
+	defer backstop.Stop()
+	select {
+	case <-p.adopted:
+		return
+	case <-backstop.C:
+		return
+	case <-p.connDone:
+	}
+	// The connection left before its set, so nothing is adopting this pane:
+	// the case is the no-connection one, and the grace applies.
+	grace.Reset(spawnGrace)
+	select {
+	case <-p.adopted:
+	case <-grace.C:
+	case <-backstop.C:
 	}
 }
 
