@@ -54,10 +54,10 @@ func Env(in []string, id, session string) []string {
 }
 
 // paneEnvKeep is the exact allowlist: the names a shell, a terminal or a dm
-// command in the shell needs to start. Keep it short. Anything else the
-// operator's rc file re-exports is theirs to choose; a name only lands here
-// when the child, or dm run inside it, reads it before the first rc line
-// runs.
+// command in the shell needs. Keep it short. Anything else the operator's rc
+// file re-exports is theirs to choose; a name lands here when the child reads
+// it before the first rc line, when a program it starts later opens a path the
+// name holds, or when a dm command run inside the shell needs it.
 var paneEnvKeep = map[string]struct{}{
 	// The command search path. Without it nothing runs.
 	"PATH": {},
