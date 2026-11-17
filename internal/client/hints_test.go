@@ -170,7 +170,7 @@ func TestRenameHintNamesTheKeymap(t *testing.T) {
 	// The drawn prompt carries the new keys, not the old ones.
 	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 60, 12, nil)
 	var b bytes.Buffer
-	drawRename(&b, theme.DefaultTheme(), snap, "s1", "main", false, cfg)
+	drawRename(&b, theme.DefaultTheme(), snap, "s1", inputOf("main"), false, cfg)
 	win := renamePromptVisible(b.String())
 	if !strings.Contains(win, "ctrl+s  ctrl+q") {
 		t.Fatalf("drawn prompt = %q, want the rebound hint", win)

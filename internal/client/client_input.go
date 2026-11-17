@@ -1005,7 +1005,7 @@ func (t *tui) openSearch() {
 	if t.search == nil {
 		t.search = &scrollSearch{}
 	}
-	t.search.draft = ""
+	t.search.draft.SetValue("")
 	t.mode = "search"
 	// The bytes after the key that opened the row are the start of the query:
 	// `/ROW-01` in one read opens the prompt with the draft already filled.
@@ -1016,7 +1016,7 @@ func (t *tui) openSearch() {
 // was.
 func (t *tui) cancelSearch() {
 	if t.search != nil {
-		t.search.draft = ""
+		t.search.draft.SetValue("")
 	}
 	t.mode = "scroll"
 	t.inbuf = nil
@@ -1034,8 +1034,8 @@ func (t *tui) clearSearch() {
 // included, and jumps to the nearest match at or above the top of the band. A
 // query with no match raises a toast and leaves the offset alone.
 func (t *tui) acceptSearch() {
-	q := strings.TrimSpace(t.search.draft)
-	t.search.draft = ""
+	q := strings.TrimSpace(t.search.draft.String())
+	t.search.draft.SetValue("")
 	t.search.model = nil
 	t.mode = "scroll"
 	t.inbuf = nil
@@ -1086,16 +1086,15 @@ func (t *tui) searchKey() bool {
 	case '\r', '\n':
 		t.acceptSearch()
 	case 0x7f, 0x08:
-		if r := []rune(t.search.draft); len(r) > 0 {
-			t.search.draft = string(r[:len(r)-1])
-		}
+		t.search.draft.Backspace()
 		t.dirty = true
 	case 0x15: // ctrl+u
-		t.search.draft = ""
+		// ctrl+u clears the whole line, not the tail the caret sits before.
+		t.search.draft.SetValue("")
 		t.dirty = true
 	default:
 		if ok {
-			t.search.draft += string(r)
+			t.search.draft.InsertRune(r)
 			t.dirty = true
 		}
 	}
@@ -1113,7 +1112,7 @@ func (t *tui) searchPaste(seq []byte) {
 		len(text) >= len(pasteStart)+len(pasteEnd) {
 		text = text[len(pasteStart) : len(text)-len(pasteEnd)]
 	}
-	t.search.draft += strings.NewReplacer("\r\n", "", "\n", "", "\r", "").Replace(string(text))
+	t.search.draft.InsertString(strings.NewReplacer("\r\n", "", "\n", "", "\r", "").Replace(string(text)))
 	t.dirty = true
 }
 
@@ -2735,7 +2734,7 @@ func (t *tui) openProjectPrompt() {
 func (t *tui) openRenamePromptFor(kind, id, current string) {
 	t.renameKind = kind
 	t.renameID = id
-	t.renameDraft = current
+	t.renameDraft.SetValue(current)
 	t.mode = "rename"
 	t.armed = false
 	t.pending = false
@@ -2745,7 +2744,7 @@ func (t *tui) openRenamePromptFor(kind, id, current string) {
 // closeRename drops the prompt and its draft, whatever it held.
 func (t *tui) closeRename() {
 	t.mode = ""
-	t.renameDraft = ""
+	t.renameDraft.SetValue("")
 	t.renameID = ""
 	t.renameKind = ""
 	t.inbuf = nil
@@ -2762,7 +2761,7 @@ func (t *tui) submitRename() {
 		t.closeRename()
 		return
 	}
-	name := strings.TrimSpace(t.renameDraft)
+	name := strings.TrimSpace(t.renameDraft.String())
 	target := t.renameID
 	kind := t.renameKind
 	action := "rename-workspace"
@@ -2829,12 +2828,12 @@ func (t *tui) renameKey() bool {
 		case "submit":
 			t.submitRename()
 		case "backspace":
-			if r := []rune(t.renameDraft); len(r) > 0 {
-				t.renameDraft = string(r[:len(r)-1])
-			}
+			t.renameDraft.Backspace()
 			t.dirty = true
 		case "clear":
-			t.renameDraft = ""
+			// The key clears the whole name, not the tail the caret sits
+			// before.
+			t.renameDraft.SetValue("")
 			t.dirty = true
 		default:
 			// The arrows cancel as they always have.
@@ -2861,7 +2860,7 @@ func (t *tui) renameKey() bool {
 	t.inbuf = append([]byte(nil), t.inbuf[size:]...)
 	t.pending = false
 	if ok {
-		t.renameDraft += string(r)
+		t.renameDraft.InsertRune(r)
 		t.dirty = true
 	}
 	return true

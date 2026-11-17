@@ -74,8 +74,8 @@ func TestRenamePromptOpensOnPrefixR(t *testing.T) {
 	if tr.mode != "rename" {
 		t.Fatalf("mode = %q, want rename", tr.mode)
 	}
-	if tr.renameDraft != "main" {
-		t.Fatalf("draft = %q, want %q", tr.renameDraft, "main")
+	if tr.renameDraft.String() != "main" {
+		t.Fatalf("draft = %q, want %q", tr.renameDraft.String(), "main")
 	}
 	testutil.NoMsg(t, got)
 
@@ -84,8 +84,8 @@ func TestRenamePromptOpensOnPrefixR(t *testing.T) {
 	tr.snap.All = nil
 	tr.closeRename()
 	renamePromptKeys(tr, "\x02r")
-	if tr.mode != "rename" || tr.renameDraft != "" {
-		t.Fatalf("no-match open: mode = %q draft = %q", tr.mode, tr.renameDraft)
+	if tr.mode != "rename" || tr.renameDraft.String() != "" {
+		t.Fatalf("no-match open: mode = %q draft = %q", tr.mode, tr.renameDraft.String())
 	}
 	testutil.NoMsg(t, got)
 }
@@ -112,8 +112,8 @@ func TestRenamePromptMenuRow(t *testing.T) {
 	if tr.menu != nil {
 		t.Fatalf("menu is still open: %+v", tr.menu)
 	}
-	if tr.mode != "rename" || tr.renameDraft != "main" {
-		t.Fatalf("menu row gave mode %q draft %q", tr.mode, tr.renameDraft)
+	if tr.mode != "rename" || tr.renameDraft.String() != "main" {
+		t.Fatalf("menu row gave mode %q draft %q", tr.mode, tr.renameDraft.String())
 	}
 	testutil.NoMsg(t, got)
 }
@@ -144,26 +144,26 @@ func TestRenamePromptEditsDraft(t *testing.T) {
 	renamePromptKeys(tr, "\x02r")
 
 	renamePromptKeys(tr, "api")
-	if tr.renameDraft != "mainapi" {
-		t.Fatalf("after typing draft = %q", tr.renameDraft)
+	if tr.renameDraft.String() != "mainapi" {
+		t.Fatalf("after typing draft = %q", tr.renameDraft.String())
 	}
 	renamePromptKeys(tr, "\x7f")
-	if tr.renameDraft != "mainap" {
-		t.Fatalf("after 0x7f draft = %q", tr.renameDraft)
+	if tr.renameDraft.String() != "mainap" {
+		t.Fatalf("after 0x7f draft = %q", tr.renameDraft.String())
 	}
 	renamePromptKeys(tr, "\x08")
-	if tr.renameDraft != "maina" {
-		t.Fatalf("after 0x08 draft = %q", tr.renameDraft)
+	if tr.renameDraft.String() != "maina" {
+		t.Fatalf("after 0x08 draft = %q", tr.renameDraft.String())
 	}
 	// A rune, not a byte: a wide label keeps its head intact.
-	tr.renameDraft = "naïve"
+	tr.renameDraft.SetValue("naïve")
 	renamePromptKeys(tr, "\x7f")
-	if tr.renameDraft != "naïv" {
-		t.Fatalf("rune delete draft = %q, want %q", tr.renameDraft, "naïv")
+	if tr.renameDraft.String() != "naïv" {
+		t.Fatalf("rune delete draft = %q, want %q", tr.renameDraft.String(), "naïv")
 	}
 	renamePromptKeys(tr, "\x15")
-	if tr.renameDraft != "" {
-		t.Fatalf("ctrl+u draft = %q, want empty", tr.renameDraft)
+	if tr.renameDraft.String() != "" {
+		t.Fatalf("ctrl+u draft = %q, want empty", tr.renameDraft.String())
 	}
 	testutil.NoMsg(t, got)
 }
@@ -174,7 +174,7 @@ func TestRenamePromptEnterSendsReq(t *testing.T) {
 	t.Parallel()
 	tr, got := renamePromptTUI(t)
 	renamePromptKeys(tr, "\x02r")
-	tr.renameDraft = ""
+	tr.renameDraft.SetValue("")
 	renamePromptKeys(tr, "  api work  \r")
 	if tr.mode != "" {
 		t.Fatalf("mode = %q after enter, want empty", tr.mode)
@@ -233,8 +233,8 @@ func TestRenamePromptEscArrowAndPasteCancel(t *testing.T) {
 	if tr.mode != "" {
 		t.Fatalf("arrow left mode %q", tr.mode)
 	}
-	if strings.Contains(tr.renameDraft, "[") || strings.Contains(tr.renameDraft, "A") {
-		t.Fatalf("arrow corrupted the draft: %q", tr.renameDraft)
+	if strings.Contains(tr.renameDraft.String(), "[") || strings.Contains(tr.renameDraft.String(), "A") {
+		t.Fatalf("arrow corrupted the draft: %q", tr.renameDraft.String())
 	}
 	testutil.NoMsg(t, got)
 
@@ -244,8 +244,8 @@ func TestRenamePromptEscArrowAndPasteCancel(t *testing.T) {
 	if tr.mode != "" {
 		t.Fatalf("paste left mode %q", tr.mode)
 	}
-	if strings.Contains(tr.renameDraft, "pasted") {
-		t.Fatalf("paste reached the draft: %q", tr.renameDraft)
+	if strings.Contains(tr.renameDraft.String(), "pasted") {
+		t.Fatalf("paste reached the draft: %q", tr.renameDraft.String())
 	}
 	testutil.NoMsg(t, got)
 }
@@ -262,8 +262,8 @@ func TestRenamePromptShieldsPane(t *testing.T) {
 	if tr.mode != "rename" {
 		t.Fatalf("click closed the prompt: mode %q", tr.mode)
 	}
-	if tr.renameDraft != "mainhello" {
-		t.Fatalf("draft = %q, want %q", tr.renameDraft, "mainhello")
+	if tr.renameDraft.String() != "mainhello" {
+		t.Fatalf("draft = %q, want %q", tr.renameDraft.String(), "mainhello")
 	}
 	testutil.NoMsg(t, got)
 }
@@ -278,7 +278,7 @@ func renameFloatPaint(t *testing.T, snap *wire.Snapshot, id, draft string, kind 
 		t.Fatalf("%dx%d: no box", snap.Cols, snap.Rows)
 	}
 	var b bytes.Buffer
-	drawRename(&b, theme.DefaultTheme(), snap, id, draft, false, keymap.LoadDefault(), kind...)
+	drawRename(&b, theme.DefaultTheme(), snap, id, inputOf(draft), false, keymap.LoadDefault(), kind...)
 	return box, helpBoxParse(t, b.String())
 }
 
@@ -384,7 +384,7 @@ func TestRenamePromptDrawsNothingWhenTooSmall(t *testing.T) {
 	for _, c := range []struct{ cols, rows int }{{1, 8}, {20, 4}} {
 		snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, c.cols, c.rows, nil)
 		var b bytes.Buffer
-		drawRename(&b, theme.DefaultTheme(), snap, "s1", "main", false, keymap.LoadDefault())
+		drawRename(&b, theme.DefaultTheme(), snap, "s1", inputOf("main"), false, keymap.LoadDefault())
 		if b.Len() != 0 {
 			t.Fatalf("%dx%d: painted %q", c.cols, c.rows, b.String())
 		}
@@ -473,9 +473,9 @@ func TestRenamePromptSetProjectMenuRow(t *testing.T) {
 	if tr.menu != nil {
 		t.Fatalf("menu is still open: %+v", tr.menu)
 	}
-	if tr.mode != "rename" || tr.renameKind != "project" || tr.renameID != "s1" || tr.renameDraft != "dm" {
+	if tr.mode != "rename" || tr.renameKind != "project" || tr.renameID != "s1" || tr.renameDraft.String() != "dm" {
 		t.Fatalf("menu row gave mode %q kind %q id %q draft %q",
-			tr.mode, tr.renameKind, tr.renameID, tr.renameDraft)
+			tr.mode, tr.renameKind, tr.renameID, tr.renameDraft.String())
 	}
 	renamePromptKeys(tr, "\r")
 	m := testutil.NextMsg(t, got)
@@ -528,7 +528,7 @@ func TestSetProjectKeyOpensPrompt(t *testing.T) {
 	tr, _ := renamePromptTUI(t)
 	tr.snap.All[0].Project = "dm"
 	renamePromptKeys(tr, "\x02P")
-	if tr.mode != "rename" || tr.renameKind != "project" || tr.renameID != "s1" || tr.renameDraft != "dm" {
-		t.Fatalf("P opened mode=%q kind=%q id=%q draft=%q", tr.mode, tr.renameKind, tr.renameID, tr.renameDraft)
+	if tr.mode != "rename" || tr.renameKind != "project" || tr.renameID != "s1" || tr.renameDraft.String() != "dm" {
+		t.Fatalf("P opened mode=%q kind=%q id=%q draft=%q", tr.mode, tr.renameKind, tr.renameID, tr.renameDraft.String())
 	}
 }

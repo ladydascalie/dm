@@ -151,26 +151,26 @@ func TestRenamePromptTakesUTF8(t *testing.T) {
 	tr, _ := renamePromptTUI(t)
 	feedKeys(tr, "\x02r")
 	feedKeys(tr, "caf\xc3\xa9")
-	if tr.renameDraft != "maincafé" {
-		t.Fatalf("draft = %q, want maincafé", tr.renameDraft)
+	if tr.renameDraft.String() != "maincafé" {
+		t.Fatalf("draft = %q, want maincafé", tr.renameDraft.String())
 	}
 	// A rune split across reads waits for its tail instead of dropping the
 	// lead byte, and the tail joins it whole.
 	feedKeys(tr, "\xe2")
-	if tr.renameDraft != "maincafé" {
-		t.Fatalf("a split lead byte changed the draft: %q", tr.renameDraft)
+	if tr.renameDraft.String() != "maincafé" {
+		t.Fatalf("a split lead byte changed the draft: %q", tr.renameDraft.String())
 	}
 	if !tr.pending {
 		t.Fatal("a split rune did not hold the prompt")
 	}
 	feedKeys(tr, "\x82\xac")
-	if tr.renameDraft != "maincafé€" {
-		t.Fatalf("draft = %q, want maincafé€", tr.renameDraft)
+	if tr.renameDraft.String() != "maincafé€" {
+		t.Fatalf("draft = %q, want maincafé€", tr.renameDraft.String())
 	}
 	// A control byte and a broken byte are still not text.
 	feedKeys(tr, "\x01\xff")
-	if tr.renameDraft != "maincafé€" {
-		t.Fatalf("draft = %q, want maincafé€", tr.renameDraft)
+	if tr.renameDraft.String() != "maincafé€" {
+		t.Fatalf("draft = %q, want maincafé€", tr.renameDraft.String())
 	}
 }
 
@@ -188,8 +188,8 @@ func TestRenamePromptUnboundEscapeKeepsDraft(t *testing.T) {
 		if tr.mode != "rename" {
 			t.Fatalf("%q left mode %q, want the prompt still open", seq, tr.mode)
 		}
-		if tr.renameDraft != "mainkeep" {
-			t.Fatalf("%q left draft %q, want mainkeep", seq, tr.renameDraft)
+		if tr.renameDraft.String() != "mainkeep" {
+			t.Fatalf("%q left draft %q, want mainkeep", seq, tr.renameDraft.String())
 		}
 	}
 	feedKeys(tr, "\x1b[D")
@@ -226,8 +226,8 @@ func TestRenamePromptPartialEscapeWaits(t *testing.T) {
 	if tr.mode != "rename" {
 		t.Fatalf("mode = %q after the sequence completed, want rename", tr.mode)
 	}
-	if tr.renameDraft != "mainkeep" {
-		t.Fatalf("draft = %q, want mainkeep", tr.renameDraft)
+	if tr.renameDraft.String() != "mainkeep" {
+		t.Fatalf("draft = %q, want mainkeep", tr.renameDraft.String())
 	}
 }
 
@@ -238,22 +238,22 @@ func TestSearchQueryTakesUTF8(t *testing.T) {
 	tui, _ := searchTUI(t, 60)
 	press(t, tui, "/")
 	press(t, tui, "caf\xc3\xa9")
-	if tui.search.draft != "café" {
-		t.Fatalf("draft = %q, want café", tui.search.draft)
+	if tui.search.draft.String() != "café" {
+		t.Fatalf("draft = %q, want café", tui.search.draft.String())
 	}
 	// A rune split across reads waits for its tail, and the tail joins it.
 	tui.inbuf = append(tui.inbuf, "\xe2"...)
 	tui.processInput()
-	if tui.search.draft != "café" {
-		t.Fatalf("a split lead byte changed the draft: %q", tui.search.draft)
+	if tui.search.draft.String() != "café" {
+		t.Fatalf("a split lead byte changed the draft: %q", tui.search.draft.String())
 	}
 	if !tui.pending {
 		t.Fatal("a split rune did not hold the query row")
 	}
 	tui.inbuf = append(tui.inbuf, "\x82\xac"...)
 	tui.processInput()
-	if tui.search.draft != "café€" {
-		t.Fatalf("draft = %q, want café€", tui.search.draft)
+	if tui.search.draft.String() != "café€" {
+		t.Fatalf("draft = %q, want café€", tui.search.draft.String())
 	}
 }
 

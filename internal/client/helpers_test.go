@@ -9,9 +9,18 @@ import (
 	"dm/internal/layout"
 	"dm/internal/testutil"
 	"dm/internal/transport"
+	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
+
+// inputOf builds an input value with the caret at the end of s, the shape a
+// prompt hands the component for a value that is already typed.
+func inputOf(s string) ui.Input {
+	var in ui.Input
+	in.SetValue(s)
+	return in
+}
 
 // clientTUI builds a client with a real snapshot and a conn over net.Pipe, and
 // a reader that collects every message the client sends.

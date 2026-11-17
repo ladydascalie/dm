@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"dm/internal/ui"
 	"dm/internal/vt"
 )
 
@@ -152,11 +153,11 @@ func (s *ScrollSearch) OffsetFor(row, bandH, maxOff int) int {
 	return off
 }
 
-// scrollSearch is the client's scrollback search. The draft is the query row's
-// text while the prompt is open; the model is the accepted query over the tall
+// scrollSearch is the client's scrollback search. The draft is the query row
+// while the prompt is open; the model is the accepted query over the tall
 // terminal's rows, nil while no query is accepted.
 type scrollSearch struct {
-	draft string
+	draft ui.Input
 	model *ScrollSearch
 }
 

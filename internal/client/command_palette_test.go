@@ -11,7 +11,10 @@ import (
 	"dm/internal/cells"
 	"dm/internal/configdoc"
 	"dm/internal/keymap"
+	"dm/internal/layout"
 	"dm/internal/testutil"
+	"dm/internal/theme"
+	"dm/internal/vt"
 )
 
 // TestCommandPaletteOpens: prefix k raises the palette over the main actions,
@@ -326,10 +329,46 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	if cx < g.X+1 {
 		t.Fatalf("cursor column = %d, before the interior edge %d", cx, g.X+1)
 	}
-	// The ? signpost reserves the query line's right edge; the cursor must
-	// stop short of it even on a full query.
+	// The signpost and its two cells of gutter end the row, and the value keeps
+	// the cell before the signpost for ground: a query that fills the line
+	// parks the cursor on that cell, never under the signpost.
 	if cx > g.X+g.W-2-cells.Cells(paletteHelpHint)-2 {
 		t.Fatalf("cursor column = %d, under the ? signpost", cx)
+	}
+}
+
+// TestCommandPaletteQueryRowPaintsTheOldCells: the query row is the row eddc70d
+// painted. The caller passes the signpost and its two cells of gutter as the
+// trailing text, so the signpost sits two cells clear of the right edge and the
+// query keeps the rest of the line.
+func TestCommandPaletteQueryRowPaintsTheOldCells(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	paintPaletteQuery(&buf, theme.DefaultTheme(), inputOf("send"), layout.Rect{W: 20, H: 1}, "? help")
+	term := vt.NewTerm(20, 1)
+	term.Write(buf.Bytes())
+	term.Flush()
+	if got, want := term.Grid().Text(0), "> send      ? help"; got != want {
+		t.Fatalf("query row = %q, want %q", got, want)
+	}
+}
+
+// TestCommandPaletteCursorFollowsTheQuery: the cursor sits one cell past the
+// last query rune, so the terminal parks it after the text it types. The
+// hand-written painter returned the row's left edge, which parked the cursor on
+// the prompt.
+func TestCommandPaletteCursorFollowsTheQuery(t *testing.T) {
+	t.Parallel()
+	tui, _ := switcherTUI(t)
+	feed(tui, "\x02K")
+	feed(tui, "send")
+	g := commandPaletteGeom(tui.snap, tui.cp.total, tui.cp.capRows)
+	cx, cy := drawCommandPalette(&bytes.Buffer{}, tui.theme(), tui.cp, tui.snap)
+	if cy != g.Y+1 {
+		t.Fatalf("cursor row = %d, want the query line at %d", cy, g.Y+1)
+	}
+	if want := g.X + 1 + cells.Cells("> ") + cells.Cells("send"); cx != want {
+		t.Fatalf("cursor column = %d, want %d, the cell after the query", cx, want)
 	}
 }
 

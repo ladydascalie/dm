@@ -39,8 +39,8 @@ func TestRenameWindowPromptSendsWindowID(t *testing.T) {
 	if tr.renameKind != "window" {
 		t.Fatalf("kind = %q, want window", tr.renameKind)
 	}
-	if tr.renameDraft != "two" {
-		t.Fatalf("draft = %q, want %q", tr.renameDraft, "two")
+	if tr.renameDraft.String() != "two" {
+		t.Fatalf("draft = %q, want %q", tr.renameDraft.String(), "two")
 	}
 	testutil.NoMsg(t, got)
 
@@ -70,8 +70,8 @@ func TestRenameWorkspacePromptStillSendsWorkspace(t *testing.T) {
 	if tr.renameKind != "workspace" {
 		t.Fatalf("kind = %q, want workspace", tr.renameKind)
 	}
-	if tr.renameDraft != "main" {
-		t.Fatalf("draft = %q, want main", tr.renameDraft)
+	if tr.renameDraft.String() != "main" {
+		t.Fatalf("draft = %q, want main", tr.renameDraft.String())
 	}
 	renamePromptKeys(tr, "\r")
 	m := testutil.NextMsg(t, got)
@@ -94,7 +94,7 @@ func TestRenamePromptLabelsTheKind(t *testing.T) {
 	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 60, 8, nil)
 
 	var wb bytes.Buffer
-	drawRename(&wb, theme.DefaultTheme(), snap, "w2", "two", false, keymap.LoadDefault(), "window")
+	drawRename(&wb, theme.DefaultTheme(), snap, "w2", inputOf("two"), false, keymap.LoadDefault(), "window")
 	win := renamePromptVisible(wb.String())
 	if !strings.Contains(win, "rename window w2") {
 		t.Fatalf("window title = %q", win)
@@ -104,7 +104,7 @@ func TestRenamePromptLabelsTheKind(t *testing.T) {
 	}
 
 	var sb bytes.Buffer
-	drawRename(&sb, theme.DefaultTheme(), snap, "s1", "main", false, keymap.LoadDefault(), "workspace")
+	drawRename(&sb, theme.DefaultTheme(), snap, "s1", inputOf("main"), false, keymap.LoadDefault(), "workspace")
 	ws := renamePromptVisible(sb.String())
 	if !strings.Contains(ws, "rename workspace s1") {
 		t.Fatalf("workspace title = %q", ws)
@@ -179,12 +179,12 @@ func TestRenamePanePromptSendsPaneName(t *testing.T) {
 	if tr.renameKind != "pane" {
 		t.Fatalf("kind = %q, want pane", tr.renameKind)
 	}
-	if tr.renameDraft != "alpha" {
-		t.Fatalf("draft = %q, want alpha", tr.renameDraft)
+	if tr.renameDraft.String() != "alpha" {
+		t.Fatalf("draft = %q, want alpha", tr.renameDraft.String())
 	}
 	testutil.NoMsg(t, got)
 
-	tr.renameDraft = ""
+	tr.renameDraft.SetValue("")
 	renamePromptKeys(tr, "api\r")
 	if tr.mode != "" {
 		t.Fatalf("mode = %q after enter, want empty", tr.mode)
