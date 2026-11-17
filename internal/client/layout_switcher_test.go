@@ -193,7 +193,7 @@ func TestLayoutPickerOnePaneRefuses(t *testing.T) {
 	}
 	testutil.NoMsg(t, got)
 	var out bytes.Buffer
-	drawLayoutSwitcher(&out, tui.theme(), snap, tui.lsw)
+	drawLayoutSwitcher(&out, tui.theme(), snap, tui.lsw, keymap.LoadDefault())
 	if s := out.String(); !strings.Contains(s, "one pane: every layout is this") {
 		t.Fatalf("footer = %q, want the one-pane line", s)
 	}
@@ -286,7 +286,7 @@ func TestLayoutRefreshFollowsSnapshot(t *testing.T) {
 func TestLayoutPreviewBandDropsOnSmallScreen(t *testing.T) {
 	t.Parallel()
 	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 40, 16, nil)
-	g := layoutPaletteGeom(snap, 1)
+	g := layoutPaletteGeom(snap, 1, keymap.LoadDefault())
 	if g.preview.W != 0 {
 		t.Fatalf("40x16 kept a %+v preview, want it dropped", g.preview)
 	}
@@ -295,7 +295,7 @@ func TestLayoutPreviewBandDropsOnSmallScreen(t *testing.T) {
 	}
 	l := &layoutSwitcher{panes: []string{"a"}, focus: "a"}
 	var out bytes.Buffer
-	drawLayoutSwitcher(&out, theme.DefaultTheme(), snap, l)
+	drawLayoutSwitcher(&out, theme.DefaultTheme(), snap, l, keymap.LoadDefault())
 	if s := out.String(); !strings.Contains(s, "no room here for the preview") {
 		t.Fatalf("footer = %q, want the dropped-preview note", s)
 	}
@@ -340,7 +340,7 @@ func TestLayoutSeamTiledRowsMatchPaneArea(t *testing.T) {
 		root := seamPanes(n)
 		snap := testutil.TestSnapshot(root, 200, 30, nil)
 		snap.Rail = 20
-		g := layoutPaletteGeom(snap, n)
+		g := layoutPaletteGeom(snap, n, keymap.LoadDefault())
 		if g.preview.W == 0 {
 			t.Fatalf("%d panes on 200x30 dropped the preview: %+v", n, g)
 		}
@@ -353,7 +353,7 @@ func TestLayoutSeamTiledRowsMatchPaneArea(t *testing.T) {
 		snap := testutil.TestSnapshot(root, 100, 30, nil)
 		snap.Rail = 34
 		area := layout.PaneAreaForWithTabBar(100, 30, 34)
-		g := layoutPaletteGeom(snap, n)
+		g := layoutPaletteGeom(snap, n, keymap.LoadDefault())
 		if g.preview.W == 0 {
 			t.Fatalf("%d panes on 100x30 dropped the preview: %+v", n, g)
 		}
@@ -376,7 +376,7 @@ func TestLayoutPaletteGeomLiftsToMinimum(t *testing.T) {
 	snap := testutil.TestSnapshot(root, 86, 22, nil)
 	snap.Rail = 20
 	area := layout.PaneAreaForWithTabBar(86, 22, 20)
-	g := layoutPaletteGeom(snap, 6)
+	g := layoutPaletteGeom(snap, 6, keymap.LoadDefault())
 	if g.preview.W != layoutPreviewPrefW || g.preview.H != layoutPreviewMinH {
 		t.Fatalf("extreme band = %dx%d, want the lift to %dx%d", g.preview.W, g.preview.H, layoutPreviewPrefW, layoutPreviewMinH)
 	}
@@ -398,7 +398,7 @@ func TestLayoutPreviewShowsOnMaximisedWideScreen(t *testing.T) {
 	t.Parallel()
 	root := seamPanes(2)
 	snap := testutil.TestSnapshot(root, 80, 24, nil)
-	g := layoutPaletteGeom(snap, 2)
+	g := layoutPaletteGeom(snap, 2, keymap.LoadDefault())
 	if g.preview.W != 44 || g.preview.H != layoutPreviewMinH {
 		t.Fatalf("80x24 preview = %+v, want 44x%d", g.preview, layoutPreviewMinH)
 	}
@@ -411,7 +411,7 @@ func TestLayoutMousePaths(t *testing.T) {
 	t.Parallel()
 	tui, got := layoutTUI(t)
 	openLayout(t, tui)
-	g := layoutPaletteGeom(tui.snap, len(tui.lsw.panes))
+	g := layoutPaletteGeom(tui.snap, len(tui.lsw.panes), keymap.LoadDefault())
 	if g.preview.W == 0 {
 		t.Fatalf("the 100x30 fixture dropped the preview: %+v", g)
 	}

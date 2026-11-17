@@ -64,7 +64,7 @@ func (t *tui) draw() {
 	drawBar(&bar, th, win, t.armed, t.barInfo(), t.glyphSet(), t.barBadgeOf(th, t.glyphSet()))
 	drawToasts(&toasts, th, win, t.toasts)
 	if t.sw != nil {
-		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.previewTerms(), paintPaneFrom, t.glyphSet())
+		t.swX, t.swY = switcher.DrawSwitcher(&pal, th, t.sw, win, t.previewTerms(), paintPaneFrom, t.glyphSet(), t.km())
 		t.askPreview()
 	}
 	if t.cp != nil {
@@ -74,7 +74,7 @@ func (t *tui) draw() {
 		drawHelp(&help, th, win.Cols, win.Rows, t.km().FloatShadow(), t.km().HelpEntries(), t.km().HelpNotes())
 	}
 	if t.mode == "sessions" {
-		drawSessions(&sess, th, win.Cols, win.Rows, t.sessions, t.sel, t.session)
+		drawSessions(&sess, th, win.Cols, win.Rows, t.sessions, t.sel, t.session, t.km())
 	}
 	if t.mode == "menu" && t.menu != nil {
 		drawMenu(&menu, th, t.menu)
@@ -83,7 +83,7 @@ func (t *tui) draw() {
 		// The palette re-reads the window's panes every frame, so a pane
 		// that exits while it is open updates the preview.
 		t.lsw.refresh(win)
-		drawLayoutSwitcher(&lswBuf, th, win, t.lsw)
+		drawLayoutSwitcher(&lswBuf, th, win, t.lsw, t.km())
 	}
 	if t.mode == "rename" {
 		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.km().FloatShadow(), t.renameKind)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/testutil"
 	"dm/internal/theme"
@@ -83,7 +84,7 @@ func boxScreenRow(screen *vt.Term, y, x, w int) string {
 // the title and the key hint.
 func TestBoxViewListsNewestFirst(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 34}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	screen := boxScreen(t, b, snap.Cols, snap.Rows)
 	r := b.Float.Rect
@@ -117,7 +118,7 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 // row that still fills the pane.
 func TestBoxViewScrollClamps(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
 		entries = append(entries, box.Entry{Seq: i + 1, State: box.StateNote, Msg: "note"})
@@ -147,7 +148,7 @@ func TestBoxViewScrollClamps(t *testing.T) {
 // and the title names the rows in view once the log scrolls.
 func TestBoxViewFitsLog(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	if got, want := b.Float.Rect.H, len(boxEntries()); got != want {
 		t.Fatalf("height = %d, want the log length %d", got, want)
@@ -171,7 +172,7 @@ func TestBoxViewFitsLog(t *testing.T) {
 // TestBoxViewTitleWatching: the title counts parked watches, omits the count
 // when none is parked, and keeps the entry count.
 func TestBoxViewTitleWatching(t *testing.T) {
-	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	b.watchers = boxWatches()
 	b.paint(theme.DefaultTheme())
@@ -191,7 +192,7 @@ func TestBoxViewTitleWatching(t *testing.T) {
 // TestBoxViewReceipt: a wide view prefixes each row with the number of watches
 // served that entry. A narrow view drops the marker whole.
 func TestBoxViewReceipt(t *testing.T) {
-	wide := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	wide := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	wide.watchers = receiptWatches()
 	wide.Set(boxEntries(), theme.DefaultTheme())
 	if wide.Float.Rect.W < boxReceiptMinW {
@@ -206,7 +207,7 @@ func TestBoxViewReceipt(t *testing.T) {
 		t.Fatalf("second row = %q, want two receipts", row)
 	}
 
-	narrow := NewBoxView(&wire.Snapshot{Cols: 50, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	narrow := NewBoxView(&wire.Snapshot{Cols: 50, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	narrow.watchers = receiptWatches()
 	narrow.Set(boxEntries(), theme.DefaultTheme())
 	if narrow.Float.Rect.W >= boxReceiptMinW {
@@ -233,7 +234,7 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 		{65, boxReceiptMinW - 1},
 	} {
 		snap := &wire.Snapshot{Cols: tc.cols, Rows: 30, Rail: 0}
-		b := NewBoxView(snap, theme.DefaultTheme())
+		b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 		b.watchers = boxWatches()
 		b.Set(entries, theme.DefaultTheme())
 		if got := b.Float.Rect.W; got != tc.want {
@@ -258,7 +259,7 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 // grows and names what arrived above it. At the top the view follows the
 // newest entry and the count clears.
 func TestBoxViewAnchor(t *testing.T) {
-	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 40)
 	for i := range entries {
 		entries[i] = box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"}
@@ -301,7 +302,7 @@ func TestBoxViewAnchor(t *testing.T) {
 // follows once the selection would leave the view, and the clamps hold.
 func TestBoxViewSelectionFollows(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 30)
 	for i := 0; i < 30; i++ {
 		entries = append(entries, box.Entry{Seq: 30 - i, State: box.StateNote, Msg: "note"})
@@ -344,7 +345,7 @@ func TestBoxViewSelectionFollows(t *testing.T) {
 // the newest entry.
 func TestBoxViewSelectionKeepsBySeq(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
 		entries = append(entries, box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"})
@@ -366,7 +367,7 @@ func TestBoxViewSelectionKeepsBySeq(t *testing.T) {
 	}
 
 	// At the top: the selection rides the newest entry instead.
-	b = NewBoxView(snap, theme.DefaultTheme())
+	b = NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(entries, theme.DefaultTheme())
 	b.Set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), theme.DefaultTheme())
 	if e, _ := b.Selected(); e.Seq != 41 {
@@ -382,7 +383,7 @@ func TestBoxViewSelectionKeepsBySeq(t *testing.T) {
 // log does not carry changes nothing.
 func TestBoxViewSelect(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
 		entries = append(entries, box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"})
@@ -406,7 +407,7 @@ func TestBoxViewSelect(t *testing.T) {
 // and the bright cell moves with the selection.
 func TestBoxViewPaintsSelectionBright(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	screen := boxScreen(t, b, snap.Cols, snap.Rows)
 	r := b.Float.Rect
@@ -428,7 +429,7 @@ func TestBoxViewPaintsSelectionBright(t *testing.T) {
 // every watch, and the page has its own offset.
 func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	few := append(boxWatches(), box.Watch{Pane: "w1p3", Key: "lane/b", Cursor: 4})
-	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	b.SetWatchers(few, theme.DefaultTheme())
 	if got, want := b.Float.Rect.H, len(few); got != want {
 		t.Fatalf("height = %d, want one row per watch %d", got, want)
@@ -455,7 +456,7 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	for i := range many {
 		many[i] = box.Watch{Pane: fmt.Sprintf("p%02d", i+1), Key: "lane/a", Cursor: i}
 	}
-	b = NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b = NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	b.SetWatchers(many, theme.DefaultTheme())
 	if b.Float.Rect.H != 22 {
@@ -486,7 +487,7 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 // Sync. A theme that changed repaints even when the rect did not move.
 func TestBoxViewRepaintsOnThemeChange(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	changed := theme.DefaultTheme()
 	changed.States[string(box.StateDone)] = theme.StateStyle{
@@ -507,7 +508,7 @@ func TestBoxViewRepaintsOnThemeChange(t *testing.T) {
 // rendered prefix instead of a fixed offset.
 func TestBoxViewRowHighlightWideSeq(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := []box.Entry{
 		{Seq: 12345, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "gate green"},
 	}

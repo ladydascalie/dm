@@ -13,6 +13,7 @@ import (
 	"dm/internal/palette"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/wire"
 )
 
@@ -362,8 +363,9 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 const paletteHelpWidth = 56
 
 // paletteHelpHint is the query line's right-edge signpost: ? explains the
-// command under the selection.
-const paletteHelpHint = "? help"
+// command under the selection. The palette owns that key and the keymap binds
+// no action to it, so it stays literal.
+var paletteHelpHint = ui.Hints([]ui.Hint{{Keys: []string{"?"}, Label: "help"}})
 
 // paintPaletteHelp paints the help float for the selected command: a small
 // panel centred over the palette, carrying the command's key, its name and

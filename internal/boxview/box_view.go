@@ -6,7 +6,8 @@ package boxview
 // session's entries newest first, one row each, and follows the log while it is
 // open through the server's box push. It also keeps the presence list, so a
 // reader can see who is parked on which filter and how far each has read. Keys
-// scroll it and toggle the watcher page; esc closes it.
+// scroll it and toggle the watcher page, and a close key closes it. Every key
+// it names comes from the box keymap, so a rebind moves the hint with it.
 
 import (
 	"bytes"
@@ -16,9 +17,11 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -83,14 +86,26 @@ type BoxView struct {
 	// th is the theme the float last painted. Sync compares it, so a reload
 	// that changes the theme repaints a float whose rect did not move.
 	th theme.Theme
+	// km names the key of every hint the view paints. A reload swaps it
+	// through SetKeymap, so a rebind moves the border without reopening the
+	// float.
+	km *keymap.Config
 }
 
-// NewBoxView opens the float on a screen. The log stays empty until the reply
-// lands.
-func NewBoxView(snap *wire.Snapshot, th theme.Theme) *BoxView {
-	b := &BoxView{Float: &panel.FloatingPane{ID: "box", Active: true}, snap: snap}
+// NewBoxView opens the float on a screen. km is the config the hint names its
+// keys from. The log stays empty until the reply lands.
+func NewBoxView(snap *wire.Snapshot, th theme.Theme, km *keymap.Config) *BoxView {
+	b := &BoxView{Float: &panel.FloatingPane{ID: "box", Active: true}, snap: snap, km: km}
 	b.Sync(snap, th)
 	return b
+}
+
+// SetKeymap swaps the config the hint is derived from and rewrites the border
+// hint in place, so a reload that rebinds a key moves the hint without
+// reopening the float.
+func (b *BoxView) SetKeymap(km *keymap.Config) {
+	b.km = km
+	b.Float.Hint = b.hint()
 }
 
 // BoxViewRect is where the float sits: centred over the pane area, one cell
@@ -489,12 +504,29 @@ func (b *BoxView) title() string {
 	return " " + strings.Join(parts, "  ") + " "
 }
 
-// hint names the keys the view takes, in its bottom border.
+// hint is the float's bottom border: the keys the view takes, named from the
+// box keymap so a rebind moves the hint. The reader affordance is the client's
+// own key, because the box keymap binds no action to it.
 func (b *BoxView) hint() string {
+	hints := []ui.Hint{{Keys: []string{b.key("down"), b.key("up")}, Label: "scroll"}}
 	if b.page {
-		return " j/k scroll  w log  esc close "
+		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "log"})
+	} else {
+		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "watchers"})
+		if e, ok := b.Selected(); ok && e.Body != "" {
+			hints = append(hints, ui.Hint{Keys: []string{"enter"}, Label: "body"})
+		}
 	}
-	return " j/k scroll  w watchers  esc close "
+	return ui.Hints(append(hints, ui.Hint{Keys: []string{b.key("close-esc")}, Label: "close"}))
+}
+
+// key is the key the box keymap shows for action. A view without a config
+// names no key, and the hint drops that key rather than inventing one.
+func (b *BoxView) key(action string) string {
+	if b.km == nil {
+		return ""
+	}
+	return b.km.Key("box", action)
 }
 
 // parked counts the watches whose wait is outstanding.

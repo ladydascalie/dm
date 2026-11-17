@@ -769,9 +769,31 @@ func (t *tui) reload() error {
 	}
 	th := cfg.Theme()
 	t.th = &th
+	// Every hint names its key from the config, and the border is painted from
+	// the float's hint rather than from a stored terminal. Rename the hints of
+	// the floats that are up now, so a rebind shows without reopening one.
+	t.refreshHints(cfg)
 	t.dirty = true
 	t.notify("config reloaded")
 	return nil
+}
+
+// refreshHints renames the border hint of every float that keeps a config of
+// its own. The overlays that draw from the live keymap need nothing here: they
+// rename their keys on the next paint.
+func (t *tui) refreshHints(cfg *keymap.Config) {
+	if t.box != nil {
+		t.box.SetKeymap(cfg)
+	}
+	if t.keys != nil {
+		t.keys.SetKeymap(cfg)
+	}
+	if t.ncentre != nil {
+		t.ncentre.SetKeymap(cfg)
+	}
+	if t.reader != nil {
+		t.reader.SetKeymap(cfg)
+	}
 }
 
 // runAction runs one action from the main keymap.

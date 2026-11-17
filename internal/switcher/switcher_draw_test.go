@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/rail"
 	"dm/internal/testutil"
@@ -33,7 +34,7 @@ var switcherSizes = [][2]int{
 func drawFloat(t *testing.T, s *Switcher, snap *wire.Snapshot, vts map[string]*vt.Term) (string, int, int, *vt.Term) {
 	t.Helper()
 	var b bytes.Buffer
-	cx, cy := DrawSwitcher(&b, theme.DefaultTheme(), s, snap, vts, testPanePainter, theme.GlyphASCII)
+	cx, cy := DrawSwitcher(&b, theme.DefaultTheme(), s, snap, vts, testPanePainter, theme.GlyphASCII, keymap.LoadDefault())
 	screen := vt.NewTerm(snap.Cols, snap.Rows)
 	screen.Write(b.Bytes())
 	screen.Flush()
@@ -258,7 +259,7 @@ func TestSwitcherDrawFrame(t *testing.T) {
 	// The footer names every key the dashboard takes, then the ordering and the
 	// preview's share at the right edge.
 	wantLeft := "enter pick  esc close  1-9 jump  i copy id  d diff  " +
-		"/ filter  s sort  p peek  +/- size  ^u/^d scroll  D diff split"
+		"/ filter  s sort  p peek  +/- size  ctrl+u/ctrl+d scroll  D diff split"
 	wantRight := "recent 20%"
 	wantFoot := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
 	if foot := switcherText(screen, l.inner.X, l.footY, l.inner.W); foot != wantFoot {
@@ -343,7 +344,7 @@ func TestSwitcherDrawFootDropsHints(t *testing.T) {
 	if foot != want {
 		t.Fatalf("footer = %q, want %q", foot, want)
 	}
-	for _, gone := range []string{"s sort", "p peek", "+/- size", "^u/^d scroll"} {
+	for _, gone := range []string{"s sort", "p peek", "+/- size", "ctrl+u/ctrl+d scroll"} {
 		if strings.Contains(foot, gone) {
 			t.Fatalf("footer kept %q: %q", gone, foot)
 		}
@@ -483,7 +484,7 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	}
 	screen := vt.NewTerm(snap.Cols, snap.Rows)
 	var b bytes.Buffer
-	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter, theme.GlyphASCII)
+	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter, theme.GlyphASCII, keymap.LoadDefault())
 	screen.Write(b.Bytes())
 	screen.Flush()
 	if c := switcherCell(screen, l.prevX, l.bodyY+l.bodyH-1); c == " " || c == "" {
@@ -491,7 +492,7 @@ func TestSwitcherDrawNoPreviewData(t *testing.T) {
 	}
 	b.Reset()
 	s.SetPreview(2, "w1p1")
-	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter, theme.GlyphASCII)
+	DrawSwitcher(&b, theme.DefaultTheme(), s, snap, nil, testPanePainter, theme.GlyphASCII, keymap.LoadDefault())
 	screen.Write(b.Bytes())
 	screen.Flush()
 	for y := l.bodyY; y < l.bodyY+l.bodyH; y++ {
@@ -616,5 +617,28 @@ func TestSwitcherRowPinnedAccentFG(t *testing.T) {
 	p.ProjectAccentSet = false
 	if got := switcherRowCells(th, theme.GlyphASCII, p, 0, 0)[1][0].FG; got != th.Accents[rail.RailAccentSlot("a")] {
 		t.Fatalf("fallback project FG = %v, want %v", got, th.Accents[rail.RailAccentSlot("a")])
+	}
+}
+
+// TestSwitcherHintNamesTheKeymap: the footer and the idle query row name the
+// keys the switcher keymap binds, so a rebind moves both, and a hint the config
+// leaves unbound drops out of the footer whole.
+func TestSwitcherHintNamesTheKeymap(t *testing.T) {
+	cfg, err := keymap.ParseConfig(`keymap "switcher" {
+		"pick" "ctrl+p"
+		"close-esc" "ctrl+q"
+		"filter" "f"
+	}`)
+	if err != nil {
+		t.Fatalf("parse test keymap: %v", err)
+	}
+	if got, want := switcherHint(200, cfg), "ctrl+p pick  ctrl+q close  f filter"; got != want {
+		t.Fatalf("footer = %q, want %q", got, want)
+	}
+	if got, want := switcherIdleHint(cfg), "press f to filter"; got != want {
+		t.Fatalf("idle query row = %q, want %q", got, want)
+	}
+	if got := switcherHint(200, nil); got != "" {
+		t.Fatalf("footer without a config = %q, want empty", got)
 	}
 }

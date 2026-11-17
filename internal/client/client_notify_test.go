@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/keymap"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -188,7 +189,7 @@ func TestNotifyReplyWantsRearm(t *testing.T) {
 func TestNotifyRoutesSharedIds(t *testing.T) {
 	t.Parallel()
 	tui, got := clientTUI(t, nil)
-	tui.ncentre = newNotifyCentre(tui.snap, theme.DefaultTheme())
+	tui.ncentre = newNotifyCentre(tui.snap, theme.DefaultTheme(), keymap.LoadDefault())
 	tui.notifyCatchUp()
 	tui.notifyCentreRequest()
 	first := expectRequest(t, got)

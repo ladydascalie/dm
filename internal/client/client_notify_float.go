@@ -17,6 +17,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -37,14 +38,25 @@ type notifyCentre struct {
 	// rect moves.
 	vtW, vtH int
 	Float    *panel.FloatingPane
+	// km names the key of every hint the centre paints. A reload swaps it
+	// through SetKeymap, so a rebind moves the border without reopening the
+	// float.
+	km *keymap.Config
 }
 
-// newNotifyCentre opens the float on a screen. The list stays empty until the
-// reply lands.
-func newNotifyCentre(snap *wire.Snapshot, th theme.Theme) *notifyCentre {
-	c := &notifyCentre{Float: &panel.FloatingPane{ID: "notif", Active: true}}
+// newNotifyCentre opens the float on a screen, with its hint named from km.
+// The list stays empty until the reply lands.
+func newNotifyCentre(snap *wire.Snapshot, th theme.Theme, km *keymap.Config) *notifyCentre {
+	c := &notifyCentre{Float: &panel.FloatingPane{ID: "notif", Active: true}, km: km}
 	c.Sync(snap, th)
 	return c
+}
+
+// SetKeymap swaps the config the hint is derived from and rewrites the border
+// hint in place, so a reload that rebinds a key moves the hint.
+func (c *notifyCentre) SetKeymap(km *keymap.Config) {
+	c.km = km
+	c.Float.Hint = c.hint()
 }
 
 // Sync fits the float to the screen after a snapshot or a rail change.
@@ -65,7 +77,7 @@ func (c *notifyCentre) Sync(snap *wire.Snapshot, th theme.Theme) {
 func (c *notifyCentre) paint(th theme.Theme) {
 	r := c.Float.Rect
 	c.Float.Title = c.title()
-	c.Float.Hint = " j/k move  enter body  g pane  m box  x clear  X clear all  esc close "
+	c.Float.Hint = c.hint()
 	if r.W < 1 || r.H < 1 {
 		if c.vtW != 1 || c.vtH != 1 {
 			c.Float.VT = vt.NewTerm(1, 1)
@@ -109,6 +121,28 @@ func (c *notifyCentre) paint(th theme.Theme) {
 	term.Write(buf.Bytes())
 	term.Flush()
 	c.Float.VT = term
+}
+
+// hint is the float's bottom border. The centre answers through the box
+// keymap for its list keys and the main keymap for the two clear keys, so each
+// key is named from the map that dispatches it. Enter is the centre's own key
+// and the box keymap binds no action to it, so it stays literal.
+func (c *notifyCentre) hint() string {
+	key := func(mode, action string) string {
+		if c.km == nil {
+			return ""
+		}
+		return c.km.Key(mode, action)
+	}
+	return ui.Hints([]ui.Hint{
+		{Keys: []string{key("box", "down"), key("box", "up")}, Label: "move"},
+		{Keys: []string{"enter"}, Label: "body"},
+		{Keys: []string{key("box", "top")}, Label: "pane"},
+		{Keys: []string{key("box", "close-m")}, Label: "box"},
+		{Keys: []string{key("main", "close-pane")}, Label: "clear"},
+		{Keys: []string{key("main", "close-window")}, Label: "clear all"},
+		{Keys: []string{key("box", "close-esc")}, Label: "close"},
+	})
 }
 
 // notifyRowText is one row: unread mark, state, pane id, app, age, then the
@@ -209,7 +243,7 @@ func openNotifyCentre(t *tui) {
 		closeNotifyCentre(t)
 		return
 	}
-	t.ncentre = newNotifyCentre(t.snap, t.theme())
+	t.ncentre = newNotifyCentre(t.snap, t.theme(), t.km())
 	t.AddFloatingPane(t.ncentre.Float)
 	t.mode = "notif"
 	t.armed = false
@@ -470,7 +504,7 @@ func (t *tui) notifOpenBody() {
 	if e.Seq > t.notifyRead {
 		t.notifyRead = e.Seq
 	}
-	t.reader = newBodyReader(e, t.ncentre.Float.Rect, t.theme())
+	t.reader = newBodyReader(e, t.ncentre.Float.Rect, t.theme(), t.km())
 	t.AddFloatingPane(t.reader.Float)
 }
 

@@ -87,7 +87,7 @@ func TestDrawSessionsWidth(t *testing.T) {
 	const cols, rows = 100, 30
 	sessions := []transport.SessionInfo{{Name: "alpha", Live: true}, {Name: "beta"}}
 	var buf bytes.Buffer
-	drawSessions(&buf, theme.DefaultTheme(), cols, rows, sessions, 1, "alpha")
+	drawSessions(&buf, theme.DefaultTheme(), cols, rows, sessions, 1, "alpha", keymap.LoadDefault())
 	screen := panelFilled(t, cols, rows, buf.Bytes())
 
 	// The picker is 46 wide and centred: its top row, one row per session, the

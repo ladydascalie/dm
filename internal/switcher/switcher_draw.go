@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/rail"
 	"dm/internal/segment"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -220,7 +222,7 @@ func sum6(c [6]int) int {
 // the float owns is painted, blanks included, and every row starts with an
 // absolute cursor move so bandRows can address it. Nothing is written outside
 // the rect and the screen is never cleared.
-func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Snapshot, vts map[string]*vt.Term, paint PanePainter, set theme.GlyphSet) (cx, cy int) {
+func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Snapshot, vts map[string]*vt.Term, paint PanePainter, set theme.GlyphSet, km *keymap.Config) (cx, cy int) {
 	if buf == nil || s == nil || snap == nil || snap.Cols < 1 || snap.Rows < 1 {
 		return 0, 0
 	}
@@ -231,10 +233,10 @@ func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Sna
 	}
 	cols := switcherColumns(l.listW)
 	panel.PaintPanel(buf, th, l.inner, panel.PanelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
-		cx, cy = paintSwitcherQuery(b, th, s, l)
+		cx, cy = paintSwitcherQuery(b, th, s, l, km)
 		paintSwitcherHead(b, th, l, cols)
 		paintSwitcherBody(b, th, s, vts, l, cols, paint, set)
-		paintSwitcherFoot(b, th, s, l)
+		paintSwitcherFoot(b, th, s, l, km)
 	})
 	paintSwitcherTitle(buf, th, l)
 	return cx, cy
@@ -258,12 +260,23 @@ func paintSwitcherTitle(buf *bytes.Buffer, th theme.Theme, l switcherLayout) {
 
 // switcherIdleHint is the query row's text outside filter mode. The row keeps
 // its place so the table never moves, and the hint says how to start typing.
-const switcherIdleHint = "press / to filter"
+// The key is the one the switcher keymap binds to filter, so a rebind moves it.
+// An unbound filter leaves the row blank rather than naming a dead key.
+func switcherIdleHint(km *keymap.Config) string {
+	key := ""
+	if km != nil {
+		key = km.Key("switcher", "filter")
+	}
+	if key == "" {
+		return ""
+	}
+	return "press " + key + " to filter"
+}
 
 // paintSwitcherQuery paints the query row: "> " then the query while filter mode
 // is on, a prompt otherwise, both clipped to the table. It returns one past the
 // query's last cell.
-func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout) (cx, cy int) {
+func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout, km *keymap.Config) (cx, cy int) {
 	if !l.hasRow(l.queryY) {
 		return l.inner.X, l.inner.Y
 	}
@@ -278,7 +291,7 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 	} else {
 		prompt := "> "
 		if !s.Filtering() {
-			hint := cells.Clip(switcherIdleHint, w)
+			hint := cells.Clip(switcherIdleHint(km), w)
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 			buf.WriteString("\x1b[0m")
 			buf.WriteString(ground.BG())
@@ -519,21 +532,58 @@ func paintRuleCell(buf *bytes.Buffer, th theme.Theme, x, y int) {
 	buf.WriteString("\x1b[0m")
 }
 
-// switcherHints is the footer's key hints in the order they are worth cells.
-// A narrow float keeps the head of the list and drops the rest whole, so it
-// loses the scroll reminder before it loses the jump keys.
-var switcherHints = []string{
-	"enter pick", "esc close", "1-9 jump", "i copy id", "d diff",
-	"/ filter", "s sort", "p peek", "+/- size", "^u/^d scroll", "D diff split",
+// switcherHints is the footer's key hints in the order they are worth cells,
+// each naming the key the switcher keymap binds to its action. A hint whose
+// action the config leaves unbound carries no key and drops out whole. A
+// narrow float keeps the head of the list and drops the rest, so it loses the
+// scroll reminder before it loses the jump keys.
+func switcherHints(km *keymap.Config) []ui.Hint {
+	key := func(action string) string {
+		if km == nil {
+			return ""
+		}
+		return km.Key("switcher", action)
+	}
+	return []ui.Hint{
+		{Keys: []string{key("pick")}, Label: "pick"},
+		{Keys: []string{key("close-esc")}, Label: "close"},
+		{Keys: []string{jumpSpan(km)}, Label: "jump"},
+		{Keys: []string{key("copy-pane-id")}, Label: "copy id"},
+		{Keys: []string{key("diff")}, Label: "diff"},
+		{Keys: []string{key("filter")}, Label: "filter"},
+		{Keys: []string{key("sort")}, Label: "sort"},
+		{Keys: []string{key("peek")}, Label: "peek"},
+		{Keys: []string{key("preview-bigger"), key("preview-smaller")}, Label: "size"},
+		{Keys: []string{key("preview-up"), key("preview-down")}, Label: "scroll"},
+		{Keys: []string{key("diff-split")}, Label: "diff split"},
+	}
+}
+
+// jumpSpan names the digit range the jump keys occupy: the mode binds one key
+// per digit, so the hint names the span from the first pick key to the last.
+// Either key unbound leaves no span to name.
+func jumpSpan(km *keymap.Config) string {
+	if km == nil {
+		return ""
+	}
+	first, last := km.Key("switcher", "pick-1"), km.Key("switcher", "pick-9")
+	if first == "" || last == "" {
+		return ""
+	}
+	return first + "-" + last
 }
 
 // switcherHint fits the hints into room cells and drops the ones that do not
 // fit. It never ends on half a hint: a key that does not fit is not named.
-func switcherHint(room int) string {
-	kept := make([]string, 0, len(switcherHints))
+func switcherHint(room int, km *keymap.Config) string {
+	var kept []ui.Hint
 	used := 0
-	for _, hint := range switcherHints {
-		need := cells.Cells(hint)
+	for _, hint := range switcherHints(km) {
+		text := ui.Hints([]ui.Hint{hint})
+		if text == "" {
+			continue
+		}
+		need := cells.Cells(text)
 		if len(kept) > 0 {
 			need += 2
 		}
@@ -543,12 +593,12 @@ func switcherHint(room int) string {
 		kept = append(kept, hint)
 		used += need
 	}
-	return strings.Join(kept, "  ")
+	return ui.Hints(kept)
 }
 
 // paintSwitcherFoot paints the hint row at the bottom of the box: the keys on
 // the left and the ordering with the preview's share on the right.
-func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout) {
+func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout, km *keymap.Config) {
 	if l.footY <= l.queryY || !l.hasRow(l.footY) || l.inner.W <= 0 {
 		return
 	}
@@ -560,7 +610,7 @@ func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switche
 	if room < 0 {
 		right, room = "", l.inner.W
 	}
-	left := switcherHint(room)
+	left := switcherHint(room, km)
 	pad := l.inner.W - cells.Cells(left) - cells.Cells(right)
 	if pad < 0 {
 		pad = 0

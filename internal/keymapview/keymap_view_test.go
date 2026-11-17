@@ -185,7 +185,7 @@ func TestKeymapViewPaints(t *testing.T) {
 			t.Fatalf("scrollback row looks like a header: %q", row)
 		}
 	}
-	hint := keymapScreenRow(screen, r.Y+r.H, r.X+2, r.W-2)
+	hint := keymapScreenRow(screen, r.Y+r.H, r.X+1, r.W-2)
 	if !strings.Contains(hint, "j/k scroll") || !strings.Contains(hint, "esc close") {
 		t.Fatalf("hint = %q, want the scroll and close keys", hint)
 	}
@@ -306,5 +306,27 @@ func TestKeymapSearchRuneBackspaceAndTypedTitle(t *testing.T) {
 	}
 	if got := k.title(); !strings.Contains(got, "/Prefix") {
 		t.Fatalf("title = %q, want the typed query /Prefix", got)
+	}
+}
+
+// TestKeymapViewHintNamesTheKeymap: the border hint names the help keymap's
+// keys, so SetKeymap renames it in place when a reload rebinds one.
+func TestKeymapViewHintNamesTheKeymap(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
+	cfg := keymapTestLoad(t, `keymap "help" {
+		"down" "n"
+		"up" "a"
+		"top" "t"
+		"bottom" "B"
+		"search" "f"
+		"close-esc" "ctrl+q"
+	}`)
+	k := NewKeymapView(snap, keymap.LoadDefault())
+	if got, want := k.Float.Hint, "j/k scroll  g/G ends  / search  esc close"; got != want {
+		t.Fatalf("hint = %q, want %q", got, want)
+	}
+	k.SetKeymap(cfg)
+	if got, want := k.Float.Hint, "n/a scroll  t/B ends  f search  ctrl+q close"; got != want {
+		t.Fatalf("hint after SetKeymap = %q, want %q", got, want)
 	}
 }

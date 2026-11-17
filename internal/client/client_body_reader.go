@@ -12,9 +12,11 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/vt"
 )
 
@@ -30,11 +32,11 @@ type bodyReader struct {
 	Float *panel.FloatingPane
 }
 
-// newBodyReader builds the overlay for one entry at the box float's rect. The
-// summary line comes first and the body renders inline below it; a summary
-// the entry does not carry is skipped, and one trailing empty line from the
-// body's final newline is dropped.
-func newBodyReader(e box.Entry, r layout.Rect, th theme.Theme) *bodyReader {
+// newBodyReader builds the overlay for one entry at the box float's rect, with
+// its hint named from km. The summary line comes first and the body renders
+// inline below it; a summary the entry does not carry is skipped, and one
+// trailing empty line from the body's final newline is dropped.
+func newBodyReader(e box.Entry, r layout.Rect, th theme.Theme, km *keymap.Config) *bodyReader {
 	raw := make([]string, 0, strings.Count(e.Body, "\n")+2)
 	if e.Msg != "" {
 		raw = append(raw, e.Msg)
@@ -51,7 +53,7 @@ func newBodyReader(e box.Entry, r layout.Rect, th theme.Theme) *bodyReader {
 			Active: true,
 			Rect:   r,
 			Title:  " " + e.Key + "  @" + strconv.Itoa(e.Seq) + " " + string(e.State) + " ",
-			Hint:   " j/k scroll  esc back ",
+			Hint:   readerHint(km),
 		},
 	}
 	b.rewrap()
@@ -158,7 +160,8 @@ func (r *bodyReader) clamp() {
 	}
 }
 
-// The client side of the reader: the key that opens the overlay on the box view, and the affordance the hint carries.
+// The client side of the reader: the keys that open the overlay on the box
+// view, and the hint the overlay carries.
 
 // openBodyReader opens the overlay for the entry the selection sits on. An
 // entry without a body opens nothing, which is why the hint only offers the
@@ -168,7 +171,7 @@ func openBodyReader(t *tui) {
 	if !ok || e.Body == "" {
 		return
 	}
-	t.reader = newBodyReader(e, t.box.Float.Rect, t.theme())
+	t.reader = newBodyReader(e, t.box.Float.Rect, t.theme(), t.km())
 	t.AddFloatingPane(t.reader.Float)
 }
 
@@ -182,20 +185,25 @@ func closeBodyReader(t *tui) {
 	t.reader = nil
 }
 
-// boxBodyHint amends the hint the view painted with the reader key when the
-// selected entry carries a body. An entry without a body leaves the hint as
-// the view wrote it, so the affordance names nothing.
-func (t *tui) boxBodyHint() {
-	if t.box == nil {
-		return
-	}
-	h := strings.Replace(t.box.Float.Hint, "  enter body", "", 1)
-	if !t.boxPage {
-		if e, ok := t.box.Selected(); ok && e.Body != "" {
-			h += "  enter body"
+// readerHint is the overlay's bottom border: the box keymap's scroll pair and
+// close key, with the reader's own word for the close. A rebind moves it.
+func readerHint(km *keymap.Config) string {
+	key := func(action string) string {
+		if km == nil {
+			return ""
 		}
+		return km.Key("box", action)
 	}
-	t.box.Float.Hint = h
+	return ui.Hints([]ui.Hint{
+		{Keys: []string{key("down"), key("up")}, Label: "scroll"},
+		{Keys: []string{key("close-esc")}, Label: "back"},
+	})
+}
+
+// SetKeymap renames the reader's hint from a new config, so a reload that
+// rebinds a scroll or close key moves the border of an open reader.
+func (r *bodyReader) SetKeymap(km *keymap.Config) {
+	r.Float.Hint = readerHint(km)
 }
 
 // readerAction runs one box-keymap action on the reader, whichever float

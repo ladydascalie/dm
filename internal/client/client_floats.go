@@ -30,7 +30,7 @@ func openBoxView(t *tui) {
 		closeBoxView(t)
 		return
 	}
-	t.box = boxview.NewBoxView(t.snap, t.theme())
+	t.box = boxview.NewBoxView(t.snap, t.theme(), t.km())
 	t.AddFloatingPane(t.box.Float)
 	t.mode = "box"
 	t.armed = false
@@ -124,7 +124,6 @@ func (t *tui) takeBoxList(m wire.Msg) {
 	if jump != 0 {
 		t.box.Select(jump, t.theme())
 	}
-	t.boxBodyHint()
 	t.dirty = true
 }
 
@@ -146,7 +145,6 @@ func (t *tui) takeBoxWatchers(m wire.Msg) {
 		return
 	}
 	t.box.SetWatchers(rep.Watchers, t.theme())
-	t.boxBodyHint()
 	t.dirty = true
 }
 
@@ -184,7 +182,6 @@ func (t *tui) boxWheel(ev mouseEvent) {
 		t.reader.Scroll(step, t.theme())
 	} else {
 		t.box.Scroll(step, t.theme())
-		t.boxBodyHint()
 	}
 	t.dirty = true
 }
@@ -272,7 +269,6 @@ func (t *tui) boxKey() bool {
 		closeBoxView(t)
 		return true
 	}
-	t.boxBodyHint()
 	t.dirty = true
 	return true
 }
