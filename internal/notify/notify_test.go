@@ -144,6 +144,39 @@ func TestSendWithoutBinary(t *testing.T) {
 	stillNotify(t, log, 0, 400*time.Millisecond)
 }
 
+// TestSendTagsTheNotification proves the suite's marker reaches both the title
+// and the body. A popup a test scenario triggers is the one surface the suite
+// cannot take back, so it has to name the suite it came from.
+func TestSendTagsTheNotification(t *testing.T) {
+	// Serial: the marker is read from the environment, which t.Setenv owns.
+	t.Setenv(EnvTag, "TESTSUITE")
+	dir, log := fakeNotify(t)
+	Send(Config{Enabled: true, BinPath: filepath.Join(dir, "notify-send")},
+		"notify/w1p2 error", "pane w1p2 stopped taking server pushes")
+	line := waitNotify(t, log, 1)[0]
+	for _, want := range []string{"TESTSUITE notify/w1p2 error", "TESTSUITE: pane w1p2 stopped taking server pushes"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("notification = %q, want %q in it", line, want)
+		}
+	}
+}
+
+// Tagged is the whole prefixing rule: an empty marker leaves a title and a
+// body exactly as the caller wrote them.
+func TestTagged(t *testing.T) {
+	t.Setenv(EnvTag, "")
+	if title, body := Tagged("t", "b"); title != "t" || body != "b" {
+		t.Fatalf("Tagged with no marker = %q %q, want the inputs", title, body)
+	}
+	t.Setenv(EnvTag, "TESTSUITE")
+	if title, body := Tagged("t", "b"); title != "TESTSUITE t" || body != "TESTSUITE: b" {
+		t.Fatalf("Tagged = %q %q, want the marker in front", title, body)
+	}
+	if title, body := Tagged("t", ""); title != "TESTSUITE t" || body != "" {
+		t.Fatalf("Tagged without a body = %q %q, want an untagged empty body", title, body)
+	}
+}
+
 // SystemNotify runs notify-send from PATH when DM_NOTIFY is not "0", and
 // DM_NOTIFY=0 stops it. These tests keep t.Setenv and stay serial: t.Setenv
 // forbids t.Parallel, and the env fallback behaviour of the exported wrapper

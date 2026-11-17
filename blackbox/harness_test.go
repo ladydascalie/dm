@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"dm/internal/notify"
 )
 
 // buildOnce builds the dm binary under test. The test package lives one
@@ -39,6 +41,7 @@ func testEnv(base []string, extra ...string) []string {
 		"DM_SESSION":      true,
 		"DM_PANE":         true,
 		"DM_NOTIFY":       true,
+		notify.EnvTag:     true,
 		"DM_NERD":         true,
 		"DM_STATS":        true,
 		"DM_COLOR":        true,
@@ -90,7 +93,10 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(cfgDir) })
-	return &harness{t: t, bin: buildOnce(t), env: testEnv(os.Environ(), "DM_STATE="+state, "XDG_CONFIG_HOME="+cfgDir)}
+	// A scenario that wedges a pane pops a real desktop notification. The tag
+	// names it as the suite's, so it cannot read as a live alert.
+	return &harness{t: t, bin: buildOnce(t), env: testEnv(os.Environ(),
+		"DM_STATE="+state, "XDG_CONFIG_HOME="+cfgDir, notify.EnvTag+"=TESTSUITE")}
 }
 
 func (h *harness) run(args ...string) string {

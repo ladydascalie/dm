@@ -42,6 +42,27 @@ func Urgent(state string) bool {
 	return false
 }
 
+// EnvTag names the marker a caller puts in front of every notification title
+// and body. The test suite sets it, so a popup one of its scenarios triggers
+// arrives named as an artifact of the suite: a desktop notification is the one
+// surface the suite cannot take back, and without the tag a popup a test
+// provokes looks exactly like the live alert the test is asserting on.
+const EnvTag = "DM_NOTIFY_TAG"
+
+// Tagged puts the marker from EnvTag in front of a title and a body. An unset
+// or empty marker returns both untouched, which is every path outside a test
+// suite.
+func Tagged(title, body string) (string, string) {
+	tag := os.Getenv(EnvTag)
+	if tag == "" {
+		return title, body
+	}
+	if body == "" {
+		return tag + " " + title, ""
+	}
+	return tag + " " + title, tag + ": " + body
+}
+
 // Config is the explicit notifier configuration: the on/off switch and the
 // path to the notify-send binary.
 type Config struct {
@@ -57,6 +78,7 @@ func Send(cfg Config, title, body string) {
 	if !cfg.Enabled || cfg.BinPath == "" || title == "" {
 		return
 	}
+	title, body = Tagged(title, body)
 	// The fork happens in the goroutine: the caller is the pane watch loop,
 	// and a loaded host must not stall status handling.
 	go func() {

@@ -63,6 +63,11 @@ func TestNotifyPaneStatePostsAndDispatches(t *testing.T) {
 	if !strings.Contains(lines[0], "notify/"+focus+" blocked") || !strings.Contains(lines[0], "needs review") {
 		t.Fatalf("dispatch = %q, want the topic, state and msg", lines[0])
 	}
+	// The suite's marker rides every popup its own tests cause, so the alert
+	// the operator sees names the suite and not a live pane.
+	if !strings.Contains(lines[0], "TESTSUITE notify/"+focus+" blocked") {
+		t.Fatalf("dispatch = %q, want the suite's marker in front", lines[0])
+	}
 	entries := notifyEntries(t, s)
 	if len(entries) != 1 {
 		t.Fatalf("logged = %+v, want one entry", entries)
