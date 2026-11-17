@@ -301,7 +301,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var id string
 		err := s.mutation(func() error {
 			var e error
-			id, e = s.split(m.Target, m.Dir, m.Cwd, m.Ratio, m.NoFocus, m.Argv)
+			id, e = s.split(m.Target, m.Dir, m.Cwd, m.Ratio, m.NoFocus, m.Argv, nil)
 			return e
 		})
 		s.afterMutation()
@@ -428,7 +428,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var wid, pid string
 		err := s.mutation(func() error {
 			var e error
-			wid, pid, e = s.newWindow(m.Target, m.Name, m.Cwd, m.NoFocus, m.Argv)
+			wid, pid, e = s.newWindow(m.Target, m.Name, m.Cwd, m.NoFocus, m.Argv, nil)
 			return e
 		})
 		s.afterMutation()
@@ -436,8 +436,9 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 
 	case "run-plugin":
 		var req struct {
-			Name  string `json:"name"`
-			Where string `json:"where"`
+			Name   string `json:"name"`
+			Where  string `json:"where"`
+			Source string `json:"source"`
 		}
 		if len(m.Res) > 0 {
 			if err := json.Unmarshal(m.Res, &req); err != nil {
@@ -457,7 +458,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		var id string
 		err := s.mutation(func() error {
 			var e error
-			id, e = s.runPlugin(p, m.Target, where)
+			id, e = s.runPlugin(p, m.Target, where, req.Source)
 			return e
 		})
 		s.afterMutation()

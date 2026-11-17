@@ -719,17 +719,17 @@ func applyDefaultFold(st *session.State, cfg *keymap.Config) {
 }
 
 func (s *server) addPaneState(id string) {
-	s.addPaneStateAt(id, "", nil)
+	s.addPaneStateAt(id, "", nil, nil)
 }
 
-func (s *server) addPaneStateAt(id, cwd string, argv []string) {
+func (s *server) addPaneStateAt(id, cwd string, argv, pluginEnv []string) {
 	if s.st.Panes[id] != nil {
 		return
 	}
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	s.st.Panes[id] = &session.PaneState{Shell: os.Getenv("SHELL"), Cwd: cwd, Cols: 80, Rows: 24, Argv: argv}
+	s.st.Panes[id] = &session.PaneState{Shell: os.Getenv("SHELL"), Cwd: cwd, Cols: 80, Rows: 24, Argv: argv, PluginEnv: pluginEnv}
 }
 
 // paneCommand builds the __pane command for a fresh daemon. A known colour
@@ -737,15 +737,24 @@ func (s *server) addPaneStateAt(id, cwd string, argv []string) {
 // client's terminal instead of the compiled-in default. A half-known pair
 // passes only the half it has and leaves the other at its default.
 func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours, history int) *exec.Cmd {
-	args := []string{"__pane", "--id", id, "--session", sess,
+	args := []string{
+		"__pane", "--id", id, "--session", sess,
 		"--cwd", ps.Cwd, "--shell", ps.Shell,
 		"--cols", strconv.Itoa(ps.Cols), "--rows", strconv.Itoa(ps.Rows),
-		"--history", strconv.Itoa(history)}
+		"--history", strconv.Itoa(history),
+	}
 	if len(ps.Argv) > 0 {
 		// The pane flag is comma separated, the shape the state file holds.
 		// The server validated every element before it stored it, so the join
 		// is the exact program the restart must run.
 		args = append(args, "--argv", strings.Join(ps.Argv, ","))
+	}
+	if len(ps.PluginEnv) > 0 {
+		// The pairs are a JSON array, so one flag carries every name without
+		// a separator the values could contain. The daemon appends them after
+		// the allowlist.
+		raw, _ := json.Marshal(ps.PluginEnv)
+		args = append(args, "--plugin-env", string(raw))
 	}
 	if tc != nil {
 		if tc.fg != "" {

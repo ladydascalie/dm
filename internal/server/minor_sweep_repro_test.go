@@ -45,7 +45,7 @@ func TestNamesBoundedAndFiltered(t *testing.T) {
 		if err := s.setProject(wsID, name); err == nil {
 			t.Fatalf("setProject accepted %q", name)
 		}
-		if _, _, err := s.newWindow(wsID, name, "", false, nil); err == nil {
+		if _, _, err := s.newWindow(wsID, name, "", false, nil, nil); err == nil {
 			t.Fatalf("newWindow label accepted %q", name)
 		}
 		if _, _, _, err := s.newWorkspace(name, name, "", "", false, nil); err == nil {

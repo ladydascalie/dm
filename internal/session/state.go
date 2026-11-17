@@ -85,6 +85,10 @@ type PaneState struct {
 	// Argv is the program the pane runs instead of a shell, program first.
 	// Empty means $SHELL -l, a pane as it has always been.
 	Argv []string `json:"argv,omitempty"`
+	// PluginEnv is the environment a plugin pane adds after the allowlist:
+	// the block's env, then the host's DM_PLUGIN_* values. Empty for a
+	// plain pane. Persisted so a respawn reproduces the launch.
+	PluginEnv []string `json:"plugin_env,omitempty"`
 }
 
 type State struct {

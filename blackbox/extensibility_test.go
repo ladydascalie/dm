@@ -6,6 +6,7 @@ package blackbox
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -226,6 +227,79 @@ func TestPluginStartEndToEnd(t *testing.T) {
 	h.rpc(s, map[string]any{"action": "reload"})
 	latePane := strings.TrimSpace(h.run("plugin", "start", "late", "-s", s))
 	h.waitFor(s, latePane, "LATE")
+}
+
+// TestPluginEnvironmentEndToEnd proves the four host values and the block's
+// env reach the child, the context names the invoking pane, and the state
+// directory exists at 0700.
+func TestPluginEnvironmentEndToEnd(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	s := "pluginenv"
+	dir := h.stateDir()
+	script := filepath.Join(dir, "plugin-env.sh")
+	out := filepath.Join(dir, "plugin-env.out")
+	body := "#!/bin/sh\n{\n  echo \"ID=$DM_PLUGIN_ID\"\n  echo \"ROOT=$DM_PLUGIN_ROOT\"\n  echo \"STATE=$DM_PLUGIN_STATE_DIR\"\n  echo \"EXTRA=$GIT_RAIL_DEPTH\"\n  echo \"CTX=$DM_PLUGIN_CONTEXT_JSON\"\n} > \"$1\"\necho PLUGINENVREADY\nsleep 30\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := fmt.Sprintf(`plugin "env" {
+	exec %q %q
+	where "split"
+	env "GIT_RAIL_DEPTH=2"
+}
+`, script, out)
+	if err := os.MkdirAll(filepath.Join(h.configDir(), "dm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.configDir(), "dm", "config.kdl"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.run("new", "-s", s)
+	root := h.focus(s)
+	pane := strings.TrimSpace(h.run("plugin", "start", "env", "-s", s))
+	h.waitFor(s, pane, "PLUGINENVREADY")
+
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("plugin wrote no environment file: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{
+		"ID=env",
+		"ROOT=" + dir,
+		"STATE=" + filepath.Join(dir, "plugins", "env"),
+		"EXTRA=2",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("environment file = %q, want %q", text, want)
+		}
+	}
+	var ctx struct {
+		Session string `json:"session"`
+		Source  string `json:"source"`
+		Plugin  string `json:"plugin"`
+		Pane    struct {
+			ID string `json:"id"`
+		} `json:"pane"`
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if after, ok := strings.CutPrefix(line, "CTX="); ok {
+			if err := json.Unmarshal([]byte(after), &ctx); err != nil {
+				t.Fatalf("context JSON: %v", err)
+			}
+		}
+	}
+	if ctx.Session != s || ctx.Source != "cli" || ctx.Plugin != "env" || ctx.Pane.ID != root {
+		t.Fatalf("context = %+v, want session %s, cli, env and pane %s", ctx, s, root)
+	}
+	info, err := os.Stat(filepath.Join(dir, "plugins", "env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("plugin state dir mode = %o, want 700", got)
+	}
 }
 
 // TestArgvSplitRespawns drives the argv feature end to end: a split carries

@@ -1247,7 +1247,7 @@ func pluginStart(c *cmdFlags, name string) error {
 	if c.pluginWindow {
 		where = "window"
 	}
-	res, _ := json.Marshal(map[string]string{"name": name, "where": where})
+	res, _ := json.Marshal(map[string]string{"name": name, "where": where, "source": "cli"})
 	m, err := transport.RPC(c.session, wire.Msg{Action: "run-plugin", Target: c.target, Res: res})
 	if err != nil {
 		return err

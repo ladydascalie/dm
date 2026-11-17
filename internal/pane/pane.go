@@ -530,6 +530,10 @@ type paneOpts struct {
 	// a shell. argvRaw is the comma separated flag it came from.
 	argvRaw string
 	argv    []string
+	// pluginEnvRaw is the --plugin-env JSON array, and pluginEnv is the
+	// parsed list of KEY=VALUE pairs appended after the allowlist.
+	pluginEnvRaw string
+	pluginEnv    []string
 }
 
 // historyBudget is the one rule the pane flag and the set-history action share:
@@ -563,6 +567,29 @@ func splitArgv(s string) ([]string, error) {
 	return out, nil
 }
 
+// splitPluginEnv parses a pane's --plugin-env value: a JSON array of
+// KEY=VALUE pairs the pane appends after the allowlist. Every entry must
+// name a variable and carry no NUL, the two things exec cannot.
+func splitPluginEnv(s string) ([]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil, fmt.Errorf("--plugin-env is not a JSON array: %w", err)
+	}
+	for i, kv := range out {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || name == "" {
+			return nil, fmt.Errorf("--plugin-env element %d is not KEY=VALUE", i+1)
+		}
+		if strings.ContainsRune(kv, '\x00') {
+			return nil, fmt.Errorf("--plugin-env element %d contains a NUL byte", i+1)
+		}
+	}
+	return out, nil
+}
+
 // paneCmd builds the command a pane runs: the --argv program when one was
 // given, else the shell. Either way the pane is told its own session through
 // DM_PANE and DM_SESSION, so a program started direct still posts to the pane
@@ -576,7 +603,7 @@ func paneCmd(o *paneOpts) *exec.Cmd {
 	// The env is built by rule, not inherited whole: the daemon holds the
 	// server's environment and only the names a shell and a terminal need
 	// may reach the pane. Env documents the allowlist rule.
-	cmd.Env = Env(os.Environ(), o.id, o.session)
+	cmd.Env = append(Env(os.Environ(), o.id, o.session), o.pluginEnv...)
 	return cmd
 }
 
@@ -590,6 +617,7 @@ func parsePaneArgs(args []string) (*paneOpts, error) {
 	fs.StringVar(&o.cwd, "cwd", "", "working directory")
 	fs.StringVar(&o.shell, "shell", "", "shell")
 	fs.StringVar(&o.argvRaw, "argv", "", "program and arguments, comma separated")
+	fs.StringVar(&o.pluginEnvRaw, "plugin-env", "", "plugin KEY=VALUE pairs, a JSON array")
 	fs.IntVar(&o.cols, "cols", 80, "columns")
 	fs.IntVar(&o.rows, "rows", 24, "rows")
 	fs.StringVar(&o.fg, "fg", osc.TermFG, "terminal foreground colour")
@@ -612,6 +640,11 @@ func parsePaneArgs(args []string) (*paneOpts, error) {
 		return nil, err
 	}
 	o.argv = argv
+	pluginEnv, err := splitPluginEnv(o.pluginEnvRaw)
+	if err != nil {
+		return nil, err
+	}
+	o.pluginEnv = pluginEnv
 	return o, nil
 }
 

@@ -940,7 +940,7 @@ func (t *tui) runPlugin(name string) {
 		t.disarm()
 		return
 	}
-	res, _ := json.Marshal(map[string]string{"name": name})
+	res, _ := json.Marshal(map[string]string{"name": name, "source": "key"})
 	t.action("run-plugin", func(m *wire.Msg) {
 		m.Res = res
 	})

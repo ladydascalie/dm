@@ -11,8 +11,9 @@ import (
 )
 
 // TestPluginKeySendsRunPlugin: a plugin: action asks the server to open the
-// declared plugin beside the focused pane, with the name in the payload. The
-// server owns the lookup and the argv, so the client sends no command text.
+// declared plugin beside the focused pane, with the name and the key source in
+// the payload. The server owns the lookup and the argv, so the client sends
+// no command text.
 func TestPluginKeySendsRunPlugin(t *testing.T) {
 	t.Parallel()
 	tui, got := switcherTUI(t)
@@ -41,14 +42,15 @@ keymap "main" {
 		t.Fatalf("g sent %+v, want a run-plugin request for the focused pane w1p1", req)
 	}
 	var res struct {
-		Name  string `json:"name"`
-		Where string `json:"where"`
+		Name   string `json:"name"`
+		Source string `json:"source"`
+		Where  string `json:"where"`
 	}
 	if err := json.Unmarshal(req.Res, &res); err != nil {
 		t.Fatalf("payload: %v", err)
 	}
-	if res.Name != "rail" || res.Where != "" {
-		t.Fatalf("payload = %q/%q, want the name and no placement override", res.Name, res.Where)
+	if res.Name != "rail" || res.Source != "key" || res.Where != "" {
+		t.Fatalf("payload = %+v, want the name, the key source and no placement override", res)
 	}
 	testutil.NoMsg(t, got)
 }

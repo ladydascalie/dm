@@ -1747,6 +1747,7 @@ func TestConfigPluginErrors(t *testing.T) {
 		{"collision", `plugin "reload" { exec "/bin/true" where "split" }`, "collides with a built-in action"},
 		{"duplicate env", `plugin "rail" { exec "/bin/true" where "split" env "A=1" env "A=2" }`, "duplicate env key"},
 		{"bad env", `plugin "rail" { exec "/bin/true" where "split" env "A" }`, "must be KEY=VALUE"},
+		{"reserved env", `plugin "rail" { exec "/bin/true" where "split" env "DM_PANE=x" }`, "is reserved"},
 		{"unknown binding", `keymap "main" { "plugin:nope" "g" }`, "names no plugin"},
 	}
 	for _, tc := range bad {

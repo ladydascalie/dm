@@ -692,6 +692,9 @@ func checkPluginEnv(seen []string, kv string) error {
 	if !ok || name == "" {
 		return fmt.Errorf("env %q must be KEY=VALUE", kv)
 	}
+	if strings.HasPrefix(name, "DM_") {
+		return fmt.Errorf("env %q is reserved: dm sets DM_ names", name)
+	}
 	if strings.ContainsRune(name, '\x00') || strings.ContainsRune(value, '\x00') {
 		return fmt.Errorf("env %q contains a NUL byte", name)
 	}
