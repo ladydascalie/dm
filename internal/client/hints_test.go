@@ -1,6 +1,9 @@
 package client
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +12,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/keymapview"
 	"dm/internal/layout"
+	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
@@ -137,6 +141,45 @@ func TestLayoutHintNamesTheKeymap(t *testing.T) {
 	}
 }
 
+// TestRenameHintNamesTheKeymap: the rename prompt has a keymap mode, so its
+// border names the keys the config binds to submit and cancel. A rebind moves
+// the hint with the keys the prompt itself dispatches on.
+func TestRenameHintNamesTheKeymap(t *testing.T) {
+	t.Parallel()
+	cfg := hintKeymap(t, `keymap "rename" {
+		"submit" "ctrl+s"
+		"cancel" "ctrl+q"
+	}`)
+	if got, want := renameHint(cfg), "ctrl+s  ctrl+q"; got != want {
+		t.Fatalf("hint = %q, want %q", got, want)
+	}
+	// The review's counter-example: a user block that rebinds submit only. The
+	// merge keeps cancel on its default key, and the hint names both.
+	path := filepath.Join(t.TempDir(), "config.kdl")
+	if err := os.WriteFile(path, []byte("keymap \"rename\" {\n\t\"submit\" \"ctrl+s\"\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	merged, err := keymap.LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
+	if got, want := renameHint(merged), "ctrl+s  esc"; got != want {
+		t.Fatalf("merged hint = %q, want %q", got, want)
+	}
+
+	// The drawn prompt carries the new keys, not the old ones.
+	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 60, 12, nil)
+	var b bytes.Buffer
+	drawRename(&b, theme.DefaultTheme(), snap, "s1", "main", false, cfg)
+	win := renamePromptVisible(b.String())
+	if !strings.Contains(win, "ctrl+s  ctrl+q") {
+		t.Fatalf("drawn prompt = %q, want the rebound hint", win)
+	}
+	if strings.Contains(win, "enter  esc") {
+		t.Fatalf("drawn prompt = %q, the literal keys survived", win)
+	}
+}
+
 // TestOverlayHintsArePlainRows: the rows the client owns spell their one or two
 // keys through ui.Hints, so nothing carries outer padding and nothing carries
 // an escape.
@@ -144,7 +187,7 @@ func TestOverlayHintsArePlainRows(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ name, got, want string }{
 		{"palette", paletteHelpHint, "? help"},
-		{"rename", renameHint(), "enter  esc"},
+		{"rename", renameHint(keymap.LoadDefault()), "enter  esc"},
 		{"help box", helpBoxHint(), "esc"},
 	}
 	for _, c := range cases {

@@ -130,14 +130,14 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 
 // drawRename paints the rename prompt as a floating pane over the pane area.
 // The title names the action, the kind and the id: a project is set, not
-// renamed, so that title reads "set project <id>". The hint names the keys that
-// submit and cancel, and the one input row holds the label, the draft and the
-// caret. The
-// caret is fixed: the draft takes what is left and loses its head first, so a
-// long name still shows its end and the caret stays on screen. The kind is
-// optional: a call without it renames a workspace, as the frozen prompt test
-// expects. A screen too small to hold the box paints nothing.
-func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, shadow bool, kind ...string) {
+// renamed, so that title reads "set project <id>". The hint names the keys the
+// rename keymap binds to submit and cancel, and the one input row holds the
+// label, the draft and the caret. The caret is fixed: the draft takes what is
+// left and loses its head first, so a long name still shows its end and the
+// caret stays on screen. The kind is optional: a call without it renames a
+// workspace, as the frozen prompt test expects. A screen too small to hold the
+// box paints nothing.
+func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, shadow bool, km *keymap.Config, kind ...string) {
 	if snap == nil {
 		return
 	}
@@ -157,7 +157,7 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 		ID:    "rename",
 		Rect:  inner,
 		Title: title,
-		Hint:  renameHint(),
+		Hint:  renameHint(km),
 		Paint: func(b *bytes.Buffer, r layout.Rect) {
 			renameInputRow(b, th, r, k, draft)
 		},
@@ -170,12 +170,19 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 	f.Draw(buf, th)
 }
 
-// renameHint is the prompt's bottom border: submit and cancel. The prompt owns
-// the two keys it names, so they stay literal.
-func renameHint() string {
+// renameHint is the prompt's bottom border: the keys the rename keymap binds to
+// submit and cancel, so a rebind moves the hint with the keys the prompt
+// dispatches on.
+func renameHint(km *keymap.Config) string {
+	key := func(action string) string {
+		if km == nil {
+			return ""
+		}
+		return km.Key("rename", action)
+	}
 	return ui.Hints([]ui.Hint{
-		{Keys: []string{"enter"}},
-		{Keys: []string{"esc"}},
+		{Keys: []string{key("submit")}},
+		{Keys: []string{key("cancel")}},
 	})
 }
 

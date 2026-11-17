@@ -86,7 +86,7 @@ func (t *tui) draw() {
 		drawLayoutSwitcher(&lswBuf, th, win, t.lsw, t.km())
 	}
 	if t.mode == "rename" {
-		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.km().FloatShadow(), t.renameKind)
+		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.km().FloatShadow(), t.km(), t.renameKind)
 	}
 	if t.mode == "search" && t.search != nil {
 		drawSearchPrompt(&prompt, th, win, t.search.draft)

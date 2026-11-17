@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/rail"
 	"dm/internal/testutil"
@@ -277,7 +278,7 @@ func renameFloatPaint(t *testing.T, snap *wire.Snapshot, id, draft string, kind 
 		t.Fatalf("%dx%d: no box", snap.Cols, snap.Rows)
 	}
 	var b bytes.Buffer
-	drawRename(&b, theme.DefaultTheme(), snap, id, draft, false, kind...)
+	drawRename(&b, theme.DefaultTheme(), snap, id, draft, false, keymap.LoadDefault(), kind...)
 	return box, helpBoxParse(t, b.String())
 }
 
@@ -383,7 +384,7 @@ func TestRenamePromptDrawsNothingWhenTooSmall(t *testing.T) {
 	for _, c := range []struct{ cols, rows int }{{1, 8}, {20, 4}} {
 		snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, c.cols, c.rows, nil)
 		var b bytes.Buffer
-		drawRename(&b, theme.DefaultTheme(), snap, "s1", "main", false)
+		drawRename(&b, theme.DefaultTheme(), snap, "s1", "main", false, keymap.LoadDefault())
 		if b.Len() != 0 {
 			t.Fatalf("%dx%d: painted %q", c.cols, c.rows, b.String())
 		}
