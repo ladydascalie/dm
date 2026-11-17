@@ -470,9 +470,11 @@ func paletteWrap(s string, w int) []string {
 //
 // The signpost and its two cells of gutter are the row's trailing text, so the
 // signpost sits two cells clear of the right edge and the query's room is the
-// row minus the prompt, the signpost and the gutter. The row's cells are the
-// ones the hand-written painter drew. No caret glyph: the palette shows the
-// terminal cursor.
+// row minus the prompt, the signpost, the gutter and the ground cell the
+// component keeps before the signpost. The row's cells are the ones the
+// hand-written painter drew, except at the exact fill, where the component
+// clips the query rather than glue it to the signpost. No caret glyph: the
+// palette shows the terminal cursor.
 func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, in ui.Input, r layout.Rect, hint string) (cx, cy int) {
 	trailing := ""
 	if hint != "" {

@@ -163,6 +163,10 @@ func (in *Input) pos() int {
 // mark, and the text after the caret is cut to the cells that remain. No edit
 // and no width can push the caret off the row, and no cell of Rect is left to
 // the frame before it.
+//
+// The trailing text keeps a cell of ground between it and the value, so a value
+// that fills the room is clipped to fit instead of gluing itself to the
+// trailing text.
 func DrawInput(buf *bytes.Buffer, th theme.Theme, p InputProps, in Input) (cx, cy int) {
 	r := p.Rect
 	if r.W <= 0 || r.H <= 0 {
@@ -177,7 +181,13 @@ func DrawInput(buf *bytes.Buffer, th theme.Theme, p InputProps, in Input) (cx, c
 	// short rather than painted over the caret.
 	prompt := cells.Clip(p.Prompt, max(r.W-caretCells, 0))
 	trailing := cells.Clip(p.Trailing, max(r.W-caretCells-cells.Cells(prompt), 0))
-	room := max(r.W-caretCells-cells.Cells(prompt)-cells.Cells(trailing), 0)
+	// A trailing text owns the cell before it, so the value stops one cell
+	// short of it: the row never glues the two together.
+	gap := 0
+	if trailing != "" {
+		gap = 1
+	}
+	room := max(r.W-caretCells-cells.Cells(prompt)-cells.Cells(trailing)-gap, 0)
 
 	at := in.Caret
 	if at < 0 {

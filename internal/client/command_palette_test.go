@@ -329,12 +329,11 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	if cx < g.X+1 {
 		t.Fatalf("cursor column = %d, before the interior edge %d", cx, g.X+1)
 	}
-	// The signpost and its two cells of gutter end the row, so the signpost's
-	// first cell is one past the room the query gets. A query that fills the
-	// line leaves the cursor on that cell, and never past it.
-	signpost := g.X + g.W - 2 - cells.Cells(paletteHelpHint) - 2 + 1
-	if cx > signpost {
-		t.Fatalf("cursor column = %d, past the signpost's first cell %d", cx, signpost)
+	// The signpost and its two cells of gutter end the row, and the value keeps
+	// the cell before the signpost for ground: a query that fills the line
+	// parks the cursor on that cell, never under the signpost.
+	if cx > g.X+g.W-2-cells.Cells(paletteHelpHint)-2 {
+		t.Fatalf("cursor column = %d, under the ? signpost", cx)
 	}
 }
 
