@@ -140,6 +140,7 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 h1 { color: var(--accent); font-size: 2rem; margin: 0 0 .75rem; }
 h2 { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: .3rem; margin: 0 0 1rem; }
 h3 { color: var(--accent-2); margin: 1.75rem 0 .5rem; }
+h4 { color: var(--accent-2); margin: 1.25rem 0 .4rem; font-size: .95rem; }
 p { margin: .5rem 0 .75rem; }
 .sidebar {
   position: fixed;
@@ -224,6 +225,7 @@ dl.flags dd { margin: 0; color: var(--dim); }
 <li><a class="toc-link" href="#sec-environment">Environment</a></li>
 <li><a class="toc-link" href="#sec-files">Files</a></li>
 <li><a class="toc-link" href="#sec-actions">Actions</a></li>
+<li><a class="toc-link" href="#sec-components">Components</a></li>
 </ol>
 </nav>
 </aside>
@@ -299,7 +301,7 @@ func HTMLPage() string {
 	b.WriteString(`<h2 id="introduction">Introduction</h2>`)
 	b.WriteString(`<p>dm is a durable terminal multiplexer in one binary. One process is the server: it owns the panes and their pty state, and it keeps running after you leave. A second mode is the TUI client, which draws the panes and sends actions. A third is the CLI, which sends the same actions to the same server, so a script and a hand on the keyboard drive one surface. Detach and reattach, and the shells keep running.</p>`)
 	b.WriteString(`<p>A workspace is <code>s1</code>, <code>s2</code>, and so on. A window is <code>w1</code>, <code>w2</code>. A pane is its window id plus <code>p</code> and a per-window sequence: <code>w2p3</code> is the third pane opened in window 2. Ids are readable and constructible, and a counter only moves forward, so a closed id is never reused.</p>`)
-	b.WriteString(`<p class="provenance">Where this page comes from: <code>dm html</code> renders it from the Go tables <code>cliCommands</code>, <code>manActionFields</code>, <code>manActionNames</code>, <code>keymap.LoadDefault().HelpEntries()</code> and the <code>configdoc</code> tables and the prompt-mark section.</p>`)
+	b.WriteString(`<p class="provenance">Where this page comes from: <code>dm html</code> renders it from the Go tables <code>cliCommands</code>, <code>manActionFields</code>, <code>manActionNames</code>, <code>keymap.LoadDefault().HelpEntries()</code>, the <code>configdoc</code> tables, the prompt-mark section and the component tables.</p>`)
 	b.WriteString(`</section>`)
 
 	b.WriteString(htmlCommands(ids))
@@ -310,6 +312,7 @@ func HTMLPage() string {
 	b.WriteString(htmlEnvironment(ids))
 	b.WriteString(htmlFiles(ids))
 	b.WriteString(htmlActions(ids))
+	b.WriteString(htmlComponents(ids))
 
 	b.WriteString(htmlPageScript)
 	return b.String()

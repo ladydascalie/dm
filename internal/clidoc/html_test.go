@@ -40,6 +40,7 @@ func TestHTMLPageCarriesEverySection(t *testing.T) {
 		"sec-keymaps", "sec-themes", "sec-theme-sample", "sec-prompt-marks",
 		"sec-environment", "sec-files", "sec-actions", "sec-action-names",
 		"sec-action-desc",
+		"sec-components",
 	} {
 		if !strings.Contains(page, `id="`+id+`"`) {
 			t.Errorf("page has no section %q", id)
