@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -53,27 +54,47 @@ type scrubber struct {
 }
 
 // set replaces the secret list. Empty and too short values are dropped, a
-// value longer than secretMax is dropped, and the list is capped at
-// secretCap values. An empty list turns the stage into a pass-through that
-// still drains any bytes a previous list held back.
+// value longer than MaxSecretLen is dropped, and the list is capped at
+// MaxSecrets values, counted before the derived forms so a multi-line value
+// costs one of the cap's places and not two. An empty list turns the stage
+// into a pass-through that still drains any bytes a previous list held back.
 func (s *scrubber) set(values []string) {
 	vals := make([][]byte, 0, len(values))
 	maxLen := 0
+	used := 0
 	for _, v := range values {
+		if used == MaxSecrets {
+			break
+		}
 		if len(v) < MinSecretLen || len(v) > MaxSecretLen {
 			continue
 		}
-		vals = append(vals, []byte(v))
-		if len(v) > maxLen {
-			maxLen = len(v)
-		}
-		if len(vals) == MaxSecrets {
-			break
+		used++
+		for _, form := range valueForms(v) {
+			vals = append(vals, []byte(form))
+			maxLen = max(maxLen, len(form))
 		}
 	}
 	s.mu.Lock()
 	s.vals, s.maxLen = vals, maxLen
 	s.mu.Unlock()
+}
+
+// valueForms lists the spellings a value can take in the output stream. The
+// pty rewrites every LF to CRLF on output, so a value holding a newline is
+// never matched byte for byte by the raw form: the CRLF form is what the
+// stream actually carries. Both are returned, because the raw form costs
+// nothing when the value has no newline and covers a stream the pty did not
+// translate; the two forms of one value are matched independently and the
+// longest match at an offset wins, so an overlap redacts the larger span.
+//
+// The derived form is at most twice its value, so a list at MaxSecretLen
+// keeps the scan and the hold-back bounded by twice the shared cap.
+func valueForms(v string) []string {
+	if !strings.Contains(v, "\n") {
+		return []string{v}
+	}
+	return []string{v, strings.ReplaceAll(v, "\n", "\r\n")}
 }
 
 // toggle flips the redaction switch and reports the new state: true when
@@ -114,21 +135,7 @@ func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 	}
 	data := append(s.carry, b...)
 	s.carry = s.carry[:0]
-	pos := 0
-	for {
-		best, bestLen := -1, 0
-		for _, v := range vals {
-			if i := bytes.Index(data[pos:], v); i >= 0 && (best < 0 || pos+i < best) {
-				best, bestLen = pos+i, len(v)
-			}
-		}
-		if best < 0 {
-			break
-		}
-		out.Write(data[pos:best])
-		writeRedacted(out, bestLen)
-		pos = best + bestLen
-	}
+	pos := redactInto(out, vals, data)
 	// Only the bytes a next chunk could complete wait in carry: the longest
 	// suffix of the unemitted data that is a proper prefix of some value.
 	// A tail that cannot begin a match flows with zero delay, the same rule
@@ -185,22 +192,48 @@ func (s *scrubber) flush(out *bytes.Buffer) {
 		out.Write(data)
 		return
 	}
+	pos := redactInto(out, vals, data)
+	out.Write(data[pos:])
+}
+
+// redactInto writes data with every value replaced by the same number of
+// redaction bytes and returns the offset it stopped emitting at, which is the
+// end of the last match or zero when no value matched.
+//
+// Matching is leftmost-longest: at each position the match that starts first
+// wins, and among values that start at the same offset the longest wins. The
+// longest rule is load bearing, not a tie-break: the server pushes values in
+// name order, so a value that is a proper prefix of another one arrives
+// first, and redacting only the prefix would publish the longer value's tail
+// in the clear.
+func redactInto(out *bytes.Buffer, vals [][]byte, data []byte) int {
 	pos := 0
 	for {
-		best, bestLen := -1, 0
-		for _, v := range vals {
-			if i := bytes.Index(data[pos:], v); i >= 0 && (best < 0 || pos+i < best) {
-				best, bestLen = pos+i, len(v)
-			}
+		at, n := nextMatch(vals, data, pos)
+		if at < 0 {
+			return pos
 		}
-		if best < 0 {
-			break
-		}
-		out.Write(data[pos:best])
-		writeRedacted(out, bestLen)
-		pos = best + bestLen
+		out.Write(data[pos:at])
+		writeRedacted(out, n)
+		pos = at + n
 	}
-	out.Write(data[pos:])
+}
+
+// nextMatch returns the offset and the length of the leftmost, longest value
+// match at or after pos, or -1 when no value matches.
+func nextMatch(vals [][]byte, data []byte, pos int) (at, n int) {
+	at, n = -1, 0
+	for _, v := range vals {
+		i := bytes.Index(data[pos:], v)
+		if i < 0 {
+			continue
+		}
+		got := pos + i
+		if at < 0 || got < at || (got == at && len(v) > n) {
+			at, n = got, len(v)
+		}
+	}
+	return at, n
 }
 
 // writeRedacted appends n redaction bytes, one per secret byte, so the
@@ -211,18 +244,42 @@ func writeRedacted(out *bytes.Buffer, n int) {
 	}
 }
 
-// secretValues reads a set-secrets request body: {"values":["..."]}. The
-// payload rides Res because it is server-only and the envelope has no field
-// for a string list.
+// secretValues reads a set-secrets request body:
+// {"valuesB64":["<base64>",...]}. The payload rides Res because it is
+// server-only and the envelope has no field for a byte list.
+//
+// The list is base64 and not a JSON string list because the registry holds
+// raw bytes. json.Marshal replaces every byte of a Go string that is not
+// valid UTF-8 with U+FFFD, so a plain string list hands the pane a different
+// byte string than the value and the stage never matches the value's real
+// bytes. A []byte field marshals as base64, so the pane's list is
+// byte-identical to the registry's.
+//
+// The legacy plain "values" list is still read when "valuesB64" is absent.
+// It exists for a pane daemon older than this encoding, which a running
+// server can outlive: the old daemon keeps the redaction it had instead of
+// answering the push with an error and redacting nothing. A pane that reads
+// valuesB64 never looks at the plain list.
 func secretValues(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("set-secrets needs a {\"values\":[...]} body")
+		return nil, fmt.Errorf("set-secrets needs a {\"valuesB64\":[...]} body")
 	}
 	var payload struct {
-		Values []string `json:"values"`
+		ValuesB64 [][]byte `json:"valuesB64"`
+		Values    []string `json:"values"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, fmt.Errorf("set-secrets body: %w", err)
+	}
+	if payload.ValuesB64 != nil {
+		values := make([]string, len(payload.ValuesB64))
+		for i, v := range payload.ValuesB64 {
+			values[i] = string(v)
+		}
+		return values, nil
+	}
+	if payload.Values == nil {
+		return nil, fmt.Errorf("set-secrets needs a {\"valuesB64\":[...]} body")
 	}
 	return payload.Values, nil
 }

@@ -178,6 +178,32 @@ func (s *server) pushLocalScrub() (map[string]error, []string) {
 	return s.sendSecretScrub()
 }
 
+// secretWireValues renders a value list for a JSON body. The envelope is
+// JSON and a Go string is not a byte carrier: json.Marshal replaces every
+// byte that is not valid UTF-8 with U+FFFD, so a plain string list would
+// hand a pane a different byte string than the registry holds and its stage
+// would never match the value. A []byte field marshals as base64, so the
+// pane's list stays byte-identical to the registry's.
+func secretWireValues(values []string) [][]byte {
+	out := make([][]byte, len(values))
+	for i, v := range values {
+		out[i] = []byte(v)
+	}
+	return out
+}
+
+// secretSetBody is one set-secrets body: the exact bytes of every value in
+// valuesB64, plus the plain values list for a pane daemon older than the
+// encoding, which a live server can outlive. The plain list is lossy for a
+// value that is not valid UTF-8; a pane that reads valuesB64 never looks at
+// it, so it is a fallback for an old daemon and never a source of truth.
+func secretSetBody(values []string) json.RawMessage {
+	return jsonRaw(map[string]any{
+		"values":    values,
+		"valuesB64": secretWireValues(values),
+	})
+}
+
 // sendSecretScrub collects the current set and sends it to every adopted
 // pane. The caller holds secretPush.
 func (s *server) sendSecretScrub() (map[string]error, []string) {
@@ -188,7 +214,7 @@ func (s *server) sendSecretScrub() (map[string]error, []string) {
 		panes = append(panes, pc)
 	}
 	s.mu.Unlock()
-	body := jsonRaw(map[string]any{"values": values})
+	body := secretSetBody(values)
 	failed := map[string]error{}
 	missed := []string{}
 	for _, pc := range panes {
@@ -237,7 +263,7 @@ func (s *server) adoptSecretScrub(id string) {
 	if pc.isDegraded() {
 		return
 	}
-	if err := pc.send(wire.Msg{Action: "set-secrets", Res: jsonRaw(map[string]any{"values": values})}); err != nil {
+	if err := pc.send(wire.Msg{Action: "set-secrets", Res: secretSetBody(values)}); err != nil {
 		log.Printf("pane %s: set-secrets: %v", id, err)
 	}
 }
@@ -384,7 +410,9 @@ func livePaneSockets(root, name string) int {
 // this server unwinds here, on the deadline, and reads as uncovered, the safe
 // side.
 func coverRoundtrip(c net.Conn, own string, values []string) error {
-	body, err := json.Marshal(map[string]any{"session": own, "values": values})
+	body, err := json.Marshal(map[string]any{
+		"session": own, "values": values, "valuesB64": secretWireValues(values),
+	})
 	if err != nil {
 		return err
 	}
@@ -836,8 +864,11 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 // so a sender that heard the count knows the panes already scrub.
 func (s *server) secretCover(cl *client, m wire.Msg) {
 	var body struct {
-		Session string   `json:"session"`
-		Values  []string `json:"values"`
+		Session string `json:"session"`
+		// ValuesB64 is the exact byte list; Values is the legacy plain list
+		// a sender older than the encoding still sends.
+		ValuesB64 [][]byte `json:"valuesB64"`
+		Values    []string `json:"values"`
 	}
 	if err := json.Unmarshal(m.Res, &body); err != nil || body.Session == "" {
 		s.reply(cl, m, nil, fmt.Errorf("secret-cover needs a session and a set of values"))
@@ -847,12 +878,19 @@ func (s *server) secretCover(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, fmt.Errorf("secret-cover refuses session %q", body.Session))
 		return
 	}
+	values := body.Values
+	if body.ValuesB64 != nil {
+		values = make([]string, len(body.ValuesB64))
+		for i, v := range body.ValuesB64 {
+			values[i] = string(v)
+		}
+	}
 	s.mu.Lock()
 	s.secretEnsure()
-	if len(body.Values) == 0 {
+	if len(values) == 0 {
 		delete(s.secretForeign, body.Session)
 	} else {
-		s.secretForeign[body.Session] = body.Values
+		s.secretForeign[body.Session] = values
 	}
 	s.mu.Unlock()
 	failed, merged := s.pushLocalScrub()
@@ -867,7 +905,7 @@ func (s *server) secretCover(cl *client, m wire.Msg) {
 		scrubbed[v] = true
 	}
 	dropped := 0
-	for _, v := range body.Values {
+	for _, v := range values {
 		if !scrubbed[v] {
 			dropped++
 		}
@@ -890,6 +928,15 @@ func (s *server) secretType(cl *client, m wire.Msg) {
 	}
 	value, err := s.fetchSecret(sec)
 	if err != nil {
+		s.reply(cl, m, nil, err)
+		return
+	}
+	// A control byte is not data on this path. The pty reads LF as Enter,
+	// so a multi-line value would submit its first line, run the rest of the
+	// value as commands and leave the value in the shell's history file,
+	// which no scrub stage covers. Refuse before the value is activated or
+	// typed, and name the reason without any part of the value.
+	if err := secretTypeShape(sec.Name, value); err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}
@@ -922,6 +969,23 @@ func (s *server) secretType(cl *client, m wire.Msg) {
 		return
 	}
 	s.reply(cl, m, map[string]any{"pane": m.Target, "warning": warning}, nil)
+}
+
+// secretTypeShape refuses a value the keystroke path cannot carry as data.
+// The write path sends bytes to a pty and the terminal driver reads a control
+// byte as a keystroke, not as a character: LF is Enter, so a multi-line value
+// submits its first line and runs the rest. The broadest safe shape is the
+// printable set, and a refusal names the reason and never the value.
+func secretTypeShape(name, value string) error {
+	for i := 0; i < len(value); i++ {
+		switch b := value[i]; {
+		case b == '\n':
+			return fmt.Errorf("secret %s: the value contains a newline; a pane's terminal reads it as Enter, so the shell would run part of the value and write it to its history; nothing was typed", name)
+		case b < 0x20 || b == 0x7f:
+			return fmt.Errorf("secret %s: the value contains the control byte %#02x; a pane's terminal reads it as a keystroke, not as data; nothing was typed", name, b)
+		}
+	}
+	return nil
 }
 
 // secretTypeDests names the panes the keystrokes will reach: the whole

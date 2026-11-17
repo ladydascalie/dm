@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/creack/pty"
+
 	"dm/internal/wire"
 )
 
@@ -60,6 +62,152 @@ func TestScrubMatchesEarliest(t *testing.T) {
 	if got != want {
 		t.Fatalf("scrubbed %q, want %q", got, want)
 	}
+}
+
+// TestScrubPrefersLongestAtEqualOffset proves two values where one is a
+// proper prefix of the other redact whole. The server pushes values in name
+// order, so the short value arrives first: a first-match rule would redact
+// the prefix and publish the longer value's tail in the clear.
+func TestScrubPrefersLongestAtEqualOffset(t *testing.T) {
+	t.Parallel()
+	got := runScrub(t, []string{"poc-", "poc-token-1234"}, "key: poc-token-1234\n")
+	want := "key: " + strings.Repeat("*", len("poc-token-1234")) + "\n"
+	if got != want {
+		t.Fatalf("scrubbed %q, want %q", got, want)
+	}
+	if len(got) != len("key: poc-token-1234\n") {
+		t.Fatalf("scrub changed the stream length: %q", got)
+	}
+	// The same list with the long value first is the control: the ordering
+	// is what decides which value the scan keeps.
+	got = runScrub(t, []string{"poc-token-1234", "poc-"}, "key: poc-token-1234\n")
+	if got != want {
+		t.Fatalf("long value first scrubbed %q, want %q", got, want)
+	}
+}
+
+// TestScrubRedactsMultiLineValue proves a value holding a newline is
+// redacted from the finished read surfaces. The pty rewrites every LF to
+// CRLF on output, so the byte-exact LF value never appears in the stream:
+// the stage has to hold the CRLF spelling too. The stream here comes from a
+// real pty, so the translation is the terminal's and not a mock.
+func TestScrubRedactsMultiLineValue(t *testing.T) {
+	t.Parallel()
+	value := "poc-pem-5678\nsecond-line-9999"
+	stream := writeToPty(t, []byte(value+"\n"))
+	if !strings.Contains(stream, strings.ReplaceAll(value, "\n", "\r\n")) {
+		t.Fatalf("the pty did not translate the value's newline: %q", stream)
+	}
+	got := runScrub(t, []string{value}, stream)
+	if strings.Contains(got, "poc-pem-5678") || strings.Contains(got, "second-line-9999") {
+		t.Fatalf("the multi-line value reached the read surface: %q", got)
+	}
+	if want := strings.Repeat("*", len(value)+1) + "\r\n"; got != want {
+		t.Fatalf("scrubbed %q, want the value redacted whole", got)
+	}
+	if len(got) != len(stream) {
+		t.Fatalf("scrub changed the stream length: %q", got)
+	}
+}
+
+// TestScrubRedactsMultiLineValueAcrossChunks proves the hold-back covers the
+// derived CRLF form at every boundary: the pty's two inserted bytes can be
+// split anywhere, and no prefix of the value may reach the wire first.
+func TestScrubRedactsMultiLineValueAcrossChunks(t *testing.T) {
+	t.Parallel()
+	value := "poc-pem-5678\nsecond-line-9999"
+	stream := "\x1b[0m" + writeToPty(t, []byte(value+"\n"))
+	for cut := 1; cut < len(stream); cut++ {
+		got := runScrub(t, []string{value}, stream[:cut], stream[cut:])
+		if strings.Contains(got, "1234") || strings.Contains(got, "poc-pem") {
+			t.Fatalf("split at %d leaked the value: %q", cut, got)
+		}
+		if len(got) != len(stream) {
+			t.Fatalf("split at %d changed the stream length: %q", cut, got)
+		}
+	}
+}
+
+// TestScrubRedactsCRLFValue proves a value that already carries CRLF still
+// redacts whole. The pty leaves the CR alone and adds one to the LF, so the
+// stream holds CR CR LF and the stage's derived form is built from the same
+// rule: the raw form would match only the tail and leave the CR behind.
+func TestScrubRedactsCRLFValue(t *testing.T) {
+	t.Parallel()
+	value := "poc-crlf-5678\r\nsecond-line-9999"
+	stream := writeToPty(t, []byte(value+"\n"))
+	got := runScrub(t, []string{value}, stream)
+	if strings.Contains(got, "5678") || strings.Contains(got, "9999") {
+		t.Fatalf("the CRLF value reached the read surface: %q", got)
+	}
+	if want := strings.Repeat("*", len(value)+1) + "\r\n"; got != want {
+		t.Fatalf("scrubbed %q, want %q", got, want)
+	}
+}
+
+// TestPaneReadDrawsRedactedMultiLineValue proves the multi-line redaction
+// reaches a read surface: the pane takes the server's set, the stage scrubs
+// the pty's CRLF stream, and `read` draws the redaction and no part of the
+// value. The stream is a real pty's output, so the newline translation is
+// the terminal driver's and not the test's.
+func TestPaneReadDrawsRedactedMultiLineValue(t *testing.T) {
+	t.Parallel()
+	p, cli, msgs := yankPane(t, 60, 10)
+	// The adopted signal is the daemon's, and this harness builds the pane
+	// by hand: the push would close a nil channel.
+	p.adopted = make(chan struct{})
+	value := "poc-pem-5678\nsecond-line-9999"
+	body := jsonRaw(map[string]any{
+		"values":    []string{value},
+		"valuesB64": [][]byte{[]byte(value)},
+	})
+	if reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "set-secrets", ID: 1, Res: body}); !reply.OK {
+		t.Fatalf("set-secrets: %s", reply.Error)
+	}
+	var out bytes.Buffer
+	p.scrub.feed([]byte(writeToPty(t, []byte(value+"\n"))), &out)
+	p.mu.Lock()
+	p.publishLocked(out.Bytes())
+	p.mu.Unlock()
+	reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "read", ID: 2})
+	drawn := strings.Join(reply.Lines, "\n")
+	if strings.Contains(drawn, "poc-pem") || strings.Contains(drawn, "second-line") {
+		t.Fatalf("the read surface drew the value: %q", drawn)
+	}
+	if !strings.Contains(drawn, strings.Repeat("*", len(value)+1)) {
+		t.Fatalf("the read surface drew %q, want the value redacted whole", drawn)
+	}
+}
+
+// TestScrubRedactsBareLFValue proves the raw LF form stays registered: a
+// stream the pty did not translate still redacts whole.
+func TestScrubRedactsBareLFValue(t *testing.T) {
+	t.Parallel()
+	value := "poc-pem-5678\nsecond-line-9999"
+	got := runScrub(t, []string{value}, "x"+value+"y")
+	if want := "x" + strings.Repeat("*", len(value)) + "y"; got != want {
+		t.Fatalf("scrubbed %q, want %q", got, want)
+	}
+}
+
+// writeToPty writes b to a real pty's output side and returns the bytes its
+// master reads, so the newline translation is the terminal driver's.
+func writeToPty(t *testing.T, b []byte) string {
+	t.Helper()
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatalf("pty: %v", err)
+	}
+	t.Cleanup(func() { _ = ptmx.Close(); _ = tty.Close() })
+	if _, err := tty.Write(b); err != nil {
+		t.Fatalf("write pty: %v", err)
+	}
+	buf := make([]byte, 4096)
+	n, err := ptmx.Read(buf)
+	if err != nil {
+		t.Fatalf("read pty: %v", err)
+	}
+	return string(buf[:n])
 }
 
 // TestScrubWithoutValuesPassesThrough proves a pane with no secrets emits
@@ -127,6 +275,95 @@ func TestSecretValuesReadsBody(t *testing.T) {
 	}
 	if _, err := secretValues([]byte(`{`)); err == nil {
 		t.Fatal("malformed body accepted, want an error")
+	}
+}
+
+// TestSecretValuesReadsExactBytes proves the set-secrets body carries a
+// value's bytes exactly. A plain JSON string list is not a byte carrier:
+// json.Marshal replaces every byte that is not valid UTF-8 with U+FFFD, so
+// the pane would hold a list the registry never had and the stage would
+// never match the value's real bytes.
+func TestSecretValuesReadsExactBytes(t *testing.T) {
+	t.Parallel()
+	value := "poc-\xff\xfe-1234"
+	body := jsonRaw(map[string]any{
+		"values":    []string{value},
+		"valuesB64": [][]byte{[]byte(value)},
+	})
+	values, err := secretValues(body)
+	if err != nil {
+		t.Fatalf("secretValues: %v", err)
+	}
+	if len(values) != 1 || values[0] != value {
+		t.Fatalf("values = %q, want the exact bytes", values)
+	}
+	// The plain list alone is the legacy fallback, and it is lossy: that is
+	// why the exact form exists.
+	legacy, err := secretValues(jsonRaw(map[string]any{"values": []string{value}}))
+	if err != nil {
+		t.Fatalf("legacy secretValues: %v", err)
+	}
+	if len(legacy) != 1 || legacy[0] == value {
+		t.Fatalf("the plain list kept the bytes: the fallback is meant to be lossy")
+	}
+	// An empty exact list is a clear, and neither form present is a bad body.
+	if got, err := secretValues(jsonRaw(map[string]any{"valuesB64": [][]byte{}})); err != nil || len(got) != 0 {
+		t.Fatalf("empty set = %q, %v, want a clear", got, err)
+	}
+	if _, err := secretValues(jsonRaw(map[string]any{})); err == nil {
+		t.Fatal("a body with no list was accepted")
+	}
+}
+
+// TestScrubRedactsWireValueWithInvalidUTF8 proves the whole path: the body
+// the server sends, the pane's parse of it, and the stage. A value with two
+// bytes that are not valid UTF-8 redacts whole, so neither the bad bytes nor
+// the readable ones around them reach a read surface.
+func TestScrubRedactsWireValueWithInvalidUTF8(t *testing.T) {
+	t.Parallel()
+	value := "poc-\xff\xfe-1234"
+	values, err := secretValues(jsonRaw(map[string]any{
+		"values":    []string{value},
+		"valuesB64": [][]byte{[]byte(value)},
+	}))
+	if err != nil {
+		t.Fatalf("secretValues: %v", err)
+	}
+	got := runScrub(t, values, "file: "+value+"\r\n")
+	want := "file: " + strings.Repeat("*", len(value)) + "\r\n"
+	if got != want {
+		t.Fatalf("scrubbed %q, want %q", got, want)
+	}
+}
+
+// TestSetSecretsActionHoldsExactBytes proves the pane's action stores the
+// list the server sent, byte for byte: the body crosses a socket and a JSON
+// frame, and the stage matches whatever the action kept.
+func TestSetSecretsActionHoldsExactBytes(t *testing.T) {
+	t.Parallel()
+	p, cli, msgs := yankPane(t, 40, 5)
+	// The adopted signal is the daemon's, and this harness builds the pane
+	// by hand: the push would close a nil channel.
+	p.adopted = make(chan struct{})
+	value := "poc-\xff\xfe-1234"
+	body := jsonRaw(map[string]any{
+		"values":    []string{value},
+		"valuesB64": [][]byte{[]byte(value)},
+	})
+	reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "set-secrets", ID: 1, Res: body})
+	if !reply.OK {
+		t.Fatalf("set-secrets: %s", reply.Error)
+	}
+	p.scrub.mu.Lock()
+	held := append([][]byte(nil), p.scrub.vals...)
+	p.scrub.mu.Unlock()
+	if len(held) != 1 || !bytes.Equal(held[0], []byte(value)) {
+		t.Fatalf("the pane holds %q, want the value's bytes", held)
+	}
+	var out bytes.Buffer
+	p.scrub.feed([]byte("x"+value+"y"), &out)
+	if want := "x" + strings.Repeat("*", len(value)) + "y"; out.String() != want {
+		t.Fatalf("the stage emitted %q, want %q", out.String(), want)
 	}
 }
 
