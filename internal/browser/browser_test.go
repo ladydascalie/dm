@@ -52,6 +52,35 @@ func TestOpenInvokesOpener(t *testing.T) {
 	}
 }
 
+// TestOpenPrefersGio proves the Linux opener is gio, with xdg-open only as the
+// fallback: xdg-open is a shell script that can exit 0 without opening
+// anything, so the page stayed closed with no error.
+func TestOpenPrefersGio(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("gio open is the linux opener")
+	}
+	gioDir, gioLog := fakeOpener(t, "gio")
+	xdgDir, xdgLog := fakeOpener(t, "xdg-open")
+	t.Setenv("PATH", gioDir+string(os.PathListSeparator)+xdgDir)
+
+	if err := Open("https://example.com"); err != nil {
+		t.Fatalf("Open() = %v, want nil", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if b, err := os.ReadFile(gioLog); err == nil && string(b) == "open https://example.com\n" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("gio not invoked with the open verb within 5s")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(xdgLog); err == nil {
+		t.Fatal("xdg-open was invoked while gio was on PATH")
+	}
+}
+
 func TestOpenNoOpener(t *testing.T) {
 	empty := t.TempDir()
 	t.Setenv("PATH", empty)

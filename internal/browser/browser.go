@@ -10,6 +10,10 @@ import (
 // It starts the opener and returns; a goroutine reaps the opener once it
 // exits, so the caller holds no zombie. An error means no opener could start,
 // so the caller still owns target.
+//
+// On Linux it prefers gio open: gio asks the desktop for the default handler,
+// while xdg-open is a shell script that exits 0 without opening anything when
+// the desktop helper it looks for is missing. gio is the one that reports it.
 func Open(target string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
@@ -18,7 +22,11 @@ func Open(target string) error {
 	case "windows":
 		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
 	default:
-		cmd = exec.Command("xdg-open", target)
+		if _, err := exec.LookPath("gio"); err == nil {
+			cmd = exec.Command("gio", "open", target)
+		} else {
+			cmd = exec.Command("xdg-open", target)
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		return err
