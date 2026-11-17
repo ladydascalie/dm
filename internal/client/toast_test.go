@@ -8,11 +8,25 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/cells"
 	"dm/internal/rail"
 	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
+)
+
+// toastParts renders the whole announcement a toast carries: its state, its
+// topic and its message, so a test reads a notify toast at a glance.
+func toastParts(x toast) string {
+	return strings.TrimSpace(strings.Join([]string{x.state, x.topic, x.text}, " "))
+}
+
+// The default theme's escapes the toast box paints with: the dim border and the
+// bright message.
+var (
+	dimBorder  = theme.DefaultTheme().Palette.RailDim.FG()
+	brightText = theme.DefaultTheme().Palette.RailText.FG()
 )
 
 func toastTexts(t *tui) []string {
@@ -238,7 +252,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 			}
 			// The interior is the text alone: bright text, then the right
 			// border, with no padding and no dropped glyph.
-			want := "\x1b[97m" + c.text + "\x1b[0m\x1b[90m" + theme.DefaultTheme().Glyphs.BorderVertical
+			want := brightText + c.text + "\x1b[0m" + dimBorder + theme.DefaultTheme().Glyphs.BorderVertical
 			if !strings.Contains(out, want) {
 				t.Fatalf("interior is not the whole text %q: %q", c.text, out)
 			}
@@ -301,12 +315,12 @@ func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
 	var b bytes.Buffer
 	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
 	out := b.String()
-	at := strings.Index(out, "\x1b[97m")
-	end := strings.Index(out[at:], "\x1b[0m\x1b[90m")
+	at := strings.Index(out, brightText)
+	end := strings.Index(out[at:], "\x1b[0m"+dimBorder)
 	if at < 0 || end < 0 {
 		t.Fatalf("no toast interior in %q", out)
 	}
-	got := strings.TrimRight(out[at+len("\x1b[97m"):at+end], " ")
+	got := strings.TrimRight(out[at+len(brightText):at+end], " ")
 	if n := cells.Cells(got); n > toastMaxWidth {
 		t.Fatalf("interior paints %d cells, want at most %d", n, toastMaxWidth)
 	}
@@ -340,7 +354,7 @@ func TestDrawToastsPaintsClosedBox(t *testing.T) {
 	if !strings.Contains(out, g.BorderBottomLeft+edge+g.BorderBottomRight) {
 		t.Fatalf("the box has no closed bottom border: %q", out)
 	}
-	want := "\x1b[0m\x1b[90m" + g.BorderVertical + "\x1b[97msaved 3 files\x1b[0m\x1b[90m" + g.BorderVertical + "\x1b[0m"
+	want := "\x1b[0m" + dimBorder + g.BorderVertical + "\x1b[0m" + brightText + "saved 3 files\x1b[0m" + dimBorder + g.BorderVertical + "\x1b[0m"
 	if !strings.Contains(out, want) {
 		t.Fatalf("the text row is not framed on both sides: %q", out)
 	}
@@ -421,5 +435,147 @@ func TestDrawToastsDropsBoxesThatDoNotFit(t *testing.T) {
 		if r > snap.Rows-1 {
 			t.Fatalf("a box painted on the bar row %d", r)
 		}
+	}
+}
+
+// drawRows lists the distinct screen rows a drawing placed a cursor on, in
+// first-seen order, so a test can count a box's rows.
+func drawRows(t *testing.T, out string) []int {
+	t.Helper()
+	seen := map[int]bool{}
+	rows := []int{}
+	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
+		r, _ := strconv.Atoi(out[m[2]:m[3]])
+		if !seen[r] {
+			seen[r] = true
+			rows = append(rows, r)
+		}
+	}
+	return rows
+}
+
+// A notify toast names its state in the top border: the theme's state mark and
+// the state word, in the state's colour, inside the corners.
+func TestDrawToastsNamesStateInBorder(t *testing.T) {
+	t.Parallel()
+	th := theme.DefaultTheme()
+	g := th.Glyphs
+	done := th.States["done"]
+	snap := &wire.Snapshot{Cols: 40, Rows: 8}
+	tui := &tui{}
+	tui.notifyEntry(box.Entry{Key: "notify/demo", State: box.StateDone, Msg: "gate green"})
+	var b bytes.Buffer
+	drawToasts(&b, th, snap, tui.toasts)
+	out := b.String()
+	head := g.BorderTopLeft + " " + done.Glyph + " done "
+	if !strings.Contains(out, head) {
+		t.Fatalf("the top border does not name the state %q: %q", head, out)
+	}
+	if !strings.Contains(out, done.Colour.FG()+head) {
+		t.Fatalf("the state name is not in the state's colour: %q", out)
+	}
+	if strings.Contains(out, "done:") {
+		t.Fatalf("the state name carries a colon: %q", out)
+	}
+}
+
+// An entry with no message is one interior row: the topic between the borders,
+// with no colon and no empty row behind it.
+func TestDrawToastsEmptyMessageKeepsOneRow(t *testing.T) {
+	t.Parallel()
+	th := theme.DefaultTheme()
+	snap := &wire.Snapshot{Cols: 40, Rows: 10}
+	tui := &tui{}
+	tui.notifyEntry(box.Entry{Key: "notify/demo", State: box.StateDone})
+	var b bytes.Buffer
+	drawToasts(&b, th, snap, tui.toasts)
+	out := b.String()
+	if !strings.Contains(out, "notify/demo") {
+		t.Fatalf("the topic is missing from the box: %q", out)
+	}
+	if strings.Contains(out, ":") {
+		t.Fatalf("an empty message left punctuation behind: %q", out)
+	}
+	// The box is three rows: the top border, the topic, the bottom border.
+	if rows := drawRows(t, out); len(rows) != 3 {
+		t.Fatalf("the box paints %d rows, want the border, the topic and the border: %v", len(rows), rows)
+	}
+	// The bottom border sits on the newest box's row, just above the bar.
+	if want := snap.Rows - 1; !strings.Contains(out, "\x1b["+strconv.Itoa(want)+";") {
+		t.Fatalf("the box does not end on row %d: %q", want, out)
+	}
+}
+
+// A notify toast stacks the topic above the message: the topic dim, the message
+// bright, both inside the border.
+func TestDrawToastsStacksTopicAboveMessage(t *testing.T) {
+	t.Parallel()
+	th := theme.DefaultTheme()
+	g := th.Glyphs
+	snap := &wire.Snapshot{Cols: 40, Rows: 10}
+	tui := &tui{}
+	tui.notifyEntry(box.Entry{Key: "notify/demo", State: box.StateBlocked, Msg: "waiting on tests"})
+	var b bytes.Buffer
+	drawToasts(&b, th, snap, tui.toasts)
+	out := b.String()
+	border := th.States["blocked"].Colour.FG()
+	topicRow := "\x1b[0m" + border + g.BorderVertical + "\x1b[0m" + dimBorder + "notify/demo"
+	if !strings.Contains(out, topicRow) {
+		t.Fatalf("the topic does not sit dim inside the border: %q", out)
+	}
+	msgRow := "\x1b[0m" + border + g.BorderVertical + "\x1b[0m" + brightText + "waiting on tests"
+	if !strings.Contains(out, msgRow) {
+		t.Fatalf("the message does not sit bright inside the border: %q", out)
+	}
+	if topicAt, msgAt := strings.Index(out, topicRow), strings.Index(out, msgRow); topicAt > msgAt {
+		t.Fatalf("the message paints above the topic: %q", out)
+	}
+	// Four rows: border, topic, message, border.
+	if rows := drawRows(t, out); len(rows) != 4 {
+		t.Fatalf("the box paints %d rows, want the border, both rows and the border: %v", len(rows), rows)
+	}
+}
+
+// A plain toast keeps the bare border it had: no state word, the text alone.
+func TestDrawToastsPlainHasNoTitle(t *testing.T) {
+	t.Parallel()
+	th := theme.DefaultTheme()
+	g := th.Glyphs
+	snap := &wire.Snapshot{Cols: 40, Rows: 8}
+	tui := &tui{}
+	tui.notify("copied 5 chars")
+	var b bytes.Buffer
+	drawToasts(&b, th, snap, tui.toasts)
+	out := b.String()
+	edge := strings.Repeat(g.BorderHorizontal, cells.Cells("copied 5 chars"))
+	if !strings.Contains(out, g.BorderTopLeft+edge+g.BorderTopRight) {
+		t.Fatalf("a plain toast grew a title bar: %q", out)
+	}
+}
+
+// A box on a screen narrower than its state name keeps a closed border and
+// stays inside the screen: the title elides rather than pushing the corner off
+// the right edge.
+func TestDrawToastsNarrowScreenClosesBox(t *testing.T) {
+	t.Parallel()
+	th := theme.DefaultTheme()
+	g := th.Glyphs
+	snap := &wire.Snapshot{Cols: 8, Rows: 8}
+	tui := &tui{}
+	tui.notifyEntry(box.Entry{Key: "notify/demo", State: box.StateDone, Msg: "gate green"})
+	var b bytes.Buffer
+	drawToasts(&b, th, snap, tui.toasts)
+	out := b.String()
+	title := th.States["done"].Glyph + " done"
+	want := g.BorderTopLeft + " " + cells.Elide(title, snap.Cols-4) + " " + g.BorderTopRight
+	if !strings.Contains(out, want) {
+		t.Fatalf("the top border is not closed inside the screen %q: %q", want, out)
+	}
+	// The box fills the screen: its left border sits in column 1.
+	if head := ";1H\x1b[0m" + th.States["done"].Colour.FG() + g.BorderTopLeft; !strings.Contains(out, head) {
+		t.Fatalf("the box does not start in column 1: %q", out)
+	}
+	if !strings.Contains(out, g.BorderBottomLeft+strings.Repeat(g.BorderHorizontal, snap.Cols-2)+g.BorderBottomRight) {
+		t.Fatalf("the bottom border is not closed across the screen: %q", out)
 	}
 }

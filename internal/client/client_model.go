@@ -418,30 +418,55 @@ type panePaint struct {
 	mark  *searchMark
 }
 
-// toast is one short message for the operator. Its time is when it was raised,
-// so the stack can expire it.
+// toast is one short message for the operator. A plain toast carries text
+// alone; a notify toast also carries the entry's state and topic, so its box
+// can name the state in the border and the topic above the message. Its time
+// is when it was raised, so the stack can expire it.
 type toast struct {
-	text string
-	at   time.Time
+	text  string
+	state string
+	topic string
+	at    time.Time
 }
 
-// notify raises a toast. A repeat of the newest text inside toastDedupe is the
-// same toast, not a second one. The stack keeps the last toastMax.
+// notify raises a plain toast: a client message with no entry behind it. The
+// box carries the text alone.
 func (t *tui) notify(text string) {
-	if text == "" {
+	t.pushToast(toast{text: text})
+}
+
+// notifyEntry raises the toast a notify entry deserves: the state in the title
+// bar, the topic above the message, and the message itself when the entry has
+// one.
+func (t *tui) notifyEntry(e box.Entry) {
+	t.pushToast(toast{text: e.Msg, state: string(e.State), topic: e.Key})
+}
+
+// pushToast appends a toast to the stack. A repeat of the newest toast inside
+// toastDedupe is the same toast, not a second one; an empty one is dropped. The
+// stack keeps the last toastMax.
+func (t *tui) pushToast(x toast) {
+	if x.text == "" && x.topic == "" {
 		return
 	}
-	now := time.Now()
+	x.at = time.Now()
 	if n := len(t.toasts); n > 0 {
-		if last := t.toasts[n-1]; last.text == text && now.Sub(last.at) < toastDedupe {
+		if last := t.toasts[n-1]; last.same(x) && x.at.Sub(last.at) < toastDedupe {
 			return
 		}
 	}
-	t.toasts = append(t.toasts, toast{text: text, at: now})
+	t.toasts = append(t.toasts, x)
 	if len(t.toasts) > toastMax {
 		t.toasts = t.toasts[len(t.toasts)-toastMax:]
 	}
 	t.dirty = true
+}
+
+// same reports whether two toasts are the same announcement: the same state,
+// topic and message, so a repeat about another pane or another state is a new
+// toast.
+func (x toast) same(y toast) bool {
+	return x.text == y.text && x.state == y.state && x.topic == y.topic
 }
 
 // expireToasts drops the toasts past toastLifetime.

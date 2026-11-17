@@ -936,13 +936,16 @@ is how a pasted mysql statement showed up as `0~SET GLOBAL ...;1~`.
 Small actions answer with a toast, not text in the status bar: the bar's right
 block is reserved for the scroll position, the search match and the divider
 hint. The client keeps up to three, each with the time it was raised, and
-draws them bottom right just above the bar, newest at the bottom: one row of
-bright text inside a dim border, as wide as the longest text plus its two
-border cells, clamped to the screen. A repeat of the newest text within one
-second is the same toast, and every toast expires after three seconds. Copying
-raises one, as does a failed request, an unknown key, an empty scrollback and a
-pane exit. An entry posted under `notify/` raises one too, unless it names the
-focused pane.
+draws them bottom right just above the bar, newest at the bottom. A toast is a
+small closed box, as wide as its longest row plus the two border cells, clamped
+to the screen: a plain one holds one row of bright text inside a dim border. An
+entry posted under `notify/` raises a toast that names the entry's state in the
+top border, in the state's own glyph and colour, and holds the topic dim above
+the bright message; an entry with no message is that border, the topic and the
+bottom border, with no colon and no empty row. A repeat of the newest
+announcement within one second is the same toast, and every toast expires after
+three seconds. Copying raises one, as does a failed request, an unknown key, an
+empty scrollback and a pane exit.
 
 System notifications are for the events worth interrupting for. A pane that
 enters `blocked`, `done` or `error`, or that exits, is posted to the box under

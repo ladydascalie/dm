@@ -34,12 +34,6 @@ func (t *tui) notifyRouteTag(id int, route string) {
 	t.notifyRoute[id] = route
 }
 
-// notifyToastText is the one line a toast shows: topic, state, message, in the
-// server renderer's order.
-func notifyToastText(e box.Entry) string {
-	return e.Key + " " + string(e.State) + ": " + e.Msg
-}
-
 // notifySuppress reports whether the operator is already looking at the pane
 // the entry is about, matching the server's renderer-side rule: a topic of
 // notify/<pane-id> with that pane focused stays silent, and a bare notify/
@@ -106,7 +100,7 @@ func (t *tui) takeNotifyList(m wire.Msg) {
 		if t.notifySuppress(e.Key) {
 			continue
 		}
-		t.notify(notifyToastText(e))
+		t.notifyEntry(e)
 	}
 	t.notifyRecentMerge(rep.Entries)
 	t.notifySeen = true

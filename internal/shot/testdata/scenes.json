@@ -335,6 +335,39 @@
       ],
       "activeWindow": 0,
       "focus": "a"
+    },
+    {
+      "name": "notify",
+      "cols": 100,
+      "rows": 20,
+      "rail": 34,
+      "theme": "dark",
+      "root": {
+        "dir": "row",
+        "kids": [
+          {
+            "pane": "a"
+          }
+        ]
+      },
+      "panes": [
+        {
+          "id": "a",
+          "name": "alpha",
+          "content": "$ go test ./...\nok  dm/internal/client"
+        }
+      ],
+      "windows": [
+        {
+          "id": "w1",
+          "name": "one"
+        }
+      ],
+      "activeWindow": 0,
+      "focus": "a",
+      "toast": "gate green",
+      "toastState": "done",
+      "toastTopic": "notify/demo"
     }
   ]
 }

@@ -32,7 +32,7 @@ func TestPaneExitToastsOnce(t *testing.T) {
 	if n := len(tui.toasts); n != 1 {
 		t.Fatalf("toasts = %d, want the one the entry raised", n)
 	}
-	if got, want := tui.toasts[0].text, "notify/w1p2 note: exited"; got != want {
+	if got, want := toastParts(tui.toasts[0]), "note notify/w1p2 exited"; got != want {
 		t.Fatalf("toast = %q, want %q", got, want)
 	}
 }

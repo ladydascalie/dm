@@ -177,8 +177,8 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 		v.Flush()
 		tr.vts[p.ID] = v
 	}
-	if sc.Toast != "" {
-		tr.toasts = []toast{{text: sc.Toast}}
+	if sc.Toast != "" || sc.ToastTopic != "" {
+		tr.toasts = []toast{{text: sc.Toast, state: sc.ToastState, topic: sc.ToastTopic}}
 	}
 	if sc.Float != nil {
 		fr := layout.Rect{X: sc.Float.X, Y: sc.Float.Y, W: sc.Float.W, H: sc.Float.H}

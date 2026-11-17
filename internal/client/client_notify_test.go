@@ -106,8 +106,8 @@ func TestNotifyFirstCatchUpToastsBacklogCap(t *testing.T) {
 	if got := len(tui.toasts); got != 3 {
 		t.Fatalf("toasts = %d, want 3: %+v", got, tui.toasts)
 	}
-	if tui.toasts[2].text != "notify/b done: third" {
-		t.Fatalf("newest toast = %q, want the newest entry", tui.toasts[2].text)
+	if got := toastParts(tui.toasts[2]); got != "done notify/b third" {
+		t.Fatalf("newest toast = %q, want the newest entry", got)
 	}
 	if tui.notifyCursor != 10 || !tui.notifySeen {
 		t.Fatalf("cursor = %d seen = %v, want 10 and caught up", tui.notifyCursor, tui.notifySeen)
@@ -124,7 +124,7 @@ func TestNotifyFocusedPaneSkipsToast(t *testing.T) {
 		{Seq: 5, Key: "notify/a", State: box.StateBlocked, Msg: "waiting on tests"},
 	}
 	tui.apply(notifyReply(tui.notifyID, entries))
-	if got := toastTexts(tui); len(got) != 1 || got[0] != "notify/b done: gate green" {
+	if got := toastParts(tui.toasts[0]); len(tui.toasts) != 1 || got != "done notify/b gate green" {
 		t.Fatalf("toasts = %q, want only the other pane's entry", got)
 	}
 	if tui.notifyCursor != 6 {
@@ -158,7 +158,7 @@ func TestNotifyCursorSkipsSeen(t *testing.T) {
 		{Seq: 9, Key: "notify/b", State: box.StateWorking, Msg: "old"},
 	}
 	tui.apply(notifyReply(tui.notifyID, entries))
-	if got := toastTexts(tui); len(got) != 1 || got[0] != "notify/b done: fresh" {
+	if got := toastParts(tui.toasts[0]); len(tui.toasts) != 1 || got != "done notify/b fresh" {
 		t.Fatalf("toasts = %q, want only the unseen entry", got)
 	}
 	if tui.notifyCursor != 11 {
@@ -226,5 +226,65 @@ func TestNotifyRoutesSharedIds(t *testing.T) {
 	}))
 	if got := len(tui.ncentre.entries); got != 1 {
 		t.Fatalf("centre entries = %d, want the newest reply alone", got)
+	}
+}
+
+// A notify toast keeps the entry's state and topic, so the box can name the
+// state in its border and the topic above the message. An entry with no message
+// carries no message row.
+func TestNotifyToastKeepsEntryParts(t *testing.T) {
+	t.Parallel()
+	tui := notifyTUI("")
+	tui.apply(notifyReply(tui.notifyID, []box.Entry{
+		{Seq: 2, Key: "notify/demo", State: box.StateDone},
+		{Seq: 1, Key: "notify/b", State: box.StateBlocked, Msg: "waiting on tests"},
+	}))
+	if got := len(tui.toasts); got != 2 {
+		t.Fatalf("toasts = %d, want both entries", got)
+	}
+	full := tui.toasts[0]
+	if full.state != "blocked" || full.topic != "notify/b" || full.text != "waiting on tests" {
+		t.Fatalf("toast = %+v, want the entry's state, topic and message", full)
+	}
+	bare := tui.toasts[1]
+	if bare.state != "done" || bare.topic != "notify/demo" || bare.text != "" {
+		t.Fatalf("toast = %+v, want the entry's state and topic and no message", bare)
+	}
+}
+
+// Every notify entry toasts, whatever its state: the toast surfaces the log, so
+// a note or a working entry is not silent.
+func TestNotifyEveryStateToasts(t *testing.T) {
+	t.Parallel()
+	tui := notifyTUI("")
+	tui.apply(notifyReply(tui.notifyID, []box.Entry{
+		{Seq: 3, Key: "notify/a", State: box.StateWorking, Msg: "running"},
+		{Seq: 2, Key: "notify/a", State: box.StateNote, Msg: "noted"},
+		{Seq: 1, Key: "notify/a", State: box.StateError, Msg: "crashed"},
+	}))
+	if got := len(tui.toasts); got != 3 {
+		t.Fatalf("toasts = %d, want one per state: %+v", got, tui.toasts)
+	}
+}
+
+// Two panes finishing with the same message are two announcements, so the dedupe
+// compares the topic as well as the message.
+func TestNotifyDedupeComparesTopic(t *testing.T) {
+	t.Parallel()
+	tui := notifyTUI("")
+	tui.apply(notifyReply(tui.notifyID, []box.Entry{
+		{Seq: 2, Key: "notify/b", State: box.StateDone, Msg: "ok"},
+		{Seq: 1, Key: "notify/a", State: box.StateDone, Msg: "ok"},
+	}))
+	if got := len(tui.toasts); got != 2 {
+		t.Fatalf("toasts = %d, want one per pane: %+v", got, tui.toasts)
+	}
+	// The same pane in the same state with the same message inside the dedupe
+	// window is one toast, not two.
+	tui.apply(notifyReply(tui.notifyID, []box.Entry{
+		{Seq: 3, Key: "notify/b", State: box.StateDone, Msg: "ok"},
+	}))
+	if got := len(tui.toasts); got != 2 {
+		t.Fatalf("toasts = %d, want the repeat joined: %+v", got, tui.toasts)
 	}
 }
