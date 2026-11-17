@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 
+	"dm/internal/pane"
 	"dm/internal/wire"
 
 	"github.com/creack/pty"
@@ -61,15 +62,25 @@ const (
 	maxWinRows = 65535
 )
 
-// floatEnv is the child's environment: the server's own, plus the pane and
-// session it belongs to, plus a TERM when the server has none. A child with no
-// TERM paints with whatever the default is, which is not what a pager wants.
+// floatEnv is the child's environment: the pane allowlist, with the float's
+// own pane and session ids, plus a TERM when the server has none. A child with
+// no TERM paints with whatever the default is, which is not what a pager
+// wants. The filter is pane.Env, the same rule a pane's shell gets, so the two
+// spawn paths cannot disagree about what the server may hand a shell.
 func floatEnv(session, target string) []string {
-	env := append(os.Environ(), "DM_PANE="+target, "DM_SESSION="+session)
-	if os.Getenv("TERM") == "" {
-		env = append(env, "TERM=xterm-256color")
+	env := pane.Env(os.Environ(), target, session)
+	if os.Getenv("TERM") != "" {
+		return env
 	}
-	return env
+	// The server has no TERM, or an empty one. Drop a kept-but-empty entry so
+	// the child gets one TERM, not two.
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "TERM=") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, "TERM=xterm-256color")
 }
 
 // openFloat starts a shell command on a PTY for cl and registers it. The id is

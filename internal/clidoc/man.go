@@ -215,6 +215,9 @@ func ManPage() string {
 		b.WriteString(roffEscape(e.Desc))
 		b.WriteString("\n")
 	}
+	b.WriteString("\n")
+	b.WriteString(roffEscape(PaneEnvNote))
+	b.WriteString("\n")
 
 	b.WriteString(".SH SEE ALSO\n")
 	b.WriteString(".BR tmux (1)\n")
