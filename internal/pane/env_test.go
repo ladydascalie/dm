@@ -1,65 +1,91 @@
 package pane
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 )
 
-// TestPaneEnvStripsSecrets proves the pane's child environment follows the
-// strip rule: a credential the server holds, whatever its spelling, never
-// reaches the pane, while the variables a shell needs and the pane's own
-// identity do.
-func TestPaneEnvStripsSecrets(t *testing.T) {
+// TestPaneEnvMatrix proves the allowlist rule, name by name. The first block
+// is the set a shell and a terminal must keep; the second is what the
+// adversarial review proved reached a pane when the rule was a denylist; the
+// last is everything else, which the rule now drops.
+func TestPaneEnvMatrix(t *testing.T) {
 	t.Parallel()
-	in := []string{
-		"PATH=/usr/bin",
-		"HOME=/home/b",
-		"TERM=xterm-256color",
-		"LANG=en_GB.UTF-8",
-		"OP_SERVICE_ACCOUNT_TOKEN=secret-op",
-		"AWS_SECRET_ACCESS_KEY=secret-aws",
-		"GITHUB_TOKEN=secret-gh",
-		"MY_PASSWORD=secret-pw",
-		"appCredential=secret-app",
-		"api-key=secret-api",
-		"私人PASSWORD=secret-unicode",
-		"DM_SESSION=stale",
-		"GPG_KEY=ABCDEF12",
-		"DM_STATE=/state",
-		"SSH_AUTH_SOCK=/tmp/agent.sock",
-		"XAUTHORITY=/home/b/.Xauthority",
+	cases := []struct {
+		name string
+		keep bool
+	}{
+		// A shell and a terminal need these.
+		{"PATH", true},
+		{"HOME", true},
+		{"USER", true},
+		{"LOGNAME", true},
+		{"SHELL", true},
+		{"TERM", true},
+		{"TERM_PROGRAM", true},
+		{"COLORTERM", true},
+		{"LANG", true},
+		{"LC_ALL", true},
+		{"LC_CTYPE", true},
+		{"TZ", true},
+		{"TMPDIR", true},
+		{"XDG_CONFIG_HOME", true},
+		{"XDG_RUNTIME_DIR", true},
+		{"DISPLAY", true},
+		// The path exemptions: a socket path or a cookie path, not a value.
+		{"SSH_AUTH_SOCK", true},
+		{"XAUTHORITY", true},
+		{"MY_SOCK", true},
+		// Proved to reach a pane while nine hint words were the whole rule.
+		{"AWS_ACCESS_KEY_ID", false},
+		{"AWS_SECRET_ACCESS_KEY", false},
+		{"MYSQL_PWD", false},
+		{"DATABASE_URL", false},
+		{"STRIPE_KEY", false},
+		{"GIT_ASKPASS", false},
+		{"KUBECONFIG", false},
+		{"OP_SERVICE_ACCOUNT_TOKEN", false},
+		{"GITHUB_TOKEN", false},
+		{"PASSWORD", false},
+		{"私人PASSWORD", false},
+		// A credential-shaped name may not ride the socket exemption.
+		{"AUTH_TOKEN_SOCK", false},
+		{"COOKIEJAR_SOCK", false},
+		// A shell does not need these, and DM_STATE is not inherited.
+		{"WINDOWID", false},
+		{"TMUX", false},
+		{"MAIL", false},
+		{"EDITOR", false},
+		{"GPG_KEY", false},
+		{"DM_STATE", false},
+		{"DM_NERD", false},
+		{"PWD", false},
 	}
-	got := paneEnv(in, "p1", "sess")
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := paneEnv([]string{c.name + "=value"}, "p1", "sess")
+			if kept := containsExact(got, c.name+"=value"); kept != c.keep {
+				t.Fatalf("%s: kept = %v, want %v (env: %q)", c.name, kept, c.keep, got)
+			}
+		})
+	}
+}
 
-	var kept, stripped []string
-	for _, kv := range in {
-		name := kv[:strings.IndexByte(kv, '=')]
-		if name == "DM_SESSION" {
-			continue // replaced, judged below
-		}
-		if containsExact(got, kv) {
-			kept = append(kept, name)
-		} else {
-			stripped = append(stripped, name)
+// TestPaneEnvMatrixNameToken proves the hint tokenizer behaves as its comment
+// says: a separator makes a match, a missing or doubled one does not.
+func TestPaneEnvMatrixNameToken(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"API_KEY", "api_key", "api-key"} {
+		if !secretEnvName(name) {
+			t.Errorf("%s: not a credential name, want one", name)
 		}
 	}
-	wantKept := []string{"PATH", "HOME", "TERM", "LANG", "GPG_KEY", "DM_STATE", "SSH_AUTH_SOCK", "XAUTHORITY"}
-	wantStripped := []string{"OP_SERVICE_ACCOUNT_TOKEN", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "MY_PASSWORD", "appCredential", "api-key", "私人PASSWORD"}
-	if !reflect.DeepEqual(kept, wantKept) {
-		t.Fatalf("kept %q, want %q", kept, wantKept)
-	}
-	if !reflect.DeepEqual(stripped, wantStripped) {
-		t.Fatalf("stripped %q, want %q", stripped, wantStripped)
-	}
-	if !containsExact(got, "DM_PANE=p1") {
-		t.Fatalf("env lacks DM_PANE=p1: %q", got)
-	}
-	if !containsExact(got, "DM_SESSION=sess") {
-		t.Fatalf("env lacks DM_SESSION=sess: %q", got)
-	}
-	if containsPrefix(got, "DM_SESSION=") && !containsExact(got, "DM_SESSION=sess") {
-		t.Fatalf("stale DM_SESSION survived: %q", got)
+	for _, name := range []string{"API__KEY", "APIKEY", "apiKey"} {
+		if secretEnvName(name) {
+			t.Errorf("%s: a credential name, want none", name)
+		}
 	}
 }
 
@@ -78,6 +104,51 @@ func TestPaneEnvOverridesInherited(t *testing.T) {
 	}
 }
 
+// TestPaneEnvKeepsSocketAndCookiePaths proves the path exemption outranks the
+// credential words: SSH_AUTH_SOCK and XAUTHORITY carry a permission-gated
+// path, and stripping them breaks ssh-agent forwarding and X clients. A
+// credential-shaped name still cannot use the exemption.
+func TestPaneEnvKeepsSocketAndCookiePaths(t *testing.T) {
+	t.Parallel()
+	got := paneEnv([]string{
+		"SSH_AUTH_SOCK=/tmp/agent.sock",
+		"XAUTHORITY=/home/b/.Xauthority",
+		"MY_SOCK=/run/my.sock",
+		"DOCKER_AUTH_TOKEN=secret",
+		"MY_TOKEN_SOCK=/run/token.sock",
+	}, "p", "s")
+	for _, keep := range []string{
+		"SSH_AUTH_SOCK=/tmp/agent.sock",
+		"XAUTHORITY=/home/b/.Xauthority",
+		"MY_SOCK=/run/my.sock",
+	} {
+		if !containsExact(got, keep) {
+			t.Errorf("%s stripped, want kept: %q", keep, got)
+		}
+	}
+	for _, drop := range []string{"DOCKER_AUTH_TOKEN=secret", "MY_TOKEN_SOCK=/run/token.sock"} {
+		if containsExact(got, drop) {
+			t.Errorf("%s kept, want stripped: %q", drop, got)
+		}
+	}
+}
+
+// TestPaneEnvAllowlistIsSmall proves the allowlist stays short: a name lands
+// on it when a shell or a terminal reads it before the first rc line runs,
+// and every other need is the operator's rc file to re-export.
+func TestPaneEnvAllowlistIsSmall(t *testing.T) {
+	t.Parallel()
+	const limit = 20
+	if len(paneEnvKeep) > limit {
+		t.Fatalf("allowlist has %d names, want at most %d: %v", len(paneEnvKeep), limit, paneEnvKeep)
+	}
+	for name := range paneEnvKeep {
+		if name != strings.ToUpper(name) {
+			t.Errorf("allowlist name %q is not upper case", name)
+		}
+	}
+}
+
 func containsExact(env []string, kv string) bool {
 	for _, e := range env {
 		if e == kv {
@@ -85,36 +156,4 @@ func containsExact(env []string, kv string) bool {
 		}
 	}
 	return false
-}
-
-func containsPrefix(env []string, prefix string) bool {
-	for _, e := range env {
-		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
-			return true
-		}
-	}
-	return false
-}
-
-// TestPaneEnvKeepsSocketAndCookiePaths proves the path exemption outranks
-// the AUTH hint: SSH_AUTH_SOCK and XAUTHORITY name permission-gated files,
-// not secrets, and stripping them would break ssh-agent forwarding and X
-// clients from panes.
-func TestPaneEnvKeepsSocketAndCookiePaths(t *testing.T) {
-	t.Parallel()
-	got := paneEnv([]string{
-		"SSH_AUTH_SOCK=/tmp/agent.sock",
-		"XAUTHORITY=/home/b/.Xauthority",
-		"GPG_AGENT_INFO=/tmp/gpg,S0:1",
-		"DOCKER_AUTH_TOKEN=secret", // AUTH hint still strips plain credential names
-	}, "p", "s")
-	if !containsExact(got, "SSH_AUTH_SOCK=/tmp/agent.sock") {
-		t.Fatalf("SSH_AUTH_SOCK stripped, want kept: %q", got)
-	}
-	if !containsExact(got, "XAUTHORITY=/home/b/.Xauthority") {
-		t.Fatalf("XAUTHORITY stripped, want kept: %q", got)
-	}
-	if containsExact(got, "DOCKER_AUTH_TOKEN=secret") {
-		t.Fatalf("DOCKER_AUTH_TOKEN kept, want stripped: %q", got)
-	}
 }

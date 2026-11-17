@@ -5,23 +5,31 @@ import (
 )
 
 // paneEnv builds the child's environment by rule, not by inheritance. The
-// pane daemon inherits the server's whole environment, and the server may
-// hold credentials of its own, OP_SERVICE_ACCOUNT_TOKEN for one. None of
-// those may reach a pane: everything the pane runs lands on its screen, its
-// scrollback and every read-back, so a leaked variable is published output.
+// pane runs the server's children, so inheriting the whole environment hands
+// the shell every variable the server holds, including its own credentials.
+// A variable that reaches a pane is published twice over, on the screen and
+// in every read-back, and the server's redaction only knows the values it
+// registered.
 //
-// The rule strips by name pattern. A variable whose upper-cased name
-// contains one of the secretEnvHints words is a credential and is dropped,
-// whatever its exact spelling; everything else a shell needs, PATH, HOME,
-// TERM, LANG and the rest, passes through. DM_PANE and DM_SESSION are
-// dropped from the inheritance and set last, so a pane always reports the
-// ids it was spawned with and never a stale pair.
+// So the rule is an allowlist. A variable passes only when it is one of the
+// names in paneEnvKeep, a name a shell and a terminal need; or when it
+// belongs to the LC_ or XDG_ name families; or when it is a path to a
+// permission-gated socket or cookie file, SSH_AUTH_SOCK and its kin,
+// XAUTHORITY. Everything else is dropped, and the operator's own rc file can
+// re-export whatever else the session needs.
 //
-// One exemption runs before the strip rule, the same way bare KEY already
-// escapes it: a name is kept when it names a socket path or a cookie file
-// path. SSH_AUTH_SOCK and XAUTHORITY match the AUTH hint, but their values
-// are filesystem paths gated by file permissions, not env secrets, and
-// stripping them breaks ssh-agent forwarding and X clients from panes.
+// The path exemption is narrow on purpose: a credential-shaped name may not
+// ride it, so a name must clear the allowlist or be free of the credential
+// words to pass. The allowlist itself is the rule; a name is not judged on
+// its spelling once it is on it, and a name that is not on it is not judged
+// at all.
+//
+// This narrows a shell's environment for accidents. It is not a secrecy
+// boundary: a pane runs as the same user as the server, so it can read the
+// daemon's /proc/<pid>/environ whatever this function does.
+//
+// DM_PANE and DM_SESSION are never inherited: the pane sets them last, so a
+// pane always reports the ids it was spawned with and never a stale pair.
 func paneEnv(in []string, id, session string) []string {
 	out := make([]string, 0, len(in)+2)
 	for _, kv := range in {
@@ -32,7 +40,7 @@ func paneEnv(in []string, id, session string) []string {
 		if name == "DM_PANE" || name == "DM_SESSION" {
 			continue
 		}
-		if !envPathName(name) && secretEnvName(name) {
+		if !paneEnvName(name) {
 			continue
 		}
 		out = append(out, kv)
@@ -40,25 +48,82 @@ func paneEnv(in []string, id, session string) []string {
 	return append(out, "DM_PANE="+id, "DM_SESSION="+session)
 }
 
+// paneEnvKeep is the exact allowlist: the names a shell and a terminal need
+// to start. Keep it short. Anything else the operator's rc file re-exports is
+// theirs to choose; a name only lands here when a shell or a terminal reads
+// it before the first rc line runs.
+var paneEnvKeep = map[string]struct{}{
+	// The command search path. Without it nothing runs.
+	"PATH": {},
+	// The home directory ~, rc files and history hang off.
+	"HOME": {},
+	// The identity a prompt and a tool read.
+	"USER": {},
+	// The other spelling of the login user; POSIX tools read it.
+	"LOGNAME": {},
+	// The login shell the operator chose.
+	"SHELL": {},
+	// The terminal type terminfo and curses look up.
+	"TERM": {},
+	// The terminal family; programs that adapt to it read it.
+	"TERM_PROGRAM": {},
+	// True colour support; the shell's colour helpers check it.
+	"COLORTERM": {},
+	// The default locale.
+	"LANG": {},
+	// The timezone date and the shell prompt read.
+	"TZ": {},
+	// Where mktemp and every temp file go.
+	"TMPDIR": {},
+	// The X display; with XAUTHORITY, an X client started from a pane.
+	"DISPLAY": {},
+	// The agent socket path; ssh-agent forwarding.
+	"SSH_AUTH_SOCK": {},
+	// The X cookie path; the other half of the DISPLAY exemption.
+	"XAUTHORITY": {},
+}
+
+// paneEnvPrefixes are the name families that pass whole: LC_* carries the
+// locale categories a shell and every program it starts read, XDG_* the base
+// directories a login session uses.
+var paneEnvPrefixes = []string{"LC_", "XDG_"}
+
+// paneEnvName reports whether the pane may inherit a variable with this name.
+func paneEnvName(name string) bool {
+	if _, ok := paneEnvKeep[name]; ok {
+		return true
+	}
+	for _, prefix := range paneEnvPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return envPathName(name) && !secretEnvName(name)
+}
+
 // envPathName reports whether a variable name carries a path to a
 // permission-gated socket or cookie file rather than a secret value. The
 // suffix covers the socket conventions, SSH_AUTH_SOCK and its kin; the
-// single name covers X's cookie path, XAUTHORITY.
+// single name covers X's cookie path, XAUTHORITY. A credential-shaped name
+// cannot use the exemption: the caller checks it against secretEnvName.
 func envPathName(name string) bool {
 	return name == "XAUTHORITY" || strings.HasSuffix(name, "_SOCK")
 }
 
 // secretEnvHints are the words that mark a variable name as a credential.
 // The match runs against the upper-cased name with every run of
-// non-alphanumeric characters turned into one underscore, so api-key,
-// apiKey and API_KEY all match API_KEY. KEY alone is absent on purpose: it
-// would strip ordinary non-secret names like GPG_KEY.
+// non-alphanumeric characters turned into one underscore: API_KEY and
+// api-key match, API__KEY, APIKEY and apiKey do not, because the tokenizer
+// keeps no separator. The allowlist is what carries the rule; this match
+// only stops a credential-shaped name from riding the socket path exemption.
+// KEY alone is absent on purpose: it would catch ordinary names like
+// GPG_KEY.
 var secretEnvHints = []string{
 	"TOKEN", "SECRET", "PASSWD", "PASSWORD", "CREDENTIAL",
 	"API_KEY", "PRIVATE_KEY", "AUTH", "COOKIE",
 }
 
-// secretEnvName reports whether a variable name matches the strip rule.
+// secretEnvName reports whether a variable name names a credential.
 func secretEnvName(name string) bool {
 	upper := strings.ToUpper(name)
 	var b strings.Builder

@@ -1222,5 +1222,7 @@ The shell a new pane runs.
 .TP
 \fBTMUX\fP
 Set inside tmux; dm uses it to pick its terminal behaviour.
+
+A pane's shell inherits a short allowlist of the server's environment: PATH, HOME, USER, LOGNAME, SHELL, TERM, TERM_PROGRAM, COLORTERM, LANG, LC_*, TZ, TMPDIR, XDG_*, DISPLAY, SSH_AUTH_SOCK and XAUTHORITY. Everything else is dropped, and dm sets DM_PANE and DM_SESSION itself. Each entry is a name a shell, a terminal or an X client needs before the shell reads its rc file; the rc file can re-export what else a session needs.
 .SH SEE ALSO
 .BR tmux (1)
