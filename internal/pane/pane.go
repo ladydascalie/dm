@@ -1164,6 +1164,28 @@ func (p *paneProc) setStatus(st wire.Status) {
 	p.broadcastLocked(wire.Msg{Type: "status", St: &st})
 }
 
+// rescrubStatus re-applies the scrub to the stored status after the value list
+// changed. It is the one writer's other half: a status stored before the set
+// was scrubbed with an empty list, and the text is in the box the pane's reads
+// draw from, so the new list has to reach it too. The status is republished
+// only when the text changed, so a push that exposes nothing is not a wake-up
+// for every client.
+//
+// The lock order is the pane's then the scrubber's. Nothing takes them the
+// other way: the filter and the read loop scrub before they take p.mu.
+func (p *paneProc) rescrubStatus() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	st := p.st
+	st.Message = p.scrub.redactText(st.Message)
+	st.App = p.scrub.redactText(st.App)
+	if st == p.st {
+		return
+	}
+	p.st = st
+	p.broadcastLocked(wire.Msg{Type: "status", St: &st})
+}
+
 func (p *paneProc) shutdown() {
 	ptmx, cmd := p.shellProc()
 	if ptmx != nil {
@@ -1363,6 +1385,12 @@ func (p *paneProc) serve(c net.Conn) {
 				continue
 			}
 			p.scrub.set(values)
+			// A status reported before this set was stored as it arrived: the
+			// shell can start on the grace with an empty list, or report
+			// before its first connection carried one. The set is what makes
+			// the stored text safe, so it is scrubbed again here and
+			// republished when the text changed.
+			p.rescrubStatus()
 			// The set is in place, so the shell may start: startShell waits
 			// on this close, which is what makes the pane's first byte
 			// scrubbed. A later push only updates the values.

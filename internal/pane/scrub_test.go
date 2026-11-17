@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/creack/pty"
 
@@ -84,6 +83,70 @@ func TestScrubPrefersLongestAtEqualOffset(t *testing.T) {
 	got = runScrub(t, []string{"poc-token-1234", "poc-"}, "key: poc-token-1234\n")
 	if got != want {
 		t.Fatalf("long value first scrubbed %q, want %q", got, want)
+	}
+}
+
+// TestScrubPrefersLongestAtEverySplit proves the prefix rule survives every
+// chunk boundary. A cut inside the longer value leaves the shorter one as the
+// only complete match in hand, and a scan that finalises it puts "****" on the
+// wire and lets the longer value's tail follow raw. Both name orders, every
+// split point.
+func TestScrubPrefersLongestAtEverySplit(t *testing.T) {
+	t.Parallel()
+	const long = "poc-token-1234"
+	stream := "key: " + long + "\n"
+	want := "key: " + strings.Repeat("*", len(long)) + "\n"
+	for _, vals := range [][]string{{"poc-", long}, {long, "poc-"}} {
+		for cut := 1; cut < len(stream); cut++ {
+			got := runScrub(t, vals, stream[:cut], stream[cut:])
+			if got != want {
+				t.Fatalf("values %v, split at %d: %q, want %q", vals, cut, got, want)
+			}
+			if len(got) != len(stream) {
+				t.Fatalf("values %v, split at %d changed the length: %q", vals, cut, got)
+			}
+		}
+	}
+}
+
+// TestScrubPrefersLongestByteAtATime is the worst case for the hold-back: one
+// byte per chunk, so the longer value is never in the scan at the moment its
+// prefix completes.
+func TestScrubPrefersLongestByteAtATime(t *testing.T) {
+	t.Parallel()
+	const long = "poc-token-1234"
+	stream := "key: " + long + "\n"
+	want := "key: " + strings.Repeat("*", len(long)) + "\n"
+	for _, vals := range [][]string{{"poc-", long}, {long, "poc-"}} {
+		chunks := make([]string, 0, len(stream))
+		for i := 0; i < len(stream); i++ {
+			chunks = append(chunks, stream[i:i+1])
+		}
+		got := runScrub(t, vals, chunks...)
+		if got != want {
+			t.Fatalf("values %v, byte at a time: %q, want %q", vals, got, want)
+		}
+	}
+}
+
+// TestScrubFlushFinalisesAHeldPrefix proves the end of the stream settles a
+// held match: the longer value can no longer complete, so the shorter one is
+// redacted whole and its tail follows.
+func TestScrubFlushFinalisesAHeldPrefix(t *testing.T) {
+	t.Parallel()
+	var s scrubber
+	s.set([]string{"poc-", "poc-token-1234"})
+	var out bytes.Buffer
+	s.feed([]byte("poc-tok"), &out)
+	if out.Len() != 0 {
+		t.Fatalf("the unsettled match was on the wire already: %q", out.String())
+	}
+	s.flush(&out)
+	if got, want := out.String(), "****tok"; got != want {
+		t.Fatalf("flush emitted %q, want %q", got, want)
+	}
+	if out.Len() != len("poc-tok") {
+		t.Fatalf("flush changed the length: %q", out.String())
 	}
 }
 
@@ -194,11 +257,11 @@ func TestScrubRedactsBareLFValue(t *testing.T) {
 // writeToPty writes b to a real pty's output side and returns the bytes its
 // master reads, so the newline translation is the terminal driver's.
 //
-// One read may return less than the driver wrote, so the read loops until the
-// whole input has arrived. The output is never shorter than the input: the
-// only translation is ONLCR, which adds a byte per LF. A single read here
-// handed a loaded machine a truncated stream, and the test then failed on a
-// value the pty never delivered.
+// The output side is closed after the write, so the master reads the driver's
+// whole translation and then hits the end of the stream. One read can stop
+// short of what the driver wrote, and a hard coded expansion would stop
+// testing the driver, so the end of the stream is the only correct stopping
+// rule here.
 func writeToPty(t *testing.T, b []byte) string {
 	t.Helper()
 	ptmx, tty, err := pty.Open()
@@ -209,17 +272,19 @@ func writeToPty(t *testing.T, b []byte) string {
 	if _, err := tty.Write(b); err != nil {
 		t.Fatalf("write pty: %v", err)
 	}
-	buf := make([]byte, 4096)
+	_ = tty.Close()
 	var out []byte
-	for len(out) < len(b) {
-		_ = ptmx.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 4096)
+	for {
 		n, err := ptmx.Read(buf)
 		out = append(out, buf[:n]...)
 		if err != nil {
-			t.Fatalf("read pty: %v", err)
+			if len(out) == 0 {
+				t.Fatalf("read pty: %v", err)
+			}
+			return string(out)
 		}
 	}
-	return string(out)
 }
 
 // TestScrubWithoutValuesPassesThrough proves a pane with no secrets emits

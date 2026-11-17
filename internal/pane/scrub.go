@@ -135,13 +135,16 @@ func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 	}
 	data := append(s.carry, b...)
 	s.carry = s.carry[:0]
-	pos := redactInto(out, vals, data)
+	// A match is not final while the data stops inside a longer value that
+	// starts at the same offset: the scan gives those bytes back, and the
+	// hold-back below takes them from the match start. That is what keeps a
+	// short value that is a proper prefix of a long one from finalising at a
+	// chunk boundary.
+	pos := redactInto(out, vals, data, false)
 	// Only the bytes a next chunk could complete wait in carry: the longest
 	// suffix of the unemitted data that is a proper prefix of some value.
 	// A tail that cannot begin a match flows with zero delay, the same rule
-	// the OSC filter applies to partial sequences. A match that reached past
-	// this point already consumed its bytes, and they are redacted on the
-	// wire.
+	// the OSC filter applies to partial sequences.
 	hold := 0
 	if maxLen > 1 {
 		hold = holdBack(vals, maxLen, data[pos:])
@@ -192,7 +195,7 @@ func (s *scrubber) flush(out *bytes.Buffer) {
 		out.Write(data)
 		return
 	}
-	pos := redactInto(out, vals, data)
+	pos := redactInto(out, vals, data, true)
 	out.Write(data[pos:])
 }
 
@@ -220,14 +223,16 @@ func (s *scrubber) redactText(text string) string {
 	data := []byte(text)
 	var out bytes.Buffer
 	out.Grow(len(data))
-	pos := redactInto(&out, vals, data)
+	pos := redactInto(&out, vals, data, true)
 	out.Write(data[pos:])
 	return out.String()
 }
 
 // redactInto writes data with every value replaced by the same number of
-// redaction bytes and returns the offset it stopped emitting at, which is the
-// end of the last match or zero when no value matched.
+// redaction bytes and returns the offset it stopped emitting at: every byte
+// before it is on the wire, redacted or not, and the bytes from it on are not.
+// That is the end of the last finalised match, the start of a match the data
+// cannot yet settle, or zero when no value matched.
 //
 // Matching is leftmost-longest: at each position the match that starts first
 // wins, and among values that start at the same offset the longest wins. The
@@ -235,17 +240,40 @@ func (s *scrubber) redactText(text string) string {
 // name order, so a value that is a proper prefix of another one arrives
 // first, and redacting only the prefix would publish the longer value's tail
 // in the clear.
-func redactInto(out *bytes.Buffer, vals [][]byte, data []byte) int {
+//
+// The longest rule only holds over the bytes in hand. A chunk can end inside a
+// longer value that starts at the same offset, and then the shorter value is
+// the only complete match: finalising it would put its redaction on the wire
+// and flush the longer value's tail after it. So a match whose bytes are a
+// proper prefix of a longer value is not finalised while more data can come:
+// the scan stops before it and the caller holds the bytes from the match start
+// for the next chunk. final says no more data can come (a flush, or a whole
+// status text), so the longest complete match is the answer and the hold ends.
+func redactInto(out *bytes.Buffer, vals [][]byte, data []byte, final bool) int {
 	pos := 0
 	for {
 		at, n := nextMatch(vals, data, pos)
 		if at < 0 {
 			return pos
 		}
+		if !final && extendsPast(vals, data[at:]) {
+			return pos
+		}
 		out.Write(data[pos:at])
 		writeRedacted(out, n)
 		pos = at + n
 	}
+}
+
+// extendsPast reports whether data is a proper prefix of a registered value,
+// so a next chunk could still complete a longer match at the same offset.
+func extendsPast(vals [][]byte, data []byte) bool {
+	for _, v := range vals {
+		if len(v) > len(data) && bytes.HasPrefix(v, data) {
+			return true
+		}
+	}
+	return false
 }
 
 // nextMatch returns the offset and the length of the leftmost, longest value

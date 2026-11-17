@@ -170,6 +170,79 @@ func TestStatusAppIsScrubbed(t *testing.T) {
 	}
 }
 
+// TestStatusStateNeverCarriesAValue proves the state field is validated, not
+// scrubbed: every verb prints the state unscrubbed, so a report cannot put a
+// value there at all. The pane holds the value on its list, so an asterisk
+// state here would mean the wrong fix ran.
+func TestStatusStateNeverCarriesAValue(t *testing.T) {
+	t.Parallel()
+	p, _, _ := statusPane(t)
+	feedStatus(t, p, "\x1b]7501;state="+statusValue+":app=pi\x07", 1)
+	p.mu.Lock()
+	st := p.st
+	p.mu.Unlock()
+	if st.State != "unknown" {
+		t.Fatalf("state = %q, want unknown: a state is not free text", st.State)
+	}
+}
+
+// TestStatusRescrubbedWhenTheSetArrives proves a status stored before the value
+// list existed does not stay raw. The grace lets a shell start with no list, so
+// a report can land first; the set has to reach the stored text and the clients
+// that read it.
+func TestStatusRescrubbedWhenTheSetArrives(t *testing.T) {
+	t.Parallel()
+	p, cli, msgs := yankPane(t, 60, 10)
+	// The adopted signal is the daemon's, and this harness builds the pane by
+	// hand: the push would close a nil channel.
+	p.adopted = make(chan struct{})
+	// No list yet: the report is stored as it arrived.
+	feedStatus(t, p, wireStatus("error", statusValue, "auth failed: "+statusValue), 1)
+	p.mu.Lock()
+	st := p.st
+	p.mu.Unlock()
+	if st.Message != "auth failed: "+statusValue || st.App != statusValue {
+		t.Fatalf("status = %+v, want it stored as reported", st)
+	}
+
+	sub := subscriber(p)
+	body := jsonRaw(map[string]any{
+		"values":    []string{statusValue},
+		"valuesB64": [][]byte{[]byte(statusValue)},
+	})
+	if reply := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "set-secrets", ID: 1, Res: body}); !reply.OK {
+		t.Fatalf("set-secrets: %s", reply.Error)
+	}
+
+	want := "auth failed: " + strings.Repeat("*", len(statusValue))
+	p.mu.Lock()
+	st = p.st
+	p.mu.Unlock()
+	if st.Message != want {
+		t.Fatalf("stored message = %q, want %q", st.Message, want)
+	}
+	if st.App != strings.Repeat("*", len(statusValue)) {
+		t.Fatalf("stored app = %q, want the redaction", st.App)
+	}
+	if st.State != "error" {
+		t.Fatalf("state = %q, want error", st.State)
+	}
+
+	// The rewrite reaches the clients as a fresh status broadcast and the read
+	// surface as the stored status.
+	frame := waitStatusFrame(t, sub)
+	if frame.St == nil || frame.St.Message != want {
+		t.Fatalf("broadcast status = %+v, want the redaction", frame.St)
+	}
+	read := paneRequest(t, cli, msgs, wire.Msg{Type: "req", Action: "read", ID: 2})
+	if read.St == nil || read.St.Message != want {
+		t.Fatalf("read status = %+v, want the redaction", read.St)
+	}
+	if strings.Contains(string(mustJSON(t, read)), statusValue) {
+		t.Fatal("the read reply holds the value")
+	}
+}
+
 // TestStatusWithoutValueIsUnchanged proves a status with no value in it is
 // stored as it arrived, and a clear still clears. Nothing about the value list
 // changes the ordinary report.
