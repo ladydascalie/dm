@@ -465,17 +465,18 @@ func paletteWrap(s string, w int) []string {
 }
 
 // paintPaletteQuery paints the query line with the input component: the
-// prompt, the query text and the right signpost, on the rail ground. It returns
-// the cell the terminal parks its cursor on, which is the cell after the query.
+// prompt, the query text and the signpost, on the rail ground. It returns the
+// cell the terminal parks its cursor on, which is the cell after the query.
 //
-// The signpost sits on the interior's right edge. The three cells before it are
-// the cursor's cell and the two cells of gutter the row keeps between the query
-// and the signpost, so a query that fills the line still leaves the cursor on a
-// blank cell. No caret glyph: the palette shows the terminal cursor.
+// The signpost and its two cells of gutter are the row's trailing text, so the
+// signpost sits two cells clear of the right edge and the query's room is the
+// row minus the prompt, the signpost and the gutter. The row's cells are the
+// ones the hand-written painter drew. No caret glyph: the palette shows the
+// terminal cursor.
 func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, in ui.Input, r layout.Rect, hint string) (cx, cy int) {
 	trailing := ""
 	if hint != "" {
-		trailing = "   " + hint
+		trailing = hint + "  "
 	}
 	return ui.DrawInput(buf, th, ui.InputProps{
 		Rect:     r,

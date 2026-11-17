@@ -11,7 +11,10 @@ import (
 	"dm/internal/cells"
 	"dm/internal/configdoc"
 	"dm/internal/keymap"
+	"dm/internal/layout"
 	"dm/internal/testutil"
+	"dm/internal/theme"
+	"dm/internal/vt"
 )
 
 // TestCommandPaletteOpens: prefix k raises the palette over the main actions,
@@ -326,10 +329,28 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	if cx < g.X+1 {
 		t.Fatalf("cursor column = %d, before the interior edge %d", cx, g.X+1)
 	}
-	// The ? signpost reserves the query line's right edge; the cursor must
-	// stop short of it even on a full query.
-	if cx > g.X+g.W-2-cells.Cells(paletteHelpHint)-2 {
-		t.Fatalf("cursor column = %d, under the ? signpost", cx)
+	// The signpost and its two cells of gutter end the row, so the signpost's
+	// first cell is one past the room the query gets. A query that fills the
+	// line leaves the cursor on that cell, and never past it.
+	signpost := g.X + g.W - 2 - cells.Cells(paletteHelpHint) - 2 + 1
+	if cx > signpost {
+		t.Fatalf("cursor column = %d, past the signpost's first cell %d", cx, signpost)
+	}
+}
+
+// TestCommandPaletteQueryRowPaintsTheOldCells: the query row is the row eddc70d
+// painted. The caller passes the signpost and its two cells of gutter as the
+// trailing text, so the signpost sits two cells clear of the right edge and the
+// query keeps the rest of the line.
+func TestCommandPaletteQueryRowPaintsTheOldCells(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	paintPaletteQuery(&buf, theme.DefaultTheme(), inputOf("send"), layout.Rect{W: 20, H: 1}, "? help")
+	term := vt.NewTerm(20, 1)
+	term.Write(buf.Bytes())
+	term.Flush()
+	if got, want := term.Grid().Text(0), "> send      ? help"; got != want {
+		t.Fatalf("query row = %q, want %q", got, want)
 	}
 }
 

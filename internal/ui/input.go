@@ -32,7 +32,7 @@ type Input struct {
 type InputProps struct {
 	Rect     layout.Rect // Rect is the one row the input owns.
 	Prompt   string      // Prompt is the fixed label before the text.
-	Trailing string      // Trailing is the text on the row's right edge, gap included.
+	Trailing string      // Trailing is the text on the row's right edge, its spaces included.
 	Ground   theme.RGB   // Ground is the row's ground, filled to Rect.
 	Dim      theme.RGB   // Dim is the prompt and the trailing text.
 	Text     theme.RGB   // Text is the value.

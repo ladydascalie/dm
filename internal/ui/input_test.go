@@ -155,23 +155,38 @@ func TestDrawInput(t *testing.T) {
 		},
 		{
 			// internal/client:paintPaletteQuery's row: the prompt, the query
-			// and the right-edge signpost, with no caret cell of its own.
+			// and the signpost the caller passes, which carries its own two
+			// cells of gutter. No caret cell: the palette parks the terminal
+			// cursor. The row is the one eddc70d painted, the signpost two
+			// cells clear of the right edge.
 			name:     "the palette row",
 			rect:     layout.Rect{W: 20, H: 1},
 			prompt:   "> ",
-			trailing: "  ? help",
+			trailing: "? help  ",
 			value:    "send",
 			caret:    4,
-			want:     "> send        ? help",
+			want:     "> send      ? help  ",
 			wantCX:   6,
 		},
 		{
-			name:   "the palette row with no query",
+			name:     "the palette row with no query",
+			rect:     layout.Rect{W: 20, H: 1},
+			prompt:   "> ",
+			trailing: "? help  ",
+			caret:    0,
+			want:     ">           ? help  ",
+			wantCX:   2,
+		},
+		{
+			// The palette hides the signpost while the help float is open, so
+			// the row carries no trailing text at all.
+			name:   "the palette row with the signpost hidden",
 			rect:   layout.Rect{W: 20, H: 1},
 			prompt: "> ",
-			caret:  0,
-			want:   ">                   ",
-			wantCX: 2,
+			value:  "send",
+			caret:  4,
+			want:   "> send              ",
+			wantCX: 6,
 		},
 		{
 			name:   "the empty value",
@@ -270,7 +285,7 @@ func TestDrawInput(t *testing.T) {
 			name:     "a trailing text wider than the row is cut",
 			rect:     layout.Rect{W: 8, H: 1},
 			prompt:   "> ",
-			trailing: "? help",
+			trailing: "? help  ",
 			caret:    0,
 			want:     "> ? help",
 			wantCX:   2,
@@ -315,13 +330,14 @@ func TestDrawInput(t *testing.T) {
 }
 
 // TestDrawInputColours: the prompt and the trailing text paint in Dim, the
-// value in Text and the caret cell in Caret, on the row's ground.
+// value in Text and the caret cell in Caret, on the row's ground. The trailing
+// is the palette caller's form, the signpost and its two cells of gutter.
 func TestDrawInputColours(t *testing.T) {
 	th := theme.DefaultTheme()
 	p := InputProps{
-		Rect:     layout.Rect{W: 16, H: 1},
+		Rect:     layout.Rect{W: 20, H: 1},
 		Prompt:   " name: ",
-		Trailing: " ",
+		Trailing: "? help  ",
 		Ground:   th.Palette.RailBG,
 		Dim:      th.Palette.RailDim,
 		Text:     th.Palette.RailText,
@@ -336,7 +352,7 @@ func TestDrawInputColours(t *testing.T) {
 		{0, 7, p.Dim},
 		{7, 11, p.Text},
 		{11, 12, p.Caret},
-		{15, 16, p.Dim},
+		{12, 20, p.Dim},
 	}
 	for _, w := range want {
 		for col := w.from; col < w.to; col++ {
@@ -349,7 +365,7 @@ func TestDrawInputColours(t *testing.T) {
 		t.Fatalf("caret cell = (%d,%d), want (11,0)", cx, cy)
 	}
 	// The caret cell is the only cell painted in the caret colour.
-	for col := 0; col < 16; col++ {
+	for col := 0; col < 20; col++ {
 		if col == cx {
 			continue
 		}
