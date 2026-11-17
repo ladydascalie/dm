@@ -78,8 +78,8 @@ func TestBodyReaderOpensOnV(t *testing.T) {
 		got[1] != "first body line" || got[5] != "fifth" {
 		t.Fatalf("reader lines = %q, want the summary with the body below", got)
 	}
-	if tui.reader.off != 0 {
-		t.Fatalf("reader offset = %d, want the top", tui.reader.off)
+	if tui.reader.win.Off != 0 {
+		t.Fatalf("reader offset = %d, want the top", tui.reader.win.Off)
 	}
 }
 
@@ -104,16 +104,16 @@ func TestBodyReaderScrolls(t *testing.T) {
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "v")
 	feed(tui, "j")
-	if tui.reader.off != 1 {
-		t.Fatalf("offset = %d, want 1", tui.reader.off)
+	if tui.reader.win.Off != 1 {
+		t.Fatalf("offset = %d, want 1", tui.reader.win.Off)
 	}
 	feed(tui, "G")
-	if want := len(tui.reader.lines) - tui.reader.Float.Rect.H; tui.reader.off != want || want == 0 {
-		t.Fatalf("offset = %d, want the bottom at %d", tui.reader.off, want)
+	if want := len(tui.reader.lines) - tui.reader.Float.Rect.H; tui.reader.win.Off != want || want == 0 {
+		t.Fatalf("offset = %d, want the bottom at %d", tui.reader.win.Off, want)
 	}
 	feed(tui, "g")
-	if tui.reader.off != 0 {
-		t.Fatalf("offset = %d, want the top", tui.reader.off)
+	if tui.reader.win.Off != 0 {
+		t.Fatalf("offset = %d, want the top", tui.reader.win.Off)
 	}
 	// The list window did not move while the reader scrolled.
 	if tui.box.Top() != 0 {
@@ -279,8 +279,8 @@ func TestBodyReaderScrollsWrappedRows(t *testing.T) {
 		t.Fatalf("lines = %q, want a wrapped body", r.lines)
 	}
 	r.Scroll(len(r.lines), theme.DefaultTheme())
-	if want := len(r.lines) - wrapRect().H; r.off != want {
-		t.Fatalf("offset = %d, want the bottom at %d", r.off, want)
+	if want := len(r.lines) - wrapRect().H; r.win.Off != want {
+		t.Fatalf("offset = %d, want the bottom at %d", r.win.Off, want)
 	}
 	screen := readerScreen(t, r, 80, 24)
 	rect := r.Float.Rect

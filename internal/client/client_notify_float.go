@@ -29,7 +29,10 @@ const notifyCentreLimit = 50
 // the operator has selected, and the pane that draws it.
 type notifyCentre struct {
 	entries []box.Entry
-	sel     int
+	// vp is the selection and the window over entries: the row the operator
+	// selected and the first row on screen. The centre's list scrolls, so the
+	// window follows the selection.
+	vp ui.Viewport
 	// read is the client's read mark: the seq below which every entry is
 	// read. The tui owns it; the copy here keeps the paint honest.
 	read int
@@ -62,13 +65,21 @@ func (c *notifyCentre) SetKeymap(km *keymap.Config) {
 // Sync fits the float to the screen after a snapshot or a rail change.
 func (c *notifyCentre) Sync(snap *wire.Snapshot, th theme.Theme) {
 	c.Float.Rect = boxview.BoxViewRect(snap, len(c.entries))
-	if c.sel >= len(c.entries) {
-		c.sel = len(c.entries) - 1
-	}
-	if c.sel < 0 {
-		c.sel = 0
-	}
+	c.fit()
 	c.paint(th)
+}
+
+// fit sizes the window to the entries and the float and holds it on the
+// selection: the selection never leaves the list and the window never hides
+// it.
+func (c *notifyCentre) fit() {
+	c.vp.N, c.vp.H = len(c.entries), c.Float.Rect.H
+	if c.vp.Sel < 0 && c.vp.N > 0 {
+		// The centre has no empty selection of its own: a reply after an empty
+		// list opens on the newest entry, the way the first reply does.
+		c.vp.Sel = 0
+	}
+	c.vp.Ensure()
 }
 
 // paint rewrites the float's terminal from the rows. Every row is placed
@@ -99,7 +110,7 @@ func (c *notifyCentre) paint(th theme.Theme) {
 	// earlier, longer list wrote do not survive under the shorter one.
 	buf.WriteString("\x1b[0m\x1b[2J")
 	for row := 0; row < r.H; row++ {
-		i := row
+		i := c.vp.Off + row
 		if i >= len(c.entries) {
 			break
 		}
@@ -110,7 +121,7 @@ func (c *notifyCentre) paint(th theme.Theme) {
 		}
 		// The selected row keeps its full intensity; the rest sit dim, the
 		// way the box paints its rows.
-		if i == c.sel {
+		if i == c.vp.Sel {
 			buf.WriteString("\x1b[0m")
 		} else {
 			buf.WriteString("\x1b[0m")
@@ -212,24 +223,20 @@ func (c *notifyCentre) unreadAt(i int) bool {
 	return c.entries[i].Seq > c.read
 }
 
-// Move moves the selection by n rows and repaints.
+// Move moves the selection by n rows and repaints. The window follows, so the
+// selected row is always on screen: the page keys step by the float's height.
 func (c *notifyCentre) Move(n int, th theme.Theme) {
-	c.sel += n
-	if c.sel >= len(c.entries) {
-		c.sel = len(c.entries) - 1
-	}
-	if c.sel < 0 {
-		c.sel = 0
-	}
+	c.vp.N = len(c.entries)
+	c.vp.Move(n)
 	c.paint(th)
 }
 
 // selected is the entry the operator acts on.
 func (c *notifyCentre) selected() (box.Entry, bool) {
-	if c.sel < 0 || c.sel >= len(c.entries) {
+	if c.vp.Sel < 0 || c.vp.Sel >= len(c.entries) {
 		return box.Entry{}, false
 	}
-	return c.entries[c.sel], true
+	return c.entries[c.vp.Sel], true
 }
 
 // openNotifyCentre summons the centre, or closes it when it is already up.
@@ -309,12 +316,6 @@ func (t *tui) takeNotifyCentreList(m wire.Msg) {
 	// The centre's list is the server's own recent window, so it is the
 	// truth the badge counts from while the centre is open.
 	t.notifyRecent = append(t.notifyRecent[:0], rep.Entries...)
-	if t.ncentre.sel >= len(rep.Entries) {
-		t.ncentre.sel = len(rep.Entries) - 1
-	}
-	if t.ncentre.sel < 0 {
-		t.ncentre.sel = 0
-	}
 	// Sync paints, so one paint covers the reply: the read mark goes in first,
 	// and notifPaint's second paint would write the same bytes again.
 	t.ncentre.read = t.notifyRead

@@ -409,7 +409,7 @@ func TestSwitcherDrawFocusRow(t *testing.T) {
 	s.Move(2)
 	out, _, _, _ := drawFloat(t, s, snap, nil)
 	l := switcherLayoutOf(s, snap)
-	want := l.bodyY + (s.sel - s.top)
+	want := l.bodyY + (s.vp.Sel - s.vp.Off)
 	focus := switcherFocusRows(out)
 	if len(focus) != 1 || focus[0] != want {
 		t.Fatalf("focus background on rows %v, want only %d", focus, want)
@@ -553,20 +553,20 @@ func TestSwitcherDrawScroll(t *testing.T) {
 		t.Fatalf("the body fits every row (%d >= %d), so it cannot scroll", l.bodyH, len(s.rows))
 	}
 	_, _, _, screen := drawFloat(t, s, snap, nil)
-	if s.top == 0 {
+	if s.vp.Off == 0 {
 		t.Fatal("the table did not scroll to the selection")
 	}
-	y := l.bodyY + (s.sel - s.top)
+	y := l.bodyY + (s.vp.Sel - s.vp.Off)
 	if y < l.bodyY || y >= l.bodyY+l.bodyH {
 		t.Fatalf("the selected row sits at %d, outside the body %d..%d", y, l.bodyY, l.bodyY+l.bodyH-1)
 	}
 	if text := switcherText(screen, l.inner.X, y, l.listW); !strings.Contains(text, "pane30") {
 		t.Fatalf("the selected row reads %q, want pane30", text)
 	}
-	top := s.top
+	top := s.vp.Off
 	_, _, _, _ = drawFloat(t, s, snap, nil)
-	if s.top != top {
-		t.Fatalf("a redraw moved the scroll offset from %d to %d", top, s.top)
+	if s.vp.Off != top {
+		t.Fatalf("a redraw moved the scroll offset from %d to %d", top, s.vp.Off)
 	}
 }
 

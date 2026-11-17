@@ -40,6 +40,10 @@ type commandPalette struct {
 	// help is the open help float: ? over a selected command explains it.
 	// The palette stays up under it.
 	help bool
+	// vp is the window over the filtered rows. The model keeps the selection;
+	// the value keeps the first row on screen, so the list follows the
+	// selection and holds still while it stays inside.
+	vp ui.Viewport
 }
 
 // commandPaletteCommands builds the palette's rows from the source the help
@@ -349,7 +353,7 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 			hint = paletteHelpHint
 		}
 		cx, cy = paintPaletteQuery(b, th, cp.pal.Query(), r, hint)
-		paintPaletteRows(b, th, rows, cp.pal.SelectedIndex(), r)
+		paintPaletteRows(b, th, cp, rows, r)
 	})
 	if cp.help {
 		paintPaletteHelp(buf, th, cp, g)
@@ -517,22 +521,20 @@ func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, query string, r layout
 // paintPaletteRows paints the body: the filtered rows the viewport holds,
 // best match first, the selection on the focus ground. A filter that leaves
 // no rows says so on the first body row.
-func paintPaletteRows(buf *bytes.Buffer, th theme.Theme, rows []palette.Command, sel int, r layout.Rect) {
+func paintPaletteRows(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, rows []palette.Command, r layout.Rect) {
 	bodyH := r.H - 1
 	if bodyH <= 0 {
 		return
 	}
-	// The viewport follows the selection: it never scrolls past it, and it
-	// sits still while the selection stays inside it.
-	top := sel - bodyH + 1
-	if top < 0 {
-		top = 0
-	}
+	// The body is the window: the selection stays inside it, and the window
+	// holds still while the selection does.
+	cp.vp.N, cp.vp.H, cp.vp.Sel = len(rows), bodyH, cp.pal.SelectedIndex()
+	cp.vp.Ensure()
 	for i := 0; i < bodyH; i++ {
 		y := r.Y + 1 + i
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, r.X+1)
 		buf.WriteString("\x1b[0m")
-		idx := top + i
+		idx := cp.vp.Off + i
 		if idx >= len(rows) {
 			if len(rows) == 0 && i == 0 {
 				buf.WriteString(th.Palette.RailBG.BG())
@@ -546,7 +548,7 @@ func paintPaletteRows(buf *bytes.Buffer, th theme.Theme, rows []palette.Command,
 			}
 			continue
 		}
-		selected := idx == sel
+		selected := idx == cp.vp.Sel
 		ground := th.Palette.RailBG
 		if selected {
 			ground = th.Palette.RailFocusBG

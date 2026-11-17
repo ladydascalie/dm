@@ -28,7 +28,9 @@ type bodyReader struct {
 	e     box.Entry
 	raw   []string
 	lines []string
-	off   int
+	// win is the window over the wrapped lines: the first line in view. The
+	// reader selects nothing, so only the offset moves.
+	win   ui.Viewport
 	Float *panel.FloatingPane
 }
 
@@ -117,7 +119,7 @@ func (r *bodyReader) paint(th theme.Theme) {
 	term := vt.NewTerm(rect.W, rect.H)
 	var buf bytes.Buffer
 	for row := 0; row < rect.H; row++ {
-		i := r.off + row
+		i := r.win.Off + row
 		if i >= len(r.lines) {
 			break
 		}
@@ -130,8 +132,8 @@ func (r *bodyReader) paint(th theme.Theme) {
 
 // Scroll moves the window by n rows, positive toward later lines.
 func (r *bodyReader) Scroll(n int, th theme.Theme) {
-	r.off += n
-	r.clamp()
+	r.win.Off += n
+	r.fit()
 	r.paint(th)
 }
 
@@ -140,24 +142,15 @@ func (r *bodyReader) Scroll(n int, th theme.Theme) {
 func (r *bodyReader) Sync(rect layout.Rect, th theme.Theme) {
 	r.Float.Rect = rect
 	r.rewrap()
-	r.clamp()
+	r.fit()
 	r.paint(th)
 }
 
-// clamp keeps the window on the rows: the offset never passes the last row
-// that still fills the pane.
-func (r *bodyReader) clamp() {
-	rect := r.Float.Rect
-	max := len(r.lines) - rect.H
-	if max < 0 {
-		max = 0
-	}
-	if r.off > max {
-		r.off = max
-	}
-	if r.off < 0 {
-		r.off = 0
-	}
+// fit sizes the window to the wrapped lines and the float and holds it on the
+// rows: the offset never passes the last row that still fills the pane.
+func (r *bodyReader) fit() {
+	r.win.N, r.win.H, r.win.Sel = len(r.lines), r.Float.Rect.H, -1
+	r.win.Clamp()
 }
 
 // The client side of the reader: the keys that open the overlay on the box
@@ -221,7 +214,7 @@ func (t *tui) readerAction(action string) {
 	case "page-down":
 		t.reader.Scroll(t.reader.Float.Rect.H, th)
 	case "top":
-		t.reader.Scroll(-t.reader.off-1, th)
+		t.reader.Scroll(-t.reader.win.Off-1, th)
 	case "bottom":
 		t.reader.Scroll(len(t.reader.lines), th)
 	default:

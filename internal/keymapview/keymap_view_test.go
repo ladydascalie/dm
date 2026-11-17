@@ -211,12 +211,12 @@ func TestKeymapViewScrollsAndClamps(t *testing.T) {
 	}
 
 	k.Scroll(1000)
-	if k.off != max {
-		t.Fatalf("off = %d, want the last row %d", k.off, max)
+	if k.win.Off != max {
+		t.Fatalf("off = %d, want the last row %d", k.win.Off, max)
 	}
 	k.Scroll(-1000)
-	if k.off != 0 {
-		t.Fatalf("off = %d, want the first row 0", k.off)
+	if k.win.Off != 0 {
+		t.Fatalf("off = %d, want the first row 0", k.win.Off)
 	}
 
 	// The paint shows the window that starts at the offset.
@@ -231,9 +231,9 @@ func TestKeymapViewScrollsAndClamps(t *testing.T) {
 	k.Scroll(1000)
 	smaller := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
 	k.Sync(smaller)
-	if k.off > len(k.rows)-k.Float.Rect.H {
+	if k.win.Off > len(k.rows)-k.Float.Rect.H {
 		t.Fatalf("sync left the window past the last row: off=%d rows=%d h=%d",
-			k.off, len(k.rows), k.Float.Rect.H)
+			k.win.Off, len(k.rows), k.Float.Rect.H)
 	}
 }
 
@@ -255,8 +255,8 @@ func TestKeymapSearch(t *testing.T) {
 		t.Fatalf("hint = %q, want the next/prev keys", got)
 	}
 	first := k.matches[0]
-	if first < k.off || first >= k.off+k.Float.Rect.H {
-		t.Fatalf("first match %d is outside the window starting at %d", first, k.off)
+	if first < k.win.Off || first >= k.win.Off+k.Float.Rect.H {
+		t.Fatalf("first match %d is outside the window starting at %d", first, k.win.Off)
 	}
 	k.NextMatch(1)
 	if k.match != 1 {

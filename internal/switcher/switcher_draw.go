@@ -383,15 +383,16 @@ func paintSwitcherHead(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols
 // paintSwitcherBody paints the table rows and, on the right of the split, the
 // selected pane's screen.
 func paintSwitcherBody(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, l switcherLayout, cols [7]int, paint PanePainter, set theme.GlyphSet) {
-	if l.bodyH > 0 {
-		s.scrollTo(l.bodyH)
-	}
+	// The body height is the window's height: sizing it here keeps a resize
+	// and the selection in one place, so a redraw never scrolls on its own.
+	s.vp.N, s.vp.H = len(s.rows), l.bodyH
+	s.vp.Ensure()
 	now := switcherNow().Unix()
 	for i := 0; i < l.bodyH; i++ {
 		y := l.bodyY + i
-		idx := s.top + i
+		idx := s.vp.Off + i
 		if idx >= 0 && idx < len(s.rows) {
-			selected := idx == s.sel
+			selected := idx == s.vp.Sel
 			paintSwitcherRow(buf, th, l, cols, s.rows[idx], idx+1, selected, set, now, y)
 		} else {
 			paintSwitcherBlankRow(buf, th, y, l.inner.X, l.listW)
@@ -628,33 +629,6 @@ func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switche
 		buf.WriteString(right)
 	}
 	buf.WriteString("\x1b[0m")
-}
-
-// scrollTo moves the table's first visible row so the selection stays in the
-// body, and never scrolls past the last row.
-func (s *Switcher) scrollTo(h int) {
-	if h <= 0 || len(s.rows) == 0 {
-		s.top = 0
-		return
-	}
-	if s.sel >= 0 {
-		if s.sel < s.top {
-			s.top = s.sel
-		}
-		if s.sel >= s.top+h {
-			s.top = s.sel - h + 1
-		}
-	}
-	max := len(s.rows) - h
-	if max < 0 {
-		max = 0
-	}
-	if s.top > max {
-		s.top = max
-	}
-	if s.top < 0 {
-		s.top = 0
-	}
 }
 
 // previewRow0 is the first content row to paint for a band of h rows over n rows

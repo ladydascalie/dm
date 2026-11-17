@@ -35,8 +35,10 @@ const (
 // KeymapView is the open keymap float: the rows built when it opened, the
 // first row in view, and the float that draws them.
 type KeymapView struct {
-	rows  []string
-	off   int
+	rows []string
+	// win is the window over rows: the first row in view. The view selects
+	// nothing, so the window carries no selection and only its offset moves.
+	win   ui.Viewport
 	query string
 	// matches are the row numbers the query matched, and match is the one
 	// n/N last moved to.
@@ -178,7 +180,7 @@ func clampRect(r layout.Rect, cols, rows int) layout.Rect {
 func (k *KeymapView) Sync(snap *wire.Snapshot) {
 	k.snap = snap
 	k.Float.Rect = KeymapViewRect(snap, len(k.rows))
-	k.clamp()
+	k.fit()
 	k.paint()
 }
 
@@ -189,29 +191,21 @@ func (k *KeymapView) RowCount() int {
 
 // Offset is the first row in view.
 func (k *KeymapView) Offset() int {
-	return k.off
+	return k.win.Off
 }
 
 // Scroll moves the window by n rows. The offset stops at the first row and at
 // the last row that still fills the rect.
 func (k *KeymapView) Scroll(n int) {
-	k.off += n
-	k.clamp()
+	k.win.Off += n
+	k.fit()
 	k.paint()
 }
 
-// clamp keeps the window on the rows.
-func (k *KeymapView) clamp() {
-	max := len(k.rows) - k.Float.Rect.H
-	if max < 0 {
-		max = 0
-	}
-	if k.off > max {
-		k.off = max
-	}
-	if k.off < 0 {
-		k.off = 0
-	}
+// fit sizes the window to the rows and the float and holds it on the rows.
+func (k *KeymapView) fit() {
+	k.win.N, k.win.H, k.win.Sel = len(k.rows), k.Float.Rect.H, -1
+	k.win.Clamp()
 }
 
 // StartSearch begins a new query. The old query and its matches go.
@@ -274,8 +268,8 @@ func (k *KeymapView) jumpToMatch() {
 	if len(k.matches) == 0 {
 		return
 	}
-	k.off = k.matches[k.match] - k.Float.Rect.H/2
-	k.clamp()
+	k.win.Off = k.matches[k.match] - k.Float.Rect.H/2
+	k.fit()
 }
 
 // NextMatch moves to the next or previous matching row and centres it.
@@ -372,7 +366,7 @@ func (k *KeymapView) paint() {
 	term := vt.NewTerm(r.W, r.H)
 	var buf bytes.Buffer
 	for row := 0; row < r.H; row++ {
-		i := k.off + row
+		i := k.win.Off + row
 		if i >= len(k.rows) {
 			break
 		}
