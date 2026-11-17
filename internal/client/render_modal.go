@@ -12,6 +12,7 @@ import (
 	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/transport"
+	"dm/internal/ui"
 	"dm/internal/wire"
 )
 
@@ -20,7 +21,7 @@ import (
 // highlight, the tee row that crosses the border and the key hint under it. The
 // title row is a fill row: dim, and its trailing cells are spaces rather than
 // the border rune, so the row is one write and its cells are the picker's.
-func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []transport.SessionInfo, sel int, current string) {
+func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []transport.SessionInfo, sel int, current string, km *keymap.Config) {
 	g := th.Glyphs
 	w := 46
 	if w > cols-2 {
@@ -61,12 +62,28 @@ func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []
 			line := cells.Pad(mark+" "+cells.Pad(s.Name, 18)+" "+cells.Pad(state, 4)+" "+cells.Pad(now, 3), r.W)
 			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", r.Y+i+1, r.X+1, colour, line)
 		}
-		hint := cells.Pad(" j/k move  enter switch  esc cancel", r.W)
+		hint := cells.Pad(sessionsHint(km), r.W)
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s", r.Y+len(sessions)+2, r.X+1, hint)
 	})
 	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+len(sessions)+2, x+1,
 		g.BorderTeeLeft, strings.Repeat(g.BorderHorizontal, w-2), g.BorderTeeRight)
 	buf.WriteString("\x1b[0m")
+}
+
+// sessionsHint is the picker's footnote, named from the picker keymap so a
+// rebind moves it.
+func sessionsHint(km *keymap.Config) string {
+	key := func(action string) string {
+		if km == nil {
+			return ""
+		}
+		return km.Key("picker", action)
+	}
+	return ui.Hints([]ui.Hint{
+		{Keys: []string{key("down"), key("up")}, Label: "move"},
+		{Keys: []string{key("pick")}, Label: "switch"},
+		{Keys: []string{key("close-esc")}, Label: "cancel"},
+	})
 }
 
 // renamePromptWidth is the inner width the rename float asks for. A narrower
@@ -113,14 +130,14 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 
 // drawRename paints the rename prompt as a floating pane over the pane area.
 // The title names the action, the kind and the id: a project is set, not
-// renamed, so that title reads "set project <id>". The hint names the keys that
-// submit and cancel, and the one input row holds the label, the draft and the
-// caret. The
-// caret is fixed: the draft takes what is left and loses its head first, so a
-// long name still shows its end and the caret stays on screen. The kind is
-// optional: a call without it renames a workspace, as the frozen prompt test
-// expects. A screen too small to hold the box paints nothing.
-func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, shadow bool, kind ...string) {
+// renamed, so that title reads "set project <id>". The hint names the keys the
+// rename keymap binds to submit and cancel, and the one input row holds the
+// label, the draft and the caret. The caret is fixed: the draft takes what is
+// left and loses its head first, so a long name still shows its end and the
+// caret stays on screen. The kind is optional: a call without it renames a
+// workspace, as the frozen prompt test expects. A screen too small to hold the
+// box paints nothing.
+func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, shadow bool, km *keymap.Config, kind ...string) {
 	if snap == nil {
 		return
 	}
@@ -140,7 +157,7 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 		ID:    "rename",
 		Rect:  inner,
 		Title: title,
-		Hint:  "enter  esc",
+		Hint:  renameHint(km),
 		Paint: func(b *bytes.Buffer, r layout.Rect) {
 			renameInputRow(b, th, r, k, draft)
 		},
@@ -151,6 +168,22 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draf
 		panel.PaintShadow(buf, th, inner, snap.Cols, snap.Rows-2)
 	}
 	f.Draw(buf, th)
+}
+
+// renameHint is the prompt's bottom border: the keys the rename keymap binds to
+// submit and cancel, so a rebind moves the hint with the keys the prompt
+// dispatches on.
+func renameHint(km *keymap.Config) string {
+	key := func(action string) string {
+		if km == nil {
+			return ""
+		}
+		return km.Key("rename", action)
+	}
+	return ui.Hints([]ui.Hint{
+		{Keys: []string{key("submit")}},
+		{Keys: []string{key("cancel")}},
+	})
 }
 
 // renameInputRow paints the rename float's one input row: the dim label, the
@@ -229,7 +262,7 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, ke
 	f := &panel.FloatingPane{
 		Rect:  layout.Rect{X: g.x, Y: g.y, W: g.inner, H: g.h},
 		Title: "prefix",
-		Hint:  "esc",
+		Hint:  helpBoxHint(),
 		Paint: func(b *bytes.Buffer, inner layout.Rect) {
 			helpBoxRows(b, inner, g)
 		},
@@ -240,6 +273,13 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, ke
 		panel.PaintShadow(buf, th, f.Rect, cols, rows-2)
 	}
 	f.Draw(buf, th)
+}
+
+// helpBoxHint is the armed help box's bottom border: the one key that closes
+// it. The armed box owns that key, and the keymap binds no action for it, so
+// it stays literal.
+func helpBoxHint() string {
+	return ui.Hints([]ui.Hint{{Keys: []string{"esc"}}})
 }
 
 // displayRow is one row of the help box: a category header or a key-action pair.

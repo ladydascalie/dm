@@ -857,7 +857,6 @@ func (t *tui) apply(m wire.Msg) {
 			if t.reader != nil {
 				t.reader.Sync(t.box.Float.Rect, t.theme())
 			}
-			t.boxBodyHint()
 			t.dirty = true
 		}
 		if t.keys != nil {

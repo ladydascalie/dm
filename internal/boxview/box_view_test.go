@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/testutil"
 	"dm/internal/theme"
@@ -83,7 +84,7 @@ func boxScreenRow(screen *vt.Term, y, x, w int) string {
 // the title and the key hint.
 func TestBoxViewListsNewestFirst(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 34}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	screen := boxScreen(t, b, snap.Cols, snap.Rows)
 	r := b.Float.Rect
@@ -117,7 +118,7 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 // row that still fills the pane.
 func TestBoxViewScrollClamps(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
 		entries = append(entries, box.Entry{Seq: i + 1, State: box.StateNote, Msg: "note"})
@@ -128,18 +129,18 @@ func TestBoxViewScrollClamps(t *testing.T) {
 		t.Fatalf("fixture is too short to scroll: %d entries in %d rows", len(entries), b.Float.Rect.H)
 	}
 	b.Scroll(100, theme.DefaultTheme())
-	if b.off != max {
-		t.Fatalf("off = %d, want the oldest row %d", b.off, max)
+	if b.log.Off != max {
+		t.Fatalf("off = %d, want the oldest row %d", b.log.Off, max)
 	}
 	b.Scroll(-100, theme.DefaultTheme())
-	if b.off != 0 {
-		t.Fatalf("off = %d, want the newest row", b.off)
+	if b.log.Off != 0 {
+		t.Fatalf("off = %d, want the newest row", b.log.Off)
 	}
 	// A log that shrinks under the window pulls the view back to the top.
 	b.Scroll(max, theme.DefaultTheme())
 	b.Set(entries[:2], theme.DefaultTheme())
-	if b.off != 0 {
-		t.Fatalf("off = %d after the log shrank, want 0", b.off)
+	if b.log.Off != 0 {
+		t.Fatalf("off = %d after the log shrank, want 0", b.log.Off)
 	}
 }
 
@@ -147,7 +148,7 @@ func TestBoxViewScrollClamps(t *testing.T) {
 // and the title names the rows in view once the log scrolls.
 func TestBoxViewFitsLog(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	if got, want := b.Float.Rect.H, len(boxEntries()); got != want {
 		t.Fatalf("height = %d, want the log length %d", got, want)
@@ -171,7 +172,7 @@ func TestBoxViewFitsLog(t *testing.T) {
 // TestBoxViewTitleWatching: the title counts parked watches, omits the count
 // when none is parked, and keeps the entry count.
 func TestBoxViewTitleWatching(t *testing.T) {
-	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	b.watchers = boxWatches()
 	b.paint(theme.DefaultTheme())
@@ -191,7 +192,7 @@ func TestBoxViewTitleWatching(t *testing.T) {
 // TestBoxViewReceipt: a wide view prefixes each row with the number of watches
 // served that entry. A narrow view drops the marker whole.
 func TestBoxViewReceipt(t *testing.T) {
-	wide := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	wide := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	wide.watchers = receiptWatches()
 	wide.Set(boxEntries(), theme.DefaultTheme())
 	if wide.Float.Rect.W < boxReceiptMinW {
@@ -206,7 +207,7 @@ func TestBoxViewReceipt(t *testing.T) {
 		t.Fatalf("second row = %q, want two receipts", row)
 	}
 
-	narrow := NewBoxView(&wire.Snapshot{Cols: 50, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	narrow := NewBoxView(&wire.Snapshot{Cols: 50, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	narrow.watchers = receiptWatches()
 	narrow.Set(boxEntries(), theme.DefaultTheme())
 	if narrow.Float.Rect.W >= boxReceiptMinW {
@@ -233,7 +234,7 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 		{65, boxReceiptMinW - 1},
 	} {
 		snap := &wire.Snapshot{Cols: tc.cols, Rows: 30, Rail: 0}
-		b := NewBoxView(snap, theme.DefaultTheme())
+		b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 		b.watchers = boxWatches()
 		b.Set(entries, theme.DefaultTheme())
 		if got := b.Float.Rect.W; got != tc.want {
@@ -258,29 +259,29 @@ func TestBoxViewReceiptBoundary(t *testing.T) {
 // grows and names what arrived above it. At the top the view follows the
 // newest entry and the count clears.
 func TestBoxViewAnchor(t *testing.T) {
-	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 40)
 	for i := range entries {
 		entries[i] = box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"}
 	}
 	b.Set(entries, theme.DefaultTheme())
 	b.Scroll(100, theme.DefaultTheme())
-	top := b.entries[b.off].Seq
-	if b.entries[b.sel].Seq != 1 || b.off != len(entries)-b.Float.Rect.H {
-		t.Fatalf("selection = %d off = %d, want the oldest row in the window's last row", b.entries[b.sel].Seq, b.off)
+	top := b.entries[b.log.Off].Seq
+	if b.entries[b.log.Sel].Seq != 1 || b.log.Off != len(entries)-b.Float.Rect.H {
+		t.Fatalf("selection = %d off = %d, want the oldest row in the window's last row", b.entries[b.log.Sel].Seq, b.log.Off)
 	}
 
 	// Two pushes, one entry each: the count must add up, not restart from the
 	// current index.
 	b.Set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), theme.DefaultTheme())
-	if got := b.entries[b.off].Seq; got != top {
+	if got := b.entries[b.log.Off].Seq; got != top {
 		t.Fatalf("top seq = %d after one entry, want %d", got, top)
 	}
 	if b.new != 1 {
 		t.Fatalf("new = %d after one entry, want 1", b.new)
 	}
 	b.Set(append([]box.Entry{{Seq: 42, State: box.StateNote, Msg: "note"}}, b.entries...), theme.DefaultTheme())
-	if got := b.entries[b.off].Seq; got != top {
+	if got := b.entries[b.log.Off].Seq; got != top {
 		t.Fatalf("top seq = %d after two entries, want %d", got, top)
 	}
 	if b.new != 2 {
@@ -292,8 +293,8 @@ func TestBoxViewAnchor(t *testing.T) {
 
 	b.Scroll(-b.ListLen(), theme.DefaultTheme())
 	b.Set(append([]box.Entry{{Seq: 44, State: box.StateNote, Msg: "note"}}, b.entries...), theme.DefaultTheme())
-	if b.off != 0 || b.new != 0 || strings.Contains(b.title(), "+") {
-		t.Fatalf("off = %d, new = %d, title = %q, want the newest entry", b.off, b.new, b.title())
+	if b.log.Off != 0 || b.new != 0 || strings.Contains(b.title(), "+") {
+		t.Fatalf("off = %d, new = %d, title = %q, want the newest entry", b.log.Off, b.new, b.title())
 	}
 }
 
@@ -301,7 +302,7 @@ func TestBoxViewAnchor(t *testing.T) {
 // follows once the selection would leave the view, and the clamps hold.
 func TestBoxViewSelectionFollows(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 30)
 	for i := 0; i < 30; i++ {
 		entries = append(entries, box.Entry{Seq: 30 - i, State: box.StateNote, Msg: "note"})
@@ -317,25 +318,25 @@ func TestBoxViewSelectionFollows(t *testing.T) {
 	if e, _ := b.Selected(); e.Seq != 30-h {
 		t.Fatalf("selection sat still at %d, want %d", e.Seq, 30-h)
 	}
-	if b.off != 1 {
-		t.Fatalf("off = %d, want 1", b.off)
+	if b.log.Off != 1 {
+		t.Fatalf("off = %d, want 1", b.log.Off)
 	}
 	// A move inside the window leaves the window alone.
 	b.Scroll(-1, theme.DefaultTheme())
 	if e, _ := b.Selected(); e.Seq != 30-h+1 {
 		t.Fatalf("selection = %d, want %d", e.Seq, 30-h+1)
 	}
-	if b.off != 1 {
-		t.Fatalf("off = %d, want it still at 1", b.off)
+	if b.log.Off != 1 {
+		t.Fatalf("off = %d, want it still at 1", b.log.Off)
 	}
 	// The clamps hold at both ends.
 	b.Scroll(1000, theme.DefaultTheme())
-	if b.off != len(entries)-h || b.sel != len(entries)-1 {
-		t.Fatalf("off = %d sel = %d, want the oldest full window and the last row", b.off, b.sel)
+	if b.log.Off != len(entries)-h || b.log.Sel != len(entries)-1 {
+		t.Fatalf("off = %d sel = %d, want the oldest full window and the last row", b.log.Off, b.log.Sel)
 	}
 	b.Scroll(-1000, theme.DefaultTheme())
-	if b.off != 0 || b.sel != 0 {
-		t.Fatalf("off = %d sel = %d, want the newest row", b.off, b.sel)
+	if b.log.Off != 0 || b.log.Sel != 0 {
+		t.Fatalf("off = %d sel = %d, want the newest row", b.log.Off, b.log.Sel)
 	}
 }
 
@@ -344,7 +345,7 @@ func TestBoxViewSelectionFollows(t *testing.T) {
 // the newest entry.
 func TestBoxViewSelectionKeepsBySeq(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
 		entries = append(entries, box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"})
@@ -353,27 +354,27 @@ func TestBoxViewSelectionKeepsBySeq(t *testing.T) {
 
 	// Scrolled back: the selection rides its entry through the arrival.
 	b.Scroll(1000, theme.DefaultTheme())
-	top := b.entries[b.off].Seq
+	top := b.entries[b.log.Off].Seq
 	b.Set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), theme.DefaultTheme())
-	if b.entries[b.sel].Seq != 1 {
-		t.Fatalf("selection seq = %d, want 1", b.entries[b.sel].Seq)
+	if b.entries[b.log.Sel].Seq != 1 {
+		t.Fatalf("selection seq = %d, want 1", b.entries[b.log.Sel].Seq)
 	}
-	if b.entries[b.off].Seq != top {
-		t.Fatalf("top seq = %d, want %d", b.entries[b.off].Seq, top)
+	if b.entries[b.log.Off].Seq != top {
+		t.Fatalf("top seq = %d, want %d", b.entries[b.log.Off].Seq, top)
 	}
 	if b.new != 1 {
 		t.Fatalf("new = %d, want 1", b.new)
 	}
 
 	// At the top: the selection rides the newest entry instead.
-	b = NewBoxView(snap, theme.DefaultTheme())
+	b = NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(entries, theme.DefaultTheme())
 	b.Set(append([]box.Entry{{Seq: 41, State: box.StateNote, Msg: "note"}}, entries...), theme.DefaultTheme())
 	if e, _ := b.Selected(); e.Seq != 41 {
 		t.Fatalf("selection seq = %d, want the newest entry 41", e.Seq)
 	}
-	if b.off != 0 || b.new != 0 {
-		t.Fatalf("off = %d new = %d, want the window still at the top", b.off, b.new)
+	if b.log.Off != 0 || b.new != 0 {
+		t.Fatalf("off = %d new = %d, want the window still at the top", b.log.Off, b.new)
 	}
 }
 
@@ -382,7 +383,7 @@ func TestBoxViewSelectionKeepsBySeq(t *testing.T) {
 // log does not carry changes nothing.
 func TestBoxViewSelect(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := make([]box.Entry, 0, 40)
 	for i := 0; i < 40; i++ {
 		entries = append(entries, box.Entry{Seq: 40 - i, State: box.StateNote, Msg: "note"})
@@ -392,13 +393,13 @@ func TestBoxViewSelect(t *testing.T) {
 	if e, ok := b.Selected(); !ok || e.Seq != 20 {
 		t.Fatalf("selected = %+v ok %v, want seq 20", e, ok)
 	}
-	if want := len(entries) - b.Float.Rect.H; b.off != want {
-		t.Fatalf("off = %d, want the clamp's oldest full window %d", b.off, want)
+	if want := len(entries) - b.Float.Rect.H; b.log.Off != want {
+		t.Fatalf("off = %d, want the clamp's oldest full window %d", b.log.Off, want)
 	}
-	before := b.off
+	before := b.log.Off
 	b.Select(999, theme.DefaultTheme())
-	if b.off != before {
-		t.Fatalf("off = %d, want Select to leave an unknown seq alone", b.off)
+	if b.log.Off != before {
+		t.Fatalf("off = %d, want Select to leave an unknown seq alone", b.log.Off)
 	}
 }
 
@@ -406,7 +407,7 @@ func TestBoxViewSelect(t *testing.T) {
 // and the bright cell moves with the selection.
 func TestBoxViewPaintsSelectionBright(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	screen := boxScreen(t, b, snap.Cols, snap.Rows)
 	r := b.Float.Rect
@@ -428,7 +429,7 @@ func TestBoxViewPaintsSelectionBright(t *testing.T) {
 // every watch, and the page has its own offset.
 func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	few := append(boxWatches(), box.Watch{Pane: "w1p3", Key: "lane/b", Cursor: 4})
-	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b := NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	b.SetWatchers(few, theme.DefaultTheme())
 	if got, want := b.Float.Rect.H, len(few); got != want {
 		t.Fatalf("height = %d, want one row per watch %d", got, want)
@@ -442,8 +443,8 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 			t.Fatalf("row %d = %q, want pane %s", i, row, w.Pane)
 		}
 	}
-	if b.pOff != 0 || b.off != 0 {
-		t.Fatalf("offsets = %d/%d, want both at the first row", b.pOff, b.off)
+	if b.watches.Off != 0 || b.log.Off != 0 {
+		t.Fatalf("offsets = %d/%d, want both at the first row", b.watches.Off, b.log.Off)
 	}
 	if got := b.title(); !strings.Contains(got, "1 watching") {
 		t.Fatalf("title = %q, want the parked wait", got)
@@ -455,7 +456,7 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	for i := range many {
 		many[i] = box.Watch{Pane: fmt.Sprintf("p%02d", i+1), Key: "lane/a", Cursor: i}
 	}
-	b = NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme())
+	b = NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	b.SetWatchers(many, theme.DefaultTheme())
 	if b.Float.Rect.H != 22 {
@@ -463,11 +464,11 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 	}
 	b.TogglePage(theme.DefaultTheme())
 	b.Scroll(100, theme.DefaultTheme())
-	if got := b.pOff; got != len(many)-b.Float.Rect.H {
+	if got := b.watches.Off; got != len(many)-b.Float.Rect.H {
 		t.Fatalf("page offset = %d, want the last page %d", got, len(many)-b.Float.Rect.H)
 	}
-	if b.off != 0 {
-		t.Fatalf("log offset = %d, want the page to scroll alone", b.off)
+	if b.log.Off != 0 {
+		t.Fatalf("log offset = %d, want the page to scroll alone", b.log.Off)
 	}
 	screen = boxScreen(t, b, 100, 30)
 	r = b.Float.Rect
@@ -476,8 +477,8 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 		t.Fatalf("last row = %q, want the oldest watch %s", last, many[len(many)-1].Pane)
 	}
 	b.Scroll(-100, theme.DefaultTheme())
-	if b.pOff != 0 {
-		t.Fatalf("page offset = %d after scrolling back, want the first watch", b.pOff)
+	if b.watches.Off != 0 {
+		t.Fatalf("page offset = %d after scrolling back, want the first watch", b.watches.Off)
 	}
 }
 
@@ -486,7 +487,7 @@ func TestBoxViewWatcherPageEmptyLog(t *testing.T) {
 // Sync. A theme that changed repaints even when the rect did not move.
 func TestBoxViewRepaintsOnThemeChange(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set(boxEntries(), theme.DefaultTheme())
 	changed := theme.DefaultTheme()
 	changed.States[string(box.StateDone)] = theme.StateStyle{
@@ -507,7 +508,7 @@ func TestBoxViewRepaintsOnThemeChange(t *testing.T) {
 // rendered prefix instead of a fixed offset.
 func TestBoxViewRowHighlightWideSeq(t *testing.T) {
 	snap := &wire.Snapshot{Cols: 100, Rows: 30, Rail: 0}
-	b := NewBoxView(snap, theme.DefaultTheme())
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	entries := []box.Entry{
 		{Seq: 12345, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "gate green"},
 	}

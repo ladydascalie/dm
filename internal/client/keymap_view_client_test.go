@@ -41,7 +41,7 @@ func keymapTitle(t *testing.T, k *keymapview.KeymapView, cols, rows int) string 
 func keymapHint(t *testing.T, k *keymapview.KeymapView, cols, rows int) string {
 	t.Helper()
 	r := k.Float.Rect
-	return boxScreenRow(keymapScreen(t, k, cols, rows), r.Y+r.H, r.X+2, r.W-2)
+	return boxScreenRow(keymapScreen(t, k, cols, rows), r.Y+r.H, r.X+1, r.W-2)
 }
 
 // TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n

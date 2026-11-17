@@ -7,6 +7,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -541,7 +542,37 @@ func TestCentreBottomMovesToTheLastRow(t *testing.T) {
 	tui, got := switcherTUI(t)
 	openCentre(t, tui, got, centreEntries())
 	feed(tui, "G")
-	if tui.ncentre.sel != len(centreEntries())-1 {
-		t.Fatalf("selection = %d, want the last row", tui.ncentre.sel)
+	if tui.ncentre.vp.Sel != len(centreEntries())-1 {
+		t.Fatalf("selection = %d, want the last row", tui.ncentre.vp.Sel)
+	}
+}
+
+// TestCentreScrollsToTheSelection: the centre is a window on the entries, so a
+// list longer than the float scrolls to the selected row and the newest row
+// leaves the window when the operator walks to the end.
+func TestCentreScrollsToTheSelection(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	entries := make([]box.Entry, 0, 25)
+	for seq := 25; seq >= 1; seq-- {
+		entries = append(entries, box.Entry{Seq: seq, Key: "notify/w1p1",
+			State: box.StateNote, From: "w1p1", Msg: "entry " + strconv.Itoa(seq)})
+	}
+	openCentre(t, tui, got, entries)
+	h := tui.ncentre.Float.Rect.H
+	feed(tui, "G")
+	if got, want := tui.ncentre.vp.Sel, len(entries)-1; got != want {
+		t.Fatalf("selection = %d, want the last row %d", got, want)
+	}
+	if got, want := tui.ncentre.vp.Off, len(entries)-h; got != want {
+		t.Fatalf("window top = %d, want the last full window %d", got, want)
+	}
+	r := tui.ncentre.Float.Rect
+	screen := centreScreen(t, tui)
+	if row := boxScreenRow(screen, r.Y+r.H-1, r.X, r.W); !strings.Contains(row, "entry 1") {
+		t.Fatalf("last row = %q, want the oldest entry", row)
+	}
+	if row := boxScreenRow(screen, r.Y, r.X, r.W); strings.Contains(row, "entry 25") {
+		t.Fatalf("top row = %q, want the newest entry scrolled out", row)
 	}
 }

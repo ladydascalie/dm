@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/rail"
+	"dm/internal/ui"
 	"dm/internal/wire"
 )
 
@@ -71,12 +72,12 @@ type Switcher struct {
 	full    bool
 
 	// all is the snapshot's pane list, and rows are the panes the query keeps
-	// in the sort mode's order. sel is one of rows, or -1 when nothing
-	// survives. top is the first row on screen, so a redraw does not jump.
+	// in the sort mode's order. vp is the selection and the window over rows:
+	// the selected row, or -1 when nothing survives, and the first row on
+	// screen, so a redraw does not jump.
 	all  []wire.AllPane
 	rows []wire.AllPane
-	sel  int
-	top  int
+	vp   ui.Viewport
 
 	// query is the filter's text and filter says whether it is live. A query
 	// only filters while the dashboard is in filter mode, because outside it
@@ -103,7 +104,7 @@ type Switcher struct {
 // caller that has no snapshot yet, and the snapshot's size wins once there is
 // one.
 func NewSwitcher(rect layout.Rect, snap *wire.Snapshot) *Switcher {
-	s := &Switcher{Rect: rect, sel: -1, ratio: previewRatioDefault, previewOn: true, full: true}
+	s := &Switcher{Rect: rect, vp: ui.Viewport{Sel: -1}, ratio: previewRatioDefault, previewOn: true, full: true}
 	s.Sync(snap)
 	return s
 }
@@ -149,7 +150,7 @@ func (s *Switcher) Sync(snap *wire.Snapshot) {
 		s.asked, s.pane, s.lines, s.offset = false, "", nil, 0
 	}
 	prev := s.Target()
-	s.rebuild(s.sel, prev)
+	s.rebuild(s.vp.Sel, prev)
 }
 
 // Filtering reports whether the dashboard is in filter mode, where every
@@ -225,24 +226,12 @@ func (s *Switcher) RowCount() int {
 	return len(s.rows)
 }
 
-// Move steps the selection d rows and stops at either end of the table.
+// Move steps the selection d rows and stops at either end of the table. The
+// window follows the selection in the same call, so a redraw never has to
+// catch up.
 func (s *Switcher) Move(d int) {
-	if len(s.rows) == 0 {
-		s.sel = -1
-		return
-	}
-	i := s.sel
-	if i < 0 {
-		i = 0
-	}
-	i += d
-	if i < 0 {
-		i = 0
-	}
-	if i >= len(s.rows) {
-		i = len(s.rows) - 1
-	}
-	s.sel = i
+	s.vp.N = len(s.rows)
+	s.vp.Move(d)
 }
 
 // Jump selects the n'th row, numbered from one the way the 1-9 keys are, and
@@ -251,25 +240,25 @@ func (s *Switcher) Jump(n int) bool {
 	if n < 1 || n > len(s.rows) {
 		return false
 	}
-	s.sel = n - 1
+	s.vp.Sel = n - 1
 	return true
 }
 
 // Selected is the highlighted pane row. It is always a rail.Pane item built
 // from the AllPane, so a caller that reads Kind and Pane keeps working.
 func (s *Switcher) Selected() (rail.RailItem, bool) {
-	if s.sel < 0 || s.sel >= len(s.rows) {
+	if s.vp.Sel < 0 || s.vp.Sel >= len(s.rows) {
 		return rail.RailItem{}, false
 	}
-	return paneItem(s.rows[s.sel]), true
+	return paneItem(s.rows[s.vp.Sel]), true
 }
 
 // Target is the pane id of the selected row, or empty when nothing is selected.
 func (s *Switcher) Target() string {
-	if s.sel < 0 || s.sel >= len(s.rows) {
+	if s.vp.Sel < 0 || s.vp.Sel >= len(s.rows) {
 		return ""
 	}
-	return s.rows[s.sel].ID
+	return s.rows[s.vp.Sel].ID
 }
 
 // SortMode is the table's current ordering.
@@ -282,7 +271,7 @@ func (s *Switcher) SortMode() SortMode {
 func (s *Switcher) CycleSort() SortMode {
 	s.mode = s.mode.nextSort()
 	prev := s.Target()
-	s.rebuild(s.sel, prev)
+	s.rebuild(s.vp.Sel, prev)
 	return s.mode
 }
 
@@ -396,8 +385,8 @@ func (s *Switcher) AcceptPreview(id int, lines []string) bool {
 // refilter rebuilds the rows after a query edit and lands the selection on the
 // best match, so a typed query shows the nearest of its hits.
 func (s *Switcher) refilter() {
-	s.top = 0
-	s.rebuild(s.sel, "")
+	s.vp.Off = 0
+	s.rebuild(s.vp.Sel, "")
 }
 
 // rebuild filters and sorts the rows, then takes a selection: keep is the pane
@@ -415,12 +404,12 @@ func (s *Switcher) rebuild(old int, keep string) {
 	if keep != "" {
 		for i, p := range s.rows {
 			if p.ID == keep {
-				s.sel = i
+				s.vp.Sel = i
 				return
 			}
 		}
 	}
-	s.sel = s.pick(old)
+	s.vp.Sel = s.pick(old)
 }
 
 // sortRows orders the rows for the current sort mode. Every mode is stable, so

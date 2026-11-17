@@ -444,3 +444,43 @@ func TestCommandPalettePrefixInsideIsSwallowed(t *testing.T) {
 	}
 	testutil.NoMsg(t, got)
 }
+
+// TestCommandPaletteWindowFollowsTheSelection: the body is a window on the
+// filtered rows. It scrolls only when the selection would leave it, so a step
+// back up moves the selection inside the window instead of rewinding the list
+// under it.
+func TestCommandPaletteWindowFollowsTheSelection(t *testing.T) {
+	t.Parallel()
+	tui, _ := switcherTUI(t)
+	feed(tui, "\x02K")
+	if tui.cp == nil {
+		t.Fatal("prefix k did not open the palette")
+	}
+	draw := func() {
+		drawCommandPalette(&bytes.Buffer{}, tui.theme(), tui.cp, tui.snap)
+	}
+	draw()
+	h := tui.cp.vp.H
+	if got := tui.cp.vp.N; got <= h+1 {
+		t.Skipf("the palette holds %d rows, too few to scroll in a %d row body", got, h)
+	}
+	for i := 0; i < h+3; i++ {
+		feed(tui, "\x1b[B")
+		draw()
+	}
+	sel, top := tui.cp.vp.Sel, tui.cp.vp.Off
+	if sel != h+3 || top != 4 {
+		t.Fatalf("after %d steps down selection = %d window top = %d, want %d and 4", h+3, sel, top, h+3)
+	}
+	feed(tui, "\x1b[A")
+	draw()
+	if got := tui.cp.vp.Off; got != top {
+		t.Fatalf("window top = %d after one step up, want it held at %d", got, top)
+	}
+	if got, want := tui.cp.vp.Sel, sel-1; got != want {
+		t.Fatalf("selection = %d after one step up, want %d", got, want)
+	}
+	if !tui.cp.vp.Visible(tui.cp.vp.Sel) {
+		t.Fatalf("selection %d left the window %+v", tui.cp.vp.Sel, tui.cp.vp)
+	}
+}

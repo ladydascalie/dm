@@ -6,7 +6,8 @@ package boxview
 // session's entries newest first, one row each, and follows the log while it is
 // open through the server's box push. It also keeps the presence list, so a
 // reader can see who is parked on which filter and how far each has read. Keys
-// scroll it and toggle the watcher page; esc closes it.
+// scroll it and toggle the watcher page, and a close key closes it. Every key
+// it names comes from the box keymap, so a rebind moves the hint with it.
 
 import (
 	"bytes"
@@ -16,9 +17,11 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -57,19 +60,20 @@ const (
 // and the float that draws them.
 type BoxView struct {
 	entries []box.Entry
-	// sel is the row the selection sits on, an index into entries. The
-	// window follows it, the way the notification centre's cursor works.
-	sel int
-	off int
+	// log is the selection and the window over the entries: the row the
+	// selection sits on and the first row in view. The view sets N and H from
+	// the log and the float; the value owns the clamp and the follow.
+	log ui.Viewport
 	// new counts the entries that arrived above a scrolled-back window. It is
 	// zero while the window follows the newest entry.
 	new int
 
 	watchers []box.Watch
 	// page is true while the float shows the watcher list instead of the log,
-	// and pOff is the first watch row in view.
-	page bool
-	pOff int
+	// and watches is the window over the watch rows. The page selects nothing,
+	// so the window carries no selection.
+	page    bool
+	watches ui.Viewport
 	// WatchAt is when the view last asked for the watcher list, and WatchWant
 	// marks a push whose ask the interval held back.
 	WatchAt   time.Time
@@ -83,14 +87,26 @@ type BoxView struct {
 	// th is the theme the float last painted. Sync compares it, so a reload
 	// that changes the theme repaints a float whose rect did not move.
 	th theme.Theme
+	// km names the key of every hint the view paints. A reload swaps it
+	// through SetKeymap, so a rebind moves the border without reopening the
+	// float.
+	km *keymap.Config
 }
 
-// NewBoxView opens the float on a screen. The log stays empty until the reply
-// lands.
-func NewBoxView(snap *wire.Snapshot, th theme.Theme) *BoxView {
-	b := &BoxView{Float: &panel.FloatingPane{ID: "box", Active: true}, snap: snap}
+// NewBoxView opens the float on a screen. km is the config the hint names its
+// keys from. The log stays empty until the reply lands.
+func NewBoxView(snap *wire.Snapshot, th theme.Theme, km *keymap.Config) *BoxView {
+	b := &BoxView{Float: &panel.FloatingPane{ID: "box", Active: true}, snap: snap, km: km}
 	b.Sync(snap, th)
 	return b
+}
+
+// SetKeymap swaps the config the hint is derived from and rewrites the border
+// hint in place, so a reload that rebinds a key moves the hint without
+// reopening the float.
+func (b *BoxView) SetKeymap(km *keymap.Config) {
+	b.km = km
+	b.Float.Hint = b.hint()
 }
 
 // BoxViewRect is where the float sits: centred over the pane area, one cell
@@ -183,9 +199,6 @@ func (b *BoxView) Sync(snap *wire.Snapshot, th theme.Theme) {
 		return
 	}
 	b.Float.Rect = r
-	b.clamp()
-	b.clampSel()
-	b.pageClamp()
 	b.paint(th)
 }
 
@@ -223,16 +236,16 @@ func (b *BoxView) rows() int {
 // under the reader. A window at the top follows the newest entry.
 func (b *BoxView) Set(entries []box.Entry, th theme.Theme) {
 	top := 0
-	if b.off > 0 && b.off < len(b.entries) {
-		top = b.entries[b.off].Seq
+	if b.log.Off > 0 && b.log.Off < len(b.entries) {
+		top = b.entries[b.log.Off].Seq
 	}
 	// A window at the top follows the newest entry, and the selection rides
 	// with it. A scrolled-back window keeps the selection by seq, the way it
 	// keeps the top row.
-	follow := b.off == 0
+	follow := b.log.Off == 0
 	selSeq := 0
-	if !follow && b.sel > 0 && b.sel < len(b.entries) {
-		selSeq = b.entries[b.sel].Seq
+	if !follow && b.log.Sel > 0 && b.log.Sel < len(b.entries) {
+		selSeq = b.entries[b.log.Sel].Seq
 	}
 	b.entries = entries
 	b.Float.Rect = BoxViewRect(b.snap, b.rows())
@@ -240,23 +253,20 @@ func (b *BoxView) Set(entries []box.Entry, th theme.Theme) {
 		if i := boxSeqIndex(entries, top); i >= 0 {
 			// The entries between the old top and the new one arrived above
 			// the window; the rest of the log did not move.
-			b.new += i - b.off
+			b.new += i - b.log.Off
 			if b.new < 0 {
 				b.new = 0
 			}
-			b.off = i
+			b.log.Off = i
 		}
 	}
 	if follow {
-		b.sel = 0
+		b.log.Sel = 0
 	} else if selSeq != 0 {
 		if i := boxSeqIndex(entries, selSeq); i >= 0 {
-			b.sel = i
+			b.log.Sel = i
 		}
 	}
-	b.clamp()
-	b.clampSel()
-	b.pageClamp()
 	b.paint(th)
 }
 
@@ -265,8 +275,6 @@ func (b *BoxView) Set(entries []box.Entry, th theme.Theme) {
 func (b *BoxView) SetWatchers(watchers []box.Watch, th theme.Theme) {
 	b.watchers = watchers
 	b.Float.Rect = BoxViewRect(b.snap, b.rows())
-	b.clamp()
-	b.pageClamp()
 	b.paint(th)
 }
 
@@ -285,27 +293,12 @@ func boxSeqIndex(entries []box.Entry, seq int) int {
 // own offset and scrolls, so a toggle leaves each where it was.
 func (b *BoxView) Scroll(n int, th theme.Theme) {
 	if b.page {
-		b.pOff += n
-		b.pageClamp()
+		b.watches.Off += n
+		b.fitWatches()
 	} else {
-		b.sel += n
-		b.clampSel()
+		b.log.Move(n)
 	}
 	b.paint(th)
-}
-
-// pageClamp keeps the watcher page on its list.
-func (b *BoxView) pageClamp() {
-	max := len(b.watchers) - b.Float.Rect.H
-	if max < 0 {
-		max = 0
-	}
-	if b.pOff > max {
-		b.pOff = max
-	}
-	if b.pOff < 0 {
-		b.pOff = 0
-	}
 }
 
 // ListLen is the number of rows in the list the float shows.
@@ -316,56 +309,39 @@ func (b *BoxView) ListLen() int {
 	return len(b.entries)
 }
 
-// clamp keeps the window on the log: the offset never passes the oldest row
-// that still fills the pane, a log that shrank goes back to the top, and the
-// arrival count clears once the reader is at the top.
-func (b *BoxView) clamp() {
-	max := len(b.entries) - b.Float.Rect.H
-	if max < 0 {
-		max = 0
-	}
-	if b.off > max {
-		b.off = max
-	}
-	if b.off < 0 {
-		b.off = 0
-	}
-	if b.off == 0 {
+// fit sizes both windows to their lists and the float and holds them on their
+// rows. It runs on every paint, so a resize, a shorter log and a new entry
+// all land here. The arrival count clears once the window is back at the
+// newest entry.
+func (b *BoxView) fit() {
+	b.log.N, b.log.H = len(b.entries), b.Float.Rect.H
+	b.log.Ensure()
+	b.fitWatches()
+	if b.log.Off == 0 {
 		b.new = 0
 	}
 }
 
-// clampSel keeps the selection on the log and the window on the selection:
-// the selection never leaves the entries and the window never hides it.
-func (b *BoxView) clampSel() {
-	if b.sel > len(b.entries)-1 {
-		b.sel = len(b.entries) - 1
-	}
-	if b.sel < 0 {
-		b.sel = 0
-	}
-	if b.sel < b.off {
-		b.off = b.sel
-	}
-	if b.sel >= b.off+b.Float.Rect.H {
-		b.off = b.sel - b.Float.Rect.H + 1
-	}
-	b.clamp()
+// fitWatches sizes the page's window to the watcher rows and the float. The
+// page selects nothing, so its window carries no selection.
+func (b *BoxView) fitWatches() {
+	b.watches.N, b.watches.H, b.watches.Sel = len(b.watchers), b.Float.Rect.H, -1
+	b.watches.Clamp()
 }
 
 // Selected is the entry the selection sits on: the one the body reader opens.
 // The watcher page has no selection.
 func (b *BoxView) Selected() (box.Entry, bool) {
-	if b.page || b.sel < 0 || b.sel >= len(b.entries) {
+	if b.page || b.log.Sel < 0 || b.log.Sel >= len(b.entries) {
 		return box.Entry{}, false
 	}
-	return b.entries[b.sel], true
+	return b.entries[b.log.Sel], true
 }
 
 // Top is the index of the window's first row. The view owns the window; a
 // caller reads it here instead of keeping its own mirror.
 func (b *BoxView) Top() int {
-	return b.off
+	return b.log.Off
 }
 
 // Select selects the entry with the seq and lands it at the top of the
@@ -376,10 +352,8 @@ func (b *BoxView) Select(seq int, th theme.Theme) {
 	if i < 0 {
 		return
 	}
-	b.sel = i
-	b.off = i
-	b.clamp()
-	b.clampSel()
+	b.log.Sel = i
+	b.log.Off = i
 	b.paint(th)
 }
 
@@ -394,6 +368,7 @@ func (b *BoxView) TogglePage(th theme.Theme) {
 // window whole.
 func (b *BoxView) paint(th theme.Theme) {
 	b.th = th
+	b.fit()
 	r := b.Float.Rect
 	b.Float.Title = b.title()
 	b.Float.Hint = b.hint()
@@ -421,7 +396,7 @@ func (b *BoxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th theme.Theme)
 		return
 	}
 	for row := 0; row < r.H; row++ {
-		i := b.off + row
+		i := b.log.Off + row
 		if i >= len(b.entries) {
 			break
 		}
@@ -430,7 +405,7 @@ func (b *BoxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th theme.Theme)
 		if r.W >= boxReceiptMinW {
 			receipt = b.received(b.entries[i])
 		}
-		boxPaintRow(buf, th, b.entries[i], r.W, receipt, i == b.sel)
+		boxPaintRow(buf, th, b.entries[i], r.W, receipt, i == b.log.Sel)
 	}
 }
 
@@ -442,7 +417,7 @@ func (b *BoxView) paintWatchers(buf *bytes.Buffer, r layout.Rect, th theme.Theme
 		return
 	}
 	for row := 0; row < r.H; row++ {
-		i := b.pOff + row
+		i := b.watches.Off + row
 		if i >= len(b.watchers) {
 			break
 		}
@@ -472,11 +447,11 @@ func (b *BoxView) title() string {
 		if n <= rows {
 			head = fmt.Sprintf("box  %d entries", n)
 		} else {
-			last := b.off + rows
+			last := b.log.Off + rows
 			if last > n {
 				last = n
 			}
-			head = fmt.Sprintf("box  %d entries  %d-%d", n, b.off+1, last)
+			head = fmt.Sprintf("box  %d entries  %d-%d", n, b.log.Off+1, last)
 		}
 	}
 	parts := []string{head}
@@ -489,12 +464,29 @@ func (b *BoxView) title() string {
 	return " " + strings.Join(parts, "  ") + " "
 }
 
-// hint names the keys the view takes, in its bottom border.
+// hint is the float's bottom border: the keys the view takes, named from the
+// box keymap so a rebind moves the hint. The reader affordance is the client's
+// own key, because the box keymap binds no action to it.
 func (b *BoxView) hint() string {
+	hints := []ui.Hint{{Keys: []string{b.key("down"), b.key("up")}, Label: "scroll"}}
 	if b.page {
-		return " j/k scroll  w log  esc close "
+		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "log"})
+	} else {
+		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "watchers"})
+		if e, ok := b.Selected(); ok && e.Body != "" {
+			hints = append(hints, ui.Hint{Keys: []string{"enter"}, Label: "body"})
+		}
 	}
-	return " j/k scroll  w watchers  esc close "
+	return ui.Hints(append(hints, ui.Hint{Keys: []string{b.key("close-esc")}, Label: "close"}))
+}
+
+// key is the key the box keymap shows for action. A view without a config
+// names no key, and the hint drops that key rather than inventing one.
+func (b *BoxView) key(action string) string {
+	if b.km == nil {
+		return ""
+	}
+	return b.km.Key("box", action)
 }
 
 // parked counts the watches whose wait is outstanding.

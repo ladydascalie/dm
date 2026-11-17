@@ -17,6 +17,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -34,8 +35,10 @@ const (
 // KeymapView is the open keymap float: the rows built when it opened, the
 // first row in view, and the float that draws them.
 type KeymapView struct {
-	rows  []string
-	off   int
+	rows []string
+	// win is the window over rows: the first row in view. The view selects
+	// nothing, so the window carries no selection and only its offset moves.
+	win   ui.Viewport
 	query string
 	// matches are the row numbers the query matched, and match is the one
 	// n/N last moved to.
@@ -46,15 +49,27 @@ type KeymapView struct {
 	// Float is the pane that draws the view.
 	Float *panel.FloatingPane
 	snap  *wire.Snapshot
+	// km names the key of every hint the view paints. The rows are built once
+	// from the config the view opened with; the hint is derived from km at
+	// paint time, so a reload moves it without a rebuild.
+	km *keymap.Config
 }
 
 // NewKeymapView opens the float on a screen. The rows are built once, so a
 // scroll never re-reads the config.
 func NewKeymapView(snap *wire.Snapshot, cfg *keymap.Config) *KeymapView {
-	k := &KeymapView{Float: &panel.FloatingPane{ID: keymapViewID, Active: true}, snap: snap}
+	k := &KeymapView{Float: &panel.FloatingPane{ID: keymapViewID, Active: true}, snap: snap, km: cfg}
 	k.rows = KeymapRows(cfg)
 	k.Sync(snap)
 	return k
+}
+
+// SetKeymap swaps the config the hint is derived from and rewrites the border
+// hint in place, so a reload that rebinds a key moves the hint. The rows keep
+// the config the view listed when it opened.
+func (k *KeymapView) SetKeymap(cfg *keymap.Config) {
+	k.km = cfg
+	k.Float.Hint = k.hint()
 }
 
 // KeymapRows builds the view's rows: the prefix, a blank, then every mode as a
@@ -165,7 +180,7 @@ func clampRect(r layout.Rect, cols, rows int) layout.Rect {
 func (k *KeymapView) Sync(snap *wire.Snapshot) {
 	k.snap = snap
 	k.Float.Rect = KeymapViewRect(snap, len(k.rows))
-	k.clamp()
+	k.fit()
 	k.paint()
 }
 
@@ -176,29 +191,21 @@ func (k *KeymapView) RowCount() int {
 
 // Offset is the first row in view.
 func (k *KeymapView) Offset() int {
-	return k.off
+	return k.win.Off
 }
 
 // Scroll moves the window by n rows. The offset stops at the first row and at
 // the last row that still fills the rect.
 func (k *KeymapView) Scroll(n int) {
-	k.off += n
-	k.clamp()
+	k.win.Off += n
+	k.fit()
 	k.paint()
 }
 
-// clamp keeps the window on the rows.
-func (k *KeymapView) clamp() {
-	max := len(k.rows) - k.Float.Rect.H
-	if max < 0 {
-		max = 0
-	}
-	if k.off > max {
-		k.off = max
-	}
-	if k.off < 0 {
-		k.off = 0
-	}
+// fit sizes the window to the rows and the float and holds it on the rows.
+func (k *KeymapView) fit() {
+	k.win.N, k.win.H, k.win.Sel = len(k.rows), k.Float.Rect.H, -1
+	k.win.Clamp()
 }
 
 // StartSearch begins a new query. The old query and its matches go.
@@ -261,8 +268,8 @@ func (k *KeymapView) jumpToMatch() {
 	if len(k.matches) == 0 {
 		return
 	}
-	k.off = k.matches[k.match] - k.Float.Rect.H/2
-	k.clamp()
+	k.win.Off = k.matches[k.match] - k.Float.Rect.H/2
+	k.fit()
 }
 
 // NextMatch moves to the next or previous matching row and centres it.
@@ -289,16 +296,39 @@ func (k *KeymapView) title() string {
 }
 
 // hint is the float's bottom border: the normal keys, the search keys while
-// the query is typed, or the match keys after enter keeps it.
+// the query is typed, or the match keys after enter keeps it. The scroll,
+// search and close keys come from the help keymap; the two keys the search
+// itself owns, enter and esc, are the client's own and stay literal.
 func (k *KeymapView) hint() string {
 	switch {
 	case k.Searching:
-		return " enter keep  esc clear "
+		return ui.Hints([]ui.Hint{
+			{Keys: []string{"enter"}, Label: "keep"},
+			{Keys: []string{"esc"}, Label: "clear"},
+		})
 	case k.query != "":
-		return " n/N next  / edit  esc close "
+		return ui.Hints([]ui.Hint{
+			{Keys: []string{k.key("next-match"), k.key("prev-match")}, Label: "next"},
+			{Keys: []string{k.key("search")}, Label: "edit"},
+			{Keys: []string{k.key("close-esc")}, Label: "close"},
+		})
 	default:
-		return " j/k scroll  g/G ends  / search  esc close "
+		return ui.Hints([]ui.Hint{
+			{Keys: []string{k.key("down"), k.key("up")}, Label: "scroll"},
+			{Keys: []string{k.key("top"), k.key("bottom")}, Label: "ends"},
+			{Keys: []string{k.key("search")}, Label: "search"},
+			{Keys: []string{k.key("close-esc")}, Label: "close"},
+		})
 	}
+}
+
+// key is the key the help keymap shows for action. A view without a config
+// names no key, and the hint drops that key rather than inventing one.
+func (k *KeymapView) key(action string) string {
+	if k.km == nil {
+		return ""
+	}
+	return k.km.Key("help", action)
 }
 
 // style is the SGR a row paints in. A mode header is bright white, the active
@@ -336,7 +366,7 @@ func (k *KeymapView) paint() {
 	term := vt.NewTerm(r.W, r.H)
 	var buf bytes.Buffer
 	for row := 0; row < r.H; row++ {
-		i := k.off + row
+		i := k.win.Off + row
 		if i >= len(k.rows) {
 			break
 		}

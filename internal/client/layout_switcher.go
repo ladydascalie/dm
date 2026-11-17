@@ -12,6 +12,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/wire"
 )
 
@@ -222,15 +223,25 @@ func layoutPaneArea(win *wire.Snapshot) layout.Rect {
 
 // layoutFooterText is the palette's footer line: the dropped-preview note on a
 // screen too small for the floor preview, the one-pane line on a window with a
-// single pane, and the key hint otherwise.
-func layoutFooterText(show bool, paneCount int) string {
+// single pane, and the key hint otherwise. The hint names the layout keymap's
+// pick and close keys, so a rebind moves it.
+func layoutFooterText(show bool, paneCount int, km *keymap.Config) string {
 	switch {
 	case !show:
 		return "no room here for the preview"
 	case paneCount < 2:
 		return "one pane: every layout is this"
 	}
-	return "enter pick  esc close"
+	key := func(action string) string {
+		if km == nil {
+			return ""
+		}
+		return km.Key("layout", action)
+	}
+	return ui.Hints([]ui.Hint{
+		{Keys: []string{key("pick")}, Label: "pick"},
+		{Keys: []string{key("close-esc")}, Label: "close"},
+	})
 }
 
 // layoutPaletteGeom places the palette, centred, sized to the wider of the
@@ -241,7 +252,7 @@ func layoutFooterText(show bool, paneCount int) string {
 // size where a wide or tall aspect demands it. The screen is the only hard
 // cap: where even the floor cannot sit inside the screen, the preview drops
 // and the list shows alone with a footer note.
-func layoutPaletteGeom(win *wire.Snapshot, paneCount int) layoutPalette {
+func layoutPaletteGeom(win *wire.Snapshot, paneCount int, km *keymap.Config) layoutPalette {
 	var g layoutPalette
 	if win == nil || win.Cols < 1 || win.Rows < 1 {
 		return g
@@ -285,7 +296,7 @@ func layoutPaletteGeom(win *wire.Snapshot, paneCount int) layoutPalette {
 	if show && pw > w {
 		w = pw
 	}
-	if n := cells.Cells(layoutFooterText(show, paneCount)); n > w {
+	if n := cells.Cells(layoutFooterText(show, paneCount, km)); n > w {
 		w = n
 	}
 	w += 2                  // the borders
@@ -347,7 +358,7 @@ func (t *tui) layoutMouse(ev mouseEvent, x, y int) {
 		closeLayoutSwitcher(t)
 		return
 	}
-	g := layoutPaletteGeom(t.snap, len(t.lsw.panes))
+	g := layoutPaletteGeom(t.snap, len(t.lsw.panes), t.km())
 	if g.rect.W < 1 {
 		return
 	}
@@ -396,8 +407,8 @@ func (t *tui) layoutMouse(ev mouseEvent, x, y int) {
 // on is highlighted; the row matching the window's stored layout name carries
 // the current mark; on a one-pane window every preset row dims and the footer
 // says why.
-func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l *layoutSwitcher) {
-	g := layoutPaletteGeom(win, len(l.panes))
+func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l *layoutSwitcher, km *keymap.Config) {
+	g := layoutPaletteGeom(win, len(l.panes), km)
 	if g.rect.W < 1 || l == nil {
 		return
 	}
@@ -442,7 +453,7 @@ func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l
 			}
 			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", g.listY+i+1, r.X+1, colour, line)
 		}
-		foot := layoutFooterText(g.preview.W > 0, len(l.panes))
+		foot := layoutFooterText(g.preview.W > 0, len(l.panes), km)
 		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s%s", g.footY+1, r.X+1,
 			groundSGR(th.Palette.RailBG), cells.Pad(foot, r.W))
 	})

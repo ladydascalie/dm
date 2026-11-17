@@ -12,6 +12,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/theme"
 	"dm/internal/vt"
@@ -77,8 +78,8 @@ func TestBodyReaderOpensOnV(t *testing.T) {
 		got[1] != "first body line" || got[5] != "fifth" {
 		t.Fatalf("reader lines = %q, want the summary with the body below", got)
 	}
-	if tui.reader.off != 0 {
-		t.Fatalf("reader offset = %d, want the top", tui.reader.off)
+	if tui.reader.win.Off != 0 {
+		t.Fatalf("reader offset = %d, want the top", tui.reader.win.Off)
 	}
 }
 
@@ -103,16 +104,16 @@ func TestBodyReaderScrolls(t *testing.T) {
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "v")
 	feed(tui, "j")
-	if tui.reader.off != 1 {
-		t.Fatalf("offset = %d, want 1", tui.reader.off)
+	if tui.reader.win.Off != 1 {
+		t.Fatalf("offset = %d, want 1", tui.reader.win.Off)
 	}
 	feed(tui, "G")
-	if want := len(tui.reader.lines) - tui.reader.Float.Rect.H; tui.reader.off != want || want == 0 {
-		t.Fatalf("offset = %d, want the bottom at %d", tui.reader.off, want)
+	if want := len(tui.reader.lines) - tui.reader.Float.Rect.H; tui.reader.win.Off != want || want == 0 {
+		t.Fatalf("offset = %d, want the bottom at %d", tui.reader.win.Off, want)
 	}
 	feed(tui, "g")
-	if tui.reader.off != 0 {
-		t.Fatalf("offset = %d, want the top", tui.reader.off)
+	if tui.reader.win.Off != 0 {
+		t.Fatalf("offset = %d, want the top", tui.reader.win.Off)
 	}
 	// The list window did not move while the reader scrolled.
 	if tui.box.Top() != 0 {
@@ -207,7 +208,7 @@ func TestBodyReaderWrapsLongLine(t *testing.T) {
 	t.Parallel()
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
 		Body: "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo"}
-	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme(), keymap.LoadDefault())
 	inner := wrapRect().W - 2
 	if len(r.lines) < 2 {
 		t.Fatalf("lines = %q, want the long line wrapped", r.lines)
@@ -227,7 +228,7 @@ func TestBodyReaderHardBreaksUnbrokenRun(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("a", 100)
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1", Body: body}
-	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme(), keymap.LoadDefault())
 	inner := wrapRect().W - 2
 	if len(r.lines) != 3 {
 		t.Fatalf("rows = %d, want 3 hard-broken rows", len(r.lines))
@@ -248,7 +249,7 @@ func TestBodyReaderWrapsWideRunes(t *testing.T) {
 	t.Parallel()
 	body := strings.Repeat("日", 30) // 60 cells, wider than the 38-cell row
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1", Body: body}
-	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme(), keymap.LoadDefault())
 	inner := wrapRect().W - 2
 	got := 0
 	for i, row := range r.lines {
@@ -273,13 +274,13 @@ func TestBodyReaderScrollsWrappedRows(t *testing.T) {
 	t.Parallel()
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
 		Body: strings.Repeat("word ", 40)}
-	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme(), keymap.LoadDefault())
 	if len(r.lines) < 3 {
 		t.Fatalf("lines = %q, want a wrapped body", r.lines)
 	}
 	r.Scroll(len(r.lines), theme.DefaultTheme())
-	if want := len(r.lines) - wrapRect().H; r.off != want {
-		t.Fatalf("offset = %d, want the bottom at %d", r.off, want)
+	if want := len(r.lines) - wrapRect().H; r.win.Off != want {
+		t.Fatalf("offset = %d, want the bottom at %d", r.win.Off, want)
 	}
 	screen := readerScreen(t, r, 80, 24)
 	rect := r.Float.Rect
@@ -294,7 +295,7 @@ func TestBodyReaderKeepsShortLines(t *testing.T) {
 	t.Parallel()
 	e := box.Entry{Seq: 1, Key: "lane/a", State: box.StateDone, From: "w1p1",
 		Msg: "summary", Body: "one\ntwo\nthree"}
-	r := newBodyReader(e, wrapRect(), theme.DefaultTheme())
+	r := newBodyReader(e, wrapRect(), theme.DefaultTheme(), keymap.LoadDefault())
 	want := []string{"summary", "one", "two", "three"}
 	if strings.Join(r.lines, "|") != strings.Join(want, "|") {
 		t.Fatalf("lines = %q, want %q", r.lines, want)
