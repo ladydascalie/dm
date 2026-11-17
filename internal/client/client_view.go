@@ -89,7 +89,7 @@ func (t *tui) draw() {
 		drawRename(&rename, th, win, t.renameID, t.renameDraft, t.km().FloatShadow(), t.km(), t.renameKind)
 	}
 	if t.mode == "search" && t.search != nil {
-		drawSearchPrompt(&prompt, th, win, t.search.draft)
+		drawSearchPrompt(&prompt, th, win, t.search.Search.Input)
 	}
 
 	// A picture that is not stable repaints whole and may clear: a size, a

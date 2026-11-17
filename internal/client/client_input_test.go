@@ -238,22 +238,22 @@ func TestSearchQueryTakesUTF8(t *testing.T) {
 	tui, _ := searchTUI(t, 60)
 	press(t, tui, "/")
 	press(t, tui, "caf\xc3\xa9")
-	if tui.search.draft.String() != "café" {
-		t.Fatalf("draft = %q, want café", tui.search.draft.String())
+	if tui.search.Search.Input.String() != "café" {
+		t.Fatalf("draft = %q, want café", tui.search.Search.Input.String())
 	}
 	// A rune split across reads waits for its tail, and the tail joins it.
 	tui.inbuf = append(tui.inbuf, "\xe2"...)
 	tui.processInput()
-	if tui.search.draft.String() != "café" {
-		t.Fatalf("a split lead byte changed the draft: %q", tui.search.draft.String())
+	if tui.search.Search.Input.String() != "café" {
+		t.Fatalf("a split lead byte changed the draft: %q", tui.search.Search.Input.String())
 	}
 	if !tui.pending {
 		t.Fatal("a split rune did not hold the query row")
 	}
 	tui.inbuf = append(tui.inbuf, "\x82\xac"...)
 	tui.processInput()
-	if tui.search.draft.String() != "café€" {
-		t.Fatalf("draft = %q, want café€", tui.search.draft.String())
+	if tui.search.Search.Input.String() != "café€" {
+		t.Fatalf("draft = %q, want café€", tui.search.Search.Input.String())
 	}
 }
 

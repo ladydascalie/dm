@@ -791,6 +791,7 @@ keymap "switcher" {
     "filter" "/"
     "clear-query" "ctrl+l"
     "backspace" "backspace"
+    "delete-word" "ctrl+w"
     "sort" "s"
     "preview-up" "ctrl+u"
     "preview-down" "ctrl+d"
@@ -853,6 +854,7 @@ keymap "rename" {
     "cancel-right" "right"
     "submit" "enter"
     "backspace" "backspace"
+    "delete-word" "ctrl+w"
     "clear" "ctrl+u"
 }
 

@@ -9,6 +9,21 @@ import (
 	"dm/internal/testutil"
 )
 
+// TestSwitcherFilterDeleteWord proves ctrl+w cuts the filter query's last word,
+// spaces in front of it included, through the switcher keymap.
+func TestSwitcherFilterDeleteWord(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02a")
+	feed(tui, "/")
+	feed(tui, "alpha one")
+	feed(tui, "\x17")
+	if q := tui.sw.Query(); q != "alpha " {
+		t.Fatalf("query after ctrl+w = %q, want %q", q, "alpha ")
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestSwitcherFilterTakesUTF8 proves the filter query takes a multi-byte rune
 // whole, in one read or split across two, where the bytes used to be dropped
 // byte by byte in silence.

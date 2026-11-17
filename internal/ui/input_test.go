@@ -61,6 +61,41 @@ func TestInputKeys(t *testing.T) {
 	}
 }
 
+// TestInputDeleteWord runs one case per edge of the word delete: inside a word,
+// at the end of the line, with spaces between the caret and the word, over
+// spaces only, on the empty value, at either end, and with a multi-byte and a
+// wide rune, each of which counts as one rune.
+func TestInputDeleteWord(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		caret int
+		want  string
+		wantC int
+	}{
+		{"mid-word", "hello world", 9, "hello ld", 6},
+		{"end of the line", "one two", 7, "one ", 4},
+		{"a trailing space", "one two   ", 10, "one ", 4},
+		{"all spaces", "   ", 3, "", 0},
+		{"the empty value", "", 0, "", 0},
+		{"the caret at 0", "abc", 0, "abc", 0},
+		{"the caret at len(Value)", "abc", 3, "", 0},
+		{"a multi-byte rune", "naïve x", 5, " x", 0},
+		{"a wide rune", "ab 名前", 5, "ab ", 3},
+		{"a wide space is a space", "ab\u3000cd", 4, "ab\u3000d", 3},
+	}
+	for _, c := range cases {
+		in := Input{Value: []rune(c.value), Caret: c.caret}
+		in.DeleteWord()
+		if got := in.String(); got != c.want {
+			t.Fatalf("%s: value = %q, want %q", c.name, got, c.want)
+		}
+		if in.Caret != c.wantC {
+			t.Fatalf("%s: caret = %d, want %d", c.name, in.Caret, c.wantC)
+		}
+	}
+}
+
 // TestInputClampedCaret guards the exported fields: a caller that sets Value
 // and leaves Caret behind gets an edit at the end of the runes, not a panic and
 // not a gap.

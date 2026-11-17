@@ -70,6 +70,7 @@ ui.DrawInput(buf, th, ui.InputProps{
 		{"paste", "InsertString", "The string lands at the caret and the caret moves after it."},
 		{"backspace", "Backspace", "The rune before the caret goes, or nothing at 0."},
 		{"delete", "Delete", "The rune at the caret goes, or nothing at len(Value)."},
+		{"delete a word", "DeleteWord", "The word before the caret goes, the spaces in front of it included, or nothing at 0."},
 		{"move left", "Left", "The caret moves one rune left, or stays at 0."},
 		{"move right", "Right", "The caret moves one rune right, or stays at len(Value)."},
 		{"move home", "Home", "The caret moves to 0."},

@@ -307,7 +307,7 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 			}
 			return x, cy
 		}
-		q := cells.Clip(string(s.query), w-len(prompt))
+		q := cells.Clip(s.Search.Input.String(), w-len(prompt))
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, x+1)
 		buf.WriteString("\x1b[0m")
 		buf.WriteString(ground.BG())
@@ -384,7 +384,9 @@ func paintSwitcherHead(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols
 // selected pane's screen.
 func paintSwitcherBody(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, l switcherLayout, cols [7]int, paint PanePainter, set theme.GlyphSet) {
 	// The body height is the window's height: sizing it here keeps a resize
-	// and the selection in one place, so a redraw never scrolls on its own.
+	// and the selection in one place. The selection is the Search's cursor,
+	// so a redraw never scrolls on its own.
+	s.vp.Sel = s.Search.Cursor
 	s.vp.N, s.vp.H = len(s.rows), l.bodyH
 	s.vp.Ensure()
 	now := switcherNow().Unix()

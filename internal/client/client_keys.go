@@ -625,6 +625,9 @@ func (t *tui) switcherKey() bool {
 	case "backspace":
 		t.sw.Backspace()
 		t.dirty = true
+	case "delete-word":
+		t.sw.DeleteWord()
+		t.dirty = true
 	case "sort":
 		t.sw.CycleSort()
 		t.dirty = true

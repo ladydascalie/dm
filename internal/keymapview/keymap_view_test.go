@@ -244,8 +244,8 @@ func TestKeymapSearch(t *testing.T) {
 	k := NewKeymapView(snap, keymap.LoadDefault())
 	k.StartSearch()
 	k.AppendQuery("split")
-	if k.query != "split" || len(k.matches) < 2 {
-		t.Fatalf("query %q matches %v, want at least two split rows", k.query, k.matches)
+	if k.Search.Input.String() != "split" || len(k.Search.Matches) < 2 {
+		t.Fatalf("query %q matches %v, want at least two split rows", k.Search.Input.String(), k.Search.Matches)
 	}
 	k.AcceptSearch()
 	if got := k.title(); !strings.Contains(got, "1/") {
@@ -254,16 +254,16 @@ func TestKeymapSearch(t *testing.T) {
 	if got := k.hint(); !strings.Contains(got, "n/N") {
 		t.Fatalf("hint = %q, want the next/prev keys", got)
 	}
-	first := k.matches[0]
+	first := k.Search.Matches[0]
 	if first < k.win.Off || first >= k.win.Off+k.Float.Rect.H {
 		t.Fatalf("first match %d is outside the window starting at %d", first, k.win.Off)
 	}
 	k.NextMatch(1)
-	if k.match != 1 {
-		t.Fatalf("next match = %d, want 1", k.match)
+	if k.Search.Cursor != 1 {
+		t.Fatalf("next match = %d, want 1", k.Search.Cursor)
 	}
-	active := k.matches[k.match]
-	other := k.matches[0]
+	active := k.Search.Matches[k.Search.Cursor]
+	other := k.Search.Matches[0]
 	if k.style(active) == k.style(other) {
 		t.Fatalf("active and other match share style %q", k.style(active))
 	}
@@ -274,8 +274,8 @@ func TestKeymapSearch(t *testing.T) {
 		t.Fatalf("other match style = %q, want the white match", k.style(other))
 	}
 	k.CancelSearch()
-	if k.query != "" || len(k.matches) != 0 {
-		t.Fatalf("cancel left query %q matches %v", k.query, k.matches)
+	if k.Search.Input.String() != "" || len(k.Search.Matches) != 0 {
+		t.Fatalf("cancel left query %q matches %v", k.Search.Input.String(), k.Search.Matches)
 	}
 }
 
@@ -286,26 +286,49 @@ func TestKeymapSearchRuneBackspaceAndTypedTitle(t *testing.T) {
 	k := NewKeymapView(snap, keymap.LoadDefault())
 	k.StartSearch()
 	k.AppendQuery("sär")
-	if k.query != "sär" {
-		t.Fatalf("query = %q, want sär", k.query)
+	if k.Search.Input.String() != "sär" {
+		t.Fatalf("query = %q, want sär", k.Search.Input.String())
 	}
 	k.BackspaceQuery()
-	if k.query != "sä" {
-		t.Fatalf("query after backspace = %q, want sä", k.query)
+	if k.Search.Input.String() != "sä" {
+		t.Fatalf("query after backspace = %q, want sä", k.Search.Input.String())
 	}
 	k.BackspaceQuery()
-	if k.query != "s" {
-		t.Fatalf("query after two backspaces = %q, want s", k.query)
+	if k.Search.Input.String() != "s" {
+		t.Fatalf("query after two backspaces = %q, want s", k.Search.Input.String())
 	}
 
 	// The match test folds case; the title keeps what the operator typed.
 	k.StartSearch()
 	k.AppendQuery("Prefix")
-	if len(k.matches) == 0 {
+	if len(k.Search.Matches) == 0 {
 		t.Fatal("the case-folded match test found nothing for Prefix")
 	}
 	if got := k.title(); !strings.Contains(got, "/Prefix") {
 		t.Fatalf("title = %q, want the typed query /Prefix", got)
+	}
+}
+
+// TestKeymapSearchDeleteWord cuts the word before the caret, the spaces in
+// front of it included, and refilters the binding rows.
+func TestKeymapSearchDeleteWord(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
+	k := NewKeymapView(snap, keymap.LoadDefault())
+	k.StartSearch()
+	k.AppendQuery("split pa")
+	k.DeleteWordQuery()
+	if got := k.Search.Input.String(); got != "split " {
+		t.Fatalf("after one delete the query = %q, want %q", got, "split ")
+	}
+	if len(k.Search.Matches) == 0 {
+		t.Fatal("the refilter found no match for the remaining word")
+	}
+	k.DeleteWordQuery()
+	if got := k.Search.Input.String(); got != "" {
+		t.Fatalf("after two deletes the query = %q, want empty", got)
+	}
+	if len(k.Search.Matches) != 0 {
+		t.Fatalf("an empty query kept %v, want no matches", k.Search.Matches)
 	}
 }
 

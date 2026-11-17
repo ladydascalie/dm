@@ -43,6 +43,23 @@ func TestCommandPaletteOpens(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
+// TestCommandPaletteDeleteWord: ctrl+w cuts the query's last word and the rows
+// filter for what is left.
+func TestCommandPaletteDeleteWord(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	feed(tui, "\x02K")
+	feed(tui, "split ri")
+	feed(tui, "\x17")
+	if q := tui.cp.pal.Query(); q != "split " {
+		t.Fatalf("query after ctrl+w = %q, want %q", q, "split ")
+	}
+	if len(tui.cp.pal.Rows()) == 0 {
+		t.Fatal("the remaining word filtered every row out")
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestCommandPaletteHoldsBoundLetters: a query that holds letters the main
 // table binds is text, so it neither opens a float nor runs an action.
 func TestCommandPaletteHoldsBoundLetters(t *testing.T) {

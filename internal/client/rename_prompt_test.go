@@ -168,6 +168,46 @@ func TestRenamePromptEditsDraft(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
+// ctrl+w cuts the word before the caret in the draft, and a config that
+// rebinds delete-word moves the key: the old key stops editing and the new one
+// cuts the same word.
+func TestRenamePromptDeleteWordFollowsTheKeymap(t *testing.T) {
+	t.Parallel()
+	tr, got := renamePromptTUI(t)
+	renamePromptKeys(tr, "\x02r")
+	renamePromptKeys(tr, " work")
+	renamePromptKeys(tr, "\x17")
+	if got := tr.renameDraft.String(); got != "main " {
+		t.Fatalf("after ctrl+w draft = %q, want %q", got, "main ")
+	}
+	testutil.NoMsg(t, got)
+
+	cfg := testutil.KeymapTestLoad(t, `
+keymap "main" {
+    "send-prefix" "prefix"
+    "rename-workspace" "r"
+}
+keymap "rename" {
+    "cancel" "esc"
+    "submit" "enter"
+    "backspace" "backspace"
+    "delete-word" "ctrl+q"
+}`)
+	tr, got = renamePromptTUI(t)
+	tr.keymap = cfg
+	renamePromptKeys(tr, "\x02r")
+	renamePromptKeys(tr, " work")
+	renamePromptKeys(tr, "\x17") // no longer the delete-word key
+	if got := tr.renameDraft.String(); got != "main work" {
+		t.Fatalf("the old key still deletes: draft = %q, want %q", got, "main work")
+	}
+	renamePromptKeys(tr, "\x11")
+	if got := tr.renameDraft.String(); got != "main " {
+		t.Fatalf("after the rebound key draft = %q, want %q", got, "main ")
+	}
+	testutil.NoMsg(t, got)
+}
+
 // Enter sends one req with the trimmed draft and the active workspace id, and
 // closes the prompt.
 func TestRenamePromptEnterSendsReq(t *testing.T) {

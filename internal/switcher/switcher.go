@@ -72,18 +72,19 @@ type Switcher struct {
 	full    bool
 
 	// all is the snapshot's pane list, and rows are the panes the query keeps
-	// in the sort mode's order. vp is the selection and the window over rows:
-	// the selected row, or -1 when nothing survives, and the first row on
-	// screen, so a redraw does not jump.
+	// in the sort mode's order. vp is the window over rows, so a redraw does
+	// not jump; its selection is the Search's cursor.
 	all  []wire.AllPane
 	rows []wire.AllPane
 	vp   ui.Viewport
 
-	// query is the filter's text and filter says whether it is live. A query
-	// only filters while the dashboard is in filter mode, because outside it
-	// every letter is a key. Leaving the mode drops the query with it, so the
-	// table shows every pane again the moment the letters are keys again.
-	query  []rune
+	// Search is the filter's query: the draft, the rows of the snapshot it
+	// keeps and the selected row among them. The filter flag says whether the
+	// query is live. A query only filters while the dashboard is in filter
+	// mode, because outside it every letter is a key. Leaving the mode drops
+	// the query with it, so the table shows every pane again the moment the
+	// letters are keys again.
+	Search ui.Search
 	filter bool
 
 	mode      SortMode
@@ -150,7 +151,7 @@ func (s *Switcher) Sync(snap *wire.Snapshot) {
 		s.asked, s.pane, s.lines, s.offset = false, "", nil, 0
 	}
 	prev := s.Target()
-	s.rebuild(s.vp.Sel, prev)
+	s.rebuild(s.Search.Cursor, prev)
 }
 
 // Filtering reports whether the dashboard is in filter mode, where every
@@ -166,8 +167,8 @@ func (s *Switcher) StartFilter() {
 		return
 	}
 	s.filter = true
-	if len(s.query) > 0 {
-		s.query = nil
+	if !s.Search.Input.Empty() {
+		s.Search.Input.SetValue("")
 		s.refilter()
 	}
 }
@@ -180,10 +181,10 @@ func (s *Switcher) StopFilter() {
 		return
 	}
 	s.filter = false
-	if len(s.query) == 0 {
+	if s.Search.Input.Empty() {
 		return
 	}
-	s.query = nil
+	s.Search.Input.SetValue("")
 	s.refilter()
 }
 
@@ -193,32 +194,41 @@ func (s *Switcher) AppendText(r rune) {
 	if !s.filter {
 		return
 	}
-	s.query = append(s.query, r)
+	s.Search.Input.InsertRune(r)
 	s.refilter()
 }
 
 // Backspace removes the query's last rune and reselects.
 func (s *Switcher) Backspace() {
-	if !s.filter || len(s.query) == 0 {
+	if !s.filter || s.Search.Input.Empty() {
 		return
 	}
-	s.query = s.query[:len(s.query)-1]
+	s.Search.Input.Backspace()
+	s.refilter()
+}
+
+// DeleteWord removes the query's word before the caret and reselects.
+func (s *Switcher) DeleteWord() {
+	if !s.filter || s.Search.Input.Empty() {
+		return
+	}
+	s.Search.Input.DeleteWord()
 	s.refilter()
 }
 
 // ClearQuery empties the query and reselects. The table stays in the mode it is
 // in, so the next keystroke is still a letter of the query.
 func (s *Switcher) ClearQuery() {
-	if !s.filter || len(s.query) == 0 {
+	if !s.filter || s.Search.Input.Empty() {
 		return
 	}
-	s.query = nil
+	s.Search.Input.SetValue("")
 	s.refilter()
 }
 
 // Query is the query as a lower-case string to match against.
 func (s *Switcher) Query() string {
-	return strings.ToLower(string(s.query))
+	return strings.ToLower(s.Search.Input.String())
 }
 
 // RowCount is how many panes the query keeps.
@@ -227,11 +237,10 @@ func (s *Switcher) RowCount() int {
 }
 
 // Move steps the selection d rows and stops at either end of the table. The
-// window follows the selection in the same call, so a redraw never has to
-// catch up.
+// painter keeps the window on the cursor at the next draw, so the ends hold
+// without a wrap.
 func (s *Switcher) Move(d int) {
-	s.vp.N = len(s.rows)
-	s.vp.Move(d)
+	s.Search.SetCursor(s.Search.Cursor + d)
 }
 
 // Jump selects the n'th row, numbered from one the way the 1-9 keys are, and
@@ -240,25 +249,27 @@ func (s *Switcher) Jump(n int) bool {
 	if n < 1 || n > len(s.rows) {
 		return false
 	}
-	s.vp.Sel = n - 1
+	s.Search.SetCursor(n - 1)
 	return true
 }
 
 // Selected is the highlighted pane row. It is always a rail.Pane item built
 // from the AllPane, so a caller that reads Kind and Pane keeps working.
 func (s *Switcher) Selected() (rail.RailItem, bool) {
-	if s.vp.Sel < 0 || s.vp.Sel >= len(s.rows) {
+	cur := s.Search.Cursor
+	if cur < 0 || cur >= len(s.rows) {
 		return rail.RailItem{}, false
 	}
-	return paneItem(s.rows[s.vp.Sel]), true
+	return paneItem(s.rows[cur]), true
 }
 
 // Target is the pane id of the selected row, or empty when nothing is selected.
 func (s *Switcher) Target() string {
-	if s.vp.Sel < 0 || s.vp.Sel >= len(s.rows) {
+	cur := s.Search.Cursor
+	if cur < 0 || cur >= len(s.rows) {
 		return ""
 	}
-	return s.rows[s.vp.Sel].ID
+	return s.rows[cur].ID
 }
 
 // SortMode is the table's current ordering.
@@ -271,7 +282,7 @@ func (s *Switcher) SortMode() SortMode {
 func (s *Switcher) CycleSort() SortMode {
 	s.mode = s.mode.nextSort()
 	prev := s.Target()
-	s.rebuild(s.vp.Sel, prev)
+	s.rebuild(s.Search.Cursor, prev)
 	return s.mode
 }
 
@@ -386,51 +397,56 @@ func (s *Switcher) AcceptPreview(id int, lines []string) bool {
 // best match, so a typed query shows the nearest of its hits.
 func (s *Switcher) refilter() {
 	s.vp.Off = 0
-	s.rebuild(s.vp.Sel, "")
+	s.rebuild(s.Search.Cursor, "")
 }
 
 // rebuild filters and sorts the rows, then takes a selection: keep is the pane
 // id to hold when it survives, and old is the row index the reselect measured
 // from when it does not.
 func (s *Switcher) rebuild(old int, keep string) {
-	s.rows = s.rows[:0]
 	q := s.Query()
-	for _, p := range s.all {
-		if _, ok := matchPane(p, q); ok {
-			s.rows = append(s.rows, p)
-		}
-	}
+	s.Search.Refilter(len(s.all), func(i int) bool {
+		_, ok := matchPane(s.all[i], q)
+		return ok
+	})
 	s.sortRows()
+	s.rows = s.rows[:0]
+	for _, i := range s.Search.Matches {
+		s.rows = append(s.rows, s.all[i])
+	}
 	if keep != "" {
 		for i, p := range s.rows {
 			if p.ID == keep {
-				s.vp.Sel = i
+				s.Search.SetCursor(i)
 				return
 			}
 		}
 	}
-	s.vp.Sel = s.pick(old)
+	s.Search.SetCursor(s.pick(old))
 }
 
-// sortRows orders the rows for the current sort mode. Every mode is stable, so
-// panes the mode cannot tell apart keep the snapshot's order.
+// sortRows orders the matched source rows for the current sort mode. The
+// matches carry the order, so Matches and the pane rows never disagree. Every
+// mode is stable, so panes the mode cannot tell apart keep the snapshot's
+// order.
 func (s *Switcher) sortRows() {
+	matches := s.Search.Matches
 	switch s.mode {
 	case SortProject:
-		sort.SliceStable(s.rows, func(i, j int) bool {
-			a, b := s.rows[i].Project, s.rows[j].Project
+		sort.SliceStable(matches, func(i, j int) bool {
+			a, b := s.all[matches[i]].Project, s.all[matches[j]].Project
 			if (a == "") != (b == "") {
 				return a != ""
 			}
 			return strings.ToLower(a) < strings.ToLower(b)
 		})
 	case SortStatus:
-		sort.SliceStable(s.rows, func(i, j int) bool {
-			return statusRank(s.rows[i].Status) < statusRank(s.rows[j].Status)
+		sort.SliceStable(matches, func(i, j int) bool {
+			return statusRank(s.all[matches[i]].Status) < statusRank(s.all[matches[j]].Status)
 		})
 	default:
-		sort.SliceStable(s.rows, func(i, j int) bool {
-			return s.rows[i].StatusChangedAt > s.rows[j].StatusChangedAt
+		sort.SliceStable(matches, func(i, j int) bool {
+			return s.all[matches[i]].StatusChangedAt > s.all[matches[j]].StatusChangedAt
 		})
 	}
 }

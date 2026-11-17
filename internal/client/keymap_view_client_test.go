@@ -44,6 +44,20 @@ func keymapHint(t *testing.T, k *keymapview.KeymapView, cols, rows int) string {
 	return boxScreenRow(keymapScreen(t, k, cols, rows), r.Y+r.H, r.X+1, r.W-2)
 }
 
+// TestKeymapSearchDeleteWord: ctrl+w cuts the query's last word in the keymap
+// view's search row and refilters the binding rows.
+func TestKeymapSearchDeleteWord(t *testing.T) {
+	t.Parallel()
+	tui := &tui{snap: testutil.TestSnapshot(&layout.Node{Pane: "a"}, 100, 30, nil), keymap: keymap.LoadDefault()}
+	tui.runAction("help")
+	feed(tui, "/")
+	feed(tui, "split pa")
+	feed(tui, "\x17")
+	if got := tui.keys.Search.Input.String(); got != "split " {
+		t.Fatalf("query after ctrl+w = %q, want %q", got, "split ")
+	}
+}
+
 // TestKeymapSearchInput: / starts a query, typing filters, enter keeps it, n
 // moves to the next match, and esc clears it.
 func TestKeymapSearchInput(t *testing.T) {

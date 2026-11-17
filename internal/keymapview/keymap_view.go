@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"dm/internal/cells"
 	"dm/internal/keymap"
@@ -38,13 +37,11 @@ type KeymapView struct {
 	rows []string
 	// win is the window over rows: the first row in view. The view selects
 	// nothing, so the window carries no selection and only its offset moves.
-	win   ui.Viewport
-	query string
-	// matches are the row numbers the query matched, and match is the one
-	// n/N last moved to.
-	matches []int
-	match   int
-	// Searching is true while the query is being typed.
+	win ui.Viewport
+	// Search is the query, the committed query and the matching binding rows,
+	// with the cursor on the active one. Searching says whether the query is
+	// being typed.
+	Search    ui.Search
 	Searching bool
 	// Float is the pane that draws the view.
 	Float *panel.FloatingPane
@@ -208,76 +205,103 @@ func (k *KeymapView) fit() {
 	k.win.Clamp()
 }
 
-// StartSearch begins a new query. The old query and its matches go.
+// StartSearch begins a new query. The old query, its matches and the query it
+// committed go.
 func (k *KeymapView) StartSearch() {
 	k.Searching = true
-	k.SetQuery("")
+	k.Search.Clear()
+	k.paint()
 }
 
 // CancelSearch drops the query and its highlight.
 func (k *KeymapView) CancelSearch() {
 	k.Searching = false
-	k.SetQuery("")
-}
-
-// AcceptSearch keeps the query and its highlight and returns to normal keys.
-func (k *KeymapView) AcceptSearch() {
-	k.Searching = false
+	k.Search.Clear()
 	k.paint()
 }
 
-// AppendQuery adds one printable byte to the query.
+// AcceptSearch keeps the query and its highlight, makes it the accepted query
+// and returns to normal keys.
+func (k *KeymapView) AcceptSearch() {
+	k.Searching = false
+	k.Search.Commit()
+	k.paint()
+}
+
+// AppendQuery adds text to the query at the caret and recomputes the matches.
 func (k *KeymapView) AppendQuery(s string) {
-	k.SetQuery(k.query + s)
+	k.Search.Input.InsertString(s)
+	k.refilter()
 }
 
 // BackspaceQuery removes the last rune of the query. A multi-byte rune goes
 // whole: cutting one byte would leave a broken prefix that matches nothing.
 func (k *KeymapView) BackspaceQuery() {
-	if k.query == "" {
+	if k.Search.Input.Empty() {
 		return
 	}
-	_, size := utf8.DecodeLastRuneInString(k.query)
-	k.SetQuery(k.query[:len(k.query)-size])
+	k.Search.Input.Backspace()
+	k.refilter()
 }
 
-// SetQuery replaces the query, recomputes the matching binding rows and puts
-// the first match in view. An empty query clears the highlight. The query is
-// kept as typed: the title shows it, and only the match test folds case.
-func (k *KeymapView) SetQuery(q string) {
-	k.query = q
-	lower := strings.ToLower(q)
-	k.matches = k.matches[:0]
-	if lower != "" {
-		for i, row := range k.rows {
-			if keymapHeader(row) || strings.TrimSpace(row) == "" {
-				continue
-			}
-			if strings.Contains(strings.ToLower(row), lower) {
-				k.matches = append(k.matches, i)
-			}
-		}
+// DeleteWordQuery removes the word before the caret. The spaces in front of it
+// go with it, and a wide or multi-byte rune counts as one rune.
+func (k *KeymapView) DeleteWordQuery() {
+	if k.Search.Input.Empty() {
+		return
 	}
-	k.match = 0
+	k.Search.Input.DeleteWord()
+	k.refilter()
+}
+
+// SetQuery replaces the draft query, recomputes the matching binding rows and
+// puts the first match in view. An empty query clears the highlight. The query
+// is kept as typed: the title shows it, and only the match test folds case.
+func (k *KeymapView) SetQuery(q string) {
+	k.Search.Input.SetValue(q)
+	k.refilter()
+}
+
+// refilter rebuilds the match set from the draft and centres the first match.
+// The match test folds case and reads the draft through the Search, so the
+// highlight answers the query the title shows.
+func (k *KeymapView) refilter() {
+	lower := strings.ToLower(k.Search.Input.String())
+	empty := lower == ""
+	k.Search.Refilter(len(k.rows), func(i int) bool {
+		if empty {
+			return false
+		}
+		row := k.rows[i]
+		if keymapHeader(row) || strings.TrimSpace(row) == "" {
+			return false
+		}
+		return strings.Contains(strings.ToLower(row), lower)
+	})
 	k.jumpToMatch()
 	k.paint()
 }
 
 // jumpToMatch centres the current match in the window.
 func (k *KeymapView) jumpToMatch() {
-	if len(k.matches) == 0 {
+	row := k.Search.Match()
+	if row < 0 {
 		return
 	}
-	k.win.Off = k.matches[k.match] - k.Float.Rect.H/2
+	k.win.Off = row - k.Float.Rect.H/2
 	k.fit()
 }
 
 // NextMatch moves to the next or previous matching row and centres it.
 func (k *KeymapView) NextMatch(dir int) {
-	if len(k.matches) == 0 {
+	if k.Search.Count() == 0 {
 		return
 	}
-	k.match = (k.match + dir + len(k.matches)) % len(k.matches)
+	if dir < 0 {
+		k.Search.Prev()
+	} else {
+		k.Search.Next()
+	}
 	k.jumpToMatch()
 	k.paint()
 }
@@ -285,14 +309,15 @@ func (k *KeymapView) NextMatch(dir int) {
 // title is the float's top border: keymaps, plus the live query and the
 // position of the active match.
 func (k *KeymapView) title() string {
-	if k.query == "" {
+	q := k.Search.Input.String()
+	if q == "" {
 		return " keymaps "
 	}
 	pos := "0/0"
-	if len(k.matches) > 0 {
-		pos = fmt.Sprintf("%d/%d", k.match+1, len(k.matches))
+	if n := k.Search.Count(); n > 0 {
+		pos = fmt.Sprintf("%d/%d", k.Search.Cursor+1, n)
 	}
-	return " keymaps  /" + k.query + "  " + pos + " "
+	return " keymaps  /" + q + "  " + pos + " "
 }
 
 // hint is the float's bottom border: the normal keys, the search keys while
@@ -306,7 +331,7 @@ func (k *KeymapView) hint() string {
 			{Keys: []string{"enter"}, Label: "keep"},
 			{Keys: []string{"esc"}, Label: "clear"},
 		})
-	case k.query != "":
+	case !k.Search.Input.Empty():
 		return ui.Hints([]ui.Hint{
 			{Keys: []string{k.key("next-match"), k.key("prev-match")}, Label: "next"},
 			{Keys: []string{k.key("search")}, Label: "edit"},
@@ -340,7 +365,7 @@ func (k *KeymapView) style(i int) string {
 		return "\x1b[0m\x1b[97m"
 	case k.activeMatch(i):
 		return "\x1b[0m\x1b[30;103m"
-	case k.query != "" && strings.Contains(strings.ToLower(k.rows[i]), strings.ToLower(k.query)):
+	case k.rowMatch(i):
 		return "\x1b[0m\x1b[30;107m"
 	default:
 		return "\x1b[0m\x1b[90m"
@@ -349,7 +374,17 @@ func (k *KeymapView) style(i int) string {
 
 // activeMatch reports whether row i is the match n/N last moved to.
 func (k *KeymapView) activeMatch(i int) bool {
-	return len(k.matches) > 0 && k.matches[k.match] == i
+	return k.Search.Match() == i
+}
+
+// rowMatch reports whether the query matched row i.
+func (k *KeymapView) rowMatch(i int) bool {
+	for _, m := range k.Search.Matches {
+		if m == i {
+			return true
+		}
+	}
+	return false
 }
 
 // paint rewrites the float's terminal from the rows. Every row is placed
