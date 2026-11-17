@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"dm/internal/panel"
 	"dm/internal/ui"
 )
 
@@ -19,7 +20,7 @@ func TestComponentPageNamesEveryField(t *testing.T) {
 			t.Run(c.name, func(t *testing.T) {
 				checkFields(t, "props", c.props, reflect.TypeOf(ui.InputProps{}))
 				checkFields(t, "state", c.state, reflect.TypeOf(ui.Input{}))
-				checkMethods(t, c.keys, reflect.TypeOf(&ui.Input{}))
+				checkMethods(t, c.keys, reflect.TypeOf(&ui.Input{}), "")
 			})
 		case "search":
 			t.Run(c.name, func(t *testing.T) {
@@ -27,7 +28,18 @@ func TestComponentPageNamesEveryField(t *testing.T) {
 					t.Errorf("search has props; a molecule owns no draw")
 				}
 				checkFields(t, "state", c.state, reflect.TypeOf(ui.Search{}))
-				checkMethods(t, c.keys, reflect.TypeOf(&ui.Search{}))
+				checkMethods(t, c.keys, reflect.TypeOf(&ui.Search{}), "")
+			})
+		case "box":
+			t.Run(c.name, func(t *testing.T) {
+				checkFields(t, "props", c.props, reflect.TypeOf(panel.FloatingPane{}))
+				if len(c.state) != 0 {
+					t.Errorf("box has state rows; a float owns none")
+				}
+				if len(c.keys) != 0 {
+					t.Errorf("box has key rows; a float never reads a key")
+				}
+				checkMethods(t, c.keys, reflect.TypeOf(&panel.FloatingPane{}), c.draw)
 			})
 		}
 	}
@@ -59,8 +71,9 @@ func checkFields(t *testing.T, table string, rows []componentField, typ reflect.
 }
 
 // checkMethods requires one row per exported method of typ, and no row without
-// a method.
-func checkMethods(t *testing.T, rows []componentKey, typ reflect.Type) {
+// a method. draw names the method that is the component's Draw, which is not a
+// key and therefore has no row.
+func checkMethods(t *testing.T, rows []componentKey, typ reflect.Type, draw string) {
 	t.Helper()
 	have := make(map[string]bool, len(rows))
 	for _, r := range rows {
@@ -68,6 +81,9 @@ func checkMethods(t *testing.T, rows []componentKey, typ reflect.Type) {
 	}
 	for i := 0; i < typ.NumMethod(); i++ {
 		name := typ.Method(i).Name
+		if name == draw {
+			continue
+		}
 		if !have[name] {
 			t.Errorf("keys has no row for method %s", name)
 		}
