@@ -25,8 +25,16 @@ var switcherMoveRe = regexp.MustCompile("\x1b\\[([0-9]+);([0-9]+)H")
 // switcherSizes are the floats the dashboard must fit: a palette-sized box on
 // a screen of each shape, then the whole screen of the same shapes.
 var switcherSizes = [][2]int{
-	{200, 60}, {120, 40}, {80, 24}, {40, 12}, {20, 8}, {12, 5},
-	{160, 30}, {61, 10}, {60, 9}, {40, 8},
+	{200, 60},
+	{120, 40},
+	{80, 24},
+	{40, 12},
+	{20, 8},
+	{12, 5},
+	{160, 30},
+	{61, 10},
+	{60, 9},
+	{40, 8},
 }
 
 // drawFloat draws the dashboard in the ASCII glyph set and replays its bytes
@@ -348,6 +356,33 @@ func TestSwitcherDrawFootDropsHints(t *testing.T) {
 		if strings.Contains(foot, gone) {
 			t.Fatalf("footer kept %q: %q", gone, foot)
 		}
+	}
+}
+
+// TestSwitcherDrawFootFoldsControlKeys checks a footer too narrow for the
+// spelled-out keys retries with the caret form, so the scroll reminder keeps
+// the cells the full key name would spend. A wide footer keeps the full name.
+func TestSwitcherDrawFootFoldsControlKeys(t *testing.T) {
+	s, snap := switcherOn(120, 30)
+	l := switcherLayoutOf(s, snap)
+	_, _, _, screen := drawFloat(t, s, snap, nil)
+	foot := switcherText(screen, l.inner.X, l.footY, l.inner.W)
+	if !strings.Contains(foot, "^u/^d scroll") {
+		t.Fatalf("narrow footer = %q, want ^u/^d scroll", foot)
+	}
+	if strings.Contains(foot, "ctrl+u") {
+		t.Fatalf("narrow footer kept the full key name: %q", foot)
+	}
+
+	wide, wsnap := switcherOn(200, 40)
+	wl := switcherLayoutOf(wide, wsnap)
+	_, _, _, wscreen := drawFloat(t, wide, wsnap, nil)
+	wfoot := switcherText(wscreen, wl.inner.X, wl.footY, wl.inner.W)
+	if !strings.Contains(wfoot, "ctrl+u/ctrl+d scroll") {
+		t.Fatalf("wide footer = %q, want ctrl+u/ctrl+d scroll", wfoot)
+	}
+	if strings.Contains(wfoot, "^u/^d") {
+		t.Fatalf("wide footer folded a key that fits: %q", wfoot)
 	}
 }
 

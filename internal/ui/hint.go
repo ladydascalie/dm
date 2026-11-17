@@ -1,6 +1,9 @@
 package ui
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // Hint is one key hint: the keys that fire an action and the label that names
 // it. A key written by the caller is painted as it stands, so "ctrl+x" reads
@@ -29,6 +32,22 @@ func Hints(hints []Hint) string {
 		parts = append(parts, text)
 	}
 	return strings.Join(parts, "  ")
+}
+
+// ShortKey folds a control chord to its terminal shorthand: ctrl+u becomes ^u,
+// so a row short of cells can still name the key it means. Only a ctrl chord
+// with exactly one rune after it folds: ctrl+up is not ^up, and every other
+// key is returned as it stands.
+func ShortKey(key string) string {
+	const prefix = "ctrl+"
+	if !strings.HasPrefix(key, prefix) {
+		return key
+	}
+	rest := key[len(prefix):]
+	if utf8.RuneCountInString(rest) != 1 {
+		return key
+	}
+	return "^" + rest
 }
 
 // hintText is one hint's text, or the empty string when every key is empty.

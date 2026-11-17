@@ -575,11 +575,33 @@ func jumpSpan(km *keymap.Config) string {
 }
 
 // switcherHint fits the hints into room cells and drops the ones that do not
-// fit. It never ends on half a hint: a key that does not fit is not named.
+// fit. It tries the full key names first and, only when the row would lose a
+// hint, retries with the control chords folded to ^x: a narrow footer can
+// afford the caret but not the word. It never ends on half a hint: a key that
+// does not fit is not named.
 func switcherHint(room int, km *keymap.Config) string {
+	hints := switcherHints(km)
+	if text, whole := fitHints(hints, room); whole {
+		return text
+	}
+	short := make([]ui.Hint, len(hints))
+	for i, h := range hints {
+		keys := make([]string, len(h.Keys))
+		for j, k := range h.Keys {
+			keys[j] = ui.ShortKey(k)
+		}
+		short[i] = ui.Hint{Keys: keys, Label: h.Label}
+	}
+	text, _ := fitHints(short, room)
+	return text
+}
+
+// fitHints keeps the longest head of hints that fits in room cells and
+// reports whether every hint was kept.
+func fitHints(hints []ui.Hint, room int) (string, bool) {
 	var kept []ui.Hint
 	used := 0
-	for _, hint := range switcherHints(km) {
+	for _, hint := range hints {
 		text := ui.Hints([]ui.Hint{hint})
 		if text == "" {
 			continue
@@ -589,12 +611,12 @@ func switcherHint(room int, km *keymap.Config) string {
 			need += 2
 		}
 		if used+need > room {
-			break
+			return ui.Hints(kept), false
 		}
 		kept = append(kept, hint)
 		used += need
 	}
-	return ui.Hints(kept)
+	return ui.Hints(kept), true
 }
 
 // paintSwitcherFoot paints the hint row at the bottom of the box: the keys on

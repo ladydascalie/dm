@@ -40,6 +40,28 @@ func TestHints(t *testing.T) {
 	}
 }
 
+// TestShortKey folds only a control chord with one rune after it: ctrl+u is
+// ^u, and everything else keeps its name so a footer never prints ^up.
+func TestShortKey(t *testing.T) {
+	cases := []struct{ key, want string }{
+		{"ctrl+u", "^u"},
+		{"ctrl+d", "^d"},
+		{"ctrl+[", "^["},
+		{"ctrl+shift+u", "ctrl+shift+u"},
+		{"ctrl+up", "ctrl+up"},
+		{"ctrl+space", "ctrl+space"},
+		{"ctrl+", "ctrl+"},
+		{"alt+u", "alt+u"},
+		{"esc", "esc"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := ShortKey(c.key); got != c.want {
+			t.Fatalf("ShortKey(%q) = %q, want %q", c.key, got, c.want)
+		}
+	}
+}
+
 // TestHintsPlainText holds the component to plain text: no escape sequence and
 // no cell of styling, because the panel paints the row.
 func TestHintsPlainText(t *testing.T) {
