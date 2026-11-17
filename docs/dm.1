@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-16" "dm" "User Commands"
+.TH DM 1 "2026-11-17" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -875,6 +875,8 @@ send prefix
 .TP
 \fBctrl+r\fP
 reload config
+.PP
+The toggle-secrets action turns a pane's secret redaction off and on. It exists so a human can edit a secret in place: while it is off the pane's registered values are kept and the pane's output passes through untouched, and turning it back on scrubs those values again. It is not a security control: an agent that can reach the dm socket can flip it, as it can already type keys and read panes. The toast names the state the pane is left in.
 .SH KEYMAPS
 A keymap mode is a table of actions. A keymap node in config.kdl patches one mode, and an action the file leaves out keeps its built-in key. The built-in bindings are:
 .TP

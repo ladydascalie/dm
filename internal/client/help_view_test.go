@@ -15,11 +15,13 @@ import (
 	"dm/internal/theme"
 )
 
-// helpBoxDraw paints the help box for a screen and returns its bytes.
-func helpBoxDraw(t *testing.T, cols, rows int, keys []keymap.HelpEntry) string {
+// helpBoxDraw paints the help box for a screen and returns its bytes. The
+// notes come from the same config as the rows, so a test cannot pass a short
+// label and forget the caveat the overlay paints under it.
+func helpBoxDraw(t *testing.T, cols, rows int, cfg *keymap.Config) string {
 	t.Helper()
 	var buf bytes.Buffer
-	drawHelp(&buf, theme.DefaultTheme(), cols, rows, false, keys)
+	drawHelp(&buf, theme.DefaultTheme(), cols, rows, false, cfg.HelpEntries(), cfg.HelpNotes())
 	return buf.String()
 }
 
@@ -131,12 +133,13 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 // on a 40-row screen.
 func TestHelpBoxSizesToWidestRowAt100x40(t *testing.T) {
 	t.Parallel()
-	keys := keymap.LoadDefault().HelpEntries()
-	g, ok := helpBoxGeometry(100, 40, keys)
+	cfg := keymap.LoadDefault()
+	keys := cfg.HelpEntries()
+	g, ok := helpBoxGeometry(100, 40, keys, cfg.HelpNotes())
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
 	}
-	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, keys))
+	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, cfg))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
 	if want := g.inner + 2; x1-x0+1 != want {
@@ -179,19 +182,66 @@ func TestHelpBoxSizesToWidestRowAt100x40(t *testing.T) {
 	}
 }
 
+// TestHelpBoxPaintsToggleRowAndCaveat proves the overlay lists ctrl+g and its
+// caveat at both sizes the docs promise. It reads the painted cells, not the
+// label string, so a reword that widens the action column cannot clip the
+// Session rows again without failing here.
+func TestHelpBoxPaintsToggleRowAndCaveat(t *testing.T) {
+	t.Parallel()
+	cfg := keymap.LoadDefault()
+	notes := cfg.HelpNotes()
+	if len(notes) == 0 {
+		t.Fatal("HelpNotes() is empty")
+	}
+	for _, size := range []struct{ cols, rows int }{{120, 30}, {100, 30}} {
+		p := helpBoxParse(t, helpBoxDraw(t, size.cols, size.rows, cfg))
+		x0, y0, x1, y1 := helpBoxBounds(t, p)
+		var rows []string
+		for row := y0 + 1; row <= y1-1; row++ {
+			rows = append(rows, helpBoxRowText(p, row, x0+1, x1-1))
+		}
+		all := strings.Join(rows, "\n")
+		if !strings.Contains(all, "Session") {
+			t.Errorf("%dx%d: the box paints no Session header", size.cols, size.rows)
+		}
+		toggle := ""
+		for _, row := range rows {
+			if strings.Contains(row, "ctrl+g") {
+				toggle = row
+				break
+			}
+		}
+		if toggle == "" {
+			t.Fatalf("%dx%d: the box paints no ctrl+g row", size.cols, size.rows)
+		}
+		// A narrow box may elide the action label, so the proof is the
+		// painted prefix of the label, not the whole string.
+		if !strings.Contains(toggle, "toggle secret redact") {
+			t.Errorf("%dx%d: ctrl+g row = %q, want it to name the action", size.cols, size.rows, toggle)
+		}
+		for _, note := range notes {
+			if !strings.Contains(all, note) {
+				t.Errorf("%dx%d: the box paints no caveat %q", size.cols, size.rows, note)
+			}
+		}
+	}
+}
+
 // TestHelpBoxShadow proves the float shadow switch paints marks beside and
 // under the help box, stops above the toast row and the bar, and that the
-// switch off paints none.
+// switch off paints none. The box needs a row to spare under its bottom
+// border, so the proof runs at the 120x30 the help scene uses.
 func TestHelpBoxShadow(t *testing.T) {
 	t.Parallel()
-	keys := keymap.LoadDefault().HelpEntries()
-	cols, rows := 100, 40
-	g, ok := helpBoxGeometry(cols, rows, keys)
+	cfg := keymap.LoadDefault()
+	keys := cfg.HelpEntries()
+	cols, rows := 120, 30
+	g, ok := helpBoxGeometry(cols, rows, keys, cfg.HelpNotes())
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
 	}
 	var on bytes.Buffer
-	drawHelp(&on, theme.DefaultTheme(), cols, rows, true, keys)
+	drawHelp(&on, theme.DefaultTheme(), cols, rows, true, keys, cfg.HelpNotes())
 	p := helpBoxParse(t, on.String())
 	x1, y1 := g.x+g.inner, g.y+g.h
 	if got := p.writes[[2]int{y1, x1 + 1}]; len(got) == 0 || got[0] != '░' {
@@ -208,7 +258,7 @@ func TestHelpBoxShadow(t *testing.T) {
 		}
 	}
 	var off bytes.Buffer
-	drawHelp(&off, theme.DefaultTheme(), cols, rows, false, keys)
+	drawHelp(&off, theme.DefaultTheme(), cols, rows, false, keys, cfg.HelpNotes())
 	p = helpBoxParse(t, off.String())
 	for rc, got := range p.writes {
 		if len(got) > 0 && got[0] == '░' {
@@ -222,9 +272,10 @@ func TestHelpBoxShadow(t *testing.T) {
 func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ cols, rows int }{{40, 15}, {26, 12}} {
-		keys := keymap.LoadDefault().HelpEntries()
+		cfg := keymap.LoadDefault()
+		keys := cfg.HelpEntries()
 		rows := categorizeHelpRows(keys)
-		p := helpBoxParse(t, helpBoxDraw(t, c.cols, c.rows, keys))
+		p := helpBoxParse(t, helpBoxDraw(t, c.cols, c.rows, cfg))
 		x0, y0, x1, y1 := helpBoxBounds(t, p)
 		if x0 < 0 || y0 < 0 || x1 > c.cols-1 || y1 > c.rows-1 {
 			t.Fatalf("%dx%d: box %d,%d..%d,%d is past the screen", c.cols, c.rows, x0, y0, x1, y1)
@@ -255,10 +306,11 @@ func TestHelpBoxStaysInBoundsOnNarrowScreens(t *testing.T) {
 // alone, with no action label bleeding in.
 func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 	t.Parallel()
-	keys := keymap.LoadDefault().HelpEntries()
+	cfg := keymap.LoadDefault()
+	keys := cfg.HelpEntries()
 	rows := categorizeHelpRows(keys)
 	keyW, actionW := helpBoxWidths(keys)
-	p := helpBoxParse(t, helpBoxDraw(t, 26, 12, keys))
+	p := helpBoxParse(t, helpBoxDraw(t, 26, 12, cfg))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
 	if got, want := x1-x0+1, keyW+2; got != want {
@@ -284,9 +336,10 @@ func TestHelpBoxNarrowDropsActionColumn(t *testing.T) {
 // cuts a label and says so.
 func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 	t.Parallel()
-	keys := keymap.LoadDefault().HelpEntries()
+	cfg := keymap.LoadDefault()
+	keys := cfg.HelpEntries()
 	keyW, _ := helpBoxWidths(keys)
-	p := helpBoxParse(t, helpBoxDraw(t, 12, 12, keys))
+	p := helpBoxParse(t, helpBoxDraw(t, 12, 12, cfg))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 	// The interior is narrower than the key column, so the action column is
 	// gone as well as the label being cut.
@@ -314,8 +367,8 @@ func TestHelpBoxEllipsisMarksCutLabel(t *testing.T) {
 // most two writes and the second is never a bare fill.
 func TestHelpBoxRowsShareColumns(t *testing.T) {
 	t.Parallel()
-	keys := keymap.LoadDefault().HelpEntries()
-	p := helpBoxParse(t, helpBoxDraw(t, 100, 30, keys))
+	cfg := keymap.LoadDefault()
+	p := helpBoxParse(t, helpBoxDraw(t, 100, 30, cfg))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
 	for row := y0 + 1; row <= y1-1; row++ {
@@ -428,7 +481,7 @@ keymap "main" {
 	if got, want := helpSectionColor("Custom"), helpCategoryColors["Utility"]; got != want {
 		t.Fatalf("helpSectionColor(Custom) = %q, want the Utility colour %q", got, want)
 	}
-	out := helpBoxDraw(t, 100, 30, entries)
+	out := helpBoxDraw(t, 100, 30, cfg)
 	if !strings.Contains(out, helpCategoryColors["Utility"]+"Custom") {
 		t.Fatal("the Custom header does not paint with the Utility colour")
 	}
@@ -440,14 +493,15 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value.
-const helpBoxDefaultSHA256 = "188f77fb8942a5407f3b885239e3f8bb3c5b44382b197790adafef8c21ce4c1f"
+const helpBoxDefaultSHA256 = "3208c4a542b49d69d8b238ece5fc89fd9849149c29d388e90ad9e9acc5947a2c"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the
 // rest of the default config is untagged.
 func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
 	t.Parallel()
-	entries := keymap.LoadDefault().HelpEntries()
+	cfg := keymap.LoadDefault()
+	entries := cfg.HelpEntries()
 	want := map[string]string{
 		"swap with next / prev pane": "Layout",
 		"cycle layout":               "Layout",
@@ -463,7 +517,7 @@ func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
 			t.Fatalf("default entry %q carries section %q", e.Action, e.Section)
 		}
 	}
-	sum := sha256.Sum256([]byte(helpBoxDraw(t, 100, 30, entries)))
+	sum := sha256.Sum256([]byte(helpBoxDraw(t, 100, 30, cfg)))
 	if got := hex.EncodeToString(sum[:]); got != helpBoxDefaultSHA256 {
 		t.Fatalf("default help box bytes changed: sha256 %s, want %s", got, helpBoxDefaultSHA256)
 	}

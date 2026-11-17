@@ -206,7 +206,7 @@ func LLMsText() string {
 	}
 
 	b.WriteString("\n## Keys\n\n")
-	b.WriteString("The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use.\n\n")
+	b.WriteString("The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use. " + ToggleSecretsNote + "\n\n")
 	b.WriteString("| Keys | Action | Help label |\n")
 	b.WriteString("| --- | --- | --- |\n")
 	for _, k := range llmsKeys() {

@@ -2187,3 +2187,73 @@ func TestLoadFallsBackToGoodConfig(t *testing.T) {
 		t.Errorf("error = %q, want no fallback note without a good copy", err)
 	}
 }
+
+// TestHelpSummaryToggleSecretsCaveat proves the toggle's caveat stays out of
+// the help label and in the note. The label is the action column the box
+// paints, and 31 cells still splits the box into two columns at 120x30 while
+// 35 does not; the caveat costs one row there instead of widening that column.
+// A reword that drops either half makes the toggle read as a security control
+// again.
+func TestHelpSummaryToggleSecretsCaveat(t *testing.T) {
+	t.Parallel()
+	cfg := LoadDefault()
+	label := ""
+	for _, e := range cfg.HelpEntries() {
+		for _, action := range HelpActions(e.Action) {
+			if action == "toggle-secrets" {
+				label = e.Action
+			}
+		}
+	}
+	if label == "" {
+		t.Fatal("no help row carries the toggle-secrets action")
+	}
+	if len(label) > 31 {
+		t.Errorf("help label %q is %d cells, want at most 31 so the box keeps two columns at 120x30", label, len(label))
+	}
+	for _, caveat := range []string{"edit in place", "not a control"} {
+		if strings.Contains(label, caveat) {
+			t.Errorf("help label %q carries the caveat %q, want it in the note", label, caveat)
+		}
+	}
+	notes := cfg.HelpNotes()
+	if len(notes) != 1 {
+		t.Fatalf("HelpNotes() = %#v, want the toggle-secrets note alone", notes)
+	}
+	for _, caveat := range []string{"edit in place", "not a control"} {
+		if !strings.Contains(notes[0], caveat) {
+			t.Errorf("help note %q does not say %q", notes[0], caveat)
+		}
+	}
+}
+
+// TestHelpNotesNameARow proves every note is keyed by a label the table
+// carries, so a reworded row cannot orphan its caveat.
+func TestHelpNotesNameARow(t *testing.T) {
+	t.Parallel()
+	labels := make(map[string]bool, len(helpRows))
+	for _, row := range helpRows {
+		labels[row.label] = true
+	}
+	for label := range helpNotes {
+		if !labels[label] {
+			t.Errorf("helpNotes[%q] names no help row", label)
+		}
+	}
+}
+
+// TestHelpNotesFollowTheirRow proves a note paints only while its row is
+// bound, so a keymap that drops toggle-secrets leaves no stray caveat behind.
+func TestHelpNotesFollowTheirRow(t *testing.T) {
+	t.Parallel()
+	cfg, err := ParseConfig(`prefix "ctrl+a"
+keymap "main" {
+	"split-right" "|"
+}`)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if notes := cfg.HelpNotes(); len(notes) != 0 {
+		t.Fatalf("HelpNotes() = %#v, want none without the toggle-secrets row", notes)
+	}
+}

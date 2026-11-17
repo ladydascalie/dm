@@ -217,11 +217,12 @@ func promptRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, label, draft st
 // drawHelp paints the bottom-right action preview from the configured keymap
 // rows. The box sizes to its widest row and is painted by the floating pane
 // primitive, so the top border carries the word prefix and the bottom border
-// names the key that closes it. The box stays clear of the rail, the toast row
-// and the status bar: it gives up columns, then its trailing rows, before it
-// paints over any of them.
-func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, keys []keymap.HelpEntry) {
-	g, ok := helpBoxGeometry(cols, rows, keys)
+// names the key that closes it. A note paints as its own row under the
+// columns. The box stays clear of the rail, the toast row and the status bar:
+// it gives up columns, then its trailing rows, before it paints over any of
+// them.
+func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, keys []keymap.HelpEntry, notes []string) {
+	g, ok := helpBoxGeometry(cols, rows, keys, notes)
 	if !ok {
 		return
 	}
@@ -324,8 +325,11 @@ type helpColumn struct {
 	rows    []displayRow
 }
 
-// newHelpColumn sizes a column to its categories, flattened into rows.
-func newHelpColumn(categories [][]displayRow) helpColumn {
+// newHelpColumn sizes a column to its categories, flattened into rows. A
+// positive actionCap cuts the action budget: the rows keep their full text and
+// helpBoxRows elides what does not fit, so the column can take part in a split
+// the whole labels would not fit.
+func newHelpColumn(categories [][]displayRow, actionCap int) helpColumn {
 	var rows []displayRow
 	for _, cat := range categories {
 		rows = append(rows, cat...)
@@ -340,6 +344,9 @@ func newHelpColumn(categories [][]displayRow) helpColumn {
 	if keyW < 1 {
 		keyW = 1
 	}
+	if actionCap > 0 && actionW > actionCap {
+		actionW = actionCap
+	}
 	return helpColumn{keyW: keyW, actionW: actionW, rows: rows}
 }
 
@@ -352,17 +359,25 @@ func (c helpColumn) width() int {
 }
 
 // helpBoxLayout is the box drawHelp paints: the content origin and width, the
-// number of rows that fit, and the columns it draws.
+// number of rows that fit, the columns it draws and the notes it paints under
+// them. Each note owns one of the h rows, so the columns get h-len(notes).
 type helpBoxLayout struct {
 	x, y    int
 	inner   int
 	h       int
 	columns []helpColumn
+	notes   []string
 }
 
 // layoutHelpColumns picks the number of columns and the split of categories
 // into them. It prefers more columns when they fit, and balances the heights.
-func layoutHelpColumns(categories [][]displayRow, avail int) []helpColumn {
+//
+// A split that fits the width but not maxRows loses its tail sections, and the
+// Session rows sit at the tail, so it then retries with a cut action column:
+// the widest cap that still fits both the width and the rows wins, and more
+// columns are preferred at that cap. Whole labels always win over cut ones, so
+// the cap only reaches a screen too small to hold the table whole.
+func layoutHelpColumns(categories [][]displayRow, avail, maxRows int) []helpColumn {
 	n := len(categories)
 	if n == 0 {
 		return nil
@@ -371,19 +386,54 @@ func layoutHelpColumns(categories [][]displayRow, avail int) []helpColumn {
 	if n < maxCols {
 		maxCols = n
 	}
+	var fallback []helpColumn
 	for nCols := maxCols; nCols >= 1; nCols-- {
-		cols := bestColumnSplit(categories, nCols, avail)
-		if cols != nil {
+		cols := bestColumnSplit(categories, nCols, avail, 0)
+		if cols == nil {
+			continue
+		}
+		if helpColumnsHeight(cols) <= maxRows {
 			return cols
 		}
+		if fallback == nil {
+			fallback = cols
+		}
 	}
-	return nil
+	for cap := widestAction(categories) - 1; cap > 0; cap-- {
+		for nCols := maxCols; nCols >= 1; nCols-- {
+			if cols := bestColumnSplit(categories, nCols, avail, cap); cols != nil && helpColumnsHeight(cols) <= maxRows {
+				return cols
+			}
+		}
+	}
+	// Nothing fits the rows: keep the whole labels and let the tail clip.
+	return fallback
+}
+
+// helpColumnsHeight is the tallest column in the split.
+func helpColumnsHeight(cols []helpColumn) int {
+	h := 0
+	for _, c := range cols {
+		h = layout.MaxInt(h, len(c.rows))
+	}
+	return h
+}
+
+// widestAction is the widest action label in cells.
+func widestAction(categories [][]displayRow) int {
+	w := 0
+	for _, cat := range categories {
+		for _, r := range cat {
+			w = layout.MaxInt(w, cells.Cells(r.action))
+		}
+	}
+	return w
 }
 
 // bestColumnSplit finds the split of categories into nCols columns that fits
 // in avail cells and has the smallest maximum height. Ties go to the narrowest
 // box.
-func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColumn {
+func bestColumnSplit(categories [][]displayRow, nCols, avail, actionCap int) []helpColumn {
 	n := len(categories)
 	var best []helpColumn
 	bestHeight := int(^uint(0) >> 1)
@@ -394,7 +444,7 @@ func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColu
 		if remaining == 1 {
 			all := make([]helpColumn, len(current)+1)
 			copy(all, current)
-			all[len(current)] = newHelpColumn(categories[start:])
+			all[len(current)] = newHelpColumn(categories[start:], actionCap)
 			w := 0
 			h := 0
 			for i, c := range all {
@@ -414,7 +464,7 @@ func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColu
 			return
 		}
 		for i := start; i <= n-remaining; i++ {
-			c := newHelpColumn(categories[start : i+1])
+			c := newHelpColumn(categories[start:i+1], actionCap)
 			visit(i+1, remaining-1, append(current, c))
 		}
 	}
@@ -426,7 +476,7 @@ func bestColumnSplit(categories [][]displayRow, nCols int, avail int) []helpColu
 // no other band owns. The fit is X-1 >= rail, X+width-1 <= cols-1, Y-1 >= 0 and
 // Y+h <= rows-3, so both borders own a row and the toast row and the bar stay
 // clear. It reports false when the screen cannot hold even a key column.
-func helpBoxGeometry(cols, rows int, keys []keymap.HelpEntry) (helpBoxLayout, bool) {
+func helpBoxGeometry(cols, rows int, keys []keymap.HelpEntry, notes []string) (helpBoxLayout, bool) {
 	var g helpBoxLayout
 	if cols < 3 || rows < 5 || len(keys) == 0 {
 		return g, false
@@ -437,10 +487,13 @@ func helpBoxGeometry(cols, rows int, keys []keymap.HelpEntry) (helpBoxLayout, bo
 	if avail < 3 {
 		return g, false
 	}
-	helpCols := layoutHelpColumns(categories, avail-2)
+	// A note wider than the widest box cannot paint, so it does not claim a
+	// row either.
+	notes = helpNotesThatFit(notes, avail-2)
+	helpCols := layoutHelpColumns(categories, avail-2, rows-4-len(notes))
 	if helpCols == nil {
 		// A narrow screen keeps the key column alone.
-		col := newHelpColumn(categories)
+		col := newHelpColumn(categories, 0)
 		col.actionW = 0
 		if room := avail - 2; col.keyW > room {
 			col.keyW = room
@@ -462,6 +515,10 @@ func helpBoxGeometry(cols, rows int, keys []keymap.HelpEntry) (helpBoxLayout, bo
 	if inner < 1 || inner+2 > avail {
 		return g, false
 	}
+	if n := helpNotesWidth(notes); n > inner {
+		inner = n
+	}
+	h += len(notes)
 	width := inner + 2
 	x := cols - width - 2
 	if x < left {
@@ -469,6 +526,11 @@ func helpBoxGeometry(cols, rows int, keys []keymap.HelpEntry) (helpBoxLayout, bo
 	}
 	if h > rows-4 {
 		h = rows - 4
+	}
+	// The notes paint last, so a clamped box keeps them and gives up the
+	// trailing column rows instead. A box with no room for both drops them.
+	if h <= len(notes) {
+		notes = nil
 	}
 	if h < 1 {
 		return g, false
@@ -480,25 +542,48 @@ func helpBoxGeometry(cols, rows int, keys []keymap.HelpEntry) (helpBoxLayout, bo
 	if y+h > rows-3 {
 		return g, false
 	}
-	return helpBoxLayout{x: x, y: y, inner: inner, h: h, columns: helpCols}, true
+	return helpBoxLayout{x: x, y: y, inner: inner, h: h, columns: helpCols, notes: notes}, true
+}
+
+// helpNotesThatFit drops the notes wider than room, so a screen too narrow for
+// a note keeps the key column instead of losing the box.
+func helpNotesThatFit(notes []string, room int) []string {
+	var out []string
+	for _, note := range notes {
+		if cells.Cells(note) <= room {
+			out = append(out, note)
+		}
+	}
+	return out
+}
+
+// helpNotesWidth is the widest note in cells.
+func helpNotesWidth(notes []string) int {
+	w := 0
+	for _, note := range notes {
+		w = layout.MaxInt(w, cells.Cells(note))
+	}
+	return w
 }
 
 // helpBoxRows paints every content row of the box. Each row starts with an
 // absolute cursor move and writes exactly its column's cells, so it neither
 // keeps a glyph the frame before left nor paints past the border. A header is
 // a coloured line, a key is bright and an action label is dim. Columns are
-// separated by a dim vertical bar.
+// separated by a dim vertical bar. The notes paint last, one dim row each
+// across the whole interior, so they never share a row with a column.
 func helpBoxRows(buf *bytes.Buffer, inner layout.Rect, g helpBoxLayout) {
+	contentRows := g.h - len(g.notes)
 	xOff := 0
 	for ci, col := range g.columns {
 		if ci > 0 {
-			for i := 0; i < g.h; i++ {
+			for i := 0; i < contentRows; i++ {
 				y := inner.Y + i
 				fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m \u2502 \x1b[0m", y+1, inner.X+xOff+1)
 			}
 			xOff += 3
 		}
-		maxRows := g.h
+		maxRows := contentRows
 		if len(col.rows) < maxRows {
 			maxRows = len(col.rows)
 		}
@@ -530,12 +615,17 @@ func helpBoxRows(buf *bytes.Buffer, inner layout.Rect, g helpBoxLayout) {
 			helpBoxKey(buf, r.key, color, col.width())
 			buf.WriteString("\x1b[0m")
 		}
-		for i := maxRows; i < g.h; i++ {
+		for i := maxRows; i < contentRows; i++ {
 			y := inner.Y + i
 			x := inner.X + xOff
 			fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m%s\x1b[0m", y+1, x+1, strings.Repeat(" ", col.width()))
 		}
 		xOff += col.width()
+	}
+	for i, note := range g.notes {
+		y := inner.Y + contentRows + i
+		fmt.Fprintf(buf, "\x1b[%d;%dH\x1b[0m\x1b[90m%s\x1b[0m", y+1, inner.X+1,
+			cells.Pad(cells.Elide(note, g.inner), g.inner))
 	}
 }
 
