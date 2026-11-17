@@ -28,38 +28,41 @@ import (
 )
 
 type cmdFlags struct {
-	fs         *flag.FlagSet
-	session    string
-	msg        string
-	enter      bool
-	dir        string
-	msgJSON    string
-	lines      int
-	scrollback int
-	jsonOut    bool
-	key        string
-	keyPrefix  string
-	state      string
-	body       string
-	bodyFile   string
-	tool       string
-	ref        string
-	upstream   string
-	header     string
-	to         string
-	envs       []string
-	argv       []string
-	seq        int
-	from       string
-	limit      int
-	after      int
-	timeout    time.Duration
-	dry        bool
-	all        bool
-	force      bool
-	trust      bool
-	args       []string
-	root       string
+	fs           *flag.FlagSet
+	session      string
+	msg          string
+	enter        bool
+	dir          string
+	msgJSON      string
+	lines        int
+	scrollback   int
+	jsonOut      bool
+	key          string
+	keyPrefix    string
+	state        string
+	body         string
+	bodyFile     string
+	tool         string
+	ref          string
+	upstream     string
+	header       string
+	to           string
+	envs         []string
+	argv         []string
+	pluginSplit  bool
+	pluginWindow bool
+	target       string
+	seq          int
+	from         string
+	limit        int
+	after        int
+	timeout      time.Duration
+	dry          bool
+	all          bool
+	force        bool
+	trust        bool
+	args         []string
+	root         string
 	// usage overrides the flag set's usage printer. The bare-word fallback
 	// sets it, because a bad flag there is a top-level mistake, not one
 	// verb's.
@@ -107,7 +110,7 @@ func (c *cmdFlags) parse(args []string) error {
 	ordered := reorder(args)
 	_, pos, dangling := split(args)
 	verb := c.fs.Name()
-	if verb == "msg" || verb == "secret" {
+	if verb == "msg" || verb == "secret" || verb == "plugin" {
 		// The subverb of a grouped verb is the first positional, read
 		// from the original argv order: reorder has moved a dangling
 		// value-taking flag in front of it, and reading the reordered
@@ -138,6 +141,10 @@ func (c *cmdFlags) parse(args []string) error {
 		}
 		if c.usage != nil {
 			fmt.Fprint(out, c.usage())
+			return
+		}
+		if verb == "plugin" {
+			fmt.Fprint(out, clidoc.PluginSubcommands())
 			return
 		}
 		if verb == "msg" {
@@ -315,6 +322,12 @@ func (c *cmdFlags) register(name, desc string) {
 		c.fs.Var(repeatValue{&c.envs}, "env", desc)
 	case "argv":
 		c.fs.Var(repeatValue{&c.argv}, "argv", desc)
+	case "split":
+		c.fs.BoolVar(&c.pluginSplit, "split", false, desc)
+	case "window":
+		c.fs.BoolVar(&c.pluginWindow, "window", false, desc)
+	case "target":
+		c.fs.StringVar(&c.target, "target", "", desc)
 	default:
 		panic("cli: no field binding for flag " + name)
 	}
@@ -402,6 +415,7 @@ var withValue = map[string]bool{
 	"-tool": true, "--tool": true, "-ref": true, "--ref": true,
 	"-env": true, "--env": true,
 	"-argv": true, "--argv": true,
+	"-target": true, "--target": true,
 	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
 	"-to": true, "--to": true,
 }
@@ -810,6 +824,13 @@ func Run(argv []string) error {
 		}
 		return peek(c.session, c.args[0], c.lines)
 
+	case "plugin":
+		c := newFlagsAt(root, "plugin")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		return runPlugin(c)
+
 	case "msg":
 		c := newFlagsAt(root, "msg")
 		if err := c.parse(argv[1:]); err != nil {
@@ -1153,6 +1174,93 @@ func runBox(c *cmdFlags) error {
 		return boxSchemaVerb(c)
 	}
 	return fmt.Errorf("msg: unknown verb %q: want post, list, show, wait, sub, clear, watchers or schema", c.args[0])
+}
+
+// runPlugin dispatches the bare plugin verb.
+func runPlugin(c *cmdFlags) error {
+	if len(c.args) == 0 {
+		fmt.Print(clidoc.PluginSubcommands())
+		return nil
+	}
+	if len(c.args) > 2 {
+		return fmt.Errorf("plugin %s: unexpected argument %q", c.args[0], c.args[2])
+	}
+	switch c.args[0] {
+	case "list":
+		if len(c.args) != 1 {
+			return fmt.Errorf("plugin list: unexpected argument %q", c.args[1])
+		}
+		return pluginList(c)
+	case "start":
+		if len(c.args) != 2 {
+			return fmt.Errorf("plugin start needs a name")
+		}
+		return pluginStart(c, c.args[1])
+	}
+	return fmt.Errorf("plugin: unknown verb %q: want list or start", c.args[0])
+}
+
+// pluginList prints the declarations the server loaded, one row each, or the
+// server's JSON with --json.
+func pluginList(c *cmdFlags) error {
+	if c.jsonOut {
+		return printRPC(c.session, wire.Msg{Action: "plugin-list"})
+	}
+	m, err := transport.RPC(c.session, wire.Msg{Action: "plugin-list"})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var res struct {
+		Plugins []struct {
+			Name  string   `json:"name"`
+			Exec  []string `json:"exec"`
+			Cwd   string   `json:"cwd"`
+			Where string   `json:"where"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		return err
+	}
+	if len(res.Plugins) == 0 {
+		fmt.Println("no plugins")
+		return nil
+	}
+	for _, p := range res.Plugins {
+		fmt.Printf("%s\t%s\t%s\t%s\n", p.Name, p.Where, strings.Join(p.Exec, " "), p.Cwd)
+	}
+	return nil
+}
+
+// pluginStart opens a plugin pane. The declaration's placement wins unless a
+// flag names the other one for this launch; the server refuses the rest.
+func pluginStart(c *cmdFlags, name string) error {
+	if c.pluginSplit && c.pluginWindow {
+		return fmt.Errorf("plugin start: --split and --window are exclusive")
+	}
+	where := ""
+	if c.pluginSplit {
+		where = "split"
+	}
+	if c.pluginWindow {
+		where = "window"
+	}
+	res, _ := json.Marshal(map[string]string{"name": name, "where": where})
+	m, err := transport.RPC(c.session, wire.Msg{Action: "run-plugin", Target: c.target, Res: res})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	var out struct {
+		Pane string `json:"pane"`
+	}
+	_ = json.Unmarshal(m.Res, &out)
+	fmt.Println(out.Pane)
+	return nil
 }
 
 // boxBody resolves the body the post carries: --body wins, --body-file reads

@@ -153,6 +153,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"theme":             `theme "probe"`,
 		"keymap":            `keymap "main" { "detach" "D" }`,
 		"command":           `command "check" { run "go test ./..." }`,
+		"plugin":            `plugin "rail" { exec "/bin/true" where "split" }`,
 	}
 	if len(samples) != len(ConfigNodes) {
 		t.Fatalf("table has %d nodes, test has %d samples", len(ConfigNodes), len(samples))
@@ -253,6 +254,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"theme":             "",
 		"keymap":            "the built-in table",
 		"command":           "none",
+		"plugin":            "none",
 	}
 	for _, n := range ConfigNodes {
 		if got, ok := want[n.Name]; !ok {

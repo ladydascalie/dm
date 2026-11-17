@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"dm/internal/box"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/paths"
 	"dm/internal/session"
@@ -862,6 +863,47 @@ func (s *server) movePane(id, target, dir string) error {
 		}
 	}
 	return fmt.Errorf("no pane %q", id)
+}
+
+// plugin returns the declaration named name from the config the server
+// holds. A reloaded config is a new pointer, so the read takes the lock and
+// works from the pointer it took.
+func (s *server) plugin(name string) (keymap.Plugin, bool) {
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
+	if cfg == nil {
+		return keymap.Plugin{}, false
+	}
+	return cfg.Plugin(name)
+}
+
+// plugins returns every declaration in the config the server holds.
+func (s *server) plugins() []keymap.Plugin {
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
+	if cfg == nil {
+		return nil
+	}
+	return cfg.Plugins()
+}
+
+// runPlugin opens one plugin pane: the argv the declaration carries, in the
+// folder it names, at the demanded placement. A float is refused because a
+// float ends with the client that opened it.
+func (s *server) runPlugin(p keymap.Plugin, target, where string) (string, error) {
+	switch where {
+	case "split":
+		return s.split(target, "right", p.Cwd, 0, false, p.Exec)
+	case "window":
+		_, id, err := s.newWindow(target, "", p.Cwd, false, p.Exec)
+		return id, err
+	case "float":
+		return "", fmt.Errorf("plugin %q: a float ends with its client, so it cannot host a plugin", p.Name)
+	default:
+		return "", fmt.Errorf("plugin %q: where must be split or window, got %q", p.Name, where)
+	}
 }
 
 func (s *server) split(target, dir, cwd string, ratio float64, noFocus bool, argv []string) (string, error) {

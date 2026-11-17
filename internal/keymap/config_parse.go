@@ -3,6 +3,7 @@ package keymap
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,6 +18,11 @@ import (
 // malformed blocks and bindings to commands the file does not define. Multiple
 // keymap nodes for one mode merge.
 func parseKeymaps(toks []kdl.Token, cfg *Config) error {
+	plugins, err := findPlugins(toks)
+	if err != nil {
+		return err
+	}
+	cfg.plugins = plugins
 	commands, err := findCommands(toks)
 	if err != nil {
 		return err
@@ -327,6 +333,12 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 						return fmt.Errorf("line %d: action %q names no command in this file", actionLine, action)
 					}
 				}
+				if strings.HasPrefix(action, "plugin:") {
+					name := action[len("plugin:"):]
+					if _, ok := cfg.plugins[name]; !ok {
+						return fmt.Errorf("line %d: action %q names no plugin in this file", actionLine, action)
+					}
+				}
 				if key == "none" {
 					m.unbound[action] = true
 					continue
@@ -357,27 +369,10 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 					m.bindings = append(m.bindings, binding{bytes: seq, action: action})
 				}
 			}
-		case "command":
-			// findCommands parsed and validated this block; consume its
-			// tokens so the body is not read as nodes.
-			if i+1 < len(toks) && toks[i+1].Kind == kdl.String {
-				i += 2
-			} else {
-				i++
-			}
-			if i < len(toks) && toks[i].Kind == kdl.LBrace {
-				i++
-				depth := 1
-				for i < len(toks) && depth > 0 {
-					switch toks[i].Kind {
-					case kdl.LBrace:
-						depth++
-					case kdl.RBrace:
-						depth--
-					}
-					i++
-				}
-			}
+		case "command", "plugin":
+			// findCommands and findPlugins parsed and validated the block;
+			// consume its tokens so the body is not read as nodes.
+			i = consumeDeclBlock(toks, i)
 		default:
 			return fmt.Errorf("line %d: unknown node %q", t.Line, t.Value)
 		}
@@ -385,17 +380,17 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 	return nil
 }
 
-// commandNameMax is the longest command name the config accepts, in bytes.
-const commandNameMax = 32
+// nameMax is the longest command or plugin name the config accepts, in bytes.
+const nameMax = 32
 
-// checkCommandName holds a command name to letters, digits, _ and -, 1 to 32
-// bytes.
-func checkCommandName(name string) error {
+// checkName holds a name to letters, digits, _ and -, 1 to nameMax bytes.
+// kind names the declaration in the error.
+func checkName(kind, name string) error {
 	if name == "" {
-		return fmt.Errorf("command name must not be empty")
+		return fmt.Errorf("%s name must not be empty", kind)
 	}
-	if len(name) > commandNameMax {
-		return fmt.Errorf("command name %q is longer than %d bytes", name, commandNameMax)
+	if len(name) > nameMax {
+		return fmt.Errorf("%s name %q is longer than %d bytes", kind, name, nameMax)
 	}
 	for _, r := range name {
 		switch {
@@ -404,10 +399,41 @@ func checkCommandName(name string) error {
 		case r >= '0' && r <= '9':
 		case r == '_' || r == '-':
 		default:
-			return fmt.Errorf("command name %q must match [A-Za-z0-9_-]+", name)
+			return fmt.Errorf("%s name %q must match [A-Za-z0-9_-]+", kind, name)
 		}
 	}
 	return nil
+}
+
+// checkCommandName holds a command name to the shared name rule.
+func checkCommandName(name string) error { return checkName("command", name) }
+
+// checkPluginName holds a plugin name to the shared name rule.
+func checkPluginName(name string) error { return checkName("plugin", name) }
+
+// consumeDeclBlock skips one command or plugin block the caller already
+// validated: a quoted name, then a brace-delimited body. It returns the index
+// past the body's closing brace.
+func consumeDeclBlock(toks []kdl.Token, i int) int {
+	if i+1 < len(toks) && toks[i+1].Kind == kdl.String {
+		i += 2
+	} else {
+		i++
+	}
+	if i < len(toks) && toks[i].Kind == kdl.LBrace {
+		i++
+		depth := 1
+		for i < len(toks) && depth > 0 {
+			switch toks[i].Kind {
+			case kdl.LBrace:
+				depth++
+			case kdl.RBrace:
+				depth--
+			}
+			i++
+		}
+	}
+	return i
 }
 
 // findCommands walks the top-level tokens for command blocks and returns the
@@ -495,6 +521,186 @@ func parseCommandBlock(toks []kdl.Token, i int) (Command, int, error) {
 		return Command{}, i, fmt.Errorf("line %d: command %q needs a run key", nameLine, name)
 	}
 	return Command{Name: name, Run: run}, i, nil
+}
+
+// findPlugins walks the top-level tokens for plugin blocks and returns the
+// declarations they make. It rejects a malformed block, a duplicate name, a
+// name that collides with a built-in action, and an exec the pane flag cannot
+// carry back.
+func findPlugins(toks []kdl.Token) (map[string]Plugin, error) {
+	plugins := make(map[string]Plugin)
+	depth := 0
+	for i := 0; i < len(toks); i++ {
+		t := toks[i]
+		if t.Kind == kdl.LBrace {
+			depth++
+			continue
+		}
+		if t.Kind == kdl.RBrace {
+			depth--
+			continue
+		}
+		if t.Kind != kdl.Ident || depth != 0 || t.Value != "plugin" {
+			continue
+		}
+		p, next, err := parsePluginBlock(toks, i)
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := plugins[p.Name]; dup {
+			return nil, fmt.Errorf("line %d: duplicate plugin %q", t.Line, p.Name)
+		}
+		if builtinActions[p.Name] {
+			return nil, fmt.Errorf("line %d: plugin name %q collides with a built-in action", t.Line, p.Name)
+		}
+		plugins[p.Name] = p
+		i = next - 1
+	}
+	return plugins, nil
+}
+
+// parsePluginBlock reads one top-level plugin block: plugin <quoted name>
+// { exec <argv...>; cwd <quoted folder>; where <split|window>; env <KEY=VALUE>... }.
+// toks[i] is the plugin ident. It returns the declaration and the index past
+// the closing brace.
+func parsePluginBlock(toks []kdl.Token, i int) (Plugin, int, error) {
+	line := toks[i].Line
+	if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+		return Plugin{}, i, fmt.Errorf("line %d: expected a quoted name after plugin", line)
+	}
+	name := toks[i+1].Value
+	nameLine := toks[i+1].Line
+	if err := checkPluginName(name); err != nil {
+		return Plugin{}, i, fmt.Errorf("line %d: %w", nameLine, err)
+	}
+	i += 2
+	if i >= len(toks) || toks[i].Kind != kdl.LBrace {
+		return Plugin{}, i, fmt.Errorf("line %d: expected '{' after plugin %q", line, name)
+	}
+	i++
+	p := Plugin{Name: name}
+	for {
+		if i >= len(toks) || toks[i].Kind == kdl.EOF {
+			return Plugin{}, i, fmt.Errorf("line %d: plugin %q is not closed", nameLine, name)
+		}
+		if toks[i].Kind == kdl.RBrace {
+			i++
+			if len(p.Exec) == 0 {
+				return Plugin{}, i, fmt.Errorf("line %d: plugin %q needs exec", nameLine, name)
+			}
+			if p.Where == "" {
+				return Plugin{}, i, fmt.Errorf("line %d: plugin %q needs where", nameLine, name)
+			}
+			return p, i, nil
+		}
+		if toks[i].Kind != kdl.Ident {
+			return Plugin{}, i, fmt.Errorf("line %d: expected a key in plugin %q, got %q", toks[i].Line, name, toks[i].Value)
+		}
+		key := toks[i].Value
+		keyLine := toks[i].Line
+		i++
+		switch key {
+		case "exec":
+			if len(p.Exec) > 0 {
+				return Plugin{}, i, fmt.Errorf("line %d: duplicate exec in plugin %q", keyLine, name)
+			}
+			for i < len(toks) && toks[i].Kind == kdl.String {
+				if err := checkExecWord(toks[i].Value); err != nil {
+					return Plugin{}, i, fmt.Errorf("line %d: %w", toks[i].Line, err)
+				}
+				p.Exec = append(p.Exec, toks[i].Value)
+				i++
+			}
+			if len(p.Exec) == 0 {
+				return Plugin{}, i, fmt.Errorf("line %d: exec in plugin %q needs a program", keyLine, name)
+			}
+			if !filepath.IsAbs(p.Exec[0]) {
+				return Plugin{}, i, fmt.Errorf("line %d: exec in plugin %q must be an absolute path, got %q", keyLine, name, p.Exec[0])
+			}
+		case "cwd":
+			if p.Cwd != "" {
+				return Plugin{}, i, fmt.Errorf("line %d: duplicate cwd in plugin %q", keyLine, name)
+			}
+			if i >= len(toks) || toks[i].Kind != kdl.String {
+				return Plugin{}, i, fmt.Errorf("line %d: expected a quoted folder after cwd", keyLine)
+			}
+			if err := checkCwd(toks[i].Value); err != nil {
+				return Plugin{}, i, fmt.Errorf("line %d: %w", toks[i].Line, err)
+			}
+			p.Cwd = toks[i].Value
+			i++
+		case "where":
+			if p.Where != "" {
+				return Plugin{}, i, fmt.Errorf("line %d: duplicate where in plugin %q", keyLine, name)
+			}
+			if i >= len(toks) || toks[i].Kind != kdl.String {
+				return Plugin{}, i, fmt.Errorf("line %d: expected a quoted placement after where", keyLine)
+			}
+			if v := toks[i].Value; v != "split" && v != "window" {
+				return Plugin{}, i, fmt.Errorf("line %d: where in plugin %q must be \"split\" or \"window\", got %q", toks[i].Line, name, v)
+			}
+			p.Where = toks[i].Value
+			i++
+		case "env":
+			if i >= len(toks) || toks[i].Kind != kdl.String {
+				return Plugin{}, i, fmt.Errorf("line %d: expected a quoted KEY=VALUE after env", keyLine)
+			}
+			if err := checkPluginEnv(p.Env, toks[i].Value); err != nil {
+				return Plugin{}, i, fmt.Errorf("line %d: %w", toks[i].Line, err)
+			}
+			p.Env = append(p.Env, toks[i].Value)
+			i++
+		default:
+			return Plugin{}, i, fmt.Errorf("line %d: unknown key %q in plugin %q", keyLine, key, name)
+		}
+	}
+}
+
+// checkExecWord refuses one argv word the pane flag cannot carry back: empty,
+// a comma, which is the flag's separator, or a NUL byte.
+func checkExecWord(s string) error {
+	if s == "" {
+		return fmt.Errorf("exec has an empty element")
+	}
+	if strings.ContainsRune(s, ',') {
+		return fmt.Errorf("exec element %q contains a comma", s)
+	}
+	if strings.ContainsRune(s, '\x00') {
+		return fmt.Errorf("exec element contains a NUL byte")
+	}
+	return nil
+}
+
+// checkCwd holds a plugin folder to an absolute path with no NUL.
+func checkCwd(s string) error {
+	if s == "" {
+		return fmt.Errorf("cwd must not be empty")
+	}
+	if !filepath.IsAbs(s) {
+		return fmt.Errorf("cwd must be an absolute path, got %q", s)
+	}
+	if strings.ContainsRune(s, '\x00') {
+		return fmt.Errorf("cwd contains a NUL byte")
+	}
+	return nil
+}
+
+// checkPluginEnv holds one env entry to KEY=VALUE, refuses a duplicate key,
+// and refuses a NUL in the name or the value.
+func checkPluginEnv(seen []string, kv string) error {
+	name, value, ok := strings.Cut(kv, "=")
+	if !ok || name == "" {
+		return fmt.Errorf("env %q must be KEY=VALUE", kv)
+	}
+	if strings.ContainsRune(name, '\x00') || strings.ContainsRune(value, '\x00') {
+		return fmt.Errorf("env %q contains a NUL byte", name)
+	}
+	for _, e := range seen {
+		if k, _, _ := strings.Cut(e, "="); k == name {
+			return fmt.Errorf("duplicate env key %q", name)
+		}
+	}
+	return nil
 }
 
 // findPrefix scans the top-level tokens for the prefix node. It returns the
@@ -915,12 +1121,12 @@ func duplicateBinding(bindings []binding, seqs [][]byte) (string, bool) {
 // labels, but a load must not: a typo such as "cloes-pane" parses clean,
 // then mergeDefaults sees its key taken and skips the real close-pane, so
 // the real action runs on no key at all and no parse error ever names it.
-// command:<name> references are already whitelisted against the command
-// block at parse time.
+// command:<name> and plugin:<name> references are already whitelisted against
+// the command and plugin blocks at parse time.
 func (c *Config) checkActions() error {
 	for name, m := range c.modes {
 		for action := range m.actions {
-			if strings.HasPrefix(action, "command:") {
+			if strings.HasPrefix(action, "command:") || strings.HasPrefix(action, "plugin:") {
 				continue
 			}
 			if !builtinActions[action] {

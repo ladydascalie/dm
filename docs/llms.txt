@@ -25,6 +25,8 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm focus` | `<pane>` | focus a pane | `dm focus w1p2` |
 | `dm next-pane` | `-` | focus the next pane | `dm next-pane` |
 | `dm prev-pane` | `-` | focus the previous pane | `dm prev-pane` |
+| `dm plugin list` | `-` | list the plugins the config declares | `dm plugin list` |
+| `dm plugin start` | `<name> [--split \| --window] [--target <pane>]` | open a plugin pane | `dm plugin start <name> [--split \| --window] [--target <pane>]` |
 | `dm rename-workspace` | `<ws> <name>` | rename a workspace | `dm rename-workspace s1 build` |
 | `dm set-project` | `<ws> [name]` | set a workspace's project, or clear it with no name | `dm set-project s1 dm` |
 | `dm new-window` | `[--argv CMD]...` | open a new window | `dm new-window` |
@@ -205,6 +207,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `theme` | a quoted theme name matching [A-Za-z0-9_-]+ | none | Select a theme from the themes directory beside config.kdl; no node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a { "action" "key" } block | `the built-in table` | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 | `command` | a quoted name matching [A-Za-z0-9_-]+ and a { run "..." } block | `none` | Define a command a keymap can run: bind "command:<name>" to a key and it runs the run text through sh -c in the window's folder. |
+| `plugin` | a quoted name matching [A-Za-z0-9_-]+ and a { exec ... where ... } block | `none` | Declare a plugin: bind "plugin:<name>" to a key and it opens the exec argv in a split or window pane, in its folder, with its env. |
 
 ## Keymaps
 
@@ -419,7 +422,7 @@ The marks are defined by the semantic prompts proposal: https://gitlab.freedeskt
 | `$DM_STATE/sessions/<name>/server.sock` | Unix socket the session server listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.sock` | Unix socket one pane's mux listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.log` | Pane output log. |
-| `$XDG_CONFIG_HOME/dm/config.kdl` | Holds prefix, keymaps, commands, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run. |
+| `$XDG_CONFIG_HOME/dm/config.kdl` | Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run. |
 | `$XDG_CONFIG_HOME/dm/themes/<name>.kdl` | Theme palette, accents, glyphs and state styles. |
 
 ## Recipes

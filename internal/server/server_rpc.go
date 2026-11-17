@@ -434,6 +434,45 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.afterMutation()
 		s.reply(cl, m, map[string]any{"window": wid, "pane": pid}, err)
 
+	case "run-plugin":
+		var req struct {
+			Name  string `json:"name"`
+			Where string `json:"where"`
+		}
+		if len(m.Res) > 0 {
+			if err := json.Unmarshal(m.Res, &req); err != nil {
+				s.reply(cl, m, nil, fmt.Errorf("run-plugin: %w", err))
+				return
+			}
+		}
+		p, ok := s.plugin(req.Name)
+		if !ok {
+			s.reply(cl, m, nil, fmt.Errorf("no plugin %q", req.Name))
+			return
+		}
+		where := p.Where
+		if req.Where != "" {
+			where = req.Where
+		}
+		var id string
+		err := s.mutation(func() error {
+			var e error
+			id, e = s.runPlugin(p, m.Target, where)
+			return e
+		})
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"pane": id}, err)
+
+	case "plugin-list":
+		out := make([]map[string]any, 0)
+		for _, p := range s.plugins() {
+			out = append(out, map[string]any{
+				"name": p.Name, "exec": p.Exec, "cwd": p.Cwd,
+				"where": p.Where, "env": p.Env,
+			})
+		}
+		s.reply(cl, m, map[string]any{"plugins": out}, nil)
+
 	case "next-window", "prev-window":
 		step := 1
 		if m.Action == "prev-window" {

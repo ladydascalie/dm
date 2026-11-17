@@ -183,6 +183,51 @@ func TestNewWindowArgvFlag(t *testing.T) {
 	h.waitFor(s, res.Pane, "NEWWIN")
 }
 
+// TestPluginStartEndToEnd proves the config block reaches a pane: the server
+// resolves the name, the CLI starts it, and the pane prints the marker.
+func TestPluginStartEndToEnd(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	s := "plugincli"
+	cfg := `plugin "marker" {
+	exec "/bin/sh" "-c" "echo PLUGINPANE; sleep 30"
+	where "split"
+}
+`
+	if err := os.MkdirAll(filepath.Join(h.configDir(), "dm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(h.configDir(), "dm", "config.kdl"), []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.run("new", "-s", s)
+
+	out := h.run("plugin", "start", "marker", "-s", s)
+	pane := strings.TrimSpace(out)
+	if !strings.HasPrefix(pane, "w") || strings.Contains(pane, " ") {
+		t.Fatalf("plugin start printed %q, want one pane id", out)
+	}
+	h.waitFor(s, pane, "PLUGINPANE")
+
+	list := h.run("plugin", "list", "-s", s)
+	if !strings.Contains(list, "marker") || !strings.Contains(list, "split") {
+		t.Fatalf("plugin list = %q, want the marker and its placement", list)
+	}
+
+	// Reload picks up a declaration added after the server started.
+	late := `plugin "late" {
+	exec "/bin/sh" "-c" "echo LATE; sleep 30"
+	where "split"
+}
+`
+	if err := os.WriteFile(filepath.Join(h.configDir(), "dm", "config.kdl"), []byte(late), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.rpc(s, map[string]any{"action": "reload"})
+	latePane := strings.TrimSpace(h.run("plugin", "start", "late", "-s", s))
+	h.waitFor(s, latePane, "LATE")
+}
+
 // TestArgvSplitRespawns drives the argv feature end to end: a split carries
 // the program, the pane prints its marker, and after the server, the pane's
 // process and its socket are taken away, the next server respawns the same

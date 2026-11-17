@@ -99,6 +99,7 @@ var flagDefaults = map[string]string{
 	"state": "", "body": "", "body-file": "", "seq": "-1", "from": "",
 	"limit": "0", "after": "-1", "timeout": "5m0s", "dry-run": "false",
 	"all": "false", "force": "false", "trust": "false", "action-json": "",
+	"argv": "", "split": "false", "window": "false", "target": "",
 }
 
 // TestFlagDefaultsSurvivePerVerbRegistration proves the per-verb sets keep
@@ -136,7 +137,8 @@ var fieldFlag = map[string]string{
 	"all": "all", "force": "force", "trust": "trust",
 	"tool": "tool", "ref": "ref", "upstream": "upstream", "header": "header",
 	"to": "to", "envs": "env",
-	"argv": "argv",
+	"argv":        "argv",
+	"pluginSplit": "split", "pluginWindow": "window", "target": "target",
 }
 
 // cmdFlagsMethods are the methods the walk recurses into. parse is missing on
@@ -250,15 +252,15 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 		return label
 	}
 
-	// declaredOf gathers the flags a verb's rows declare. The msg case
-	// dispatches on args, so its rows are the union of the msg subverbs.
+	// declaredOf gathers the flags a verb's rows declare. A grouped verb
+	// dispatches on args, so its rows are the union of its subverbs.
 	declaredOf := func(verb string) map[string]bool {
 		out := map[string]bool{}
+		grouped := verb == "msg" || verb == "secret" || verb == "plugin"
 		for _, v := range clidoc.Verbs() {
-			if verb == "msg" && !strings.HasPrefix(v, "msg ") {
+			if grouped && !strings.HasPrefix(v, verb+" ") {
 				continue
-			}
-			if verb != "msg" && v != verb {
+			} else if v != verb {
 				continue
 			}
 			for _, fl := range clidoc.VerbFlags(v) {
@@ -340,21 +342,24 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 				if skip[verb] {
 					continue // man, llms and html keep their own flag set
 				}
-				if verb == "msg" || verb == "secret" {
+				if verb == "msg" || verb == "secret" || verb == "plugin" {
 					// The grouped case dispatches on args[0], so each
 					// subverb is checked against its own row, and the case
 					// body itself against the union.
 					reads := map[string]bool{}
-					walk(cc, reads, map[string]bool{"Run": true, "runBox": true, "runSecret": true})
+					walk(cc, reads, map[string]bool{"Run": true, "runBox": true, "runSecret": true, "runPlugin": true})
 					for name := range reads {
 						if !declaredOf(verb)[name] {
 							t.Errorf("dm %s reads %q, which no %s row declares", verb, name, verb)
 						}
 					}
-					if verb == "msg" {
+					switch verb {
+					case "msg":
 						found += dispatch(readers["runBox"], "msg ")
-					} else {
+					case "secret":
 						found += dispatch(readers["runSecret"], "secret ")
+					default:
+						found += dispatch(readers["runPlugin"], "plugin ")
 					}
 					continue
 				}

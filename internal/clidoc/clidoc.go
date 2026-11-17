@@ -182,6 +182,29 @@ var cliCommands = []cliCommand{
 		group:   groupPanes,
 	},
 
+	// Plugins.
+	{
+		name:    "plugin list",
+		summary: "list the plugins the config declares",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"json", "", "print the server's JSON"},
+		},
+		group: groupPanes,
+	},
+	{
+		name:    "plugin start",
+		args:    "<name> [--split | --window] [--target <pane>]",
+		summary: "open a plugin pane",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"split", "", "open beside the focused pane (the default)"},
+			{"window", "", "open in a new window"},
+			{"target", "PANE", "the pane to open beside, or the source window"},
+		},
+		group: groupPanes,
+	},
+
 	// Windows and workspaces.
 	{
 		name:    "rename-workspace",
@@ -686,6 +709,21 @@ func SecretSubcommands() string {
 	}
 	writeRows(&b, rows)
 	b.WriteString("\n  run dm help for every command, or dm secret <verb> -h for one verb.\n")
+	return b.String()
+}
+
+// PluginSubcommands is the bare plugin verb's help: one row per subverb.
+func PluginSubcommands() string {
+	var b strings.Builder
+	b.WriteString("dm plugin\n")
+	var rows []usageRow
+	for _, c := range cliCommands {
+		if strings.HasPrefix(c.name, "plugin ") {
+			rows = append(rows, usageRow{c.line(), c.summary})
+		}
+	}
+	writeRows(&b, rows)
+	b.WriteString("\n  run dm help for every command, or dm plugin <verb> -h for one verb.\n")
 	return b.String()
 }
 

@@ -1693,6 +1693,72 @@ func TestConfigCommandDuplicateName(t *testing.T) {
 	}
 }
 
+// TestConfigPlugin parses one plugin block, proves every field reaches the
+// accessor, and binds it as plugin:<name>.
+func TestConfigPlugin(t *testing.T) {
+	cfg, err := parseConfig(`plugin "rail" {
+	exec "/home/b/rail/run" "--watch"
+	cwd "/home/b/rail"
+	where "window"
+	env "A=1"
+	env "B=2"
+}
+keymap "main" {
+	"plugin:rail" "g"
+}`)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	want := []Plugin{{
+		Name:  "rail",
+		Exec:  []string{"/home/b/rail/run", "--watch"},
+		Cwd:   "/home/b/rail",
+		Where: "window",
+		Env:   []string{"A=1", "B=2"},
+	}}
+	if got := cfg.Plugins(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Plugins() = %#v, want %#v", got, want)
+	}
+	if p, ok := cfg.Plugin("rail"); !ok || p.Where != "window" {
+		t.Fatalf("Plugin(rail) = %#v/%v, want the declaration", p, ok)
+	}
+	if got := cfg.Key("main", "plugin:rail"); got != "g" {
+		t.Fatalf("Key(plugin:rail) = %q, want g", got)
+	}
+}
+
+// TestConfigPluginErrors proves each malformed block fails at parse with a
+// sentence naming the fault.
+func TestConfigPluginErrors(t *testing.T) {
+	bad := []struct{ name, src, want string }{
+		{"missing name", `plugin {`, "expected a quoted name after plugin"},
+		{"bad name", `plugin "a b" { exec "/bin/true" where "split" }`, "plugin name"},
+		{"missing exec", `plugin "rail" { where "split" }`, "needs exec"},
+		{"empty exec", `plugin "rail" { exec "" where "split" }`, "exec has an empty element"},
+		{"relative exec", `plugin "rail" { exec "rail" where "split" }`, "must be an absolute path"},
+		{"comma exec", `plugin "rail" { exec "/bin/true" "a,b" where "split" }`, "contains a comma"},
+		{"missing where", `plugin "rail" { exec "/bin/true" }`, "needs where"},
+		{"bad where", `plugin "rail" { exec "/bin/true" where "float" }`, "must be \"split\" or \"window\""},
+		{"duplicate exec", `plugin "rail" { exec "/bin/true" exec "/bin/false" where "split" }`, "duplicate exec"},
+		{"duplicate cwd", `plugin "rail" { exec "/bin/true" cwd "/a" cwd "/b" where "split" }`, "duplicate cwd"},
+		{"relative cwd", `plugin "rail" { exec "/bin/true" cwd "a" where "split" }`, "cwd must be an absolute path"},
+		{"unknown key", `plugin "rail" { exec "/bin/true" where "split" key "x" }`, "unknown key"},
+		{"duplicate plugin", `plugin "rail" { exec "/bin/true" where "split" } plugin "rail" { exec "/bin/true" where "split" }`, "duplicate plugin"},
+		{"collision", `plugin "reload" { exec "/bin/true" where "split" }`, "collides with a built-in action"},
+		{"duplicate env", `plugin "rail" { exec "/bin/true" where "split" env "A=1" env "A=2" }`, "duplicate env key"},
+		{"bad env", `plugin "rail" { exec "/bin/true" where "split" env "A" }`, "must be KEY=VALUE"},
+		{"unknown binding", `keymap "main" { "plugin:nope" "g" }`, "names no plugin"},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseConfig(tc.src)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("parseConfig = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // TestConfigCommandCollides proves a command whose name is also a built-in
 // action name fails with its line.
 func TestConfigCommandCollides(t *testing.T) {

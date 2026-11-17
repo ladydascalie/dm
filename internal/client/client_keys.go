@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -910,6 +911,10 @@ func (t *tui) runAction(name string) {
 		}
 		t.disarm()
 	default:
+		if strings.HasPrefix(name, "plugin:") {
+			t.runPlugin(strings.TrimPrefix(name, "plugin:"))
+			return
+		}
 		if strings.HasPrefix(name, "command:") {
 			t.runCommand(strings.TrimPrefix(name, "command:"))
 			return
@@ -925,6 +930,20 @@ func (t *tui) runAction(name string) {
 		t.notify(fmt.Sprintf("no binding for %q", name))
 		t.disarm()
 	}
+}
+
+// runPlugin asks the server to open a plugin pane beside the focused pane.
+// The server resolves the declaration and the argv; the client only names the
+// plugin and lets action set the target.
+func (t *tui) runPlugin(name string) {
+	if t.conn == nil || t.snap == nil {
+		t.disarm()
+		return
+	}
+	res, _ := json.Marshal(map[string]string{"name": name})
+	t.action("run-plugin", func(m *wire.Msg) {
+		m.Res = res
+	})
 }
 
 // runCommand opens a user command in a floating pane on the focused pane's

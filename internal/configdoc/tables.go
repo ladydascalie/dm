@@ -106,6 +106,12 @@ var ConfigNodes = []ConfigNode{
 		Default: "none",
 		Desc:    `Define a command a keymap can run: bind "command:<name>" to a key and it runs the run text through sh -c in the window's folder.`,
 	},
+	{
+		Name:    "plugin",
+		Value:   `a quoted name matching [A-Za-z0-9_-]+ and a { exec ... where ... } block`,
+		Default: "none",
+		Desc:    `Declare a plugin: bind "plugin:<name>" to a key and it opens the exec argv in a split or window pane, in its folder, with its env.`,
+	},
 }
 
 // EnvVars lists every environment variable dm reads. The source comment names
@@ -163,7 +169,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{

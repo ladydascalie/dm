@@ -42,6 +42,17 @@ type mode struct {
 
 // Command is one user-defined command: the name a keymap action refers to as
 // "command:<name>", and the shell text it runs.
+// Plugin is one user-declared plugin: the argv the host runs, the folder it
+// runs in, where its pane opens, and the environment it adds. A keymap names
+// it as "plugin:<name>".
+type Plugin struct {
+	Name  string
+	Exec  []string
+	Cwd   string
+	Where string
+	Env   []string
+}
+
 type Command struct {
 	Name string
 	Run  string
@@ -93,6 +104,9 @@ type Config struct {
 	// commands maps a command name to its run text. A config without a
 	// command block carries an empty map.
 	commands map[string]string
+	// plugins maps a plugin name to its declaration. A config without a
+	// plugin block carries an empty map.
+	plugins map[string]Plugin
 }
 
 // Theme returns the resolved theme. It is never the zero Theme: a Config
@@ -233,6 +247,32 @@ func (c *Config) Commands() []Command {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+// Plugins returns every plugin the config declares, sorted by name.
+func (c *Config) Plugins() []Plugin {
+	if c == nil {
+		return nil
+	}
+	out := make([]Plugin, 0, len(c.plugins))
+	for _, p := range c.plugins {
+		p.Exec = append([]string(nil), p.Exec...)
+		p.Env = append([]string(nil), p.Env...)
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// Plugin returns the declaration named name.
+func (c *Config) Plugin(name string) (Plugin, bool) {
+	if c == nil {
+		return Plugin{}, false
+	}
+	p, ok := c.plugins[name]
+	return p, ok
 }
 
 // DashboardFullScreen reports whether the dashboard takes the whole screen. A
