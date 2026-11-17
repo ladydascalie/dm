@@ -443,6 +443,14 @@ var helpRows = []helpRow{
 	{[]string{"reload"}, "reload config"},
 }
 
+// helpNotes is the extra copy the help overlay paints as its own rows under
+// the columns, keyed by the label of the row it belongs to. A caveat lives
+// here and not in the label, so it never widens the action column and never
+// pushes the box from two columns to one at 120 columns.
+var helpNotes = map[string]string{
+	"toggle secret redaction": "toggle secret redaction: edit in place, not a control",
+}
+
 // HelpActions returns the action names the help row with the given label
 // groups. It returns nil when no row carries the label.
 func HelpActions(label string) []string {
@@ -519,6 +527,31 @@ func (c *Config) HelpRows() [][2]string {
 		rows[i] = [2]string{e.Key, e.Action}
 	}
 	return rows
+}
+
+// HelpNotes returns the help overlay's footer notes, in table order. A note
+// belongs to a row that is bound in main, so a rebind keeps it and an unbound
+// row drops it. The overlay paints each note as its own row inside the box.
+func (c *Config) HelpNotes() []string {
+	var notes []string
+	for _, row := range helpRows {
+		note, ok := helpNotes[row.label]
+		if !ok || !c.helpRowBound(row) {
+			continue
+		}
+		notes = append(notes, note)
+	}
+	return notes
+}
+
+// helpRowBound reports whether any of the row's actions has a key in main.
+func (c *Config) helpRowBound(row helpRow) bool {
+	for _, action := range row.actions {
+		if c.Key("main", action) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // KeySequences turns a key name into one or more byte sequences. A name maps to

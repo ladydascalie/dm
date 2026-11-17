@@ -51,10 +51,11 @@ func (s *server) secretEnsure() {
 // secretTool maps a registered secret to the command that prints its value.
 // The reference is an argument, never a value. The child inherits the
 // configuration and paths the tools need, and nothing else: the entries the
-// secret record carries come on top and a credential name is refused at
-// register time, so a token never reaches the state file. op reads its
-// service-account token from the operator's own environment, which rides
-// process to child and nowhere else.
+// secret record carries come on top and each must be on the tool
+// configuration allowlist, refused by name at register and at sync. So a
+// record cannot set LD_PRELOAD, PATH or a credential, and the state file
+// carries only configuration. op reads its service-account token from the
+// operator's own environment, which rides process to child and nowhere else.
 func secretTool(sec *session.Secret) secrets.Tool {
 	switch sec.Tool {
 	case session.ToolOp:
@@ -92,33 +93,60 @@ func (s *server) fetchSecret(sec *session.Secret) (string, error) {
 	return secrets.Fetch(secretTool(sec))
 }
 
-// secretValuesLocked returns the live values in secret-name order, capped at
-// the panes' list size. The caller holds s.mu: the active map and the
-// registry are shared with every connection goroutine. The order and the cap
-// are the survivor policy: the pane keeps the first MaxSecrets values it is
-// pushed, so the server decides deterministically which names make the cut
-// and can name the ones that did not.
-func (s *server) secretValuesLocked() ([]string, []string) {
+// secretValuesLocked returns the live values in the order the panes get
+// them: the registered secrets first, the file donations second, each group
+// in name order and the whole capped at the panes' list size. The two groups
+// are kept apart because a file-derived name starts with its path, so one
+// name sort would put every file value ahead of every secret and let a repo
+// mapping evict the operator's live values. A file donation fills only the
+// room the registered secrets leave.
+//
+// The caller holds s.mu: the active map and the registry are shared with
+// every connection goroutine. The return names the registered secrets the cap
+// dropped and counts the file donations that did not fit, so a caller can
+// report what walks unredacted without naming a file key.
+func (s *server) secretValuesLocked() (values, droppedSecrets []string, droppedFiles int) {
 	s.secretEnsure()
-	names := make([]string, 0, len(s.secretActive))
-	for name := range s.secretActive {
-		names = append(names, name)
+	fileNames := make(map[string]bool, len(s.secretFiles))
+	for _, names := range s.secretFiles {
+		for _, name := range names {
+			fileNames[name] = true
+		}
 	}
-	sort.Strings(names)
-	values := make([]string, 0, len(names))
-	var dropped []string
-	for _, name := range names {
+	var registered, donated []string
+	for name := range s.secretActive {
+		if fileNames[name] {
+			donated = append(donated, name)
+		} else {
+			registered = append(registered, name)
+		}
+	}
+	sort.Strings(registered)
+	sort.Strings(donated)
+	values = make([]string, 0, len(registered)+len(donated))
+	for _, name := range registered {
 		v, ok := s.secrets.Get(name)
 		if !ok {
 			continue
 		}
 		if len(values) == pane.MaxSecrets {
-			dropped = append(dropped, name)
+			droppedSecrets = append(droppedSecrets, name)
 			continue
 		}
 		values = append(values, v)
 	}
-	return values, dropped
+	for _, name := range donated {
+		v, ok := s.secrets.Get(name)
+		if !ok {
+			continue
+		}
+		if len(values) == pane.MaxSecrets {
+			droppedFiles++
+			continue
+		}
+		values = append(values, v)
+	}
+	return values, droppedSecrets, droppedFiles
 }
 
 // pushSecretScrub sends the live values to every adopted pane, so their
@@ -151,6 +179,32 @@ func (s *server) pushLocalScrub() (map[string]error, []string) {
 	return s.sendSecretScrub()
 }
 
+// secretWireValues renders a value list for a JSON body. The envelope is
+// JSON and a Go string is not a byte carrier: json.Marshal replaces every
+// byte that is not valid UTF-8 with U+FFFD, so a plain string list would
+// hand a pane a different byte string than the registry holds and its stage
+// would never match the value. A []byte field marshals as base64, so the
+// pane's list stays byte-identical to the registry's.
+func secretWireValues(values []string) [][]byte {
+	out := make([][]byte, len(values))
+	for i, v := range values {
+		out[i] = []byte(v)
+	}
+	return out
+}
+
+// secretSetBody is one set-secrets body: the exact bytes of every value in
+// valuesB64, plus the plain values list for a pane daemon older than the
+// encoding, which a live server can outlive. The plain list is lossy for a
+// value that is not valid UTF-8; a pane that reads valuesB64 never looks at
+// it, so it is a fallback for an old daemon and never a source of truth.
+func secretSetBody(values []string) json.RawMessage {
+	return jsonRaw(map[string]any{
+		"values":    values,
+		"valuesB64": secretWireValues(values),
+	})
+}
+
 // sendSecretScrub collects the current set and sends it to every adopted
 // pane. The caller holds secretPush.
 func (s *server) sendSecretScrub() (map[string]error, []string) {
@@ -161,7 +215,7 @@ func (s *server) sendSecretScrub() (map[string]error, []string) {
 		panes = append(panes, pc)
 	}
 	s.mu.Unlock()
-	body := jsonRaw(map[string]any{"values": values})
+	body := secretSetBody(values)
 	failed := map[string]error{}
 	missed := []string{}
 	for _, pc := range panes {
@@ -210,7 +264,7 @@ func (s *server) adoptSecretScrub(id string) {
 	if pc.isDegraded() {
 		return
 	}
-	if err := pc.send(wire.Msg{Action: "set-secrets", Res: jsonRaw(map[string]any{"values": values})}); err != nil {
+	if err := pc.send(wire.Msg{Action: "set-secrets", Res: secretSetBody(values)}); err != nil {
 		log.Printf("pane %s: set-secrets: %v", id, err)
 	}
 }
@@ -222,7 +276,7 @@ func (s *server) adoptSecretScrub(id string) {
 // push: an adopt and a plain push answer to no one, so the drop must not stay
 // silent. The caller holds s.mu.
 func (s *server) scrubValuesLocked() ([]string, int) {
-	values, _ := s.secretValuesLocked()
+	values, _, _ := s.secretValuesLocked()
 	if len(s.secretForeign) == 0 {
 		return values, 0
 	}
@@ -283,7 +337,7 @@ const coverRoundtripTimeout = 2 * time.Second
 func (s *server) coverSiblings() map[string]error {
 	s.mu.Lock()
 	s.secretEnsure()
-	values, _ := s.secretValuesLocked()
+	values, _, _ := s.secretValuesLocked()
 	var root, own string
 	if s.st != nil {
 		root, own = s.st.Dir(), s.st.Name
@@ -357,7 +411,9 @@ func livePaneSockets(root, name string) int {
 // this server unwinds here, on the deadline, and reads as uncovered, the safe
 // side.
 func coverRoundtrip(c net.Conn, own string, values []string) error {
-	body, err := json.Marshal(map[string]any{"session": own, "values": values})
+	body, err := json.Marshal(map[string]any{
+		"session": own, "values": values, "valuesB64": secretWireValues(values),
+	})
 	if err != nil {
 		return err
 	}
@@ -406,7 +462,8 @@ func secretBoundsWarning(name, value string) string {
 
 // secretCapWarning names the secrets the cap left off the panes' lists, so
 // the operator knows exactly which values ride unredacted. The cut is
-// deterministic: the panes keep the first MaxSecrets names in name order.
+// deterministic: the panes keep the first MaxSecrets registered names in name
+// order.
 func secretCapWarning(dropped []string) string {
 	if len(dropped) == 0 {
 		return ""
@@ -421,6 +478,17 @@ func secretCapWarning(dropped []string) string {
 	}
 	return fmt.Sprintf("the panes hold %d values; these ride unredacted until some are revoked: %s%s",
 		pane.MaxSecrets, strings.Join(shown, ", "), more)
+}
+
+// secretFileCapWarning counts the file donations the panes' cap left off the
+// list. It names no key: a file key is untrusted input and can equal the
+// value beside it. Registered secrets never lose their place, so this count
+// is the room a file block could not have.
+func secretFileCapWarning(dropped int) string {
+	if dropped == 0 {
+		return ""
+	}
+	return fmt.Sprintf("the panes hold %d values; %d file values did not fit and ride unredacted", pane.MaxSecrets, dropped)
 }
 
 // secretRegister adds one secret to the session's registry. The registry
@@ -587,8 +655,12 @@ func (s *server) secretUse(cl *client, m wire.Msg) {
 	if w := secretBoundsWarning(sec.Name, value); w != "" {
 		warnings = append(warnings, w)
 	}
-	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+	_, dropped, droppedFiles := s.secretActiveSet()
+	if len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	if w := secretFileCapWarning(droppedFiles); w != "" {
+		warnings = append(warnings, w)
 	}
 	if len(uncovered) > 0 {
 		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the value would echo there unredacted", strings.Join(uncovered, ", ")))
@@ -632,9 +704,9 @@ func (s *server) secretActivate(sec *session.Secret, value string) error {
 	return nil
 }
 
-// secretActiveSet is the live values with the names the cap dropped, under
-// s.mu.
-func (s *server) secretActiveSet() ([]string, []string) {
+// secretActiveSet is the live values, the registered names the cap dropped
+// and the count of file donations that did not fit, under s.mu.
+func (s *server) secretActiveSet() ([]string, []string, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.secretValuesLocked()
@@ -768,8 +840,12 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 	if w := secretBoundsWarning(sec.Name, value); w != "" {
 		warnings = append(warnings, w)
 	}
-	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+	_, dropped, droppedFiles := s.secretActiveSet()
+	if len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	if w := secretFileCapWarning(droppedFiles); w != "" {
+		warnings = append(warnings, w)
 	}
 	if len(uncovered) > 0 {
 		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the value would echo there unredacted", strings.Join(uncovered, ", ")))
@@ -789,8 +865,11 @@ func (s *server) secretHydrate(cl *client, m wire.Msg) {
 // so a sender that heard the count knows the panes already scrub.
 func (s *server) secretCover(cl *client, m wire.Msg) {
 	var body struct {
-		Session string   `json:"session"`
-		Values  []string `json:"values"`
+		Session string `json:"session"`
+		// ValuesB64 is the exact byte list; Values is the legacy plain list
+		// a sender older than the encoding still sends.
+		ValuesB64 [][]byte `json:"valuesB64"`
+		Values    []string `json:"values"`
 	}
 	if err := json.Unmarshal(m.Res, &body); err != nil || body.Session == "" {
 		s.reply(cl, m, nil, fmt.Errorf("secret-cover needs a session and a set of values"))
@@ -800,12 +879,19 @@ func (s *server) secretCover(cl *client, m wire.Msg) {
 		s.reply(cl, m, nil, fmt.Errorf("secret-cover refuses session %q", body.Session))
 		return
 	}
+	values := body.Values
+	if body.ValuesB64 != nil {
+		values = make([]string, len(body.ValuesB64))
+		for i, v := range body.ValuesB64 {
+			values[i] = string(v)
+		}
+	}
 	s.mu.Lock()
 	s.secretEnsure()
-	if len(body.Values) == 0 {
+	if len(values) == 0 {
 		delete(s.secretForeign, body.Session)
 	} else {
-		s.secretForeign[body.Session] = body.Values
+		s.secretForeign[body.Session] = values
 	}
 	s.mu.Unlock()
 	failed, merged := s.pushLocalScrub()
@@ -820,7 +906,7 @@ func (s *server) secretCover(cl *client, m wire.Msg) {
 		scrubbed[v] = true
 	}
 	dropped := 0
-	for _, v := range body.Values {
+	for _, v := range values {
 		if !scrubbed[v] {
 			dropped++
 		}
@@ -843,6 +929,15 @@ func (s *server) secretType(cl *client, m wire.Msg) {
 	}
 	value, err := s.fetchSecret(sec)
 	if err != nil {
+		s.reply(cl, m, nil, err)
+		return
+	}
+	// A control byte is not data on this path. The pty reads LF as Enter,
+	// so a multi-line value would submit its first line, run the rest of the
+	// value as commands and leave the value in the shell's history file,
+	// which no scrub stage covers. Refuse before the value is activated or
+	// typed, and name the reason without any part of the value.
+	if err := secretTypeShape(sec.Name, value); err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}
@@ -875,6 +970,23 @@ func (s *server) secretType(cl *client, m wire.Msg) {
 		return
 	}
 	s.reply(cl, m, map[string]any{"pane": m.Target, "warning": warning}, nil)
+}
+
+// secretTypeShape refuses a value the keystroke path cannot carry as data.
+// The write path sends bytes to a pty and the terminal driver reads a control
+// byte as a keystroke, not as a character: LF is Enter, so a multi-line value
+// submits its first line and runs the rest. The broadest safe shape is the
+// printable set, and a refusal names the reason and never the value.
+func secretTypeShape(name, value string) error {
+	for i := 0; i < len(value); i++ {
+		switch b := value[i]; {
+		case b == '\n':
+			return fmt.Errorf("secret %s: the value contains a newline; a pane's terminal reads it as Enter, so the shell would run part of the value and write it to its history; nothing was typed", name)
+		case b < 0x20 || b == 0x7f:
+			return fmt.Errorf("secret %s: the value contains the control byte %#02x; a pane's terminal reads it as a keystroke, not as data; nothing was typed", name, b)
+		}
+	}
+	return nil
 }
 
 // secretTypeDests names the panes the keystrokes will reach: the whole

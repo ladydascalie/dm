@@ -403,7 +403,9 @@ func htmlKeys(ids *idGen) string {
 			htmlEscape(ids.id("key", e.Key+" "+e.Action)),
 			htmlEscape(e.Key), htmlEscape(e.Action), htmlEscape(section))
 	}
-	b.WriteString("</tbody></table></section>")
+	b.WriteString("</tbody></table>")
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(ToggleSecretsNote))
+	b.WriteString("</section>")
 	return b.String()
 }
 
@@ -498,7 +500,9 @@ func htmlEnvironment(ids *idGen) string {
 		fmt.Fprintf(&b, `<tr id="%s" data-row><td><code>%s</code></td><td>%s</td></tr>`,
 			htmlEscape(ids.id("env", e.Name)), htmlEscape(e.Name), htmlEscape(e.Desc))
 	}
-	b.WriteString("</tbody></table></section>")
+	b.WriteString("</tbody></table>")
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(PaneEnvNote))
+	b.WriteString("</section>")
 	return b.String()
 }
 

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -230,7 +231,9 @@ func TestSecretEnvValidation(t *testing.T) {
 	good := []*Secret{
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"PASSWORD_STORE_DIR=/home/b/.pass"}},
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"GNUPGHOME=/x", "LANG=C.UTF-8"}},
-		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"EMPTY="}},
+		{Name: "gh", Tool: ToolOp, Reference: "op://v/i/f", Env: []string{"OP_ACCOUNT=my.1password.com"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"HOME=/home/b", "XDG_CONFIG_HOME=/home/b/.config"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"GNUPGHOME="}},
 	}
 	for _, s := range good {
 		if err := s.Validate(); err != nil {
@@ -240,10 +243,21 @@ func TestSecretEnvValidation(t *testing.T) {
 	bad := []*Secret{
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"NOEQUALS"}},
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"=value"}},
-		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"MY_TOKEN=x"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"LD_PRELOAD=/tmp/evil.so"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"LD_LIBRARY_PATH=/tmp"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"PATH=/repo/bin"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"BASH_ENV=/tmp/x"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"ENV=/tmp/x"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"SHELLOPTS=xtrace"}},
+		{Name: "gh", Tool: ToolOp, Reference: "op://v/i/f", Env: []string{"DB_PASS=x"}},
+		{Name: "gh", Tool: ToolOp, Reference: "op://v/i/f", Env: []string{"OP_SESSION_me=x"}},
+		{Name: "gh", Tool: ToolOp, Reference: "op://v/i/f", Env: []string{"OP_SERVICE_ACCOUNT_TOKEN=x"}},
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"api-key=x"}},
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"HOME=/a", "HOME=/b"}},
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"X=1\nY=2"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"home=/a"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"HOME_EXTRA=/a"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{" HOME=/a"}},
 	}
 	for _, s := range bad {
 		if err := s.Validate(); err == nil {
@@ -252,25 +266,88 @@ func TestSecretEnvValidation(t *testing.T) {
 	}
 }
 
-// TestSecretsDropBadEnvOnLoad proves a hand-edited state file costs its bad
-// env entries, not the whole registry.
-func TestSecretsDropBadEnvOnLoad(t *testing.T) {
+// TestSecretEnvErrorNeverCarriesTheValue pins the second half of the
+// contract: a refusal names the entry by index, or the key by name, plus a
+// length, and never the KEY=VALUE text. A value typed into --env must not
+// reach the CLI's stderr or a sync reply through the error string.
+func TestSecretEnvErrorNeverCarriesTheValue(t *testing.T) {
+	t.Parallel()
+	const value = "poc-token-envval"
+	cases := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"no equals", []string{"env " + value}, "env entry 0"},
+		{"line break", []string{"TOKEN=" + value + "\nX=1"}, "env entry 0"},
+		{"not allowlisted", []string{"DB_PASS=" + value}, "DB_PASS"},
+		{"empty key", []string{"=" + value}, "env entry 0"},
+	}
+	for _, tc := range cases {
+		s := &Secret{Name: "s", Tool: ToolPass, Reference: "item", Env: tc.env}
+		err := s.Validate()
+		if err == nil {
+			t.Fatalf("%s: Validate accepted %q", tc.name, tc.env)
+		}
+		if strings.Contains(err.Error(), value) {
+			t.Fatalf("%s: error carries the value: %q", tc.name, err)
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: error %q, want it to name %q", tc.name, err, tc.want)
+		}
+		if !strings.Contains(err.Error(), "bytes") {
+			t.Fatalf("%s: error %q carries no length", tc.name, err)
+		}
+	}
+}
+
+// TestSecretEnvRefusesALongKeyValue pins the key echo's bound: a key that is
+// really a pasted value is cut and its length kept, so the whole string does
+// not travel into the error.
+func TestSecretEnvRefusesALongKeyValue(t *testing.T) {
+	t.Parallel()
+	key := strings.Repeat("poc-token-key", 16)
+	s := &Secret{Name: "s", Tool: ToolPass, Reference: "item", Env: []string{key + "=1"}}
+	err := s.Validate()
+	if err == nil {
+		t.Fatal("Validate accepted a key that is a pasted value")
+	}
+	if strings.Contains(err.Error(), key) {
+		t.Fatalf("the error carries the whole key: %q", err)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf("(%d bytes)", len(key))) {
+		t.Fatalf("the error does not carry the key's length: %q", err)
+	}
+}
+
+// TestSecretEnvRefusedOnLoadKeepsNoValue proves an old state file that carried
+// a credential-named env entry loads without it, and the rewritten state file
+// holds no value: the allowlist is enforced at rest, not only at register.
+func TestSecretEnvRefusedOnLoadKeepsNoValue(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	st := NewStateAt(root, "envdrop")
+	const value = "poc-db-pass-1234"
+	st := NewStateAt(root, "envold")
 	st.Secrets = []*Secret{
 		{Name: "ok", Tool: ToolPass, Reference: "dev/t", Env: []string{"PASSWORD_STORE_DIR=/p"}},
-		{Name: "bad", Tool: ToolPass, Reference: "dev/t", Env: []string{"TOKEN=x"}},
+		{Name: "old", Tool: ToolOp, Reference: "op://v/i/f", Env: []string{"DB_PASS=" + value}},
 	}
 	if err := st.Save(); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadStateAt(root, "envdrop")
+	got, err := LoadStateAt(root, "envold")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Secrets) != 1 || got.Secrets[0].Name != "ok" {
 		t.Fatalf("load kept %+v, want only the ok entry", got.Secrets)
+	}
+	b, err := os.ReadFile(got.StatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), value) {
+		t.Fatalf("the rewritten state file still carries the value: %s", b)
 	}
 }
 

@@ -2,10 +2,10 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -24,7 +24,9 @@ import (
 // answer with. A file block never fetches and never rides the proxy: its
 // values are display protection only. A value read from a file lives in the
 // registry and the redaction push alone; it never reaches argv, the logs,
-// the state file, the box or a reply body.
+// the state file, the box or a reply body. A file key is file data too: the
+// replies and the logs carry counts and the file's path, never a key, because
+// a key can hold any text, a value included.
 
 // mappingSecret is one secret block of a parsed mapping.
 type mappingSecret struct {
@@ -189,34 +191,87 @@ func countStrings(toks []kdl.Token, i int) int {
 }
 
 // fileResult is one file block's answer: the counts the line rule produced
-// and the read error, if any. No value ever appears here; Duplicate names
-// keys, never values.
+// and the read error, if any. No value and no file key ever appears here; a
+// key is untrusted file data and can equal the value beside it.
 type fileResult struct {
-	Path      string   `json:"path"`
-	Values    int      `json:"values"`
-	Skipped   int      `json:"skipped"`
-	Empty     int      `json:"empty"`
-	EmptyKey  int      `json:"emptyKeys,omitempty"`
-	Duplicate []string `json:"duplicateKeys,omitempty"`
-	Bounds    int      `json:"bounds"`
-	Error     string   `json:"error,omitempty"`
+	Path     string `json:"path"`
+	Values   int    `json:"values"`
+	Skipped  int    `json:"skipped"`
+	Empty    int    `json:"empty"`
+	EmptyKey int    `json:"emptyKeys,omitempty"`
+	Repeated int    `json:"repeatedKeys,omitempty"`
+	Bounds   int    `json:"bounds"`
+	Error    string `json:"error,omitempty"`
 }
 
-// syncValue is one value a file donated, with the name it registers under.
-type syncValue struct {
-	name  string
-	value string
+// maxSecretFileBytes caps one mapping or file block read. The mapping is
+// untrusted input: a device, a FIFO or a huge regular file must not grow the
+// server's heap or stall the sync request, so every read asks for at most
+// this much and refuses a regular file bigger than it.
+const maxSecretFileBytes = 1 << 20
+
+// configDir is the operator's dm config directory: $XDG_CONFIG_HOME/dm, or
+// ~/.config/dm when XDG_CONFIG_HOME is unset. Empty when the home directory is
+// unknown.
+func configDir() string {
+	home, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "dm")
+}
+
+// mappingUnderConfigDir reports whether path resolves under the config
+// directory, symlinks on both sides included. dm exec sends no trust verdict,
+// so the server answers with this: a mapping the operator keeps in the config
+// tree is trusted, a mapping in a repo is not.
+func mappingUnderConfigDir(path string) bool {
+	dir := configDir()
+	if dir == "" {
+		return false
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		realDir = filepath.Clean(dir)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		realPath = filepath.Clean(path)
+	}
+	rel, err := filepath.Rel(realDir, realPath)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// secretSyncTrusted resolves the mapping's trust verdict: an explicit wire
+// verdict wins, and nil defers to the mapping's path. dm secret sync always
+// sends its verdict; a raw dm exec body carries none.
+func secretSyncTrusted(trust *bool, path string) bool {
+	if trust != nil {
+		return *trust
+	}
+	return mappingUnderConfigDir(path)
 }
 
 // secretSync applies one mapping: register the secret blocks, ingest the
 // file blocks, push the redaction set and answer. The mapping path arrives
 // absolute; the file paths inside it resolve against its directory.
+//
+// The sender may carry a trust verdict: dm secret sync sends true when the
+// mapping lives under the operator's config directory or the operator passed
+// --trust, and false otherwise. A nil verdict, which is what a raw dm exec
+// body carries, makes the server resolve the same question from the mapping's
+// path. An untrusted mapping may not register secret blocks and may read only
+// files under its own directory: a repo-local mapping must not pin an
+// upstream for the operator's store value or read the operator's files.
 func (s *server) secretSync(cl *client, m wire.Msg) {
 	if m.Path == "" {
 		s.reply(cl, m, nil, fmt.Errorf("secret sync needs the mapping path"))
 		return
 	}
-	src, err := os.ReadFile(m.Path)
+	src, err := readRegularFile(m.Path, maxSecretFileBytes)
 	if err != nil {
 		s.reply(cl, m, nil, fmt.Errorf("secret sync: %w", err))
 		return
@@ -224,6 +279,13 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 	mp, err := parseSecretsMapping(string(src))
 	if err != nil {
 		s.reply(cl, m, nil, fmt.Errorf("%s: %w", m.Path, err))
+		return
+	}
+	trusted := secretSyncTrusted(m.Trust, m.Path)
+	if !trusted && len(mp.Secrets) > 0 {
+		s.reply(cl, m, nil, fmt.Errorf(
+			"%s: an untrusted mapping registers no secrets; move it under $XDG_CONFIG_HOME/dm (or ~/.config/dm) or run dm secret sync --trust",
+			m.Path))
 		return
 	}
 	// Every secret block validates before anything mutates, so a bad block
@@ -260,13 +322,15 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 		return
 	}
 	dir := filepath.Dir(m.Path)
+	realDir := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		realDir = resolved
+	}
 	results := make([]fileResult, 0, len(mp.Files))
-	var bounds []syncValue
 	for i := range mp.Files {
-		b := &mp.Files[i]
-		res, vals := s.ingestSecretFile(filepath.Join(dir, b.Path))
-		results = append(results, res)
-		bounds = append(bounds, vals...)
+		results = append(results, s.ingestSecretFile(fileScan{
+			dir: dir, realDir: realDir, block: mp.Files[i], trusted: trusted,
+		}))
 	}
 	failed := s.pushSecretScrub()
 	uncovered := make([]string, 0, len(failed))
@@ -296,17 +360,19 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 		if len(lost) > 0 {
 			warnings = append(warnings, fmt.Sprintf("file %s: %s; they registered nothing", r.Path, strings.Join(lost, ", ")))
 		}
-		for _, key := range r.Duplicate {
-			warnings = append(warnings, fmt.Sprintf("file %s: key %s repeats; only its last value redacts", r.Path, key))
+		if r.Repeated > 0 {
+			warnings = append(warnings, fmt.Sprintf("file %s: %d keys repeat; only their last value redacts", r.Path, r.Repeated))
+		}
+		if r.Bounds > 0 {
+			warnings = append(warnings, fmt.Sprintf("file %s: %d values are outside the %d..%d byte redaction range; they registered nothing and will echo unredacted", r.Path, r.Bounds, pane.MinSecretLen, pane.MaxSecretLen))
 		}
 	}
-	for _, v := range bounds {
-		if w := secretBoundsWarning(v.name, v.value); w != "" {
-			warnings = append(warnings, w)
-		}
-	}
-	if _, dropped := s.secretActiveSet(); len(dropped) > 0 {
+	_, dropped, droppedFiles := s.secretActiveSet()
+	if len(dropped) > 0 {
 		warnings = append(warnings, secretCapWarning(dropped))
+	}
+	if w := secretFileCapWarning(droppedFiles); w != "" {
+		warnings = append(warnings, w)
 	}
 	if len(uncovered) > 0 {
 		warnings = append(warnings, fmt.Sprintf("the redaction set did not reach: %s; the values would echo there unredacted", strings.Join(uncovered, ", ")))
@@ -321,26 +387,49 @@ func (s *server) secretSync(cl *client, m wire.Msg) {
 	}, nil)
 }
 
+// fileScan is one file block to read: the mapping directory it resolves
+// against, that directory with symlinks resolved, the block itself and the
+// mapping's trust verdict.
+type fileScan struct {
+	dir     string
+	realDir string
+	block   mappingFile
+	trusted bool
+}
+
 // ingestSecretFile reads one file block's path and turns its lines into
 // redaction values. A non-empty line donates everything after the first =;
 // a line without = registers nothing; an empty value, an empty key and a
 // value outside the scrub bounds register nothing and are counted. A key
 // the file already donated keeps its last in-bounds donation: the earlier
-// ones drop, and every key that dropped one is counted and warned by name,
-// so a collision never shrinks the protected set in silence. The values
-// activate under s.mu with names derived from the path and the key, so a
-// re-run of the same mapping replaces exactly the values it donated before
-// and nothing else. The counts travel out, the values never do.
-func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
+// ones drop, and every key that dropped one is counted, so a collision never
+// shrinks the protected set in silence. The count travels out, never the key:
+// a key is file data and can equal the value beside it. The values activate
+// under s.mu with names derived from the path and the key, so a re-run of the
+// same mapping replaces exactly the values it donated before and nothing
+// else. The counts travel out, the values never do.
+//
+// An untrusted block may read only a regular file under the mapping's own
+// directory. A trusted block may read anywhere the operator can, as before.
+func (s *server) ingestSecretFile(scan fileScan) fileResult {
+	path := scan.block.Path
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(scan.dir, path)
+	}
 	res := fileResult{Path: path}
-	raw, err := os.ReadFile(path)
+	if !scan.trusted {
+		if err := checkFileConfined(scan.realDir, scan.block.Path, path); err != nil {
+			res.Error = err.Error()
+			return res
+		}
+	}
+	raw, err := readRegularFile(path, maxSecretFileBytes)
 	if err != nil {
 		res.Error = err.Error()
-		return res, nil
+		return res
 	}
 	values := map[string]string{}
-	var dups []string
-	var bounds []syncValue
+	repeated := map[string]bool{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSuffix(line, "\r")
 		if strings.TrimSpace(line) == "" {
@@ -361,17 +450,16 @@ func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
 		}
 		if len(value) < pane.MinSecretLen || len(value) > pane.MaxSecretLen {
 			res.Bounds++
-			bounds = append(bounds, syncValue{name: path + "#" + key, value: value})
 			continue
 		}
 		name := path + "#" + key
-		if _, dup := values[name]; dup && !slices.Contains(dups, key) {
-			dups = append(dups, key)
+		if _, dup := values[name]; dup {
+			repeated[key] = true
 		}
 		values[name] = value
 	}
 	res.Values = len(values)
-	res.Duplicate = dups
+	res.Repeated = len(repeated)
 	// The activation is one step under s.mu, so a concurrent push reads
 	// either the old set or the new one, never a half-swapped mixture.
 	s.mu.Lock()
@@ -392,5 +480,52 @@ func (s *server) ingestSecretFile(path string) (fileResult, []syncValue) {
 	}
 	s.secretFiles[path] = names
 	s.mu.Unlock()
-	return res, bounds
+	return res
+}
+
+// checkFileConfined refuses a file block that resolves outside the mapping's
+// own directory. Symlinks resolve on both sides, so a link placed in the
+// mapping's directory cannot point the read out of it, and an absolute path
+// inside the directory still passes. The refusal names the block's declared
+// path, the form the mapping's author wrote.
+func checkFileConfined(realDir, declared, path string) error {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(realDir, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("path %q resolves outside the mapping directory %s; an untrusted mapping reads only files under its own directory", declared, realDir)
+	}
+	return nil
+}
+
+// readRegularFile reads a regular file of at most limit bytes and refuses
+// anything else by name. The stat runs before the open, so a FIFO, a device
+// or a directory never stalls or grows the read, and the limit reader holds
+// the bytes in case the file grows past the size the stat saw.
+func readRegularFile(path string, limit int64) ([]byte, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if fi.Size() > limit {
+		return nil, fmt.Errorf("%s is %d bytes; the limit is %d", path, fi.Size(), limit)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("%s grew past the %d byte limit", path, limit)
+	}
+	return raw, nil
 }

@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-16"
+const manDate = "2026-11-17"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -56,6 +56,7 @@ var manActionFields = []manField{
 	{"upstream", "secret-register: the proxy upstream URL the secret rides to"},
 	{"header", "secret-register: the proxy header template, {} marks the value slot"},
 	{"path", "secret-hydrate: the file the value is written to, out of band"},
+	{"trust", "secret-sync: true trusts a mapping outside the config directory, false enforces the untrusted rule; absent resolves it from the mapping's path"},
 	{"env", "secret-register: extra environment entries for the tool, as KEY=VALUE; credential names are refused"},
 }
 
@@ -185,6 +186,9 @@ func ManPage() string {
 		b.WriteString(roffEscape(action))
 		b.WriteString("\n")
 	}
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(ToggleSecretsNote))
+	b.WriteString("\n")
 
 	b.WriteString(manKeymaps())
 
@@ -214,6 +218,9 @@ func ManPage() string {
 		b.WriteString(roffEscape(e.Desc))
 		b.WriteString("\n")
 	}
+	b.WriteString("\n")
+	b.WriteString(roffEscape(PaneEnvNote))
+	b.WriteString("\n")
 
 	b.WriteString(".SH SEE ALSO\n")
 	b.WriteString(".BR tmux (1)\n")

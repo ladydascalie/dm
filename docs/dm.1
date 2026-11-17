@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-16" "dm" "User Commands"
+.TH DM 1 "2026-11-17" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -335,12 +335,14 @@ fetch a secret and type it into a pane
 .br
 Example: \fBdm secret type gh-cli --to w1p1\fP
 .TP
-\fBdm secret sync [--from M]\fP
+\fBdm secret sync [--from M] [--trust]\fP
 apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere
 .br
 \fB--s name\fP session name
 .br
 \fB--from M\fP mapping path, default .dm-secrets.kdl in the working directory
+.br
+\fB--trust\fP trust a mapping outside the config directory: allow secret blocks and file paths anywhere
 .br
 Example: \fBdm secret sync\fP
 .TP
@@ -458,6 +460,9 @@ secret-register: the proxy header template, {} marks the value slot
 .TP
 \fBpath\fP
 secret-hydrate: the file the value is written to, out of band
+.TP
+\fBtrust\fP
+secret-sync: true trusts a mapping outside the config directory, false enforces the untrusted rule; absent resolves it from the mapping's path
 .TP
 \fBenv\fP
 secret-register: extra environment entries for the tool, as KEY=VALUE; credential names are refused
@@ -776,7 +781,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 .TP
 \fBsecret-sync\fP
 .nf
-{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl"}
+{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}
 .fi
 .SH KEYS
 The default keymap. A key label is the key pressed after the prefix key.
@@ -870,6 +875,8 @@ send prefix
 .TP
 \fBctrl+r\fP
 reload config
+.PP
+The toggle-secrets action turns a pane's secret redaction off and on. It exists so a human can edit a secret in place: while it is off the pane's registered values are kept and the pane's output passes through untouched, and turning it back on scrubs those values again. It is not a security control: an agent that can reach the dm socket can flip it, as it can already type keys and read panes. The toast names the state the pane is left in.
 .SH KEYMAPS
 A keymap mode is a table of actions. A keymap node in config.kdl patches one mode, and an action the file leaves out keeps its built-in key. The built-in bindings are:
 .TP
@@ -1217,5 +1224,7 @@ The shell a new pane runs.
 .TP
 \fBTMUX\fP
 Set inside tmux; dm uses it to pick its terminal behaviour.
+
+A shell dm starts, a pane's or a float's, inherits a short allowlist of the server's environment: PATH, HOME, USER, LOGNAME, SHELL, TERM, TERM_PROGRAM, COLORTERM, LANG, LC_*, TZ, TMPDIR, XDG_*, DISPLAY, SSH_AUTH_SOCK, XAUTHORITY and DM_STATE, plus a *_SOCK name with an absolute path value when the name is not credential-shaped. Everything else is dropped, and dm sets DM_PANE and DM_SESSION itself. Each entry is a name a shell, a terminal or an X client needs before the shell reads its rc file, or the dm state root that a dm command in the shell needs; the rc file can re-export what else a session needs.
 .SH SEE ALSO
 .BR tmux (1)

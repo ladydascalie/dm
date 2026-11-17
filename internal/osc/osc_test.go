@@ -121,6 +121,72 @@ func TestTermColoursAreLegalOSC(t *testing.T) {
 	}
 }
 
+// TestParseStatusKeepsTheKnownStates proves the protocol's states survive the
+// validation unchanged, in every form the parser accepts.
+func TestParseStatusKeepsTheKnownStates(t *testing.T) {
+	for _, state := range []string{"idle", "working", "blocked", "done", "error", "unknown"} {
+		forms := []string{
+			"state=" + state,
+			"state=" + state + ":app=pi",
+			state,
+			`{"state":"` + state + `"}`,
+		}
+		for _, in := range forms {
+			if got := ParseStatus(in).State; got != state {
+				t.Fatalf("ParseStatus(%q).State = %q, want %q", in, got, state)
+			}
+		}
+	}
+}
+
+// TestParseStatusRefusesAnUnknownState proves the state field cannot carry
+// free text. Every read verb prints the state unscrubbed, so a word the
+// protocol does not name must not survive the parse: a value reported as the
+// state would reach `dm status` and `dm exec` in the clear.
+func TestParseStatusRefusesAnUnknownState(t *testing.T) {
+	const value = "poc-state-9911"
+	forms := []string{
+		"state=" + value,
+		"state=" + value + ":app=pi",
+		value,
+		`{"state":"` + value + `"}`,
+		"state=" + value + ":msg=" + base64.StdEncoding.EncodeToString([]byte("later")),
+	}
+	for _, in := range forms {
+		st := ParseStatus(in)
+		if st.State != "unknown" {
+			t.Fatalf("ParseStatus(%q).State = %q, want unknown", in, st.State)
+		}
+		if strings.Contains(st.State, value) {
+			t.Fatalf("ParseStatus(%q) kept the value in the state", in)
+		}
+	}
+}
+
+// TestParseStatusClearDropsTheMessage proves the normalisation clear always
+// had still holds after validation: clear, and an empty state, leave nothing of
+// the report but the app name.
+func TestParseStatusClearDropsTheMessage(t *testing.T) {
+	msg := base64.StdEncoding.EncodeToString([]byte("gone"))
+	for _, in := range []string{"state=clear:app=pi:msg=" + msg, "state=:app=pi:msg=" + msg} {
+		st := ParseStatus(in)
+		if st.State != "unknown" || st.Message != "" || st.App != "pi" {
+			t.Fatalf("ParseStatus(%q) = %+v, want unknown, no message, app kept", in, st)
+		}
+	}
+}
+
+// TestParseStatusUnknownStateKeepsTheMessage proves the state validation only
+// touches the state: a report whose state is wrong still carries its message,
+// which the scrub handles on its own path.
+func TestParseStatusUnknownStateKeepsTheMessage(t *testing.T) {
+	in := "state=poc-state-9911:msg=" + base64.StdEncoding.EncodeToString([]byte("needs review"))
+	st := ParseStatus(in)
+	if st.State != "unknown" || st.Message != "needs review" {
+		t.Fatalf("ParseStatus(%q) = %+v, want unknown with the message", in, st)
+	}
+}
+
 func TestParseStatusClearNormalised(t *testing.T) {
 	// One state, one render: the bare form normalises like the keyed form.
 	for _, in := range []string{"clear", "state=clear"} {

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"dm/internal/session"
 	"dm/internal/testutil"
 	"dm/internal/wire"
 )
@@ -132,6 +134,32 @@ func TestSecretRegisterForwardsEnv(t *testing.T) {
 	}
 }
 
+// TestSecretRegisterErrorCarriesNoValue proves the CLI's stderr stays inside
+// the boundary when a register is refused: the server's allowlist error names
+// the entry by index and its length, and the value typed into --env appears in
+// neither. The handler runs the registry's own validation, so the text under
+// test is the one a live server sends.
+func TestSecretRegisterErrorCarriesNoValue(t *testing.T) {
+	const value = "poc-token-clival"
+	startFakeServer(t, "main", func(_ net.Conn, req wire.Msg) (wire.Msg, bool) {
+		sec := &session.Secret{Name: req.Name, Tool: req.Tool, Reference: req.Ref, Env: req.Env}
+		if err := sec.Validate(); err != nil {
+			return wire.Msg{Error: err.Error()}, true
+		}
+		return wire.Msg{OK: true, Res: json.RawMessage(`{"name":"bad"}`)}, true
+	})
+	err := Run([]string{"secret", "register", "bad", "--tool", "pass", "--ref", "dev/t", "--env", value})
+	if err == nil {
+		t.Fatal("dm secret register accepted a malformed env entry")
+	}
+	if strings.Contains(err.Error(), value) {
+		t.Fatalf("the error carries the value: %q", err)
+	}
+	if !strings.Contains(err.Error(), "env entry 0") || !strings.Contains(err.Error(), "bytes") {
+		t.Fatalf("the error does not name the entry and its length: %q", err)
+	}
+}
+
 // TestSecretUseWithoutUpstreamExplainsItself proves the redaction-only use
 // says so on stderr instead of printing an empty endpoint.
 func TestSecretUseWithoutUpstreamExplainsItself(t *testing.T) {
@@ -252,5 +280,150 @@ func TestSecretSyncRefusesExtraArguments(t *testing.T) {
 	t.Setenv("DM_STATE", t.TempDir())
 	if err := Run([]string{"secret", "sync", "extra"}); err == nil {
 		t.Fatal("dm secret sync extra succeeded, want a refusal")
+	}
+}
+
+// TestSecretSyncSendsTheTrustVerdict proves the client decides trust and the
+// request carries it: a repo mapping is untrusted unless --trust is typed.
+func TestSecretSyncSendsTheTrustVerdict(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cases := []struct {
+		argv []string
+		want bool
+	}{
+		{[]string{"secret", "sync"}, false},
+		{[]string{"secret", "sync", "--trust"}, true},
+	}
+	for _, tc := range cases {
+		rec := &recorder{}
+		startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+			rec.handler()(c, req)
+			return wire.Msg{OK: true, Res: json.RawMessage(`{}`)}, true
+		})
+		if err := Run(tc.argv); err != nil {
+			t.Fatalf("dm %v: %v", tc.argv, err)
+		}
+		if got := rec.last(); got.Trust == nil || *got.Trust != tc.want {
+			t.Fatalf("dm %v sent trust=%v, want the explicit verdict %v", tc.argv, got.Trust, tc.want)
+		}
+	}
+}
+
+// TestSecretSyncTrustsAConfigDirMapping proves a mapping under
+// $XDG_CONFIG_HOME/dm needs no flag.
+func TestSecretSyncTrustsAConfigDirMapping(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	dir := filepath.Join(cfg, "dm")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mapping := filepath.Join(dir, "secrets.kdl")
+	if err := os.WriteFile(mapping, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		rec.handler()(c, req)
+		return wire.Msg{OK: true, Res: json.RawMessage(`{}`)}, true
+	})
+	if err := Run([]string{"secret", "sync", "--from", mapping}); err != nil {
+		t.Fatalf("dm secret sync: %v", err)
+	}
+	if got := rec.last(); got.Trust == nil || !*got.Trust {
+		t.Fatal("a config-dir mapping was not trusted without --trust")
+	}
+}
+
+// TestSecretSyncTrustsTheHomeConfigFallback proves the ~/.config/dm
+// fallback applies when XDG_CONFIG_HOME is unset.
+func TestSecretSyncTrustsTheHomeConfigFallback(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".config", "dm")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mapping := filepath.Join(dir, "secrets.kdl")
+	if err := os.WriteFile(mapping, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		rec.handler()(c, req)
+		return wire.Msg{OK: true, Res: json.RawMessage(`{}`)}, true
+	})
+	if err := Run([]string{"secret", "sync", "--from", mapping}); err != nil {
+		t.Fatalf("dm secret sync: %v", err)
+	}
+	if got := rec.last(); got.Trust == nil || !*got.Trust {
+		t.Fatal("a ~/.config/dm mapping was not trusted without --trust")
+	}
+}
+
+// TestSecretSyncDoesNotTrustASymlinkOutOfTheConfigDir proves trust follows
+// the text the server reads: a config-tree link to a repo mapping is not
+// trusted, so the repo's text cannot borrow the operator's config path.
+func TestSecretSyncDoesNotTrustASymlinkOutOfTheConfigDir(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+	repo := t.TempDir()
+	target := filepath.Join(repo, "secrets.kdl")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(cfg, "dm")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "secrets.kdl")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		rec.handler()(c, req)
+		return wire.Msg{OK: true, Res: json.RawMessage(`{}`)}, true
+	})
+	if err := Run([]string{"secret", "sync", "--from", link}); err != nil {
+		t.Fatalf("dm secret sync: %v", err)
+	}
+	if got := rec.last(); got.Trust == nil || *got.Trust {
+		t.Fatal("a config-dir symlink out to a repo was trusted")
+	}
+}
+
+// TestSecretSyncUsageNamesTrust proves the verb's help carries the flag and
+// the rule behind it.
+func TestSecretSyncUsageNamesTrust(t *testing.T) {
+	c := newFlagsAt(t.TempDir(), "secret")
+	if err := c.parse([]string{"sync"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	text := usageOf(t, c)
+	for _, want := range []string{"--trust", "trust a mapping outside the config directory"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("secret sync usage does not carry %q: %q", want, text)
+		}
+	}
+}
+
+// TestExecLeavesTheTrustVerdictToTheServer proves the dm exec route sends no
+// verdict: the raw JSON rarely carries one, and the server now resolves it
+// from the mapping's path. dm secret sync keeps sending its own.
+func TestExecLeavesTheTrustVerdictToTheServer(t *testing.T) {
+	rec := &recorder{}
+	startFakeServer(t, "main", func(c net.Conn, req wire.Msg) (wire.Msg, bool) {
+		rec.handler()(c, req)
+		return wire.Msg{OK: true, Res: json.RawMessage(`{}`)}, true
+	})
+	body := `{"action":"secret-sync","path":"/tmp/x/.dm-secrets.kdl"}`
+	if err := Run([]string{"exec", body}); err != nil {
+		t.Fatalf("dm exec: %v", err)
+	}
+	got := rec.last()
+	if got.Action != "secret-sync" || got.Trust != nil {
+		t.Fatalf("exec sent %+v, want the trust verdict absent", got)
 	}
 }

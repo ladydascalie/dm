@@ -56,6 +56,7 @@ type cmdFlags struct {
 	dry        bool
 	all        bool
 	force      bool
+	trust      bool
 	args       []string
 	root       string
 	// usage overrides the flag set's usage printer. The bare-word fallback
@@ -295,6 +296,8 @@ func (c *cmdFlags) register(name, desc string) {
 		c.fs.BoolVar(&c.all, "all", false, desc)
 	case "force":
 		c.fs.BoolVar(&c.force, "force", false, desc)
+	case "trust":
+		c.fs.BoolVar(&c.trust, "trust", false, desc)
 	case "action-json":
 		c.fs.StringVar(&c.msgJSON, "action-json", "", desc)
 	case "tool":
@@ -1003,6 +1006,13 @@ func secretTypeVerb(c *cmdFlags) error {
 // mapping is the working directory's .dm-secrets.kdl. The client sends an
 // absolute mapping path, so the file paths inside it resolve against the
 // mapping's own directory no matter where the server was started.
+//
+// The client also sends its trust verdict. A mapping under the operator's
+// config directory is trusted; any other mapping is trusted only with
+// --trust, which the operator types. The verdict is explicit, so the server
+// never has to guess on this route. The server enforces it, so a repo-local
+// mapping cannot register an upstream or read a file outside its own
+// directory unless the operator said so.
 func secretSyncVerb(c *cmdFlags) error {
 	if len(c.args) > 1 {
 		return fmt.Errorf("secret sync: unexpected argument %q", c.args[1])
@@ -1015,7 +1025,44 @@ func secretSyncVerb(c *cmdFlags) error {
 	if err != nil {
 		return fmt.Errorf("secret sync: %w", err)
 	}
-	return printSecretRPC(c.session, wire.Msg{Action: "secret-sync", Path: abs})
+	trusted := c.trust || mappingTrusted(abs)
+	return printSecretRPC(c.session, wire.Msg{Action: "secret-sync", Path: abs, Trust: &trusted})
+}
+
+// configDir is the operator's dm config directory: $XDG_CONFIG_HOME/dm, or
+// ~/.config/dm when XDG_CONFIG_HOME is unset. Empty when the home directory
+// is unknown.
+func configDir() string {
+	home, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "dm")
+}
+
+// mappingTrusted reports whether the mapping lives under the operator's
+// config directory. Symlinks resolve on both sides: a mapping in the config
+// tree that links out to a repo is not trusted, and a repo link that lands
+// in the config tree is, because the text the server reads is the config
+// tree's.
+func mappingTrusted(path string) bool {
+	dir := configDir()
+	if dir == "" {
+		return false
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		realDir = filepath.Clean(dir)
+	}
+	realPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		realPath = filepath.Clean(path)
+	}
+	rel, err := filepath.Rel(realDir, realPath)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func printRPC(name string, req wire.Msg) error {

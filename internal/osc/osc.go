@@ -247,15 +247,37 @@ func csiEnd(b []byte) (int, bool) {
 	return 0, false
 }
 
+// knownState reports whether s is one of the states the protocol defines, the
+// set the README's OSC 7501 section lists. A state is a wire word, not text:
+// `dm status`, the rail, `dm exec read` and `dm exec list` print it unscrubbed,
+// so a report must not be able to put a value there.
+func knownState(s string) bool {
+	switch s {
+	case "idle", "working", "blocked", "done", "error", "unknown":
+		return true
+	}
+	return false
+}
+
+// normaliseState maps a reported state to the wire set. clear is the
+// protocol's removal, shown as unknown; a word the set does not name is
+// unknown too, so no report can invent a state.
+func normaliseState(s string) string {
+	if knownState(s) {
+		return s
+	}
+	return "unknown"
+}
+
 // ParseStatus accepts the OSC 7501 wire format, `state=working:app=pi:msg=<b64>`,
-// plus the JSON and bare-state forms dm accepted before.
+// plus the JSON and bare-state forms dm accepted before. The state is validated
+// against the protocol's set: every read verb prints it, and a state is never a
+// place for free text.
 func ParseStatus(s string) wire.Status {
 	s = strings.TrimSpace(s)
 	var st wire.Status
 	if strings.HasPrefix(s, "{") && json.Unmarshal([]byte(s), &st) == nil {
-		if st.State == "" {
-			st.State = "unknown"
-		}
+		st.State = normaliseState(st.State)
 		return st
 	}
 	if strings.Contains(s, "=") {
@@ -275,16 +297,18 @@ func ParseStatus(s string) wire.Status {
 				}
 			}
 		}
-		if st.State == "clear" || st.State == "" {
+		if st.State == "" || st.State == "clear" {
+			// clear is the protocol's removal: nothing is left of the
+			// report, the message included. An empty state is the same
+			// report with a word missing.
 			st.State = "unknown"
 			st.Message = ""
+			return st
 		}
+		st.State = normaliseState(st.State)
 		return st
 	}
 	// The keyed form normalises clear to unknown; the bare form gets the
 	// same treatment, so one state never renders two ways.
-	if s == "" || s == "clear" {
-		s = "unknown"
-	}
-	return wire.Status{State: s}
+	return wire.Status{State: normaliseState(s)}
 }

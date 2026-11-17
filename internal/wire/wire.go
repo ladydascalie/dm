@@ -47,6 +47,13 @@ type Msg struct {
 	// to, out of band. Secret sync rides it too, with the mapping file to
 	// apply; the file paths inside it resolve against its directory.
 	Path string `json:"path,omitempty"`
+	// Trust is the secret sync request: the sender's verdict that the
+	// mapping may register secret blocks and read file blocks anywhere.
+	// Nil means the sender did not decide: the server then trusts the
+	// mapping only when it resolves under the operator's config
+	// directory. dm secret sync sends its resolved verdict; dm exec sends
+	// nothing and lets the server answer from the path.
+	Trust *bool `json:"trust,omitempty"`
 	// Env is the secret register request: extra environment entries the
 	// fetch tool needs, as KEY=VALUE. Credential-named keys are refused.
 	Env     []string `json:"env,omitempty"`
