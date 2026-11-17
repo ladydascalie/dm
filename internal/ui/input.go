@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"dm/internal/cells"
 	"dm/internal/layout"
@@ -93,6 +94,27 @@ func (in *Input) Delete() {
 	}
 	in.Value = append(in.Value[:at], in.Value[at+1:]...)
 	in.Caret = at
+}
+
+// DeleteWord removes the word before the caret: first the run of spaces
+// before the caret, then the run of non-spaces before it. The caret lands at
+// the deletion point. At the start of the text it changes nothing. A rune is a
+// space when unicode.IsSpace says so, and a wide rune counts as one rune.
+func (in *Input) DeleteWord() {
+	at := in.pos()
+	if at == 0 {
+		in.Caret = 0
+		return
+	}
+	start := at
+	for start > 0 && unicode.IsSpace(in.Value[start-1]) {
+		start--
+	}
+	for start > 0 && !unicode.IsSpace(in.Value[start-1]) {
+		start--
+	}
+	in.Value = append(in.Value[:start], in.Value[at:]...)
+	in.Caret = start
 }
 
 // Left moves the caret one rune towards the start, and stops there.
