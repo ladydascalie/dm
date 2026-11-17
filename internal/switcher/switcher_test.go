@@ -214,7 +214,7 @@ func TestSwitcherFilterMode(t *testing.T) {
 	s.AppendText('d')
 	s.Backspace()
 	s.ClearQuery()
-	if s.Filtering() || len(s.query) != 0 || s.RowCount() != len(all) {
+	if s.Filtering() || s.Search.Input.String() != "" || s.RowCount() != len(all) {
 		t.Fatalf("typing outside the mode changed the table: query %q rows %d", s.Query(), s.RowCount())
 	}
 	s.StartFilter()
