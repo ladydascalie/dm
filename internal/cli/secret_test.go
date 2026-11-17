@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/session"
 	"dm/internal/testutil"
 	"dm/internal/wire"
 )
@@ -130,6 +131,32 @@ func TestSecretRegisterForwardsEnv(t *testing.T) {
 	got := rec.last()
 	if len(got.Env) != 2 || got.Env[0] != "PASSWORD_STORE_DIR=/p" || got.Env[1] != "GNUPGHOME=/g" {
 		t.Fatalf("register sent env %v", got.Env)
+	}
+}
+
+// TestSecretRegisterErrorCarriesNoValue proves the CLI's stderr stays inside
+// the boundary when a register is refused: the server's allowlist error names
+// the entry by index and its length, and the value typed into --env appears in
+// neither. The handler runs the registry's own validation, so the text under
+// test is the one a live server sends.
+func TestSecretRegisterErrorCarriesNoValue(t *testing.T) {
+	const value = "poc-token-clival"
+	startFakeServer(t, "main", func(_ net.Conn, req wire.Msg) (wire.Msg, bool) {
+		sec := &session.Secret{Name: req.Name, Tool: req.Tool, Reference: req.Ref, Env: req.Env}
+		if err := sec.Validate(); err != nil {
+			return wire.Msg{Error: err.Error()}, true
+		}
+		return wire.Msg{OK: true, Res: json.RawMessage(`{"name":"bad"}`)}, true
+	})
+	err := Run([]string{"secret", "register", "bad", "--tool", "pass", "--ref", "dev/t", "--env", value})
+	if err == nil {
+		t.Fatal("dm secret register accepted a malformed env entry")
+	}
+	if strings.Contains(err.Error(), value) {
+		t.Fatalf("the error carries the value: %q", err)
+	}
+	if !strings.Contains(err.Error(), "env entry 0") || !strings.Contains(err.Error(), "bytes") {
+		t.Fatalf("the error does not name the entry and its length: %q", err)
 	}
 }
 

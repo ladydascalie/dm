@@ -19,7 +19,9 @@ type Tool struct {
 	Bin  string   // executable path or name
 	Args []string // argument template; a secret never goes here
 	// Env holds the entries the tool requires beyond the inheritance, as
-	// KEY=VALUE. An entry wins over an inherited one of the same name.
+	// KEY=VALUE. An entry wins over an inherited one of the same name. The
+	// registry refuses any key outside its tool configuration allowlist, so
+	// an entry is never a credential and never a code loader.
 	Env []string
 	// Inherit names the variables copied from this process into the child,
 	// when they are set: configuration and paths a tool needs, never a
