@@ -294,7 +294,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `switcher` | `pick` | `enter` |
 | `switcher` | `filter` | `/` |
 | `switcher` | `clear-query` | `ctrl+l` |
-| `switcher` | `backspace` | `backspace` |
+| `switcher` | `backspace, delete-word` | `backspace, ctrl+w` |
 | `switcher` | `sort` | `s` |
 | `switcher` | `preview-up` | `ctrl+u` |
 | `switcher` | `preview-down` | `ctrl+d` |
@@ -339,7 +339,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `rename` | `cancel-left` | `left` |
 | `rename` | `cancel-right` | `right` |
 | `rename` | `submit` | `enter` |
-| `rename` | `backspace` | `backspace` |
+| `rename` | `backspace, delete-word` | `backspace, ctrl+w` |
 | `rename` | `clear` | `ctrl+u` |
 | `box` | `up` | `k` |
 | `box` | `up-arrow` | `up` |

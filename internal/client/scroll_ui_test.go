@@ -131,6 +131,17 @@ func TestSearchPromptKeys(t *testing.T) {
 	}
 }
 
+// ctrl+w in the query row cuts the word before the caret, spaces and all.
+func TestSearchPromptDeleteWord(t *testing.T) {
+	tui, _ := searchTUI(t, 60)
+	press(t, tui, "/")
+	press(t, tui, "alpha beta")
+	press(t, tui, "\x17")
+	if got := tui.search.Search.Input.String(); got != "alpha " {
+		t.Fatalf("query after ctrl+w = %q, want %q", got, "alpha ")
+	}
+}
+
 // TestSearchPromptKeepsKeysFromThePane checks no key of the query row reaches
 // the pane: the prompt consumes every byte and sends nothing.
 func TestSearchPromptKeepsKeysFromThePane(t *testing.T) {

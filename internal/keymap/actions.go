@@ -93,6 +93,7 @@ var builtinActions = map[string]bool{
 	"filter":              true,
 	"clear-query":         true,
 	"backspace":           true,
+	"delete-word":         true,
 	"down-ctrl-n":         true,
 	"up-ctrl-p":           true,
 	"sort":                true,

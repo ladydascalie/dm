@@ -267,6 +267,7 @@ var ActionDesc = map[string]string{
 	"filter":          "Start filtering; in filter mode every printable key edits the query and esc leaves it.",
 	"clear-query":     "Clear the dashboard query.",
 	"backspace":       "Delete the last character of the query or name.",
+	"delete-word":     "Delete the word before the caret, the spaces in front of it included.",
 	"down-ctrl-n":     "Move the selection down one row; ctrl+n is an alternative key.",
 	"up-ctrl-p":       "Move the selection up one row; ctrl+p is an alternative key.",
 	"sort":            "Cycle the dashboard ordering: recent, project, status.",
@@ -346,8 +347,29 @@ func KeymapModes() []Mode {
 				Desc: ActionDesc[a.Action],
 			})
 		}
-		m.Actions = foldPicks(m.Actions)
+		m.Actions = foldQueryEdits(foldPicks(m.Actions))
 		out = append(out, m)
+	}
+	return out
+}
+
+// foldQueryEdits prints the two query edits as one row when a mode binds them
+// back to back: backspace deletes one rune and delete-word deletes the word
+// before the caret, one job at two granularities. The pair takes one row, which
+// keeps the keymap tables and the one-pass llms.txt inside their line budget.
+func foldQueryEdits(actions []Action) []Action {
+	out := make([]Action, 0, len(actions))
+	for i := 0; i < len(actions); i++ {
+		if i+1 < len(actions) && actions[i].Name == "backspace" && actions[i+1].Name == "delete-word" {
+			out = append(out, Action{
+				Name: "backspace, delete-word",
+				Key:  actions[i].Key + ", " + actions[i+1].Key,
+				Desc: actions[i].Desc + " " + actions[i+1].Desc,
+			})
+			i++
+			continue
+		}
+		out = append(out, actions[i])
 	}
 	return out
 }

@@ -309,6 +309,29 @@ func TestKeymapSearchRuneBackspaceAndTypedTitle(t *testing.T) {
 	}
 }
 
+// TestKeymapSearchDeleteWord cuts the word before the caret, the spaces in
+// front of it included, and refilters the binding rows.
+func TestKeymapSearchDeleteWord(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 120, Rows: 40, Rail: 30}
+	k := NewKeymapView(snap, keymap.LoadDefault())
+	k.StartSearch()
+	k.AppendQuery("split pa")
+	k.DeleteWordQuery()
+	if got := k.Search.Input.String(); got != "split " {
+		t.Fatalf("after one delete the query = %q, want %q", got, "split ")
+	}
+	if len(k.Search.Matches) == 0 {
+		t.Fatal("the refilter found no match for the remaining word")
+	}
+	k.DeleteWordQuery()
+	if got := k.Search.Input.String(); got != "" {
+		t.Fatalf("after two deletes the query = %q, want empty", got)
+	}
+	if len(k.Search.Matches) != 0 {
+		t.Fatalf("an empty query kept %v, want no matches", k.Search.Matches)
+	}
+}
+
 // TestKeymapViewHintNamesTheKeymap: the border hint names the help keymap's
 // keys, so SetKeymap renames it in place when a reload rebinds one.
 func TestKeymapViewHintNamesTheKeymap(t *testing.T) {

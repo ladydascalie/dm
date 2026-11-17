@@ -244,6 +244,16 @@ func (k *KeymapView) BackspaceQuery() {
 	k.refilter()
 }
 
+// DeleteWordQuery removes the word before the caret. The spaces in front of it
+// go with it, and a wide or multi-byte rune counts as one rune.
+func (k *KeymapView) DeleteWordQuery() {
+	if k.Search.Input.Empty() {
+		return
+	}
+	k.Search.Input.DeleteWord()
+	k.refilter()
+}
+
 // SetQuery replaces the draft query, recomputes the matching binding rows and
 // puts the first match in view. An empty query clears the highlight. The query
 // is kept as typed: the title shows it, and only the match test folds case.

@@ -1098,6 +1098,11 @@ func (t *tui) searchKey() bool {
 		// ctrl+u clears the whole line, not the tail the caret sits before.
 		t.search.Search.Input.SetValue("")
 		t.dirty = true
+	case 0x17: // ctrl+w
+		// ctrl+w deletes the word before the caret, the spaces in front of it
+		// included.
+		t.search.Search.Input.DeleteWord()
+		t.dirty = true
 	default:
 		if ok {
 			t.search.Search.Input.InsertRune(r)
@@ -2835,6 +2840,9 @@ func (t *tui) renameKey() bool {
 			t.submitRename()
 		case "backspace":
 			t.renameDraft.Backspace()
+			t.dirty = true
+		case "delete-word":
+			t.renameDraft.DeleteWord()
 			t.dirty = true
 		case "clear":
 			// The key clears the whole name, not the tail the caret sits

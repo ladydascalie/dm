@@ -414,6 +414,8 @@ func (t *tui) keymapSearchKey() bool {
 		t.keys.BackspaceQuery()
 	case 0x15:
 		t.keys.SetQuery("")
+	case 0x17:
+		t.keys.DeleteWordQuery()
 	default:
 		if ok {
 			t.keys.AppendQuery(string(r))

@@ -105,6 +105,34 @@ func TestKeymapModesFoldsPicks(t *testing.T) {
 	}
 }
 
+// TestKeymapModesFoldsQueryEdits proves the query-edit pair prints as one row
+// in the modes that bind both, and that no other mode carries the folded row.
+func TestKeymapModesFoldsQueryEdits(t *testing.T) {
+	for _, m := range KeymapModes() {
+		folded := false
+		for _, a := range m.Actions {
+			switch a.Name {
+			case "backspace":
+				t.Errorf("mode %q lists backspace on its own", m.Name)
+			case "delete-word":
+				t.Errorf("mode %q lists delete-word on its own", m.Name)
+			case "backspace, delete-word":
+				folded = true
+				if a.Key != "backspace, ctrl+w" {
+					t.Errorf("mode %q folded row key = %q, want %q", m.Name, a.Key, "backspace, ctrl+w")
+				}
+				if a.Desc == "" {
+					t.Errorf("mode %q folded row has no description", m.Name)
+				}
+			}
+		}
+		bindsBoth := m.Name == "switcher" || m.Name == "rename"
+		if bindsBoth != folded {
+			t.Errorf("mode %q folded = %v, want %v", m.Name, folded, bindsBoth)
+		}
+	}
+}
+
 // TestConfigNodesParse builds a config that names every node in the table and
 // proves the parser accepts it and the getters return the values it sets.
 func TestConfigNodesParse(t *testing.T) {

@@ -254,6 +254,30 @@ func TestSwitcherFilterMode(t *testing.T) {
 	}
 }
 
+// TestSwitcherDeleteWord cuts the word before the caret, spaces in front of it
+// included, and reselects. Outside filter mode ctrl+w is not text, so the
+// query and the table stay as they are.
+func TestSwitcherDeleteWord(t *testing.T) {
+	s := switcherFull(160, 30)
+	all := switcherRowIDs(s)
+	s.DeleteWord()
+	if s.Filtering() || s.Query() != "" || !reflect.DeepEqual(switcherRowIDs(s), all) {
+		t.Fatalf("DeleteWord outside the mode changed the table: query %q", s.Query())
+	}
+	switcherType(s, "dock one")
+	s.DeleteWord()
+	if got := s.Query(); got != "dock " {
+		t.Fatalf("after one delete the query = %q, want %q", got, "dock ")
+	}
+	s.DeleteWord()
+	if got := s.Query(); got != "" {
+		t.Fatalf("after two deletes the query = %q, want empty", got)
+	}
+	if got := switcherRowIDs(s); !reflect.DeepEqual(got, all) {
+		t.Fatalf("an empty query keeps %v, want every row %v", got, all)
+	}
+}
+
 // TestSwitcherMove walks the selection and holds at both ends.
 func TestSwitcherMove(t *testing.T) {
 	s := switcherFull(160, 30)

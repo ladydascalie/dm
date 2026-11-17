@@ -234,6 +234,12 @@ func (t *tui) commandPaletteKey() bool {
 		t.takePaletteBytes(1)
 		t.togglePaletteHelp()
 		t.dirty = true
+	case b == 0x17:
+		// ctrl+w deletes the word before the caret, not one rune of it.
+		t.takePaletteBytes(1)
+		t.closePaletteHelp()
+		t.cp.pal.Search.Input.DeleteWord()
+		t.dirty = true
 	case b >= 0x20 && b < 0x7f:
 		t.takePaletteBytes(1)
 		t.closePaletteHelp()

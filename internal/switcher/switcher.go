@@ -207,6 +207,15 @@ func (s *Switcher) Backspace() {
 	s.refilter()
 }
 
+// DeleteWord removes the query's word before the caret and reselects.
+func (s *Switcher) DeleteWord() {
+	if !s.filter || s.Search.Input.Empty() {
+		return
+	}
+	s.Search.Input.DeleteWord()
+	s.refilter()
+}
+
 // ClearQuery empties the query and reselects. The table stays in the mode it is
 // in, so the next keystroke is still a letter of the query.
 func (s *Switcher) ClearQuery() {
