@@ -157,6 +157,7 @@ var cliCommands = []cliCommand{
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"dir", "D", "split direction: left right up down"},
+			{"argv", "CMD", "run CMD as the new pane's program; repeat once per word"},
 			{"json", "", "print JSON"},
 		},
 		group: groupPanes,
@@ -199,9 +200,13 @@ var cliCommands = []cliCommand{
 	},
 	{
 		name:    "new-window",
+		args:    "[--argv CMD]...",
 		summary: "open a new window",
-		flags:   []cliFlag{{"s", "name", "session name"}},
-		group:   groupWindows,
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"argv", "CMD", "run CMD as the new pane's program; repeat once per word"},
+		},
+		group: groupWindows,
 	},
 	{
 		name:    "next-window",

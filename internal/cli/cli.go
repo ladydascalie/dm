@@ -48,6 +48,7 @@ type cmdFlags struct {
 	header     string
 	to         string
 	envs       []string
+	argv       []string
 	seq        int
 	from       string
 	limit      int
@@ -311,19 +312,21 @@ func (c *cmdFlags) register(name, desc string) {
 	case "to":
 		c.fs.StringVar(&c.to, "to", "", desc)
 	case "env":
-		c.fs.Var(envValue{&c.envs}, "env", desc)
+		c.fs.Var(repeatValue{&c.envs}, "env", desc)
+	case "argv":
+		c.fs.Var(repeatValue{&c.argv}, "argv", desc)
 	default:
 		panic("cli: no field binding for flag " + name)
 	}
 }
 
-// envValue is a repeatable flag value: --env KEY=VALUE. Each occurrence
-// appends one entry, so a tool can take several.
-type envValue struct{ p *[]string }
+// repeatValue is a repeatable flag value: --env KEY=VALUE or --argv WORD.
+// Each occurrence appends one entry, so a flag can take several.
+type repeatValue struct{ p *[]string }
 
-func (v envValue) String() string { return strings.Join(*v.p, ",") }
+func (v repeatValue) String() string { return strings.Join(*v.p, ",") }
 
-func (v envValue) Set(s string) error {
+func (v repeatValue) Set(s string) error {
 	*v.p = append(*v.p, s)
 	return nil
 }
@@ -398,6 +401,7 @@ var withValue = map[string]bool{
 	"-limit": true, "--limit": true, "-timeout": true, "--timeout": true,
 	"-tool": true, "--tool": true, "-ref": true, "--ref": true,
 	"-env": true, "--env": true,
+	"-argv": true, "--argv": true,
 	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
 	"-to": true, "--to": true,
 }
@@ -659,9 +663,9 @@ func Run(argv []string) error {
 			return fmt.Errorf("split needs a pane id")
 		}
 		if c.jsonOut {
-			return printRPC(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+			return printRPC(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir, Argv: c.argv})
 		}
-		m, err := transport.RPC(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir})
+		m, err := transport.RPC(c.session, wire.Msg{Action: "split", Target: c.args[0], Dir: c.dir, Argv: c.argv})
 		if err != nil {
 			return err
 		}
@@ -718,7 +722,17 @@ func Run(argv []string) error {
 		}
 		return printRPC(c.session, wire.Msg{Action: "set-project", Target: c.args[0], Name: name})
 
-	case "next-pane", "prev-pane", "new-window", "next-window", "prev-window":
+	case "new-window":
+		c := newFlagsAt(root, "new-window")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
+		return printRPC(c.session, wire.Msg{Action: "new-window", Argv: c.argv})
+
+	case "next-pane", "prev-pane", "next-window", "prev-window":
 		c := newFlagsAt(root, argv[0])
 		if err := c.parse(argv[1:]); err != nil {
 			return err

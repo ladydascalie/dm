@@ -27,7 +27,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm prev-pane` | `-` | focus the previous pane | `dm prev-pane` |
 | `dm rename-workspace` | `<ws> <name>` | rename a workspace | `dm rename-workspace s1 build` |
 | `dm set-project` | `<ws> [name]` | set a workspace's project, or clear it with no name | `dm set-project s1 dm` |
-| `dm new-window` | `-` | open a new window | `dm new-window` |
+| `dm new-window` | `[--argv CMD]...` | open a new window | `dm new-window` |
 | `dm next-window` | `-` | focus the next window | `dm next-window` |
 | `dm prev-window` | `-` | focus the previous window | `dm prev-window` |
 | `dm status` | `[pane]` | show OSC 7501 agent status | `dm status w1p1` |

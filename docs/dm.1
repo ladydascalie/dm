@@ -84,6 +84,8 @@ split a pane: left right up down
 .br
 \fB--dir D\fP split direction: left right up down
 .br
+\fB--argv CMD\fP run CMD as the new pane's program; repeat once per word
+.br
 \fB--json\fP print JSON
 .TP
 \fBdm focus <pane>\fP
@@ -113,10 +115,12 @@ set a workspace's project, or clear it with no name
 .br
 Example: \fBdm set-project s1 dm\fP
 .TP
-\fBdm new-window\fP
+\fBdm new-window [--argv CMD]...\fP
 open a new window
 .br
 \fB--s name\fP session name
+.br
+\fB--argv CMD\fP run CMD as the new pane's program; repeat once per word
 .TP
 \fBdm next-window\fP
 focus the next window

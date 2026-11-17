@@ -144,6 +144,45 @@ func TestCommandFloatEndToEnd(t *testing.T) {
 	}
 }
 
+// TestSplitArgvFlag proves the CLI reaches the same argv pane the RPC path
+// builds: a repeated --argv, a value that starts with a dash, and one word
+// holding a space. The server validates the argv, so the flag passes values
+// through untouched.
+func TestSplitArgvFlag(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	s := "argvcli"
+	h.run("new", "-s", s)
+	root := h.focus(s)
+
+	out := h.run("split", root, "-s", s, "--dir", "right",
+		"--argv", "sh", "--argv", "-c", "--argv", "echo CLIPANE; sleep 30")
+	pane := strings.TrimSpace(out)
+	if !strings.HasPrefix(pane, "w") || strings.Contains(pane, " ") {
+		t.Fatalf("split printed %q, want one pane id", out)
+	}
+	h.waitFor(s, pane, "CLIPANE")
+}
+
+// TestNewWindowArgvFlag proves the window path builds the same argv pane. The
+// reply is the RPC JSON, because new-window has no bespoke printer.
+func TestNewWindowArgvFlag(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	s := "argvwin"
+	h.run("new", "-s", s)
+
+	out := h.run("new-window", "-s", s,
+		"--argv", "sh", "--argv", "-c", "--argv", "echo NEWWIN; sleep 30")
+	var res struct {
+		Pane string `json:"pane"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Pane == "" {
+		t.Fatalf("new-window printed %q, want a pane in JSON", out)
+	}
+	h.waitFor(s, res.Pane, "NEWWIN")
+}
+
 // TestArgvSplitRespawns drives the argv feature end to end: a split carries
 // the program, the pane prints its marker, and after the server, the pane's
 // process and its socket are taken away, the next server respawns the same
