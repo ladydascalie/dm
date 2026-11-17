@@ -107,6 +107,36 @@ func TestResizeRewrapsScreen(t *testing.T) {
 	}
 }
 
+// TestResizeHeightOnlyGrowsTheGrid pins the height half of a geometry
+// change. A column split resizes a pane's height alone, and the pty takes
+// that size, so a grid that ignored it would stay short and clip whatever
+// the app painted below its old last row.
+func TestResizeHeightOnlyGrowsTheGrid(t *testing.T) {
+	t.Parallel()
+	p := newReflowPane(10, 6)
+	feedReflow(p, "one\r\ntwo")
+
+	serve, cli := net.Pipe()
+	defer func() { _ = cli.Close() }()
+	go p.serve(serve)
+	_ = cli.SetDeadline(time.Now().Add(5 * time.Second))
+
+	tall := resizePane(t, cli, p, 10, 10)
+	if cols, rows := tall.Grid().Size(); cols != 10 || rows != 10 {
+		t.Fatalf("size after a height-only grow %dx%d, want 10x10", cols, rows)
+	}
+	for y, want := range []string{"one", "two"} {
+		if got := tall.Grid().Text(y); got != want {
+			t.Errorf("row %d = %q, want %q", y, got, want)
+		}
+	}
+
+	short := resizePane(t, cli, p, 10, 3)
+	if cols, rows := short.Grid().Size(); cols != 10 || rows != 3 {
+		t.Fatalf("size after a height-only shrink %dx%d, want 10x3", cols, rows)
+	}
+}
+
 // TestResizeNeverResurrectsHistory pins the rule the ring replay broke: a pane
 // whose screen the app cleared holds only what the app painted, and a wider
 // screen brings none of the scrolled output back.

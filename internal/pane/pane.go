@@ -1161,9 +1161,15 @@ func (p *paneProc) serve(c net.Conn) {
 			// rows join into logical lines and wrap again at the new width.
 			// Rewrap refuses the alternate screen and an application scroll
 			// region, and those keep the plain resize. A height change alone
-			// has nothing to re-wrap.
-			oc, _ := p.vt.Grid().Size()
-			if m.Cols != oc && !p.vt.Grid().Rewrap(m.Cols, m.Rows) {
+			// has nothing to re-wrap, but the grid still takes the new height:
+			// the pty takes it, and so does the client's terminal.
+			oc, or := p.vt.Grid().Size()
+			switch {
+			case m.Cols != oc:
+				if !p.vt.Grid().Rewrap(m.Cols, m.Rows) {
+					p.vt.Grid().Resize(m.Cols, m.Rows)
+				}
+			case m.Rows != or:
 				p.vt.Grid().Resize(m.Cols, m.Rows)
 			}
 			p.mu.Unlock()

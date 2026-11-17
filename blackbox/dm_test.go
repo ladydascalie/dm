@@ -247,6 +247,37 @@ func TestZoomSplitWindow(t *testing.T) {
 	}
 }
 
+// TestZoomHeightGrowsThePaneGrid pins the zoom's height. A column split makes
+// the pane taller, not wider, so the pane's pty and its grid both take the new
+// height. A grid that kept the old rows would clamp the app's last row to the
+// old bottom, and the picture would come back short.
+func TestZoomHeightGrowsThePaneGrid(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	const session = "zgrow"
+	h.run("new", "-s", session)
+	top := h.focus(session)
+	bottom := h.split(session, top, "down")
+	if got := h.toggleZoom(session); got != bottom {
+		t.Fatalf("zoom-pane = %q, want %q", got, bottom)
+	}
+	rect := h.rects(session)[bottom]
+	if rect.H < 4 {
+		t.Fatalf("the zoomed pane is %d rows tall, want the pane area", rect.H)
+	}
+	// The pane's socket carries the resize before this write, so the grid has
+	// the zoom's height when the shell paints its last row.
+	cmd := fmt.Sprintf("printf '\\033[%d;1HROW18'; exec cat >/dev/null", rect.H)
+	h.run("write-to", bottom, "-s", session, "--msg", cmd, "--enter")
+	out := waitScreen(t, h, session, bottom, func(out string) bool {
+		return hasBareRow(out, "ROW18")
+	})
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != rect.H {
+		t.Fatalf("the pane's screen holds %d rows, want the zoomed %d:\n%s", len(lines), rect.H, out)
+	}
+}
+
 // TestZoomSinglePaneNoop pins the one-pane guard: the action replies ok, sets
 // no zoom, and leaves the rect alone.
 func TestZoomSinglePaneNoop(t *testing.T) {
