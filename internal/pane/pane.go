@@ -1080,7 +1080,18 @@ func (p *paneProc) sampleTitle() {
 	p.broadcastLocked(wire.Msg{Type: "title", Res: jsonRaw(map[string]any{"title": title})})
 }
 
+// setStatus records and publishes a status report. The OSC filter decodes the
+// report out of the byte stream, so the stream stage never sees it: the
+// message and the app name are scrubbed here, at the one point every later
+// reader passes through (the status broadcast, the read and status actions,
+// the box post, the desktop notification and the state file). Scrubbing the
+// sequence's text would not do: the message arrives base64 in the wire format
+// and JSON before it, so the decoded string is the only place the value can be
+// caught. The state itself is always recorded, so a report that carried a
+// value still settles a wait.
 func (p *paneProc) setStatus(st wire.Status) {
+	st.Message = p.scrub.redactText(st.Message)
+	st.App = p.scrub.redactText(st.App)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.st == st {

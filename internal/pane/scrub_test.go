@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/creack/pty"
 
@@ -192,6 +193,12 @@ func TestScrubRedactsBareLFValue(t *testing.T) {
 
 // writeToPty writes b to a real pty's output side and returns the bytes its
 // master reads, so the newline translation is the terminal driver's.
+//
+// One read may return less than the driver wrote, so the read loops until the
+// whole input has arrived. The output is never shorter than the input: the
+// only translation is ONLCR, which adds a byte per LF. A single read here
+// handed a loaded machine a truncated stream, and the test then failed on a
+// value the pty never delivered.
 func writeToPty(t *testing.T, b []byte) string {
 	t.Helper()
 	ptmx, tty, err := pty.Open()
@@ -203,11 +210,16 @@ func writeToPty(t *testing.T, b []byte) string {
 		t.Fatalf("write pty: %v", err)
 	}
 	buf := make([]byte, 4096)
-	n, err := ptmx.Read(buf)
-	if err != nil {
-		t.Fatalf("read pty: %v", err)
+	var out []byte
+	for len(out) < len(b) {
+		_ = ptmx.SetReadDeadline(time.Now().Add(10 * time.Second))
+		n, err := ptmx.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			t.Fatalf("read pty: %v", err)
+		}
 	}
-	return string(buf[:n])
+	return string(out)
 }
 
 // TestScrubWithoutValuesPassesThrough proves a pane with no secrets emits

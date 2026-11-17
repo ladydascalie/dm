@@ -196,6 +196,35 @@ func (s *scrubber) flush(out *bytes.Buffer) {
 	out.Write(data[pos:])
 }
 
+// redactText replaces every value in text with the same number of redaction
+// bytes and returns the result. It is the metadata path: a status report is
+// decoded out of the stream before the stage runs, so it has to be scrubbed by
+// the same matcher and the same value list. There is no hold-back here: the
+// text is whole, and a caller that held a prefix would have to wait for a next
+// report that may never come.
+//
+// The switch does not apply. Off is a human's window into the pane's output
+// bytes, which the stage feeds; the text this scrubs is the status a report
+// carries to the box, the desktop notification and the state file, and none of
+// those is a surface the toggle reaches.
+func (s *scrubber) redactText(text string) string {
+	if text == "" {
+		return text
+	}
+	s.mu.Lock()
+	vals, maxLen := s.vals, s.maxLen
+	s.mu.Unlock()
+	if maxLen == 0 || len(vals) == 0 {
+		return text
+	}
+	data := []byte(text)
+	var out bytes.Buffer
+	out.Grow(len(data))
+	pos := redactInto(&out, vals, data)
+	out.Write(data[pos:])
+	return out.String()
+}
+
 // redactInto writes data with every value replaced by the same number of
 // redaction bytes and returns the offset it stopped emitting at, which is the
 // end of the last match or zero when no value matched.
