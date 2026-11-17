@@ -211,7 +211,7 @@ func (t *tui) commandPaletteKey() bool {
 	case b == 0x7f || b == 0x08:
 		t.takePaletteBytes(1)
 		t.closePaletteHelp()
-		t.cp.pal.Input.Backspace()
+		t.cp.pal.Search.Input.Backspace()
 		t.dirty = true
 	case b == 0x0d || b == 0x0a:
 		t.takePaletteBytes(1)
@@ -237,7 +237,7 @@ func (t *tui) commandPaletteKey() bool {
 	case b >= 0x20 && b < 0x7f:
 		t.takePaletteBytes(1)
 		t.closePaletteHelp()
-		t.cp.pal.Input.InsertRune(rune(b))
+		t.cp.pal.Search.Input.InsertRune(rune(b))
 		t.dirty = true
 	case b >= 0x80:
 		// A multi-byte rune is one key. The palette used to drop it byte by
@@ -256,7 +256,7 @@ func (t *tui) commandPaletteKey() bool {
 		t.takePaletteBytes(size)
 		t.closePaletteHelp()
 		if ok {
-			t.cp.pal.Input.InsertRune(r)
+			t.cp.pal.Search.Input.InsertRune(r)
 			t.dirty = true
 		}
 	default:
@@ -352,7 +352,7 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 		if !cp.help {
 			hint = paletteHelpHint
 		}
-		cx, cy = paintPaletteQuery(b, th, cp.pal.Input, r, hint)
+		cx, cy = paintPaletteQuery(b, th, cp.pal.Search.Input, r, hint)
 		paintPaletteRows(b, th, cp, rows, r)
 	})
 	if cp.help {

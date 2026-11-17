@@ -107,23 +107,23 @@ func TestSearchPromptKeys(t *testing.T) {
 		t.Fatal("the query row opened without a draft")
 	}
 	press(t, tui, "ROW")
-	if tui.search.draft.String() != "ROW" {
-		t.Fatalf("draft = %q, want ROW", tui.search.draft.String())
+	if tui.search.Search.Input.String() != "ROW" {
+		t.Fatalf("draft = %q, want ROW", tui.search.Search.Input.String())
 	}
 	press(t, tui, "\x7f")
-	if tui.search.draft.String() != "RO" {
-		t.Fatalf("after backspace draft = %q, want RO", tui.search.draft.String())
+	if tui.search.Search.Input.String() != "RO" {
+		t.Fatalf("after backspace draft = %q, want RO", tui.search.Search.Input.String())
 	}
 	press(t, tui, "\x15")
-	if tui.search.draft.String() != "" {
-		t.Fatalf("after ctrl+u draft = %q, want empty", tui.search.draft.String())
+	if tui.search.Search.Input.String() != "" {
+		t.Fatalf("after ctrl+u draft = %q, want empty", tui.search.Search.Input.String())
 	}
 	press(t, tui, "zz")
 	press(t, tui, "\x1b")
 	if tui.mode != "scroll" {
 		t.Fatalf("esc left mode = %q, want scroll", tui.mode)
 	}
-	if tui.search == nil || tui.search.draft.String() != "" {
+	if tui.search == nil || tui.search.Search.Input.String() != "" {
 		t.Fatalf("esc kept the draft: %+v", tui.search)
 	}
 	if tui.search.model != nil {
@@ -145,8 +145,8 @@ func TestSearchPromptKeepsKeysFromThePane(t *testing.T) {
 	if tui.mode != "search" {
 		t.Fatalf("mode = %q, want search", tui.mode)
 	}
-	if tui.search.draft.String() != "ROW-0" {
-		t.Fatalf("draft = %q, want ROW-0", tui.search.draft.String())
+	if tui.search.Search.Input.String() != "ROW-0" {
+		t.Fatalf("draft = %q, want ROW-0", tui.search.Search.Input.String())
 	}
 }
 
@@ -520,7 +520,7 @@ func TestSearchPromptTakesPaste(t *testing.T) {
 	if tui.mode != "search" {
 		t.Fatalf("the paste left mode = %q, want search", tui.mode)
 	}
-	if tui.search == nil || tui.search.draft.String() != "W-01" {
+	if tui.search == nil || tui.search.Search.Input.String() != "W-01" {
 		t.Fatalf("draft = %+v, want the pasted W-01", tui.search)
 	}
 	testutil.NoMsg(t, sent)
@@ -552,7 +552,7 @@ func TestSearchPromptKeepsBurstAfterSlash(t *testing.T) {
 	if tui.mode != "search" {
 		t.Fatalf("mode = %q, want search", tui.mode)
 	}
-	if tui.search == nil || tui.search.draft.String() != "ROW-01" {
+	if tui.search == nil || tui.search.Search.Input.String() != "ROW-01" {
 		t.Fatalf("draft = %+v, want ROW-01 from the same read", tui.search)
 	}
 	press(t, tui, "\r")

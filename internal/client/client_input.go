@@ -1005,7 +1005,7 @@ func (t *tui) openSearch() {
 	if t.search == nil {
 		t.search = &scrollSearch{}
 	}
-	t.search.draft.SetValue("")
+	t.search.Search.Input.SetValue("")
 	t.mode = "search"
 	// The bytes after the key that opened the row are the start of the query:
 	// `/ROW-01` in one read opens the prompt with the draft already filled.
@@ -1016,7 +1016,7 @@ func (t *tui) openSearch() {
 // was.
 func (t *tui) cancelSearch() {
 	if t.search != nil {
-		t.search.draft.SetValue("")
+		t.search.Search.Cancel()
 	}
 	t.mode = "scroll"
 	t.inbuf = nil
@@ -1034,14 +1034,15 @@ func (t *tui) clearSearch() {
 // included, and jumps to the nearest match at or above the top of the band. A
 // query with no match raises a toast and leaves the offset alone.
 func (t *tui) acceptSearch() {
-	q := strings.TrimSpace(t.search.draft.String())
-	t.search.draft.SetValue("")
+	q := strings.TrimSpace(t.search.Search.Input.String())
+	t.search.Search.Input.SetValue("")
 	t.search.model = nil
 	t.mode = "scroll"
 	t.inbuf = nil
 	t.dirty = true
 	if q == "" {
 		// An empty query is no query: the old one goes with its highlights.
+		t.search.Search.Clear()
 		return
 	}
 	model := NewScrollSearch(termRows(t.scrollVT), q)
@@ -1049,6 +1050,11 @@ func (t *tui) acceptSearch() {
 		t.notify("no match: " + q)
 		return
 	}
+	// The accepted query is the trimmed one. The draft goes as the prompt
+	// closes, so a later prompt starts empty.
+	t.search.Search.Input.SetValue(q)
+	t.search.Search.Commit()
+	t.search.Search.Input.SetValue("")
 	t.search.model = model
 	row0, _ := t.searchBand()
 	t.jumpSearch(model, model.SelectAtOrAbove(row0))
@@ -1086,15 +1092,15 @@ func (t *tui) searchKey() bool {
 	case '\r', '\n':
 		t.acceptSearch()
 	case 0x7f, 0x08:
-		t.search.draft.Backspace()
+		t.search.Search.Input.Backspace()
 		t.dirty = true
 	case 0x15: // ctrl+u
 		// ctrl+u clears the whole line, not the tail the caret sits before.
-		t.search.draft.SetValue("")
+		t.search.Search.Input.SetValue("")
 		t.dirty = true
 	default:
 		if ok {
-			t.search.draft.InsertRune(r)
+			t.search.Search.Input.InsertRune(r)
 			t.dirty = true
 		}
 	}
@@ -1112,7 +1118,7 @@ func (t *tui) searchPaste(seq []byte) {
 		len(text) >= len(pasteStart)+len(pasteEnd) {
 		text = text[len(pasteStart) : len(text)-len(pasteEnd)]
 	}
-	t.search.draft.InsertString(strings.NewReplacer("\r\n", "", "\n", "", "\r", "").Replace(string(text)))
+	t.search.Search.Input.InsertString(strings.NewReplacer("\r\n", "", "\n", "", "\r", "").Replace(string(text)))
 	t.dirty = true
 }
 
