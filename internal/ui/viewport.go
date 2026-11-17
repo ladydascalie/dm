@@ -1,7 +1,8 @@
 // Package ui holds the primitives a view shares: a scrolling window over a list
-// of rows and the text of one key hint. It is a pure library: it paints nothing,
-// writes no escape sequence, and depends on no client. The panel styles the row
-// it draws, and the caller owns every value here between frames.
+// of rows, the text of one key hint, and one line of editable text. It is a
+// pure library: it holds no client and no frame, and the caller owns every
+// value here between frames. Only DrawInput paints a row; the caller's panel
+// styles everything else.
 package ui
 
 // Viewport is one scrolling window over N rows: the selected row and the first
