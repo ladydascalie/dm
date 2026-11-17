@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -240,6 +242,63 @@ func TestStatusRescrubbedWhenTheSetArrives(t *testing.T) {
 	}
 	if strings.Contains(string(mustJSON(t, read)), statusValue) {
 		t.Fatal("the read reply holds the value")
+	}
+}
+
+// TestStatusSetIsAtomicWithTheStatusStore is the race the serial rescrub did
+// not close: a report scrubs on the old value list, the set lands and rescrubs
+// the status stored before the report, and the report then stores its
+// unscubbed text with no later set to revisit it. The store and the set
+// serialize on the pane's lock, so the set either lands before the report's
+// scrub, which then sees the value, or after the report's store, which the
+// set's rescrub then rewrites.
+//
+// The report is long and the list is at its cap, so the scrub is slow enough to
+// be overtaken; the set runs from another goroutine a few microseconds in, the
+// window the review reproduced.
+func TestStatusSetIsAtomicWithTheStatusStore(t *testing.T) {
+	// Not parallel: the race needs the report and the set on two CPUs, and
+	// this test is the one that sets the floor. A sequential test runs alone,
+	// so the change cannot disturb another test.
+	oldGOMAXPROCS := runtime.GOMAXPROCS(2)
+	defer runtime.GOMAXPROCS(oldGOMAXPROCS)
+
+	const value = "poc-race-1234"
+	// The list at its cap. The scan runs per value per position, so a wide
+	// list is what makes the report's scrub long enough to be overtaken. The
+	// value joins the list only when the set lands.
+	values := make([]string, 0, MaxSecrets)
+	for i := 0; i < MaxSecrets-1; i++ {
+		values = append(values, fmt.Sprintf("poc-filler-%03d", i))
+	}
+	withValue := append(append([]string(nil), values...), value)
+	// 7000 bytes, the value last, so a scrub that finished before the set
+	// misses it.
+	raw := strings.Repeat("x", 7000) + value
+	want := strings.Repeat("x", 7000) + strings.Repeat("*", len(value))
+
+	for i := 0; i < 30; i++ {
+		p := &paneProc{subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}}
+		p.setSecrets(values)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			p.setStatus(wire.Status{State: "error", Message: raw})
+		}()
+		time.Sleep(time.Duration(1+i%20) * time.Microsecond)
+		p.setSecrets(withValue)
+		<-done
+
+		p.mu.Lock()
+		st := p.st
+		p.mu.Unlock()
+		if strings.Contains(st.Message, value) {
+			t.Fatalf("iteration %d: stored the value raw", i)
+		}
+		if st.Message != want {
+			t.Fatalf("iteration %d: stored message of %d bytes, want %d with the redaction",
+				i, len(st.Message), len(want))
+		}
 	}
 }
 

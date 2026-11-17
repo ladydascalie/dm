@@ -42,6 +42,11 @@ const (
 // stream. set and toggle are called from the serve loop; feed and flush run
 // only on the pty reader goroutine, which owns carry. vals and off are
 // guarded by mu.
+//
+// The lock order with the pane is the pane's mu then this one: the status
+// writer and the set path scrub while they hold p.mu, so a report can never
+// scrub on one list and store under another. This type never calls back into
+// the pane, so nothing takes them the other way.
 type scrubber struct {
 	mu     sync.Mutex
 	vals   [][]byte
