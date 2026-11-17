@@ -623,6 +623,86 @@ func TestSecretUseNamesThePanesThatMissedTheSet(t *testing.T) {
 	}
 }
 
+// TestSecretSetSecretsCarriesExactBytes proves the push carries a value's
+// bytes and not a JSON-mangled copy of them. A Go string is not a byte
+// carrier over JSON: json.Marshal replaces every byte that is not valid
+// UTF-8 with U+FFFD, so a plain string list would give the pane a list the
+// registry never held, the stage would never match the value, and no warning
+// would fire because the length is legal. The exact list rides base64; the
+// plain list stays as the fallback an older pane daemon reads.
+func TestSecretSetSecretsCarriesExactBytes(t *testing.T) {
+	value := "poc-\xff\xfe-1234"
+	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "gh", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	if rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-use", Name: "gh"}); !rep.OK {
+		t.Fatalf("use: %s", rep.Error)
+	}
+	got := readSpyUntil(t, ch, "set-secrets")
+	var payload struct {
+		Values    []string `json:"values"`
+		ValuesB64 [][]byte `json:"valuesB64"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.ValuesB64) != 1 || string(payload.ValuesB64[0]) != value {
+		t.Fatalf("valuesB64 = %q, want the registry's bytes", payload.ValuesB64)
+	}
+	if len(payload.Values) != 1 || payload.Values[0] == value {
+		t.Fatalf("the plain list kept the bytes: it is the lossy fallback, %q", payload.Values)
+	}
+}
+
+// TestSecretTypeRefusesMultiLineValue proves the keystroke path refuses a
+// value with a newline before anything is activated or typed. A pty reads LF
+// as Enter, so the shell would run the first line of the value and write it
+// to its history file, which no scrub stage covers. The reply names the
+// reason and carries no part of the value.
+func TestSecretTypeRefusesMultiLineValue(t *testing.T) {
+	value := "-----BEGIN KEY-----\npoc-pem-5678\n-----END KEY-----"
+	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "pem", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-type", Name: "pem", Target: "w1p1"})
+	wantErr(t, "secret-type", "newline", rep)
+	for _, part := range strings.Split(value, "\n") {
+		if strings.Contains(rep.Error, part) {
+			t.Fatalf("the refusal named part of the value: %q", rep.Error)
+		}
+	}
+	// Nothing was typed, nothing was pushed, nothing became live: the
+	// refusal comes before every side effect.
+	spyEmpty(t, ch)
+	s.mu.Lock()
+	live := s.secretActive["pem"]
+	s.mu.Unlock()
+	if live {
+		t.Fatal("the refused value was activated")
+	}
+}
+
+// TestSecretTypeRefusesControlByte proves the refusal is not newline only: a
+// control byte is a keystroke on a pty too, so the printable set is the
+// broadest shape the write path can carry as data.
+func TestSecretTypeRefusesControlByte(t *testing.T) {
+	s, cl, conn, ch := secretServer(t, "secrets", "poc-\x03-1234", nil)
+	if rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-register", Name: "ctl", Tool: "op", Ref: "op://x/y",
+	}); !rep.OK {
+		t.Fatalf("register: %s", rep.Error)
+	}
+	rep := secretCall(t, s, cl, conn, wire.Msg{Action: "secret-type", Name: "ctl", Target: "w1p1"})
+	wantErr(t, "secret-type", "control byte", rep)
+	spyEmpty(t, ch)
+}
+
 func TestSecretTypeRefusesWhenASyncedSiblingMissedTheSet(t *testing.T) {
 	value := "s3cret-synced"
 	s, cl, conn, ch := secretServer(t, "secrets", value, nil)
@@ -1905,6 +1985,37 @@ func TestSecretHydrateRefusesARevokedWhileFetchingSecret(t *testing.T) {
 	wantErr(t, "secret-hydrate", "revoked while the value was being fetched or pushed", rep)
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the revoked secret left a file behind: %v", err)
+	}
+}
+
+// TestSecretCoverCarriesExactBytes proves a cover carries a foreign value's
+// bytes and not a JSON-mangled copy: the sibling's panes must hold the byte
+// string the origin registry holds, or their stage never matches it. The
+// exact list rides valuesB64; the plain list stays for a sender older than
+// the encoding.
+func TestSecretCoverCarriesExactBytes(t *testing.T) {
+	s, cl, conn, ch := secretServer(t, "secrets", "", nil)
+	value := "poc-\xff\xfe-1234"
+	rep := secretCall(t, s, cl, conn, wire.Msg{
+		Action: "secret-cover",
+		Res: jsonRaw(map[string]any{
+			"session":   "other",
+			"values":    []string{value},
+			"valuesB64": [][]byte{[]byte(value)},
+		}),
+	})
+	if !rep.OK {
+		t.Fatalf("cover: %s", rep.Error)
+	}
+	got := readSpyUntil(t, ch, "set-secrets")
+	var payload struct {
+		ValuesB64 [][]byte `json:"valuesB64"`
+	}
+	if err := json.Unmarshal(got.Res, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.ValuesB64) != 1 || string(payload.ValuesB64[0]) != value {
+		t.Fatalf("the pushed list = %q, want the foreign value's bytes", payload.ValuesB64)
 	}
 }
 

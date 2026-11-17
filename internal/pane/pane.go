@@ -51,6 +51,14 @@ type paneProc struct {
 	adopted   chan struct{}
 	adoptOnce sync.Once
 
+	// conned closes when the first connection is accepted, connDone when
+	// that connection ends. The spawn wait reads them: a pane with a live
+	// connection waits for the set it carries, a pane nothing dials starts
+	// on the grace, and a connection that leaves before its set falls back
+	// to the grace.
+	conned   chan struct{}
+	connDone chan struct{}
+
 	// done stops the background goroutines when Run returns without starting
 	// a shell. A pane whose shell never starts has nothing left to serve, and
 	// a caller that drives Run in-process must not be left with a reaper that
@@ -623,8 +631,10 @@ func Run(args []string) error {
 		st:   wire.Status{State: "unknown"},
 		fg:   o.fg, bg: o.bg,
 
-		adopted: make(chan struct{}),
-		done:    make(chan struct{}),
+		adopted:  make(chan struct{}),
+		conned:   make(chan struct{}),
+		connDone: make(chan struct{}),
+		done:     make(chan struct{}),
 	}
 
 	if err := os.MkdirAll(paths.SessionDir(o.session)+"/panes", 0o700); err != nil {
@@ -657,16 +667,30 @@ func Run(args []string) error {
 	// loop: a pane nothing dials still starts its shell on the grace.
 	errc := make(chan error, 1)
 	go func() {
+		first := true
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				errc <- err
 				return
 			}
-			go p.serve(c)
+			// The first connection is the one the spawn wait watches: it is
+			// the server's, and its set is what the shell waits for. A later
+			// connection is an attach or a wait and has no say.
+			lead := first
+			first = false
+			if lead {
+				close(p.conned)
+			}
+			go func() {
+				p.serve(c)
+				if lead {
+					close(p.connDone)
+				}
+			}()
 		}
 	}()
-	p.awaitAdopt()
+	p.awaitAdopt(adoptDeadline)
 	if err := p.startShell(o); err != nil {
 		// Nothing can serve this pane. Stop the accept loop and the reaper
 		// before the error leaves Run.
@@ -677,17 +701,56 @@ func Run(args []string) error {
 	return <-errc
 }
 
-// spawnGrace bounds the wait for the server's adopted set before the pane
-// starts its shell anyway. The server pushes set-secrets on every adopt, so
-// the wait normally ends in a few milliseconds; a pane with no server to
-// adopt it still starts on its own.
+// spawnGrace bounds the wait for the server's adopted set when no connection
+// has ever been accepted. It is the pane-without-a-server case: a daemon that
+// nothing dials still starts its shell, so dm's pane works when the server is
+// gone and a bare `__pane` run works at all.
 const spawnGrace = 250 * time.Millisecond
 
-// awaitAdopt waits for the adopted set, or the grace when nothing adopts.
-func (p *paneProc) awaitAdopt() {
+// adoptDeadline bounds the wait for a live connection's set. It is not a
+// schedule, it is a backstop: a connection that is up, says nothing and never
+// closes cannot hold the shell for ever. The server's adopt push is held across
+// a sibling cover, and each cover request is bounded by coverRoundtripTimeout
+// (2s) in the server, so the backstop sits well past a slow adopt and never on
+// the path of one.
+const adoptDeadline = 30 * time.Second
+
+// awaitAdopt waits for the adopted set. The two waits are different cases: a
+// pane nothing dials gets the grace, and a pane with a connection gets the set
+// that connection carries. The daemon cannot tell a slow adopter from an
+// absent one by time alone, which is why the grace is not applied while a
+// connection is up: the server pushes the set on every adopt, empty list
+// included, so a live server always resolves the wait. The deadline only
+// bounds a connection that never sends and never closes.
+func (p *paneProc) awaitAdopt(deadline time.Duration) {
+	grace := time.NewTimer(spawnGrace)
+	defer grace.Stop()
 	select {
 	case <-p.adopted:
-	case <-time.After(spawnGrace):
+		return
+	case <-grace.C:
+		return
+	case <-p.conned:
+		grace.Stop()
+	}
+	// A connection exists: the server's set is on its way, and the shell waits
+	// for it, however long the push is held.
+	backstop := time.NewTimer(deadline)
+	defer backstop.Stop()
+	select {
+	case <-p.adopted:
+		return
+	case <-backstop.C:
+		return
+	case <-p.connDone:
+	}
+	// The connection left before its set, so nothing is adopting this pane:
+	// the case is the no-connection one, and the grace applies.
+	grace.Reset(spawnGrace)
+	select {
+	case <-p.adopted:
+	case <-grace.C:
+	case <-backstop.C:
 	}
 }
 
@@ -1080,9 +1143,54 @@ func (p *paneProc) sampleTitle() {
 	p.broadcastLocked(wire.Msg{Type: "title", Res: jsonRaw(map[string]any{"title": title})})
 }
 
+// setStatus records and publishes a status report. The OSC filter decodes the
+// report out of the byte stream, so the stream stage never sees it: the
+// message and the app name are scrubbed here, at the one point every later
+// reader passes through (the status broadcast, the read and status actions,
+// the box post, the desktop notification and the state file). Scrubbing the
+// sequence's text would not do: the message arrives base64 in the wire format
+// and JSON before it, so the decoded string is the only place the value can be
+// caught. The state itself is always recorded, so a report that carried a
+// value still settles a wait.
 func (p *paneProc) setStatus(st wire.Status) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// The scrub and the store are one step under the pane's lock. A set that
+	// landed between them would install a new list and rescrub the status
+	// stored before it, and this report, scrubbed on the old list, would then
+	// store the raw text with no later set to revisit it.
+	p.storeStatusLocked(p.scrubbedStatusLocked(st))
+}
+
+// setSecrets installs a value list and re-applies it to the stored status. It
+// is the one writer's other half: a status stored before the set was scrubbed
+// with an empty list, and the text is what the reads draw from, so the new list
+// has to reach it too. The list, the rescrub and the store are one step under
+// the pane's lock, so a report cannot scrub on the old list and store after the
+// rescrub has looked. The status is republished only when the text changed, so
+// a push that exposes nothing is not a wake-up for every client.
+//
+// The lock order is the pane's then the scrubber's. Nothing takes them the
+// other way: the filter and the read loop scrub before they take p.mu.
+func (p *paneProc) setSecrets(values []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.scrub.set(values)
+	p.storeStatusLocked(p.scrubbedStatusLocked(p.st))
+}
+
+// scrubbedStatusLocked scrubs a status's message and app with the current
+// value list. The caller holds p.mu, which is what keeps the list from moving
+// between the scrub and the store.
+func (p *paneProc) scrubbedStatusLocked(st wire.Status) wire.Status {
+	st.Message = p.scrub.redactText(st.Message)
+	st.App = p.scrub.redactText(st.App)
+	return st
+}
+
+// storeStatusLocked records a status and publishes it when it changed. The
+// caller holds p.mu.
+func (p *paneProc) storeStatusLocked(st wire.Status) {
 	if p.st == st {
 		return
 	}
@@ -1288,7 +1396,12 @@ func (p *paneProc) serve(c net.Conn) {
 				_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: false, Error: err.Error()})
 				continue
 			}
-			p.scrub.set(values)
+			// The list lands and the stored status is rescrubbed under one
+			// lock: a status reported before this set (the shell can start on
+			// the grace with an empty list, or report before its first
+			// connection carried one) is stored as it arrived, and the set is
+			// what makes that text safe.
+			p.setSecrets(values)
 			// The set is in place, so the shell may start: startShell waits
 			// on this close, which is what makes the pane's first byte
 			// scrubbed. A later push only updates the values.

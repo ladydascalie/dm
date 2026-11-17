@@ -183,13 +183,19 @@ func TestRunDefaultsResolveToABadShell(t *testing.T) {
 	t.Setenv("SHELL", "/nonexistent-dm-test-shell")
 
 	// The daemon starts its shell only after the server's adopted set, so the
-	// failure surfaces once a connection lands. Connect as the server does,
-	// and leave the shell to the grace: no frame means no adopted set.
+	// failure surfaces once a connection lands. Connect as the server does and
+	// push the set it would push: a live connection holds the shell until then,
+	// because a slow adopt and an absent server look the same by time alone.
 	errc := make(chan error, 1)
 	go func() { errc <- Run([]string{"--id", "p1", "--session", "s1"}) }()
 	sock := paths.PaneSockAt(root, "s1", "p1")
 	c := dialPaneSock(t, sock)
 	defer func() { _ = c.Close() }()
+	adopt := wire.Msg{Type: "req", Action: "set-secrets", ID: 1,
+		Res: jsonRaw(map[string]any{"valuesB64": [][]byte{}})}
+	if err := wire.WriteMsg(c, adopt); err != nil {
+		t.Fatalf("send the adopted set: %v", err)
+	}
 
 	select {
 	case err := <-errc:
