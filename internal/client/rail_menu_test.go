@@ -181,9 +181,9 @@ func TestRailMenuRenameTargetsRow(t *testing.T) {
 		if tui.mode != "rename" {
 			t.Fatalf("row %d: mode = %q, want rename", c.row, tui.mode)
 		}
-		if tui.renameKind != c.kind || tui.renameID != c.id || tui.renameDraft != c.draft {
+		if tui.renameKind != c.kind || tui.renameID != c.id || tui.renameDraft.String() != c.draft {
 			t.Fatalf("row %d: prompt = kind %q id %q draft %q, want %q %q %q",
-				c.row, tui.renameKind, tui.renameID, tui.renameDraft,
+				c.row, tui.renameKind, tui.renameID, tui.renameDraft.String(),
 				c.kind, c.id, c.draft)
 		}
 	}
@@ -380,9 +380,9 @@ func TestRailDoubleClickRenamesPane(t *testing.T) {
 	if tui.mode != "rename" {
 		t.Fatalf("second press mode = %q, want rename", tui.mode)
 	}
-	if tui.renameKind != "pane" || tui.renameID != "w1p1" || tui.renameDraft != "pi" {
+	if tui.renameKind != "pane" || tui.renameID != "w1p1" || tui.renameDraft.String() != "pi" {
 		t.Fatalf("prompt = kind %q id %q draft %q, want pane w1p1 pi",
-			tui.renameKind, tui.renameID, tui.renameDraft)
+			tui.renameKind, tui.renameID, tui.renameDraft.String())
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: 4})
 	testutil.NoMsg(t, got)
@@ -407,9 +407,9 @@ func TestRailDoubleClickRenamesWindow(t *testing.T) {
 	if tui.mode != "rename" {
 		t.Fatalf("second press mode = %q, want rename", tui.mode)
 	}
-	if tui.renameKind != "window" || tui.renameID != "w1" || tui.renameDraft != "one" {
+	if tui.renameKind != "window" || tui.renameID != "w1" || tui.renameDraft.String() != "one" {
 		t.Fatalf("prompt = kind %q id %q draft %q, want window w1 one",
-			tui.renameKind, tui.renameID, tui.renameDraft)
+			tui.renameKind, tui.renameID, tui.renameDraft.String())
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 6, y: 2})
 	testutil.NoMsg(t, got)
@@ -434,9 +434,9 @@ func TestRailDoubleClickRenamesWorkspace(t *testing.T) {
 	if tui.mode != "rename" {
 		t.Fatalf("second press mode = %q, want rename", tui.mode)
 	}
-	if tui.renameKind != "workspace" || tui.renameID != "s1" || tui.renameDraft != "main" {
+	if tui.renameKind != "workspace" || tui.renameID != "s1" || tui.renameDraft.String() != "main" {
 		t.Fatalf("prompt = kind %q id %q draft %q, want workspace s1 main",
-			tui.renameKind, tui.renameID, tui.renameDraft)
+			tui.renameKind, tui.renameID, tui.renameDraft.String())
 	}
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 4, y: 1})
 	testutil.NoMsg(t, got)

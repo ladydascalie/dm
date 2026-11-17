@@ -333,6 +333,25 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	}
 }
 
+// TestCommandPaletteCursorFollowsTheQuery: the cursor sits one cell past the
+// last query rune, so the terminal parks it after the text it types. The
+// hand-written painter returned the row's left edge, which parked the cursor on
+// the prompt.
+func TestCommandPaletteCursorFollowsTheQuery(t *testing.T) {
+	t.Parallel()
+	tui, _ := switcherTUI(t)
+	feed(tui, "\x02K")
+	feed(tui, "send")
+	g := commandPaletteGeom(tui.snap, tui.cp.total, tui.cp.capRows)
+	cx, cy := drawCommandPalette(&bytes.Buffer{}, tui.theme(), tui.cp, tui.snap)
+	if cy != g.Y+1 {
+		t.Fatalf("cursor row = %d, want the query line at %d", cy, g.Y+1)
+	}
+	if want := g.X + 1 + cells.Cells("> ") + cells.Cells("send"); cx != want {
+		t.Fatalf("cursor column = %d, want %d, the cell after the query", cx, want)
+	}
+}
+
 // TestCommandPaletteRowsCarryNoHint: the row list holds names alone. The
 // palette's width cut descriptions mid-word, so the hint moved to the help
 // float the ? key opens.

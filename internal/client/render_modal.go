@@ -9,7 +9,6 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
-	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/transport"
 	"dm/internal/ui"
@@ -132,12 +131,12 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 // The title names the action, the kind and the id: a project is set, not
 // renamed, so that title reads "set project <id>". The hint names the keys the
 // rename keymap binds to submit and cancel, and the one input row holds the
-// label, the draft and the caret. The caret is fixed: the draft takes what is
-// left and loses its head first, so a long name still shows its end and the
-// caret stays on screen. The kind is optional: a call without it renames a
-// workspace, as the frozen prompt test expects. A screen too small to hold the
-// box paints nothing.
-func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id, draft string, shadow bool, km *keymap.Config, kind ...string) {
+// label, the draft and the caret. The row is the ui.Input component: the draft
+// takes what is left and loses its head first, so a long name still shows its
+// end and the caret stays on screen. The kind is optional: a call without it
+// renames a workspace, as the frozen prompt test expects. A screen too small to
+// hold the box paints nothing.
+func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id string, draft ui.Input, shadow bool, km *keymap.Config, kind ...string) {
 	if snap == nil {
 		return
 	}
@@ -189,62 +188,38 @@ func renameHint(km *keymap.Config) string {
 // renameInputRow paints the rename float's one input row: the dim label, the
 // draft and the caret. The label names the kind: a project prompt reads
 // "project: ", every other kind " name: ".
-func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, kind, draft string) {
+func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, kind string, draft ui.Input) {
 	label := " name: "
 	if kind == "project" {
 		label = "project: "
 	}
-	promptRow(buf, th, r, label, draft)
+	ui.DrawInput(buf, th, ui.InputProps{
+		Rect:   r,
+		Prompt: label,
+		Ground: th.Palette.RailBG,
+		Dim:    th.Palette.RailDim,
+		Text:   th.Palette.RailText,
+		Caret:  th.Palette.BarAccent,
+		Active: true,
+	}, draft)
 }
 
 // drawSearchPrompt paints the scrollback query row, on the row above the status
 // bar. It reads like the rename prompt's input row: the dim label, the draft
 // and the caret, on the rail ground across the whole row.
-func drawSearchPrompt(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, draft string) {
+func drawSearchPrompt(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, draft ui.Input) {
 	if snap == nil || snap.Rows < 3 || snap.Cols < 1 {
 		return
 	}
-	promptRow(buf, th, layout.Rect{X: 0, Y: snap.Rows - 2, W: snap.Cols, H: 1}, " search: ", draft)
-}
-
-// promptRow paints one input row: the dim label, the draft and the caret on the
-// rail ground, padded to the full width so the row owns every cell. The draft
-// keeps its tail and drops its head when it runs out of room, and a wide rune
-// is cut whole.
-func promptRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, label, draft string) {
-	p := th.Palette
-	const caret = "▏"
-	labelRoom := r.W - cells.Cells(caret)
-	if labelRoom < 0 {
-		labelRoom = 0
-	}
-	segs := segment.ClipSegs([]segment.Seg{{Text: label, FG: p.RailDim}}, labelRoom)
-	draftRoom := r.W - cells.Cells(caret) - segment.SegCells(segs)
-	if cells.Cells(draft) > draftRoom {
-		mark := th.Glyphs.ElideMark()
-		if draftRoom > cells.Cells(mark) {
-			draft = mark + cells.ClipTail(draft, draftRoom-cells.Cells(mark))
-		} else {
-			draft = ""
-		}
-	}
-	segs = append(segs,
-		segment.Seg{Text: draft, FG: p.RailText},
-		segment.Seg{Text: caret, FG: p.BarAccent},
-	)
-	fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+1, r.X+1)
-	buf.WriteString(groundSGR(p.RailBG))
-	for _, s := range segs {
-		buf.WriteString(theme.Style{Fg: styleColor(s.FG), Bg: styleColor(p.RailBG)}.SGR())
-		buf.WriteString(s.Text)
-	}
-	if n := r.W - segment.SegCells(segs); n > 0 {
-		// The ground is already live from the last run, so the pad only needs
-		// its cells; a second ground escape would repaint the last run's
-		// foreground to the terminal default.
-		buf.WriteString(strings.Repeat(" ", n))
-	}
-	buf.WriteString("\x1b[0m")
+	ui.DrawInput(buf, th, ui.InputProps{
+		Rect:   layout.Rect{X: 0, Y: snap.Rows - 2, W: snap.Cols, H: 1},
+		Prompt: " search: ",
+		Ground: th.Palette.RailBG,
+		Dim:    th.Palette.RailDim,
+		Text:   th.Palette.RailText,
+		Caret:  th.Palette.BarAccent,
+		Active: true,
+	}, draft)
 }
 
 // drawHelp paints the bottom-right action preview from the configured keymap

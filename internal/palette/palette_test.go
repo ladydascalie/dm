@@ -24,21 +24,21 @@ func TestNewWithEmptyQueryListsAllInInputOrder(t *testing.T) {
 	}
 }
 
-func TestAppendRuneFiltersAndBackspaceRestores(t *testing.T) {
+func TestInsertRuneFiltersAndBackspaceRestores(t *testing.T) {
 	m := New(cmds())
-	m.AppendRune('s')
-	m.AppendRune('p')
-	m.AppendRune('l')
+	m.Input.InsertRune('s')
+	m.Input.InsertRune('p')
+	m.Input.InsertRune('l')
 	got := m.Rows()
 	if len(got) != 1 || got[0].Action != "split-right" {
 		t.Errorf("Rows() after \"spl\" = %v, want split-right", got)
 	}
-	m.Backspace()
-	m.Backspace()
+	m.Input.Backspace()
+	m.Input.Backspace()
 	if got := m.Rows(); len(got) != 2 || got[0].Action != "split-right" {
 		t.Errorf("Rows() after two backspaces = %v, want two rows led by split-right", got)
 	}
-	m.Backspace()
+	m.Input.Backspace()
 	if got := m.Rows(); len(got) != 3 {
 		t.Errorf("Rows() after three backspaces = %v, want all three", got)
 	}
@@ -46,7 +46,7 @@ func TestAppendRuneFiltersAndBackspaceRestores(t *testing.T) {
 
 func TestBackspaceOnEmptyQueryDoesNothing(t *testing.T) {
 	m := New(cmds())
-	m.Backspace()
+	m.Input.Backspace()
 	if m.Query() != "" {
 		t.Errorf("Query() = %q, want empty", m.Query())
 	}
@@ -61,14 +61,14 @@ func TestSelectionClampsWhenRowsShrink(t *testing.T) {
 	if m.SelectedIndex() != 2 {
 		t.Fatalf("SelectedIndex() = %d, want 2", m.SelectedIndex())
 	}
-	m.AppendRune('s') // Split Right and Close Pane survive
+	m.Input.InsertRune('s') // Split Right and Close Pane survive
 	if got := m.SelectedIndex(); got != 1 {
 		t.Errorf("SelectedIndex() = %d, want clamped to 1", got)
 	}
 	if sel, ok := m.Selected(); !ok || sel.Action != "close-pane" {
 		t.Errorf("Selected() = %v, %v, want close-pane", sel, ok)
 	}
-	m.Backspace() // back to all three, the clamp holds
+	m.Input.Backspace() // back to all three, the clamp holds
 	if got := m.SelectedIndex(); got != 1 {
 		t.Errorf("SelectedIndex() = %d, want 1", got)
 	}
@@ -77,7 +77,7 @@ func TestSelectionClampsWhenRowsShrink(t *testing.T) {
 func TestSelectionOnEmptyRows(t *testing.T) {
 	m := New(cmds())
 	m.Cycle(2)
-	m.AppendRune('z') // matches nothing
+	m.Input.InsertRune('z') // matches nothing
 	if len(m.Rows()) != 0 {
 		t.Fatalf("Rows() after 'z' = %v, want none", m.Rows())
 	}
@@ -92,7 +92,7 @@ func TestSelectionOnEmptyRows(t *testing.T) {
 	if m.SelectedIndex() != 0 {
 		t.Errorf("SelectedIndex() after cycle = %d, want 0", m.SelectedIndex())
 	}
-	m.Backspace() // rows return, selection starts over at the top
+	m.Input.Backspace() // rows return, selection starts over at the top
 	if got := m.SelectedIndex(); got != 0 {
 		t.Errorf("SelectedIndex() = %d, want 0", got)
 	}
@@ -124,12 +124,12 @@ func TestCycleWrapsBothWays(t *testing.T) {
 
 func TestQueryKeepsUnicodeRune(t *testing.T) {
 	m := New(cmds())
-	m.AppendRune('é')
+	m.Input.InsertRune('é')
 	if got := m.Query(); got != "é" {
 		t.Errorf("Query() = %q, want é", got)
 	}
-	m.AppendRune('w')
-	m.Backspace()
+	m.Input.InsertRune('w')
+	m.Input.Backspace()
 	if got := m.Query(); got != "é" {
 		t.Errorf("Query() = %q, want é", got)
 	}

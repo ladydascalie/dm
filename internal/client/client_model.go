@@ -20,6 +20,7 @@ import (
 	"dm/internal/switcher"
 	"dm/internal/theme"
 	"dm/internal/transport"
+	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -104,7 +105,7 @@ type tui struct {
 	// row under the pointer.
 	menuPress bool
 	// renameDraft is the text the rename prompt holds while mode is "rename".
-	renameDraft string
+	renameDraft ui.Input
 	// renameID is the id of the workspace, window or pane the prompt renames.
 	// The server looks the target up by id, so the request carries this, not
 	// the draft.

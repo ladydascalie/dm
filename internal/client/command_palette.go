@@ -211,7 +211,7 @@ func (t *tui) commandPaletteKey() bool {
 	case b == 0x7f || b == 0x08:
 		t.takePaletteBytes(1)
 		t.closePaletteHelp()
-		t.cp.pal.Backspace()
+		t.cp.pal.Input.Backspace()
 		t.dirty = true
 	case b == 0x0d || b == 0x0a:
 		t.takePaletteBytes(1)
@@ -237,7 +237,7 @@ func (t *tui) commandPaletteKey() bool {
 	case b >= 0x20 && b < 0x7f:
 		t.takePaletteBytes(1)
 		t.closePaletteHelp()
-		t.cp.pal.AppendRune(rune(b))
+		t.cp.pal.Input.InsertRune(rune(b))
 		t.dirty = true
 	case b >= 0x80:
 		// A multi-byte rune is one key. The palette used to drop it byte by
@@ -256,7 +256,7 @@ func (t *tui) commandPaletteKey() bool {
 		t.takePaletteBytes(size)
 		t.closePaletteHelp()
 		if ok {
-			t.cp.pal.AppendRune(r)
+			t.cp.pal.Input.InsertRune(r)
 			t.dirty = true
 		}
 	default:
@@ -352,7 +352,7 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 		if !cp.help {
 			hint = paletteHelpHint
 		}
-		cx, cy = paintPaletteQuery(b, th, cp.pal.Query(), r, hint)
+		cx, cy = paintPaletteQuery(b, th, cp.pal.Input, r, hint)
 		paintPaletteRows(b, th, cp, rows, r)
 	})
 	if cp.help {
@@ -464,58 +464,27 @@ func paletteWrap(s string, w int) []string {
 	return out
 }
 
-// paintPaletteQuery paints the query line: the prompt, the query text and the
-// ground to the end of the row. It returns the cursor cell, which sits after
-// the last query rune.
-func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, query string, r layout.Rect, hint string) (cx, cy int) {
-	ground, dim, text := th.Palette.RailBG, th.Palette.RailDim, th.Palette.RailText
-	prompt := "> "
-	hintW := 0
+// paintPaletteQuery paints the query line with the input component: the
+// prompt, the query text and the right signpost, on the rail ground. It returns
+// the cell the terminal parks its cursor on, which is the cell after the query.
+//
+// The signpost sits on the interior's right edge. The three cells before it are
+// the cursor's cell and the two cells of gutter the row keeps between the query
+// and the signpost, so a query that fills the line still leaves the cursor on a
+// blank cell. No caret glyph: the palette shows the terminal cursor.
+func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, in ui.Input, r layout.Rect, hint string) (cx, cy int) {
+	trailing := ""
 	if hint != "" {
-		hintW = cells.Cells(hint) + 2
+		trailing = "   " + hint
 	}
-	w := r.W - cells.Cells(prompt) - hintW
-	if w < 0 {
-		w = 0
-	}
-	q := cells.Clip(query, w)
-	used := cells.Cells(prompt) + cells.Cells(q)
-	fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+1, r.X+1)
-	buf.WriteString("\x1b[0m")
-	buf.WriteString(ground.BG())
-	buf.WriteString(dim.FG())
-	buf.WriteString(prompt)
-	if q != "" {
-		buf.WriteString("\x1b[0m")
-		buf.WriteString(ground.BG())
-		buf.WriteString(text.FG())
-		buf.WriteString(q)
-	}
-	if hint != "" {
-		// The hint sits on the row's right edge, in the dim colour: it
-		// points at ? without competing with the query. The clip budget
-		// above reserves its cells, so the two never meet.
-		buf.WriteString(strings.Repeat(" ", max(1, r.W-used-hintW)))
-		buf.WriteString("\x1b[0m")
-		buf.WriteString(ground.BG())
-		buf.WriteString(dim.FG())
-		buf.WriteString(hint)
-		used += r.W - used
-	}
-	if n := r.W - used; n > 0 {
-		buf.WriteString(strings.Repeat(" ", n))
-	}
-	buf.WriteString("\x1b[0m")
-	// The cell is one past the query's last cell, clamped inside the row: a
-	// query as long as the line must not park the cursor on the border.
-	maxX := r.X + r.W - 1
-	if cx > maxX {
-		cx = maxX
-	}
-	if cx < r.X {
-		cx = r.X
-	}
-	return cx, r.Y
+	return ui.DrawInput(buf, th, ui.InputProps{
+		Rect:     r,
+		Prompt:   "> ",
+		Trailing: trailing,
+		Ground:   th.Palette.RailBG,
+		Dim:      th.Palette.RailDim,
+		Text:     th.Palette.RailText,
+	}, in)
 }
 
 // paintPaletteRows paints the body: the filtered rows the viewport holds,
