@@ -1,46 +1,51 @@
 package pane
 
 import (
+	"path/filepath"
 	"strings"
 )
 
-// paneEnv builds the child's environment by rule, not by inheritance. The
-// pane runs the server's children, so inheriting the whole environment hands
-// the shell every variable the server holds, including its own credentials.
-// A variable that reaches a pane is published twice over, on the screen and
-// in every read-back, and the server's redaction only knows the values it
-// registered.
+// Env returns the environment a child dm starts may inherit: the server's
+// environment passed through an allowlist, with the child's own pane and
+// session ids set last. A pane's shell and a float both come through here, so
+// one rule covers every shell the server starts.
 //
-// So the rule is an allowlist. A variable passes only when it is one of the
-// names in paneEnvKeep, a name a shell and a terminal need; or when it
-// belongs to the LC_ or XDG_ name families; or when it is a path to a
-// permission-gated socket or cookie file, SSH_AUTH_SOCK and its kin,
-// XAUTHORITY. Everything else is dropped, and the operator's own rc file can
-// re-export whatever else the session needs.
+// The need is not hypothetical. The server holds credentials of its own,
+// OP_SERVICE_ACCOUNT_TOKEN for one, and a variable that reaches a shell is
+// published twice over: on the screen, and in every read-back. The server's
+// redaction only knows the values it registered, so an unregistered credential
+// in the environment is output.
 //
-// The path exemption is narrow on purpose: a credential-shaped name may not
-// ride it, so a name must clear the allowlist or be free of the credential
-// words to pass. The allowlist itself is the rule; a name is not judged on
-// its spelling once it is on it, and a name that is not on it is not judged
-// at all.
+// So the rule is an allowlist. A name passes when it is in paneEnvKeep, a name
+// a shell, a terminal or a dm command in the shell needs to start; when it
+// starts with LC_ or XDG_; or when it is a socket exemption, a *_SOCK name
+// whose value is an absolute path. Everything else is dropped, and the
+// operator's own rc file can re-export whatever else a session needs.
+//
+// On the allowlist the name is the whole decision: the value is not
+// inspected. A name that is not on the allowlist is judged only for the socket
+// shape: the value must be an absolute path and the name must not be
+// credential-shaped, so MY_SOCK=/run/x.sock passes, MY_SOCK=pass:secret does
+// not, and MY_TOKEN_SOCK=/run/t.sock does not either. SSH_AUTH_SOCK and
+// XAUTHORITY are on the allowlist, so they pass by name alone.
 //
 // This narrows a shell's environment for accidents. It is not a secrecy
-// boundary: a pane runs as the same user as the server, so it can read the
+// boundary: a child runs as the same user as the server, so it can read the
 // daemon's /proc/<pid>/environ whatever this function does.
 //
-// DM_PANE and DM_SESSION are never inherited: the pane sets them last, so a
-// pane always reports the ids it was spawned with and never a stale pair.
-func paneEnv(in []string, id, session string) []string {
+// DM_PANE and DM_SESSION are never inherited: they are set last, so a child
+// always reports the ids it was spawned with and never a stale pair.
+func Env(in []string, id, session string) []string {
 	out := make([]string, 0, len(in)+2)
 	for _, kv := range in {
-		name, _, ok := strings.Cut(kv, "=")
+		name, value, ok := strings.Cut(kv, "=")
 		if !ok {
 			continue
 		}
 		if name == "DM_PANE" || name == "DM_SESSION" {
 			continue
 		}
-		if !paneEnvName(name) {
+		if !envAllowed(name, value) {
 			continue
 		}
 		out = append(out, kv)
@@ -48,10 +53,11 @@ func paneEnv(in []string, id, session string) []string {
 	return append(out, "DM_PANE="+id, "DM_SESSION="+session)
 }
 
-// paneEnvKeep is the exact allowlist: the names a shell and a terminal need
-// to start. Keep it short. Anything else the operator's rc file re-exports is
-// theirs to choose; a name only lands here when a shell or a terminal reads
-// it before the first rc line runs.
+// paneEnvKeep is the exact allowlist: the names a shell, a terminal or a dm
+// command in the shell needs to start. Keep it short. Anything else the
+// operator's rc file re-exports is theirs to choose; a name only lands here
+// when the child, or dm run inside it, reads it before the first rc line
+// runs.
 var paneEnvKeep = map[string]struct{}{
 	// The command search path. Without it nothing runs.
 	"PATH": {},
@@ -81,6 +87,10 @@ var paneEnvKeep = map[string]struct{}{
 	"SSH_AUTH_SOCK": {},
 	// The X cookie path; the other half of the DISPLAY exemption.
 	"XAUTHORITY": {},
+	// The dm state root. A dm command run inside the shell needs the same
+	// root to find its session; DM_SESSION names no path on its own. It is a
+	// path, not a credential.
+	"DM_STATE": {},
 }
 
 // paneEnvPrefixes are the name families that pass whole: LC_* carries the
@@ -88,8 +98,8 @@ var paneEnvKeep = map[string]struct{}{
 // directories a login session uses.
 var paneEnvPrefixes = []string{"LC_", "XDG_"}
 
-// paneEnvName reports whether the pane may inherit a variable with this name.
-func paneEnvName(name string) bool {
+// envAllowed reports whether a name and value may be inherited.
+func envAllowed(name, value string) bool {
 	if _, ok := paneEnvKeep[name]; ok {
 		return true
 	}
@@ -98,16 +108,17 @@ func paneEnvName(name string) bool {
 			return true
 		}
 	}
-	return envPathName(name) && !secretEnvName(name)
+	return envPathName(name, value)
 }
 
-// envPathName reports whether a variable name carries a path to a
-// permission-gated socket or cookie file rather than a secret value. The
-// suffix covers the socket conventions, SSH_AUTH_SOCK and its kin; the
-// single name covers X's cookie path, XAUTHORITY. A credential-shaped name
-// cannot use the exemption: the caller checks it against secretEnvName.
-func envPathName(name string) bool {
-	return name == "XAUTHORITY" || strings.HasSuffix(name, "_SOCK")
+// envPathName reports whether a name is the socket exemption: a *_SOCK name
+// whose value is an absolute path to a permission-gated socket, and whose name
+// is not credential-shaped. The value check keeps a credential pasted into a
+// socket-shaped name out; the name check keeps a credential name from wearing
+// the suffix. XAUTHORITY is not here: it is on the allowlist and passes by
+// name alone.
+func envPathName(name, value string) bool {
+	return strings.HasSuffix(name, "_SOCK") && filepath.IsAbs(value) && !secretEnvName(name)
 }
 
 // secretEnvHints are the words that mark a variable name as a credential.
@@ -115,7 +126,7 @@ func envPathName(name string) bool {
 // non-alphanumeric characters turned into one underscore: API_KEY and
 // api-key match, API__KEY, APIKEY and apiKey do not, because the tokenizer
 // keeps no separator. The allowlist is what carries the rule; this match
-// only stops a credential-shaped name from riding the socket path exemption.
+// only stops a credential-shaped name from riding the socket exemption.
 // KEY alone is absent on purpose: it would catch ordinary names like
 // GPG_KEY.
 var secretEnvHints = []string{

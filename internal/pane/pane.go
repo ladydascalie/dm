@@ -567,8 +567,8 @@ func paneCmd(o *paneOpts) *exec.Cmd {
 	cmd.Dir = o.cwd
 	// The env is built by rule, not inherited whole: the daemon holds the
 	// server's environment and only the names a shell and a terminal need
-	// may reach the pane. paneEnv documents the allowlist rule.
-	cmd.Env = paneEnv(os.Environ(), o.id, o.session)
+	// may reach the pane. Env documents the allowlist rule.
+	cmd.Env = Env(os.Environ(), o.id, o.session)
 	return cmd
 }
 
