@@ -75,6 +75,7 @@ internal/kdl         the KDL tokenizer shared by keymap and theme
 internal/cells       cell-width measuring and clipping
 internal/segment     a styled run of text
 internal/panel       the bordered box painter
+internal/ui          the scrolling window and the hint row shared by the views
 internal/vt          VT replay and screen serialisation
 internal/paths       the session filesystem layout
 internal/testutil    test helpers shared by more than one package
@@ -969,6 +970,15 @@ buffer. `internal/client/render_pane.go` owns the pane painters: `drawPane`,
 is a styled run: text, foreground, background, weight and the pin mark.
 `panel` builds a box: `PaintPanel` clips the interior to a rect and writes the
 title and hint rows, and `DrawPaneBox` paints the border around content.
+
+`ui` is the pair of values a view shares: a component is a value plus a pure
+renderer. The client keeps the state. There is no retained tree. `ui.Viewport`
+is the scrolling window a list draws through: row count, height, offset and
+selection, with the steps that move it and keep the selection in view. It
+replaces the offset and selection arithmetic each float and table writes for
+itself. `ui.Hints` lays one row of key hints out as plain text. It replaces the
+hint string each view builds by hand. Neither writes an escape sequence. The
+panel styles the row it draws.
 
 On a stable frame, the diff decides what is written. A layout change writes
 every band and row. `PaintPanel` holds no state and keeps no buffer between
