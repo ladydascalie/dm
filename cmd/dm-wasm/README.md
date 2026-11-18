@@ -50,6 +50,12 @@ step finished, and the program pushes `lesson.step` or `lesson.finish` for the
 page to draw. A step's rule names an action, a command or a pane count, and a
 track can therefore be played in a Go test with no browser at all.
 
+Every track is played through the real client and this fake session in
+`internal/websession`'s tests: the keys of each step go through the client's key
+channel, and the lesson advances only when a step's rule is met. A track that
+names a key the client does not act on, or a command the shell does not answer,
+fails the build rather than the tour.
+
 ## Events, for a lesson
 
 `dm.onEvent(fn)` receives what the operator did, as the session sees it:
