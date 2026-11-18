@@ -2,3 +2,4 @@ dm
 .dungeon
 internal/esctest/testdata/esctest/
 gremlins-results/
+out/
