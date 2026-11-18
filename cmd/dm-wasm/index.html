@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>dm, in a tab</title>
+    <title>dm, in a browser</title>
     <link rel="stylesheet" href="vendor/xterm.css" />
     <style>
       @font-face {
@@ -18,61 +18,217 @@
         font-weight: 700;
         font-display: block;
       }
-      html, body { margin: 0; height: 100%; background: #101014; }
-      #term { position: fixed; inset: 0; padding: 8px; }
-      #card {
-        position: fixed; right: 16px; bottom: 48px; width: 340px;
-        background: #18181f; border: 1px solid #34343f; border-radius: 8px;
-        color: #d6d6da; font: 13px/1.5 ui-monospace, monospace; padding: 14px 16px;
-        box-shadow: 0 8px 24px #0008; display: none;
+
+      :root {
+        --bg: #0e0e12;
+        --panel: #15151b;
+        --panel-edge: #26262f;
+        --edge: #33333d;
+        --ink: #d9d9df;
+        --ink-dim: #8d8d99;
+        --ink-faint: #64646f;
+        --accent: #6fd2c4;
+        --good: #8fd18f;
+        --mono: "dm-mono", ui-monospace, SFMono-Regular, Menlo, monospace;
       }
-      #card .step { color: #8a8a92; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-      #card h2 { font-size: 15px; margin: 6px 0 4px; }
-      #card p { margin: 0 0 10px; color: #b6b6be; }
-      #card .keys { display: flex; gap: 6px; flex-wrap: wrap; }
-      #card kbd {
-        border: 1px solid #4a4a58; border-bottom-width: 2px; border-radius: 5px;
-        padding: 2px 7px; background: #22222b; font: inherit;
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.6 var(--mono);
+        -webkit-font-smoothing: antialiased;
       }
-      #card kbd.on { background: #2c4a2c; border-color: #4f8a4f; color: #cfeccf; }
-      #card .done { color: #7fc47f; }
+
+      .page {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 28px 28px 40px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+
+      header.top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      header.top h1 {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        margin: 0;
+      }
+      header.top p {
+        margin: 0;
+        color: var(--ink-faint);
+        font-size: 12px;
+      }
+      .progress { color: var(--ink-dim); font-size: 12px; }
+      .progress b { color: var(--accent); font-weight: 400; }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(280px, 30ch) minmax(0, 1fr);
+        gap: 28px;
+        align-items: start;
+      }
+      @media (max-width: 900px) {
+        main { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+        .page { padding: 18px 16px 28px; }
+      }
+
+      /* narration */
+      .step { display: flex; flex-direction: column; gap: 12px; }
+      .step .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .step h2 { font-size: 19px; line-height: 1.35; margin: 0; font-weight: 700; }
+      .step p { margin: 0; color: var(--ink-dim); }
+      .keys { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+      kbd {
+        border: 1px solid var(--edge);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+        padding: 2px 8px;
+        background: #1c1c24;
+        font: inherit;
+        font-size: 12px;
+        color: var(--ink);
+        white-space: nowrap;
+      }
+      kbd.on { border-color: #4f8a6a; background: #1b2a22; color: var(--good); }
+      .tip {
+        margin-top: 6px;
+        padding-top: 12px;
+        border-top: 1px solid var(--panel-edge);
+        color: var(--ink-faint);
+        font-size: 12px;
+      }
+      .tip b { color: var(--ink-dim); font-weight: 400; }
+      .finish { color: var(--good); }
+      .again {
+        align-self: start;
+        margin-top: 8px;
+        border: 1px solid var(--edge);
+        background: #1c1c24;
+        color: var(--ink);
+        font: inherit;
+        font-size: 12px;
+        padding: 6px 12px;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      .again:hover { border-color: var(--accent); }
+
+      /* terminal */
+      .screen-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+      .screen-bar {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--ink-faint);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+      }
+      .screen-bar .dot { color: var(--good); }
+      .screen {
+        position: relative;
+        width: 100%;
+        max-width: 1040px;
+        height: clamp(320px, 56vh, 600px);
+        background: var(--panel);
+        border: 1px solid var(--panel-edge);
+        border-radius: 10px;
+        padding: 10px 12px;
+        overflow: hidden;
+      }
+      #term { position: absolute; inset: 10px 12px; }
       #boot {
-        position: fixed; inset: 0; display: grid; place-items: center;
-        color: #8a8a92; font: 13px ui-monospace, monospace; white-space: pre;
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: var(--ink-faint);
+        font-size: 12px;
+        background: var(--panel);
       }
+
+      footer.bot {
+        color: var(--ink-faint);
+        font-size: 12px;
+        border-top: 1px solid var(--panel-edge);
+        padding-top: 14px;
+      }
+      footer.bot b { color: var(--ink-dim); font-weight: 400; }
     </style>
   </head>
   <body>
-    <div id="term"></div>
-    <div id="boot">loading dm…</div>
-    <div id="card">
-      <div class="step"></div>
-      <h2></h2>
-      <p></p>
-      <div class="keys"></div>
+    <div class="page">
+      <header class="top">
+        <div>
+          <h1>dm, in a browser</h1>
+          <p>the real client, a pretend session</p>
+        </div>
+        <div class="progress" id="progress">step <b>1</b> of 3</div>
+      </header>
+
+      <main>
+        <article class="step">
+          <div class="eyebrow" id="eyebrow">step 1</div>
+          <h2 id="title">Run a command</h2>
+          <p id="note">Type it and press enter. The pane is a pretend shell, but the keys are real.</p>
+          <div class="keys" id="keys"></div>
+          <div class="tip"><b>Stuck?</b> <span id="tip">the hint goes here after a while.</span></div>
+        </article>
+
+        <section class="screen-wrap">
+          <div class="screen-bar">
+            <span>session spike</span>
+            <span><span class="dot">●</span> local tab, nothing installed</span>
+          </div>
+          <div class="screen">
+            <div id="term"></div>
+            <div id="boot">loading dm…</div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="bot">
+        <b>What is real:</b> the client, the frames, the keys, the layout arithmetic.
+        <b>What is not:</b> the pty, the daemon, the session on disk. Read
+        <code>cmd/dm-wasm/README.md</code>.
+      </footer>
     </div>
 
     <script src="vendor/xterm.js"></script>
     <script src="vendor/addon-fit.js"></script>
     <script src="wasm_exec.js"></script>
     <script type="module">
-      const boot = document.getElementById("boot");
+      const el = (id) => document.getElementById(id);
+      const termHost = el("term");
+      const boot = el("boot");
 
       const term = new Terminal({
         allowProposedApi: true,
         cursorBlink: true,
-        fontFamily: "dm-mono, ui-monospace, monospace",
+        fontFamily: '"dm-mono", ui-monospace, monospace',
         fontSize: 14,
-        theme: { background: "#101014", foreground: "#d6d6da" },
+        theme: { background: "#15151b", foreground: "#d9d9df" },
       });
       const fit = new FitAddon.FitAddon();
       term.loadAddon(fit);
-      term.open(document.getElementById("term"));
+      term.open(termHost);
       fit.fit();
 
-      // The program sets dm and then calls this. The page owns the size, so a
-      // viewport change re-fits and tells the program, which re-reads it on
-      // the resize signal.
       // A track is data: a step lists the keys it teaches and what proves it
       // happened. The page keeps only this: the session runs the lesson.
       const track = [
@@ -80,49 +236,65 @@
           title: "Run a command",
           note: "Type it and press enter. The pane is a pretend shell, but the keys are real.",
           keys: ["echo hi", "enter"],
+          tip: "type echo hi, then press enter.",
           done: (ev) => ev.type === "command" && ev.line === "echo hi",
         },
         {
           title: "Split the window",
-          note: "ctrl+b, then |. The prefix works from any mode.",
+          note: "The prefix works from any mode: ctrl+b, let go, then the key.",
           keys: ["ctrl+b", "|"],
+          tip: "ctrl+b, then |.",
           done: (ev) => ev.type === "action" && ev.name === "split-right",
         },
         {
           title: "Move the focus",
-          note: "ctrl+b, then h. Focus walks to the pane on the left.",
+          note: "Focus walks to the pane on the left. The bright frame follows it.",
           keys: ["ctrl+b", "h"],
+          tip: "ctrl+b, then h.",
           done: (ev) => ev.type === "action" && ev.name === "focus-left",
         },
       ];
 
-      const card = document.getElementById("card");
-      const stepEl = card.querySelector(".step");
-      const titleEl = card.querySelector("h2");
-      const noteEl = card.querySelector("p");
-      const keysEl = card.querySelector(".keys");
-
       let at = 0;
-      const show = () => {
+      let hintAt = 0;
+      let hintTimer = 0;
+
+      const render = () => {
         const s = track[at];
         if (!s) {
-          stepEl.textContent = "done";
-          titleEl.textContent = "That is the shape of a track.";
-          noteEl.textContent = "Three steps, each one checked against what the session did.";
-          keysEl.innerHTML = "";
-          card.style.display = "block";
+          el("eyebrow").textContent = "track finished";
+          el("title").textContent = "That is the shape of a track.";
+          el("note").textContent = "Three steps, each one checked against what the session did.";
+          el("keys").innerHTML = "";
+          el("tip").textContent = "nothing left to press.";
+          el("progress").innerHTML = 'track <b>done</b>';
+          addAgain();
           return;
         }
-        stepEl.textContent = `step ${at + 1} of ${track.length}`;
-        titleEl.textContent = s.title;
-        noteEl.textContent = s.note;
-        keysEl.innerHTML = "";
+        el("eyebrow").textContent = `step ${at + 1}`;
+        el("title").textContent = s.title;
+        el("note").textContent = s.note;
+        el("tip").textContent = s.tip;
+        el("keys").innerHTML = "";
         for (const k of s.keys) {
-          const el = document.createElement("kbd");
-          el.textContent = k;
-          keysEl.append(el);
+          const el2 = document.createElement("kbd");
+          el2.textContent = k;
+          el("keys").append(el2);
         }
-        card.style.display = "block";
+        el("progress").innerHTML = `step <b>${at + 1}</b> of ${track.length}`;
+        hintAt = Date.now();
+        clearTimeout(hintTimer);
+        hintTimer = setTimeout(() => {
+          if (at < track.length) el("tip").textContent = track[at].tip;
+        }, 0);
+      };
+
+      const addAgain = () => {
+        const btn = document.createElement("button");
+        btn.className = "again";
+        btn.textContent = "start again";
+        btn.onclick = () => { at = 0; render(); };
+        el("keys").append(btn);
       };
 
       const check = (ev) => {
@@ -130,23 +302,23 @@
         if (!s) return;
         if (s.done(ev)) {
           at += 1;
-          if (!track[at]) {
-            keysEl.innerHTML = '<span class="done">all three done</span>';
-          }
-          show();
+          render();
         }
       };
 
+      const size = () => {
+        fit.fit();
+        dm.resize(term.cols, term.rows);
+      };
+
       window.onDmReady = (dm) => {
-        const size = () => {
-          fit.fit();
-          dm.resize(term.cols, term.rows);
-        };
         window.addEventListener("resize", size);
+        // The font settles after the first frame, and the cell box with it.
+        document.fonts.ready.then(size);
         dm.onOutput((data) => term.write(data));
         dm.onEvent(check);
-        show();
         term.onData((text) => dm.input(text));
+        render();
         size();
         boot.remove();
       };
