@@ -71,6 +71,39 @@
       }
       .progress { color: var(--ink-dim); font-size: 12px; }
       .progress b { color: var(--accent); font-weight: 400; }
+      .head-right { display: flex; align-items: baseline; gap: 12px; }
+
+      /* the track hub: one button per track, the current one marked */
+      .tracks {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+        margin-top: -12px;
+      }
+      .tracks .eyebrow {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .track-row { display: flex; flex-wrap: wrap; gap: 8px; }
+      .track {
+        border: 1px solid var(--edge);
+        background: #1c1c24;
+        color: var(--ink-dim);
+        font: inherit;
+        font-size: 12px;
+        padding: 4px 11px;
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .track:hover { border-color: var(--accent); color: var(--ink); }
+      .track[aria-current="true"] {
+        border-color: var(--accent);
+        background: #15231f;
+        color: var(--accent);
+      }
 
       main {
         display: grid;
@@ -152,6 +185,13 @@
         padding: 10px 12px;
         overflow: hidden;
       }
+      /* the coach: the shape of what the person built, counted by the session */
+      .coach {
+        color: var(--ink-faint);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        min-height: 1.6em;
+      }
       #term { position: absolute; inset: 10px 12px; }
       #boot {
         position: absolute;
@@ -179,8 +219,16 @@
           <h1>dm, in a browser</h1>
           <p>the real client, a pretend session</p>
         </div>
-        <div class="progress" id="progress">step <b>1</b> of 3</div>
+        <div class="head-right">
+          <div class="progress" id="progress">step <b>1</b> of 3</div>
+          <button class="again" id="restart" type="button">restart track</button>
+        </div>
       </header>
+
+      <nav class="tracks" aria-label="the tour's tracks">
+        <span class="eyebrow">tracks</span>
+        <div class="track-row" id="tracks"></div>
+      </nav>
 
       <main>
         <article class="step">
@@ -200,6 +248,7 @@
             <div id="term"></div>
             <div id="boot">loading dm…</div>
           </div>
+          <div class="coach" id="coach"></div>
         </section>
       </main>
 
@@ -230,12 +279,17 @@
       term.open(termHost);
       fit.fit();
 
-      // The page holds no track and no rule. It draws the step the lesson
-      // reports and nothing else, so a track can be tested without a browser.
+      // The page holds no track and no rule. It draws the hub, the step and the
+      // coach the wasm side reports and nothing else, so a track can be tested
+      // without a browser.
       let at = 1;
       let total = 1;
+      // resuming is true while the boot replays the steps already done. The
+      // first lesson.step turns it off and the card takes over.
+      let resuming = false;
 
       const draw = (ev) => {
+        resuming = false;
         at = ev.index ?? at;
         total = ev.total ?? total;
         el("eyebrow").textContent = `step ${at} of ${total}`;
@@ -253,6 +307,46 @@
         el("progress").innerHTML = `step <b>${at}</b> of ${total}`;
       };
 
+      // The hub: the wasm side names every track and marks the one being
+      // played, and the page draws a button for each. A switch boots a clean
+      // session, so nothing of the old track is left behind. A boot that resumes
+      // says so here instead of drawing a step nobody is on yet.
+      const hub = (ev) => {
+        const row = el("tracks");
+        row.replaceChildren();
+        for (const tr of ev.tracks ?? []) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "track";
+          b.textContent = tr.title;
+          if (tr.current) b.setAttribute("aria-current", "true");
+          b.onclick = () => dm.pick(tr.id);
+          row.append(b);
+        }
+        resuming = !!ev.resuming;
+        if (!resuming) return;
+        el("eyebrow").textContent = "resuming";
+        el("title").textContent = "Picking up where you left off.";
+        el("note").textContent =
+          `the session replays steps 1 to ${ev.resumeAt} before step ${ev.resumeAt + 1}.`;
+        el("tip").textContent = "one moment.";
+        el("keys").replaceChildren();
+        el("progress").textContent = "resuming";
+      };
+
+      // The coach: the shape of what the person built, counted by the session.
+      // The page draws the counts and holds no rule about them.
+      const coach = (ev) => {
+        const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+        const parts = [
+          count(ev.windows ?? 0, "window", "windows"),
+          count(ev.workspaces ?? 0, "workspace", "workspaces"),
+          count(ev.panes ?? 0, "pane", "panes"),
+        ];
+        if (ev.focus) parts.push(`focus ${ev.focus}`);
+        el("coach").textContent = parts.join(" · ");
+      };
+
       const finish = (ev) => {
         el("eyebrow").textContent = "track finished";
         el("title").textContent = "That is the shape of a track.";
@@ -265,6 +359,7 @@
       // The ladder: the session reports each rung, the page draws it. Show me
       // is a button here and a key press in there, through the same path.
       const hint = (ev) => {
+        if (resuming) return;
         el("tip").textContent = ev.hint ?? "";
         if (ev.level >= 2 && !document.getElementById("showme")) {
           const btn = document.createElement("button");
@@ -278,7 +373,9 @@
       };
 
       const onEvent = (ev) => {
-        if (ev.type === "lesson.step") {
+        if (ev.type === "lesson.tracks") hub(ev);
+        else if (ev.type === "session") coach(ev);
+        else if (ev.type === "lesson.step") {
           const btn = document.getElementById("showme");
           if (btn) btn.remove();
           draw(ev);
@@ -314,6 +411,7 @@
         document.fonts.ready.then(size);
         dm.onOutput((data) => term.write(data));
         dm.onEvent(onEvent);
+        el("restart").onclick = () => dm.restart();
         term.onData((text) => dm.input(text));
         size();
         boot.remove();

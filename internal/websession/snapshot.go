@@ -100,13 +100,16 @@ func (s *Session) allPanes() []wire.AllPane {
 	return out
 }
 
-// push sends the picture: the snapshot, then the screen of every pane the
-// client does not already hold at that rect. A snapshot drops every terminal
-// outside the active window, so those entries leave sent with it and the next
-// visit sends their screens again.
+// push sends the picture: the snapshot, the session event that counts it, then
+// the screen of every pane the client does not already hold at that rect. A
+// snapshot drops every terminal outside the active window, so those entries
+// leave sent with it and the next visit sends their screens again.
 func (s *Session) push() {
 	snap := s.snapshot()
 	_ = wire.WriteMsg(s.conn, wire.Msg{Type: "snapshot", Snap: snap})
+	// One session event per snapshot, for the page's coach. It is not a frame:
+	// the wire the client reads is unchanged.
+	s.reportSession()
 	live := make(map[string]bool, len(snap.Panes))
 	for _, p := range snap.Panes {
 		live[p.ID] = true
