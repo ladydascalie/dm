@@ -567,13 +567,7 @@ func Run(args []string) error {
 	if cfgErr != nil {
 		log.Printf("keymap: %v", cfgErr)
 	}
-	s := &server{
-		st: st, cfg: cfg, panes: map[string]*paneConn{}, paneSpawn: map[string]*sync.Mutex{}, clients: map[*client]bool{},
-		floats: map[string]*floatProc{},
-		cols:   st.Cols, rows: st.Rows, adopt: adopt,
-		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},
-		statusChangedAt: map[string]int64{},
-	}
+	s := newServer(st, cfg, adopt)
 	// A pending settle must not outlive the accept loop. endSession exits the
 	// process before this defer runs, so it stops the timer itself.
 	defer s.stopReflow()
@@ -652,12 +646,32 @@ func Run(args []string) error {
 	if err != nil {
 		return err
 	}
-	s.ln = ln
 	_ = os.Chmod(sock, 0o600)
 	writePID(filepath.Join(st.SessionDir(), "server.pid"))
 	close(started)
 
 	log.Printf("session %q listening on %s", *name, sock)
+	return s.serveListener(ln)
+}
+
+// newServer builds the server over a session's state. Run fills the state from
+// the disk; a caller with no disk fills it from memory. Everything the machine
+// decides, the lock file, the socket and the signals, stays with the caller.
+func newServer(st *session.State, cfg *keymap.Config, adopt map[string]bool) *server {
+	return &server{
+		st: st, cfg: cfg, panes: map[string]*paneConn{}, paneSpawn: map[string]*sync.Mutex{}, clients: map[*client]bool{},
+		floats: map[string]*floatProc{},
+		cols:   st.Cols, rows: st.Rows, adopt: adopt,
+		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},
+		statusChangedAt: map[string]int64{},
+	}
+}
+
+// serveListener accepts clients until the listener fails. The listener comes
+// from the caller, so a machine binds the session's socket and a build with no
+// sockets hands over one that lives in memory.
+func (s *server) serveListener(ln net.Listener) error {
+	s.ln = ln
 	for {
 		c, err := ln.Accept()
 		if err != nil {
