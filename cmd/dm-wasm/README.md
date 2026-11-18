@@ -71,8 +71,8 @@ picks the track from that record, the first track when the record is absent,
 unknown or malformed, and clamps the step to one the track has: zero for anything
 outside it. The record is treated as hostile, so nothing in it reaches the page.
 
-A record that says step N is in progress replays steps 1 to N before the first
-card is drawn: each done step's keys go through the same channel `dm.showMe`
+A record that says N steps are done replays steps 1 to N before the card for
+step N+1 is drawn: each done step's keys go through the same channel `dm.showMe`
 uses, one keystroke at a time, and the fast forward waits for the lesson to
 advance before the next step. Because the fake session is deterministic, a reload
 on step 4 of 6 ends on step 4 with the session in the shape steps 1 to 3 built.
@@ -104,7 +104,7 @@ from the fake shell, and `session` from the session's own model. Events that
 arrive before the page registers are held and delivered in order, and an event
 with no reader is dropped so a slow card never stalls the session.
 
-The page draws five lesson events and no rule of its own:
+The page draws four lesson events and no rule of its own:
 
 | Event | Data | When |
 | --- | --- | --- |

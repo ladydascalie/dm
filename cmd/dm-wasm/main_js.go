@@ -313,9 +313,6 @@ func resume(keys chan []byte, l *lesson.Lesson, hand *handover, events chan map[
 		}
 	}
 	hand.done()
-	if stalled && hand.live() {
-		clearStep(l)
-	}
 	handOver(events, l, hand, !stalled)
 }
 
@@ -333,18 +330,18 @@ func waitPast(l *lesson.Lesson, i int) bool {
 	}
 }
 
-// handOver draws the step the fast forward reached. A handover that got there
-// saves the count; one that stalled has already cleared the saved step, and the
-// next step saves again.
-func handOver(events chan map[string]any, l *lesson.Lesson, hand *handover, save bool) {
-	if at, step, ok := l.Current(); ok {
-		if save && hand.live() {
-			saveProgress(progress{Track: l.Track().ID, Step: at})
-		}
+// handOver draws the step the fast forward reached and writes the one record the
+// handover owns. One decision, one writer: handoverSave says whether there is a
+// record at all, so no branch can write after a pick has halted the page.
+func handOver(events chan map[string]any, l *lesson.Lesson, hand *handover, kept bool) {
+	at, step, ok := l.Current()
+	if p, write := handoverSave(l.Track(), at, kept && ok, hand.live()); write {
+		saveProgress(p)
+	}
+	if ok {
 		pushEvent(events, stepEvent("lesson.step", l, step))
 		return
 	}
-	clearStep(l)
 	pushEvent(events, map[string]any{"type": "lesson.finish", "title": l.Track().Title})
 }
 
@@ -421,21 +418,34 @@ func main() {
 		t := time.NewTicker(500 * time.Millisecond)
 		defer t.Stop()
 		last := lesson.NoHelp
+		lastStep := -1
 		for now := range t.C {
 			if hand.running() {
 				continue
 			}
 			level := l.Ladder(now)
+			at, step, ok := l.Current()
+			if !ok {
+				continue
+			}
+			if at != lastStep {
+				// A new step climbs on its own clock: the rung the last step
+				// reached says nothing about this one.
+				lastStep, last = at, lesson.NoHelp
+			}
 			if level == last {
 				continue
 			}
 			last = level
-			if at, step, ok := l.Current(); ok {
-				pushEvent(events, map[string]any{
-					"type": "lesson.hint", "index": at + 1, "level": int(level),
-					"hint": step.Hint,
-				})
+			if level < lesson.Hint {
+				// The bottom rung is not help: a step that has just arrived has
+				// not stalled, so its hint stays back.
+				continue
 			}
+			pushEvent(events, map[string]any{
+				"type": "lesson.hint", "index": at + 1, "level": int(level),
+				"hint": step.Hint,
+			})
 		}
 	}()
 

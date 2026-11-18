@@ -57,6 +57,10 @@ func TestResumePlanRefusesAHostileRecord(t *testing.T) {
 		{"no track", `{"step":2}`},
 		{"a step past the end", `{"track":"basics","step":5}`},
 		{"a negative step", `{"track":"basics","step":-3}`},
+		// A step that is not a number parses the track and then fails. Without
+		// this case a decode that swallows the error still answers the first
+		// track, because every other string leaves the whole record zero.
+		{"a step that is not a number", `{"track":"windows","step":"x"}`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -66,6 +70,38 @@ func TestResumePlanRefusesAHostileRecord(t *testing.T) {
 					c.raw, tr.ID, at, first.ID)
 			}
 		})
+	}
+}
+
+// TestHandoverWritesNothingAfterAHalt pins F4's decision in the untagged file: a
+// halted handover writes no record, whatever step it reached, so a pick made
+// during a replay is the record the reload boots from.
+func TestHandoverWritesNothingAfterAHalt(t *testing.T) {
+	tr, ok := lookupTrack("windows")
+	if !ok {
+		t.Fatal("the windows track is gone")
+	}
+	for _, kept := range []bool{false, true} {
+		for _, at := range []int{0, 1, len(tr.Steps) - 1, len(tr.Steps)} {
+			if p, write := handoverSave(tr, at, kept, false); write {
+				t.Fatalf("a halted handover of %q at step %d wrote %+v, want no record", tr.ID, at, p)
+			}
+		}
+	}
+	// A live handover that replayed every step keeps the count it reached.
+	for _, at := range []int{1, 3, len(tr.Steps) - 1} {
+		p, write := handoverSave(tr, at, true, true)
+		if !write || p != (progress{Track: tr.ID, Step: at}) {
+			t.Fatalf("a live handover at step %d wrote %+v, %v", at, p, write)
+		}
+	}
+	// One that stalled, or reached the end of the track, keeps the choice and
+	// clears the step.
+	for _, at := range []int{0, 2, len(tr.Steps)} {
+		p, write := handoverSave(tr, at, false, true)
+		if !write || p != (progress{Track: tr.ID}) {
+			t.Fatalf("a cleared handover at step %d wrote %+v, %v", at, p, write)
+		}
 	}
 }
 

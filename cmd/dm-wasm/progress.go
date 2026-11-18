@@ -91,6 +91,22 @@ func trackList(current string) []any {
 	return out
 }
 
+// handoverSave is the record a handover writes when it hands the card back, and
+// whether it writes one at all. A halted page writes nothing: the choice a pick
+// just made is the record the reload boots from, and the replay it left behind
+// must not write over it. kept reports whether the fast forward replayed every
+// step and can keep the count it reached. A handover that stalled, or that
+// reached the end of the track, keeps the choice and clears the step.
+func handoverSave(tr lesson.Track, at int, kept, live bool) (progress, bool) {
+	if !live {
+		return progress{}, false
+	}
+	if !kept {
+		return progress{Track: tr.ID}, true
+	}
+	return progress{Track: tr.ID, Step: at}, true
+}
+
 // stepKeys is one step's keystrokes, as the key channel carries them.
 func stepKeys(tr lesson.Track, step int) []string {
 	if step < 0 || step >= len(tr.Steps) {
