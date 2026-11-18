@@ -12,9 +12,15 @@ What is fake is the session on the other end. One window, several panes, a
 pretend shell in each, no pty, no pane daemon, no server and no state file. The
 fake lives in `main_js.go` and answers the real wire messages. It serves splits
 in four directions, focus by direction or by rail row, next and previous pane,
-close pane, the rail's fold triangles, the rail width, and the five layout
-presets including the cycle. Zoom, swap, and new window or workspace are not
-served yet: they answer with an empty reply and change nothing.
+close pane, zoom, swap by direction, synchronize panes, the rail's fold
+triangles, the rail width, and the five layout presets including the cycle. New
+window and new workspace are not served yet: they answer with an empty reply
+and change nothing.
+
+The fake uses the same helpers the server uses rather than its own arithmetic:
+`layout.SplitLeaf`, `layout.PruneLeaf`, `layout.Swap`, `layout.Neighbor` and
+`layout.ApplyPreset`. Where a helper does not exist, that is a sign the fake is
+standing in for something that belongs in the tree.
 
 The page turns on the mouse modes, so a click on a rail row reaches the client
 the way it does on a machine. `dm.last()` returns the last request the fake

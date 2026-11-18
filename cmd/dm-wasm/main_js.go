@@ -195,6 +195,10 @@ type session struct {
 	// preset is the layout name last applied, empty for a hand made tree. A
 	// "next" request walks the order from it.
 	preset string
+	// zoom is the pane drawn over the whole area, empty for none.
+	zoom string
+	// sync is the window's synchronize-panes flag: keys reach every pane.
+	sync bool
 }
 
 // newSession makes the one pane a session starts with.
@@ -215,8 +219,14 @@ func (s *session) addPane() string {
 // rects lays the tree out for the renderer's size.
 func (s *session) rects() map[string]layout.Rect {
 	cols, rows := s.size.get()
+	pad := keymap.LoadDefault().Padding()
+	area := layout.PaneAreaFor(cols, rows, s.railWidth())
 	out := map[string]layout.Rect{}
-	layout.Layout(s.root, layout.PaneAreaFor(cols, rows, s.railWidth()), keymap.LoadDefault().Padding(), out)
+	layout.Layout(s.root, area, pad, out)
+	if _, ok := out[s.zoom]; ok {
+		// A zoomed pane covers the rest, which keep their places underneath.
+		out[s.zoom] = layout.InsetBox(area, pad)
+	}
 	return out
 }
 
@@ -307,6 +317,31 @@ func (s *session) handle(m wire.Msg) bool {
 			return true
 		}
 		return false
+	case "zoom-pane":
+		if s.zoom == s.focus {
+			s.zoom = ""
+		} else {
+			s.zoom = s.focus
+		}
+		s.fit()
+		return true
+	case "swap-panes":
+		other := s.neighbor(m.Dir)
+		if other == "" || !layout.Swap(s.root, s.focus, other) {
+			return false
+		}
+		// The ids travel with their content, so the two panes change places
+		// and the focus stays on the same pane.
+		s.preset = ""
+		s.fit()
+		return true
+	case "synchronize-panes":
+		if m.On != nil {
+			s.sync = *m.On
+		} else {
+			s.sync = !s.sync
+		}
+		return true
 	case "select-layout":
 		return s.setLayout(m.Layout)
 	case "focus-dir":
@@ -367,45 +402,38 @@ func (s *session) setLayout(name string) bool {
 	return true
 }
 
-// focusDir moves focus to the nearest pane in that direction, by the distance
-// between the two rectangles' centres.
+// focusDir moves focus to the nearest pane in that direction.
 func (s *session) focusDir(dir string) {
-	r := s.rects()
-	from, ok := r[s.focus]
-	if !ok {
-		return
-	}
-	fx, fy := from.X+from.W/2, from.Y+from.H/2
-	best, bestAt := "", 0
-	for id, rect := range r {
-		if id == s.focus {
-			continue
-		}
-		dx := rect.X + rect.W/2 - fx
-		dy := rect.Y + rect.H/2 - fy
-		var ahead bool
-		at := 0
-		switch dir {
-		case "left":
-			ahead, at = dx < 0, -dx
-		case "right":
-			ahead, at = dx > 0, dx
-		case "up":
-			ahead, at = dy < 0, -dy
-		case "down":
-			ahead, at = dy > 0, dy
-		}
-		if ahead && (best == "" || at < bestAt) {
-			best, bestAt = id, at
-		}
-	}
-	if best != "" {
-		s.focus = best
+	if id := s.neighbor(dir); id != "" {
+		s.focus = id
 	}
 }
 
+// neighbor is the pane the server would walk to in that direction. The
+// geometry is layout.Neighbor, the same call the server makes, so a click and a
+// key cannot disagree about which pane is next.
+func (s *session) neighbor(dir string) string {
+	return layout.Neighbor(s.rects(), s.focus, dir)
+}
+
+// targets is the panes one read of keys reaches. A synced window takes them in
+// every pane of the window, as on a machine.
+func (s *session) targets(id string) []string {
+	if !s.sync {
+		return []string{id}
+	}
+	out := []string{}
+	for _, p := range layout.AllPanes(s.root) {
+		if p != id {
+			out = append(out, p)
+		}
+	}
+	return append([]string{id}, out...)
+}
+
 // snapshot describes the session the way a server does, with the padding the
-// built-in keymap asks for.
+// built-in keymap asks for. A zoomed pane is drawn last, because the client
+// paints in this order and the zoom has to cover the tiling under it.
 func (s *session) snapshot() *wire.Snapshot {
 	cols, rows := s.size.get()
 	r := s.rects()
@@ -415,6 +443,8 @@ func (s *session) snapshot() *wire.Snapshot {
 		Windows:      []wire.WindowInfo{{ID: "w1", Name: "one"}},
 		ActiveWindow: 0,
 		Focus:        s.focus,
+		Zoom:         s.zoom,
+		Sync:         s.sync,
 		Cols:         cols,
 		Rows:         rows,
 		Pad:          keymap.LoadDefault().Padding(),
@@ -422,7 +452,14 @@ func (s *session) snapshot() *wire.Snapshot {
 		RailWant:     s.rail,
 		Root:         s.root,
 	}
-	for _, id := range layout.AllPanes(s.root) {
+	ids := layout.AllPanes(s.root)
+	for i, id := range ids {
+		if id == s.zoom {
+			ids = append(append(append([]string{}, ids[:i]...), ids[i+1:]...), id)
+			break
+		}
+	}
+	for _, id := range ids {
 		rect, ok := r[id]
 		if !ok {
 			continue
@@ -478,8 +515,10 @@ func fakeServer(c net.Conn, size *sizer) {
 			if id == "" {
 				id = s.focus
 			}
-			if sh := s.panes[id]; sh != nil {
-				_ = wire.WriteMsg(c, wire.Msg{Type: "bytes", Target: id, Data: sh.feed(m.Keys)})
+			for _, id := range s.targets(id) {
+				if sh := s.panes[id]; sh != nil {
+					_ = wire.WriteMsg(c, wire.Msg{Type: "bytes", Target: id, Data: sh.feed(m.Keys)})
+				}
 			}
 		case "req":
 			if s.handle(m) {
