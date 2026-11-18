@@ -60,6 +60,13 @@ modified `greet.go`, and every command reads the same two maps, so `cd`, `ls`,
 not there is not found. A half working command reads as broken, a refusal reads
 as a limit.
 
+The shell keeps its screen as a list of lines, and a pane draws it again
+whenever the window changes size. A terminal cannot rewrap bytes it already
+printed, so without that a split clipped the right half of every line and a zoom
+never brought it back. This is the one place the pretend shell does more work
+than a real one: a real shell repaints because the program behind it gets
+SIGWINCH, and here the shell owns the screen.
+
 `ctrl+c`, `ctrl+d`, `ctrl+l` and `ctrl+u` do what they do at a live prompt,
 except that `ctrl+d` prints `exit` and hands back a prompt, because the pane
 must not end. Arrow keys are swallowed whole rather than left on the line. The

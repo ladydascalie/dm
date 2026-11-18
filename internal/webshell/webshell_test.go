@@ -184,3 +184,32 @@ func TestHistorySkipsRepeatsAndBlanks(t *testing.T) {
 		t.Fatalf("up on an empty history printed %q", got)
 	}
 }
+
+func TestRepaintDrawsTheSameLinesAgain(t *testing.T) {
+	s := New()
+	run(s, "git status")
+	run(s, "ls")
+	painted := plain(string(s.Repaint(40)))
+	for _, want := range []string{"On branch main", "modified:   greet.go", "README.md", "$ "} {
+		if !strings.Contains(painted, want) {
+			t.Fatalf("repaint is missing %q:\n%s", want, painted)
+		}
+	}
+	// A pane too short for the scroll keeps the end of it, and the prompt.
+	short := plain(string(s.Repaint(4)))
+	if strings.Contains(short, "dm, in a tab") {
+		t.Fatalf("a short repaint kept the banner:\n%s", short)
+	}
+	if !strings.HasSuffix(short, "$ ") {
+		t.Fatalf("a short repaint lost the prompt:\n%s", short)
+	}
+}
+
+func TestRepaintKeepsTheLineBeingTyped(t *testing.T) {
+	s := New()
+	s.Feed([]byte("git sta"))
+	got := plain(string(s.Repaint(10)))
+	if !strings.HasSuffix(got, "$ git sta") {
+		t.Fatalf("repaint dropped the line being typed: %q", got)
+	}
+}

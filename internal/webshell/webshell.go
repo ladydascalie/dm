@@ -41,6 +41,11 @@ type Shell struct {
 	history []string
 	at      int
 	draft   []rune
+	// scroll is what the screen holds, one entry per line, prompt included.
+	// The pane redraws from it when the window changes size, because a
+	// terminal cannot rewrap bytes it already printed: a narrower pane would
+	// otherwise clip the right half of everything and keep it clipped.
+	scroll []string
 	// OnRun hears every line a person ran, nil when nobody is listening.
 	OnRun func(line string)
 }
@@ -52,7 +57,34 @@ func New() *Shell {
 
 // Greet returns the banner and the first prompt.
 func (s *Shell) Greet() []byte {
+	s.record(banner)
 	return []byte(banner + s.prompt())
+}
+
+// Repaint returns the whole screen again, drawn to fit rows lines. A pane calls
+// it after a resize: the bytes on screen cannot be rewrapped, but the lines
+// behind them can be drawn again.
+func (s *Shell) Repaint(rows int) []byte {
+	keep := rows - 1
+	if keep < 1 {
+		keep = 1
+	}
+	start := len(s.scroll) - keep
+	if start < 0 {
+		start = 0
+	}
+	out := "\x1b[2J\x1b[H"
+	for _, line := range s.scroll[start:] {
+		out += line + "\r\n"
+	}
+	return []byte(out + s.prompt() + string(s.line))
+}
+
+// record keeps the lines of a print, so Repaint can draw them again.
+func (s *Shell) record(out string) {
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\r\n"), "\r\n") {
+		s.scroll = append(s.scroll, line)
+	}
 }
 
 // Cwd is where the shell stands.
@@ -99,7 +131,10 @@ func (s *Shell) Feed(in []byte) []byte {
 		case r == '\r':
 			out = append(out, "\r\n"...)
 			s.remember(string(s.line))
-			out = append(out, s.run(string(s.line))...)
+			s.scroll = append(s.scroll, s.prompt()+string(s.line))
+			answer := string(s.run(string(s.line)))
+			s.record(answer)
+			out = append(out, answer...)
 			s.line = s.line[:0]
 			out = append(out, s.prompt()...)
 		case r == 0x7f || r == 0x08:
@@ -215,6 +250,7 @@ func (s *Shell) run(line string) []byte {
 	case "git":
 		return s.git(args)
 	case "clear":
+		s.scroll = nil
 		return []byte("\x1b[2J\x1b[H")
 	case "exit", "logout":
 		return []byte("exit\r\n")

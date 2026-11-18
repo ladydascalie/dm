@@ -351,6 +351,10 @@ func (p *pane) resize(cols, rows int) {
 	if r.Top == 0 && r.Bottom == or-1 && r.Left == 0 && r.Right == oc-1 {
 		g.SetScrollRegion(vt.ScrollRegion{Top: 0, Bottom: rows - 1, Left: 0, Right: cols - 1})
 	}
+	// A narrower terminal cannot rewrap what it already printed, so the shell
+	// draws its screen again at the new width. Without this a split clips the
+	// right half of every line and a zoom never brings it back.
+	p.write(p.sh.Repaint(rows))
 }
 
 type session struct {
