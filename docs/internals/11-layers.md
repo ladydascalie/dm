@@ -2,16 +2,18 @@
 
 The module splits into six layers, and every package sits in exactly one of
 them. A layer may import itself and the layers below it, never upward. The
-model lives in `internal/arch/arch.go:39` as data, the gate in
-`internal/arch/arch_test.go:17` enforces it, and `internal/archdoc` renders the
-package graph from it. The tree has 122 import edges between its own packages; no reviewer reads them
-all, so the gate does. This page explains the table, the reason for each arrow,
-and how to add a package.
+model is the layer data in `internal/arch/arch.go:39`. The package graph is the
+tree's real imports: 122 edges, which `internal/arch.Load` reads. A Go test,
+`TestArchitecture` (`internal/arch/arch_test.go:17`), turns each layer into an
+import rule and fails on a violation; that test is the gate. `internal/archdoc`
+groups the graph's edges by the model and renders the generated page. No
+reviewer reads them all; the gate does.
 
 ## The model
 
 Top to bottom: `entry > services > presentation > domain > leaf`. `tooling` is a
-side branch: it reads the model and the package graph, and nothing imports it.
+side branch: it reads the model and the package graph, and no package imports it
+today. The entry row allows a future entry point to import it.
 
 ```mermaid
 flowchart TD
@@ -23,9 +25,13 @@ flowchart TD
   tooling --> leaf
 ```
 
-An arrow is an allowed import, not a real edge. Most arrows carry many real
-edges, and the generated page draws every one of them. The two `tooling` arrows
-carry none today: the model states that a tool may read domain types.
+Each arrow is the shortest form of an allowed import: one layer to the layer
+below it, plus `tooling` to `domain` and `leaf`. The table below repeats the
+model, so a row may name a layer no arrow joins directly: `entry` reaches
+`domain` and `leaf` down the chain, and `entry` may import `tooling` although
+no arrow draws it. An arrow is an allowed import, not a real edge. Most arrows
+carry many real edges, and the generated page counts every one of them. The two
+`tooling` arrows carry none today: the model lets a tool read domain types.
 
 | Layer | May import | Packages |
 | --- | --- | --- |
@@ -36,6 +42,7 @@ carry none today: the model states that a tool may read domain types.
 | leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/paths`, `internal/redact`, `internal/wlabel` |
 | tooling | tooling, domain, leaf | `internal/arch`, `internal/archdoc` |
 
+The Packages column drops the `dm/` module prefix, so `blackbox` is `dm/blackbox`.
 `internal/archdoc` checks this table against the model, so a stale row fails
 `go test ./internal/archdoc`. The model is the only copy that matters.
 
@@ -59,12 +66,13 @@ entry point that is not a program keeps it.
 `internal/keymapview`, `internal/segment`, `internal/ui`. The other six do not:
 `internal/clidoc` renders the help, man and llms text, `internal/configdoc`
 holds the config surface as plain data, `internal/esctest` drives the escape
-harness, `internal/palette` filters the rows that `internal/client` paints
-(`internal/client/command_palette.go:502`), `internal/shot` rasterises a cell
-grid to a PNG, `internal/testutil` holds the test helpers. A presentation
-package may not import a service, so a view that would dial the socket is a
-build failure, not a review comment. Services may import presentation:
-`internal/client` renders with `internal/boxview` and `internal/ui`.
+harness, `internal/palette` filters the command palette rows, `internal/shot`
+rasterises a cell grid to a PNG, `internal/testutil` holds the test helpers. A
+presentation package may not import a service, so a view that would dial the
+socket is a build failure, not a review comment. Services may import
+presentation: `internal/client` paints the rows that `internal/palette` filters
+(`internal/client/command_palette.go:502`) and renders with `internal/boxview`
+and `internal/ui`.
 
 **domain** holds the state, the data types and the rules that need no screen:
 `internal/wire`, `internal/session`, `internal/layout`, `internal/vt`,
@@ -73,13 +81,15 @@ build failure, not a review comment. Services may import presentation:
 presentation. A wire message can carry a `*vt.Snapshot`
 (`internal/wire/wire.go:85`) and each snapshot row carries `SnapshotCell`
 values (`internal/vt/snapshot.go:48`), because `vt` is a domain package too. A
-frame never carries a `boxview` or a `panel`.
+wire frame, one length-prefixed JSON message on the socket
+(`internal/wire/wire.go:252`), never carries a `boxview` or a `panel`.
 
 **leaf** packages import nothing from the module: `internal/cells`,
 `internal/paths`, `internal/kdl`, `internal/browser`, `internal/wlabel`,
 `internal/redact`, and `dm/blackbox`. Most are primitives used from everywhere,
-so an import out of a leaf would be the most expensive cycle in the tree.
-`internal/browser` is a standalone tool: it opens a URL in the default browser.
+so an import out of a leaf would close a cycle through most of the tree: the
+most expensive cycle in the model. `internal/browser` is a standalone tool: it
+opens a URL in the default browser.
 
 **tooling** is offline. `internal/arch` runs the Go toolchain and holds the
 model, `internal/archdoc` renders the docs from it. Neither runs in `dm`, so
@@ -87,10 +97,10 @@ neither may reach into services or presentation.
 
 ## How to run the gate
 
-`internal/arch` is the only part of the docs that shells out. `Load` runs
-`go list -f '{{.ImportPath}} {{join .Imports " "}}' ./...` in the module root
-(`internal/arch/arch.go:176`) and finds the root with `go env GOMOD`
-(`internal/arch/arch.go:199`). It reads the package list and the non-test
+The gate shells out to the Go toolchain. `internal/arch.Load` finds the module
+root with `go env GOMOD` (`internal/arch/arch.go:198`) and runs
+`go list -f '{{.ImportPath}} {{join .Imports " "}}' ./...` in it
+(`internal/arch/arch.go:176`). It reads the package list and the non-test
 imports from the stdout of that one command, caches them for the test process,
 and stops. The gate needs the Go toolchain and a `go.mod`; it does not compile
 the code. Its only new dependency is `github.com/arch-go/arch-go`, imported by
@@ -122,8 +132,10 @@ exist, and when a rule selects no package at all.
   files and by no non-test file, and `internal/redact` is imported by nothing
   at all. The gate reads non-test imports, so it sees no edge for either and
   flags neither.
-- **Test imports.** The rules read the non-test import list. `dm/blackbox` sits
-  in the leaf, and its test files import `cells`, `notify`, `vt` and `wire`.
+- **Test imports.** The rules read the non-test import list. `dm/blackbox`
+  sits in the leaf, and its test files import `dm/internal/cells`,
+  `dm/internal/notify`, `dm/internal/vt` and `dm/internal/wire`. The leaf
+  forbids those imports and the gate cannot see them.
 - **Cycles.** arch-go deprecated `CyclesRule` in v1.4.0. The tree is a DAG
   today; the gate would not notice a cycle between two packages of one layer.
 - **Direction inside a layer.** Two domain packages may import each other. The
@@ -143,10 +155,12 @@ exist, and when a rule selects no package at all.
 
 ## The generated page
 
-`docs/internals/generated/package-graph.md` holds the layer table and a mermaid
-flowchart of the graph collapsed to layers: 40 packages, 37 under
-`internal/`, 122 import edges, each one counted in a layer node or on a layer
-arrow. Open [the package graph](generated/package-graph.md).
+`docs/internals/generated/package-graph.md` holds the layer table again and a
+mermaid flowchart of the graph collapsed to one node per layer. A node counts
+the imports whose two ends sit in that layer; an arrow counts the imports
+between two layers. The page lists 40 packages, 37 of them under `internal/`,
+and 122 import edges, each one counted once in a node or on an arrow. Open
+[the package graph](generated/package-graph.md).
 `make docs-internals` rewrites the file with the `-update` flag of the archdoc
 test.
 
