@@ -14,6 +14,7 @@ help:
 	@echo "make esctest-gate   run the esctest2 baseline gate"
 	@echo "make gremlins        mutation-test every package, fail on survivors"
 	@echo "make gremlins-pkg PKG=x   mutation-test one package, e.g. PKG=pane"
+	@echo "make docs-internals  regenerate docs/internals/generated/package-graph.md"
 
 .PHONY: esctest-fetch
 esctest-fetch:
@@ -51,3 +52,7 @@ gremlins-pkg:
 	@test -n "$(PKG)" || { echo "usage: make gremlins-pkg PKG=pane"; exit 1; }
 	@mkdir -p $(GREMLINS_OUT)
 	@gremlins unleash ./internal/$(PKG) -o $(GREMLINS_OUT)/$(PKG).json
+
+.PHONY: docs-internals
+docs-internals:
+	go test -count=1 -run TestGenerated ./internal/archdoc -update

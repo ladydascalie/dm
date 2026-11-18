@@ -50,6 +50,8 @@ fails when one is stale.
 declaration, the environment, the box topics and the example under
 `examples/`.
 
+The architecture and internals entry point is [docs/internals/README.md](docs/internals/README.md).
+
 ## Code layout
 
 `main.go` dispatches the internal verbs and hands everything else to the CLI.
