@@ -8,6 +8,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"dm/internal/box"
@@ -19,9 +20,11 @@ import (
 )
 
 // openBoxView opens the message box as a floating pane, or closes it when it is
-// already up. The view asks for the whole log and the watcher list; the replies
-// fill it.
-func openBoxView(t *tui) {
+// already up. filter is the topic prefix it opens on: empty for the whole log,
+// notify/ for the notification centre. The view asks for the whole log and the
+// watcher list; the replies fill it, and the filter narrows it in the client,
+// so a toggle costs no round trip.
+func openBoxView(t *tui, filter string) {
 	if t.snap == nil {
 		t.disarm()
 		return
@@ -31,25 +34,30 @@ func openBoxView(t *tui) {
 		return
 	}
 	t.box = boxview.NewBoxView(t.snap, t.theme(), t.km())
+	t.box.SetRead(t.notifyRead, t.theme())
+	t.box.SetFilter(filter, t.theme())
 	t.AddFloatingPane(t.box.Float)
 	t.mode = "box"
 	t.armed = false
-	t.boxPage = false
 	t.boxRequest()
 	t.boxWatchers(time.Now())
 	t.dirty = true
 }
 
-// closeBoxView takes the float down and gives the keyboard back to the panes.
+// closeBoxView takes the float down, gives the keyboard back to the panes and
+// marks every entry it held read, so the bar badge counts from the same mark
+// the rows carried.
 func closeBoxView(t *tui) {
 	if t.box == nil {
 		return
 	}
 	closeBodyReader(t)
+	if mark := t.box.MarkReadAll(); mark > t.notifyRead {
+		t.notifyRead = mark
+	}
 	t.RemoveFloatingPane(t.box.Float.ID)
 	t.box = nil
 	t.mode = ""
-	t.boxPage = false
 	// The close key stays in the buffer while the pending timer waits. Drop
 	// the whole buffer here, so a later keypress cannot forward a stray escape
 	// to a pane.
@@ -113,17 +121,7 @@ func (t *tui) takeBoxList(m wire.Msg) {
 		t.notify("box: " + err.Error())
 		return
 	}
-	// A jump from the notification centre asks the reply to land with that
-	// entry selected; the view opens at the top, so the select moves it once.
-	jump := 0
-	if t.boxJumpSeq != 0 {
-		jump = t.boxJumpSeq
-		t.boxJumpSeq = 0
-	}
 	t.box.Set(rep.Entries, t.theme())
-	if jump != 0 {
-		t.box.Select(jump, t.theme())
-	}
 	t.dirty = true
 }
 
@@ -214,16 +212,6 @@ func (t *tui) boxKey() bool {
 		t.dirty = true
 		return true
 	}
-	if !t.boxPage && t.reader == nil && len(t.inbuf) == 1 &&
-		(t.inbuf[0] == 'v' || t.inbuf[0] == '\r') {
-		// v and enter open the reader for the selected entry; an entry
-		// without a body opens nothing.
-		t.inbuf = t.inbuf[1:]
-		t.pending = false
-		openBodyReader(t)
-		t.dirty = true
-		return true
-	}
 	action, n, state := t.km().Match("box", t.inbuf)
 	switch state {
 	case keymap.Partial:
@@ -264,13 +252,87 @@ func (t *tui) boxKey() bool {
 		t.box.Scroll(t.box.ListLen(), t.theme())
 	case "toggle-page":
 		t.box.TogglePage(t.theme())
-		t.boxPage = !t.boxPage
+	case "body":
+		// An entry without a body opens nothing.
+		openBodyReader(t)
+	case "filter-notify":
+		t.box.ToggleFilter(t.theme())
+	case "jump-pane":
+		t.boxJumpPane()
+		return true
+	case "clear-entry":
+		t.boxClearEntry()
+	case "clear-filter":
+		t.boxClearFilter()
 	default:
 		closeBoxView(t)
 		return true
 	}
 	t.dirty = true
 	return true
+}
+
+// boxJumpPane focuses the pane the selected entry is about and closes the
+// float. A key that names no pane, and a pane the session does not carry, raise
+// a toast instead: the float stays where it is.
+func (t *tui) boxJumpPane() {
+	e, ok := t.box.Selected()
+	if !ok {
+		return
+	}
+	pane := ""
+	if box.IsNotifyTopic(e.Key) {
+		pane = strings.TrimPrefix(e.Key, box.NotifyPrefix)
+	}
+	if pane == "" {
+		t.notify("no pane named by " + e.Key)
+		return
+	}
+	if t.paneByID(pane) == nil {
+		t.notify("no pane " + pane)
+		return
+	}
+	closeBoxView(t)
+	t.actionOn(pane, "focus", nil)
+}
+
+// boxClearEntry clears the selected entry's key through msg-clear and drops it
+// from the recent cache, so the badge and the list agree until the reply
+// refetches the log.
+func (t *tui) boxClearEntry() {
+	e, ok := t.box.Selected()
+	if !ok {
+		return
+	}
+	t.notifyRecentDropKey(e.Key)
+	t.boxClear(box.ClearReq{Key: e.Key})
+}
+
+// boxClearFilter clears what the view shows: the notify branch while the filter
+// is on, and the whole log otherwise. Rows the filter excludes are never named,
+// so a filtered clear cannot touch a key the operator cannot see.
+func (t *tui) boxClearFilter() {
+	t.notifyRecent = nil
+	if t.box.Filter() != "" {
+		t.boxClear(box.ClearReq{KeyPrefix: box.NotifyPrefix})
+		return
+	}
+	t.boxClear(box.ClearReq{})
+}
+
+// boxClear sends one msg-clear tagged with the view's route. The reply handler
+// owns the refetch; a session without a connection clears nothing.
+func (t *tui) boxClear(req box.ClearReq) {
+	if t.conn == nil {
+		return
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	t.notifyID++
+	t.notifyRouteTag(t.notifyID, notifyRouteClear)
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "msg-clear", ID: t.notifyID, Res: body})
 }
 
 // openKeymapView opens the keymap view as a floating pane, or closes it when it

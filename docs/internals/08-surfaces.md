@@ -50,7 +50,7 @@ three checks and changes nothing: the exact `key`, the `keyPrefix` as a `strings
 cursor. So a list, a wait and a subscribe all see the same entries. `box.ParseReq` (`box.go:283`) is the one decoder
 the server calls for a box request: it builds the request, rejects an unknown field and validates the values.
 
-Three branches are convention, and the repository README (`README.md:1231`, `README.md:1295`) shows their use:
+Three branches are convention, and the repository README (`README.md:1239`, `README.md:1303`) shows their use:
 `lane/<id>`, `msg/<name>`, `reply/<pane>`. A fourth, `plugin/<name>/...`, is reserved for plugins
 (`PLUGINS.md:117`), the `...` meaning any depth. One branch belongs to the code: `box.NotifyPrefix` is `notify/`,
 and `box.IsNotifyTopic` (`box.go:39`) is the check a *renderer* runs to decide whether it renders the entry. A
@@ -107,7 +107,7 @@ report on `notify/<pane>` (`internal/server/notify_server.go:21`). Three gates d
 The box is a log with no opinion about a desktop, so the policy lives apart: `internal/box` imports the standard
 library only and never shells out, while the notify package owns the `notify-send` call (`notify.Send`,
 `notify.go:77`). A host with no `notify-send` logs the failure and keeps the entry. The client applies the same
-suppression rule to its toasts (`internal/client/client_notify.go:41`): a toast is the popup the client raises for a
+suppression rule to its toasts (`internal/client/client_notify.go:43`): a toast is the popup the client raises for a
 `notify/` entry it has not seen, and it drops the toast for the focused pane.
 
 ## OSC 7501 and pane status

@@ -260,18 +260,13 @@ type tui struct {
 
 	// reader is the open body reader overlay, nil when closed. The box view
 	// owns its window and selection, so the client reads them off the view.
-	boxPage bool
-	reader  *bodyReader
-	// boxJumpSeq asks the next list reply to land with that entry selected;
-	// zero means no jump is waiting.
-	boxJumpSeq int
+	reader *bodyReader
 
-	// ncentre is the open notification centre, nil when closed. notifyRead
-	// is the seq below which every notify/ entry is read. notifyID numbers
-	// every id'd msg-list the notify work sends, and notifyRoute remembers
-	// which of the two reads each outstanding id belongs to, so a reply
-	// never lands in the other's handler.
-	ncentre     *notifyCentre
+	// notifyRead is the seq below which every notify/ entry is read: the mark
+	// the box view paints its rows from and the bar badge counts from, so the
+	// two cannot disagree. notifyID numbers every id'd message request the
+	// notify work sends, and notifyRoute remembers which read each outstanding
+	// id belongs to, so a reply never lands in another handler.
 	notifyRead  int
 	notifyID    int
 	notifyRoute map[int]string
@@ -287,9 +282,9 @@ type tui struct {
 	notifyWant    bool
 
 	// notifyRecent is the newest notify/ entries the client knows, newest
-	// first, capped at notifyCentreLimit. Every notify msg-list reply feeds
-	// it and a clear prunes it, so the bar badge counts the same rows the
-	// centre's unread marks do.
+	// first, capped at notifyRecentLimit. The catch-up reply feeds it and a
+	// clear prunes it, so the bar badge counts the same rows the box view's
+	// unread marks carry.
 	notifyRecent []box.Entry
 
 	// rowsig holds one fingerprint per pane content row, so a steady frame
@@ -864,15 +859,6 @@ func (t *tui) apply(m wire.Msg) {
 			t.keys.Sync(m.Snap)
 			t.dirty = true
 		}
-		if t.ncentre != nil {
-			t.ncentre.Sync(m.Snap, t.theme())
-			// A reader over the centre rides the centre's rect: the same sync
-			// the box branch gives its reader.
-			if t.reader != nil {
-				t.reader.Sync(t.ncentre.Float.Rect, t.theme())
-			}
-			t.dirty = true
-		}
 		t.dirty = true
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
@@ -964,25 +950,19 @@ func (t *tui) apply(m wire.Msg) {
 			if m.Action == "read" && t.sw != nil && t.sw.AcceptPreview(m.ID, previewLines(m)) {
 				t.dirty = true
 			}
-			// A notify catch-up asks for the entries past the cursor; the
-			// centre asks for the recent notify/ list. The route map says
-			// which read the id belongs to, so one counter serves both and
-			// a reply never lands in the other's handler.
-			if m.Action == "msg-list" {
-				switch t.notifyRoute[m.ID] {
-				case notifyRouteCatchUp:
-					t.takeNotifyList(m)
-				case notifyRouteCentre:
-					t.takeNotifyCentreList(m)
-				}
+			// A notify catch-up asks for the notify/ entries past the cursor.
+			// The route map says which read the id belongs to, so a reply
+			// never lands in another handler.
+			if m.Action == "msg-list" && t.notifyRoute[m.ID] == notifyRouteCatchUp {
+				t.takeNotifyList(m)
 				delete(t.notifyRoute, m.ID)
 			}
-			// A centre clear refetches the list from the reply, whatever the
-			// count was; the reply itself carries only the number that went.
+			// A clear from the view refetches the log, whatever the count was;
+			// the reply itself carries only the number that went.
 			if m.Action == "msg-clear" && t.notifyRoute[m.ID] == notifyRouteClear {
 				delete(t.notifyRoute, m.ID)
-				if t.ncentre != nil {
-					t.notifyCentreRequest()
+				if t.box != nil {
+					t.boxRequest()
 				}
 			}
 			break
@@ -1008,12 +988,8 @@ func (t *tui) apply(m wire.Msg) {
 			t.boxRequest()
 		}
 		// Either way the notify branch catches up, so a toast finds the new
-		// entries whether or not the log view is open. An open centre asks
-		// for its list again.
+		// entries whether or not the log view is open.
 		t.notifyCatchUp()
-		if t.ncentre != nil {
-			t.notifyCentreRequest()
-		}
 	case "watch":
 		// A watch appeared, advanced, unparked or went. An open view asks for
 		// the list again, at most once per boxview.WatchInterval.

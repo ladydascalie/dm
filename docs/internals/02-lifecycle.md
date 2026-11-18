@@ -102,7 +102,7 @@ Attach registers a client and builds one snapshot, the layout and ids, not a
 backlog, the output it missed (`server_view.go:786`). The client asks for history
 with a `replay` request when it enters scrollback. Several clients may attach at
 once and share one layout: the largest terminal sets the size, and a smaller
-client's copy is clipped to its own screen (`README.md:1395`).
+client's copy is clipped to its own screen (`README.md:1425`).
 
 Detach sends nothing. The client sets `quit` (`internal/client/client_keys.go:900`)
 and closes the socket; the server's `serve` defer drops it, refits the remaining

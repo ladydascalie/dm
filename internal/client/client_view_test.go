@@ -19,7 +19,7 @@ func TestCursorHidesInEveryMode(t *testing.T) {
 	t.Parallel()
 	tui, _ := switcherTUI(t)
 	for _, mode := range []string{
-		"box", "help", "search", "scroll", "sessions", "menu", "rename", "layout", "notif", "float",
+		"box", "help", "search", "scroll", "sessions", "menu", "rename", "layout", "float",
 	} {
 		tui.mode = mode
 		if got := tui.cursorBlock(); got != "\x1b[?25l" {

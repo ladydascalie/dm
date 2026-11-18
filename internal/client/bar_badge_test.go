@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"dm/internal/box"
-	"dm/internal/panel"
 	"dm/internal/rail"
 	"dm/internal/segment"
 	"dm/internal/testutil"
 	"dm/internal/theme"
+	"dm/internal/ui"
 	"dm/internal/wire"
 )
 
@@ -91,8 +91,9 @@ func TestBarBadgeHiddenAtZero(t *testing.T) {
 }
 
 // A tui fed by the notify replies computes its badge from the entries past
-// the read mark, so the bar and the centre's unread marks agree.
-func TestBarBadgeAgreesWithCentre(t *testing.T) {
+// the read mark, and the merged list marks the same rows unread, so the bar and
+// the list agree.
+func TestBarBadgeAgreesWithList(t *testing.T) {
 	t.Parallel()
 	tui := &tui{}
 	tui.notifyRecent = []box.Entry{
@@ -100,60 +101,35 @@ func TestBarBadgeAgreesWithCentre(t *testing.T) {
 		badgeEntry(8, box.StateDone),
 		badgeEntry(7, box.StateNote),
 	}
-	c := &notifyCentre{entries: tui.notifyRecent}
+	var list ui.MessageList
+	list.Set(tui.notifyRecent)
 
 	if n := tui.barBadgeOf(theme.DefaultTheme(), theme.GlyphNerd).n; n != 3 {
 		t.Fatalf("badge = %d, want 3 unread", n)
 	}
-	c.read = tui.notifyRead
-	if u := c.unread(); u != 3 {
-		t.Fatalf("centre unread = %d, want 3", u)
+	if u := list.Unread(); u != 3 {
+		t.Fatalf("list unread = %d, want 3", u)
 	}
 
 	// Opening the newest entry raises the read mark: both drop together.
 	tui.notifyRead = 9
-	c.read = 9
+	list.Read = 9
 	if n := tui.barBadgeOf(theme.DefaultTheme(), theme.GlyphNerd).n; n != 0 {
 		t.Fatalf("badge = %d, want 0 after reading up to 9", n)
 	}
-	if u := c.unread(); u != 0 {
-		t.Fatalf("centre unread = %d, want 0", u)
+	if u := list.Unread(); u != 0 {
+		t.Fatalf("list unread = %d, want 0", u)
 	}
 
 	// A newer entry lands: both rise together.
 	tui.notifyRecentMerge([]box.Entry{badgeEntry(12, box.StateError)})
-	c.entries = tui.notifyRecent
-	c.read = tui.notifyRead
+	list.Set(tui.notifyRecent)
+	list.Read = tui.notifyRead
 	if n := tui.barBadgeOf(theme.DefaultTheme(), theme.GlyphNerd).n; n != 1 {
 		t.Fatalf("badge = %d, want 1", n)
 	}
-	if u := c.unread(); u != 1 {
-		t.Fatalf("centre unread = %d, want 1", u)
-	}
-}
-
-// Clearing entries moves the badge: a cleared key and a cleared topic leave
-// the cache, so the badge follows the centre's list.
-func TestBarBadgeClearMoves(t *testing.T) {
-	t.Parallel()
-	tui := &tui{}
-	tui.notifyRecent = []box.Entry{
-		{Seq: 9, Key: "notify/w1p1", State: box.StateBlocked, Msg: "m"},
-		{Seq: 8, Key: "notify/w1p2", State: box.StateError, Msg: "m"},
-		{Seq: 7, Key: "notify/w1p1", State: box.StateDone, Msg: "m"},
-	}
-
-	tui.notifyRecentDropKey("notify/w1p1")
-	if n := tui.notifyUnread(); n != 1 {
-		t.Fatalf("badge = %d, want 1 after clearing notify/w1p1", n)
-	}
-
-	tui.notifClearAll()
-	if n := tui.notifyUnread(); n != 0 {
-		t.Fatalf("badge = %d, want 0 after clearing the topic", n)
-	}
-	if len(tui.notifyRecent) != 0 {
-		t.Fatalf("cache = %v, want empty", tui.notifyRecent)
+	if u := list.Unread(); u != 1 {
+		t.Fatalf("list unread = %d, want 1", u)
 	}
 }
 
@@ -184,28 +160,5 @@ func TestBarBadgeFeedFromCatchUp(t *testing.T) {
 	tui.takeNotifyList(wire.Msg{Type: "resp", OK: true, Action: "msg-list", Res: body})
 	if n := len(tui.notifyRecent); n != 3 {
 		t.Fatalf("cache = %d entries, want 3 after a repeat", n)
-	}
-}
-
-// The centre's reply is the truth while the centre is open: it replaces the
-// cache, so the badge matches the rows the float shows.
-func TestBarBadgeFeedFromCentre(t *testing.T) {
-	t.Parallel()
-	tui := &tui{snap: &wire.Snapshot{Cols: 60, Rows: 24}, ncentre: &notifyCentre{
-		Float: &panel.FloatingPane{ID: "notif", Active: true},
-	}}
-	tui.notifyRecent = []box.Entry{badgeEntry(99, box.StateNote)}
-	rep := box.ListReply{Entries: []box.Entry{badgeEntry(11, box.StateError)}}
-	body, err := json.Marshal(rep)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tui.takeNotifyCentreList(wire.Msg{Type: "resp", OK: true, Action: "msg-list", Res: body})
-
-	if len(tui.notifyRecent) != 1 || tui.notifyRecent[0].Seq != 11 {
-		t.Fatalf("cache = %v, want the centre's list alone", tui.notifyRecent)
-	}
-	if n := tui.notifyUnread(); n != 1 {
-		t.Fatalf("badge = %d, want 1", n)
 	}
 }

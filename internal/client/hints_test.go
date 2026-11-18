@@ -41,17 +41,17 @@ func TestBoxHintNamesTheKeymap(t *testing.T) {
 	}`)
 	snap := &wire.Snapshot{Cols: 100, Rows: 30}
 	b := boxview.NewBoxView(snap, theme.DefaultTheme(), cfg)
-	if got, want := b.Float.Hint, "n/a scroll  ctrl+w watchers  ctrl+q close"; got != want {
+	if got, want := b.Float.Hint, "n/a move  ctrl+w watchers  ctrl+q close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	b.Set(make([]box.Entry, 0), theme.DefaultTheme())
 	b.TogglePage(theme.DefaultTheme())
-	if got, want := b.Float.Hint, "n/a scroll  ctrl+w log  ctrl+q close"; got != want {
+	if got, want := b.Float.Hint, "n/a move  ctrl+w log  ctrl+q close"; got != want {
 		t.Fatalf("page hint = %q, want %q", got, want)
 	}
 	// A reload swaps the config, and the border follows it in place.
 	b.SetKeymap(keymap.LoadDefault())
-	if got := b.Float.Hint; !strings.Contains(got, "j/k scroll") || !strings.Contains(got, "esc close") {
+	if got := b.Float.Hint; !strings.Contains(got, "j/k move") || !strings.Contains(got, "esc close") {
 		t.Fatalf("hint after a reload = %q, want the default keys", got)
 	}
 }
@@ -77,29 +77,26 @@ func TestReaderHintNamesTheKeymap(t *testing.T) {
 	}
 }
 
-// TestNotifyCentreHintNamesTheKeymap: the centre names its list keys from the
-// box keymap and its two clear keys from the main keymap, because that is the
-// map each key dispatches through.
-func TestNotifyCentreHintNamesTheKeymap(t *testing.T) {
+// TestMessageHintNamesOnlyTheBoxKeymap: the message view names every key it
+// paints from the box keymap, so no key in the corner is a literal and a rebind
+// moves it.
+func TestMessageHintNamesOnlyTheBoxKeymap(t *testing.T) {
 	t.Parallel()
 	cfg := hintKeymap(t, `keymap "box" {
 		"down" "n"
 		"up" "a"
-		"top" "t"
-		"close-m" "ctrl+m"
+		"toggle-page" "w"
+		"filter-notify" "f"
+		"body" "e"
 		"close-esc" "ctrl+q"
-	}
-	keymap "main" {
-		"close-pane" "ctrl+x"
-		"close-window" "ctrl+w"
 	}`)
-	c := newNotifyCentre(&wire.Snapshot{Cols: 100, Rows: 30}, theme.DefaultTheme(), cfg)
-	want := "n/a move  enter body  t pane  ctrl+m box  ctrl+x clear  ctrl+w clear all  ctrl+q close"
-	if got := c.Float.Hint; got != want {
+	b := boxview.NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30}, theme.DefaultTheme(), cfg)
+	b.Set([]box.Entry{{Seq: 1, Key: "lane/a", Body: "text"}}, theme.DefaultTheme())
+	if got, want := b.Float.Hint, "n/a move  w watchers  f notify  e body  ctrl+q close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
-	c.SetKeymap(keymap.LoadDefault())
-	if got := c.Float.Hint; !strings.Contains(got, "j/k move") || !strings.Contains(got, "x clear") {
+	b.SetKeymap(keymap.LoadDefault())
+	if got := b.Float.Hint; !strings.Contains(got, "j/k move") || !strings.Contains(got, "m notify") || !strings.Contains(got, "enter body") {
 		t.Fatalf("hint after a reload = %q, want the default keys", got)
 	}
 }
@@ -204,8 +201,8 @@ func TestOverlayHintsArePlainRows(t *testing.T) {
 }
 
 // TestRefreshHintsMovesOpenFloats: a reload renames the hints of the floats
-// that keep their own config, so an open box, keymap view, centre or reader
-// names the new keys without reopening.
+// that keep their own config, so an open box, keymap view or reader names the
+// new keys without reopening.
 func TestRefreshHintsMovesOpenFloats(t *testing.T) {
 	t.Parallel()
 	defaults := keymap.LoadDefault()
@@ -227,7 +224,6 @@ func TestRefreshHintsMovesOpenFloats(t *testing.T) {
 	tui := &tui{snap: snap}
 	tui.box = boxview.NewBoxView(snap, theme.DefaultTheme(), defaults)
 	tui.keys = keymapview.NewKeymapView(snap, defaults)
-	tui.ncentre = newNotifyCentre(snap, theme.DefaultTheme(), defaults)
 	tui.reader = newBodyReader(box.Entry{Seq: 1, Key: "lane/a", Body: "text"},
 		layout.Rect{X: 2, Y: 2, W: 40, H: 6}, theme.DefaultTheme(), defaults)
 
@@ -236,7 +232,6 @@ func TestRefreshHintsMovesOpenFloats(t *testing.T) {
 	for name, hint := range map[string]string{
 		"box":    tui.box.Float.Hint,
 		"keys":   tui.keys.Float.Hint,
-		"centre": tui.ncentre.Float.Hint,
 		"reader": tui.reader.Float.Hint,
 	} {
 		if !strings.Contains(hint, "n/a") {

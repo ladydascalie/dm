@@ -56,17 +56,17 @@ func readerScreen(t *testing.T, r *bodyReader, cols, rows int) *vt.Term {
 	return screen
 }
 
-// v opens the reader on the selected entry, and the overlay carries the body
-// below the summary line.
-func TestBodyReaderOpensOnV(t *testing.T) {
+// enter opens the reader on the selected entry, and the overlay carries the
+// body below the summary line.
+func TestBodyReaderOpensOnEnter(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	if !strings.Contains(tui.box.Float.Hint, "enter body") {
 		t.Fatalf("hint = %q, want the affordance", tui.box.Float.Hint)
 	}
-	feed(tui, "v")
+	feed(tui, "\r")
 	if tui.reader == nil {
-		t.Fatal("v did not open the reader")
+		t.Fatal("enter did not open the reader")
 	}
 	if got := len(tui.floats); got != 2 {
 		t.Fatalf("floats = %d, want the box and the reader", got)
@@ -87,7 +87,7 @@ func TestBodyReaderOpensOnV(t *testing.T) {
 func TestBodyReaderPaintsBodyBelowTheLine(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
-	feed(tui, "v")
+	feed(tui, "\r")
 	r := tui.reader.Float.Rect
 	screen := readerScreen(t, tui.reader, tui.snap.Cols, tui.snap.Rows)
 	if row := boxScreenRow(screen, r.Y, r.X, r.W); !strings.Contains(row, "short summary") {
@@ -102,7 +102,7 @@ func TestBodyReaderPaintsBodyBelowTheLine(t *testing.T) {
 func TestBodyReaderScrolls(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
-	feed(tui, "v")
+	feed(tui, "\r")
 	feed(tui, "j")
 	if tui.reader.win.Off != 1 {
 		t.Fatalf("offset = %d, want 1", tui.reader.win.Off)
@@ -130,7 +130,7 @@ func TestBodyReaderScrolls(t *testing.T) {
 func TestBodyReaderClosesOnQ(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
-	feed(tui, "v")
+	feed(tui, "\r")
 	feed(tui, "q")
 	if tui.reader != nil || len(tui.floats) != 1 || tui.box == nil {
 		t.Fatalf("q did not close only the reader")
@@ -148,15 +148,15 @@ func TestBodylessEntryHasNoAffordance(t *testing.T) {
 	if strings.Contains(tui.box.Float.Hint, "enter body") {
 		t.Fatalf("hint = %q, want no reader affordance", tui.box.Float.Hint)
 	}
-	feed(tui, "v")
+	feed(tui, "\r")
 	if tui.reader != nil {
-		t.Fatal("v opened a reader for an entry without a body")
+		t.Fatal("enter opened a reader for an entry without a body")
 	}
 }
 
 // The selection moves with j and enter opens the reader on it. The hint
 // follows the selection: an entry without a body names no reader.
-func TestBodyReaderOpensOnEnter(t *testing.T) {
+func TestBodyReaderSelectionAndHint(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "jj")
@@ -186,7 +186,7 @@ func TestBodyReaderOpensOnEnter(t *testing.T) {
 func TestBodyReaderFollowsResize(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
-	feed(tui, "v")
+	feed(tui, "\r")
 	big := *tui.snap
 	big.Cols += 20
 	big.Rows += 10

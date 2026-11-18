@@ -81,7 +81,7 @@ internal/kdl         the KDL tokenizer shared by keymap and theme
 internal/cells       cell-width measuring and clipping
 internal/segment     a styled run of text
 internal/panel       the bordered box painter
-internal/ui          the scrolling window, the hint row and the one-line input
+internal/ui          the scrolling window, the message list, the hint row and the one-line input
 internal/vt          VT replay and screen serialisation
 internal/paths       the session filesystem layout
 internal/testutil    test helpers shared by more than one package
@@ -135,7 +135,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `S` | synchronize panes |
 | `a` | dashboard: every pane in a full-screen table |
 | `m` | message box: the session's log as a floating pane |
-| `N` | notification centre: the recent `notify/` entries |
+| `N` | message box opened on the `notify/` entries, the notification filter on |
 | `?` | all keymaps, in a floating pane |
 | `)` | next workspace |
 | `r` | rename the active workspace |
@@ -960,10 +960,11 @@ its reserved topic `notify/<pane id>`: the entered state as the entry's state,
 the message or the exit note as its text. The popups are subscribers of that
 log, not side effects of the transition. A headless session renders each entry
 through `notify-send`; an attached client raises a toast for the entries it has
-not seen and lists the recent ones in the notification centre, under `N`. An
-entry for the pane the operator is looking at is still logged but pops nothing,
-so a focused pane with a client attached stays quiet. `DM_NOTIFY=0` turns
-desktop notifications off, and a host without `notify-send` gets none.
+not seen and lists the recent ones under `N`, in the message box with the
+notification filter on. An entry for the pane the operator is looking at is
+still logged but pops nothing, so a focused pane with a client attached stays
+quiet. `DM_NOTIFY=0` turns desktop notifications off, and a host without
+`notify-send` gets none.
 
 ## Rendering
 
@@ -986,6 +987,13 @@ view. It replaces the offset and selection arithmetic each float and table
 writes for itself. `ui.Hints` lays one row of key hints out as plain text. It
 replaces the hint string each view builds by hand. Neither writes an escape
 sequence.
+
+`ui.MessageList` is the list behind the message view: the entries, the topic
+filter, the selection window, the read mark and the row painter. `Set`,
+`SetFilter` and `ToggleFilter` replace or narrow the rows and keep the selection
+on its entry, `Move`, `Top` and `Bottom` step it, `MarkRead` and `MarkReadAll`
+raise the read mark, and `Draw` paints one row per visible entry into the
+caller's buffer. The float keeps the title, the hint and the watcher page.
 
 `ui.Input` is one line of editable text: the runes and the caret, and the
 methods that insert, delete and move. It is the first component under the
@@ -1342,23 +1350,41 @@ Conventions the box does not enforce, and the ones to keep:
 - Liveness is the wait timeout. A dead pane posts nothing, so the orchestrator
   treats a timeout as a lost worker.
 
-`prefix m` floats the box over the panes. One row per entry, newest first, as
-`SEQ STATE KEY FROM MSG`, with the state in the colour the rail gives that
-status. `j`, `k` and the arrows scroll one row and the wheel scrolls three;
-`g` and `G` jump to the newest and the oldest row. The box grows with the log
-up to 22 rows and then scrolls, and its title names the rows in view. The title
-also counts the parked watches as `N watching` and the entries that arrived
-above a scrolled-back window as `+N`, and omits each part at zero. At 60 columns
-or wider each entry row starts with a two-cell count of the watches that were
-served that entry; a narrower view drops the marker whole, so the message keeps
-its cells. `w` swaps the entry list for the watcher page: one row per watch as
+`prefix m` floats the message view over the panes. `N` opens the same float on
+the `notify/` branch: the notification filter is a view over one log, not a
+second surface. One row per entry, newest first, as
+`MARK COUNT SEQ STATE KEY FROM AGE MSG`. `MARK` is `*` while the entry is past
+the read mark and a space once it is read. `COUNT` is the two-cell count of the
+watches that were served the entry; the whole column drops below 60 columns, so
+the message keeps its cells. `AGE` is short: `42s`, `7m`, `3h`, `2d`. The state
+sits in the colour the rail gives that status.
+
+`j`, `k` and the arrows move the selection one row, `PgUp` and `PgDn` one page,
+the wheel three rows, and `g` and `G` jump to the newest and the oldest row. The
+window follows the selection. The float grows with the log up to 22 rows and
+then scrolls. The title names the filter, `box` or `notifications`, the entry
+count, the rows in view, the parked watches as `N watching`, the entries that
+arrived above a scrolled-back window as `+N`, and the unread count. It omits
+each part at zero.
+
+`w` swaps the entry list for the watcher page: one row per watch as
 `PANE FILTER @CURSOR`, with a `wait` mark while a wait is parked. A live `sub`
-shows as parked too. A window the reader scrolled back stays on its top entry
-as new entries arrive, so the text does not slide. A post or a clear anywhere
-in the session refreshes an open view, and a change in the watch set pushes
-`{"type":"watch"}`, which asks for the list again at most once per 100 ms. The
-view follows a lane without a keypress. `esc`, `q` or the prefix key closes it.
-It posts nothing and clears nothing.
+shows as parked too. `enter` opens the selected entry's body over the list when
+the entry carries one. `m` toggles the notification filter and keeps the
+selection on its entry. `p` closes the float and focuses the pane the entry is
+about; an entry that names no pane, or a pane the session does not carry, raises
+a toast and changes nothing. `x` clears the selected entry's key; `X` clears
+what the view shows, which is the `notify/` branch under the filter and the
+whole log otherwise.
+
+A window the reader scrolled back stays on its top entry as new entries arrive,
+so the text does not slide. A post or a clear anywhere in the session refreshes
+an open view, and a change in the watch set pushes `{"type":"watch"}`, which
+asks for the list again at most once per 100 ms. The view follows a lane without
+a keypress. Opening a body marks that entry read, and closing the float marks
+the entries the filter shows read, so the bar badge and the row marks count from
+one seq. `esc`, `q` or the prefix key closes it. The hint names every key from
+the box keymap, so a rebind moves it.
 
 ## Subscriptions
 

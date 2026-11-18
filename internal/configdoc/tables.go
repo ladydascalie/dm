@@ -221,7 +221,7 @@ var ActionDesc = map[string]string{
 	"set-project":         "Set or clear the active workspace project.",
 	"toggle-rail":         "Cycle the rail between full, thin and hidden.",
 	"message-box":         "Open the message box.",
-	"notification-centre": "Open the notification centre: recent notify/ entries.",
+	"notification-centre": "Open the message box filtered to notify/ entries.",
 	"detach":              "Detach the client and leave the session running.",
 	"detach-alt":          "Detach the client and leave the session running; alternative key.",
 	"window-1":            "Select window 1 in the active workspace.",
@@ -306,8 +306,12 @@ var ActionDesc = map[string]string{
 	"clear":        "Clear the whole input.",
 
 	// box
-	"close-m":      "Close the message box; m is an alternative close key.",
-	"close-prefix": "Close the overlay without choosing anything; the prefix key is an alternative close key.",
+	"body":          "Open the selected entry's body.",
+	"filter-notify": "Toggle the notify topic filter.",
+	"jump-pane":     "Focus the pane the selected entry is about.",
+	"clear-entry":   "Clear the selected entry's key.",
+	"clear-filter":  "Clear what the view shows.",
+	"close-prefix":  "Close the overlay without choosing anything; the prefix key is an alternative close key.",
 
 	// help
 	"search":         "Start a search in the open view.",

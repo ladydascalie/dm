@@ -41,6 +41,12 @@ func TestComponentPageNamesEveryField(t *testing.T) {
 				}
 				checkMethods(t, c.keys, reflect.TypeOf(&panel.FloatingPane{}), c.draw)
 			})
+		case "messagelist":
+			t.Run(c.name, func(t *testing.T) {
+				checkFields(t, "props", c.props, reflect.TypeOf(ui.MessageListProps{}))
+				checkFields(t, "state", c.state, reflect.TypeOf(ui.MessageList{}))
+				checkMethods(t, c.keys, reflect.TypeOf(&ui.MessageList{}), c.draw)
+			})
 		}
 	}
 }

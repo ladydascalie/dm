@@ -16,17 +16,19 @@ import (
 // most its three newest entries, and the toast stack itself holds toastMax.
 const notifyFetch = 3
 
-// The two reads an id'd msg-list can serve; the reply carries only the id,
+// notifyRecentLimit caps the recent notify/ cache the bar badge counts from.
+const notifyRecentLimit = 50
+
+// The reads an id'd message request can serve; the reply carries only the id,
 // so the route rides in the client's map.
 const (
 	notifyRouteCatchUp = "catchup"
-	notifyRouteCentre  = "centre"
 	notifyRouteClear   = "clear"
 )
 
-// notifyRouteTag tags an outstanding id'd msg-list with the read it serves.
-// The map builds itself: a tui constructed by hand has no map until the first
-// request goes out.
+// notifyRouteTag tags an outstanding id'd message request with the read it
+// serves. The map builds itself: a tui constructed by hand has no map until the
+// first request goes out.
 func (t *tui) notifyRouteTag(id int, route string) {
 	if t.notifyRoute == nil {
 		t.notifyRoute = map[int]string{}
@@ -108,4 +110,52 @@ func (t *tui) takeNotifyList(m wire.Msg) {
 		t.notifyWant = false
 		t.notifyCatchUp()
 	}
+}
+
+// notifyRecentMerge folds a msg-list reply into the client's recent entries.
+// The reply is newest first; the known seqs are skipped and the cache keeps
+// its newest-first order, capped at notifyRecentLimit.
+func (t *tui) notifyRecentMerge(entries []box.Entry) {
+	known := make(map[int]bool, len(t.notifyRecent))
+	for _, e := range t.notifyRecent {
+		known[e.Seq] = true
+	}
+	var fresh []box.Entry
+	for _, e := range entries {
+		if !known[e.Seq] {
+			fresh = append(fresh, e)
+			known[e.Seq] = true
+		}
+	}
+	for i := len(fresh) - 1; i >= 0; i-- {
+		t.notifyRecent = append([]box.Entry{fresh[i]}, t.notifyRecent...)
+	}
+	if len(t.notifyRecent) > notifyRecentLimit {
+		t.notifyRecent = t.notifyRecent[:notifyRecentLimit]
+	}
+}
+
+// notifyRecentDropKey drops every cached entry under key, the rows a msg-clear
+// with that key removed server-side. The badge follows the cache, so it cannot
+// keep a cleared entry alive.
+func (t *tui) notifyRecentDropKey(key string) {
+	out := make([]box.Entry, 0, len(t.notifyRecent))
+	for _, e := range t.notifyRecent {
+		if e.Key != key {
+			out = append(out, e)
+		}
+	}
+	t.notifyRecent = out
+}
+
+// notifyUnread counts the cached entries past the read mark: the same rows the
+// box view marks unread, so the bar badge and the marks never drift.
+func (t *tui) notifyUnread() int {
+	n := 0
+	for _, e := range t.notifyRecent {
+		if e.Seq > t.notifyRead {
+			n++
+		}
+	}
+	return n
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/keymap"
 	"dm/internal/rail"
 	"dm/internal/wire"
@@ -792,9 +793,6 @@ func (t *tui) refreshHints(cfg *keymap.Config) {
 	if t.keys != nil {
 		t.keys.SetKeymap(cfg)
 	}
-	if t.ncentre != nil {
-		t.ncentre.SetKeymap(cfg)
-	}
 	if t.reader != nil {
 		t.reader.SetKeymap(cfg)
 	}
@@ -890,9 +888,11 @@ func (t *tui) runAction(name string) {
 	case "toggle-rail":
 		t.toggleRail()
 	case "message-box":
-		openBoxView(t)
+		openBoxView(t, "")
 	case "notification-centre":
-		openNotifyCentre(t)
+		// The same float, opened on the notify branch. The action name stays,
+		// so the N key and existing configs keep working.
+		openBoxView(t, box.NotifyPrefix)
 	case "help":
 		openKeymapView(t)
 		t.disarm()

@@ -63,8 +63,9 @@ var configTestDefaultActions = map[string][]string{
 	},
 	"box": {
 		"up", "up-arrow", "down", "down-arrow", "page-up",
-		"page-down", "top", "bottom", "toggle-page", "close",
-		"close-m", "close-prefix", "close-ctrl-c", "close-esc",
+		"page-down", "top", "bottom", "toggle-page", "body",
+		"filter-notify", "jump-pane", "clear-entry", "clear-filter",
+		"close", "close-prefix", "close-ctrl-c", "close-esc",
 	},
 	"help": {
 		"up", "up-arrow", "down", "down-arrow", "page-up",

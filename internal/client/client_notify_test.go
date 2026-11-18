@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/boxview"
 	"dm/internal/keymap"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -183,34 +184,39 @@ func TestNotifyReplyWantsRearm(t *testing.T) {
 	}
 }
 
-// The catch-up and the centre share one id counter; a reply routes by the tag
-// its request left, so an open centre's list never runs through the toast
-// handler and a late reply lands nowhere.
+// The catch-up and a view clear share one id counter; a reply routes by the tag
+// its request left, so a clear reply never raises a toast and a catch-up reply
+// never refetches the float.
 func TestNotifyRoutesSharedIds(t *testing.T) {
 	t.Parallel()
 	tui, got := clientTUI(t, nil)
-	tui.ncentre = newNotifyCentre(tui.snap, theme.DefaultTheme(), keymap.LoadDefault())
 	tui.notifyCatchUp()
-	tui.notifyCentreRequest()
+	tui.box = boxview.NewBoxView(tui.snap, theme.DefaultTheme(), keymap.LoadDefault())
+	tui.boxClear(box.ClearReq{Key: "notify/b"})
 	first := expectRequest(t, got)
 	second := expectRequest(t, got)
-	if first.ID != 1 || second.ID != 2 {
-		t.Fatalf("request ids = %d, %d, want the shared counter 1, 2", first.ID, second.ID)
+	if first.Action != "msg-list" || first.ID != 1 {
+		t.Fatalf("catch-up = %+v, want msg-list id 1", first)
 	}
-	// The centre's reply carries entries past the cursor; misrouted, they
-	// would toast. Routed, they fill the centre.
-	tui.apply(centreReply(t, 2, []box.Entry{
-		{Seq: 21, Key: "notify/b", State: box.StateDone, Msg: "centre one"},
-		{Seq: 20, Key: "notify/b", State: box.StateDone, Msg: "centre two"},
-	}))
+	if second.Action != "msg-clear" || second.ID != 2 {
+		t.Fatalf("clear = %+v, want msg-clear id 2", second)
+	}
+
+	// The clear's reply refetches the open float and raises no toast.
+	res, err := json.Marshal(box.ClearReply{Cleared: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-clear", ID: second.ID, OK: true, Res: res})
 	if got := toastTexts(tui); len(got) != 0 {
-		t.Fatalf("toasts = %q, want none from the centre's reply", got)
+		t.Fatalf("toasts = %q, want none from a clear", got)
 	}
-	if got := len(tui.ncentre.entries); got != 2 {
-		t.Fatalf("centre entries = %d, want 2", got)
+	if m := expectRequest(t, got); m.Action != "msg-list" || m.ID != 0 {
+		t.Fatalf("after the clear the client sent %+v, want the float's log", m)
 	}
+
 	// The catch-up's own reply raises its toasts and moves the cursor.
-	tui.apply(notifyReply(1, []box.Entry{
+	tui.apply(notifyReply(first.ID, []box.Entry{
 		{Seq: 11, Key: "notify/b", State: box.StateDone, Msg: "catch-up"},
 	}))
 	if got := toastTexts(tui); len(got) != 1 {
@@ -219,15 +225,14 @@ func TestNotifyRoutesSharedIds(t *testing.T) {
 	if tui.notifyCursor != 11 {
 		t.Fatalf("cursor = %d, want 11", tui.notifyCursor)
 	}
-	// A third round trip: the centre's next refresh routes too.
-	tui.notifyCentreRequest()
+	// A catch-up id on a clear reply lands nowhere: the tag says catch-up.
+	tui.notifyCatchUp()
 	third := expectRequest(t, got)
-	tui.apply(centreReply(t, third.ID, []box.Entry{
-		{Seq: 22, Key: "notify/b", State: box.StateDone, Msg: "centre three"},
-	}))
-	if got := len(tui.ncentre.entries); got != 1 {
-		t.Fatalf("centre entries = %d, want the newest reply alone", got)
+	if third.Action != "msg-list" {
+		t.Fatalf("catch-up = %+v, want msg-list", third)
 	}
+	tui.apply(wire.Msg{Type: "resp", Action: "msg-clear", ID: third.ID, OK: true, Res: res})
+	expectNothing(t, got)
 }
 
 // A notify toast keeps the entry's state and topic, so the box can name the

@@ -149,6 +149,61 @@ f.Draw(buf, th)`,
 	focus: "The app sets Active. The float never reads a key or a keymap.",
 	compose: "The content is a terminal or a paint func. The border, the labels and the " +
 		"ground are drawn around it; the panel never centres itself.",
+}, {
+	level: "component",
+	draw:  "Draw",
+	id:    "messagelist",
+	name:  "MessageList",
+	pkg:   "internal/ui",
+	summary: "MessageList is the list behind the message view: the entries, the topic filter, " +
+		"the selection window, the read mark and the row painter. It composes Viewport and owns " +
+		"no float, no border and no key byte: the caller sets the window height and paints the " +
+		"chrome around the rows.",
+	usage: `var list ui.MessageList
+list.Set(entries)              // newest first, as the box serves them
+list.SetFilter(box.NotifyPrefix)
+list.View.H = inner.H          // the caller sets the window height
+
+list.Draw(buf, th, ui.MessageListProps{
+    Rect:     inner,
+    Dim:      th.Palette.RailDim,
+    Text:     th.Palette.RailText,
+    Receipts: receipts,        // receipt count per entry seq
+    Active:   true,
+})`,
+	props: []componentField{
+		{"Rect", "layout.Rect", "zero", "The rows the list owns. A row is clipped to W and the window is H tall, placed from Rect's first row and column."},
+		{"Now", "time.Time", "zero", "The clock the age column reads. Zero means time.Now()."},
+		{"Dim", "theme.RGB", "", "An unselected row, and every row while the list is not Active."},
+		{"Text", "theme.RGB", "", "The selected row while the list is Active."},
+		{"Active", "bool", "false", "Whether the selected row keeps its full intensity. Focus is this prop and nothing else."},
+		{"Receipts", "map[int]int", "nil", "Receipt count per entry seq, keyed by seq. A missing seq counts zero, and the whole column is dropped below 60 columns."},
+	},
+	state: []componentField{
+		{"Entries", "[]box.Entry", "nil", "The log, newest first, as the box serves it."},
+		{"Filter", "string", `""`, "A topic prefix. Empty shows every entry."},
+		{"View", "ui.Viewport", "zero", "The selection and the window over the filtered rows. The caller sets H from the rect."},
+		{"Read", "int", "0", "The highest seq the reader has seen. An entry is unread when its seq is above it."},
+	},
+	keys: []componentKey{
+		{"replace the entries", "Set", "The log is replaced and the selection stays on its seq when the filter still shows it. A selection whose seq is gone keeps its row, clamped."},
+		{"filter", "SetFilter", "The list narrows to a topic prefix, or widens on an empty one. The selection stays on its seq when the filter shows it, and keeps its row otherwise."},
+		{"toggle the notify filter", "ToggleFilter", "An unfiltered list shows the notify branch, and any filtered list opens to every entry."},
+		{"move the selection", "Move", "The selection moves n rows toward older entries, clamped at both ends, and the window follows it."},
+		{"top", "Top", "The newest visible entry is selected and the window scrolls to the top."},
+		{"bottom", "Bottom", "The oldest visible entry is selected and the window scrolls to the end."},
+		{"read the selection", "Selected", "Reports the entry the selection sits on, or false on an empty list."},
+		{"count", "Len", "The number of rows the filter shows."},
+		{"count unread", "Unread", "The filtered entries past the read mark."},
+		{"mark one read", "MarkRead", "The read mark rises to the seq, and never walks back."},
+		{"mark the view read", "MarkReadAll", "Every entry the filter shows is marked read."},
+		{"read a row back", "SeqAt", "The seq of the filtered row, or 0 when the row is not shown. A caller that holds a filtered index, View.Off for one, reads the seq here."},
+		{"find a row", "Index", "The filtered row of the seq, or -1 when the filter hides it. A caller that holds the seq reads its row here after the entries change."},
+	},
+	focus: "The app sets Active. The list never reads the keymap and never sees a key byte. " +
+		"The mode's key handler is the only dispatcher, so a rebind moves the key and the hint together.",
+	compose: "It paints rows inside the rect a parent hands it and never paints a border. " +
+		"A float's paint calls it, and the parent keeps the title, the hint and the empty note.",
 }}
 
 // componentDefault renders a default cell: a code run when there is one, and an

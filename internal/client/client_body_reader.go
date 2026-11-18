@@ -156,14 +156,18 @@ func (r *bodyReader) fit() {
 // The client side of the reader: the keys that open the overlay on the box
 // view, and the hint the overlay carries.
 
-// openBodyReader opens the overlay for the entry the selection sits on. An
-// entry without a body opens nothing, which is why the hint only offers the
-// key when the selected entry carries one.
+// openBodyReader opens the overlay for the entry the selection sits on, and
+// marks that entry read. An entry without a body opens nothing, which is why
+// the hint only offers the key when the selected entry carries one.
 func openBodyReader(t *tui) {
 	e, ok := t.box.Selected()
 	if !ok || e.Body == "" {
 		return
 	}
+	if e.Seq > t.notifyRead {
+		t.notifyRead = e.Seq
+	}
+	t.box.MarkRead(e.Seq, t.theme())
 	t.reader = newBodyReader(e, t.box.Float.Rect, t.theme(), t.km())
 	t.AddFloatingPane(t.reader.Float)
 }

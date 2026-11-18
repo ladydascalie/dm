@@ -4,10 +4,16 @@ package boxview
 
 // The message box as a floating pane. The view is read-only: it lists the
 // session's entries newest first, one row each, and follows the log while it is
-// open through the server's box push. It also keeps the presence list, so a
-// reader can see who is parked on which filter and how far each has read. Keys
-// scroll it and toggle the watcher page, and a close key closes it. Every key
-// it names comes from the box keymap, so a rebind moves the hint with it.
+// open through the server's box push. A topic filter narrows it: the whole log,
+// or the notify branch the notification centre opens on. It also keeps the
+// presence list, so a reader can see who is parked on which filter and how far
+// each has read. Keys scroll it, swap the watcher page, toggle the filter and
+// act on the selected entry; every key it names comes from the box keymap, so a
+// rebind moves the hint with it.
+//
+// The rows, the selection, the filter and the unread marks live in ui.MessageList,
+// which owns the window and the row painter. The view keeps the float, the
+// watcher page, the title and the hint.
 
 import (
 	"bytes"
@@ -26,18 +32,6 @@ import (
 	"dm/internal/wire"
 )
 
-// The columns of one entry row, in order: receipt, seq, state, key, from, msg.
-// The fixed widths let a column read down the list.
-const (
-	boxSeqW   = 4
-	boxStateW = 7
-	boxKeyW   = 14
-	boxFromW  = 6
-	// boxReceiptW is the receipt marker: a two-cell count and the space that
-	// separates it from the seq column.
-	boxReceiptW = 3
-)
-
 // The columns of one watcher row, in order: pane, filter, cursor. The wait
 // mark follows the cursor.
 const (
@@ -49,21 +43,14 @@ const (
 	// WatchInterval is the shortest gap between watcher requests. A burst of
 	// watch pushes asks the server once.
 	WatchInterval = 100 * time.Millisecond
-
-	// boxReceiptMinW is the narrowest rect that carries the receipt marker.
-	// Below it the marker is dropped whole, so the message keeps its cells.
-	boxReceiptMinW = 60
 )
 
-// BoxView is the open message-box float: the entries the server sent, the rows
-// of the newest one shown at the top, the watchers the server last reported,
-// and the float that draws them.
+// BoxView is the open message-box float: the log under its topic filter, the
+// watchers the server last reported, and the float that draws them.
 type BoxView struct {
-	entries []box.Entry
-	// log is the selection and the window over the entries: the row the
-	// selection sits on and the first row in view. The view sets N and H from
-	// the log and the float; the value owns the clamp and the follow.
-	log ui.Viewport
+	// list is the log under its filter: the rows, the selection, the window,
+	// the read mark and the row painter.
+	list ui.MessageList
 	// new counts the entries that arrived above a scrolled-back window. It is
 	// zero while the window follows the newest entry.
 	new int
@@ -225,49 +212,93 @@ func themeEqual(a, b theme.Theme) bool {
 // rows is the number of rows the float fits: the larger list wins, so the
 // watcher page is usable before the first entry lands.
 func (b *BoxView) rows() int {
-	if len(b.watchers) > len(b.entries) {
+	if len(b.watchers) > b.list.Len() {
 		return len(b.watchers)
 	}
-	return len(b.entries)
+	return b.list.Len()
 }
 
 // Set replaces the log after a list reply or a box push. A scrolled-back
-// window keeps its top entry by seq, so new entries do not slide the text
-// under the reader. A window at the top follows the newest entry.
+// window keeps its top entry by seq in the rows the filter shows, so an
+// arrival the filter hides does not move the text under the reader. A window
+// at the top follows the newest entry instead.
 func (b *BoxView) Set(entries []box.Entry, th theme.Theme) {
-	top := 0
-	if b.log.Off > 0 && b.log.Off < len(b.entries) {
-		top = b.entries[b.log.Off].Seq
-	}
-	// A window at the top follows the newest entry, and the selection rides
-	// with it. A scrolled-back window keeps the selection by seq, the way it
-	// keeps the top row.
-	follow := b.log.Off == 0
-	selSeq := 0
-	if !follow && b.log.Sel > 0 && b.log.Sel < len(b.entries) {
-		selSeq = b.entries[b.log.Sel].Seq
-	}
-	b.entries = entries
+	// View.Off is an index in the filtered rows, so the window anchor and its
+	// new row are read and found through the filter as well.
+	old := b.list.View.Off
+	follow := old == 0
+	top := b.list.SeqAt(old)
+	// The list keeps the selection on its seq. A window at the top moves the
+	// selection to the newest entry instead, the way a log reader expects.
+	b.list.Set(entries)
 	b.Float.Rect = BoxViewRect(b.snap, b.rows())
-	if top != 0 {
-		if i := boxSeqIndex(entries, top); i >= 0 {
-			// The entries between the old top and the new one arrived above
-			// the window; the rest of the log did not move.
-			b.new += i - b.log.Off
+	switch {
+	case follow:
+		b.list.Top()
+		b.new = 0
+	case top != 0:
+		if i := b.list.Index(top); i >= 0 {
+			// The rows the filter shows between the old top and the new one
+			// arrived above the window; the rest of the view did not move.
+			b.new += i - old
 			if b.new < 0 {
 				b.new = 0
 			}
-			b.log.Off = i
-		}
-	}
-	if follow {
-		b.log.Sel = 0
-	} else if selSeq != 0 {
-		if i := boxSeqIndex(entries, selSeq); i >= 0 {
-			b.log.Sel = i
+			b.list.View.Off = i
 		}
 	}
 	b.paint(th)
+}
+
+// SetFilter narrows the log to a topic prefix; an empty prefix shows every
+// entry. The selection stays on its seq when the new filter shows it, and the
+// float refits to the rows that are left.
+func (b *BoxView) SetFilter(prefix string, th theme.Theme) {
+	if prefix == b.list.Filter {
+		return
+	}
+	b.list.SetFilter(prefix)
+	b.Float.Rect = BoxViewRect(b.snap, b.rows())
+	b.paint(th)
+}
+
+// Filter is the topic prefix the log is narrowed to, empty when it shows every
+// entry.
+func (b *BoxView) Filter() string {
+	return b.list.Filter
+}
+
+// ToggleFilter swaps between the whole log and the notify topic: an unfiltered
+// log shows the notify branch, and a filtered one opens to every entry.
+func (b *BoxView) ToggleFilter(th theme.Theme) {
+	if b.list.Filter == "" {
+		b.SetFilter(box.NotifyPrefix, th)
+		return
+	}
+	b.SetFilter("", th)
+}
+
+// SetRead raises the list's read mark to seq; an entry is unread when its seq
+// is above it. The mark never walks back.
+func (b *BoxView) SetRead(seq int, th theme.Theme) {
+	if seq <= b.list.Read {
+		return
+	}
+	b.list.Read = seq
+	b.paint(th)
+}
+
+// MarkRead marks one entry read, the entry whose body the operator opened.
+func (b *BoxView) MarkRead(seq int, th theme.Theme) {
+	b.list.MarkRead(seq)
+	b.paint(th)
+}
+
+// MarkReadAll marks every entry the filter shows read and reports the mark.
+// The caller mirrors it, so the bar badge counts from the same seq.
+func (b *BoxView) MarkReadAll() int {
+	b.list.MarkReadAll()
+	return b.list.Read
 }
 
 // SetWatchers replaces the watcher page after a msg-watchers reply. The float
@@ -278,16 +309,6 @@ func (b *BoxView) SetWatchers(watchers []box.Watch, th theme.Theme) {
 	b.paint(th)
 }
 
-// boxSeqIndex finds an entry by seq in the newest-first log.
-func boxSeqIndex(entries []box.Entry, seq int) int {
-	for i, e := range entries {
-		if e.Seq == seq {
-			return i
-		}
-	}
-	return -1
-}
-
 // Scroll moves the selection by n rows, positive toward older rows, and the
 // window follows so the selection stays in view. The watcher page keeps its
 // own offset and scrolls, so a toggle leaves each where it was.
@@ -296,7 +317,7 @@ func (b *BoxView) Scroll(n int, th theme.Theme) {
 		b.watches.Off += n
 		b.fitWatches()
 	} else {
-		b.log.Move(n)
+		b.list.Move(n)
 	}
 	b.paint(th)
 }
@@ -306,7 +327,7 @@ func (b *BoxView) ListLen() int {
 	if b.page {
 		return len(b.watchers)
 	}
-	return len(b.entries)
+	return b.list.Len()
 }
 
 // fit sizes both windows to their lists and the float and holds them on their
@@ -314,10 +335,10 @@ func (b *BoxView) ListLen() int {
 // all land here. The arrival count clears once the window is back at the
 // newest entry.
 func (b *BoxView) fit() {
-	b.log.N, b.log.H = len(b.entries), b.Float.Rect.H
-	b.log.Ensure()
+	b.list.View.H = b.Float.Rect.H
+	b.list.View.Ensure()
 	b.fitWatches()
-	if b.log.Off == 0 {
+	if b.list.View.Off == 0 {
 		b.new = 0
 	}
 }
@@ -332,35 +353,27 @@ func (b *BoxView) fitWatches() {
 // Selected is the entry the selection sits on: the one the body reader opens.
 // The watcher page has no selection.
 func (b *BoxView) Selected() (box.Entry, bool) {
-	if b.page || b.log.Sel < 0 || b.log.Sel >= len(b.entries) {
+	if b.page {
 		return box.Entry{}, false
 	}
-	return b.entries[b.log.Sel], true
+	return b.list.Selected()
 }
 
 // Top is the index of the window's first row. The view owns the window; a
 // caller reads it here instead of keeping its own mirror.
 func (b *BoxView) Top() int {
-	return b.log.Off
-}
-
-// Select selects the entry with the seq and lands it at the top of the
-// window, the way the notification centre's handover asks. A seq the log
-// does not carry changes nothing.
-func (b *BoxView) Select(seq int, th theme.Theme) {
-	i := boxSeqIndex(b.entries, seq)
-	if i < 0 {
-		return
-	}
-	b.log.Sel = i
-	b.log.Off = i
-	b.paint(th)
+	return b.list.View.Off
 }
 
 // TogglePage swaps the float between the entry list and the watcher page.
 func (b *BoxView) TogglePage(th theme.Theme) {
 	b.page = !b.page
 	b.paint(th)
+}
+
+// Unread is the count of visible entries past the read mark.
+func (b *BoxView) Unread() int {
+	return b.list.Unread()
 }
 
 // paint rewrites the float's terminal from the entries or the watcher list.
@@ -388,25 +401,35 @@ func (b *BoxView) paint(th theme.Theme) {
 	b.Float.VT = term
 }
 
-// paintEntries draws the window of the log. A wide enough rect carries the
-// receipt count in every row.
+// paintEntries draws the window of the log with the list's own painter. The
+// receipt count per entry comes from the watches: the filters that cover the
+// entry's key and whose cursor is at or past its seq.
 func (b *BoxView) paintEntries(buf *bytes.Buffer, r layout.Rect, th theme.Theme) {
-	if len(b.entries) == 0 {
-		boxPaintNote(buf, 1, "no entries yet", r.W)
+	if b.list.Len() == 0 {
+		boxPaintNote(buf, 1, b.emptyNote(), r.W)
 		return
 	}
-	for row := 0; row < r.H; row++ {
-		i := b.log.Off + row
-		if i >= len(b.entries) {
-			break
-		}
-		fmt.Fprintf(buf, "\x1b[%d;1H", row+1)
-		receipt := -1
-		if r.W >= boxReceiptMinW {
-			receipt = b.received(b.entries[i])
-		}
-		boxPaintRow(buf, th, b.entries[i], r.W, receipt, i == b.log.Sel)
+	receipts := make(map[int]int, len(b.list.Entries))
+	for _, e := range b.list.Entries {
+		receipts[e.Seq] = b.received(e)
 	}
+	b.list.Draw(buf, th, ui.MessageListProps{
+		Rect:     layout.Rect{W: r.W, H: r.H},
+		Dim:      th.Palette.RailDim,
+		Text:     th.Palette.RailText,
+		Active:   true,
+		Receipts: receipts,
+	})
+}
+
+// emptyNote is the placeholder the list page paints when it has no rows. A
+// filter can hide every entry of a log that is not empty, so the note names the
+// filter when one is on.
+func (b *BoxView) emptyNote() string {
+	if b.list.Filter != "" {
+		return "no entries under " + b.list.Filter
+	}
+	return "no entries yet"
 }
 
 // paintWatchers draws the watcher page in the server's order, clipped to the
@@ -431,27 +454,32 @@ func boxPaintNote(buf *bytes.Buffer, row int, text string, w int) {
 	fmt.Fprintf(buf, "\x1b[%d;1H\x1b[0m\x1b[90m %s", row, cells.Clip(text, w-1))
 }
 
-// title is the count in the top border, the visible rows when the log is
-// longer than the box, the parked watches, and the entries that arrived above
-// a scrolled-back window. The last two are omitted when they are zero.
+// title is the count in the top border, naming the filter: box unfiltered,
+// notifications filtered. It carries the visible rows when the log is longer
+// than the box, the parked watches, the entries that arrived above a
+// scrolled-back window and the unread count. Each is omitted when it is zero.
 func (b *BoxView) title() string {
-	n := len(b.entries)
+	n := b.list.Len()
+	name := "box"
+	if b.list.Filter != "" {
+		name = "notifications"
+	}
 	var head string
 	switch n {
 	case 0:
-		head = "box  empty"
+		head = name + "  empty"
 	case 1:
-		head = "box  1 entry"
+		head = name + "  1 entry"
 	default:
 		rows := b.Float.Rect.H
 		if n <= rows {
-			head = fmt.Sprintf("box  %d entries", n)
+			head = fmt.Sprintf("%s  %d entries", name, n)
 		} else {
-			last := b.log.Off + rows
+			last := b.list.View.Off + rows
 			if last > n {
 				last = n
 			}
-			head = fmt.Sprintf("box  %d entries  %d-%d", n, b.log.Off+1, last)
+			head = fmt.Sprintf("%s  %d entries  %d-%d", name, n, b.list.View.Off+1, last)
 		}
 	}
 	parts := []string{head}
@@ -461,20 +489,28 @@ func (b *BoxView) title() string {
 	if b.new > 0 {
 		parts = append(parts, fmt.Sprintf("+%d", b.new))
 	}
+	if unread := b.list.Unread(); unread > 0 {
+		parts = append(parts, fmt.Sprintf("%d unread", unread))
+	}
 	return " " + strings.Join(parts, "  ") + " "
 }
 
-// hint is the float's bottom border: the keys the view takes, named from the
-// box keymap so a rebind moves the hint. The reader affordance is the client's
-// own key, because the box keymap binds no action to it.
+// hint is the float's bottom border: the keys the view takes, every one named
+// from the box keymap, so a rebind moves the hint. The body affordance shows
+// only when the selected entry carries a body.
 func (b *BoxView) hint() string {
-	hints := []ui.Hint{{Keys: []string{b.key("down"), b.key("up")}, Label: "scroll"}}
+	hints := []ui.Hint{{Keys: []string{b.key("down"), b.key("up")}, Label: "move"}}
 	if b.page {
 		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "log"})
 	} else {
 		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "watchers"})
+		if b.list.Filter == "" {
+			hints = append(hints, ui.Hint{Keys: []string{b.key("filter-notify")}, Label: "notify"})
+		} else {
+			hints = append(hints, ui.Hint{Keys: []string{b.key("filter-notify")}, Label: "all"})
+		}
 		if e, ok := b.Selected(); ok && e.Body != "" {
-			hints = append(hints, ui.Hint{Keys: []string{"enter"}, Label: "body"})
+			hints = append(hints, ui.Hint{Keys: []string{b.key("body")}, Label: "body"})
 		}
 	}
 	return ui.Hints(append(hints, ui.Hint{Keys: []string{b.key("close-esc")}, Label: "close"}))
@@ -548,67 +584,4 @@ func boxPaintWatch(buf *bytes.Buffer, w box.Watch, width int) {
 	}
 	buf.WriteString("\x1b[0m\x1b[90m")
 	buf.WriteString(cells.Clip(row, width))
-}
-
-// boxPaintRow writes one entry into buf, dim text with the state word in the
-// colour the rail gives that state. A receipt of zero or more prefixes a
-// two-cell count; a negative receipt drops the marker. The row is clipped to
-// w cells.
-func boxPaintRow(buf *bytes.Buffer, th theme.Theme, e box.Entry, w int, receipt int, sel bool) {
-	row, start := boxRowText(e, w, receipt)
-	state := string(e.State)
-	if start+len(state) > cells.Cells(row) {
-		buf.WriteString(row)
-		return
-	}
-	// The selected row keeps its full intensity; the rest sit dim, the way
-	// the notification centre paints its rows.
-	text := "\x1b[0m\x1b[90m"
-	if sel {
-		text = "\x1b[0m"
-	}
-	buf.WriteString(text)
-	buf.WriteString(row[:start])
-	buf.WriteString("\x1b[0m")
-	buf.WriteString(boxStateColour(th, e.State).FG())
-	buf.WriteString(state)
-	buf.WriteString("\x1b[0m")
-	buf.WriteString(text)
-	buf.WriteString(row[start+len(state):])
-}
-
-// boxRowText is the plain text of one entry row, columns padded and the whole
-// clipped to w cells. It also returns the cell offset of the state column: a
-// seq past the four-cell column prints whole and shifts the later columns
-// right, so the painter derives the highlight from the rendered prefix.
-func boxRowText(e box.Entry, w int, receipt int) (string, int) {
-	key := cells.Pad(cells.Clip(e.Key, boxKeyW), boxKeyW)
-	from := cells.Pad(cells.Clip(e.From, boxFromW), boxFromW)
-	mark := ""
-	if receipt >= 0 {
-		if receipt > 99 {
-			receipt = 99
-		}
-		mark = fmt.Sprintf("%2d ", receipt)
-	}
-	seq := fmt.Sprintf("%*d", boxSeqW, e.Seq)
-	start := cells.Cells(mark) + cells.Cells(seq) + 1
-	return cells.Clip(mark+seq+" "+fmt.Sprintf("%s %s %s %s",
-		cells.Pad(string(e.State), boxStateW), key, from, e.Msg), w), start
-}
-
-// boxStateColour is the state's hue. It is the rail's status colour, so a lane
-// reads the same in the box as on the rail. note carries no progress meaning,
-// so it is dim text.
-func boxStateColour(th theme.Theme, st box.State) theme.RGB {
-	if st == box.StateNote {
-		return th.Palette.RailDim
-	}
-	if s, ok := th.States[string(st)]; ok {
-		return s.Colour
-	}
-	if s, ok := th.States["unknown"]; ok {
-		return s.Colour
-	}
-	return theme.DefaultTheme().States["unknown"].Colour
 }
