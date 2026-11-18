@@ -8,19 +8,39 @@ connection, a writer, a key stream, a resize channel and a size function, and
 runs one attached session over them. `Run` keeps its terminal and calls the
 same code.
 
-What is fake is the session on the other end. One window, several panes, a
-pretend shell in each, no pty, no pane daemon, no server and no state file. The
-fake lives in `main_js.go` and answers the real wire messages. It serves splits
-in four directions, focus by direction or by rail row, next and previous pane,
-close pane, zoom, swap by direction, synchronize panes, the rail's fold
-triangles, the rail width, and the five layout presets including the cycle. New
-window and new workspace are not served yet: they answer with an empty reply
-and change nothing.
+What is fake is the session on the other end. The model is real enough for a
+tour: workspaces `s1` and `s2` holding windows `w1`, `w2`, ..., each window with
+its own layout tree, focus, preset and synchronize flag, and a pretend shell in
+every pane (`w1p1`, `w1p2`, ...). There is no pty, no pane daemon, no server and
+no state file. The fake lives in `internal/websession` and answers the real wire
+messages; `main_js.go` keeps only the page bridge.
+
+It serves new-window and new-workspace (naming no argv or cwd), select-window by
+index, next and previous window, next and previous workspace, close-window and
+close-workspace, focus on any pane in the session, the rail's fold triangles for
+a window or a workspace, the rail width, splits in four directions, close pane,
+zoom, swap by direction, next and previous pane, synchronize panes, and the five
+layout presets including the cycle. A focus on a pane in another window or
+workspace makes both active, so a rail click, a tab click and a key agree.
+
+A close never ends the session the tour is teaching: the last window, the last
+pane and the last workspace are refused. Anything else is still unserved and
+answers with an empty reply.
 
 The fake uses the same helpers the server uses rather than its own arithmetic:
 `layout.SplitLeaf`, `layout.PruneLeaf`, `layout.Swap`, `layout.Neighbor` and
-`layout.ApplyPreset`. Where a helper does not exist, that is a sign the fake is
-standing in for something that belongs in the tree.
+`layout.ApplyPreset`. Pane ids only move forward per window, as on a machine.
+Where a helper does not exist, that is a sign the fake is standing in for
+something that belongs in the tree.
+
+## Scrollback
+
+Each pane keeps a bounded raw ring of the bytes it printed, 512 KiB, the way a
+pane daemon does. A resize repaint goes into the ring too, because those bytes
+really printed. A `replay` request returns the ring for a pane, and the client
+builds scrollback by replaying it through `vt.ReplayRows` at the pane's own
+rectangle. After enough output a wheel into history shows rows the screen no
+longer holds, and the replay ends with the live screen.
 
 ## The lesson
 
@@ -102,6 +122,7 @@ shipped code.
 
 The pane, server and session packages are not in the wasm yet. `creack/pty` and
 `syscall.SysProcAttr.Setsid` do not build for js, so the next seams are the pty,
-the pane's own `net.Listen("unix")`, and the state file. Nothing here is a
-lesson, an event stream or a fake shell worth teaching: a tour needs those, and
-they do not exist yet.
+the pane's own `net.Listen("unix")`, and the state file. The fake persists
+nothing, and it does not move panes or windows, rename anything, or answer the
+separate list requests. Its tests drive the session over the wire and are named
+for what they prove.
