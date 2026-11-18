@@ -90,6 +90,39 @@ func TestTheBasicsTrackPlaysThrough(t *testing.T) {
 	}
 }
 
+// TestTheWiderSessionTrackPlaysThrough plays the window, workspace and
+// scrollback track the way a person would, event by event.
+func TestTheWiderSessionTrackPlaysThrough(t *testing.T) {
+	var track Track
+	for _, tr := range Tracks {
+		if tr.ID == "windows" {
+			track = tr
+		}
+	}
+	if track.ID == "" {
+		t.Fatal("the windows track is gone")
+	}
+
+	l := Start(track)
+	events := []Event{
+		{Type: "action", Name: "new-window"},
+		{Type: "action", Name: "next-window"},
+		{Type: "action", Name: "new-workspace"},
+		{Type: "action", Name: "next-workspace"},
+		{Type: "command", Line: "cat CHANGELOG.md"},
+		{Type: "action", Name: "scrollback"},
+	}
+	for _, ev := range events {
+		if !l.Feed(ev) {
+			at, step, _ := l.Current()
+			t.Fatalf("step %d %q ignored %v", at+1, step.Title, ev)
+		}
+	}
+	if !l.Finished() {
+		t.Fatal("the windows track did not finish")
+	}
+}
+
 func TestTheLadderClimbsOnTimeAndNeverFalls(t *testing.T) {
 	l := Start(Track{Steps: []Step{{Title: "one", Done: Rule{Action: "split-right"}, Keys: []Key{{Label: "|", Bytes: "|"}}}}})
 	now := l.startedAt

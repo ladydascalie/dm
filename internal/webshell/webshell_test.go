@@ -70,6 +70,23 @@ func TestCatReadsTheSameTree(t *testing.T) {
 	}
 }
 
+// TestTheChangelogFillsAScreen is the fixture's proof for the tour's scrollback
+// step: one command prints more rows than the page can show at its tallest, so
+// entering scrollback always has history above the screen.
+func TestTheChangelogFillsAScreen(t *testing.T) {
+	s := New()
+	got := plain(run(s, "cat CHANGELOG.md"))
+	rows := strings.Split(strings.TrimSuffix(got, "\r\n"), "\r\n")
+	if len(rows) < 40 {
+		t.Fatalf("cat CHANGELOG.md printed %d rows, want at least 40", len(rows))
+	}
+	for _, want := range []string{"# Changelog", "print hello, world"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("cat CHANGELOG.md is missing %q", want)
+		}
+	}
+}
+
 func TestGitKnowsWhereItStands(t *testing.T) {
 	s := New()
 	if got := run(s, "git status"); !strings.Contains(got, "modified:   greet.go") {

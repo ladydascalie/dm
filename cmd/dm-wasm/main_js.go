@@ -22,7 +22,9 @@ package main
 
 import (
 	"net"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"syscall/js"
 	"time"
@@ -164,6 +166,27 @@ type resizeSignal struct{}
 func (resizeSignal) String() string { return "resize" }
 func (resizeSignal) Signal()        {}
 
+// trackFromURL names the track to play. The page has no hub yet, so a track is
+// picked with ?track=<id> and a name no track answers plays the first one, which
+// is what a bare address gets. Delete this when the hub names the track itself.
+func trackFromURL() lesson.Track {
+	loc := js.Global().Get("location")
+	if loc.Type() != js.TypeObject {
+		return lesson.Tracks[0]
+	}
+	q, err := url.ParseQuery(strings.TrimPrefix(loc.Get("search").String(), "?"))
+	if err != nil {
+		return lesson.Tracks[0]
+	}
+	id := q.Get("track")
+	for _, tr := range lesson.Tracks {
+		if tr.ID == id {
+			return tr
+		}
+	}
+	return lesson.Tracks[0]
+}
+
 func main() {
 	size := &sizer{cols: 100, rows: 30}
 	b := &bridge{}
@@ -179,8 +202,7 @@ func main() {
 
 	clientConn, serverConn := net.Pipe()
 	events := make(chan map[string]any, 64)
-	track := lesson.Tracks[0]
-	l := lesson.Start(track)
+	l := lesson.Start(trackFromURL())
 	if _, step, ok := l.Current(); ok {
 		pushEvent(events, lessonEvent("lesson.step", l, step))
 	}

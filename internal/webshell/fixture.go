@@ -8,7 +8,7 @@ package webshell
 var tree = map[string][]string{
 	Home:               {"projects"},
 	Home + "/projects": {"hello"},
-	Repo:               {"README.md", "greet.go", "main.go"},
+	Repo:               {"CHANGELOG.md", "README.md", "greet.go", "main.go"},
 	"/":                {"home"},
 	"/home":            {"guest"},
 }
@@ -16,6 +16,71 @@ var tree = map[string][]string{
 // files maps a path to its contents.
 var files = map[string]string{
 	Repo + "/README.md": "# hello\n\nA tiny Go project that greets you.\n\n    go run .\n",
+	Repo + "/CHANGELOG.md": `# Changelog
+
+Every change to hello, newest first.
+
+## Unreleased
+
+- greet takes the name from the caller
+- main prints what greet returns
+- add a case for an empty name
+
+## 0.4.0
+
+- greet returns the string instead of printing it
+- main prints the result
+- README says how to run it
+
+## 0.3.3
+
+- fix the greeting for a name with a space
+- drop the unused import
+
+## 0.3.2
+
+- print the greeting once, not twice
+- keep the build green
+
+## 0.3.1
+
+- add an example to the README
+- rename the package to main
+
+## 0.3.0
+
+- split greet into its own file
+- add the first test
+
+## 0.2.3
+
+- refuse an empty name
+- say hello, not hi
+
+## 0.2.2
+
+- trim the name before printing
+- lowercase the first letter
+
+## 0.2.1
+
+- print to stdout instead of stderr
+- add the run line to the README
+
+## 0.2.0
+
+- read the name from the command line
+- default to world when it is missing
+
+## 0.1.1
+
+- move the greeting into a function
+- add a blank line before the output
+
+## 0.1.0
+
+- first commit
+- print hello, world`,
 	Repo + "/main.go": `package main
 
 import "fmt"

@@ -108,6 +108,9 @@ The page gives the terminal the keyboard at boot and after any click on the page
 a browser takes `ctrl+b` for its own bookmarks bar otherwise and the prefix never reaches
 the client. The bar under the screen says when the browser holds the keys instead.
 
+The page plays the first track. Name another one by its id, for example
+<http://127.0.0.1:8765/?track=windows>, until the page grows a track list.
+
 ## What the seam is
 
 | Real machine | Here |
