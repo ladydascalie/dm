@@ -800,6 +800,9 @@ func (t *tui) refreshHints(cfg *keymap.Config) {
 
 // runAction runs one action from the main keymap.
 func (t *tui) runAction(name string) {
+	// One action per key, reported before it runs, so a harness sees the same
+	// order the session does.
+	t.emit(Event{Type: "action", Name: name})
 	switch name {
 	case "split-right":
 		t.action("split", func(m *wire.Msg) { m.Dir = "right" })

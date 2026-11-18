@@ -99,8 +99,11 @@ func TestAttachConnRunsWithNoTerminal(t *testing.T) {
 		}
 	}()
 
+	var events []Event
+	var evMu sync.Mutex
 	go func() {
-		_, _ = attachConn(&transport.Conn{Conn: clientConn}, out, keys, winch, size.get, "test", &pacer{})
+		onEvent := func(e Event) { evMu.Lock(); events = append(events, e); evMu.Unlock() }
+		_, _ = attachConn(&transport.Conn{Conn: clientConn}, out, keys, winch, size.get, "test", &pacer{}, onEvent)
 	}()
 
 	waitFrame(t, frames, func(m wire.Msg) bool { return m.Type == "attach" })
@@ -110,6 +113,29 @@ func TestAttachConnRunsWithNoTerminal(t *testing.T) {
 	m := waitFrame(t, frames, func(m wire.Msg) bool { return m.Type == "keys" })
 	if string(m.Keys) != "x" {
 		t.Fatalf("keys = %q, want %q", m.Keys, "x")
+	}
+
+	// The tap reports the action a keybinding ran.
+	keys <- []byte("\x02")
+	keys <- []byte("|")
+	deadline := time.After(5 * time.Second)
+	for {
+		evMu.Lock()
+		found := false
+		for _, e := range events {
+			if e.Type == "action" && e.Name == "split-right" {
+				found = true
+			}
+		}
+		evMu.Unlock()
+		if found {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("no split-right action reported")
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 
 	size.set(100, 30)

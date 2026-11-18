@@ -47,7 +47,9 @@ const (
 type bridge struct {
 	mu      sync.Mutex
 	out     js.Value
+	events  js.Value
 	pending [][]byte
+	held    []map[string]any
 }
 
 // Write sends one frame to the page.
@@ -70,6 +72,31 @@ func (b *bridge) send(fn js.Value, p []byte) {
 	buf := js.Global().Get("Uint8Array").New(len(p))
 	js.CopyBytesToJS(buf, p)
 	fn.Invoke(buf)
+}
+
+// pushEvent queues one event for the page, dropping it when nobody is reading:
+// a lesson must never stall the session behind a slow card.
+func pushEvent(events chan map[string]any, ev map[string]any) {
+	select {
+	case events <- ev:
+	default:
+	}
+}
+
+// drainEvents hands events to the page's callback as they arrive. Events that
+// came before the page registered are held and delivered in order.
+func drainEvents(b *bridge, events chan map[string]any) {
+	for ev := range events {
+		b.mu.Lock()
+		fn := b.events
+		if fn.IsUndefined() || fn.IsNull() {
+			b.held = append(b.held, ev)
+			b.mu.Unlock()
+			continue
+		}
+		b.mu.Unlock()
+		fn.Invoke(js.ValueOf(ev))
+	}
 }
 
 // lastReq is the request the fake handled last, for the page or a test that
@@ -132,8 +159,19 @@ func main() {
 	_, _ = b.Write([]byte("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h"))
 
 	clientConn, serverConn := net.Pipe()
-	go fakeServer(serverConn, size)
-	go func() { _, _ = client.Attach(clientConn, b, keys, winch, size.get, "spike") }()
+	events := make(chan map[string]any, 64)
+	go fakeServer(serverConn, size, events)
+	go func() {
+		h := client.Harness{
+			Conn: clientConn, Out: b, Keys: keys, Winch: winch,
+			Size: size.get, Session: "spike",
+			OnEvent: func(e client.Event) {
+				pushEvent(events, map[string]any{"type": e.Type, "name": e.Name})
+			},
+		}
+		_, _ = client.Attach(h)
+	}()
+	go drainEvents(b, events)
 
 	api := map[string]any{
 		"onOutput": js.FuncOf(func(_ js.Value, args []js.Value) any {
@@ -151,6 +189,17 @@ func main() {
 			select {
 			case keys <- []byte(args[0].String()):
 			default: // a page that types faster than the client reads
+			}
+			return nil
+		}),
+		"onEvent": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			b.mu.Lock()
+			b.events = args[0]
+			held := b.held
+			b.held = nil
+			b.mu.Unlock()
+			for _, ev := range held {
+				b.events.Invoke(js.ValueOf(ev))
 			}
 			return nil
 		}),
@@ -199,11 +248,14 @@ type session struct {
 	zoom string
 	// sync is the window's synchronize-panes flag: keys reach every pane.
 	sync bool
+	// events carries what the shells ran to the page, which is how a lesson
+	// sees a command and not just a key.
+	events chan map[string]any
 }
 
 // newSession makes the one pane a session starts with.
-func newSession(size *sizer) *session {
-	s := &session{size: size, panes: map[string]*shell{}, seq: 1, rail: layout.DefaultRail}
+func newSession(size *sizer, events chan map[string]any) *session {
+	s := &session{size: size, panes: map[string]*shell{}, seq: 1, rail: layout.DefaultRail, events: events}
 	s.root = &layout.Node{Pane: "w1p1"}
 	s.focus = "w1p1"
 	s.fit()
@@ -250,6 +302,9 @@ func (s *session) fit() {
 			continue
 		}
 		sh := newShell(rect.W, rect.H)
+		sh.onRun = func(line string) {
+			pushEvent(s.events, map[string]any{"type": "command", "line": line})
+		}
 		sh.greet()
 		s.panes[id] = sh
 	}
@@ -495,8 +550,8 @@ func (s *session) push(c net.Conn) {
 
 // fakeServer is the session the client talks to. It answers the frames a server
 // answers, over a pipe instead of a socket.
-func fakeServer(c net.Conn, size *sizer) {
-	s := newSession(size)
+func fakeServer(c net.Conn, size *sizer, events chan map[string]any) {
+	s := newSession(size, events)
 	s.push(c)
 
 	for {
@@ -538,6 +593,8 @@ func fakeServer(c net.Conn, size *sizer) {
 type shell struct {
 	term *vt.Term
 	line []rune
+	// onRun hears every line a person ran, nil when nobody is listening.
+	onRun func(line string)
 	// esc is where a key is in an escape sequence: 0 outside one, 1 after the
 	// esc, 2 inside a CSI. A sequence is swallowed, so an arrow key does not
 	// leave its tail on the line.
@@ -639,6 +696,9 @@ func (s *shell) emit(b []byte) []byte {
 // run answers one line. An unknown word is refused the way a shell refuses it,
 // so a step cannot pass on a typo.
 func (s *shell) run(line string) []byte {
+	if s.onRun != nil {
+		s.onRun(line)
+	}
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
 		return nil

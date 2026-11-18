@@ -96,6 +96,9 @@ type tui struct {
 	// a buffer in a test.
 	out io.Writer
 
+	// onEvent reports what the operator did to a harness, nil in a session.
+	onEvent func(Event)
+
 	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help"
 	sessions []transport.SessionInfo
 	sel      int
@@ -664,24 +667,53 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 		cols, rows, _ := term.GetSize(fd)
 		return cols, rows
 	}
-	return attachConn(c, os.Stdout, keys, winch, size, name, pace)
+	return attachConn(c, os.Stdout, keys, winch, size, name, pace, nil)
 }
 
-// Attach runs one attached session over a connection the caller made, writing
-// frames to out and taking the size from size. Run owns a terminal, reads its
-// own size and keys, and asks the outer terminal for its colours; Attach owns
-// none of that, which is what a harness with no tty needs. It returns the
-// session to switch to, empty when the client is done.
-func Attach(c net.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), session string) (string, error) {
+// Event is one thing the operator did, reported to a harness that wants to
+// check a step against it. The client is the only place that knows which
+// action a key ran, so the report comes from here and not from the session.
+type Event struct {
+	// Type is "action". More will follow as a harness needs them.
+	Type string
+	// Name is the keybinding action, such as "split-right".
+	Name string
+}
+
+// Harness is what a caller with no terminal supplies. Run owns a terminal: raw
+// mode, the key reader, the colour probe, the resize signal, os.Stdout. A
+// harness owns none of that, so it hands over the connection, where frames go,
+// where keys and resizes come from, and where to report what happened.
+type Harness struct {
+	Conn    net.Conn
+	Out     io.Writer
+	Keys    <-chan []byte
+	Winch   <-chan os.Signal
+	Size    func() (int, int)
+	Session string
+	// OnEvent receives one Event per action the operator ran. Nil ignores them.
+	OnEvent func(Event)
+}
+
+// Attach runs one attached session over a connection the caller made. It
+// returns the session to switch to, empty when the client is done.
+func Attach(h Harness) (string, error) {
 	theme.SetDepth(theme.DetectDepth(os.Getenv))
-	return attachConn(&transport.Conn{Conn: c}, out, keys, winch, size, session, &pacer{})
+	return attachConn(&transport.Conn{Conn: h.Conn}, h.Out, h.Keys, h.Winch, h.Size, h.Session, &pacer{}, h.OnEvent)
+}
+
+// emit reports one event to the harness, if it asked for any.
+func (t *tui) emit(e Event) {
+	if t.onEvent != nil {
+		t.onEvent(e)
+	}
 }
 
 // attachConn is one attached session over a connection already in hand.
-func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), name string, pace *pacer) (string, error) {
+func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), name string, pace *pacer, onEvent func(Event)) (string, error) {
 	t := &tui{
 		session: name, conn: c, vts: map[string]*vt.Term{},
-		hist: map[string][]byte{},
+		hist: map[string][]byte{}, onEvent: onEvent,
 	}
 	// The sink counts a frame's bytes so the pacer can tell whether the
 	// frame said anything.

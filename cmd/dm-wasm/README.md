@@ -22,6 +22,22 @@ The fake uses the same helpers the server uses rather than its own arithmetic:
 `layout.ApplyPreset`. Where a helper does not exist, that is a sign the fake is
 standing in for something that belongs in the tree.
 
+## Events, for a lesson
+
+`dm.onEvent(fn)` receives what the operator did, as the session sees it:
+
+| Event | Data | When |
+| --- | --- | --- |
+| `action` | `{name}` | a keybinding action ran, such as `split-right` or `focus-left` |
+| `command` | `{line}` | the pretend shell answered a line |
+
+Two sources, one stream: the action comes from the client, which is the only
+place that knows which action a key ran, and the command comes from the fake
+shell. A step is data on the page and a check against these events, as the
+three-step card in `index.html` shows. Events that arrive before the page
+registers are held and delivered in order, and an event with no reader is
+dropped so a slow card never stalls the session.
+
 The page turns on the mouse modes, so a click on a rail row reaches the client
 the way it does on a machine. `dm.last()` returns the last request the fake
 handled, which is how a click can be traced to the message it sent.

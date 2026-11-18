@@ -20,6 +20,22 @@
       }
       html, body { margin: 0; height: 100%; background: #101014; }
       #term { position: fixed; inset: 0; padding: 8px; }
+      #card {
+        position: fixed; right: 16px; bottom: 48px; width: 340px;
+        background: #18181f; border: 1px solid #34343f; border-radius: 8px;
+        color: #d6d6da; font: 13px/1.5 ui-monospace, monospace; padding: 14px 16px;
+        box-shadow: 0 8px 24px #0008; display: none;
+      }
+      #card .step { color: #8a8a92; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+      #card h2 { font-size: 15px; margin: 6px 0 4px; }
+      #card p { margin: 0 0 10px; color: #b6b6be; }
+      #card .keys { display: flex; gap: 6px; flex-wrap: wrap; }
+      #card kbd {
+        border: 1px solid #4a4a58; border-bottom-width: 2px; border-radius: 5px;
+        padding: 2px 7px; background: #22222b; font: inherit;
+      }
+      #card kbd.on { background: #2c4a2c; border-color: #4f8a4f; color: #cfeccf; }
+      #card .done { color: #7fc47f; }
       #boot {
         position: fixed; inset: 0; display: grid; place-items: center;
         color: #8a8a92; font: 13px ui-monospace, monospace; white-space: pre;
@@ -29,6 +45,12 @@
   <body>
     <div id="term"></div>
     <div id="boot">loading dm…</div>
+    <div id="card">
+      <div class="step"></div>
+      <h2></h2>
+      <p></p>
+      <div class="keys"></div>
+    </div>
 
     <script src="vendor/xterm.js"></script>
     <script src="vendor/addon-fit.js"></script>
@@ -51,6 +73,70 @@
       // The program sets dm and then calls this. The page owns the size, so a
       // viewport change re-fits and tells the program, which re-reads it on
       // the resize signal.
+      // A track is data: a step lists the keys it teaches and what proves it
+      // happened. The page keeps only this: the session runs the lesson.
+      const track = [
+        {
+          title: "Run a command",
+          note: "Type it and press enter. The pane is a pretend shell, but the keys are real.",
+          keys: ["echo hi", "enter"],
+          done: (ev) => ev.type === "command" && ev.line === "echo hi",
+        },
+        {
+          title: "Split the window",
+          note: "ctrl+b, then |. The prefix works from any mode.",
+          keys: ["ctrl+b", "|"],
+          done: (ev) => ev.type === "action" && ev.name === "split-right",
+        },
+        {
+          title: "Move the focus",
+          note: "ctrl+b, then h. Focus walks to the pane on the left.",
+          keys: ["ctrl+b", "h"],
+          done: (ev) => ev.type === "action" && ev.name === "focus-left",
+        },
+      ];
+
+      const card = document.getElementById("card");
+      const stepEl = card.querySelector(".step");
+      const titleEl = card.querySelector("h2");
+      const noteEl = card.querySelector("p");
+      const keysEl = card.querySelector(".keys");
+
+      let at = 0;
+      const show = () => {
+        const s = track[at];
+        if (!s) {
+          stepEl.textContent = "done";
+          titleEl.textContent = "That is the shape of a track.";
+          noteEl.textContent = "Three steps, each one checked against what the session did.";
+          keysEl.innerHTML = "";
+          card.style.display = "block";
+          return;
+        }
+        stepEl.textContent = `step ${at + 1} of ${track.length}`;
+        titleEl.textContent = s.title;
+        noteEl.textContent = s.note;
+        keysEl.innerHTML = "";
+        for (const k of s.keys) {
+          const el = document.createElement("kbd");
+          el.textContent = k;
+          keysEl.append(el);
+        }
+        card.style.display = "block";
+      };
+
+      const check = (ev) => {
+        const s = track[at];
+        if (!s) return;
+        if (s.done(ev)) {
+          at += 1;
+          if (!track[at]) {
+            keysEl.innerHTML = '<span class="done">all three done</span>';
+          }
+          show();
+        }
+      };
+
       window.onDmReady = (dm) => {
         const size = () => {
           fit.fit();
@@ -58,6 +144,8 @@
         };
         window.addEventListener("resize", size);
         dm.onOutput((data) => term.write(data));
+        dm.onEvent(check);
+        show();
         term.onData((text) => dm.input(text));
         size();
         boot.remove();
