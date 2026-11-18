@@ -140,6 +140,7 @@
         letter-spacing: 0.04em;
       }
       .screen-bar .dot { color: var(--good); }
+      .screen-bar .dot.off { color: var(--ink-faint); }
       .screen {
         position: relative;
         width: 100%;
@@ -193,7 +194,7 @@
         <section class="screen-wrap">
           <div class="screen-bar">
             <span>session spike</span>
-            <span><span class="dot">●</span> local tab, nothing installed</span>
+            <span id="keys-note"><span class="dot">●</span> local tab, nothing installed</span>
           </div>
           <div class="screen">
             <div id="term"></div>
@@ -285,6 +286,23 @@
         else if (ev.type === "lesson.finish") finish(ev);
       };
 
+      // A terminal only sees a key when its own input has focus. Firefox takes
+      // ctrl+b for its bookmarks sidebar from anywhere else, so the prefix never
+      // reaches the client. The page hands the keyboard to the terminal at boot,
+      // gives it back on any click that is not a button, and says out loud when
+      // the browser holds it instead.
+      const showKeys = () => {
+        const typing = document.activeElement === term.textarea;
+        el("keys-note").innerHTML = typing
+          ? '<span class="dot">●</span> local tab, nothing installed'
+          : '<span class="dot off">○</span> click the screen, then keys reach dm';
+      };
+
+      const takeKeys = () => {
+        term.focus();
+        showKeys();
+      };
+
       const size = () => {
         fit.fit();
         dm.resize(term.cols, term.rows);
@@ -299,6 +317,17 @@
         term.onData((text) => dm.input(text));
         size();
         boot.remove();
+        // The click that dismisses the boot screen is also the click that
+        // hands the keyboard to the terminal.
+        takeKeys();
+        document.addEventListener("pointerup", (ev) => {
+          if (ev.target.closest("button, a, input, textarea")) return;
+          takeKeys();
+        }, true);
+        term.textarea?.addEventListener("focus", showKeys);
+        term.textarea?.addEventListener("blur", showKeys);
+        // A tab switch drops the keyboard: give it back when the window returns.
+        window.addEventListener("focus", takeKeys);
       };
 
       const go = new Go();

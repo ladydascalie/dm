@@ -104,6 +104,10 @@ Open <http://127.0.0.1:8765>. Type, press `ctrl+b`, watch the prefix panel. The
 page loads xterm.js from a CDN, so it needs the network; the program needs
 nothing but the files in `out`.
 
+The page gives the terminal the keyboard at boot and after any click on the page, because
+a browser takes `ctrl+b` for its own bookmarks bar otherwise and the prefix never reaches
+the client. The bar under the screen says when the browser holds the keys instead.
+
 ## What the seam is
 
 | Real machine | Here |
