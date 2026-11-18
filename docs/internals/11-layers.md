@@ -35,7 +35,7 @@ carry many real edges, and the generated page counts every one of them. The two
 
 | Layer | May import | Packages |
 | --- | --- | --- |
-| entry | entry, services, presentation, domain, leaf, tooling | `dm`, `cmd/esctest-harness` |
+| entry | entry, services, presentation, domain, leaf, tooling | `dm`, `cmd/dm-wasm`, `cmd/esctest-harness` |
 | services | services, presentation, domain, leaf | `internal/cli`, `internal/client`, `internal/pane`, `internal/proxy`, `internal/server`, `internal/transport` |
 | presentation | presentation, domain, leaf | `internal/boxview`, `internal/clidoc`, `internal/configdoc`, `internal/esctest`, `internal/keymapview`, `internal/palette`, `internal/panel`, `internal/rail`, `internal/segment`, `internal/shot`, `internal/switcher`, `internal/testutil`, `internal/ui` |
 | domain | domain, leaf | `internal/box`, `internal/keymap`, `internal/layout`, `internal/notify`, `internal/osc`, `internal/secrets`, `internal/session`, `internal/theme`, `internal/vt`, `internal/wire` |
@@ -48,9 +48,10 @@ The Packages column drops the `dm/` module prefix, so `blackbox` is `dm/blackbox
 
 ## Why each layer sits where it sits
 
-**entry** is the composition root. `main.go` and `cmd/esctest-harness` decide
-which process starts and which packages run inside it. Entry may import
-anything, so its row lists the whole stack.
+**entry** is the composition root. `main.go`, `cmd/dm-wasm` and
+`cmd/esctest-harness` decide which process starts and which packages run inside
+it. `cmd/dm-wasm` is the browser spike: it runs the client with a fake session
+and nothing native. Entry may import anything, so its row lists the whole stack.
 
 **services** own the things that block. `internal/server` accepts the socket,
 `internal/pane` owns a child process and a pty, `internal/client` renders into a

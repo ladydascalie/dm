@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dm, in a tab</title>
+    <link rel="stylesheet" href="vendor/xterm.css" />
+    <style>
+      @font-face {
+        font-family: "dm-mono";
+        src: url("vendor/JetBrainsMono-Regular.woff2") format("woff2");
+        font-weight: 400;
+        font-display: block;
+      }
+      @font-face {
+        font-family: "dm-mono";
+        src: url("vendor/JetBrainsMono-Bold.woff2") format("woff2");
+        font-weight: 700;
+        font-display: block;
+      }
+      html, body { margin: 0; height: 100%; background: #101014; }
+      #term { position: fixed; inset: 0; padding: 8px; }
+      #boot {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        color: #8a8a92; font: 13px ui-monospace, monospace; white-space: pre;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="term"></div>
+    <div id="boot">loading dm…</div>
+
+    <script src="vendor/xterm.js"></script>
+    <script src="vendor/addon-fit.js"></script>
+    <script src="wasm_exec.js"></script>
+    <script type="module">
+      const boot = document.getElementById("boot");
+
+      const term = new Terminal({
+        allowProposedApi: true,
+        cursorBlink: true,
+        fontFamily: "dm-mono, ui-monospace, monospace",
+        fontSize: 14,
+        theme: { background: "#101014", foreground: "#d6d6da" },
+      });
+      const fit = new FitAddon.FitAddon();
+      term.loadAddon(fit);
+      term.open(document.getElementById("term"));
+      fit.fit();
+
+      // The program sets dm and then calls this. The page owns the size, so a
+      // viewport change re-fits and tells the program, which re-reads it on
+      // the resize signal.
+      window.onDmReady = (dm) => {
+        const size = () => {
+          fit.fit();
+          dm.resize(term.cols, term.rows);
+        };
+        window.addEventListener("resize", size);
+        dm.onOutput((data) => term.write(data));
+        term.onData((text) => dm.input(text));
+        size();
+        boot.remove();
+      };
+
+      const go = new Go();
+      const bytes = await (await fetch("dm.wasm")).arrayBuffer();
+      const { instance } = await WebAssembly.instantiate(bytes, go.importObject);
+      go.run(instance);
+    </script>
+  </body>
+</html>

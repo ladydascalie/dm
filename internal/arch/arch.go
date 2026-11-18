@@ -39,7 +39,7 @@ type Layer struct {
 var Layers = []Layer{
 	{
 		Name:      "entry",
-		Packages:  []string{"dm", "dm/cmd/esctest-harness"},
+		Packages:  []string{"dm", "dm/cmd/dm-wasm", "dm/cmd/esctest-harness"},
 		MayImport: []string{"entry", "services", "presentation", "domain", "leaf", "tooling"},
 	},
 	{
