@@ -4,7 +4,7 @@ The module splits into six layers, and every package sits in exactly one of
 them. A layer may import itself and the layers below it, never upward. The
 model lives in `internal/arch/arch.go:39` as data, the gate in
 `internal/arch/arch_test.go:17` enforces it, and `internal/archdoc` renders the
-package graph from it. The tree has 122 internal edges; no reviewer reads them
+package graph from it. The tree has 122 import edges between its own packages; no reviewer reads them
 all, so the gate does. This page explains the table, the reason for each arrow,
 and how to add a package.
 
@@ -145,7 +145,8 @@ exist, and when a rule selects no package at all.
 
 `docs/internals/generated/package-graph.md` holds the layer table and a mermaid
 flowchart of the graph collapsed to layers: 40 packages, 37 under
-`internal/`, 122 internal edges. Open [the package graph](generated/package-graph.md).
+`internal/`, 122 import edges, each one counted in a layer node or on a layer
+arrow. Open [the package graph](generated/package-graph.md).
 `make docs-internals` rewrites the file with the `-update` flag of the archdoc
 test.
 
