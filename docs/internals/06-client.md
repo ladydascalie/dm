@@ -45,7 +45,7 @@ flowchart TD
 `wake` (`:641`) floors the pacer and draws at once when a frame is due. `tick` (`:612`) runs the expiry timers, places a quiet pane's pending grapheme cluster, and draws at most one frame. Both end in `frame` (`:649`), which clears `dirty` and tells the pacer whether the frame wrote any bytes. The pacer is a value, not a goroutine (`internal/client/pacing.go:16`): it floors the interval at 16ms, doubles it on empty ticks to 250ms, and resets it on a wake, so a burst coalesces and an idle client almost never wakes. A frame that lands mid-stream is never dropped. `apply` updates the model and marks it dirty, and the pacer decides when the pixels follow.
 
 ```mermaid
-flowchart LR
+flowchart TD
     keys["keys chan"] --> pi["processInput"]
     pi --> km["keymap.Match"]
     km -->|"action"| ra["runAction"]

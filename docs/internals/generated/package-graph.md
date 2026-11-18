@@ -17,186 +17,29 @@ A layer may import itself and every layer it names. `entry` may import the whole
 | leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/paths`, `internal/redact`, `internal/wlabel` |
 | tooling | tooling, domain, leaf | `internal/arch`, `internal/archdoc` |
 
-## Graph
+## The graph at layer level
 
-One node per package, grouped by layer. An arrow is one internal import,
-read from `go list ./...`. Test imports are not drawn: the toolchain does not
-report them for a package.
+The tree draws 122 imports. At one node per package that is a
+hairball, so this diagram collapses it to layers and counts the edges.
+A node carries the package count and the imports inside the layer. An
+arrow carries the imports leaving the layer, into the layer it points at.
+The table above names every package, so the counts are traceable, and
+`go test ./internal/arch/...` is the edge list that matters.
 
 ```mermaid
 flowchart TD
-  subgraph l_entry["entry"]
-    p_dm["dm"]
-    p_dm_cmd_esctest_harness["cmd/esctest-harness"]
-  end
-  subgraph l_services["services"]
-    p_dm_internal_cli["internal/cli"]
-    p_dm_internal_client["internal/client"]
-    p_dm_internal_pane["internal/pane"]
-    p_dm_internal_proxy["internal/proxy"]
-    p_dm_internal_server["internal/server"]
-    p_dm_internal_transport["internal/transport"]
-  end
-  subgraph l_presentation["presentation"]
-    p_dm_internal_boxview["internal/boxview"]
-    p_dm_internal_clidoc["internal/clidoc"]
-    p_dm_internal_configdoc["internal/configdoc"]
-    p_dm_internal_esctest["internal/esctest"]
-    p_dm_internal_keymapview["internal/keymapview"]
-    p_dm_internal_palette["internal/palette"]
-    p_dm_internal_panel["internal/panel"]
-    p_dm_internal_rail["internal/rail"]
-    p_dm_internal_segment["internal/segment"]
-    p_dm_internal_shot["internal/shot"]
-    p_dm_internal_switcher["internal/switcher"]
-    p_dm_internal_testutil["internal/testutil"]
-    p_dm_internal_ui["internal/ui"]
-  end
-  subgraph l_domain["domain"]
-    p_dm_internal_box["internal/box"]
-    p_dm_internal_keymap["internal/keymap"]
-    p_dm_internal_layout["internal/layout"]
-    p_dm_internal_notify["internal/notify"]
-    p_dm_internal_osc["internal/osc"]
-    p_dm_internal_secrets["internal/secrets"]
-    p_dm_internal_session["internal/session"]
-    p_dm_internal_theme["internal/theme"]
-    p_dm_internal_vt["internal/vt"]
-    p_dm_internal_wire["internal/wire"]
-  end
-  subgraph l_leaf["leaf"]
-    p_dm_blackbox["blackbox"]
-    p_dm_internal_browser["internal/browser"]
-    p_dm_internal_cells["internal/cells"]
-    p_dm_internal_kdl["internal/kdl"]
-    p_dm_internal_paths["internal/paths"]
-    p_dm_internal_redact["internal/redact"]
-    p_dm_internal_wlabel["internal/wlabel"]
-  end
-  subgraph l_tooling["tooling"]
-    p_dm_internal_arch["internal/arch"]
-    p_dm_internal_archdoc["internal/archdoc"]
-  end
-  p_dm --> p_dm_internal_cli
-  p_dm --> p_dm_internal_clidoc
-  p_dm --> p_dm_internal_pane
-  p_dm --> p_dm_internal_server
-  p_dm_cmd_esctest_harness --> p_dm_internal_esctest
-  p_dm_internal_archdoc --> p_dm_internal_arch
-  p_dm_internal_boxview --> p_dm_internal_box
-  p_dm_internal_boxview --> p_dm_internal_cells
-  p_dm_internal_boxview --> p_dm_internal_keymap
-  p_dm_internal_boxview --> p_dm_internal_layout
-  p_dm_internal_boxview --> p_dm_internal_panel
-  p_dm_internal_boxview --> p_dm_internal_theme
-  p_dm_internal_boxview --> p_dm_internal_ui
-  p_dm_internal_boxview --> p_dm_internal_vt
-  p_dm_internal_boxview --> p_dm_internal_wire
-  p_dm_internal_cli --> p_dm_internal_box
-  p_dm_internal_cli --> p_dm_internal_browser
-  p_dm_internal_cli --> p_dm_internal_cells
-  p_dm_internal_cli --> p_dm_internal_clidoc
-  p_dm_internal_cli --> p_dm_internal_client
-  p_dm_internal_cli --> p_dm_internal_paths
-  p_dm_internal_cli --> p_dm_internal_session
-  p_dm_internal_cli --> p_dm_internal_transport
-  p_dm_internal_cli --> p_dm_internal_wire
-  p_dm_internal_clidoc --> p_dm_internal_configdoc
-  p_dm_internal_clidoc --> p_dm_internal_keymap
-  p_dm_internal_clidoc --> p_dm_internal_theme
-  p_dm_internal_client --> p_dm_internal_box
-  p_dm_internal_client --> p_dm_internal_boxview
-  p_dm_internal_client --> p_dm_internal_browser
-  p_dm_internal_client --> p_dm_internal_cells
-  p_dm_internal_client --> p_dm_internal_configdoc
-  p_dm_internal_client --> p_dm_internal_keymap
-  p_dm_internal_client --> p_dm_internal_keymapview
-  p_dm_internal_client --> p_dm_internal_layout
-  p_dm_internal_client --> p_dm_internal_palette
-  p_dm_internal_client --> p_dm_internal_panel
-  p_dm_internal_client --> p_dm_internal_rail
-  p_dm_internal_client --> p_dm_internal_segment
-  p_dm_internal_client --> p_dm_internal_switcher
-  p_dm_internal_client --> p_dm_internal_theme
-  p_dm_internal_client --> p_dm_internal_transport
-  p_dm_internal_client --> p_dm_internal_ui
-  p_dm_internal_client --> p_dm_internal_vt
-  p_dm_internal_client --> p_dm_internal_wire
-  p_dm_internal_client --> p_dm_internal_wlabel
-  p_dm_internal_configdoc --> p_dm_internal_keymap
-  p_dm_internal_configdoc --> p_dm_internal_theme
-  p_dm_internal_esctest --> p_dm_internal_vt
-  p_dm_internal_keymap --> p_dm_internal_kdl
-  p_dm_internal_keymap --> p_dm_internal_theme
-  p_dm_internal_keymap --> p_dm_internal_wlabel
-  p_dm_internal_keymapview --> p_dm_internal_cells
-  p_dm_internal_keymapview --> p_dm_internal_keymap
-  p_dm_internal_keymapview --> p_dm_internal_layout
-  p_dm_internal_keymapview --> p_dm_internal_panel
-  p_dm_internal_keymapview --> p_dm_internal_ui
-  p_dm_internal_keymapview --> p_dm_internal_vt
-  p_dm_internal_keymapview --> p_dm_internal_wire
-  p_dm_internal_osc --> p_dm_internal_wire
-  p_dm_internal_palette --> p_dm_internal_ui
-  p_dm_internal_pane --> p_dm_internal_osc
-  p_dm_internal_pane --> p_dm_internal_paths
-  p_dm_internal_pane --> p_dm_internal_vt
-  p_dm_internal_pane --> p_dm_internal_wire
-  p_dm_internal_panel --> p_dm_internal_cells
-  p_dm_internal_panel --> p_dm_internal_layout
-  p_dm_internal_panel --> p_dm_internal_theme
-  p_dm_internal_panel --> p_dm_internal_vt
-  p_dm_internal_rail --> p_dm_internal_layout
-  p_dm_internal_rail --> p_dm_internal_segment
-  p_dm_internal_rail --> p_dm_internal_theme
-  p_dm_internal_rail --> p_dm_internal_wire
-  p_dm_internal_rail --> p_dm_internal_wlabel
-  p_dm_internal_segment --> p_dm_internal_cells
-  p_dm_internal_segment --> p_dm_internal_theme
-  p_dm_internal_server --> p_dm_internal_box
-  p_dm_internal_server --> p_dm_internal_kdl
-  p_dm_internal_server --> p_dm_internal_keymap
-  p_dm_internal_server --> p_dm_internal_layout
-  p_dm_internal_server --> p_dm_internal_notify
-  p_dm_internal_server --> p_dm_internal_pane
-  p_dm_internal_server --> p_dm_internal_paths
-  p_dm_internal_server --> p_dm_internal_proxy
-  p_dm_internal_server --> p_dm_internal_rail
-  p_dm_internal_server --> p_dm_internal_secrets
-  p_dm_internal_server --> p_dm_internal_session
-  p_dm_internal_server --> p_dm_internal_theme
-  p_dm_internal_server --> p_dm_internal_vt
-  p_dm_internal_server --> p_dm_internal_wire
-  p_dm_internal_session --> p_dm_internal_box
-  p_dm_internal_session --> p_dm_internal_layout
-  p_dm_internal_session --> p_dm_internal_paths
-  p_dm_internal_shot --> p_dm_internal_cells
-  p_dm_internal_shot --> p_dm_internal_theme
-  p_dm_internal_shot --> p_dm_internal_vt
-  p_dm_internal_switcher --> p_dm_internal_cells
-  p_dm_internal_switcher --> p_dm_internal_keymap
-  p_dm_internal_switcher --> p_dm_internal_layout
-  p_dm_internal_switcher --> p_dm_internal_panel
-  p_dm_internal_switcher --> p_dm_internal_rail
-  p_dm_internal_switcher --> p_dm_internal_segment
-  p_dm_internal_switcher --> p_dm_internal_theme
-  p_dm_internal_switcher --> p_dm_internal_ui
-  p_dm_internal_switcher --> p_dm_internal_vt
-  p_dm_internal_switcher --> p_dm_internal_wire
-  p_dm_internal_testutil --> p_dm_internal_keymap
-  p_dm_internal_testutil --> p_dm_internal_layout
-  p_dm_internal_testutil --> p_dm_internal_segment
-  p_dm_internal_testutil --> p_dm_internal_session
-  p_dm_internal_testutil --> p_dm_internal_vt
-  p_dm_internal_testutil --> p_dm_internal_wire
-  p_dm_internal_theme --> p_dm_internal_cells
-  p_dm_internal_theme --> p_dm_internal_kdl
-  p_dm_internal_transport --> p_dm_internal_paths
-  p_dm_internal_transport --> p_dm_internal_wire
-  p_dm_internal_ui --> p_dm_internal_cells
-  p_dm_internal_ui --> p_dm_internal_layout
-  p_dm_internal_ui --> p_dm_internal_theme
-  p_dm_internal_vt --> p_dm_internal_cells
-  p_dm_internal_wire --> p_dm_internal_layout
-  p_dm_internal_wire --> p_dm_internal_vt
+  entry["entry<br/>2 packages<br/>0 inside"]
+  services["services<br/>6 packages<br/>5 inside"]
+  presentation["presentation<br/>13 packages<br/>12 inside"]
+  domain["domain<br/>10 packages<br/>6 inside"]
+  leaf["leaf<br/>7 packages<br/>0 inside"]
+  tooling["tooling<br/>2 packages<br/>1 inside"]
+  entry -->|3| services
+  entry -->|2| presentation
+  services -->|11| presentation
+  services -->|22| domain
+  services -->|10| leaf
+  presentation -->|36| domain
+  presentation -->|8| leaf
+  domain -->|6| leaf
 ```

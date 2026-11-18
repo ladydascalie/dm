@@ -120,13 +120,13 @@ sequenceDiagram
     participant R as ring
     C->>S: keys frame
     S->>P: write {keys, enter}
-    P->>P: record anchor and echo under mu
-    P->>T: drainPtyWrites: bytes, then CR
+    P->>P: record anchor, echo
+    P->>T: bytes, then CR
     T-->>P: readLoop 32 KiB
-    P->>P: osc.Filter and scrub stage
+    P->>P: status filter, scrub
     P->>V: Write chunk
     P->>R: Write chunk
-    R->>R: produced += len(chunk)
+    R->>R: produced += len
     P-->>S: bytes frame
     S-->>C: bytes frame with target
     S->>P: read {id}

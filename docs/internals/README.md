@@ -77,17 +77,17 @@ the enforced contract.
 
 ```mermaid
 flowchart TD
-  entry["01 Entry point<br/>main.go, three processes, sockets"]
-  lifecycle["02 Lifecycle<br/>session, state file, teardown"]
-  proto["03 Protocol<br/>frame, envelope, action matrix"]
-  server["04 Server<br/>authoritative state, clients, box"]
-  pane["05 Pane daemon<br/>PTY, VT screen, ring, status"]
-  client["06 Client<br/>input, frames, overlays"]
-  layout["07 Layout<br/>split tree, geometry"]
-  surf["08 Surfaces<br/>box, notify, status"]
-  secrets["09 Secrets<br/>register, redact, proxy"]
-  config["10 Config<br/>CLI table, keymap, theme"]
-  layers["11 Layers<br/>model, gate, generated graph"]
+  entry["01 Entry point"]
+  lifecycle["02 Lifecycle"]
+  proto["03 Protocol"]
+  server["04 Server"]
+  pane["05 Pane daemon"]
+  client["06 Client"]
+  layout["07 Layout"]
+  surf["08 Surfaces"]
+  secrets["09 Secrets"]
+  config["10 Config"]
+  layers["11 Layers"]
 
   entry --> proto
   proto --> server

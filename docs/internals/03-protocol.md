@@ -142,8 +142,8 @@ flowchart TD
     A["wire.ReadMsg"] --> B{"frame ok?"}
     B -- no --> C["return: the connection ends"]
     B -- yes --> D{"switch m.Type"}
-    D -- attach --> E["attach: register, snapshot, one screen per pane"]
-    D -- keys --> F["keys: write to the pane, or to the focused float"]
+    D -- attach --> E["attach: register, snapshot, screens"]
+    D -- keys --> F["keys: write to the pane or float"]
     D -- resize --> G["resize: client size, or float size"]
     D -- req --> H["handleReq"]
     D -- other --> I["ignored on this socket"]

@@ -76,12 +76,12 @@ sequenceDiagram
     participant PX as proxy
     participant UP as upstream
     CLI->>SRV: secret-register, then secret-use
-    SRV->>SRV: validate, fetch, and push set-secrets
-    SRV->>PX: Register with the header filled
+    SRV->>SRV: validate, fetch, push
+    SRV->>PX: Register with the header
     SRV-->>CLI: endpoint URL
-    CLI->>CH: the operator exports the URL
+    CLI->>CH: operator exports the URL
     CH->>PX: GET /<prefix>/resource
-    PX->>UP: request with the header filled, then the body streams back
+    PX->>UP: request with the header
 ```
 
 ## The trust rule for a sync mapping

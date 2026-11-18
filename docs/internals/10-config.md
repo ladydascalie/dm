@@ -7,7 +7,7 @@ gate, the recipe, and the config, keymap and theme files.
 ## The path of one verb
 
 ```mermaid
-flowchart LR
+flowchart TD
   A["dm &lt;verb&gt;"] --> B["cli.Run (cli.go:426)"]
   B --> C["transport.RPC (transport.go:139)"]
   C --> D["server.handleReq (server_rpc.go:15)"]

@@ -102,12 +102,12 @@ sequenceDiagram
     participant S as dm __server
     participant P as dm __pane
     participant H as shell
-    C->>S: start __server, then retry the dial 100 times
+    C->>S: start __server, retry the dial
     S->>S: flock server.lock, else refuse a second server
-    S->>S: load state.json, or build the default s1 and w1
+    S->>S: load state.json, or build s1 and w1
     S->>P: start __pane for w1p1, then retry the dial
-    P->>P: listen on panes/w1p1.sock, write the pid file
-    S->>P: adopt, push the secret set and the terminal colours
+    P->>P: listen on panes/w1p1.sock, write pid
+    S->>P: adopt, push secrets and colours
     P->>H: start the shell on a pty
     S->>S: save state.json, listen on server.sock, write server.pid
     C->>S: attach with the terminal size

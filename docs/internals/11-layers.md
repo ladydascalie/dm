@@ -144,7 +144,7 @@ exist, and when a rule selects no package at all.
 ## The generated page
 
 `docs/internals/generated/package-graph.md` holds the layer table and a mermaid
-flowchart of every package and every internal import: 40 packages, 37 under
+flowchart of the graph collapsed to layers: 40 packages, 37 under
 `internal/`, 122 internal edges. Open [the package graph](generated/package-graph.md).
 `make docs-internals` rewrites the file with the `-update` flag of the archdoc
 test.
