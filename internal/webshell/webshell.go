@@ -33,8 +33,14 @@ type Shell struct {
 	line []rune
 	// esc is where a key is in an escape sequence: 0 outside one, 1 after the
 	// esc, 2 inside a CSI. A sequence is swallowed, so an arrow key does not
-	// leave its tail on the line.
+	// leave its tail on the line. Up and down are the two it acts on.
 	esc int
+	// history holds the lines that ran, oldest first. at indexes it while
+	// walking: len(history) means the line being typed, and draft keeps that
+	// line so down can come back to it.
+	history []string
+	at      int
+	draft   []rune
 	// OnRun hears every line a person ran, nil when nobody is listening.
 	OnRun func(line string)
 }
@@ -77,14 +83,22 @@ func (s *Shell) Feed(in []byte) []byte {
 				s.esc = 0
 			}
 		case s.esc == 2:
-			// A CSI ends at its first final byte.
+			// A CSI ends at its first final byte. Up and down walk the
+			// history; every other sequence is swallowed.
 			if r >= 0x40 && r <= 0x7e {
 				s.esc = 0
+				switch r {
+				case 'A':
+					out = append(out, s.up()...)
+				case 'B':
+					out = append(out, s.down()...)
+				}
 			}
 		case r == 0x1b:
 			s.esc = 1
 		case r == '\r':
 			out = append(out, "\r\n"...)
+			s.remember(string(s.line))
 			out = append(out, s.run(string(s.line))...)
 			s.line = s.line[:0]
 			out = append(out, s.prompt()...)
@@ -120,6 +134,51 @@ func (s *Shell) Feed(in []byte) []byte {
 		}
 	}
 	return out
+}
+
+// remember keeps a line so up can find it again. A repeat of the last line is
+// not stored twice, and a blank line is not stored at all.
+func (s *Shell) remember(line string) {
+	if line != "" && (len(s.history) == 0 || s.history[len(s.history)-1] != line) {
+		s.history = append(s.history, line)
+	}
+	s.at = len(s.history)
+	s.draft = nil
+}
+
+// up walks back through the history, keeping the line being typed so down can
+// return to it.
+func (s *Shell) up() []byte {
+	if s.at == 0 {
+		return nil
+	}
+	if s.at == len(s.history) {
+		s.draft = append([]rune(nil), s.line...)
+	}
+	s.at--
+	s.line = []rune(s.history[s.at])
+	return s.redraw()
+}
+
+// down walks forward again, and lands on the line being typed after the newest
+// entry.
+func (s *Shell) down() []byte {
+	if s.at >= len(s.history) {
+		return nil
+	}
+	s.at++
+	if s.at == len(s.history) {
+		s.line = s.draft
+	} else {
+		s.line = []rune(s.history[s.at])
+	}
+	return s.redraw()
+}
+
+// redraw puts the prompt and the current line back on the row the cursor is
+// on.
+func (s *Shell) redraw() []byte {
+	return []byte("\r\x1b[K" + s.prompt() + string(s.line))
 }
 
 // run answers one line.

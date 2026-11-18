@@ -126,3 +126,61 @@ func TestOnRunHearsTheLine(t *testing.T) {
 		t.Fatalf("OnRun heard %q", heard)
 	}
 }
+
+func TestUpAndDownWalkTheHistory(t *testing.T) {
+	s := New()
+	run(s, "echo one")
+	run(s, "echo two")
+
+	// Up returns the newest line, and prints it back with the prompt.
+	got := plain(string(s.Feed([]byte("\x1b[A"))))
+	if !strings.HasSuffix(got, "$ echo two") {
+		t.Fatalf("up = %q", got)
+	}
+	got = plain(string(s.Feed([]byte("\x1b[A"))))
+	if !strings.HasSuffix(got, "$ echo one") {
+		t.Fatalf("second up = %q", got)
+	}
+	// The oldest line does not walk further back: nothing is redrawn, and the
+	// line is still the one on screen.
+	if got := s.Feed([]byte("\x1b[A")); got != nil {
+		t.Fatalf("up past the oldest redrew %q", got)
+	}
+	if got := plain(string(s.redraw())); !strings.HasSuffix(got, "$ echo one") {
+		t.Fatalf("the line after walking to the oldest = %q", got)
+	}
+	// Down comes back, and lands on the empty line being typed.
+	s.Feed([]byte("\x1b[A"))
+	s.Feed([]byte("\x1b[A"))
+	got = plain(string(s.Feed([]byte("\x1b[B"))))
+	if !strings.HasSuffix(got, "$ echo two") {
+		t.Fatalf("down = %q", got)
+	}
+	got = plain(string(s.Feed([]byte("\x1b[B"))))
+	if !strings.HasSuffix(got, "$ ") {
+		t.Fatalf("down to the draft = %q", got)
+	}
+	// The draft comes back rather than being lost.
+	s.Feed([]byte("half"))
+	s.Feed([]byte("\x1b[A"))
+	s.Feed([]byte("\x1b[B"))
+	got = plain(string(s.Feed([]byte("\r"))))
+	if !strings.Contains(got, "half: command not found") {
+		t.Fatalf("the draft after walking = %q", got)
+	}
+}
+
+func TestHistorySkipsRepeatsAndBlanks(t *testing.T) {
+	s := New()
+	run(s, "pwd")
+	run(s, "pwd")
+	run(s, "")
+	if len(s.history) != 1 {
+		t.Fatalf("history = %q, want one entry", s.history)
+	}
+	// An empty history ignores up.
+	empty := New()
+	if got := empty.Feed([]byte("\x1b[A")); got != nil {
+		t.Fatalf("up on an empty history printed %q", got)
+	}
+}
