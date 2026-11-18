@@ -1,6 +1,7 @@
 package lesson
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -155,6 +156,53 @@ func TestHintedStepsRecordHinted(t *testing.T) {
 	l.Feed(Event{Type: "action", Name: "split-right"})
 	if got := l.Results(); len(got) != 1 || got[0] != Hinted {
 		t.Fatalf("results = %v", got)
+	}
+}
+
+// TestTheLessonTakesEventsFromTwoGoroutines is the shape the tour runs: the
+// client reports actions on one goroutine, the pretend session reports commands
+// on another, and the ladder reads the step while they arrive. Run with -race,
+// it is the proof that the engine needs no lock from its caller.
+func TestTheLessonTakesEventsFromTwoGoroutines(t *testing.T) {
+	track := Track{Steps: []Step{
+		{Title: "one", Done: Rule{Command: "echo one"}},
+		{Title: "two", Done: Rule{Action: "new-window"}},
+	}}
+	l := Start(track)
+	stop := make(chan struct{})
+	var feeders, reader sync.WaitGroup
+	feeders.Add(2)
+	go func() {
+		defer feeders.Done()
+		for i := 0; i < 200; i++ {
+			l.Feed(Event{Type: "command", Line: "echo one"})
+		}
+	}()
+	go func() {
+		defer feeders.Done()
+		for i := 0; i < 200; i++ {
+			l.Feed(Event{Type: "action", Name: "new-window"})
+		}
+	}()
+	reader.Add(1)
+	go func() {
+		defer reader.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = l.Ladder(time.Now())
+				_ = l.Keys()
+				_, _, _ = l.Current()
+			}
+		}
+	}()
+	feeders.Wait()
+	close(stop)
+	reader.Wait()
+	if got := len(l.Results()); got != len(track.Steps) {
+		t.Fatalf("results = %d, want one per step", got)
 	}
 }
 

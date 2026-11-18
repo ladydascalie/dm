@@ -4,7 +4,10 @@
 // browser, and the cards can be redesigned without touching a rule.
 package lesson
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // The ladder: how long a step waits before it offers its hint, and before it
 // offers to play the keys itself.
@@ -86,13 +89,17 @@ type Event struct {
 	Panes int
 }
 
-// Lesson is a person's place in a track.
+// Lesson is a person's place in a track. It is safe for concurrent use: the
+// tour feeds it from two goroutines, the client's actions on one and the
+// pretend session's commands on another, while the ladder and show me read the
+// step. No caller needs a lock of its own.
 type Lesson struct {
+	mu      sync.Mutex
 	track   Track
 	at      int
 	results []Result
-	// at_ is when the current step started, and level is what the ladder has
-	// already offered for it, so a step never climbs twice.
+	// startedAt is when the current step started, and level is what the ladder
+	// has already offered for it, so a step never climbs twice.
 	startedAt time.Time
 	level     Level
 }
@@ -118,7 +125,14 @@ func Start(t Track) *Lesson {
 // clock restarts on every step, so time spent reading the previous card does
 // not count against this one.
 func (l *Lesson) Level(now time.Time) Level {
-	if l.Finished() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.levelAt(now)
+}
+
+// levelAt is Level with the lock held.
+func (l *Lesson) levelAt(now time.Time) Level {
+	if l.at >= len(l.track.Steps) {
 		return NoHelp
 	}
 	waited := now.Sub(l.startedAt)
@@ -134,11 +148,12 @@ func (l *Lesson) Level(now time.Time) Level {
 // Ladder reports what the ladder now offers, and records it, so a step that was
 // helped is not reported as clean.
 func (l *Lesson) Ladder(now time.Time) Level {
-	if l.Finished() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.at >= len(l.track.Steps) {
 		return NoHelp
 	}
-	next := l.Level(now)
-	if next > l.level {
+	if next := l.levelAt(now); next > l.level {
 		l.level = next
 	}
 	return l.level
@@ -146,17 +161,25 @@ func (l *Lesson) Ladder(now time.Time) Level {
 
 // Keys is the step's keys, for show me to play.
 func (l *Lesson) Keys() []Key {
-	if l.Finished() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.at >= len(l.track.Steps) {
 		return nil
 	}
 	return l.track.Steps[l.at].Keys
 }
 
 // Track is the track this lesson runs.
-func (l *Lesson) Track() Track { return l.track }
+func (l *Lesson) Track() Track {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.track
+}
 
 // Current is the step to draw, and false once the track is finished.
 func (l *Lesson) Current() (int, Step, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.at >= len(l.track.Steps) {
 		return l.at, Step{}, false
 	}
@@ -164,12 +187,18 @@ func (l *Lesson) Current() (int, Step, bool) {
 }
 
 // Finished reports whether every step is done.
-func (l *Lesson) Finished() bool { return l.at >= len(l.track.Steps) }
+func (l *Lesson) Finished() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.at >= len(l.track.Steps)
+}
 
 // Feed takes one event. It reports whether that event finished the current
 // step, after which Current is the next one.
 func (l *Lesson) Feed(ev Event) bool {
-	if l.Finished() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.at >= len(l.track.Steps) {
 		return false
 	}
 	if !l.track.Steps[l.at].Done.matches(ev) {
@@ -189,4 +218,8 @@ func (l *Lesson) Feed(ev Event) bool {
 }
 
 // Results is how each finished step went, oldest first.
-func (l *Lesson) Results() []Result { return append([]Result(nil), l.results...) }
+func (l *Lesson) Results() []Result {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]Result(nil), l.results...)
+}
