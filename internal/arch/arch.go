@@ -99,6 +99,7 @@ var Layers = []Layer{
 			"dm/internal/paths",
 			"dm/internal/ptyspawn",
 			"dm/internal/redact",
+			"dm/internal/webshell",
 			"dm/internal/wlabel",
 		},
 	},

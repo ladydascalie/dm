@@ -39,7 +39,7 @@ carry many real edges, and the generated page counts every one of them. The two
 | services | services, presentation, domain, leaf | `internal/cli`, `internal/client`, `internal/pane`, `internal/proxy`, `internal/server`, `internal/transport` |
 | presentation | presentation, domain, leaf | `internal/boxview`, `internal/clidoc`, `internal/configdoc`, `internal/esctest`, `internal/keymapview`, `internal/palette`, `internal/panel`, `internal/rail`, `internal/segment`, `internal/shot`, `internal/switcher`, `internal/testutil`, `internal/ui` |
 | domain | domain, leaf | `internal/box`, `internal/keymap`, `internal/layout`, `internal/notify`, `internal/osc`, `internal/secrets`, `internal/session`, `internal/theme`, `internal/vt`, `internal/wire` |
-| leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/paths`, `internal/ptyspawn`, `internal/redact`, `internal/wlabel` |
+| leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/paths`, `internal/ptyspawn`, `internal/redact`, `internal/webshell`, `internal/wlabel` |
 | tooling | tooling, domain, leaf | `internal/arch`, `internal/archdoc` |
 
 The Packages column drops the `dm/` module prefix, so `blackbox` is `dm/blackbox`.

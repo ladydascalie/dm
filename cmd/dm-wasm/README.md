@@ -42,11 +42,20 @@ The page turns on the mouse modes, so a click on a rail row reaches the client
 the way it does on a machine. `dm.last()` returns the last request the fake
 handled, which is how a click can be traced to the message it sent.
 
-The pretend shell has a line buffer and four commands: `echo`, `clear`, `help`,
-and anything else is refused as not found. `ctrl+c`, `ctrl+d`, `ctrl+l` and
-`ctrl+u` do what they do at a live prompt, except that `ctrl+d` prints `exit`
-and hands back a prompt, because the pane must not end. Arrow keys are
-swallowed whole rather than left on the line.
+The pretend shell is `internal/webshell`: a line buffer over a small file tree,
+with `echo`, `clear`, `help`, `pwd`, `cd`, `ls`, `cat` and three git verbs. There
+is one project, `~/projects/hello`, a Go repository with four commits and a
+modified `greet.go`, and every command reads the same two maps, so `cd`, `ls`,
+`cat` and `git status` cannot contradict each other. Anything else is refused:
+`git push` says it is not part of the pretend repository, and a command that is
+not there is not found. A half working command reads as broken, a refusal reads
+as a limit.
+
+`ctrl+c`, `ctrl+d`, `ctrl+l` and `ctrl+u` do what they do at a live prompt,
+except that `ctrl+d` prints `exit` and hands back a prompt, because the pane
+must not end. Arrow keys are swallowed whole rather than left on the line. The
+package has no build tags and is tested natively, which is where a fixture
+belongs.
 
 Build it:
 

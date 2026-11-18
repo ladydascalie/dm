@@ -19,7 +19,6 @@ import (
 	"net"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall/js"
 
@@ -27,6 +26,7 @@ import (
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/vt"
+	"dm/internal/webshell"
 	"dm/internal/wire"
 )
 
@@ -228,11 +228,39 @@ func main() {
 // shell behind each pane, and which pane has focus. It is small on purpose. The
 // real server is not in this binary yet, so this stands in for the parts a
 // lesson presses on.
+// pane is one pretend pane: the terminal it drew and the shell behind it.
+type pane struct {
+	term *vt.Term
+	sh   *webshell.Shell
+}
+
+// write puts bytes on the pane's screen and returns them, so a read travels to
+// the client in one frame.
+func (p *pane) write(b []byte) []byte {
+	p.term.Write(b)
+	return b
+}
+
+// resize fits the pane's screen to a new rect. The client does the same to its
+// copy in resizeTerm, so both sides stay on the same grid.
+func (p *pane) resize(cols, rows int) {
+	g := p.term.Grid()
+	oc, or := g.Size()
+	if oc == cols && or == rows {
+		return
+	}
+	r := g.ScrollRegion()
+	g.Resize(cols, rows)
+	if r.Top == 0 && r.Bottom == or-1 && r.Left == 0 && r.Right == oc-1 {
+		g.SetScrollRegion(vt.ScrollRegion{Top: 0, Bottom: rows - 1, Left: 0, Right: cols - 1})
+	}
+}
+
 type session struct {
 	size  *sizer
 	root  *layout.Node
 	focus string
-	panes map[string]*shell
+	panes map[string]*pane
 	seq   int
 	// rail is the width the page asked for: 0 hidden, CollapsedRail thin,
 	// DefaultRail full. The width the screen can spare is computed from it.
@@ -255,7 +283,7 @@ type session struct {
 
 // newSession makes the one pane a session starts with.
 func newSession(size *sizer, events chan map[string]any) *session {
-	s := &session{size: size, panes: map[string]*shell{}, seq: 1, rail: layout.DefaultRail, events: events}
+	s := &session{size: size, panes: map[string]*pane{}, seq: 1, rail: layout.DefaultRail, events: events}
 	s.root = &layout.Node{Pane: "w1p1"}
 	s.focus = "w1p1"
 	s.fit()
@@ -297,16 +325,17 @@ func (s *session) fit() {
 		if !ok {
 			continue
 		}
-		if sh := s.panes[id]; sh != nil {
-			sh.resize(rect.W, rect.H)
+		if pn := s.panes[id]; pn != nil {
+			pn.resize(rect.W, rect.H)
 			continue
 		}
-		sh := newShell(rect.W, rect.H)
-		sh.onRun = func(line string) {
+		sh := webshell.New()
+		sh.OnRun = func(line string) {
 			pushEvent(s.events, map[string]any{"type": "command", "line": line})
 		}
-		sh.greet()
-		s.panes[id] = sh
+		pn := &pane{term: vt.NewTerm(rect.W, rect.H), sh: sh}
+		pn.write(sh.Greet())
+		s.panes[id] = pn
 	}
 }
 
@@ -540,11 +569,11 @@ func (s *session) snapshot() *wire.Snapshot {
 func (s *session) push(c net.Conn) {
 	_ = wire.WriteMsg(c, wire.Msg{Type: "snapshot", Snap: s.snapshot()})
 	for _, id := range layout.AllPanes(s.root) {
-		sh := s.panes[id]
-		if sh == nil {
+		pn := s.panes[id]
+		if pn == nil {
 			continue
 		}
-		_ = wire.WriteMsg(c, wire.Msg{Type: "screen", Target: id, VTSnap: sh.term.Snapshot()})
+		_ = wire.WriteMsg(c, wire.Msg{Type: "screen", Target: id, VTSnap: pn.term.Snapshot()})
 	}
 }
 
@@ -571,8 +600,8 @@ func fakeServer(c net.Conn, size *sizer, events chan map[string]any) {
 				id = s.focus
 			}
 			for _, id := range s.targets(id) {
-				if sh := s.panes[id]; sh != nil {
-					_ = wire.WriteMsg(c, wire.Msg{Type: "bytes", Target: id, Data: sh.feed(m.Keys)})
+				if pn := s.panes[id]; pn != nil {
+					_ = wire.WriteMsg(c, wire.Msg{Type: "bytes", Target: id, Data: pn.write(pn.sh.Feed(m.Keys))})
 				}
 			}
 		case "req":
@@ -584,133 +613,5 @@ func fakeServer(c net.Conn, size *sizer, events chan map[string]any) {
 				_ = wire.WriteMsg(c, wire.Msg{Type: "resp", Action: m.Action, OK: true})
 			}
 		}
-	}
-}
-
-// shell is the fake pane program: a prompt, a line buffer and three commands.
-// There is no process under it and no pty. It turns keys into the bytes a shell
-// would print, which is what a step needs to check and all this spike has.
-type shell struct {
-	term *vt.Term
-	line []rune
-	// onRun hears every line a person ran, nil when nobody is listening.
-	onRun func(line string)
-	// esc is where a key is in an escape sequence: 0 outside one, 1 after the
-	// esc, 2 inside a CSI. A sequence is swallowed, so an arrow key does not
-	// leave its tail on the line.
-	esc int
-}
-
-// newShell makes a shell of the given size.
-func newShell(cols, rows int) *shell {
-	return &shell{term: vt.NewTerm(cols, rows)}
-}
-
-// greet draws the banner and the first prompt.
-func (s *shell) greet() {
-	s.emit([]byte(banner))
-	s.emit([]byte(prompt))
-}
-
-// resize fits the shell's own screen to a new rect. The client does the same to
-// its copy in resizeTerm, so both sides stay on the same grid.
-func (s *shell) resize(cols, rows int) {
-	g := s.term.Grid()
-	oc, or := g.Size()
-	if oc == cols && or == rows {
-		return
-	}
-	r := g.ScrollRegion()
-	g.Resize(cols, rows)
-	if r.Top == 0 && r.Bottom == or-1 && r.Left == 0 && r.Right == oc-1 {
-		g.SetScrollRegion(vt.ScrollRegion{Top: 0, Bottom: rows - 1, Left: 0, Right: cols - 1})
-	}
-}
-
-// feed runs one read of keys and returns what the terminal should show.
-func (s *shell) feed(in []byte) []byte {
-	var out []byte
-	for _, r := range []rune(string(in)) {
-		switch {
-		case s.esc == 1:
-			// ESC then a byte: a two-byte sequence, and '[' or 'O' starts a
-			// longer one.
-			if r == '[' || r == 'O' {
-				s.esc = 2
-			} else {
-				s.esc = 0
-			}
-		case s.esc == 2:
-			// A CSI ends at its first final byte.
-			if r >= 0x40 && r <= 0x7e {
-				s.esc = 0
-			}
-		case r == 0x1b:
-			s.esc = 1
-		case r == '\r':
-			out = append(out, s.emit([]byte("\r\n"))...)
-			out = append(out, s.emit(s.run(string(s.line)))...)
-			s.line = s.line[:0]
-			out = append(out, s.emit([]byte(prompt))...)
-		case r == 0x7f || r == 0x08:
-			if n := len(s.line); n > 0 {
-				s.line = s.line[:n-1]
-				out = append(out, s.emit([]byte("\b \b"))...)
-			}
-		case r == 0x03:
-			s.line = s.line[:0]
-			out = append(out, s.emit([]byte("^C\r\n"))...)
-			out = append(out, s.emit([]byte(prompt))...)
-		case r == 0x04:
-			// The pane outlives the shell, so ctrl+d prints what a shell says
-			// and hands back a prompt instead of ending anything.
-			s.line = s.line[:0]
-			out = append(out, s.emit([]byte("exit\r\n"))...)
-			out = append(out, s.emit([]byte(prompt))...)
-		case r == 0x0c:
-			out = append(out, s.emit([]byte("\x1b[2J\x1b[H"))...)
-			out = append(out, s.emit([]byte(prompt))...)
-			out = append(out, s.emit([]byte(string(s.line)))...)
-		case r == 0x15:
-			for range s.line {
-				out = append(out, s.emit([]byte("\b \b"))...)
-			}
-			s.line = s.line[:0]
-		case r < 0x20:
-			// Every other control key does nothing, as at a live prompt.
-		default:
-			s.line = append(s.line, r)
-			out = append(out, s.emit([]byte(string(r)))...)
-		}
-	}
-	return out
-}
-
-// emit shows b and returns it, so a whole read travels to the client in one
-// frame.
-func (s *shell) emit(b []byte) []byte {
-	s.term.Write(b)
-	return b
-}
-
-// run answers one line. An unknown word is refused the way a shell refuses it,
-// so a step cannot pass on a typo.
-func (s *shell) run(line string) []byte {
-	if s.onRun != nil {
-		s.onRun(line)
-	}
-	fields := strings.Fields(line)
-	if len(fields) == 0 {
-		return nil
-	}
-	switch fields[0] {
-	case "echo":
-		return []byte(strings.Join(fields[1:], " ") + "\r\n")
-	case "clear":
-		return []byte("\x1b[2J\x1b[H")
-	case "help":
-		return []byte("echo WORDS  print the words back\r\nclear       clear the screen\r\n")
-	default:
-		return []byte(fields[0] + ": command not found\r\n")
 	}
 }
