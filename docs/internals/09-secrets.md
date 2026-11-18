@@ -129,9 +129,9 @@ attach the operator's store value to, and it reads files only under its own dire
 The daemon builds a pane's environment once, in `paneCmd` (`internal/pane/pane.go:597`), from an allowlist
 (`Env`, `internal/pane/env.go:38`). A name passes when it is on the keep list (`paneEnvKeep`,
 `internal/pane/env.go:62`): PATH, HOME, USER, LOGNAME, SHELL, TERM, TERM_PROGRAM, COLORTERM, LANG, TZ,
-TMPDIR, DISPLAY, SSH_AUTH_SOCK, XAUTHORITY, DM_STATE. It also passes when the name starts with `LC_` or
+TMPDIR, WAYLAND_DISPLAY, DISPLAY, SSH_AUTH_SOCK, XAUTHORITY, DM_STATE. It also passes when the name starts with `LC_` or
 `XDG_`, or ends in `_SOCK` while the value is an absolute path and the name is not credential-shaped.
-Credential-shaped means the name carries a word from `secretEnvHints` (`internal/pane/env.go:133`): TOKEN,
+Credential-shaped means the name carries a word from `secretEnvHints` (`internal/pane/env.go:138`): TOKEN,
 SECRET, PASSWD, PASSWORD, CREDENTIAL, API_KEY, PRIVATE_KEY, AUTH, COOKIE.
 
 Everything else is dropped, so a pane never inherits `OP_SERVICE_ACCOUNT_TOKEN`, the 1Password token the

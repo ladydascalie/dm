@@ -82,6 +82,11 @@ var paneEnvKeep = map[string]struct{}{
 	"TZ": {},
 	// Where mktemp and every temp file go.
 	"TMPDIR": {},
+	// The Wayland socket name, relative to XDG_RUNTIME_DIR. A Wayland client
+	// started from a pane, and every tool that reads the selection, needs it:
+	// without the name, wl-paste falls back to wayland-0, and a clipboard
+	// holding an image reads as empty.
+	"WAYLAND_DISPLAY": {},
 	// The X display; with XAUTHORITY, an X client started from a pane.
 	"DISPLAY": {},
 	// The agent socket path; ssh-agent forwarding.

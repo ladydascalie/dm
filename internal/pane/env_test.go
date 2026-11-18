@@ -33,6 +33,7 @@ func TestEnvMatrix(t *testing.T) {
 		{"TMPDIR", "/tmp", true},
 		{"XDG_CONFIG_HOME", "/home/b/.config", true},
 		{"XDG_RUNTIME_DIR", "/run/user/1000", true},
+		{"WAYLAND_DISPLAY", "wayland-1", true},
 		{"DISPLAY", ":0", true},
 		// A dm command run inside the shell needs the state root, which
 		// DM_SESSION does not carry.
