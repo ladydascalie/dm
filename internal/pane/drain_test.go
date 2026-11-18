@@ -28,7 +28,7 @@ func stalledPane(t *testing.T) (*paneProc, net.Conn, chan wire.Msg, *os.File) {
 	t.Cleanup(func() { _ = r.Close(); _ = w.Close() })
 	p := &paneProc{
 		id: "w1p1", vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault),
-		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, ptmx: w,
+		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, ptmx: testPty{w},
 	}
 	serve, cli := net.Pipe()
 	t.Cleanup(func() { _ = cli.Close() })

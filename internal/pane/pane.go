@@ -25,7 +25,7 @@ import (
 	"dm/internal/vt"
 	"dm/internal/wire"
 
-	"github.com/creack/pty"
+	"dm/internal/ptyspawn"
 )
 
 // paneProc is one pane daemon: it owns the PTY, the VT screen, the status and
@@ -42,7 +42,7 @@ type paneProc struct {
 	// the server's adopted set arrives, so a serve goroutine can reach the
 	// pane before the pty exists. A leaf lock, never held while taking mu.
 	shellMu sync.Mutex
-	ptmx    *os.File
+	ptmx    ptyspawn.Pty
 	cmd     *exec.Cmd
 
 	// adopted closes on the server's first set-secrets push, the signal
@@ -802,7 +802,7 @@ func (p *paneProc) awaitAdopt(deadline time.Duration) {
 func (p *paneProc) startShell(o *paneOpts) error {
 	cmd := paneCmd(o)
 	cols, rows := p.vt.Grid().Size()
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	ptmx, err := ptyspawn.Start(cmd, cols, rows)
 	if err != nil {
 		return fmt.Errorf("start shell: %w", err)
 	}
@@ -820,14 +820,14 @@ func (p *paneProc) startShell(o *paneOpts) error {
 }
 
 // shellProc returns the pty and the shell command, nil before the spawn.
-func (p *paneProc) shellProc() (*os.File, *exec.Cmd) {
+func (p *paneProc) shellProc() (ptyspawn.Pty, *exec.Cmd) {
 	p.shellMu.Lock()
 	defer p.shellMu.Unlock()
 	return p.ptmx, p.cmd
 }
 
 // setShell publishes the spawned pty and command to the serve goroutines.
-func (p *paneProc) setShell(ptmx *os.File, cmd *exec.Cmd) {
+func (p *paneProc) setShell(ptmx ptyspawn.Pty, cmd *exec.Cmd) {
 	p.shellMu.Lock()
 	defer p.shellMu.Unlock()
 	p.ptmx, p.cmd = ptmx, cmd
@@ -1129,7 +1129,7 @@ func (p *paneProc) drainPtyWrites() {
 // before the fork returns, so a keystroke sent right after a split would
 // otherwise vanish. The wait is the spawn grace, so a pane with no shell
 // still drains and drops.
-func (p *paneProc) ptyFrame() *os.File {
+func (p *paneProc) ptyFrame() ptyspawn.Pty {
 	deadline := time.Now().Add(spawnGrace)
 	for {
 		if ptmx, _ := p.shellProc(); ptmx != nil {
@@ -1269,9 +1269,7 @@ func (p *paneProc) shutdown() {
 	if ptmx != nil {
 		_ = ptmx.Close()
 	}
-	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Signal(syscall.SIGHUP)
-	}
+	hangupShell(cmd)
 }
 
 func (p *paneProc) serve(c net.Conn) {
@@ -1351,7 +1349,7 @@ func (p *paneProc) serve(c net.Conn) {
 			// spawn that has not run yet picks it up; the pty only takes a
 			// resize once it exists.
 			if ptmx, _ := p.shellProc(); ptmx != nil {
-				_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(m.Cols), Rows: uint16(m.Rows)})
+				_ = ptmx.Resize(m.Cols, m.Rows)
 			}
 		case "read":
 			p.mu.Lock()

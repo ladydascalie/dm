@@ -97,6 +97,7 @@ var Layers = []Layer{
 			"dm/internal/cells",
 			"dm/internal/kdl",
 			"dm/internal/paths",
+			"dm/internal/ptyspawn",
 			"dm/internal/redact",
 			"dm/internal/wlabel",
 		},

@@ -241,7 +241,7 @@ func TestReadLoopPublishesAndReportsExit(t *testing.T) {
 	r, w := ptyPipe(t)
 	p := &paneProc{
 		id: "w1p1", vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault),
-		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, ptmx: r,
+		subs: map[*subConn]bool{}, st: wire.Status{State: "idle"}, ptmx: testPty{r},
 	}
 	msgs := subscriber(p)
 	go p.readLoop()
@@ -284,7 +284,7 @@ func TestReadLoopPublishesAndReportsExit(t *testing.T) {
 func TestReplyTerminalWritesIntoThePty(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
-	p := &paneProc{ptmx: w}
+	p := &paneProc{ptmx: testPty{w}}
 	p.replyTerminal("\x1b[?25h")
 	_ = r.SetReadDeadline(time.Now().Add(5 * time.Second))
 	got := make([]byte, 6)
@@ -304,7 +304,7 @@ func TestReplyTerminalWritesIntoThePty(t *testing.T) {
 func TestReplyQueryAnswersTheProbe(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
-	p := &paneProc{ptmx: w, st: wire.Status{State: "working", App: "pi", Message: "building"}}
+	p := &paneProc{ptmx: testPty{w}, st: wire.Status{State: "working", App: "pi", Message: "building"}}
 	p.replyQuery()
 	want := "\x1b]7501;?state=working:app=pi:msg=" +
 		base64.StdEncoding.EncodeToString([]byte("building")) + "\x1b\\"
@@ -324,7 +324,7 @@ func TestReplyQueryAnswersTheProbe(t *testing.T) {
 func TestReplyQueryAnswersWithUnknown(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
-	p := &paneProc{ptmx: w}
+	p := &paneProc{ptmx: testPty{w}}
 	p.replyQuery()
 	want := "\x1b]7501;?state=unknown\x1b\\"
 	got := readReply(t, r, len(want))
@@ -468,7 +468,7 @@ func TestShutdownClosesThePtyAndHupsTheShell(t *testing.T) {
 	t.Parallel()
 	r, w := ptyPipe(t)
 	cmd := sleepingShell(t, "sleep 30")
-	p := &paneProc{vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault), ptmx: w, cmd: cmd}
+	p := &paneProc{vt: vt.NewTerm(20, 5), ring: NewRing(ringDefault), ptmx: testPty{w}, cmd: cmd}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()

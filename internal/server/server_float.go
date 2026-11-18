@@ -11,7 +11,7 @@ import (
 	"dm/internal/pane"
 	"dm/internal/wire"
 
-	"github.com/creack/pty"
+	"dm/internal/ptyspawn"
 )
 
 // floatProc is one floating command process: a PTY child the client that
@@ -20,7 +20,7 @@ import (
 type floatProc struct {
 	id    string
 	owner *client
-	pty   *os.File
+	pty   ptyspawn.Pty
 	cmd   *exec.Cmd
 
 	// mu guards the size and the dead flag. The pty itself is written and
@@ -122,7 +122,7 @@ func (s *server) openFloat(cl *client, spec floatSpec) error {
 	// The child leads its own session, so SIGKILL to its process group takes
 	// the shell and anything it started. StartWithSize sets the same flag.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	ptmx, err := ptyspawn.Start(cmd, cols, rows)
 	if err != nil {
 		return fmt.Errorf("start float %q: %w", spec.id, err)
 	}
@@ -260,7 +260,7 @@ func (s *server) resizeFloat(id string, cols, rows int) {
 	f.mu.Lock()
 	f.cols, f.rows = cols, rows
 	f.mu.Unlock()
-	_ = pty.Setsize(f.pty, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
+	_ = f.pty.Resize(cols, rows)
 }
 
 // markDead flips the dead flag once and reports whether this call flipped it.
