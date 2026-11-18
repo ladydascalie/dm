@@ -4,6 +4,25 @@
 // browser, and the cards can be redesigned without touching a rule.
 package lesson
 
+import "time"
+
+// The ladder: how long a step waits before it offers its hint, and before it
+// offers to play the keys itself.
+const (
+	HintAfter   = 8 * time.Second
+	ShowMeAfter = 20 * time.Second
+)
+
+// Level is how much help a stalled step offers: none, its hint, or show me.
+type Level int
+
+// The rungs of the ladder.
+const (
+	NoHelp    Level = 0
+	Hint      Level = 1
+	OfferShow Level = 2
+)
+
 // Rule says what proves a step happened. A step whose rule has more than one
 // field set accepts any of them, which is how a step can be passed by the key
 // or by the command.
@@ -29,12 +48,20 @@ func (r Rule) matches(ev Event) bool {
 	return false
 }
 
+// Key is one keystroke a step names: what its cap says, and the bytes that
+// press it. Show me feeds the bytes through the same path a person's keys take,
+// so the session cannot tell the difference and the caps light up.
+type Key struct {
+	Label string
+	Bytes string
+}
+
 // Step is one card: what it teaches, the keys it names, and what proves it.
 type Step struct {
 	Title string
 	Note  string
 	// Keys are the caps the card shows, in the words a person would say.
-	Keys []string
+	Keys []Key
 	Done Rule
 	// Hint is the line shown when the step stalls.
 	Hint string
@@ -64,18 +91,65 @@ type Lesson struct {
 	track   Track
 	at      int
 	results []Result
+	// at_ is when the current step started, and level is what the ladder has
+	// already offered for it, so a step never climbs twice.
+	startedAt time.Time
+	level     Level
 }
 
 // Result is how a step went. Only Clean exists until the ladder lands: a track
 // that has no hints yet cannot be hinted.
 type Result string
 
-// Clean is a step the person finished themselves.
-const Clean Result = "clean"
+// Clean is a step the person finished themselves. Hinted is one the ladder
+// helped with, and Shown one show me played.
+const (
+	Clean  Result = "clean"
+	Hinted Result = "hinted"
+	Shown  Result = "shown"
+)
 
 // Start puts a person at the first step of a track.
 func Start(t Track) *Lesson {
-	return &Lesson{track: t}
+	return &Lesson{track: t, startedAt: time.Now()}
+}
+
+// Level is what the ladder offers for the step as it stands at now. The step's
+// clock restarts on every step, so time spent reading the previous card does
+// not count against this one.
+func (l *Lesson) Level(now time.Time) Level {
+	if l.Finished() {
+		return NoHelp
+	}
+	waited := now.Sub(l.startedAt)
+	switch {
+	case waited >= ShowMeAfter:
+		return OfferShow
+	case waited >= HintAfter:
+		return Hint
+	}
+	return NoHelp
+}
+
+// Ladder reports what the ladder now offers, and records it, so a step that was
+// helped is not reported as clean.
+func (l *Lesson) Ladder(now time.Time) Level {
+	if l.Finished() {
+		return NoHelp
+	}
+	next := l.Level(now)
+	if next > l.level {
+		l.level = next
+	}
+	return l.level
+}
+
+// Keys is the step's keys, for show me to play.
+func (l *Lesson) Keys() []Key {
+	if l.Finished() {
+		return nil
+	}
+	return l.track.Steps[l.at].Keys
 }
 
 // Track is the track this lesson runs.
@@ -101,8 +175,16 @@ func (l *Lesson) Feed(ev Event) bool {
 	if !l.track.Steps[l.at].Done.matches(ev) {
 		return false
 	}
-	l.results = append(l.results, Clean)
+	result := Clean
+	switch l.level {
+	case OfferShow:
+		result = Shown
+	case Hint:
+		result = Hinted
+	}
+	l.results = append(l.results, result)
 	l.at++
+	l.level, l.startedAt = NoHelp, time.Now()
 	return true
 }
 

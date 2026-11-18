@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall/js"
+	"time"
 
 	"dm/internal/client"
 	"dm/internal/keymap"
@@ -106,7 +107,7 @@ func report(events chan map[string]any, l *lesson.Lesson, ev map[string]any) {
 func lessonEvent(kind string, l *lesson.Lesson, step lesson.Step) map[string]any {
 	keys := make([]any, 0, len(step.Keys))
 	for _, k := range step.Keys {
-		keys = append(keys, k)
+		keys = append(keys, k.Label)
 	}
 	at, _, _ := l.Current()
 	return map[string]any{
@@ -232,7 +233,44 @@ func main() {
 	}()
 	go drainEvents(b, events)
 
+	// The ladder: one timer for the whole tour, reporting each rung once per
+	// step. The page draws what it hears.
+	go func() {
+		t := time.NewTicker(500 * time.Millisecond)
+		defer t.Stop()
+		last := lesson.NoHelp
+		for now := range t.C {
+			level := l.Ladder(now)
+			if level == last {
+				continue
+			}
+			last = level
+			if at, step, ok := l.Current(); ok {
+				pushEvent(events, map[string]any{
+					"type": "lesson.hint", "index": at + 1, "level": int(level),
+					"hint": step.Hint,
+				})
+			}
+		}
+	}()
+
 	api := map[string]any{
+		"showMe": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			// Show me presses the keys through the same channel the page types
+			// on, one at a time, so the caps light and the step advances the
+			// way it does for a person.
+			stepKeys := l.Keys()
+			go func() {
+				for _, k := range stepKeys {
+					select {
+					case keys <- []byte(k.Bytes):
+					case <-time.After(time.Second):
+					}
+					time.Sleep(250 * time.Millisecond)
+				}
+			}()
+			return nil
+		}),
 		"onOutput": js.FuncOf(func(_ js.Value, args []js.Value) any {
 			b.mu.Lock()
 			b.out = args[0]

@@ -1,6 +1,9 @@
 package lesson
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestAStepAdvancesOnTheEventItsRuleNames(t *testing.T) {
 	track := Track{Steps: []Step{
@@ -84,5 +87,55 @@ func TestTheBasicsTrackPlaysThrough(t *testing.T) {
 	}
 	if len(l.Results()) != len(track.Steps) {
 		t.Fatalf("results = %v, want one per step", l.Results())
+	}
+}
+
+func TestTheLadderClimbsOnTimeAndNeverFalls(t *testing.T) {
+	l := Start(Track{Steps: []Step{{Title: "one", Done: Rule{Action: "split-right"}, Keys: []Key{{Label: "|", Bytes: "|"}}}}})
+	now := l.startedAt
+	if got := l.Ladder(now.Add(3 * time.Second)); got != NoHelp {
+		t.Fatalf("after 3s the ladder offered %v", got)
+	}
+	if got := l.Ladder(now.Add(HintAfter + time.Second)); got != Hint {
+		t.Fatalf("after the hint delay it offered %v", got)
+	}
+	if got := l.Ladder(now.Add(ShowMeAfter + time.Second)); got != OfferShow {
+		t.Fatalf("after the show me delay it offered %v", got)
+	}
+	// The clock resetting is not a reason to take help away.
+	if got := l.Ladder(now); got != OfferShow {
+		t.Fatalf("the ladder fell back to %v", got)
+	}
+	// A helped step is not reported as clean, and the next step starts fresh.
+	l.Feed(Event{Type: "action", Name: "split-right"})
+	if got := l.Results(); len(got) != 1 || got[0] != Shown {
+		t.Fatalf("results = %v", got)
+	}
+	if got := l.Ladder(time.Now()); got != NoHelp {
+		t.Fatalf("the next step started at %v", got)
+	}
+}
+
+func TestHintedStepsRecordHinted(t *testing.T) {
+	l := Start(Track{Steps: []Step{{Done: Rule{Action: "split-right"}}}})
+	l.Ladder(l.startedAt.Add(HintAfter + time.Second))
+	l.Feed(Event{Type: "action", Name: "split-right"})
+	if got := l.Results(); len(got) != 1 || got[0] != Hinted {
+		t.Fatalf("results = %v", got)
+	}
+}
+
+func TestShowMeHasTheBytesForEveryStep(t *testing.T) {
+	for _, tr := range Tracks {
+		for _, step := range tr.Steps {
+			if len(step.Keys) == 0 {
+				t.Fatalf("%s: step %q names no keys, so show me has nothing to play", tr.ID, step.Title)
+			}
+			for _, k := range step.Keys {
+				if k.Bytes == "" {
+					t.Fatalf("%s: step %q has a cap %q with no bytes", tr.ID, step.Title, k.Label)
+				}
+			}
+		}
 	}
 }

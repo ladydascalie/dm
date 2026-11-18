@@ -240,7 +240,9 @@
         el("eyebrow").textContent = `step ${at} of ${total}`;
         el("title").textContent = ev.title ?? "";
         el("note").textContent = ev.note ?? "";
-        el("tip").textContent = ev.hint ?? "";
+        // The hint stays back until the ladder offers it, so a step gets a
+        // chance to be worked out.
+        el("tip").textContent = "take your time.";
         el("keys").innerHTML = "";
         for (const k of ev.keys ?? []) {
           const cap = document.createElement("kbd");
@@ -259,8 +261,27 @@
         el("progress").innerHTML = "track <b>done</b>";
       };
 
+      // The ladder: the session reports each rung, the page draws it. Show me
+      // is a button here and a key press in there, through the same path.
+      const hint = (ev) => {
+        el("tip").textContent = ev.hint ?? "";
+        if (ev.level >= 2 && !document.getElementById("showme")) {
+          const btn = document.createElement("button");
+          btn.id = "showme";
+          btn.className = "again";
+          btn.textContent = "show me";
+          btn.onclick = () => dm.showMe();
+          el("tip").append(" ");
+          el("tip").append(btn);
+        }
+      };
+
       const onEvent = (ev) => {
-        if (ev.type === "lesson.step") draw(ev);
+        if (ev.type === "lesson.step") {
+          const btn = document.getElementById("showme");
+          if (btn) btn.remove();
+          draw(ev);
+        } else if (ev.type === "lesson.hint") hint(ev);
         else if (ev.type === "lesson.finish") finish(ev);
       };
 
