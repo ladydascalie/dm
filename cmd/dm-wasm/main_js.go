@@ -25,6 +25,7 @@ import (
 	"dm/internal/client"
 	"dm/internal/keymap"
 	"dm/internal/layout"
+	"dm/internal/lesson"
 	"dm/internal/vt"
 	"dm/internal/webshell"
 	"dm/internal/wire"
@@ -72,6 +73,47 @@ func (b *bridge) send(fn js.Value, p []byte) {
 	buf := js.Global().Get("Uint8Array").New(len(p))
 	js.CopyBytesToJS(buf, p)
 	fn.Invoke(buf)
+}
+
+// report sends one session event to the page and folds it into the lesson, so a
+// step advances on what the session did and the page only draws the result.
+func report(events chan map[string]any, l *lesson.Lesson, ev map[string]any) {
+	pushEvent(events, ev)
+	le := lesson.Event{}
+	if v, ok := ev["type"].(string); ok {
+		le.Type = v
+	}
+	if v, ok := ev["name"].(string); ok {
+		le.Name = v
+	}
+	if v, ok := ev["line"].(string); ok {
+		le.Line = v
+	}
+	if v, ok := ev["panes"].(int); ok {
+		le.Panes = v
+	}
+	if !l.Feed(le) {
+		return
+	}
+	if _, step, ok := l.Current(); ok {
+		pushEvent(events, lessonEvent("lesson.step", l, step))
+		return
+	}
+	pushEvent(events, map[string]any{"type": "lesson.finish", "title": l.Track().Title})
+}
+
+// lessonEvent is one step as the page draws it.
+func lessonEvent(kind string, l *lesson.Lesson, step lesson.Step) map[string]any {
+	keys := make([]any, 0, len(step.Keys))
+	for _, k := range step.Keys {
+		keys = append(keys, k)
+	}
+	at, _, _ := l.Current()
+	return map[string]any{
+		"type": kind, "track": l.Track().Title, "index": at + 1,
+		"total": len(l.Track().Steps), "title": step.Title,
+		"note": step.Note, "hint": step.Hint, "keys": keys,
+	}
 }
 
 // pushEvent queues one event for the page, dropping it when nobody is reading:
@@ -160,13 +202,30 @@ func main() {
 
 	clientConn, serverConn := net.Pipe()
 	events := make(chan map[string]any, 64)
-	go fakeServer(serverConn, size, events)
+	track := lesson.Tracks[0]
+	l := lesson.Start(track)
+	if _, step, ok := l.Current(); ok {
+		pushEvent(events, lessonEvent("lesson.step", l, step))
+	}
+	forward := func(ev map[string]any) { report(events, l, ev) }
+	go fakeServer(serverConn, size, events, forward)
 	go func() {
 		h := client.Harness{
 			Conn: clientConn, Out: b, Keys: keys, Winch: winch,
 			Size: size.get, Session: "spike",
 			OnEvent: func(e client.Event) {
-				pushEvent(events, map[string]any{"type": e.Type, "name": e.Name})
+				ev := map[string]any{"type": e.Type}
+				if e.Name != "" {
+					ev["name"] = e.Name
+				}
+				if e.Type == "state" {
+					ev["panes"] = e.Panes
+					ev["focus"] = e.Focus
+					ev["rail"] = e.Rail
+					ev["zoom"] = e.Zoom
+					ev["sync"] = e.Sync
+				}
+				forward(ev)
 			},
 		}
 		_, _ = client.Attach(h)
@@ -278,12 +337,13 @@ type session struct {
 	sync bool
 	// events carries what the shells ran to the page, which is how a lesson
 	// sees a command and not just a key.
-	events chan map[string]any
+	events  chan map[string]any
+	forward func(map[string]any)
 }
 
 // newSession makes the one pane a session starts with.
-func newSession(size *sizer, events chan map[string]any) *session {
-	s := &session{size: size, panes: map[string]*pane{}, seq: 1, rail: layout.DefaultRail, events: events}
+func newSession(size *sizer, events chan map[string]any, forward func(map[string]any)) *session {
+	s := &session{size: size, panes: map[string]*pane{}, seq: 1, rail: layout.DefaultRail, events: events, forward: forward}
 	s.root = &layout.Node{Pane: "w1p1"}
 	s.focus = "w1p1"
 	s.fit()
@@ -331,7 +391,7 @@ func (s *session) fit() {
 		}
 		sh := webshell.New()
 		sh.OnRun = func(line string) {
-			pushEvent(s.events, map[string]any{"type": "command", "line": line})
+			s.forward(map[string]any{"type": "command", "line": line})
 		}
 		pn := &pane{term: vt.NewTerm(rect.W, rect.H), sh: sh}
 		pn.write(sh.Greet())
@@ -579,8 +639,8 @@ func (s *session) push(c net.Conn) {
 
 // fakeServer is the session the client talks to. It answers the frames a server
 // answers, over a pipe instead of a socket.
-func fakeServer(c net.Conn, size *sizer, events chan map[string]any) {
-	s := newSession(size, events)
+func fakeServer(c net.Conn, size *sizer, events chan map[string]any, forward func(map[string]any)) {
+	s := newSession(size, events, forward)
 	s.push(c)
 
 	for {

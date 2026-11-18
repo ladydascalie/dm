@@ -229,81 +229,39 @@
       term.open(termHost);
       fit.fit();
 
-      // A track is data: a step lists the keys it teaches and what proves it
-      // happened. The page keeps only this: the session runs the lesson.
-      const track = [
-        {
-          title: "Run a command",
-          note: "Type it and press enter. The pane is a pretend shell, but the keys are real.",
-          keys: ["echo hi", "enter"],
-          tip: "type echo hi, then press enter.",
-          done: (ev) => ev.type === "command" && ev.line === "echo hi",
-        },
-        {
-          title: "Split the window",
-          note: "The prefix works from any mode: ctrl+b, let go, then the key.",
-          keys: ["ctrl+b", "|"],
-          tip: "ctrl+b, then |.",
-          done: (ev) => ev.type === "action" && ev.name === "split-right",
-        },
-        {
-          title: "Move the focus",
-          note: "Focus walks to the pane on the left. The bright frame follows it.",
-          keys: ["ctrl+b", "h"],
-          tip: "ctrl+b, then h.",
-          done: (ev) => ev.type === "action" && ev.name === "focus-left",
-        },
-      ];
+      // The page holds no track and no rule. It draws the step the lesson
+      // reports and nothing else, so a track can be tested without a browser.
+      let at = 1;
+      let total = 1;
 
-      let at = 0;
-      let hintAt = 0;
-      let hintTimer = 0;
-
-      const render = () => {
-        const s = track[at];
-        if (!s) {
-          el("eyebrow").textContent = "track finished";
-          el("title").textContent = "That is the shape of a track.";
-          el("note").textContent = "Three steps, each one checked against what the session did.";
-          el("keys").innerHTML = "";
-          el("tip").textContent = "nothing left to press.";
-          el("progress").innerHTML = 'track <b>done</b>';
-          addAgain();
-          return;
-        }
-        el("eyebrow").textContent = `step ${at + 1}`;
-        el("title").textContent = s.title;
-        el("note").textContent = s.note;
-        el("tip").textContent = s.tip;
+      const draw = (ev) => {
+        at = ev.index ?? at;
+        total = ev.total ?? total;
+        el("eyebrow").textContent = `step ${at} of ${total}`;
+        el("title").textContent = ev.title ?? "";
+        el("note").textContent = ev.note ?? "";
+        el("tip").textContent = ev.hint ?? "";
         el("keys").innerHTML = "";
-        for (const k of s.keys) {
-          const el2 = document.createElement("kbd");
-          el2.textContent = k;
-          el("keys").append(el2);
+        for (const k of ev.keys ?? []) {
+          const cap = document.createElement("kbd");
+          cap.textContent = k;
+          el("keys").append(cap);
         }
-        el("progress").innerHTML = `step <b>${at + 1}</b> of ${track.length}`;
-        hintAt = Date.now();
-        clearTimeout(hintTimer);
-        hintTimer = setTimeout(() => {
-          if (at < track.length) el("tip").textContent = track[at].tip;
-        }, 0);
+        el("progress").innerHTML = `step <b>${at}</b> of ${total}`;
       };
 
-      const addAgain = () => {
-        const btn = document.createElement("button");
-        btn.className = "again";
-        btn.textContent = "start again";
-        btn.onclick = () => { at = 0; render(); };
-        el("keys").append(btn);
+      const finish = (ev) => {
+        el("eyebrow").textContent = "track finished";
+        el("title").textContent = "That is the shape of a track.";
+        el("note").textContent = `${ev.title ?? "the track"} runs its steps on what the session did, not on what the page thinks.`;
+        el("tip").textContent = "nothing left to press.";
+        el("keys").innerHTML = "";
+        el("progress").innerHTML = "track <b>done</b>";
       };
 
-      const check = (ev) => {
-        const s = track[at];
-        if (!s) return;
-        if (s.done(ev)) {
-          at += 1;
-          render();
-        }
+      const onEvent = (ev) => {
+        if (ev.type === "lesson.step") draw(ev);
+        else if (ev.type === "lesson.finish") finish(ev);
       };
 
       const size = () => {
@@ -316,9 +274,8 @@
         // The font settles after the first frame, and the cell box with it.
         document.fonts.ready.then(size);
         dm.onOutput((data) => term.write(data));
-        dm.onEvent(check);
+        dm.onEvent(onEvent);
         term.onData((text) => dm.input(text));
-        render();
         size();
         boot.remove();
       };

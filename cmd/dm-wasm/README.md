@@ -22,6 +22,14 @@ The fake uses the same helpers the server uses rather than its own arithmetic:
 `layout.ApplyPreset`. Where a helper does not exist, that is a sign the fake is
 standing in for something that belongs in the tree.
 
+## The lesson
+
+The track and its rules live in `internal/lesson`, in Go, and the page holds
+none of it. `lesson.Start(track)` is fed every event, `Feed` reports whether a
+step finished, and the program pushes `lesson.step` or `lesson.finish` for the
+page to draw. A step's rule names an action, a command or a pane count, and a
+track can therefore be played in a Go test with no browser at all.
+
 ## Events, for a lesson
 
 `dm.onEvent(fn)` receives what the operator did, as the session sees it:
@@ -30,10 +38,11 @@ standing in for something that belongs in the tree.
 | --- | --- | --- |
 | `action` | `{name}` | a keybinding action ran, such as `split-right` or `focus-left` |
 | `command` | `{line}` | the pretend shell answered a line |
+| `state` | `{panes, focus, rail, zoom, sync}` | the session changed shape |
 
-Two sources, one stream: the action comes from the client, which is the only
-place that knows which action a key ran, and the command comes from the fake
-shell. A step is data on the page and a check against these events, as the
+Three sources, one stream: `action` from the client, which is the only place
+that knows which action a key ran, `state` from the client once per change, and
+`command` from the fake shell. A step is data on the page and a check against these events, as the
 three-step card in `index.html` shows. Events that arrive before the page
 registers are held and delivered in order, and an event with no reader is
 dropped so a slow card never stalls the session.

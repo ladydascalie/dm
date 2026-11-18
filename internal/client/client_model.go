@@ -97,7 +97,8 @@ type tui struct {
 	out io.Writer
 
 	// onEvent reports what the operator did to a harness, nil in a session.
-	onEvent func(Event)
+	onEvent   func(Event)
+	lastState stateSummary
 
 	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help"
 	sessions []transport.SessionInfo
@@ -674,10 +675,17 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 // check a step against it. The client is the only place that knows which
 // action a key ran, so the report comes from here and not from the session.
 type Event struct {
-	// Type is "action". More will follow as a harness needs them.
+	// Type is "action" or "state".
 	Type string
 	// Name is the keybinding action, such as "split-right".
 	Name string
+	// Panes, Focus, Rail, Zoom and Sync describe the session on a "state"
+	// event, which comes once per change and only when something changed.
+	Panes int
+	Focus string
+	Rail  int
+	Zoom  bool
+	Sync  bool
 }
 
 // Harness is what a caller with no terminal supplies. Run owns a terminal: raw
@@ -700,6 +708,39 @@ type Harness struct {
 func Attach(h Harness) (string, error) {
 	theme.SetDepth(theme.DetectDepth(os.Getenv))
 	return attachConn(&transport.Conn{Conn: h.Conn}, h.Out, h.Keys, h.Winch, h.Size, h.Session, &pacer{}, h.OnEvent)
+}
+
+// lastState is what the harness heard last, so a snapshot that changes nothing
+// it can see does not wake it.
+type stateSummary struct {
+	panes int
+	focus string
+	rail  int
+	zoom  bool
+	sync  bool
+}
+
+// reportState tells the harness what the session looks like now, when it is not
+// what the last report said.
+func (t *tui) reportState() {
+	if t.snap == nil || t.onEvent == nil {
+		return
+	}
+	now := stateSummary{
+		panes: len(t.snap.Panes),
+		focus: t.snap.Focus,
+		rail:  t.snap.Rail,
+		zoom:  t.snap.Zoom != "",
+		sync:  t.snap.Sync,
+	}
+	if now == t.lastState {
+		return
+	}
+	t.lastState = now
+	t.emit(Event{
+		Type: "state", Panes: now.panes, Focus: now.focus,
+		Rail: now.rail, Zoom: now.zoom, Sync: now.sync,
+	})
 }
 
 // emit reports one event to the harness, if it asked for any.
@@ -811,6 +852,7 @@ func (t *tui) apply(m wire.Msg) {
 	switch m.Type {
 	case "snapshot":
 		t.snap = m.Snap
+		t.reportState()
 		t.snap.WindowLabel = t.km().WindowLabel()
 		t.updatePadHover(t.mouseX, t.mouseY)
 		t.updateRailHover()
