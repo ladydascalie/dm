@@ -31,9 +31,16 @@ type harness struct {
 // newHarness starts a session and attaches one client to it.
 func newHarness(t *testing.T, cols, rows int) *harness {
 	t.Helper()
+	return newHarnessWith(t, cols, rows, func(map[string]any) {})
+}
+
+// newHarnessWith is newHarness with the session's forward callback, which is how
+// a test hears the session event the page draws its coach from.
+func newHarnessWith(t *testing.T, cols, rows int, forward func(map[string]any)) *harness {
+	t.Helper()
 	client, server := net.Pipe()
 	size := func() (int, int) { return cols, rows }
-	sess := websession.New(size, func(map[string]any) {}, server)
+	sess := websession.New(size, forward, server)
 	go sess.Serve()
 	h := &harness{t: t, conn: client, peer: server, cols: cols, rows: rows, terms: map[string]*vt.Term{}}
 	t.Cleanup(func() {

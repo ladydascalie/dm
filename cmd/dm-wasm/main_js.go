@@ -10,21 +10,26 @@
 // and what is left.
 //
 // This file is the page bridge only: the frame sink, the key channel, the
-// resize signal and the lesson. The session itself has no build tags, so it is
-// tested natively.
+// resize signal, the hub, the saved progress and the lesson. The session itself
+// has no build tags, so it is tested natively, and the tour's progress rules are
+// pure functions in progress.go, which is tested natively too.
 //
 // The page talks to it through one global, set before the program starts:
 //
 //	dm.onOutput(fn)        fn(Uint8Array) receives the frame bytes
 //	dm.input(text)         keys, as a terminal would send them
 //	dm.resize(cols, rows)  the renderer's size in cells
+//	dm.onEvent(fn)         fn(event) receives one event to draw
+//	dm.tracks()            every track, the one being played marked
+//	dm.pick(id)            play that track from its first step
+//	dm.restart()           play the current track from its first step
+//	dm.showMe()            press the current step's keys
+//	dm.last()              the last request the fake session handled
 package main
 
 import (
 	"net"
-	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"syscall/js"
 	"time"
@@ -33,6 +38,14 @@ import (
 	"dm/internal/lesson"
 	"dm/internal/websession"
 )
+
+// The fast forward and show me leave this long between keystrokes, so each read
+// reaches the session on its own, as a person's would.
+const keyGap = 250 * time.Millisecond
+
+// stepWait is how long one fast forward step gets to be proved before the
+// handover gives up on it.
+const stepWait = 5 * time.Second
 
 // bridge is the page's side of the program: the frame sink the client writes
 // to, and the queues the page fills. Output written before the page registers
@@ -67,10 +80,78 @@ func (b *bridge) send(fn js.Value, p []byte) {
 	fn.Invoke(buf)
 }
 
-// report sends one session event to the page and folds it into the lesson, so a
-// step advances on what the session did and the page only draws the result.
-func report(events chan map[string]any, l *lesson.Lesson, ev map[string]any) {
+// handover is the boot's fast forward. While it runs the lesson still advances,
+// but no step and no hint is drawn: the card does not flash through steps the
+// person already did, and it is drawn once, at the step the handover reached.
+// A halted handover is a page on its way out: nothing it saves may write the old
+// step back over the record the reload boots from.
+type handover struct {
+	mu     sync.Mutex
+	busy   bool
+	halted bool
+}
+
+// running reports whether the fast forward still owns the card.
+func (h *handover) running() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.busy
+}
+
+// done hands the card back to the lesson.
+func (h *handover) done() {
+	h.mu.Lock()
+	h.busy = false
+	h.mu.Unlock()
+}
+
+// halt stops the fast forward and its saves. A page that is about to reload with
+// a fresh record calls it first.
+func (h *handover) halt() {
+	h.mu.Lock()
+	h.busy, h.halted = false, true
+	h.mu.Unlock()
+}
+
+// live reports whether a save may still land.
+func (h *handover) live() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return !h.halted
+}
+
+// report sends one event to the page and folds it into the lesson, so a step
+// advances on what the session did and the page only draws the result.
+func report(events chan map[string]any, l *lesson.Lesson, hand *handover, ev map[string]any) {
 	pushEvent(events, ev)
+	if kind, _ := ev["type"].(string); kind == "session" {
+		// The session's own shape is the coach: the page draws it, and the
+		// lesson never sees it.
+		return
+	}
+	if !l.Feed(asLessonEvent(ev)) {
+		return
+	}
+	if hand.running() {
+		// The fast forward draws the card when it hands over.
+		return
+	}
+	if at, step, ok := l.Current(); ok {
+		if hand.live() {
+			saveProgress(progress{Track: l.Track().ID, Step: at})
+		}
+		pushEvent(events, stepEvent("lesson.step", l, step))
+		return
+	}
+	if hand.live() {
+		clearStep(l)
+	}
+	pushEvent(events, map[string]any{"type": "lesson.finish", "title": l.Track().Title})
+}
+
+// asLessonEvent is one session event as the engine sees it. The engine reads
+// four fields and the page's session event carries none of its business.
+func asLessonEvent(ev map[string]any) lesson.Event {
 	le := lesson.Event{}
 	if v, ok := ev["type"].(string); ok {
 		le.Type = v
@@ -84,18 +165,11 @@ func report(events chan map[string]any, l *lesson.Lesson, ev map[string]any) {
 	if v, ok := ev["panes"].(int); ok {
 		le.Panes = v
 	}
-	if !l.Feed(le) {
-		return
-	}
-	if _, step, ok := l.Current(); ok {
-		pushEvent(events, lessonEvent("lesson.step", l, step))
-		return
-	}
-	pushEvent(events, map[string]any{"type": "lesson.finish", "title": l.Track().Title})
+	return le
 }
 
-// lessonEvent is one step as the page draws it.
-func lessonEvent(kind string, l *lesson.Lesson, step lesson.Step) map[string]any {
+// stepEvent is one step as the page draws it.
+func stepEvent(kind string, l *lesson.Lesson, step lesson.Step) map[string]any {
 	keys := make([]any, 0, len(step.Keys))
 	for _, k := range step.Keys {
 		keys = append(keys, k.Label)
@@ -166,25 +240,112 @@ type resizeSignal struct{}
 func (resizeSignal) String() string { return "resize" }
 func (resizeSignal) Signal()        {}
 
-// trackFromURL names the track to play. The page has no hub yet, so a track is
-// picked with ?track=<id> and a name no track answers plays the first one, which
-// is what a bare address gets. Delete this when the hub names the track itself.
-func trackFromURL() lesson.Track {
+// storage is the browser's localStorage, or an empty value when the page has
+// none to offer.
+func storage() js.Value {
+	ls := js.Global().Get("localStorage")
+	if ls.Type() != js.TypeObject {
+		return js.Value{}
+	}
+	return ls
+}
+
+// savedRaw reads the saved record, empty when it cannot be read. The wasm side
+// is the only writer; the page only draws what it is told.
+func savedRaw() (raw string) {
+	ls := storage()
+	if ls.IsUndefined() || ls.IsNull() {
+		return ""
+	}
+	defer func() { _ = recover() }()
+	return ls.Call("getItem", progressKey).String()
+}
+
+// saveProgress writes the record. A browser that refuses storage leaves the
+// tour running: progress is a convenience, not a rule.
+func saveProgress(p progress) {
+	ls := storage()
+	if ls.IsUndefined() || ls.IsNull() {
+		return
+	}
+	defer func() { _ = recover() }()
+	ls.Call("setItem", progressKey, encodeProgress(p))
+}
+
+// clearStep drops the saved step and keeps the chosen track, so a finished,
+// restarted or switched track plays from its first step next time.
+func clearStep(l *lesson.Lesson) {
+	saveProgress(progress{Track: l.Track().ID})
+}
+
+// reload asks the browser for a fresh session. A track switch boots a new
+// lesson, a new session and a new client, so nothing of the old track is left
+// behind in either.
+func reload() {
 	loc := js.Global().Get("location")
-	if loc.Type() != js.TypeObject {
-		return lesson.Tracks[0]
+	if loc.Type() == js.TypeObject {
+		loc.Call("reload")
 	}
-	q, err := url.ParseQuery(strings.TrimPrefix(loc.Get("search").String(), "?"))
-	if err != nil {
-		return lesson.Tracks[0]
-	}
-	id := q.Get("track")
-	for _, tr := range lesson.Tracks {
-		if tr.ID == id {
-			return tr
+}
+
+// resume replays the steps already done and then hands the card over. It presses
+// each step's keys through the same channel show me uses and waits for the
+// lesson to move on before the next step, so the session ends in the shape steps
+// 1..N built. A step that does not advance in time ends the fast forward where
+// the lesson really reached: it never loops, and it never presses a step twice.
+func resume(keys chan []byte, l *lesson.Lesson, hand *handover, events chan map[string]any, at int) {
+	tr := l.Track()
+	stalled := false
+	for step := 0; step < at; step++ {
+		for _, k := range stepKeys(tr, step) {
+			select {
+			case keys <- []byte(k):
+			case <-time.After(time.Second):
+			}
+			time.Sleep(keyGap)
+		}
+		if !waitPast(l, step) {
+			// The session did not do what the saved step promised. The saved
+			// step is cleared and the card is the step the lesson really
+			// reached.
+			stalled = true
+			break
 		}
 	}
-	return lesson.Tracks[0]
+	hand.done()
+	if stalled && hand.live() {
+		clearStep(l)
+	}
+	handOver(events, l, hand, !stalled)
+}
+
+// waitPast waits for the lesson to move beyond step i, reporting whether it did.
+func waitPast(l *lesson.Lesson, i int) bool {
+	end := time.Now().Add(stepWait)
+	for {
+		if now, _, _ := l.Current(); now > i {
+			return true
+		}
+		if time.Now().After(end) {
+			return false
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// handOver draws the step the fast forward reached. A handover that got there
+// saves the count; one that stalled has already cleared the saved step, and the
+// next step saves again.
+func handOver(events chan map[string]any, l *lesson.Lesson, hand *handover, save bool) {
+	if at, step, ok := l.Current(); ok {
+		if save && hand.live() {
+			saveProgress(progress{Track: l.Track().ID, Step: at})
+		}
+		pushEvent(events, stepEvent("lesson.step", l, step))
+		return
+	}
+	clearStep(l)
+	pushEvent(events, map[string]any{"type": "lesson.finish", "title": l.Track().Title})
 }
 
 func main() {
@@ -192,6 +353,28 @@ func main() {
 	b := &bridge{}
 	keys := make(chan []byte, 64)
 	winch := make(chan os.Signal, 1)
+	events := make(chan map[string]any, 64)
+
+	// The saved record decides the track and the step. It is hostile input:
+	// resumePlan answers the first track's first step for anything it cannot
+	// trust.
+	track, resumeAt := resumePlan(savedRaw())
+	l := lesson.Start(track)
+	hand := &handover{busy: resumeAt > 0}
+	forward := func(ev map[string]any) { report(events, l, hand, ev) }
+
+	// The hub first, so the page can name the track it plays and say it is
+	// resuming before any step is drawn. A boot that resumes draws no step:
+	// the fast forward draws the one the person reloaded on.
+	pushEvent(events, map[string]any{
+		"type": "lesson.tracks", "tracks": trackList(track.ID),
+		"resumeAt": resumeAt, "resuming": resumeAt > 0,
+	})
+	if resumeAt == 0 {
+		if _, step, ok := l.Current(); ok {
+			pushEvent(events, stepEvent("lesson.step", l, step))
+		}
+	}
 
 	// The prologue Run writes on a real machine: the alternate screen, a
 	// hidden cursor, a clear, and the mouse modes, without which the rail is
@@ -201,13 +384,6 @@ func main() {
 	_, _ = b.Write([]byte("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h"))
 
 	clientConn, serverConn := net.Pipe()
-	events := make(chan map[string]any, 64)
-	l := lesson.Start(trackFromURL())
-	if _, step, ok := l.Current(); ok {
-		pushEvent(events, lessonEvent("lesson.step", l, step))
-	}
-	forward := func(ev map[string]any) { report(events, l, ev) }
-
 	sess := websession.New(size.get, forward, serverConn)
 	go sess.Serve()
 	go func() {
@@ -232,14 +408,23 @@ func main() {
 		_, _ = client.Attach(h)
 	}()
 	go drainEvents(b, events)
+	if resumeAt > 0 {
+		// The keys queue while the client attaches, so the first read loses
+		// nothing.
+		go resume(keys, l, hand, events, resumeAt)
+	}
 
 	// The ladder: one timer for the whole tour, reporting each rung once per
-	// step. The page draws what it hears.
+	// step. The page draws what it hears. It waits while the fast forward owns
+	// the card, so a step it is replaying is not offered help.
 	go func() {
 		t := time.NewTicker(500 * time.Millisecond)
 		defer t.Stop()
 		last := lesson.NoHelp
 		for now := range t.C {
+			if hand.running() {
+				continue
+			}
 			level := l.Ladder(now)
 			if level == last {
 				continue
@@ -266,9 +451,39 @@ func main() {
 					case keys <- []byte(k.Bytes):
 					case <-time.After(time.Second):
 					}
-					time.Sleep(250 * time.Millisecond)
+					time.Sleep(keyGap)
 				}
 			}()
+			return nil
+		}),
+		"tracks": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			// The hub's content, from the same list the boot event carries, so
+			// the API and the page cannot disagree about a track.
+			return js.ValueOf(trackList(l.Track().ID))
+		}),
+		"pick": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			// A track switch starts from a clean session: the choice is saved
+			// with no step, and the reload boots the new track at its first
+			// step. A name no track answers changes nothing.
+			if len(args) == 0 {
+				return nil
+			}
+			id := args[0].String()
+			if _, ok := lookupTrack(id); !ok {
+				return nil
+			}
+			// Nothing still running may write a step back: the reload boots
+			// the track the record names.
+			hand.halt()
+			saveProgress(progress{Track: id})
+			reload()
+			return nil
+		}),
+		"restart": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			// A restart keeps the track and clears its step.
+			hand.halt()
+			clearStep(l)
+			reload()
 			return nil
 		}),
 		"onOutput": js.FuncOf(func(_ js.Value, args []js.Value) any {

@@ -56,6 +56,37 @@ channel, and the lesson advances only when a step's rule is met. A track that
 names a key the client does not act on, or a command the shell does not answer,
 fails the build rather than the tour.
 
+The page plays the track it is told to play and holds none of the rule. It draws
+the hub, one button per track, from the boot's `lesson.tracks` event, and asks
+for a switch with `dm.pick(id)`. A switch is a full reload: the choice is saved
+and the new track boots at its first step, so nothing of the old one is left in
+the session. `dm.restart()` clears the step of the current track and reloads the
+same way. `dm.tracks()` returns the same list the page draws.
+
+## Progress
+
+The tour saves one record under the versioned key `dm.tour.v1`: the chosen track
+and how many of its steps are done. The wasm side is the only writer. On boot it
+picks the track from that record, the first track when the record is absent,
+unknown or malformed, and clamps the step to one the track has: zero for anything
+outside it. The record is treated as hostile, so nothing in it reaches the page.
+
+A record that says step N is in progress replays steps 1 to N before the first
+card is drawn: each done step's keys go through the same channel `dm.showMe`
+uses, one keystroke at a time, and the fast forward waits for the lesson to
+advance before the next step. Because the fake session is deterministic, a reload
+on step 4 of 6 ends on step 4 with the session in the shape steps 1 to 3 built.
+`lesson.step` and `lesson.hint` are held back until the handover, so the card does
+not flash through steps already done. A step that does not advance within five
+seconds ends the fast forward where the lesson really reached: it never presses a
+step twice. The count is saved after every step, and cleared when a track
+finishes, restarts or is switched.
+
+The storage decode, the track lookup, the step clamp and the keys a fast forward
+presses are pure functions in `progress.go`, a file with no build tag, so
+`go test ./cmd/dm-wasm/...` proves them on the host. The `js` surface stays thin
+and the browser checks it.
+
 ## Events, for a lesson
 
 `dm.onEvent(fn)` receives what the operator did, as the session sees it:
@@ -65,13 +96,26 @@ fails the build rather than the tour.
 | `action` | `{name}` | a keybinding action ran, such as `split-right` or `focus-left` |
 | `command` | `{line}` | the pretend shell answered a line |
 | `state` | `{panes, focus, rail, zoom, sync}` | the session changed shape |
+| `session` | `{workspaces, windows, panes, focus}` | every snapshot the session sends |
 
-Three sources, one stream: `action` from the client, which is the only place
-that knows which action a key ran, `state` from the client once per change, and
-`command` from the fake shell. A step is data on the page and a check against these events, as the
-three-step card in `index.html` shows. Events that arrive before the page
-registers are held and delivered in order, and an event with no reader is
-dropped so a slow card never stalls the session.
+Four sources, one stream: `action` from the client, which is the only place that
+knows which action a key ran, `state` from the client once per change, `command`
+from the fake shell, and `session` from the session's own model. Events that
+arrive before the page registers are held and delivered in order, and an event
+with no reader is dropped so a slow card never stalls the session.
+
+The page draws five lesson events and no rule of its own:
+
+| Event | Data | When |
+| --- | --- | --- |
+| `lesson.tracks` | `{tracks: [{id, title, current}], resumeAt, resuming}` | boot, before any step |
+| `lesson.step` | `{track, index, total, title, note, hint, keys}` | a step to draw |
+| `lesson.hint` | `{index, level, hint}` | the ladder offers help |
+| `lesson.finish` | `{title}` | the track is done |
+
+`session` is the coach and never reaches the lesson. The page draws its counts as
+one quiet line under the screen: `2 windows · 1 workspace · 3 panes · focus
+w2p1`. Resuming is turned off by the first `lesson.step`.
 
 The page turns on the mouse modes, so a click on a rail row reaches the client
 the way it does on a machine. `dm.last()` returns the last request the fake
@@ -114,8 +158,9 @@ The page gives the terminal the keyboard at boot and after any click on the page
 a browser takes `ctrl+b` for its own bookmarks bar otherwise and the prefix never reaches
 the client. The bar under the screen says when the browser holds the keys instead.
 
-The page plays the first track. Name another one by its id, for example
-<http://127.0.0.1:8765/?track=windows>, until the page grows a track list.
+The page plays the track saved under `dm.tour.v1`, the first track on a clean
+browser. The hub under the header switches tracks, and the button beside the
+progress restarts the current one.
 
 ## What the seam is
 
