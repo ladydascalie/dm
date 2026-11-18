@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"dm/internal/box"
@@ -544,7 +544,7 @@ func Run(name string) error {
 	keys := make(chan []byte, 64)
 	go stdinReader(keys)
 	winch := make(chan os.Signal, 1)
-	signal.Notify(winch, syscall.SIGWINCH)
+	notifyResize(winch)
 	defer signal.Stop(winch)
 
 	var out bytes.Buffer
@@ -652,20 +652,40 @@ func (t *tui) frame(now time.Time, pace *pacer, sink *frameSink) {
 	}
 }
 
+// runSession dials the session and hands it to attachConn over the connection
+// it owns.
 func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal, pace *pacer) (string, error) {
 	c, err := transport.Dial(name)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = c.Close() }()
+	size := func() (int, int) {
+		cols, rows, _ := term.GetSize(fd)
+		return cols, rows
+	}
+	return attachConn(c, os.Stdout, keys, winch, size, name, pace)
+}
 
+// Attach runs one attached session over a connection the caller made, writing
+// frames to out and taking the size from size. Run owns a terminal, reads its
+// own size and keys, and asks the outer terminal for its colours; Attach owns
+// none of that, which is what a harness with no tty needs. It returns the
+// session to switch to, empty when the client is done.
+func Attach(c net.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), session string) (string, error) {
+	theme.SetDepth(theme.DetectDepth(os.Getenv))
+	return attachConn(&transport.Conn{Conn: c}, out, keys, winch, size, session, &pacer{})
+}
+
+// attachConn is one attached session over a connection already in hand.
+func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), name string, pace *pacer) (string, error) {
 	t := &tui{
 		session: name, conn: c, vts: map[string]*vt.Term{},
 		hist: map[string][]byte{},
 	}
 	// The sink counts a frame's bytes so the pacer can tell whether the
 	// frame said anything.
-	sink := &frameSink{w: os.Stdout}
+	sink := &frameSink{w: out}
 	t.out = sink
 	// The keymap is loaded once for the whole session. A missing file is
 	// written with the defaults first; a load error is toasted and the
@@ -679,7 +699,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 	if err != nil {
 		t.notify(err.Error())
 	}
-	t.cols, t.rows, _ = term.GetSize(fd)
+	t.cols, t.rows = size()
 	defer closeSwitcher(t)
 
 	done := make(chan struct{})
@@ -724,8 +744,8 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 			t.apply(m)
 			t.wake(time.Now(), pace, sink)
 		case <-winch:
-			cols, rows, err := term.GetSize(fd)
-			if err == nil && (cols != t.cols || rows != t.rows) {
+			cols, rows := size()
+			if cols != t.cols || rows != t.rows {
 				t.cols, t.rows = cols, rows
 				_ = t.conn.Send(wire.Msg{Type: "resize", Cols: cols, Rows: rows})
 				t.dirty = true

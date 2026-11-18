@@ -81,7 +81,7 @@ func EnsureAt(root, name string) (net.Conn, error) {
 		}
 	}
 	cmd.Env = append(env, "DM_STATE="+root)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	detachProcess(cmd)
 	cmd.Stdout, cmd.Stderr = lf, lf
 	if err := cmd.Start(); err != nil {
 		return nil, err
