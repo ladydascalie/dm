@@ -1369,8 +1369,11 @@ each part at zero.
 
 `w` swaps the entry list for the watcher page: one row per watch as
 `PANE FILTER @CURSOR`, with a `wait` mark while a wait is parked. A live `sub`
-shows as parked too. `enter` opens the selected entry's body over the list when
-the entry carries one. `m` toggles the notification filter and keeps the
+shows as parked too. `enter` opens the selected entry over the list in a
+scrolling reader: the summary line, then the body below it, wrapped. The
+overlay is at least twelve rows tall and grows with a longer list, so an entry
+reads even in a short log, and a notification with no body still reads its
+message. `m` toggles the notification filter and keeps the
 selection on its entry. `p` closes the float and focuses the pane the entry is
 about; an entry that names no pane, or a pane the session does not carry, raises
 a toast and changes nothing. `x` clears the selected entry's key; `X` clears

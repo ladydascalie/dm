@@ -140,6 +140,22 @@ func BoxViewRect(snap *wire.Snapshot, n int) layout.Rect {
 	return clampRect(layout.Rect{X: x, Y: y, W: w, H: h}, snap.Cols, snap.Rows)
 }
 
+// ReaderMinRows is the shortest reader overlay. The reader copies the list's
+// rect, but a short log would leave it one or two rows tall and the body would
+// sit below the window, so the overlay keeps at least this many rows.
+const ReaderMinRows = 12
+
+// ReaderRect is where the body reader sits: the list's rect widened to at
+// least ReaderMinRows, centred and clamped the way the list's rect is. A list
+// taller than the floor keeps its own height, so a long log reads the whole
+// entry in one screen.
+func ReaderRect(snap *wire.Snapshot, listRows int) layout.Rect {
+	if listRows < ReaderMinRows {
+		listRows = ReaderMinRows
+	}
+	return BoxViewRect(snap, listRows)
+}
+
 // clampRect keeps r inside a cols by rows screen.
 func clampRect(r layout.Rect, cols, rows int) layout.Rect {
 	if r.W > cols {
@@ -496,24 +512,56 @@ func (b *BoxView) title() string {
 }
 
 // hint is the float's bottom border: the keys the view takes, every one named
-// from the box keymap, so a rebind moves the hint. The body affordance shows
-// only when the selected entry carries a body.
+// from the box keymap, so a rebind moves the hint. The entry keys show only
+// while the log page has a row to act on: the watcher page has no selection.
+// A float too narrow for the whole row drops hints left to right, so the keys
+// that move, read and close survive a cramped border.
 func (b *BoxView) hint() string {
-	hints := []ui.Hint{{Keys: []string{b.key("down"), b.key("up")}, Label: "move"}}
+	move := ui.Hint{Keys: []string{b.key("down"), b.key("up")}, Label: "move"}
+	closeHint := ui.Hint{Keys: []string{b.key("close-esc")}, Label: "close"}
 	if b.page {
-		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "log"})
-	} else {
-		hints = append(hints, ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "watchers"})
-		if b.list.Filter == "" {
-			hints = append(hints, ui.Hint{Keys: []string{b.key("filter-notify")}, Label: "notify"})
-		} else {
-			hints = append(hints, ui.Hint{Keys: []string{b.key("filter-notify")}, Label: "all"})
-		}
-		if e, ok := b.Selected(); ok && e.Body != "" {
+		return ui.Hints([]ui.Hint{move,
+			{Keys: []string{b.key("toggle-page")}, Label: "log"},
+			closeHint,
+		})
+	}
+	hints := []ui.Hint{move}
+	if e, ok := b.Selected(); ok {
+		if e.Msg != "" || e.Body != "" {
 			hints = append(hints, ui.Hint{Keys: []string{b.key("body")}, Label: "body"})
 		}
+		hints = append(hints,
+			ui.Hint{Keys: []string{b.key("jump-pane")}, Label: "pane"},
+			ui.Hint{Keys: []string{b.key("clear-entry")}, Label: "clear"},
+			ui.Hint{Keys: []string{b.key("clear-filter")}, Label: "clear all"},
+		)
 	}
-	return ui.Hints(append(hints, ui.Hint{Keys: []string{b.key("close-esc")}, Label: "close"}))
+	label := "notify"
+	if b.list.Filter != "" {
+		label = "all"
+	}
+	hints = append(hints,
+		ui.Hint{Keys: []string{b.key("filter-notify")}, Label: label},
+		ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "watch"},
+		closeHint,
+	)
+	// The border row fits the float's width plus its two corners. Drop the
+	// least useful hints, in this order, until the row fits; the move, body
+	// and close hints stay whatever happens.
+	limit := b.Float.Rect.W + 2
+	for _, drop := range []string{"clear all", "notify", "all", "pane", "clear", "watch"} {
+		if cells.Cells(ui.Hints(hints)) <= limit {
+			break
+		}
+		kept := hints[:0:0]
+		for _, h := range hints {
+			if h.Label != drop {
+				kept = append(kept, h)
+			}
+		}
+		hints = kept
+	}
+	return ui.Hints(hints)
 }
 
 // key is the key the box keymap shows for action. A view without a config

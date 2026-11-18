@@ -851,7 +851,7 @@ func (t *tui) apply(m wire.Msg) {
 		if t.box != nil {
 			t.box.Sync(m.Snap, t.theme())
 			if t.reader != nil {
-				t.reader.Sync(t.box.Float.Rect, t.theme())
+				t.reader.Sync(boxview.ReaderRect(t.snap, t.box.ListLen()), t.theme())
 			}
 			t.dirty = true
 		}

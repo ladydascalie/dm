@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/boxview"
 	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -313,18 +314,26 @@ func TestViewReaderOverList(t *testing.T) {
 	tui, got := switcherTUI(t)
 	openView(t, tui, got, "\x02N")
 	fillView(t, tui, viewEntries())
-	// Enter on an entry without a body opens nothing.
+	// Enter opens the selected entry whether it carries a body or not: a
+	// summary wraps in the same reader.
 	feed(tui, "\r")
+	if tui.reader == nil {
+		t.Fatal("enter did not open the reader for a summary")
+	}
+	if got := tui.reader.lines; len(got) != 1 || got[0] != tui.reader.e.Msg {
+		t.Fatalf("reader lines = %q, want the summary", got)
+	}
+	feed(tui, "q")
 	if tui.reader != nil {
-		t.Fatal("enter opened a reader for an entry with no body")
+		t.Fatal("q did not close the summary reader")
 	}
 	feed(tui, "jj") // seq 2, the entry with a body
 	feed(tui, "\r")
 	if tui.reader == nil {
 		t.Fatal("enter did not open the reader")
 	}
-	if tui.reader.Float.Rect != tui.box.Float.Rect {
-		t.Fatalf("reader rect = %+v, want the box's %+v", tui.reader.Float.Rect, tui.box.Float.Rect)
+	if want := boxview.ReaderRect(tui.snap, tui.box.ListLen()); tui.reader.Float.Rect != want {
+		t.Fatalf("reader rect = %+v, want %+v", tui.reader.Float.Rect, want)
 	}
 	// q closes the reader first and leaves the list up.
 	feed(tui, "q")

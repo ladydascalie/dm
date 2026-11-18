@@ -1,16 +1,18 @@
 package client
 
-// The body reader: the list page opens one entry's body in a scrolling
-// overlay, the entry renders the body below the summary line, and an entry
-// without a body offers no reader.
+// The body reader: the list page opens one entry in a scrolling overlay. The
+// overlay carries the summary line and the body below it, and it wraps a
+// summary that has no body at all, so a notification still reads.
 
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"dm/internal/box"
+	"dm/internal/boxview"
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
@@ -27,6 +29,19 @@ func bodyEntries() []box.Entry {
 			Body: "first body line\nsecond body line\nthird\nfourth\nfifth\n"},
 		{Seq: 8, Key: "lane/a", State: box.StateWorking, From: "w3p1", Msg: "plain entry"},
 		{Seq: 7, Key: "lane/b", State: box.StateNote, From: "w2p1", Msg: "note"},
+	}
+}
+
+// longBodyEntries is one entry long enough to scroll in a reader: the floor
+// height is shorter than the body.
+func longBodyEntries() []box.Entry {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("body line %02d", i)
+	}
+	return []box.Entry{
+		{Seq: 9, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "summary",
+			Body: strings.Join(lines, "\n")},
 	}
 }
 
@@ -101,7 +116,7 @@ func TestBodyReaderPaintsBodyBelowTheLine(t *testing.T) {
 // The reader scrolls and the list page keeps the reader's place separate.
 func TestBodyReaderScrolls(t *testing.T) {
 	t.Parallel()
-	tui := openBoxWith(t, bodyEntries())
+	tui := openBoxWith(t, longBodyEntries())
 	feed(tui, "\r")
 	feed(tui, "j")
 	if tui.reader.win.Off != 1 {
@@ -137,25 +152,43 @@ func TestBodyReaderClosesOnQ(t *testing.T) {
 	}
 }
 
-// An entry without a body shows no reader affordance and v opens nothing.
-func TestBodylessEntryHasNoAffordance(t *testing.T) {
+// A summary with no body reads: the overlay wraps it. An entry with no text at
+// all opens nothing and offers no affordance.
+func TestSummaryOnlyEntryReads(t *testing.T) {
 	t.Parallel()
 	entries := []box.Entry{
-		{Seq: 10, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "plain"},
-		{Seq: 9, Key: "lane/a", State: box.StateDone, From: "w3p1", Msg: "with body", Body: "text"},
+		{Seq: 10, Key: "notify/w3p1", State: box.StateBlocked, From: "w3p1", Msg: "needs you"},
 	}
 	tui := openBoxWith(t, entries)
-	if strings.Contains(tui.box.Float.Hint, "enter body") {
-		t.Fatalf("hint = %q, want no reader affordance", tui.box.Float.Hint)
+	if !strings.Contains(tui.box.Float.Hint, "enter body") {
+		t.Fatalf("hint = %q, want the reader affordance on a summary", tui.box.Float.Hint)
 	}
 	feed(tui, "\r")
-	if tui.reader != nil {
-		t.Fatal("enter opened a reader for an entry without a body")
+	if tui.reader == nil {
+		t.Fatal("enter did not open the reader for a summary")
+	}
+	if got := tui.reader.lines; len(got) != 1 || got[0] != "needs you" {
+		t.Fatalf("reader lines = %q, want the summary", got)
 	}
 }
 
-// The selection moves with j and enter opens the reader on it. The hint
-// follows the selection: an entry without a body names no reader.
+// An entry carrying neither a summary nor a body has nothing to read.
+func TestEmptyEntryOpensNothing(t *testing.T) {
+	t.Parallel()
+	tui := openBoxWith(t, []box.Entry{
+		{Seq: 10, Key: "notify/w3p1", State: box.StateWorking, From: "w3p1"},
+	})
+	if strings.Contains(tui.box.Float.Hint, "enter body") {
+		t.Fatalf("hint = %q, want no reader affordance for an empty entry", tui.box.Float.Hint)
+	}
+	feed(tui, "\r")
+	if tui.reader != nil {
+		t.Fatal("enter opened a reader for an entry with no text")
+	}
+}
+
+// The selection moves with j and enter opens the reader on it, body or not:
+// the summary is text the reader wraps.
 func TestBodyReaderSelectionAndHint(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
@@ -164,29 +197,35 @@ func TestBodyReaderSelectionAndHint(t *testing.T) {
 	if !ok || e.Seq != 7 {
 		t.Fatalf("selected = %+v ok %v, want seq 7", e, ok)
 	}
-	if strings.Contains(tui.box.Float.Hint, "enter body") {
-		t.Fatalf("hint = %q, want no reader affordance for a bodyless entry", tui.box.Float.Hint)
+	if !strings.Contains(tui.box.Float.Hint, "enter body") {
+		t.Fatalf("hint = %q, want the reader affordance on a summary", tui.box.Float.Hint)
 	}
-	// Back on the bodied entry, enter opens the reader on it.
+	feed(tui, "\r")
+	if tui.reader == nil {
+		t.Fatal("enter did not open the reader for a summary")
+	}
+	if got := tui.reader.lines; len(got) != 1 || got[0] != "note" {
+		t.Fatalf("reader lines = %q, want the summary alone", got)
+	}
+	// Back on the bodied entry, the reader carries the body below the summary.
+	feed(tui, "\x1b")
 	feed(tui, "kk")
 	if e, ok := tui.box.Selected(); !ok || e.Seq != 9 {
 		t.Fatalf("selected = %+v ok %v, want seq 9", e, ok)
 	}
 	feed(tui, "\r")
-	if tui.reader == nil {
-		t.Fatal("enter did not open the reader")
-	}
-	if tui.reader.e.Seq != 9 {
-		t.Fatalf("reader entry seq = %d, want 9", tui.reader.e.Seq)
+	if tui.reader == nil || tui.reader.e.Seq != 9 {
+		t.Fatalf("reader = %+v, want the bodied entry", tui.reader)
 	}
 }
 
-// The reader follows a resize: a snapshot refits the float and the reader
-// rides the same rect.
+// The reader follows a resize: a snapshot refits the overlay to the reader's
+// own rect, which is the list's rect widened to the reader floor.
 func TestBodyReaderFollowsResize(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
 	feed(tui, "\r")
+	before := tui.reader.Float.Rect
 	big := *tui.snap
 	big.Cols += 20
 	big.Rows += 10
@@ -194,8 +233,11 @@ func TestBodyReaderFollowsResize(t *testing.T) {
 	if tui.reader == nil {
 		t.Fatal("the snapshot closed the reader")
 	}
-	if tui.reader.Float.Rect != tui.box.Float.Rect {
-		t.Fatalf("reader rect = %+v, want the float's %+v", tui.reader.Float.Rect, tui.box.Float.Rect)
+	if want := boxview.ReaderRect(tui.snap, tui.box.ListLen()); tui.reader.Float.Rect != want {
+		t.Fatalf("reader rect = %+v, want %+v", tui.reader.Float.Rect, want)
+	}
+	if tui.reader.Float.Rect.W <= before.W {
+		t.Fatalf("reader width = %d, want wider than %d", tui.reader.Float.Rect.W, before.W)
 	}
 }
 

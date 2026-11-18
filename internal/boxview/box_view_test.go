@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/box"
+	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/testutil"
@@ -659,5 +660,55 @@ func TestBoxViewEmptyNoteNamesTheFilter(t *testing.T) {
 	r := b.Float.Rect
 	if row := boxScreenRow(screen, r.Y, r.X, r.W); !strings.Contains(row, "no entries under notify/") {
 		t.Fatalf("row = %q, want the filter named", row)
+	}
+}
+
+// TestReaderRectFloor: a short list still gives the reader a full overlay, so
+// a body is not hidden behind a one-row window.
+func TestReaderRectFloor(t *testing.T) {
+	t.Parallel()
+	snap := &wire.Snapshot{Cols: 100, Rows: 30}
+	short := BoxViewRect(snap, 1)
+	r := ReaderRect(snap, 1)
+	if r.H != ReaderMinRows {
+		t.Fatalf("reader height = %d, want the floor %d", r.H, ReaderMinRows)
+	}
+	if r.W != short.W || r.X != short.X {
+		t.Fatalf("reader rect = %+v, want the list's width and column %+v", r, short)
+	}
+	if r.Y+r.H > snap.Rows || r.Y < 0 {
+		t.Fatalf("reader rect %+v leaves the screen", r)
+	}
+}
+
+// TestReaderRectKeepsATallList: a list past the floor keeps its own height, so
+// a long log reads whole.
+func TestReaderRectKeepsATallList(t *testing.T) {
+	t.Parallel()
+	snap := &wire.Snapshot{Cols: 100, Rows: 40}
+	r := ReaderRect(snap, 20)
+	if r.H != 20 {
+		t.Fatalf("reader height = %d, want the list's 20", r.H)
+	}
+}
+
+// TestBoxHintDropsHintsOnANarrowFloat: a cramped border keeps move, body,
+// clear, watch and close, and drops the wider hints whole.
+func TestBoxHintDropsHintsOnANarrowFloat(t *testing.T) {
+	t.Parallel()
+	snap := &wire.Snapshot{Cols: 64, Rows: 30}
+	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
+	b.Set([]box.Entry{{Seq: 1, Key: "lane/a", Msg: "text"}}, theme.DefaultTheme())
+	got := b.Float.Hint
+	for _, want := range []string{"move", "body", "clear", "watch", "close"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("hint = %q, misses %q on a narrow float", got, want)
+		}
+	}
+	if strings.Contains(got, "clear all") {
+		t.Fatalf("hint = %q, want the widest hint dropped first", got)
+	}
+	if cells.Cells(got) > b.Float.Rect.W+2 {
+		t.Fatalf("hint = %q is %d cells, the border holds %d", got, cells.Cells(got), b.Float.Rect.W+2)
 	}
 }

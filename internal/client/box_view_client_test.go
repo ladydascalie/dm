@@ -241,7 +241,7 @@ func TestBoxViewWatcherPage(t *testing.T) {
 	if row := boxScreenRow(screen, r.Y, r.X, r.W); !strings.Contains(row, "gate green") {
 		t.Fatalf("row after w = %q, want the log again", row)
 	}
-	if hint := boxScreenRow(screen, r.Y+r.H, r.X+1, r.W-2); !strings.Contains(hint, "w watchers") {
+	if hint := boxScreenRow(screen, r.Y+r.H, r.X+1, r.W-2); !strings.Contains(hint, "w watch") {
 		t.Fatalf("hint = %q, want the page key", hint)
 	}
 }

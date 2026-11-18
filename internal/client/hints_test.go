@@ -29,8 +29,7 @@ func hintKeymap(t *testing.T, src string) *keymap.Config {
 }
 
 // TestBoxHintNamesTheKeymap: the message box border names the box keymap's
-// keys, so a rebind moves the hint and the reader affordance stays with the
-// page that has a body.
+// keys, so a rebind moves the hint.
 func TestBoxHintNamesTheKeymap(t *testing.T) {
 	t.Parallel()
 	cfg := hintKeymap(t, `keymap "box" {
@@ -41,7 +40,7 @@ func TestBoxHintNamesTheKeymap(t *testing.T) {
 	}`)
 	snap := &wire.Snapshot{Cols: 100, Rows: 30}
 	b := boxview.NewBoxView(snap, theme.DefaultTheme(), cfg)
-	if got, want := b.Float.Hint, "n/a move  ctrl+w watchers  ctrl+q close"; got != want {
+	if got, want := b.Float.Hint, "n/a move  ctrl+w watch  ctrl+q close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	b.Set(make([]box.Entry, 0), theme.DefaultTheme())
@@ -92,7 +91,7 @@ func TestMessageHintNamesOnlyTheBoxKeymap(t *testing.T) {
 	}`)
 	b := boxview.NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30}, theme.DefaultTheme(), cfg)
 	b.Set([]box.Entry{{Seq: 1, Key: "lane/a", Body: "text"}}, theme.DefaultTheme())
-	if got, want := b.Float.Hint, "n/a move  w watchers  f notify  e body  ctrl+q close"; got != want {
+	if got, want := b.Float.Hint, "n/a move  e body  f notify  w watch  ctrl+q close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	b.SetKeymap(keymap.LoadDefault())

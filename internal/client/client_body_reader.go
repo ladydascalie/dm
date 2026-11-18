@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"dm/internal/box"
+	"dm/internal/boxview"
 	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
@@ -157,18 +158,19 @@ func (r *bodyReader) fit() {
 // view, and the hint the overlay carries.
 
 // openBodyReader opens the overlay for the entry the selection sits on, and
-// marks that entry read. An entry without a body opens nothing, which is why
-// the hint only offers the key when the selected entry carries one.
+// marks that entry read. An entry carries a summary even when it has no body,
+// and the overlay wraps it, so a notification still reads. An entry with
+// neither opens nothing.
 func openBodyReader(t *tui) {
 	e, ok := t.box.Selected()
-	if !ok || e.Body == "" {
+	if !ok || (e.Msg == "" && e.Body == "") {
 		return
 	}
 	if e.Seq > t.notifyRead {
 		t.notifyRead = e.Seq
 	}
 	t.box.MarkRead(e.Seq, t.theme())
-	t.reader = newBodyReader(e, t.box.Float.Rect, t.theme(), t.km())
+	t.reader = newBodyReader(e, boxview.ReaderRect(t.snap, t.box.ListLen()), t.theme(), t.km())
 	t.AddFloatingPane(t.reader.Float)
 }
 
