@@ -46,6 +46,10 @@ paints itself from the built-in theme's palette. The committed files
 `docs/dm.1`, `docs/llms.txt` and `docs/dm.html` are snapshots, and the gate
 fails when one is stale.
 
+`PLUGINS.md` is the plugin contract by hand: a program in a pane, the
+declaration, the environment, the box topics and the example under
+`examples/`.
+
 ## Code layout
 
 `main.go` dispatches the internal verbs and hands everything else to the CLI.
