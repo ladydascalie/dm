@@ -741,8 +741,24 @@ func TestTabBarRowIsReserved(t *testing.T) {
 	}
 }
 
-// TestSmallestAcceptedSize proves the page and the session share one minimum:
-// 20 by 6 is laid out, and 19 columns or 5 rows is ignored.
+// TestSizeOK proves the shared minimum itself: 20 by 6 is accepted, and 19x6,
+// 20x5 and 19x5 are refused. The session and the page both call this predicate,
+// so this native test covers the gate on both paths.
+func TestSizeOK(t *testing.T) {
+	for _, size := range [][2]int{{20, 6}, {21, 6}, {20, 7}, {100, 30}} {
+		if !websession.SizeOK(size[0], size[1]) {
+			t.Errorf("SizeOK(%d, %d) = false, want true", size[0], size[1])
+		}
+	}
+	for _, size := range [][2]int{{19, 6}, {20, 5}, {19, 5}} {
+		if websession.SizeOK(size[0], size[1]) {
+			t.Errorf("SizeOK(%d, %d) = true, want false", size[0], size[1])
+		}
+	}
+}
+
+// TestSmallestAcceptedSize proves the session lays out the smallest size
+// SizeOK accepts: 20 by 6 has a pane, and 19 columns or 5 rows is ignored.
 func TestSmallestAcceptedSize(t *testing.T) {
 	h := newHarness(t, 100, 30)
 	h.send(wire.Msg{Type: "resize", Cols: 20, Rows: 6})
@@ -846,37 +862,78 @@ func TestSwapByDirection(t *testing.T) {
 	}
 }
 
-// TestNextAndPrevPane proves both pane keys walk the window and wrap.
+// TestNextAndPrevPane proves both pane keys walk the window and wrap. Three
+// panes make the two directions tell apart: from the third, next lands on the
+// first and prev on the second.
 func TestNextAndPrevPane(t *testing.T) {
 	h := newHarness(t, 100, 30)
 	h.request("split", "w1p1", func(m *wire.Msg) { m.Dir = "right" })
-	if h.snap.Focus != "w1p2" {
-		t.Fatalf("setup focused %q", h.snap.Focus)
+	h.request("split", "w1p2", func(m *wire.Msg) { m.Dir = "down" })
+	only(t, "setup panes", h.paneIDs(), "w1p1", "w1p2", "w1p3")
+	if h.snap.Focus != "w1p3" {
+		t.Fatalf("setup focused %q, want w1p3", h.snap.Focus)
 	}
+
+	// From the third pane, next wraps to the first.
 	h.request("next-pane", "", nil)
 	if h.snap.Focus != "w1p1" {
-		t.Fatalf("next-pane focused %q, want w1p1", h.snap.Focus)
+		t.Fatalf("next-pane from w1p3 focused %q, want w1p1", h.snap.Focus)
 	}
+	// From the first, prev wraps to the third.
+	h.request("prev-pane", "", nil)
+	if h.snap.Focus != "w1p3" {
+		t.Fatalf("prev-pane from w1p1 focused %q, want w1p3", h.snap.Focus)
+	}
+	// From the third, prev lands on the second, not the first.
 	h.request("prev-pane", "", nil)
 	if h.snap.Focus != "w1p2" {
-		t.Fatalf("prev-pane focused %q, want w1p2", h.snap.Focus)
+		t.Fatalf("prev-pane from w1p3 focused %q, want w1p2", h.snap.Focus)
+	}
+	h.request("next-pane", "", nil)
+	if h.snap.Focus != "w1p3" {
+		t.Fatalf("next-pane from w1p2 focused %q, want w1p3", h.snap.Focus)
 	}
 }
 
-// TestPrevWorkspace proves the previous workspace key walks backwards and wraps.
+// TestPrevWorkspace proves the workspace keys walk in opposite directions and
+// wrap. Three workspaces make the two tell apart: from the third, next lands on
+// the first and prev on the second.
 func TestPrevWorkspace(t *testing.T) {
 	h := newHarness(t, 100, 30)
 	h.request("new-workspace", "w1p1", nil)
-	if h.snap.Workspace != "ws2" {
-		t.Fatalf("setup left workspace %q", h.snap.Workspace)
+	h.request("new-workspace", "w1p1", nil)
+	if h.snap.Workspace != "ws3" {
+		t.Fatalf("setup left workspace %q, want ws3", h.snap.Workspace)
 	}
+
+	// From the third workspace, next wraps to the first.
+	h.request("next-workspace", "", nil)
+	if h.snap.Workspace != "main" {
+		t.Fatalf("next-workspace from ws3 = %q, want main", h.snap.Workspace)
+	}
+	// From the first, next lands on the second, not the third.
+	h.request("next-workspace", "", nil)
+	if h.snap.Workspace != "ws2" {
+		t.Fatalf("next-workspace from main = %q, want ws2", h.snap.Workspace)
+	}
+	// From the second, prev lands on the first.
 	h.request("prev-workspace", "", nil)
 	if h.snap.Workspace != "main" {
-		t.Fatalf("prev-workspace = %q, want main", h.snap.Workspace)
+		t.Fatalf("prev-workspace from ws2 = %q, want main", h.snap.Workspace)
 	}
+	// From the first, prev wraps to the third.
+	h.request("prev-workspace", "", nil)
+	if h.snap.Workspace != "ws3" {
+		t.Fatalf("prev-workspace from main = %q, want ws3", h.snap.Workspace)
+	}
+	// From the third, prev lands on the second, not the first.
 	h.request("prev-workspace", "", nil)
 	if h.snap.Workspace != "ws2" {
-		t.Fatalf("prev-workspace wrapped to %q, want ws2", h.snap.Workspace)
+		t.Fatalf("prev-workspace from ws3 = %q, want ws2", h.snap.Workspace)
+	}
+	h.request("next-workspace", "", nil)
+	if h.snap.Workspace != "ws3" {
+		t.Fatalf("next-workspace from ws2 = %q, want ws3", h.snap.Workspace)
 	}
 }
 

@@ -146,10 +146,10 @@ func (s *sizer) get() (int, int) {
 	return s.cols, s.rows
 }
 
-// set writes the size, refusing one too small to lay out. It uses the
-// session's own minimum, so the page and the fake accept the same sizes.
+// set writes the size, refusing one too small to lay out. It asks the session
+// package, so the page and the fake hold one gate.
 func (s *sizer) set(cols, rows int) {
-	if cols < websession.MinCols || rows < websession.MinRows {
+	if !websession.SizeOK(cols, rows) {
 		return
 	}
 	s.mu.Lock()

@@ -137,7 +137,7 @@ func New(size SizeFunc, forward func(map[string]any), conn net.Conn) *Session {
 	}
 	s.cols, s.rows = 100, 30
 	if size != nil {
-		if cols, rows := size(); cols >= MinCols && rows >= MinRows {
+		if cols, rows := size(); SizeOK(cols, rows) {
 			s.cols, s.rows = cols, rows
 		}
 	}
@@ -209,17 +209,22 @@ func (s *Session) serve(m wire.Msg) {
 	}
 }
 
-// MinCols and MinRows are the smallest size a session lays out. The page's
-// sizer refuses the same pair, so a 20 by 6 window is the smallest one both
-// sides accept.
+// minCols and minRows are the smallest size a session lays out.
 const (
-	MinCols = 20
-	MinRows = 6
+	minCols = 20
+	minRows = 6
 )
+
+// SizeOK reports whether a renderer size is large enough to lay out. The
+// session and the page both call it, so the two gates hold one comparison and
+// cannot drift apart.
+func SizeOK(cols, rows int) bool {
+	return cols >= minCols && rows >= minRows
+}
 
 // applySize records a renderer size too small to lay out as a no-op.
 func (s *Session) applySize(cols, rows int) bool {
-	if cols < MinCols || rows < MinRows {
+	if !SizeOK(cols, rows) {
 		return false
 	}
 	if cols == s.cols && rows == s.rows {
