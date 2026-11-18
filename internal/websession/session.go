@@ -137,7 +137,7 @@ func New(size SizeFunc, forward func(map[string]any), conn net.Conn) *Session {
 	}
 	s.cols, s.rows = 100, 30
 	if size != nil {
-		if cols, rows := size(); cols > 20 && rows > 5 {
+		if cols, rows := size(); cols >= MinCols && rows >= MinRows {
 			s.cols, s.rows = cols, rows
 		}
 	}
@@ -209,9 +209,17 @@ func (s *Session) serve(m wire.Msg) {
 	}
 }
 
+// MinCols and MinRows are the smallest size a session lays out. The page's
+// sizer refuses the same pair, so a 20 by 6 window is the smallest one both
+// sides accept.
+const (
+	MinCols = 20
+	MinRows = 6
+)
+
 // applySize records a renderer size too small to lay out as a no-op.
 func (s *Session) applySize(cols, rows int) bool {
-	if cols <= 20 || rows <= 5 {
+	if cols < MinCols || rows < MinRows {
 		return false
 	}
 	if cols == s.cols && rows == s.rows {
@@ -279,7 +287,7 @@ func (s *Session) request(m wire.Msg) answer {
 	case "toggle-fold":
 		return s.toggleFold(m)
 	case "zoom-pane":
-		return s.zoomPane(m)
+		return s.zoomPane()
 	case "swap-panes":
 		return s.swapPanes(m)
 	case "synchronize-panes":
@@ -342,17 +350,20 @@ func (s *Session) split(m wire.Msg) answer {
 	default:
 		return answer{err: fmt.Errorf("dir must be left, right, up or down")}
 	}
-	ws, w, ok := s.locatePane(m.Target)
 	target := m.Target
-	if !ok {
-		if target != "" {
-			return answer{err: fmt.Errorf("no pane %q", target)}
-		}
-		ws, w = s.activeWorkspace(), s.activeWindow()
+	if target == "" {
+		// The server resolves an empty target to the focus before it looks at
+		// the tree. A split node also has an empty Pane field, so locating ""
+		// would find the root split and replace the whole tree with it.
+		w := s.activeWindow()
 		if w == nil {
 			return answer{err: errNoWindow}
 		}
 		target = w.Focus
+	}
+	ws, w, ok := s.locatePane(target)
+	if !ok {
+		return answer{err: fmt.Errorf("no pane %q", target)}
 	}
 	w.NextPane++
 	id := w.ID + "p" + strconv.Itoa(w.NextPane)
@@ -364,7 +375,7 @@ func (s *Session) split(m wire.Msg) answer {
 	w.Focus = id
 	s.activate(ws, w)
 	s.zoom = ""
-	return answer{changed: true}
+	return answer{changed: true, res: map[string]any{"pane": id}}
 }
 
 // closePane removes one pane. The last pane of a window takes the window with
@@ -452,25 +463,23 @@ func (s *Session) toggleFold(m wire.Msg) answer {
 }
 
 // zoomPane makes the focused pane cover its window, or puts the tiling back
-// when it already does.
-func (s *Session) zoomPane(m wire.Msg) answer {
+// when it already does. One pane already fills the area, so the server answers
+// that case with an empty zoom and changes nothing.
+func (s *Session) zoomPane() answer {
 	w := s.activeWindow()
 	if w == nil {
 		return answer{err: errNoWindow}
 	}
-	id := m.Target
-	if id == "" {
-		id = w.Focus
+	if len(layout.AllPanes(w.Root)) < 2 {
+		s.zoom = ""
+		return answer{res: map[string]any{"zoom": ""}}
 	}
-	if !layout.FindLeaf(w.Root, id) {
-		return answer{err: fmt.Errorf("no pane %q", id)}
-	}
-	if s.zoom == id {
+	if s.zoom == w.Focus {
 		s.zoom = ""
 	} else {
-		s.zoom = id
+		s.zoom = w.Focus
 	}
-	return answer{changed: true}
+	return answer{changed: true, res: map[string]any{"zoom": s.zoom}}
 }
 
 // swapPanes trades the focused pane with its neighbour in dir. The ids travel
@@ -510,7 +519,9 @@ func (s *Session) selectLayout(m wire.Msg) answer {
 			}
 		}
 	}
-	area := layout.PaneAreaFor(s.cols, s.rows, s.railWidth())
+	// The client draws the window tab bar on row 0 and hit-tests with the
+	// same helper, so the fake must keep that row free.
+	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railWidth())
 	root, ok := layout.ApplyPreset(w.Root, name, ids, area.W, area.H)
 	if !ok {
 		return answer{err: fmt.Errorf("unknown layout %q", name)}
@@ -908,7 +919,9 @@ func (s *Session) newPane(rect layout.Rect) *pane {
 // window in front, and the zoomed pane covers the rest, which keep their places
 // underneath.
 func (s *Session) windowRects(w *window) map[string]layout.Rect {
-	area := layout.PaneAreaFor(s.cols, s.rows, s.railWidth())
+	// The client draws the window tab bar on row 0 and hit-tests with the
+	// same helper, so the fake must keep that row free.
+	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railWidth())
 	pad := keymap.LoadDefault().Padding()
 	out := map[string]layout.Rect{}
 	layout.Layout(w.Root, area, pad, out)
