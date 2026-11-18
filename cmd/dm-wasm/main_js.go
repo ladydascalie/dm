@@ -72,6 +72,20 @@ func (b *bridge) send(fn js.Value, p []byte) {
 	fn.Invoke(buf)
 }
 
+// lastReq is the request the fake handled last, for the page or a test that
+// wants to see what a click sent.
+var lastReq struct {
+	mu sync.Mutex
+	s  string
+}
+
+// recordLast notes one request.
+func recordLast(s string) {
+	lastReq.mu.Lock()
+	lastReq.s = s
+	lastReq.mu.Unlock()
+}
+
 // sizer is the renderer's size in cells, written by the page and read by the
 // client on the resize signal.
 type sizer struct {
@@ -111,9 +125,11 @@ func main() {
 	winch := make(chan os.Signal, 1)
 
 	// The prologue Run writes on a real machine: the alternate screen, a
-	// hidden cursor, a clear. Attach owns no terminal, so the harness opens
-	// the screen it draws on.
+	// hidden cursor, a clear, and the mouse modes, without which the rail is
+	// never sent a click. Attach owns no terminal, so the harness opens the
+	// screen it draws on.
 	_, _ = b.Write([]byte("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H"))
+	_, _ = b.Write([]byte("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h"))
 
 	clientConn, serverConn := net.Pipe()
 	go fakeServer(serverConn, size)
@@ -137,6 +153,11 @@ func main() {
 			default: // a page that types faster than the client reads
 			}
 			return nil
+		}),
+		"last": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			lastReq.mu.Lock()
+			defer lastReq.mu.Unlock()
+			return lastReq.s
 		}),
 		"resize": js.FuncOf(func(_ js.Value, args []js.Value) any {
 			size.set(args[0].Int(), args[1].Int())
@@ -167,6 +188,13 @@ type session struct {
 	// rail is the width the page asked for: 0 hidden, CollapsedRail thin,
 	// DefaultRail full. The width the screen can spare is computed from it.
 	rail int
+	// winFolded and wsFolded are the rail's fold state, which the server owns
+	// and a click on a triangle asks it to flip.
+	winFolded bool
+	wsFolded  bool
+	// preset is the layout name last applied, empty for a hand made tree. A
+	// "next" request walks the order from it.
+	preset string
 }
 
 // newSession makes the one pane a session starts with.
@@ -227,6 +255,7 @@ func (s *session) railWidth() int {
 // handle runs one request. It reports whether the screen changed, so the caller
 // sends a snapshot only when there is something new to see.
 func (s *session) handle(m wire.Msg) bool {
+	recordLast(m.Action + " " + m.Target + " " + m.Layout)
 	switch m.Action {
 	case "split":
 		id := s.addPane()
@@ -260,6 +289,26 @@ func (s *session) handle(m wire.Msg) bool {
 		s.rail = m.Index
 		s.fit()
 		return true
+	case "focus":
+		// A click on a rail row names the pane to focus.
+		if _, ok := s.rects()[m.Target]; ok {
+			s.focus = m.Target
+			return true
+		}
+		return false
+	case "toggle-fold":
+		// The rail's triangles ask the server to flip a workspace or a window.
+		switch m.Target {
+		case "s1":
+			s.wsFolded = !s.wsFolded
+			return true
+		case "w1":
+			s.winFolded = !s.winFolded
+			return true
+		}
+		return false
+	case "select-layout":
+		return s.setLayout(m.Layout)
 	case "focus-dir":
 		s.focusDir(m.Dir)
 		return true
@@ -283,6 +332,39 @@ func (s *session) handle(m wire.Msg) bool {
 		return true
 	}
 	return false
+}
+
+// presetOrder is the cycle a "next" layout request walks, in the same order
+// the server walks it.
+var presetOrder = []string{"even-horizontal", "even-vertical", "main-horizontal", "main-vertical", "tiled"}
+
+// setLayout rebuilds the tree as a preset over the same panes, which is what
+// the layout picker and the cycle key ask the server for.
+func (s *session) setLayout(name string) bool {
+	ids := layout.AllPanes(s.root)
+	if len(ids) < 2 {
+		// Nothing to arrange. A real machine refuses for the same reason.
+		return false
+	}
+	if name == "next" {
+		name = presetOrder[0]
+		for i, p := range presetOrder {
+			if p == s.preset {
+				name = presetOrder[(i+1)%len(presetOrder)]
+				break
+			}
+		}
+	}
+	cols, rows := s.size.get()
+	area := layout.PaneAreaFor(cols, rows, s.railWidth())
+	root, ok := layout.ApplyPreset(s.root, name, ids, area.W, area.H)
+	if !ok {
+		return false
+	}
+	s.root = root
+	s.preset = name
+	s.fit()
+	return true
 }
 
 // focusDir moves focus to the nearest pane in that direction, by the distance
@@ -352,7 +434,7 @@ func (s *session) snapshot() *wire.Snapshot {
 			ID: id, Window: "w1", WindowName: "one",
 			Workspace: "s1", WorkspaceName: "main",
 			Status: "idle", Title: "sh", Cwd: "/home/guest",
-			WindowUnfolded: true, WorkspaceUnfolded: true,
+			WindowUnfolded: !s.winFolded, WorkspaceUnfolded: !s.wsFolded,
 			WorkspaceActive: true, WindowActive: true,
 			Focus: id == s.focus,
 		})

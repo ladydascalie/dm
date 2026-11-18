@@ -11,9 +11,14 @@ same code.
 What is fake is the session on the other end. One window, several panes, a
 pretend shell in each, no pty, no pane daemon, no server and no state file. The
 fake lives in `main_js.go` and answers the real wire messages. It serves splits
-in four directions, focus by direction, next and previous pane, and close pane.
-Zoom, swap, cycle layout, and new window or workspace are not served yet: they
-answer with an empty reply and change nothing.
+in four directions, focus by direction or by rail row, next and previous pane,
+close pane, the rail's fold triangles, the rail width, and the five layout
+presets including the cycle. Zoom, swap, and new window or workspace are not
+served yet: they answer with an empty reply and change nothing.
+
+The page turns on the mouse modes, so a click on a rail row reaches the client
+the way it does on a machine. `dm.last()` returns the last request the fake
+handled, which is how a click can be traced to the message it sent.
 
 The pretend shell has a line buffer and four commands: `echo`, `clear`, `help`,
 and anything else is refused as not found. `ctrl+c`, `ctrl+d`, `ctrl+l` and
