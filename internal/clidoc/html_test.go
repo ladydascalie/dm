@@ -36,7 +36,7 @@ func TestEveryActionHasAParsedExample(t *testing.T) {
 func TestHTMLPageCarriesEverySection(t *testing.T) {
 	page := HTMLPage()
 	for _, id := range []string{
-		"sec-introduction", "sec-commands", "sec-keys", "sec-config",
+		"sec-introduction", "sec-commands", "sec-layouts", "sec-keys", "sec-config",
 		"sec-keymaps", "sec-themes", "sec-theme-sample", "sec-prompt-marks",
 		"sec-environment", "sec-files", "sec-actions", "sec-action-names",
 		"sec-action-desc",
@@ -100,7 +100,7 @@ func TestHTMLPageNamesEveryRow(t *testing.T) {
 			t.Errorf("page does not carry the variable %q", e.Name)
 		}
 	}
-	for _, f := range configdoc.Files {
+	for _, f := range docsFiles() {
 		if !strings.Contains(page, htmlEscape(f.Path)) || !strings.Contains(page, htmlEscape(f.Desc)) {
 			t.Errorf("page does not carry the file %q", f.Path)
 		}
@@ -290,7 +290,7 @@ func TestLLMsTableRowsCarryTheExtraForms(t *testing.T) {
 func TestLLMsTextCarriesEverySection(t *testing.T) {
 	doc := LLMsText()
 	for _, head := range []string{
-		"## Identifiers", "## Commands", "## Actions: `dm exec`", "## Keys",
+		"## Identifiers", "## Layouts", "## Commands", "## Actions: `dm exec`", "## Keys",
 		"## Sidebar", "## Config", "## Keymaps", "## Theme", "## Prompt marks",
 		"## Environment", "## Files", "## Recipes", "## Gotchas",
 	} {

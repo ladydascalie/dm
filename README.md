@@ -170,6 +170,64 @@ most every 30 ms plus a final call on release. Both sides keep at least three
 cells. A divider always belongs to dm, even when a pane claims the mouse: the
 app's PTY covers only its content rect, so the border press is not its event.
 
+## Layouts
+
+A layout is a named JSON document that holds a session's shape: its
+workspaces, their windows, the split trees, and each pane's launch cwd and
+argv. It is how a working set is rebuilt instead of by hand. Files live at
+`$XDG_CONFIG_HOME/dm/layouts/<name>.json`, or
+`$HOME/.config/dm/layouts/<name>.json` when `XDG_CONFIG_HOME` is unset. The
+name is letters, digits, `_` or `-`, the same rule as a session name.
+
+```sh
+dm layout save work -s go-backend   # capture the live shape under the name work
+dm -L work                          # start the session "work" from the file
+dm -L work -s other --force         # reset "other" and replay the file over it
+dm layout ls                        # files with their workspace, window and pane counts
+dm layout show work                 # the file unchanged
+dm layout rm work                   # delete it
+```
+
+`dm -L` seeds an empty session and then attaches, so the first snapshot is the
+whole layout. An existing session wins: a layout never rearranges a live one,
+and `--force` is the only way to replay a file over a session that has state.
+The session defaults to the layout name, so the same command twice reattaches
+instead of stacking sessions. A malformed file fails at the CLI, naming the
+file and the field, before a server starts.
+
+One file: two panes in a column, the first running pi in the project.
+
+```json
+{
+  "version": 1,
+  "name": "go-backend",
+  "workspaces": [{
+    "name": "development",
+    "project": "go-backend",
+    "active": 0,
+    "windows": [{
+      "name": "api",
+      "focus": "w1p1",
+      "root": {
+        "dir": "col",
+        "sizes": [0.6, 0.4],
+        "kids": [{"pane": "w1p1"}, {"pane": "w1p2"}]
+      }
+    }]
+  }],
+  "panes": {
+    "w1p1": {"cwd": "/home/b/Code/Personal/go-backend", "argv": ["pi"]},
+    "w1p2": {"cwd": "/home/b/Code/Personal/go-backend"}
+  }
+}
+```
+
+Pane ids inside a file are local to it: applying one assigns ids from the
+target session's counters, so the same file can seed any session. Only the
+launch argv is durable, so a pane that began as a shell and now runs pi reopens
+as a shell. The session's box, its secrets, the agent state and the rail width
+never travel.
+
 ## Config
 
 One file holds the config. dm reads `$HOME/.config/dm/config.kdl`, or

@@ -495,7 +495,14 @@ func (t *tui) expireToasts(now time.Time) {
 
 // Run owns the terminal. A session switch returns to this loop with a new
 // name, so raw mode and the stdin reader survive it.
-func Run(name string) error {
+func Run(name string) error { return RunWithLayout(name, "") }
+
+// RunWithLayout is Run with a layout file for a session that is not running
+// yet: the server this start spawns seeds its state from the file and the
+// client then attaches the normal way. An empty path is Run. The layout
+// applies to the first start only, so a session switch from inside the client
+// attaches the next session as it stands.
+func RunWithLayout(name, layoutPath string) error {
 	// The pacer spans session switches so the stats describe the process.
 	var pace pacer
 	// DM_STATS asks for the render's cache and pacing tallies when the
@@ -565,7 +572,7 @@ func Run(name string) error {
 	}()
 
 	for {
-		next, err := runSession(fd, name, keys, winch, &pace)
+		next, err := runSession(fd, name, layoutPath, keys, winch, &pace)
 		if err != nil {
 			return err
 		}
@@ -573,6 +580,8 @@ func Run(name string) error {
 			return nil
 		}
 		name = next
+		// The layout already did its work on the first start.
+		layoutPath = ""
 		_, _ = os.Stdout.WriteString("\x1b[0m\x1b[2J\x1b[H")
 	}
 }
@@ -663,9 +672,10 @@ func (t *tui) frame(now time.Time, pace *pacer, sink *frameSink) {
 }
 
 // runSession dials the session and hands it to attachConn over the connection
-// it owns.
-func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal, pace *pacer) (string, error) {
-	c, err := transport.Dial(name)
+// it owns. A layout path rides the dial, so the server it spawns seeds from the
+// file; an already-running session ignores it.
+func runSession(fd int, name, layoutPath string, keys <-chan []byte, winch <-chan os.Signal, pace *pacer) (string, error) {
+	c, err := transport.DialWithLayout(name, layoutPath)
 	if err != nil {
 		return "", err
 	}

@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-17" "dm" "User Commands"
+.TH DM 1 "2026-11-19" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -7,22 +7,25 @@ dm \- durable terminal multiplexer
 .br
 .B dm
 [\fB\-s\fP \fIname\fP]
+.br
+.B dm
+[\fB\-L\fP \fIlayout\fP] [\fB\-s\fP \fIname\fP] [\fB\-\-force\fP]
 .SH COMMANDS
 A command is the first word after dm. With no command, dm attaches to a session, creating it if needed.
 .TP
-\fBdm [-s name]\fP
+\fBdm [-s name] [-L layout [--force]]\fP
 attach to a session, creating it if needed
 .br
 \fB--s name\fP session name
 .TP
-\fBdm attach [-s name]\fP
+\fBdm attach [-s name] [-L layout [--force]]\fP
 attach to a session, creating it if needed
 .br
 Aliases: a.
 .br
 \fB--s name\fP session name
 .TP
-\fBdm new [-s name]\fP
+\fBdm new [-s name] [-L layout [--force]]\fP
 start a session without attaching
 .br
 \fB--s name\fP session name
@@ -63,6 +66,26 @@ send an action as JSON
 \fB--action-json\fP action JSON
 .br
 Example: \fBdm exec '{"action":"split","target":"w1p1","dir":"right"}'\fP
+.TP
+\fBdm layout save <name> [-s name] [--force]\fP
+capture a session's shape as a named layout file
+.br
+\fB--s name\fP session the layout is captured from
+.br
+\fB--force\fP overwrite an existing layout file
+.br
+Example: \fBdm layout save work -s base\fP
+.TP
+\fBdm layout ls\fP
+list layout files with their workspace, window and pane counts
+.TP
+\fBdm layout show <name>\fP
+print a layout file unchanged
+.br
+Example: \fBdm layout show work\fP
+.TP
+\fBdm layout rm <name>\fP
+delete a layout file
 .TP
 \fBdm write-to <pane> --msg T\fP
 type text into a pane (--enter to accept)
@@ -1193,6 +1216,40 @@ the command ended. The copy ends here.
 The marks are ordinary output, so they travel over ssh and a nested multiplexer like any other bytes. A shell on a remote host needs the same line in its own start file; a pane running a program instead of a shell has no prompt and no marks. dm reads the marks per pane and needs no configuration of its own.
 .PP
 The marks are defined by the semantic prompts proposal: https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/semantic-prompts.md
+.SH LAYOUTS
+A layout is a named JSON document that holds a session's shape: its workspaces, their windows, the split trees and each pane's launch data. A file lives at $XDG_CONFIG_HOME/dm/layouts/<name>.json, or $HOME/.config/dm/layouts/<name>.json when XDG_CONFIG_HOME is unset. The name follows the session-name rule: letters, digits, underscore or hyphen. dm layout save <name> captures the shape: from the session's server when one answers, and from its state.json when the session is stopped.
+.PP
+dm -L <name> starts a session from the file and attaches to it. The session defaults to the layout name, so the same command twice reattaches instead of stacking sessions. A layout seeds an empty session: when the session already has state, that state wins and the file is not applied, so a layout patches nothing. --force resets the session first, then replays the file over the reset.
+.PP
+dm layout save <name> [-s name] [--force] captures a session, dm -L <name> applies one, and dm layout ls, show and rm list, print and delete the files.
+.PP
+Only the launch argv is durable. A pane that began as a shell and now runs pi reopens as a shell, because the program a pane runs is recorded at launch, not what it later became. The session's box, its secrets, the agent state and the rail width never travel.
+.PP
+One layout file:
+.nf
+{
+  "version": 1,
+  "name": "go-backend",
+  "workspaces": [{
+    "name": "development",
+    "project": "go-backend",
+    "active": 0,
+    "windows": [{
+      "name": "api",
+      "focus": "w1p1",
+      "root": {
+        "dir": "col",
+        "sizes": [0.6, 0.4],
+        "kids": [{"pane": "w1p1"}, {"pane": "w1p2"}]
+      }
+    }]
+  }],
+  "panes": {
+    "w1p1": {"cwd": "/home/b/Code/Personal/go-backend", "argv": ["pi"]},
+    "w1p2": {"cwd": "/home/b/Code/Personal/go-backend"}
+  }
+}
+.fi
 .SH FILES
 Paths use $DM_STATE and $XDG_CONFIG_HOME as ENVIRONMENT describes.
 .TP
@@ -1213,6 +1270,9 @@ Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-w
 .TP
 \fB$XDG_CONFIG_HOME/dm/themes/<name>.kdl\fP
 Theme palette, accents, glyphs and state styles.
+.TP
+\fB$XDG_CONFIG_HOME/dm/layouts/<name>.json\fP
+A captured layout: workspaces, windows, split trees and each pane's launch cwd and argv. Written by dm layout save.
 .SH ENVIRONMENT
 .TP
 \fBDM_STATE\fP
@@ -1251,6 +1311,6 @@ The shell a new pane runs.
 \fBTMUX\fP
 Set inside tmux; dm uses it to pick its terminal behaviour.
 
-A shell dm starts, a pane's or a float's, inherits a short allowlist of the server's environment: PATH, HOME, USER, LOGNAME, SHELL, TERM, TERM_PROGRAM, COLORTERM, LANG, LC_*, TZ, TMPDIR, XDG_*, DISPLAY, SSH_AUTH_SOCK, XAUTHORITY and DM_STATE, plus a *_SOCK name with an absolute path value when the name is not credential-shaped. Everything else is dropped, and dm sets DM_PANE and DM_SESSION itself. Each entry is a name a shell, a terminal or an X client needs before the shell reads its rc file, or the dm state root that a dm command in the shell needs; the rc file can re-export what else a session needs.
+A shell dm starts, a pane's or a float's, inherits a short allowlist of the server's environment: PATH, HOME, USER, LOGNAME, SHELL, TERM, TERM_PROGRAM, COLORTERM, LANG, LC_*, TZ, TMPDIR, XDG_*, WAYLAND_DISPLAY, DISPLAY, SSH_AUTH_SOCK, XAUTHORITY and DM_STATE, plus a *_SOCK name with an absolute path value when the name is not credential-shaped. Everything else is dropped, and dm sets DM_PANE and DM_SESSION itself. Each entry is a name a shell, a terminal or an X client needs before the shell reads its rc file, or the dm state root that a dm command in the shell needs; the rc file can re-export what else a session needs.
 .SH SEE ALSO
 .BR tmux (1)

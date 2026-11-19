@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-17"
+const manDate = "2026-11-19"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -111,6 +111,9 @@ func ManPage() string {
 	b.WriteString(".br\n")
 	b.WriteString(".B dm\n")
 	b.WriteString("[\\fB\\-s\\fP \\fIname\\fP]\n")
+	b.WriteString(".br\n")
+	b.WriteString(".B dm\n")
+	b.WriteString("[\\fB\\-L\\fP \\fIlayout\\fP] [\\fB\\-s\\fP \\fIname\\fP] [\\fB\\-\\-force\\fP]\n")
 
 	b.WriteString(".SH COMMANDS\n")
 	b.WriteString("A command is the first word after dm. With no command, dm attaches to a session, creating it if needed.\n")
@@ -197,9 +200,11 @@ func ManPage() string {
 
 	b.WriteString(manPromptMarks())
 
+	b.WriteString(manLayouts())
+
 	b.WriteString(".SH FILES\n")
 	b.WriteString("Paths use $DM_STATE and $XDG_CONFIG_HOME as ENVIRONMENT describes.\n")
-	for _, f := range configdoc.Files {
+	for _, f := range docsFiles() {
 		b.WriteString(".TP\n")
 		b.WriteString(roffBold(f.Path))
 		b.WriteString("\n")
@@ -225,6 +230,31 @@ func ManPage() string {
 	b.WriteString(".SH SEE ALSO\n")
 	b.WriteString(".BR tmux (1)\n")
 
+	return b.String()
+}
+
+// manLayouts renders the LAYOUTS section: what a layout file holds, how it is
+// captured, the seeding rule, the fidelity limit and one sample file.
+func manLayouts() string {
+	var b strings.Builder
+	b.WriteString(".SH LAYOUTS\n")
+	b.WriteString(roffEscape(LayoutsIntro))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(LayoutsSeed))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(LayoutsVerbs))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(LayoutsLimit))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString("One layout file:\n")
+	b.WriteString(".nf\n")
+	b.WriteString(roffEscape(LayoutsSample))
+	b.WriteString("\n")
+	b.WriteString(".fi\n")
 	return b.String()
 }
 

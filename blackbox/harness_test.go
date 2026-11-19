@@ -342,11 +342,12 @@ type stateWindow struct {
 }
 
 type statePane struct {
-	Cwd      string `json:"cwd"`
-	Cols     int    `json:"cols"`
-	Rows     int    `json:"rows"`
-	Reported bool   `json:"reported"`
-	App      string `json:"app"`
+	Cwd      string   `json:"cwd"`
+	Argv     []string `json:"argv"`
+	Cols     int      `json:"cols"`
+	Rows     int      `json:"rows"`
+	Reported bool     `json:"reported"`
+	App      string   `json:"app"`
 }
 
 // paneRect is the rectangle the snapshot reports for a pane. Its field names

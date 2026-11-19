@@ -66,6 +66,10 @@ var llmsExamples = map[string]string{
 	"msg clear":                  "dm msg clear --key build",
 	"msg watchers":               "dm msg watchers",
 	"msg schema":                 "dm msg schema",
+	"layout save":                "dm layout save work -s base",
+	"layout ls":                  "dm layout ls",
+	"layout show":                "dm layout show work",
+	"layout rm":                  "dm layout rm work",
 	"man":                        "dm man -o dm.1",
 	"llms":                       "dm llms -o llms.txt",
 }
@@ -166,6 +170,11 @@ func LLMsText() string {
 
 	b.WriteString("\n## Identifiers\n\n")
 	b.WriteString("A workspace is `s1`, `s2`, and so on. A window is `w1`, `w2`. A pane is its window id plus `p` and a per-window sequence: `w2p3` is the third pane opened in window 2. Ids are readable and constructible, and a counter only moves forward, so a closed id is never reused.\n")
+
+	// The whole layout story is one paragraph, so the one-pass page keeps its
+	// line budget.
+	b.WriteString("\n## Layouts\n\n")
+	b.WriteString(LayoutsIntro + " " + LayoutsSeed + " " + LayoutsVerbs + " " + LayoutsLimit + "\n")
 
 	b.WriteString("\n## Commands\n\n")
 	b.WriteString("A command is the first word after `dm`. With no command, `dm` attaches to a session, creating it if needed.\n\n")
@@ -268,19 +277,18 @@ func LLMsText() string {
 	b.WriteString("\n## Files\n\n")
 	b.WriteString("| Path | What it holds |\n")
 	b.WriteString("| --- | --- |\n")
-	for _, f := range configdoc.Files {
+	for _, f := range docsFiles() {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", llmsCell(f.Path), llmsCell(f.Desc))
 	}
 
 	b.WriteString("\n## Recipes\n\n")
-	b.WriteString("Attach to a session, creating it if needed:\n\n")
-	b.WriteString("```sh\ndm attach -s work\n```\n\n")
+	// Two recipes are left out, attach and split: the command table already
+	// prints those exact command lines as their examples, and the page spends
+	// every line its budget allows.
 	b.WriteString("Run a command in a pane:\n\n")
 	b.WriteString("```sh\ndm write-to w1p1 --msg 'go test ./...' --enter\n```\n\n")
 	b.WriteString("Read a pane's screen, or rows above it:\n\n")
 	b.WriteString("```sh\ndm read w1p1 --lines 20\ndm read w1p1 --scrollback 200\n```\n\n")
-	b.WriteString("Split a pane:\n\n")
-	b.WriteString("```sh\ndm split w1p1 --dir right\n```\n\n")
 	b.WriteString("Close a window and every pane in it:\n\n")
 	b.WriteString("```sh\ndm exec '{\"action\":\"close-window\",\"target\":\"w1\"}'\n```\n\n")
 	b.WriteString("Post to the box and wait on it:\n\n")

@@ -80,6 +80,7 @@ var Layers = []Layer{
 			"dm/internal/box",
 			"dm/internal/keymap",
 			"dm/internal/layout",
+			"dm/internal/layoutdoc",
 			"dm/internal/notify",
 			"dm/internal/osc",
 			"dm/internal/secrets",
