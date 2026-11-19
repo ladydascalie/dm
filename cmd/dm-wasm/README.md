@@ -54,9 +54,10 @@ session's own model and never from a file: `state.json`, which is
 way `State.Save` marshals it, `snapshot.json`, the last `wire.Snapshot` the
 session sent, and, for every pane in every workspace and window,
 `panes/<id>.sock`, `panes/<id>.log` and `panes/<id>.sock.pid`. `server.sock`,
-`server.pid`, `server.lock` and `server.log` are listed beside them. Everything
-but the two documents is marked absent, because this tab has no server process
-and no pane process: nothing is invented to fill those rows.
+`server.pid`, `server.lock` and `server.log` are listed beside them. Every row
+beside the two documents is marked absent or socket, in the words the rows carry,
+because this tab has no server process and no pane process: nothing is invented
+to fill them.
 
 Each row carries a tag and one sentence, both built in `internal/websession` and
 drawn as they arrive: real means a real session writes that file, memory means a
@@ -65,7 +66,7 @@ session has and this tab does not. The page holds no copy of those words, and th
 footer names the tags and says the browser writes none of it.
 
 The document's counters are the last id handed out, as a real state file stores
-them: 1 and 1 for a fresh session, 2 and 2 once a new window and a new workspace
+them: 1 and 1 for a fresh session, 2 and 3 once a new window and a new workspace
 have been made, and each window's `nextPane` means the same thing.
 
 It is live: the same event rides with every snapshot, so splitting a pane adds a
