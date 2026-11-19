@@ -142,9 +142,21 @@ func layoutSave(args []string) error {
 }
 
 // captureLayout reads one session's shape: the live server's reply when a
-// server answers, else the session's state.json. A save never spawns a server,
-// because that would start every pane of a session the operator stopped.
+// server answers, else the session's state.json, so a session that is stopped
+// when the save starts is read from disk and never booted.
+//
+// The liveness check is a sample, not a lock: captureLayoutLive goes through
+// transport.RPC, which ensures a server, so a session whose socket goes away
+// between the check and the dial is started instead of read from disk. That is
+// a race with a session ending mid-save, not the ordinary stopped-session path,
+// which never dials at all.
 func captureLayout(c *cmdFlags) (layoutdoc.Doc, error) {
+	// The name reaches the filesystem on the state-file path. transport.RPC
+	// refused a bad one before that path existed, so refuse it here too, in the
+	// transport's own words.
+	if !paths.ValidSessionName(c.session) {
+		return layoutdoc.Doc{}, fmt.Errorf("invalid session name %q", c.session)
+	}
 	if envSessionLive(c.root, c.session) {
 		return captureLayoutLive(c.session)
 	}

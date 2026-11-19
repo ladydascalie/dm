@@ -5,6 +5,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -444,6 +445,53 @@ func TestLayoutBarePrintsTheSubcommands(t *testing.T) {
 	}
 	if err := Run([]string{"layout", "show"}); err == nil || !strings.Contains(err.Error(), "needs a name") {
 		t.Fatalf("dm layout show without a name = %v", err)
+	}
+}
+
+// TestLayoutSaveRefusesABadSessionName proves the stopped-session read checks
+// the name before it touches the filesystem: a traversal is refused in the
+// transport's words, and a state file planted where it would land is not read.
+func TestLayoutSaveRefusesABadSessionName(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DM_STATE", root)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// "../etc" resolves to <root>/etc, outside the session tree. A valid state
+	// file there would be saved if the name went unchecked.
+	outside := filepath.Join(root, "etc")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(session.NewStateAt(root, "etc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "state.json"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path, err := layoutdoc.Path("bad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../etc", "a/b"} {
+		var runErr error
+		out := testutil.CaptureStdout(t, func() {
+			runErr = Run([]string{"layout", "save", "bad", "-s", name})
+		})
+		if runErr == nil {
+			t.Fatalf("dm layout save -s %q was accepted: %q", name, out)
+		}
+		if want := fmt.Sprintf("invalid session name %q", name); !strings.Contains(runErr.Error(), want) {
+			t.Errorf("error %q does not name %q", runErr, want)
+		}
+		if strings.Contains(runErr.Error(), "state") {
+			t.Errorf("error %q came from a state read, want the name refused first", runErr)
+		}
+		if out != "" {
+			t.Errorf("a refused save printed %q", out)
+		}
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("a refused save wrote %s: %v", path, statErr)
+		}
 	}
 }
 

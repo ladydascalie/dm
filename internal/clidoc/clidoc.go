@@ -71,11 +71,13 @@ var cliCommands = []cliCommand{
 	// Sessions.
 	// -L and --force ride the args line of the verbs that start a session
 	// rather than their flag rows: the layout path registers both itself, so a
-	// row that declared them would register each one twice. The LAYOUTS
-	// section says what they do.
+	// row that declared them would register each one twice. --force sits inside
+	// the -L brackets because it means nothing without a layout: the code
+	// refuses it rather than reset a session. The LAYOUTS section says what
+	// they do.
 	{
 		name:    "",
-		args:    "[-s name] [-L layout] [--force]",
+		args:    "[-s name] [-L layout [--force]]",
 		summary: "attach to a session, creating it if needed",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		group:   groupSessions,
@@ -83,14 +85,14 @@ var cliCommands = []cliCommand{
 	{
 		name:    "attach",
 		aliases: []string{"a"},
-		args:    "[-s name] [-L layout] [--force]",
+		args:    "[-s name] [-L layout [--force]]",
 		summary: "attach to a session, creating it if needed",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		group:   groupSessions,
 	},
 	{
 		name:    "new",
-		args:    "[-s name] [-L layout] [--force]",
+		args:    "[-s name] [-L layout [--force]]",
 		summary: "start a session without attaching",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		group:   groupSessions,

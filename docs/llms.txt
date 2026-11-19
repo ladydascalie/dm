@@ -16,9 +16,9 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 
 | Command | Arguments | What it does | Example |
 | --- | --- | --- | --- |
-| `dm` | `[-s name] [-L layout] [--force]` | attach to a session, creating it if needed | `dm -s work` |
-| `dm attach` | `[-s name] [-L layout] [--force]` | attach to a session, creating it if needed (alias: a) | `dm attach -s work` |
-| `dm new` | `[-s name] [-L layout] [--force]` | start a session without attaching | `dm new -s work` |
+| `dm` | `[-s name] [-L layout [--force]]` | attach to a session, creating it if needed | `dm -s work` |
+| `dm attach` | `[-s name] [-L layout [--force]]` | attach to a session, creating it if needed (alias: a) | `dm attach -s work` |
+| `dm new` | `[-s name] [-L layout [--force]]` | start a session without attaching | `dm new -s work` |
 | `dm ls` | `-` | list sessions with pane counts and project (alias: list-sessions) | `dm ls` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
