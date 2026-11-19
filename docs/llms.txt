@@ -3,23 +3,28 @@
 dm is a durable terminal multiplexer in one binary. One process is the server; it owns the panes and their pty state, and it keeps running after you leave. A second mode is the TUI client, which draws the panes and sends actions. A third is the CLI, which sends the same actions to the same server, so a script and a hand on the keyboard drive one surface. Detach and reattach, and the shells keep running.
 
 ## Identifiers
-
 A workspace is `s1`, `s2`, and so on. A window is `w1`, `w2`. A pane is its window id plus `p` and a per-window sequence: `w2p3` is the third pane opened in window 2. Ids are readable and constructible, and a counter only moves forward, so a closed id is never reused.
 
-## Commands
+## Layouts
+A layout is a named JSON document that holds a session's shape: its workspaces, their windows, the split trees and each pane's launch data. A file lives at $XDG_CONFIG_HOME/dm/layouts/<name>.json, or $HOME/.config/dm/layouts/<name>.json when XDG_CONFIG_HOME is unset. The name follows the session-name rule: letters, digits, underscore or hyphen. dm layout save <name> captures the live shape. dm -L <name> starts a session from the file and attaches to it. The session defaults to the layout name, so the same command twice reattaches instead of stacking sessions. A layout seeds an empty session: when the session already has state, that state wins and the file is not applied, so a layout patches nothing. --force resets the session first, then replays the file over the reset. dm layout save <name> [-s name] [--force] captures a session, dm -L <name> applies one, and dm layout ls, show and rm list, print and delete the files. Only the launch argv is durable. A pane that began as a shell and now runs pi reopens as a shell, because the program a pane runs is recorded at launch, not what it later became. The session's box, its secrets, the agent state and the rail width never travel.
 
+## Commands
 A command is the first word after `dm`. With no command, `dm` attaches to a session, creating it if needed.
 
 | Command | Arguments | What it does | Example |
 | --- | --- | --- | --- |
-| `dm` | `[-s name]` | attach to a session, creating it if needed | `dm -s work` |
-| `dm attach` | `[-s name]` | attach to a session, creating it if needed (alias: a) | `dm attach -s work` |
-| `dm new` | `[-s name]` | start a session without attaching | `dm new -s work` |
+| `dm` | `[-s name] [-L layout] [--force]` | attach to a session, creating it if needed | `dm -s work` |
+| `dm attach` | `[-s name] [-L layout] [--force]` | attach to a session, creating it if needed (alias: a) | `dm attach -s work` |
+| `dm new` | `[-s name] [-L layout] [--force]` | start a session without attaching | `dm new -s work` |
 | `dm ls` | `-` | list sessions with pane counts and project (alias: list-sessions) | `dm ls` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
 | `dm reset` | `[-s name \| --all] --force` | discard a session and its panes for a full restart | `dm reset -s work --force` |
 | `dm exec` | `'<json>' [-s name]` | send an action as JSON | `dm exec '{"action":"split","target":"w1p1","dir":"right"}'` |
+| `dm layout save` | `<name> [-s name] [--force]` | capture a session's shape as a named layout file | `dm layout save work -s base` |
+| `dm layout ls` | `-` | list layout files with their workspace, window and pane counts | `dm layout ls` |
+| `dm layout show` | `<name>` | print a layout file unchanged | `dm layout show work` |
+| `dm layout rm` | `<name>` | delete a layout file | `dm layout rm work` |
 | `dm write-to` | `<pane> --msg T` | type text into a pane (--enter to accept) (alias: write) | `dm write-to w1p1 --msg 'ls -la' --enter` |
 | `dm split` | `<pane> --dir D` | split a pane: left right up down | `dm split w1p1 --dir right` |
 | `dm focus` | `<pane>` | focus a pane | `dm focus w1p2` |
@@ -60,7 +65,6 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm html` | `[-o path]` | open this page as HTML in a browser, or write it to a file | `dm html -o dm.html` |
 
 ## Actions: `dm exec`
-
 `dm exec` takes one JSON object. The fields are:
 
 | Field | Meaning |
@@ -145,7 +149,6 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `secret-sync` | `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}` |
 
 ## Keys
-
 The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use. The toggle-secrets action turns a pane's secret redaction off and on. It exists so a human can edit a secret in place: while it is off the pane's registered values are kept and the pane's output passes through untouched, and turning it back on scrubs those values again and repaints the pane's history and screen, so nothing the reveal drew is left behind for a read-back or a scrollback to serve. It is not a security control: an agent that can reach the dm socket can flip it, as it can already type keys and read panes. The toast names the state the pane is left in.
 
 | Keys | Action | Help label |
@@ -182,11 +185,9 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `ctrl+r` | `reload` | reload config |
 
 ## Sidebar
-
 The sidebar is a tree of workspaces, windows and panes. A workspace row is a foldable header. Under an unfolded workspace, each window gets a window row with its fold caret, its rendered window label, branch and dirty counts, and a dim note row when that pane has a commit message. The label falls back to the folder, then the window name, when the template renders empty. The source pane is the focused pane when it carries a branch, else the first pane carrying a branch, else the focused pane, else the window's first pane. The window's pane rows follow when the window is unfolded. A folded workspace hides its windows and panes; a folded window hides only its panes. A left click on a workspace row focuses the first available pane in that workspace. A left click on a workspace caret toggles the workspace fold without changing focus. A left click on a window row focuses the first available pane in that window and makes it the active window. A left click on a window caret toggles the window fold without changing focus. A left click on a pane row focuses that pane. Double-clicking a workspace row opens the workspace rename prompt; double-clicking a window row opens the window rename prompt; double-clicking a pane row opens the pane rename prompt. A right click on any row opens the row menu for that row: rename, close, new, fold and focus, as the row allows. The bottom row of the sidebar is its control: a left click there toggles the rail between full and thin. The `toggle-rail` key cycles full, thin and hidden. A window tab bar sits above the pane area, to the right of the rail. One tab per window in the active workspace. A tab is its label plus one padding cell on each side, clamped to `tab-min-width` and `tab-max-width` from `config.kdl` (defaults 8 and 20 cells); a label wider than the maximum is cut with an ellipsis. The tab label, the window row's leading label and the status bar window chip come from the `window-label` Go template, which defaults to the window name for a named window and the id plus repository folder for an unnamed one. Clicking a tab selects that window; double-clicking opens the window rename prompt.
 
 ## Config
-
 `$XDG_CONFIG_HOME/dm/config.kdl`, or `$HOME/.config/dm/config.kdl` when XDG_CONFIG_HOME is unset, is a patch over the built-in values: a node the file leaves out keeps its built-in value, and an action left out of a `keymap` block keeps its built-in key. dm writes a default file on first run.
 
 | Node | Value | Default | What it does |
@@ -210,7 +211,6 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `plugin` | a quoted name matching [A-Za-z0-9_-]+ and a { exec ... where ... } block | `none` | Declare a plugin: bind "plugin:<name>" to a key and it opens the exec argv in a split or window pane, in its folder, with its env. |
 
 ## Keymaps
-
 Each mode is a table of actions. The table lists the built-in binding; `dm exec` and a `keymap` node use the action name.
 
 | Mode | Action | Key |
@@ -378,7 +378,6 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `help` | `close-question` | `?` |
 
 ## Theme
-
 A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, named by the `theme` node; no node keeps the built-in theme. Every block and every key is optional, because the file reads over the built-in theme. A colour is `#rrggbb`; a glyph is one rune one cell wide. The built-in values are:
 
 | Block | Keys and built-in defaults | What it carries |
@@ -389,7 +388,6 @@ A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, named by the `theme` no
 | `states` | `working.glyph` ●, `working.colour` #f5be50, `idle.glyph` ○, `idle.colour` #78c8e1, `blocked.glyph` ▲, `blocked.colour` #ff6e6e, `done.glyph` ✓, `done.colour` #6ee191, `error.glyph` ✕, `error.colour` #ff82a0, `unknown.glyph` ?, `unknown.colour` #8f93a8, `shell.glyph` ▶, `shell.colour` #8f93a8 | Glyph and colour per pane state: working, idle, blocked, done, error, unknown, shell. |
 
 ## Prompt marks
-
 dm copies a command's output with prefix y and dm yank. The Enter dm forwards marks where that output starts; the shell's OSC 133 marks make both edges exact. Without them the copy starts after the echoed command line and ends at the last row with content, so the trailing prompt is copied too. With them the copy is the command's output alone, even when the prompt repaints its line on Enter.
 zsh emits the marks with one line in ~/.zshrc, before the prompt theme registers its own precmd hook:
 
@@ -402,7 +400,6 @@ The marks are ordinary output, so they travel over ssh and a nested multiplexer 
 The marks are defined by the semantic prompts proposal: https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/semantic-prompts.md
 
 ## Environment
-
 | Variable | What it sets |
 | --- | --- |
 | `DM_STATE` | State directory; overrides XDG_STATE_HOME. |
@@ -419,7 +416,6 @@ The marks are defined by the semantic prompts proposal: https://gitlab.freedeskt
 | `TMUX` | Set inside tmux; dm uses it to pick its terminal behaviour. |
 
 ## Files
-
 | Path | What it holds |
 | --- | --- |
 | `$DM_STATE/sessions/<name>/state.json` | Session state: workspaces, windows, panes, layouts and names. |
@@ -428,9 +424,9 @@ The marks are defined by the semantic prompts proposal: https://gitlab.freedeskt
 | `$DM_STATE/sessions/<name>/panes/<id>.log` | Pane output log. |
 | `$XDG_CONFIG_HOME/dm/config.kdl` | Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run. |
 | `$XDG_CONFIG_HOME/dm/themes/<name>.kdl` | Theme palette, accents, glyphs and state styles. |
+| `$XDG_CONFIG_HOME/dm/layouts/<name>.json` | A captured layout: workspaces, windows, split trees and each pane's launch cwd and argv. Written by dm layout save. |
 
 ## Recipes
-
 Attach to a session, creating it if needed:
 
 ```sh
@@ -471,7 +467,6 @@ dm msg wait --key build --state done --timeout 10m
 
 
 ## Gotchas
-
 - `dm kill` stops a session's server. The panes keep running; attach again and they are there.
 - `dm purge` removes dead sessions whose panes are gone. Add `--dry-run` to see the list first.
 - `dm reset` discards a session and its panes for a full restart. It needs `--force`; `--all` resets every session.

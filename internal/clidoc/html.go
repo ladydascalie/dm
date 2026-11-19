@@ -218,6 +218,7 @@ dl.flags dd { margin: 0; color: var(--dim); }
 <ol>
 <li><a class="toc-link" href="#sec-introduction">Introduction</a></li>
 <li><a class="toc-link" href="#sec-commands">Commands</a></li>
+<li><a class="toc-link" href="#sec-layouts">Layouts</a></li>
 <li><a class="toc-link" href="#sec-keys">Keys</a></li>
 <li><a class="toc-link" href="#sec-config">Config</a></li>
 <li><a class="toc-link" href="#sec-themes">Themes</a></li>
@@ -301,10 +302,11 @@ func HTMLPage() string {
 	b.WriteString(`<h2 id="introduction">Introduction</h2>`)
 	b.WriteString(`<p>dm is a durable terminal multiplexer in one binary. One process is the server: it owns the panes and their pty state, and it keeps running after you leave. A second mode is the TUI client, which draws the panes and sends actions. A third is the CLI, which sends the same actions to the same server, so a script and a hand on the keyboard drive one surface. Detach and reattach, and the shells keep running.</p>`)
 	b.WriteString(`<p>A workspace is <code>s1</code>, <code>s2</code>, and so on. A window is <code>w1</code>, <code>w2</code>. A pane is its window id plus <code>p</code> and a per-window sequence: <code>w2p3</code> is the third pane opened in window 2. Ids are readable and constructible, and a counter only moves forward, so a closed id is never reused.</p>`)
-	b.WriteString(`<p class="provenance">Where this page comes from: <code>dm html</code> renders it from the Go tables <code>cliCommands</code>, <code>manActionFields</code>, <code>manActionNames</code>, <code>keymap.LoadDefault().HelpEntries()</code>, the <code>configdoc</code> tables, the prompt-mark section and the component tables.</p>`)
+	b.WriteString(`<p class="provenance">Where this page comes from: <code>dm html</code> renders it from the Go tables <code>cliCommands</code>, <code>manActionFields</code>, <code>manActionNames</code>, <code>keymap.LoadDefault().HelpEntries()</code>, the <code>configdoc</code> tables, the layout section, the prompt-mark section and the component tables.</p>`)
 	b.WriteString(`</section>`)
 
 	b.WriteString(htmlCommands(ids))
+	b.WriteString(htmlLayouts(ids))
 	b.WriteString(htmlKeys(ids))
 	b.WriteString(htmlConfig(ids))
 	b.WriteString(htmlThemes(ids))
@@ -387,6 +389,22 @@ func htmlCommands(ids *idGen) string {
 		b.WriteString("</dd></div>")
 	}
 	b.WriteString(`</dl></section>`)
+	return b.String()
+}
+
+// htmlLayouts renders the LAYOUTS section: the file, the seeding rule, the
+// verbs and the one fidelity limit, with a sample file.
+func htmlLayouts(ids *idGen) string {
+	var b strings.Builder
+	b.WriteString(`<section class="sec" id="sec-layouts">`)
+	b.WriteString(`<h2 id="layouts">Layouts</h2>`)
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(LayoutsIntro))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(LayoutsSeed))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(LayoutsVerbs))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(LayoutsLimit))
+	fmt.Fprintf(&b, `<pre id="%s"><code>%s</code></pre>`,
+		htmlEscape(ids.id("layout", "sample")), htmlEscape(LayoutsSample))
+	b.WriteString("</section>")
 	return b.String()
 }
 
@@ -516,7 +534,7 @@ func htmlFiles(ids *idGen) string {
 	b.WriteString(`<h2 id="files">Files</h2>`)
 	b.WriteString(`<p>Paths use <code>$DM_STATE</code> and <code>$XDG_CONFIG_HOME</code> as the Environment section describes.</p>`)
 	b.WriteString("<table><thead><tr><th>Path</th><th>What it holds</th><th>dm writes it</th></tr></thead><tbody>")
-	for _, f := range configdoc.Files {
+	for _, f := range docsFiles() {
 		write := "no"
 		if f.Write {
 			write = "yes"

@@ -40,6 +40,7 @@ type cliCommand struct {
 
 const (
 	groupSessions = "sessions"
+	groupLayouts  = "layouts"
 	groupPanes    = "panes"
 	groupWindows  = "windows and workspaces"
 	groupObserve  = "observe"
@@ -55,6 +56,7 @@ var cliGroups = []struct {
 	title string
 }{
 	{groupSessions, "Sessions"},
+	{groupLayouts, "Layouts"},
 	{groupPanes, "Panes"},
 	{groupWindows, "Windows and workspaces"},
 	{groupObserve, "Observe"},
@@ -67,9 +69,13 @@ var cliGroups = []struct {
 // of one group sit together, and the groups follow cliGroups.
 var cliCommands = []cliCommand{
 	// Sessions.
+	// -L and --force ride the args line of the verbs that start a session
+	// rather than their flag rows: the layout path registers both itself, so a
+	// row that declared them would register each one twice. The LAYOUTS
+	// section says what they do.
 	{
 		name:    "",
-		args:    "[-s name]",
+		args:    "[-s name] [-L layout] [--force]",
 		summary: "attach to a session, creating it if needed",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		group:   groupSessions,
@@ -77,14 +83,14 @@ var cliCommands = []cliCommand{
 	{
 		name:    "attach",
 		aliases: []string{"a"},
-		args:    "[-s name]",
+		args:    "[-s name] [-L layout] [--force]",
 		summary: "attach to a session, creating it if needed",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		group:   groupSessions,
 	},
 	{
 		name:    "new",
-		args:    "[-s name]",
+		args:    "[-s name] [-L layout] [--force]",
 		summary: "start a session without attaching",
 		flags:   []cliFlag{{"s", "name", "session name"}},
 		group:   groupSessions,
@@ -134,6 +140,38 @@ var cliCommands = []cliCommand{
 		},
 		example: `dm exec '{"action":"split","target":"w1p1","dir":"right"}'`,
 		group:   groupSessions,
+	},
+
+	// Layouts: capture a session's shape under a name, then seed a new
+	// session from it.
+	{
+		name:    "layout save",
+		args:    "<name> [-s name] [--force]",
+		summary: "capture a session's shape as a named layout file",
+		flags: []cliFlag{
+			{"s", "name", "session the layout is captured from"},
+			{"force", "", "overwrite an existing layout file"},
+		},
+		example: `dm layout save work -s base`,
+		group:   groupLayouts,
+	},
+	{
+		name:    "layout ls",
+		summary: "list layout files with their workspace, window and pane counts",
+		group:   groupLayouts,
+	},
+	{
+		name:    "layout show",
+		args:    "<name>",
+		summary: "print a layout file unchanged",
+		example: `dm layout show work`,
+		group:   groupLayouts,
+	},
+	{
+		name:    "layout rm",
+		args:    "<name>",
+		summary: "delete a layout file",
+		group:   groupLayouts,
 	},
 
 	// Panes.
@@ -526,7 +564,9 @@ const usageFooter = `Actions are the same everywhere:
 
 // usageMaxWidth is the widest command line that still carries a summary. A
 // longer line prints alone, so the box verbs do not push every summary right.
-const usageMaxWidth = 40
+// The width holds the longest of the verbs that start a session, with its
+// layout flags, without letting the box verbs in.
+const usageMaxWidth = 42
 
 // cliLine is the command line a row prints, without the leading indent.
 func (c cliCommand) line() string {
