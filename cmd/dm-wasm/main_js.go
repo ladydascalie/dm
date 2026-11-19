@@ -126,9 +126,10 @@ func (h *handover) live() bool {
 // advances on what the session did and the page only draws the result.
 func report(events chan map[string]any, l *lesson.Lesson, hand *handover, ev map[string]any) {
 	pushEvent(events, ev)
-	if kind, _ := ev["type"].(string); kind == "session" {
-		// The session's own shape is the coach: the page draws it, and the
-		// lesson never sees it.
+	if kind, _ := ev["type"].(string); kind == "session" || kind == "session.files" {
+		// The session's own shape is the coach, and the files it would leave
+		// are the panel. The page draws both, and the lesson never sees
+		// either.
 		return
 	}
 	if !l.Feed(asLessonEvent(ev)) {
