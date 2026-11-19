@@ -74,6 +74,15 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.mu.Unlock()
 		s.reply(cl, m, map[string]any{"snapshot": snap, "tree": tree}, nil)
 
+	case "layout":
+		// The live shape as a layout document, for `dm layout save`. Pane ids
+		// stay live: layoutdoc.BuildInto renumbers them when the file comes
+		// back in.
+		s.mu.Lock()
+		doc := s.captureLayoutLocked()
+		s.mu.Unlock()
+		s.reply(cl, m, map[string]any{"layout": doc}, nil)
+
 	case "read":
 		lines, st, err := s.paneLines(m.Target)
 		if err != nil {

@@ -530,6 +530,7 @@ type server struct {
 func Run(args []string) error {
 	fs := flag.NewFlagSet("__server", flag.ContinueOnError)
 	name := fs.String("s", "main", "session name")
+	layoutPath := fs.String("layout", "", "seed a fresh session from this layout file")
 	fs.Bool("headless", true, "unused, kept for clarity")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -548,13 +549,9 @@ func Run(args []string) error {
 	}
 	defer func() { _ = lf.Close() }()
 
-	st, err := session.LoadStateAt(root, *name)
-	fromDisk := err == nil
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	st, fromDisk, err := loadState(root, *name, *layoutPath)
+	if err != nil {
 		return err
-	}
-	if st == nil {
-		st = session.NewStateAt(root, *name)
 	}
 	adopt := map[string]bool{}
 	if fromDisk {
@@ -743,7 +740,9 @@ func (s *server) addPaneStateAt(id, cwd string, argv, pluginEnv []string) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	s.st.Panes[id] = &session.PaneState{Shell: os.Getenv("SHELL"), Cwd: cwd, Cols: 80, Rows: 24, Argv: argv, PluginEnv: pluginEnv}
+	ps := &session.PaneState{Cwd: cwd, Argv: argv, PluginEnv: pluginEnv}
+	paneDefaults(ps)
+	s.st.Panes[id] = ps
 }
 
 // paneCommand builds the __pane command for a fresh daemon. A known colour
