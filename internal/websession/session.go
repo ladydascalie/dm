@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -331,6 +332,8 @@ func (s *Session) request(m wire.Msg) answer {
 		return s.closeWorkspace(m)
 	case "replay":
 		return s.replay(m)
+	case "resize-split":
+		return s.resizeSplit(m)
 	}
 	return answer{}
 }
@@ -385,6 +388,63 @@ func (s *Session) split(m wire.Msg) answer {
 	s.activate(ws, w)
 	s.zoom = ""
 	return answer{changed: true, res: map[string]any{"pane": id}}
+}
+
+// resizeSplit sets the weights of the split between two adjacent panes. Ratio
+// is the share the first pane keeps, clamped so both sides keep the smallest
+// box a drag may leave. The rule is the server's, spelled with the layout
+// helpers the fake already lays out with, so a divider drag lands where it does
+// on a machine.
+func (s *Session) resizeSplit(m wire.Msg) answer {
+	if math.IsNaN(m.Ratio) || math.IsInf(m.Ratio, 0) {
+		return answer{err: errors.New("bad ratio")}
+	}
+	if m.Target == "" || m.Other == "" || m.Target == m.Other {
+		return answer{err: errors.New("resize-split needs two panes")}
+	}
+	for _, ws := range s.workspaces {
+		for _, w := range ws.Windows {
+			if !layout.FindLeaf(w.Root, m.Target) || !layout.FindLeaf(w.Root, m.Other) {
+				continue
+			}
+			pa := layout.AncestorPath(w.Root, m.Target, nil)
+			pb := layout.AncestorPath(w.Root, m.Other, nil)
+			split := layout.LowestCommonAncestor(pa, pb)
+			if split == nil || split.Pane != "" || len(split.Kids) != 2 {
+				return answer{err: fmt.Errorf("panes %q and %q share no split", m.Target, m.Other)}
+			}
+			// The client hit-tests the pad with the tab bar's row free, so the
+			// rect a drag measured is the one the ratio is taken against.
+			area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railWidth())
+			r, ok := layout.NodeRect(w.Root, split, area, s.pad())
+			if !ok {
+				return answer{err: fmt.Errorf("no rect for split of %q", m.Target)}
+			}
+			space := r.W
+			if split.Dir != "row" {
+				space = r.H
+			}
+			if space < 2 {
+				return answer{err: fmt.Errorf("split between %q and %q is too small", m.Target, m.Other)}
+			}
+			// A pane box is border, padding, content, padding, border, and the
+			// smallest content a drag may leave is 3 cells.
+			minBox := 5 + 2*s.pad()
+			ratio := m.Ratio
+			if space < 2*minBox {
+				ratio = 0.5
+			} else {
+				const eps = 1e-9
+				lo := float64(minBox)/float64(space) + eps
+				hi := 1 - float64(minBox)/float64(space) + eps
+				ratio = math.Min(hi, math.Max(lo, ratio))
+			}
+			split.Sizes = []float64{ratio, 1 - ratio}
+			s.zoom = ""
+			return answer{changed: true}
+		}
+	}
+	return answer{err: fmt.Errorf("no pane %q", m.Target)}
 }
 
 // closePane removes one pane. The last pane of a window takes the window with
@@ -931,12 +991,11 @@ func (s *Session) windowRects(w *window) map[string]layout.Rect {
 	// The client draws the window tab bar on row 0 and hit-tests with the
 	// same helper, so the fake must keep that row free.
 	area := layout.PaneAreaForWithTabBar(s.cols, s.rows, s.railWidth())
-	pad := keymap.LoadDefault().Padding()
 	out := map[string]layout.Rect{}
-	layout.Layout(w.Root, area, pad, out)
+	layout.Layout(w.Root, area, s.pad(), out)
 	if w == s.activeWindow() && s.zoom != "" {
 		if _, ok := out[s.zoom]; ok {
-			out[s.zoom] = layout.InsetBox(area, pad)
+			out[s.zoom] = layout.InsetBox(area, s.pad())
 		}
 	}
 	return out
@@ -949,6 +1008,13 @@ func (s *Session) activeRects() map[string]layout.Rect {
 		return s.windowRects(w)
 	}
 	return map[string]layout.Rect{}
+}
+
+// pad is the cells between two adjacent pane boxes. It is the keymap's default,
+// the width a real session reads from the same file, because the fake has no
+// config of its own.
+func (s *Session) pad() int {
+	return keymap.LoadDefault().Padding()
 }
 
 // railWidth is the rail the screen can show: what the page asked for, clamped
