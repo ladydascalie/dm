@@ -52,11 +52,21 @@ It lists what the session would leave under its state directory, built from the
 session's own model and never from a file: `state.json`, which is
 `internal/session`'s shipped `State` populated from the fake and marshalled the
 way `State.Save` marshals it, `snapshot.json`, the last `wire.Snapshot` the
-session sent, one `panes/<id>.sock` per pane in every workspace and window, and
-`server.sock`, `server.pid` and `server.log` marked absent because this tab has
-no server process. Nothing is invented for the last three. The panel says in its
-own footer that `snapshot.json` never reaches disk and that a tab has no disk, so
-the rows are what the session would write, built from memory.
+session sent, and, for every pane in every workspace and window,
+`panes/<id>.sock`, `panes/<id>.log` and `panes/<id>.sock.pid`. `server.sock`,
+`server.pid`, `server.lock` and `server.log` are listed beside them. Everything
+but the two documents is marked absent, because this tab has no server process
+and no pane process: nothing is invented to fill those rows.
+
+Each row carries a tag and one sentence, both built in `internal/websession` and
+drawn as they arrive: real means a real session writes that file, memory means a
+frame the client got, socket means a unix socket, and absent means a file a real
+session has and this tab does not. The page holds no copy of those words, and the
+footer names the tags and says the browser writes none of it.
+
+The document's counters are the last id handed out, as a real state file stores
+them: 1 and 1 for a fresh session, 2 and 2 once a new window and a new workspace
+have been made, and each window's `nextPane` means the same thing.
 
 It is live: the same event rides with every snapshot, so splitting a pane adds a
 socket and grows `state.json`, and a closed pane's socket leaves the tree. The

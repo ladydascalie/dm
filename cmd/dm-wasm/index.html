@@ -267,10 +267,10 @@
         text-transform: uppercase;
         color: var(--ink-faint);
       }
-      .tree .row .tag.mem { color: var(--warn); }
+      .tree .row .tag.memory { color: var(--warn); }
       .tree .row .tag.real { color: var(--good); }
-      .tree .row .tag.sock { color: var(--ink-faint); }
-      .tree .row .tag.gone { color: var(--ink-faint); }
+      .tree .row .tag.socket { color: var(--ink-faint); }
+      .tree .row .tag.absent { color: var(--ink-faint); }
       .view { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
       .tabs {
         display: flex;
@@ -405,8 +405,8 @@
                 </div>
               </div>
               <div class="files-foot">
-                <span><b>a real session writes:</b> state.json, the sockets, server.log.</span>
-                <span><b>never on disk:</b> snapshot.json is one frame the client got.</span>
+                <span><b>drawn:</b> every file this session would write, tagged real, memory or socket, and every file a real session has and this tab does not, tagged absent.</span>
+                <span><b>the browser writes none of it:</b> no disk, no server process, no pane process.</span>
               </div>
             </div>
           </div>
@@ -538,39 +538,14 @@
       // The session files panel. The wasm side reports what the session would
       // leave under its state directory, built from its own model, one
       // session.files event per snapshot. The page draws those rows and holds
-      // no rule about them: every path, kind and body comes from the event, and
-      // the words here are fixed copy.
+      // no rule about them: every path, tag, note and body comes from the
+      // event, and none of the words in it are the page's.
       let files = null; // the newest session.files event
       let filesOpen = false;
       let openPath = "state.json";
       // what the code view last drew, so a redraw that changed nothing keeps
       // the reader's place.
       let drawn = { path: "", body: "" };
-
-      // The tag a row wears. The kind is the event's; the word is this page's,
-      // and so is the one fact the footer states too: snapshot.json is a frame
-      // the client got, not a file a real session writes.
-      const tagOf = (row) => {
-        if (row.kind === "socket") return { cls: "sock", text: "socket" };
-        if (row.kind === "absent") return { cls: "gone", text: "absent" };
-        if (row.path === "snapshot.json") return { cls: "mem", text: "memory" };
-        return { cls: "real", text: "real" };
-      };
-      const kindOf = (row) => {
-        if (row.kind === "socket") return "a unix socket, it has no contents";
-        if (row.kind === "absent") return "a real session has this; this tab has none";
-        if (row.path === "snapshot.json") return "one frame the client got, never on disk";
-        return "the file a real session writes";
-      };
-      const noteOf = (row) => {
-        if (row.kind === "socket") {
-          return "A unix socket has no contents to read. On a machine this is how the server reaches the pane's mux: one socket per pane, beside the state file.\n\nThe browser has no pane process, so nothing is behind this one.";
-        }
-        if (row.kind === "absent") {
-          return "A real session has this; this tab has none.\n\nThe browser has no server process, so this session writes no socket, no pid and no log. Nothing here is invented to fill them.";
-        }
-        return "";
-      };
 
       // escape first, then paint JSON tokens: keys, strings, numbers, literals.
       const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -602,12 +577,35 @@
         return out;
       };
 
-      // show one row: its body with line numbers, or the note a socket and an
-      // absent file get instead.
+      // the tab bar: the root rows, plus the open row when it sits deeper. It
+      // is rebuilt by showRow, so a row opened by a click has a tab at once.
+      const drawTabs = () => {
+        const rows = files?.files ?? [];
+        const tabs = el("files-tabs");
+        tabs.replaceChildren();
+        const tabbed = rows.filter((r) => !r.path.includes("/"));
+        const open = rows.find((r) => r.path === openPath);
+        if (open && !tabbed.includes(open)) tabbed.push(open);
+        for (const row of tabbed) {
+          const b = document.createElement("span");
+          b.className = "tab";
+          b.dataset.path = row.path;
+          b.textContent = row.path;
+          b.classList.toggle("on", row.path === openPath);
+          b.addEventListener("click", () => {
+            openPath = row.path;
+            showRow(row);
+          });
+          tabs.append(b);
+        }
+      };
+
+      // show one row: its body with line numbers, or the note the event carries
+      // for a socket and for a file this tab has none of.
       const showRow = (row) => {
         if (!row) return;
         el("files-crumb").textContent = row.path;
-        el("files-kind").textContent = kindOf(row);
+        el("files-kind").textContent = row.note ?? "";
         const code = el("files-code");
         const same = drawn.path === row.path && drawn.body === row.body;
         const top = same ? code.scrollTop : 0;
@@ -616,7 +614,7 @@
           code.innerHTML = "";
           const note = document.createElement("div");
           note.className = "note";
-          note.textContent = noteOf(row);
+          note.textContent = row.note ?? "";
           code.append(note);
         } else {
           const lines = body.replace(/\n$/, "").split("\n");
@@ -630,11 +628,9 @@
         }
         code.scrollTop = top;
         drawn = { path: row.path, body };
+        drawTabs();
         for (const r of document.querySelectorAll("#files-tree .row")) {
           r.classList.toggle("sel", r.dataset.path === row.path);
-        }
-        for (const b of document.querySelectorAll("#files-tabs .tab")) {
-          b.classList.toggle("on", b.dataset.path === row.path);
         }
       };
 
@@ -660,10 +656,9 @@
           name.textContent = label;
           r.append(caret, name);
           if (row) {
-            const tag = tagOf(row);
             const t = document.createElement("span");
-            t.className = `tag ${tag.cls}`;
-            t.textContent = tag.text;
+            t.className = `tag ${row.tag ?? ""}`;
+            t.textContent = row.tag ?? "";
             r.append(t);
             r.addEventListener("click", () => {
               openPath = path;
@@ -687,23 +682,6 @@
           for (const row of kids) addRow(row.path.slice(folder.length + 1), row.path, 2, row);
         }
 
-        // The tab bar: the root files, and the open row when it sits deeper.
-        const tabs = el("files-tabs");
-        tabs.replaceChildren();
-        const tabbed = root.slice();
-        const openRow = byPath.get(openPath);
-        if (openRow && !tabbed.includes(openRow)) tabbed.push(openRow);
-        for (const row of tabbed) {
-          const b = document.createElement("span");
-          b.className = "tab";
-          b.dataset.path = row.path;
-          b.textContent = row.path;
-          b.addEventListener("click", () => {
-            openPath = row.path;
-            showRow(row);
-          });
-          tabs.append(b);
-        }
         showRow(byPath.get(openPath));
       };
 

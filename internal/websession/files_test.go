@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -88,11 +89,14 @@ func pathsOf(rows map[string]map[string]any) []string {
 func sockets(rows map[string]map[string]any) []string {
 	out := []string{}
 	for path := range rows {
-		id, ok := strings.CutPrefix(path, "panes/")
+		id, ok := strings.CutSuffix(path, ".sock")
 		if !ok {
 			continue
 		}
-		out = append(out, strings.TrimSuffix(id, ".sock"))
+		if id, ok = strings.CutPrefix(id, "panes/"); !ok {
+			continue
+		}
+		out = append(out, id)
 	}
 	sort.Strings(out)
 	return out
@@ -105,6 +109,17 @@ func sockets(rows map[string]map[string]any) []string {
 func TestStateBodyIsTheStateADocument(t *testing.T) {
 	var rec recorder
 	h := newHarnessWith(t, 100, 30, rec.forward)
+
+	// A fresh session writes the last id handed out: s1 and w1 exist, so both
+	// counters read 1, as a real state file does.
+	_, bootRows, _ := filesEvent(t, rec.take())
+	var boot session.State
+	if err := json.Unmarshal([]byte(body(t, bootRows, "state.json")), &boot); err != nil {
+		t.Fatalf("state.json does not unmarshal into a session.State: %v", err)
+	}
+	if boot.NextWorkspace != 1 || boot.NextWindow != 1 {
+		t.Fatalf("a fresh session's counters = (%d, %d), want (1, 1)", boot.NextWorkspace, boot.NextWindow)
+	}
 
 	// Build a session with two workspaces, three windows and four panes.
 	h.request("split", "w1p1", func(m *wire.Msg) { m.Dir = "down" })
@@ -188,10 +203,22 @@ func TestStateBodyIsTheStateADocument(t *testing.T) {
 	}
 	sort.Strings(gotPanes)
 
-	// The counters are the session's own, and the rail is what the page asked
-	// for.
-	if st.NextWorkspace != 3 || st.NextWindow != 4 {
-		t.Fatalf("state counters = (%d, %d), want (3, 4)", st.NextWorkspace, st.NextWindow)
+	// The counters are the last id handed out, as a state file stores them:
+	// s2 and w3 were the last a new-workspace and a new-window made, and the
+	// split's second pane left w1 at nextPane 2. The three counters in this
+	// document mean one thing, which they did not before.
+	if st.NextWorkspace != 2 || st.NextWindow != 3 {
+		t.Fatalf("state counters = (%d, %d), want (2, 3)", st.NextWorkspace, st.NextWindow)
+	}
+	for _, ws := range st.Workspaces {
+		for _, w := range ws.Windows {
+			if w.ID != "w1" {
+				continue
+			}
+			if w.NextPane != 2 {
+				t.Fatalf("window w1 nextPane = %d, want 2, the last pane it handed out", w.NextPane)
+			}
+		}
 	}
 	if st.Rail != 34 || !st.RailSet {
 		t.Fatalf("state rail = %d set=%v, want 34 set", st.Rail, st.RailSet)
@@ -275,42 +302,110 @@ func TestSocketsFollowThePanes(t *testing.T) {
 	}
 }
 
-// TestAbsentFilesAreListed proves the files a real session has and this one does
-// not are listed, stably, with no contents invented for them.
+// TestAbsentFilesAreListed proves the files a real session writes and this one
+// does not are listed, stably and completely: the four beside the state file,
+// and a log and a socket pid beside every pane socket. They carry no contents
+// invented for them.
 func TestAbsentFilesAreListed(t *testing.T) {
 	var rec recorder
 	h := newHarnessWith(t, 100, 30, rec.forward)
 
-	want := []string{"server.sock", "server.pid", "server.log"}
-	check := func(round string) {
+	// The files a real session writes directly under its session directory.
+	root := []string{"server.sock", "server.pid", "server.lock", "server.log"}
+	check := func(round string, panes ...string) {
 		t.Helper()
 		_, rows, order := filesEvent(t, rec.take())
+		want := []string{}
+		for _, id := range panes {
+			want = append(want, "panes/"+id+".log", "panes/"+id+".sock.pid")
+		}
+		want = append(want, root...)
+		sort.Strings(want)
 		got := []string{}
 		for _, path := range order {
 			if rows[path]["kind"] == "absent" {
 				got = append(got, path)
 			}
 		}
+		sort.Strings(got)
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: absent rows = %v, want %v", round, got, want)
 		}
-		for _, path := range want {
-			if got := body(t, rows, path); got != "" {
-				t.Fatalf("%s: absent row %q carries %q, want nothing", round, path, got)
+		for _, path := range got {
+			if body := body(t, rows, path); body != "" {
+				t.Fatalf("%s: absent row %q carries %q, want nothing", round, path, body)
+			}
+			if tag := rows[path]["tag"]; tag != "absent" {
+				t.Fatalf("%s: absent row %q tag = %v, want absent", round, path, tag)
+			}
+			if note, _ := rows[path]["note"].(string); note == "" {
+				t.Fatalf("%s: absent row %q carries no note", round, path)
 			}
 		}
 	}
-	check("the first snapshot")
+	check("the first snapshot", "w1p1")
 	h.request("split", "w1p1", func(m *wire.Msg) { m.Dir = "down" })
-	check("after a split")
+	check("after a split", "w1p1", "w1p2")
 	h.request("new-workspace", "w1p2", nil)
-	check("after a new workspace")
+	check("after a new workspace", "w1p1", "w1p2", "w2p1")
+}
+
+// TestEveryRowCarriesTagAndNote proves the panel reads its words from the event:
+// each row has a tag from the fixed set and one sentence saying what the file is
+// and whether this tab has it. The page keeps no copy of either.
+func TestEveryRowCarriesTagAndNote(t *testing.T) {
+	var rec recorder
+	h := newHarnessWith(t, 100, 30, rec.forward)
+	h.request("split", "w1p1", func(m *wire.Msg) { m.Dir = "right" })
+
+	_, rows, order := filesEvent(t, rec.take())
+	want := map[string]string{
+		"state.json":          "real",
+		"snapshot.json":       "memory",
+		"panes/w1p1.sock":     "socket",
+		"panes/w1p1.log":      "absent",
+		"server.sock":         "absent",
+		"panes/w1p2.sock.pid": "absent",
+	}
+	got := map[string]string{}
+	for _, path := range order {
+		tag, _ := rows[path]["tag"].(string)
+		switch tag {
+		case "real", "memory", "socket", "absent":
+		default:
+			t.Fatalf("row %q tag = %q, want real, memory, socket or absent", path, tag)
+		}
+		note, _ := rows[path]["note"].(string)
+		if note == "" {
+			t.Fatalf("row %q carries no note", path)
+		}
+		// One sentence: it ends in a full stop and holds no other.
+		if !strings.HasSuffix(note, ".") || strings.Contains(strings.TrimSuffix(note, "."), ".") {
+			t.Fatalf("row %q note = %q, want one sentence", path, note)
+		}
+		got[path] = tag
+	}
+	for path, tag := range want {
+		if got[path] != tag {
+			t.Fatalf("row %q tag = %q, want %q", path, got[path], tag)
+		}
+	}
 }
 
 // TestFilesCarryNoHostPath proves the panel is built from memory: no body names
 // a path on this host, so nothing was read from disk to fill it, and the
-// directory it prints is the short form a person reads, not this machine's.
+// directory it prints is internal/paths' layout with a home of /home/guest
+// written as a tilde, so a change in that layout fails this test.
 func TestFilesCarryNoHostPath(t *testing.T) {
+	// This host's paths, read before the environment below stands in for the
+	// pretend machine's.
+	cwd, _ := os.Getwd()
+	hostHome, _ := os.UserHomeDir()
+
+	t.Setenv("HOME", "/home/guest")
+	t.Setenv("DM_STATE", "")
+	t.Setenv("XDG_STATE_HOME", "")
+
 	var rec recorder
 	h := newHarnessWith(t, 100, 30, rec.forward)
 	h.request("split", "w1p1", func(m *wire.Msg) { m.Dir = "down" })
@@ -319,12 +414,19 @@ func TestFilesCarryNoHostPath(t *testing.T) {
 	if want := "~/.local/state/dm/sessions/spike"; dir != want {
 		t.Fatalf("the files dir = %q, want %q", dir, want)
 	}
-	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
-	host := []string{cwd, home}
-	if v := os.Getenv("DM_STATE"); v != "" {
-		host = append(host, v)
+	if strings.HasPrefix(dir, "/") {
+		t.Fatalf("the files dir %q is an absolute path", dir)
 	}
+	// The directory follows paths, not a constant of its own: move the state
+	// tree and the printed dir moves with it.
+	elsewhere := t.TempDir()
+	t.Setenv("DM_STATE", elsewhere)
+	h.request("focus", "w1p1", nil)
+	if dir, _, _ := filesEvent(t, rec.take()); dir != paths.SessionDirAt(elsewhere, "spike") {
+		t.Fatalf("with DM_STATE set the files dir = %q, want %q", dir, paths.SessionDirAt(elsewhere, "spike"))
+	}
+
+	host := []string{cwd, hostHome}
 	for _, path := range pathsOf(rows) {
 		b := body(t, rows, path)
 		for _, h := range host {
