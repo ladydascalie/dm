@@ -404,25 +404,25 @@ func shapeKey(t *testing.T, h *harness, session string) string {
 }
 
 // TestLayoutDeletedCwd is the spec's deleted-directory case: a pane whose saved
-// cwd no longer exists spawns at $HOME, logs one line, and one deleted
-// directory never fails the whole layout.
-//
-// Skipped because the product does not do it yet. Measured with this tree
-// (2026-11-19): pane.Run hands the saved cwd to the pty, the chdir fails, the
-// pane daemon exits, the server reads it as a closed pane, prunes it from the
-// tree, and a session whose last pane it was ends outright (endSession removes
-// the session directory). Neither internal/server nor internal/pane stats the
-// cwd or falls back to $HOME. Both are outside this lane. Delete the skip when
-// the fallback lands: the body below is the acceptance test for it.
+// cwd no longer exists lands in the nearest surviving directory, here $HOME,
+// logs one line, and one deleted directory never fails the whole layout.
 func TestLayoutDeletedCwd(t *testing.T) {
 	home := os.Getenv("HOME")
 	if home == "" {
 		t.Skip("the harness has no HOME to fall back to")
 	}
-	t.Skip("deleted cwd does not fall back to $HOME yet: see the comment above")
-
+	// The saved folder sits inside the home directory and is removed before the
+	// layout is applied, so the nearest surviving ancestor is $HOME. A folder
+	// under t.TempDir() would land in the temp directory instead: same rule,
+	// different expected path.
+	gone, err := os.MkdirTemp(home, "dm-gone-")
+	if err != nil {
+		t.Skipf("cannot make a deleted folder under %s: %v", home, err)
+	}
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
 	h := newHarness(t)
-	gone := filepath.Join(t.TempDir(), "gone")
 	layout := layoutFile(h, "gone-cwd")
 	if err := os.MkdirAll(filepath.Dir(layout), 0o755); err != nil {
 		t.Fatal(err)
@@ -438,5 +438,23 @@ func TestLayoutDeletedCwd(t *testing.T) {
 	st := h.sessionState("gone")
 	if ps := st.Panes["w1p1"]; ps == nil || filepath.Clean(ps.Cwd) != filepath.Clean(home) {
 		t.Fatalf("deleted cwd pane = %+v, want cwd %q", ps, home)
+	}
+	// The fallback moved one pane and not the other, and the moved pane is
+	// alive: it answers a status request instead of dying on the chdir.
+	if ps := st.Panes["w1p2"]; ps == nil || filepath.Clean(ps.Cwd) != "/tmp" {
+		t.Fatalf("the untroubled pane = %+v, want its cwd /tmp untouched", ps)
+	}
+	if _, err := h.try("status", "w1p1", "-s", "gone"); err != nil {
+		t.Fatalf("the fallback pane does not answer: %v", err)
+	}
+	// The move is reported once, naming the pane and both directories.
+	serverLog, err := os.ReadFile(filepath.Join(h.stateDir(), "sessions", "gone", "server.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"pane w1p1", gone, home} {
+		if !strings.Contains(string(serverLog), want) {
+			t.Fatalf("server.log does not name %q:\n%s", want, serverLog)
+		}
 	}
 }

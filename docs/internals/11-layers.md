@@ -38,7 +38,7 @@ carry many real edges, and the generated page counts every one of them. The two
 | entry | entry, services, presentation, domain, leaf, tooling | `dm`, `cmd/dm-wasm`, `cmd/esctest-harness` |
 | services | services, presentation, domain, leaf | `internal/cli`, `internal/client`, `internal/pane`, `internal/proxy`, `internal/server`, `internal/transport`, `internal/websession` |
 | presentation | presentation, domain, leaf | `internal/boxview`, `internal/clidoc`, `internal/configdoc`, `internal/esctest`, `internal/keymapview`, `internal/palette`, `internal/panel`, `internal/rail`, `internal/segment`, `internal/shot`, `internal/switcher`, `internal/testutil`, `internal/ui` |
-| domain | domain, leaf | `internal/box`, `internal/keymap`, `internal/layout`, `internal/notify`, `internal/osc`, `internal/secrets`, `internal/session`, `internal/theme`, `internal/vt`, `internal/wire` |
+| domain | domain, leaf | `internal/box`, `internal/keymap`, `internal/layout`, `internal/layoutdoc`, `internal/notify`, `internal/osc`, `internal/secrets`, `internal/session`, `internal/theme`, `internal/vt`, `internal/wire` |
 | leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/lesson`, `internal/paths`, `internal/ptyspawn`, `internal/redact`, `internal/webshell`, `internal/wlabel` |
 | tooling | tooling, domain, leaf | `internal/arch`, `internal/archdoc` |
 
@@ -76,10 +76,10 @@ presentation: `internal/client` paints the rows that `internal/palette` filters
 and `internal/ui`.
 
 **domain** holds the state, the data types and the rules that need no screen:
-`internal/wire`, `internal/session`, `internal/layout`, `internal/vt`,
-`internal/theme`, `internal/keymap`, `internal/box`, `internal/notify`,
-`internal/osc`, `internal/secrets`. A domain package may not import
-presentation. A wire message can carry a `*vt.Snapshot`
+`internal/wire`, `internal/session`, `internal/layout`, `internal/layoutdoc`,
+`internal/vt`, `internal/theme`, `internal/keymap`, `internal/box`,
+`internal/notify`, `internal/osc`, `internal/secrets`. A domain package may not
+import presentation. A wire message can carry a `*vt.Snapshot`
 (`internal/wire/wire.go:85`) and each snapshot row carries `SnapshotCell`
 values (`internal/vt/snapshot.go:48`), because `vt` is a domain package too. A
 wire frame, one length-prefixed JSON message on the socket

@@ -137,9 +137,80 @@ func TestLayoutRPCCapture(t *testing.T) {
 	}
 }
 
+// TestFallbackCwd proves the seed rule for a saved folder that is gone: the
+// nearest live ancestor, else the home directory, else nothing invented. A pane
+// whose cwd is fine and a pane with no cwd are left alone, and one log line per
+// moved pane names the pane and both directories.
+func TestFallbackCwd(t *testing.T) {
+	home := t.TempDir()
+	live := t.TempDir()
+	gone := filepath.Join(live, "gone")                         // never created
+	orphan := filepath.Join("/", "dm-no-such-root-xyz", "gone") // only the root above it
+	st := &session.State{Panes: map[string]*session.PaneState{
+		"w1p1": {Cwd: live},
+		"w1p2": {Cwd: gone},
+		"w1p3": {Cwd: orphan},
+		"w1p4": {Cwd: ""},
+	}}
+
+	var logs bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(old)
+
+	fallbackCwd(st, home)
+
+	if got := st.Panes["w1p1"].Cwd; got != live {
+		t.Errorf("a live cwd moved: %q, want %q", got, live)
+	}
+	if got := st.Panes["w1p2"].Cwd; got != live {
+		t.Errorf("deleted cwd = %q, want the nearest ancestor %q", got, live)
+	}
+	if got := st.Panes["w1p3"].Cwd; got != home {
+		t.Errorf("orphan cwd = %q, want the home directory %q", got, home)
+	}
+	if got := st.Panes["w1p4"].Cwd; got != "" {
+		t.Errorf("an empty cwd became %q, want it left empty", got)
+	}
+	out := logs.String()
+	for _, want := range []string{"w1p2", gone, live, "w1p3", orphan, home} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log %q does not name %q", out, want)
+		}
+	}
+	if n := strings.Count(out, "\n"); n != 2 {
+		t.Errorf("logged %d lines, want one per moved pane: %q", n, out)
+	}
+}
+
+// TestFallbackCwdNoHome proves the fallback invents nothing when the
+// environment has no home directory: the pane keeps an empty cwd and starts
+// where the server did.
+func TestFallbackCwdNoHome(t *testing.T) {
+	st := &session.State{Panes: map[string]*session.PaneState{
+		"w1p1": {Cwd: filepath.Join("/", "dm-no-such-root-xyz", "gone")},
+	}}
+	var logs bytes.Buffer
+	old := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(old)
+
+	fallbackCwd(st, "")
+
+	if got := st.Panes["w1p1"].Cwd; got != "" {
+		t.Fatalf("cwd = %q, want it left empty with no home directory", got)
+	}
+	if !strings.Contains(logs.String(), "w1p1") {
+		t.Errorf("log %q does not name the pane", logs.String())
+	}
+}
+
 // seedDoc is a two-pane column over doc-local ids, with a cwd and an argv on
-// each pane.
-func seedDoc() *layoutdoc.Doc {
+// each pane. The cwds are real directories, so the seed path leaves them alone:
+// TestFallbackCwd owns the deleted-directory case.
+func seedDoc(t *testing.T) *layoutdoc.Doc {
+	t.Helper()
+	api, logs := t.TempDir(), t.TempDir()
 	return &layoutdoc.Doc{
 		Version: layoutdoc.Version,
 		Name:    "seed",
@@ -155,8 +226,8 @@ func seedDoc() *layoutdoc.Doc {
 			}},
 		}},
 		Panes: map[string]layoutdoc.Pane{
-			"one": {Cwd: "/work/api", Argv: []string{"pi"}},
-			"two": {Cwd: "/work/logs", Argv: []string{"tail", "-f", "app.log"}},
+			"one": {Cwd: api, Argv: []string{"pi"}},
+			"two": {Cwd: logs, Argv: []string{"tail", "-f", "app.log"}},
 		},
 	}
 }
@@ -167,7 +238,8 @@ func seedDoc() *layoutdoc.Doc {
 func TestLoadStateSeedsFromLayout(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(t.TempDir(), "seed.json")
-	if err := layoutdoc.Save(path, seedDoc()); err != nil {
+	seed := seedDoc(t)
+	if err := layoutdoc.Save(path, seed); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	st, fromDisk, err := loadState(root, "seeded", path)
@@ -187,11 +259,11 @@ func TestLoadStateSeedsFromLayout(t *testing.T) {
 	if w.Focus != "w1p1" {
 		t.Errorf("focus = %q, want w1p1", w.Focus)
 	}
-	if p := st.Panes["w1p1"]; p == nil || p.Cwd != "/work/api" || strings.Join(p.Argv, " ") != "pi" {
-		t.Errorf("w1p1 = %+v, want /work/api with argv pi", st.Panes["w1p1"])
+	if p := st.Panes["w1p1"]; p == nil || p.Cwd != seed.Panes["one"].Cwd || strings.Join(p.Argv, " ") != "pi" {
+		t.Errorf("w1p1 = %+v, want %q with argv pi", st.Panes["w1p1"], seed.Panes["one"].Cwd)
 	}
-	if p := st.Panes["w1p2"]; p == nil || p.Cwd != "/work/logs" || strings.Join(p.Argv, " ") != "tail -f app.log" {
-		t.Errorf("w1p2 = %+v, want /work/logs with its argv", st.Panes["w1p2"])
+	if p := st.Panes["w1p2"]; p == nil || p.Cwd != seed.Panes["two"].Cwd || strings.Join(p.Argv, " ") != "tail -f app.log" {
+		t.Errorf("w1p2 = %+v, want %q with its argv", st.Panes["w1p2"], seed.Panes["two"].Cwd)
 	}
 	for id, p := range st.Panes {
 		if p.Shell == "" || p.Cols != 80 || p.Rows != 24 {
@@ -216,7 +288,7 @@ func TestLoadStateSeedsFromLayout(t *testing.T) {
 func TestLoadStateIgnoresLayoutWhenStateExists(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(t.TempDir(), "seed.json")
-	if err := layoutdoc.Save(path, seedDoc()); err != nil {
+	if err := layoutdoc.Save(path, seedDoc(t)); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if _, _, err := loadState(root, "seeded", path); err != nil {
