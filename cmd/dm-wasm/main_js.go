@@ -26,6 +26,8 @@
 //	dm.restart()           play the current track from its first step
 //	dm.showMe()            press the current step's keys
 //	dm.last()              the last request the fake session handled
+//	dm.theme()             the palette: the screen's colours, the 16 ANSI slots
+//	                       by xterm's names, and the page's CSS variables
 package main
 
 import (
@@ -37,6 +39,7 @@ import (
 
 	"dm/internal/client"
 	"dm/internal/lesson"
+	"dm/internal/theme"
 	"dm/internal/websession"
 )
 
@@ -361,6 +364,34 @@ func (b *bridge) clipboard(text string) bool {
 	return fn.Invoke(js.ValueOf(text)).Truthy()
 }
 
+// themeValue is the palette the page draws with: the screen's own colours, the
+// sixteen ANSI slots under the names an xterm theme gives them, and the
+// stylesheet's colour variables. Every value is a #rrggbb string, so the page
+// holds no palette, no hex literal and no slot table of its own.
+//
+// It is the built-in theme, not the one the client loaded from a config file: a
+// page has no config, and the tour is drawn in dm's own colours.
+func themeValue(th theme.Theme) map[string]any {
+	tp := th.Terminal()
+	ansi := map[string]any{}
+	for i, c := range tp.ANSI {
+		ansi[theme.ANSINames[i]] = c.Hex()
+	}
+	css := map[string]any{}
+	for _, v := range th.CSSVars() {
+		css[v.Name] = v.Value
+	}
+	return map[string]any{
+		"background":   tp.Background.Hex(),
+		"foreground":   tp.Foreground.Hex(),
+		"cursor":       tp.Cursor.Hex(),
+		"cursorAccent": tp.CursorAccent.Hex(),
+		"selection":    tp.Selection.Hex(),
+		"ansi":         ansi,
+		"css":          css,
+	}
+}
+
 func main() {
 	size := &sizer{cols: 100, rows: 30}
 	b := &bridge{}
@@ -400,9 +431,13 @@ func main() {
 	sess := websession.New(size.get, forward, serverConn)
 	go sess.Serve()
 	go func() {
+		// A browser page has no COLORTERM to detect: the canvas is 24-bit, so
+		// the harness names the depth instead of guessing it from an empty
+		// environment.
+		depth := theme.TrueColor
 		h := client.Harness{
 			Conn: clientConn, Out: b, Keys: keys, Winch: winch,
-			Size: size.get, Session: "spike",
+			Size: size.get, Session: "spike", Depth: &depth,
 			Clipboard: b.clipboard,
 			OnEvent: func(e client.Event) {
 				ev := map[string]any{"type": e.Type}
@@ -550,6 +585,9 @@ func main() {
 		}),
 		"last": js.FuncOf(func(_ js.Value, args []js.Value) any {
 			return sess.LastRequest()
+		}),
+		"theme": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			return js.ValueOf(themeValue(theme.DefaultTheme()))
 		}),
 		"resize": js.FuncOf(func(_ js.Value, args []js.Value) any {
 			size.set(args[0].Int(), args[1].Int())

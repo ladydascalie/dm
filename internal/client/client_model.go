@@ -709,12 +709,22 @@ type Harness struct {
 	// harness that returns false gets no "copied" toast. Nil writes through the
 	// terminal, the way Run always has.
 	Clipboard func(text string) bool
+	// Depth is the colour depth the client emits. Nil detects it from the
+	// environment, the way Run does. A harness with no environment to detect,
+	// such as a browser page, names the depth its renderer supports instead.
+	Depth *theme.Depth
 }
 
 // Attach runs one attached session over a connection the caller made. It
 // returns the session to switch to, empty when the client is done.
 func Attach(h Harness) (string, error) {
-	theme.SetDepth(theme.DetectDepth(os.Getenv))
+	// A harness that knows its renderer names the depth. One that does not gets
+	// the environment's answer, exactly as Run does.
+	if h.Depth != nil {
+		theme.SetDepth(*h.Depth)
+	} else {
+		theme.SetDepth(theme.DetectDepth(os.Getenv))
+	}
 	return attachConn(&transport.Conn{Conn: h.Conn}, h.Out, h.Keys, h.Winch, h.Size, h.Session, &pacer{}, h.OnEvent, h.Clipboard)
 }
 
