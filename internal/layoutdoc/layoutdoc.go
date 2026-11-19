@@ -13,6 +13,8 @@ package layoutdoc
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"dm/internal/layout"
 )
@@ -56,7 +58,7 @@ type Pane struct {
 
 // Validate reports whether the document is a layout this package can apply.
 // Every refusal names the field it refused, with the workspace and the window
-// index that carry it.
+// index that carry it, and the pane id whose launch data it refused.
 func (d *Doc) Validate() error {
 	if d.Version != Version {
 		return fmt.Errorf("version %d: want %d", d.Version, Version)
@@ -107,8 +109,12 @@ func (d *Doc) Validate() error {
 				return fmt.Errorf("%s.focus: pane %q is not a leaf of this window", winPath, w.Focus)
 			}
 			for _, id := range ids {
-				if _, ok := d.Panes[id]; !ok {
+				p, ok := d.Panes[id]
+				if !ok {
 					return fmt.Errorf("%s.root: pane %q is missing from panes", winPath, id)
+				}
+				if err := validatePane(id, p); err != nil {
+					return err
 				}
 			}
 		}
@@ -116,13 +122,42 @@ func (d *Doc) Validate() error {
 	return nil
 }
 
+// validatePane refuses launch data the server cannot carry back to a pane.
+// layoutdoc cannot import server, so the rules the server's own validateArgv
+// enforces are stated here again: an empty element makes the pane run the shell
+// instead of the named program, a comma is the --argv flag's separator so the
+// element arrives split and the pane replays a different program, and a NUL
+// byte makes the spawn fail. A relative cwd is resolved against the server
+// process's cwd, so the same file would mean a different folder depending on
+// where dm ran; an empty cwd is kept, because it means the pane's own default.
+func validatePane(id string, p Pane) error {
+	for i, a := range p.Argv {
+		switch {
+		case a == "":
+			return fmt.Errorf("panes[%q].argv[%d]: empty", id, i)
+		case strings.ContainsRune(a, ','):
+			return fmt.Errorf("panes[%q].argv[%d]: contains a comma", id, i)
+		case strings.ContainsRune(a, '\x00'):
+			return fmt.Errorf("panes[%q].argv[%d]: contains a NUL byte", id, i)
+		}
+	}
+	if p.Cwd != "" && !filepath.IsAbs(p.Cwd) {
+		return fmt.Errorf("panes[%q].cwd: %q is not absolute", id, p.Cwd)
+	}
+	return nil
+}
+
 // leaves collects the pane ids of a tree in layout.Walk order. It refuses a
-// node that holds both a pane id and kids: Walk reads such a node as a leaf,
-// so the kids would never reach the session and the layout would lose panes.
+// node that holds both a pane id and kids, because Walk reads such a node as a
+// leaf, so the kids would never reach the session and the layout would lose
+// panes. It also refuses a node that holds neither a pane id nor kids, because
+// the window would keep a half with no id to focus or close; a tree with no
+// leaf at all keeps the whole-window refusal the caller names instead.
 func leaves(n *layout.Node) ([]string, error) {
 	var out []string
-	var walk func(*layout.Node) error
-	walk = func(n *layout.Node) error {
+	dead := ""
+	var walk func(*layout.Node, string) error
+	walk = func(n *layout.Node, path string) error {
 		if n == nil {
 			return nil
 		}
@@ -133,15 +168,24 @@ func leaves(n *layout.Node) ([]string, error) {
 			out = append(out, n.Pane)
 			return nil
 		}
-		for _, k := range n.Kids {
-			if err := walk(k); err != nil {
+		if len(n.Kids) == 0 {
+			if dead == "" {
+				dead = path
+			}
+			return nil
+		}
+		for i, k := range n.Kids {
+			if err := walk(k, fmt.Sprintf("%s.kids[%d]", path, i)); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	if err := walk(n); err != nil {
+	if err := walk(n, "root"); err != nil {
 		return nil, err
+	}
+	if len(out) > 0 && dead != "" {
+		return nil, fmt.Errorf("node at %s has no kids and no pane id", dead)
 	}
 	return out, nil
 }
