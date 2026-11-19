@@ -14,7 +14,7 @@ func (s *Session) snapshot() *wire.Snapshot {
 	ws := s.activeWorkspace()
 	w := s.activeWindow()
 	snap := &wire.Snapshot{
-		Session:      "spike",
+		Session:      sessionName,
 		Windows:      []wire.WindowInfo{},
 		ActiveWindow: 0,
 		Cols:         s.cols,
@@ -109,7 +109,9 @@ func (s *Session) push() {
 	_ = wire.WriteMsg(s.conn, wire.Msg{Type: "snapshot", Snap: snap})
 	// One session event per snapshot, for the page's coach. It is not a frame:
 	// the wire the client reads is unchanged.
+	s.lastSnap = snap
 	s.reportSession()
+	s.reportFiles()
 	live := make(map[string]bool, len(snap.Panes))
 	for _, p := range snap.Panes {
 		live[p.ID] = true

@@ -41,16 +41,24 @@ func frameTypes(frames []wire.Msg) []string {
 
 // checkSession asserts one session event carries these counts. The event is the
 // page's coach: it is counted from the session's own model, and it says nothing
-// else.
+// else. Every snapshot carries one of these and one session files event, so a
+// batch of two is one snapshot's worth.
 func checkSession(t *testing.T, events []map[string]any, workspaces, windows, panes int, focus string) {
 	t.Helper()
-	if len(events) != 1 {
-		t.Fatalf("the session pushed %d events %v, want one", len(events), events)
+	var session []map[string]any
+	files := 0
+	for _, ev := range events {
+		switch ev["type"] {
+		case "session":
+			session = append(session, ev)
+		case "session.files":
+			files++
+		}
 	}
-	ev := events[0]
-	if kind, _ := ev["type"].(string); kind != "session" {
-		t.Fatalf("the event type = %q, want session", kind)
+	if len(session) != 1 || files != 1 || len(events) != 2 {
+		t.Fatalf("the session pushed %d events %v, want one session event and one session files event", len(events), events)
 	}
+	ev := session[0]
 	want := map[string]any{"workspaces": workspaces, "windows": windows, "panes": panes, "focus": focus}
 	for key, value := range want {
 		if got := ev[key]; got != value {

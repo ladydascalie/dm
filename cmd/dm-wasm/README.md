@@ -42,6 +42,29 @@ builds scrollback by replaying it through `vt.ReplayRows` at the pane's own
 rectangle. After enough output a wheel into history shows rows the screen no
 longer holds, and the replay ends with the live screen.
 
+## The session files panel
+
+The bar under the header toggles it. It covers the screen area while it is open,
+and the step card stays, so the session can be read while the tour runs. The
+tour still opens on the terminal, because the panel starts closed.
+
+It lists what the session would leave under its state directory, built from the
+session's own model and never from a file: `state.json`, which is
+`internal/session`'s shipped `State` populated from the fake and marshalled the
+way `State.Save` marshals it, `snapshot.json`, the last `wire.Snapshot` the
+session sent, one `panes/<id>.sock` per pane in every workspace and window, and
+`server.sock`, `server.pid` and `server.log` marked absent because this tab has
+no server process. Nothing is invented for the last three. The panel says in its
+own footer that `snapshot.json` never reaches disk and that a tab has no disk, so
+the rows are what the session would write, built from memory.
+
+It is live: the same event rides with every snapshot, so splitting a pane adds a
+socket and grows `state.json`, and a closed pane's socket leaves the tree. The
+selected path survives a redraw and falls back to `state.json` when it disappears,
+and a body that did not change keeps its scroll position. The panel is a reading
+surface: a click in it does not take the keyboard from the terminal, so a
+selection stays and the browser's own copy works.
+
 ## The lesson
 
 The track and its rules live in `internal/lesson`, in Go, and the page holds
@@ -97,6 +120,7 @@ and the browser checks it.
 | `command` | `{line}` | the pretend shell answered a line |
 | `state` | `{panes, focus, rail, zoom, sync}` | the session changed shape |
 | `session` | `{workspaces, windows, panes, focus}` | every snapshot the session sends |
+| `session.files` | `{dir, files: [{path, kind, body}]}` | every snapshot the session sends, after `session` |
 
 Four sources, one stream: `action` from the client, which is the only place that
 knows which action a key ran, `state` from the client once per change, `command`
@@ -113,7 +137,8 @@ The page draws four lesson events and no rule of its own:
 | `lesson.hint` | `{index, level, hint}` | the ladder offers help |
 | `lesson.finish` | `{title}` | the track is done |
 
-`session` is the coach and never reaches the lesson. The page draws its counts as
+`session` is the coach, and `session.files` is the panel, and neither reaches the
+lesson. The page draws its counts as
 one quiet line under the screen: `2 windows · 1 workspace · 3 panes · focus
 w2p1`. Resuming is turned off by the first `lesson.step`.
 
@@ -161,11 +186,6 @@ python3 -m http.server -d out 8765
 Open <http://127.0.0.1:8765>. Type, press `ctrl+b`, watch the prefix panel. The
 page loads xterm.js from a CDN, so it needs the network; the program needs
 nothing but the files in `out`.
-
-`mockups/session-files.html` is a design mockup, not part of the build: it shows
-the session's `state.json` and the last wire snapshot in a file pane where the
-terminal sits. Copy it into `out/mockups/` and open `/mockups/session-files.html`
-to see it beside the tour.
 
 The page gives the terminal the keyboard at boot and after any click on the page, because
 a browser takes `ctrl+b` for its own bookmarks bar otherwise and the prefix never reaches

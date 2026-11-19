@@ -29,6 +29,11 @@
         --ink-faint: #64646f;
         --accent: #6fd2c4;
         --good: #8fd18f;
+        --warn: #d8b46a;
+        --key: #9cc7ff;
+        --str: #c3e88d;
+        --num: #d8b46a;
+        --kw: #c792ea;
         --mono: "dm-mono", ui-monospace, SFMono-Regular, Menlo, monospace;
       }
 
@@ -174,6 +179,18 @@
       }
       .screen-bar .dot { color: var(--good); }
       .screen-bar .dot.off { color: var(--ink-faint); }
+      .bar-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+      .bar-btn {
+        border: 1px solid var(--edge);
+        background: #1c1c24;
+        color: var(--ink-dim);
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 10px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .bar-btn.on { border-color: var(--accent); color: var(--accent); }
       .screen {
         position: relative;
         width: 100%;
@@ -193,6 +210,127 @@
         min-height: 1.6em;
       }
       #term { position: absolute; inset: 10px 12px; }
+
+      /* the session files panel: what the session would leave on disk. It
+         covers the terminal while it is open and the step card stays put. */
+      .files {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        background: #12121a;
+      }
+      .files[hidden] { display: none; }
+      .files-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--panel-edge);
+        font-size: 11px;
+        color: var(--ink-faint);
+        letter-spacing: 0.03em;
+      }
+      .files-head .path { color: var(--ink-dim); }
+      .files-head .path b { color: var(--ink); font-weight: 400; }
+      .files-head .nodisk { color: var(--ink-faint); }
+      .files-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 0; }
+      @media (max-width: 760px) { .files-body { grid-template-columns: 140px minmax(0, 1fr); } }
+      .tree {
+        border-right: 1px solid var(--panel-edge);
+        padding: 10px 6px;
+        font-size: 12px;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      /* the session directory row: the one label long enough to wrap */
+      .tree .row.root { white-space: normal; line-height: 1.35; overflow-wrap: anywhere; }
+      .tree .row {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: var(--ink-dim);
+        white-space: nowrap;
+      }
+      .tree .row.open { cursor: pointer; }
+      .tree .row.open:hover { background: #1a1a22; }
+      .tree .row.sel { background: #1c2430; color: var(--ink); }
+      .tree .row .caret { color: var(--ink-faint); width: 8px; }
+      .tree .row .tag {
+        margin-left: auto;
+        font-size: 9px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+      }
+      .tree .row .tag.mem { color: var(--warn); }
+      .tree .row .tag.real { color: var(--good); }
+      .tree .row .tag.sock { color: var(--ink-faint); }
+      .tree .row .tag.gone { color: var(--ink-faint); }
+      .view { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; }
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 6px 10px 0;
+        border-bottom: 1px solid var(--panel-edge);
+        font-size: 11px;
+        overflow: auto;
+      }
+      .tab {
+        padding: 4px 10px;
+        border: 1px solid transparent;
+        border-bottom: none;
+        border-radius: 5px 5px 0 0;
+        color: var(--ink-faint);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .tab.on { border-color: var(--panel-edge); background: #12121a; color: var(--ink); }
+      .code {
+        margin: 0;
+        padding: 10px 12px 16px 0;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.55;
+        tab-size: 2;
+      }
+      .code .line { display: flex; gap: 14px; white-space: pre; }
+      .code .ln {
+        color: #3d3d47;
+        text-align: right;
+        width: 3.2em;
+        flex: none;
+        user-select: none;
+      }
+      .code .tx { white-space: pre; }
+      .k { color: var(--key); }
+      .s { color: var(--str); }
+      .n { color: var(--num); }
+      .b { color: var(--kw); }
+      .p { color: #8d8d99; }
+      .note {
+        padding: 14px 16px;
+        color: var(--ink-dim);
+        font-size: 12px;
+        max-width: 66ch;
+        white-space: pre-wrap;
+        line-height: 1.7;
+      }
+      .files-foot {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 7px 12px;
+        border-top: 1px solid var(--panel-edge);
+        font-size: 11px;
+        color: var(--ink-faint);
+      }
+      .files-foot b { color: var(--ink-dim); font-weight: 400; }
       #boot {
         position: absolute;
         inset: 0;
@@ -241,12 +379,36 @@
 
         <section class="screen-wrap">
           <div class="screen-bar">
-            <span>session spike</span>
+            <span class="bar-left">
+              <span>session spike</span>
+              <button class="bar-btn on" id="tab-term" type="button" aria-pressed="true">terminal</button>
+              <button class="bar-btn" id="tab-files" type="button" aria-pressed="false">session files</button>
+            </span>
             <span id="keys-note"><span class="dot">●</span> local tab, nothing installed</span>
           </div>
           <div class="screen">
             <div id="term"></div>
             <div id="boot">loading dm…</div>
+            <div class="files" id="files" hidden>
+              <div class="files-head">
+                <span class="path">
+                  <b id="files-dir"></b> <span id="files-crumb"></span>
+                  <span class="nodisk">no disk in a tab: these are what the session would write, from memory</span>
+                </span>
+                <span id="files-kind"></span>
+              </div>
+              <div class="files-body">
+                <nav class="tree" id="files-tree" aria-label="the session's files"></nav>
+                <div class="view">
+                  <div class="tabs" id="files-tabs"></div>
+                  <pre class="code" id="files-code"></pre>
+                </div>
+              </div>
+              <div class="files-foot">
+                <span><b>a real session writes:</b> state.json, the sockets, server.log.</span>
+                <span><b>never on disk:</b> snapshot.json is one frame the client got.</span>
+              </div>
+            </div>
           </div>
           <div class="coach" id="coach"></div>
         </section>
@@ -372,9 +534,205 @@
         }
       };
 
+
+      // The session files panel. The wasm side reports what the session would
+      // leave under its state directory, built from its own model, one
+      // session.files event per snapshot. The page draws those rows and holds
+      // no rule about them: every path, kind and body comes from the event, and
+      // the words here are fixed copy.
+      let files = null; // the newest session.files event
+      let filesOpen = false;
+      let openPath = "state.json";
+      // what the code view last drew, so a redraw that changed nothing keeps
+      // the reader's place.
+      let drawn = { path: "", body: "" };
+
+      // The tag a row wears. The kind is the event's; the word is this page's,
+      // and so is the one fact the footer states too: snapshot.json is a frame
+      // the client got, not a file a real session writes.
+      const tagOf = (row) => {
+        if (row.kind === "socket") return { cls: "sock", text: "socket" };
+        if (row.kind === "absent") return { cls: "gone", text: "absent" };
+        if (row.path === "snapshot.json") return { cls: "mem", text: "memory" };
+        return { cls: "real", text: "real" };
+      };
+      const kindOf = (row) => {
+        if (row.kind === "socket") return "a unix socket, it has no contents";
+        if (row.kind === "absent") return "a real session has this; this tab has none";
+        if (row.path === "snapshot.json") return "one frame the client got, never on disk";
+        return "the file a real session writes";
+      };
+      const noteOf = (row) => {
+        if (row.kind === "socket") {
+          return "A unix socket has no contents to read. On a machine this is how the server reaches the pane's mux: one socket per pane, beside the state file.\n\nThe browser has no pane process, so nothing is behind this one.";
+        }
+        if (row.kind === "absent") {
+          return "A real session has this; this tab has none.\n\nThe browser has no server process, so this session writes no socket, no pid and no log. Nothing here is invented to fill them.";
+        }
+        return "";
+      };
+
+      // escape first, then paint JSON tokens: keys, strings, numbers, literals.
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const paint = (line) => {
+        let out = "";
+        let i = 0;
+        while (i < line.length) {
+          const rest = line.slice(i);
+          const m = rest.match(/^("(?:[^"\\]|\\.)*")(\s*:)?|^(-?\d+(?:\.\d+)?)|^(true|false|null)|^([{}\[\],:])|^\s+/);
+          if (!m) {
+            out += esc(line[i]);
+            i += 1;
+            continue;
+          }
+          if (m[1]) {
+            out += `<span class="${m[2] ? "k" : "s"}">${esc(m[1])}</span>`;
+            if (m[2]) out += `<span class="p">${esc(m[2])}</span>`;
+          } else if (m[3]) {
+            out += `<span class="n">${esc(m[3])}</span>`;
+          } else if (m[4]) {
+            out += `<span class="b">${esc(m[4])}</span>`;
+          } else if (m[5]) {
+            out += `<span class="p">${esc(m[5])}</span>`;
+          } else {
+            out += esc(m[0]);
+          }
+          i += m[0].length;
+        }
+        return out;
+      };
+
+      // show one row: its body with line numbers, or the note a socket and an
+      // absent file get instead.
+      const showRow = (row) => {
+        if (!row) return;
+        el("files-crumb").textContent = row.path;
+        el("files-kind").textContent = kindOf(row);
+        const code = el("files-code");
+        const same = drawn.path === row.path && drawn.body === row.body;
+        const top = same ? code.scrollTop : 0;
+        const body = row.body ?? "";
+        if (!body) {
+          code.innerHTML = "";
+          const note = document.createElement("div");
+          note.className = "note";
+          note.textContent = noteOf(row);
+          code.append(note);
+        } else {
+          const lines = body.replace(/\n$/, "").split("\n");
+          const width = String(lines.length).length;
+          code.innerHTML = lines
+            .map((line, i) => {
+              const n = String(i + 1).padStart(width, " ");
+              return `<div class="line"><span class="ln">${n}</span><span class="tx">${paint(line.replace(/\t/g, "  "))}</span></div>`;
+            })
+            .join("");
+        }
+        code.scrollTop = top;
+        drawn = { path: row.path, body };
+        for (const r of document.querySelectorAll("#files-tree .row")) {
+          r.classList.toggle("sel", r.dataset.path === row.path);
+        }
+        for (const b of document.querySelectorAll("#files-tabs .tab")) {
+          b.classList.toggle("on", b.dataset.path === row.path);
+        }
+      };
+
+      // draw the panel from the newest event. A path that left the tree, as a
+      // closed pane's socket does, falls back to state.json.
+      const drawFiles = () => {
+        if (!files) return;
+        const rows = files.files ?? [];
+        const byPath = new Map(rows.map((r) => [r.path, r]));
+        if (!byPath.has(openPath)) openPath = byPath.has("state.json") ? "state.json" : (rows[0]?.path ?? "");
+        el("files-dir").textContent = `${files.dir ?? ""}/`;
+
+        const tree = el("files-tree");
+        tree.replaceChildren();
+        const addRow = (label, path, depth, row) => {
+          const r = document.createElement("div");
+          r.className = row ? "row open" : depth === 0 ? "row root" : "row";
+          r.dataset.path = path;
+          const caret = document.createElement("span");
+          caret.className = "caret";
+          caret.textContent = label.endsWith("/") ? "▾" : "";
+          const name = document.createElement("span");
+          name.textContent = label;
+          r.append(caret, name);
+          if (row) {
+            const tag = tagOf(row);
+            const t = document.createElement("span");
+            t.className = `tag ${tag.cls}`;
+            t.textContent = tag.text;
+            r.append(t);
+            r.addEventListener("click", () => {
+              openPath = path;
+              showRow(row);
+            });
+          }
+          r.style.paddingLeft = `${8 + depth * 12}px`;
+          tree.append(r);
+        };
+        addRow(`${files.dir ?? ""}/`, "", 0, null);
+        const root = rows.filter((r) => !r.path.includes("/"));
+        const nested = new Map();
+        for (const r of rows.filter((r) => r.path.includes("/"))) {
+          const folder = r.path.slice(0, r.path.indexOf("/"));
+          if (!nested.has(folder)) nested.set(folder, []);
+          nested.get(folder).push(r);
+        }
+        for (const row of root) addRow(row.path, row.path, 1, row);
+        for (const [folder, kids] of nested) {
+          addRow(`${folder}/`, "", 1, null);
+          for (const row of kids) addRow(row.path.slice(folder.length + 1), row.path, 2, row);
+        }
+
+        // The tab bar: the root files, and the open row when it sits deeper.
+        const tabs = el("files-tabs");
+        tabs.replaceChildren();
+        const tabbed = root.slice();
+        const openRow = byPath.get(openPath);
+        if (openRow && !tabbed.includes(openRow)) tabbed.push(openRow);
+        for (const row of tabbed) {
+          const b = document.createElement("span");
+          b.className = "tab";
+          b.dataset.path = row.path;
+          b.textContent = row.path;
+          b.addEventListener("click", () => {
+            openPath = row.path;
+            showRow(row);
+          });
+          tabs.append(b);
+        }
+        showRow(byPath.get(openPath));
+      };
+
+      // A session.files event arrives once per snapshot. The panel keeps the
+      // newest one and draws nothing while it is closed, so a closed panel
+      // costs nothing and opening it shows the session as it is now.
+      const onFiles = (ev) => {
+        files = ev;
+        if (!filesOpen) return;
+        drawFiles();
+      };
+
+      // Opening the panel covers the screen area. The terminal keeps its size
+      // and its scrollback under it, so closing returns to the same screen.
+      const showFiles = (on) => {
+        filesOpen = on;
+        el("files").hidden = !on;
+        for (const [id, shown] of [["tab-term", !on], ["tab-files", on]]) {
+          const b = el(id);
+          b.classList.toggle("on", shown);
+          b.setAttribute("aria-pressed", String(shown));
+        }
+        if (on) drawFiles();
+      };
+
       const onEvent = (ev) => {
         if (ev.type === "lesson.tracks") hub(ev);
         else if (ev.type === "session") coach(ev);
+        else if (ev.type === "session.files") onFiles(ev);
         else if (ev.type === "lesson.step") {
           const btn = document.getElementById("showme");
           if (btn) btn.remove();
@@ -430,7 +788,13 @@
         dm.resize(term.cols, term.rows);
       };
 
+      const wirePanel = () => {
+        el("tab-term").addEventListener("click", () => showFiles(false));
+        el("tab-files").addEventListener("click", () => showFiles(true));
+      };
+
       window.onDmReady = (dm) => {
+        wirePanel();
         window.addEventListener("resize", size);
         // The font settles after the first frame, and the cell box with it.
         document.fonts.ready.then(size);
@@ -444,8 +808,11 @@
         // The click that dismisses the boot screen is also the click that
         // hands the keyboard to the terminal.
         takeKeys();
+        // The files panel is a reading surface: a click in it leaves the
+        // keyboard where it is, so a selection stays and the browser's own
+        // copy works. A click on the terminal or the page gives the keys back.
         document.addEventListener("pointerup", (ev) => {
-          if (ev.target.closest("button, a, input, textarea")) return;
+          if (ev.target.closest("button, a, input, textarea, .files")) return;
           takeKeys();
         }, true);
         term.textarea?.addEventListener("focus", showKeys);

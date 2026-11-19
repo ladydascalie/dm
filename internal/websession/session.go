@@ -119,6 +119,10 @@ type Session struct {
 	// with it and the next visit sends the screen again.
 	sent map[string]layout.Rect
 
+	// lastSnap is the snapshot push sent last. The panel shows the frame it
+	// was drawn from, which is not a file a real session writes.
+	lastSnap *wire.Snapshot
+
 	// reqMu guards last, which the page reads from its own callback.
 	reqMu sync.Mutex
 	last  string
