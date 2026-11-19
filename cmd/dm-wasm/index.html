@@ -19,21 +19,11 @@
         font-display: block;
       }
 
+      /* The colour variables are not here: the wasm side owns the palette, and
+         the page sets every one of them from dm.theme() at boot. color-scheme
+         keeps the canvas dark in the moment before that call. */
       :root {
-        --bg: #0e0e12;
-        --panel: #15151b;
-        --panel-edge: #26262f;
-        --edge: #33333d;
-        --ink: #d9d9df;
-        --ink-dim: #8d8d99;
-        --ink-faint: #64646f;
-        --accent: #6fd2c4;
-        --good: #8fd18f;
-        --warn: #d8b46a;
-        --key: #9cc7ff;
-        --str: #c3e88d;
-        --num: #d8b46a;
-        --kw: #c792ea;
+        color-scheme: dark;
         --mono: "dm-mono", ui-monospace, SFMono-Regular, Menlo, monospace;
       }
 
@@ -95,7 +85,7 @@
       .track-row { display: flex; flex-wrap: wrap; gap: 8px; }
       .track {
         border: 1px solid var(--edge);
-        background: #1c1c24;
+        background: var(--raised);
         color: var(--ink-dim);
         font: inherit;
         font-size: 12px;
@@ -106,7 +96,7 @@
       .track:hover { border-color: var(--accent); color: var(--ink); }
       .track[aria-current="true"] {
         border-color: var(--accent);
-        background: #15231f;
+        background: var(--raised);
         color: var(--accent);
       }
 
@@ -137,13 +127,13 @@
         border-bottom-width: 2px;
         border-radius: 5px;
         padding: 2px 8px;
-        background: #1c1c24;
+        background: var(--raised);
         font: inherit;
         font-size: 12px;
         color: var(--ink);
         white-space: nowrap;
       }
-      kbd.on { border-color: #4f8a6a; background: #1b2a22; color: var(--good); }
+      kbd.on { border-color: var(--good); background: var(--raised); color: var(--good); }
       .tip {
         margin-top: 6px;
         padding-top: 12px;
@@ -157,7 +147,7 @@
         align-self: start;
         margin-top: 8px;
         border: 1px solid var(--edge);
-        background: #1c1c24;
+        background: var(--raised);
         color: var(--ink);
         font: inherit;
         font-size: 12px;
@@ -182,7 +172,7 @@
       .bar-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
       .bar-btn {
         border: 1px solid var(--edge);
-        background: #1c1c24;
+        background: var(--raised);
         color: var(--ink-dim);
         font: inherit;
         font-size: 11px;
@@ -218,7 +208,7 @@
         inset: 0;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr) auto;
-        background: #12121a;
+        background: var(--panel);
       }
       .files[hidden] { display: none; }
       .files-head {
@@ -262,8 +252,8 @@
         white-space: nowrap;
       }
       .tree .row.open { cursor: pointer; }
-      .tree .row.open:hover { background: #1a1a22; }
-      .tree .row.sel { background: #1c2430; color: var(--ink); }
+      .tree .row.open:hover { background: var(--raised); }
+      .tree .row.sel { background: var(--raised); color: var(--ink); }
       .tree .row .caret { color: var(--ink-faint); width: 8px; }
       .tree .row .tag {
         margin-left: auto;
@@ -294,7 +284,7 @@
         cursor: pointer;
         white-space: nowrap;
       }
-      .tab.on { border-color: var(--panel-edge); background: #12121a; color: var(--ink); }
+      .tab.on { border-color: var(--panel-edge); background: var(--panel); color: var(--ink); }
       .code {
         margin: 0;
         padding: 10px 12px 16px 0;
@@ -305,7 +295,7 @@
       }
       .code .line { display: flex; gap: 14px; white-space: pre; }
       .code .ln {
-        color: #3d3d47;
+        color: var(--ink-faint);
         text-align: right;
         width: 3.2em;
         flex: none;
@@ -316,7 +306,7 @@
       .s { color: var(--str); }
       .n { color: var(--num); }
       .b { color: var(--kw); }
-      .p { color: #8d8d99; }
+      .p { color: var(--ink-dim); }
       .note {
         padding: 14px 16px;
         color: var(--ink-dim);
@@ -436,7 +426,6 @@
         cursorBlink: true,
         fontFamily: '"dm-mono", ui-monospace, monospace',
         fontSize: 14,
-        theme: { background: "#15151b", foreground: "#d9d9df" },
       });
       const fit = new FitAddon.FitAddon();
       term.loadAddon(fit);
@@ -785,7 +774,27 @@
         el("tab-files").addEventListener("click", () => showFiles(true));
       };
 
+      // The page holds no palette of its own. The wasm side answers one call
+      // with the screen's colours, the sixteen ANSI slots under xterm's names
+      // and the stylesheet's variables, all as #rrggbb, and the page applies
+      // them: the variables to the root, the rest to the terminal it already
+      // has open.
+      const applyTheme = (p) => {
+        for (const [name, value] of Object.entries(p.css ?? {})) {
+          document.documentElement.style.setProperty(name, value);
+        }
+        term.options.theme = {
+          background: p.background,
+          foreground: p.foreground,
+          cursor: p.cursor,
+          cursorAccent: p.cursorAccent,
+          selectionBackground: p.selection,
+          ...p.ansi,
+        };
+      };
+
       window.onDmReady = (dm) => {
+        applyTheme(dm.theme());
         wirePanel();
         window.addEventListener("resize", size);
         // The font settles after the first frame, and the cell box with it.

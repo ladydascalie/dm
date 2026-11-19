@@ -26,6 +26,22 @@ func (c RGB) FG() string { return "\x1b[" + c.SGR(false) + "m" }
 // BG is the background escape for the colour at the current depth.
 func (c RGB) BG() string { return "\x1b[" + c.SGR(true) + "m" }
 
+// Hex is the colour as #rrggbb, the form a stylesheet and an xterm theme read.
+// The channels are clamped, so a caller cannot print a colour no browser
+// understands.
+func (c RGB) Hex() string { return fmt.Sprintf("#%02x%02x%02x", clamp8(c.R), clamp8(c.G), clamp8(c.B)) }
+
+// clamp8 holds one channel to 0..255.
+func clamp8(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return v
+}
+
 // Lum is the WCAG relative luminance.
 func (c RGB) Lum() float64 {
 	lin := func(v int) float64 {

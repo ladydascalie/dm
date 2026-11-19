@@ -175,6 +175,19 @@ clipboard API is not used, because it may refuse a copy made after the gesture.
 A copy the page refuses is not toasted as copied: the client says the clipboard
 refused it instead of claiming a copy that went nowhere.
 
+The page carries no colours of its own. `dm.theme()` answers once at boot with
+dm's palette: the screen's background, foreground, cursor, cursor accent and
+selection colour, the sixteen ANSI slots under the names an xterm theme gives
+them, and the stylesheet's colour variables, every one a `#rrggbb` string. The
+page sets the variables on the root and hands the rest to `term.options.theme`,
+so the terminal inside it and the page around it are one palette. The mapping
+lives in `internal/theme`, next to the palette, and not in the page.
+
+The client normally detects the depth from `COLORTERM`. A page has no
+environment to detect, so the harness names truecolour and the chrome reaches
+the terminal as 24-bit escapes instead of the sixteen colours the empty
+environment used to report.
+
 The pretend shell is `internal/webshell`: a line buffer over a small file tree,
 with `echo`, `clear`, `help`, `pwd`, `cd`, `ls`, `cat` and three git verbs. There
 is one project, `~/projects/hello`, a Go repository with four commits and a
