@@ -63,6 +63,9 @@ type tui struct {
 	// keymap is the loaded keybindings. A nil keymap means the built-in
 	// defaults, so a test TUI runs without a config file.
 	keymap *keymap.Config
+	// keymapSeam is true when the harness supplied the keymap, so a reload has
+	// no file to re-read and keeps what the harness gave.
+	keymapSeam bool
 	// th is the loaded theme. A nil theme means the built-in theme, so a test
 	// TUI runs without a config file.
 	th     *theme.Theme
@@ -671,7 +674,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 		cols, rows, _ := term.GetSize(fd)
 		return cols, rows
 	}
-	return attachConn(c, os.Stdout, keys, winch, size, name, pace, nil, nil)
+	return attachConn(c, Harness{Out: os.Stdout, Keys: keys, Winch: winch, Size: size, Session: name}, pace)
 }
 
 // Event is one thing the operator did, reported to a harness that wants to
@@ -713,6 +716,11 @@ type Harness struct {
 	// environment, the way Run does. A harness with no environment to detect,
 	// such as a browser page, names the depth its renderer supports instead.
 	Depth *theme.Depth
+	// Keymap is the keybindings the session runs. Nil loads the default config
+	// file, the way Run does. A harness with no filesystem, such as a browser
+	// page, passes the built-in defaults instead, so no path is read and no load
+	// error is toasted.
+	Keymap *keymap.Config
 }
 
 // Attach runs one attached session over a connection the caller made. It
@@ -725,7 +733,7 @@ func Attach(h Harness) (string, error) {
 	} else {
 		theme.SetDepth(theme.DetectDepth(os.Getenv))
 	}
-	return attachConn(&transport.Conn{Conn: h.Conn}, h.Out, h.Keys, h.Winch, h.Size, h.Session, &pacer{}, h.OnEvent, h.Clipboard)
+	return attachConn(&transport.Conn{Conn: h.Conn}, h, &pacer{})
 }
 
 // lastState is what the harness heard last, so a snapshot that changes nothing
@@ -769,28 +777,37 @@ func (t *tui) emit(e Event) {
 }
 
 // attachConn is one attached session over a connection already in hand.
-func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), name string, pace *pacer, onEvent func(Event), clipboard func(string) bool) (string, error) {
+func attachConn(c *transport.Conn, h Harness, pace *pacer) (string, error) {
 	t := &tui{
-		session: name, conn: c, vts: map[string]*vt.Term{},
-		hist: map[string][]byte{}, onEvent: onEvent, clipboard: clipboard,
+		session: h.Session, conn: c, vts: map[string]*vt.Term{},
+		hist: map[string][]byte{}, onEvent: h.OnEvent, clipboard: h.Clipboard,
 	}
 	// The sink counts a frame's bytes so the pacer can tell whether the
 	// frame said anything.
-	sink := &frameSink{w: out}
+	sink := &frameSink{w: h.Out}
 	t.out = sink
-	// The keymap is loaded once for the whole session. A missing file is
-	// written with the defaults first; a load error is toasted and the
-	// built-in defaults carry the session.
-	cfg, err := keymap.LoadDefaultPath(true)
+	// The keymap is loaded once for the whole session. A harness that supplies
+	// one owns it: a page has no filesystem, so there is no path to read and no
+	// load error to toast. Otherwise a missing file is written with the defaults
+	// first; a load error is toasted and the built-in defaults carry the
+	// session.
+	cfg := h.Keymap
+	if cfg == nil {
+		var err error
+		cfg, err = keymap.LoadDefaultPath(true)
+		if err != nil {
+			t.notify(err.Error())
+		}
+	} else {
+		// Nothing on disk owns the keymap, so a reload has nothing to re-read.
+		t.keymapSeam = true
+	}
 	t.keymap = cfg
 	t.histRows = cfg.HistoryLines()
 	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())
 	th := cfg.Theme()
 	t.th = &th
-	if err != nil {
-		t.notify(err.Error())
-	}
-	t.cols, t.rows = size()
+	t.cols, t.rows = h.Size()
 	defer closeSwitcher(t)
 
 	done := make(chan struct{})
@@ -821,7 +838,7 @@ func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-ch
 
 	for {
 		select {
-		case b, ok := <-keys:
+		case b, ok := <-h.Keys:
 			if !ok {
 				return "", nil
 			}
@@ -834,8 +851,8 @@ func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-ch
 			}
 			t.apply(m)
 			t.wake(time.Now(), pace, sink)
-		case <-winch:
-			cols, rows := size()
+		case <-h.Winch:
+			cols, rows := h.Size()
 			if cols != t.cols || rows != t.rows {
 				t.cols, t.rows = cols, rows
 				_ = t.conn.Send(wire.Msg{Type: "resize", Cols: cols, Rows: rows})

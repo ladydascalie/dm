@@ -4,9 +4,9 @@ A spike, not a feature. It answers one question: does `internal/client`, which
 owns a terminal on a real machine, run with no terminal at all?
 
 The client is the shipped one. `client.Attach` is the seam: it takes a
-connection, a writer, a key stream, a resize channel and a size function, and
-runs one attached session over them. `Run` keeps its terminal and calls the
-same code.
+connection, a writer, a key stream, a resize channel, a size function and a
+keymap, and runs one attached session over them. `Run` keeps its terminal and
+calls the same code.
 
 What is fake is the session on the other end. The model is real enough for a
 tour: workspaces `s1` and `s2` holding windows `w1`, `w2`, ..., each window with
@@ -18,10 +18,11 @@ messages; `main_js.go` keeps only the page bridge.
 It serves new-window and new-workspace (naming no argv or cwd), select-window by
 index, next and previous window, next and previous workspace, close-window and
 close-workspace, focus on any pane in the session, the rail's fold triangles for
-a window or a workspace, the rail width, splits in four directions, close pane,
-zoom, swap by direction, next and previous pane, synchronize panes, and the five
-layout presets including the cycle. A focus on a pane in another window or
-workspace makes both active, so a rail click, a tab click and a key agree.
+a window or a workspace, the rail width, splits in four directions, a divider
+drag, close pane, zoom, swap by direction, next and previous pane, synchronize
+panes, and the five layout presets including the cycle. A focus on a pane in
+another window or workspace makes both active, so a rail click, a tab click and
+a key agree.
 
 A close never ends the session the tour is teaching: the last window, the last
 pane and the last workspace are refused. Anything else is still unserved and
@@ -236,6 +237,7 @@ progress restarts the current one.
 | `transport.Dial` opens a unix socket | the harness passes a `net.Pipe` end |
 | the pty supplies keys and size | xterm.js supplies both |
 | `SIGWINCH` | the page sends on the resize channel |
+| the config file supplies the keymap | the harness passes `keymap.LoadDefault()` |
 | `os.Stdout` | a `js.FuncOf` callback into the page |
 
 Two build-tagged files make the package compile for `js/wasm`:

@@ -103,7 +103,10 @@ func TestAttachConnRunsWithNoTerminal(t *testing.T) {
 	var evMu sync.Mutex
 	go func() {
 		onEvent := func(e Event) { evMu.Lock(); events = append(events, e); evMu.Unlock() }
-		_, _ = attachConn(&transport.Conn{Conn: clientConn}, out, keys, winch, size.get, "test", &pacer{}, onEvent, nil)
+		_, _ = attachConn(&transport.Conn{Conn: clientConn}, Harness{
+			Out: out, Keys: keys, Winch: winch, Size: size.get, Session: "test",
+			OnEvent: onEvent,
+		}, &pacer{})
 	}()
 
 	waitFrame(t, frames, func(m wire.Msg) bool { return m.Type == "attach" })

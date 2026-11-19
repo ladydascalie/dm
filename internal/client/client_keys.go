@@ -747,6 +747,12 @@ func (t *tui) reload() error {
 	if t.conn != nil {
 		_ = t.conn.Send(wire.Msg{Type: "req", Action: "reload"})
 	}
+	// A harness that supplied the keymap has no file to re-read, so a reload
+	// keeps it: the server is asked above and nothing else changes, which is
+	// what a page with no filesystem can honestly do.
+	if t.keymapSeam {
+		return nil
+	}
 	cfg, err := keymap.LoadDefaultPath(false)
 	if err != nil {
 		return err

@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"dm/internal/client"
+	"dm/internal/keymap"
 	"dm/internal/lesson"
 	"dm/internal/theme"
 	"dm/internal/websession"
@@ -438,6 +439,10 @@ func main() {
 		h := client.Harness{
 			Conn: clientConn, Out: b, Keys: keys, Winch: winch,
 			Size: size.get, Session: "spike", Depth: &depth,
+			// A tab has no filesystem, so the built-in keymap is the whole
+			// config. The file load would toast a missing home directory on
+			// the front door.
+			Keymap:    keymap.LoadDefault(),
 			Clipboard: b.clipboard,
 			OnEvent: func(e client.Event) {
 				ev := map[string]any{"type": e.Type}
