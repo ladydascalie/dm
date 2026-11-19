@@ -30,6 +30,7 @@ import (
 type cmdFlags struct {
 	fs           *flag.FlagSet
 	session      string
+	layout       string
 	msg          string
 	enter        bool
 	dir          string
@@ -133,6 +134,12 @@ func (c *cmdFlags) parse(args []string) error {
 	}
 	for _, f := range clidoc.VerbFlags(verb) {
 		c.register(f.Name, f.Desc)
+	}
+	// The verbs that start or attach a session also take -L and --force. The
+	// clidoc table has no layout row yet, so the layout path registers its own
+	// flags here, beside the table's.
+	if verb == "attach" || verb == "new" {
+		registerLayoutFlags(c)
 	}
 	c.fs.Usage = func() {
 		out := c.fs.Output()
@@ -418,6 +425,7 @@ var withValue = map[string]bool{
 	"-target": true, "--target": true,
 	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
 	"-to": true, "--to": true,
+	"-L": true, "--L": true, "-layout": true, "--layout": true,
 }
 
 // Run parses argv and runs one verb. The state root comes from
@@ -441,7 +449,11 @@ func Run(argv []string) error {
 		if len(c.args) > 0 {
 			name = c.args[0]
 		}
-		return client.Run(name)
+		layoutPath, target, err := startLayout(c, name)
+		if err != nil {
+			return err
+		}
+		return client.RunWithLayout(target, layoutPath)
 
 	case "new":
 		c := newFlagsAt(root, "new")
@@ -455,7 +467,11 @@ func Run(argv []string) error {
 		if len(c.args) > 0 {
 			name = c.args[0]
 		}
-		m, err := transport.RPC(name, wire.Msg{Action: "ping"})
+		layoutPath, target, err := startLayout(c, name)
+		if err != nil {
+			return err
+		}
+		m, err := transport.RPCWithLayout(target, layoutPath, wire.Msg{Action: "ping"})
 		if err != nil {
 			return err
 		}
@@ -855,6 +871,9 @@ func Run(argv []string) error {
 		}
 		return runSecret(c)
 
+	case "layout":
+		return runLayout(argv[1:])
+
 	default:
 		// A bare word is a session name; leading flags are attach flags.
 		// A bad flag there is a top-level mistake, so the usage it
@@ -871,7 +890,11 @@ func Run(argv []string) error {
 		if len(c.args) > 0 {
 			name = c.args[0]
 		}
-		return client.Run(name)
+		layoutPath, target, err := startLayout(c, name)
+		if err != nil {
+			return err
+		}
+		return client.RunWithLayout(target, layoutPath)
 	}
 }
 

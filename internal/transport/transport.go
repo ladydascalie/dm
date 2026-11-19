@@ -36,9 +36,21 @@ func (c *Conn) Send(m wire.Msg) error {
 // Dial returns a live connection to the session server, starting it if needed.
 func Dial(name string) (*Conn, error) { return DialAt(paths.StateDir(), name) }
 
+// DialWithLayout is Dial with a layout file for a session that is not running
+// yet. An empty path is Dial.
+func DialWithLayout(name, layoutPath string) (*Conn, error) {
+	return DialAtWithLayout(paths.StateDir(), name, layoutPath)
+}
+
 // DialAt is Dial with an explicit state root instead of paths.StateDir().
 func DialAt(root, name string) (*Conn, error) {
-	nc, err := EnsureAt(root, name)
+	return DialAtWithLayout(root, name, "")
+}
+
+// DialAtWithLayout is DialAt with a layout file for a session that is not
+// running yet.
+func DialAtWithLayout(root, name, layoutPath string) (*Conn, error) {
+	nc, err := EnsureAtWithLayout(root, name, layoutPath)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +63,13 @@ func Ensure(name string) (net.Conn, error) { return EnsureAt(paths.StateDir(), n
 
 // EnsureAt is Ensure with an explicit state root instead of paths.StateDir().
 func EnsureAt(root, name string) (net.Conn, error) {
+	return EnsureAtWithLayout(root, name, "")
+}
+
+// EnsureAtWithLayout is EnsureAt with a layout file. The file reaches the
+// server only when this call spawns one: a session already answering on its
+// socket attaches as it stands, and a layout never rearranges live state.
+func EnsureAtWithLayout(root, name, layoutPath string) (net.Conn, error) {
 	if !paths.ValidSessionName(name) {
 		return nil, fmt.Errorf("invalid session name %q", name)
 	}
@@ -71,7 +90,11 @@ func EnsureAt(root, name string) (net.Conn, error) {
 		return nil, err
 	}
 	defer func() { _ = lf.Close() }()
-	cmd := exec.Command(exe, "__server", "-s", name)
+	args := []string{"__server", "-s", name}
+	if layoutPath != "" {
+		args = append(args, "-layout", layoutPath)
+	}
+	cmd := exec.Command(exe, args...)
 	// The spawned server resolves its own paths from DM_STATE. Pin the
 	// child's copy to root so an explicit root survives the spawn.
 	env := make([]string, 0, len(os.Environ())+1)
@@ -138,9 +161,21 @@ func logTail(path string) string {
 // RPC sends one request and returns the first response.
 func RPC(name string, m wire.Msg) (wire.Msg, error) { return RPCAt(paths.StateDir(), name, m) }
 
+// RPCWithLayout is RPC with a layout file for a session that is not running
+// yet. An empty path is RPC.
+func RPCWithLayout(name, layoutPath string, m wire.Msg) (wire.Msg, error) {
+	return RPCAtWithLayout(paths.StateDir(), name, layoutPath, m)
+}
+
 // RPCAt is RPC with an explicit state root instead of paths.StateDir().
 func RPCAt(root, name string, m wire.Msg) (wire.Msg, error) {
-	c, err := EnsureAt(root, name)
+	return RPCAtWithLayout(root, name, "", m)
+}
+
+// RPCAtWithLayout is RPCAt with a layout file for a session that is not
+// running yet.
+func RPCAtWithLayout(root, name, layoutPath string, m wire.Msg) (wire.Msg, error) {
+	c, err := EnsureAtWithLayout(root, name, layoutPath)
 	if err != nil {
 		return wire.Msg{}, err
 	}

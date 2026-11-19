@@ -25,6 +25,13 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "__server":
+			// DM_TEST_ARGV_DIR names a directory the child writes its own argv
+			// into, one file per session name, so a test can prove what the
+			// spawn carried without racing another test's child.
+			if dir := os.Getenv("DM_TEST_ARGV_DIR"); dir != "" {
+				path := filepath.Join(dir, flagValue(os.Args, "-s")+".argv")
+				_ = os.WriteFile(path, []byte(strings.Join(os.Args, "\n")), 0o600)
+			}
 			if hasFlag(os.Args, "--hard") {
 				// A server that ignores SIGTERM forces stopServer down its
 				// SIGKILL escalation.
@@ -310,6 +317,67 @@ func TestEnsureSpawnsAndReuses(t *testing.T) {
 		t.Fatalf("Ensure warm: %v", err)
 	}
 	defer func() { _ = c2.Close() }()
+}
+
+// TestEnsureCarriesLayoutOnlyWhenAsked proves the spawned server gets
+// -layout <abs path> when the caller names a layout, and no layout flag when
+// it does not.
+func TestEnsureCarriesLayoutOnlyWhenAsked(t *testing.T) {
+	root := t.TempDir()
+	argDir := t.TempDir()
+	layout := filepath.Join(t.TempDir(), "go-backend.json")
+	if err := os.WriteFile(layout, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DM_TEST_ARGV_DIR", argDir)
+
+	c, err := EnsureAtWithLayout(root, "seeded", layout)
+	if err != nil {
+		t.Fatalf("EnsureAtWithLayout: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	args := childArgs(t, filepath.Join(argDir, "seeded.argv"))
+	if !hasFlagValue(args, "-layout", layout) {
+		t.Fatalf("spawned argv = %v, want -layout %s", args, layout)
+	}
+
+	c2, err := EnsureAt(root, "plain")
+	if err != nil {
+		t.Fatalf("EnsureAt: %v", err)
+	}
+	defer func() { _ = c2.Close() }()
+	args = childArgs(t, filepath.Join(argDir, "plain.argv"))
+	if hasFlag(args, "-layout") {
+		t.Fatalf("spawned argv = %v, want no -layout", args)
+	}
+}
+
+// childArgs reads the argv the spawned test child recorded under its session
+// name, waiting for the child to write it.
+func childArgs(t *testing.T, path string) []string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the spawned child never wrote %s: %v", path, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// hasFlagValue reports whether args carries name immediately followed by
+// value.
+func hasFlagValue(args []string, name, value string) bool {
+	for i, a := range args {
+		if a == name && i+1 < len(args) && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRPCSkipsInterleavedFrames(t *testing.T) {

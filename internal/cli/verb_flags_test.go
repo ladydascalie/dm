@@ -20,7 +20,16 @@ import (
 
 // ownFlagSet are the verbs that keep their own flag.FlagSet instead of the
 // cmdFlags, so the per-verb tests skip them.
-var ownFlagSet = map[string]bool{"man": true, "llms": true, "html": true}
+var ownFlagSet = map[string]bool{"man": true, "llms": true, "html": true, "layout": true}
+
+// layoutAttachFlags are the flags the layout path adds to the verbs that start
+// or attach a session: -L and its long form, and the --force that resets the
+// session first. clidoc carries no layout row yet, so these register in
+// cli.go beside the table's flags, and the tests below allow for them.
+var layoutAttachFlags = map[string][]string{
+	"attach": {"L", "layout", "force"},
+	"new":    {"L", "layout", "force"},
+}
 
 // parseVerb builds one verb's flag set the way Run does and parses the args a
 // bare invocation would carry. A msg subverb travels as the positional parse
@@ -71,6 +80,12 @@ func TestVerbParsesExactlyItsTableFlags(t *testing.T) {
 				declared[f.Name] = true
 				if c.fs.Lookup(f.Name) == nil {
 					t.Errorf("dm %s does not register --%s", verb, f.Name)
+				}
+			}
+			for _, name := range layoutAttachFlags[verb] {
+				declared[name] = true
+				if c.fs.Lookup(name) == nil {
+					t.Errorf("dm %s does not register --%s", verb, name)
 				}
 			}
 			n := 0
@@ -266,6 +281,9 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 			for _, fl := range clidoc.VerbFlags(v) {
 				out[fl.Name] = true
 			}
+			for _, name := range layoutAttachFlags[verb] {
+				out[name] = true
+			}
 		}
 		return out
 	}
@@ -312,7 +330,7 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 		return checked
 	}
 
-	skip := map[string]bool{"man": true, "llms": true, "html": true}
+	skip := map[string]bool{"man": true, "llms": true, "html": true, "layout": true}
 	found := 0
 	for _, stmt := range run.Body.List {
 		sw, ok := stmt.(*ast.SwitchStmt)
