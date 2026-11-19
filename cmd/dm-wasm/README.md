@@ -62,8 +62,18 @@ to fill them.
 Each row carries a tag and one sentence, both built in `internal/websession` and
 drawn as they arrive: real means a real session writes that file, memory means a
 frame the client got, socket means a unix socket, and absent means a file a real
-session has and this tab does not. The page holds no copy of those words, and the
-footer names the tags and says the browser writes none of it.
+session has and this tab does not. The page holds no copy of those words: the
+head gives each tag a short fixed phrase, and the note panel carries the event's
+sentence.
+
+The head has two columns: the directory and the open path on the left, and that
+short kind on the right, on one line. The tree draws the directory as its last
+two segments, the folder that holds the session and the session itself, then the
+rows under them; the full path is the head's, so no row wraps. The tab bar holds
+the documents, the rows that have contents: `state.json` and `snapshot.json`. A
+socket or an absent file opens its note in the viewer with no tab marked. The
+footer has two halves: what the rows are, and that the browser writes none of it,
+which is the one place the panel says a tab has no disk.
 
 The document's counters are the last id handed out, as a real state file stores
 them: 1 and 1 for a fresh session, 2 and 3 once a new window and a new workspace
