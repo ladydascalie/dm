@@ -37,11 +37,18 @@ type attachTerm struct {
 // the default state root instead of the test's own.
 func startAttach(t *testing.T, h *harness, session string) *attachTerm {
 	t.Helper()
-	cmd := exec.Command(h.bin, "attach", "-s", session)
+	return startAttachArgs(t, h, "attach", "-s", session)
+}
+
+// startAttachArgs is startAttach with the client's own argv, so a test reaches
+// the bare-word fallback or the -L layout flag instead of one fixed verb.
+func startAttachArgs(t *testing.T, h *harness, args ...string) *attachTerm {
+	t.Helper()
+	cmd := exec.Command(h.bin, args...)
 	cmd.Env = append(h.env[:len(h.env):len(h.env)], "TERM=xterm-256color")
 	master, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 100, Rows: 30})
 	if err != nil {
-		t.Fatalf("attach %s: %v", session, err)
+		t.Fatalf("attach %s: %v", strings.Join(args, " "), err)
 	}
 	a := &attachTerm{cmd: cmd, master: master}
 	t.Cleanup(func() {

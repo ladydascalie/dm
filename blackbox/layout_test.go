@@ -10,9 +10,10 @@ import (
 // layoutNode is the shape of the split tree the list reply carries. Field
 // names match the wire value, so it decodes straight from the JSON.
 type layoutNode struct {
-	Pane string        `json:"pane,omitempty"`
-	Dir  string        `json:"dir,omitempty"`
-	Kids []*layoutNode `json:"kids,omitempty"`
+	Pane  string        `json:"pane,omitempty"`
+	Dir   string        `json:"dir,omitempty"`
+	Kids  []*layoutNode `json:"kids,omitempty"`
+	Sizes []float64     `json:"sizes,omitempty"`
 }
 
 // decodeRoot is the reply's tree, decoded into the local node shape.
