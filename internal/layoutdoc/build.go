@@ -80,14 +80,19 @@ func BuildInto(st *session.State, d *Doc) error {
 
 // cloneTree copies the tree, rewriting every leaf id through next in tree
 // order, so pane ids come out left to right and top to bottom the way
-// layout.Walk reads them. Validate has already refused a node that holds both
-// a pane id and kids, so a leaf's kids are empty here.
+// layout.Walk reads them. A nil next keeps the ids as they are, which is what
+// Project needs. Validate has already refused a node that holds both a pane id
+// and kids, so a leaf's kids are empty here.
 func cloneTree(n *layout.Node, next func(string) string) *layout.Node {
 	if n == nil {
 		return nil
 	}
 	if n.Pane != "" {
-		return &layout.Node{Pane: next(n.Pane)}
+		id := n.Pane
+		if next != nil {
+			id = next(id)
+		}
+		return &layout.Node{Pane: id}
 	}
 	cp := &layout.Node{
 		Dir:   n.Dir,

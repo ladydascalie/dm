@@ -6,51 +6,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"dm/internal/layout"
 	"dm/internal/layoutdoc"
 	"dm/internal/session"
 )
 
 // captureLayoutLocked projects the live state onto a layout document. The
-// caller holds s.mu.
-//
-// Pane ids stay the live ids: layoutdoc.BuildInto renumbers them from the
-// target session's own counters on the way back in, so the reply never has to
-// invent an id scheme of its own. The document carries the shape and the launch
-// data only: no box entry, no secret, no agent status and no rail width. Those
-// belong to the session that had them, not to the layout.
+// caller holds s.mu. layoutdoc.Project copies the tree and the argv, so the
+// unlocked marshal of the reply cannot race a later split.
 func (s *server) captureLayoutLocked() *layoutdoc.Doc {
-	doc := &layoutdoc.Doc{
-		Version: layoutdoc.Version,
-		Name:    s.st.Name,
-		Panes:   map[string]layoutdoc.Pane{},
-	}
-	for _, ws := range s.st.Workspaces {
-		dws := layoutdoc.Workspace{
-			Name:    ws.Name,
-			Project: ws.Project,
-			Active:  ws.Active,
-		}
-		for _, w := range ws.Windows {
-			dws.Windows = append(dws.Windows, layoutdoc.Window{
-				Name:  w.Name,
-				Focus: w.Focus,
-				Root:  cloneTree(w.Root),
-			})
-			// Only panes the tree references travel: a state can carry a pane
-			// no window holds, and a layout would have nothing to replay it at.
-			layout.Walk(w.Root, func(id string) {
-				p := layoutdoc.Pane{}
-				if ps := s.st.Panes[id]; ps != nil {
-					p.Cwd = ps.Cwd
-					p.Argv = append([]string(nil), ps.Argv...)
-				}
-				doc.Panes[id] = p
-			})
-		}
-		doc.Workspaces = append(doc.Workspaces, dws)
-	}
-	return doc
+	return layoutdoc.Project(s.st)
 }
 
 // loadState loads a session's state, or seeds a fresh one from the layout file

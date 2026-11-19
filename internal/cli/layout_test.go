@@ -14,6 +14,7 @@ import (
 	"dm/internal/layout"
 	"dm/internal/layoutdoc"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/testutil"
 	"dm/internal/wire"
 )
@@ -146,6 +147,142 @@ func TestLayoutSaveRefusesAnExistingFile(t *testing.T) {
 	}
 	if doc.Name != "go-backend" {
 		t.Fatalf("name = %q, want the saved layout name", doc.Name)
+	}
+}
+
+// stoppedState writes a state file for name under root, the shape a stopped
+// session leaves behind: two panes in a column, one with argv.
+func stoppedState(t *testing.T, root, name string) {
+	t.Helper()
+	st := session.NewStateAt(root, name)
+	st.Workspaces = []*session.Workspace{{
+		ID: "s1", Name: "work", Project: "go-backend", Unfolded: true,
+		Windows: []*session.Window{{
+			ID: "w1", Name: "api", Focus: "w1p1",
+			Root: &layout.Node{Dir: "col", Sizes: []float64{0.6, 0.4}, Kids: []*layout.Node{
+				{Pane: "w1p1"}, {Pane: "w1p2"},
+			}},
+		}},
+	}}
+	st.NextWorkspace, st.NextWindow = 1, 1
+	st.Panes = map[string]*session.PaneState{
+		"w1p1": {Cwd: "/work/api", Argv: []string{"pi"}},
+		"w1p2": {Cwd: "/work/api"},
+	}
+	if err := st.Save(); err != nil {
+		t.Fatalf("save the state file: %v", err)
+	}
+}
+
+// TestLayoutSaveReadsAStoppedSession proves a save on a stopped session reads
+// its state.json and spawns nothing: no server pid and no server log.
+func TestLayoutSaveReadsAStoppedSession(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DM_STATE", root)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	stoppedState(t, root, "stopped")
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = Run([]string{"layout", "save", "saved", "-s", "stopped"})
+	})
+	if err != nil {
+		t.Fatalf("dm layout save on a stopped session: %v", err)
+	}
+	path, pathErr := layoutdoc.Path("saved")
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
+	if strings.TrimSpace(out) != path {
+		t.Fatalf("save printed %q, want the path %q", out, path)
+	}
+	doc, loadErr := layoutdoc.Load(path)
+	if loadErr != nil {
+		t.Fatalf("the saved file does not load: %v", loadErr)
+	}
+	if doc.Name != "saved" {
+		t.Errorf("name = %q, want the layout name", doc.Name)
+	}
+	ws := doc.Workspaces[0]
+	if ws.Name != "work" || ws.Project != "go-backend" {
+		t.Errorf("workspace = %+v, want work/go-backend", ws)
+	}
+	if w := ws.Windows[0]; w.Name != "api" || w.Focus != "w1p1" || w.Root.Dir != "col" {
+		t.Errorf("window = %+v, want api focus w1p1 over a col split", w)
+	}
+	if p := doc.Panes["w1p1"]; p.Cwd != "/work/api" || strings.Join(p.Argv, " ") != "pi" {
+		t.Errorf("pane w1p1 = %+v, want /work/api with argv pi", p)
+	}
+	dir := paths.SessionDirAt(root, "stopped")
+	for _, f := range []string{"server.pid", "server.log", "server.sock"} {
+		if _, statErr := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(statErr) {
+			t.Errorf("a save on a stopped session left %s behind: %v", f, statErr)
+		}
+	}
+}
+
+// TestLayoutSavePrefersTheLiveServer proves a live session is still captured
+// through the RPC, even when its state.json says something else.
+func TestLayoutSavePrefersTheLiveServer(t *testing.T) {
+	got := captureServer(t, "main")
+	// The fake server has already bound DM_STATE, so this state file lands in
+	// the same tree: a save that read it would write the wrong shape.
+	stoppedState(t, paths.StateDir(), "main")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = Run([]string{"layout", "save", "live"})
+	})
+	if err != nil {
+		t.Fatalf("dm layout save on a live session: %v", err)
+	}
+	if len(*got) != 1 || (*got)[0].Action != "layout" {
+		t.Fatalf("save sent %+v, want one layout action", *got)
+	}
+	path, pathErr := layoutdoc.Path("live")
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
+	if strings.TrimSpace(out) != path {
+		t.Fatalf("save printed %q, want the path %q", out, path)
+	}
+	doc, loadErr := layoutdoc.Load(path)
+	if loadErr != nil {
+		t.Fatalf("the saved file does not load: %v", loadErr)
+	}
+	if doc.Workspaces[0].Project != "go-backend" {
+		t.Fatalf("workspace = %+v, want the live server's go-backend shape", doc.Workspaces[0])
+	}
+	if p := doc.Panes["w1p1"]; p.Cwd != "/work/api" {
+		t.Fatalf("pane w1p1 = %+v, want the live server's shape", p)
+	}
+}
+
+// TestLayoutSaveFailsWithNeitherServerNorState proves a save names the session
+// when it has nothing to read, and writes no file.
+func TestLayoutSaveFailsWithNeitherServerNorState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("DM_STATE", root)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = Run([]string{"layout", "save", "nowhere", "-s", "gone"})
+	})
+	if err == nil {
+		t.Fatalf("dm layout save on a missing session was accepted: %q", out)
+	}
+	for _, want := range []string{"no live server", "no state file", `"gone"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+	path, pathErr := layoutdoc.Path("nowhere")
+	if pathErr != nil {
+		t.Fatal(pathErr)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("a failed save wrote %s: %v", path, statErr)
 	}
 }
 

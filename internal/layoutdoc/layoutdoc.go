@@ -1,13 +1,13 @@
 // Package layoutdoc owns the layout file: a named JSON document that holds a
 // session's shape so it can be captured once and applied to a fresh session.
 //
-// The keys mirror state.json, so a save is a projection of live state and an
+// The keys mirror state.json, so a save is a projection of session state and an
 // apply is a restore with fresh ids. Pane ids inside a file are local to it: a
 // document can never collide with a live session's ids, because BuildInto
 // assigns every id from the target's own counters.
 //
-// The package holds the document and nothing else: no server, no CLI, no
-// capture from live state.
+// The package holds the document and nothing else: no server and no CLI.
+// Project reads a session.State, so a capture needs no running daemon.
 package layoutdoc
 
 import (

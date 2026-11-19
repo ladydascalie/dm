@@ -1,8 +1,9 @@
 package cli
 
 // The layout verbs: a layout file is a named document that holds a session's
-// shape. `dm layout save` captures the live shape, and `-L <name>` on attach,
-// new and the bare word seeds a fresh session from the file.
+// shape. `dm layout save` captures that shape, from the live server when one
+// answers and from the session's state.json when it does not, and `-L <name>`
+// on attach, new and the bare word seeds a fresh session from the file.
 //
 // The layout verbs keep their own flag sets. The clidoc table is the
 // parse-time source of truth for the verbs it lists, and it has no layout row,
@@ -10,6 +11,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 
 	"dm/internal/layoutdoc"
 	"dm/internal/paths"
+	"dm/internal/session"
 	"dm/internal/transport"
 	"dm/internal/wire"
 )
@@ -91,7 +94,7 @@ func layoutParse(c *cmdFlags, args []string) error {
 	return nil
 }
 
-// layoutSave captures the live shape of a session and writes it as the layout
+// layoutSave captures the shape of a session and writes it as the layout
 // called name. An existing file is refused unless --force: a save is not a
 // silent overwrite of something the operator may have hand-edited.
 func layoutSave(args []string) error {
@@ -112,28 +115,18 @@ func layoutSave(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Refuse an existing file before the dial: a lost save must not boot a
-	// stopped session for nothing.
+	// Refuse an existing file before reading the session: a lost save must not
+	// look at a stopped session for nothing.
 	if !c.force {
 		if _, err := os.Stat(path); err == nil {
 			return fmt.Errorf("layout %s already exists; pass --force to overwrite", name)
 		}
 	}
 	c.resolveSession()
-	m, err := transport.RPC(c.session, wire.Msg{Action: "layout"})
+	doc, err := captureLayout(c)
 	if err != nil {
 		return err
 	}
-	if !m.OK {
-		return fmt.Errorf("%s", m.Error)
-	}
-	var res struct {
-		Layout layoutdoc.Doc `json:"layout"`
-	}
-	if err := json.Unmarshal(m.Res, &res); err != nil {
-		return fmt.Errorf("layout save: bad reply: %w", err)
-	}
-	doc := res.Layout
 	// The file is named for the layout, so the document says so too.
 	doc.Name = name
 	// A save that Load would refuse is a trap, so refuse it here instead.
@@ -145,6 +138,42 @@ func layoutSave(args []string) error {
 	}
 	fmt.Println(path)
 	return nil
+}
+
+// captureLayout reads one session's shape: the live server's reply when a
+// server answers, else the session's state.json. A save never spawns a server,
+// because that would start every pane of a session the operator stopped.
+func captureLayout(c *cmdFlags) (layoutdoc.Doc, error) {
+	if envSessionLive(c.root, c.session) {
+		return captureLayoutLive(c.session)
+	}
+	st, err := session.LoadStateAt(c.root, c.session)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return layoutdoc.Doc{}, fmt.Errorf(
+				"layout save: session %q has no live server and no state file", c.session)
+		}
+		return layoutdoc.Doc{}, fmt.Errorf("layout save: %w", err)
+	}
+	return *layoutdoc.Project(st), nil
+}
+
+// captureLayoutLive asks a live server for its shape.
+func captureLayoutLive(name string) (layoutdoc.Doc, error) {
+	m, err := transport.RPC(name, wire.Msg{Action: "layout"})
+	if err != nil {
+		return layoutdoc.Doc{}, err
+	}
+	if !m.OK {
+		return layoutdoc.Doc{}, fmt.Errorf("%s", m.Error)
+	}
+	var res struct {
+		Layout layoutdoc.Doc `json:"layout"`
+	}
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		return layoutdoc.Doc{}, fmt.Errorf("layout save: bad reply: %w", err)
+	}
+	return res.Layout, nil
 }
 
 // layoutLs lists the layout files, newest column last. A broken file keeps its
