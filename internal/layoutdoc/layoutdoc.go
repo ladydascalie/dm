@@ -152,13 +152,16 @@ func validatePane(id string, p Pane) error {
 // leaf, so the kids would never reach the session and the layout would lose
 // panes. It also refuses a node that holds neither a pane id nor kids, because
 // the window would keep a half with no id to focus or close; a tree with no
-// leaf at all keeps the whole-window refusal the caller names instead.
+// leaf at all keeps the whole-window refusal the caller names instead. A null
+// child is refused too: a node that is absent would leave the same empty half,
+// and no rule below would name it.
 func leaves(n *layout.Node) ([]string, error) {
 	var out []string
 	dead := ""
 	var walk func(*layout.Node, string) error
 	walk = func(n *layout.Node, path string) error {
 		if n == nil {
+			// Only the root reaches this: a null child is refused by its parent.
 			return nil
 		}
 		if n.Pane != "" {
@@ -175,7 +178,11 @@ func leaves(n *layout.Node) ([]string, error) {
 			return nil
 		}
 		for i, k := range n.Kids {
-			if err := walk(k, fmt.Sprintf("%s.kids[%d]", path, i)); err != nil {
+			childPath := fmt.Sprintf("%s.kids[%d]", path, i)
+			if k == nil {
+				return fmt.Errorf("node at %s is null", childPath)
+			}
+			if err := walk(k, childPath); err != nil {
 				return err
 			}
 		}

@@ -121,3 +121,43 @@ func TestProjectCopies(t *testing.T) {
 		t.Errorf("the document's workspace name followed the state: %q", doc.Workspaces[0].Name)
 	}
 }
+
+// TestProjectDropsARelativeCwd proves the projection of a live pane that never
+// reported an absolute cwd still loads: the cwd is left empty, so the pane
+// reopens where the session starts, and the argv is kept.
+func TestProjectDropsARelativeCwd(t *testing.T) {
+	t.Parallel()
+	st := projectState()
+	st.Panes["w1p1"].Cwd = "."
+	st.Panes["w1p2"].Cwd = "sub/dir"
+	doc := Project(st)
+	if got := doc.Panes["w1p1"].Cwd; got != "" {
+		t.Fatalf("pane w1p1 cwd = %q, want it left empty", got)
+	}
+	if got := doc.Panes["w1p2"].Cwd; got != "" {
+		t.Fatalf("pane w1p2 cwd = %q, want it left empty", got)
+	}
+	if got := doc.Panes["w1p1"].Argv; !reflect.DeepEqual(got, []string{"pi"}) {
+		t.Errorf("pane w1p1 argv = %v, want the launch argv kept", got)
+	}
+	if got := doc.Panes["w1p3"].Cwd; got != "/work/api" {
+		t.Errorf("pane w1p3 cwd = %q, want the absolute cwd kept", got)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Fatalf("a state with a relative cwd projected to a document Validate refuses: %v", err)
+	}
+	path := t.TempDir() + "/relative.json"
+	if err := Save(path, doc); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reflect.DeepEqual(got, doc) {
+		t.Fatalf("round trip changed the doc:\ngot  %+v\nwant %+v", got, doc)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("the loaded document is refused: %v", err)
+	}
+}

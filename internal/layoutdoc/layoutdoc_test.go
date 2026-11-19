@@ -220,6 +220,23 @@ func TestValidateRefusals(t *testing.T) {
 			want: "node at root.kids[1] has no kids and no pane id",
 		},
 		{
+			name: "null split child",
+			edit: func(d *Doc) {
+				d.Workspaces[0].Windows[0].Root.Kids[1] = nil
+			},
+			want: "node at root.kids[1] is null",
+		},
+		{
+			name: "null child inside a nested split",
+			edit: func(d *Doc) {
+				d.Workspaces[0].Windows[0].Root.Kids[1] = &layout.Node{
+					Dir:  "row",
+					Kids: []*layout.Node{{Pane: "w1p2"}, nil},
+				}
+			},
+			want: "node at root.kids[1].kids[1] is null",
+		},
+		{
 			name: "leaf id with kids",
 			edit: func(d *Doc) {
 				d.Workspaces[0].Windows[0].Root.Kids[1] = &layout.Node{

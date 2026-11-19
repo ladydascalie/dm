@@ -1,6 +1,8 @@
 package layoutdoc
 
 import (
+	"path/filepath"
+
 	"dm/internal/layout"
 	"dm/internal/session"
 )
@@ -19,6 +21,13 @@ import (
 // The document carries the shape and the launch data only: no box entry, no
 // secret, no agent status, no rail width, no fold and no accent. Those belong
 // to the session that had them, not to the layout.
+//
+// A pane cwd that is not absolute is left empty in the document, because
+// Validate refuses a relative one and a projection must always produce a
+// document that loads. The empty cwd makes the pane reopen where the session
+// starts. Resolving it against this process's cwd would invent the folder the
+// absolute rule exists to refuse: a live pane can carry a relative cwd until it
+// reports an absolute one.
 func Project(st *session.State) *Doc {
 	doc := &Doc{
 		Version: Version,
@@ -42,7 +51,9 @@ func Project(st *session.State) *Doc {
 			layout.Walk(w.Root, func(id string) {
 				p := Pane{}
 				if ps := st.Panes[id]; ps != nil {
-					p.Cwd = ps.Cwd
+					if filepath.IsAbs(ps.Cwd) {
+						p.Cwd = ps.Cwd
+					}
 					p.Argv = append([]string(nil), ps.Argv...)
 				}
 				doc.Panes[id] = p
