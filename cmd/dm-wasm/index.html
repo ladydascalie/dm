@@ -226,16 +226,23 @@
         align-items: baseline;
         justify-content: space-between;
         gap: 12px;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         padding: 8px 12px;
         border-bottom: 1px solid var(--panel-edge);
         font-size: 11px;
         color: var(--ink-faint);
         letter-spacing: 0.03em;
       }
-      .files-head .path { color: var(--ink-dim); }
+      /* the directory and the open path on the left, clipped before the kind */
+      .files-head .path {
+        color: var(--ink-dim);
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .files-head .path b { color: var(--ink); font-weight: 400; }
-      .files-head .nodisk { color: var(--ink-faint); }
+      .files-head .kind { white-space: nowrap; }
       .files-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); min-height: 0; }
       @media (max-width: 760px) { .files-body { grid-template-columns: 140px minmax(0, 1fr); } }
       .tree {
@@ -245,8 +252,6 @@
         overflow-y: auto;
         overflow-x: hidden;
       }
-      /* the session directory row: the one label long enough to wrap */
-      .tree .row.root { white-space: normal; line-height: 1.35; overflow-wrap: anywhere; }
       .tree .row {
         display: flex;
         align-items: baseline;
@@ -391,11 +396,8 @@
             <div id="boot">loading dm…</div>
             <div class="files" id="files" hidden>
               <div class="files-head">
-                <span class="path">
-                  <b id="files-dir"></b> <span id="files-crumb"></span>
-                  <span class="nodisk">no disk in a tab: these are what the session would write, from memory</span>
-                </span>
-                <span id="files-kind"></span>
+                <span class="path"><b id="files-dir"></b> <span id="files-crumb"></span></span>
+                <span class="kind" id="files-kind"></span>
               </div>
               <div class="files-body">
                 <nav class="tree" id="files-tree" aria-label="the session's files"></nav>
@@ -405,8 +407,8 @@
                 </div>
               </div>
               <div class="files-foot">
-                <span><b>drawn:</b> every file this session would write, tagged real, memory or socket, and every file a real session has and this tab does not, tagged absent.</span>
-                <span><b>the browser writes none of it:</b> no disk, no server process, no pane process.</span>
+                <span><b>drawn:</b> state.json and snapshot.json as documents; the rest, a real session's files.</span>
+                <span><b>the browser writes none of it:</b> no disk in a tab, so these come from memory.</span>
               </div>
             </div>
           </div>
@@ -577,16 +579,23 @@
         return out;
       };
 
-      // the tab bar: the root rows, plus the open row when it sits deeper. It
-      // is rebuilt by showRow, so a row opened by a click has a tab at once.
+      // The head's short kind, one fixed phrase per tag. The event's longer
+      // sentence is the note panel's, not the head's.
+      const KIND = {
+        real: "the file a real session writes",
+        memory: "a frame, never on disk",
+        socket: "a unix socket, nothing to read",
+        absent: "a real session has this; this tab has none",
+      };
+
+      // the tab bar holds the documents, the rows that have contents. A socket
+      // or an absent row opens its note with no tab marked. It is rebuilt by
+      // showRow, so a click updates it at once.
       const drawTabs = () => {
         const rows = files?.files ?? [];
         const tabs = el("files-tabs");
         tabs.replaceChildren();
-        const tabbed = rows.filter((r) => !r.path.includes("/"));
-        const open = rows.find((r) => r.path === openPath);
-        if (open && !tabbed.includes(open)) tabbed.push(open);
-        for (const row of tabbed) {
+        for (const row of rows.filter((r) => (r.body ?? "") !== "")) {
           const b = document.createElement("span");
           b.className = "tab";
           b.dataset.path = row.path;
@@ -605,7 +614,7 @@
       const showRow = (row) => {
         if (!row) return;
         el("files-crumb").textContent = row.path;
-        el("files-kind").textContent = row.note ?? "";
+        el("files-kind").textContent = KIND[row.tag] ?? "";
         const code = el("files-code");
         const same = drawn.path === row.path && drawn.body === row.body;
         const top = same ? code.scrollTop : 0;
@@ -647,7 +656,7 @@
         tree.replaceChildren();
         const addRow = (label, path, depth, row) => {
           const r = document.createElement("div");
-          r.className = row ? "row open" : depth === 0 ? "row root" : "row";
+          r.className = row ? "row open" : "row";
           r.dataset.path = path;
           const caret = document.createElement("span");
           caret.className = "caret";
@@ -668,7 +677,12 @@
           r.style.paddingLeft = `${8 + depth * 12}px`;
           tree.append(r);
         };
-        addRow(`${files.dir ?? ""}/`, "", 0, null);
+        // The directory as its last two segments, the way the mockup draws it:
+        // the folder that holds the session, then the session. The full path is
+        // the head's, so no row is long enough to wrap.
+        const segs = (files.dir ?? "").split("/").filter(Boolean).slice(-2);
+        segs.forEach((seg, i) => addRow(`${seg}/`, "", i, null));
+        const depth = segs.length;
         const root = rows.filter((r) => !r.path.includes("/"));
         const nested = new Map();
         for (const r of rows.filter((r) => r.path.includes("/"))) {
@@ -676,10 +690,10 @@
           if (!nested.has(folder)) nested.set(folder, []);
           nested.get(folder).push(r);
         }
-        for (const row of root) addRow(row.path, row.path, 1, row);
+        for (const row of root) addRow(row.path, row.path, depth, row);
         for (const [folder, kids] of nested) {
-          addRow(`${folder}/`, "", 1, null);
-          for (const row of kids) addRow(row.path.slice(folder.length + 1), row.path, 2, row);
+          addRow(`${folder}/`, "", depth, null);
+          for (const row of kids) addRow(row.path.slice(folder.length + 1), row.path, depth + 1, row);
         }
 
         showRow(byPath.get(openPath));
