@@ -80,7 +80,8 @@ Every change to hello, newest first.
 ## 0.1.0
 
 - first commit
-- print hello, world`,
+- print hello, world
+`,
 	Repo + "/main.go": `package main
 
 import "fmt"
