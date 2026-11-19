@@ -30,9 +30,9 @@ type TerminalPalette struct {
 // colour behind it: the rail and bar take the screen's own colours, and the
 // slots take the rail palette, the six accents and the per-state marks.
 //
-// Slot 0 is the background itself, as the brief that added this asked; a
-// program that paints text in "black" paints it invisible, which is the one
-// cost of a dark theme whose black is its own background.
+// No slot repeats the background. Slot 0 is the darkest grey above it, so a
+// program that paints text in "black" still shows: a slot that matched the
+// background would vanish into it, at 1.0:1.
 func (t Theme) Terminal() TerminalPalette {
 	state := func(name string) RGB { return t.States[name].Colour }
 	return TerminalPalette{
@@ -42,7 +42,7 @@ func (t Theme) Terminal() TerminalPalette {
 		CursorAccent: t.Palette.RailBG,      // text inside the cursor: the screen's background
 		Selection:    t.Palette.RailFocusBG, // the rail's focus row
 		ANSI: [ANSISlots]RGB{
-			t.Palette.RailBG,      // 0 black
+			t.Palette.RailFocusBG, // 0 black: the darkest grey above the background
 			t.Palette.RailDiffDel, // 1 red
 			t.Palette.RailDiffAdd, // 2 green
 			t.Palette.RailWorking, // 3 yellow

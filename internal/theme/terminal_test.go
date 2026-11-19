@@ -73,6 +73,23 @@ func TestTerminalPaletteIsDistinct(t *testing.T) {
 	}
 }
 
+// TestNoANSISlotIsTheBackground proves no slot of the terminal palette
+// disappears into the screen. A slot that matched the background paints
+// invisible text at 1:1, which is what slot 0 did before this rule: it was the
+// background itself.
+func TestNoANSISlotIsTheBackground(t *testing.T) {
+	th := DefaultTheme()
+	tp := th.Terminal()
+	if want := th.Palette.RailFocusBG; tp.ANSI[0] != want {
+		t.Fatalf("ANSI slot 0 = %v (%s), want the darkest grey above the background, %v (%s)", tp.ANSI[0], tp.ANSI[0].Hex(), want, want.Hex())
+	}
+	for i, c := range tp.ANSI {
+		if c == tp.Background {
+			t.Fatalf("ANSI slot %d (%s) is the background %s: text in it would be invisible", i, ANSINames[i], c.Hex())
+		}
+	}
+}
+
 // TestRGBHex pins the #rrggbb form, the one a stylesheet and an xterm theme read.
 func TestRGBHex(t *testing.T) {
 	cases := []struct {
