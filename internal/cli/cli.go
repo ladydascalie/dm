@@ -135,9 +135,12 @@ func (c *cmdFlags) parse(args []string) error {
 	for _, f := range clidoc.VerbFlags(verb) {
 		c.register(f.Name, f.Desc)
 	}
-	// The verbs that start or attach a session also take -L and --force. The
-	// clidoc table has no layout row yet, so the layout path registers its own
-	// flags here, beside the table's.
+	// The verbs that start or attach a session also take -L and --force, which
+	// their clidoc rows do not declare: the layout path registers both here,
+	// and a row that declared them would register each one twice. The layout
+	// verbs keep their own flag set instead, because layoutParse calls
+	// c.fs.Parse and never c.parse, and c.parse is the call that applies
+	// clidoc.VerbFlags.
 	if verb == "attach" || verb == "new" {
 		registerLayoutFlags(c)
 	}

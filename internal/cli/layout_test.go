@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -357,8 +358,14 @@ func TestLayoutLs(t *testing.T) {
 			bad = line
 		}
 	}
-	if !strings.Contains(good, "2") || !strings.Contains(good, "3") {
-		t.Errorf("good row = %q, want the 2 workspace and 3 window counts", good)
+	// Compare the columns, not the row text: the mtime's year carries a 2 and a
+	// 3, so a substring match would pass with the counts gone.
+	cols := strings.Fields(good)
+	if len(cols) < 5 {
+		t.Fatalf("good row = %q, want name, three counts and a timestamp", good)
+	}
+	if want := []string{"2", "3", "3"}; !reflect.DeepEqual(cols[1:4], want) {
+		t.Errorf("good row counts = %v, want workspaces 2, windows 3, panes 3", cols[1:4])
 	}
 	if !strings.Contains(bad, "broken.json") {
 		t.Errorf("broken row = %q, want the decode error in place of the counts", bad)

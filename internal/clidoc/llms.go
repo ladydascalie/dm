@@ -168,15 +168,15 @@ func LLMsText() string {
 	b.WriteString("# dm\n\n")
 	b.WriteString("dm is a durable terminal multiplexer in one binary. One process is the server; it owns the panes and their pty state, and it keeps running after you leave. A second mode is the TUI client, which draws the panes and sends actions. A third is the CLI, which sends the same actions to the same server, so a script and a hand on the keyboard drive one surface. Detach and reattach, and the shells keep running.\n")
 
-	b.WriteString("\n## Identifiers\n")
+	b.WriteString("\n## Identifiers\n\n")
 	b.WriteString("A workspace is `s1`, `s2`, and so on. A window is `w1`, `w2`. A pane is its window id plus `p` and a per-window sequence: `w2p3` is the third pane opened in window 2. Ids are readable and constructible, and a counter only moves forward, so a closed id is never reused.\n")
 
 	// The whole layout story is one paragraph, so the one-pass page keeps its
 	// line budget.
-	b.WriteString("\n## Layouts\n")
+	b.WriteString("\n## Layouts\n\n")
 	b.WriteString(LayoutsIntro + " " + LayoutsSeed + " " + LayoutsVerbs + " " + LayoutsLimit + "\n")
 
-	b.WriteString("\n## Commands\n")
+	b.WriteString("\n## Commands\n\n")
 	b.WriteString("A command is the first word after `dm`. With no command, `dm` attaches to a session, creating it if needed.\n\n")
 	b.WriteString("| Command | Arguments | What it does | Example |\n")
 	b.WriteString("| --- | --- | --- | --- |\n")
@@ -189,7 +189,7 @@ func LLMsText() string {
 			llmsCell(r.line), llmsCell(args), llmsCell(r.summary), llmsCell(r.example))
 	}
 
-	b.WriteString("\n## Actions: `dm exec`\n")
+	b.WriteString("\n## Actions: `dm exec`\n\n")
 	b.WriteString("`dm exec` takes one JSON object. The fields are:\n\n")
 	b.WriteString("| Field | Meaning |\n")
 	b.WriteString("| --- | --- |\n")
@@ -214,7 +214,7 @@ func LLMsText() string {
 		fmt.Fprintf(&b, "| %s | %s |\n", strings.Join(names, ", "), strings.Join(examples, ", "))
 	}
 
-	b.WriteString("\n## Keys\n")
+	b.WriteString("\n## Keys\n\n")
 	b.WriteString("The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use. " + ToggleSecretsNote + "\n\n")
 	b.WriteString("| Keys | Action | Help label |\n")
 	b.WriteString("| --- | --- | --- |\n")
@@ -222,10 +222,10 @@ func LLMsText() string {
 		fmt.Fprintf(&b, "| `%s` | `%s` | %s |\n", k.keys, k.actions, k.label)
 	}
 
-	b.WriteString("\n## Sidebar\n")
+	b.WriteString("\n## Sidebar\n\n")
 	b.WriteString("The sidebar is a tree of workspaces, windows and panes. A workspace row is a foldable header. Under an unfolded workspace, each window gets a window row with its fold caret, its rendered window label, branch and dirty counts, and a dim note row when that pane has a commit message. The label falls back to the folder, then the window name, when the template renders empty. The source pane is the focused pane when it carries a branch, else the first pane carrying a branch, else the focused pane, else the window's first pane. The window's pane rows follow when the window is unfolded. A folded workspace hides its windows and panes; a folded window hides only its panes. A left click on a workspace row focuses the first available pane in that workspace. A left click on a workspace caret toggles the workspace fold without changing focus. A left click on a window row focuses the first available pane in that window and makes it the active window. A left click on a window caret toggles the window fold without changing focus. A left click on a pane row focuses that pane. Double-clicking a workspace row opens the workspace rename prompt; double-clicking a window row opens the window rename prompt; double-clicking a pane row opens the pane rename prompt. A right click on any row opens the row menu for that row: rename, close, new, fold and focus, as the row allows. The bottom row of the sidebar is its control: a left click there toggles the rail between full and thin. The `toggle-rail` key cycles full, thin and hidden. A window tab bar sits above the pane area, to the right of the rail. One tab per window in the active workspace. A tab is its label plus one padding cell on each side, clamped to `tab-min-width` and `tab-max-width` from `config.kdl` (defaults 8 and 20 cells); a label wider than the maximum is cut with an ellipsis. The tab label, the window row's leading label and the status bar window chip come from the `window-label` Go template, which defaults to the window name for a named window and the id plus repository folder for an unnamed one. Clicking a tab selects that window; double-clicking opens the window rename prompt.\n")
 
-	b.WriteString("\n## Config\n")
+	b.WriteString("\n## Config\n\n")
 	b.WriteString("`$XDG_CONFIG_HOME/dm/config.kdl`, or `$HOME/.config/dm/config.kdl` when XDG_CONFIG_HOME is unset, is a patch over the built-in values: a node the file leaves out keeps its built-in value, and an action left out of a `keymap` block keeps its built-in key. dm writes a default file on first run.\n\n")
 	b.WriteString("| Node | Value | Default | What it does |\n")
 	b.WriteString("| --- | --- | --- | --- |\n")
@@ -238,7 +238,7 @@ func LLMsText() string {
 			n.Name, llmsCell(n.Value), def, llmsCell(n.Desc))
 	}
 
-	b.WriteString("\n## Keymaps\n")
+	b.WriteString("\n## Keymaps\n\n")
 	b.WriteString("Each mode is a table of actions. The table lists the built-in binding; `dm exec` and a `keymap` node use the action name.\n\n")
 	b.WriteString("| Mode | Action | Key |\n")
 	b.WriteString("| --- | --- | --- |\n")
@@ -248,7 +248,7 @@ func LLMsText() string {
 		}
 	}
 
-	b.WriteString("\n## Theme\n")
+	b.WriteString("\n## Theme\n\n")
 	b.WriteString("A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, named by the `theme` node; no node keeps the built-in theme. Every block and every key is optional, because the file reads over the built-in theme. A colour is `#rrggbb`; a glyph is one rune one cell wide. The built-in values are:\n\n")
 	b.WriteString("| Block | Keys and built-in defaults | What it carries |\n")
 	b.WriteString("| --- | --- | --- |\n")
@@ -256,7 +256,7 @@ func LLMsText() string {
 		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", blk.name, llmsCell(blk.keys), llmsCell(blk.desc))
 	}
 
-	b.WriteString("\n## Prompt marks\n")
+	b.WriteString("\n## Prompt marks\n\n")
 	b.WriteString(PromptMarkIntro + "\n")
 	b.WriteString(PromptMarkWhere + "\n\n")
 	b.WriteString("```zsh\n" + PromptMarkHook + "\n```\n\n")
@@ -264,7 +264,7 @@ func LLMsText() string {
 	b.WriteString(PromptMarkLanes + "\n")
 	b.WriteString("The marks are defined by the semantic prompts proposal: " + PromptMarkSpec + "\n")
 
-	b.WriteString("\n## Environment\n")
+	b.WriteString("\n## Environment\n\n")
 	b.WriteString("| Variable | What it sets |\n")
 	b.WriteString("| --- | --- |\n")
 	for _, e := range configdoc.EnvVars {
@@ -274,27 +274,26 @@ func LLMsText() string {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", e.Name, llmsCell(e.Desc))
 	}
 
-	b.WriteString("\n## Files\n")
+	b.WriteString("\n## Files\n\n")
 	b.WriteString("| Path | What it holds |\n")
 	b.WriteString("| --- | --- |\n")
 	for _, f := range docsFiles() {
 		fmt.Fprintf(&b, "| `%s` | %s |\n", llmsCell(f.Path), llmsCell(f.Desc))
 	}
 
-	b.WriteString("\n## Recipes\n")
-	b.WriteString("Attach to a session, creating it if needed:\n\n")
-	b.WriteString("```sh\ndm attach -s work\n```\n\n")
+	b.WriteString("\n## Recipes\n\n")
+	// Two recipes are left out, attach and split: the command table already
+	// prints those exact command lines as their examples, and the page spends
+	// every line its budget allows.
 	b.WriteString("Run a command in a pane:\n\n")
 	b.WriteString("```sh\ndm write-to w1p1 --msg 'go test ./...' --enter\n```\n\n")
 	b.WriteString("Read a pane's screen, or rows above it:\n\n")
 	b.WriteString("```sh\ndm read w1p1 --lines 20\ndm read w1p1 --scrollback 200\n```\n\n")
-	b.WriteString("Split a pane:\n\n")
-	b.WriteString("```sh\ndm split w1p1 --dir right\n```\n\n")
 	b.WriteString("Close a window and every pane in it:\n\n")
 	b.WriteString("```sh\ndm exec '{\"action\":\"close-window\",\"target\":\"w1\"}'\n```\n\n")
 	b.WriteString("Post to the box and wait on it:\n\n")
 	b.WriteString("```sh\ndm msg post --key build --state done --msg 'all green'\ndm msg wait --key build --state done --timeout 10m\n```\n\n")
-	b.WriteString("\n## Gotchas\n")
+	b.WriteString("\n## Gotchas\n\n")
 	b.WriteString("- `dm kill` stops a session's server. The panes keep running; attach again and they are there.\n")
 	b.WriteString("- `dm purge` removes dead sessions whose panes are gone. Add `--dry-run` to see the list first.\n")
 	b.WriteString("- `dm reset` discards a session and its panes for a full restart. It needs `--force`; `--all` resets every session.\n")

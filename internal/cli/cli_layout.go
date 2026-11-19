@@ -5,9 +5,10 @@ package cli
 // answers and from the session's state.json when it does not, and `-L <name>`
 // on attach, new and the bare word seeds a fresh session from the file.
 //
-// The layout verbs keep their own flag sets. The clidoc table is the
-// parse-time source of truth for the verbs it lists, and it has no layout row,
-// so the flags these verbs read are registered here rather than by the table.
+// The layout verbs keep their own flag sets. layoutParse calls c.fs.Parse and
+// never c.parse, and c.parse is the function that applies clidoc.VerbFlags, so
+// the table's layout rows describe these verbs for the usage text and the pages
+// without registering anything: each handler here registers the flags it reads.
 
 import (
 	"encoding/json"

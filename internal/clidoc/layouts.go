@@ -15,7 +15,8 @@ const LayoutsIntro = "A layout is a named JSON document that holds a session's "
 	"shape: its workspaces, their windows, the split trees and each pane's launch " +
 	"data. A file lives at " + LayoutsDir + ". The name follows the session-name " +
 	"rule: letters, digits, underscore or hyphen. dm layout save <name> captures " +
-	"the live shape."
+	"the shape: from the session's server when one answers, and from its " +
+	"state.json when the session is stopped."
 
 // LayoutsSeed is how a layout is applied: it seeds an empty session, an
 // existing session wins, and --force replays the file over a reset.
