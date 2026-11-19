@@ -121,6 +121,14 @@ The page turns on the mouse modes, so a click on a rail row reaches the client
 the way it does on a machine. `dm.last()` returns the last request the fake
 handled, which is how a click can be traced to the message it sent.
 
+A browser tab has no terminal to write OSC 52 to, so the page owns the
+clipboard. `dm.onClipboard(fn)` registers `fn(text)`, which copies the text and
+returns whether it landed. The page uses `execCommand`, which is synchronous and
+answers yes or no inside the pointer release that asked for the copy; the async
+clipboard API is not used, because it may refuse a copy made after the gesture.
+A copy the page refuses is not toasted as copied: the client says the clipboard
+refused it instead of claiming a copy that went nowhere.
+
 The pretend shell is `internal/webshell`: a line buffer over a small file tree,
 with `echo`, `clear`, `help`, `pwd`, `cd`, `ls`, `cat` and three git verbs. There
 is one project, `~/projects/hello`, a Go repository with four commits and a

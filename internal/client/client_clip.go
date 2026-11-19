@@ -101,22 +101,34 @@ func clipTools(goos string, lookPath func(string) (string, error)) []clipTool {
 	return out
 }
 
-// writeClipboard sends text to the terminal's clipboard. A terminal the probe
-// heard stays on OSC 52; one it did not gets the text piped to a platform
-// tool instead.
-func (t *tui) writeClipboard(text string) {
+// writeClipboard sends text to the clipboard and reports whether it landed.
+// A harness with a clipboard of its own takes the text: a browser tab has no
+// terminal to write OSC 52 to, and its page owns the clipboard. Otherwise a
+// terminal the probe heard stays on OSC 52, and one it did not gets the text
+// piped to a platform tool. The caller says "copied" only on true, so a copy
+// that went nowhere is not reported as one that did.
+func (t *tui) writeClipboard(text string) bool {
+	if t.clipboard != nil {
+		if !t.clipboard(text) {
+			t.notify("the clipboard refused the copy")
+			return false
+		}
+		return true
+	}
 	if clipResolve(time.Now()) != clipExternal {
 		_, _ = os.Stdout.WriteString(osc52(text))
-		return
+		return true
 	}
 	tools := clipTools(runtime.GOOS, exec.LookPath)
 	if len(tools) == 0 {
 		t.notify("no clipboard carrier; install pbcopy, wl-copy or xclip")
-		return
+		return false
 	}
 	cmd := exec.Command(tools[0].name, tools[0].args...)
 	cmd.Stdin = strings.NewReader(text)
 	if err := cmd.Run(); err != nil {
 		t.notify("clipboard: " + err.Error())
+		return false
 	}
+	return true
 }

@@ -99,6 +99,9 @@ type tui struct {
 	// onEvent reports what the operator did to a harness, nil in a session.
 	onEvent   func(Event)
 	lastState stateSummary
+	// clipboard is the harness's clipboard, nil when the terminal owns it and
+	// a copy rides OSC 52 or an external tool.
+	clipboard func(string) bool
 
 	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help"
 	sessions []transport.SessionInfo
@@ -668,7 +671,7 @@ func runSession(fd int, name string, keys <-chan []byte, winch <-chan os.Signal,
 		cols, rows, _ := term.GetSize(fd)
 		return cols, rows
 	}
-	return attachConn(c, os.Stdout, keys, winch, size, name, pace, nil)
+	return attachConn(c, os.Stdout, keys, winch, size, name, pace, nil, nil)
 }
 
 // Event is one thing the operator did, reported to a harness that wants to
@@ -701,13 +704,18 @@ type Harness struct {
 	Session string
 	// OnEvent receives one Event per action the operator ran. Nil ignores them.
 	OnEvent func(Event)
+	// Clipboard receives text the operator copied, for a harness with no
+	// terminal to write OSC 52 to. It reports whether the text landed; a
+	// harness that returns false gets no "copied" toast. Nil writes through the
+	// terminal, the way Run always has.
+	Clipboard func(text string) bool
 }
 
 // Attach runs one attached session over a connection the caller made. It
 // returns the session to switch to, empty when the client is done.
 func Attach(h Harness) (string, error) {
 	theme.SetDepth(theme.DetectDepth(os.Getenv))
-	return attachConn(&transport.Conn{Conn: h.Conn}, h.Out, h.Keys, h.Winch, h.Size, h.Session, &pacer{}, h.OnEvent)
+	return attachConn(&transport.Conn{Conn: h.Conn}, h.Out, h.Keys, h.Winch, h.Size, h.Session, &pacer{}, h.OnEvent, h.Clipboard)
 }
 
 // lastState is what the harness heard last, so a snapshot that changes nothing
@@ -751,10 +759,10 @@ func (t *tui) emit(e Event) {
 }
 
 // attachConn is one attached session over a connection already in hand.
-func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), name string, pace *pacer, onEvent func(Event)) (string, error) {
+func attachConn(c *transport.Conn, out io.Writer, keys <-chan []byte, winch <-chan os.Signal, size func() (int, int), name string, pace *pacer, onEvent func(Event), clipboard func(string) bool) (string, error) {
 	t := &tui{
 		session: name, conn: c, vts: map[string]*vt.Term{},
-		hist: map[string][]byte{}, onEvent: onEvent,
+		hist: map[string][]byte{}, onEvent: onEvent, clipboard: clipboard,
 	}
 	// The sink counts a frame's bytes so the pacer can tell whether the
 	// frame said anything.

@@ -19,6 +19,7 @@
 //	dm.onOutput(fn)        fn(Uint8Array) receives the frame bytes
 //	dm.input(text)         keys, as a terminal would send them
 //	dm.resize(cols, rows)  the renderer's size in cells
+//	dm.onClipboard(fn)     fn(text) bool receives a copy; false refuses it
 //	dm.onEvent(fn)         fn(event) receives one event to draw
 //	dm.tracks()            every track, the one being played marked
 //	dm.pick(id)            play that track from its first step
@@ -54,6 +55,7 @@ type bridge struct {
 	mu      sync.Mutex
 	out     js.Value
 	events  js.Value
+	clip    js.Value
 	pending [][]byte
 	held    []map[string]any
 }
@@ -345,6 +347,19 @@ func handOver(events chan map[string]any, l *lesson.Lesson, hand *handover, kept
 	pushEvent(events, map[string]any{"type": "lesson.finish", "title": l.Track().Title})
 }
 
+// clipboard hands text to the page's clipboard and reports whether the page
+// took it. A page that registered none has no clipboard, so the copy did not
+// happen and the client must not say it did.
+func (b *bridge) clipboard(text string) bool {
+	b.mu.Lock()
+	fn := b.clip
+	b.mu.Unlock()
+	if fn.IsUndefined() || fn.IsNull() {
+		return false
+	}
+	return fn.Invoke(js.ValueOf(text)).Truthy()
+}
+
 func main() {
 	size := &sizer{cols: 100, rows: 30}
 	b := &bridge{}
@@ -387,6 +402,7 @@ func main() {
 		h := client.Harness{
 			Conn: clientConn, Out: b, Keys: keys, Winch: winch,
 			Size: size.get, Session: "spike",
+			Clipboard: b.clipboard,
 			OnEvent: func(e client.Event) {
 				ev := map[string]any{"type": e.Type}
 				if e.Name != "" {
@@ -512,6 +528,12 @@ func main() {
 			case keys <- []byte(args[0].String()):
 			default: // a page that types faster than the client reads
 			}
+			return nil
+		}),
+		"onClipboard": js.FuncOf(func(_ js.Value, args []js.Value) any {
+			b.mu.Lock()
+			b.clip = args[0]
+			b.mu.Unlock()
 			return nil
 		}),
 		"onEvent": js.FuncOf(func(_ js.Value, args []js.Value) any {

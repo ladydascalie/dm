@@ -145,3 +145,33 @@ func TestClipQuery(t *testing.T) {
 		t.Fatalf("tmux clipQuery = %q, want %q", got, want)
 	}
 }
+
+// A harness with a clipboard of its own takes the text, so a page with no
+// terminal can copy, and the caller is told the copy landed.
+func TestWriteClipboardUsesTheHarnessSeam(t *testing.T) {
+	settleClip(t, clipExternal, time.Time{})
+	var got string
+	tui := &tui{clipboard: func(text string) bool { got = text; return true }}
+	if !tui.writeClipboard("hello") {
+		t.Fatal("writeClipboard = false, want true")
+	}
+	if got != "hello" {
+		t.Fatalf("clipboard got %q, want hello", got)
+	}
+	if len(tui.toasts) != 0 {
+		t.Fatalf("toasts = %v, want none", tui.toasts)
+	}
+}
+
+// A harness that refuses the copy is reported, and the caller must not go on
+// to say "copied".
+func TestWriteClipboardReportsARefusedSeam(t *testing.T) {
+	settleClip(t, clipExternal, time.Time{})
+	tui := &tui{clipboard: func(string) bool { return false }}
+	if tui.writeClipboard("hello") {
+		t.Fatal("writeClipboard = true, want false")
+	}
+	if len(tui.toasts) != 1 || !strings.Contains(tui.toasts[0].text, "clipboard") {
+		t.Fatalf("toasts = %v, want one about the clipboard", tui.toasts)
+	}
+}

@@ -400,6 +400,31 @@
         showKeys();
       };
 
+      // The browser owns the clipboard. The client hands over the text it
+      // copied and this puts it there with execCommand, which is synchronous and
+      // answers yes or no inside the pointer release that asked for the copy.
+      // The async clipboard API is not used: it may refuse a copy made after the
+      // gesture, and a copy that answers late cannot be toasted honestly. The
+      // bool is what the client toasts on.
+      const copyText = (text) => {
+        const field = document.createElement("textarea");
+        field.value = text;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.top = "-1000px";
+        document.body.append(field);
+        field.select();
+        let ok = false;
+        try {
+          ok = document.execCommand("copy");
+        } catch {
+          ok = false;
+        }
+        field.remove();
+        takeKeys();
+        return ok;
+      };
+
       const size = () => {
         fit.fit();
         dm.resize(term.cols, term.rows);
@@ -411,6 +436,7 @@
         document.fonts.ready.then(size);
         dm.onOutput((data) => term.write(data));
         dm.onEvent(onEvent);
+        dm.onClipboard(copyText);
         el("restart").onclick = () => dm.restart();
         term.onData((text) => dm.input(text));
         size();

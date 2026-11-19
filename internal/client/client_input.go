@@ -1625,8 +1625,9 @@ func (t *tui) copySelection() {
 		return
 	}
 	text := extractSelection(term, p.Rect.W, s.anchor, s.focus)
-	t.writeClipboard(text)
-	t.notify(fmt.Sprintf("copied %d chars", len(text)))
+	if t.writeClipboard(text) {
+		t.notify(fmt.Sprintf("copied %d chars", len(text)))
+	}
 }
 
 // focusedPane is the pane the main keymap acts on, nil when the picture has
@@ -1662,8 +1663,9 @@ func (t *tui) copyPaneID() {
 		t.disarm()
 		return
 	}
-	t.writeClipboard(p.ID)
-	t.notify("copied " + p.ID)
+	if t.writeClipboard(p.ID) {
+		t.notify("copied " + p.ID)
+	}
 	t.disarm()
 }
 
@@ -1682,8 +1684,9 @@ func (t *tui) copyScreen() {
 		return
 	}
 	text := screenText(term)
-	t.writeClipboard(text)
-	t.notify(fmt.Sprintf("copied %d chars", len(text)))
+	if t.writeClipboard(text) {
+		t.notify(fmt.Sprintf("copied %d chars", len(text)))
+	}
 	t.disarm()
 }
 
@@ -1736,8 +1739,9 @@ func (t *tui) takeYank(m wire.Msg) {
 			return
 		}
 		text := screenText(term)
-		t.writeClipboard(text)
-		t.notify(fmt.Sprintf("no Enter yet; copied %d chars from screen", len(text)))
+		if t.writeClipboard(text) {
+			t.notify(fmt.Sprintf("no Enter yet; copied %d chars from screen", len(text)))
+		}
 		return
 	}
 	if res.Start < 0 || res.Start > res.Rows || res.Rows > len(res.Lines) {
