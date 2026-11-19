@@ -244,7 +244,8 @@ func layoutRemove(args []string) error {
 }
 
 // startLayout resolves -L for a verb that starts or attaches a session. With
-// no layout it hands the name back untouched and no path.
+// no layout it hands the name back untouched and no path, and refuses --force:
+// a bare --force would read as a reset, which is dm reset --force's job.
 //
 // The file is resolved, read and validated before anything spawns, so a bad
 // name or a malformed document fails as the CLI's own error instead of the
@@ -254,6 +255,10 @@ func layoutRemove(args []string) error {
 // dm reset --force uses, so the layout has a fresh session to seed.
 func startLayout(c *cmdFlags, session string) (layoutPath, name string, err error) {
 	if c.layout == "" {
+		if c.force {
+			return "", "", fmt.Errorf(
+				"--force needs -L <name>: use dm reset --force to reset a session")
+		}
 		return "", session, nil
 	}
 	path, err := layoutdoc.Path(c.layout)
@@ -273,7 +278,9 @@ func startLayout(c *cmdFlags, session string) (layoutPath, name string, err erro
 	}
 	if c.force {
 		if _, err := os.Stat(paths.SessionDirAt(c.root, name)); err == nil {
-			if err := transport.ResetSession(name); err != nil {
+			// The bound root, not paths.StateDir: --force must reset the
+			// session the flags point at, and nothing else.
+			if err := transport.ResetSessionAt(c.root, name); err != nil {
 				return "", "", err
 			}
 		}

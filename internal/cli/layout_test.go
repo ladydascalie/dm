@@ -440,6 +440,79 @@ func TestLayoutBarePrintsTheSubcommands(t *testing.T) {
 	}
 }
 
+// TestForceWithoutALayoutIsRefused proves the advertised --force never lies: on
+// attach, new or the bare word it needs -L, and a refused run starts nothing.
+func TestForceWithoutALayoutIsRefused(t *testing.T) {
+	for _, argv := range [][]string{
+		{"new", "--force", "-s", "x"},
+		{"attach", "--force", "x"},
+		{"x", "--force"},
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			state := t.TempDir()
+			t.Setenv("DM_STATE", state)
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			err := Run(argv)
+			if err == nil {
+				t.Fatalf("dm %v was accepted", argv)
+			}
+			for _, want := range []string{"--force", "-L"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("dm %v = %v, want it to name %q", argv, err, want)
+				}
+			}
+			if _, statErr := os.Stat(paths.SessionDirAt(state, "x")); !os.IsNotExist(statErr) {
+				t.Fatalf("a refused --force started session x: %v", statErr)
+			}
+		})
+	}
+}
+
+// TestLayoutForceResetsTheBoundRoot proves --force -L resets the session under
+// the flags' root, not the one paths.StateDir names.
+func TestLayoutForceResetsTheBoundRoot(t *testing.T) {
+	own, elsewhere := t.TempDir(), t.TempDir()
+	t.Setenv("DM_STATE", elsewhere)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path, err := layoutdoc.Path("shape")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := layoutdoc.Doc{Version: layoutdoc.Version, Name: "shape", Workspaces: []layoutdoc.Workspace{{
+		Name: "one", Windows: []layoutdoc.Window{{Name: "a", Focus: "p", Root: &layout.Node{Pane: "p"}}},
+	}}, Panes: map[string]layoutdoc.Pane{"p": {Cwd: "/work"}}}
+	if err := layoutdoc.Save(path, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{own, elsewhere} {
+		if err := session.NewStateAt(root, "s").Save(); err != nil {
+			t.Fatalf("seed %s: %v", root, err)
+		}
+	}
+	c := newFlagsAt(own, "attach")
+	if err := c.parse([]string{"--force", "-s", "s", "-L", "shape"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	c.resolveSession()
+	gotPath, name, err := startLayout(c, c.session)
+	if err != nil {
+		t.Fatalf("startLayout: %v", err)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != abs || name != "s" {
+		t.Fatalf("startLayout = %q, %q; want %q, s", gotPath, name, abs)
+	}
+	if _, statErr := os.Stat(paths.SessionDirAt(own, "s")); !os.IsNotExist(statErr) {
+		t.Fatalf("--force left the bound root's session: %v", statErr)
+	}
+	if _, statErr := os.Stat(paths.SessionDirAt(elsewhere, "s")); statErr != nil {
+		t.Fatalf("--force reset the session under paths.StateDir: %v", statErr)
+	}
+}
+
 // TestAttachLayoutFailsBeforeTheSpawn proves -L resolves and reads the file
 // before anything spawns: a bad name or a missing file is the CLI's error and
 // the state tree gains no session.
