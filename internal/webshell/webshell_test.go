@@ -19,7 +19,7 @@ func run(s *Shell, line string) string {
 func TestPromptFollowsTheDirectory(t *testing.T) {
 	s := New()
 	if got := string(s.Greet()); !strings.Contains(got, "~/projects/hello") {
-		t.Fatalf("greeting has no prompt for the repo: %q", got)
+		t.Fatalf("the first prompt has no folder for the repo: %q", got)
 	}
 	if got := run(s, "cd .."); strings.Contains(got, "no such file") {
 		t.Fatalf("cd .. refused: %q", got)
@@ -32,6 +32,19 @@ func TestPromptFollowsTheDirectory(t *testing.T) {
 	}
 	if got := plain(run(s, "")); !strings.Contains(got, ":~/projects$") {
 		t.Fatalf("prompt for ~/projects = %q", got)
+	}
+}
+
+// TestGreetIsJustThePrompt is the page's rule: the tour explains itself, so a
+// pane opens at a bare prompt, with no greeting to print again on every window.
+func TestGreetIsJustThePrompt(t *testing.T) {
+	s := New()
+	got := string(s.Greet())
+	if want := s.prompt(); got != want {
+		t.Fatalf("greeting = %q, want the prompt %q and nothing else", got, want)
+	}
+	if strings.Contains(got, "\r\n") {
+		t.Fatalf("greeting prints a line of its own: %q", got)
 	}
 }
 
@@ -214,9 +227,6 @@ func TestRepaintDrawsTheSameLinesAgain(t *testing.T) {
 	}
 	// A pane too short for the scroll keeps the end of it, and the prompt.
 	short := plain(string(s.Repaint(4)))
-	if strings.Contains(short, "dm, in a tab") {
-		t.Fatalf("a short repaint kept the banner:\n%s", short)
-	}
 	if !strings.HasSuffix(short, "$ ") {
 		t.Fatalf("a short repaint lost the prompt:\n%s", short)
 	}

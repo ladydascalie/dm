@@ -528,9 +528,9 @@ func TestReplayRingBeatsTheScreen(t *testing.T) {
 // later scrollback ends with the screen the resize produced.
 func TestResizeRepaintEntersTheRing(t *testing.T) {
 	h := newHarness(t, 100, 30)
-	banner := "dm, in a tab."
-	if got := strings.Count(string(h.replay("w1p1")), banner); got != 1 {
-		t.Fatalf("the ring holds the banner %d times before a resize, want 1", got)
+	prompt := "guest@dm"
+	if got := strings.Count(string(h.replay("w1p1")), prompt); got != 1 {
+		t.Fatalf("the ring holds the prompt %d times before a resize, want 1", got)
 	}
 	h.send(wire.Msg{Type: "resize", Cols: 80, Rows: 24})
 	if m := h.read(); m.Type != "snapshot" {
@@ -541,8 +541,8 @@ func TestResizeRepaintEntersTheRing(t *testing.T) {
 			t.Fatalf("resize after the snapshot sent %q, want a screen", m.Type)
 		}
 	}
-	if got := strings.Count(string(h.replay("w1p1")), banner); got != 2 {
-		t.Fatalf("the ring holds the banner %d times after a resize, want 2", got)
+	if got := strings.Count(string(h.replay("w1p1")), prompt); got != 2 {
+		t.Fatalf("the ring holds the prompt %d times after a resize, want 2", got)
 	}
 }
 

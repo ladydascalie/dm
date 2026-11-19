@@ -22,11 +22,6 @@ const (
 // prompt is what the shell prints before every line.
 const prompt = "\x1b[32mguest@dm\x1b[0m:\x1b[34m%s\x1b[0m$ "
 
-// banner is the greeting, drawn once when a pane starts.
-const banner = "\x1b[H\x1b[2Jdm, in a tab.\r\n" +
-	"A pretend shell, one project, no pty behind it.\r\n" +
-	"Type help for what is here, or ctrl+b for the prefix.\r\n\r\n"
-
 // Shell is a line editor over a small file tree.
 type Shell struct {
 	cwd  string
@@ -55,10 +50,11 @@ func New() *Shell {
 	return &Shell{cwd: Repo}
 }
 
-// Greet returns the banner and the first prompt.
+// Greet returns the first prompt. A pane starts at a bare prompt: the page
+// explains the tour, so the shell does not print a billboard every time a pane
+// opens, and a second window is not a second greeting.
 func (s *Shell) Greet() []byte {
-	s.record(banner)
-	return []byte(banner + s.prompt())
+	return []byte(s.prompt())
 }
 
 // Repaint returns the whole screen again, drawn to fit rows lines. A pane calls
