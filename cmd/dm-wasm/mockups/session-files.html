@@ -1,0 +1,633 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dm session files, a mockup</title>
+    <style>
+      @font-face {
+        font-family: "dm-mono";
+        src: url("../vendor/JetBrainsMono-Regular.woff2") format("woff2");
+        font-weight: 400;
+        font-display: block;
+      }
+      @font-face {
+        font-family: "dm-mono";
+        src: url("../vendor/JetBrainsMono-Bold.woff2") format("woff2");
+        font-weight: 700;
+        font-display: block;
+      }
+
+      :root {
+        --bg: #0e0e12;
+        --panel: #15151b;
+        --panel-edge: #26262f;
+        --edge: #33333d;
+        --ink: #d9d9df;
+        --ink-dim: #8d8d99;
+        --ink-faint: #64646f;
+        --accent: #6fd2c4;
+        --good: #8fd18f;
+        --warn: #d8b46a;
+        --key: #9cc7ff;
+        --str: #c3e88d;
+        --num: #d8b46a;
+        --kw: #c792ea;
+        --mono: "dm-mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.6 var(--mono);
+        -webkit-font-smoothing: antialiased;
+      }
+      .page {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 28px 28px 34px;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+      }
+      header.top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      header.top h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: 0.02em; }
+      header.top p { margin: 0; color: var(--ink-faint); font-size: 12px; }
+      .progress { color: var(--ink-dim); font-size: 12px; }
+      .progress b { color: var(--accent); font-weight: 400; }
+      .mock {
+        border: 1px solid var(--warn);
+        color: var(--warn);
+        border-radius: 999px;
+        padding: 1px 10px;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: minmax(280px, 30ch) minmax(0, 1fr);
+        gap: 28px;
+        align-items: start;
+      }
+      @media (max-width: 980px) {
+        main { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+        .page { padding: 18px 16px 28px; }
+      }
+
+      .step { display: flex; flex-direction: column; gap: 12px; }
+      .step .eyebrow { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+      .step h2 { font-size: 19px; line-height: 1.35; margin: 0; font-weight: 700; }
+      .step p { margin: 0; color: var(--ink-dim); }
+      .keys { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+      kbd {
+        border: 1px solid var(--edge);
+        border-bottom-width: 2px;
+        border-radius: 5px;
+        padding: 2px 8px;
+        background: #1c1c24;
+        font: inherit;
+        font-size: 12px;
+        color: var(--ink);
+      }
+      .tip { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--panel-edge); color: var(--ink-faint); font-size: 12px; }
+      .tip b { color: var(--ink-dim); font-weight: 400; }
+
+      .screen-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+      .screen-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        color: var(--ink-faint);
+        font-size: 11px;
+        letter-spacing: 0.04em;
+      }
+      .screen-bar .dot { color: var(--good); }
+      .bar-left { display: flex; align-items: baseline; gap: 12px; }
+      .bar-btn {
+        border: 1px solid var(--edge);
+        background: #1c1c24;
+        color: var(--ink-dim);
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 10px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .bar-btn.on { border-color: var(--accent); color: var(--accent); }
+      .screen {
+        position: relative;
+        width: 100%;
+        height: clamp(420px, 62vh, 640px);
+        background: var(--panel);
+        border: 1px solid var(--panel-edge);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      /* the pretend terminal the panel covers */
+      #term {
+        position: absolute;
+        inset: 0;
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--ink);
+        white-space: pre;
+        overflow: hidden;
+      }
+      #term .dim { color: var(--ink-faint); }
+      #term .acc { color: var(--accent); }
+      #term .good { color: var(--good); }
+
+      /* the session files panel */
+      .files {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        background: #12121a;
+      }
+      .files[hidden] { display: none; }
+      .files-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--panel-edge);
+        font-size: 11px;
+        color: var(--ink-faint);
+        letter-spacing: 0.03em;
+      }
+      .files-head .path { color: var(--ink-dim); }
+      .files-head .path b { color: var(--ink); font-weight: 400; }
+      .files-body { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 0; }
+      @media (max-width: 760px) { .files-body { grid-template-columns: 140px minmax(0, 1fr); } }
+
+      .tree {
+        border-right: 1px solid var(--panel-edge);
+        padding: 10px 6px;
+        font-size: 12px;
+        overflow: auto;
+      }
+      .tree .row {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        color: var(--ink-dim);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .tree .row:hover { background: #1a1a22; }
+      .tree .row.sel { background: #1c2430; color: var(--ink); }
+      .tree .row .caret { color: var(--ink-faint); width: 8px; }
+      .tree .row .tag { margin-left: auto; font-size: 9px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-faint); }
+      .tree .row .tag.mem { color: var(--warn); }
+      .tree .row .tag.sock { color: var(--ink-faint); }
+      .tree .row .tag.real { color: var(--good); }
+
+      .view { display: grid; grid-template-rows: auto 1fr; min-width: 0; min-height: 0; }
+      .tabs {
+        display: flex;
+        gap: 2px;
+        padding: 6px 10px 0;
+        border-bottom: 1px solid var(--panel-edge);
+        font-size: 11px;
+      }
+      .tab {
+        padding: 4px 10px;
+        border: 1px solid transparent;
+        border-bottom: none;
+        border-radius: 5px 5px 0 0;
+        color: var(--ink-faint);
+      }
+      .tab.on { border-color: var(--panel-edge); background: #12121a; color: var(--ink); }
+
+      .code {
+        margin: 0;
+        padding: 10px 12px 16px 0;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.55;
+        tab-size: 2;
+      }
+      .code .line { display: flex; gap: 14px; white-space: pre; }
+      .code .ln {
+        color: #3d3d47;
+        text-align: right;
+        width: 3.2em;
+        flex: none;
+        user-select: none;
+      }
+      .code .tx { white-space: pre; }
+      .k { color: var(--key); }
+      .s { color: var(--str); }
+      .n { color: var(--num); }
+      .b { color: var(--kw); }
+      .p { color: #8d8d99; }
+      .note {
+        padding: 14px 16px;
+        color: var(--ink-dim);
+        font-size: 12px;
+        max-width: 66ch;
+        white-space: pre-wrap;
+        line-height: 1.7;
+      }
+      .note b { color: var(--ink); font-weight: 400; }
+
+      .files-foot {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 7px 12px;
+        border-top: 1px solid var(--panel-edge);
+        font-size: 11px;
+        color: var(--ink-faint);
+      }
+      .files-foot b { color: var(--ink-dim); font-weight: 400; }
+
+      footer.bot { color: var(--ink-faint); font-size: 12px; border-top: 1px solid var(--panel-edge); padding-top: 14px; }
+      footer.bot b { color: var(--ink-dim); font-weight: 400; }
+      footer.bot code { color: var(--ink-dim); }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="top">
+        <div>
+          <h1>dm, in a browser <span class="mock">mockup</span></h1>
+          <p>the real client, a pretend session</p>
+        </div>
+        <div class="progress">step <b>4</b> of 6</div>
+      </header>
+
+      <main>
+        <article class="step">
+          <div class="eyebrow">step 4</div>
+          <h2>Come back</h2>
+          <p>The workspace cycle wraps too, so one press returns to the first workspace.</p>
+          <div class="keys"><kbd>ctrl+b</kbd><kbd>)</kbd></div>
+          <div class="tip"><b>Stuck?</b> take your time.</div>
+        </article>
+
+        <section class="screen-wrap">
+          <div class="screen-bar">
+            <span class="bar-left">
+              <span>session spike</span>
+              <button class="bar-btn" id="tab-term" type="button">terminal</button>
+              <button class="bar-btn on" id="tab-files" type="button">session files</button>
+            </span>
+            <span><span class="dot">●</span> this panel is a mockup</span>
+          </div>
+
+          <div class="screen">
+            <div id="term">
+  <span class="dim">   ▾ main</span>          ┌──────────────────────────────────────────────────────────────┐
+  <span class="dim">       ▾ w1</span>          │ <span class="good">guest@dm</span>:<span class="acc">~/projects/hello</span>$ cat CHANGELOG.md            │
+  <span class="dim">         ○ w1p1 ·</span>      │ # Changelog                                                  │
+  <span class="dim">       ▾ w2</span>          │                                                              │
+  <span class="dim">         ○ w2p1 ·</span>      │ Every change to hello, newest first.                         │
+  <span class="dim">   ▾ ws2</span>          │                                                              │
+  <span class="dim">       ▾ w3</span>          │ ## Unreleased                                                │
+  <span class="dim">         ○ w3p1 ·</span>      │ - greet takes the name from the caller                       │
+                      │ - main prints what greet returns                             │
+                      └──────────────────────────────────────────────────────────────┘
+            </div>
+
+            <div class="files" id="files">
+              <div class="files-head">
+                <span class="path"><b>~/.local/state/dm/sessions/spike/</b><span id="crumb">state.json</span></span>
+                <span id="kind">the file a real session writes</span>
+              </div>
+              <div class="files-body">
+                <nav class="tree" id="tree"></nav>
+                <div class="view">
+                  <div class="tabs" id="tabs"></div>
+                  <pre class="code" id="code"></pre>
+                </div>
+              </div>
+              <div class="files-foot">
+                <span><b>Real on a machine:</b> state.json, the sockets, server.log.</span>
+                <span><b>Never on disk:</b> snapshot.json is one frame the client got.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="bot">
+        <b>This is a mockup:</b> the panel, its files and the toggle do not exist in the build yet.
+        It shows what <code>dm</code> would leave under
+        <code>~/.local/state/dm/sessions/spike/</code> if the pretend session persisted, and how a
+        file pane could sit where the terminal sits.
+      </footer>
+    </div>
+
+    <script>
+      const stateJSON = `{
+  "name": "spike",
+  "workspaces": [
+    {
+      "id": "s1",
+      "name": "main",
+      "windows": [
+        {
+          "id": "w1",
+          "name": "w1",
+          "root": { "pane": "w1p1" },
+          "focus": "w1p1",
+          "nextPane": 1,
+          "unfolded": true
+        },
+        {
+          "id": "w2",
+          "name": "w2",
+          "root": { "pane": "w2p1" },
+          "focus": "w2p1",
+          "nextPane": 1,
+          "unfolded": true
+        }
+      ],
+      "active": 0,
+      "unfolded": true
+    },
+    {
+      "id": "s2",
+      "name": "ws2",
+      "windows": [
+        {
+          "id": "w3",
+          "name": "w3",
+          "root": { "pane": "w3p1" },
+          "focus": "w3p1",
+          "nextPane": 1,
+          "unfolded": true
+        }
+      ],
+      "active": 0,
+      "unfolded": true
+    }
+  ],
+  "active": 0,
+  "cols": 108,
+  "rows": 24,
+  "panes": {
+    "w1p1": { "shell": "/bin/zsh", "cwd": "/home/guest/projects/hello", "cols": 76, "rows": 20 },
+    "w2p1": { "shell": "/bin/zsh", "cwd": "/home/guest/projects/hello", "cols": 76, "rows": 20 },
+    "w3p1": { "shell": "/bin/zsh", "cwd": "/home/guest/projects/hello", "cols": 76, "rows": 20 }
+  },
+  "nextWorkspace": 3,
+  "nextWindow": 4,
+  "idVersion": 2,
+  "rail": 30,
+  "railSet": true
+}
+`;
+
+      const snapshotJSON = `{
+  "session": "spike",
+  "workspace": "main",
+  "windows": [
+    { "id": "w1", "name": "w1" },
+    { "id": "w2", "name": "w2" }
+  ],
+  "activeWindow": 0,
+  "panes": [
+    { "id": "w1p1", "rect": { "X": 31, "Y": 2, "W": 76, "H": 20 } }
+  ],
+  "all": [
+    {
+      "id": "w1p1",
+      "status": "idle",
+      "title": "sh",
+      "cwd": "/home/guest/projects/hello",
+      "workspace": "s1",
+      "workspaceName": "main",
+      "window": "w1",
+      "windowName": "w1",
+      "workspaceUnfolded": true,
+      "windowUnfolded": true,
+      "workspaceActive": true,
+      "windowActive": true,
+      "focus": true
+    },
+    {
+      "id": "w2p1",
+      "status": "idle",
+      "title": "sh",
+      "cwd": "/home/guest/projects/hello",
+      "workspace": "s1",
+      "workspaceName": "main",
+      "window": "w2",
+      "windowName": "w2",
+      "workspaceUnfolded": true,
+      "windowUnfolded": true,
+      "workspaceActive": true,
+      "windowActive": false,
+      "focus": false
+    },
+    {
+      "id": "w3p1",
+      "status": "idle",
+      "title": "sh",
+      "cwd": "/home/guest/projects/hello",
+      "workspace": "s2",
+      "workspaceName": "ws2",
+      "window": "w3",
+      "windowName": "w3",
+      "workspaceUnfolded": true,
+      "windowUnfolded": true,
+      "workspaceActive": false,
+      "windowActive": false,
+      "focus": false
+    }
+  ],
+  "rail": 30,
+  "railWant": 30,
+  "focus": "w1p1",
+  "cols": 108,
+  "rows": 24,
+  "pad": 0,
+  "root": { "pane": "w1p1" },
+  "sync": false
+}
+`;
+
+      const serverLog = `dm: session spike opened by the browser tour
+dm: pane w1p1 attached, 76x20
+dm: pane w2p1 attached, 76x20
+dm: pane w3p1 attached, 76x20
+dm: nothing else to log: the fake has no server behind it
+`;
+
+      const files = {
+        "state.json": {
+          body: stateJSON,
+          kind: "the file a real session writes",
+          crumb: "state.json",
+          note: "",
+          tag: "real",
+          tagText: "real",
+        },
+        "snapshot.json": {
+          body: snapshotJSON,
+          kind: "the last frame the client got, never on disk",
+          crumb: "snapshot.json",
+          note: "",
+          tag: "mem",
+          tagText: "memory",
+        },
+        "server.log": {
+          body: serverLog,
+          kind: "a real session's log; the fake writes nothing",
+          crumb: "server.log",
+          note: "",
+          tag: "real",
+          tagText: "real",
+        },
+        "panes/w1p1.sock": {
+          body: "",
+          kind: "a unix socket",
+          crumb: "panes/w1p1.sock",
+          note: "A unix socket has no contents to read. On a machine this is how the server reaches the pane's mux: one socket per pane, beside the state file. The browser fake has no pane process, so there is nothing behind it.",
+          tag: "sock",
+          tagText: "socket",
+        },
+        "panes/w2p1.sock": {
+          body: "",
+          kind: "a unix socket",
+          crumb: "panes/w2p1.sock",
+          note: "One socket per pane. A pane's scrollback ring lives in that pane process, not in a file, which is why a pane's history is not in state.json.",
+          tag: "sock",
+          tagText: "socket",
+        },
+        "panes/w3p1.sock": {
+          body: "",
+          kind: "a unix socket",
+          crumb: "panes/w3p1.sock",
+          note: "One socket per pane, across every workspace and window of the session.",
+          tag: "sock",
+          tagText: "socket",
+        },
+      };
+
+      const order = ["state.json", "snapshot.json", "server.log"];
+      let open = "state.json";
+
+      // escape first, then paint JSON tokens: keys, strings, numbers, literals.
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const paint = (line) => {
+        let out = "";
+        let i = 0;
+        while (i < line.length) {
+          const rest = line.slice(i);
+          const m = rest.match(/^("(?:[^"\\]|\\.)*")(\s*:)?|^(-?\d+(?:\.\d+)?)|^(true|false|null)|^([{}[\],:])|^\s+/);
+          if (!m) {
+            out += esc(line[i]);
+            i += 1;
+            continue;
+          }
+          if (m[1]) {
+            out += `<span class="${m[2] ? "k" : "s"}">${esc(m[1])}</span>`;
+            if (m[2]) out += `<span class="p">${esc(m[2])}</span>`;
+          } else if (m[3]) {
+            out += `<span class="n">${esc(m[3])}</span>`;
+          } else if (m[4]) {
+            out += `<span class="b">${esc(m[4])}</span>`;
+          } else if (m[5]) {
+            out += `<span class="p">${esc(m[5])}</span>`;
+          } else {
+            out += esc(m[0]);
+          }
+          i += m[0].length;
+        }
+        return out;
+      };
+
+      const render = (name) => {
+        open = name;
+        const f = files[name];
+        document.getElementById("crumb").textContent = f.crumb;
+        document.getElementById("kind").textContent = f.kind;
+        for (const row of document.querySelectorAll(".tree .row")) {
+          row.classList.toggle("sel", row.dataset.path === name);
+        }
+        document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("on", t.dataset.path === name));
+
+        const code = document.getElementById("code");
+        if (!f.body) {
+          code.innerHTML = `<div class="note">${f.note}</div>`;
+          return;
+        }
+        const lines = f.body.replace(/\n$/, "").split("\n");
+        const width = String(lines.length).length;
+        code.innerHTML = lines
+          .map((line, i) => {
+            const n = String(i + 1).padStart(width, " ");
+            return `<div class="line"><span class="ln">${n}</span><span class="tx">${paint(line.replace(/\t/g, "  "))}</span></div>`;
+          })
+          .join("");
+      };
+
+      const tree = document.getElementById("tree");
+      const addRow = (label, path, depth, tag, tagText) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.dataset.path = path;
+        row.innerHTML = `<span class="caret">${label.endsWith("/") ? "▾" : ""}</span><span>${esc(label)}</span>` +
+          (tag ? `<span class="tag ${tag}">${tagText}</span>` : "");
+        row.style.paddingLeft = `${8 + depth * 12}px`;
+        if (path && files[path]) row.addEventListener("click", () => render(path));
+        tree.append(row);
+      };
+      addRow("sessions/", "", 0, "", "");
+      addRow("spike/", "", 1, "", "");
+      addRow("state.json", "state.json", 2, "real", "real");
+      addRow("snapshot.json", "snapshot.json", 2, "mem", "memory");
+      addRow("server.log", "server.log", 2, "real", "real");
+      addRow("server.sock", "", 2, "sock", "socket");
+      addRow("server.pid", "", 2, "real", "real");
+      addRow("panes/", "", 2, "", "");
+      addRow("w1p1.sock", "panes/w1p1.sock", 3, "sock", "socket");
+      addRow("w2p1.sock", "panes/w2p1.sock", 3, "sock", "socket");
+      addRow("w3p1.sock", "panes/w3p1.sock", 3, "sock", "socket");
+
+      const tabs = document.getElementById("tabs");
+      for (const name of order) {
+        const tab = document.createElement("span");
+        tab.className = "tab";
+        tab.dataset.path = name;
+        tab.textContent = name;
+        tab.addEventListener("click", () => render(name));
+        tabs.append(tab);
+      }
+
+      const filesPanel = document.getElementById("files");
+      const term = document.getElementById("term");
+      const showFiles = (on) => {
+        filesPanel.hidden = !on;
+        term.style.visibility = on ? "hidden" : "visible";
+        document.getElementById("tab-files").classList.toggle("on", on);
+        document.getElementById("tab-term").classList.toggle("on", !on);
+      };
+      document.getElementById("tab-files").addEventListener("click", () => showFiles(true));
+      document.getElementById("tab-term").addEventListener("click", () => showFiles(false));
+
+      render(open);
+    </script>
+  </body>
+</html>

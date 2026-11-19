@@ -162,6 +162,11 @@ Open <http://127.0.0.1:8765>. Type, press `ctrl+b`, watch the prefix panel. The
 page loads xterm.js from a CDN, so it needs the network; the program needs
 nothing but the files in `out`.
 
+`mockups/session-files.html` is a design mockup, not part of the build: it shows
+the session's `state.json` and the last wire snapshot in a file pane where the
+terminal sits. Copy it into `out/mockups/` and open `/mockups/session-files.html`
+to see it beside the tour.
+
 The page gives the terminal the keyboard at boot and after any click on the page, because
 a browser takes `ctrl+b` for its own bookmarks bar otherwise and the prefix never reaches
 the client. The bar under the screen says when the browser holds the keys instead.
