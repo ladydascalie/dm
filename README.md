@@ -537,8 +537,9 @@ The arrows and ctrl+n and ctrl+p still move the selection while filtering.
 
 `s` cycles the ordering: recent, then project, then status. Recent puts the
 newest status change first. Project groups the rows by project name, with the
-panes outside a project last. Status puts the states that want attention first:
-blocked, error, working, done, idle, unknown, then a shell.
+smallest pane id first inside a group and the panes outside a project last.
+Status puts the states that want attention first: blocked, error, working,
+done, idle, unknown, then a shell.
 
 The right of the screen previews the selected pane's live screen: from the
 local VT in the active window, and from a screen request elsewhere. A read

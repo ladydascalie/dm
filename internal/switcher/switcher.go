@@ -19,8 +19,8 @@ type SortMode int
 const (
 	// SortRecent puts the newest agent status change first. It is the default.
 	SortRecent SortMode = iota
-	// SortProject groups the rows by project name and keeps the snapshot's
-	// order inside a group. A pane outside a project sorts last.
+	// SortProject groups the rows by project name, then by pane id inside a
+	// group. A pane outside a project sorts last.
 	SortProject
 	// SortStatus puts the states that want attention first: blocked, error,
 	// working, done, idle, unknown, then a shell.
@@ -434,11 +434,14 @@ func (s *Switcher) sortRows() {
 	switch s.mode {
 	case SortProject:
 		sort.SliceStable(matches, func(i, j int) bool {
-			a, b := s.all[matches[i]].Project, s.all[matches[j]].Project
-			if (a == "") != (b == "") {
-				return a != ""
+			a, b := s.all[matches[i]], s.all[matches[j]]
+			if (a.Project == "") != (b.Project == "") {
+				return a.Project != ""
 			}
-			return strings.ToLower(a) < strings.ToLower(b)
+			if pa, pb := strings.ToLower(a.Project), strings.ToLower(b.Project); pa != pb {
+				return pa < pb
+			}
+			return paneIDLess(a.ID, b.ID)
 		})
 	case SortStatus:
 		sort.SliceStable(matches, func(i, j int) bool {
@@ -449,6 +452,56 @@ func (s *Switcher) sortRows() {
 			return s.all[matches[i]].StatusChangedAt > s.all[matches[j]].StatusChangedAt
 		})
 	}
+}
+
+// paneIDLess orders two pane ids the way the project sort shows them inside a
+// group: a run of digits compares as a number, so w9p1 sorts before w10p1, and
+// the rest compares as text. Equal ids are never less than each other, so the
+// sort stays stable.
+func paneIDLess(a, b string) bool {
+	for a != "" && b != "" {
+		if isDigit(a[0]) && isDigit(b[0]) {
+			var ra, rb string
+			ra, a = splitDigits(a)
+			rb, b = splitDigits(b)
+			if c := numberCompare(ra, rb); c != 0 {
+				return c < 0
+			}
+			continue
+		}
+		if a[0] != b[0] {
+			return a[0] < b[0]
+		}
+		a, b = a[1:], b[1:]
+	}
+	return len(a) < len(b)
+}
+
+// isDigit reports whether c is an ASCII digit, which is the whole of a pane
+// id's number.
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// splitDigits cuts the digit run off the front of s and returns the run and
+// what follows it.
+func splitDigits(s string) (string, string) {
+	i := 0
+	for i < len(s) && isDigit(s[i]) {
+		i++
+	}
+	return s[:i], s[i:]
+}
+
+// numberCompare orders two digit runs as numbers. It drops the leading zeros,
+// then compares the length before the digits, so a long run never overflows.
+func numberCompare(a, b string) int {
+	a, b = strings.TrimLeft(a, "0"), strings.TrimLeft(b, "0")
+	if len(a) != len(b) {
+		if len(a) < len(b) {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(a, b)
 }
 
 // statusRank orders the states for SortStatus: what wants attention first,

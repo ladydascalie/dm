@@ -360,6 +360,27 @@ func TestSwitcherSort(t *testing.T) {
 	}
 }
 
+// TestSwitcherProjectSortByID proves the project sort puts the panes of one
+// project in pane id order, whatever order the snapshot lists them in, and
+// reads the id's numbers as numbers: w10p1 comes after w9p1, not before it.
+func TestSwitcherProjectSortByID(t *testing.T) {
+	snap := &wire.Snapshot{Cols: 160, Rows: 30, All: []wire.AllPane{
+		{ID: "w10p1", Project: "dm"},
+		{ID: "w2p2", Project: "web"},
+		{ID: "w9p2", Project: "dm"},
+		{ID: "w9p1", Project: "dm"},
+		{ID: "w2p1", Project: "web"},
+		{ID: "w1p1", Title: "notes"},
+	}}
+	s := NewSwitcher(layout.Rect{W: 160, H: 30}, snap)
+	if s.CycleSort() != SortProject {
+		t.Fatalf("first cycle = %v, want project", s.SortMode())
+	}
+	if got, want := switcherRowIDs(s), []string{"w9p1", "w9p2", "w10p1", "w2p1", "w2p2", "w1p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("project order = %v, want %v", got, want)
+	}
+}
+
 // TestSwitcherSync keeps the selection on its pane across a snapshot and picks
 // the nearest row when the pane is gone.
 func TestSwitcherSync(t *testing.T) {
