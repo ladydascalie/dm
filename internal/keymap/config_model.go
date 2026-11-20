@@ -98,6 +98,15 @@ type Config struct {
 	floatShadowSet bool
 	dashFull       bool
 	dashFullSet    bool
+	// shelfCentered places the shelf float: true centres it over the pane
+	// area, false lays it over the focused pane. shelfCenteredSet separates the
+	// default from a config that never named the node.
+	shelfCentered    bool
+	shelfCenteredSet bool
+	// shelfSize is the centred shelf's share of the pane area, in percent.
+	// shelfSizeSet separates the default from a config that never named it.
+	shelfSize    int
+	shelfSizeSet bool
 	// diffCommand is the shell command the dashboard diff key runs in a
 	// floating pane. An empty value means the config never named the node.
 	diffCommand string
@@ -222,6 +231,32 @@ func (c *Config) DashboardPreview() int {
 		return 100
 	}
 	return c.dashPreview
+}
+
+// ShelfCentered reports whether the shelf float centres over the pane area.
+// A config without the node reports true: a summoned shelf reads as a tray
+// over the work, so the rail, the tab bar and the status bar stay visible.
+func (c *Config) ShelfCentered() bool {
+	if c == nil || !c.shelfCenteredSet {
+		return defaultShelfCentered
+	}
+	return c.shelfCentered
+}
+
+// ShelfSize returns the centred shelf's share of the pane area, in percent,
+// clamped to the range the parser accepts. A config without the node reports
+// the built-in default.
+func (c *Config) ShelfSize() int {
+	if c == nil || !c.shelfSizeSet {
+		return defaultShelfSize
+	}
+	if c.shelfSize < minShelfSize {
+		return minShelfSize
+	}
+	if c.shelfSize > 100 {
+		return 100
+	}
+	return c.shelfSize
 }
 
 // DiffCommand returns the shell command the dashboard diff key runs in a

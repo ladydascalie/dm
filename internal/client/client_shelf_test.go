@@ -61,7 +61,10 @@ func drainSummon(t *testing.T, tui *tui, got chan wire.Msg) {
 func TestShelfPrefixToggles(t *testing.T) {
 	t.Parallel()
 	tui, got := shelfTUI(t)
-	r := shelfRect(tui.snap)
+	r := tui.shelfRect()
+	if want := shelfRectFor(tui.snap, true, 80); r != want {
+		t.Fatalf("default shelf rect = %+v, want the centred box %+v", r, want)
+	}
 	feed(tui, "\x02F")
 	if tui.shelf == nil || tui.mode != "shelf" {
 		t.Fatalf("prefix F left shelf %v and mode %q", tui.shelf, tui.mode)
@@ -467,6 +470,73 @@ func TestShelfChordSurvivesTheLonePrefixTimeout(t *testing.T) {
 		t.Fatal("the chord key after the timeout did not close the shelf")
 	}
 	testutil.NoMsg(t, got)
+}
+
+// TestShelfRectModes proves the shelf's two placements: a centred tray takes
+// a share of the pane area with equal gaps, the pane layout sits over the
+// focused pane, a share under the floor is the floor, and a focused pane too
+// small for the strip falls back to the centred box.
+func TestShelfRectModes(t *testing.T) {
+	t.Parallel()
+	tui, _ := shelfTUI(t)
+	area := layout.PaneAreaForWithTabBar(100, 30, 34)
+
+	centered := shelfRectFor(tui.snap, true, 80)
+	if want := (layout.Rect{X: 41, Y: 5, W: 51, H: 20}); centered != want {
+		t.Fatalf("centred rect = %+v, want %+v", centered, want)
+	}
+	if l, r := centered.X-1-area.X, area.X+area.W-(centered.X+centered.W+1); l != r {
+		t.Fatalf("side gaps = %d and %d, want equal", l, r)
+	}
+	if t1, b := centered.Y-1-area.Y, area.Y+area.H-(centered.Y+centered.H+1); t1 != b {
+		t.Fatalf("vertical gaps = %d and %d, want equal", t1, b)
+	}
+
+	if got, want := shelfRectFor(tui.snap, false, 80), (layout.Rect{X: 35, Y: 2, W: 63, H: 25}); got != want {
+		t.Fatalf("pane rect = %+v, want %+v", got, want)
+	}
+
+	if got, floor := shelfRectFor(tui.snap, true, 1), shelfRectFor(tui.snap, true, 20); got != floor {
+		t.Fatalf("a share under the floor gave %+v, want the floor's %+v", got, floor)
+	}
+	if got, want := shelfRectFor(tui.snap, true, 100), (layout.Rect{X: 34, Y: 2, W: 65, H: 26}); got != want {
+		t.Fatalf("a full share gave %+v, want %+v", got, want)
+	}
+
+	small := &wire.Snapshot{
+		Cols: 100, Rows: 30, Rail: 34, Focus: "w1p1",
+		Panes: []wire.PaneInfo{{ID: "w1p1", Rect: layout.Rect{X: 35, Y: 2, W: 10, H: 4}}},
+	}
+	if got := shelfRectFor(small, false, 80); got != centered {
+		t.Fatalf("a small focused pane gave %+v, want the centred fallback %+v", got, centered)
+	}
+}
+
+// TestShelfReloadsTheConfigWithTheBoxUp proves the config key still works with
+// the shelf up: a size or placement change is exactly what the operator wants
+// to see land, and reload refits the box.
+func TestShelfReloadsTheConfigWithTheBoxUp(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	feed(tui, "\x02\x12")
+	select {
+	case m := <-got:
+		if m.Type != "req" || m.Action != "reload" {
+			t.Fatalf("prefix ctrl+r sent %+v, want a reload request", m)
+		}
+	case <-time.After(200 * time.Millisecond):
+		last := ""
+		if n := len(tui.toasts); n > 0 {
+			last = tui.toasts[n-1].text
+		}
+		t.Fatalf("nothing sent; inbuf=%q toast=%q mode=%q", tui.inbuf, last, tui.mode)
+	}
+	if tui.shelf == nil {
+		t.Fatal("the reload closed the shelf")
+	}
 }
 
 // TestShelfUnboundChordConsumesTheWholeKey proves an unbound chord spends its

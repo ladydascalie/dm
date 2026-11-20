@@ -83,6 +83,18 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Draw the dashboard over the whole screen, or as a palette centred over the panes.",
 	},
 	{
+		Name:    "shelf-layout",
+		Value:   `"centered" or "pane"`,
+		Default: `"centered"`,
+		Desc:    "Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both.",
+	},
+	{
+		Name:    "shelf-size",
+		Value:   "an integer from 20 to 100",
+		Default: "80",
+		Desc:    "Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept.",
+	},
+	{
 		Name:    "float-shadow",
 		Value:   `"off" or "on"`,
 		Default: `"off"`,
@@ -169,7 +181,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{

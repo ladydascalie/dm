@@ -141,8 +141,8 @@ func llmsCell(s string) string {
 var llmsActionGroups = [][]string{
 	{"ping", "term-colours"}, {"list"},
 	{"read", "screen"}, {"history", "yank"}, {"replay", "status"},
-	{"write-to", "exec"}, {"keys"},
-	{"split"}, {"zoom-pane"}, {"set-rail", "reload"}, {"resize-split"},
+	{"write-to", "exec", "keys"},
+	{"split", "zoom-pane"}, {"set-rail", "reload"}, {"resize-split"},
 	{"focus"}, {"focus-dir"}, {"next-pane", "prev-pane"}, {"close-pane"},
 	{"close-window", "close-workspace"}, {"new-window", "new-workspace"},
 	{"next-window", "prev-window"}, {"select-window"},

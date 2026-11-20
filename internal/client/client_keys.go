@@ -775,6 +775,11 @@ func (t *tui) reload() error {
 	// resolve it again or a change from auto to ascii would only take effect on
 	// the next attach.
 	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())
+	// A new placement or share moves the shelf, so fit it now rather than
+	// waiting for a snapshot that may never come.
+	if t.shelf != nil && t.snap != nil {
+		t.syncShelf(t.snap)
+	}
 	if t.snap != nil {
 		t.snap.WindowLabel = cfg.WindowLabel()
 	}

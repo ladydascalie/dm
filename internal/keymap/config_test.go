@@ -1175,6 +1175,76 @@ func TestConfigDashboardLayout(t *testing.T) {
 	}
 }
 
+// TestConfigShelfPlacement reads the shelf float's placement and share: the
+// defaults, both layouts, the size bounds it rejects, and the duplicate rule.
+func TestConfigShelfPlacement(t *testing.T) {
+	placements := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultShelfCentered},
+		{"centered", `shelf-layout "centered"`, true},
+		{"pane", `shelf-layout "pane"`, false},
+	}
+	for _, c := range placements {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.ShelfCentered(); got != c.want {
+				t.Fatalf("ShelfCentered() = %v, want %v", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().ShelfCentered(); got != defaultShelfCentered {
+		t.Fatalf("LoadDefault().ShelfCentered() = %v, want %v", got, defaultShelfCentered)
+	}
+
+	sizes := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultShelfSize},
+		{"thirty", `shelf-size 30`, 30},
+		{"floor", `shelf-size 20`, 20},
+		{"ceiling", `shelf-size 100`, 100},
+	}
+	for _, c := range sizes {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.ShelfSize(); got != c.want {
+				t.Fatalf("ShelfSize() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().ShelfSize(); got != defaultShelfSize {
+		t.Fatalf("LoadDefault().ShelfSize() = %d, want %d", got, defaultShelfSize)
+	}
+
+	for _, bad := range []string{
+		`shelf-layout "wide"`, `shelf-layout 1`,
+		`shelf-size 19`, `shelf-size 101`, `shelf-size "big"`,
+	} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	for _, dup := range []string{
+		"shelf-layout \"centered\"\nshelf-layout \"pane\"",
+		"shelf-size 30\nshelf-size 40",
+	} {
+		if _, err := parseConfig(dup); err == nil {
+			t.Fatalf("parseConfig accepted two nodes in %q", dup)
+		}
+	}
+}
+
 // TestConfigPaletteRows reads the command palette's row cap: the node, the
 // default, and the bounds it rejects.
 func TestConfigPaletteRows(t *testing.T) {

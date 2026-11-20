@@ -43,25 +43,91 @@ func shelfActiveIndex(snap *wire.Snapshot, members []wire.PaneInfo) int {
 	return snap.ShelfActive
 }
 
-// shelfRect is where the shelf float sits: over the focused pane, inset one
-// cell so its border lands on the pane's own frame. A pane too small for a
-// strip and a row of screen falls back to the box every other float gets.
-func shelfRect(snap *wire.Snapshot) layout.Rect {
+// shelfRect is where the shelf float sits. A centred shelf takes a share of
+// the pane area and lands in the middle of it, so the rail, the tab bar and the
+// status bar stay visible. The pane layout lays the box over the focused pane,
+// inset one cell so its border lands on the pane's own frame. A focused pane
+// too small for a strip and a row of screen falls back to the centred box.
+func (t *tui) shelfRect() layout.Rect {
+	return shelfRectFor(t.snap, t.km().ShelfCentered(), t.km().ShelfSize())
+}
+
+// shelfRectFor is the geometry under shelfRect, so a test can name a placement
+// and a share without a config.
+func shelfRectFor(snap *wire.Snapshot, centered bool, size int) layout.Rect {
 	if snap == nil {
 		return layout.Rect{}
 	}
-	for i := range snap.Panes {
-		p := &snap.Panes[i]
-		if p.ID != snap.Focus || p.Shelf {
-			continue
+	if !centered {
+		for i := range snap.Panes {
+			p := &snap.Panes[i]
+			if p.ID != snap.Focus || p.Shelf {
+				continue
+			}
+			r := layout.Rect{X: p.Rect.X + 1, Y: p.Rect.Y + 1, W: p.Rect.W - 2, H: p.Rect.H - 2}
+			if r.W >= minShelfWidth && r.H >= minShelfHeight {
+				return r
+			}
+			break
 		}
-		r := layout.Rect{X: p.Rect.X + 1, Y: p.Rect.Y + 1, W: p.Rect.W - 2, H: p.Rect.H - 2}
-		if r.W >= 12 && r.H >= 4 {
-			return r
-		}
-		break
 	}
-	return floatRect(snap)
+	return centeredShelfRect(snap, size)
+}
+
+// The smallest shelf box worth drawing: enough width for a couple of chips and
+// enough rows for the strip and three rows of screen. minShelfShare is the
+// smallest share the geometry honours, matching the config's floor.
+const (
+	minShelfWidth  = 24
+	minShelfHeight = 6
+	minShelfShare  = 20
+)
+
+// centeredShelfRect centres the box over the pane area, at size percent of it.
+// The panel draws its border one cell outside the rect, so the share is the
+// whole box and the interior gives up two cells each way. A share too small for
+// the strip grows to the minimum unless the area cannot hold it.
+func centeredShelfRect(snap *wire.Snapshot, size int) layout.Rect {
+	area := layout.PaneAreaForWithTabBar(snap.Cols, snap.Rows, snap.Rail)
+	if area.W < 2 || area.H < 2 {
+		return floatRect(snap)
+	}
+	if size < minShelfShare {
+		size = minShelfShare
+	}
+	if size > 100 {
+		size = 100
+	}
+	boxW := area.W * size / 100
+	boxH := area.H * size / 100
+	w, h := boxW-2, boxH-2
+	if w < minShelfWidth {
+		w = minShelfWidth
+	}
+	if h < minShelfHeight {
+		h = minShelfHeight
+	}
+	if w > area.W-2 {
+		w = area.W - 2
+	}
+	if h > area.H-2 {
+		h = area.H - 2
+	}
+	x := area.X + (area.W-boxW)/2 + 1
+	y := area.Y + (area.H-boxH)/2 + 1
+	if x < area.X+1 {
+		x = area.X + 1
+	}
+	if y < area.Y+1 {
+		y = area.Y + 1
+	}
+	if x+w+1 > area.X+area.W {
+		x = area.X + area.W - w - 1
+	}
+	if y+h+1 > area.Y+area.H {
+		y = area.Y + area.H - h - 1
+	}
+	return layout.Rect{X: x, Y: y, W: w, H: h}
 }
 
 // shelfToggle opens the shelf float over the focused pane, or closes it when it
@@ -82,7 +148,7 @@ func (t *tui) shelfToggle() {
 		t.disarm()
 		return
 	}
-	r := shelfRect(t.snap)
+	r := t.shelfRect()
 	member := members[shelfActiveIndex(t.snap, members)].ID
 	sv := &shelfView{active: member, cols: r.W, rows: r.H - 1}
 	sv.float = &panel.FloatingPane{ID: "shelf", Rect: r, Active: true}
@@ -157,7 +223,7 @@ func (t *tui) syncShelf(snap *wire.Snapshot) {
 		return
 	}
 	at := shelfActiveIndex(snap, members)
-	r := shelfRect(snap)
+	r := shelfRectFor(snap, t.km().ShelfCentered(), t.km().ShelfSize())
 	moved := r != sv.float.Rect
 	if moved {
 		sv.float.Rect = r
@@ -336,6 +402,12 @@ func (t *tui) shelfAction(action string) {
 		t.moveShelf(1)
 	case "prev-pane":
 		t.moveShelf(-1)
+	case "reload":
+		// A size or placement change is what the operator wants to see now,
+		// so the config key works with the box up. reload refits the shelf.
+		if err := t.reload(); err != nil {
+			t.notify(err.Error())
+		}
 	default:
 		t.notify(action + " is not a shelf key")
 	}
