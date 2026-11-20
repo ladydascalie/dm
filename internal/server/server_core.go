@@ -171,6 +171,9 @@ type client struct {
 
 	cols int
 	rows int
+	// seq is the order this client attached in, so the sizing client is the
+	// highest one attached. Zero before the attach frame.
+	seq int64
 	// paused holds the queue while the client is being caught up. A paused
 	// client queues; the writer does not touch the socket.
 	paused bool
@@ -439,6 +442,14 @@ type server struct {
 	// zoom is the zoomed pane id, empty when no pane is zoomed. Memory only:
 	// a restart shows the splits, so it never reaches state.json.
 	zoom string
+
+	// sizer is the client that sizes the layout panes: the one that attached
+	// last. claims holds the per-pane sizes it claimed, and a pane without a
+	// claim takes its layout rectangle. Both are memory only: a restart drops
+	// the claims and the attached client claims again. Guarded by mu.
+	sizer     *client
+	attachSeq int64
+	claims    map[string]paneSize
 
 	// secretPush serialises the redaction pushes: collecting the set and
 	// sending it are one step, so a push can never interleave between

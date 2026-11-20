@@ -268,8 +268,10 @@ func TestReplayRequestReturnsTheRing(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Let the attach burst land first, so the assertions below see only the
-	// answer to the request.
-	for i := 0; i < len(ids)+2; i++ {
+	// answer to the request. The burst is the sizer frame, one snapshot, one
+	// screen per pane and the snapshot that carries the screen's alt and mouse
+	// facts.
+	for i := 0; i < len(ids)+3; i++ {
 		if _, err := readFrame(cl, 5*time.Second); err != nil {
 			t.Fatalf("attach frame %d: %v", i, err)
 		}
@@ -312,7 +314,7 @@ func TestReplayRequestForMissingPaneFails(t *testing.T) {
 	if err := wire.WriteMsg(cl, wire.Msg{Type: "attach", Cols: 100, Rows: 30}); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < len(ids)+2; i++ {
+	for i := 0; i < len(ids)+3; i++ {
 		if _, err := readFrame(cl, 5*time.Second); err != nil {
 			t.Fatalf("attach frame %d: %v", i, err)
 		}

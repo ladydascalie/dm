@@ -15,7 +15,7 @@ import (
 
 // Msg is the single envelope for every dm socket, in both directions.
 type Msg struct {
-	Type   string `json:"type"`             // req resp attach keys resize snapshot bytes replay scrub status exit
+	Type   string `json:"type"`             // req resp attach keys resize snapshot bytes replay scrub status exit sizer
 	Action string `json:"action,omitempty"` // req action
 	Target string `json:"target,omitempty"` // pane id
 	Dir    string `json:"dir,omitempty"`    // left right up down
@@ -70,6 +70,11 @@ type Msg struct {
 	// On is the optional value of a switch action: synchronize-panes. Nil
 	// toggles, true and false set the flag.
 	On *bool `json:"on,omitempty"`
+	// Sizing rides the server's sizer frame: true when this client sizes the
+	// layout panes, false when it does not. It is a pointer so an explicit
+	// false survives the frame, the way Trust does; a client that never
+	// receives one keeps sizing its own terminals to the layout rect.
+	Sizing *bool `json:"sizing,omitempty"`
 
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`
