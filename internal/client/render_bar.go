@@ -291,6 +291,21 @@ func (l *barLeft) groups(th theme.Theme) [][]segment.Seg {
 	return out
 }
 
+// shelfSpan is the chip's clickable cell span, clamped to the cells the fitted
+// left block actually paints. The ladder and its final clip can cut the chip
+// away, and the cells it gives up are the bar's pad: a click there must not run
+// a chip the operator cannot see.
+func (l *barLeft) shelfSpan(painted int) (int, int) {
+	if l.shelfW < 1 || l.shelfLo >= painted {
+		return 0, 0
+	}
+	hi := l.shelfLo + l.shelfW
+	if hi > painted {
+		hi = painted
+	}
+	return l.shelfLo, hi
+}
+
 // fit elides the left block to budget cells in the ladder the footer uses:
 // window names, then trailing window chips, then the workspace name, then the
 // session name, then the focus chip's sync mark, status word and name. The

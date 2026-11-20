@@ -112,7 +112,8 @@ The action field names one of these. Each example is one JSON object, carrying o
 
 | Action | Example |
 | --- | --- |
-| `ping`, `term-colours`, `list` | `{"action":"ping"}`, `{"action":"term-colours","fg":"#c0c0c0","bg":"#101010"}`, `{"action":"list"}` |
+| `ping`, `term-colours` | `{"action":"ping"}`, `{"action":"term-colours","fg":"#c0c0c0","bg":"#101010"}` |
+| `list` | `{"action":"list"}` |
 | `read`, `screen` | `{"action":"read","target":"w1p1"}`, `{"action":"screen","target":"w1p1"}` |
 | `history`, `yank` | `{"action":"history","target":"w1p1","count":200}`, `{"action":"yank","target":"w1p1"}` |
 | `replay`, `status` | `{"action":"replay","target":"w1p1"}`, `{"action":"status","target":"w1p1"}` |
@@ -167,7 +168,6 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `n / p` | `next-pane / prev-pane` | next/prev pane |
 | `x` | `close-pane` | close pane |
 | `X` | `close-window` | close window |
-| `f G F` | `shelve-pane / pop-pane / toggle-shelf` | shelve / pop / shelf |
 | `z` | `zoom-pane` | zoom pane |
 | `c` | `new-window` | new window |
 | `w / W` | `next-window / prev-window` | next/prev win |

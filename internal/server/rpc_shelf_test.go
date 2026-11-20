@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"dm/internal/layout"
 	"dm/internal/session"
@@ -363,5 +364,153 @@ func TestShelfErrorNamesThePane(t *testing.T) {
 	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "close-pane", Target: c, ID: 2})
 	if m.OK || !strings.Contains(m.Error, c) {
 		t.Fatalf("close error = %q, want it to name %q", m.Error, c)
+	}
+}
+
+// TestShelveLeavesASidePaneFocusAlone proves the focus rule: only a pane that
+// held the focus passes it on. Shelving a pane from the side leaves the
+// operator's focus exactly where it was.
+func TestShelveLeavesASidePaneFocusAlone(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, a, b, c := shelfServer(t, "rpcshelvefocuskeep")
+	if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "focus", Target: a, ID: 1}); !m.OK {
+		t.Fatalf("focus %s: %s", a, m.Error)
+	}
+	s.mu.Lock()
+	focus := s.st.ActiveWindow().Focus
+	s.mu.Unlock()
+	if focus != a {
+		t.Fatalf("focus = %q, want %q before the shelve", focus, a)
+	}
+
+	// b is neither the focused pane nor the shelf target: shelving c must not
+	// move the focus.
+	if focus == b || focus == c {
+		t.Fatalf("fixture focus %q must differ from %q and %q", focus, b, c)
+	}
+	if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "shelve-pane", Target: c, ID: 2}); !m.OK {
+		t.Fatalf("shelve: %s", m.Error)
+	}
+	s.mu.Lock()
+	after := s.st.ActiveWindow().Focus
+	s.mu.Unlock()
+	if after != focus {
+		t.Fatalf("focus moved from %q to %q when a pane off focus was shelved", focus, after)
+	}
+
+	// The shelved pane's own focus still moves: shelve the focused pane and the
+	// window hands focus to a survivor.
+	if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "shelve-pane", Target: after, ID: 3}); !m.OK {
+		t.Fatalf("shelve the focus: %s", m.Error)
+	}
+	s.mu.Lock()
+	win := s.st.ActiveWindow()
+	ids := layout.AllPanes(win.Root)
+	moved := win.Focus
+	s.mu.Unlock()
+	if moved == focus {
+		t.Fatalf("shelving the focused pane %q left the focus on it", focus)
+	}
+	if !layout.FindLeaf(win.Root, moved) {
+		t.Fatalf("focus = %q, want a pane in the tree %v", moved, ids)
+	}
+}
+
+// TestClosePaneRefusesTheLastTreePaneWithAShelf proves the session can never
+// reach zero windows with a live shelf: the close is refused, the error names
+// the shelf count, and the pane keeps its PTY.
+func TestClosePaneRefusesTheLastTreePaneWithAShelf(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, a, _, c := shelfServer(t, "rpclastwithshelf")
+	spy := spyPane(t, s, a)
+	if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "shelve-pane", Target: c, ID: 1}); !m.OK {
+		t.Fatalf("shelve: %s", m.Error)
+	}
+	// Reduce the tree to the one pane the close would take.
+	s.mu.Lock()
+	win := s.st.ActiveWindow()
+	closest := win.Focus
+	other := ""
+	for _, id := range layout.AllPanes(win.Root) {
+		if id != closest {
+			other = id
+		}
+	}
+	s.mu.Unlock()
+	if other != "" {
+		if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "close-pane", Target: other, ID: 2}); !m.OK {
+			t.Fatalf("close %s: %s", other, m.Error)
+		}
+	}
+	s.mu.Lock()
+	tree := s.treePaneCountLocked()
+	shelf := len(s.st.Shelf)
+	s.mu.Unlock()
+	if tree != 1 || shelf != 1 {
+		t.Fatalf("after the setup the session has %d tree panes and %d shelved, want 1 and 1", tree, shelf)
+	}
+
+	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "close-pane", ID: 3})
+	wantErr(t, "close-pane", "shelf", m)
+	if !strings.Contains(m.Error, "1 pane") {
+		t.Fatalf("close error = %q, want it to name the shelf count", m.Error)
+	}
+	s.mu.Lock()
+	tree = s.treePaneCountLocked()
+	s.mu.Unlock()
+	if tree != 1 {
+		t.Fatalf("the refused close took the last tree pane, %d left", tree)
+	}
+	// The refused close must not reach the pane. A resync may still send it a
+	// resize, so the test looks for the kill frame alone.
+	deadline := time.After(200 * time.Millisecond)
+	for {
+		select {
+		case msg := <-spy:
+			if msg.Action == "kill" {
+				t.Fatalf("the refused close sent kill to %q", a)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// TestNewWindowBuildsAWorkspaceWhenThereIsNone proves new-window never appends
+// to the throwaway workspace ActiveWorkspace hands back for an empty session:
+// the window lands in a real workspace, so a pop can use it.
+func TestNewWindowBuildsAWorkspaceWhenThereIsNone(t *testing.T) {
+	t.Parallel()
+	s, cl, conn, a, _, _ := shelfServer(t, "rpcnewws")
+	// The pane new-window will open, so the join finds a socket instead of
+	// spawning a process.
+	screenPane(t, s.st, "w2p1")
+	// The state the shelf can leave behind: a live shelf, no workspace.
+	s.mu.Lock()
+	s.st.Shelf = []string{a}
+	s.st.Workspaces = nil
+	s.st.Active = 0
+	s.mu.Unlock()
+
+	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "new-window", ID: 1})
+	if !m.OK {
+		t.Fatalf("new-window: %s", m.Error)
+	}
+	s.mu.Lock()
+	workspaces := len(s.st.Workspaces)
+	windows := 0
+	if workspaces > 0 {
+		windows = len(s.st.Workspaces[0].Windows)
+	}
+	wsID := ""
+	if workspaces > 0 {
+		wsID = s.st.Workspaces[0].ID
+	}
+	s.mu.Unlock()
+	if workspaces != 1 || windows != 1 {
+		t.Fatalf("new-window left %d workspaces and %d windows, want one each", workspaces, windows)
+	}
+	if wsID == "" || wsID == "s0" {
+		t.Fatalf("workspace id = %q, want a fresh one from NewWorkspaceID", wsID)
 	}
 }

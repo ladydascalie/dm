@@ -21,7 +21,7 @@ import (
 func helpBoxDraw(t *testing.T, cols, rows int, cfg *keymap.Config) string {
 	t.Helper()
 	var buf bytes.Buffer
-	drawHelp(&buf, theme.DefaultTheme(), cols, rows, false, cfg.HelpEntries(), cfg.HelpNotes())
+	drawHelp(&buf, theme.DefaultTheme(), cols, rows, false, helpBoxHint(cfg), cfg.HelpEntries(), cfg.HelpNotes())
 	return buf.String()
 }
 
@@ -127,26 +127,27 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 	return b.String()
 }
 
-// TestHelpBoxSizesToWidestRowAt100x44 proves the box holds the default layout
+// TestHelpBoxSizesToWidestRowAt100x40 proves the box holds the default layout
 // whole, that both border rows own a row, and that the frame carries its title
-// and hint. The default table grew one shelf row, so the proof runs on a
-// 44-row screen, as it moved to 40 for the toggle-secrets row.
-func TestHelpBoxSizesToWidestRowAt100x44(t *testing.T) {
+// and hint. The default table grew one toggle-secrets row, so the proof runs
+// on a 40-row screen. The shelf keys ride the footer rather than a row, so the
+// table still fits it.
+func TestHelpBoxSizesToWidestRowAt100x40(t *testing.T) {
 	t.Parallel()
 	cfg := keymap.LoadDefault()
 	keys := cfg.HelpEntries()
-	g, ok := helpBoxGeometry(100, 44, keys, cfg.HelpNotes())
+	g, ok := helpBoxGeometry(100, 40, keys, cfg.HelpNotes())
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
 	}
-	p := helpBoxParse(t, helpBoxDraw(t, 100, 44, cfg))
+	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, cfg))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
 	if want := g.inner + 2; x1-x0+1 != want {
 		t.Fatalf("box width = %d, want %d", x1-x0+1, want)
 	}
-	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 43 {
-		t.Fatalf("box %d,%d..%d,%d is not inside 100x44", x0, y0, x1, y1)
+	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 39 {
+		t.Fatalf("box %d,%d..%d,%d is not inside 100x40", x0, y0, x1, y1)
 	}
 	if want := g.h + 2; y1-y0+1 != want {
 		t.Fatalf("box height = %d, want %d", y1-y0+1, want)
@@ -241,7 +242,7 @@ func TestHelpBoxShadow(t *testing.T) {
 		t.Fatal("helpBoxGeometry returned false")
 	}
 	var on bytes.Buffer
-	drawHelp(&on, theme.DefaultTheme(), cols, rows, true, keys, cfg.HelpNotes())
+	drawHelp(&on, theme.DefaultTheme(), cols, rows, true, helpBoxHint(cfg), keys, cfg.HelpNotes())
 	p := helpBoxParse(t, on.String())
 	x1, y1 := g.x+g.inner, g.y+g.h
 	if got := p.writes[[2]int{y1, x1 + 1}]; len(got) == 0 || got[0] != '░' {
@@ -258,7 +259,7 @@ func TestHelpBoxShadow(t *testing.T) {
 		}
 	}
 	var off bytes.Buffer
-	drawHelp(&off, theme.DefaultTheme(), cols, rows, false, keys, cfg.HelpNotes())
+	drawHelp(&off, theme.DefaultTheme(), cols, rows, false, helpBoxHint(cfg), keys, cfg.HelpNotes())
 	p = helpBoxParse(t, off.String())
 	for rc, got := range p.writes {
 		if len(got) > 0 && got[0] == '░' {
@@ -494,7 +495,7 @@ keymap "main" {
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value. It
 // moved when the table gained the shelve/pop and shelf rows.
-const helpBoxDefaultSHA256 = "cd2ebf1dfea909396274778e09402fae2182c114ed1e9115292b63d773a49851"
+const helpBoxDefaultSHA256 = "ab90e06f3ad371cb3be320a67fe5a140e62b1a0af0a05f49c4825c1e1a9f5a47"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the
@@ -521,5 +522,34 @@ func TestHelpBoxDefaultBytesFrozen(t *testing.T) {
 	sum := sha256.Sum256([]byte(helpBoxDraw(t, 100, 30, cfg)))
 	if got := hex.EncodeToString(sum[:]); got != helpBoxDefaultSHA256 {
 		t.Fatalf("default help box bytes changed: sha256 %s, want %s", got, helpBoxDefaultSHA256)
+	}
+}
+
+// TestHelpBoxFooterCarriesTheShelfKeys proves the overlay names the shelf's
+// three keys. They ride the footer, not a row: one more table row pushes the
+// last section off a 100x40 screen, and that table must fit whole.
+func TestHelpBoxFooterCarriesTheShelfKeys(t *testing.T) {
+	t.Parallel()
+	cfg := keymap.LoadDefault()
+	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, cfg))
+	x0, _, x1, y1 := helpBoxBounds(t, p)
+	hint := helpBoxRowText(p, y1, x0+2, x1-1)
+	for _, want := range []string{"esc", "f/F/G shelf"} {
+		if !strings.Contains(hint, want) {
+			t.Fatalf("help footer = %q, want %q in it", hint, want)
+		}
+	}
+	// The three keys come from the keymap, so a remap moves the footer with it.
+	rc, err := keymap.ParseConfig(`prefix "ctrl+a"
+keymap "main" {
+	"shelve-pane" "ctrl+s"
+	"toggle-shelf" "ctrl+t"
+	"pop-pane" "ctrl+p"
+}`)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if got := helpBoxHint(rc); !strings.Contains(got, "ctrl+s/ctrl+t/ctrl+p shelf") {
+		t.Fatalf("remapped footer = %q, want the rebound shelf keys", got)
 	}
 }

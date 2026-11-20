@@ -210,14 +210,23 @@ func (st *State) ClampShelfActive() {
 	}
 }
 
-// PruneShelf drops members the session no longer carries a PaneState for, then
-// clamps the active index. It reports whether it dropped anything. A shelf row
-// naming a dead id would point at a pane nothing can adopt.
+// PruneShelf drops members the session no longer carries a PaneState for and
+// keeps the active index on the member it named, the way DropShelf does: every
+// member removed before it steps the index back one. It then clamps. It reports
+// whether it dropped anything. A shelf row naming a dead id would point at a
+// pane nothing can adopt.
 func (st *State) PruneShelf() bool {
 	kept := st.Shelf[:0]
-	for _, id := range st.Shelf {
+	active := st.ShelfActive
+	for i, id := range st.Shelf {
 		if st.Panes[id] != nil {
 			kept = append(kept, id)
+			continue
+		}
+		// The member is gone. One dropped before the active member takes the
+		// index with it, so the same pane stays active.
+		if i < active {
+			active--
 		}
 	}
 	changed := len(kept) != len(st.Shelf)
@@ -230,6 +239,7 @@ func (st *State) PruneShelf() bool {
 	if len(st.Shelf) == 0 {
 		st.Shelf = nil
 	}
+	st.ShelfActive = active
 	st.ClampShelfActive()
 	return changed
 }

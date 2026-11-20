@@ -61,6 +61,7 @@ func (s *server) shelvePane(target string) (string, error) {
 			at = i
 		}
 	}
+	focused := win.Focus == target
 	root, ok := layout.PruneLeaf(win.Root, target)
 	if !ok {
 		return "", fmt.Errorf("no pane %q", target)
@@ -76,12 +77,15 @@ func (s *server) shelvePane(target string) (string, error) {
 		s.st.AddShelf(target)
 		return target, nil
 	}
-	// Focus moves to a surviving pane of the window: the pane that took the
-	// shelved one's place, else the last pane.
-	if at >= len(rest) {
-		at = len(rest) - 1
+	// Focus only moves when the shelved pane held it: a pane set aside from
+	// the side must not take the operator's focus with it. The survivor is the
+	// pane that took the shelved one's place, else the last pane.
+	if focused {
+		if at >= len(rest) {
+			at = len(rest) - 1
+		}
+		win.Focus = rest[at]
 	}
-	win.Focus = rest[at]
 	s.st.AddShelf(target)
 	return target, nil
 }

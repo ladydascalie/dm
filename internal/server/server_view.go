@@ -443,7 +443,13 @@ func (s *server) dropEmptyWindows() {
 // a shelved pane still owns a PTY, so a session that kept one is not empty and
 // must not tear down.
 func (s *server) countPanes() int {
-	n := len(s.st.Shelf)
+	return s.treePaneCountLocked() + len(s.st.Shelf)
+}
+
+// treePaneCountLocked counts the panes in the layout, the shelf excluded. It
+// is what a close or an exit can take away. The caller holds s.mu.
+func (s *server) treePaneCountLocked() int {
+	n := 0
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
 			n += len(layout.AllPanes(w.Root))

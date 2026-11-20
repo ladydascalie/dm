@@ -665,21 +665,35 @@ func TestShelfClampAndPrune(t *testing.T) {
 			}
 		})
 	}
+	// A dead member before the active one steps the index back with it, so the
+	// prune keeps the same member active: x at 0, then a at 1, b at 2, c at 3.
 	st := &State{
-		Shelf:       []string{"a", "gone", "b"},
+		Shelf:       []string{"x", "a", "b", "c"},
 		ShelfActive: 2,
-		Panes:       map[string]*PaneState{"a": {}, "b": {}},
+		Panes:       map[string]*PaneState{"a": {}, "b": {}, "c": {}},
 	}
 	if !st.PruneShelf() {
 		t.Fatal("PruneShelf dropped nothing, want the dead member gone")
 	}
-	if len(st.Shelf) != 2 || st.Shelf[0] != "a" || st.Shelf[1] != "b" {
-		t.Fatalf("shelf = %v, want a then b", st.Shelf)
+	if len(st.Shelf) != 3 || st.Shelf[0] != "a" || st.Shelf[1] != "b" || st.Shelf[2] != "c" {
+		t.Fatalf("shelf = %v, want a, b then c", st.Shelf)
 	}
-	if st.ShelfActive != 1 {
-		t.Fatalf("active = %d, want the last member", st.ShelfActive)
+	if st.ShelfActive != 1 || st.Shelf[st.ShelfActive] != "b" {
+		t.Fatalf("active = %d (%q), want 1 and b", st.ShelfActive, st.Shelf[st.ShelfActive])
 	}
 	if st.PruneShelf() {
 		t.Fatal("a second prune dropped something")
+	}
+	// A dead member after the active one leaves the index alone.
+	st = &State{
+		Shelf:       []string{"a", "b", "gone"},
+		ShelfActive: 0,
+		Panes:       map[string]*PaneState{"a": {}, "b": {}},
+	}
+	if !st.PruneShelf() {
+		t.Fatal("PruneShelf dropped nothing, want the tail member gone")
+	}
+	if st.ShelfActive != 0 || st.Shelf[0] != "a" {
+		t.Fatalf("active = %d (%q), want 0 and a", st.ShelfActive, st.Shelf[0])
 	}
 }

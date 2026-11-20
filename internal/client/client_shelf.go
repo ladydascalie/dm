@@ -289,6 +289,12 @@ func (t *tui) shelfKey() bool {
 		return false
 	}
 	action, n, state := t.km().Match("main", rest)
+	if state == keymap.Match && escapeRun(rest) > n {
+		// The match covered only the head of one escape sequence, so the key as
+		// a whole has no binding: alt+x must not run the esc action and leave
+		// its tail for the member. armedKey treats it the same way.
+		state = keymap.NoMatch
+	}
 	switch state {
 	case keymap.Partial:
 		// The chord key is still arriving; the buffer keeps the prefix so the
@@ -304,12 +310,17 @@ func (t *tui) shelfKey() bool {
 		t.shelfAction(action)
 		return true
 	}
-	// The prefix is the chrome's byte, so an unbound chord is spent here: its
-	// own key is dropped and nothing reaches the member. The shelf stays up: it
-	// is a view, not a command line.
-	t.inbuf = append([]byte(nil), rest[1:]...)
+	// The prefix is the chrome's byte, so an unbound chord is spent here and
+	// nothing reaches the member. The whole key goes, not one byte: the tail of
+	// an escape sequence such as alt+x would otherwise arrive as typed input.
+	cut := escapeRun(rest)
+	if cut < 1 {
+		cut = 1
+	}
+	chord := string(rest[:cut])
+	t.inbuf = append([]byte(nil), rest[cut:]...)
 	t.pending = false
-	t.notify(fmt.Sprintf("no shelf binding for %q", string(rest[0])))
+	t.notify(fmt.Sprintf("no shelf binding for %q", chord))
 	return true
 }
 
@@ -405,11 +416,8 @@ func (t *tui) shelfChipSpan() (int, int) {
 	th, set := t.theme(), t.glyphSet()
 	budget := barLeftBudget(th, t.snap, t.armed, t.barInfo(), t.barBadgeOf(th, set))
 	l := barLeftFor(th, t.snap, set)
-	l.fit(th, budget)
-	if l.shelfW < 1 {
-		return 0, 0
-	}
-	return l.shelfLo, l.shelfLo + l.shelfW
+	segs := l.fit(th, budget)
+	return l.shelfSpan(segment.SegCells(segs))
 }
 
 // shelfChipAt reports whether x is inside the status bar's shelf chip.

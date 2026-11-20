@@ -558,3 +558,52 @@ func TestUnknownSubverbBeatsFlagParsing(t *testing.T) {
 		}
 	}
 }
+
+// TestListTableCarriesAShelvedPane proves dm list names a shelved pane: it is
+// alive and addressable, so it belongs in the fleet the table prints. The
+// windowed rows stay as they were, and the shelf row says where it sits.
+func TestListTableCarriesAShelvedPane(t *testing.T) {
+	startFakeServer(t, "main", okHandler(`{"snapshot":{"session":"main","all":[
+		{"id":"w1p1","workspace":"s1","workspaceName":"main","window":"w1","windowName":"one","focus":true}],
+		"panes":[
+		{"id":"w1p1","rect":{"X":0,"Y":0,"W":10,"H":5}},
+		{"id":"w1p2","name":"held","status":"working","shelf":true}]}}`))
+	out := testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"list"}); err != nil {
+			t.Fatalf("dm list: %v", err)
+		}
+	})
+	if !strings.Contains(out, "w1p1*") {
+		t.Fatalf("dm list dropped the windowed pane: %q", out)
+	}
+	if !strings.Contains(out, "w1p2") {
+		t.Fatalf("dm list does not list the shelved pane: %q", out)
+	}
+	line := ""
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "w1p2") {
+			line = l
+		}
+	}
+	for _, want := range []string{"shelf", "agent", "working"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("shelved row %q misses %q", line, want)
+		}
+	}
+}
+
+// TestListJSONKeepsTheShelvedPaneInTheSnapshot proves --json still passes the
+// snapshot through, so a script reads the shelf from the panes it already
+// parses.
+func TestListJSONKeepsTheShelvedPaneInTheSnapshot(t *testing.T) {
+	startFakeServer(t, "main", okHandler(`{"snapshot":{"session":"main","all":[],
+		"panes":[{"id":"w1p2","shelf":true}]}}`))
+	out := testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"list", "--json"}); err != nil {
+			t.Fatalf("dm list --json: %v", err)
+		}
+	})
+	if !strings.Contains(out, `"shelf":true`) {
+		t.Fatalf("dm list --json lost the shelf flag: %q", out)
+	}
+}

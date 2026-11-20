@@ -461,9 +461,6 @@ var helpRows = []helpRow{
 	{[]string{"next-pane", "prev-pane"}, "next/prev pane"},
 	{[]string{"close-pane"}, "close pane"},
 	{[]string{"close-window"}, "close window"},
-	// One row carries the shelf's three keys: they are one feature, and the
-	// row keeps the table short enough for the one-pass llms page.
-	{[]string{"shelve-pane", "pop-pane", "toggle-shelf"}, "shelve / pop / shelf"},
 	{[]string{"zoom-pane"}, "zoom pane"},
 	{[]string{"new-window"}, "new window"},
 	{[]string{"next-window", "prev-window"}, "next/prev win"},

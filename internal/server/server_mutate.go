@@ -1107,6 +1107,17 @@ func (s *server) closePane(target string) error {
 	}
 	ids := layout.AllPanes(win.Root)
 	if len(ids) <= 1 {
+		// The last tree pane of the session cannot go while the shelf holds a
+		// pane: the session would keep a live shelf with no window to pop it
+		// into. A shelf panes pop into a window, so one window must stay.
+		if shelf := len(s.st.Shelf); shelf > 0 && s.treePaneCountLocked() <= 1 {
+			what := "panes are"
+			if shelf == 1 {
+				what = "pane is"
+			}
+			s.mu.Unlock()
+			return fmt.Errorf("cannot close %q: it is the last pane in the layout and %d %s on the shelf: pop one into a window first", target, shelf, what)
+		}
 		// Closing the last pane empties the window. Let the pane's exit drive
 		// the normal path, which drops the window and ends the session when
 		// nothing is left, exactly like a shell exiting.
@@ -1259,6 +1270,16 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool, argv, pluginEn
 	}
 	s.mu.Lock()
 	ws := s.st.ActiveWorkspace()
+	if len(s.st.Workspaces) == 0 {
+		// ActiveWorkspace hands back a throwaway when the session has none, so
+		// a window appended to it would answer with an id that no state holds:
+		// the PTY would run with no window and the shell would stay unreachable.
+		// A session can reach zero workspaces with a live shelf, so build the
+		// real one here.
+		ws = &session.Workspace{ID: s.st.NewWorkspaceID(), Name: s.st.Name, Unfolded: true}
+		s.st.Workspaces = append(s.st.Workspaces, ws)
+		s.st.Active = 0
+	}
 	src := ""
 	if wsID != "" {
 		ws = nil

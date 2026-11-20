@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/box"
 	"dm/internal/cells"
 	"dm/internal/layout"
 	"dm/internal/rail"
+	"dm/internal/segment"
 	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/wire"
@@ -122,22 +124,30 @@ func TestShelfKeysGoToTheActiveMember(t *testing.T) {
 }
 
 // TestShelfPrefixNPMovesTheMember proves prefix n and prefix p ask the server
-// to move the active member, and that the shelf itself stays up.
+// for opposite steps: two members, active 0, n names index 1 and p names index
+// 0. The server's snapshot answers each request, so the second move starts from
+// where the first landed.
 func TestShelfPrefixNPMovesTheMember(t *testing.T) {
 	t.Parallel()
 	tui, got := shelfTUI(t)
 	feed(tui, "\x02F")
 	drainSummon(t, tui, got)
+	if at := shelfActiveIndex(tui.snap, rail.ShelfPanes(tui.snap)); at != 0 {
+		t.Fatalf("shelf starts on member %d, want 0", at)
+	}
 
 	feed(tui, "\x02n")
 	m := nextMsg(t, got)
 	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p8" {
 		t.Fatalf("prefix n sent %+v, want a focus request for w1p8", m)
 	}
+	// The server answers with the new active index, the way the shelf's own
+	// reply snapshot does.
+	tui.snap.ShelfActive = 1
 	feed(tui, "\x02p")
 	m = nextMsg(t, got)
-	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p8" {
-		t.Fatalf("prefix p sent %+v, want a focus request wrapping back to w1p8", m)
+	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p7" {
+		t.Fatalf("prefix p sent %+v, want a focus request back to w1p7", m)
 	}
 	if tui.shelf == nil {
 		t.Fatal("a move closed the shelf")
@@ -428,5 +438,89 @@ func TestShelfChordWaitsForItsKey(t *testing.T) {
 	m := nextMsg(t, got)
 	if m.Type != "req" || m.Action != "pop-pane" || m.Target != "w1p7" {
 		t.Fatalf("prefix then G sent %+v, want pop-pane for w1p7", m)
+	}
+}
+
+// TestShelfUnboundChordConsumesTheWholeKey proves an unbound chord spends its
+// whole key: the tail of a two-byte chord must not reach the member as typed
+// input.
+func TestShelfUnboundChordConsumesTheWholeKey(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	// The prefix then alt+x. The keymap matches the leading esc (dismiss-esc),
+	// but the key as a whole has no binding, so the shelf has to spend both
+	// bytes of it rather than run esc and hand the x to the member.
+	feed(tui, "\x02\x1bx")
+	if len(tui.toasts) == 0 {
+		t.Fatal("an unbound chord raised no toast")
+	}
+	if last := tui.toasts[len(tui.toasts)-1].text; !strings.Contains(last, "no shelf binding") {
+		t.Fatalf("toast = %q, want it to name the unbound chord", last)
+	}
+	if len(tui.inbuf) != 0 {
+		t.Fatalf("the chord left %q in the buffer", tui.inbuf)
+	}
+	testutil.NoMsg(t, got)
+}
+
+// barLeftCells is the cells the status bar's left block paints at the current
+// snapshot: the fitted block, elision included.
+func barLeftCells(tui *tui) int {
+	th, set := tui.theme(), tui.glyphSet()
+	budget := barLeftBudget(th, tui.snap, tui.armed, tui.barInfo(), tui.barBadgeOf(th, set))
+	return segment.SegCells(barLeftFor(th, tui.snap, set).fit(th, budget))
+}
+
+// TestShelfBarChipSpanClampsToThePaintedCells proves the chip's clickable span
+// never reaches past the cells the bar painted: at a width where elision cuts
+// the chip, only the painted cells summon it, and the cells elision gave up do
+// nothing.
+func TestShelfBarChipSpanClampsToThePaintedCells(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	// An unread badge pins cells on the right, so a narrow screen has to cut
+	// the left block and the chip with it.
+	tui.notifyRecent = []box.Entry{{Seq: 3, Key: "notify/w1p9", State: box.StateDone}}
+	tui.snap.Cols = 120
+	lo, hi := tui.shelfChipSpan()
+	full := hi - lo
+	if full < 2 {
+		t.Fatalf("chip span at 120 cols = %d..%d, want a painted chip", lo, hi)
+	}
+
+	cut := 0
+	for cols := 119; cols >= 8; cols-- {
+		tui.snap.Cols = cols
+		lo, hi := tui.shelfChipSpan()
+		painted := barLeftCells(tui)
+		if hi > painted {
+			t.Fatalf("chip span %d..%d at %d cols reaches past the %d painted cells", lo, hi, cols, painted)
+		}
+		if cut == 0 && hi > lo && hi-lo < full {
+			cut = cols
+		}
+	}
+	if cut == 0 {
+		t.Fatal("no width elided the chip in part, so the clamp is unproven")
+	}
+
+	tui.snap.Cols = cut
+	lo, hi = tui.shelfChipSpan()
+	if hi <= lo {
+		t.Fatalf("chip span at %d cols = %d..%d, want the painted part of it", cut, lo, hi)
+	}
+	// The bar row owns the pointer, so a click past the painted chip must do
+	// nothing at all.
+	tui.handleMouse(mouseEvent{btn: 0, x: hi + 1, y: tui.snap.Rows})
+	if tui.shelf != nil {
+		t.Fatalf("a click at cell %d, past the painted chip %d..%d, summoned the shelf", hi, lo, hi)
+	}
+	testutil.NoMsg(t, got)
+	tui.handleMouse(mouseEvent{btn: 0, x: hi, y: tui.snap.Rows})
+	if tui.shelf == nil {
+		t.Fatalf("a click at cell %d inside the painted chip %d..%d did not summon it", hi-1, lo, hi)
 	}
 }
