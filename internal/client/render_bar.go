@@ -126,6 +126,43 @@ type barLeft struct {
 	showStat  bool
 	showSync  bool
 	showZoom  bool
+	// shelf is the shelf chip, nil when the shelf is empty. shelfLo and
+	// shelfW are its cell span in the left block the last groups call built,
+	// so a click on the bar can tell the chip from the rest of the row.
+	shelf   *barShelfChip
+	shelfLo int
+	shelfW  int
+}
+
+// barShelfChip is the status bar's shelf mark: the shelf glyph, how many panes
+// are set aside, and the state mark of the member that asks most.
+type barShelfChip struct {
+	mark   string
+	count  int
+	glyph  string
+	colour theme.RGB
+}
+
+// barShelf builds the shelf chip from the snapshot's shelved panes. An empty
+// shelf gets no chip, so a session that never shelved a pane paints the bar it
+// always did.
+func barShelf(th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) *barShelfChip {
+	members := rail.ShelfPanes(snap)
+	if len(members) == 0 {
+		return nil
+	}
+	statuses := make([]string, 0, len(members))
+	for _, m := range members {
+		statuses = append(statuses, m.Status)
+	}
+	worst := rail.WorstState(statuses)
+	if worst == "" {
+		// A shelf of plain shells has no state to name: the unknown mark is
+		// the honest one, exactly as the focus chip paints a shell.
+		worst = "unknown"
+	}
+	glyph, colour := rail.RailGlyph(th, worst, set)
+	return &barShelfChip{mark: rail.ShelfMark(set), count: len(members), glyph: glyph, colour: colour}
 }
 
 // barFocus builds the focus chip from the focused pane. An agent reports a
@@ -182,6 +219,7 @@ func barLeftFor(th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet) *barLef
 		l.windows = append(l.windows, barWindow{num: i + 1, name: wlabel.Render(snap.WindowLabel, rail.WindowVars(snap, w)), active: i == snap.ActiveWindow})
 	}
 	l.focus = barFocus(th, snap, set)
+	l.shelf = barShelf(th, snap, set)
 	return l
 }
 
@@ -233,6 +271,21 @@ func (l *barLeft) groups(th theme.Theme) [][]segment.Seg {
 		if l.showStat && l.focus.status != "" {
 			chip = append(chip, segment.Seg{Text: " " + l.focus.status, FG: p.RailDim, BG: p.RailFocusBG})
 		}
+		out = append(out, chip)
+	}
+	if l.shelf != nil {
+		// The chip records its cell span as it is composed, so the bar's
+		// click handler answers the chip the frame painted and nothing else.
+		at := 0
+		for _, g := range out {
+			at += segment.SegCells(g) + 1
+		}
+		chip := []segment.Seg{
+			{Text: l.shelf.mark, FG: p.BarAccent, BG: p.RailBG},
+			{Text: strconv.Itoa(l.shelf.count), FG: p.RailText, BG: p.RailBG, Bold: true},
+			{Text: " " + l.shelf.glyph, FG: l.shelf.colour, BG: p.RailBG},
+		}
+		l.shelfLo, l.shelfW = at, segment.SegCells(chip)
 		out = append(out, chip)
 	}
 	return out
@@ -379,6 +432,15 @@ func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, s
 		b = badge[0]
 	}
 	right := barFitPinned(barPinned(th, armed, info, b), snap.Cols, th.Glyphs.ElideMark())
+	left := barLeftFor(th, snap, set).fit(th, barLeftBudget(th, snap, armed, info, b))
+	return append(left, right...)
+}
+
+// barLeftBudget is the room the pinned block leaves the left block, one gutter
+// cell short. A bar that pins nothing leaves the whole row. The click handler
+// re-runs it so a click is tested against the same elision the frame painted.
+func barLeftBudget(th theme.Theme, snap *wire.Snapshot, armed bool, info string, badge barBadge) int {
+	right := barFitPinned(barPinned(th, armed, info, badge), snap.Cols, th.Glyphs.ElideMark())
 	budget := snap.Cols - segment.SegCells(right)
 	if len(right) > 0 {
 		// Keep one gutter cell between the blocks. drawBar spends it as part of
@@ -386,10 +448,9 @@ func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, s
 		budget--
 	}
 	if budget < 0 {
-		budget = 0
+		return 0
 	}
-	left := barLeftFor(th, snap, set).fit(th, budget)
-	return append(left, right...)
+	return budget
 }
 
 // barBadgeOf collects the unread mark the bar pins: the count of notify

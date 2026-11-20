@@ -609,6 +609,10 @@ func Run(args []string) error {
 			ids = append(ids, layout.AllPanes(w.Root)...)
 		}
 	}
+	// A shelved pane sits in no tree, so the walk above misses it. Its PTY
+	// outlives the server and is the shelf's whole point: adopt it too, or a
+	// restart leaves it without a watcher and its exit unnoticed.
+	ids = append(ids, st.Shelf...)
 	for _, id := range ids {
 		if err := s.ensurePane(id); err != nil {
 			log.Printf("pane %s: %v", id, err)

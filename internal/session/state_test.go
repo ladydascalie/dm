@@ -551,3 +551,135 @@ func TestWindowSyncRoundTrip(t *testing.T) {
 		t.Fatal("a window with no sync key loaded synced")
 	}
 }
+
+// TestShelfDefaultsEmpty proves the shelf is zero on a state file written
+// before it existed: no members, no active member, unfolded.
+func TestShelfDefaultsEmpty(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	const raw = `{
+  "name": "oldshelf",
+  "workspaces": [
+    {"id": "s1", "name": "main",
+     "windows": [{"id": "w1", "name": "one", "root": {"pane": "w1p1"}, "focus": "w1p1"}],
+     "active": 0}
+  ],
+  "active": 0,
+  "cols": 80,
+  "rows": 24,
+  "panes": {"w1p1": {"cols": 20, "rows": 10}},
+  "nextWorkspace": 1,
+  "nextWindow": 1,
+  "idVersion": 2
+}`
+	if err := os.MkdirAll(paths.SessionDirAt(root, "oldshelf"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePathAt(root, "oldshelf"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(root, "oldshelf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Shelf) != 0 || got.ShelfActive != 0 || got.ShelfFolded {
+		t.Fatalf("old state loaded shelf %v active %d folded %v, want an empty shelf",
+			got.Shelf, got.ShelfActive, got.ShelfFolded)
+	}
+	if got.Shelved("w1p1") {
+		t.Fatal("a tree pane loaded shelved")
+	}
+	if idx := got.ShelfIndex("w1p1"); idx != -1 {
+		t.Fatalf("ShelfIndex of a tree pane = %d, want -1", idx)
+	}
+}
+
+// TestShelfAddDrop is the shelf index contract in a table: an add keeps the
+// active member where it was, a drop keeps the index on the member it named,
+// and both ends of the slice stay in range.
+func TestShelfAddDrop(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		shelf  []string
+		active int
+		op     string
+		id     string
+		want   []string
+		at     int
+	}{
+		{"add to an empty shelf activates it", nil, 3, "add", "a", []string{"a"}, 0},
+		{"add keeps the active member", []string{"a"}, 0, "add", "b", []string{"a", "b"}, 0},
+		{"add refuses a duplicate", []string{"a"}, 0, "add", "a", []string{"a"}, 0},
+		{"drop the active first member", []string{"a", "b"}, 0, "drop", "a", []string{"b"}, 0},
+		{"drop before the active member steps it back", []string{"a", "b", "c"}, 2, "drop", "a", []string{"b", "c"}, 1},
+		{"drop after the active member leaves it", []string{"a", "b", "c"}, 0, "drop", "c", []string{"a", "b"}, 0},
+		{"drop the last member empties the shelf", []string{"a"}, 0, "drop", "a", nil, 0},
+		{"drop a stranger changes nothing", []string{"a"}, 0, "drop", "z", []string{"a"}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &State{Shelf: append([]string(nil), tc.shelf...), ShelfActive: tc.active}
+			switch tc.op {
+			case "add":
+				st.AddShelf(tc.id)
+			case "drop":
+				st.DropShelf(tc.id)
+			}
+			if len(st.Shelf) != len(tc.want) {
+				t.Fatalf("shelf = %v, want %v", st.Shelf, tc.want)
+			}
+			for i := range st.Shelf {
+				if st.Shelf[i] != tc.want[i] {
+					t.Fatalf("shelf = %v, want %v", st.Shelf, tc.want)
+				}
+			}
+			if st.ShelfActive != tc.at {
+				t.Fatalf("active = %d, want %d", st.ShelfActive, tc.at)
+			}
+		})
+	}
+}
+
+// TestShelfClampAndPrune proves the index never leaves the slice and a member
+// whose pane the session no longer carries is dropped on load.
+func TestShelfClampAndPrune(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		shelf []string
+		at    int
+		want  int
+	}{
+		{"empty shelf", nil, 4, 0},
+		{"past the end", []string{"a", "b"}, 9, 1},
+		{"negative", []string{"a", "b"}, -3, 0},
+		{"inside", []string{"a", "b"}, 1, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &State{Shelf: tc.shelf, ShelfActive: tc.at}
+			st.ClampShelfActive()
+			if st.ShelfActive != tc.want {
+				t.Fatalf("active = %d, want %d", st.ShelfActive, tc.want)
+			}
+		})
+	}
+	st := &State{
+		Shelf:       []string{"a", "gone", "b"},
+		ShelfActive: 2,
+		Panes:       map[string]*PaneState{"a": {}, "b": {}},
+	}
+	if !st.PruneShelf() {
+		t.Fatal("PruneShelf dropped nothing, want the dead member gone")
+	}
+	if len(st.Shelf) != 2 || st.Shelf[0] != "a" || st.Shelf[1] != "b" {
+		t.Fatalf("shelf = %v, want a then b", st.Shelf)
+	}
+	if st.ShelfActive != 1 {
+		t.Fatalf("active = %d, want the last member", st.ShelfActive)
+	}
+	if st.PruneShelf() {
+		t.Fatal("a second prune dropped something")
+	}
+}

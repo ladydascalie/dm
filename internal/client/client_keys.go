@@ -840,6 +840,20 @@ func (t *tui) runAction(name string) {
 		t.action("prev-pane", nil)
 	case "close-pane":
 		t.action("close-pane", nil)
+	case "shelve-pane":
+		// The focused pane leaves the layout and joins the shelf. Its shell
+		// keeps running, and the reply's toast is the server's refusal, if any.
+		t.action("shelve-pane", nil)
+	case "toggle-shelf":
+		t.shelfToggle()
+	case "pop-pane":
+		// While the shelf is up, G pops the member it shows; otherwise the pop
+		// names no target and the server takes the shelf's active member.
+		if t.shelf != nil {
+			t.popShelf()
+			break
+		}
+		t.actionOn("", "pop-pane", nil)
 	case "close-window":
 		pane := ""
 		if t.snap != nil {

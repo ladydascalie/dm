@@ -139,7 +139,7 @@ func llmsCell(s string) string {
 // so near neighbours share a row. Every action in manActionNames appears here
 // exactly once.
 var llmsActionGroups = [][]string{
-	{"ping", "term-colours"}, {"list"},
+	{"ping", "term-colours", "list"},
 	{"read", "screen"}, {"history", "yank"}, {"replay", "status"},
 	{"write-to", "exec"}, {"keys"},
 	{"split"}, {"zoom-pane"}, {"set-rail", "reload"}, {"resize-split"},
@@ -153,7 +153,7 @@ var llmsActionGroups = [][]string{
 	{"rename-window", "rename-workspace", "set-project"},
 	{"swap-panes", "move-pane"}, {"move-window", "move-workspace"},
 	{"select-layout", "synchronize-panes"},
-	{"float-open", "float-close"},
+	{"float-open", "float-close", "shelve-pane", "pop-pane"},
 	{"msg-post"}, {"msg-list"}, {"msg-clear"}, {"msg-wait"}, {"msg-sub"},
 	{"msg-watchers", "msg-schema"},
 	{"secret-register", "secret-list", "secret-revoke"},

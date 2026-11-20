@@ -405,6 +405,14 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.reply(cl, m, map[string]any{"layout": name}, err)
 
 	case "focus":
+		// A shelf member has no window focus to take: naming one moves the
+		// shelf's active member instead, which is what the shelf float's n
+		// and p keys and a rail shelf row send.
+		if s.focusShelf(m.Target) {
+			s.pushSnapshot()
+			s.reply(cl, m, nil, nil)
+			return
+		}
 		err := s.mutation(func() error { return s.setFocus(m.Target) })
 		s.afterMutation()
 		s.reply(cl, m, nil, err)
@@ -427,6 +435,30 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		err := s.mutation(func() error { return s.closePane(m.Target) })
 		s.afterMutation()
 		s.reply(cl, m, nil, err)
+
+	case "shelve-pane":
+		// The pane leaves its window's tree and joins the shelf: it keeps its
+		// id, its state and its PTY, and gives up its rect and its focus.
+		var id string
+		err := s.mutation(func() error {
+			var e error
+			id, e = s.shelvePane(m.Target)
+			return e
+		})
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"pane": id}, err)
+
+	case "pop-pane":
+		// The shelf member returns beside the focused pane, on the right, and
+		// takes the focus. The tree change is the split path's own.
+		var id string
+		err := s.mutation(func() error {
+			var e error
+			id, e = s.popPane(m.Target)
+			return e
+		})
+		s.afterMutation()
+		s.reply(cl, m, map[string]any{"pane": id}, err)
 
 	case "close-window":
 		err := s.mutation(func() error { return s.closeWindow(m.Target) })

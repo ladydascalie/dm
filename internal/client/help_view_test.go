@@ -127,26 +127,26 @@ func helpBoxRowText(p helpBoxPainted, row, from, to int) string {
 	return b.String()
 }
 
-// TestHelpBoxSizesToWidestRowAt100x40 proves the box holds the default layout
+// TestHelpBoxSizesToWidestRowAt100x44 proves the box holds the default layout
 // whole, that both border rows own a row, and that the frame carries its title
-// and hint. The default table grew one toggle-secrets row, so the proof runs
-// on a 40-row screen.
-func TestHelpBoxSizesToWidestRowAt100x40(t *testing.T) {
+// and hint. The default table grew one shelf row, so the proof runs on a
+// 44-row screen, as it moved to 40 for the toggle-secrets row.
+func TestHelpBoxSizesToWidestRowAt100x44(t *testing.T) {
 	t.Parallel()
 	cfg := keymap.LoadDefault()
 	keys := cfg.HelpEntries()
-	g, ok := helpBoxGeometry(100, 40, keys, cfg.HelpNotes())
+	g, ok := helpBoxGeometry(100, 44, keys, cfg.HelpNotes())
 	if !ok {
 		t.Fatal("helpBoxGeometry returned false")
 	}
-	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, cfg))
+	p := helpBoxParse(t, helpBoxDraw(t, 100, 44, cfg))
 	x0, y0, x1, y1 := helpBoxBounds(t, p)
 
 	if want := g.inner + 2; x1-x0+1 != want {
 		t.Fatalf("box width = %d, want %d", x1-x0+1, want)
 	}
-	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 39 {
-		t.Fatalf("box %d,%d..%d,%d is not inside 100x40", x0, y0, x1, y1)
+	if x0 < 0 || y0 < 0 || x1 > 99 || y1 > 43 {
+		t.Fatalf("box %d,%d..%d,%d is not inside 100x44", x0, y0, x1, y1)
 	}
 	if want := g.h + 2; y1-y0+1 != want {
 		t.Fatalf("box height = %d, want %d", y1-y0+1, want)
@@ -492,8 +492,9 @@ keymap "main" {
 
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
-// same order. Regenerate it by running the test and copying the got value.
-const helpBoxDefaultSHA256 = "3208c4a542b49d69d8b238ece5fc89fd9849149c29d388e90ad9e9acc5947a2c"
+// same order. Regenerate it by running the test and copying the got value. It
+// moved when the table gained the shelve/pop and shelf rows.
+const helpBoxDefaultSHA256 = "cd2ebf1dfea909396274778e09402fae2182c114ed1e9115292b63d773a49851"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the

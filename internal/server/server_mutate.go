@@ -21,6 +21,17 @@ func (s *server) toggleFold(id string) (bool, error) {
 	if name, ok := strings.CutPrefix(id, wire.ProjectTargetPrefix); ok {
 		return s.toggleProjectFold(name)
 	}
+	if id == wire.ShelfFoldTarget {
+		// The shelf section folds like a window: the flag hides its rows and
+		// survives a restart with the rest of the state.
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.st.ShelfFolded = !s.st.ShelfFolded
+		if err := s.st.Save(); err != nil {
+			return false, err
+		}
+		return !s.st.ShelfFolded, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
@@ -1087,6 +1098,12 @@ func (s *server) closePane(target string) error {
 	win := s.st.ActiveWindow()
 	if target == "" {
 		target = win.Focus
+	}
+	// A shelved pane is in no tree, so the count below cannot see it: closing
+	// it here would reach the last-pane branch and kill a PTY the shelf owns.
+	if s.st.Shelved(target) {
+		s.mu.Unlock()
+		return fmt.Errorf("pane %q is on the shelf: pop it before closing it", target)
 	}
 	ids := layout.AllPanes(win.Root)
 	if len(ids) <= 1 {

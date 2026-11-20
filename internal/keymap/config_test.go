@@ -481,6 +481,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"n / p", "next/prev pane"},
 		{"x", "close pane"},
 		{"X", "close window"},
+		{"f G F", "shelve / pop / shelf"},
 		{"z", "zoom pane"},
 		{"c", "new window"},
 		{"w / W", "next/prev win"},
