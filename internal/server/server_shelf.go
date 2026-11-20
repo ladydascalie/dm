@@ -114,13 +114,18 @@ func (s *server) popPane(target string) (string, error) {
 		// build the workspace and its window, the way new-window does, and let
 		// the member fill it below.
 		ws := &session.Workspace{ID: s.st.NewWorkspaceID(), Name: s.st.Name, Unfolded: true}
-		win = &session.Window{ID: s.st.NewWindowID(), Unfolded: s.cfg.DefaultFold()}
-		if ps := s.st.Panes[target]; ps != nil {
-			win.Name = paths.FolderName(ps.Cwd)
-		}
+		win = s.shelfWindowLocked(target)
 		ws.Windows = []*session.Window{win}
 		s.st.Workspaces = []*session.Workspace{ws}
 		s.st.Active = 0
+	} else if ws := s.st.ActiveWorkspace(); len(ws.Windows) == 0 {
+		// The workspace exists with no window, so ActiveWindow handed back a
+		// throwaway: writing the member into it reports a pop that no state
+		// holds. Build the real window before the root is read, the same way
+		// the branch above does.
+		win = s.shelfWindowLocked(target)
+		ws.Windows = []*session.Window{win}
+		ws.Active = 0
 	}
 	if len(layout.AllPanes(win.Root)) == 0 {
 		// An empty window has no pane to split: the member becomes its root,
@@ -141,6 +146,17 @@ func (s *server) popPane(target string) (string, error) {
 	win.Focus = target
 	s.st.DropShelf(target)
 	return target, nil
+}
+
+// shelfWindowLocked builds the window a pop lands in when the session has none
+// to use: a fresh id, folded by the config, and named after the member's folder
+// the way new-window names one. The caller stores it. The caller holds s.mu.
+func (s *server) shelfWindowLocked(target string) *session.Window {
+	win := &session.Window{ID: s.st.NewWindowID(), Unfolded: s.cfg.DefaultFold()}
+	if ps := s.st.Panes[target]; ps != nil {
+		win.Name = paths.FolderName(ps.Cwd)
+	}
+	return win
 }
 
 // focusShelf moves the shelf's active member to the pane named, and reports

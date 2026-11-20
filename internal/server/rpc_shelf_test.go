@@ -757,9 +757,13 @@ func TestNewWindowRefusedLeavesNoEmptyWorkspace(t *testing.T) {
 // TestStartSkipsTheSeedWithNoWindow proves the same refusal one level down: a
 // workspace with no window hands back a throwaway window, so the start path
 // seeds no pane into it either.
-func TestStartSkipsTheSeedWithNoWindow(t *testing.T) {
+// noWindowSession saves a session with one workspace, no window and one shelf
+// member that has a pane state: the state the start path refuses to seed and a
+// pop must build a real window for.
+func noWindowSession(t *testing.T, name string) (string, string) {
+	t.Helper()
 	root := t.TempDir()
-	st := session.NewStateAt(root, "shelfnowindow")
+	st := session.NewStateAt(root, name)
 	win := st.ActiveWindow()
 	id := win.NewPaneID()
 	st.Panes = map[string]*session.PaneState{id: {}}
@@ -770,6 +774,14 @@ func TestStartSkipsTheSeedWithNoWindow(t *testing.T) {
 	if err := st.Save(); err != nil {
 		t.Fatal(err)
 	}
+	return root, id
+}
+
+// TestStartSkipsTheSeedWithNoWindow proves the same refusal one level down: a
+// workspace with no window hands back a throwaway window, so the start path
+// seeds no pane into it either.
+func TestStartSkipsTheSeedWithNoWindow(t *testing.T) {
+	root, id := noWindowSession(t, "shelfnowindow")
 	loaded, err := session.LoadStateAt(root, "shelfnowindow")
 	if err != nil {
 		t.Fatalf("reload: %v", err)
@@ -784,5 +796,79 @@ func TestStartSkipsTheSeedWithNoWindow(t *testing.T) {
 	}
 	if len(loaded.Workspaces) != 1 || len(loaded.Workspaces[0].Windows) != 0 {
 		t.Fatalf("the seed built %+v, want the workspace left as it was", loaded.Workspaces)
+	}
+}
+
+// TestPopPaneBuildsAWindowWhenTheWorkspaceHasNone proves a pop into a workspace
+// that exists with no window reports a real landing: the window is built and
+// stored, the member is in its tree and off the shelf, and a restart finds it
+// there. Without this the reply says success while the pane sits in a throwaway
+// window no state holds, alive and unreachable.
+func TestPopPaneBuildsAWindowWhenTheWorkspaceHasNone(t *testing.T) {
+	root, id := noWindowSession(t, "shelfpopnowin")
+	loaded, err := session.LoadStateAt(root, "shelfpopnowin")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	s := railServer(loaded)
+	// The start path leaves the session as it is, and the member's shell is
+	// live: the pop must not need it to be absent.
+	s.seedWindow()
+	paneConnFor(t, s, id, "live")
+
+	got, err := s.popPane("")
+	if err != nil {
+		t.Fatalf("pop into a workspace with no window: %v", err)
+	}
+	if got != id {
+		t.Fatalf("pop reply = %q, want the active member %q", got, id)
+	}
+	if len(loaded.Workspaces) != 1 {
+		t.Fatalf("workspaces = %d, want one", len(loaded.Workspaces))
+	}
+	ws := loaded.Workspaces[0]
+	if len(ws.Windows) != 1 {
+		t.Fatalf("windows = %d, want one real window", len(ws.Windows))
+	}
+	win := ws.Windows[0]
+	if win.ID == "" || ws.Windows[0] != win {
+		t.Fatalf("window = %+v, want a stored real one", win)
+	}
+	if ids := layout.AllPanes(win.Root); len(ids) != 1 || ids[0] != id {
+		t.Fatalf("window root = %v, want the member %q", ids, id)
+	}
+	if win.Focus != id {
+		t.Fatalf("focus = %q, want the member", win.Focus)
+	}
+	if loaded.Shelved(id) || len(loaded.Shelf) != 0 {
+		t.Fatalf("shelf = %v, want the member off it", loaded.Shelf)
+	}
+
+	// The landing is on disk, not only in the throwaway that ActiveWindow
+	// handed back: a save and a load find the window and its pane.
+	if err := loaded.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := session.LoadStateAt(root, "shelfpopnowin")
+	if err != nil {
+		t.Fatalf("second reload: %v", err)
+	}
+	if len(again.Workspaces) != 1 || len(again.Workspaces[0].Windows) != 1 {
+		t.Fatalf("reloaded workspaces = %+v, want one with one window", again.Workspaces)
+	}
+	rwin := again.Workspaces[0].Windows[0]
+	if ids := layout.AllPanes(rwin.Root); len(ids) != 1 || ids[0] != id {
+		t.Fatalf("reloaded root = %v, want the member %q", ids, id)
+	}
+	if rwin.Focus != id {
+		t.Fatalf("reloaded focus = %q, want the member", rwin.Focus)
+	}
+	if len(again.Shelf) != 0 {
+		t.Fatalf("reloaded shelf = %v, want it empty", again.Shelf)
+	}
+
+	// The member left the shelf, so a second pop of the same id refuses.
+	if _, err := s.popPane(id); err == nil {
+		t.Fatal("a second pop accepted a pane that is no longer on the shelf")
 	}
 }
