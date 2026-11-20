@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm: environment groups, mockups</title>
+<style>
+  :root {
+    --bg: #0e0d13;
+    --pane: #0b0a10;
+    --rail: #14131a;
+    --rail-focus: #2c2a38;
+    --rail-hover: #21202d;
+    --line: #2c2a38;
+    --text: #e9eaf1;
+    --dim: #8f93a8;
+    --header: #a6a9bd;
+    --win: #9599ae;
+    --accent: #7ac0eb;
+    --working: #f5be50;
+    --done: #6ee191;
+    --idle: #78c8e1;
+    --error: #ff82a0;
+    --blocked: #ff6e6e;
+    --add: #78dc82;
+    --del: #ff7d7d;
+    --violet: #bb9af7;
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 24px 120px;
+    background: #07070b; color: var(--text);
+    font: 14px/1.5 var(--mono);
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 6px; letter-spacing: .02em; }
+  .lede { color: var(--dim); margin: 0 0 28px; max-width: 70ch; }
+  .lede b { color: var(--text); font-weight: 600; }
+  section { margin: 0 0 40px; }
+  .head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+  .step {
+    font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); border: 1px solid #244; border-radius: 3px;
+    padding: 1px 6px; white-space: nowrap;
+  }
+  .step.now { color: var(--dim); border-color: var(--line); }
+  h2 { font-size: 14px; margin: 0; font-weight: 600; }
+  .note { color: var(--dim); margin: 0 0 10px; max-width: 82ch; font-size: 12.5px; }
+  .note b { color: var(--text); font-weight: 600; }
+
+  /* frame: rail | tabbar + panes; status bar spans the bottom */
+  .frame {
+    display: grid;
+    grid-template-columns: 156px 1fr;
+    grid-template-rows: 22px 1fr 22px;
+    grid-template-areas: "rail tabs" "rail panes" "bar bar";
+    background: var(--pane);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.45;
+    height: 340px;
+  }
+  .frame.short { height: 250px; }
+  .frame.tall { height: 400px; }
+
+  .rail {
+    grid-area: rail; background: var(--rail); border-right: 1px solid var(--line);
+    padding: 4px 0; overflow: hidden;
+  }
+  .rail .row { padding: 1px 8px; white-space: nowrap; }
+  .rail .proj { color: var(--header); }
+  .rail .ws { color: var(--text); }
+  .rail .winrow { color: var(--win); }
+  .rail .pane { color: var(--dim); padding-left: 26px; }
+  .rail .pane.on { background: var(--rail-focus); color: var(--text); }
+  .rail .bar { color: var(--accent); }
+  .rail .g { color: var(--dim); }
+  .rail .branch { color: var(--add); }
+  .rail .del { color: var(--del); }
+
+  .tabs {
+    grid-area: tabs; display: flex; align-items: stretch; gap: 1px;
+    background: var(--rail); border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    padding: 0 8px; display: flex; align-items: center; gap: 6px;
+    color: var(--dim); white-space: nowrap;
+  }
+  .tab.on { background: var(--rail-focus); color: var(--text); }
+  .tab .dot { color: var(--accent); }
+
+  .panes {
+    grid-area: panes; display: grid; gap: 1px; background: var(--line);
+    grid-template-columns: 2.35fr 1fr;
+    grid-template-rows: repeat(4, 1fr);
+    overflow: hidden;
+  }
+  .pi { grid-row: 1 / -1; }
+  .pane-box {
+    background: var(--pane); padding: 3px 8px; overflow: hidden;
+    position: relative;
+  }
+  .pane-box .l { white-space: pre; }
+  .statusbar {
+    grid-area: bar; display: flex; align-items: center; gap: 14px;
+    background: var(--rail); border-top: 1px solid var(--line);
+    padding: 0 10px; color: var(--dim); font-size: 10.5px; overflow: hidden;
+  }
+  .statusbar .on { color: var(--text); background: var(--rail-focus); padding: 0 6px; }
+  .statusbar .spacer { flex: 1; }
+
+  .c-dim { color: var(--dim); }
+  .c-head { color: var(--header); }
+  .c-acc { color: var(--accent); }
+  .c-work { color: var(--working); }
+  .c-done { color: var(--done); }
+  .c-idle { color: var(--idle); }
+  .c-err { color: var(--error); }
+  .c-ok { color: var(--add); }
+  .c-bad { color: var(--del); }
+  .c-vio { color: var(--violet); }
+  .b { font-weight: 600; }
+
+  /* jump palette overlay */
+  .overlay-frame { position: relative; }
+  .overlay {
+    position: absolute; inset: 0; display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    background: rgba(7,7,11,.82);
+  }
+  .palette {
+    margin: 18px; border: 1px solid var(--line); border-radius: 6px;
+    background: #121119; overflow: hidden; display: flex; flex-direction: column;
+    box-shadow: 0 12px 40px rgba(0,0,0,.55);
+  }
+  .palette .query {
+    padding: 5px 10px; border-bottom: 1px solid var(--line); color: var(--text);
+  }
+  .palette .query .caret { color: var(--accent); }
+  .palette .row {
+    display: grid; grid-template-columns: 16px 1fr 1.15fr 1.1fr .6fr .5fr;
+    gap: 8px; padding: 2px 10px; color: var(--dim); white-space: nowrap;
+  }
+  .palette .row.sel { background: var(--rail-focus); color: var(--text); }
+  .palette .row .n { color: var(--accent); }
+  .palette .foot {
+    margin-top: auto; padding: 4px 10px; border-top: 1px solid var(--line);
+    color: var(--dim); font-size: 10.5px;
+  }
+  .preview {
+    margin: 18px 18px 18px 0; border: 1px solid var(--line); border-radius: 6px;
+    background: #0b0a10; padding: 6px 10px; overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,.55);
+  }
+  .preview .cap { color: var(--dim); font-size: 10.5px; margin-bottom: 4px; }
+
+  /* server bar */
+  .barrow {
+    grid-area: bar2; display: flex; gap: 1px; background: var(--line);
+    border-bottom: 1px solid var(--line); overflow: hidden;
+  }
+  .frame.withbar {
+    grid-template-rows: 22px 20px 1fr 22px;
+    grid-template-areas: "rail tabs" "rail bar2" "rail panes" "bar bar";
+  }
+  .barrow .cell {
+    display: flex; align-items: center; gap: 6px; padding: 0 8px;
+    background: var(--rail); color: var(--dim); white-space: nowrap;
+    min-width: 0; overflow: hidden;
+  }
+  .barrow .cell.on { background: var(--rail-focus); color: var(--text); }
+  .barrow .cell.bad { background: #2a1720; }
+  .barrow .cell .tail { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+
+  /* group node */
+  .split2 { grid-area: panes; display: grid; grid-template-columns: 1.32fr 1fr; gap: 1px; background: var(--line); overflow: hidden; }
+  .groupbox { background: var(--pane); display: flex; flex-direction: column; overflow: hidden; }
+  .strip {
+    display: flex; align-items: stretch; gap: 1px; background: #17161f;
+    border-bottom: 1px solid var(--line); height: 20px; flex: none;
+  }
+  .chip {
+    display: flex; align-items: center; gap: 6px; padding: 0 8px;
+    color: var(--dim); white-space: nowrap; cursor: pointer;
+  }
+  .chip.on { background: var(--rail-focus); color: var(--text); }
+  .chip.bad { color: var(--error); }
+  .chip .gbadge { color: var(--dim); }
+  .groupbody { padding: 3px 8px; overflow: hidden; flex: 1; }
+  .groupbody .l { white-space: pre; }
+  .log { display: none; }
+  .log.on { display: block; }
+
+  .grid4 {
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr;
+    gap: 1px; background: var(--line); flex: 1; overflow: hidden;
+  }
+  .tile { background: var(--pane); display: flex; flex-direction: column; overflow: hidden; }
+  .tile.on { outline: 1px solid var(--accent); outline-offset: -1px; }
+  .tile .thead { display: flex; gap: 6px; padding: 1px 6px; background: #17161f; color: var(--dim); white-space: nowrap; }
+  .tile .tbody { padding: 2px 6px; overflow: hidden; }
+  .tile .tbody .l { white-space: pre; }
+
+  table.states { border-collapse: collapse; margin: 6px 0 0; font-size: 11.5px; }
+  table.states td { padding: 3px 14px 3px 0; color: var(--dim); vertical-align: top; }
+  table.states td.g { white-space: nowrap; }
+
+  .legend { color: var(--dim); font-size: 11.5px; margin-top: 10px; }
+  .legend code { color: var(--text); background: #17161f; padding: 0 4px; border-radius: 3px; }
+  .step.wild { color: var(--violet); border-color: #3b2f52; }
+  .rail .sep { height: 1px; background: var(--line); margin: 5px 0; padding: 0; }
+  .rail .sh { color: var(--header); padding-left: 8px; }
+  .floater {
+    position: absolute; left: 20%; right: 6%; top: 7%; bottom: 11%;
+    border: 1px solid #3b3550; border-radius: 6px; background: #0b0a10;
+    display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 18px 60px rgba(0,0,0,.7);
+  }
+  .floater .ftitle {
+    display: flex; justify-content: space-between; padding: 2px 9px;
+    background: #17161f; border-bottom: 1px solid var(--line); color: var(--text);
+  }
+  .floater .fbody { flex: 1; padding: 4px 10px; overflow: hidden; }
+  .floater .ffoot {
+    border-top: 1px solid var(--line); padding: 2px 9px; background: #17161f;
+    color: var(--dim); font-size: 10.5px;
+  }
+  .split1 { grid-area: panes; background: var(--pane); overflow: hidden; }
+  .statelist { padding: 3px 10px; }
+  .statelist .r { display: grid; grid-template-columns: 120px 1fr; gap: 2px 14px; padding: 1px 0; color: var(--dim); }
+  .statelist .g { color: var(--text); }
+  .q { margin-top: 44px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--rail); }
+  .q h3 { margin: 0 0 8px; font-size: 13px; }
+  .q ol { margin: 0; padding-left: 20px; color: var(--dim); }
+  .q li { margin: 4px 0; }
+  .q b { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>dm: environment groups</h1>
+  <p class="lede">
+    The cast is your workspace 1: <b>w1</b> in workspace <b>main</b>, project go-backend.
+    One pi pane at 73% width, four dev servers stacked in a column.
+    Panels 1 to 5 are the ladder, cheapest first. 6 and 7 are the wildcard:
+    panes off the grid. 8 is what a member can say.
+    Colours, glyphs and the 1px divider are dm's own.
+  </p>
+
+  <!-- ============ 1. today ============ -->
+  <section>
+    <div class="head"><span class="step now">now</span><h2>w1 as it stands</h2></div>
+    <p class="note">
+      Each server gets about 8 usable rows. <b>srv-authgame</b> has failed and the failure is
+      cut off at the third line. Reaching <b>srv-publishers</b> is two focus moves, or
+      <code>prefix a</code> and a round trip.
+    </p>
+    <div class="frame">
+      <div class="rail">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row ws"><span class="bar">▌</span> main</div>
+        <div class="row winrow">  ▾ b <span class="branch">main +1</span> <span class="del">-1</span></div>
+        <div class="row pane on">· π go-backend</div>
+        <div class="row pane">· srv-go</div>
+        <div class="row pane">· srv-publishers</div>
+        <div class="row pane">· srv-authgame</div>
+        <div class="row pane">· srv-console</div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="panes">
+        <div class="pane-box pi">
+          <div class="l c-dim">π go-backend <span class="c-ok">main</span></div>
+          <div class="l">&nbsp;</div>
+          <div class="l">&gt; the callback scope is dropped on refresh</div>
+          <div class="l c-dim">  I'll trace where the token loses scope.</div>
+          <div class="l">&nbsp;</div>
+          <div class="l">● Grep "scope" <span class="c-dim">in auth</span></div>
+          <div class="l c-dim">  internal/auth/callback.go</div>
+          <div class="l c-dim">  internal/auth/refresh.go</div>
+          <div class="l">&nbsp;</div>
+          <div class="l c-dim">  reading refresh.go…</div>
+        </div>
+        <div class="pane-box">
+          <div class="l c-dim">$ make run</div>
+          <div class="l">go build ./...</div>
+          <div class="l">ok   cmd/api</div>
+          <div class="l c-ok">listening :8080</div>
+          <div class="l c-dim">·</div>
+        </div>
+        <div class="pane-box">
+          <div class="l c-dim">$ npm run dev</div>
+          <div class="l">VITE v6.0.3</div>
+          <div class="l c-done">ready in 214 ms</div>
+          <div class="l">➜ :5173</div>
+          <div class="l c-dim">·</div>
+        </div>
+        <div class="pane-box">
+          <div class="l c-dim">$ go test ./auth/…</div>
+          <div class="l c-bad">--- FAIL: TestCallbackScope</div>
+          <div class="l c-bad">  want "openid" | got ""</div>
+          <div class="l c-bad">FAIL</div>
+          <div class="l c-dim">cut</div>
+        </div>
+        <div class="pane-box">
+          <div class="l c-dim">$ npm run dev</div>
+          <div class="l">next dev 15.2</div>
+          <div class="l c-done">ready :3000</div>
+          <div class="l c-dim">·</div>
+          <div class="l c-dim">·</div>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span>main</span><span class="on">main</span><span>▸ 1 b</span>
+        <span class="c-dim">focus w1p6</span>
+        <span class="spacer"></span>
+        <span class="c-dim">5 panes &nbsp; ctrl+b</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 2. jump palette ============ -->
+  <section>
+    <div class="head"><span class="step">step 1</span><h2>Jump palette: prefix j</h2></div>
+    <p class="note">
+      Reuses the dashboard's filter, preview band and jump. Rows are the panes you named.
+      No tree change, no new server memory. <b>Fixes finding, not reading.</b>
+    </p>
+    <div class="frame overlay-frame">
+      <div class="rail">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row ws"><span class="bar">▌</span> main</div>
+        <div class="row winrow">  ▾ b</div>
+        <div class="row pane">· srv-go</div>
+        <div class="row pane">· srv-authgame</div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="panes" style="grid-template-columns: 1fr; grid-template-rows: 1fr;">
+        <div class="pane-box"><div class="l c-dim">under the palette</div></div>
+      </div>
+      <div class="statusbar"><span>main</span><span class="on">main</span><span>▸ 1 b</span></div>
+
+      <div class="overlay">
+        <div class="palette">
+          <div class="query"><span class="caret">▏</span> jump <span class="c-dim">every named pane, 2 workspaces</span></div>
+          <div class="row c-dim"><span class="n">#</span><span>label</span><span>project</span><span>state</span><span>branch</span><span>age</span></div>
+          <div class="row sel"><span class="n">1</span><span>srv-authgame</span><span>go-backend</span><span class="c-err">✕ error</span><span>main</span><span>3m</span></div>
+          <div class="row"><span class="n">2</span><span>srv-go</span><span>go-backend</span><span class="c-work">● working</span><span>main</span><span>12s</span></div>
+          <div class="row"><span class="n">3</span><span>srv-publishers</span><span>go-backend</span><span class="c-done">✓ done</span><span>main</span><span>4m</span></div>
+          <div class="row"><span class="n">4</span><span>srv-console</span><span>go-backend</span><span class="c-done">✓ done</span><span>main</span><span>4m</span></div>
+          <div class="row"><span class="n">5</span><span>π go-backend</span><span>go-backend</span><span class="c-work">● working</span><span>main</span><span>2s</span></div>
+          <div class="row"><span class="n">6</span><span>lane/api</span><span>go-backend</span><span class="c-idle">○ idle</span><span>fix2</span><span>9m</span></div>
+          <div class="row"><span class="n">7</span><span>srv-go</span><span>dm</span><span class="c-done">✓ done</span><span>main</span><span>1h</span></div>
+          <div class="foot">/ filter &nbsp; j k move &nbsp; enter focus &nbsp; esc</div>
+        </div>
+        <div class="preview">
+          <div class="cap">srv-authgame · w1p12 · 3m since status change</div>
+          <div class="l c-dim">$ go test ./auth/…</div>
+          <div class="l c-dim">=== RUN   TestCallbackScope</div>
+          <div class="l c-bad">--- FAIL: TestCallbackScope (0.42s)</div>
+          <div class="l c-bad">    callback_test.go:88:</div>
+          <div class="l c-bad">      want scope "openid,profile"</div>
+          <div class="l c-bad">      got  scope ""</div>
+          <div class="l c-bad">FAIL</div>
+          <div class="l c-dim">exit status 1</div>
+          <div class="l c-dim">&nbsp;</div>
+          <div class="l c-dim">refresh.go:61 drops the claim</div>
+          <div class="l c-dim">before the exchange</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3. server bar ============ -->
+  <section>
+    <div class="head"><span class="step">step 2</span><h2>Server bar: one row of live state</h2></div>
+    <p class="note">
+      One candle per named pane: glyph, name, last line. The glimpse lives in the row,
+      the reading lives in zoom, and zoom keeps the bar. Still no tree change.
+      Needs the foreground-process check to tell a dead server from a prompt.
+    </p>
+    <div class="frame withbar">
+      <div class="rail">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row ws"><span class="bar">▌</span> main</div>
+        <div class="row winrow">  ▾ b</div>
+        <div class="row pane on">· π go-backend</div>
+        <div class="row pane">· srv-go</div>
+        <div class="row pane">· srv-publishers</div>
+        <div class="row pane">· srv-authgame</div>
+        <div class="row pane">· srv-console</div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="barrow">
+        <div class="cell"><span class="c-work">●</span> srv-go <span class="tail">listening :8080</span></div>
+        <div class="cell"><span class="c-done">✓</span> srv-pub <span class="tail">ready :5173</span></div>
+        <div class="cell on bad"><span class="c-err">✕</span> srv-auth <span class="tail c-err">FAIL TestCallbackScope</span></div>
+        <div class="cell"><span class="c-done">✓</span> srv-con <span class="tail">ready :3000</span></div>
+      </div>
+      <div class="split1">
+        <div class="pane-box">
+          <div class="l c-dim">srv-authgame · zoomed from the bar · w1p12</div>
+          <div class="l c-dim">$ go test ./auth/… -run Callback</div>
+          <div class="l c-dim">=== RUN   TestCallbackScope</div>
+          <div class="l c-bad">--- FAIL: TestCallbackScope (0.42s)</div>
+          <div class="l c-bad">    callback_test.go:88: want scope</div>
+          <div class="l c-bad">      "openid,profile", got ""</div>
+          <div class="l c-bad">FAIL    go-backend/internal/auth    0.431s</div>
+          <div class="l c-bad">exit status 1</div>
+          <div class="l">&nbsp;</div>
+          <div class="l c-dim">$ _</div>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span>main</span><span class="on">main</span><span>▸ 1 b</span>
+        <span class="c-dim">focus w1p12 · zoomed</span>
+        <span class="spacer"></span>
+        <span class="c-dim">click bar to zoom · prefix z back</span>
+      </div>
+    </div>
+    <p class="legend">
+      The four tiles still exist in the tree, so nothing is lost. The bar is a second view
+      of the same panes, drawn by the client from status plus the last line of each VT.
+    </p>
+  </section>
+
+  <!-- ============ 4. group, stack ============ -->
+  <section>
+    <div class="head"><span class="step">step 3</span><h2>Group node, stack mode</h2></div>
+    <p class="note">
+      The group is one rect with a native strip. One member is visible at full height.
+      Hidden members stay live and keep reporting. <b>n / p cycle inside the group only.</b>
+      Click a chip to switch.
+    </p>
+    <div class="frame tall">
+      <div class="rail">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row ws"><span class="bar">▌</span> main</div>
+        <div class="row winrow">  ▾ b</div>
+        <div class="row pane on">· π go-backend</div>
+        <div class="row winrow">  ▾ dev servers <span class="c-dim">g1</span></div>
+        <div class="row pane">· srv-go <span class="c-work">●</span></div>
+        <div class="row pane">· srv-publishers <span class="c-done">✓</span></div>
+        <div class="row pane">· srv-authgame <span class="c-err">✕</span></div>
+        <div class="row pane">· srv-console <span class="c-done">✓</span></div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="split2">
+        <div class="pane-box">
+          <div class="l c-dim">π go-backend <span class="c-ok">main</span></div>
+          <div class="l">&nbsp;</div>
+          <div class="l">&gt; the callback scope is dropped on refresh</div>
+          <div class="l">&nbsp;</div>
+          <div class="l">● Grep "scope" <span class="c-dim">in auth</span></div>
+          <div class="l c-dim">  internal/auth/callback.go</div>
+          <div class="l c-dim">  internal/auth/refresh.go</div>
+          <div class="l">&nbsp;</div>
+          <div class="l">● Read refresh.go</div>
+          <div class="l c-dim">  claim dropped at line 61</div>
+          <div class="l">&nbsp;</div>
+          <div class="l c-dim">  waiting on you</div>
+        </div>
+        <div class="groupbox">
+          <div class="strip">
+            <div class="chip" data-log="go"><span class="c-work">●</span> srv-go</div>
+            <div class="chip" data-log="pub"><span class="c-done">✓</span> srv-pub</div>
+            <div class="chip on bad" data-log="auth"><span class="c-err">✕</span> srv-auth</div>
+            <div class="chip" data-log="con"><span class="c-done">✓</span> srv-con</div>
+          </div>
+          <div class="groupbody">
+            <div class="log" id="log-go">
+              <div class="l c-dim">$ make run</div>
+              <div class="l">go build ./...</div>
+              <div class="l c-ok">ok   go-backend/cmd/api</div>
+              <div class="l c-ok">ok   go-backend/internal/auth</div>
+              <div class="l c-ok">ok   go-backend/internal/store</div>
+              <div class="l">&nbsp;</div>
+              <div class="l c-done">listening on :8080</div>
+              <div class="l c-dim">GET /health 200  4ms</div>
+              <div class="l c-dim">GET /v1/accounts 200  11ms</div>
+              <div class="l c-dim">GET /health 200  3ms</div>
+            </div>
+            <div class="log" id="log-pub">
+              <div class="l c-dim">$ npm run dev</div>
+              <div class="l">&nbsp;</div>
+              <div class="l c-vio">VITE v6.0.3</div>
+              <div class="l c-done">ready in 214 ms</div>
+              <div class="l">&nbsp;</div>
+              <div class="l">➜  Local:   http://localhost:5173/</div>
+              <div class="l c-dim">➜  press h + enter to show help</div>
+              <div class="l">&nbsp;</div>
+              <div class="l c-dim">hmr update /src/routes/accounts.tsx</div>
+            </div>
+            <div class="log on" id="log-auth">
+              <div class="l c-dim">$ go test ./auth/… -run Callback</div>
+              <div class="l c-dim">=== RUN   TestCallbackScope</div>
+              <div class="l c-bad">--- FAIL: TestCallbackScope (0.42s)</div>
+              <div class="l c-bad">    callback_test.go:88: want scope</div>
+              <div class="l c-bad">      "openid,profile", got ""</div>
+              <div class="l c-bad">FAIL</div>
+              <div class="l c-bad">exit status 1</div>
+              <div class="l">&nbsp;</div>
+              <div class="l c-dim">$ _</div>
+              <div class="l">&nbsp;</div>
+              <div class="l c-dim">pane is at a prompt, not running</div>
+            </div>
+            <div class="log" id="log-con">
+              <div class="l c-dim">$ npm run dev</div>
+              <div class="l">&nbsp;</div>
+              <div class="l c-done">ready - started on :3000</div>
+              <div class="l c-dim">compiled /accounts in 412ms</div>
+              <div class="l c-dim">compiled /accounts/123 in 388ms</div>
+              <div class="l">&nbsp;</div>
+              <div class="l c-dim">watching for file changes</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span>main</span><span class="on">main</span><span>▸ 1 b</span>
+        <span class="c-dim">focus g1 · srv-authgame 3/4</span>
+        <span class="spacer"></span>
+        <span class="c-dim">n / p members</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5. group, grid ============ -->
+  <section>
+    <div class="head"><span class="step">step 3</span><h2>Same group, grid mode</h2></div>
+    <p class="note">
+      A mode on the same object, not a second primitive. All four visible at once, about
+      22 rows each in this half of the screen. Pick stack or grid per group and persist it.
+    </p>
+    <div class="frame tall">
+      <div class="rail">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row ws"><span class="bar">▌</span> main</div>
+        <div class="row winrow">  ▾ b</div>
+        <div class="row pane">· π go-backend</div>
+        <div class="row winrow">  ▾ dev servers <span class="c-dim">g1</span> <span class="c-dim">grid</span></div>
+        <div class="row pane">· srv-go</div>
+        <div class="row pane">· srv-publishers</div>
+        <div class="row pane on">· srv-authgame</div>
+        <div class="row pane">· srv-console</div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="split2">
+        <div class="pane-box">
+          <div class="l c-dim">π go-backend <span class="c-ok">main</span></div>
+          <div class="l">&nbsp;</div>
+          <div class="l">&gt; the callback scope is dropped on refresh</div>
+          <div class="l">&nbsp;</div>
+          <div class="l">● Read refresh.go</div>
+          <div class="l c-dim">  claim dropped at line 61</div>
+          <div class="l">&nbsp;</div>
+          <div class="l">● Edit refresh.go:61</div>
+          <div class="l c-dim">  keep scope through exchange</div>
+          <div class="l">&nbsp;</div>
+          <div class="l c-dim">  waiting on you</div>
+        </div>
+        <div class="groupbox">
+          <div class="grid4">
+            <div class="tile">
+              <div class="thead"><span class="c-work">●</span> srv-go <span class="tail">:8080</span></div>
+              <div class="tbody">
+                <div class="l c-dim">$ make run</div>
+                <div class="l c-done">listening :8080</div>
+                <div class="l c-dim">GET /health 200</div>
+                <div class="l c-dim">GET /health 200</div>
+                <div class="l c-dim">GET /health 200</div>
+              </div>
+            </div>
+            <div class="tile">
+              <div class="thead"><span class="c-done">✓</span> srv-pub <span class="tail">:5173</span></div>
+              <div class="tbody">
+                <div class="l c-vio">VITE v6.0.3</div>
+                <div class="l c-done">ready in 214 ms</div>
+                <div class="l">➜ :5173</div>
+                <div class="l c-dim">hmr /src/routes</div>
+              </div>
+            </div>
+            <div class="tile on">
+              <div class="thead"><span class="c-err">✕</span> srv-auth <span class="tail">exit 1</span></div>
+              <div class="tbody">
+                <div class="l c-bad">--- FAIL: TestCallbackScope</div>
+                <div class="l c-bad">  want "openid" | got ""</div>
+                <div class="l c-bad">FAIL  internal/auth</div>
+                <div class="l c-dim">$ _</div>
+              </div>
+            </div>
+            <div class="tile">
+              <div class="thead"><span class="c-done">✓</span> srv-con <span class="tail">:3000</span></div>
+              <div class="tbody">
+                <div class="l c-done">ready :3000</div>
+                <div class="l c-dim">compiled /accounts</div>
+                <div class="l c-dim">compiled /accounts/123</div>
+                <div class="l c-dim">watching</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span>main</span><span class="on">main</span><span>▸ 1 b</span>
+        <span class="c-dim">focus g1 · srv-authgame</span>
+        <span class="spacer"></span>
+        <span class="c-dim">keys go to the focused tile</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 6. shelf summoned ============ -->
+  <section>
+    <div class="head"><span class="step wild">wildcard</span><h2>Shelf, called up: prefix f</h2></div>
+    <p class="note">
+      <b>prefix f</b> shelves the focused pane: it leaves the grid and keeps running.
+      <b>prefix f</b> again summons the shelf as a float. The strip and the body are the same
+      object as step 3, except its rect exists only while it is up. Keys go to the active
+      member, because this is a terminal. The prefix is never sent, so the shelf stays
+      navigable while it has the keyboard.
+    </p>
+    <div class="frame overlay-frame tall">
+      <div class="rail">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row ws"><span class="bar">▌</span> main</div>
+        <div class="row winrow">  ▾ b</div>
+        <div class="row pane">· π go-backend</div>
+        <div class="row sep"></div>
+        <div class="row sh">▾ shelf <span class="c-dim">dev servers · 4</span></div>
+        <div class="row pane">· srv-go <span class="c-work">●</span></div>
+        <div class="row pane">· srv-publishers <span class="c-done">✓</span></div>
+        <div class="row pane">· srv-authgame <span class="c-err">✕</span></div>
+        <div class="row pane">· srv-console <span class="c-done">✓</span></div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="split1">
+        <div class="pane-box">
+          <div class="l c-dim">π go-backend <span class="c-ok">main</span></div>
+          <div class="l">&nbsp;</div>
+          <div class="l">&gt; the callback scope is dropped on refresh</div>
+          <div class="l">&nbsp;</div>
+          <div class="l c-dim">  behind the shelf. still live, still yours.</div>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span>main</span><span class="on">main</span><span>▸ 1 b</span>
+        <span class="c-dim">focus shelf · srv-authgame 3/4</span>
+        <span class="spacer"></span>
+        <span class="c-dim">prefix f dismiss</span>
+      </div>
+
+      <div class="floater">
+        <div class="ftitle"><span>dev servers <span class="c-dim">· shelf</span></span><span class="c-dim">3/4</span></div>
+        <div class="strip">
+          <div class="chip"><span class="c-work">●</span> srv-go</div>
+          <div class="chip"><span class="c-done">✓</span> srv-pub</div>
+          <div class="chip on bad"><span class="c-err">✕</span> srv-auth</div>
+          <div class="chip"><span class="c-done">✓</span> srv-con</div>
+        </div>
+        <div class="fbody">
+          <div class="l c-dim">$ go test ./auth/… -run Callback</div>
+          <div class="l c-dim">=== RUN   TestCallbackScope</div>
+          <div class="l c-bad">--- FAIL: TestCallbackScope (0.42s)</div>
+          <div class="l c-bad">    callback_test.go:88: want scope</div>
+          <div class="l c-bad">      "openid,profile", got ""</div>
+          <div class="l c-bad">FAIL    go-backend/internal/auth    0.431s</div>
+          <div class="l c-bad">exit status 1</div>
+          <div class="l">&nbsp;</div>
+          <div class="l c-dim">$ _</div>
+        </div>
+        <div class="ffoot">prefix f dismiss &nbsp; prefix n / p member &nbsp; prefix P pop into the grid</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 7. shelf put away ============ -->
+  <section>
+    <div class="head"><span class="step wild">wildcard</span><h2>Shelf, put away</h2></div>
+    <p class="note">
+      The grid keeps only the work you are doing. The shelf is <b>one row and one chip</b>.
+      The panes are not gone: no PTY closed, no process lost, and they survive detach
+      because the shelf is session state, not a client float.
+    </p>
+    <div class="frame">
+      <div class="rail">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row ws"><span class="bar">▌</span> main</div>
+        <div class="row winrow">  ▾ b</div>
+        <div class="row pane on">· π go-backend</div>
+        <div class="row sep"></div>
+        <div class="row sh">▾ shelf <span class="c-dim">dev servers · 4</span></div>
+        <div class="row pane">· srv-go <span class="c-work">●</span></div>
+        <div class="row pane">· srv-publishers <span class="c-done">✓</span></div>
+        <div class="row pane">· srv-authgame <span class="c-err">✕</span></div>
+        <div class="row pane">· srv-console <span class="c-done">✓</span></div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="split1">
+        <div class="pane-box">
+          <div class="l c-dim">π go-backend <span class="c-ok">main</span></div>
+          <div class="l">&nbsp;</div>
+          <div class="l">&gt; the callback scope is dropped on refresh</div>
+          <div class="l">&nbsp;</div>
+          <div class="l">● Read refresh.go</div>
+          <div class="l c-dim">  the claim is built, then discarded</div>
+          <div class="l">&nbsp;</div>
+          <div class="l">● Edit refresh.go:61</div>
+          <div class="l c-dim">  keep the scope through the exchange</div>
+          <div class="l">&nbsp;</div>
+          <div class="l c-dim">  w1 is one pane again, full width</div>
+        </div>
+      </div>
+      <div class="statusbar">
+        <span>main</span><span class="on">main</span><span>▸ 1 b</span>
+        <span class="c-dim">focus w1p1</span>
+        <span class="spacer"></span>
+        <span class="c-dim">⧉ dev servers 4</span><span class="c-err">✕1</span>
+        <span class="c-dim">prefix f</span>
+      </div>
+    </div>
+    <p class="legend">
+      The chip is the whole glance: it carries the count and the worst state, so a server
+      that died while shelved still reads <span class="c-err">✕1</span> in the bar.
+      The cost is real: with the shelf away, two servers are never visible at once.
+    </p>
+  </section>
+
+  <!-- ============ 6. states ============ -->
+  <section>
+    <div class="head"><span class="step">step 3</span><h2>What a member can say</h2></div>
+    <p class="note">
+      Everything above needs one signal dm does not have: is the thing in the pane still
+      running. Agent status covers panes that report it. A dev server usually does not.
+    </p>
+    <div class="frame short" style="grid-template-rows: 22px 1fr 22px; height: 200px; grid-template-areas: 'rail tabs' 'rail panes' 'bar bar';">
+      <div class="rail" style="padding-top: 8px;">
+        <div class="row proj">▾ go-backend</div>
+        <div class="row winrow">  ▾ dev servers</div>
+      </div>
+      <div class="tabs"><div class="tab on"><span class="dot">▸</span> b</div></div>
+      <div class="groupbox" style="grid-area: panes;">
+        <div class="strip">
+          <div class="chip"><span class="c-work">●</span> srv-go <span class="gbadge">running</span></div>
+          <div class="chip"><span class="c-done">✓</span> srv-pub <span class="gbadge">ready</span></div>
+          <div class="chip on bad"><span class="c-err">✕</span> srv-auth <span class="gbadge">exit 1</span></div>
+          <div class="chip"><span class="c-dim">▶</span> srv-con <span class="gbadge">prompt</span></div>
+          <div class="chip"><span class="c-dim">?</span> srv-old <span class="gbadge">unknown</span></div>
+        </div>
+        <div class="groupbody">
+          <div class="statelist">
+            <div class="r"><span class="g"><span class="c-work">●</span> running</span><span>foreground process alive, no report needed</span></div>
+            <div class="r"><span class="g"><span class="c-done">✓</span> ready</span><span>explicit report, or a listen line seen once</span></div>
+            <div class="r"><span class="g"><span class="c-err">✕</span> exit 1</span><span>process exited non-zero since you last looked</span></div>
+            <div class="r"><span class="g"><span class="c-dim">▶</span> prompt</span><span>back at a shell, exit 0 or unknown</span></div>
+            <div class="r"><span class="g"><span class="c-dim">?</span> unknown</span><span>no process check yet, the state you have today</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="statusbar"><span>main</span><span class="on">main</span><span>▸ 1 b</span></div>
+    </div>
+  </section>
+
+  <div class="q">
+    <h3>What I need from you</h3>
+    <ol>
+      <li><b>One environment per window, or several?</b> If one, step 2 is likely the whole feature.</li>
+      <li><b>Stack, grid, or a mode on one object?</b> Mode is cheaper and covers both, at the price of one key and one persisted field.</li>
+      <li><b>Does a group own argv?</b> If restart-one is the point, the group becomes a live layout and step 2 is not enough.</li>
+      <li><b>Name.</b> "stack", "group", "env", "set". It lands in ids, config keys, sidebar rows and docs.</li>
+      <li><b>Shelf or group, not both?</b> If the wildcard wins, step 3 may be dead code: the shelf is the same object with a rect that only exists while summoned.</li>
+    </ol>
+  </div>
+
+</div>
+<script>
+  const chips = document.querySelectorAll('.chip[data-log]');
+  chips.forEach(chip => {
+    chip.addEventListener('click', () => {
+      chips.forEach(c => c.classList.remove('on'));
+      chip.classList.add('on');
+      document.querySelectorAll('.log').forEach(l => l.classList.remove('on'));
+      document.getElementById('log-' + chip.dataset.log).classList.add('on');
+    });
+  });
+</script>
+</body>
+</html>

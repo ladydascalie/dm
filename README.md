@@ -728,8 +728,6 @@ window reads the same in every place. The data is a struct with these fields:
 - `.Cwd`: the source pane's working directory.
 - `.Root`: the source pane's repository root, empty outside git.
 
-i added useles changes lol
-
 The `base` function prints the last path element: `{{base .Root}}` is the
 repository folder name. The default template shows the name of a named window
 and the id plus the repository folder of an unnamed one:
