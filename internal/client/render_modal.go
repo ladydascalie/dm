@@ -229,7 +229,7 @@ func drawSearchPrompt(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, dr
 // columns. The box stays clear of the rail, the toast row and the status bar:
 // it gives up columns, then its trailing rows, before it paints over any of
 // them.
-func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, keys []keymap.HelpEntry, notes []string) {
+func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, hint string, keys []keymap.HelpEntry, notes []string) {
 	g, ok := helpBoxGeometry(cols, rows, keys, notes)
 	if !ok {
 		return
@@ -237,7 +237,7 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, ke
 	f := &panel.FloatingPane{
 		Rect:  layout.Rect{X: g.x, Y: g.y, W: g.inner, H: g.h},
 		Title: "prefix",
-		Hint:  helpBoxHint(),
+		Hint:  hint,
 		Paint: func(b *bytes.Buffer, inner layout.Rect) {
 			helpBoxRows(b, inner, g)
 		},
@@ -250,11 +250,25 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, ke
 	f.Draw(buf, th)
 }
 
-// helpBoxHint is the armed help box's bottom border: the one key that closes
-// it. The armed box owns that key, and the keymap binds no action for it, so
-// it stays literal.
-func helpBoxHint() string {
-	return ui.Hints([]ui.Hint{{Keys: []string{"esc"}}})
+// helpBoxHint is the armed help box's bottom border: the key that closes it,
+// then the shelf's keys. The armed box owns esc, and the keymap binds no action
+// for it, so it stays literal.
+//
+// The shelf keeps no row of its own in the table: the whole default table has
+// to fit a 100x40 screen, and one more row pushes the last section off it. The
+// footer carries the three keys instead, so the overlay still names them.
+func helpBoxHint(cfg *keymap.Config) string {
+	hints := []ui.Hint{{Keys: []string{"esc"}}}
+	var shelf []string
+	for _, action := range []string{"shelve-pane", "toggle-shelf", "pop-pane"} {
+		if k := cfg.Key("main", action); k != "" {
+			shelf = append(shelf, k)
+		}
+	}
+	if len(shelf) > 0 {
+		hints = append(hints, ui.Hint{Keys: shelf, Label: "shelf"})
+	}
+	return ui.Hints(hints)
 }
 
 // displayRow is one row of the help box: a category header or a key-action pair.

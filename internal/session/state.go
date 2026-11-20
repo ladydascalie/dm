@@ -136,6 +136,112 @@ type State struct {
 	// is fetched and where it rides, never the value itself. A state file
 	// written before the registry existed loads with zero, an empty registry.
 	Secrets []*Secret `json:"secrets,omitempty"`
+
+	// Shelf holds the panes set aside: each keeps its id, its PaneState and
+	// its PTY, but sits in no window's tree and has no rect. The slice order
+	// is the order the shelf shows them. ShelfActive indexes the member the
+	// shelf float shows and every mutation path clamps it. ShelfFolded hides
+	// the rail's shelf section rows. All three are zero by default, so a
+	// state file written before the shelf existed loads as an empty shelf.
+	Shelf       []string `json:"shelf,omitempty"`
+	ShelfActive int      `json:"shelfActive,omitempty"`
+	ShelfFolded bool     `json:"shelfFolded,omitempty"`
+}
+
+// ShelfIndex is the index of id in the shelf, or -1 when it is not a member.
+func (st *State) ShelfIndex(id string) int {
+	if id == "" {
+		return -1
+	}
+	for i, sid := range st.Shelf {
+		if sid == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// Shelved reports whether id is a shelf member.
+func (st *State) Shelved(id string) bool { return st.ShelfIndex(id) >= 0 }
+
+// AddShelf appends id to the shelf and reports false when id is already a
+// member. An empty shelf puts the active index on the member it just gained.
+func (st *State) AddShelf(id string) bool {
+	if id == "" || st.Shelved(id) {
+		return false
+	}
+	if len(st.Shelf) == 0 {
+		st.ShelfActive = 0
+	}
+	st.Shelf = append(st.Shelf, id)
+	return true
+}
+
+// DropShelf removes id from the shelf, keeping the active index on the member
+// it named where it can, and reports whether id was a member. After a removal
+// the index points at the member that took the removed one's place, else the
+// last member.
+func (st *State) DropShelf(id string) bool {
+	at := st.ShelfIndex(id)
+	if at < 0 {
+		return false
+	}
+	st.Shelf = append(st.Shelf[:at], st.Shelf[at+1:]...)
+	if at < st.ShelfActive {
+		st.ShelfActive--
+	}
+	st.ClampShelfActive()
+	return true
+}
+
+// ClampShelfActive puts ShelfActive back inside the shelf: zero for an empty
+// shelf, the last member for an index past the end, and zero below the start.
+// A clamp alone never reorders or drops a member.
+func (st *State) ClampShelfActive() {
+	if len(st.Shelf) == 0 {
+		st.ShelfActive = 0
+		return
+	}
+	if st.ShelfActive < 0 {
+		st.ShelfActive = 0
+	}
+	if st.ShelfActive >= len(st.Shelf) {
+		st.ShelfActive = len(st.Shelf) - 1
+	}
+}
+
+// PruneShelf drops members the session no longer carries a PaneState for and
+// keeps the active index on the member it named, the way DropShelf does: every
+// member removed before it steps the index back one. It then clamps. It reports
+// whether it dropped anything. A shelf row naming a dead id would point at a
+// pane nothing can adopt.
+func (st *State) PruneShelf() bool {
+	kept := st.Shelf[:0]
+	active := st.ShelfActive
+	for i, id := range st.Shelf {
+		if st.Panes[id] != nil {
+			kept = append(kept, id)
+			continue
+		}
+		// The member is gone. One dropped before the active member takes the
+		// index with it, so the same pane stays active.
+		if i < active {
+			active--
+		}
+	}
+	changed := len(kept) != len(st.Shelf)
+	for i := len(kept); i < len(st.Shelf); i++ {
+		st.Shelf[i] = ""
+	}
+	if changed {
+		st.Shelf = kept
+	}
+	if len(st.Shelf) == 0 {
+		st.Shelf = nil
+	}
+	st.ShelfActive = active
+	st.ClampShelfActive()
+	return changed
 }
 
 // numericName reports whether a window label is a plain number, the old
@@ -292,6 +398,12 @@ func LoadStateAt(root, name string) (*State, error) {
 	if st.IDVersion < 2 {
 		st.MigrateIDs()
 		st.IDVersion = 2
+		changed = true
+	}
+	// A shelf names panes that live outside every tree, so the tree walk
+	// above never reaches them: prune them against the pane map here, after a
+	// migration has renumbered the panes a tree still holds.
+	if st.PruneShelf() {
 		changed = true
 	}
 	// A hand-edited or interleaved state file loads grouped, because the rail

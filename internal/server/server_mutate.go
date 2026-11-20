@@ -21,6 +21,17 @@ func (s *server) toggleFold(id string) (bool, error) {
 	if name, ok := strings.CutPrefix(id, wire.ProjectTargetPrefix); ok {
 		return s.toggleProjectFold(name)
 	}
+	if id == wire.ShelfFoldTarget {
+		// The shelf section folds like a window: the flag hides its rows and
+		// survives a restart with the rest of the state.
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.st.ShelfFolded = !s.st.ShelfFolded
+		if err := s.st.Save(); err != nil {
+			return false, err
+		}
+		return !s.st.ShelfFolded, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
@@ -1088,8 +1099,25 @@ func (s *server) closePane(target string) error {
 	if target == "" {
 		target = win.Focus
 	}
+	// A shelved pane is in no tree, so the count below cannot see it: closing
+	// it here would reach the last-pane branch and kill a PTY the shelf owns.
+	if s.st.Shelved(target) {
+		s.mu.Unlock()
+		return fmt.Errorf("pane %q is on the shelf: pop it before closing it", target)
+	}
 	ids := layout.AllPanes(win.Root)
 	if len(ids) <= 1 {
+		// The last tree pane of the session cannot go while the shelf holds a
+		// pane: the session would keep a live shelf with no window to pop it
+		// into. A shelf panes pop into a window, so one window must stay.
+		if shelf := len(s.st.Shelf); shelf > 0 && s.treePaneCountLocked() <= 1 {
+			what := "panes are"
+			if shelf == 1 {
+				what = "pane is"
+			}
+			s.mu.Unlock()
+			return fmt.Errorf("cannot close %q: it is the last pane in the layout and %d %s on the shelf: pop one into a window first", target, shelf, what)
+		}
 		// Closing the last pane empties the window. Let the pane's exit drive
 		// the normal path, which drops the window and ends the session when
 		// nothing is left, exactly like a shell exiting.
@@ -1264,6 +1292,16 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool, argv, pluginEn
 			s.mu.Unlock()
 			return "", "", fmt.Errorf("no workspace or pane %q", wsID)
 		}
+	} else if len(s.st.Workspaces) == 0 {
+		// ActiveWorkspace hands back a throwaway when the session has none, so
+		// a window appended to it would answer with an id that no state holds:
+		// the PTY would run with no window and the shell would stay unreachable.
+		// A session can reach zero workspaces with a live shelf, so build the
+		// real one here. It is built after the target resolved, so a refused
+		// call leaves no empty workspace behind.
+		ws = &session.Workspace{ID: s.st.NewWorkspaceID(), Name: s.st.Name, Unfolded: true}
+		s.st.Workspaces = append(s.st.Workspaces, ws)
+		s.st.Active = 0
 	}
 	// The new pane opens where the source pane is, or where the active pane of
 	// the target workspace is, so the window's folder name and its shell agree.

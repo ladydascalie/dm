@@ -149,6 +149,8 @@ func TestConfigNodesParse(t *testing.T) {
 		"palette-rows":      `palette-rows 12`,
 		"diff-command":      `diff-command "git diff --stat"`,
 		"dashboard-layout":  `dashboard-layout "float"`,
+		"shelf-layout":      `shelf-layout "pane"`,
+		"shelf-size":        `shelf-size 35`,
 		"float-shadow":      `float-shadow "on"`,
 		"theme":             `theme "probe"`,
 		"keymap":            `keymap "main" { "detach" "D" }`,
@@ -212,6 +214,12 @@ func TestConfigNodesParse(t *testing.T) {
 	if cfg.DashboardFullScreen() {
 		t.Error("DashboardFullScreen = true, want the float layout")
 	}
+	if cfg.ShelfCentered() {
+		t.Error("ShelfCentered = true, want the pane layout")
+	}
+	if got := cfg.ShelfSize(); got != 35 {
+		t.Errorf("ShelfSize = %d, want 35", got)
+	}
 	if got := cfg.Key("main", "detach"); got != "D" {
 		t.Errorf("Key(main, detach) = %q, want D", got)
 	}
@@ -250,6 +258,8 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"palette-rows":      "10",
 		"diff-command":      `"git diff"`,
 		"dashboard-layout":  `"full"`,
+		"shelf-layout":      `"centered"`,
+		"shelf-size":        "80",
 		"float-shadow":      `"off"`,
 		"theme":             "",
 		"keymap":            "the built-in table",

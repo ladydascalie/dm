@@ -74,6 +74,7 @@ var manActionNames = []string{
 	"swap-panes", "move-pane", "move-window", "move-workspace",
 	"select-layout", "synchronize-panes",
 	"float-open", "float-close",
+	"shelve-pane", "pop-pane",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",
 	"msg-watchers", "msg-schema",
 	"secret-register", "secret-list", "secret-revoke",

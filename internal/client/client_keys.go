@@ -775,6 +775,11 @@ func (t *tui) reload() error {
 	// resolve it again or a change from auto to ascii would only take effect on
 	// the next attach.
 	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())
+	// A new placement or share moves the shelf, so fit it now rather than
+	// waiting for a snapshot that may never come.
+	if t.shelf != nil && t.snap != nil {
+		t.syncShelf(t.snap)
+	}
 	if t.snap != nil {
 		t.snap.WindowLabel = cfg.WindowLabel()
 	}
@@ -840,6 +845,20 @@ func (t *tui) runAction(name string) {
 		t.action("prev-pane", nil)
 	case "close-pane":
 		t.action("close-pane", nil)
+	case "shelve-pane":
+		// The focused pane leaves the layout and joins the shelf. Its shell
+		// keeps running, and the reply's toast is the server's refusal, if any.
+		t.action("shelve-pane", nil)
+	case "toggle-shelf":
+		t.shelfToggle()
+	case "pop-pane":
+		// While the shelf is up, G pops the member it shows; otherwise the pop
+		// names no target and the server takes the shelf's active member.
+		if t.shelf != nil {
+			t.popShelf()
+			break
+		}
+		t.actionOn("", "pop-pane", nil)
 	case "close-window":
 		pane := ""
 		if t.snap != nil {

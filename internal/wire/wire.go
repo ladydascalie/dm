@@ -136,7 +136,15 @@ type PaneInfo struct {
 	// asked gets the text alone: its line editor would read the markers as
 	// keys and leave their tail on the line.
 	Paste bool `json:"paste,omitempty"`
+	// Shelf is true for a shelved pane: it keeps its id, its state and its
+	// PTY, but it is in no window's tree, so Rect is zero and no walk that
+	// feeds geometry may count it.
+	Shelf bool `json:"shelf,omitempty"`
 }
+
+// ShelfFoldTarget is the toggle-fold target of the rail's shelf section, the
+// way ProjectTargetPrefix marks a project name.
+const ShelfFoldTarget = "shelf"
 
 // ProjectTargetPrefix marks a toggle-fold target as a project name rather than
 // a workspace or window id.
@@ -242,6 +250,14 @@ type Snapshot struct {
 	// Sync is the active window's synchronize-panes flag, so the client can
 	// paint the focus chip's sync mark.
 	Sync bool `json:"sync,omitempty"`
+	// ShelfActive indexes the shelved pane the shelf shows, in the order the
+	// shelved panes appear in Panes. It is session-wide, not per client: two
+	// clients share one active member. Zero covers both "no shelf" and "the
+	// first member".
+	ShelfActive int `json:"shelfActive,omitempty"`
+	// ShelfFolded hides the rail's shelf rows, the way a window's fold hides
+	// its panes.
+	ShelfFolded bool `json:"shelfFolded,omitempty"`
 }
 
 // MaxFrame is the largest frame the socket accepts, four bytes of length plus

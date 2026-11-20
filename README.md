@@ -246,6 +246,8 @@ optional and each one overrides its built-in value.
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
 | `dashboard-layout` | `"full"` or `"float"` | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
+| `shelf-layout` | `"centered"` or `"pane"` | `"centered"` | Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both. |
+| `shelf-size` | an integer from 20 to 100 | `80` | Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept. |
 | `float-shadow` | `"off"` or `"on"` | `"off"` | Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane. |
 | `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
 | `diff-command` | a quoted shell command | `"git diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |

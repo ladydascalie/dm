@@ -69,6 +69,8 @@ var actionExamples = []actionExample{
 	{"synchronize-panes", `{"action":"synchronize-panes","on":true}`},
 	{"float-open", `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`},
 	{"float-close", `{"action":"float-close","float":"f1"}`},
+	{"shelve-pane", `{"action":"shelve-pane","target":"w1p1"}`},
+	{"pop-pane", `{"action":"pop-pane","target":"w1p1"}`},
 
 	{"rename-workspace", `{"action":"rename-workspace","target":"s1","name":"build"}`},
 	{"set-project", `{"action":"set-project","target":"s1","name":"dm"}`},

@@ -83,6 +83,18 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Draw the dashboard over the whole screen, or as a palette centred over the panes.",
 	},
 	{
+		Name:    "shelf-layout",
+		Value:   `"centered" or "pane"`,
+		Default: `"centered"`,
+		Desc:    "Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both.",
+	},
+	{
+		Name:    "shelf-size",
+		Value:   "an integer from 20 to 100",
+		Default: "80",
+		Desc:    "Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept.",
+	},
+	{
 		Name:    "float-shadow",
 		Value:   `"off" or "on"`,
 		Default: `"off"`,
@@ -169,7 +181,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{
@@ -202,6 +214,9 @@ var ActionDesc = map[string]string{
 	"prev-pane":           "Focus the previous pane in the window.",
 	"close-pane":          "Close the focused pane.",
 	"close-window":        "Close the active window and every pane in it.",
+	"shelve-pane":         "Set the focused pane aside on the shelf: it keeps its shell running, leaves the layout and takes no room.",
+	"toggle-shelf":        "Open or close the shelf over the focused pane: a strip of shelved panes above the active one's screen.",
+	"pop-pane":            "Put the active shelf pane back in the layout, split off the focused pane's right, and focus it.",
 	"zoom-pane":           "Toggle the focused pane between zoomed and tiled.",
 	"new-window":          "Create a window in the active workspace.",
 	"next-window":         "Select the next window in the active workspace.",

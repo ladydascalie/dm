@@ -71,7 +71,7 @@ func (t *tui) draw() {
 		t.cpX, t.cpY = drawCommandPalette(&pal, th, t.cp, win)
 	}
 	if t.armed {
-		drawHelp(&help, th, win.Cols, win.Rows, t.km().FloatShadow(), t.km().HelpEntries(), t.km().HelpNotes())
+		drawHelp(&help, th, win.Cols, win.Rows, t.km().FloatShadow(), helpBoxHint(t.km()), t.km().HelpEntries(), t.km().HelpNotes())
 	}
 	if t.mode == "sessions" {
 		drawSessions(&sess, th, win.Cols, win.Rows, t.sessions, t.sel, t.session, t.km())

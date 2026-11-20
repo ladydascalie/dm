@@ -224,6 +224,42 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			}
 			cfg.floatShadowSet = true
 			i += 2
+		case "shelf-layout":
+			if cfg.shelfCenteredSet {
+				return fmt.Errorf("line %d: duplicate shelf-layout node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted layout after shelf-layout", t.Line)
+			}
+			v := toks[i+1]
+			switch v.Value {
+			case "centered":
+				cfg.shelfCentered = true
+			case "pane":
+				cfg.shelfCentered = false
+			default:
+				return fmt.Errorf("line %d: shelf-layout must be \"centered\" or \"pane\", got %q", v.Line, v.Value)
+			}
+			cfg.shelfCenteredSet = true
+			i += 2
+		case "shelf-size":
+			if cfg.shelfSizeSet {
+				return fmt.Errorf("line %d: duplicate shelf-size node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after shelf-size", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: shelf-size must be a number, got %q", v.Line, v.Value)
+			}
+			if n < minShelfSize || n > 100 {
+				return fmt.Errorf("line %d: shelf-size must be %d to 100, got %d", v.Line, minShelfSize, n)
+			}
+			cfg.shelfSize = n
+			cfg.shelfSizeSet = true
+			i += 2
 		case "diff-command":
 			if cfg.diffCommand != "" {
 				return fmt.Errorf("line %d: duplicate diff-command node", t.Line)
@@ -771,6 +807,16 @@ const (
 // preview band takes when it opens.
 const defaultDashboardPreview = 60
 
+// The shelf float's placement and share. A centred shelf takes
+// defaultShelfSize percent of the pane area, never under minShelfSize. The
+// placement defaults to centred: the shelf is a tray over the work, not a
+// pane in the grid.
+const (
+	defaultShelfCentered = true
+	defaultShelfSize     = 80
+	minShelfSize         = 20
+)
+
 // defaultPaletteRows is the built-in command palette row cap.
 const defaultPaletteRows = 10
 
@@ -885,6 +931,10 @@ diff-command "git diff"
 // Set the drop shadow the floats paint beside and under their box.
 float-shadow "off"
 dashboard-layout "full"
+// The shelf float centres over the pane area and takes this share of it.
+// "pane" lays it over the focused pane instead.
+shelf-layout "centered"
+shelf-size 80
 // A command: define it here, then bind "command:<name>" to a key in a keymap.
 // The run text goes through sh -c in the window's folder.
 // command "tests" {
@@ -911,6 +961,9 @@ keymap "main" {
     "prev-pane" "p"
     "close-pane" "x"
     "close-window" "X"
+    "shelve-pane" "f"
+    "toggle-shelf" "F"
+    "pop-pane" "G"
     "zoom-pane" "z"
     "new-window" "c"
     "next-window" "w"
