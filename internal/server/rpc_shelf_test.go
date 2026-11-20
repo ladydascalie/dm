@@ -421,58 +421,59 @@ func TestShelveLeavesASidePaneFocusAlone(t *testing.T) {
 // the shelf count, and the pane keeps its PTY.
 func TestClosePaneRefusesTheLastTreePaneWithAShelf(t *testing.T) {
 	t.Parallel()
-	s, cl, conn, a, _, c := shelfServer(t, "rpclastwithshelf")
-	spy := spyPane(t, s, a)
+	s, cl, conn, _, _, c := shelfServer(t, "rpclastwithshelf")
 	if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "shelve-pane", Target: c, ID: 1}); !m.OK {
 		t.Fatalf("shelve: %s", m.Error)
 	}
-	// Reduce the tree to the one pane the close would take.
+	// Reduce the tree to one pane, then spy on that pane: it is the target the
+	// refused close names, so its conn is the one that must stay silent.
+	s.mu.Lock()
+	ids := layout.AllPanes(s.st.ActiveWindow().Root)
+	s.mu.Unlock()
+	for i, id := range ids {
+		if i == len(ids)-1 {
+			continue
+		}
+		if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "close-pane", Target: id, ID: 2 + i}); !m.OK {
+			t.Fatalf("close %s: %s", id, m.Error)
+		}
+	}
 	s.mu.Lock()
 	win := s.st.ActiveWindow()
-	closest := win.Focus
-	other := ""
-	for _, id := range layout.AllPanes(win.Root) {
-		if id != closest {
-			other = id
-		}
-	}
-	s.mu.Unlock()
-	if other != "" {
-		if m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "close-pane", Target: other, ID: 2}); !m.OK {
-			t.Fatalf("close %s: %s", other, m.Error)
-		}
-	}
-	s.mu.Lock()
-	tree := s.treePaneCountLocked()
+	rest := layout.AllPanes(win.Root)
 	shelf := len(s.st.Shelf)
 	s.mu.Unlock()
-	if tree != 1 || shelf != 1 {
-		t.Fatalf("after the setup the session has %d tree panes and %d shelved, want 1 and 1", tree, shelf)
+	if len(rest) != 1 || shelf != 1 {
+		t.Fatalf("after the setup the session has %v tree panes and %d shelved, want 1 and 1", rest, shelf)
 	}
+	last := rest[0]
+	spy := spyPane(t, s, last)
 
-	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "close-pane", ID: 3})
+	m := rpcCall(t, s, cl, conn, wire.Msg{Type: "req", Action: "close-pane", Target: last, ID: 9})
+	// The refusal must come back without a kill: a close that reached its own
+	// target would take the last pane and strand the shelf. The drain runs
+	// first, so a revert fails on the kill and not on the missing error.
+	deadline := time.After(200 * time.Millisecond)
+drain:
+	for {
+		select {
+		case msg := <-spy:
+			if msg.Action == "kill" {
+				t.Fatalf("the refused close sent kill to its target %q", last)
+			}
+		case <-deadline:
+			break drain
+		}
+	}
 	wantErr(t, "close-pane", "shelf", m)
 	if !strings.Contains(m.Error, "1 pane") {
 		t.Fatalf("close error = %q, want it to name the shelf count", m.Error)
 	}
 	s.mu.Lock()
-	tree = s.treePaneCountLocked()
+	tree := s.treePaneCountLocked()
 	s.mu.Unlock()
 	if tree != 1 {
 		t.Fatalf("the refused close took the last tree pane, %d left", tree)
-	}
-	// The refused close must not reach the pane. A resync may still send it a
-	// resize, so the test looks for the kill frame alone.
-	deadline := time.After(200 * time.Millisecond)
-	for {
-		select {
-		case msg := <-spy:
-			if msg.Action == "kill" {
-				t.Fatalf("the refused close sent kill to %q", a)
-			}
-		case <-deadline:
-			return
-		}
 	}
 }
 
@@ -512,5 +513,276 @@ func TestNewWindowBuildsAWorkspaceWhenThereIsNone(t *testing.T) {
 	}
 	if wsID == "" || wsID == "s0" {
 		t.Fatalf("workspace id = %q, want a fresh one from NewWorkspaceID", wsID)
+	}
+}
+
+// shelfExitSession is a session with one tree pane and two shelf members: the
+// state a shell exit leaves when the last tree pane goes.
+func shelfExitSession(t *testing.T, name string) (*server, string, [2]string) {
+	t.Helper()
+	st := session.NewStateAt(t.TempDir(), name)
+	win := st.ActiveWindow()
+	a, b, c := win.NewPaneID(), win.NewPaneID(), win.NewPaneID()
+	win.Root = &layout.Node{Pane: a}
+	win.Focus = a
+	st.Panes[a] = &session.PaneState{}
+	st.Panes[b] = &session.PaneState{}
+	st.Panes[c] = &session.PaneState{}
+	st.Shelf = []string{b, c}
+	st.ShelfActive = 0
+	s := railServer(st)
+	paneConnFor(t, s, a, "done for now")
+	return s, a, [2]string{b, c}
+}
+
+// emptyWorkspaceSession saves a session that has a live shelf and no workspace:
+// the state an older build could strand, and the state the start path and pop
+// must both survive.
+func emptyWorkspaceSession(t *testing.T, name string) (string, string) {
+	t.Helper()
+	root := t.TempDir()
+	st := session.NewStateAt(root, name)
+	win := st.ActiveWindow()
+	id := win.NewPaneID()
+	win.Root = nil
+	st.Panes = map[string]*session.PaneState{id: {}}
+	st.Workspaces = nil
+	st.Active = 0
+	st.Shelf = []string{id}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	return root, id
+}
+
+// TestPaneExitWithAShelfKeepsAWindow proves a tree pane's own exit never leaves
+// zero windows with a live shelf: the shelf's active member takes the emptied
+// window, the state round-trips, a restart seeds no phantom pane, and a pop
+// lands the rest in a real window.
+func TestPaneExitWithAShelfKeepsAWindow(t *testing.T) {
+	s, a, shelf := shelfExitSession(t, "shelfexit")
+	s.paneExited(a)
+
+	st := s.st
+	if len(st.Workspaces) != 1 {
+		t.Fatalf("workspaces = %d, want the one window kept", len(st.Workspaces))
+	}
+	ws := st.Workspaces[0]
+	if len(ws.Windows) != 1 {
+		t.Fatalf("windows = %d, want one", len(ws.Windows))
+	}
+	win := ws.Windows[0]
+	if ids := layout.AllPanes(win.Root); len(ids) != 1 || ids[0] != shelf[0] {
+		t.Fatalf("window root = %v, want the active shelf member %q", ids, shelf[0])
+	}
+	if win.Focus != shelf[0] {
+		t.Fatalf("focus = %q, want the promoted member %q", win.Focus, shelf[0])
+	}
+	if len(st.Shelf) != 1 || st.Shelf[0] != shelf[1] {
+		t.Fatalf("shelf = %v, want the member that stayed", st.Shelf)
+	}
+	if st.ShelfActive != 0 {
+		t.Fatalf("shelf active = %d, want 0", st.ShelfActive)
+	}
+	if _, ok := st.Panes[shelf[0]]; !ok {
+		t.Fatal("the promoted pane lost its state")
+	}
+	if s.countPanes() != 2 {
+		t.Fatalf("countPanes = %d, want the promoted pane and the member left", s.countPanes())
+	}
+
+	// A restart reads that state back and seeds nothing from a throwaway
+	// window: every pane in the state is one the session really has.
+	loaded, err := session.LoadStateAt(st.Dir(), st.Name)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	next := railServer(loaded)
+	next.seedWindow()
+	for id := range loaded.Panes {
+		if id != shelf[0] && id != shelf[1] {
+			t.Fatalf("the start path stored a phantom pane %q: %v", id, loaded.Panes)
+		}
+	}
+	if len(loaded.Shelf) != 1 || loaded.Shelf[0] != shelf[1] {
+		t.Fatalf("reloaded shelf = %v, want the member that stayed", loaded.Shelf)
+	}
+
+	// The member left pops into the window the reloaded session has.
+	if id, err := next.popPane(""); err != nil || id != shelf[1] {
+		t.Fatalf("pop after restart = %q, %v", id, err)
+	}
+	lws := loaded.Workspaces[0]
+	lwin := lws.Windows[0]
+	if lwin.Focus != shelf[1] {
+		t.Fatalf("focus = %q, want the popped member %q", lwin.Focus, shelf[1])
+	}
+	if ids := layout.AllPanes(lwin.Root); len(ids) != 2 {
+		t.Fatalf("tree = %v, want the member beside the promoted pane", ids)
+	}
+	if len(loaded.Shelf) != 0 {
+		t.Fatalf("shelf = %v, want it empty after the pop", loaded.Shelf)
+	}
+}
+
+// TestStartSkipsTheSeedWithNoWorkspace proves the start path never mints a pane
+// from the throwaway window ActiveWindow returns: a session with only a shelf
+// restarts with exactly its shelf, and no phantom id reaches the state file.
+func TestStartSkipsTheSeedWithNoWorkspace(t *testing.T) {
+	root, id := emptyWorkspaceSession(t, "shelfnoseed")
+	loaded, err := session.LoadStateAt(root, "shelfnoseed")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	s := railServer(loaded)
+	s.seedWindow()
+	if len(loaded.Workspaces) != 0 {
+		t.Fatalf("the start path built %d workspaces, want none", len(loaded.Workspaces))
+	}
+	if len(loaded.Panes) != 1 {
+		t.Fatalf("panes = %v, want the shelf member alone", loaded.Panes)
+	}
+	if _, ok := loaded.Panes[id]; !ok {
+		t.Fatalf("panes = %v, want %q", loaded.Panes, id)
+	}
+	// The state parses back with no phantom pane either.
+	if err := loaded.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := session.LoadStateAt(root, "shelfnoseed")
+	if err != nil {
+		t.Fatalf("second reload: %v", err)
+	}
+	for pid := range again.Panes {
+		if pid != id {
+			t.Fatalf("a save and load minted the phantom pane %q", pid)
+		}
+	}
+	if len(again.Shelf) != 1 || again.Shelf[0] != id {
+		t.Fatalf("shelf = %v, want %q", again.Shelf, id)
+	}
+}
+
+// TestPopPaneBuildsAWorkspaceWhenThereIsNone proves pop is always landable: a
+// session with a live shelf and no workspace gets a real one, with a real
+// window, and the member becomes its root and its focus.
+func TestPopPaneBuildsAWorkspaceWhenThereIsNone(t *testing.T) {
+	root, id := emptyWorkspaceSession(t, "shelfpopws")
+	loaded, err := session.LoadStateAt(root, "shelfpopws")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	s := railServer(loaded)
+	s.seedWindow()
+	if got, err := s.popPane(""); err != nil || got != id {
+		t.Fatalf("pop = %q, %v", got, err)
+	}
+	if len(loaded.Workspaces) != 1 {
+		t.Fatalf("workspaces = %d, want one", len(loaded.Workspaces))
+	}
+	ws := loaded.Workspaces[0]
+	if ws.ID == "" || len(ws.Windows) != 1 {
+		t.Fatalf("workspace = %+v, want one real window", ws)
+	}
+	win := ws.Windows[0]
+	if win.ID == "" {
+		t.Fatal("the built window has no id")
+	}
+	if ids := layout.AllPanes(win.Root); len(ids) != 1 || ids[0] != id {
+		t.Fatalf("window root = %v, want the member %q", ids, id)
+	}
+	if win.Focus != id {
+		t.Fatalf("focus = %q, want the member", win.Focus)
+	}
+	if len(loaded.Shelf) != 0 {
+		t.Fatalf("shelf = %v, want it empty", loaded.Shelf)
+	}
+	if err := loaded.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := session.LoadStateAt(root, "shelfpopws")
+	if err != nil {
+		t.Fatalf("second reload: %v", err)
+	}
+	if len(again.Workspaces) != 1 || len(again.Workspaces[0].Windows) != 1 {
+		t.Fatalf("reloaded workspaces = %+v, want one with one window", again.Workspaces)
+	}
+}
+
+// TestNewWindowRefusedLeavesNoEmptyWorkspace proves a targeted new-window that
+// names no workspace or pane leaves the state exactly as it was: the workspace
+// it would need is built only after the target resolves.
+func TestNewWindowRefusedLeavesNoEmptyWorkspace(t *testing.T) {
+	root, id := emptyWorkspaceSession(t, "shelfbadtarget")
+	loaded, err := session.LoadStateAt(root, "shelfbadtarget")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	before, err := json.Marshal(loaded.Workspaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := railServer(loaded)
+	// The target is the shelf member: it is in no tree, so it names no window
+	// either.
+	if _, _, err := s.newWindow(id, "", "", false, nil, nil); err == nil {
+		t.Fatal("new-window accepted a target that is no workspace and no pane")
+	}
+	after, err := json.Marshal(loaded.Workspaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("a refused new-window changed the workspaces: %s -> %s", before, after)
+	}
+	if len(loaded.Workspaces) != 0 {
+		t.Fatalf("workspaces = %+v, want none", loaded.Workspaces)
+	}
+	// A save and a load of that state carry no empty workspace either.
+	if err := loaded.Save(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := session.LoadStateAt(root, "shelfbadtarget")
+	if err != nil {
+		t.Fatalf("second reload: %v", err)
+	}
+	if len(again.Workspaces) != 0 {
+		t.Fatalf("reloaded workspaces = %+v, want none", again.Workspaces)
+	}
+	if len(again.Shelf) != 1 || again.Shelf[0] != id {
+		t.Fatalf("shelf = %v, want the member %q", again.Shelf, id)
+	}
+}
+
+// TestStartSkipsTheSeedWithNoWindow proves the same refusal one level down: a
+// workspace with no window hands back a throwaway window, so the start path
+// seeds no pane into it either.
+func TestStartSkipsTheSeedWithNoWindow(t *testing.T) {
+	root := t.TempDir()
+	st := session.NewStateAt(root, "shelfnowindow")
+	win := st.ActiveWindow()
+	id := win.NewPaneID()
+	st.Panes = map[string]*session.PaneState{id: {}}
+	ws := st.ActiveWorkspace()
+	ws.Windows = nil
+	ws.Active = 0
+	st.Shelf = []string{id}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := session.LoadStateAt(root, "shelfnowindow")
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	s := railServer(loaded)
+	s.seedWindow()
+	if len(loaded.Panes) != 1 {
+		t.Fatalf("panes = %v, want the shelf member alone", loaded.Panes)
+	}
+	if _, ok := loaded.Panes[id]; !ok {
+		t.Fatalf("panes = %v, want %q", loaded.Panes, id)
+	}
+	if len(loaded.Workspaces) != 1 || len(loaded.Workspaces[0].Windows) != 0 {
+		t.Fatalf("the seed built %+v, want the workspace left as it was", loaded.Workspaces)
 	}
 }

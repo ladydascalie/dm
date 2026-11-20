@@ -298,6 +298,8 @@ func (s *server) paneExited(id string) {
 	s.st.DropShelf(id)
 
 	found, emptyWindow := false, false
+	// The window this exit empties, so the shelf can refill it below.
+	var emptied *session.Window
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
 			if !layout.FindLeaf(w.Root, id) {
@@ -326,6 +328,7 @@ func (s *server) paneExited(id string) {
 			}
 			w.Root = nil
 			emptyWindow = true
+			emptied = w
 		}
 	}
 	if !found && pc == nil {
@@ -337,6 +340,20 @@ func (s *server) paneExited(id string) {
 		_ = os.Remove(old)
 		_ = os.Remove(old + ".pid")
 		return
+	}
+	// A session with a live shelf never loses its last window. When the exit
+	// takes the only tree pane, the shelf's active member takes the window the
+	// exit emptied: the operator keeps a window, the pane keeps its PTY, and no
+	// state carries zero windows with a live shelf. Without this the session is
+	// stranded, because every pop needs a window to land in.
+	if emptyWindow && emptied != nil && s.treePaneCountLocked() == 0 {
+		if sid := s.shelfActivePaneLocked(); sid != "" {
+			emptied.Root = &layout.Node{Pane: sid}
+			emptied.Focus = sid
+			emptied.Layout = ""
+			s.st.DropShelf(sid)
+			emptyWindow = false
+		}
 	}
 	if emptyWindow {
 		s.dropEmptyWindows()

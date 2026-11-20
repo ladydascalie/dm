@@ -123,31 +123,31 @@ func TestShelfKeysGoToTheActiveMember(t *testing.T) {
 	}
 }
 
-// TestShelfPrefixNPMovesTheMember proves prefix n and prefix p ask the server
-// for opposite steps: two members, active 0, n names index 1 and p names index
-// 0. The server's snapshot answers each request, so the second move starts from
-// where the first landed.
+// TestShelfPrefixNPMovesTheMember proves prefix n and prefix p step in
+// opposite directions. Three members, active 1: n names index 2 and p names
+// index 0. Two members cannot prove it, because both steps round to the same
+// pane from either index, so a moveShelf that ignored its sign would pass.
 func TestShelfPrefixNPMovesTheMember(t *testing.T) {
 	t.Parallel()
 	tui, got := shelfTUI(t)
+	tui.snap.Panes = append(tui.snap.Panes,
+		wire.PaneInfo{ID: "w1p9", Name: "third", Status: "idle", Shelf: true})
 	feed(tui, "\x02F")
 	drainSummon(t, tui, got)
-	if at := shelfActiveIndex(tui.snap, rail.ShelfPanes(tui.snap)); at != 0 {
-		t.Fatalf("shelf starts on member %d, want 0", at)
-	}
 
+	// From the middle member, n asks for the last.
+	tui.snap.ShelfActive = 1
 	feed(tui, "\x02n")
 	m := nextMsg(t, got)
-	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p8" {
-		t.Fatalf("prefix n sent %+v, want a focus request for w1p8", m)
+	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p9" {
+		t.Fatalf("prefix n from member 1 sent %+v, want a focus request for w1p9 at index 2", m)
 	}
-	// The server answers with the new active index, the way the shelf's own
-	// reply snapshot does.
+	// From the same middle member, p asks for the first.
 	tui.snap.ShelfActive = 1
 	feed(tui, "\x02p")
 	m = nextMsg(t, got)
 	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p7" {
-		t.Fatalf("prefix p sent %+v, want a focus request back to w1p7", m)
+		t.Fatalf("prefix p from member 1 sent %+v, want a focus request for w1p7 at index 0", m)
 	}
 	if tui.shelf == nil {
 		t.Fatal("a move closed the shelf")

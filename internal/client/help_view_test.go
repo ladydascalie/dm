@@ -494,7 +494,9 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value. It
-// moved when the table gained the shelve/pop and shelf rows.
+// moved when the footer started naming the shelf keys: the table itself is
+// unchanged, because a shelf row would push the last section off a 100x40
+// screen.
 const helpBoxDefaultSHA256 = "ab90e06f3ad371cb3be320a67fe5a140e62b1a0af0a05f49c4825c1e1a9f5a47"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable

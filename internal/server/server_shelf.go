@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"dm/internal/layout"
+	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/wire"
 )
@@ -108,12 +109,30 @@ func (s *server) popPane(target string) (string, error) {
 		return "", fmt.Errorf("pane %q is not on the shelf", target)
 	}
 	win := s.st.ActiveWindow()
-	if !layout.FindLeaf(win.Root, win.Focus) {
-		ids := layout.AllPanes(win.Root)
-		if len(ids) == 0 {
-			return "", fmt.Errorf("window %s has no pane to split", win.ID)
+	if len(s.st.Workspaces) == 0 {
+		// A session with a live shelf and no workspace has nowhere to pop into:
+		// build the workspace and its window, the way new-window does, and let
+		// the member fill it below.
+		ws := &session.Workspace{ID: s.st.NewWorkspaceID(), Name: s.st.Name, Unfolded: true}
+		win = &session.Window{ID: s.st.NewWindowID(), Unfolded: s.cfg.DefaultFold()}
+		if ps := s.st.Panes[target]; ps != nil {
+			win.Name = paths.FolderName(ps.Cwd)
 		}
-		win.Focus = ids[0]
+		ws.Windows = []*session.Window{win}
+		s.st.Workspaces = []*session.Workspace{ws}
+		s.st.Active = 0
+	}
+	if len(layout.AllPanes(win.Root)) == 0 {
+		// An empty window has no pane to split: the member becomes its root,
+		// which is the pane it would have split beside.
+		win.Root = &layout.Node{Pane: target}
+		win.Focus = target
+		win.Layout = ""
+		s.st.DropShelf(target)
+		return target, nil
+	}
+	if !layout.FindLeaf(win.Root, win.Focus) {
+		win.Focus = layout.AllPanes(win.Root)[0]
 	}
 	if !layout.SplitLeaf(win.Root, win.Focus, "right", target, 0) {
 		return "", fmt.Errorf("could not split %q", win.Focus)

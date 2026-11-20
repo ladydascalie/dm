@@ -1270,16 +1270,6 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool, argv, pluginEn
 	}
 	s.mu.Lock()
 	ws := s.st.ActiveWorkspace()
-	if len(s.st.Workspaces) == 0 {
-		// ActiveWorkspace hands back a throwaway when the session has none, so
-		// a window appended to it would answer with an id that no state holds:
-		// the PTY would run with no window and the shell would stay unreachable.
-		// A session can reach zero workspaces with a live shelf, so build the
-		// real one here.
-		ws = &session.Workspace{ID: s.st.NewWorkspaceID(), Name: s.st.Name, Unfolded: true}
-		s.st.Workspaces = append(s.st.Workspaces, ws)
-		s.st.Active = 0
-	}
 	src := ""
 	if wsID != "" {
 		ws = nil
@@ -1302,6 +1292,16 @@ func (s *server) newWindow(wsID, label, cwd string, noFocus bool, argv, pluginEn
 			s.mu.Unlock()
 			return "", "", fmt.Errorf("no workspace or pane %q", wsID)
 		}
+	} else if len(s.st.Workspaces) == 0 {
+		// ActiveWorkspace hands back a throwaway when the session has none, so
+		// a window appended to it would answer with an id that no state holds:
+		// the PTY would run with no window and the shell would stay unreachable.
+		// A session can reach zero workspaces with a live shelf, so build the
+		// real one here. It is built after the target resolved, so a refused
+		// call leaves no empty workspace behind.
+		ws = &session.Workspace{ID: s.st.NewWorkspaceID(), Name: s.st.Name, Unfolded: true}
+		s.st.Workspaces = append(s.st.Workspaces, ws)
+		s.st.Active = 0
 	}
 	// The new pane opens where the source pane is, or where the active pane of
 	// the target workspace is, so the window's folder name and its shell agree.

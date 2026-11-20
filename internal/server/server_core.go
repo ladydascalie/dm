@@ -593,14 +593,7 @@ func Run(args []string) error {
 	}
 
 	applyDefaultFold(st, cfg)
-
-	win := st.ActiveWindow()
-	if win.Root == nil {
-		id := win.NewPaneID()
-		win.Root = &layout.Node{Pane: id}
-		win.Focus = id
-		s.addPaneState(id)
-	}
+	s.seedWindow()
 
 	// Start or adopt every pane in the state, all workspaces and windows.
 	var ids []string
@@ -782,6 +775,33 @@ func paneCommand(exe, sess, id string, ps *session.PaneState, tc *termColours, h
 		}
 	}
 	return exec.Command(exe, args...)
+}
+
+// seedWindow gives a session that has a workspace and no pane in it one pane to
+// attach to, the pane a fresh state starts with. It refuses a session with no
+// workspace, or a workspace with no window: ActiveWorkspace and ActiveWindow
+// hand back a throwaway in those cases, so a pane minted from it would be
+// stored with no window, no socket and no way to reach it. Such a session keeps
+// only its shelf, and pop-pane builds it a workspace.
+func (s *server) seedWindow() {
+	if len(s.st.Workspaces) == 0 {
+		return
+	}
+	ws := s.st.ActiveWorkspace()
+	if len(ws.Windows) == 0 {
+		return
+	}
+	if ws.Active < 0 || ws.Active >= len(ws.Windows) {
+		ws.Active = 0
+	}
+	win := ws.Windows[ws.Active]
+	if win.Root != nil {
+		return
+	}
+	id := win.NewPaneID()
+	win.Root = &layout.Node{Pane: id}
+	win.Focus = id
+	s.addPaneState(id)
 }
 
 // ensurePane dials the pane's socket and adopts it, or spawns a fresh daemon.
