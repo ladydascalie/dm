@@ -25,10 +25,11 @@ import (
 type sizerDaemon struct {
 	id string
 
-	mu    sync.Mutex
-	cols  int
-	rows  int
-	sizes [][2]int
+	mu         sync.Mutex
+	cols       int
+	rows       int
+	sizes      [][2]int
+	reflowReqs [][2]int
 }
 
 func newSizerDaemon(t *testing.T, st *session.State, id string) *sizerDaemon {
@@ -71,7 +72,14 @@ func (d *sizerDaemon) serve(c net.Conn) {
 			d.cols, d.rows = m.Cols, m.Rows
 			d.sizes = append(d.sizes, [2]int{m.Cols, m.Rows})
 			d.mu.Unlock()
-		case "screen", "reflow":
+		case "reflow":
+			// The picture handshake: the server asks once per settled size
+			// and the answer is the screen the "screen" case already sends.
+			d.mu.Lock()
+			d.reflowReqs = append(d.reflowReqs, [2]int{m.Cols, m.Rows})
+			d.mu.Unlock()
+			fallthrough
+		case "screen":
 			d.mu.Lock()
 			cols, rows := d.cols, d.rows
 			d.mu.Unlock()
@@ -104,6 +112,14 @@ func (d *sizerDaemon) resizes() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return len(d.sizes)
+}
+
+// reflows is the number of picture handshakes the server asked for, and the
+// size each one named.
+func (d *sizerDaemon) reflows() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.reflowReqs)
 }
 
 // sizerFixture is one server with two layout panes side by side, each behind a
@@ -231,6 +247,73 @@ func (f *sizerFixture) waitClients(t *testing.T, n int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("the server never held %d clients", n)
+}
+
+// drain discards every frame until the server has been quiet for quiet, so a
+// test reads the frames one claim produced and not the tail of an earlier
+// settle.
+func (c *sizerClient) drain(t *testing.T, quiet time.Duration) {
+	t.Helper()
+	for {
+		select {
+		case _, ok := <-c.frames:
+			if !ok {
+				return
+			}
+		case <-time.After(quiet):
+			return
+		}
+	}
+}
+
+// screen waits for the next screen frame for a pane and proves it carries cols
+// x rows. It reports how many screen frames for that pane it read on the way,
+// and fails on one at another size: a client that is not the sizer never
+// resizes a terminal, so this frame is the only way it learns a pane's size.
+func (c *sizerClient) screen(t *testing.T, id string, cols, rows int) int {
+	t.Helper()
+	seen := 0
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case m, ok := <-c.frames:
+			if !ok {
+				t.Fatalf("the client conn closed before a %dx%d screen frame for %s", cols, rows, id)
+			}
+			if m.Type != "screen" || m.Target != id {
+				continue
+			}
+			seen++
+			if m.VTSnap == nil {
+				t.Fatalf("a screen frame for %s carried no snapshot", id)
+			}
+			if m.VTSnap.Cols != cols || m.VTSnap.Rows != rows {
+				t.Fatalf("%s screen is %dx%d, want %dx%d", id, m.VTSnap.Cols, m.VTSnap.Rows, cols, rows)
+			}
+			return seen
+		case <-deadline:
+			t.Fatalf("no %dx%d screen frame for %s arrived: the client keeps its old grid", cols, rows, id)
+		}
+	}
+}
+
+// expectNoScreen fails if another screen frame for id arrives within wait.
+func (c *sizerClient) expectNoScreen(t *testing.T, id string, wait time.Duration) {
+	t.Helper()
+	deadline := time.After(wait)
+	for {
+		select {
+		case m, ok := <-c.frames:
+			if !ok {
+				return
+			}
+			if m.Type == "screen" && m.Target == id {
+				t.Fatalf("a second screen frame for %s arrived for one claim", id)
+			}
+		case <-deadline:
+			return
+		}
+	}
 }
 
 // waitSize waits until the daemon holds cols x rows and reports the size it had
@@ -429,4 +512,63 @@ func TestNonSizerClaimIsRefused(t *testing.T) {
 		t.Fatalf("the refused claim moved the screen to %dx%d", screen[0], screen[1])
 	}
 	t.Logf("refused claim: %s stayed %dx%d, no claim recorded", f.a, ra.W, ra.H)
+}
+
+// TestClaimHeightReachesNonSizer is the two-client repro from the attach
+// review's F3. The sizing client changes only the row count, and the client
+// that is not the sizer must take the new grid from a screen frame: it never
+// resizes a terminal. Before the fix dm sent the pane a resize and no screen,
+// so the non-sizer kept the old row count and a full-screen program scrolled
+// rows out of a grid that was too short.
+func TestClaimHeightReachesNonSizer(t *testing.T) {
+	t.Parallel()
+	f := newSizerFixture(t, "sizerheight")
+	first := f.client(t, 100, 30)
+	if !first.waitSizer(t, true) {
+		t.Fatal("the first client to attach was not made the sizing client")
+	}
+	f.waitClients(t, 1)
+	rect := rectOf(t, f.s, f.a)
+	f.waitSize(t, f.a, rect.W, rect.H)
+
+	second := f.client(t, 100, 30)
+	if !second.waitSizer(t, true) {
+		t.Fatal("the second client was not made the sizing client")
+	}
+	if first.waitSizer(t, false) {
+		t.Fatal("the first client was still told it sizes the panes")
+	}
+	f.waitClients(t, 2)
+	f.waitSize(t, f.a, rect.W, rect.H)
+	// The attach shrank the pane back to its rectangle, which is a width
+	// change of its own. Let that settle finish before a claim is measured.
+	first.drain(t, 100*time.Millisecond)
+	t.Logf("no claim yet: %s %dx%d, first client drained", f.a, rect.W, rect.H)
+
+	// oneClaim sends one claim and proves the frames it costs: one resize to
+	// the pane, one picture handshake, and one screen for the non-sizer.
+	oneClaim := func(cols, rows int, kind string) {
+		t.Helper()
+		resizes := f.demons[f.a].resizes()
+		reflows := f.demons[f.a].reflows()
+		second.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: cols, Rows: rows})
+		f.waitSize(t, f.a, cols, rows)
+		if n := first.screen(t, f.a, cols, rows); n != 1 {
+			t.Fatalf("the %dx%d claim sent %d screen frames for %s, want 1", cols, rows, n, f.a)
+		}
+		first.expectNoScreen(t, f.a, 60*time.Millisecond)
+		if got := f.demons[f.a].resizes(); got != resizes+1 {
+			t.Fatalf("the %dx%d claim sent the pane %d resize frames, want 1", cols, rows, got-resizes)
+		}
+		if got := f.demons[f.a].reflows(); got != reflows+1 {
+			t.Fatalf("the %dx%d claim sent the pane %d reflow requests, want 1", cols, rows, got-reflows)
+		}
+		t.Logf("%s claim %dx%d: 1 resize to the pty, 1 reflow, 1 screen to the non-sizer", kind, cols, rows)
+	}
+
+	// The control, unchanged by the fix: a width change pushes a screen.
+	oneClaim(60, 20, "width")
+	// Height only, smaller then larger: each owes the non-sizer one frame.
+	oneClaim(60, 16, "height-only")
+	oneClaim(60, 30, "height-only")
 }
