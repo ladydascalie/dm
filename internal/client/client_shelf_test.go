@@ -441,6 +441,34 @@ func TestShelfChordWaitsForItsKey(t *testing.T) {
 	}
 }
 
+// TestShelfChordSurvivesTheLonePrefixTimeout proves the shelf's prefix is a
+// chord head, not a lone esc: a hand takes longer than escTimeout to press the
+// second key, and that key must still read as a chord rather than as the
+// member's input. The expiry handler that closes every other overlay must
+// leave the shelf's wait alone.
+func TestShelfChordSurvivesTheLonePrefixTimeout(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	feed(tui, "\x02")
+	tui.escAt = time.Now().Add(-escTimeout - time.Millisecond)
+	if tui.expireMode(time.Now()) {
+		t.Fatal("the shelf's lone prefix expired")
+	}
+	if len(tui.inbuf) != 1 {
+		t.Fatalf("the buffer holds %q, want the prefix still in it", tui.inbuf)
+	}
+	testutil.NoMsg(t, got)
+
+	feed(tui, "F")
+	if tui.shelf != nil {
+		t.Fatal("the chord key after the timeout did not close the shelf")
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestShelfUnboundChordConsumesTheWholeKey proves an unbound chord spends its
 // whole key: the tail of a two-byte chord must not reach the member as typed
 // input.

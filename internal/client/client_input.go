@@ -787,6 +787,12 @@ func (t *tui) expireMode(now time.Time) bool {
 		return false
 	}
 	t.pending = false
+	if t.mode == "shelf" {
+		// The shelf's prefix is the head of a chord, not a lone esc. A hand
+		// takes longer than escTimeout to press the second key, and that key
+		// must still read as a chord. It waits until the chord arrives.
+		return false
+	}
 	// The lone esc was consumed by the mode's key handler but left in the
 	// buffer. Drop it with the mode, so the next keypress does not forward a
 	// stray escape to a pane. The float never gets here: its lone prefix is
