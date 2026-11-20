@@ -68,13 +68,21 @@ type tui struct {
 	keymapSeam bool
 	// th is the loaded theme. A nil theme means the built-in theme, so a test
 	// TUI runs without a config file.
-	th     *theme.Theme
-	cols   int
-	rows   int
-	snap   *wire.Snapshot
-	vts    map[string]*vt.Term
-	armed  bool
-	toasts []toast // oldest first, newest last
+	th   *theme.Theme
+	cols int
+	rows int
+	snap *wire.Snapshot
+	vts  map[string]*vt.Term
+	// sizing and sizerKnown are the server's verdict on this client. The
+	// sizing client fits each pane's terminal to the layout rect; every other
+	// client keeps the pane's own grid and draws it in a larger rect, which
+	// the painter blanks around. A client that never receives a sizer frame
+	// keeps fitting to the rect: that is what every plain TUI and the goldens
+	// have always done.
+	sizing     bool
+	sizerKnown bool
+	armed      bool
+	toasts     []toast // oldest first, newest last
 	// lastByte is when each pane last received output, so a quiet pane's
 	// pending cluster can be placed without waiting for the next chunk.
 	lastByte map[string]time.Time
@@ -936,7 +944,7 @@ func (t *tui) apply(m wire.Msg) {
 			term := t.vts[p.ID]
 			if term != nil {
 				c, r := term.Grid().Size()
-				if c != p.Rect.W || r != p.Rect.H {
+				if t.sizesPanes() && (c != p.Rect.W || r != p.Rect.H) {
 					resizeTerm(term, p.Rect.W, p.Rect.H)
 				}
 			} else {
@@ -1012,6 +1020,15 @@ func (t *tui) apply(m wire.Msg) {
 			t.dirty = true
 		}
 		t.dirty = true
+	case "sizer":
+		// The server says whether this client sizes the panes. A change to
+		// false stops the rect fit; a change to true starts it again, and the
+		// next snapshot or screen lands at the rect.
+		if m.Sizing != nil {
+			t.sizerKnown = true
+			t.sizing = *m.Sizing
+			t.dirty = true
+		}
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
 			if p.Shelf {
@@ -1019,7 +1036,7 @@ func (t *tui) apply(m wire.Msg) {
 				// size, not at a rect the snapshot does not carry.
 				t.applyShelfScreen(m.Target, m.VTSnap)
 			} else {
-				applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+				t.applySnapshot(m.Target, p.Rect, m.VTSnap)
 			}
 		} else {
 			// A pane outside the active window has no local terminal. The
@@ -1051,7 +1068,7 @@ func (t *tui) apply(m wire.Msg) {
 			if p.Shelf {
 				t.applyShelfScreen(m.Target, m.VTSnap)
 			} else {
-				applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+				t.applySnapshot(m.Target, p.Rect, m.VTSnap)
 			}
 		} else {
 			t.applyPreviewScreen(m.Target, m.VTSnap)
@@ -1171,24 +1188,36 @@ func (t *tui) apply(m wire.Msg) {
 // snapshot. The snapshot carries its own size, and it can be the size the pane
 // had before the layout's resize reached it: syncSizes sends the resize and
 // asks for the screen without waiting, so the two race. Restore at the
-// snapshot's size and reflow to the rect, which is what the old ANSI replay
-// did. Refusing a mismatch leaves the pane blank until the program redraws.
-func applySnapshot(vts map[string]*vt.Term, id string, r layout.Rect, snap *vt.Snapshot) bool {
+// snapshot's size and, for the sizing client, reflow to the rect, which is what
+// the old ANSI replay did. Refusing a mismatch leaves the pane blank until the
+// program redraws.
+//
+// A client that is not sizing the panes keeps the snapshot's own size: the
+// sizing client claimed it, and a rect that is larger is just a larger box to
+// paint the pane's grid into.
+func (t *tui) applySnapshot(id string, r layout.Rect, snap *vt.Snapshot) bool {
 	if r.W < 1 || r.H < 1 || snap == nil {
 		return false
 	}
-	term := vts[id]
+	term := t.vts[id]
 	if term == nil {
 		term = vt.NewTerm(snap.Cols, snap.Rows)
 	}
 	if err := term.Restore(snap); err != nil {
 		return false
 	}
-	if c, rw := term.Grid().Size(); c != r.W || rw != r.H {
+	if c, rows := term.Grid().Size(); t.sizesPanes() && (c != r.W || rows != r.H) {
 		resizeTerm(term, r.W, r.H)
 	}
-	vts[id] = term
+	t.vts[id] = term
 	return true
+}
+
+// sizesPanes reports whether this client fits each pane's terminal to its
+// layout rect. It is true until the server says otherwise, so a wire peer that
+// predates the sizer frame, and the golden scenes, keep the cell fit.
+func (t *tui) sizesPanes() bool {
+	return !t.sizerKnown || t.sizing
 }
 
 // glyphSet is the glyph vocabulary the chrome draws with, resolved once. Auto

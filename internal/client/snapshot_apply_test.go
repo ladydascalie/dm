@@ -23,11 +23,11 @@ func TestApplySnapshotReflowsAMismatchedSize(t *testing.T) {
 
 	// The layout now says 50x12.
 	rect := layout.Rect{X: 0, Y: 0, W: 50, H: 12}
-	vts := map[string]*vt.Term{}
-	if !applySnapshot(vts, "w1p1", rect, snap) {
+	tui := &tui{vts: map[string]*vt.Term{}}
+	if !tui.applySnapshot("w1p1", rect, snap) {
 		t.Fatal("applySnapshot refused a snapshot of a different size")
 	}
-	term := vts["w1p1"]
+	term := tui.vts["w1p1"]
 	if term == nil {
 		t.Fatal("applySnapshot left no terminal")
 	}
@@ -44,11 +44,11 @@ func TestApplySnapshotReflowsAMismatchedSize(t *testing.T) {
 // screen message with no snapshot carries nothing to draw.
 func TestApplySnapshotRefusesNil(t *testing.T) {
 	t.Parallel()
-	vts := map[string]*vt.Term{}
-	if applySnapshot(vts, "w1p1", layout.Rect{W: 10, H: 5}, nil) {
+	tui := &tui{vts: map[string]*vt.Term{}}
+	if tui.applySnapshot("w1p1", layout.Rect{W: 10, H: 5}, nil) {
 		t.Fatal("applySnapshot accepted a nil snapshot")
 	}
-	if vts["w1p1"] != nil {
+	if tui.vts["w1p1"] != nil {
 		t.Fatal("applySnapshot created a terminal for a nil snapshot")
 	}
 }

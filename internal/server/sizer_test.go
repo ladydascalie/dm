@@ -1,0 +1,432 @@
+package server
+
+import (
+	"net"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+	"time"
+
+	"dm/internal/layout"
+	"dm/internal/session"
+	"dm/internal/vt"
+	"dm/internal/wire"
+)
+
+// The sizer tests run the real serve loop over pipes, so attach, resize and
+// detach take the wiring a socket client takes. Each pane is a fake daemon on
+// its own socket: it records every resize the server sends, which is the
+// winsize its pty would take, and answers the screen and reflow requests the
+// attach path asks for.
+
+// sizerDaemon is one fake pane daemon: its current size and the resize frames
+// it received, in order.
+type sizerDaemon struct {
+	id string
+
+	mu    sync.Mutex
+	cols  int
+	rows  int
+	sizes [][2]int
+}
+
+func newSizerDaemon(t *testing.T, st *session.State, id string) *sizerDaemon {
+	t.Helper()
+	d := &sizerDaemon{id: id}
+	sock := st.PaneSock(id)
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen %s: %v", sock, err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go d.serve(c)
+		}
+	}()
+	return d
+}
+
+// serve answers one conn the way a pane daemon does: a resize sets the size, a
+// screen answers with a grid of that size, and anything else gets a good reply.
+func (d *sizerDaemon) serve(c net.Conn) {
+	defer func() { _ = c.Close() }()
+	for {
+		m, err := wire.ReadMsg(c)
+		if err != nil {
+			return
+		}
+		switch m.Action {
+		case "resize":
+			d.mu.Lock()
+			d.cols, d.rows = m.Cols, m.Rows
+			d.sizes = append(d.sizes, [2]int{m.Cols, m.Rows})
+			d.mu.Unlock()
+		case "screen", "reflow":
+			d.mu.Lock()
+			cols, rows := d.cols, d.rows
+			d.mu.Unlock()
+			if cols < 1 {
+				cols = 80
+			}
+			if rows < 1 {
+				rows = 24
+			}
+			term := vt.NewTerm(cols, rows)
+			term.Write([]byte("pane " + d.id))
+			term.Flush()
+			_ = wire.WriteMsg(c, wire.Msg{Type: "screen", ID: m.ID, Target: d.id, VTSnap: term.Snapshot()})
+		case "replay":
+			st := wire.Status{State: "idle"}
+			_ = wire.WriteMsg(c, wire.Msg{Type: "replay", ID: m.ID, Target: d.id, Data: []byte("ring"), St: &st})
+		default:
+			_ = wire.WriteMsg(c, wire.Msg{Type: "resp", ID: m.ID, OK: true, Cwd: os.TempDir()})
+		}
+	}
+}
+
+func (d *sizerDaemon) size() (int, int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cols, d.rows
+}
+
+func (d *sizerDaemon) resizes() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.sizes)
+}
+
+// sizerFixture is one server with two layout panes side by side, each behind a
+// fake daemon, and the real serve loop for every client.
+type sizerFixture struct {
+	s      *server
+	a, b   string
+	demons map[string]*sizerDaemon
+}
+
+func newSizerFixture(t *testing.T, name string) *sizerFixture {
+	t.Helper()
+	st := session.NewStateAt(t.TempDir(), name)
+	w := st.ActiveWindow()
+	a := w.NewPaneID()
+	b := w.NewPaneID()
+	w.Root = &layout.Node{Dir: "row", Kids: []*layout.Node{{Pane: a}, {Pane: b}}}
+	w.Focus = a
+	st.Panes[a] = &session.PaneState{}
+	st.Panes[b] = &session.PaneState{}
+	if err := os.MkdirAll(st.SessionDir(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	f := &sizerFixture{s: railServer(st), a: a, b: b, demons: map[string]*sizerDaemon{}}
+	f.s.reflowSettle = 10 * time.Millisecond
+	for _, id := range []string{a, b} {
+		f.demons[id] = newSizerDaemon(t, st, id)
+		if err := f.s.ensurePane(id); err != nil {
+			t.Fatalf("ensurePane %s: %v", id, err)
+		}
+	}
+	t.Cleanup(func() {
+		// The client cleanups have closed their conns by now. Let each serve
+		// loop finish its detach bookkeeping before the temp dir goes: a
+		// detach that reverts a claim saves state, and a save that lands after
+		// the removal fails the test.
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			f.s.mu.Lock()
+			n := len(f.s.clients)
+			f.s.mu.Unlock()
+			if n == 0 {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		f.s.mu.Lock()
+		for _, pc := range f.s.panes {
+			_ = pc.c.Close()
+		}
+		f.s.mu.Unlock()
+	})
+	return f
+}
+
+// client attaches a client to the fixture's serve loop and collects the frames
+// the server sends it.
+type sizerClient struct {
+	conn   net.Conn
+	frames chan wire.Msg
+}
+
+func (f *sizerFixture) client(t *testing.T, cols, rows int) *sizerClient {
+	t.Helper()
+	srv, cli := net.Pipe()
+	go f.s.serve(srv)
+	t.Cleanup(func() { _ = cli.Close() })
+	c := &sizerClient{conn: cli, frames: make(chan wire.Msg, 256)}
+	go func() {
+		for {
+			m, err := wire.ReadMsg(cli)
+			if err != nil {
+				close(c.frames)
+				return
+			}
+			c.frames <- m
+		}
+	}()
+	if err := wire.WriteMsg(cli, wire.Msg{Type: "attach", Cols: cols, Rows: rows}); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	return c
+}
+
+func (c *sizerClient) send(t *testing.T, m wire.Msg) {
+	t.Helper()
+	if err := wire.WriteMsg(c.conn, m); err != nil {
+		t.Fatalf("send %+v: %v", m, err)
+	}
+}
+
+// waitSizer reads frames until the server says whether this client sizes the
+// panes and reports that verdict.
+func (c *sizerClient) waitSizer(t *testing.T, want bool) bool {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case m, ok := <-c.frames:
+			if !ok {
+				t.Fatal("the client conn closed before a sizer frame")
+			}
+			if m.Type != "sizer" || m.Sizing == nil {
+				continue
+			}
+			return *m.Sizing
+		case <-deadline:
+			t.Fatalf("no sizer frame arrived; wanted sizing=%v", want)
+		}
+	}
+}
+
+// waitClients blocks until the server has n clients attached, so a detach has
+// finished its bookkeeping before the test reads the outcome.
+func (f *sizerFixture) waitClients(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		f.s.mu.Lock()
+		got := len(f.s.clients)
+		f.s.mu.Unlock()
+		if got == n {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("the server never held %d clients", n)
+}
+
+// waitSize waits until the daemon holds cols x rows and reports the size it had
+// before that resize.
+func (f *sizerFixture) waitSize(t *testing.T, id string, cols, rows int) (int, int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, r := f.demons[id].size(); c == cols && r == rows {
+			return c, r
+		}
+		time.Sleep(time.Millisecond)
+	}
+	c, r := f.demons[id].size()
+	t.Fatalf("pane %s is %dx%d, want %dx%d", id, c, r, cols, rows)
+	return 0, 0
+}
+
+// expectNoResize proves a frame changed nothing: the pane's daemon receives no
+// resize and keeps the size it holds. It waits past the reflow settle, so a
+// resize that only lands late still fails the test.
+func (f *sizerFixture) expectNoResize(t *testing.T, id string, cols, rows int) {
+	t.Helper()
+	before := f.demons[id].resizes()
+	time.Sleep(60 * time.Millisecond)
+	if got := f.demons[id].resizes(); got != before {
+		t.Fatalf("pane %s received a resize, want none", id)
+	}
+	if c, r := f.demons[id].size(); c != cols || r != rows {
+		t.Fatalf("pane %s is %dx%d, want the unchanged %dx%d", id, c, r, cols, rows)
+	}
+}
+
+// rectOf is one pane's layout rectangle in the server's current snapshot.
+func rectOf(t *testing.T, s *server, id string) layout.Rect {
+	t.Helper()
+	for _, p := range snapshot(s).Panes {
+		if p.ID == id {
+			return p.Rect
+		}
+	}
+	t.Fatalf("no pane %s in the snapshot", id)
+	return layout.Rect{}
+}
+
+// TestClaimResizesOnePane: the sizing client's claim sizes that pane's pty and
+// leaves its sibling's alone.
+func TestClaimResizesOnePane(t *testing.T) {
+	t.Parallel()
+	f := newSizerFixture(t, "sizerclaim")
+	c := f.client(t, 100, 30)
+	if !c.waitSizer(t, true) {
+		t.Fatal("the first client to attach was not made the sizing client")
+	}
+	f.waitClients(t, 1)
+
+	ra := rectOf(t, f.s, f.a)
+	rb := rectOf(t, f.s, f.b)
+	f.waitSize(t, f.a, ra.W, ra.H)
+	f.waitSize(t, f.b, rb.W, rb.H)
+	sibling := f.demons[f.b].resizes()
+	t.Logf("before: %s %dx%d, %s %dx%d", f.a, ra.W, ra.H, f.b, rb.W, rb.H)
+
+	c.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: 94, Rows: 24})
+	f.waitSize(t, f.a, 94, 24)
+	if c, r := f.demons[f.b].size(); c != rb.W || r != rb.H {
+		t.Fatalf("the sibling pty moved to %dx%d", c, r)
+	}
+	if got := f.demons[f.b].resizes(); got != sibling {
+		t.Fatalf("the sibling received %d resize frames, want the %d it had", got-sibling, 0)
+	}
+	f.s.mu.Lock()
+	cols, rows := f.s.st.Panes[f.a].Cols, f.s.st.Panes[f.a].Rows
+	f.s.mu.Unlock()
+	if cols != 94 || rows != 24 {
+		t.Fatalf("the pane state is %dx%d, want 94x24", cols, rows)
+	}
+	t.Logf("after: %s 94x24, %s %dx%d", f.a, f.b, rb.W, rb.H)
+	if got := rectOf(t, f.s, f.a); got != ra {
+		t.Fatalf("the claim moved the layout rectangle to %+v, want %+v", got, ra)
+	}
+}
+
+// TestSecondAttachTakesOver: the newest client sizes the panes, the older one is
+// told it no longer does, its claims are dropped and its later claim is refused.
+func TestSecondAttachTakesOver(t *testing.T) {
+	t.Parallel()
+	f := newSizerFixture(t, "sizertakeover")
+	first := f.client(t, 100, 30)
+	if !first.waitSizer(t, true) {
+		t.Fatal("the first client was not made the sizing client")
+	}
+	f.waitClients(t, 1)
+	ra := rectOf(t, f.s, f.a)
+	f.waitSize(t, f.a, ra.W, ra.H)
+
+	first.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: 94, Rows: 24})
+	f.waitSize(t, f.a, 94, 24)
+	t.Logf("before the second attach: %s 94x24", f.a)
+
+	// The same screen size, so the layout rectangles do not move and the claim
+	// is the only thing that changes.
+	second := f.client(t, 100, 30)
+	if !second.waitSizer(t, true) {
+		t.Fatal("the second client was not made the sizing client")
+	}
+	if first.waitSizer(t, true) {
+		t.Fatal("the first client was still told it sizes the panes")
+	}
+	f.waitClients(t, 2)
+	f.waitSize(t, f.a, ra.W, ra.H)
+	t.Logf("after the second attach: %s %dx%d", f.a, ra.W, ra.H)
+
+	// The old sizing client's claim is refused, and nothing moves.
+	first.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: 70, Rows: 20})
+	f.expectNoResize(t, f.a, ra.W, ra.H)
+
+	second.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: 94, Rows: 24})
+	f.waitSize(t, f.a, 94, 24)
+	t.Logf("after the new client's claim: %s 94x24", f.a)
+}
+
+// TestDetachSizerRevertsToRemainingClient: when the sizing client goes, the most
+// recently attached remaining client takes over, and the panes fall back to the
+// layout until it claims.
+func TestDetachSizerRevertsToRemainingClient(t *testing.T) {
+	t.Parallel()
+	f := newSizerFixture(t, "sizerdetach")
+	first := f.client(t, 100, 30)
+	if !first.waitSizer(t, true) {
+		t.Fatal("the first client was not made the sizing client")
+	}
+	second := f.client(t, 100, 30)
+	if !second.waitSizer(t, true) {
+		t.Fatal("the second client was not made the sizing client")
+	}
+	if first.waitSizer(t, true) {
+		t.Fatal("the first client was still told it sizes the panes")
+	}
+	f.waitClients(t, 2)
+	ra := rectOf(t, f.s, f.a)
+	f.waitSize(t, f.a, ra.W, ra.H)
+
+	second.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: 94, Rows: 24})
+	f.waitSize(t, f.a, 94, 24)
+	t.Logf("before the detach: %s 94x24", f.a)
+
+	_ = second.conn.Close()
+	f.waitClients(t, 1)
+	if !first.waitSizer(t, true) {
+		t.Fatal("the remaining client was not handed the sizing role")
+	}
+	f.waitSize(t, f.a, ra.W, ra.H)
+	t.Logf("after the detach: %s %dx%d", f.a, ra.W, ra.H)
+
+	// The new sizing client's claim is honoured.
+	first.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: 90, Rows: 20})
+	f.waitSize(t, f.a, 90, 20)
+	t.Logf("after the remaining client's claim: %s 90x20", f.a)
+}
+
+// TestNonSizerClaimIsRefused: only the sizing client's claim reaches a pty.
+func TestNonSizerClaimIsRefused(t *testing.T) {
+	t.Parallel()
+	f := newSizerFixture(t, "sizernonsizer")
+	first := f.client(t, 100, 30)
+	if !first.waitSizer(t, true) {
+		t.Fatal("the first client was not made the sizing client")
+	}
+	second := f.client(t, 100, 30)
+	if !second.waitSizer(t, true) {
+		t.Fatal("the second client was not made the sizing client")
+	}
+	if first.waitSizer(t, true) {
+		t.Fatal("the first client was still told it sizes the panes")
+	}
+	f.waitClients(t, 2)
+	ra := rectOf(t, f.s, f.a)
+	f.waitSize(t, f.a, ra.W, ra.H)
+
+	first.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: 94, Rows: 24})
+	f.expectNoResize(t, f.a, ra.W, ra.H)
+
+	f.s.mu.Lock()
+	claims := len(f.s.claims)
+	f.s.mu.Unlock()
+	if claims != 0 {
+		t.Fatalf("%d claims were recorded from a client that does not size the panes", claims)
+	}
+	// The client's own screen size stays what its attach said: a claim is
+	// never read as the client's size.
+	f.s.mu.Lock()
+	screen := [2]int{f.s.cols, f.s.rows}
+	f.s.mu.Unlock()
+	if screen != [2]int{100, 30} {
+		t.Fatalf("the refused claim moved the screen to %dx%d", screen[0], screen[1])
+	}
+	t.Logf("refused claim: %s stayed %dx%d, no claim recorded", f.a, ra.W, ra.H)
+}

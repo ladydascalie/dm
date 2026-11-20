@@ -715,18 +715,24 @@ func (s *server) syncSizes() {
 		if ps == nil {
 			continue
 		}
-		if ps.Cols == r.W && ps.Rows == r.H {
+		// A pane the sizing client claimed takes that size; every other pane
+		// takes its layout rectangle, which is the cell grid the TUI draws.
+		w, h := r.W, r.H
+		if claim, ok := s.claims[id]; ok {
+			w, h = claim.cols, claim.rows
+		}
+		if ps.Cols == w && ps.Rows == h {
 			continue
 		}
 		// Only a width change re-wraps the line model, so only those panes
 		// wait for a reflow. A height change gets the cheap resize alone.
-		if ps.Cols != r.W {
+		if ps.Cols != w {
 			widened = append(widened, id)
 		}
-		ps.Cols, ps.Rows = r.W, r.H
+		ps.Cols, ps.Rows = w, h
 		calls = append(calls, func() {
 			if pc != nil {
-				if err := pc.send(wire.Msg{Action: "resize", Cols: r.W, Rows: r.H}); err != nil {
+				if err := pc.send(wire.Msg{Action: "resize", Cols: w, Rows: h}); err != nil {
 					// A resize is a pane event: it re-arms a wedged
 					// pane's capped watcher.
 					s.rearmPaneWatcher(id)
@@ -751,9 +757,17 @@ func (s *server) serve(c net.Conn) {
 		if registered {
 			s.mu.Lock()
 			delete(s.clients, cl)
+			// The sizing client leaving hands the role to the client that
+			// attached last among the rest. With none left nothing sizes the
+			// panes, so they fall back to their layout rectangles.
+			claimsDropped := s.sizer == cl && len(s.claims) > 0
+			sizerChanged := s.setSizerLocked(s.newestClientLocked())
 			resized := s.fitToClientsLocked()
 			s.mu.Unlock()
-			if resized {
+			if sizerChanged {
+				s.pushSizer()
+			}
+			if resized || claimsDropped {
 				s.syncSizes()
 				s.pushSnapshot()
 			}
@@ -816,6 +830,13 @@ func (s *server) serve(c net.Conn) {
 			if s.resizeShelfPane(m.Target, m.Cols, m.Rows) {
 				break
 			}
+			// A target that names a layout pane is that pane's pty size, a
+			// claim rather than the client's own screen. A client that is not
+			// the sizing client is refused and changes nothing.
+			if m.Target != "" {
+				s.claimPaneSize(cl, m.Target, m.Cols, m.Rows)
+				break
+			}
 			s.mu.Lock()
 			if m.Cols > 20 && m.Rows > 5 {
 				cl.cols, cl.rows = m.Cols, m.Rows
@@ -835,8 +856,15 @@ func (s *server) attach(cl *client, m wire.Msg) {
 	if m.Cols > 20 && m.Rows > 5 {
 		cl.cols, cl.rows = m.Cols, m.Rows
 	}
+	s.attachSeq++
+	cl.seq = s.attachSeq
 	s.fitToClientsLocked()
+	// The client that attached last sizes the panes. A new one starts with no
+	// claims, so the panes it inherits go back to the layout under it until it
+	// claims otherwise.
+	s.setSizerLocked(cl)
 	s.mu.Unlock()
+	s.pushSizer()
 	// A client that overflows later resyncs from a picture instead of a
 	// backlog: one snapshot, then one screen per pane.
 	cl.setResync(func() { s.resyncClient(cl) })

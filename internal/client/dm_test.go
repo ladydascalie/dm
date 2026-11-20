@@ -2625,17 +2625,17 @@ func TestClientScreenThenReplay(t *testing.T) {
 	src.Flush()
 	snap := src.Snapshot()
 
-	vts := map[string]*vt.Term{"p1": vt.NewTerm(12, 3)}
-	vts["p1"].Write([]byte("OLD CONTENT"))
-	vts["p1"].Flush()
+	tui := &tui{vts: map[string]*vt.Term{"p1": vt.NewTerm(12, 3)}}
+	tui.vts["p1"].Write([]byte("OLD CONTENT"))
+	tui.vts["p1"].Flush()
 	hist := map[string][]byte{}
 
-	if !applySnapshot(vts, "p1", layout.Rect{W: 12, H: 3}, snap) {
+	if !tui.applySnapshot("p1", layout.Rect{W: 12, H: 3}, snap) {
 		t.Fatal("applySnapshot refused the snapshot")
 	}
 	applyReplay(hist, "p1", []byte("RING-HISTORY"))
 
-	live := vts["p1"]
+	live := tui.vts["p1"]
 	if live == nil {
 		t.Fatal("screen did not install a VT")
 	}
