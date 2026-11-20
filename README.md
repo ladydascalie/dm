@@ -122,6 +122,9 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `n` / `p` | next / previous pane |
 | `x` | close pane |
 | `X` | close window |
+| `f` | shelve the focused pane |
+| `F` | summon or dismiss the shelf |
+| `G` | pop the active shelf member back into the layout |
 | `z` | zoom pane |
 | `c` | new window |
 | `w` / `W` | next / previous window |
@@ -595,6 +598,41 @@ prefix: one press of it kills the float and the command under it.
 A diff float also answers D: it closes the float and opens the command in a
 pane split off the pane the float sits on.
 
+## Shelf
+
+`prefix f` takes the focused pane off the grid and puts it on the shelf. The
+pane keeps running: its process, its scrollback, its status and its id are
+untouched, and it survives a detach and a server restart. It has no rectangle
+and belongs to no window.
+
+`prefix F` summons the shelf as a float, and a second press puts it away. The
+float carries a strip of one chip per shelved pane, its state glyph and its
+name, with the active member's screen under it. Keys go to the active member.
+The prefix is the only key the shelf keeps, so `prefix n` and `prefix p` move
+between members, `prefix G` pops the active member back into the layout, and
+`prefix ctrl+r` reloads the config and refits the box in place.
+
+`prefix G` pops the active member: the pane returns to the split tree as a
+split off the focused pane, and it takes the focus. The shelf keeps its ids,
+so a shelved pane still answers `dm read`, `dm status` and `dm keys`, and
+`dm list` prints it with `WS shelf`.
+
+The float is a tray over the pane area, centred, at `shelf-size` percent of
+it, so the rail, the tab bar and the status bar stay visible. `shelf-layout
+"pane"` lays it over the focused pane instead, inset one cell so its border
+lands on the pane's own frame. The strip and at least three rows of screen
+are always kept.
+
+The shelf is one list for the whole session, shared by every client, and the
+server owns the active member. The rail carries a foldable shelf section
+after the last workspace, one row per member, and the status bar carries one
+chip while the shelf is not empty.
+
+A window never holds zero panes. Shelving the last pane of a window is
+refused, and so is closing the last tree pane while the shelf holds one: pop
+a member first. A pane that exits as the last pane of its window promotes the
+active shelf member into that window instead, so a live shelf never sits
+behind no windows.
 ## Sidebar
 
 The left columns of the screen show a sidebar when the session asks for one.
