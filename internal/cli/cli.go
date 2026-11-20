@@ -1955,8 +1955,32 @@ func runList(c *cmdFlags) error {
 	if res.Snapshot == nil {
 		return fmt.Errorf("no snapshot")
 	}
-	printPaneTable(res.Snapshot.All)
+	printPaneTable(paneRowsForList(res.Snapshot))
 	return nil
+}
+
+// paneRowsForList is what dm list prints: every pane the snapshot's All carries
+// in workspace and window order, then the shelved panes, which no window holds.
+// The shelf entries ride the table alone: All stays the windowed fleet the rail,
+// the switcher and the window ranks walk.
+func paneRowsForList(snap *wire.Snapshot) []wire.AllPane {
+	if snap == nil {
+		return nil
+	}
+	rows := append(make([]wire.AllPane, 0, len(snap.All)+len(snap.Panes)), snap.All...)
+	for _, p := range snap.Panes {
+		if !p.Shelf {
+			continue
+		}
+		rows = append(rows, wire.AllPane{
+			ID: p.ID, Name: p.Name, Status: p.Status, Message: p.Message,
+			// A shelved pane answers no workspace and no window: the shelf is
+			// its address, and the table says so where both would be.
+			Agent:     p.Status != "" && p.Status != "unknown",
+			Workspace: "shelf", Window: "-",
+		})
+	}
+	return rows
 }
 
 // printPaneTable prints one row per pane: its id, workspace, window, app,

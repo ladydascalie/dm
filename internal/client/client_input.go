@@ -484,6 +484,38 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
+		if t.mode == "shelf" {
+			// The shelf owns its strip and the prefix; the active member gets
+			// every other byte. A lone esc is a key for that pane, so it skips
+			// the mouse and paste checks. A pointer event over the shelf goes
+			// to nobody, so a click on the strip never falls through to the
+			// pane under it.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.shelfKey() {
+					return
+				}
+				continue
+			}
+			if _, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if seq, n, started := t.takePaste(); started {
+				if n == 0 {
+					t.holdPaste(time.Now())
+					return
+				}
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				t.shelfPaste(seq)
+				continue
+			}
+			if !t.shelfKey() {
+				return
+			}
+			continue
+		}
 		if seq, n, started := t.takePaste(); started {
 			if n == 0 {
 				// The marker is still arriving. Keep buffering; the ticker
@@ -1377,7 +1409,16 @@ func visiblePanes(win *wire.Snapshot) []wire.PaneInfo {
 	if z := zoomedPane(win); z != nil {
 		return []wire.PaneInfo{*z}
 	}
-	return win.Panes
+	// A shelved pane is listed in the snapshot with no rect: it is drawn by
+	// the shelf float, not by the pane painter, so the drawn set skips it.
+	out := make([]wire.PaneInfo, 0, len(win.Panes))
+	for _, p := range win.Panes {
+		if p.Shelf {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // paneAtBox returns the pane whose whole box contains the point, border
@@ -1390,6 +1431,11 @@ func (t *tui) paneAtBox(x, y int) *wire.PaneInfo {
 		return p
 	}
 	for i := range t.snap.Panes {
+		if t.snap.Panes[i].Shelf {
+			// A shelved pane has no rect: its zero rect would put its box at
+			// the origin, where a click belongs to nobody.
+			continue
+		}
 		r := t.snap.Panes[i].Rect
 		// The hit area is the box including its border, so a click on the
 		// frame focuses the pane.
@@ -1409,6 +1455,9 @@ func (t *tui) paneAt(x, y int) *wire.PaneInfo {
 		return p
 	}
 	for i := range t.snap.Panes {
+		if t.snap.Panes[i].Shelf {
+			continue
+		}
 		r := t.snap.Panes[i].Rect
 		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
 			return &t.snap.Panes[i]
@@ -2142,6 +2191,16 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			return
 		}
 		t.railDragTo(x, false)
+		return
+	}
+	// The status bar owns its own row. A left press on the shelf chip summons
+	// the shelf; every other press there is chrome and goes nowhere, so a
+	// click on the bar never reaches a pane or opens its menu.
+	if y == t.snap.Rows-1 {
+		if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release && t.shelfChipAt(x) {
+			t.shelfToggle()
+			t.disarm()
+		}
 		return
 	}
 	// A left press on the grip starts that drag and sends nothing, so a stray
@@ -3493,6 +3552,20 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			// the drag arms only when the pointer moves to another row.
 			if it, ok := rail.RailItemAt(t.snap, x, y); ok {
 				t.wsDragStart(it, y)
+			}
+			return true
+		}
+		if id := rail.RailShelfAt(t.snap, x, y); id != "" {
+			// A shelf row focuses that member. A shelved pane is in no tree,
+			// so the server moves the shelf's active index and leaves the
+			// window focus alone. The float opens when it was closed, so the
+			// click both selects the member and shows it.
+			t.clearRailPress()
+			if t.conn != nil {
+				_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
+			}
+			if t.shelf == nil {
+				t.shelfToggle()
 			}
 			return true
 		}

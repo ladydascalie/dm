@@ -140,10 +140,9 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 	for _, w := range s.st.ActiveWorkspace().Windows {
 		snap.Windows = append(snap.Windows, wire.WindowInfo{ID: w.ID, Name: w.Name, Named: w.Named, Layout: w.Layout})
 	}
-	for _, id := range layout.AllPanes(win.Root) {
-		pc := s.panes[id]
-		info := wire.PaneInfo{ID: id, Rect: rects[id]}
-		if pc != nil {
+	paneInfo := func(id string, rect layout.Rect) wire.PaneInfo {
+		info := wire.PaneInfo{ID: id, Rect: rect}
+		if pc := s.panes[id]; pc != nil {
 			st := pc.status()
 			info.Status = st.State
 			info.Message = st.Message
@@ -153,13 +152,26 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		}
 		if ps := s.st.Panes[id]; ps != nil {
 			info.Name = ps.Name
+			if ps.Restarted {
+				info.Restart = true
+			}
 		}
-		ps := s.st.Panes[id]
-		if ps != nil && ps.Restarted {
-			info.Restart = true
-		}
+		return info
+	}
+	for _, id := range layout.AllPanes(win.Root) {
+		snap.Panes = append(snap.Panes, paneInfo(id, rects[id]))
+	}
+	// The shelved panes follow the window's panes in shelf order. Each keeps
+	// its id, its name and its status, and carries no rect and the shelf
+	// flag: a client draws none of them as a pane, and every walk that feeds
+	// geometry or reflow skips them.
+	for _, id := range s.st.Shelf {
+		info := paneInfo(id, layout.Rect{})
+		info.Shelf = true
 		snap.Panes = append(snap.Panes, info)
 	}
+	snap.ShelfActive = s.st.ShelfActive
+	snap.ShelfFolded = s.st.ShelfFolded
 	snap.All = s.allPanesLocked()
 	return snap
 }
@@ -281,8 +293,13 @@ func (s *server) paneExited(id string) {
 	delete(s.statusChangedAt, id)
 	delete(s.paneSpawn, id)
 	delete(s.paneWatch, id)
+	// A shelf member's exit leaves the shelf: a row naming a dead id would
+	// focus nothing. The active index follows the member it named.
+	s.st.DropShelf(id)
 
 	found, emptyWindow := false, false
+	// The window this exit empties, so the shelf can refill it below.
+	var emptied *session.Window
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
 			if !layout.FindLeaf(w.Root, id) {
@@ -311,6 +328,7 @@ func (s *server) paneExited(id string) {
 			}
 			w.Root = nil
 			emptyWindow = true
+			emptied = w
 		}
 	}
 	if !found && pc == nil {
@@ -322,6 +340,20 @@ func (s *server) paneExited(id string) {
 		_ = os.Remove(old)
 		_ = os.Remove(old + ".pid")
 		return
+	}
+	// A session with a live shelf never loses its last window. When the exit
+	// takes the only tree pane, the shelf's active member takes the window the
+	// exit emptied: the operator keeps a window, the pane keeps its PTY, and no
+	// state carries zero windows with a live shelf. Without this the session is
+	// stranded, because every pop needs a window to land in.
+	if emptyWindow && emptied != nil && s.treePaneCountLocked() == 0 {
+		if sid := s.shelfActivePaneLocked(); sid != "" {
+			emptied.Root = &layout.Node{Pane: sid}
+			emptied.Focus = sid
+			emptied.Layout = ""
+			s.st.DropShelf(sid)
+			emptyWindow = false
+		}
 	}
 	if emptyWindow {
 		s.dropEmptyWindows()
@@ -424,7 +456,16 @@ func (s *server) dropEmptyWindows() {
 	}
 }
 
+// countPanes counts every live pane of the session, the shelved ones included:
+// a shelved pane still owns a PTY, so a session that kept one is not empty and
+// must not tear down.
 func (s *server) countPanes() int {
+	return s.treePaneCountLocked() + len(s.st.Shelf)
+}
+
+// treePaneCountLocked counts the panes in the layout, the shelf excluded. It
+// is what a close or an exit can take away. The caller holds s.mu.
+func (s *server) treePaneCountLocked() int {
 	n := 0
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
@@ -767,6 +808,12 @@ func (s *server) serve(c net.Conn) {
 			// client's size, so the panes keep the room they had.
 			if s.floatFor(m.Target) != nil {
 				s.resizeFloat(m.Target, m.Cols, m.Rows)
+				break
+			}
+			// A shelved pane has no rect either: the shelf float names it
+			// and this resizes its PTY, leaving the client's own size and the
+			// layout alone.
+			if s.resizeShelfPane(m.Target, m.Cols, m.Rows) {
 				break
 			}
 			s.mu.Lock()

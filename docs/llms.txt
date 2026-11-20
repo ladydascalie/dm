@@ -141,7 +141,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `swap-panes`, `move-pane` | `{"action":"swap-panes","target":"w1p1","dir":"left"}`, `{"action":"move-pane","target":"w1p1","other":"w1p2","dir":"right"}` |
 | `move-window`, `move-workspace` | `{"action":"move-window","target":"w1","dir":"down"}`, `{"action":"move-workspace","target":"s1","dir":"down"}` |
 | `select-layout`, `synchronize-panes` | `{"action":"select-layout","layout":"next"}`, `{"action":"synchronize-panes","on":true}` |
-| `float-open`, `float-close` | `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`, `{"action":"float-close","float":"f1"}` |
+| `float-open`, `float-close`, `shelve-pane`, `pop-pane` | `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`, `{"action":"float-close","float":"f1"}`, `{"action":"shelve-pane","target":"w1p1"}`, `{"action":"pop-pane","target":"w1p1"}` |
 | `msg-post` | `{"action":"msg-post","res":{"key":"build","state":"done","msg":"all green"}}` |
 | `msg-list` | `{"action":"msg-list","res":{"key":"build","limit":20}}` |
 | `msg-clear` | `{"action":"msg-clear","res":{"key":"build"}}` |
@@ -242,6 +242,9 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `prev-pane` | `p` |
 | `main` | `close-pane` | `x` |
 | `main` | `close-window` | `X` |
+| `main` | `shelve-pane` | `f` |
+| `main` | `toggle-shelf` | `F` |
+| `main` | `pop-pane` | `G` |
 | `main` | `zoom-pane` | `z` |
 | `main` | `new-window` | `c` |
 | `main` | `next-window` | `w` |

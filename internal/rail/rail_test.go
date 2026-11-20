@@ -1267,3 +1267,141 @@ func railSegTexts(runs []railSeg) []string {
 func railSegTextsJoined(runs []railSeg) string {
 	return strings.Join(railSegTexts(runs), "")
 }
+
+// shelfSnap is railRowSnap with two panes set aside: they appear after the
+// window panes with no rect, in shelf order.
+func shelfSnap(rail int) *wire.Snapshot {
+	snap := railRowSnap(rail)
+	// The shelf rows land past the 10-row fixture's last paintable row, so the
+	// hit tests get the screen the section needs.
+	snap.Rows = 20
+	snap.ShelfActive = 1
+	snap.Panes = append(snap.Panes,
+		wire.PaneInfo{ID: "w2p7", Name: "held", Status: "blocked", Shelf: true},
+		wire.PaneInfo{ID: "w2p8", Name: "waiting", Status: "idle", Shelf: true},
+	)
+	return snap
+}
+
+// TestRailShelfSection proves the shelf section follows the last workspace with
+// one row per member, marks the active member, folds whole, and never answers a
+// live pane's hit test.
+func TestRailShelfSection(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	tests := []struct {
+		name   string
+		folded bool
+		want   []RailKind
+		panes  []string
+	}{
+		{
+			name: "unfolded lists every member",
+			want: []RailKind{Workspace, Window, WindowNote, Pane, Window, Gap, Workspace, Window,
+				ShelfHeader, Shelf, Shelf},
+			panes: []string{"w2p7", "w2p8"},
+		},
+		{
+			name:   "folded keeps the header alone",
+			folded: true,
+			want: []RailKind{Workspace, Window, WindowNote, Pane, Window, Gap, Workspace, Window,
+				ShelfHeader},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := shelfSnap(layout.DefaultRail)
+			snap.ShelfFolded = tc.folded
+			items := RailItems(snap)
+			if len(items) != len(tc.want) {
+				t.Fatalf("got %d items, want %d: %+v", len(items), len(tc.want), items)
+			}
+			for i, k := range tc.want {
+				if items[i].Kind != k {
+					t.Fatalf("item %d kind = %d, want %d", i, items[i].Kind, k)
+				}
+			}
+			header := items[len(items)-1-len(tc.panes)]
+			if header.Kind != ShelfHeader || header.Text != "shelf" || header.Count != 2 {
+				t.Fatalf("header = %+v, want a shelf header naming two members", header)
+			}
+			for i, id := range tc.panes {
+				row := items[len(items)-len(tc.panes)+i]
+				if row.Pane != id {
+					t.Fatalf("shelf row %d = %q, want %q in order", i, row.Pane, id)
+				}
+				if row.Kind != Shelf {
+					t.Fatalf("shelf row %d kind = %d, want Shelf", i, row.Kind)
+				}
+				if row.Text == "" {
+					t.Fatalf("shelf row %d has no label", i)
+				}
+				if row.Focus != (i == 1) {
+					t.Fatalf("shelf row %d active = %v, want the active index only", i, row.Focus)
+				}
+			}
+			// The header caret folds the section, and a member row answers its
+			// own id: no live pane row moves.
+			if id := RailFoldAt(snap, 1, len(items)-1-len(tc.panes)); id != wire.ShelfFoldTarget {
+				t.Fatalf("fold at the header caret = %q, want %q", id, wire.ShelfFoldTarget)
+			}
+			if tc.folded {
+				return
+			}
+			if id := RailShelfAt(snap, 6, len(items)-1); id != "w2p8" {
+				t.Fatalf("RailShelfAt over the last member = %q, want w2p8", id)
+			}
+			if id := RailPaneAt(snap, 6, len(items)-1); id != "" {
+				t.Fatalf("RailPaneAt answered a shelf row with %q", id)
+			}
+		})
+	}
+}
+
+// TestRailNoShelfKeepsTheOldRows proves an empty shelf adds no row: the rail a
+// session without a shelved pane paints is the one it always did.
+func TestRailNoShelfKeepsTheOldRows(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := railRowSnap(layout.DefaultRail)
+	if got := len(RailItems(snap)); got != 8 {
+		t.Fatalf("rows = %d, want the 8 a shelf-free session has", got)
+	}
+	// The thin rail is a bare glyph column: it lists no sections, the shelf
+	// included.
+	thin := shelfSnap(layout.CollapsedRail)
+	for _, it := range RailItems(thin) {
+		if it.Kind == ShelfHeader || it.Kind == Shelf {
+			t.Fatalf("the thin rail painted a shelf row: %+v", it)
+		}
+	}
+}
+
+// TestRailWorstState pins the order the shelf chip reads: an error outranks a
+// block, a block outranks work, and a pane that never reported ranks last.
+func TestRailWorstState(t *testing.T) {
+	tests := []struct {
+		in   []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"idle", "working", "done"}, "working"},
+		{[]string{"working", "blocked"}, "blocked"},
+		{[]string{"blocked", "error"}, "error"},
+		{[]string{"", "done", ""}, "done"},
+		{[]string{"", "", ""}, ""},
+	}
+	for _, tc := range tests {
+		if got := WorstState(tc.in); got != tc.want {
+			t.Fatalf("WorstState(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestShelfMarkFollowsTheSet proves the shelf mark is one cell of text in every
+// set, so a strip row and a bar chip never shift by the font.
+func TestShelfMarkFollowsTheSet(t *testing.T) {
+	for _, set := range []theme.GlyphSet{theme.GlyphUnicode, theme.GlyphNerd, theme.GlyphASCII} {
+		if n := cells.Cells(ShelfMark(set)); n != 2 {
+			t.Fatalf("ShelfMark(%v) = %q, %d cells, want 2 with the space", set, ShelfMark(set), n)
+		}
+	}
+}

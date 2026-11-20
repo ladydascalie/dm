@@ -957,3 +957,107 @@ func TestMiniRectsCustomWalksTheTree(t *testing.T) {
 		t.Fatal("a short pane list did not refuse")
 	}
 }
+
+// TestPruneLeafCollapses is the shelve contract on the tree: the prune removes
+// one leaf and returns the root the caller must keep, collapsing a parent left
+// with one kid into that kid. A leaf root prunes to nil, which is the signal
+// that the tree is gone.
+func TestPruneLeafCollapses(t *testing.T) {
+	tests := []struct {
+		name  string
+		root  *Node
+		leaf  string
+		want  []string
+		nil   bool
+		found bool
+	}{
+		{
+			name:  "leaf root",
+			root:  &Node{Pane: "a"},
+			leaf:  "a",
+			nil:   true,
+			found: true,
+		},
+		{
+			name:  "two kids collapse to the survivor",
+			root:  &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}},
+			leaf:  "a",
+			want:  []string{"b"},
+			found: true,
+		},
+		{
+			name: "three kids keep the split",
+			root: &Node{Dir: "row", Sizes: []float64{0.5, 0.25, 0.25},
+				Kids: []*Node{{Pane: "a"}, {Pane: "b"}, {Pane: "c"}}},
+			leaf:  "b",
+			want:  []string{"a", "c"},
+			found: true,
+		},
+		{
+			name: "nested collapse reaches the tree root",
+			root: &Node{Dir: "row", Kids: []*Node{
+				{Pane: "a"},
+				{Dir: "col", Kids: []*Node{{Pane: "b"}, {Pane: "c"}}},
+			}},
+			leaf:  "b",
+			want:  []string{"a", "c"},
+			found: true,
+		},
+		{
+			name:  "a leaf the tree does not hold",
+			root:  &Node{Dir: "row", Kids: []*Node{{Pane: "a"}, {Pane: "b"}}},
+			leaf:  "zz",
+			want:  []string{"a", "b"},
+			found: false,
+		},
+		{
+			name:  "nil tree",
+			root:  nil,
+			leaf:  "a",
+			want:  nil,
+			found: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			n, ok := PruneLeaf(tc.root, tc.leaf)
+			if ok != tc.found {
+				t.Fatalf("found = %v, want %v", ok, tc.found)
+			}
+			if tc.nil {
+				if n != nil {
+					t.Fatalf("prune left %+v, want no tree", n)
+				}
+				return
+			}
+			got := AllPanes(n)
+			if len(got) != len(tc.want) {
+				t.Fatalf("panes = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("panes = %v, want %v", got, tc.want)
+				}
+			}
+			// No node may be left holding exactly one kid.
+			var walk func(*Node) bool
+			walk = func(nd *Node) bool {
+				if nd == nil {
+					return true
+				}
+				if nd.Pane == "" && len(nd.Kids) == 1 {
+					return false
+				}
+				for _, k := range nd.Kids {
+					if !walk(k) {
+						return false
+					}
+				}
+				return true
+			}
+			if !walk(n) {
+				t.Fatalf("prune left a parent with one kid: %+v", n)
+			}
+		})
+	}
+}

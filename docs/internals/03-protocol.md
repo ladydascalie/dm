@@ -96,6 +96,9 @@ verb, only `dm exec '<json>'` (`internal/cli/cli.go:572`).
 | `run-plugin` | `target`, `res{name,where,source}` | `pane` | cli, tui |
 | `plugin-list` | none | `plugins` (a `{name, exec, cwd, where, env}` array) | cli |
 | `float-open` | `float`, `target`, `cols`, `rows`, `res{command,label}` | `command`, `label` | tui |
+| `float-close` | `float` | none | tui |
+| `shelve-pane` | `target` | `pane` | cli, tui |
+| `pop-pane` | `target` | `pane` | cli, tui |
 | `msg-post`, `msg-clear` | `res` | `entry`, or `cleared` | cli, tui |
 | `msg-list` | `res` | `entries`, `trimmed` | cli, tui |
 | `msg-wait` | `res` | `entry`, `trimmed` | cli, tui |
@@ -115,8 +118,14 @@ The layout verbs reply `none`: `focus`, `focus-window`, `focus-workspace`, `clos
 `next-pane`, `prev-pane`, `next-window`, `prev-window`, `next-workspace` and `prev-workspace` take nothing;
 `select-window` takes `index`; `rename-window` takes `target` and `name`; `swap-panes` takes `target` and `other` or `dir`;
 `resize-split` takes `target`, `other` and `ratio`. `keys` takes `target` and `keys`, `term-colours` takes `fg` and
-`bg`, `float-close` takes `float`. `keys` is `exec`; `focus` and the next/prev pane and window verbs are `cli` and
-`tui`; the rest are `tui`. A plugin is a program the config declares with a name, `exec`, `cwd`, `where` and `env`;
+`bg`. `keys` is `exec`; `focus` and the next/prev pane and window verbs are `cli` and
+`tui`; the rest are `tui`.
+
+A shelved pane is in no window's tree and has no rect. `shelve-pane` takes `target`, the focused pane when the field
+is empty, and refuses the last pane of a window. `pop-pane` takes `target`, the shelf's active member when the field
+is empty, and splits the focused pane to its right with it. A `focus` naming a shelved pane moves the shelf's active
+index and leaves the window focus alone, and a `resize` naming one sizes its PTY, which is how a summon fits it to
+the box the client draws. A plugin is a program the config declares with a name, `exec`, `cwd`, `where` and `env`;
 `run-plugin` opens it in a pane, `where` is `split` or `window`, and `source` is `cli` or `key`, who launched it.
 
 ## The pane's own actions

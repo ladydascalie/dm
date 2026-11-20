@@ -90,6 +90,9 @@ type tui struct {
 	box *boxview.BoxView
 	// keys is the keymap view float, nil when closed.
 	keys *keymapview.KeymapView
+	// shelf is the shelf float, nil when closed. It owns mode "shelf": the
+	// strip row of shelved pane chips over the active member's screen.
+	shelf *shelfView
 	// lsw is the open layout palette, nil when closed. It lives in mode
 	// "layout" and owns the keyboard while it is up.
 	lsw   *layoutSwitcher
@@ -923,6 +926,13 @@ func (t *tui) apply(m wire.Msg) {
 			}
 		}
 		for _, p := range m.Snap.Panes {
+			if p.Shelf {
+				// A shelved pane has no rect, so there is no size to fit here:
+				// the shelf float sizes its terminal when it summons it. Its
+				// terminal, if it had one before it was shelved, stays as it
+				// is and keeps taking the pane's bytes.
+				continue
+			}
 			term := t.vts[p.ID]
 			if term != nil {
 				c, r := term.Grid().Size()
@@ -987,6 +997,9 @@ func (t *tui) apply(m wire.Msg) {
 		if t.float != nil {
 			t.syncFloat(m.Snap)
 		}
+		if t.shelf != nil {
+			t.syncShelf(m.Snap)
+		}
 		if t.box != nil {
 			t.box.Sync(m.Snap, t.theme())
 			if t.reader != nil {
@@ -1001,7 +1014,13 @@ func (t *tui) apply(m wire.Msg) {
 		t.dirty = true
 	case "screen":
 		if p := t.paneByID(m.Target); p != nil {
-			applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+			if p.Shelf {
+				// A shelved pane is drawn by the shelf float at that box's
+				// size, not at a rect the snapshot does not carry.
+				t.applyShelfScreen(m.Target, m.VTSnap)
+			} else {
+				applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+			}
 		} else {
 			// A pane outside the active window has no local terminal. The
 			// dashboard owns the one its preview paints from.
@@ -1029,7 +1048,11 @@ func (t *tui) apply(m wire.Msg) {
 			}
 		}
 		if p := t.paneByID(m.Target); p != nil {
-			applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+			if p.Shelf {
+				t.applyShelfScreen(m.Target, m.VTSnap)
+			} else {
+				applySnapshot(t.vts, m.Target, p.Rect, m.VTSnap)
+			}
 		} else {
 			t.applyPreviewScreen(m.Target, m.VTSnap)
 		}

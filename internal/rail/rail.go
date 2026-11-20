@@ -31,6 +31,10 @@ const (
 	WindowNote
 	Pane
 	Gap
+	// ShelfHeader is the foldable header of the shelf section that follows the
+	// last workspace. Shelf is one shelved pane's row under it.
+	ShelfHeader
+	Shelf
 )
 
 // RailItem is one sidebar row. It exists so drawing and hit-testing share the
@@ -338,7 +342,102 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		row.Project, row.ProjectAccent = project, slot
 		out = append(out, row)
 	}
+	// The shelf section follows the last workspace, so a pane set aside keeps
+	// a row to click and to read its state from. A folded section hides its
+	// rows the way a folded window hides its panes. The thin rail has no
+	// section rows, so it shows no shelf.
+	if shelf := ShelfPanes(snap); len(shelf) > 0 {
+		out = append(out, RailItem{
+			Kind: ShelfHeader, Text: "shelf", Count: len(shelf),
+			Folded: snap.ShelfFolded,
+		})
+		if !snap.ShelfFolded {
+			for i, p := range shelf {
+				row := ShelfRow(p)
+				row.Focus = i == snap.ShelfActive
+				out = append(out, row)
+			}
+		}
+	}
 	return out
+}
+
+// ShelfPanes returns the snapshot's shelved panes in shelf order: the pane
+// entries carrying the shelf flag, in the order the server listed them. They
+// carry no rect, so nothing here reads geometry.
+func ShelfPanes(snap *wire.Snapshot) []wire.PaneInfo {
+	if snap == nil {
+		return nil
+	}
+	var out []wire.PaneInfo
+	for _, p := range snap.Panes {
+		if p.Shelf {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ShelfMark is the mark the shelf section and the status bar's shelf chip
+// paint: a stack of panes on hold. The glyph follows the resolved set, so an
+// ASCII terminal gets an ASCII mark.
+func ShelfMark(set theme.GlyphSet) string {
+	switch set {
+	case theme.GlyphNerd:
+		return "\uf0c5 "
+	case theme.GlyphASCII:
+		return "# "
+	}
+	return "\u25a4 "
+}
+
+// stateRank orders the state words by how much they ask of the operator, so a
+// chip can name the member that asks most: an error or a block outranks work
+// in flight, and a pane that never reported ranks last, with a shell.
+var stateRank = map[string]int{
+	"error":   5,
+	"blocked": 4,
+	"working": 3,
+	"idle":    2,
+	"done":    1,
+}
+
+// StateRank is the rank of one state word. A word no state names ranks with an
+// unknown pane, which is the bottom of the order.
+func StateRank(status string) int {
+	if r, ok := stateRank[status]; ok {
+		return r
+	}
+	return 0
+}
+
+// WorstState returns the state word of the members that asks most, in the
+// order the statuses arrive, and "" for no members. A pane that never reported
+// contributes its empty word, which ranks last, so a shelf of plain shells
+// answers "" and the caller paints the unknown mark.
+func WorstState(statuses []string) string {
+	worst, rank := "", -1
+	for _, st := range statuses {
+		if r := StateRank(st); r > rank {
+			worst, rank = st, r
+		}
+	}
+	return worst
+}
+
+// ShelfRow is one shelved pane's rail row. The label falls back from the pane
+// name to its id, and a status word alone marks an agent: a shelved pane
+// carries no app through the snapshot's pane entry.
+func ShelfRow(p wire.PaneInfo) RailItem {
+	label := p.Name
+	if label == "" {
+		label = p.ID
+	}
+	return RailItem{
+		Kind: Shelf, Text: label, Pane: p.ID, PaneName: p.Name,
+		Status: p.Status,
+		Agent:  p.Status != "" && p.Status != "unknown",
+	}
 }
 
 // RailPaneRow is the pane row both rails draw. The label falls back from the
@@ -698,6 +797,48 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				left = append(left, segment.Seg{Text: " " + pm, FG: p.RailDim})
 			}
 		}
+	case ShelfHeader:
+		if !compact {
+			base := p.RailHeader
+			caret := g.FoldOpen
+			if it.Folded {
+				caret = g.FoldClosed
+			}
+			left = []segment.Seg{
+				{Text: caret, FG: base},
+				{Text: " ", FG: base},
+				{Text: it.Text, FG: base, Bold: true},
+				{Text: " " + ShelfMark(set), FG: base},
+			}
+			right = []segment.Seg{{Text: strconv.Itoa(it.Count), FG: p.RailDim}}
+		}
+	case Shelf:
+		// A shelved pane keeps the pane row's shape: the agent mark, the
+		// state glyph and the name, so its state reads at a glance.
+		base := p.RailDim
+		if it.Focus {
+			base = p.RailText
+		}
+		mark, colour := RailGlyph(th, it.Status, set)
+		if !it.Agent && (it.Status == "" || it.Status == "unknown") {
+			mark = " "
+		}
+		glyph := RailMark(it.Agent, it.App, set)
+		if compact {
+			m1, _ := utf8.DecodeRuneInString(glyph)
+			left = []segment.Seg{
+				RailBar(th, it),
+				{Text: string(m1), FG: colour},
+				{Text: mark, FG: colour},
+			}
+		} else {
+			left = []segment.Seg{
+				{Text: "      ", FG: base},
+				{Text: glyph, FG: colour},
+				{Text: mark, FG: colour},
+				{Text: " " + it.Text, FG: base},
+			}
+		}
 	case Gap:
 		// The rail background and nothing else.
 	}
@@ -734,6 +875,24 @@ func RailPaneAt(snap *wire.Snapshot, x, y int) string {
 	}
 	items := RailItems(snap)
 	if y >= len(items) || items[y].Kind != Pane {
+		return ""
+	}
+	return items[y].Pane
+}
+
+// RailShelfAt returns the shelved pane whose row is under x,y, or "" for any
+// other row. A click on the row focuses that member: the server moves the
+// shelf's active index and leaves the window focus alone. The section header
+// answers nothing, so its caret folds and its body is inert.
+func RailShelfAt(snap *wire.Snapshot, x, y int) string {
+	if snap == nil || snap.Rail <= 0 {
+		return ""
+	}
+	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+		return ""
+	}
+	items := RailItems(snap)
+	if y >= len(items) || items[y].Kind != Shelf {
 		return ""
 	}
 	return items[y].Pane
@@ -820,6 +979,11 @@ func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 			return ""
 		}
 		return it.Window
+	case ShelfHeader:
+		if x != 1 {
+			return ""
+		}
+		return wire.ShelfFoldTarget
 	}
 	return ""
 }
@@ -946,7 +1110,7 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			switch {
 			case lift:
 				bg, bold = p.RailBG, false
-			case it.Kind == Pane && it.Focus:
+			case (it.Kind == Pane || it.Kind == Shelf) && it.Focus:
 				bg, bold = p.RailFocusBG, true
 			case y == hover && it.Kind != Gap:
 				bg = p.RailHoverBG
