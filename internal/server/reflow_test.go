@@ -291,22 +291,38 @@ func TestReflowOnWidthChange(t *testing.T) {
 	f.expectNoScreen(t, 3*reflowSettle)
 }
 
-// TestReflowHeightOnlyDoesNotArm proves a height change never re-wraps, so it
-// arms nothing.
-func TestReflowHeightOnlyDoesNotArm(t *testing.T) {
+// TestReflowOnHeightChange proves a height-only change still pushes a picture.
+// The resize re-wraps nothing, but a client that is not the sizing client takes
+// a pane's size from a screen frame alone, so the settle is armed either way.
+func TestReflowOnHeightChange(t *testing.T) {
 	t.Parallel()
 	f := newReflowFixture(t, "reflowheight", "w1p1")
 	f.s.mu.Lock()
 	cols := f.s.cols
 	f.s.mu.Unlock()
+	_, beforeRows := f.sizeOf("w1p1")
 	f.resize(cols, 40)
 
-	f.expectNoScreen(t, 5*reflowSettle)
-	for _, id := range f.ids {
-		if reqs := f.panes[id].reflows(); len(reqs) != 0 {
-			t.Fatalf("%s got %d reflow requests after a height change: %+v", id, len(reqs), reqs)
-		}
+	got := f.screens(t, 1)
+	if len(got) != 1 || got[0].Target != "w1p1" {
+		t.Fatalf("screens = %+v, want one for w1p1", got)
 	}
+	reqs := f.panes["w1p1"].waitReflows(t, 1, time.Second)
+	if len(reqs) != 1 {
+		t.Fatalf("got %d reflow requests after a height change, want 1: %+v", len(reqs), reqs)
+	}
+	c, r := f.sizeOf("w1p1")
+	if reqs[0].Type != "req" || reqs[0].Action != "reflow" || reqs[0].Cols != c || reqs[0].Rows != r {
+		t.Fatalf("reflow = %+v, want %dx%d", reqs[0], c, r)
+	}
+	if r <= beforeRows {
+		t.Fatalf("pane rows = %d, want more than %d: the height did not change", r, beforeRows)
+	}
+	snap := got[0].VTSnap
+	if snap == nil || snap.Cols != c || snap.Rows != r {
+		t.Fatalf("screen = %+v, want %dx%d", snap, c, r)
+	}
+	f.expectNoScreen(t, 3*reflowSettle)
 }
 
 // TestReflowDragCoalesces proves two width changes inside one settle produce

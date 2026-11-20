@@ -617,7 +617,7 @@ func (s *server) flushTitleLocked() {
 	s.broadcastLocked(wire.Msg{Type: "snapshot", Snap: snap})
 }
 
-// armReflowLocked records panes whose width changed and (re)starts the settle
+// armReflowLocked records panes whose size changed and (re)starts the settle
 // timer. Merging the ids and resetting the timer make one drag produce one
 // settle at its final size. The caller holds s.mu.
 func (s *server) armReflowLocked(ids []string) {
@@ -653,9 +653,9 @@ func (s *server) stopReflow() {
 	s.mu.Unlock()
 }
 
-// settleReflow runs reflowSettle after the last width change. It asks every
-// affected pane for its re-wrapped screen at the recorded size and broadcasts
-// each answer, the same screen frame sendScreens sends. The requests run
+// settleReflow runs reflowSettle after the last size change. It asks every
+// affected pane for its screen at the recorded size and broadcasts each
+// answer, the same screen frame sendScreens sends. The requests run
 // concurrently, so one pane that does not answer cannot hold the rest; a pane
 // that fails is skipped.
 func (s *server) settleReflow() {
@@ -708,7 +708,7 @@ func (s *server) syncSizes() {
 	rects := s.paneRectsLocked()
 	s.st.Cols, s.st.Rows = s.cols, s.rows
 	var calls []func()
-	var widened []string
+	var resized []string
 	for id, r := range rects {
 		pc := s.panes[id]
 		ps := s.st.Panes[id]
@@ -724,11 +724,15 @@ func (s *server) syncSizes() {
 		if ps.Cols == w && ps.Rows == h {
 			continue
 		}
-		// Only a width change re-wraps the line model, so only those panes
-		// wait for a reflow. A height change gets the cheap resize alone.
-		if ps.Cols != w {
-			widened = append(widened, id)
-		}
+		// Every size change arms the settle, a height-only one included.
+		// The resize frame alone takes the pane's grid to the new size, but
+		// a client that is not the sizing client never resizes a terminal:
+		// it learns a pane's size from a screen frame alone. A claim that
+		// moves rows alone owes the other clients that picture, or their
+		// per-pane VT keeps the old row count and a full-screen program
+		// scrolls rows out of a grid that is too short. The settle is a
+		// picture handshake, not a re-wrap: the resize re-wrapped.
+		resized = append(resized, id)
 		ps.Cols, ps.Rows = w, h
 		calls = append(calls, func() {
 			if pc != nil {
@@ -740,7 +744,7 @@ func (s *server) syncSizes() {
 			}
 		})
 	}
-	s.armReflowLocked(widened)
+	s.armReflowLocked(resized)
 	// The save holds the lock: st is mutated under it, so a marshal outside
 	// it races a pane exit that deletes its state.
 	_ = s.st.Save()
