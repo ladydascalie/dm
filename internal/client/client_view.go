@@ -535,6 +535,34 @@ func (t *tui) previewTerms() map[string]*vt.Term {
 	return out
 }
 
+// shelfCursorBlock places the cursor on the shelf member's cell inside the
+// float body, or hides it. The shelf takes the pane's typing, so the member's
+// cursor is the one the operator watches blink; hiding it leaves no insertion
+// point in the box.
+func (t *tui) shelfCursorBlock() string {
+	const hide = "\x1b[?25l"
+	sv := t.shelf
+	if sv == nil || sv.float == nil || t.snap == nil {
+		return hide
+	}
+	term := t.vts[sv.active]
+	if term == nil {
+		return hide
+	}
+	cur := term.Grid().Cursor()
+	r := sv.float.Rect
+	// The strip owns the box's first row, so the member starts one row down and
+	// the body is one row shorter than the box interior.
+	if !cur.Visible || cur.X < 0 || cur.Y < 0 || cur.X >= r.W || cur.Y >= r.H-1 {
+		return hide
+	}
+	x, y := r.X+cur.X, r.Y+1+cur.Y
+	if x < 0 || y < 0 || x >= t.snap.Cols || y >= t.snap.Rows {
+		return hide
+	}
+	return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", y+1, x+1)
+}
+
 // cursorBlock is the tail of a frame that places the cursor, or hides it. It
 // is empty when the frame leaves the cursor alone.
 func (t *tui) cursorBlock() string {
@@ -550,6 +578,9 @@ func (t *tui) cursorBlock() string {
 	if t.cp != nil {
 		// The palette owns the cursor while it filters: the query cell.
 		return fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", t.cpY+1, t.cpX+1)
+	}
+	if t.shelf != nil {
+		return t.shelfCursorBlock()
 	}
 	if t.float != nil {
 		// No cell of the float takes typing from the client: its keys go to

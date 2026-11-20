@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -509,6 +510,43 @@ func TestShelfRectModes(t *testing.T) {
 	}
 	if got := shelfRectFor(small, false, 80); got != centered {
 		t.Fatalf("a small focused pane gave %+v, want the centred fallback %+v", got, centered)
+	}
+}
+
+// TestShelfCursorFollowsTheMember proves the shelf places the block cursor on
+// the active member's cell inside the float body. The shelf takes the pane's
+// typing, so a hidden cursor leaves the operator with no insertion point in
+// the box.
+func TestShelfCursorFollowsTheMember(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	term := tui.vts["w1p7"]
+	if term == nil {
+		t.Fatal("the summon built no terminal for the member")
+	}
+	term.Grid().SetCursor(3, 2)
+	term.Grid().SetCursorVisible(true)
+	r := tui.shelf.float.Rect
+	want := fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", r.Y+1+2+1, r.X+3+1)
+	if got := tui.cursorBlock(); got != want {
+		t.Fatalf("shelf cursor block = %q, want %q", got, want)
+	}
+	// The frame tail carries it, so the cursor the operator sees is the one
+	// the last paint placed.
+	buf := tui.out.(*bytes.Buffer)
+	buf.Reset()
+	tui.draw()
+	if frame := buf.String(); !strings.Contains(frame, want) {
+		t.Fatalf("frame does not place the shelf cursor: %q", frame[max(0, len(frame)-60):])
+	}
+
+	// A member with no visible cursor leaves the box with none.
+	term.Grid().SetCursorVisible(false)
+	if got := tui.cursorBlock(); got != "\x1b[?25l" {
+		t.Fatalf("hidden member cursor block = %q, want the hide sequence", got)
 	}
 }
 
