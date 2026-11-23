@@ -987,7 +987,7 @@ Value: \fIa quoted key name, one sequence\fP. Default: \fI"ctrl+b"\fP.
 Set the prefix key that opens the main keymap.
 .TP
 \fBdefault-fold\fP
-Value: \fI"fold" or "unfold"\fP. Default: \fI"fold"\fP.
+Value: \fI"fold" or "unfold"\fP. Default: \fI"unfold"\fP.
 Set whether a new window's rail starts folded or unfolded. A reload applies it to windows created after it.
 .TP
 \fBtab-min-width\fP
@@ -1003,7 +1003,7 @@ Value: \fIan integer from 0 to 4 cells\fP. Default: \fI0\fP.
 Set the blank cells between a pane's border and its content. A reload resizes every pane.
 .TP
 \fBhistory-lines\fP
-Value: \fIan integer from 100 to 32768 lines\fP. Default: \fI2000\fP.
+Value: \fIan integer from 100 to 32768 lines\fP. Default: \fI10000\fP.
 Set the scrollback window and the pane ring budget: about 256 bytes per line, capped at 8 MiB.
 .TP
 \fBglyphs\fP
@@ -1015,7 +1015,7 @@ Value: \fIa quoted Go template\fP. Default: \fI"{{if .Named}}{{.Name}}{{else}}{{
 Set the template that renders a window label.
 .TP
 \fBdashboard-preview\fP
-Value: \fIan integer from 0 to 100\fP. Default: \fI60\fP.
+Value: \fIan integer from 0 to 100\fP. Default: \fI40\fP.
 Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.
 .TP
 \fBpalette-rows\fP
@@ -1023,11 +1023,11 @@ Value: \fIan integer of at least 1\fP. Default: \fI10\fP.
 Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer.
 .TP
 \fBdiff-command\fP
-Value: \fIa quoted shell command\fP. Default: \fI"git diff"\fP.
+Value: \fIa quoted shell command\fP. Default: \fI"hunk diff"\fP.
 Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder.
 .TP
 \fBdashboard-layout\fP
-Value: \fI"full" or "float"\fP. Default: \fI"full"\fP.
+Value: \fI"full" or "float"\fP. Default: \fI"float"\fP.
 Draw the dashboard over the whole screen, or as a palette centred over the panes.
 .TP
 \fBshelf-layout\fP
@@ -1066,7 +1066,7 @@ A theme file is $XDG_CONFIG_HOME/dm/themes/<name>.kdl. The theme node in config.
 Rail background. Default \fI#14131a\fP.
 .TP
 \fBrail-focus-bg\fP
-Focused rail row background. Default \fI#2c2a38\fP.
+Focused rail row background. Default \fI#1f1e27\fP.
 .TP
 \fBrail-hover-bg\fP
 Hovered rail row background. Default \fI#21202d\fP.
@@ -1127,16 +1127,16 @@ Horizontal split divider. Default \fI━\fP.
 Vertical split divider. Default \fI┃\fP.
 .TP
 \fBborder-top-left\fP
-Top-left pane border corner. Default \fI┌\fP.
+Top-left pane border corner. Default \fI╭\fP.
 .TP
 \fBborder-top-right\fP
-Top-right pane border corner. Default \fI┐\fP.
+Top-right pane border corner. Default \fI╮\fP.
 .TP
 \fBborder-bottom-left\fP
-Bottom-left pane border corner. Default \fI└\fP.
+Bottom-left pane border corner. Default \fI╰\fP.
 .TP
 \fBborder-bottom-right\fP
-Bottom-right pane border corner. Default \fI┘\fP.
+Bottom-right pane border corner. Default \fI╯\fP.
 .TP
 \fBborder-horizontal\fP
 Horizontal pane border run. Default \fI─\fP.

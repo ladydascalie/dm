@@ -136,13 +136,13 @@ func (c *Config) DefaultFoldSet() bool {
 	return c.defaultFoldSet
 }
 
-// DefaultFold reports whether a new window's rail starts unfolded. The zero
-// value means folded.
+// DefaultFold reports whether a new window's rail starts unfolded. A config
+// without the node reports the built-in default, which is unfolded.
 func (c *Config) DefaultFold() bool {
-	if c == nil {
-		return false
+	if c != nil && c.defaultFoldSet {
+		return c.defaultFold
 	}
-	return c.defaultFold
+	return true
 }
 
 // TabMinWidth returns the smallest tab width in cells. A config without the
@@ -189,7 +189,7 @@ func (c *Config) HistoryLines() int {
 
 // HistoryBytes returns the pane ring budget in bytes: the larger of the default
 // 512 KiB ring and the history window at about 256 bytes per line, so a window
-// under 2000 lines keeps today's ring and a larger one buys more scrollback.
+// under 2048 lines keeps today's ring and a larger one buys more scrollback.
 // The result is clamped to 64 KiB..8 MiB.
 func (c *Config) HistoryBytes() int {
 	lines := c.HistoryLines() * historyLineBytes
@@ -312,12 +312,12 @@ func (c *Config) Plugin(name string) (Plugin, bool) {
 
 // DashboardFullScreen reports whether the dashboard takes the whole screen. A
 // false result draws it as a centred palette over the panes. A config without
-// the node reports the built-in default, which is the full screen.
+// the node reports the built-in default, which is the float.
 func (c *Config) DashboardFullScreen() bool {
-	if c == nil || !c.dashFullSet {
-		return true
+	if c != nil && c.dashFullSet {
+		return c.dashFull
 	}
-	return c.dashFull
+	return false
 }
 
 // GlyphSet returns the glyph vocabulary the chrome draws with. A config

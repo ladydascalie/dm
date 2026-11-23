@@ -104,21 +104,21 @@ func TestToggleFold(t *testing.T) {
 		all := snap["all"].([]any)
 		return all[0].(map[string]any)["windowUnfolded"] == true
 	}
-	if unfolded() {
-		t.Fatal("a new window starts unfolded, want folded")
-	}
-	if res := h.rpc("fold", map[string]any{"action": "toggle-fold", "target": "w1"}); res["unfolded"] != true {
-		t.Fatalf("toggle-fold = %v, want unfolded", res["unfolded"])
-	}
 	if !unfolded() {
-		t.Fatal("snapshot does not show the window unfolded")
-	}
-	st := h.sessionState("fold")
-	if !st.Workspaces[0].Windows[0].Unfolded {
-		t.Fatal("fold state not persisted")
+		t.Fatal("a new window starts folded, want unfolded")
 	}
 	if res := h.rpc("fold", map[string]any{"action": "toggle-fold", "target": "w1"}); res["unfolded"] != false {
-		t.Fatalf("second toggle-fold = %v, want folded", res["unfolded"])
+		t.Fatalf("toggle-fold = %v, want folded", res["unfolded"])
+	}
+	if unfolded() {
+		t.Fatal("snapshot still shows the window unfolded")
+	}
+	st := h.sessionState("fold")
+	if st.Workspaces[0].Windows[0].Unfolded {
+		t.Fatal("fold state not persisted")
+	}
+	if res := h.rpc("fold", map[string]any{"action": "toggle-fold", "target": "w1"}); res["unfolded"] != true {
+		t.Fatalf("second toggle-fold = %v, want unfolded", res["unfolded"])
 	}
 }
 

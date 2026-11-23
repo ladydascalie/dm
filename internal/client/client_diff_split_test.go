@@ -24,7 +24,7 @@ func TestSwitcherDiffSplit(t *testing.T) {
 		if m.Type != "req" || m.Action != "split" || m.Target != "w1p1" || m.Dir != "right" {
 			t.Fatalf("D sent %+v, want a split to the right of w1p1", m)
 		}
-		if want := []string{"sh", "-c", "git diff"}; !reflect.DeepEqual(m.Argv, want) {
+		if want := []string{"sh", "-c", "hunk diff"}; !reflect.DeepEqual(m.Argv, want) {
 			t.Fatalf("D sent argv %v, want %v", m.Argv, want)
 		}
 	case <-time.After(time.Second):

@@ -497,7 +497,7 @@ keymap "main" {
 // moved when the footer started naming the shelf keys: the table itself is
 // unchanged, because a shelf row would push the last section off a 100x40
 // screen.
-const helpBoxDefaultSHA256 = "ab90e06f3ad371cb3be320a67fe5a140e62b1a0af0a05f49c4825c1e1a9f5a47"
+const helpBoxDefaultSHA256 = "1406c47cd80737c5e8d8b29fd5fcf753134b198676624cfb163fbd01f83854c3"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the

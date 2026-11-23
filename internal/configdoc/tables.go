@@ -19,7 +19,7 @@ var ConfigNodes = []ConfigNode{
 	{
 		Name:    "default-fold",
 		Value:   `"fold" or "unfold"`,
-		Default: `"fold"`,
+		Default: `"unfold"`,
 		Desc:    "Set whether a new window's rail starts folded or unfolded. A reload applies it to windows created after it.",
 	},
 	{
@@ -43,7 +43,7 @@ var ConfigNodes = []ConfigNode{
 	{
 		Name:    "history-lines",
 		Value:   "an integer from 100 to 32768 lines",
-		Default: "2000",
+		Default: "10000",
 		Desc:    "Set the scrollback window and the pane ring budget: about 256 bytes per line, capped at 8 MiB.",
 	},
 	{
@@ -61,7 +61,7 @@ var ConfigNodes = []ConfigNode{
 	{
 		Name:    "dashboard-preview",
 		Value:   "an integer from 0 to 100",
-		Default: "60",
+		Default: "40",
 		Desc:    "Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band.",
 	},
 	{
@@ -73,13 +73,13 @@ var ConfigNodes = []ConfigNode{
 	{
 		Name:    "diff-command",
 		Value:   "a quoted shell command",
-		Default: `"git diff"`,
+		Default: `"hunk diff"`,
 		Desc:    "Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder.",
 	},
 	{
 		Name:    "dashboard-layout",
 		Value:   `"full" or "float"`,
-		Default: `"full"`,
+		Default: `"float"`,
 		Desc:    "Draw the dashboard over the whole screen, or as a palette centred over the panes.",
 	},
 	{
@@ -493,7 +493,7 @@ func rgbHex(c theme.RGB) string {
 // value. Pasted as a theme it paints the built-in theme.
 const ThemeSampleKDL = `palette {
     "rail-bg"       "#14131a"
-    "rail-focus-bg" "#2c2a38"
+    "rail-focus-bg" "#1f1e27"
     "rail-hover-bg" "#21202d"
     "rail-text"     "#e9eaf1"
     "rail-dim"      "#8f93a8"
@@ -518,10 +518,10 @@ glyphs {
     "grip"                "•"
     "divider-row"         "━"
     "divider-col"         "┃"
-    "border-top-left"     "┌"
-    "border-top-right"    "┐"
-    "border-bottom-left"  "└"
-    "border-bottom-right" "┘"
+    "border-top-left"     "╭"
+    "border-top-right"    "╮"
+    "border-bottom-left"  "╰"
+    "border-bottom-right" "╯"
     "border-horizontal"   "─"
     "border-vertical"     "│"
     "border-tee-left"     "├"

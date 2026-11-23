@@ -805,7 +805,7 @@ const (
 
 // defaultDashboardPreview is the built-in share of the dashboard body the
 // preview band takes when it opens.
-const defaultDashboardPreview = 60
+const defaultDashboardPreview = 40
 
 // The shelf float's placement and share. A centred shelf takes
 // defaultShelfSize percent of the pane area, never under minShelfSize. The
@@ -822,7 +822,7 @@ const defaultPaletteRows = 10
 
 // defaultDiffCommand is the built-in command the dashboard diff key runs in a
 // floating pane.
-const defaultDiffCommand = "git diff"
+const defaultDiffCommand = "hunk diff"
 
 // defaultPadding is the built-in blank cells between a pane's border and its
 // content, and maxPadding is the largest the config accepts. A pane too small
@@ -837,10 +837,10 @@ const (
 
 // The history window bounds in lines, the bytes a line is budgeted, and the
 // pane ring bounds. historyLineBytes is the average a terminal row costs, so
-// the default 2000 lines is 500 KiB and historyFloorBytes keeps every pane at
+// the default 10000 lines is 2.5 MiB and historyFloorBytes keeps every pane at
 // today's 512 KiB ring. The 32768 line maximum is the 8 MiB cap exactly.
 const (
-	defaultHistoryLines = 2000
+	defaultHistoryLines = 10000
 	minHistoryLines     = 100
 	maxHistoryLines     = 32768
 	historyLineBytes    = 256
@@ -915,22 +915,22 @@ const defaultConfigKDL = `// dm keybinding defaults.
 // Add help "Section" after a key to move its row in the help box.
 
 prefix "ctrl+b"
-default-fold "fold"
+default-fold "unfold"
 tab-min-width 8
 tab-max-width 20
 padding 0
 // Set the scrollback window in lines; the pane ring budget is about 256 bytes per line, capped at 8 MiB.
-history-lines 2000
+history-lines 10000
 glyphs "auto"
-dashboard-preview 60
+dashboard-preview 40
 // The command palette shows at most this many entries before it scrolls.
 palette-rows 10
 
 // The diff key runs this in a floating pane through sh -c, in the selected pane folder.
-diff-command "git diff"
+diff-command "hunk diff"
 // Set the drop shadow the floats paint beside and under their box.
 float-shadow "off"
-dashboard-layout "full"
+dashboard-layout "float"
 // The shelf float centres over the pane area and takes this share of it.
 // "pane" lays it over the focused pane instead.
 shelf-layout "centered"

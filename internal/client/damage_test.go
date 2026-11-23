@@ -266,7 +266,7 @@ func TestFrameToastLeavesNothingBehind(t *testing.T) {
 	if strings.Contains(gone, "saved") {
 		t.Fatalf("toast glyphs survived the toast: %q", gone)
 	}
-	if !strings.Contains(gone, "\u2514") {
+	if !strings.Contains(gone, "\u2570") {
 		t.Fatalf("box border under the toast was not painted again: %q", gone)
 	}
 }

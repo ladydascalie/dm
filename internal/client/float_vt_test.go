@@ -50,7 +50,7 @@ func TestHelpBoxFloatVTPath(t *testing.T) {
 	var buf bytes.Buffer
 	fp.Draw(&buf, theme.DefaultTheme())
 	out := buf.String()
-	for _, s := range []string{"VT-CELLS", "┌", "└"} {
+	for _, s := range []string{"VT-CELLS", "╭", "╰"} {
 		if !strings.Contains(out, s) {
 			t.Fatalf("output is missing %q: %q", s, out)
 		}

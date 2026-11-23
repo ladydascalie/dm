@@ -1512,12 +1512,12 @@ func TestDrawPaneBox(t *testing.T) {
 	var b bytes.Buffer
 	panel.DrawPaneBox(&b, theme.DefaultTheme(), layout.Rect{X: 10, Y: 5, W: 20, H: 8}, true)
 	out := b.String()
-	for _, want := range []string{"┌", "┐", "└", "┘", "│", "─", "\x1b[1;96m"} {
+	for _, want := range []string{"╭", "╮", "╰", "╯", "│", "─", "\x1b[1;96m"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("box missing %q: %q", want, out)
 		}
 	}
-	if !strings.Contains(out, "\x1b[5;10H┌") || !strings.Contains(out, "\x1b[5;31H┐") {
+	if !strings.Contains(out, "\x1b[5;10H╭") || !strings.Contains(out, "\x1b[5;31H╮") {
 		t.Fatalf("box corners are at the wrong cells: %q", out)
 	}
 	var dim bytes.Buffer
@@ -3383,7 +3383,7 @@ func screenGlyphs(vt *vt.Term, ch rune) int {
 // box and a frame that paints two are told apart.
 func screenCorners(vt *vt.Term) int {
 	n := 0
-	for _, ch := range []rune{'┌', '┐', '└', '┘'} {
+	for _, ch := range []rune{'╭', '╮', '╰', '╯'} {
 		n += screenGlyphs(vt, ch)
 	}
 	return n
@@ -3449,7 +3449,7 @@ func TestZoomFrameFilter(t *testing.T) {
 		t.Fatalf("zoomed screen carries %d sibling borders inside the pane, want none", got)
 	}
 	corner := runeOfCell(scr.Grid().Cell(area.X, area.Y))
-	if corner != '┌' {
+	if corner != '╭' {
 		t.Fatalf("zoomed box corner = %q, want it at the pane area %d,%d", corner, area.X, area.Y)
 	}
 

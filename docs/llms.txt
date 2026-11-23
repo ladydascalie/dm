@@ -198,17 +198,17 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | Node | Value | Default | What it does |
 | --- | --- | --- | --- |
 | `prefix` | a quoted key name, one sequence | `"ctrl+b"` | Set the prefix key that opens the main keymap. |
-| `default-fold` | "fold" or "unfold" | `"fold"` | Set whether a new window's rail starts folded or unfolded. A reload applies it to windows created after it. |
+| `default-fold` | "fold" or "unfold" | `"unfold"` | Set whether a new window's rail starts folded or unfolded. A reload applies it to windows created after it. |
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below tab-min-width | `20` | Set the largest tab width before the label is cut. |
 | `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A reload resizes every pane. |
-| `history-lines` | an integer from 100 to 32768 lines | `2000` | Set the scrollback window and the pane ring budget: about 256 bytes per line, capped at 8 MiB. |
+| `history-lines` | an integer from 100 to 32768 lines | `10000` | Set the scrollback window and the pane ring budget: about 256 bytes per line, capped at 8 MiB. |
 | `glyphs` | "auto", "ascii", "unicode" or "nerd" | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | `"{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"` | Set the template that renders a window label. |
-| `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band. |
+| `dashboard-preview` | an integer from 0 to 100 | `40` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band. |
 | `palette-rows` | an integer of at least 1 | `10` | Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer. |
-| `diff-command` | a quoted shell command | `"git diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder. |
-| `dashboard-layout` | "full" or "float" | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. |
+| `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder. |
+| `dashboard-layout` | "full" or "float" | `"float"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. |
 | `shelf-layout` | "centered" or "pane" | `"centered"` | Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both. |
 | `shelf-size` | an integer from 20 to 100 | `80` | Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept. |
 | `float-shadow` | "off" or "on" | `"off"` | Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane. |
@@ -394,9 +394,9 @@ A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, named by the `theme` no
 
 | Block | Keys and built-in defaults | What it carries |
 | --- | --- | --- |
-| `palette` | `rail-bg` #14131a, `rail-focus-bg` #2c2a38, `rail-hover-bg` #21202d, `rail-text` #e9eaf1, `rail-dim` #8f93a8, `rail-header` #a6a9bd, `rail-window` #9599ae, `rail-diff-add` #78dc82, `rail-diff-del` #ff7d7d, `rail-working` #f5be50, `bar-accent` #7ac0eb | Rail and status bar colours. |
+| `palette` | `rail-bg` #14131a, `rail-focus-bg` #1f1e27, `rail-hover-bg` #21202d, `rail-text` #e9eaf1, `rail-dim` #8f93a8, `rail-header` #a6a9bd, `rail-window` #9599ae, `rail-diff-add` #78dc82, `rail-diff-del` #ff7d7d, `rail-working` #f5be50, `bar-accent` #7ac0eb | Rail and status bar colours. |
 | `accents` | `accent-1` #bb9af7, `accent-2` #6edceb, `accent-3` #f08cd7, `accent-4` #7ea9ff, `accent-5` #f0a05a, `accent-6` #8cd79b | Workspace accent colours, assigned in order. |
-| `glyphs` | `grip` •, `divider-row` ━, `divider-col` ┃, `border-top-left` ┌, `border-top-right` ┐, `border-bottom-left` └, `border-bottom-right` ┘, `border-horizontal` ─, `border-vertical` │, `border-tee-left` ├, `border-tee-right` ┤, `fold-open` ▾, `fold-closed` ▸, `active-mark` ▸, `workspace-bar` ▌, `dirty` ●, `shadow` ░ | Box, divider, fold and mark glyphs. |
+| `glyphs` | `grip` •, `divider-row` ━, `divider-col` ┃, `border-top-left` ╭, `border-top-right` ╮, `border-bottom-left` ╰, `border-bottom-right` ╯, `border-horizontal` ─, `border-vertical` │, `border-tee-left` ├, `border-tee-right` ┤, `fold-open` ▾, `fold-closed` ▸, `active-mark` ▸, `workspace-bar` ▌, `dirty` ●, `shadow` ░ | Box, divider, fold and mark glyphs. |
 | `states` | `working.glyph` ●, `working.colour` #f5be50, `idle.glyph` ○, `idle.colour` #78c8e1, `blocked.glyph` ▲, `blocked.colour` #ff6e6e, `done.glyph` ✓, `done.colour` #6ee191, `error.glyph` ✕, `error.colour` #ff82a0, `unknown.glyph` ?, `unknown.colour` #8f93a8, `shell.glyph` ▶, `shell.colour` #8f93a8 | Glyph and colour per pane state: working, idle, blocked, done, error, unknown, shell. |
 
 ## Prompt marks

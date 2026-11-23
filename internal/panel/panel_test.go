@@ -91,10 +91,10 @@ func TestPanelTitleAndHint(t *testing.T) {
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
 		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "hint", false, nil)
 	})
-	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─title──┐"; got != want {
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭─title──╮"; got != want {
 		t.Fatalf("title row = %q, want %q", got, want)
 	}
-	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "└─hint───┘"; got != want {
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰─hint───╯"; got != want {
 		t.Fatalf("hint row = %q, want %q", got, want)
 	}
 }
@@ -106,10 +106,10 @@ func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
 		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "hint", true, nil)
 	})
-	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌──┐"; got != want {
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭──╮"; got != want {
 		t.Fatalf("top row = %q, want the plain border %q", got, want)
 	}
-	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "└──┘"; got != want {
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰──╯"; got != want {
 		t.Fatalf("bottom row = %q, want the plain border %q", got, want)
 	}
 }
@@ -124,10 +124,10 @@ func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 	var b bytes.Buffer
 	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "", false, nil)
 	screen := panelFilled(t, 20, 10, b.Bytes())
-	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─t─┐"; got != want {
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭─t─╮"; got != want {
 		t.Fatalf("title row = %q, want the title cut to its one cell %q", got, want)
 	}
-	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "└───┘"; got != want {
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰───╯"; got != want {
 		t.Fatalf("bottom row = %q, want the plain border %q", got, want)
 	}
 	for y := 0; y < 10; y++ {
@@ -155,23 +155,23 @@ func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 	}, "", false, nil)
 	out := b.String()
 	// The style carries the panel ground, so the fill glyphs are opaque too.
-	if want := "\x1b[0m\x1b[90m" + theme.DefaultTheme().Palette.RailBG.BG() + "\x1b[3;4H┌ title ───┐"; !strings.HasPrefix(out, want) {
+	if want := "\x1b[0m\x1b[90m" + theme.DefaultTheme().Palette.RailBG.BG() + "\x1b[3;4H╭ title ───╮"; !strings.HasPrefix(out, want) {
 		t.Fatalf("band starts %q, want the row in one write %q", out, want)
 	}
 	if n := strings.Count(out, "\x1b[3;"); n != 1 {
 		t.Fatalf("the top row takes %d moves, want the row in one write", n)
 	}
-	if n := strings.Count(out, "┌ title ───┐"); n != 1 {
+	if n := strings.Count(out, "╭ title ───╮"); n != 1 {
 		t.Fatalf("the row appears %d times, want 1", n)
 	}
 	if n := strings.Count(out, " title "); n != 1 {
 		t.Fatalf("label appears %d times in the band, want 1", n)
 	}
 	screen := panelFilled(t, 20, 10, b.Bytes())
-	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌ title ───┐"; got != want {
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭ title ───╮"; got != want {
 		t.Fatalf("title row = %q, want %q", got, want)
 	}
-	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "└──────────┘"; got != want {
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰──────────╯"; got != want {
 		t.Fatalf("bottom row = %q, want %q", got, want)
 	}
 }
@@ -191,10 +191,10 @@ func TestPanelClipsInterior(t *testing.T) {
 		fmt.Fprintf(w, "\x1b[%d;%dHZZ", inner.Y+1, inner.X-1)
 	})
 	screen := panelFilled(t, 20, 10, b.Bytes())
-	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "┌─T──┐"; got != want {
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭─T──╮"; got != want {
 		t.Fatalf("title row = %q, want the border intact %q", got, want)
 	}
-	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "└────┘"; got != want {
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰────╯"; got != want {
 		t.Fatalf("bottom row = %q, want the border intact %q", got, want)
 	}
 	if got := panelRow(screen, r.Y, r.X-1, r.W+2); got != "│ABCD│" {

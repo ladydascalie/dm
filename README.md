@@ -241,19 +241,19 @@ optional and each one overrides its built-in value.
 | node | value | default | does |
 | --- | --- | --- | --- |
 | `prefix` | one key sequence | `"ctrl+b"` | Set the prefix key that opens the main keymap. |
-| `default-fold` | `"fold"` or `"unfold"` | `"fold"` | Set whether a new window's rail starts folded or unfolded. |
+| `default-fold` | `"fold"` or `"unfold"` | `"unfold"` | Set whether a new window's rail starts folded or unfolded. |
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below `tab-min-width` | `20` | Set the largest tab width before the label is cut. |
 | `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A change resizes every pane on reload. |
-| `history-lines` | an integer from 100 to 32768 lines | `2000` | Set the scrollback window in rows and the pane ring budget: about 256 bytes per line, at least 512 KiB and at most 8 MiB. |
+| `history-lines` | an integer from 100 to 32768 lines | `10000` | Set the scrollback window in rows and the pane ring budget: about 256 bytes per line, at least 512 KiB and at most 8 MiB. |
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
-| `dashboard-layout` | `"full"` or `"float"` | `"full"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
+| `dashboard-layout` | `"full"` or `"float"` | `"float"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
 | `shelf-layout` | `"centered"` or `"pane"` | `"centered"` | Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both. |
 | `shelf-size` | an integer from 20 to 100 | `80` | Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept. |
 | `float-shadow` | `"off"` or `"on"` | `"off"` | Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane. |
-| `dashboard-preview` | an integer from 0 to 100 | `60` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
-| `diff-command` | a quoted shell command | `"git diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
+| `dashboard-preview` | an integer from 0 to 100 | `40` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
+| `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 | `command` | a quoted name and a `{ run "..." }` block | none | Define a command a keymap can run; bind `command:<name>` to a key, and the row runs the run text in a floating pane. |
@@ -407,7 +407,7 @@ The whole shape, at the built-in values:
 ```kdl
 palette {
     "rail-bg"       "#14131a"
-    "rail-focus-bg" "#2c2a38"
+    "rail-focus-bg" "#1f1e27"
     "rail-hover-bg" "#21202d"
     "rail-text"     "#e9eaf1"
     "rail-dim"      "#8f93a8"
@@ -432,10 +432,10 @@ glyphs {
     "grip"                "•"
     "divider-row"         "━"
     "divider-col"         "┃"
-    "border-top-left"     "┌"
-    "border-top-right"    "┐"
-    "border-bottom-left"  "└"
-    "border-bottom-right" "┘"
+    "border-top-left"     "╭"
+    "border-top-right"    "╮"
+    "border-bottom-left"  "╰"
+    "border-bottom-right" "╯"
     "border-horizontal"   "─"
     "border-vertical"     "│"
     "border-tee-left"     "├"
@@ -513,10 +513,10 @@ not check a user theme: its contrast is the author's.
 ## Dashboard
 
 `prefix a` opens the dashboard: a table of every pane in the session, one row
-per pane. It is native: no child process and no PTY. It takes the whole screen
-by default; `dashboard-layout "float"` draws it as a palette centred over the
-panes instead, and leaves the panes live under it. The default order is recent,
-the newest agent status change first.
+per pane. It is native: no child process and no PTY. It draws as a palette
+centred over the panes by default; `dashboard-layout "full"` takes the whole
+screen instead and leaves the panes live under it. The default order is
+recent, the newest agent status change first.
 
 The columns are the jump key, the project, the agent label, git, the status,
 the time since the last status change and the OSC window title. The label is
@@ -558,7 +558,7 @@ keeps its own 20 to 85 range, and the peek key uses the configured share.
 
 `i` copies the selected pane's id and leaves the dashboard up, so the next
 command can name the pane. The footer says `i copy id`. `d` runs the diff
-command, `git diff` by default, in a floating terminal
+command, `hunk diff` by default, in a floating terminal
 over the panes, in the selected pane's folder, through `sh -c`. The float takes
 every key while the command runs, except the prefix: one press of it kills the
 float and the command under it, so there is no need to quit the program first.
@@ -590,7 +590,7 @@ label paints the panel title, and without one the title falls back to the
 command's first word. A label without a command is an error.
 
 The dashboard diff key is one instance of it: the request sends no command, so
-the float runs the `diff-command` config node (`git diff` by default) in the
+the float runs the `diff-command` config node (`hunk diff` by default) in the
 selected pane's folder and paints the panel the same way. A `command` binding
 is another: the run text opens on the focused pane's folder, titled with the
 command's name. The float takes every key while the command runs, except the
@@ -827,14 +827,14 @@ per window, the focus chip, then the pinned right block.
 
 Colours are explicit RGB, never terminal palette slots. The built-in theme
 paints them only on grounds it checks: railBG (#14131a) for the ground and the
-gutter, railFocusBG (#2c2a38) for the active window chip and the focus chip,
+gutter, railFocusBG (#1f1e27) for the active window chip and the focus chip,
 railHoverBG (#21202d) for the row the pointer rests on, railText (#e9eaf1),
 railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb)
 for the active mark, and the state colours of the `states` block in Themes. A
 user theme names its own RGB, so it chooses its own grounds and answers for its
 own contrast. Every footer foreground of the built-in theme reaches WCAG AA,
-4.5:1 or better, on every ground it is painted on: railDim on railFocusBG is the
-tightest at 4.62:1, and the barAccent mark reaches 7.07:1 on the focus fill it
+4.5:1 or better, on every ground it is painted on: railDim on railHoverBG is the
+tightest at 5.28:1, and the barAccent mark reaches 8.30:1 on the focus fill it
 sits on, 9.29:1 on the ground.
 
 At 80 columns, with the session `pi-footer-2026`, the workspace `main`, three
@@ -942,7 +942,7 @@ still knows even when the enabling escape sequence has left the replay ring.
 Scrollback is built on demand: the first time you scroll a pane, the client asks
 the server for that pane's output ring, replays it into a tall terminal, and
 draws a window into it at the current offset. The tall terminal is
-`history-lines` rows plus the pane's own height, so 2000 rows by default. The
+`history-lines` rows plus the pane's own height, so 10000 rows by default. The
 ring is cached per pane for that layout, so a second scroll asks for nothing. It
 is a frozen snapshot taken when you scroll, so new output does not move the
 view. The replay is approximate for full-screen programs; for streamed output

@@ -1147,7 +1147,7 @@ func TestConfigDashboardLayout(t *testing.T) {
 		src  string
 		want bool
 	}{
-		{"absent", `prefix "ctrl+b"`, true},
+		{"absent", `prefix "ctrl+b"`, false},
 		{"full", `dashboard-layout "full"`, true},
 		{"float", `dashboard-layout "float"`, false},
 	}
@@ -1162,8 +1162,8 @@ func TestConfigDashboardLayout(t *testing.T) {
 			}
 		})
 	}
-	if !LoadDefault().DashboardFullScreen() {
-		t.Fatal("LoadDefault().DashboardFullScreen() = false, want true")
+	if LoadDefault().DashboardFullScreen() {
+		t.Fatal("LoadDefault().DashboardFullScreen() = true, want false")
 	}
 	for _, bad := range []string{`dashboard-layout "wide"`, `dashboard-layout 1`} {
 		if _, err := parseConfig(bad); err == nil {
@@ -1326,7 +1326,7 @@ func TestConfigDiffCommand(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"absent", `prefix "ctrl+b"`, "git diff"},
+		{"absent", `prefix "ctrl+b"`, "hunk diff"},
 		{"set", `diff-command "git diff --stat"`, "git diff --stat"},
 		{"compound", `diff-command "git diff -- src && true"`, "git diff -- src && true"},
 	}
@@ -1344,8 +1344,8 @@ func TestConfigDiffCommand(t *testing.T) {
 	if got := LoadDefault().DiffCommand(); got != defaultDiffCommand {
 		t.Fatalf("LoadDefault().DiffCommand() = %q, want %q", got, defaultDiffCommand)
 	}
-	if defaultDiffCommand != "git diff" {
-		t.Fatalf("defaultDiffCommand = %q, want git diff", defaultDiffCommand)
+	if defaultDiffCommand != "hunk diff" {
+		t.Fatalf("defaultDiffCommand = %q, want hunk diff", defaultDiffCommand)
 	}
 }
 
@@ -1370,7 +1370,7 @@ func TestConfigDiffCommandEmpty(t *testing.T) {
 	}
 }
 
-// TestConfigDefaultFold proves the default fold setting: absent means folded,
+// TestConfigDefaultFold proves the default fold setting: absent means unfolded,
 // "fold" means folded and "unfold" means unfolded.
 func TestConfigDefaultFold(t *testing.T) {
 	cases := []struct {
@@ -1378,7 +1378,7 @@ func TestConfigDefaultFold(t *testing.T) {
 		src  string
 		want bool
 	}{
-		{"absent", `prefix "ctrl+b"`, false},
+		{"absent", `prefix "ctrl+b"`, true},
 		{"fold", `default-fold "fold"`, false},
 		{"unfold", `default-fold "unfold"`, true},
 	}
@@ -1393,8 +1393,8 @@ func TestConfigDefaultFold(t *testing.T) {
 			}
 		})
 	}
-	if got := LoadDefault().DefaultFold(); got {
-		t.Fatal("LoadDefault().DefaultFold() = true, want false")
+	if !LoadDefault().DefaultFold() {
+		t.Fatal("LoadDefault().DefaultFold() = false, want true")
 	}
 }
 
@@ -1634,17 +1634,17 @@ func TestConfigHistoryLines(t *testing.T) {
 }
 
 // TestConfigHistoryBytes proves the pane ring budget: a small window keeps the
-// 512 KiB floor, the default stays at 512 KiB, a large window grows above it,
+// 512 KiB floor, the default buys 2.5 MiB, a large window grows above it,
 // the 32768 line maximum reaches the 8 MiB cap, and a nil config reports the
-// floor.
+// built-in default.
 func TestConfigHistoryBytes(t *testing.T) {
 	cases := []struct {
 		name string
 		cfg  *Config
 		want int
 	}{
-		{"nil", nil, 512 << 10},
-		{"default", LoadDefault(), 512 << 10},
+		{"nil", nil, 10000 * 256},
+		{"default", LoadDefault(), 10000 * 256},
 		{"floor", &Config{historyLines: minHistoryLines}, 512 << 10},
 		{"default lines", &Config{historyLines: 2000}, 512 << 10},
 		{"above floor", &Config{historyLines: 4000}, 4000 * 256},

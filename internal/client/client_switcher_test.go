@@ -253,7 +253,7 @@ func TestSwitcherPreviewShare(t *testing.T) {
 		on    bool
 		ratio int
 	}{
-		{"absent", "", true, 60},
+		{"absent", "", true, 40},
 		{"off", "dashboard-preview 0\n", false, 60},
 		{"small", "dashboard-preview 25\n", true, 25},
 		{"under the floor", "dashboard-preview 5\n", true, 20},
@@ -297,14 +297,14 @@ func TestSwitcherPreviewShare(t *testing.T) {
 	}
 }
 
-// TestSwitcherFloatLayout: dashboard-layout "float" centres the palette and
-// leaves the panes live under it, so it claims no screen mode and the frame
-// keeps its tab bar and hover.
+// TestSwitcherFloatLayout: the default dashboard-layout float centres the
+// palette and leaves the panes live under it, so it claims no screen mode and
+// the frame keeps its tab bar and hover.
 func TestSwitcherFloatLayout(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.kdl")
-	if err := os.WriteFile(path, []byte("dashboard-layout \"float\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := keymap.LoadPath(path)
@@ -342,11 +342,21 @@ func TestSwitcherFloatLayout(t *testing.T) {
 	}
 }
 
-// TestSwitcherFullScreen: prefix a opens the dashboard over the whole screen in
-// its own mode, and the close key gives the screen back.
+// TestSwitcherFullScreen: dashboard-layout "full" takes the whole screen in its
+// own mode, and the close key gives the screen back.
 func TestSwitcherFullScreen(t *testing.T) {
 	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.kdl")
+	if err := os.WriteFile(path, []byte("dashboard-layout \"full\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := keymap.LoadPath(path)
+	if err != nil {
+		t.Fatalf("LoadPath: %v", err)
+	}
 	tui, got := switcherTUI(t)
+	tui.keymap = cfg
 	feed(tui, "\x02a")
 	if tui.sw == nil {
 		t.Fatal("prefix a did not open the dashboard")
@@ -414,12 +424,12 @@ func TestSwitcherPreviewKeys(t *testing.T) {
 		t.Fatalf("ctrl+d moved the offset to %d, want 3", n)
 	}
 	feed(tui, "+")
-	if n := tui.sw.PreviewRatio(); n != 65 {
-		t.Fatalf("+ took the ratio to %d, want 65", n)
+	if n := tui.sw.PreviewRatio(); n != 45 {
+		t.Fatalf("+ took the ratio to %d, want 45", n)
 	}
 	feed(tui, "-")
-	if n := tui.sw.PreviewRatio(); n != 60 {
-		t.Fatalf("- took the ratio to %d, want 60", n)
+	if n := tui.sw.PreviewRatio(); n != 40 {
+		t.Fatalf("- took the ratio to %d, want 40", n)
 	}
 	for i := 0; i < 20; i++ {
 		feed(tui, "-")

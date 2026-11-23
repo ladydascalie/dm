@@ -25,7 +25,7 @@ func TestFloatingPaneDraw(t *testing.T) {
 	if !strings.Contains(out, "Hello, Float!") {
 		t.Fatalf("missing text in output: %q", out)
 	}
-	if !strings.Contains(out, "┌") || !strings.Contains(out, "┐") {
+	if !strings.Contains(out, "╭") || !strings.Contains(out, "╮") {
 		t.Fatalf("missing border in output: %q", out)
 	}
 }
@@ -55,7 +55,7 @@ func TestHelpBoxFloatPaint(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("Paint called %d times, want 1", calls)
 	}
-	for _, s := range []string{"hi", "┌", "┐", "└", "┘", "prefix", "esc"} {
+	for _, s := range []string{"hi", "╭", "╮", "╰", "╯", "prefix", "esc"} {
 		if !strings.Contains(out, s) {
 			t.Fatalf("output is missing %q: %q", s, out)
 		}
@@ -71,7 +71,7 @@ func TestFloatingPaneNoPaint(t *testing.T) {
 	var buf bytes.Buffer
 	fp.Draw(&buf, theme.DefaultTheme())
 	out := buf.String()
-	for _, s := range []string{"┌", "└"} {
+	for _, s := range []string{"╭", "╰"} {
 		if !strings.Contains(out, s) {
 			t.Fatalf("output is missing %q: %q", s, out)
 		}
