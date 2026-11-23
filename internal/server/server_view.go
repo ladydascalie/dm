@@ -261,6 +261,7 @@ func (s *server) allPanesLocked() []wire.AllPane {
 					info.Status = pst.State
 					info.Message = pst.Message
 					info.Title = pc.title
+					info.SessionFile, info.SessionID = pc.session()
 					info.StatusChangedAt = s.statusChangedAt[id]
 				}
 				info.Agent = info.Name != "" || (ps != nil && ps.Reported) ||
@@ -992,10 +993,14 @@ type paneReplay struct {
 	data  []byte
 	st    wire.Status
 	title string
-	alt   bool
-	mouse bool
-	paste bool
-	ok    bool
+	// sessionFile and sessionID are the pane's OSC 7502 report, so a server
+	// that adopts a running pane learns the session its agent is writing.
+	sessionFile string
+	sessionID   string
+	alt         bool
+	mouse       bool
+	paste       bool
+	ok          bool
 }
 
 func readPaneReplay(st *session.State, id string) paneReplay {
@@ -1024,14 +1029,17 @@ func readPaneReplay(st *session.State, id string) paneReplay {
 			rp.st = *m.St
 		}
 		var extra struct {
-			Title string `json:"title"`
-			Alt   bool   `json:"alt"`
-			Mouse bool   `json:"mouse"`
-			Paste bool   `json:"paste"`
+			Title       string `json:"title"`
+			Alt         bool   `json:"alt"`
+			Mouse       bool   `json:"mouse"`
+			Paste       bool   `json:"paste"`
+			SessionFile string `json:"sessionFile"`
+			SessionID   string `json:"sessionID"`
 		}
 		_ = json.Unmarshal(m.Res, &extra)
 		rp.data, rp.alt, rp.mouse, rp.paste, rp.ok = m.Data, extra.Alt, extra.Mouse, extra.Paste, true
 		rp.title = extra.Title
+		rp.sessionFile, rp.sessionID = extra.SessionFile, extra.SessionID
 		return rp
 	}
 }

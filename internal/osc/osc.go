@@ -16,10 +16,14 @@ import (
 type Filter struct {
 	buf    []byte
 	Status func(wire.Status)
-	Query  func()
-	Reply  func(string)
-	Cursor func() (row, col int)
-	FG, BG string
+	// Session is called with the decoded OSC 7502 report: the file a pane's
+	// agent writes its structured session to, and the session id. A clear
+	// calls it with the zero Session, so the pane drops what it kept.
+	Session func(Session)
+	Query   func()
+	Reply   func(string)
+	Cursor  func() (row, col int)
+	FG, BG  string
 	// CursorFG is the cursor colour OSC 12 reports. Empty falls back to
 	// TermCursor, so a future cursor-colour track only fills this field.
 	CursorFG string
@@ -43,7 +47,10 @@ const (
 	replyDA2   = "\x1b[>0;10;1c"
 )
 
-var oscPrefix = []byte("\x1b]7501;")
+var (
+	oscPrefix        = []byte("\x1b]7501;")
+	oscSessionPrefix = []byte("\x1b]7502;")
+)
 
 func (f *Filter) Feed(p []byte, out *bytes.Buffer) {
 	f.buf = append(f.buf, p...)
@@ -131,6 +138,17 @@ func (f *Filter) handleOSC(seq []byte) bool {
 				return true
 			}
 		}
+	}
+	if bytes.HasPrefix(seq, oscSessionPrefix) {
+		payload := seq[len(oscSessionPrefix):]
+		payload = bytes.TrimSuffix(payload, []byte("\x1b\\"))
+		payload = bytes.TrimSuffix(payload, []byte{0x07})
+		if s, outcome := ParseSession(string(payload)); outcome != SessionNone && f.Session != nil {
+			f.Session(s)
+		}
+		// The frame names the session and nothing else: it is consumed even
+		// when it does not decode, so the VT never sees it.
+		return true
 	}
 	if bytes.HasPrefix(seq, oscPrefix) {
 		payload := seq[len(oscPrefix):]
@@ -267,6 +285,70 @@ func normaliseState(s string) string {
 		return s
 	}
 	return "unknown"
+}
+
+// Session is the decoded OSC 7502 frame: the file a pane's agent writes its
+// structured session to, and the id that session holds. The file is the path
+// itself, decoded, not the base64 the frame carries.
+type Session struct {
+	File string
+	ID   string
+}
+
+// SessionOutcome is what an OSC 7502 frame says. A frame names a session, clears
+// one, or says nothing the pane should act on.
+type SessionOutcome int
+
+const (
+	// SessionNone is a frame with no session key, or a path that does not
+	// decode. The pane ignores it and keeps what it had.
+	SessionNone SessionOutcome = iota
+	// SessionSet is a frame with a decoded path. ID may be empty.
+	SessionSet
+	// SessionClear is the session key with an empty value: the agent that
+	// reported it is gone, so the pane drops the session it kept.
+	SessionClear
+)
+
+// ParseSession accepts the OSC 7502 wire format, `session=<b64 path>;id=<id>`.
+// The path is base64 because a path holds characters the frame cannot carry.
+// Three outcomes, all distinct:
+//   - SessionSet: the session key holds a decoded path.
+//   - SessionClear: the session key is present with an empty value.
+//   - SessionNone: no session key at all, or a path that does not decode. The
+//     caller drops the frame and changes nothing.
+func ParseSession(s string) (Session, SessionOutcome) {
+	var out Session
+	keyed := false
+	for _, pair := range strings.Split(strings.TrimSpace(s), ";") {
+		k, v, found := strings.Cut(strings.TrimSpace(pair), "=")
+		if !found {
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "session":
+			keyed = true
+			v = strings.TrimSpace(v)
+			if v == "" {
+				out = Session{}
+				continue
+			}
+			b, err := base64.StdEncoding.DecodeString(v)
+			if err != nil {
+				return Session{}, SessionNone
+			}
+			out.File = string(b)
+		case "id":
+			out.ID = strings.TrimSpace(v)
+		}
+	}
+	if !keyed {
+		return Session{}, SessionNone
+	}
+	if out.File == "" {
+		return Session{}, SessionClear
+	}
+	return out, SessionSet
 }
 
 // ParseStatus accepts the OSC 7501 wire format, `state=working:app=pi:msg=<b64>`,

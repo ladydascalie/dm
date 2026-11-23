@@ -201,10 +201,18 @@ The page has five parts:
   and folder, the panes that want a decision first
 - the box: the newest entries, with a compose row that posts a key, a state and
   a message through `msg-post`
-- one pane's text: the screen the pane printed, wrapped at the phone's width and
-  polled by text revision, with an input row that types into the pane, an action
-  row for split, zoom, next pane, rename and close, and a strip that walks the
-  window and the workspace
+- one pane, in one of three views, a tap apart: the transcript, which reads the
+  agent's session file through `/api/session` and shows each turn's ask, its
+  steps and its summary; the activity feed, the same steps flattened to one row
+  each, newest first, with a divider where a turn starts; and the screen, the
+  text the pane printed, wrapped at the phone's width and polled by text
+  revision. A pane that reported a session opens on the transcript and offers
+  every view. A pane that reported none, a shell for example, opens on the
+  screen and offers no other view. A transcript that cannot be read shows the
+  screen and one line saying why. One tap switches, and the choice rides the
+  address hash, so a reload lands on the same view. Every view keeps the input
+  row that types into the pane, the action row for split, zoom, next pane,
+  rename and close, and the strip that walks the window and the workspace
 - the action sheet: one large row per command, from the catalogue the page
   fetches once, with a target picker for panes, windows and workspaces, the split
   sites and the layout presets. A command that destroys something asks once,
@@ -223,7 +231,7 @@ that fails paints the daemon's message in the banner and changes nothing else.
 `--read-only` refuses every write: pane input, the box compose and every action.
 The page hides those commands: the action sheet, the pane action row, the send
 row and the compose. Everything that only reads stays: the fleet, the box, the
-pane text with its window strip, and the picture grid.
+three pane views with their window strip, and the picture grid.
 
 ## Layouts
 

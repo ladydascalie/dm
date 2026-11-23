@@ -131,6 +131,30 @@ ESC ] 7501 ; state=working:app=myapp:msg=<base64> ESC \
 
 The README section "OSC 7501 agent status" has the full grammar.
 
+A program can also name the session file it writes, so a viewer reads the
+structured transcript instead of the screen. Speak OSC 7502:
+
+```
+ESC ] 7502 ; session=<base64 path> ; id=<id> ESC \
+```
+
+- `session=` is the path of the JSONL file the agent writes, base64 UTF-8
+  because a path holds characters the frame cannot carry.
+- `id=` is the session id in that file.
+- `BEL` and `ST` terminate the sequence. The pane consumes the frame, so it
+  never reaches the screen.
+- A frame has three outcomes. A `session=` value that decodes names a session.
+  An empty `session=` value clears it, because the agent that wrote the file is
+  gone. A frame with no `session` key at all, or a value that does not decode, is
+  ignored, and the pane keeps the last good value.
+- Send the clear frame when your agent exits. If you do not, the pane keeps the
+  session it was given, and a viewer paints a transcript over a bare shell
+  prompt.
+- A session belongs to the running pane. dm never persists it. A restart or a
+  respawn means the program starts a new session.
+- A program is free to emit nothing. A shell pane has no session, and that is
+  normal: a viewer falls back to the screen.
+
 ## Example
 
 `examples/echo-plugin/echo.sh` posts `ready`, then echoes every command posted

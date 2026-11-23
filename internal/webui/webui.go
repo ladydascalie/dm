@@ -38,6 +38,9 @@ type Config struct {
 	// in, so a test can serve a temp tree.
 	Session string
 	Root    string
+	// SessionsDir is the pi sessions tree /api/session may read. Empty means
+	// ~/.pi/agent/sessions. Nothing outside it is ever opened.
+	SessionsDir string
 	// Token is the access token. Run generates one when it is empty, so a
 	// forgotten token is never an open port.
 	Token string
@@ -123,6 +126,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.Handle("GET /static/", noStore(http.StripPrefix("/static/", http.FileServerFS(files))))
 	mux.HandleFunc("GET /api/fleet", h.fleet)
 	mux.HandleFunc("GET /api/text", h.text)
+	mux.HandleFunc("GET /api/session", h.session)
 	mux.HandleFunc("GET /api/thumbs", h.thumbs)
 	mux.HandleFunc("GET /api/commands", h.commands)
 	mux.HandleFunc("POST /api/action", h.action)
