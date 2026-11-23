@@ -712,14 +712,21 @@
     border-top: 1px solid var(--line);
   }
   #send {
-    display: flex; gap: 6px; padding: 8px;
+    display: flex; gap: 6px; padding: 8px; align-items: flex-end;
     border-top: 1px solid var(--line); background: var(--panel);
   }
-  #send input {
+  /* The composer is a textarea because a phone types multi-line blocks: enter
+     inserts a newline, and the send control decides what leaves. It grows with
+     its text, one row at rest so the row keeps the height it always had, then a
+     row at a time up to 30vh, then it scrolls inside itself. resize stays off:
+     a phone has no drag handle, and the text owns the height. */
+  #send textarea {
     flex: 1; min-width: 0;
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 10px; font-size: 15px; min-height: 44px;
+    padding: 9px 10px; font-family: inherit; font-size: 15px; line-height: 21px;
+    min-height: 44px; max-height: 30vh;
+    resize: none; overflow-y: hidden;
   }
   /* The two buttons carry a glyph instead of a word, so the input takes the
      width the words gave up. The glyph is decorative: the label and the title
@@ -856,7 +863,7 @@
      its side as well as upright. Pinch stays enabled: the zoom is the symptom,
      not the reader's setting. */
   @media (max-width: 900px) {
-    #compose input, #compose select, #send input,
+    #compose input, #compose select, #send textarea,
     #ask .ask-text, #ask .ask-note, .targets select { font-size: 16px; }
   }
 </style>
@@ -944,8 +951,9 @@
           <path d="M21 16l-5-5-9 9"/>
         </svg>
       </button>
-      <input id="send-text" type="text" autocomplete="off" autocapitalize="off"
-             autocorrect="off" spellcheck="false" placeholder="type into the pane">
+      <textarea id="send-text" rows="1" autocomplete="off" autocapitalize="off"
+                autocorrect="off" spellcheck="false"
+                placeholder="type into the pane"></textarea>
       <button id="send-submit" class="enter" aria-label="send" title="send the text and press enter">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">

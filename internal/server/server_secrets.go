@@ -965,7 +965,7 @@ func (s *server) secretType(cl *client, m wire.Msg) {
 	if warning != "" {
 		log.Print(warning)
 	}
-	if err := s.writeTo(m.Target, value, false); err != nil {
+	if err := s.writeTo(m.Target, value, writeOpts{}); err != nil {
 		s.reply(cl, m, nil, err)
 		return
 	}

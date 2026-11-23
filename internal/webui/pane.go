@@ -15,8 +15,10 @@ import (
 // directory.
 var paneIDPattern = regexp.MustCompile(`^[a-z0-9]+p[0-9]+$`)
 
-// msg writes text into a pane, with an optional Enter after it. It is the
-// phone's way to answer a prompt without holding a terminal keyboard.
+// msg writes text into a pane, with an optional Enter after it, or as a paste.
+// It is the phone's way to answer a prompt without holding a terminal keyboard.
+// A paste never enters: the page sends the block, then a separate Enter, so the
+// block reaches the program whole and submits once.
 func (h *Handler) msg(w http.ResponseWriter, r *http.Request) {
 	if h.cfg.ReadOnly {
 		http.Error(w, "dm web: read only", http.StatusForbidden)
@@ -26,6 +28,7 @@ func (h *Handler) msg(w http.ResponseWriter, r *http.Request) {
 		Pane  string `json:"pane"`
 		Text  string `json:"text"`
 		Enter bool   `json:"enter"`
+		Paste bool   `json:"paste"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "dm web: "+err.Error(), http.StatusBadRequest)
@@ -35,7 +38,12 @@ func (h *Handler) msg(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dm web: bad pane id", http.StatusBadRequest)
 		return
 	}
-	h.reply(w, wire.Msg{Action: "write-to", Target: req.Pane, Msg: req.Text, Enter: req.Enter})
+	if req.Paste && req.Enter {
+		http.Error(w, "dm web: a paste never enters", http.StatusBadRequest)
+		return
+	}
+	h.reply(w, wire.Msg{Action: "write-to", Target: req.Pane, Msg: req.Text,
+		Enter: req.Enter, Paste: req.Paste})
 }
 
 // reply runs one write action and answers the browser with the daemon's

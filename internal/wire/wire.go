@@ -26,12 +26,17 @@ type Msg struct {
 	// new workspace inherits the project of the one it was created from.
 	Project string `json:"project,omitempty"`
 	Enter   bool   `json:"enter,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Window  string `json:"window,omitempty"`
-	Index   int    `json:"index,omitempty"`
-	ID      int    `json:"id,omitempty"`
-	Cwd     string `json:"cwd,omitempty"`
-	FG      string `json:"fg,omitempty"` // terminal foreground the client detected
+	// Paste is true when Msg is a pasted block, not a typed command line. The
+	// pane frames the text for a program that asked for bracketed paste, so a
+	// multi-line block arrives whole; a program that never asked gets the text
+	// alone. A paste never carries its own Enter: it never submits.
+	Paste  bool   `json:"paste,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Window string `json:"window,omitempty"`
+	Index  int    `json:"index,omitempty"`
+	ID     int    `json:"id,omitempty"`
+	Cwd    string `json:"cwd,omitempty"`
+	FG     string `json:"fg,omitempty"` // terminal foreground the client detected
 	// Tool is the secret register request: the program that prints the
 	// value on stdout, op or pass.
 	Tool string `json:"tool,omitempty"`

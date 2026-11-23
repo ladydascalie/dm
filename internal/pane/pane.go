@@ -184,6 +184,14 @@ type waitReq struct {
 // yank. A longer write is a pasted block, not a command line.
 const echoMax = 4096
 
+// The bracketed paste markers. A program that turned bracketed paste on gets
+// its pasted block between them and reads it whole. A program that never asked
+// would read the markers as keys, so it never sees them.
+const (
+	pasteStart = "\x1b[200~"
+	pasteEnd   = "\x1b[201~"
+)
+
 // modeInfo reports the modes the client must respect: alternate screen (no
 // terminal scrollback), mouse reporting (the wheel belongs to the app) and
 // bracketed paste (a paste arrives framed by the 200~ and 201~ markers).
@@ -1432,10 +1440,23 @@ func (p *paneProc) serve(c net.Conn) {
 			if m.Keys != nil {
 				b = m.Keys
 			}
-			// An Enter records the stream position the output after it starts
-			// on. The last Enter wins, and the anchor is taken before the
-			// write so the output the Enter produces lands after it.
-			if m.Enter || bytes.ContainsAny(b, "\r\n") {
+			enter := m.Enter
+			if m.Paste {
+				// A paste is a block, not a command line. A program that asked
+				// for bracketed paste gets the markers around it, so its line
+				// editor takes the block whole; a program that never asked gets
+				// the text alone. A paste never submits, so it never carries an
+				// Enter, and it records no anchor and no echo: those belong to
+				// the command line a yank copies, and the block was never one.
+				if p.vt.Grid().Modes().BracketedPaste {
+					b = append(append([]byte(pasteStart), b...), pasteEnd...)
+				}
+				enter = false
+			} else if m.Enter || bytes.ContainsAny(b, "\r\n") {
+				// An Enter records the stream position the output after it
+				// starts on. The last Enter wins, and the anchor is taken
+				// before the write so the output the Enter produces lands
+				// after it.
 				p.anchor = p.produced
 				p.anchorSet = true
 				// Keep the text to drop its echo from a later yank, but not a
@@ -1448,7 +1469,7 @@ func (p *paneProc) serve(c net.Conn) {
 				}
 			}
 			p.mu.Unlock()
-			p.queueWrite(b, m.Enter)
+			p.queueWrite(b, enter)
 		case "resize":
 			if m.Cols < 2 || m.Rows < 2 {
 				continue

@@ -204,7 +204,15 @@ func (s *server) paneYank(id string) ([]string, int, int, bool, error) {
 	return res.Lines, res.Start, res.Rows, res.Anchor, nil
 }
 
-func (s *server) writeTo(id, text string, enter bool) error {
+// writeOpts is the shape of one write: whether an Enter follows the text, and
+// whether the text is a pasted block. A paste never enters; the pane frames it
+// for a program that asked for bracketed paste.
+type writeOpts struct {
+	enter bool
+	paste bool
+}
+
+func (s *server) writeTo(id, text string, o writeOpts) error {
 	s.mu.Lock()
 	pc := s.panes[id]
 	known := s.paneInTreeLocked(id)
@@ -229,7 +237,7 @@ func (s *server) writeTo(id, text string, enter bool) error {
 	dsts := s.syncPaneIDsLocked(id)
 	s.mu.Unlock()
 	if len(dsts) == 0 {
-		err := pc.send(wire.Msg{Action: "write", Msg: text, Enter: enter})
+		err := pc.send(wire.Msg{Action: "write", Msg: text, Enter: o.enter, Paste: o.paste})
 		if err != nil {
 			s.rearmPaneWatcher(id)
 		}
@@ -237,7 +245,7 @@ func (s *server) writeTo(id, text string, enter bool) error {
 	}
 	for _, pid := range dsts {
 		if p := s.panes[pid]; p != nil {
-			if err := p.send(wire.Msg{Action: "write", Msg: text, Enter: enter}); err != nil {
+			if err := p.send(wire.Msg{Action: "write", Msg: text, Enter: o.enter, Paste: o.paste}); err != nil {
 				s.rearmPaneWatcher(pid)
 			}
 		}
