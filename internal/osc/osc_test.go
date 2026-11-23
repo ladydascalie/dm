@@ -195,3 +195,111 @@ func TestParseStatusClearNormalised(t *testing.T) {
 		}
 	}
 }
+
+// wireSession renders the OSC 7502 frame: session=<b64 path>;id=<id>.
+func wireSession(file, id string) string {
+	return "\x1b]7502;session=" + base64.StdEncoding.EncodeToString([]byte(file)) +
+		";id=" + id + "\x1b\\"
+}
+
+// TestOSCSessionFilter proves a well formed frame reaches the callback with the
+// path decoded, is consumed rather than passed to the VT, and survives arriving
+// split across reads.
+func TestOSCSessionFilter(t *testing.T) {
+	var got []Session
+	f := &Filter{Session: func(s Session) { got = append(got, s) }}
+	var out bytes.Buffer
+	frame := wireSession("/home/me/.pi/sessions/9f2.jsonl", "9f2")
+
+	for i := 0; i < len(frame); i += 3 {
+		f.Feed([]byte(frame[i:min(i+3, len(frame))]), &out)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("the frame leaked into the stream: %q", out.String())
+	}
+	if len(got) != 1 || got[0].File != "/home/me/.pi/sessions/9f2.jsonl" || got[0].ID != "9f2" {
+		t.Fatalf("session = %+v, want the decoded path and id", got)
+	}
+}
+
+// TestOSCSessionBadFrameIgnored proves a frame with a missing or badly encoded
+// path names no session: nothing reaches the callback, and the frame is still
+// consumed so the VT never sees it.
+func TestOSCSessionBadFrameIgnored(t *testing.T) {
+	called := 0
+	f := &Filter{Session: func(Session) { called++ }}
+	var out bytes.Buffer
+	for _, frame := range []string{
+		"\x1b]7502;id=abc\x07",
+		"\x1b]7502;session=!!!not-base64!!!;id=abc\x07",
+		"\x1b]7502;state=working\x07",
+	} {
+		f.Feed([]byte(frame), &out)
+	}
+	if called != 0 {
+		t.Fatalf("a frame with no usable path reached the callback %d times", called)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("a bad frame leaked into the stream: %q", out.String())
+	}
+}
+
+// TestOSCSessionClear proves a frame with the session key and an empty value
+// clears the session: the callback receives the zero pair and the frame is
+// consumed rather than passed to the VT. An id on the clear frame goes with
+// the session, not with it.
+func TestOSCSessionClear(t *testing.T) {
+	var got []Session
+	f := &Filter{Session: func(s Session) { got = append(got, s) }}
+	var out bytes.Buffer
+
+	f.Feed([]byte("a\x1b]7502;session=;id=9f2\x07b"), &out)
+	if out.String() != "ab" {
+		t.Fatalf("the clear leaked into the stream: %q", out.String())
+	}
+	if len(got) != 1 || got[0] != (Session{}) {
+		t.Fatalf("clear = %+v, want the zero session", got)
+	}
+
+	// The ST terminator clears the same way.
+	f.Feed([]byte("\x1b]7502;session=\x1b\\"), &out)
+	if len(got) != 2 || got[1] != (Session{}) {
+		t.Fatalf("ST clear = %+v, want the zero session", got)
+	}
+}
+
+// TestParseSessionOutcomes proves the three outcomes are distinct: a session,
+// a clear, and nothing.
+func TestParseSessionOutcomes(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    Session
+		outcome SessionOutcome
+	}{
+		{"session=" + base64.StdEncoding.EncodeToString([]byte("/tmp/s.jsonl")) + ";id=9f2", Session{File: "/tmp/s.jsonl", ID: "9f2"}, SessionSet},
+		{"session=", Session{}, SessionClear},
+		{"session=;id=9f2", Session{}, SessionClear},
+		{"session=   ", Session{}, SessionClear},
+		{"id=9f2", Session{}, SessionNone},
+		{"session=!!!not-base64!!!", Session{}, SessionNone},
+		{"state=working", Session{}, SessionNone},
+		{"", Session{}, SessionNone},
+	}
+	for _, tc := range cases {
+		got, outcome := ParseSession(tc.in)
+		if outcome != tc.outcome || got != tc.want {
+			t.Errorf("ParseSession(%q) = %+v %d, want %+v %d", tc.in, got, outcome, tc.want, tc.outcome)
+		}
+	}
+}
+
+// TestOSC7502Consumed proves a 7502 frame is filtered out whether or not it
+// decodes, and a neighbouring sequence is untouched.
+func TestOSC7502Consumed(t *testing.T) {
+	f := &Filter{}
+	var out bytes.Buffer
+	f.Feed([]byte("a"+wireSession("/tmp/s.jsonl", "s")+"b\x1b]0;title\x07"), &out)
+	if out.String() != "ab\x1b]0;title\x07" {
+		t.Fatalf("stream = %q", out.String())
+	}
+}

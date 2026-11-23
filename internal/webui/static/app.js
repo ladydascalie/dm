@@ -2,6 +2,9 @@
 // Everything arrives already shaped by the server, so this file only paints.
 
 const REFRESH_MS = 3000;
+// TEXT_POLL_MS is the cadence one pane is read at. The session read rides the
+// same cadence the pane text had before the views, and only one of them runs:
+// the view on screen decides which.
 const TEXT_POLL_MS = 1000;
 
 let fleet = null;
@@ -10,7 +13,8 @@ let fleet = null;
 // nobody is looking at.
 let tab = "panes";
 const dirty = { panes: true, box: true };
-// pane is the open pane view: its id, the text revision it has, and the poll.
+// pane is the open pane: its id, the view on screen, the session it read, and
+// the polls that view runs.
 let pane = null;
 // catalogue is the command rows, fetched once. The list lives in Go.
 let catalogue = null;
@@ -25,9 +29,20 @@ let armed = null;
 const target = { pane: "", window: "", workspace: "" };
 // timers holds the polls while the page is visible, and nothing at all while
 // it is hidden.
-const timers = { fleet: null, text: null };
+const timers = { fleet: null, text: null, session: null };
 // repaintTimer is the one shot a rotation arms, held so a hide can clear it.
 let repaintTimer = null;
+// openShells names the projects whose shell panes are unfolded, so a poll does
+// not fold a list the reader just opened.
+const openShells = new Set();
+// seen is when this page first saw each pane's status and message, keyed by
+// pane id. A row has no timestamp of its own, so this is the fallback clock a
+// needs-you card measures from.
+const seen = new Map();
+// needCards maps a pane id to the card's ago line, so a poll that changes no
+// card still moves its clock and keeps the strip's sideways scroll.
+const needCards = new Map();
+let needKey = "";
 
 const $ = (id) => document.getElementById(id);
 
@@ -129,17 +144,26 @@ async function loadFleet() {
 function paintFleet(f) {
   fleet = f;
   banner(f.error || "");
+  noteSeen(f);
   // Both views are stale now; only the one on screen is painted.
   dirty.panes = true;
   dirty.box = true;
   renderVisible();
+  renderNeeds(f);
   if (thumbsOn() && tab === "panes") renderThumbs(f);
   $("session").textContent = "dm " + f.session;
   renderSummary(f);
   applyReadOnly(!!f.readOnly);
   if (pane) {
     if (!f.panes.some((p) => p.id === pane.id)) closePane();
-    else renderPaneChrome();
+    else {
+      renderPaneChrome();
+      // A pane the fleet now calls an agent may have written its first session
+      // line since the last try, so the page asks again rather than staying on
+      // the screen for good.
+      const row = f.panes.find((p) => p.id === pane.id);
+      if (row && hasSession(row) && pane.session === "none") pollSession();
+    }
   }
 }
 
@@ -250,20 +274,199 @@ function boxSummary(f) {
   return n + " waiting";
 }
 
-// renderPanes lists the fleet, blocked and error first: the rows that want a
-// decision are the ones a phone should show without scrolling.
+// ACCENTS is how many accent slots the rail carries. A project's carried slot
+// names its hue, and the page paints the same six colours.
+const ACCENTS = 6;
+
+// NEED_STATES are the two states that want a decision now. A pane in either one
+// is pinned in the strip, so it is never below a fold.
+const NEED_STATES = ["blocked", "error"];
+
+// accentOf is the class that carries a project's hue. Slot zero is the first
+// accent, and a row that carries no slot lands there too.
+function accentOf(p) {
+  const slot = (p.projectAccent || 0) % ACCENTS;
+  return "a" + (slot < 0 ? slot + ACCENTS : slot);
+}
+
+// sortWithin is one project's row order: the states that want a decision first,
+// then the id, which is the rail's own tie break.
+function sortWithin(a, b) {
+  const d = (STATE_RANK[stateOf(a)] ?? 5) - (STATE_RANK[stateOf(b)] ?? 5);
+  return d !== 0 ? d : a.id.localeCompare(b.id);
+}
+
+// projectGroups folds the fleet into one group per project, in the rail's own
+// order: the first pane's place decides where a project sits.
+function projectGroups(panes) {
+  const groups = new Map();
+  for (const p of panes) {
+    const key = p.project || "";
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, name: p.project || "no project", accent: accentOf(p), panes: [] };
+      groups.set(key, g);
+    }
+    g.panes.push(p);
+  }
+  return [...groups.values()];
+}
+
+// renderPanes lists the fleet by project. Every blocked or error pane is pinned
+// in the strip as well, so the rows a phone must not miss are on the first
+// screen whichever project owns them.
 function renderPanes(f) {
   const box = $("panes");
   box.textContent = "";
-  const panes = f.panes.slice().sort((a, b) => {
-    const d = (STATE_RANK[stateOf(a)] ?? 5) - (STATE_RANK[stateOf(b)] ?? 5);
-    return d !== 0 ? d : a.id.localeCompare(b.id);
-  });
-  if (panes.length === 0) {
+  if (f.panes.length === 0) {
     box.append(el("div", "empty", "no panes"));
     return;
   }
-  for (const p of panes) box.append(paneRow(p));
+  for (const g of projectGroups(f.panes)) box.append(projectSection(g));
+}
+
+// hasSession is the fleet's answer to the only question the fold asks: does
+// this pane have a session to read. The field is the server's: hasSession, true
+// when the pane's snapshot carries a session file. The agent flag is a
+// different question, because a pane can report a session and no status.
+function hasSession(p) {
+  return !!p.hasSession;
+}
+
+// projectSection is one project: its accent mark, its name, the count of panes
+// and agents it holds, then its rows and its folded shells.
+function projectSection(g) {
+  const sec = el("section", "project");
+  const head = el("h2", "proj " + g.accent);
+  head.append(el("span", "mark"));
+  head.append(el("span", "pname", g.name));
+  head.append(el("span", "pcount", sectionCount(g.panes)));
+  sec.append(head);
+  const agents = g.panes.filter(hasSession).sort(sortWithin);
+  const shells = g.panes.filter((p) => !hasSession(p));
+  for (const p of agents) sec.append(paneRow(p));
+  if (shells.length > 0) {
+    sec.append(shellFold(g, shells.length));
+    if (openShells.has(g.key)) for (const p of shells.sort(sortWithin)) sec.append(paneRow(p));
+  }
+  return sec;
+}
+
+// sectionCount is a project's own summary: how many panes it holds and how many
+// of them carry a session, which is what makes a pane an agent to the phone.
+function sectionCount(panes) {
+  const n = panes.length;
+  const agents = panes.filter(hasSession).length;
+  return n + (n === 1 ? " pane" : " panes") + ", " + agents + (agents === 1 ? " agent" : " agents");
+}
+
+// shellFold is the line a project's shell panes fold to. It is one tap target
+// that opens their rows, so a folder is still reachable without a row each.
+function shellFold(g, count) {
+  const open = openShells.has(g.key);
+  const btn = el("button", "fold");
+  btn.type = "button";
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  btn.append(el("span", "caret", open ? "\u25be" : "\u25b8"));
+  btn.append(el("span", "", count + (count === 1 ? " shell pane" : " shell panes")));
+  btn.addEventListener("click", () => {
+    if (open) openShells.delete(g.key);
+    else openShells.add(g.key);
+    dirty.panes = true;
+    renderVisible();
+  });
+  return btn;
+}
+
+// renderNeeds paints the needs-you strip: one card per blocked or error pane,
+// with the project, the place, the agent's message and how long it has wanted an
+// answer. A strip with nothing to say is absent.
+function renderNeeds(f) {
+  const box = $("needs");
+  const need = f.panes.filter((p) => NEED_STATES.includes(stateOf(p)));
+  need.sort((a, b) => {
+    const d = NEED_STATES.indexOf(stateOf(a)) - NEED_STATES.indexOf(stateOf(b));
+    return d !== 0 ? d : wantSince(a, f) - wantSince(b, f);
+  });
+  // The cards are rebuilt only when one of them changes; a poll that changes
+  // none only moves their clocks, so the strip keeps its sideways scroll.
+  const key = need.map((p) => p.id + ":" + stateOf(p) + ":" + (p.message || "")).join("|");
+  if (key === needKey) {
+    for (const p of need) {
+      const c = needCards.get(p.id);
+      if (c) c.ago.textContent = agoText(wantSince(p, f));
+    }
+    return;
+  }
+  needKey = key;
+  needCards.clear();
+  box.textContent = "";
+  if (need.length === 0) {
+    box.classList.remove("show");
+    return;
+  }
+  for (const p of need) {
+    const ago = el("span", "ago", agoText(wantSince(p, f)));
+    const card = el("a", "card " + accentOf(p) + " " + stateOf(p));
+    card.href = paneHash(p.id);
+    const head = el("div", "chead");
+    head.append(el("span", "cname", p.project || "no project"));
+    const place = placeOf(p);
+    if (place) head.append(el("span", "cplace", place));
+    head.append(el("span", "cwant state " + stateOf(p), stateOf(p)));
+    head.append(ago);
+    card.append(head);
+    card.append(el("div", "cmsg", p.message || "no message"));
+    needCards.set(p.id, { ago });
+    box.append(card);
+  }
+  box.classList.add("show");
+}
+
+// placeOf is a pane's place in the rail's own words: the workspace, then the
+// window inside it.
+function placeOf(p) {
+  const ws = p.workspaceName || p.workspace || "";
+  const win = p.windowName || p.window || "";
+  if (ws && win) return ws + " > " + win;
+  return ws || win;
+}
+
+// wantSince is when a pane began to want an answer. A box entry the pane wrote
+// carries the daemon's clock, so it answers first; a pane that wrote none falls
+// back to when this page first saw the state.
+function wantSince(p, f) {
+  let at = 0;
+  for (const e of f.box || []) {
+    if (e.from !== p.id || NEED_STATES.indexOf(e.state) < 0) continue;
+    const t = Date.parse(e.at) || 0;
+    if (t > at) at = t;
+  }
+  if (at > 0) return at;
+  const was = seen.get(p.id);
+  return was ? was.at : Date.now();
+}
+
+// noteSeen stamps each pane's state and message, so a card can say how long the
+// pane has been that way for as long as this page watches it.
+function noteSeen(f) {
+  const now = Date.now();
+  for (const p of f.panes) {
+    const sig = (p.status || "") + "\u0000" + (p.message || "");
+    const was = seen.get(p.id);
+    if (!was || was.sig !== sig) seen.set(p.id, { sig, at: now });
+  }
+}
+
+// agoText is a duration a thumb can read.
+function agoText(ms) {
+  const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (secs < 45) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return Math.max(1, mins) + "m ago";
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return hours + "h ago";
+  return Math.round(hours / 24) + "d ago";
 }
 
 // paneRow is one pane: the name a person would use on the first line, its
@@ -375,7 +578,7 @@ async function runAction(body) {
   await applyReply(async () => {
     banner("");
     await loadFleet();
-    if (pane) pollText();
+    refreshPane();
   });
   return text ? JSON.parse(text) : {};
 }
@@ -727,6 +930,9 @@ function renderPaneChrome() {
   const at = paneContext();
   setStripName("strip-window", at.window, at.windowName);
   setStripName("strip-workspace", at.workspace, at.workspaceName);
+  // The fleet names the pane's state every three seconds, so the header stays
+  // honest on the two views that never read the pane's text.
+  if (own.status !== undefined) setPaneState(stateOf(own), own.message || "");
 }
 
 function setStripName(id, code, name) {
@@ -736,17 +942,86 @@ function setStripName(id, code, name) {
   if (name) n.append(document.createTextNode("  " + name));
 }
 
-// openPane streams one pane into a terminal. The address bar carries the pane
-// id, so a reload or a shared link lands on the same pane.
-async function openPane(id) {
+// --- the three views -----------------------------------------------------
+//
+// One tap apart, and the address bar carries the one on screen. The transcript
+// is the agent's own session reshaped as turns, the activity is the same steps
+// as one row each, newest first, and the screen is the text the pane printed.
+// A pane whose session cannot be read has the screen only.
+
+// VIEWS are the three view names the address bar carries.
+const VIEWS = ["transcript", "activity", "screen"];
+
+// viewOf keeps a view a link names, and falls back to the transcript, which is
+// what an agent pane opens on.
+function viewOf(name) {
+  return VIEWS.includes(name) ? name : "transcript";
+}
+
+// viewHash is the address of the open pane in one view.
+function viewHash(id, view) {
+  return paneHash(id) + "&view=" + view;
+}
+
+// activeScroll is the box the visible view scrolls in, which is where the
+// follow rule reads the reader's place.
+function activeScroll() {
+  if (!pane) return null;
+  if (pane.view === "screen") return $("text");
+  return pane.view === "activity" ? $("activity") : $("transcript");
+}
+
+// openPane opens one pane on the view the address bar names, or on the one its
+// kind decides: an agent pane on its transcript, a shell pane on its screen.
+async function openPane(id, view) {
   closePane(false);
-  pane = { id, rev: "", hold: false };
+  const row = ((fleet && fleet.panes) || []).find((p) => p.id === id) || {};
+  pane = {
+    id,
+    view: viewOf(view),
+    // session is what this page knows about the pane's session: checking until
+    // a reply settles it, ok, none when the pane has no session, or failed when
+    // the read was refused.
+    session: "checking",
+    // want is the view the link named, or empty for none: a link is a
+    // preference about a pane that has a session, not a claim that there is
+    // nothing to show. pick is the view the reader tapped, and a tap wins over
+    // the link for the rest of the pane's life, including after a read fails
+    // and the screen takes over for a moment.
+    want: view ? viewOf(view) : "",
+    pick: "",
+    why: "",
+    turns: [],
+    sessionRev: "",
+    textRev: "",
+    // open holds the steps the reader unfolded, keyed turn:step, so a reply
+    // that changes the session does not fold them again.
+    open: new Set(),
+    hold: false,
+    painted: false,
+  };
   $("pane").classList.add("open");
   $("send").style.display = fleet && fleet.readOnly ? "none" : "";
   setPaneState("", "");
-  markFollow();
   renderPaneChrome();
-  await pollText();
+  renderViewChrome();
+  markFollow();
+  // A pane with no session has nothing to read. The screen is then the whole
+  // view, and the probe would only cost a request.
+  if (!hasSession(row)) {
+    pane.session = "none";
+    pane.view = "screen";
+    renderViewChrome();
+    startTimers();
+    await pollText();
+    return;
+  }
+  for (const box of ["transcript", "activity"]) {
+    $(box).textContent = "";
+    $(box).append(el("div", "empty", "reading the session"));
+  }
+  startTimers();
+  await pollSession();
   startTimers();
 }
 
@@ -760,7 +1035,7 @@ async function pollText() {
   if (!at || document.hidden) return;
   let d;
   try {
-    const res = await fetchAPI("/api/text?pane=" + encodeURIComponent(at.id) + "&since=" + encodeURIComponent(at.rev));
+    const res = await fetchAPI("/api/text?pane=" + encodeURIComponent(at.id) + "&since=" + encodeURIComponent(at.textRev));
     if (!res.ok) {
       const refused = await res.text();
       applyReply(() => banner(refused));
@@ -774,30 +1049,187 @@ async function pollText() {
   applyReply(() => paintText(at, d));
 }
 
-// FOLLOW_GAP is how far from the bottom counts as reading back through the
-// text rather than following it.
+// pollSession reads the pane's own session file through the transcript
+// endpoint. The reply carries every turn of the window and the revision it was
+// read at, so a quiet session answers the same small payload and paints
+// nothing.
+async function pollSession() {
+  const at = pane;
+  if (!at || document.hidden) return;
+  let res;
+  try {
+    res = await fetchAPI("/api/session?pane=" + encodeURIComponent(at.id)
+      + "&since=" + encodeURIComponent(at.sessionRev));
+  } catch (e) {
+    applyReply(() => paintSession(at, null, "cannot read the session: " + e));
+    return;
+  }
+  if (res.status === 404) {
+    applyReply(() => paintSession(at, null, ""));
+    return;
+  }
+  if (!res.ok) {
+    const why = await refusalText(res);
+    applyReply(() => paintSession(at, null, why));
+    return;
+  }
+  let d;
+  try {
+    d = await res.json();
+  } catch (e) {
+    applyReply(() => paintSession(at, null, "the session reply is not JSON: " + e));
+    return;
+  }
+  applyReply(() => paintSession(at, d, ""));
+}
+
+// refusalText names a refusal in the daemon's own words when its body carries
+// one, so the one line under the switch reads like the server, not like a
+// status code.
+async function refusalText(res) {
+  const body = await res.text();
+  try {
+    const j = JSON.parse(body);
+    if (j && j.error) return j.error;
+  } catch (e) {
+    // Not JSON: the body is the message.
+  }
+  return body || "the session answered " + res.status;
+}
+
+// paintSession applies one session reply. A pane with no session, or one whose
+// session this page cannot read, keeps the screen and says why in one line: this
+// page never paints an empty transcript over a pane it cannot read.
+function paintSession(at, d, why) {
+  if (pane !== at) return;
+  if (why) {
+    at.session = "failed";
+    dropToScreen(why);
+    return;
+  }
+  if (!d) {
+    at.session = "none";
+    at.turns = [];
+    dropToScreen("");
+    return;
+  }
+  const first = at.session !== "ok";
+  at.session = "ok";
+  at.why = "";
+  // The view the reader asked for: a tap wins, then the view the link named,
+  // then the transcript. This is where a session that turned up after the pane
+  // opened, or came back after a read that failed, takes the reader to the view
+  // they meant. The switch is painted before the turns so the transcript has a
+  // height to scroll in.
+  if (first) {
+    const want = at.pick || at.want || "transcript";
+    if (want !== at.view) {
+      at.view = want;
+      renderViewChrome();
+      markFollow();
+    }
+  }
+  if (d.rev) at.sessionRev = d.rev;
+  if (d.changed || !at.painted) {
+    at.painted = true;
+    at.turns = d.turns || [];
+    paintTurns();
+  }
+  if (first) {
+    renderViewChrome();
+    startTimers();
+  }
+}
+
+// dropToScreen puts the pane on the screen view and says why in one line. A
+// pane with no session has nothing to say, so the line stays empty. A pane that
+// is already on the screen only takes the new line, so a retry that fails again
+// touches no view and starts no extra poll.
+function dropToScreen(why) {
+  if (!pane) return;
+  const was = pane.view;
+  pane.why = why || "";
+  if (was === "screen") {
+    renderViewChrome();
+    return;
+  }
+  pane.view = "screen";
+  renderViewChrome();
+  markFollow();
+  startTimers();
+  pollText();
+}
+
+// refreshPane polls the source the visible view reads.
+function refreshPane() {
+  if (!pane) return;
+  if (pane.view === "screen") pollText();
+  else pollSession();
+}
+
+// renderViewChrome paints the view switch, the one view on screen, and the line
+// that says why the screen is showing instead of a session.
+function renderViewChrome() {
+  if (!pane) return;
+  // A pane with no session offers no other view. A refused session keeps the
+  // switch, so the reader can ask again.
+  const switchable = pane.session === "ok" || pane.session === "failed";
+  $("views").classList.toggle("show", switchable);
+  for (const v of VIEWS) {
+    const a = $("view-" + v);
+    a.href = viewHash(pane.id, v);
+    a.setAttribute("aria-selected", v === pane.view ? "true" : "false");
+  }
+  const body = $("screen");
+  for (const v of VIEWS) body.classList.toggle("show-" + v, pane.view === v);
+  const note = $("pane-note");
+  note.textContent = pane.why || "";
+  note.classList.toggle("show", !!pane.why);
+}
+
+// setView shows one view of the open pane. A pane with no session has only the
+// screen, so a link that names another view lands there.
+function setView(view) {
+  if (!pane) return;
+  const want = pane.session === "none" ? "screen" : viewOf(view);
+  if (want === pane.view) return;
+  pane.pick = want;
+  pane.view = want;
+  renderViewChrome();
+  markFollow();
+  startTimers();
+  refreshPane();
+}
+
+// FOLLOW_GAP is how far from the live edge counts as reading back through the
+// view rather than following it.
 const FOLLOW_GAP = 48;
 
-// awayFromBottom reports whether the reader has scrolled up out of the follow.
-function awayFromBottom() {
-  const pre = $("text");
-  return pre.scrollHeight - pre.scrollTop - pre.clientHeight > FOLLOW_GAP;
+// awayFromEdge reports whether the reader has scrolled away from the edge new
+// work lands on: the bottom of the transcript and the screen, the top of the
+// activity, which puts the newest step first.
+function awayFromEdge() {
+  const box = activeScroll();
+  if (!box) return false;
+  if (pane.view === "activity") return box.scrollTop > FOLLOW_GAP;
+  return box.scrollHeight - box.scrollTop - box.clientHeight > FOLLOW_GAP;
 }
 
 // markFollow settles the follow state and the latest control from the reader's
-// place in the text. One rule owns both, so a scroll, a poll and a tap on the
+// place in the view. One rule owns both, so a scroll, a poll and a tap on the
 // control cannot disagree.
 function markFollow() {
-  const away = !!pane && awayFromBottom();
+  const away = !!pane && awayFromEdge();
   if (pane) pane.hold = away;
   $("latest").classList.toggle("show", away);
 }
 
-// jumpLatest returns to the bottom and follows it again. The text keeps the
-// next tap: the control is only there while the reader is away from it.
+// jumpLatest returns to the edge that holds the newest work and follows it
+// again. The view keeps the next tap: the control is only there while the
+// reader is away from it.
 function jumpLatest() {
-  const pre = $("text");
-  pre.scrollTop = pre.scrollHeight;
+  const box = activeScroll() || $("text");
+  box.scrollTop = pane && pane.view === "activity" ? 0 : box.scrollHeight;
   if (pane) pane.hold = false;
   $("latest").classList.remove("show");
 }
@@ -818,26 +1250,323 @@ function setPaneState(state, message) {
 // reply that lands after another pane was opened is not painted into it.
 function paintText(at, d) {
   if (pane !== at) return;
-  at.rev = d.rev;
+  at.textRev = d.rev;
   setPaneState(d.state, d.message);
   if (!d.changed) return;
   const pre = $("text");
   pre.textContent = (d.lines || []).join("\n");
   // Follow the bottom, which is where a running agent's output is, unless the
   // reader scrolled up to read something.
-  if (!at.hold) pre.scrollTop = pre.scrollHeight;
+  if (at.view === "screen" && !at.hold) pre.scrollTop = pre.scrollHeight;
   markFollow();
 }
 
-// closePane stops the poll and, when asked, clears the address bar.
+// --- the session views ---------------------------------------------------
+
+// paintTurns rebuilds both session views from the turns on hand, so switching
+// between them costs no request. A reader who scrolled up keeps their place; a
+// reader at the bottom keeps following it.
+function paintTurns() {
+  if (!pane) return;
+  const box = activeScroll();
+  const keep = box ? box.scrollTop : 0;
+  const follow = !pane.hold;
+  paintTranscript(pane);
+  paintActivity(pane);
+  keepScroll(pane, keep, follow);
+  markFollow();
+}
+
+// keepScroll restores the reader's place after a rebuild, and follows the edge
+// when they were already there. The transcript follows its bottom, the activity
+// its top. The follow gets a second pass on the next frame: a box that lands in
+// this paint can measure taller once the browser has settled it, and a single
+// pass then stops short of the newest line.
+function keepScroll(at, keep, follow) {
+  const box = activeScroll();
+  if (!box) return;
+  const top = pane && pane.view === "activity";
+  if (!follow) {
+    box.scrollTop = keep;
+    return;
+  }
+  box.scrollTop = top ? 0 : box.scrollHeight;
+  requestAnimationFrame(() => {
+    if (pane !== at || document.hidden) return;
+    const again = activeScroll();
+    if (!again) return;
+    again.scrollTop = top ? 0 : again.scrollHeight;
+    markFollow();
+  });
+}
+
+// paintTranscript is one block per turn, oldest first: who and when, the ask in
+// a quoted block, the steps in order, the unfinished step as a live row, and the
+// numbers that close the turn.
+function paintTranscript(at) {
+  const box = $("transcript");
+  box.textContent = "";
+  if (!at.turns.length) {
+    box.append(el("div", "empty", "no turns yet"));
+    return;
+  }
+  const body = el("div", "body");
+  const total = at.turns.length;
+  at.turns.forEach((t, i) => body.append(turnBlock(t, i, total, at)));
+  box.append(body);
+}
+
+// finishedSteps are a turn's finished steps. The payload copies the unfinished
+// step into live and leaves it at the end of steps as well, so the page drops
+// that copy and paints the live row once. A live step this page cannot find at
+// the end of the list keeps every step: a duplicate is better than a lost one.
+function finishedSteps(t) {
+  const steps = t.steps || [];
+  const live = t.live;
+  if (!live || steps.length === 0) return steps;
+  const last = steps[steps.length - 1];
+  const same = last.kind === live.kind && last.tool === live.tool && last.summary === live.summary;
+  return same ? steps.slice(0, steps.length - 1) : steps;
+}
+
+// turnBlock is one turn. The number counts within the window this page holds,
+// which is the last three turns of the session.
+function turnBlock(t, i, total, at) {
+  const wrap = el("div", "turn");
+  const hd = el("div", "turn-hd");
+  hd.append(el("b", "", "you"));
+  hd.append(el("span", "", clockOf(t.at)));
+  hd.append(el("span", "tnum", "turn " + (i + 1) + " of " + total));
+  wrap.append(hd);
+  if (t.ask) wrap.append(el("div", "you", t.ask));
+  finishedSteps(t).forEach((s, j) => wrap.append(stepBlock(s, i + ":" + j, at)));
+  if (t.live) wrap.append(liveRow(t.live));
+  wrap.append(summaryRow(t.summary));
+  return wrap;
+}
+
+// stepBlock is one step of a turn: prose as itself, a thought as one collapsed
+// row with its duration, and a tool as its name, the argument that matters, its
+// duration and its outcome.
+function stepBlock(s, key, at) {
+  if (s.kind === "text") return el("p", "say", s.text || "");
+  if (s.kind === "thinking") {
+    const row = el("div", "thinkrow");
+    row.append(el("span", "chev", "\u25b8"));
+    row.append(el("b", "", "thought"));
+    row.append(el("span", "", durText(s.ms)));
+    return row;
+  }
+  return toolStep(s, key, at);
+}
+
+// toolStep is one tool call. A step that carries output is one tap target that
+// opens it, so it keeps the 44 points a thumb needs; a step with nothing to show
+// is a line, not a control.
+function toolStep(s, key, at) {
+  const bad = s.ok === false;
+  const outs = !!s.output;
+  const open = outs && at.open.has(key);
+  const step = outs ? el("button", "step openable") : el("div", "step");
+  if (outs) step.type = "button";
+  step.classList.toggle("bad", bad);
+  step.classList.toggle("open", open);
+  step.append(el("span", "ic", iconOf(s)));
+  const t = el("span", "t");
+  t.append(el("b", "", s.tool || "tool"));
+  if (s.summary) t.append(document.createTextNode(" " + s.summary));
+  t.title = (s.tool || "tool") + " " + (s.summary || "");
+  step.append(t);
+  step.append(el("span", "dur", durText(s.ms) + (bad && s.exit !== undefined ? " \u00b7 exit " + s.exit : "")));
+  if (outs) {
+    const out = el("pre", "out", s.output);
+    if (s.more) out.append(el("span", "more", "\n" + s.more + (s.more === 1 ? " more line" : " more lines")));
+    step.append(out);
+    step.addEventListener("click", () => {
+      if (at.open.has(key)) at.open.delete(key);
+      else at.open.add(key);
+      step.classList.toggle("open");
+    });
+  }
+  return step;
+}
+
+// liveRow is the step the agent is in the middle of. The session carries no
+// start time for it, so this page says it is running and invents no clock.
+function liveRow(live) {
+  const row = el("div", "live");
+  row.append(el("span", "spin"));
+  const t = el("span", "");
+  t.append(el("b", "", live.tool || "step"));
+  if (live.summary) t.append(document.createTextNode(" " + live.summary));
+  row.append(t);
+  row.append(el("span", "when", "running"));
+  return row;
+}
+
+// summaryRow closes a turn with what it did and what it cost.
+function summaryRow(s) {
+  const row = el("div", "turnft");
+  if (!s) return row;
+  const calls = el("span");
+  const n = s.calls || 0;
+  calls.append(el("b", "", n + (n === 1 ? " call" : " calls")));
+  calls.append(document.createTextNode(" "));
+  if (s.errors) calls.append(el("span", "bad", s.errors + (s.errors === 1 ? " error" : " errors")));
+  else calls.append(document.createTextNode("0 errors"));
+  row.append(calls);
+  if (s.toolMs) {
+    const sp = el("span");
+    sp.append(el("b", "", durText(s.toolMs)));
+    sp.append(document.createTextNode(" tools"));
+    row.append(sp);
+  }
+  if (s.cost) {
+    const sp = el("span");
+    sp.append(el("b", "", costText(s.cost)));
+    row.append(sp);
+  }
+  if (s.model) row.append(el("span", "", s.model));
+  return row;
+}
+
+// paintActivity flattens the same steps to one row each, newest first, with a
+// divider where a new turn starts. Every row carries the age of the turn it
+// belongs to, because the session times a turn, not a step.
+function paintActivity(at) {
+  const box = $("activity");
+  box.textContent = "";
+  if (!at.turns.length) {
+    box.append(el("div", "empty", "no steps yet"));
+    return;
+  }
+  for (let i = at.turns.length - 1; i >= 0; i--) {
+    const t = at.turns[i];
+    if (i !== at.turns.length - 1) {
+      box.append(el("div", "actsplit",
+        "turn " + (i + 1) + " \u00b7 " + clockOf(t.at) + " \u00b7 " + agoOf(t.at)));
+    }
+    if (t.live) box.append(actRow(t.live, t.at, true));
+    for (const s of finishedSteps(t).slice().reverse()) box.append(actRow(s, t.at, false));
+    box.append(askRow(t));
+  }
+}
+
+// actRow is one step as an activity row: its mark, the argument that matters,
+// its duration or outcome, then its age and the first line it said.
+function actRow(s, at, live) {
+  const row = el("div", "act");
+  const ic = el("span", "ic");
+  if (live) ic.append(el("span", "spin"));
+  else ic.textContent = iconOf(s);
+  row.append(ic);
+  if (s.kind === "text") {
+    row.append(el("span", "t", "said"));
+    row.append(el("span", "dur", ""));
+    row.append(el("span", "sub", agoOf(at) + (s.text ? " \u00b7 " + head(s.text, 80) : "")));
+    return row;
+  }
+  if (s.kind === "thinking") {
+    row.append(el("span", "t", "thought"));
+    row.append(el("span", "dur", durText(s.ms)));
+    row.append(el("span", "sub", agoOf(at)));
+    return row;
+  }
+  const bad = s.ok === false;
+  row.classList.toggle("fail", bad);
+  row.classList.toggle("now", live);
+  const t = el("span", "t");
+  t.append(el("b", "", s.tool || "tool"));
+  if (s.summary) t.append(document.createTextNode(" " + s.summary));
+  t.title = s.summary || "";
+  row.append(t);
+  row.append(el("span", "dur", live
+    ? "running"
+    : durText(s.ms) + (bad && s.exit !== undefined ? " \u00b7 exit " + s.exit : "")));
+  const sub = [live ? "running now" : agoOf(at)];
+  const said = head(s.output || "", 80);
+  if (said && !live) sub.push(said);
+  row.append(el("span", "sub", sub.join(" \u00b7 ")));
+  return row;
+}
+
+// askRow is the turn's ask, the oldest event of its block.
+function askRow(t) {
+  const row = el("div", "act");
+  row.append(el("span", "ic", "\u2709"));
+  row.append(el("span", "t", "you asked"));
+  row.append(el("span", "dur", agoOf(t.at)));
+  if (t.ask) row.append(el("span", "sub", head(t.ask, 110)));
+  return row;
+}
+
+// TOOL_ICONS is the mark a tool wears. A tool this page does not know keeps a
+// plain arrow rather than a wrong glyph.
+const TOOL_ICONS = {
+  bash: "$",
+  read: "\u25c7",
+  write: "\u270e",
+  edit: "\u270e",
+  codemode: "\u2630",
+  ask_user_question: "?",
+};
+
+function iconOf(s) {
+  if (s.kind === "text") return "\u00b6";
+  if (s.kind === "thinking") return "\u2726";
+  return TOOL_ICONS[s.tool] || "\u203a";
+}
+
+// head is the first line of a long text, cut to n characters, for a row that
+// has no room for the whole of it.
+function head(text, n) {
+  const line = ((text || "").split("\n").find((l) => l.trim() !== "") || "").trim();
+  return line.length > n ? line.slice(0, n - 1) + "\u2026" : line;
+}
+
+// clockOf is a turn's wall clock time in the phone's own zone. A time this page
+// cannot read prints nothing rather than a wrong hour.
+function clockOf(iso) {
+  const t = Date.parse(iso || "");
+  if (!t) return "";
+  return new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+// agoOf is the same instant as a distance from now.
+function agoOf(iso) {
+  const t = Date.parse(iso || "");
+  return t ? agoText(t) : "";
+}
+
+// durText is a step's own duration: milliseconds under ten, seconds above it.
+function durText(ms) {
+  if (!ms) return "";
+  if (ms < 10) return Math.round(ms) + "ms";
+  return (ms / 1000).toFixed(1) + "s";
+}
+
+// costText is the money a turn spent, in the dollars the session reports. A
+// cost below a cent keeps enough places to prove it is not zero: rounding
+// 0.00033 to three places printed $0.000, which reads as free. The ordinary
+// case stays short, and the padding zeros are trimmed off it.
+function costText(n) {
+  if (!n) return "";
+  if (n >= 0.1) return "$" + n.toFixed(2);
+  if (n < 0.0001) return "<$0.0001";
+  const places = n >= 0.01 ? 3 : n >= 0.001 ? 4 : 5;
+  return "$" + n.toFixed(places).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+// closePane stops the polls and, when asked, clears the address bar.
 function closePane(updateHash = true) {
   if (!pane) return;
   pane = null;
   disarm();
-  $("text").textContent = "";
+  for (const box of ["text", "transcript", "activity"]) $(box).textContent = "";
+  $("views").classList.remove("show");
+  $("pane-note").classList.remove("show");
   markFollow();
   $("pane").classList.remove("open");
-  stopTimers();
   startTimers();
   // The pane closes back onto the tab it was opened from.
   if (updateHash) {
@@ -1154,23 +1883,37 @@ function setThumbs(on) {
 
 // --- the clock -----------------------------------------------------------
 
-// startTimers arms the polls. A hidden page arms none, so a phone in a pocket
-// makes no request and runs no timer.
+// startTimers arms the polls the visible view needs, and only those: the screen
+// reads the pane's text, the two session views read its session. A hidden page
+// arms none, so a phone in a pocket makes no request and runs no timer.
 function startTimers() {
+  stopTimers();
   if (document.hidden) return;
-  if (!timers.fleet) timers.fleet = setInterval(loadFleet, REFRESH_MS);
-  if (pane && !timers.text) timers.text = setInterval(pollText, TEXT_POLL_MS);
+  timers.fleet = setInterval(loadFleet, REFRESH_MS);
+  if (!pane) return;
+  if (pane.view !== "screen") {
+    // The two session views read the session. A pane with no session has
+    // nothing to ask for, whatever view it is showing.
+    if (pane.session !== "none") timers.session = setInterval(pollSession, TEXT_POLL_MS);
+    return;
+  }
+  timers.text = setInterval(pollText, TEXT_POLL_MS);
+  // A session that failed to read is a state to retry, not a verdict: the pane
+  // keeps asking while it is open, so a file a live writer is in the middle of
+  // lands on the transcript again without the reader tapping anything.
+  if (pane.session === "failed") timers.session = setInterval(pollSession, TEXT_POLL_MS);
 }
 
 function stopTimers() {
-  if (timers.fleet) clearInterval(timers.fleet);
-  if (timers.text) clearInterval(timers.text);
-  timers.fleet = null;
-  timers.text = null;
+  for (const k of Object.keys(timers)) {
+    if (timers[k]) clearInterval(timers[k]);
+    timers[k] = null;
+  }
 }
 
-// route shows the tab the address bar names and opens the pane it names. The
-// hash is the whole view: #panes, #box, and #panes&pane=w1p1 for a pane.
+// route shows the tab and the view the address bar names, and opens the pane it
+// names. The hash is the whole view: #panes, #box, #panes&pane=w1p1, and
+// #panes&pane=w1p1&view=activity for one of a pane's three views.
 function route() {
   // A link from before the tabs still names a pane alone, so it opens that pane
   // on the panes tab.
@@ -1179,15 +1922,22 @@ function route() {
   setTab(parts[0]);
   const m = /^pane=(.+)$/.exec(parts[1] || "");
   const id = m ? decodeURIComponent(m[1]) : "";
-  if (id && (!pane || pane.id !== id)) openPane(id);
+  const vm = /^view=(.+)$/.exec(parts[2] || "");
+  const view = vm ? decodeURIComponent(vm[1]) : "";
+  if (id && (!pane || pane.id !== id)) openPane(id, view);
+  else if (id && view) setView(view);
   else if (!id && pane) closePane(false);
 }
 
 $("pane-close").addEventListener("click", () => closePane());
-$("text").addEventListener("scroll", () => {
-  if (!pane) return;
-  markFollow();
-});
+// Every view scrolls on its own, and the follow rule reads whichever is on
+// screen.
+for (const box of ["text", "transcript", "activity"]) {
+  $(box).addEventListener("scroll", () => {
+    if (!pane || activeScroll() !== $(box)) return;
+    markFollow();
+  });
+}
 $("latest").addEventListener("click", jumpLatest);
 $("send-plain").addEventListener("click", () => sendText(false));
 $("send-enter").addEventListener("click", () => sendText(true));
@@ -1243,7 +1993,7 @@ document.addEventListener("visibilitychange", () => {
     return;
   }
   loadFleet();
-  if (pane) pollText();
+  refreshPane();
   startTimers();
 });
 

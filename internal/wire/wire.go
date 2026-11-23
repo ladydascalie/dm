@@ -173,6 +173,12 @@ type AllPane struct {
 	// is zero when the server has seen no change, so a rail can tell a fresh
 	// pane from a long-idle one.
 	StatusChangedAt int64 `json:"statusChangedAt,omitempty"`
+	// SessionFile is the file the pane's agent writes its structured session
+	// to, as the agent reported on OSC 7502. SessionID is the id that file
+	// holds. Both belong to the running pane: they are not persisted, so a
+	// restart starts a new session.
+	SessionFile string `json:"sessionFile,omitempty"`
+	SessionID   string `json:"sessionID,omitempty"`
 	// Cwd is the pane's working directory. Root is the repository's toplevel
 	// for that directory, empty outside git.
 	Cwd  string `json:"cwd,omitempty"`

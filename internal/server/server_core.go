@@ -33,15 +33,22 @@ type paneConn struct {
 	id string
 	c  net.Conn
 	mu sync.Mutex
-	// stm guards st. The pane reader goroutine writes it with no other lock
-	// held, so every read goes through status and every write through
-	// setStatus; a torn string read would hand a reply a mismatched header.
-	stm   sync.Mutex
-	st    wire.Status
-	title string
-	alt   bool
-	mouse bool
-	paste bool
+	// stm guards st and the session pair. The pane reader goroutine writes
+	// them with no other lock held, so every read goes through status and
+	// session and every write through setStatus and setSession; a torn string
+	// read would hand a reply a mismatched header.
+	stm sync.Mutex
+	st  wire.Status
+	// sessionFile and sessionID are the OSC 7502 report: the file the pane's
+	// agent writes its structured session to, and the session id. They are
+	// guarded by stm with st and never persisted: the session belongs to the
+	// running pane, so its exit drops it.
+	sessionFile string
+	sessionID   string
+	title       string
+	alt         bool
+	mouse       bool
+	paste       bool
 
 	// sendTimeout bounds one control-socket write; zero means the package
 	// default. A test shortens it to prove a stalled pane fails fast.
@@ -147,6 +154,20 @@ func (p *paneConn) status() wire.Status {
 func (p *paneConn) setStatus(st wire.Status) {
 	p.stm.Lock()
 	p.st = st
+	p.stm.Unlock()
+}
+
+// session returns the pane's last reported session, empty when none reported.
+func (p *paneConn) session() (file, id string) {
+	p.stm.Lock()
+	defer p.stm.Unlock()
+	return p.sessionFile, p.sessionID
+}
+
+// setSession records the pane's last reported session.
+func (p *paneConn) setSession(file, id string) {
+	p.stm.Lock()
+	p.sessionFile, p.sessionID = file, id
 	p.stm.Unlock()
 }
 
@@ -629,6 +650,7 @@ func Run(args []string) error {
 			s.mu.Lock()
 			if pc := s.panes[id]; pc != nil {
 				pc.setStatus(rp.st)
+				pc.setSession(rp.sessionFile, rp.sessionID)
 				pc.title, pc.alt, pc.mouse = rp.title, rp.alt, rp.mouse
 			}
 			s.mu.Unlock()
@@ -1052,6 +1074,16 @@ func (s *server) watchConn(id string, pc *paneConn) (exit bool) {
 					s.notifyPaneState(id, to, message)
 				}
 			}
+		case "session":
+			// An empty pair is a clear: the agent that reported the session
+			// is gone, so the pane keeps none and the next snapshot says so.
+			var si struct {
+				SessionFile string `json:"sessionFile"`
+				SessionID   string `json:"sessionID"`
+			}
+			_ = json.Unmarshal(m.Res, &si)
+			pc.setSession(si.SessionFile, si.SessionID)
+			s.pushSnapshot()
 		case "cwd":
 			s.setPaneCwd(id, m.Cwd)
 		case "title":
@@ -1160,8 +1192,10 @@ func (s *server) redialPane(id string, old *paneConn) (*paneConn, error) {
 	}
 	// The count commits here, for the owner alone.
 	s.paneWatchEntryLocked(id).failed = failed
+	sessionFile, sessionID := old.session()
 	nc := &paneConn{
 		id: id, c: c, st: old.status(), title: old.title,
+		sessionFile: sessionFile, sessionID: sessionID,
 		alt: old.alt, mouse: old.mouse, paste: old.paste,
 		sendTimeout: paneSendTimeout, installedAt: time.Now(),
 	}

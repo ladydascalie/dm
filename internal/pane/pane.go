@@ -69,8 +69,13 @@ type paneProc struct {
 	vt   *vt.Term
 	ring *scrollRing
 	st   wire.Status
-	subs map[*subConn]bool
-	dead bool
+	// sessionFile and sessionID are the OSC 7502 report: the file the pane's
+	// agent writes its structured session to, and the session id. They belong
+	// to the running pane and are never persisted, so a restart starts a new
+	// one. Guarded by mu.
+	sessionFile, sessionID string
+	subs                   map[*subConn]bool
+	dead                   bool
 	// flushTimer places the parser's pending cluster once the pane's output
 	// stops, and flushGen makes a timer that a later read superseded a no-op.
 	// Both are guarded by mu.
@@ -968,12 +973,13 @@ func (p *paneProc) newFilter() *osc.Filter {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return &osc.Filter{
-		Status: p.setStatus,
-		Query:  p.replyQuery,
-		Reply:  p.replyTerminal,
-		Cursor: p.cursorPos,
-		FG:     p.fg,
-		BG:     p.bg,
+		Status:  p.setStatus,
+		Session: p.setSession,
+		Query:   p.replyQuery,
+		Reply:   p.replyTerminal,
+		Cursor:  p.cursorPos,
+		FG:      p.fg,
+		BG:      p.bg,
 	}
 }
 
@@ -1324,6 +1330,33 @@ func (p *paneProc) setStatus(st wire.Status) {
 	p.storeStatusLocked(p.scrubbedStatusLocked(st))
 }
 
+// setSession records and publishes the session a program named on OSC 7502.
+// The frame is metadata, not output: the filter consumes it, so nothing here
+// is scrubbed or reaches the stream. The pane keeps the last value so a reader
+// that attaches after the report still sees it through the replay reply. A
+// clear arrives as the zero Session: the pair goes and an empty frame tells
+// every reader, so a pane that fell back to a shell stops showing a
+// transcript.
+func (p *paneProc) setSession(s osc.Session) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.storeSessionLocked(s)
+}
+
+// storeSessionLocked records a session and publishes it when it changed. A
+// clear stores the zero pair and publishes an empty frame; a clear on a pane
+// that already holds none changes nothing and wakes nobody. The caller holds
+// p.mu.
+func (p *paneProc) storeSessionLocked(s osc.Session) {
+	if p.sessionFile == s.File && p.sessionID == s.ID {
+		return
+	}
+	p.sessionFile, p.sessionID = s.File, s.ID
+	p.broadcastLocked(wire.Msg{Type: "session", Res: jsonRaw(map[string]any{
+		"sessionFile": s.File, "sessionID": s.ID,
+	})})
+}
+
 // setSecrets installs a value list and re-applies it to the stored status. It
 // is the one writer's other half: a status stored before the set was scrubbed
 // with an empty list, and the text is what the reads draw from, so the new list
@@ -1527,11 +1560,15 @@ func (p *paneProc) serve(c net.Conn) {
 			st := p.st
 			dead := p.dead
 			title := p.vt.Title()
+			sessionFile, sessionID := p.sessionFile, p.sessionID
 			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
 			_ = sc.send(wire.Msg{
 				Type: "replay", Data: data, St: &st,
-				Res: jsonRaw(map[string]any{"title": title, "dead": dead, "alt": alt, "mouse": mouse, "paste": paste}),
+				Res: jsonRaw(map[string]any{
+					"title": title, "dead": dead, "alt": alt, "mouse": mouse, "paste": paste,
+					"sessionFile": sessionFile, "sessionID": sessionID,
+				}),
 			})
 		case "status":
 			p.mu.Lock()
