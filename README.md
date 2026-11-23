@@ -211,15 +211,19 @@ The page has five parts:
   naming its target
 - the picture grid: the active window's panes painted as blocks in the desk's
   arrangement, one stream for every tile; a pane daemon that cannot answer
-  `screen-sub` paints `no picture` instead of a blank tile
+  `screen-sub` paints `no picture` instead of a blank tile. A tile is a link
+  only when every tile is at least 44 points each way; a grid too dense for that
+  is a picture, and the pane list below it stays the way in
 
-A hidden page makes no request and arms no timer: the polls stop and the
-picture stream closes until the tab comes back. A command that fails paints the
-daemon's message in the banner and changes nothing else.
+A hidden page makes no request and arms no timer: the polls stop, the picture
+stream closes, and a rotation's repaint is cleared, until the tab comes back. A
+command that fails paints the daemon's message in the banner and changes nothing
+else.
 
 `--read-only` refuses every write: pane input, the box compose and every action.
-The page hides the controls it cannot use. The fleet, the pane text and the
-pictures stay.
+The page hides those commands: the action sheet, the pane action row, the send
+row and the compose. Everything that only reads stays: the fleet, the box, the
+pane text with its window strip, and the picture grid.
 
 ## Layouts
 

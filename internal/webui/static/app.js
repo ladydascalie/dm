@@ -21,6 +21,8 @@ const target = { pane: "", window: "", workspace: "" };
 // timers holds the polls while the page is visible, and nothing at all while
 // it is hidden.
 const timers = { fleet: null, text: null };
+// repaintTimer is the one shot a rotation arms, held so a hide can clear it.
+let repaintTimer = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -108,21 +110,17 @@ async function loadFleet() {
   }
 }
 
-// applyReadOnly hides every control the server would refuse, so the page never
-// offers a tap that answers 403. The picture toggle goes too: read only is the
-// desk's decision to show a plain page, and a control with nothing behind it
-// reads worse than its absence.
-const writeControls = ["sheet-open", "thumbs-toggle", "compose", "send", "pane-actions"];
-const placeControls = ["win-prev", "win-next", "ws-prev", "ws-next"];
+// applyReadOnly hides the commands that write, so the page never offers a tap
+// that answers 403. Views stay: the strip's arrows, the picture toggle and the
+// grid only read, and a read only page that hid them would hide the session
+// itself.
+const writeControls = ["sheet-open", "compose", "send", "pane-actions"];
 
 function applyReadOnly(ro) {
-  for (const id of writeControls.concat(placeControls)) {
+  for (const id of writeControls) {
     $(id).style.display = ro ? "none" : "";
   }
-  if (ro) {
-    dismissSheet();
-    setThumbs(false);
-  }
+  if (ro) dismissSheet();
 }
 
 // renderCounts is the header line: how many agents sit in each state.
@@ -454,19 +452,15 @@ async function sheetSend(btn, cmd, extra) {
 // paneActions are the pane's own commands, under its header. Each acts on the
 // open pane, so the phone never has to open the sheet for them.
 //
-// zoom-pane carries no target on the wire: the server toggles the active
-// window's focus (server_rpc.go:319), so focusFirst sends focus for the open
-// pane before the zoom. Without it, a zoom tapped on the pane on screen would
-// zoom another one.
-//
-// next-pane is not here. It also acts on the active window's focus
-// (server_rpc.go:425), so the phone cannot make it advance the pane it is
-// showing without moving the desk and leaving the reader behind. The fleet list
-// opens any pane in one tap, and the strip walks windows and workspaces.
+// zoom-pane and next-pane carry no target on the wire: the server acts on the
+// active window's focus (server_rpc.go:319, :425). focusFirst sends focus for the
+// open pane first, so zoom zooms the pane on screen and next pane steps from the
+// pane on screen instead of from whatever the desk happened to focus.
 const paneActions = [
   { label: "split right", body: () => ({ id: "split", target: pane.id, site: "right" }) },
   { label: "split down", body: () => ({ id: "split", target: pane.id, site: "down" }) },
   { label: "zoom", body: () => ({ id: "zoom-pane" }), focusFirst: true },
+  { label: "next pane", body: () => ({ id: "next-pane" }), focusFirst: true },
   { label: "rename", body: () => ({ id: "set-pane-name", target: pane.id }) },
   { label: "close", body: () => ({ id: "close-pane", target: pane.id }), ask: () => "close " + pane.id + "?" },
 ];
@@ -749,6 +743,11 @@ function thumbsOn() {
   return thumbState.on;
 }
 
+// MIN_TILE is the smallest tile a thumb can hit. A grid whose tiles fall below
+// it is a picture, not a set of links: it keeps the desk's arrangement, the
+// tiles stop being links, and the pane list below it stays the way in.
+const MIN_TILE = 44;
+
 // renderThumbs builds the grid from the fleet's active window. Tiles keep the
 // arrangement the desk shows, normalised to the box the panes cover, so the
 // rail and the tab bar do not eat the phone's screen. One stream carries every
@@ -764,6 +763,7 @@ function renderThumbs(f) {
     // Same panes, new boxes: the desk or a claim moved them, so move the tiles
     // instead of rebuilding the grid and its stream.
     positionTiles(panes);
+    applyTileRule();
     return;
   }
   // Close the old stream before the key moves, so the key always names the set
@@ -777,17 +777,18 @@ function renderThumbs(f) {
   }
 
   for (const p of panes) {
+    // No href yet: applyTileRule links a tile only once it measures thumb sized.
     const tile = el("a", "tile");
-    tile.href = "#pane=" + encodeURIComponent(p.id);
     const frame = el("div", "frame");
     const label = el("div", "label", (p.name || p.app || p.id) + "  " + (p.status || "note"));
     const canvas = el("canvas");
     frame.append(label, canvas);
     tile.append(frame);
     box.append(tile);
-    thumbState.tiles.set(p.id, { tile, canvas, snap: null });
+    thumbState.tiles.set(p.id, { pane: p.id, tile, canvas, snap: null });
   }
   positionTiles(panes);
+  applyTileRule();
 
   const es = new EventSource(api("/api/thumbs?panes=" + encodeURIComponent(wanted)));
   thumbState.es = es;
@@ -825,6 +826,23 @@ function closePictures() {
   if (thumbState.es) thumbState.es.close();
   thumbState.es = null;
   thumbState.tiles.clear();
+}
+
+// applyTileRule makes a tile a link only when it is a thumb sized target. A
+// dense grid keeps its picture and gives up its links, so a stray tap cannot
+// open a pane nobody meant to open, and the pane list below the grid stays
+// visible as the way in.
+function applyTileRule() {
+  let live = thumbState.tiles.size > 0;
+  for (const t of thumbState.tiles.values()) {
+    const box = t.tile.getBoundingClientRect();
+    if (box.width < MIN_TILE || box.height < MIN_TILE) live = false;
+  }
+  document.body.classList.toggle("grid-live", live);
+  for (const t of thumbState.tiles.values()) {
+    if (live) t.tile.href = "#pane=" + encodeURIComponent(t.pane);
+    else t.tile.removeAttribute("href");
+  }
 }
 
 // positionTiles places the tiles by their boxes, normalised to the box the
@@ -865,6 +883,7 @@ function setThumbs(on) {
   $("thumbs-toggle").classList.toggle("on", on);
   if (!on) {
     closePictures();
+    document.body.classList.remove("grid-live");
     $("thumbs").textContent = "";
     delete $("thumbs").dataset.panes;
     return;
@@ -917,10 +936,14 @@ $("ws-next").addEventListener("click", () => stepPlace("workspace", 1));
 $("sheet-open").addEventListener("click", openSheet);
 $("thumbs-toggle").addEventListener("click", () => setThumbs(!thumbsOn()));
 window.addEventListener("orientationchange", () => {
-  // Text re-wraps on its own; only the pictures need repainting. A hidden page
-  // arms nothing: no timer, no stream, no request.
+  // Text re-wraps on its own; only the pictures need repainting. The handle is
+  // held so a hide inside the window clears it: a hidden page runs no timer.
   if (document.hidden || !thumbsOn()) return;
-  setTimeout(repaintThumbs, 250);
+  clearTimeout(repaintTimer);
+  repaintTimer = setTimeout(() => {
+    repaintTimer = null;
+    repaintThumbs();
+  }, 250);
 });
 window.addEventListener("resize", () => {
   // A resize while hidden must not reopen the stream the hide closed.
@@ -940,6 +963,12 @@ window.addEventListener("popstate", () => {
 });
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
+    // A rotation a moment ago may have armed the repaint; it goes with the
+    // rest, so nothing runs while the page is in a pocket.
+    if (repaintTimer) {
+      clearTimeout(repaintTimer);
+      repaintTimer = null;
+    }
     stopTimers();
     closePictures();
     return;

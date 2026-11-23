@@ -49,7 +49,9 @@
 
   /* The picture grid: the active window's panes, in the arrangement the desk
      shows. A tile with no picture says so rather than staying blank. */
-  body.thumbs #panes, body.thumbs #panes-head { display: none; }
+  /* The grid stands in for the pane list only when its tiles are thumb sized.
+     A dense grid is a picture, so the list below it stays the way in. */
+  body.thumbs.grid-live #panes, body.thumbs.grid-live #panes-head { display: none; }
   #thumbs {
     display: none;
     position: relative;
@@ -61,6 +63,7 @@
   }
   body.thumbs #thumbs { display: block; }
   #thumbs .tile { position: absolute; padding: 2px; }
+  #thumbs .tile:not([href]) { cursor: default; }
   #thumbs .frame {
     position: relative; width: 100%; height: 100%;
     border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
@@ -168,7 +171,7 @@
     flex: 1; min-width: 0;
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 7px 8px; font-size: 13px;
+    padding: 7px 8px; font-size: 13px; min-height: 44px;
   }
   .cmd { border-top: 1px solid var(--line); }
   .cmd > button, .cmd .cmd-label {
