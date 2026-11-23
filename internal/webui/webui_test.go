@@ -540,6 +540,101 @@ func TestTextRefusesABadPaneID(t *testing.T) {
 	}
 }
 
+// TestShapeText proves the screen keeps what the pane said and loses the
+// chrome a phone cannot use: long rules, blank runs, and trailing spaces.
+func TestShapeText(t *testing.T) {
+	const bar = "\u2500"
+	const heavy = "\u2501"
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "a long rule becomes three characters of the same rule",
+			in:   []string{"$ make test", strings.Repeat(bar, 80)},
+			want: []string{"$ make test", strings.Repeat(bar, 3)},
+		},
+		{
+			name: "a heavy rule keeps its own character",
+			in:   []string{strings.Repeat(heavy, 12)},
+			want: []string{strings.Repeat(heavy, 3)},
+		},
+		{
+			name: "a run of four is not a rule",
+			in:   []string{strings.Repeat(bar, 4)},
+			want: []string{strings.Repeat(bar, 4)},
+		},
+		{
+			name: "a spinner between two rules keeps its word",
+			in:   []string{strings.Repeat(bar, 30) + " \u280b working " + strings.Repeat(bar, 30)},
+			want: []string{strings.Repeat(bar, 3) + " \u280b working " + strings.Repeat(bar, 3)},
+		},
+		{
+			name: "five blank lines become one",
+			in:   []string{"first", "", "", "", "", "", "second"},
+			want: []string{"first", "", "second"},
+		},
+		{
+			name: "trailing spaces go",
+			in:   []string{"ok  dm/internal/webui      ", "done   "},
+			want: []string{"ok  dm/internal/webui", "done"},
+		},
+		{
+			name: "a line of spaces is a blank line",
+			in:   []string{"a", "     ", "       ", "b"},
+			want: []string{"a", "", "b"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shapeText(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("lines %q, want %q", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("line %d is %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestTextPollOfARuledScreenIsQuiet proves the revision still hashes the text
+// the page receives: a rule redrawn the same way is one change, then none.
+func TestTextPollOfARuledScreenIsQuiet(t *testing.T) {
+	session := "main"
+	dir := root(t, session)
+	screen := []string{strings.Repeat("\u2500", 80), "\u280b working", strings.Repeat("\u2500", 80)}
+	fakeRead(t, dir, session, screen, wire.Status{State: "working"})
+	srv := httptest.NewServer(handler(Config{Session: session, Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/text?pane=w1p1&t=t")
+	var first textReply
+	if err := json.NewDecoder(res.Body).Decode(&first); err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if !first.Changed || len(first.Lines) != 3 || first.Lines[0] != strings.Repeat("\u2500", 3) {
+		t.Fatalf("first poll %+v", first)
+	}
+
+	res = get(t, srv.URL, "/api/text?pane=w1p1&since="+first.Rev+"&t=t")
+	defer func() { _ = res.Body.Close() }()
+	var second textReply
+	if err := json.NewDecoder(res.Body).Decode(&second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Changed || len(second.Lines) != 0 {
+		t.Fatalf("second poll %+v", second)
+	}
+	if second.Rev != first.Rev {
+		t.Fatalf("revisions differ on one screen: %q and %q", first.Rev, second.Rev)
+	}
+}
+
 // --- the command catalogue and the action endpoint ------------------------
 
 // post sends one JSON body to url and returns the response.
