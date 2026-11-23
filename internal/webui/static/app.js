@@ -24,22 +24,42 @@ const timers = { fleet: null, text: null };
 
 const $ = (id) => document.getElementById(id);
 
-// TOKEN is the access token this page was opened with. The server sets a
-// cookie too, but a page opened from a QR scanner is a cross site navigation
-// and a Strict cookie does not ride it, so the token is carried here and
-// appended to every request rather than assumed.
-const TOKEN = (() => {
-  const q = new URLSearchParams(location.search).get("t");
-  if (q) {
-    try { sessionStorage.setItem("dm_token", q); } catch (e) { /* private mode */ }
-    return q;
-  }
-  try { return sessionStorage.getItem("dm_token") || ""; } catch (e) { return ""; }
-})();
+// TOKEN is the access token this load was opened with, when the link carried
+// one. The server sets the cookie on that first load, and the cookie carries
+// every later request. The token stays in memory only as the fallback for a
+// caller that holds a token and no cookie.
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
 
-// api appends the token to an endpoint path.
+// The address bar is cleaned at once, so a copied URL or a screenshot hands
+// over nothing. The cookie this load set is the credential from here on.
+if (TOKEN) {
+  const rest = new URLSearchParams(location.search);
+  rest.delete("t");
+  const search = rest.toString();
+  history.replaceState(null, "", location.pathname + (search ? "?" + search : "") + location.hash);
+}
+
+// queryToken is true once the cookie has proved unusable: the request that
+// answers 401 with a token in hand retries with the token in the query, and
+// every later one rides it too.
+let queryToken = false;
+
+// api renders an endpoint path, carrying the token in the query only when the
+// cookie did not stick.
 function api(path) {
+  if (!queryToken || !TOKEN) return path;
   return path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(TOKEN);
+}
+
+// fetchAPI is one request. It retries once with the token in the query when the
+// cookie is missing, which is the one case the in-memory token is for.
+async function fetchAPI(path, opts) {
+  let res = await fetch(api(path), opts);
+  if (res.status === 401 && TOKEN && !queryToken) {
+    queryToken = true;
+    res = await fetch(api(path), opts);
+  }
+  return res;
 }
 
 // el builds one element with an optional class and text.
@@ -62,9 +82,11 @@ async function loadFleet() {
   if (document.hidden) return;
   let f;
   try {
-    const res = await fetch(api("/api/fleet"));
+    const res = await fetchAPI("/api/fleet");
     if (!res.ok) {
-      banner("cannot reach the session: " + res.status);
+      banner(res.status === 401
+        ? "this page needs its token: open the link with ?t=... on it"
+        : "cannot reach the session: " + res.status);
       return;
     }
     f = await res.json();
@@ -79,12 +101,27 @@ async function loadFleet() {
   if (thumbsOn()) renderThumbs(f);
   $("session").textContent = "dm " + f.session;
   renderCounts(f);
-  // Read only offers nothing that writes, so the sheet and the compose go.
-  $("sheet-open").style.display = f.readOnly ? "none" : "";
-  $("compose").style.display = f.readOnly ? "none" : "";
+  applyReadOnly(!!f.readOnly);
   if (pane) {
     if (!f.panes.some((p) => p.id === pane.id)) closePane();
     else renderPaneChrome();
+  }
+}
+
+// applyReadOnly hides every control the server would refuse, so the page never
+// offers a tap that answers 403. The picture toggle goes too: read only is the
+// desk's decision to show a plain page, and a control with nothing behind it
+// reads worse than its absence.
+const writeControls = ["sheet-open", "thumbs-toggle", "compose", "send", "pane-actions"];
+const placeControls = ["win-prev", "win-next", "ws-prev", "ws-next"];
+
+function applyReadOnly(ro) {
+  for (const id of writeControls.concat(placeControls)) {
+    $(id).style.display = ro ? "none" : "";
+  }
+  if (ro) {
+    dismissSheet();
+    setThumbs(false);
   }
 }
 
@@ -186,7 +223,7 @@ function renderBox(f) {
 async function runAction(body) {
   let res;
   try {
-    res = await fetch(api("/api/action"), {
+    res = await fetchAPI("/api/action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -245,7 +282,7 @@ async function loadCommands() {
   if (catalogue) return catalogue;
   let rows;
   try {
-    const res = await fetch(api("/api/commands"));
+    const res = await fetchAPI("/api/commands");
     if (!res.ok) {
       banner(await res.text());
       return null;
@@ -414,16 +451,34 @@ async function sheetSend(btn, cmd, extra) {
 
 // --- the pane view -------------------------------------------------------
 
-// paneActions are the pane's own commands, under its header. Each runs against
-// the open pane, so the phone never has to open the sheet for them.
+// paneActions are the pane's own commands, under its header. Each acts on the
+// open pane, so the phone never has to open the sheet for them.
+//
+// zoom-pane carries no target on the wire: the server toggles the active
+// window's focus (server_rpc.go:319), so focusFirst sends focus for the open
+// pane before the zoom. Without it, a zoom tapped on the pane on screen would
+// zoom another one.
+//
+// next-pane is not here. It also acts on the active window's focus
+// (server_rpc.go:425), so the phone cannot make it advance the pane it is
+// showing without moving the desk and leaving the reader behind. The fleet list
+// opens any pane in one tap, and the strip walks windows and workspaces.
 const paneActions = [
   { label: "split right", body: () => ({ id: "split", target: pane.id, site: "right" }) },
   { label: "split down", body: () => ({ id: "split", target: pane.id, site: "down" }) },
-  { label: "zoom", body: () => ({ id: "zoom-pane" }) },
-  { label: "next pane", body: () => ({ id: "next-pane" }) },
+  { label: "zoom", body: () => ({ id: "zoom-pane" }), focusFirst: true },
   { label: "rename", body: () => ({ id: "set-pane-name", target: pane.id }) },
   { label: "close", body: () => ({ id: "close-pane", target: pane.id }), ask: () => "close " + pane.id + "?" },
 ];
+
+// actOnPane runs a command the server targets at the session's focus. The focus
+// goes to the open pane first, so a refused focus stops before the command.
+async function actOnPane(body) {
+  if (!pane) return;
+  const focused = await runAction({ id: "focus", target: pane.id });
+  if (focused === null) return;
+  await runAction(body);
+}
 
 function renderPaneActions() {
   const box = $("pane-actions");
@@ -438,24 +493,56 @@ function renderPaneActions() {
         if (name === null) return;
         body.name = name;
       }
+      if (act.focusFirst) {
+        actOnPane(body);
+        return;
+      }
       dispatch(btn, body, act.ask ? act.ask() : "");
     });
     box.append(btn);
   }
 }
 
-// activeContext is the window and workspace the session stands on: what the
-// strip names and walks, and the pane's own place when the session is elsewhere.
-function activeContext() {
+// paneContext is the window and workspace the open pane belongs to. The strip
+// names this pane's place, not the session's focus: watching a pane must not
+// report another window, and must not move the desk to read it.
+function paneContext() {
   const panes = (fleet && fleet.panes) || [];
-  return panes.find((p) => p.active) || panes.find((p) => pane && p.id === pane.id) || {};
+  return panes.find((p) => pane && p.id === pane.id) || panes.find((p) => p.active) || panes[0] || {};
+}
+
+// orderedIDs lists the window or workspace ids in counter order, so prev and
+// next follow the rail's order rather than the fleet's status sort.
+function orderedIDs(kind) {
+  const panes = (fleet && fleet.panes) || [];
+  const seen = new Set();
+  for (const p of panes) {
+    const id = kind === "window" ? p.window : p.workspace;
+    if (id) seen.add(id);
+  }
+  return [...seen].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+}
+
+// stepPlace opens the pane of the neighbouring window or workspace. The strip
+// walks the session through the view alone: no command reaches the socket and
+// the desk keeps its focus.
+function stepPlace(kind, step) {
+  const ids = orderedIDs(kind);
+  const own = paneContext()[kind];
+  const at = ids.indexOf(own);
+  if (at < 0 || ids.length < 2) return;
+  const next = ids[(at + step + ids.length) % ids.length];
+  const panes = (fleet && fleet.panes) || [];
+  const inside = panes.filter((p) => (kind === "window" ? p.window : p.workspace) === next);
+  const pick = inside.find((p) => p.focus) || inside[0];
+  if (pick) location.hash = "#pane=" + encodeURIComponent(pick.id);
 }
 
 function renderPaneChrome() {
   if (!pane) return;
   const own = ((fleet && fleet.panes) || []).find((p) => p.id === pane.id) || {};
   $("pane-title").textContent = (own.name || own.app || pane.id) + "  " + pane.id;
-  const at = activeContext();
+  const at = paneContext();
   setStripName("strip-window", at.window, at.windowName);
   setStripName("strip-workspace", at.workspace, at.workspaceName);
 }
@@ -473,7 +560,7 @@ async function openPane(id) {
   closePane(false);
   pane = { id, rev: "", hold: false };
   $("pane").classList.add("open");
-  $("send").style.display = fleet && fleet.readOnly ? "none" : "flex";
+  $("send").style.display = fleet && fleet.readOnly ? "none" : "";
   $("pane-state").textContent = "";
   renderPaneChrome();
   await pollText();
@@ -489,7 +576,7 @@ async function pollText() {
   if (!pane || document.hidden) return;
   let d;
   try {
-    const res = await fetch(api("/api/text?pane=" + encodeURIComponent(pane.id) + "&since=" + encodeURIComponent(pane.rev)));
+    const res = await fetchAPI("/api/text?pane=" + encodeURIComponent(pane.id) + "&since=" + encodeURIComponent(pane.rev));
     if (!res.ok) {
       banner(await res.text());
       return;
@@ -558,7 +645,7 @@ function sendText(enter) {
 // banner.
 async function post(path, body) {
   try {
-    const res = await fetch(api(path), {
+    const res = await fetchAPI(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -654,6 +741,10 @@ function paintShot(canvas, snap) {
   }
 }
 
+// MAX_THUMBS caps one grid: a window with more panes than this shows its first
+// ones, and the stream's own limit agrees.
+const MAX_THUMBS = 8;
+
 // thumbState is the live picture view: the grid, its one stream and its tiles.
 const thumbState = { on: false, es: null, tiles: new Map() };
 
@@ -668,7 +759,9 @@ function thumbsOn() {
 // tile.
 function renderThumbs(f) {
   const box = $("thumbs");
-  const panes = f.panes.filter((p) => p.active && p.rect && p.rect.w > 0 && p.rect.h > 0);
+  const panes = f.panes
+    .filter((p) => p.active && p.rect && p.rect.w > 0 && p.rect.h > 0)
+    .slice(0, MAX_THUMBS);
   const wanted = panes.map((p) => p.id).join(",");
   if (box.dataset.panes === wanted && thumbState.es) {
     // Same panes, new boxes: the desk or a claim moved them, so move the tiles
@@ -676,10 +769,11 @@ function renderThumbs(f) {
     positionTiles(panes);
     return;
   }
+  // Close the old stream before the key moves, so the key always names the set
+  // the live stream carries. A poll that changes nothing keeps its one stream.
+  closePictures();
   box.dataset.panes = wanted;
   box.textContent = "";
-  thumbState.tiles.clear();
-  closePictures();
   if (panes.length === 0) {
     box.append(el("div", "empty", "no panes in the active window"));
     return;
@@ -700,6 +794,14 @@ function renderThumbs(f) {
 
   const es = new EventSource(api("/api/thumbs?panes=" + encodeURIComponent(wanted)));
   thumbState.es = es;
+  es.onerror = () => {
+    // A stream cannot retry itself with the token, so a page whose cookie did
+    // not stick flips the fallback here and rebuilds once.
+    if (queryToken || !TOKEN) return;
+    queryToken = true;
+    closePictures();
+    if (fleet) renderThumbs(fleet);
+  };
   es.addEventListener("shot", (ev) => {
     const d = JSON.parse(ev.data);
     const t = thumbState.tiles.get(d.pane);
@@ -719,13 +821,12 @@ function renderThumbs(f) {
   });
 }
 
-// closePictures hangs up the grid's stream and forgets the pane set, so a page
-// in a pocket holds no connection and no tile.
+// closePictures hangs up the grid's stream and forgets its tiles, so a page in
+// a pocket holds no connection. The pane key stays: it names the set the tiles
+// were built for, and the guard above reads it with the stream's own state.
 function closePictures() {
   if (thumbState.es) thumbState.es.close();
   thumbState.es = null;
-  const box = $("thumbs");
-  box.dataset.panes = "";
   thumbState.tiles.clear();
 }
 
@@ -768,6 +869,7 @@ function setThumbs(on) {
   if (!on) {
     closePictures();
     $("thumbs").textContent = "";
+    delete $("thumbs").dataset.panes;
     return;
   }
   if (fleet) renderThumbs(fleet);
@@ -778,7 +880,7 @@ function setThumbs(on) {
 // startTimers arms the polls. A hidden page arms none, so a phone in a pocket
 // makes no request and runs no timer.
 function startTimers() {
-  if (!TOKEN || document.hidden) return;
+  if (document.hidden) return;
   if (!timers.fleet) timers.fleet = setInterval(loadFleet, REFRESH_MS);
   if (pane && !timers.text) timers.text = setInterval(pollText, TEXT_POLL_MS);
 }
@@ -811,21 +913,23 @@ $("send-text").addEventListener("keydown", (e) => {
     sendText(true);
   }
 });
-$("win-prev").addEventListener("click", () => runAction({ id: "prev-window" }));
-$("win-next").addEventListener("click", () => runAction({ id: "next-window" }));
-$("ws-prev").addEventListener("click", () => runAction({ id: "prev-workspace" }));
-$("ws-next").addEventListener("click", () => runAction({ id: "next-workspace" }));
+$("win-prev").addEventListener("click", () => stepPlace("window", -1));
+$("win-next").addEventListener("click", () => stepPlace("window", 1));
+$("ws-prev").addEventListener("click", () => stepPlace("workspace", -1));
+$("ws-next").addEventListener("click", () => stepPlace("workspace", 1));
 $("sheet-open").addEventListener("click", openSheet);
 $("thumbs-toggle").addEventListener("click", () => setThumbs(!thumbsOn()));
 window.addEventListener("orientationchange", () => {
-  // Text re-wraps on its own; only the pictures need repainting.
-  if (thumbsOn()) setTimeout(repaintThumbs, 250);
+  // Text re-wraps on its own; only the pictures need repainting. A hidden page
+  // arms nothing: no timer, no stream, no request.
+  if (document.hidden || !thumbsOn()) return;
+  setTimeout(repaintThumbs, 250);
 });
 window.addEventListener("resize", () => {
-  if (fleet && thumbsOn()) {
-    renderThumbs(fleet);
-    repaintThumbs();
-  }
+  // A resize while hidden must not reopen the stream the hide closed.
+  if (document.hidden || !fleet || !thumbsOn()) return;
+  renderThumbs(fleet);
+  repaintThumbs();
 });
 $("sheet-close").addEventListener("click", dismissSheet);
 $("sheet").addEventListener("click", (e) => {
@@ -850,10 +954,9 @@ document.addEventListener("visibilitychange", () => {
 
 renderPaneActions();
 
-if (!TOKEN) {
-  banner("this page needs its token: open the link with ?t=... on it");
-} else {
-  loadFleet();
-  startTimers();
-}
+// A reloaded page carries no token in the query, and the cookie is the
+// credential. The fleet answers 401 when neither is usable, and that is where
+// the token hint comes from.
+loadFleet();
+startTimers();
 route();

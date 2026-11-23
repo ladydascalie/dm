@@ -40,8 +40,10 @@
   }
   header .sheet-open, header .toggle {
     flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
     background: none; border: 1px solid var(--line); color: var(--fg);
-    border-radius: 6px; padding: 4px 10px; font-size: 13px;
+    border-radius: 6px; padding: 4px 12px; font-size: 13px;
+    min-height: 44px; min-width: 44px;
   }
   header .toggle.on { border-color: var(--working); color: var(--working); }
 
@@ -126,13 +128,13 @@
   #compose input, #compose select {
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 10px; font-size: 15px; min-width: 0;
+    padding: 9px 10px; font-size: 15px; min-width: 0; min-height: 44px;
   }
   #compose #compose-msg, #compose button { grid-column: 1 / -1; }
   #compose button {
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 10px 12px; font-size: 14px;
+    padding: 10px 12px; font-size: 14px; min-height: 44px;
   }
 
   /* The actions sheet: full height, one thumb wide, dismissed by a tap on the
@@ -153,7 +155,8 @@
   #sheet .panel > header { position: static; }
   #sheet .close {
     margin-left: auto; background: none; border: 1px solid var(--line);
-    color: var(--fg); border-radius: 6px; padding: 4px 10px; font-size: 13px;
+    color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
+    min-height: 44px; min-width: 44px;
   }
   #sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #sheet-body h2 { margin: 16px 12px 6px; }
@@ -181,7 +184,7 @@
   .chips button {
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 10px; font-size: 14px; min-height: 40px;
+    padding: 9px 12px; font-size: 14px; min-height: 44px; min-width: 44px;
   }
   .chips button:active { border-color: var(--working); color: var(--working); }
 
@@ -195,7 +198,8 @@
   #pane header { position: static; }
   #pane .close {
     margin-left: auto; background: none; border: 1px solid var(--line);
-    color: var(--fg); border-radius: 6px; padding: 4px 10px; font-size: 13px;
+    color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
+    min-height: 44px; min-width: 44px;
   }
   /* The pane's own commands: one row, scrolled sideways at 320 points. */
   #pane-actions {
@@ -207,9 +211,10 @@
   }
   #pane-actions button {
     flex: none;
+    display: inline-flex; align-items: center;
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 8px 10px; font-size: 13px; min-height: 36px;
+    padding: 8px 12px; font-size: 13px; min-height: 44px; min-width: 44px;
   }
   #pane-actions button.armed { border-color: var(--error); color: var(--error); }
   /* The strip names where the session stands and walks it. */
@@ -225,7 +230,7 @@
   #strip .name b { color: var(--fg); font-weight: 600; }
   #strip button {
     background: none; border: 1px solid var(--line); color: var(--fg);
-    border-radius: 6px; min-width: 34px; height: 32px; font-size: 15px;
+    border-radius: 6px; min-width: 44px; height: 44px; font-size: 15px;
   }
   #text {
     flex: 1; min-height: 0;
@@ -244,12 +249,12 @@
     flex: 1; min-width: 0;
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 10px; font-size: 15px;
+    padding: 9px 10px; font-size: 15px; min-height: 44px;
   }
   #send button {
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 12px; font-size: 14px;
+    padding: 9px 12px; font-size: 14px; min-height: 44px; min-width: 44px;
   }
   #send button.enter { border-color: var(--working); color: var(--working); }
 </style>
