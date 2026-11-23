@@ -26,6 +26,10 @@ type fleetPane struct {
 	Agent         bool   `json:"agent,omitempty"`
 	Workspace     string `json:"workspace"`
 	WorkspaceName string `json:"workspaceName"`
+	// Project is the workspace project the rail groups by, and ProjectAccent
+	// its colour slot. Both come from the snapshot's AllPane.
+	Project       string `json:"project,omitempty"`
+	ProjectAccent int    `json:"projectAccent,omitempty"`
 	Window        string `json:"window"`
 	WindowName    string `json:"windowName"`
 	Cwd           string `json:"cwd,omitempty"`
@@ -120,6 +124,7 @@ func (h *Handler) collectFleet(out *fleetReply) error {
 		out.Panes = append(out.Panes, fleetPane{
 			ID: p.ID, Name: p.Name, App: p.App, Status: p.Status, Message: p.Message,
 			Agent: p.Agent, Workspace: p.Workspace, WorkspaceName: p.WorkspaceName,
+			Project: p.Project, ProjectAccent: p.ProjectAccent,
 			Window: p.Window, WindowName: p.WindowName, Cwd: p.Cwd, Branch: p.Branch,
 			Dirty: p.Dirty, Added: p.Added, Deleted: p.Deleted, Focus: p.Focus,
 			Active: active[p.ID], Rect: rects[p.ID],
