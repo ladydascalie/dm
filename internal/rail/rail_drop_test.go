@@ -36,7 +36,7 @@ func TestRailDropInsertionLine(t *testing.T) {
 		t.Fatal("fixture lost w2's window row")
 	}
 	var b bytes.Buffer
-	DrawRail(&b, th, snap, theme.GlyphUnicode, -1, &Drop{Row: dropAt, Accent: 2})
+	DrawRail(&b, th, snap, theme.GlyphUnicode, Paint{Hover: -1, Drop: &Drop{Row: dropAt, Accent: 2}})
 	if out := b.String(); !strings.Contains(out, th.Accents[2].SGR(false)) {
 		t.Fatalf("drop row is not on the accent line: %q", out)
 	}
@@ -45,20 +45,20 @@ func TestRailDropInsertionLine(t *testing.T) {
 	}
 
 	var plain bytes.Buffer
-	DrawRail(&plain, th, snap, theme.GlyphUnicode, -1, nil)
+	DrawRail(&plain, th, snap, theme.GlyphUnicode, Paint{Hover: -1})
 	if plain.String() == b.String() {
 		t.Fatal("the drop row left no mark")
 	}
 
 	// The first empty row hosts the end-of-block landing marker.
 	var end bytes.Buffer
-	DrawRail(&end, th, snap, theme.GlyphUnicode, -1, &Drop{Row: len(items), Accent: 2})
+	DrawRail(&end, th, snap, theme.GlyphUnicode, Paint{Hover: -1, Drop: &Drop{Row: len(items), Accent: 2}})
 	if !strings.Contains(end.String(), th.Accents[2].SGR(false)) {
 		t.Fatal("the empty-row landing marker drew no accent line")
 	}
 
 	var far bytes.Buffer
-	DrawRail(&far, th, snap, theme.GlyphUnicode, -1, &Drop{Row: snap.Rows + 3, Accent: 2})
+	DrawRail(&far, th, snap, theme.GlyphUnicode, Paint{Hover: -1, Drop: &Drop{Row: snap.Rows + 3, Accent: 2}})
 	if far.String() != plain.String() {
 		t.Fatal("an out-of-range drop row changed the paint")
 	}
@@ -89,7 +89,7 @@ func TestRailLiftDimsDraggedRows(t *testing.T) {
 		t.Fatalf("fixture lost rows: window %d focus %d w3 %d", windowAt, focusAt, w3At)
 	}
 	var b bytes.Buffer
-	DrawRail(&b, th, snap, theme.GlyphUnicode, -1, &Drop{Row: -1, Lift: "w1"})
+	DrawRail(&b, th, snap, theme.GlyphUnicode, Paint{Hover: -1, Drop: &Drop{Row: -1, Lift: "w1"}})
 	out := b.String()
 	windowRow := out[strings.Index(out, fmt.Sprintf("\x1b[%d;1H", windowAt+1)):]
 	if !strings.Contains(windowRow[:300], th.Palette.RailDim.SGR(false)) {
@@ -100,7 +100,7 @@ func TestRailLiftDimsDraggedRows(t *testing.T) {
 	}
 
 	var plain bytes.Buffer
-	DrawRail(&plain, th, snap, theme.GlyphUnicode, -1, nil)
+	DrawRail(&plain, th, snap, theme.GlyphUnicode, Paint{Hover: -1})
 	if plain.String() == b.String() {
 		t.Fatal("the lift left no mark")
 	}

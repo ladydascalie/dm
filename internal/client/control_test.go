@@ -47,7 +47,7 @@ func ctlSnapshot(rail int) *wire.Snapshot {
 func ctlScreen(t *testing.T, snap *wire.Snapshot) *vt.Term {
 	t.Helper()
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()
@@ -121,7 +121,7 @@ func TestRailControlRow(t *testing.T) {
 		// the control.
 		seen := map[string]bool{}
 		for y := 0; y < row; y++ {
-			if id := rail.RailPaneAt(snap, 2, y); id != "" {
+			if id := rail.RailPaneAt(snap, 2, y, 0); id != "" {
 				seen[id] = true
 			}
 		}
@@ -131,7 +131,7 @@ func TestRailControlRow(t *testing.T) {
 			}
 		}
 		last := snap.All[len(snap.All)-1]
-		if got := rail.RailPaneAt(snap, 2, row-1); got != last.ID {
+		if got := rail.RailPaneAt(snap, 2, row-1, 0); got != last.ID {
 			t.Fatalf("rail %d: last item row = %q, want %q", c.rail, got, last.ID)
 		}
 		// The last item row is drawn, not merely listed. A rail too narrow
@@ -172,10 +172,10 @@ func TestRailControlRow(t *testing.T) {
 		}
 
 		// The row belongs to the control, never to an item.
-		if got := rail.RailPaneAt(snap, 2, row); got != "" {
+		if got := rail.RailPaneAt(snap, 2, row, 0); got != "" {
 			t.Fatalf("rail %d: rail.RailPaneAt answered %q on the control row", c.rail, got)
 		}
-		if got := rail.RailWorkspaceAt(snap, 2, row); got != "" {
+		if got := rail.RailWorkspaceAt(snap, 2, row, 0); got != "" {
 			t.Fatalf("rail %d: rail.RailWorkspaceAt answered %q on the control row", c.rail, got)
 		}
 		for x := 0; x < c.rail; x++ {
@@ -195,10 +195,10 @@ func TestRailControlOwnsItsRow(t *testing.T) {
 	row := snap.Rows - 2
 	vt := ctlScreen(t, snap)
 
-	if got := rail.RailPaneAt(snap, 2, row); got != "" {
+	if got := rail.RailPaneAt(snap, 2, row, 0); got != "" {
 		t.Fatalf("rail.RailPaneAt(2,%d) = %q on the control row", row, got)
 	}
-	if got := rail.RailPaneAt(snap, 2, row-1); got != "p8" {
+	if got := rail.RailPaneAt(snap, 2, row-1, 0); got != "p8" {
 		t.Fatalf("last item row = %q, want p8", got)
 	}
 	if g := ctlCell(t, vt, 2, row); g.Char != '▶' {
@@ -316,7 +316,7 @@ func TestRailControlHidden(t *testing.T) {
 		t.Fatalf("row %d is not pane area for a hidden rail: %+v", row, area)
 	}
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	if b.Len() != 0 {
 		t.Fatalf("hidden rail drew %d bytes", b.Len())
 	}

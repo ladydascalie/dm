@@ -319,7 +319,7 @@ func TestRailGlyphPerState(t *testing.T) {
 		seen[colour] = c.glyph
 
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(c.status), theme.GlyphUnicode, -1, nil)
+		rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(c.status), theme.GlyphUnicode, rail.Paint{Hover: -1})
 		out := b.String()
 		if !painted(out, c.glyph, paramOf(colour, false)) {
 			t.Fatalf("status %q not drawn as %q in %v: %q", c.status, c.glyph, colour, out)
@@ -399,7 +399,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	for _, status := range []string{"", "unknown"} {
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 20, 40, 6), theme.GlyphUnicode, -1, nil)
+		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 20, 40, 6), theme.GlyphUnicode, rail.Paint{Hover: -1})
 		vt := vt.NewTerm(40, 6)
 		vt.Write(b.Bytes())
 		vt.Flush()
@@ -412,7 +412,7 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 
 	// An agent that has not reported yet still asks with the question mark.
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(""), theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(""), theme.GlyphUnicode, rail.Paint{Hover: -1})
 	vt := vt.NewTerm(40, 6)
 	vt.Write(b.Bytes())
 	vt.Flush()
@@ -430,7 +430,7 @@ func TestRailAgentMarker(t *testing.T) {
 	agent.All[0].Agent = true
 	agent.All[0].App = "pi"
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), agent, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), agent, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out := b.String()
 	if !strings.Contains(out, "\u258e") {
 		t.Fatalf("agent row has no marker: %q", out)
@@ -441,7 +441,7 @@ func TestRailAgentMarker(t *testing.T) {
 
 	shell := testutil.RailOnePane("unknown", "", 20, 40, 6)
 	b.Reset()
-	rail.DrawRail(&b, theme.DefaultTheme(), shell, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), shell, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out = b.String()
 	if strings.Contains(out, "\u258e") {
 		t.Fatalf("shell row has the agent marker: %q", out)
@@ -454,7 +454,7 @@ func TestRailAgentMarker(t *testing.T) {
 	thin := testutil.RailOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	thin.All[0].Agent = true
 	b.Reset()
-	rail.DrawRail(&b, theme.DefaultTheme(), thin, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), thin, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	vt := vt.NewTerm(40, 6)
 	vt.Write(b.Bytes())
 	vt.Flush()
@@ -482,7 +482,7 @@ func TestRailHit(t *testing.T) {
 		{-1, 2, ""}, // left of the screen
 	}
 	for _, c := range cases {
-		if got := rail.RailPaneAt(snap, c.x, c.y); got != c.want {
+		if got := rail.RailPaneAt(snap, c.x, c.y, 0); got != c.want {
 			t.Fatalf("rail.RailPaneAt(%d,%d) = %q, want %q", c.x, c.y, got, c.want)
 		}
 	}
@@ -500,7 +500,7 @@ func TestRailHit(t *testing.T) {
 			WindowName: "one", WindowUnfolded: true, WorkspaceUnfolded: true,
 		},
 	}
-	if got := rail.RailPaneAt(small, 5, 3); got != "w1p2" {
+	if got := rail.RailPaneAt(small, 5, 3, 0); got != "w1p2" {
 		t.Fatalf("last pane row = %q", got)
 	}
 }
@@ -564,14 +564,14 @@ func TestRailFold(t *testing.T) {
 		t.Fatalf("folded workspace row = %+v", items[0])
 	}
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	if strings.Contains(b.String(), "alpha") {
 		t.Fatalf("folded rail drew a pane: %q", b.String())
 	}
-	if got := rail.RailWorkspaceAt(snap, 3, 0); got != "s1" {
+	if got := rail.RailWorkspaceAt(snap, 3, 0, 0); got != "s1" {
 		t.Fatalf("workspace row hit = %q, want s1", got)
 	}
-	if got := rail.RailPaneAt(snap, 3, 0); got != "" {
+	if got := rail.RailPaneAt(snap, 3, 0, 0); got != "" {
 		t.Fatalf("workspace row is a pane hit: %q", got)
 	}
 
@@ -585,7 +585,7 @@ func TestRailFold(t *testing.T) {
 	if items[0].Pane != "w1p1" || items[1].Pane != "w1p2" {
 		t.Fatalf("thin rail panes = %q, %q, want w1p1, w1p2", items[0].Pane, items[1].Pane)
 	}
-	if got := rail.RailWorkspaceAt(snap, 3, 0); got != "" {
+	if got := rail.RailWorkspaceAt(snap, 3, 0, 0); got != "" {
 		t.Fatalf("thin rail row is a workspace hit: %q", got)
 	}
 }
@@ -630,7 +630,7 @@ func TestRailWorkspaceHasNoAccent(t *testing.T) {
 		t.Fatalf("workspace accents = %v, want two distinct hues", want)
 	}
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out := b.String()
 	for ws, accent := range want {
 		if painted(out, "▾", paramOf(accent, false)) {
@@ -690,7 +690,7 @@ func TestRailAccentDistinct(t *testing.T) {
 	// The slots stay distinct, but the rail paints none of them: a workspace
 	// name no longer carries its own hue.
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out := b.String()
 	for ws, accent := range want {
 		if painted(out, "▾", paramOf(accent, false)) {
@@ -764,7 +764,7 @@ func TestRailCollapsed(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := testutil.RailOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
 	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out := b.String()
 	if !strings.Contains(out, "●") {
 		t.Fatalf("thin rail has no state glyph: %q", out)
@@ -787,11 +787,11 @@ func TestRailCollapsed(t *testing.T) {
 	if glyphX != 2 {
 		t.Fatalf("state glyph at x=%d, want 2", glyphX)
 	}
-	if got := rail.RailPaneAt(snap, 2, 0); got != "w1p1" {
+	if got := rail.RailPaneAt(snap, 2, 0, 0); got != "w1p1" {
 		t.Fatalf("thin rail hit = %q, want w1p1", got)
 	}
 	// Past the fixed width is pane area, not rail.
-	if got := rail.RailPaneAt(snap, layout.CollapsedRail, 0); got != "" {
+	if got := rail.RailPaneAt(snap, layout.CollapsedRail, 0, 0); got != "" {
 		t.Fatalf("hit past collapsed width = %q", got)
 	}
 }
@@ -817,7 +817,7 @@ func TestRailNeverWritesPastWidth(t *testing.T) {
 			snap.All[0].WorkspaceName = strings.Repeat("全角見出し", 6)
 		}
 		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+		rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
 		vt := vt.NewTerm(20, 6)
 		vt.Write(b.Bytes())
 		vt.Flush()

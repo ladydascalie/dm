@@ -138,7 +138,9 @@ The server subtracts the rail from the left before the first pane box, and the c
 columns with the workspace, window and pane rows. Its width is the stored `Rail` else `DefaultRail`
 34, clamped by `EffectiveRail`, so 34 becomes 26 on an 80 column screen; `CollapsedRail` is 4, and 0
 hides the rail (`internal/layout/layout.go:381`). `DrawRail` paints rows 0 to `Rows-2` of the
-terminal, `Rows` being its height, and keeps `Rows-2` for the control row. The rail's last column
+terminal, `Rows` being its height, and keeps `Rows-2` for the control row. Its
+`Paint` carries the client's scroll offset, so the first row shows the item row
+`Off` names rather than the list's head. The rail's last column
 above that row is the drag grip, so its hit area is `x == Rail-1` with `y < Rows-2`
 (`internal/rail/rail.go:896`, `internal/client/client_input.go:2364`). A float is a client overlay
 and never enters the tree. `panel.FloatingPane` holds an explicit `Rect`

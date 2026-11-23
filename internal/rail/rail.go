@@ -117,6 +117,16 @@ func WindowVars(snap *wire.Snapshot, w wire.WindowInfo) wlabel.Vars {
 	return v
 }
 
+// Paint is one frame of the rail's own state: Off is the first item row
+// painted on the rail's first line, the client's scroll offset; Hover is the
+// item row the pointer rests on, -1 when none; Drop is the live drag's hint,
+// nil when none.
+type Paint struct {
+	Off   int
+	Hover int
+	Drop  *Drop
+}
+
 // Drop is the live drag's paint hint: Row is the items row the drop boundary
 // rests above, Lift is the dragged window's id, LiftWs the dragged
 // workspace's id (one of the two is set), and Accent is the dragged
@@ -864,83 +874,87 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 	return left, right, tail
 }
 
-// RailPaneAt returns the pane whose row is under x,y, or "" for any other row,
-// an empty row, a point outside the rail, or the rail's bottom control row.
-func RailPaneAt(snap *wire.Snapshot, x, y int) string {
-	if snap == nil || snap.Rail <= 0 {
-		return ""
+// railItemRow resolves a screen row to the item row it shows, through the
+// client's scroll offset. It reports -1 for a row outside the rail's own
+// columns, a point off the rail, an empty row or a row past the last item.
+func railItemRow(snap *wire.Snapshot, y, off int) int {
+	if snap == nil || snap.Rail <= 0 || y < 0 || y >= snap.Rows-2 {
+		return -1
 	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+	row := y + off
+	if row < 0 || row >= len(RailItems(snap)) {
+		return -1
+	}
+	return row
+}
+
+// RailPaneAt returns the pane whose row is under x,y, or "" for any other row,
+// an empty row, a point outside the rail, or the rail's bottom control row. off
+// is the rail's scroll offset, the first item row painted.
+func RailPaneAt(snap *wire.Snapshot, x, y, off int) string {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return ""
 	}
 	items := RailItems(snap)
-	if y >= len(items) || items[y].Kind != Pane {
+	i := railItemRow(snap, y, off)
+	if i < 0 || items[i].Kind != Pane {
 		return ""
 	}
-	return items[y].Pane
+	return items[i].Pane
 }
 
 // RailShelfAt returns the shelved pane whose row is under x,y, or "" for any
 // other row. A click on the row focuses that member: the server moves the
 // shelf's active index and leaves the window focus alone. The section header
 // answers nothing, so its caret folds and its body is inert.
-func RailShelfAt(snap *wire.Snapshot, x, y int) string {
-	if snap == nil || snap.Rail <= 0 {
-		return ""
-	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+func RailShelfAt(snap *wire.Snapshot, x, y, off int) string {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return ""
 	}
 	items := RailItems(snap)
-	if y >= len(items) || items[y].Kind != Shelf {
+	i := railItemRow(snap, y, off)
+	if i < 0 || items[i].Kind != Shelf {
 		return ""
 	}
-	return items[y].Pane
+	return items[i].Pane
 }
 
 // RailWindowAt returns the window whose row is under x,y, for a focus click. A
 // window line and its note line both answer. The thin rail has no window row,
 // so it never answers.
-func RailWindowAt(snap *wire.Snapshot, x, y int) string {
-	if snap == nil || snap.Rail <= 0 {
-		return ""
-	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+func RailWindowAt(snap *wire.Snapshot, x, y, off int) string {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return ""
 	}
 	if layout.RailCompact(snap.Rail) {
 		return ""
 	}
 	items := RailItems(snap)
-	if y >= len(items) {
+	i := railItemRow(snap, y, off)
+	if i < 0 {
 		return ""
 	}
-	if k := items[y].Kind; k != Window && k != WindowNote {
+	if k := items[i].Kind; k != Window && k != WindowNote {
 		return ""
 	}
-	return items[y].Window
+	return items[i].Window
 }
 
 // RailWorkspaceAt returns the workspace whose row is under x,y. The thin rail
 // has no workspace row, so it never answers.
-func RailWorkspaceAt(snap *wire.Snapshot, x, y int) string {
-	if snap == nil || snap.Rail <= 0 {
-		return ""
-	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+func RailWorkspaceAt(snap *wire.Snapshot, x, y, off int) string {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return ""
 	}
 	if layout.RailCompact(snap.Rail) {
 		return ""
 	}
 	items := RailItems(snap)
-	if y >= len(items) {
+	i := railItemRow(snap, y, off)
+	if i < 0 || items[i].Kind != Workspace {
 		return ""
 	}
-	if items[y].Kind != Workspace {
-		return ""
-	}
-	return items[y].Workspace
+	return items[i].Workspace
 }
 
 // RailFoldAt returns the project, workspace or window whose fold caret is
@@ -948,21 +962,19 @@ func RailWorkspaceAt(snap *wire.Snapshot, x, y int) string {
 // sits in column 1 and a window caret in column 3. A project target carries
 // wire.ProjectTargetPrefix. It only answers for the caret cell, so a click on
 // the row's name still focuses the row's first pane.
-func RailFoldAt(snap *wire.Snapshot, x, y int) string {
-	if snap == nil || snap.Rail <= 0 {
-		return ""
-	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+func RailFoldAt(snap *wire.Snapshot, x, y, off int) string {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return ""
 	}
 	if layout.RailCompact(snap.Rail) {
 		return ""
 	}
 	items := RailItems(snap)
-	if y >= len(items) {
+	i := railItemRow(snap, y, off)
+	if i < 0 {
 		return ""
 	}
-	it := items[y]
+	it := items[i]
 	switch it.Kind {
 	case Project:
 		if x != 1 {
@@ -990,19 +1002,18 @@ func RailFoldAt(snap *wire.Snapshot, x, y int) string {
 
 // RailItemAt returns the rail row under x,y. A point outside the rail, on the
 // bottom control row, or past the last item reports false. The gap row between
-// workspace blocks is a row, so it answers true.
-func RailItemAt(snap *wire.Snapshot, x, y int) (RailItem, bool) {
-	if snap == nil || snap.Rail <= 0 {
-		return RailItem{}, false
-	}
-	if x < 0 || x >= snap.Rail || y < 0 || y >= snap.Rows-2 {
+// workspace blocks is a row, so it answers true. off is the rail's scroll
+// offset, the first item row painted.
+func RailItemAt(snap *wire.Snapshot, x, y, off int) (RailItem, bool) {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return RailItem{}, false
 	}
 	items := RailItems(snap)
-	if y >= len(items) {
+	i := railItemRow(snap, y, off)
+	if i < 0 {
 		return RailItem{}, false
 	}
-	return items[y], true
+	return items[i], true
 }
 
 // RailControlAt reports whether x,y is the rail's bottom control row, whose
@@ -1046,18 +1057,37 @@ func RailControlSegs(th theme.Theme, compact bool, set theme.GlyphSet) []segment
 	}
 }
 
+// ClampOffset bounds a rail scroll offset to the rows the rail can show, so a
+// list that just shrank never leaves the rail blank or a pane row out of
+// reach. Every row above the control row carries an item, so one page is
+// Rows-2 rows high.
+func ClampOffset(snap *wire.Snapshot, off int) int {
+	if snap == nil || snap.Rows < 3 || off <= 0 {
+		return 0
+	}
+	max := len(RailItems(snap)) - (snap.Rows - 2)
+	if max < 0 {
+		max = 0
+	}
+	if off > max {
+		return max
+	}
+	return off
+}
+
 // DrawRail paints the sidebar above the status bar. The rail paints its own
 // background so contrast does not depend on the terminal theme. Rows past the
 // screen are clipped, and every row is written into at most Rail columns. The
 // last column above the control row is the grip strip, so no row paints there.
 // A left run is elided with an ellipsis before the right-aligned stats give up
-// a cell, so the stats survive a narrow rail. hover is the row the pointer
-// rests on, -1 when none: it paints RailHoverBG, with the focused pane row
-// keeping its stronger ground. drop is the live window drag's hint, nil when
-// none: the rows of drop.Lift dim out of place, and the row drop.Row rests
-// above is replaced by an insertion line in the dragged project's accent, so
-// the landing spot reads between the rows instead of lighting one.
-func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, hover int, drop *Drop) {
+// a cell, so the stats survive a narrow rail. A Paint carries the frame's
+// scroll offset, the row the pointer rests on (-1 when none) and the live
+// drag's hint (nil when none). The hovered row paints RailHoverBG, with the
+// focused pane row keeping its stronger ground. The rows of a lifted window
+// or workspace dim out of place, and the row the drop boundary rests above is
+// replaced by an insertion line in the dragged project's accent, so the
+// landing spot reads between the rows instead of lighting one.
+func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, paint Paint) {
 	if snap == nil || snap.Rail <= 0 || snap.Cols < 1 || snap.Rows < 3 {
 		return
 	}
@@ -1065,9 +1095,12 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 	w := snap.Rail
 	rows := snap.Rows - 1
 	items := RailItems(snap)
+	off := ClampOffset(snap, paint.Off)
+	hover := paint.Hover
 	if hover < 0 || hover >= len(items) {
 		hover = -1
 	}
+	drop := paint.Drop
 	compact := layout.RailCompact(snap.Rail)
 	// The status bar holds Rows-1 and the control holds Rows-2, so items draw
 	// in rows 0..Rows-3 and clip there. Nothing overwrites the control row.
@@ -1087,8 +1120,8 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			if segment.SegCells(left) > rowW {
 				left = segment.ElideSegs(th, left, rowW)
 			}
-		} else if y < len(items) {
-			it := items[y]
+		} else if i := y + off; i < len(items) {
+			it := items[i]
 			// The full rail gives column 0 to the project bar. The thin rail
 			// paints no project row and composes its own bar inside RailRow, so
 			// its rows keep their width.
@@ -1112,7 +1145,7 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 				bg, bold = p.RailBG, false
 			case (it.Kind == Pane || it.Kind == Shelf) && it.Focus:
 				bg, bold = p.RailFocusBG, true
-			case y == hover && it.Kind != Gap:
+			case i == hover && it.Kind != Gap:
 				bg = p.RailHoverBG
 			}
 			if lift {
@@ -1130,7 +1163,7 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 		// The drop boundary replaces its row with an insertion line in the
 		// dragged project's accent, so the landing spot sits between the rows
 		// it splits. A boundary past the list paints on the first empty row.
-		if drop != nil && drop.Row >= 0 && y == drop.Row && y < controlAt {
+		if drop != nil && drop.Row >= 0 && y == drop.Row-off && y < controlAt {
 			line := th.Glyphs.BorderHorizontal
 			if set == theme.GlyphASCII {
 				line = "-"

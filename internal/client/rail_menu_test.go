@@ -69,16 +69,16 @@ func railMenuPick(t *testing.T, tui *tui, prefix string) {
 func TestRailItemAt(t *testing.T) {
 	t.Parallel()
 	snap := railRowSnap(20)
-	if it, ok := rail.RailItemAt(snap, 2, 0); !ok || it.Kind != rail.Workspace {
+	if it, ok := rail.RailItemAt(snap, 2, 0, 0); !ok || it.Kind != rail.Workspace {
 		t.Fatalf("row 0 = %+v, %v, want the workspace row", it, ok)
 	}
-	if it, ok := rail.RailItemAt(snap, 2, 9); !ok || it.Kind != rail.Pane {
+	if it, ok := rail.RailItemAt(snap, 2, 9, 0); !ok || it.Kind != rail.Pane {
 		t.Fatalf("last item row = %+v, %v, want the pane row", it, ok)
 	}
 	for _, c := range []struct{ x, y int }{
 		{-1, 0}, {20, 0}, {2, -1}, {2, snap.Rows - 2}, {2, snap.Rows - 1},
 	} {
-		if it, ok := rail.RailItemAt(snap, c.x, c.y); ok {
+		if it, ok := rail.RailItemAt(snap, c.x, c.y, 0); ok {
 			t.Fatalf("rail.RailItemAt(%d,%d) = %+v, want false", c.x, c.y, it)
 		}
 	}

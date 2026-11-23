@@ -2180,6 +2180,12 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	if t.mode == "" && t.tabBarClick(ev, x, y) {
 		return
 	}
+	// The wheel over the rail scrolls the rail itself. The rail owns its own
+	// columns, and a list taller than the sidebar would otherwise clip its
+	// tail with no way to reach it.
+	if ev.btn&64 != 0 && !ev.release && t.railWheel(ev, x, y) {
+		return
+	}
 	// The rail grip is the rail's last column. A drag of it adjusts the rail
 	// width and swallows every event, motion and release alike, so nothing
 	// reaches a pane even when the pointer leaves the rail.
@@ -2367,19 +2373,44 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	}
 }
 
-// railHoverRow resolves the rail row the pointer lights, -1 when none. A row
-// lights only after the pointer moved at least once, and only while it could
-// act on the rail: no menu, modal, drag or selection press in flight, and
-// never a gap row.
+// railHoverRow resolves the rail item row the pointer lights, -1 when none. A
+// row lights only after the pointer moved at least once, and only while it
+// could act on the rail: no menu, modal, drag or selection press in flight,
+// and never a gap row. The row is an item index, so the scroll offset is
+// already added: the paint compares it against the item each line shows.
 func (t *tui) railHoverRow() int {
 	if !t.mouseSeen || t.mode != "" || t.dragging || t.railDragging ||
 		t.press != nil || t.snap == nil || t.snap.Rail <= 0 {
 		return -1
 	}
-	if it, ok := rail.RailItemAt(t.snap, t.mouseX, t.mouseY); ok && it.Kind != rail.Gap {
-		return t.mouseY
+	if it, ok := rail.RailItemAt(t.snap, t.mouseX, t.mouseY, t.railOff); ok && it.Kind != rail.Gap {
+		return t.mouseY + t.railOff
 	}
 	return -1
+}
+
+// railWheelStep is the rows one wheel turn moves the rail list: the same
+// three rows a wheel turn moves a pane's scrollback.
+const railWheelStep = 3
+
+// railWheel scrolls the rail by one wheel turn when the pointer rests on it,
+// and reports whether the rail took the event. A drag in flight keeps the
+// pointer: the list must not move under the row the drop boundary rests on.
+func (t *tui) railWheel(ev mouseEvent, x, y int) bool {
+	if t.snap == nil || t.snap.Rail <= 0 || t.winDrag != nil || t.wsDrag != nil {
+		return false
+	}
+	if x < 0 || x >= t.snap.Rail || y < 0 || y >= t.snap.Rows-1 {
+		return false
+	}
+	step := railWheelStep
+	if ev.btn&1 == 0 {
+		step = -step // the wheel turning up walks back up the list
+	}
+	t.railOff = rail.ClampOffset(t.snap, t.railOff+step)
+	t.updateRailHover()
+	t.dirty = true
+	return true
 }
 
 // updateRailHover re-resolves the hover and marks the frame dirty when the
@@ -3012,6 +3043,8 @@ func (t *tui) winDragMove(y int) {
 		return
 	}
 	d.armed = true
+	// The pointer reports a screen row: the list it lands in is scrolled.
+	y += t.railOff
 	items := rail.RailItems(t.snap)
 	// One span per window of the home workspace: its window row and one past
 	// its note and pane rows. Windows keep slice order, so a span's index is
@@ -3186,6 +3219,8 @@ func (t *tui) wsDragMove(y int) {
 		return
 	}
 	d.armed = true
+	// The pointer reports a screen row: the list it lands in is scrolled.
+	y += t.railOff
 	items := rail.RailItems(t.snap)
 	type block struct {
 		ws, project string
@@ -3463,7 +3498,7 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 		t.railPress = true
 		if rail.RailControlAt(t.snap, x, y) {
 			t.openSessionMenu(x, y)
-		} else if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+		} else if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok {
 			t.openRailMenu(it, x, y)
 		}
 		return true
@@ -3479,8 +3514,8 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
-		if it, ok := rail.RailItemAt(t.snap, x, y); ok && it.Kind == rail.Project {
-			if id := rail.RailFoldAt(t.snap, x, y); id != "" {
+		if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok && it.Kind == rail.Project {
+			if id := rail.RailFoldAt(t.snap, x, y, t.railOff); id != "" {
 				t.clearRailPress()
 				if t.conn != nil {
 					_ = t.conn.Send(wire.Msg{Type: "req", Action: "toggle-fold", Target: id})
@@ -3498,11 +3533,11 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
-		if id := rail.RailPaneAt(t.snap, x, y); id != "" {
+		if id := rail.RailPaneAt(t.snap, x, y, t.railOff); id != "" {
 			// A pane row focuses its pane. A second press on the same row
 			// within the double click window opens the rename prompt.
 			if t.isRailDoubleClick(y) {
-				if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+				if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok {
 					t.openRenamePromptFor("pane", it.Pane, it.PaneName)
 				}
 			} else if t.conn != nil {
@@ -3510,7 +3545,7 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
-		if id := rail.RailFoldAt(t.snap, x, y); id != "" {
+		if id := rail.RailFoldAt(t.snap, x, y, t.railOff); id != "" {
 			// The caret cell toggles the workspace's or window's fold
 			// without moving focus.
 			t.clearRailPress()
@@ -3519,13 +3554,13 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
-		if id := rail.RailWindowAt(t.snap, x, y); id != "" {
+		if id := rail.RailWindowAt(t.snap, x, y, t.railOff); id != "" {
 			// A window row focuses the first available pane in that window,
 			// which also makes the window active. A second press on the same
 			// row within the double click window opens the window rename
 			// prompt.
 			if t.isRailDoubleClick(y) {
-				if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+				if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok {
 					t.openRenamePromptFor("window", it.Window, it.WindowName)
 				}
 			} else if pid := t.firstPaneInWindow(id); pid != "" && t.conn != nil {
@@ -3533,17 +3568,17 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			// The press arms a possible drag as well: the focus stays, and the
 			// drag arms only when the pointer moves to another rail row.
-			if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+			if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok {
 				t.winDragStart(it, y)
 			}
 			return true
 		}
-		if ws := rail.RailWorkspaceAt(t.snap, x, y); ws != "" {
+		if ws := rail.RailWorkspaceAt(t.snap, x, y, t.railOff); ws != "" {
 			// A workspace row focuses the first pane in the workspace. A
 			// second press on the same row within the double click window
 			// opens the workspace rename prompt.
 			if t.isRailDoubleClick(y) {
-				if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+				if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok {
 					t.openRenamePromptFor("workspace", it.Workspace, it.Text)
 				}
 			} else if t.conn != nil {
@@ -3556,12 +3591,12 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			// The press arms a possible drag as well: the focus stays, and
 			// the drag arms only when the pointer moves to another row.
-			if it, ok := rail.RailItemAt(t.snap, x, y); ok {
+			if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok {
 				t.wsDragStart(it, y)
 			}
 			return true
 		}
-		if id := rail.RailShelfAt(t.snap, x, y); id != "" {
+		if id := rail.RailShelfAt(t.snap, x, y, t.railOff); id != "" {
 			// A shelf row focuses that member. A shelved pane is in no tree,
 			// so the server moves the shelf's active index and leaves the
 			// window focus alone. The float opens when it was closed, so the

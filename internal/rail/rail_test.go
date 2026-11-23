@@ -260,7 +260,7 @@ func TestRailRowSegments(t *testing.T) {
 	// the focused pane row paints the focus fill bold, and every other row the
 	// rail fill plain.
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, Paint{Hover: -1})
 	out := b.String()
 	focusRow := -1
 	for y := 0; y < snap.Rows-1; y++ {
@@ -420,7 +420,7 @@ type railSeg = segment.Seg
 func railRows(t *testing.T, snap *wire.Snapshot, set theme.GlyphSet) []string {
 	t.Helper()
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme().For(set), snap, set, -1, nil)
+	DrawRail(&b, theme.DefaultTheme().For(set), snap, set, Paint{Hover: -1})
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()
@@ -587,28 +587,28 @@ func TestRailWindowAndFoldAt(t *testing.T) {
 		t.Fatalf("missing row: win=%d note=%d ws=%d pane=%d items=%+v",
 			winIndex, noteIndex, wsIndex, paneIndex, items)
 	}
-	if got := RailWindowAt(snap, 0, winIndex); got != "w1" {
+	if got := RailWindowAt(snap, 0, winIndex, 0); got != "w1" {
 		t.Fatalf("RailWindowAt(0,%d) = %q, want w1", winIndex, got)
 	}
-	if got := RailWindowAt(snap, 0, noteIndex); got != "w1" {
+	if got := RailWindowAt(snap, 0, noteIndex, 0); got != "w1" {
 		t.Fatalf("RailWindowAt(0,%d) = %q on the note row, want w1", noteIndex, got)
 	}
-	if got := RailWindowAt(snap, 0, wsIndex); got != "" {
+	if got := RailWindowAt(snap, 0, wsIndex, 0); got != "" {
 		t.Fatalf("RailWindowAt(0,%d) = %q on a workspace row", wsIndex, got)
 	}
-	if got := RailWindowAt(snap, 0, paneIndex); got != "" {
+	if got := RailWindowAt(snap, 0, paneIndex, 0); got != "" {
 		t.Fatalf("RailWindowAt(0,%d) = %q on a pane row", paneIndex, got)
 	}
-	if got := RailFoldAt(snap, 3, winIndex); got != "w1" {
+	if got := RailFoldAt(snap, 3, winIndex, 0); got != "w1" {
 		t.Fatalf("RailFoldAt(3,%d) = %q, want w1", winIndex, got)
 	}
-	if got := RailFoldAt(snap, 2, winIndex); got != "" {
+	if got := RailFoldAt(snap, 2, winIndex, 0); got != "" {
 		t.Fatalf("RailFoldAt(2,%d) = %q, want empty", winIndex, got)
 	}
-	if got := RailFoldAt(snap, 3, wsIndex); got != "" {
+	if got := RailFoldAt(snap, 3, wsIndex, 0); got != "" {
 		t.Fatalf("RailFoldAt(3,%d) = %q on a workspace row, want empty", wsIndex, got)
 	}
-	if got := RailFoldAt(snap, 3, noteIndex); got != "" {
+	if got := RailFoldAt(snap, 3, noteIndex, 0); got != "" {
 		t.Fatalf("RailFoldAt(3,%d) = %q on the note row, want empty", noteIndex, got)
 	}
 }
@@ -627,13 +627,13 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 	if wsIndex < 0 {
 		t.Fatal("no workspace main row")
 	}
-	if got := RailWorkspaceAt(snap, 0, wsIndex); got != "s1" {
+	if got := RailWorkspaceAt(snap, 0, wsIndex, 0); got != "s1" {
 		t.Fatalf("RailWorkspaceAt(0,%d) = %q, want s1", wsIndex, got)
 	}
-	if got := RailFoldAt(snap, 1, wsIndex); got != "s1" {
+	if got := RailFoldAt(snap, 1, wsIndex, 0); got != "s1" {
 		t.Fatalf("RailFoldAt(1,%d) = %q, want s1", wsIndex, got)
 	}
-	if got := RailFoldAt(snap, 2, wsIndex); got != "" {
+	if got := RailFoldAt(snap, 2, wsIndex, 0); got != "" {
 		t.Fatalf("RailFoldAt(2,%d) = %q, want empty", wsIndex, got)
 	}
 	paneIndex := -1
@@ -646,10 +646,10 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 	if paneIndex < 0 {
 		t.Fatal("no pane pi row")
 	}
-	if got := RailWorkspaceAt(snap, 0, paneIndex); got != "" {
+	if got := RailWorkspaceAt(snap, 0, paneIndex, 0); got != "" {
 		t.Fatalf("RailWorkspaceAt(0,%d) = %q on a pane row", paneIndex, got)
 	}
-	if got := RailFoldAt(snap, 1, paneIndex); got != "" {
+	if got := RailFoldAt(snap, 1, paneIndex, 0); got != "" {
 		t.Fatalf("RailFoldAt(1,%d) = %q on a pane row", paneIndex, got)
 	}
 }
@@ -659,7 +659,7 @@ func TestRailWorkspaceAndFoldAt(t *testing.T) {
 func TestRailASCIIGlyphs(t *testing.T) {
 	snap := railRowSnap(layout.DefaultRail)
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII, -1, nil)
+	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII, Paint{Hover: -1})
 	out := b.String()
 	for _, glyph := range []string{"▾", "▸", "•", "·", "●", "○", "▲", "✓", "✕", "▶", "▌"} {
 		if strings.Contains(out, glyph) {
@@ -797,7 +797,7 @@ func TestRailProjectGroup(t *testing.T) {
 	}
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	var b bytes.Buffer
-	DrawRail(&b, th, snap, theme.GlyphUnicode, -1, nil)
+	DrawRail(&b, th, snap, theme.GlyphUnicode, Paint{Hover: -1})
 	term.Write(b.Bytes())
 	term.Flush()
 	for y, it := range items {
@@ -818,7 +818,7 @@ func TestRailProjectGroup(t *testing.T) {
 	}
 	// The header has a fold caret: a project row folds its whole group.
 	for i, it := range items {
-		if it.Kind == Project && RailFoldAt(snap, 1, i) != wire.ProjectTargetPrefix+it.Project {
+		if it.Kind == Project && RailFoldAt(snap, 1, i, 0) != wire.ProjectTargetPrefix+it.Project {
 			t.Fatalf("project row %d does not answer a project fold", i)
 		}
 	}
@@ -839,7 +839,7 @@ func TestRailUntaggedWorkspaceHasNoProject(t *testing.T) {
 	}
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, Paint{Hover: -1})
 	term.Write(b.Bytes())
 	term.Flush()
 	for y := 0; y < snap.Rows-2; y++ {
@@ -905,19 +905,19 @@ func TestRailFoldCaretAfterBar(t *testing.T) {
 	if wsIndex < 0 || winIndex < 0 {
 		t.Fatalf("fixture has no workspace or window row: %+v", items)
 	}
-	if got := RailFoldAt(snap, 1, wsIndex); got != items[wsIndex].Workspace {
+	if got := RailFoldAt(snap, 1, wsIndex, 0); got != items[wsIndex].Workspace {
 		t.Fatalf("RailFoldAt(1,%d) = %q, want %q", wsIndex, got, items[wsIndex].Workspace)
 	}
-	if got := RailFoldAt(snap, 0, wsIndex); got != "" {
+	if got := RailFoldAt(snap, 0, wsIndex, 0); got != "" {
 		t.Fatalf("RailFoldAt(0,%d) = %q, want empty", wsIndex, got)
 	}
-	if got := RailFoldAt(snap, 3, winIndex); got != items[winIndex].Window {
+	if got := RailFoldAt(snap, 3, winIndex, 0); got != items[winIndex].Window {
 		t.Fatalf("RailFoldAt(3,%d) = %q, want %q", winIndex, got, items[winIndex].Window)
 	}
-	if got := RailFoldAt(snap, 2, winIndex); got != "" {
+	if got := RailFoldAt(snap, 2, winIndex, 0); got != "" {
 		t.Fatalf("RailFoldAt(2,%d) = %q, want empty", winIndex, got)
 	}
-	if got := RailPaneAt(snap, 2, winIndex); got != "" {
+	if got := RailPaneAt(snap, 2, winIndex, 0); got != "" {
 		t.Fatalf("RailPaneAt(2,%d) = %q on a window row, want empty", winIndex, got)
 	}
 }
@@ -961,7 +961,7 @@ func TestThinRailProjectTrack(t *testing.T) {
 	if items[3].ProjectAccent == items[0].ProjectAccent {
 		t.Fatalf("projects alpha and beta share accent slot %d", items[0].ProjectAccent)
 	}
-	if got := RailFoldAt(snap, 1, 0); got != "" {
+	if got := RailFoldAt(snap, 1, 0, 0); got != "" {
 		t.Fatalf("thin rail answers a fold at 1: %q", got)
 	}
 }
@@ -1044,7 +1044,7 @@ func TestRailHoverBackground(t *testing.T) {
 	}
 	draw := func(hover int) string {
 		var b bytes.Buffer
-		DrawRail(&b, th, snap, theme.GlyphUnicode, hover, nil)
+		DrawRail(&b, th, snap, theme.GlyphUnicode, Paint{Hover: hover})
 		return b.String()
 	}
 	rowStart := fmt.Sprintf("\x1b[%d;1H\x1b[0m", windowAt+1) + th.Palette.RailHoverBG.BG()
@@ -1341,16 +1341,16 @@ func TestRailShelfSection(t *testing.T) {
 			}
 			// The header caret folds the section, and a member row answers its
 			// own id: no live pane row moves.
-			if id := RailFoldAt(snap, 1, len(items)-1-len(tc.panes)); id != wire.ShelfFoldTarget {
+			if id := RailFoldAt(snap, 1, len(items)-1-len(tc.panes), 0); id != wire.ShelfFoldTarget {
 				t.Fatalf("fold at the header caret = %q, want %q", id, wire.ShelfFoldTarget)
 			}
 			if tc.folded {
 				return
 			}
-			if id := RailShelfAt(snap, 6, len(items)-1); id != "w2p8" {
+			if id := RailShelfAt(snap, 6, len(items)-1, 0); id != "w2p8" {
 				t.Fatalf("RailShelfAt over the last member = %q, want w2p8", id)
 			}
-			if id := RailPaneAt(snap, 6, len(items)-1); id != "" {
+			if id := RailPaneAt(snap, 6, len(items)-1, 0); id != "" {
 				t.Fatalf("RailPaneAt answered a shelf row with %q", id)
 			}
 		})

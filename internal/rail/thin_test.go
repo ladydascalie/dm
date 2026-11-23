@@ -33,7 +33,7 @@ func thinSnapshot(panes []wire.AllPane) *wire.Snapshot {
 func thinScreen(t *testing.T, snap *wire.Snapshot) *vt.Term {
 	t.Helper()
 	var b bytes.Buffer
-	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, -1, nil)
+	DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, Paint{Hover: -1})
 	term := vt.NewTerm(snap.Cols, snap.Rows)
 	term.Write(b.Bytes())
 	term.Flush()
@@ -86,7 +86,7 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 		if g := cellOf(vt, 2, y); g.Char != glyphs[y] {
 			t.Fatalf("row %d glyph = %q, want %q for %s", y, g.Char, glyphs[y], id)
 		}
-		if got := RailPaneAt(snap, 2, y); got != id {
+		if got := RailPaneAt(snap, 2, y, 0); got != id {
 			t.Fatalf("RailPaneAt(2,%d) = %q, want %q", y, got, id)
 		}
 	}
@@ -111,10 +111,10 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 	}
 	// A thin row is never a workspace row, so a workspace or fold click finds nothing.
 	for y := 0; y < snap.Rows; y++ {
-		if got := RailWorkspaceAt(snap, 2, y); got != "" {
+		if got := RailWorkspaceAt(snap, 2, y, 0); got != "" {
 			t.Fatalf("RailWorkspaceAt(2,%d) = %q on the thin rail", y, got)
 		}
-		if got := RailFoldAt(snap, 2, y); got != "" {
+		if got := RailFoldAt(snap, 2, y, 0); got != "" {
 			t.Fatalf("RailFoldAt(2,%d) = %q on the thin rail", y, got)
 		}
 	}
@@ -259,7 +259,7 @@ func TestThinRailClips(t *testing.T) {
 	railRows := snap.Rows - 2
 	vt := thinScreen(t, snap)
 	for y := 0; y < railRows; y++ {
-		if got := RailPaneAt(snap, 2, y); got != items[y].Pane {
+		if got := RailPaneAt(snap, 2, y, 0); got != items[y].Pane {
 			t.Fatalf("RailPaneAt(2,%d) = %q, want %q", y, got, items[y].Pane)
 		}
 		if g := cellOf(vt, 2, y); g.Char != '●' {
@@ -267,7 +267,7 @@ func TestThinRailClips(t *testing.T) {
 		}
 	}
 	for _, y := range []int{railRows, railRows + 1} {
-		if got := RailPaneAt(snap, 2, y); got != "" {
+		if got := RailPaneAt(snap, 2, y, 0); got != "" {
 			t.Fatalf("RailPaneAt(2,%d) = %q, want no pane row", y, got)
 		}
 	}

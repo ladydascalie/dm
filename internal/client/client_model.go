@@ -191,6 +191,11 @@ type tui struct {
 	// railHover remembers the rail row the pointer last lit, so a motion
 	// that moves it marks the frame dirty. The paint derives the row from
 	// mouseX/mouseY, so this is a cache, never the source.
+	// railOff is the first rail item row painted, the rail's own scroll: a
+	// list taller than the sidebar would otherwise clip its tail with no way
+	// to reach it. Every read clamps it, so a fold that shortens the list
+	// cannot leave a blank rail.
+	railOff   int
 	railHover int
 	// mouseSeen turns false until the first pointer event. A tui that never
 	// saw the pointer lights no hover: the zero cell is a rail row, and a
@@ -908,6 +913,10 @@ func (t *tui) apply(m wire.Msg) {
 	switch m.Type {
 	case "snapshot":
 		t.snap = m.Snap
+
+		// A snapshot may shorten the rail's list or the rail itself, so the
+		// scroll offset must not point past the last page.
+		t.railOff = rail.ClampOffset(t.snap, t.railOff)
 		t.reportState()
 		t.snap.WindowLabel = t.km().WindowLabel()
 		t.updatePadHover(t.mouseX, t.mouseY)
