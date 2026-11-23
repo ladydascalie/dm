@@ -2,7 +2,9 @@ package keymap
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -272,6 +274,20 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 				return fmt.Errorf("line %d: diff-command must not be empty", v.Line)
 			}
 			cfg.diffCommand = v.Value
+			i += 2
+		case "web-addr":
+			if cfg.webAddrSet {
+				return fmt.Errorf("line %d: duplicate web-addr node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted address after web-addr", t.Line)
+			}
+			v := toks[i+1]
+			if err := checkWebAddr(v.Value); err != nil {
+				return fmt.Errorf("line %d: web-addr %s, got %q", v.Line, err, v.Value)
+			}
+			cfg.webAddr = v.Value
+			cfg.webAddrSet = true
 			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
@@ -823,6 +839,30 @@ const defaultPaletteRows = 10
 // defaultDiffCommand is the built-in command the dashboard diff key runs in a
 // floating pane.
 const defaultDiffCommand = "hunk diff"
+
+// DefaultWebAddr is the listen address dm web uses when neither --addr nor the
+// web-addr node names one. It is loopback: reaching the network is a choice
+// the operator makes.
+const DefaultWebAddr = "127.0.0.1:8099"
+
+// checkWebAddr holds a web-addr value to a host:port the listener can take: a
+// split host and port, with a numeric port. An empty value is the built-in
+// default, so it stays valid. An empty host is valid too: it listens on every
+// interface, which is what the operator asked for.
+func checkWebAddr(v string) error {
+	if v == "" {
+		return nil
+	}
+	_, port, err := net.SplitHostPort(v)
+	if err != nil {
+		return errors.New("must be host:port")
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 0 || n > 65535 {
+		return errors.New("must be host:port with a numeric port")
+	}
+	return nil
+}
 
 // defaultPadding is the built-in blank cells between a pane's border and its
 // content, and maxPadding is the largest the config accepts. A pane too small

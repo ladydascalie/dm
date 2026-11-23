@@ -110,6 +110,11 @@ type Config struct {
 	// diffCommand is the shell command the dashboard diff key runs in a
 	// floating pane. An empty value means the config never named the node.
 	diffCommand string
+	// webAddr is the host:port dm web listens on when --addr is absent. An
+	// empty value means the config never named the node, or named it empty.
+	// webAddrSet separates a named empty value from a config with no node.
+	webAddr    string
+	webAddrSet bool
 	// commands maps a command name to its run text. A config without a
 	// command block carries an empty map.
 	commands map[string]string
@@ -267,6 +272,23 @@ func (c *Config) DiffCommand() string {
 		return defaultDiffCommand
 	}
 	return c.diffCommand
+}
+
+// WebAddr returns the host:port dm web listens on when --addr is not passed.
+// A config without the node, or one that names an empty value, reports the
+// built-in default.
+func (c *Config) WebAddr() string {
+	if c == nil || c.webAddr == "" {
+		return DefaultWebAddr
+	}
+	return c.webAddr
+}
+
+// WebAddrSet reports whether the config named a non-empty web-addr, so a
+// caller can say where the listen address came from. An empty value keeps the
+// built-in default and reports false.
+func (c *Config) WebAddrSet() bool {
+	return c != nil && c.webAddrSet && c.webAddr != ""
 }
 
 // Commands returns every command the config defines, sorted by name.

@@ -20,6 +20,7 @@ import (
 	"dm/internal/cells"
 	"dm/internal/clidoc"
 	"dm/internal/client"
+	"dm/internal/keymap"
 	"dm/internal/paths"
 	"dm/internal/session"
 	"dm/internal/transport"
@@ -339,7 +340,7 @@ func (c *cmdFlags) register(name, desc string) {
 	case "to":
 		c.fs.StringVar(&c.to, "to", "", desc)
 	case "addr":
-		c.fs.StringVar(&c.addr, "addr", "127.0.0.1:8099", desc)
+		c.fs.StringVar(&c.addr, "addr", keymap.DefaultWebAddr, desc)
 	case "token":
 		c.fs.StringVar(&c.token, "token", "", desc)
 	case "read-only":
