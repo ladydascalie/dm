@@ -2,12 +2,15 @@ package webui
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -526,6 +529,382 @@ func TestTextRefusesABadPaneID(t *testing.T) {
 		_ = res.Body.Close()
 		if res.StatusCode != http.StatusBadRequest {
 			t.Errorf("pane %q: status %d, want 400", id, res.StatusCode)
+		}
+	}
+}
+
+// --- the command catalogue and the action endpoint ------------------------
+
+// post sends one JSON body to url and returns the response.
+func post(t *testing.T, url string, body any) *http.Response {
+	t.Helper()
+	b, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.Post(url, "application/json", strings.NewReader(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// body reads the whole response body as text.
+func body(t *testing.T, res *http.Response) string {
+	t.Helper()
+	defer func() { _ = res.Body.Close() }()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// sessionLog is a session that records every request it receives.
+type sessionLog struct {
+	mu  sync.Mutex
+	got []wire.Msg
+}
+
+func (l *sessionLog) add(m wire.Msg) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.got = append(l.got, m)
+}
+
+// last returns the request that reached the session most recently.
+func (l *sessionLog) last(t *testing.T) wire.Msg {
+	t.Helper()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.got) == 0 {
+		t.Fatal("no request reached the session")
+	}
+	return l.got[len(l.got)-1]
+}
+
+// recordSession serves one session that records every request and answers it
+// with res, or with the daemon's refusal fail when that is set.
+func recordSession(t *testing.T, dir, session, res, fail string) *sessionLog {
+	t.Helper()
+	log := &sessionLog{}
+	listenUnix(t, paths.ServerSockAt(dir, session), func(c net.Conn) {
+		for {
+			m, err := wire.ReadMsg(c)
+			if err != nil {
+				return
+			}
+			log.add(m)
+			out := wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, OK: true, Res: json.RawMessage(res)}
+			if fail != "" {
+				out.OK, out.Error = false, fail
+			}
+			if err := wire.WriteMsg(c, out); err != nil {
+				return
+			}
+		}
+	})
+	return log
+}
+
+// sampleTarget is a well formed id of the row's target kind.
+func sampleTarget(kind targetKind) string {
+	switch kind {
+	case targetPane:
+		return "w1p1"
+	case targetWindow:
+		return "w2"
+	case targetWorkspace:
+		return "s1"
+	}
+	return ""
+}
+
+// sampleRequest is one request body for a row: its id and a sample value for
+// every field the row names.
+func sampleRequest(cmd command) map[string]string {
+	body := map[string]string{"id": cmd.ID}
+	for _, f := range cmd.Fields {
+		switch f {
+		case "target":
+			body[f] = sampleTarget(cmd.Target)
+		case "site":
+			body[f] = "down"
+		case "layout":
+			body[f] = layouts[2]
+		case "name":
+			body[f] = "build"
+		case "cwd":
+			body[f] = "/tmp"
+		case "msg":
+			body[f] = "on my way"
+		case "state":
+			body[f] = "blocked"
+		case "key":
+			body[f] = "lane/x"
+		default:
+			panic("sampleRequest: no sample for field " + f)
+		}
+	}
+	return body
+}
+
+// TestEveryCommandReachesTheDaemon proves each catalogue row maps to one wire
+// request: the action name is the row's id, the fields the row names reach the
+// message, and no field the row does not name does.
+func TestEveryCommandReachesTheDaemon(t *testing.T) {
+	dir := root(t, "main")
+	log := recordSession(t, dir, "main", `{"pane":"w1p9"}`, "")
+	srv := httptest.NewServer(handler(Config{Session: "main", Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	for _, cmd := range commands {
+		t.Run(cmd.ID, func(t *testing.T) {
+			req := sampleRequest(cmd)
+			res := post(t, srv.URL+"/api/action?t=t", req)
+			if got := body(t, res); res.StatusCode != http.StatusOK {
+				t.Fatalf("status %d: %s", res.StatusCode, got)
+			}
+			got := log.last(t)
+			if got.Action != cmd.ID {
+				t.Fatalf("action %q, want %q", got.Action, cmd.ID)
+			}
+			if cmd.ID == "msg-post" {
+				// The daemon's own decoder reads the payload, so the box request
+				// is proved against the shape the server enforces.
+				parsed, err := box.ParseReq(got.Action, got.Res)
+				if err != nil {
+					t.Fatalf("the daemon would refuse the payload: %v", err)
+				}
+				post := parsed.(*box.PostReq)
+				if post.Key != req["key"] || post.Msg != req["msg"] || string(post.State) != req["state"] {
+					t.Fatalf("payload %+v", post)
+				}
+				if post.From != "" {
+					t.Fatalf("from %q, want empty: the phone is not a pane", post.From)
+				}
+				return
+			}
+			want := wire.Msg{Action: cmd.ID, Target: req["target"], Dir: req["site"],
+				Name: req["name"], Layout: req["layout"], Cwd: req["cwd"]}
+			got.Type, got.ID, got.Res = "", 0, nil
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("request reached the socket as %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestActionRefusesABadRequest proves the endpoint answers 400 with the reason:
+// an unknown id, a field outside the published shape, a field the row does not
+// name, a target on a row that takes none, and an id of the wrong shape.
+func TestActionRefusesABadRequest(t *testing.T) {
+	dir := root(t, "main")
+	recordSession(t, dir, "main", `{}`, "")
+	srv := httptest.NewServer(handler(Config{Session: "main", Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	cases := []struct {
+		name string
+		body map[string]string
+		want string
+	}{
+		{"unknown id", map[string]string{"id": "nope"}, "unknown command nope"},
+		{"unknown field", map[string]string{"id": "zoom-pane", "nope": "x"}, "unknown field"},
+		{"field the row does not name", map[string]string{"id": "zoom-pane", "name": "x"}, "zoom-pane takes no name"},
+		{"target on a targetless row", map[string]string{"id": "zoom-pane", "target": "w1p1"}, "zoom-pane takes no target"},
+		{"bad pane id", map[string]string{"id": "focus", "target": "../x"}, "bad pane id"},
+		{"bad window id", map[string]string{"id": "focus-window", "target": "w1p1"}, "bad window id"},
+		{"bad workspace id", map[string]string{"id": "focus-workspace", "target": "s1x"}, "bad workspace id"},
+		{"workspace id on a window row", map[string]string{"id": "focus-window", "target": "s1"}, "not a window id"},
+		{"bad site", map[string]string{"id": "split", "site": "sideways"}, "bad site"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := post(t, srv.URL+"/api/action?t=t", tc.body)
+			got := body(t, res)
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status %d: %s", res.StatusCode, got)
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("body %q does not name %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCommandsRefuseReadOnly proves both endpoints refuse under --read-only: a
+// menu of commands that cannot run is not offered.
+func TestCommandsRefuseReadOnly(t *testing.T) {
+	cfg := Config{Session: "main", Root: root(t, "main"), Token: "t", ReadOnly: true}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/commands?t=t")
+	if got := body(t, res); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("GET /api/commands: status %d: %s", res.StatusCode, got)
+	}
+	res = post(t, srv.URL+"/api/action?t=t", map[string]string{"id": "zoom-pane"})
+	if got := body(t, res); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("POST /api/action: status %d: %s", res.StatusCode, got)
+	}
+}
+
+// TestCommandsNeedTheToken proves the catalogue sits behind the same check as
+// every other route.
+func TestCommandsNeedTheToken(t *testing.T) {
+	cfg := Config{Session: "main", Root: root(t, "main"), Token: "t"}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/commands")
+	_ = body(t, res)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status %d, want 401", res.StatusCode)
+	}
+	res = post(t, srv.URL+"/api/action", map[string]string{"id": "zoom-pane"})
+	_ = body(t, res)
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status %d, want 401", res.StatusCode)
+	}
+}
+
+// TestActionEmptyTargetIsTheDaemonsCall proves an empty target is not guessed
+// here: the empty target reaches the socket and the daemon's refusal is the
+// answer the page gets.
+func TestActionEmptyTargetIsTheDaemonsCall(t *testing.T) {
+	dir := root(t, "main")
+	log := recordSession(t, dir, "main", "", `no pane ""`)
+	srv := httptest.NewServer(handler(Config{Session: "main", Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	res := post(t, srv.URL+"/api/action?t=t", map[string]string{"id": "focus"})
+	got := body(t, res)
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d: %s", res.StatusCode, got)
+	}
+	if !strings.Contains(got, `no pane ""`) {
+		t.Fatalf("body %q does not carry the daemon's reason", got)
+	}
+	if sent := log.last(t); sent.Target != "" {
+		t.Fatalf("target %q reached the socket, want the empty one the page sent", sent.Target)
+	}
+}
+
+// boxSession serves one session with a box that holds what msg-post stores, so
+// a test can post through the action endpoint and read the entry back from the
+// fleet's box list.
+func boxSession(t *testing.T, dir, session string) {
+	t.Helper()
+	var mu sync.Mutex
+	entries := []box.Entry{}
+	listenUnix(t, paths.ServerSockAt(dir, session), func(c net.Conn) {
+		for {
+			m, err := wire.ReadMsg(c)
+			if err != nil {
+				return
+			}
+			out := wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, OK: true}
+			switch m.Action {
+			case "list":
+				out.Res, _ = json.Marshal(map[string]any{"snapshot": wire.Snapshot{Session: session}})
+			case "msg-list":
+				mu.Lock()
+				out.Res, _ = json.Marshal(box.ListReply{Entries: append([]box.Entry{}, entries...)})
+				mu.Unlock()
+			case "msg-post":
+				parsed, err := box.ParseReq(m.Action, m.Res)
+				if err != nil {
+					out.OK, out.Error = false, err.Error()
+					break
+				}
+				post := parsed.(*box.PostReq)
+				mu.Lock()
+				e := box.Entry{Seq: len(entries) + 1, At: time.Now().UTC().Truncate(time.Second),
+					From: post.From, Key: post.Key, State: post.State, Msg: post.Msg, Body: post.Body}
+				entries = append(entries, e)
+				mu.Unlock()
+				if err := e.Validate(); err != nil {
+					out.OK, out.Error = false, err.Error()
+					break
+				}
+				out.Res, _ = json.Marshal(box.PostReply{Entry: e})
+			default:
+				out.OK, out.Error = false, "test: no action "+m.Action
+			}
+			if err := wire.WriteMsg(c, out); err != nil {
+				return
+			}
+		}
+	})
+}
+
+// TestMsgPostLandsInTheBox proves a phone can post to the box: the action
+// endpoint stores one entry through the session and the fleet lists it back.
+func TestMsgPostLandsInTheBox(t *testing.T) {
+	dir := root(t, "main")
+	boxSession(t, dir, "main")
+	srv := httptest.NewServer(handler(Config{Session: "main", Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	res := post(t, srv.URL+"/api/action?t=t", map[string]string{
+		"id": "msg-post", "key": "lane/x", "state": "blocked", "msg": "waiting on you",
+	})
+	got := body(t, res)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", res.StatusCode, got)
+	}
+	var reply box.PostReply
+	if err := json.Unmarshal([]byte(got), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Entry.Key != "lane/x" || reply.Entry.Msg != "waiting on you" || reply.Entry.From != "" {
+		t.Fatalf("posted %+v", reply.Entry)
+	}
+
+	res = get(t, srv.URL, "/api/fleet?t=t")
+	defer func() { _ = res.Body.Close() }()
+	var fleet fleetReply
+	if err := json.NewDecoder(res.Body).Decode(&fleet); err != nil {
+		t.Fatal(err)
+	}
+	if fleet.Error != "" {
+		t.Fatalf("error %q", fleet.Error)
+	}
+	if len(fleet.Box) != 1 {
+		t.Fatalf("box %+v, want the posted entry", fleet.Box)
+	}
+	if b := fleet.Box[0]; b.Key != "lane/x" || b.State != "blocked" || b.Msg != "waiting on you" || b.From != "" {
+		t.Fatalf("box entry %+v", b)
+	}
+}
+
+// TestCommandsListsTheCatalogue proves the endpoint answers one row per command
+// with the id, label and group the page builds its menus from.
+func TestCommandsListsTheCatalogue(t *testing.T) {
+	cfg := Config{Session: "main", Root: root(t, "main"), Token: "t"}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/commands?t=t")
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	var got catalogueReply
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Commands) != len(commands) {
+		t.Fatalf("%d rows, want %d", len(got.Commands), len(commands))
+	}
+	for i, c := range got.Commands {
+		want := commands[i]
+		if c.ID != want.ID || c.Label != want.Label || c.Group != want.Group || c.Target != want.Target {
+			t.Fatalf("row %d is %+v, want %+v", i, c, want)
+		}
+		if len(c.Fields) != len(want.Fields) {
+			t.Fatalf("%s names %v, want %v", c.ID, c.Fields, want.Fields)
 		}
 	}
 }
