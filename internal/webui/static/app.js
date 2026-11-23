@@ -56,12 +56,16 @@ function api(path) {
 // fetchAPI is one request. It retries once with the token in the query when the
 // cookie is missing, which is the one case the in-memory token is for.
 async function fetchAPI(path, opts) {
-  let res = await fetch(api(path), opts);
-  if (res.status === 401 && TOKEN && !queryToken) {
+  const res = await fetch(api(path), opts);
+  if (res.status !== 401 || !TOKEN || queryToken) return res;
+  // The retry is another request, so it is reply work and waits for a visible
+  // page. A dropped retry leaves queryToken alone, so the next visible call
+  // takes the fallback.
+  const again = applyReply(() => {
     queryToken = true;
-    res = await fetch(api(path), opts);
-  }
-  return res;
+    return fetch(api(path), opts);
+  });
+  return again ?? res;
 }
 
 // el builds one element with an optional class and text.
@@ -78,24 +82,46 @@ function banner(msg) {
   b.classList.toggle("show", !!msg);
 }
 
-// loadFleet paints the dashboard. A hidden tab does not poll: a phone in a
-// pocket should not keep a session awake for a screen nobody reads.
+// applyReply runs the work a server reply asks for, and drops it when the page
+// is hidden. The hide path closes the streams and clears the timers; this is the
+// other half of the same rule, so a reply that lands after the hide changes no
+// DOM, opens no stream and starts no request.
+//
+// Every continuation after an await runs through it, and the two things a
+// hidden page must never start sit behind it as well: renderThumbs is the only
+// place an EventSource is created, and fetchAPI's retry is the only request a
+// reply can send. A path added later that follows the same shape cannot miss
+// the rule.
+function applyReply(work) {
+  if (document.hidden) return undefined;
+  return work();
+}
+
+// loadFleet asks for the fleet and applies the reply. A hidden tab does not
+// poll: a phone in a pocket should not keep a session awake for a screen nobody
+// reads.
 async function loadFleet() {
   if (document.hidden) return;
   let f;
   try {
     const res = await fetchAPI("/api/fleet");
     if (!res.ok) {
-      banner(res.status === 401
+      applyReply(() => banner(res.status === 401
         ? "this page needs its token: open the link with ?t=... on it"
-        : "cannot reach the session: " + res.status);
+        : "cannot reach the session: " + res.status));
       return;
     }
     f = await res.json();
   } catch (e) {
-    banner("cannot reach the session: " + e);
+    applyReply(() => banner("cannot reach the session: " + e));
     return;
   }
+  applyReply(() => paintFleet(f));
+}
+
+// paintFleet applies one fleet reply. It runs through applyReply, so a reply
+// that lands after the hide paints nothing and builds no grid.
+function paintFleet(f) {
   fleet = f;
   banner(f.error || "");
   renderPanes(f);
@@ -227,17 +253,20 @@ async function runAction(body) {
       body: JSON.stringify(body),
     });
   } catch (e) {
-    banner("action failed: " + e);
+    applyReply(() => banner("action failed: " + e));
     return null;
   }
   if (!res.ok) {
-    banner(await res.text());
+    const refused = await res.text();
+    applyReply(() => banner(refused));
     return null;
   }
-  banner("");
   const text = await res.text();
-  await loadFleet();
-  if (pane) pollText();
+  await applyReply(async () => {
+    banner("");
+    await loadFleet();
+    if (pane) pollText();
+  });
   return text ? JSON.parse(text) : {};
 }
 
@@ -265,7 +294,9 @@ function disarm() {
 async function sendBody(body) {
   const res = await runAction(body);
   if (res === null) return;
-  if (body.id === "close-pane" && pane && body.target === pane.id) closePane();
+  applyReply(() => {
+    if (body.id === "close-pane" && pane && body.target === pane.id) closePane();
+  });
 }
 
 // dispatch sends one command. A command that destroys something asks once, with
@@ -313,12 +344,14 @@ async function openSheet() {
   const rows = await loadCommands();
   sheetPending = false;
   if (!rows) return;
-  renderSheet(rows);
-  sheetOpen = true;
-  $("sheet").classList.add("open");
-  // Push one entry, so the back gesture is the sheet's own dismiss.
-  history.pushState({ sheet: 1 }, "", location.href);
-  sheetPushed = true;
+  applyReply(() => {
+    renderSheet(rows);
+    sheetOpen = true;
+    $("sheet").classList.add("open");
+    // Push one entry, so the back gesture is the sheet's own dismiss.
+    history.pushState({ sheet: 1 }, "", location.href);
+    sheetPushed = true;
+  });
 }
 
 // dismissSheet closes the sheet the way the back gesture would, keeping the
@@ -496,8 +529,10 @@ async function actOnPane(body) {
   if (focused === null) return;
   const stepped = await runAction(body);
   if (stepped === null) return;
-  const next = focusedPaneID();
-  if (next && pane && next !== pane.id) location.hash = "#pane=" + encodeURIComponent(next);
+  applyReply(() => {
+    const next = focusedPaneID();
+    if (next && pane && next !== pane.id) location.hash = "#pane=" + encodeURIComponent(next);
+  });
 }
 
 // focusedPaneID is the pane the session stands on: the active window's focus.
@@ -604,20 +639,29 @@ async function openPane(id) {
 // at its own width and font, which is the whole reason a phone can read it
 // without the session changing size.
 async function pollText() {
-  if (!pane || document.hidden) return;
+  const at = pane;
+  if (!at || document.hidden) return;
   let d;
   try {
-    const res = await fetchAPI("/api/text?pane=" + encodeURIComponent(pane.id) + "&since=" + encodeURIComponent(pane.rev));
+    const res = await fetchAPI("/api/text?pane=" + encodeURIComponent(at.id) + "&since=" + encodeURIComponent(at.rev));
     if (!res.ok) {
-      banner(await res.text());
+      const refused = await res.text();
+      applyReply(() => banner(refused));
       return;
     }
     d = await res.json();
   } catch (e) {
-    banner("cannot read the pane: " + e);
+    applyReply(() => banner("cannot read the pane: " + e));
     return;
   }
-  pane.rev = d.rev;
+  applyReply(() => paintText(at, d));
+}
+
+// paintText applies one pane reply, and only to the pane that asked for it: a
+// reply that lands after another pane was opened is not painted into it.
+function paintText(at, d) {
+  if (pane !== at) return;
+  at.rev = d.rev;
   $("pane-state").textContent = [d.state, d.message].filter(Boolean).join(": ");
   $("pane-state").className = "state " + (d.state || "note");
   if (!d.changed) return;
@@ -625,7 +669,7 @@ async function pollText() {
   pre.textContent = (d.lines || []).join("\n");
   // Follow the bottom, which is where a running agent's output is, unless the
   // reader scrolled up to read something.
-  if (!pane.hold) pre.scrollTop = pre.scrollHeight;
+  if (!at.hold) pre.scrollTop = pre.scrollHeight;
 }
 
 // closePane stops the poll and, when asked, clears the address bar.
@@ -662,8 +706,10 @@ async function composePost(ev) {
   }
   const res = await runAction({ id: "msg-post", key, state: $("compose-state").value, msg });
   if (res === null) return;
-  $("compose-key").value = "";
-  $("compose-msg").value = "";
+  applyReply(() => {
+    $("compose-key").value = "";
+    $("compose-msg").value = "";
+  });
 }
 
 function sendText(enter) {
@@ -792,6 +838,13 @@ const MIN_TILE = 44;
 // rail and the tab bar do not eat the phone's screen. One stream carries every
 // tile.
 function renderThumbs(f) {
+  // The one place this page creates an EventSource, and it will not do it on a
+  // hidden page.
+  return applyReply(() => paintThumbs(f));
+}
+
+// paintThumbs builds the grid and its stream. It runs through renderThumbs.
+function paintThumbs(f) {
   const box = $("thumbs");
   // The fleet publishes the stream's pane limit, so the grid asks for exactly
   // the panes it paints, first ones first. One place decides; both agree.
@@ -835,22 +888,28 @@ function renderThumbs(f) {
     // A stream cannot retry itself with the token, so a page whose cookie did
     // not stick flips the fallback here and rebuilds once.
     if (queryToken || !TOKEN) return;
-    queryToken = true;
-    closePictures();
-    if (fleet) renderThumbs(fleet);
+    applyReply(() => {
+      queryToken = true;
+      closePictures();
+      if (fleet) renderThumbs(fleet);
+    });
   };
   es.addEventListener("shot", (ev) => {
     const d = JSON.parse(ev.data);
-    const t = thumbState.tiles.get(d.pane);
-    if (!t || !d.snap) return;
-    t.tile.classList.remove("gone");
-    t.snap = d.snap;
-    paintShot(t.canvas, d.snap);
+    applyReply(() => {
+      const t = thumbState.tiles.get(d.pane);
+      if (!t || !d.snap) return;
+      t.tile.classList.remove("gone");
+      t.snap = d.snap;
+      paintShot(t.canvas, d.snap);
+    });
   });
   es.addEventListener("gone", (ev) => {
     const d = JSON.parse(ev.data);
-    const t = thumbState.tiles.get(d.pane);
-    if (t) t.tile.classList.add("gone");
+    applyReply(() => {
+      const t = thumbState.tiles.get(d.pane);
+      if (t) t.tile.classList.add("gone");
+    });
   });
   es.addEventListener("end", () => {
     es.close();
@@ -1003,7 +1062,8 @@ window.addEventListener("popstate", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     // A rotation a moment ago may have armed the repaint; it goes with the
-    // rest, so nothing runs while the page is in a pocket.
+    // rest, so nothing runs while the page is in a pocket. Replies already in
+    // flight are dropped by applyReply, not here.
     if (repaintTimer) {
       clearTimeout(repaintTimer);
       repaintTimer = null;

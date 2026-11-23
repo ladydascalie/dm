@@ -215,10 +215,10 @@ The page has five parts:
   only when every tile is at least 44 points each way; a grid too dense for that
   is a picture, and the pane list below it stays the way in
 
-A hidden page makes no request and arms no timer: the polls stop, the picture
-stream closes, and a rotation's repaint is cleared, until the tab comes back. A
-command that fails paints the daemon's message in the banner and changes nothing
-else.
+A hidden page makes no request, arms no timer and acts on no reply: the polls
+stop, the picture stream closes, a rotation's repaint is cleared, and a reply
+that lands after the hide changes nothing until the tab comes back. A command
+that fails paints the daemon's message in the banner and changes nothing else.
 
 `--read-only` refuses every write: pane input, the box compose and every action.
 The page hides those commands: the action sheet, the pane action row, the send
