@@ -334,7 +334,7 @@ function renderBox(f) {
     const title = el("div", "title");
     // The key the entry answers to leads; the pane that wrote it follows.
     title.append(el("span", "name", e.key || "-"));
-    title.append(el("span", "id", e.from || "?"));
+    if (e.from) title.append(el("span", "id", e.from));
     const state = STATE_WORDS.indexOf(e.state) >= 0 ? e.state : "note";
     const st = el("span", "state " + state);
     st.append(el("span", "dot " + state));
@@ -526,7 +526,11 @@ function targetPicker(kind) {
 function targetOptions(kind) {
   const panes = (fleet && fleet.panes) || [];
   if (kind === "pane") {
-    return panes.map((p) => ({ value: p.id, label: (p.name || p.app || p.id) + "  " + p.id }));
+    return panes.map((p) => {
+      // One rule for the label: the id alone when it is the only name.
+      const name = p.name || p.app || p.id;
+      return { value: p.id, label: name === p.id ? p.id : name + "  " + p.id };
+    });
   }
   const seen = new Map();
   for (const p of panes) {
@@ -717,7 +721,9 @@ function stepPlace(kind, step) {
 function renderPaneChrome() {
   if (!pane) return;
   const own = ((fleet && fleet.panes) || []).find((p) => p.id === pane.id) || {};
-  $("pane-title").textContent = (own.name || own.app || pane.id) + "  " + pane.id;
+  // The id is the title when the pane has no name, so it is not printed twice.
+  const name = own.name || own.app || pane.id;
+  $("pane-title").textContent = name === pane.id ? name : name + "  " + pane.id;
   const at = paneContext();
   setStripName("strip-window", at.window, at.windowName);
   setStripName("strip-workspace", at.workspace, at.workspaceName);
@@ -737,7 +743,7 @@ async function openPane(id) {
   pane = { id, rev: "", hold: false };
   $("pane").classList.add("open");
   $("send").style.display = fleet && fleet.readOnly ? "none" : "";
-  $("pane-state").textContent = "";
+  setPaneState("", "");
   markFollow();
   renderPaneChrome();
   await pollText();
@@ -796,13 +802,24 @@ function jumpLatest() {
   $("latest").classList.remove("show");
 }
 
+// setPaneState paints the pane header's state line: the state word first, then
+// the message as far as the header has room. The word is its own box, so a line
+// too narrow for the message still names the state and still ends in the colon
+// that says a message is there.
+function setPaneState(state, message) {
+  $("pane-state").className = "state " + (state || "note");
+  $("pane-state-word").textContent = state ? state + (message ? ":" : "") : "";
+  // The space is a no-break one, so a line that clips the message still reads
+  // as a word and a message rather than as one long token.
+  $("pane-state-msg").textContent = message ? "\u00a0" + message : "";
+}
+
 // paintText applies one pane reply, and only to the pane that asked for it: a
 // reply that lands after another pane was opened is not painted into it.
 function paintText(at, d) {
   if (pane !== at) return;
   at.rev = d.rev;
-  $("pane-state").textContent = [d.state, d.message].filter(Boolean).join(": ");
-  $("pane-state").className = "state " + (d.state || "note");
+  setPaneState(d.state, d.message);
   if (!d.changed) return;
   const pre = $("text");
   pre.textContent = (d.lines || []).join("\n");

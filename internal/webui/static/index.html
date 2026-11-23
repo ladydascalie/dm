@@ -268,7 +268,27 @@
   }
   #pane.open { display: flex; }
   #pane header { position: static; }
+  /* A long status message once pushed the close button off the screen. Every
+     part of the header now has its own rule: the title shrinks and ellipsises,
+     the state line takes the room that is left, and the button never shrinks. */
+  #pane header h1 {
+    flex: 0 1 auto; min-width: 0; max-width: 50%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* The word never shrinks, so a clipped line still names the state and still
+     says a message is there; the message takes what room is left of the line. */
+  #pane header #pane-state {
+    flex: 1 1 0; min-width: 0;
+    display: flex; align-items: baseline;
+    overflow: hidden; white-space: nowrap;
+  }
+  #pane-state-word { flex: none; font-weight: inherit; }
+  #pane-state-msg {
+    min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   #pane .close {
+    flex: none;
     margin-left: auto; background: none; border: 1px solid var(--line);
     color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
     min-height: 44px; min-width: 44px;
@@ -408,7 +428,7 @@
   <section id="pane">
     <header>
       <h1 id="pane-title">pane</h1>
-      <span class="state" id="pane-state"></span>
+      <span class="state" id="pane-state"><b id="pane-state-word"></b><span id="pane-state-msg"></span></span>
       <button class="close" id="pane-close">close</button>
     </header>
     <div id="pane-actions"></div>
