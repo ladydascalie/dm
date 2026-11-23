@@ -47,6 +47,34 @@ func TestAllPaneWorkspaceUnfoldedRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAllPaneShelfRoundTrip proves the shelf mark survives the fleet list, and
+// that a live pane leaves the key out: a page reading an old server and a page
+// reading a live row must both see no shelf.
+func TestAllPaneShelfRoundTrip(t *testing.T) {
+	b, err := json.Marshal(wire.AllPane{ID: "w1p1", Shelf: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p wire.AllPane
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatal(err)
+	}
+	if !p.Shelf || p.ID != "w1p1" {
+		t.Fatalf("round trip = %+v, want the shelf mark kept", p)
+	}
+	if p.Workspace != "" || p.Window != "" {
+		t.Fatalf("a shelved row gained a place: %+v", p)
+	}
+
+	b, err = json.Marshal(wire.AllPane{ID: "w1p1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte("shelf")) {
+		t.Fatalf("a live row carries the shelf key: %s", b)
+	}
+}
+
 // TestTermColoursRoundTrip proves the detected pair survives the framing with
 // its exact strings, and that an unset pair leaves both keys out of the JSON.
 func TestTermColoursRoundTrip(t *testing.T) {

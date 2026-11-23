@@ -216,10 +216,44 @@ func (s *server) noteStatus(id string, st wire.Status) {
 	}
 }
 
+// fillPaneFactsLocked fills the facts a pane carries wherever it sits: the
+// name and app from its state, the folder and git facts, the live status,
+// title and session from its pane connection, and the agent mark. A pane is
+// an agent when it has a recorded name, reported the status protocol at least
+// once, or has a status other than empty or unknown; otherwise it is a shell.
+// A window row and a shelf row read the same fields this way. The caller holds
+// s.mu.
+func (s *server) fillPaneFactsLocked(info *wire.AllPane) {
+	ps := s.st.Panes[info.ID]
+	if ps != nil {
+		info.Name = ps.Name
+		info.App = ps.App
+		gi := s.gitFor(ps.Cwd)
+		info.Cwd = ps.Cwd
+		info.Root = gi.root
+		info.Branch = gi.branch
+		info.Worktree = gi.worktree
+		info.InRepo = gi.inRepo
+		info.Dirty = gi.dirty
+		info.Added = gi.added
+		info.Deleted = gi.deleted
+	}
+	if pc := s.panes[info.ID]; pc != nil {
+		pst := pc.status()
+		info.Status = pst.State
+		info.Message = pst.Message
+		info.Title = pc.title
+		info.SessionFile, info.SessionID = pc.session()
+		info.StatusChangedAt = s.statusChangedAt[info.ID]
+	}
+	info.Agent = info.Name != "" || (ps != nil && ps.Reported) ||
+		(info.Status != "" && info.Status != "unknown")
+}
+
 // allPanesLocked lists every pane in the session in workspace, window, tree
-// order. A pane is an agent when it has a recorded name, reported the status
-// protocol at least once, or has a status other than empty or unknown;
-// otherwise it is a shell. The caller holds s.mu.
+// order, then the shelf in the shelf's own order. A shelved pane is in no
+// workspace and no window, so those fields stay empty and Shelf is the whole
+// of its place. The caller holds s.mu.
 func (s *server) allPanesLocked() []wire.AllPane {
 	out := make([]wire.AllPane, 0, len(s.st.Panes))
 	for i, ws := range s.st.Workspaces {
@@ -243,33 +277,18 @@ func (s *server) allPanesLocked() []wire.AllPane {
 						info.ProjectAccentSet = true
 					}
 				}
-				ps := s.st.Panes[id]
-				if ps != nil {
-					info.Name = ps.Name
-					info.App = ps.App
-					gi := s.gitFor(ps.Cwd)
-					info.Cwd = ps.Cwd
-					info.Root = gi.root
-					info.Branch = gi.branch
-					info.Worktree = gi.worktree
-					info.InRepo = gi.inRepo
-					info.Dirty = gi.dirty
-					info.Added = gi.added
-					info.Deleted = gi.deleted
-				}
-				if pc := s.panes[id]; pc != nil {
-					pst := pc.status()
-					info.Status = pst.State
-					info.Message = pst.Message
-					info.Title = pc.title
-					info.SessionFile, info.SessionID = pc.session()
-					info.StatusChangedAt = s.statusChangedAt[id]
-				}
-				info.Agent = info.Name != "" || (ps != nil && ps.Reported) ||
-					(info.Status != "" && info.Status != "unknown")
+				s.fillPaneFactsLocked(&info)
 				out = append(out, info)
 			}
 		}
+	}
+	// The shelf follows the window rows. It carries the pane's own facts, so
+	// the page lists it like any other row, and its empty workspace and window
+	// are what tell a reader it is in none.
+	for _, id := range s.st.Shelf {
+		info := wire.AllPane{ID: id, Shelf: true}
+		s.fillPaneFactsLocked(&info)
+		out = append(out, info)
 	}
 	return out
 }

@@ -219,6 +219,10 @@ type AllPane struct {
 	Focus           bool `json:"focus,omitempty"`
 	WorkspaceActive bool `json:"workspaceActive,omitempty"`
 	WindowActive    bool `json:"windowActive,omitempty"`
+	// Shelf is true for a pane set aside. A shelved pane keeps its id, its
+	// PTY and its state, but it is in no window's tree, so Workspace and
+	// Window stay empty: the flag is the whole of its place.
+	Shelf bool `json:"shelf,omitempty"`
 }
 
 // WindowInfo is one window in the active workspace: its id, its name, whether

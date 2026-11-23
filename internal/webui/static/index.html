@@ -175,6 +175,18 @@
     font-size: 11px; font-weight: 400; color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+  /* The shelf is the panes set aside: its heading carries the count, and it
+     starts folded, so the live fleet is what a thumb sees first. */
+  .shelf { border-top: 1px solid var(--line); margin-top: 14px; }
+  .shelf .fold { border-top: 0; }
+  .shelf .fold > span:first-of-type { font-weight: 600; color: var(--fg); }
+  .shelf .scount { margin-left: auto; color: var(--dim); }
+  /* A shelved row keeps a mark of its own, so it can never read as a pane the
+     desk is drawing. */
+  .shelved { background: linear-gradient(to right, var(--panel) 3px, transparent 3px); }
+  .row .where .mark-shelved {
+    text-transform: uppercase; letter-spacing: .06em; color: var(--blocked);
+  }
   /* The shell panes fold to one count line: a pane with no agent has no status
      to paint and no work to report, so it keeps the way in without a row each. */
   .fold {

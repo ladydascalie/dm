@@ -38,6 +38,44 @@ func TestAllPanesWorkspaceUnfolded(t *testing.T) {
 	}
 }
 
+// TestAllPanesCarriesTheShelf pins the shelf's rows in the fleet list: one row
+// per shelf member after the window rows, in the shelf's own order, carrying the
+// pane's name and status and no workspace or window. A live pane carries no
+// shelf mark.
+func TestAllPanesCarriesTheShelf(t *testing.T) {
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "shelfrows")
+	live := testutil.RootPane(st)
+	st.Panes[live].Name = "main"
+	first := "shelfrows-p2"
+	second := "shelfrows-p3"
+	st.Panes[first] = &session.PaneState{Name: "set aside", Cwd: t.TempDir(), Reported: true}
+	st.Panes[second] = &session.PaneState{Cwd: t.TempDir()}
+	st.AddShelf(first)
+	st.AddShelf(second)
+	s := railServer(st)
+
+	panes := s.allPanesLocked()
+	if len(panes) != 3 {
+		t.Fatalf("%d rows, want 3: %+v", len(panes), panes)
+	}
+	if row := panes[0]; row.ID != live || row.Shelf {
+		t.Fatalf("first row %+v, want the live pane %s with no shelf mark", row, live)
+	}
+	for i, want := range []string{first, second} {
+		row := panes[i+1]
+		if row.ID != want || !row.Shelf {
+			t.Fatalf("shelf row %d is %+v, want %s with the shelf mark", i, row, want)
+		}
+		if row.Workspace != "" || row.Window != "" || row.WorkspaceName != "" || row.WindowName != "" {
+			t.Fatalf("shelf row %s invented a place: %+v", row.ID, row)
+		}
+	}
+	if row := panes[1]; row.Name != "set aside" || !row.Agent {
+		t.Fatalf("shelf row lost its facts: %+v", row)
+	}
+}
+
 // TestPaneRectsReserveTabBarRow pins the server side of the reserve: every
 // active-window pane box starts below the tab bar row and stops above the
 // status bar row. The zoomed pane fills the reserved area.
