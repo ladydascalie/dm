@@ -5,6 +5,11 @@ const REFRESH_MS = 3000;
 const TEXT_POLL_MS = 1000;
 
 let fleet = null;
+// tab is the view on screen, and dirty says which view a newer fleet left to
+// paint. A tab paints its own rows on the way in, and nothing paints a view
+// nobody is looking at.
+let tab = "panes";
+const dirty = { panes: true, box: true };
 // pane is the open pane view: its id, the text revision it has, and the poll.
 let pane = null;
 // catalogue is the command rows, fetched once. The list lives in Go.
@@ -124,11 +129,13 @@ async function loadFleet() {
 function paintFleet(f) {
   fleet = f;
   banner(f.error || "");
-  renderPanes(f);
-  renderBox(f);
-  if (thumbsOn()) renderThumbs(f);
+  // Both views are stale now; only the one on screen is painted.
+  dirty.panes = true;
+  dirty.box = true;
+  renderVisible();
+  if (thumbsOn() && tab === "panes") renderThumbs(f);
   $("session").textContent = "dm " + f.session;
-  renderCounts(f);
+  renderSummary(f);
   applyReadOnly(!!f.readOnly);
   if (pane) {
     if (!f.panes.some((p) => p.id === pane.id)) closePane();
@@ -149,8 +156,72 @@ function applyReadOnly(ro) {
   if (ro) dismissSheet();
 }
 
-// renderCounts is the header line: how many agents sit in each state.
-function renderCounts(f) {
+// --- the tabs ------------------------------------------------------------
+//
+// Panes and Box are two views of one fleet reply. The tab on screen owns the
+// header's count line, and the address bar carries the tab, so a reload or a
+// shared link lands on the same one.
+
+// STATE_WORDS are the five words a row paints. A pane with any other state, an
+// idle shell or one that never reported, has no word this page can print.
+const STATE_WORDS = ["note", "working", "blocked", "done", "error"];
+
+// STATE_RANK puts the rows that want a decision first.
+const STATE_RANK = { blocked: 0, error: 1, working: 2, done: 3, note: 4 };
+
+// stateOf is the word one pane paints, or "" when it has no agent status. The
+// dot and the word are one thing, so a row with no word paints no dot either.
+function stateOf(p) {
+  return STATE_WORDS.indexOf(p.status) >= 0 ? p.status : "";
+}
+
+// paneHash is the address of the panes view with a pane open in it.
+function paneHash(id) {
+  return "#panes&pane=" + encodeURIComponent(id);
+}
+
+// setTab shows one view. It repaints the view it shows when a newer fleet left
+// it stale, and touches nothing the other view paints.
+function setTab(next) {
+  const want = next === "box" ? "box" : "panes";
+  const on = $("tab-" + want);
+  for (const t of document.querySelectorAll("nav.tabs a")) {
+    t.setAttribute("aria-selected", t === on ? "true" : "false");
+  }
+  if (want === tab && document.body.classList.contains("tab-" + want)) return;
+  tab = want;
+  document.body.classList.toggle("tab-panes", tab === "panes");
+  document.body.classList.toggle("tab-box", tab === "box");
+  if (!fleet) return;
+  renderSummary(fleet);
+  renderVisible();
+  // The picture grid belongs to the panes view: leaving it hangs up the
+  // stream, and coming back builds the grid again.
+  if (tab === "panes" && thumbsOn()) renderThumbs(fleet);
+  else closePictures();
+}
+
+// renderVisible paints the view on screen and leaves the other one stale.
+function renderVisible() {
+  if (!fleet) return;
+  if (tab === "panes" && dirty.panes) {
+    renderPanes(fleet);
+    dirty.panes = false;
+  }
+  if (tab === "box" && dirty.box) {
+    renderBox(fleet);
+    dirty.box = false;
+  }
+}
+
+// renderSummary is the header line: the state counts on the panes tab, and the
+// box entries waiting on a decision on the box tab.
+function renderSummary(f) {
+  $("counts").textContent = tab === "box" ? boxSummary(f) : paneSummary(f);
+}
+
+// paneSummary names each state the fleet holds, blocked and error first.
+function paneSummary(f) {
   const counts = {};
   for (const p of f.panes) {
     const s = p.status || "note";
@@ -161,11 +232,17 @@ function renderCounts(f) {
   for (const s of order) {
     if (counts[s]) parts.push(counts[s] + " " + s);
   }
-  $("counts").textContent = parts.join("  ");
+  return parts.length > 0 ? parts.join("  ") : "no agents";
 }
 
-function stateOf(p) {
-  return p.status && p.status !== "clear" ? p.status : "note";
+// boxSummary counts the entries that want an answer: the lanes that left a
+// message blocked or in error.
+function boxSummary(f) {
+  let n = 0;
+  for (const e of f.box) {
+    if (e.state === "blocked" || e.state === "error") n++;
+  }
+  return n + " waiting";
 }
 
 // renderPanes lists the fleet, blocked and error first: the rows that want a
@@ -174,46 +251,77 @@ function renderPanes(f) {
   const box = $("panes");
   box.textContent = "";
   const panes = f.panes.slice().sort((a, b) => {
-    const rank = { blocked: 0, error: 1, working: 2, done: 3, note: 4 };
-    const d = (rank[stateOf(a)] ?? 5) - (rank[stateOf(b)] ?? 5);
+    const d = (STATE_RANK[stateOf(a)] ?? 5) - (STATE_RANK[stateOf(b)] ?? 5);
     return d !== 0 ? d : a.id.localeCompare(b.id);
   });
   if (panes.length === 0) {
     box.append(el("div", "empty", "no panes"));
     return;
   }
-  for (const p of panes) {
-    const row = el("a", "row");
-    row.href = "#pane=" + encodeURIComponent(p.id);
-
-    const title = el("div", "title");
-    title.append(document.createTextNode(p.name || p.app || p.id));
-    const kind = [p.workspaceName, p.windowName].filter(Boolean).join(" / ");
-    if (kind) title.append(el("span", "kind", "  " + kind));
-    row.append(title);
-
-    const st = el("div", "state " + stateOf(p));
-    st.append(el("span", "dot " + stateOf(p)));
-    st.append(document.createTextNode(stateOf(p)));
-    row.append(st);
-
-    const where = el("div", "where");
-    where.append(el("span", "id", p.id + " "));
-    if (p.branch) {
-      where.append(el("b", "", p.branch));
-      if (p.dirty) where.append(el("b", "", " +" + (p.added || 0) + "/-" + (p.deleted || 0)));
-      where.append(document.createTextNode("  "));
-    }
-    if (p.cwd) where.append(document.createTextNode(p.cwd));
-    row.append(where);
-
-    if (p.message) row.append(el("div", "msg", p.message));
-    if (p.active) row.append(el("div", "msg", "on screen at the desk"));
-    box.append(row);
-  }
+  for (const p of panes) box.append(paneRow(p));
 }
 
-// renderBox lists the newest box rows.
+// paneRow is one pane: the name a person would use on the first line, its
+// state on the right of it, and the facts that place it on the second.
+function paneRow(p) {
+  const row = el("a", "row");
+  row.href = paneHash(p.id);
+
+  const name = p.name || p.app || p.id;
+  const title = el("div", "title");
+  title.append(el("span", "name", name));
+  const state = stateOf(p);
+  if (state) {
+    const st = el("span", "state " + state);
+    st.append(el("span", "dot " + state));
+    st.append(document.createTextNode(state));
+    title.append(st);
+  }
+  row.append(title);
+
+  // The facts, each printed once: the id unless it is the name above, the
+  // place it sits in, the branch with its diff, and the folder trimmed to its
+  // tail.
+  const where = el("div", "where");
+  let empty = true;
+  const fact = (node) => {
+    if (!empty) where.append(el("span", "sep", " \u00b7 "));
+    empty = false;
+    where.append(node);
+  };
+  if (name !== p.id) fact(el("span", "id", p.id));
+  // Workspace then window, the way the rail names the pair.
+  const window = p.windowName || p.window;
+  if (p.workspaceName || p.workspace) {
+    const place = el("span", "", p.workspaceName || p.workspace);
+    if (window) place.append(document.createTextNode(" > " + window));
+    fact(place);
+  } else if (window) {
+    fact(el("span", "", window));
+  }
+  if (p.branch) {
+    const branch = el("b", "", p.branch);
+    if (p.dirty) branch.append(document.createTextNode(" +" + (p.added || 0) + "/-" + (p.deleted || 0)));
+    fact(branch);
+  }
+  if (p.cwd) {
+    const cwd = el("span", "cwd");
+    // The path keeps its reading order inside the box that clips its head.
+    const tail = document.createElement("bdi");
+    tail.setAttribute("dir", "ltr");
+    tail.textContent = p.cwd;
+    cwd.append(tail);
+    cwd.title = p.cwd;
+    fact(cwd);
+  }
+  if (!empty) row.append(where);
+
+  if (p.message) row.append(el("div", "msg", p.message));
+  if (p.active) row.append(el("div", "msg", "on screen at the desk"));
+  return row;
+}
+
+// renderBox lists the box rows, newest first.
 function renderBox(f) {
   const box = $("box");
   box.textContent = "";
@@ -224,14 +332,16 @@ function renderBox(f) {
   for (const e of f.box) {
     const row = el("div", "row");
     const title = el("div", "title");
-    title.append(el("span", "id", e.key || "-"));
-    title.append(document.createTextNode("  " + (e.from || "?")));
+    // The key the entry answers to leads; the pane that wrote it follows.
+    title.append(el("span", "name", e.key || "-"));
+    title.append(el("span", "id", e.from || "?"));
+    const state = STATE_WORDS.indexOf(e.state) >= 0 ? e.state : "note";
+    const st = el("span", "state " + state);
+    st.append(el("span", "dot " + state));
+    st.append(document.createTextNode(state));
+    title.append(st);
     row.append(title);
-    const st = el("div", "state " + (e.state || "note"));
-    st.append(el("span", "dot " + (e.state || "note")));
-    st.append(document.createTextNode(e.state || "note"));
-    row.append(st);
-    row.append(el("div", "msg", e.msg));
+    if (e.msg) row.append(el("div", "msg", e.msg));
     box.append(row);
   }
 }
@@ -531,7 +641,7 @@ async function actOnPane(body) {
   if (stepped === null) return;
   applyReply(() => {
     const next = focusedPaneID();
-    if (next && pane && next !== pane.id) location.hash = "#pane=" + encodeURIComponent(next);
+    if (next && pane && next !== pane.id) location.hash = paneHash(next);
   });
 }
 
@@ -601,7 +711,7 @@ function stepPlace(kind, step) {
   const panes = (fleet && fleet.panes) || [];
   const inside = panes.filter((p) => (kind === "window" ? p.window : p.workspace) === next);
   const pick = inside.find((p) => p.focus) || inside[0];
-  if (pick) location.hash = "#pane=" + encodeURIComponent(pick.id);
+  if (pick) location.hash = paneHash(pick.id);
 }
 
 function renderPaneChrome() {
@@ -681,7 +791,10 @@ function closePane(updateHash = true) {
   $("pane").classList.remove("open");
   stopTimers();
   startTimers();
-  if (updateHash) history.replaceState(null, "", location.pathname + location.search);
+  // The pane closes back onto the tab it was opened from.
+  if (updateHash) {
+    history.replaceState(null, "", location.pathname + location.search + "#" + tab);
+  }
 }
 
 // --- the box compose -----------------------------------------------------
@@ -872,7 +985,8 @@ function paintThumbs(f) {
     // No href yet: applyTileRule links a tile only once it measures thumb sized.
     const tile = el("a", "tile");
     const frame = el("div", "frame");
-    const label = el("div", "label", (p.name || p.app || p.id) + "  " + (p.status || "note"));
+    const state = stateOf(p);
+    const label = el("div", "label", (p.name || p.app || p.id) + (state ? "  " + state : ""));
     const canvas = el("canvas");
     frame.append(label, canvas);
     tile.append(frame);
@@ -938,7 +1052,7 @@ function applyTileRule() {
   }
   document.body.classList.toggle("grid-live", live);
   for (const t of thumbState.tiles.values()) {
-    if (live) t.tile.href = "#pane=" + encodeURIComponent(t.pane);
+    if (live) t.tile.href = paneHash(t.pane);
     else t.tile.removeAttribute("href");
   }
 }
@@ -986,7 +1100,8 @@ function setThumbs(on) {
     delete $("thumbs").dataset.panes;
     return;
   }
-  if (fleet) renderThumbs(fleet);
+  // The grid only exists in the panes view, so the box tab opens no stream.
+  if (fleet && tab === "panes") renderThumbs(fleet);
 }
 
 // --- the clock -----------------------------------------------------------
@@ -1006,11 +1121,18 @@ function stopTimers() {
   timers.text = null;
 }
 
-// route opens the pane the address bar names.
+// route shows the tab the address bar names and opens the pane it names. The
+// hash is the whole view: #panes, #box, and #panes&pane=w1p1 for a pane.
 function route() {
-  const m = /^#pane=(.+)$/.exec(location.hash);
-  if (m) openPane(decodeURIComponent(m[1]));
-  else closePane(false);
+  // A link from before the tabs still names a pane alone, so it opens that pane
+  // on the panes tab.
+  const parts = location.hash.slice(1).split("&");
+  if (/^pane=/.test(parts[0])) parts.unshift("panes");
+  setTab(parts[0]);
+  const m = /^pane=(.+)$/.exec(parts[1] || "");
+  const id = m ? decodeURIComponent(m[1]) : "";
+  if (id && (!pane || pane.id !== id)) openPane(id);
+  else if (!id && pane) closePane(false);
 }
 
 $("pane-close").addEventListener("click", () => closePane());
@@ -1045,7 +1167,7 @@ window.addEventListener("orientationchange", () => {
 });
 window.addEventListener("resize", () => {
   // A resize while hidden must not reopen the stream the hide closed.
-  if (document.hidden || !fleet || !thumbsOn()) return;
+  if (document.hidden || !fleet || !thumbsOn() || tab !== "panes") return;
   renderThumbs(fleet);
   repaintThumbs();
 });
@@ -1079,9 +1201,15 @@ document.addEventListener("visibilitychange", () => {
 
 renderPaneActions();
 
+// The address bar carries the tab, so a reload lands where the reader stood; a
+// page opened without one starts on the panes.
+route();
+if (!location.hash) {
+  history.replaceState(null, "", location.pathname + location.search + "#" + tab);
+}
+
 // A reloaded page carries no token in the query, and the cookie is the
 // credential. The fleet answers 401 when neither is usable, and that is where
 // the token hint comes from.
 loadFleet();
 startTimers();
-route();

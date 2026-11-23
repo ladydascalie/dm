@@ -26,17 +26,29 @@
     font: 15px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
+  /* The header and the tabs stay together at the top: the tab is the one
+     control a thumb reaches for, so it never scrolls away. */
+  .topbar { position: sticky; top: 0; z-index: 2; }
   header {
-    position: sticky; top: 0; z-index: 2;
     display: flex; align-items: baseline; gap: 8px;
     padding: 10px 12px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .counts {
-    margin-left: auto; font-size: 12px; color: var(--dim);
-    min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  /* The session name never wraps: a second line in the header would eat the
+     screen the tabs just bought. */
+  header h1 {
+    flex: none; font-size: 15px; margin: 0; font-weight: 600;
+    white-space: nowrap;
+  }
+  /* The fleet header carries the tab's summary on a line of its own: one row
+     of title and buttons leaves the counts too narrow to read at 320. */
+  header.fleet { display: block; }
+  header.fleet .bar { display: flex; align-items: center; gap: 8px; }
+  header.fleet h1 { margin-right: auto; }
+  header.fleet .counts {
+    margin-top: 4px; font-size: 12px; color: var(--dim);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   }
   header .sheet-open, header .toggle {
     flex: none;
@@ -47,11 +59,31 @@
   }
   header .toggle.on { border-color: var(--working); color: var(--working); }
 
+  /* Two views, one tab each. The tab is a link, so the address bar carries it
+     and the back gesture walks the views the reader visited. */
+  nav.tabs {
+    display: flex;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  nav.tabs a {
+    flex: 1 1 0;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 44px; min-width: 44px;
+    font-size: 14px; font-weight: 600;
+    color: var(--dim); text-decoration: none;
+  }
+  nav.tabs a[aria-selected="true"] {
+    color: var(--fg);
+    box-shadow: inset 0 -2px 0 var(--working);
+  }
+  body.tab-panes #view-box, body.tab-box #view-panes { display: none; }
+
   /* The picture grid: the active window's panes, in the arrangement the desk
      shows. A tile with no picture says so rather than staying blank. */
   /* The grid stands in for the pane list only when its tiles are thumb sized.
      A dense grid is a picture, so the list below it stays the way in. */
-  body.thumbs.grid-live #panes, body.thumbs.grid-live #panes-head { display: none; }
+  body.thumbs.grid-live #panes { display: none; }
   #thumbs {
     display: none;
     position: relative;
@@ -90,21 +122,41 @@
     font-size: 11px; font-weight: 600; letter-spacing: .08em;
     text-transform: uppercase; color: var(--dim);
   }
+  /* A row is one tap target: the name and its state on the first line, the
+     facts that place it on the second. */
   .row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 2px 10px;
+    display: block;
+    min-height: 44px;
     padding: 9px 12px;
     border-top: 1px solid var(--line);
     text-decoration: none; color: inherit;
   }
   .row:active { background: var(--panel); }
-  .row .id { font: 13px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); }
-  .row .title { font-weight: 600; }
-  .row .title .kind { font-weight: 400; color: var(--dim); font-size: 12px; }
-  .row .msg { grid-column: 1 / -1; font-size: 13px; color: var(--dim); }
-  .row .where { grid-column: 1 / -1; font-size: 11px; color: var(--dim); }
+  .row .title { display: flex; align-items: baseline; gap: 10px; }
+  .row .title .name {
+    flex: 1 1 auto; min-width: 0;
+    font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .row .title .state { flex: none; }
+  .row .id { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); }
+  .row .msg { font-size: 13px; color: var(--dim); }
+  .row .where {
+    margin-top: 1px;
+    font-size: 11px; line-height: 1.45; color: var(--dim);
+    overflow-wrap: anywhere;
+  }
   .row .where b { color: #9fb0bf; font-weight: 500; }
+  .row .where .sep { color: #3d4952; }
+  /* A folder has no end worth trimming: keep its tail, which is the part that
+     names the work, and let the head go. The box clips from the left, so the
+     ellipsis lands there; the bdi keeps the path itself in reading order. */
+  .row .where .cwd {
+    display: inline-block; max-width: 100%; vertical-align: bottom;
+    direction: rtl; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row .where .cwd bdi { direction: ltr; unicode-bidi: isolate; }
   .state { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
   .state.note { color: var(--note); }
   .state.working { color: var(--working); }
@@ -262,35 +314,45 @@
   #send button.enter { border-color: var(--working); color: var(--working); }
 </style>
 </head>
-<body>
-  <header>
-    <h1 id="session">dm</h1>
-    <span class="counts" id="counts"></span>
-    <button id="sheet-open" class="sheet-open">actions</button>
-    <button id="thumbs-toggle" class="toggle">pictures</button>
-  </header>
+<body class="tab-panes">
+  <div class="topbar">
+    <header class="fleet">
+      <div class="bar">
+        <h1 id="session">dm</h1>
+        <button id="sheet-open" class="sheet-open">actions</button>
+        <button id="thumbs-toggle" class="toggle">pictures</button>
+      </div>
+      <div class="counts" id="counts"></div>
+    </header>
+    <nav class="tabs" role="tablist">
+      <a id="tab-panes" href="#panes" role="tab" aria-selected="true">Panes</a>
+      <a id="tab-box" href="#box" role="tab" aria-selected="false">Box</a>
+    </nav>
+  </div>
   <div id="banner"></div>
 
-  <div id="thumbs"><div class="empty">loading</div></div>
-  <h2 id="panes-head">panes</h2>
-  <div id="panes"><div class="empty">loading</div></div>
+  <div id="view-panes">
+    <div id="thumbs"><div class="empty">loading</div></div>
+    <div id="panes"><div class="empty">loading</div></div>
+  </div>
 
-  <h2>box</h2>
-  <div id="box"><div class="empty">loading</div></div>
-  <form id="compose">
-    <input id="compose-key" type="text" autocomplete="off" autocapitalize="off"
-           autocorrect="off" spellcheck="false" placeholder="key">
-    <select id="compose-state">
-      <option value="note">note</option>
-      <option value="working">working</option>
-      <option value="blocked">blocked</option>
-      <option value="done">done</option>
-      <option value="error">error</option>
-    </select>
-    <input id="compose-msg" type="text" autocomplete="off" autocapitalize="off"
-           autocorrect="off" spellcheck="false" placeholder="message">
-    <button id="compose-post">post to the box</button>
-  </form>
+  <div id="view-box">
+    <div id="box"><div class="empty">loading</div></div>
+    <form id="compose">
+      <input id="compose-key" type="text" autocomplete="off" autocapitalize="off"
+             autocorrect="off" spellcheck="false" placeholder="key">
+      <select id="compose-state">
+        <option value="note">note</option>
+        <option value="working">working</option>
+        <option value="blocked">blocked</option>
+        <option value="done">done</option>
+        <option value="error">error</option>
+      </select>
+      <input id="compose-msg" type="text" autocomplete="off" autocapitalize="off"
+             autocorrect="off" spellcheck="false" placeholder="message">
+      <button id="compose-post">post to the box</button>
+    </form>
+  </div>
 
   <div id="sheet">
     <div class="panel">
