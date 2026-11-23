@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,143 @@ func TestAskAnswerReachesTheDaemon(t *testing.T) {
 	}
 	if it := got.Items[1]; len(it.OptionIndexes) != 2 || it.Notes != "both halves" {
 		t.Fatalf("second item %+v", it)
+	}
+}
+
+// appScript is the page's script as the build carries it. The ask form is the
+// page's own, so the rules it keeps stay in the page, and a test reads them
+// where they live.
+func appScript(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read the page's script: %v", err)
+	}
+	return string(b)
+}
+
+// funcSource is one top level function's source, from its name to the closing
+// brace at column zero.
+func funcSource(t *testing.T, src, name string) string {
+	t.Helper()
+	at := strings.Index(src, "function "+name+"(")
+	if at < 0 {
+		t.Fatalf("no function %s in the page's script", name)
+	}
+	end := strings.Index(src[at:], "\n}")
+	if end < 0 {
+		t.Fatalf("function %s has no closing brace", name)
+	}
+	return src[at : at+end+2]
+}
+
+// TestAskAnswerCarriesOneQuestionsNote proves a note typed on one question
+// rides that question's item and no other: the socket sees the note once, on
+// the item the reader typed it under.
+func TestAskAnswerCarriesOneQuestionsNote(t *testing.T) {
+	dir := root(t, "main")
+	log := askSession(t, dir, "main", openAsk())
+	srv := httptest.NewServer(handler(Config{Session: "main", Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	const note = "the last release, not the trunk"
+	res := post(t, srv.URL+"/api/action?t=t", map[string]any{
+		"id":     "ask-answer",
+		"target": "a1",
+		"answer": map[string]any{"items": []map[string]any{
+			{"questionIndex": 0, "optionIndexes": []int{1}, "notes": note},
+			{"questionIndex": 1, "optionIndexes": []int{0, 1}},
+		}},
+	})
+	raw := body(t, res)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %s", res.StatusCode, raw)
+	}
+	var got ask.Answer
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("the page's reply is not an answer: %v: %s", err, raw)
+	}
+	if len(got.Items) != 2 {
+		t.Fatalf("%d items, want 2", len(got.Items))
+	}
+	if it := got.Items[0]; it.Notes != note || len(it.OptionIndexes) != 1 {
+		t.Fatalf("first item %+v", it)
+	}
+	if it := got.Items[1]; it.Notes != "" {
+		t.Fatalf("second item grew a note: %+v", it)
+	}
+
+	// The body the socket saw carries one notes field, the first item's.
+	var sent []wire.Msg
+	for _, m := range log.all() {
+		if m.Action == "ask-answer" {
+			sent = append(sent, m)
+		}
+	}
+	if len(sent) != 1 {
+		t.Fatalf("%d answers reached the socket, want 1", len(sent))
+	}
+	if n := strings.Count(string(sent[0].Res), `"notes":`); n != 1 {
+		t.Fatalf("the answer body carries %d notes fields, want 1: %s", n, sent[0].Res)
+	}
+	if !strings.Contains(string(sent[0].Res), `"notes":"`+note+`"`) {
+		t.Fatalf("the note missing from the answer body: %s", sent[0].Res)
+	}
+}
+
+// TestAskNoteIsTrimmedAndBlankIsOmitted proves the form sends the trimmed note
+// and leaves a blank one off the item whole. The daemon checks a note's length
+// and nothing else, so the page is where a blank note is stopped.
+func TestAskNoteIsTrimmedAndBlankIsOmitted(t *testing.T) {
+	body := funcSource(t, appScript(t), "entriesOf")
+	if !strings.Contains(body, "e.note.trim()") {
+		t.Fatalf("entriesOf does not trim the note:\n%s", body)
+	}
+	if !strings.Contains(body, "if (note) item.notes = note;") {
+		t.Fatalf("entriesOf puts a blank note on the item:\n%s", body)
+	}
+	field := funcSource(t, appScript(t), "askNote")
+	if !strings.Contains(field, `placeholder = "note for this question"`) {
+		t.Fatalf("the note field has no placeholder of its own:\n%s", field)
+	}
+}
+
+// TestAskNoteIsNotASendGate proves a note never answers a question: the gate
+// reads the picks and the text only, and typing a note never refreshes the send
+// control.
+func TestAskNoteIsNotASendGate(t *testing.T) {
+	src := appScript(t)
+	for _, name := range []string{"askAnswered", "askComplete"} {
+		if body := funcSource(t, src, name); strings.Contains(strings.ToLower(body), "note") {
+			t.Fatalf("%s reads a note, so a note would answer a question:\n%s", name, body)
+		}
+	}
+	field := funcSource(t, src, "askNote")
+	if strings.Contains(field, "refreshAskSend") {
+		t.Fatalf("typing a note touches the send control:\n%s", field)
+	}
+	// The daemon's own rule is the gate the page mirrors: an item that carries
+	// a note and no pick or text does not answer its question.
+	req := &ask.AnswerReq{Items: []ask.Item{
+		{QuestionIndex: 0, Notes: "a note"},
+		{QuestionIndex: 1, OptionIndexes: []int{0}},
+	}}
+	err := ask.ValidateAnswer(openAsk().Questions, req)
+	if err == nil {
+		t.Fatal("the daemon accepted a note as an answer")
+	}
+	if !strings.Contains(err.Error(), ask.CodeInvalidAnswer) {
+		t.Fatalf("refusal %q", err)
+	}
+}
+
+// TestAskNoteHidesInReadOnly proves a read-only page carries the question with
+// no note field: the field is appended under the read-only guard, so a page
+// that may not answer cannot take a note either.
+func TestAskNoteHidesInReadOnly(t *testing.T) {
+	q := funcSource(t, appScript(t), "askQuestion")
+	if !strings.Contains(q, "if (!askState.ro) block.append(askNote(i));") {
+		t.Fatalf("the note field is not behind the read-only guard:\n%s", q)
 	}
 }
 

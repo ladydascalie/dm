@@ -1726,7 +1726,7 @@ function syncAsk() {
     askState = {
       id: a.id,
       ask: a,
-      entries: (a.questions || []).map(() => ({ picks: [], text: "", open: new Set() })),
+      entries: (a.questions || []).map(() => ({ picks: [], text: "", note: "", open: new Set() })),
       err: "",
       done: "",
       ro,
@@ -1829,7 +1829,39 @@ function askQuestion(q, i) {
   (q.options || []).forEach((o, j) => opts.append(askOption(q, i, o, j, input)));
   block.append(opts);
   block.append(input);
+  // A read-only page carries no note field: the note is one of the controls a
+  // reader at the desk owns, so it leaves with send and decline.
+  if (!askState.ro) block.append(askNote(i));
   return block;
+}
+
+// askNote is one question's note: the line that shows the note the model will
+// read, and one input row under it. The note rides the answer item, so typing
+// here never touches the send control: an answer gates send, a note never
+// does. The line reads the trimmed note, because that is what the item sends.
+function askNote(i) {
+  const e = askState.entries[i];
+  const box = el("div", "ask-notebox");
+  const shown = el("div", "ask-note-shown");
+  const input = el("input", "ask-note");
+  input.type = "text";
+  input.autocomplete = "off";
+  input.autocapitalize = "off";
+  input.spellcheck = false;
+  input.placeholder = "note for this question";
+  input.value = e.note;
+  const paint = () => {
+    const note = e.note.trim();
+    shown.textContent = note ? "note: " + note : "";
+    shown.hidden = note === "";
+  };
+  input.addEventListener("input", () => {
+    e.note = input.value;
+    paint();
+  });
+  paint();
+  box.append(shown, input);
+  return box;
 }
 
 // askOption is one choice. A row is the tap target that picks it; the preview
@@ -1981,12 +2013,16 @@ async function answerAsk(cancel) {
 
 // entriesOf turns the form's answers into the daemon's items: one per
 // question, the picks and the custom text, and neither when the reader gave
-// none of that kind.
+// none of that kind. A note rides the item trimmed, and a blank one is left out
+// whole, so an item with no note is the body the store already expects and the
+// bridge prints no empty "user notes:" line.
 function entriesOf(at) {
   return at.entries.map((e, i) => {
     const item = { questionIndex: i, optionIndexes: e.picks };
     const text = e.text.trim();
     if (text) item.text = text;
+    const note = e.note.trim();
+    if (note) item.notes = note;
     return item;
   });
 }
