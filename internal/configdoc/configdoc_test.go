@@ -148,6 +148,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"dashboard-preview": `dashboard-preview 25`,
 		"palette-rows":      `palette-rows 12`,
 		"diff-command":      `diff-command "git diff --stat"`,
+		"web-addr":          `web-addr "100.71.227.52:8099"`,
 		"dashboard-layout":  `dashboard-layout "float"`,
 		"shelf-layout":      `shelf-layout "pane"`,
 		"shelf-size":        `shelf-size 35`,
@@ -208,6 +209,12 @@ func TestConfigNodesParse(t *testing.T) {
 	if got := cfg.DiffCommand(); got != "git diff --stat" {
 		t.Errorf("DiffCommand = %q, want %q", got, "git diff --stat")
 	}
+	if got := cfg.WebAddr(); got != "100.71.227.52:8099" {
+		t.Errorf("WebAddr = %q, want %q", got, "100.71.227.52:8099")
+	}
+	if !cfg.WebAddrSet() {
+		t.Error("WebAddrSet = false, want true")
+	}
 	if !cfg.FloatShadow() {
 		t.Error("FloatShadow = false, want true")
 	}
@@ -257,6 +264,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"dashboard-preview": "40",
 		"palette-rows":      "10",
 		"diff-command":      `"hunk diff"`,
+		"web-addr":          `"` + keymap.DefaultWebAddr + `"`,
 		"dashboard-layout":  `"float"`,
 		"shelf-layout":      `"centered"`,
 		"shelf-size":        "80",

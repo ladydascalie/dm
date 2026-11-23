@@ -77,6 +77,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder.",
 	},
 	{
+		Name:    "web-addr",
+		Value:   `a quoted host:port, as in "100.71.227.52:8099"`,
+		Default: `"` + keymap.DefaultWebAddr + `"`,
+		Desc:    "Set the host:port dm web listens on. It applies only when --addr is not passed, so an explicit flag always wins. An absent or empty node keeps the loopback default; a value that is not host:port is refused when the config loads.",
+	},
+	{
 		Name:    "dashboard-layout",
 		Value:   `"full" or "float"`,
 		Default: `"float"`,
@@ -181,7 +187,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, dashboard-layout, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, web-addr, dashboard-layout, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{

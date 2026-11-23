@@ -1370,6 +1370,84 @@ func TestConfigDiffCommandEmpty(t *testing.T) {
 	}
 }
 
+// TestConfigWebAddr reads the address dm web listens on: the node, the
+// built-in default an absent or empty node keeps, and the entries it accepts.
+func TestConfigWebAddr(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+		set  bool
+	}{
+		{"absent", `prefix "ctrl+b"`, DefaultWebAddr, false},
+		{"set", `web-addr "100.71.227.52:8099"`, "100.71.227.52:8099", true},
+		{"empty", `web-addr ""`, DefaultWebAddr, false},
+		{"wildcard", `web-addr ":8099"`, ":8099", true},
+		{"ipv6", `web-addr "[::1]:8099"`, "[::1]:8099", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.WebAddr(); got != c.want {
+				t.Fatalf("WebAddr() = %q, want %q", got, c.want)
+			}
+			if got := cfg.WebAddrSet(); got != c.set {
+				t.Fatalf("WebAddrSet() = %v, want %v", got, c.set)
+			}
+		})
+	}
+	if got := LoadDefault().WebAddr(); got != DefaultWebAddr {
+		t.Fatalf("LoadDefault().WebAddr() = %q, want %q", got, DefaultWebAddr)
+	}
+	if DefaultWebAddr != "127.0.0.1:8099" {
+		t.Fatalf("DefaultWebAddr = %q, want 127.0.0.1:8099", DefaultWebAddr)
+	}
+	if LoadDefault().WebAddrSet() {
+		t.Fatal("LoadDefault().WebAddrSet() = true, want false: the node is optional")
+	}
+}
+
+// TestConfigWebAddrRefused proves a value that is not host:port is refused at
+// parse time with the key named and the value quoted, and a second node is a
+// duplicate.
+func TestConfigWebAddrRefused(t *testing.T) {
+	for _, value := range []string{
+		"nonsense",
+		"127.0.0.1",
+		"127.0.0.1:",
+		"127.0.0.1:http",
+		"127.0.0.1:70000",
+		"::1:8099",
+	} {
+		src := `web-addr "` + value + `"`
+		_, err := parseConfig(src)
+		if err == nil {
+			t.Fatalf("parseConfig accepted %q", src)
+		}
+		if !strings.Contains(err.Error(), "web-addr") {
+			t.Fatalf("error = %q, want the node name", err)
+		}
+		if !strings.Contains(err.Error(), `"`+value+`"`) {
+			t.Fatalf("error = %q, want the value quoted", err)
+		}
+	}
+	if _, err := parseConfig("web-addr"); err == nil || !strings.Contains(err.Error(), "web-addr") {
+		t.Fatalf("error = %v, want the node name", err)
+	}
+	if _, err := parseConfig(`web-addr 8099`); err == nil || !strings.Contains(err.Error(), "web-addr") {
+		t.Fatalf("error = %v, want the node name", err)
+	}
+	if _, err := parseConfig("web-addr \"127.0.0.1:8099\"\nweb-addr \"127.0.0.1:8098\""); err == nil {
+		t.Fatal("parseConfig accepted two web-addr nodes")
+	}
+	if _, err := parseConfig(`web-addr ""` + "\n" + `web-addr "127.0.0.1:8098"`); err == nil {
+		t.Fatal("parseConfig accepted two web-addr nodes, the first empty")
+	}
+}
+
 // TestConfigDefaultFold proves the default fold setting: absent means unfolded,
 // "fold" means folded and "unfold" means unfolded.
 func TestConfigDefaultFold(t *testing.T) {
