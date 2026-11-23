@@ -34,7 +34,15 @@
     border-bottom: 1px solid var(--line);
   }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .counts { margin-left: auto; font-size: 12px; color: var(--dim); }
+  header .counts {
+    margin-left: auto; font-size: 12px; color: var(--dim);
+    min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
+  header .sheet-open {
+    flex: none;
+    background: none; border: 1px solid var(--line); color: var(--fg);
+    border-radius: 6px; padding: 4px 10px; font-size: 13px;
+  }
   #banner {
     display: none;
     margin: 10px 12px 0; padding: 8px 10px;
@@ -76,6 +84,77 @@
   .dot.note { background: var(--note); }
   .empty { padding: 12px; color: var(--dim); font-size: 13px; }
 
+  /* The box compose sits under the box: a blocked lane answered without the
+     pane's pty. */
+  #compose {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+    padding: 10px 12px;
+    border-top: 1px solid var(--line);
+  }
+  #compose input, #compose select {
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 10px; font-size: 15px; min-width: 0;
+  }
+  #compose #compose-msg, #compose button { grid-column: 1 / -1; }
+  #compose button {
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; font-size: 14px;
+  }
+
+  /* The actions sheet: full height, one thumb wide, dismissed by a tap on the
+     page behind it or by the back gesture. */
+  #sheet {
+    position: fixed; inset: 0; z-index: 6;
+    display: none;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #sheet.open { display: flex; justify-content: flex-end; }
+  #sheet .panel {
+    width: calc(100% - 56px); max-width: 380px; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    overflow: hidden;
+  }
+  #sheet .panel > header { position: static; }
+  #sheet .close {
+    margin-left: auto; background: none; border: 1px solid var(--line);
+    color: var(--fg); border-radius: 6px; padding: 4px 10px; font-size: 13px;
+  }
+  #sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #sheet-body h2 { margin: 16px 12px 6px; }
+  .targets {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 12px 8px; font-size: 12px; color: var(--dim);
+  }
+  .targets select {
+    flex: 1; min-width: 0;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 8px; font-size: 13px;
+  }
+  .cmd { border-top: 1px solid var(--line); }
+  .cmd > button, .cmd .cmd-label {
+    display: block; width: 100%; text-align: left;
+    background: none; border: 0; color: var(--fg);
+    font: inherit; font-size: 16px;
+    padding: 15px 12px; min-height: 52px;
+  }
+  .cmd .cmd-label { color: var(--dim); padding-bottom: 4px; min-height: 0; }
+  .cmd > button:active { background: var(--bg); }
+  .cmd > button.armed { color: var(--error); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 12px 12px; }
+  .chips button {
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 10px; font-size: 14px; min-height: 40px;
+  }
+  .chips button:active { border-color: var(--working); color: var(--working); }
+
   /* The terminal takes the whole screen once a pane is opened. */
   #pane {
     position: fixed; inset: 0; z-index: 5;
@@ -87,6 +166,36 @@
   #pane .close {
     margin-left: auto; background: none; border: 1px solid var(--line);
     color: var(--fg); border-radius: 6px; padding: 4px 10px; font-size: 13px;
+  }
+  /* The pane's own commands: one row, scrolled sideways at 320 points. */
+  #pane-actions {
+    display: flex; gap: 6px;
+    padding: 6px 8px;
+    overflow-x: auto;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  #pane-actions button {
+    flex: none;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; font-size: 13px; min-height: 36px;
+  }
+  #pane-actions button.armed { border-color: var(--error); color: var(--error); }
+  /* The strip names where the session stands and walks it. */
+  #strip {
+    display: flex; gap: 10px;
+    padding: 6px 8px;
+    overflow-x: auto;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  #strip .grp { display: flex; align-items: center; gap: 4px; flex: none; }
+  #strip .name { font-size: 12px; color: var(--dim); white-space: nowrap; }
+  #strip .name b { color: var(--fg); font-weight: 600; }
+  #strip button {
+    background: none; border: 1px solid var(--line); color: var(--fg);
+    border-radius: 6px; min-width: 34px; height: 32px; font-size: 15px;
   }
   #text {
     flex: 1; min-height: 0;
@@ -119,6 +228,7 @@
   <header>
     <h1 id="session">dm</h1>
     <span class="counts" id="counts"></span>
+    <button id="sheet-open" class="sheet-open">actions</button>
   </header>
   <div id="banner"></div>
 
@@ -127,6 +237,30 @@
 
   <h2>box</h2>
   <div id="box"><div class="empty">loading</div></div>
+  <form id="compose">
+    <input id="compose-key" type="text" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false" placeholder="key">
+    <select id="compose-state">
+      <option value="note">note</option>
+      <option value="working">working</option>
+      <option value="blocked">blocked</option>
+      <option value="done">done</option>
+      <option value="error">error</option>
+    </select>
+    <input id="compose-msg" type="text" autocomplete="off" autocapitalize="off"
+           autocorrect="off" spellcheck="false" placeholder="message">
+    <button id="compose-post">post to the box</button>
+  </form>
+
+  <div id="sheet">
+    <div class="panel">
+      <header>
+        <h1>actions</h1>
+        <button class="close" id="sheet-close">close</button>
+      </header>
+      <div id="sheet-body"><div class="empty">loading</div></div>
+    </div>
+  </div>
 
   <section id="pane">
     <header>
@@ -134,6 +268,19 @@
       <span class="state" id="pane-state"></span>
       <button class="close" id="pane-close">close</button>
     </header>
+    <div id="pane-actions"></div>
+    <div id="strip">
+      <span class="grp">
+        <button id="win-prev" title="previous window">‹</button>
+        <span class="name" id="strip-window"></span>
+        <button id="win-next" title="next window">›</button>
+      </span>
+      <span class="grp">
+        <button id="ws-prev" title="previous workspace">‹</button>
+        <span class="name" id="strip-workspace"></span>
+        <button id="ws-next" title="next workspace">›</button>
+      </span>
+    </div>
     <pre id="text"></pre>
     <div id="send">
       <input id="send-text" type="text" autocomplete="off" autocapitalize="off"
