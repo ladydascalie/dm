@@ -162,13 +162,16 @@ func (t *tui) draw() {
 		{p: &t.last.help, buf: &help, overlay: true},
 		{p: &t.last.sess, buf: &sess, overlay: true},
 		{p: &t.last.menu, buf: &menu, overlay: true},
-		{p: &t.last.rename, buf: &rename, overlay: true},
 		{p: &t.last.prompt, buf: &prompt, overlay: true},
 		{p: &t.last.lsw, buf: &lswBuf, overlay: true},
 	}
 	for i := range t.floats {
 		bands = append(bands, band{p: floatPaints[i], buf: &floatBufs[i], overlay: true})
 	}
+	// The prompt paints after the floats, not before them: the ask float owns
+	// the desk while a question is open, and a prompt for a note or a typed
+	// answer sat under it, taking keys nobody could see.
+	bands = append(bands, band{p: &t.last.rename, buf: &rename, overlay: true})
 	// paintedRows[i] holds the rows band i laid down this frame, filled in
 	// paint order, so a later band can ask what the bands under it wrote.
 	paintedRows := make([][]int, len(bands))
