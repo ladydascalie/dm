@@ -76,7 +76,10 @@ type paneProc struct {
 	// Both are guarded by mu.
 	flushTimer *time.Timer
 	flushGen   uint64
-	mode       vt.Modes
+	// picTimer holds the pending coalesced screen push for picture
+	// subscribers; nil when none is armed. Guarded by mu.
+	picTimer *time.Timer
+	mode     vt.Modes
 	// fg and bg are the terminal colours this pane answers OSC 10 and OSC 11
 	// with. The server sets them from the client's detection; guarded by mu.
 	fg, bg string
@@ -226,6 +229,11 @@ type subConn struct {
 	closed bool
 	writer sync.Once
 
+	// pics is true when the client asked for screens instead of bytes: a
+	// renderer that paints its own way has no use for the raw stream, so the
+	// pane drops the one and coalesces the other. Guarded by the pane's mu.
+	pics bool
+
 	// sendTimeout bounds one write to the socket; zero uses subSendTimeout.
 	// A field, not a package var, so a test's stand-in lives on its own conn.
 	sendTimeout time.Duration
@@ -269,6 +277,38 @@ func (s *subConn) popLocked() wire.Msg {
 	s.q = s.q[1:]
 	s.qbytes -= msgBytes(m)
 	return m
+}
+
+// sendPic queues one screen frame for a picture subscriber and reports whether
+// it took it. A picture subscriber is served a snapshot, not a backlog: a
+// screen frame still waiting for the socket gives way to the newer one, and a
+// frame with anything else queued ahead of it is dropped. A renderer that
+// cannot keep up therefore skips screens instead of growing a queue or being
+// evicted for them; the next window paints what the pane shows then.
+func (s *subConn) sendPic(m wire.Msg) bool {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return false
+	}
+	if len(s.q) > 0 {
+		if len(s.q) != 1 || s.q[0].Type != "screen" {
+			s.mu.Unlock()
+			return false
+		}
+		s.qbytes -= msgBytes(s.q[0])
+	} else {
+		s.q = append(s.q, wire.Msg{})
+	}
+	s.q[len(s.q)-1] = m
+	s.qbytes += msgBytes(m)
+	if s.cond == nil {
+		s.cond = sync.NewCond(&s.mu)
+	}
+	s.writer.Do(func() { go s.writeLoop() })
+	s.cond.Broadcast()
+	s.mu.Unlock()
+	return true
 }
 
 // writeLoop is the one goroutine that owns a subscriber's socket. It takes
@@ -384,6 +424,11 @@ const memHeadroom = 32 << 20
 // next rune proves it complete, so a program that writes once and waits would
 // otherwise leave the last character off the grid until it writes again.
 const flushIdle = 16 * time.Millisecond
+
+// picWindow bounds how often a picture subscriber is served. A burst of output
+// coalesces into one screen, so a renderer paints at most ten frames a second
+// and never meets a backlog.
+const picWindow = 100 * time.Millisecond
 
 // scrollRing is the pane's history: a circular buffer over a fixed budget.
 // Writing wraps in place, so a burst never grows the daemon's heap and no trim
@@ -949,6 +994,7 @@ func (p *paneProc) publishLocked(b []byte) {
 	p.ring.Write(b)
 	p.produced += int64(len(b))
 	p.broadcastLocked(wire.Msg{Type: "bytes", Data: b})
+	p.schedulePicsLocked()
 	p.armFlushLocked()
 	m := p.vt.Grid().Modes()
 	if p.vt.Grid().AltTransitions() != oldTransitions {
@@ -1034,7 +1080,57 @@ func (p *paneProc) subEvictions() int64 { return p.subEvicted.Load() }
 
 func (p *paneProc) broadcastLocked(m wire.Msg) {
 	for sc := range p.subs {
+		if sc.pics && m.Type == "bytes" {
+			continue
+		}
 		_ = sc.send(m)
+	}
+}
+
+// schedulePicsLocked arms the coalesced screen push for picture subscribers.
+// The caller holds p.mu. A push already pending answers every burst inside the
+// window, so the timer is the rate limit and not a queue, and a pane nobody
+// watches for pictures arms nothing.
+func (p *paneProc) schedulePicsLocked() {
+	if p.picTimer != nil {
+		return
+	}
+	if len(p.picSubsLocked()) == 0 {
+		return
+	}
+	p.picTimer = time.AfterFunc(picWindow, p.pushPics)
+}
+
+// picSubsLocked lists the subscribers that want screens. The caller holds p.mu.
+func (p *paneProc) picSubsLocked() []*subConn {
+	out := make([]*subConn, 0, len(p.subs))
+	for sc := range p.subs {
+		if sc.pics {
+			out = append(out, sc)
+		}
+	}
+	return out
+}
+
+// pushPics sends one screen to every picture subscriber. It takes the snapshot
+// under the pane lock and hands it out off it, so a slow renderer cannot park
+// the pane's pty reader. A cluster the parser still holds belongs on the
+// picture, so it is flushed first, the same way the quiet timer would.
+func (p *paneProc) pushPics() {
+	p.mu.Lock()
+	p.picTimer = nil
+	subs := p.picSubsLocked()
+	if len(subs) == 0 {
+		p.mu.Unlock()
+		return
+	}
+	p.vt.Flush()
+	snap := p.vt.Snapshot()
+	alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
+	p.mu.Unlock()
+	m := wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)}
+	for _, sc := range subs {
+		_ = sc.sendPic(m)
 	}
 }
 
@@ -1395,6 +1491,22 @@ func (p *paneProc) serve(c net.Conn) {
 				go p.pollWaitChildren(demoted)
 			}
 			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)})
+		case "screen-sub":
+			// A renderer that wants pictures, not bytes. It takes the pane's
+			// visible screen now, and a coalesced one after every burst of
+			// output, so it never polls and never meets a backlog. The frames
+			// are queued under the lock, the way every broadcast is, so the
+			// first picture cannot land after a newer one.
+			p.mu.Lock()
+			sc.pics = true
+			// A cluster the parser still holds belongs on the first picture,
+			// so flush it the way the quiet timer would.
+			p.vt.Flush()
+			snap := p.vt.Snapshot()
+			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
+			_ = sc.send(wire.Msg{Type: "screen", VTSnap: snap, Res: modeRes(alt, mouse, paste)})
+			_ = sc.send(wire.Msg{Type: "resp", ID: m.ID, OK: true})
+			p.mu.Unlock()
 		case "yank":
 			p.mu.Lock()
 			tail, cols, h, ok := p.yankTailLocked()
