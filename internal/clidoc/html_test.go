@@ -280,8 +280,14 @@ func TestLLMsTableRowsCarryTheExtraForms(t *testing.T) {
 	for _, c := range cliCommands {
 		extra += len(c.extra)
 	}
-	if len(rows) != len(cliCommands)+extra {
-		t.Errorf("llmsTableRows = %d rows, want %d commands + %d extras", len(rows), len(cliCommands), extra)
+	// A grouped command rides its group's row, so it costs no row of its own.
+	grouped := 0
+	for _, g := range llmsCommandGroups {
+		grouped += len(g.names) - 1
+	}
+	if len(rows) != len(cliCommands)+extra-grouped {
+		t.Errorf("llmsTableRows = %d rows, want %d commands + %d extras - %d grouped",
+			len(rows), len(cliCommands), extra, grouped)
 	}
 }
 

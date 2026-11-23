@@ -36,7 +36,7 @@ carry many real edges, and the generated page counts every one of them. The two
 | Layer | May import | Packages |
 | --- | --- | --- |
 | entry | entry, services, presentation, domain, leaf, tooling | `dm`, `cmd/dm-wasm`, `cmd/esctest-harness` |
-| services | services, presentation, domain, leaf | `internal/cli`, `internal/client`, `internal/pane`, `internal/proxy`, `internal/server`, `internal/transport`, `internal/websession` |
+| services | services, presentation, domain, leaf | `internal/cli`, `internal/client`, `internal/pane`, `internal/proxy`, `internal/server`, `internal/transport`, `internal/websession`, `internal/webui` |
 | presentation | presentation, domain, leaf | `internal/boxview`, `internal/clidoc`, `internal/configdoc`, `internal/esctest`, `internal/keymapview`, `internal/palette`, `internal/panel`, `internal/rail`, `internal/segment`, `internal/shot`, `internal/switcher`, `internal/testutil`, `internal/ui` |
 | domain | domain, leaf | `internal/box`, `internal/keymap`, `internal/layout`, `internal/layoutdoc`, `internal/notify`, `internal/osc`, `internal/secrets`, `internal/session`, `internal/theme`, `internal/vt`, `internal/wire` |
 | leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/lesson`, `internal/paths`, `internal/ptyspawn`, `internal/redact`, `internal/webshell`, `internal/wlabel` |
@@ -56,11 +56,12 @@ and nothing native. Entry may import anything, so its row lists the whole stack.
 **services** own the things that block. `internal/server` accepts the socket,
 `internal/pane` owns a child process and a pty, `internal/client` renders into a
 terminal, `internal/cli` parses the command line, `internal/transport` dials the
-session socket, `internal/proxy` serves the loopback capability endpoint. No
-package below entry imports a service. A service may not import entry either:
-`main.go:1` and `cmd/esctest-harness/main.go:5` are `package main`, so the go
-tool already refuses that import, and the model repeats the ban so a future
-entry point that is not a program keeps it.
+session socket, `internal/proxy` serves the loopback capability endpoint, and
+`internal/webui` serves the phone page. No package below entry imports a
+service. A service may not import entry either: `main.go:1` and
+`cmd/esctest-harness/main.go:5` are `package main`, so the go tool already
+refuses that import, and the model repeats the ban so a future entry point that
+is not a program keeps it.
 
 **presentation** turns state into output. Seven packages draw the screen:
 `internal/panel`, `internal/rail`, `internal/switcher`, `internal/boxview`,

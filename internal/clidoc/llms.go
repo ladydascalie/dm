@@ -99,6 +99,22 @@ type llmsTableRow struct {
 func llmsTableRows() []llmsTableRow {
 	var rows []llmsTableRow
 	for _, c := range cliCommands {
+		if g, ok := llmsCommandGroupOf(c.name); ok {
+			if c.name != g.names[0] {
+				continue // this name rides its group's row
+			}
+			names := make([]string, 0, len(g.names))
+			for _, n := range g.names {
+				names = append(names, "dm "+n)
+			}
+			rows = append(rows, llmsTableRow{
+				line:    strings.Join(names, ", "),
+				args:    c.args,
+				summary: g.summary,
+				example: llmsExample(c),
+			})
+			continue
+		}
 		summary := c.summary
 		if len(c.aliases) > 0 {
 			summary += " (alias: " + strings.Join(c.aliases, ", ") + ")"
@@ -127,6 +143,32 @@ func llmsTableRows() []llmsTableRow {
 		}
 	}
 	return rows
+}
+
+// llmsCommandGroup is one packed command row: the names it carries, in table
+// order, and the summary the row prints. The first name carries the example.
+type llmsCommandGroup struct {
+	names   []string
+	summary string
+}
+
+// llmsCommandGroups packs commands that read as one row. The command table costs
+// one line per row and the page has a one-pass budget, so near neighbours share
+// a row the way the action table's do.
+var llmsCommandGroups = []llmsCommandGroup{
+	{names: []string{"next-pane", "prev-pane"}, summary: "focus the next or previous pane"},
+}
+
+// llmsCommandGroupOf returns the group a command belongs to.
+func llmsCommandGroupOf(name string) (llmsCommandGroup, bool) {
+	for _, g := range llmsCommandGroups {
+		for _, n := range g.names {
+			if n == name {
+				return g, true
+			}
+		}
+	}
+	return llmsCommandGroup{}, false
 }
 
 // llmsCell escapes a table cell. A pipe would end the cell, so it is escaped.

@@ -62,8 +62,8 @@ func TestLLMSCommandWritesFile(t *testing.T) {
 // one pass.
 func TestLLMSTextStaysOnePass(t *testing.T) {
 	t.Parallel()
-	if n := strings.Count(clidoc.LLMsText(), "\n"); n >= 484 {
-		t.Fatalf("llms.txt is %d lines, want under 484", n)
+	if n := strings.Count(clidoc.LLMsText(), "\n"); n >= 480 {
+		t.Fatalf("llms.txt is %d lines, want under 480", n)
 	}
 }
 

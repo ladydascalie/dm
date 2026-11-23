@@ -115,7 +115,7 @@ var cliCommands = []cliCommand{
 			{"s", "name", "session name"},
 			{"addr", "host:port", "listen address"},
 			{"token", "t", "access token, generated when empty"},
-			{"read-only", "", "refuse keys and messages"},
+			{"read-only", "", "refuse keys, messages and actions"},
 		},
 		example: "dm web --addr 100.71.227.52:8099",
 		group:   groupSessions,

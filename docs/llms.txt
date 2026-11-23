@@ -32,8 +32,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm write-to` | `<pane> --msg T` | type text into a pane (--enter to accept) (alias: write) | `dm write-to w1p1 --msg 'ls -la' --enter` |
 | `dm split` | `<pane> --dir D` | split a pane: left right up down | `dm split w1p1 --dir right` |
 | `dm focus` | `<pane>` | focus a pane | `dm focus w1p2` |
-| `dm next-pane` | `-` | focus the next pane | `dm next-pane` |
-| `dm prev-pane` | `-` | focus the previous pane | `dm prev-pane` |
+| `dm next-pane, dm prev-pane` | `-` | focus the next or previous pane | `dm next-pane` |
 | `dm plugin list` | `-` | list the plugins the config declares | `dm plugin list` |
 | `dm plugin start` | `<name> [--split \| --window] [--target <pane>]` | open a plugin pane | `dm plugin start <name> [--split \| --window] [--target <pane>]` |
 | `dm rename-workspace` | `<ws> <name>` | rename a workspace | `dm rename-workspace s1 build` |
