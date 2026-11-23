@@ -398,6 +398,41 @@
     color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
     min-height: 44px; min-width: 44px;
   }
+  /* The view switch: transcript, activity, screen, one tap apart. It is absent
+     for a pane whose session cannot be read, because the screen is then the
+     only honest view. */
+  #views {
+    display: none;
+    padding: 6px 8px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  #views.show { display: block; }
+  #views .seg {
+    display: flex; overflow: hidden;
+    background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  #views .seg a {
+    flex: 1 1 0; min-height: 44px; min-width: 44px;
+    display: flex; align-items: center; justify-content: center;
+    border-left: 1px solid var(--line);
+    font-size: 12px; letter-spacing: .04em;
+    color: var(--dim); text-decoration: none;
+  }
+  #views .seg a:first-child { border-left: 0; }
+  #views .seg a[aria-selected="true"] {
+    background: var(--working); color: #0b1013; font-weight: 650;
+  }
+  /* The one line that says why the screen is showing instead of the session. */
+  #pane-note {
+    display: none;
+    padding: 8px 12px;
+    font-size: 12px; color: var(--dim);
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  #pane-note.show { display: block; }
   /* The pane's own commands: three by two, so all six read at 320 points with
      no sideways scrolling. The cells keep the order the list is built in. */
   #pane-actions {
@@ -453,14 +488,140 @@
     border: 1px solid var(--line); border-radius: 6px;
   }
   #latest.show { display: inline-flex; }
+  /* One of the three views is on screen at a time, and each one scrolls on its
+     own, so the follow rule reads the box the reader is actually in. */
+  #screen > .view {
+    display: none;
+    flex: 1 1 auto; min-width: 0; min-height: 0;
+    overflow: auto; -webkit-overflow-scrolling: touch;
+  }
+  #screen.show-screen #text,
+  #screen.show-transcript #transcript,
+  #screen.show-activity #activity { display: block; }
   #text {
-    flex: 1; min-width: 0; min-height: 0;
     margin: 0;
     padding: 8px 10px;
-    overflow: auto;
     font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  /* The transcript: a turn's ask in a quoted block, its steps in order, the
+     unfinished step as a live row, and the turn's own numbers at its foot. */
+  #transcript .body { padding: 12px 12px 18px; }
+  .turn-hd {
+    display: flex; align-items: baseline; gap: 8px;
+    margin: 2px 0 8px;
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim);
+  }
+  .turn-hd b { color: var(--fg); font-weight: 650; }
+  .turn-hd .tnum { margin-left: auto; }
+  .you {
+    border-left: 2px solid var(--accent-0);
+    background: #171a24;
+    padding: 9px 11px;
+    border-radius: 0 9px 9px 0;
+    margin: 0 0 12px;
+    font-size: 14px; color: #cfd8e0;
+    overflow-wrap: anywhere;
+  }
+  .say {
+    margin: 0 0 12px;
+    font-size: 14.5px; line-height: 1.55; color: #cfd8e0;
+    overflow-wrap: anywhere;
+  }
+  .thinkrow {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--dim);
+  }
+  .thinkrow .chev { font-size: 10px; }
+  .thinkrow b { font-weight: 500; }
+  /* A step that carries output is one tap target, so it keeps the 44 it needs
+     even when its own line is shorter. */
+  .step {
+    display: grid; grid-template-columns: 18px minmax(0, 1fr) auto;
+    gap: 1px 9px; align-items: baseline;
+    width: 100%; padding: 7px 0;
+    background: none; border: 0; border-top: 1px solid var(--line);
+    color: inherit; font: inherit; text-align: left;
+  }
+  button.step { min-height: 44px; align-content: center; }
+  .step .ic { font-size: 12px; color: var(--dim); text-align: center; }
+  .step .t {
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #a9b8c6;
+    min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .step .t b { color: var(--accent-1); font-weight: 500; }
+  .step .dur { font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .step .out {
+    grid-column: 2 / -1; margin: 4px 0 2px;
+    font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--dim);
+    background: #0c1013; border: 1px solid var(--line); border-radius: 7px;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 116px; overflow: hidden;
+  }
+  .step .out .more { color: var(--dim); opacity: .8; }
+  .step.bad .t { color: #e5b3ae; }
+  .step.bad .ic, .step.bad .dur { color: var(--error); }
+  .step.bad .out { border-color: #43292c; color: #d8a7a2; }
+  .step.open .out { max-height: none; }
+  .live {
+    display: flex; align-items: baseline; gap: 9px;
+    padding: 10px 0 2px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--working);
+  }
+  .live b { font-weight: 650; }
+  .live .when { margin-left: auto; font-size: 11px; color: var(--dim); }
+  .spin {
+    width: 13px; height: 13px; border-radius: 50%; flex: none;
+    border: 2px solid rgba(99,169,255,.25); border-top-color: var(--working);
+    animation: sp 1s linear infinite;
+    align-self: center;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .turnft {
+    display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+    margin: 10px 0 22px; padding-top: 9px;
+    border-top: 1px solid var(--line);
+    font-size: 11px; color: var(--dim);
+  }
+  .turnft b { color: var(--fg); font-weight: 500; }
+  .turnft .bad { color: var(--error); }
+
+  /* The activity: the same steps, one row each, newest first, with a divider
+     where a new turn starts. No prose, so the page answers "is it stuck". */
+  .act {
+    display: grid; grid-template-columns: 16px minmax(0, 1fr) auto;
+    gap: 2px 10px; align-items: baseline;
+    padding: 9px 12px;
+    border-top: 1px solid var(--line);
+  }
+  .act .ic { font-size: 12px; color: var(--dim); text-align: center; }
+  .act .t {
+    font-size: 13px; color: #b9c6d2;
+    min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .act .t b { color: var(--accent-1); font-weight: 500; }
+  .act .dur { font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .act .sub {
+    grid-column: 2 / -1;
+    font-size: 11.5px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .act.fail .ic, .act.fail .dur { color: var(--error); }
+  .act.now .ic, .act.now .dur { color: var(--working); }
+  .actsplit {
+    padding: 8px 12px;
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim);
+    background: var(--panel);
+    border-top: 1px solid var(--line);
   }
   #send {
     display: flex; gap: 6px; padding: 8px;
@@ -537,6 +698,11 @@
       <span class="state" id="pane-state"><b id="pane-state-word"></b><span id="pane-state-msg"></span></span>
       <button class="close" id="pane-close">close</button>
     </header>
+    <div id="views"><div class="seg" role="tablist">
+      <a id="view-transcript" role="tab" aria-selected="true">transcript</a>
+      <a id="view-activity" role="tab" aria-selected="false">activity</a>
+      <a id="view-screen" role="tab" aria-selected="false">screen</a>
+    </div></div>
     <div id="pane-actions"></div>
     <div id="strip">
       <span class="lbl">window</span>
@@ -548,8 +714,11 @@
       <span class="name" id="strip-workspace"></span>
       <button id="ws-next" title="next workspace">›</button>
     </div>
-    <div id="screen">
-      <pre id="text"></pre>
+    <div id="pane-note"></div>
+    <div id="screen" class="show-screen">
+      <pre id="text" class="view"></pre>
+      <div id="transcript" class="view"></div>
+      <div id="activity" class="view"></div>
       <button id="latest" title="jump to the latest output">latest</button>
     </div>
     <div id="send">
