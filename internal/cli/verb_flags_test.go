@@ -115,6 +115,7 @@ var flagDefaults = map[string]string{
 	"limit": "0", "after": "-1", "timeout": "5m0s", "dry-run": "false",
 	"all": "false", "force": "false", "trust": "false", "action-json": "",
 	"argv": "", "split": "false", "window": "false", "target": "",
+	"addr": "127.0.0.1:8099", "token": "", "read-only": "false",
 }
 
 // TestFlagDefaultsSurvivePerVerbRegistration proves the per-verb sets keep
@@ -154,6 +155,7 @@ var fieldFlag = map[string]string{
 	"to": "to", "envs": "env",
 	"argv":        "argv",
 	"pluginSplit": "split", "pluginWindow": "window", "target": "target",
+	"addr": "addr", "token": "token", "readOnly": "read-only",
 }
 
 // cmdFlagsMethods are the methods the walk recurses into. parse is missing on

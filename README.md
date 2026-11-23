@@ -1,7 +1,7 @@
 # dm
 
 A small, durable terminal multiplexer. One static Go binary that carries the
-server, the pane harness, the TUI client and the CLI.
+server, the pane harness, the TUI client, the CLI and the phone page.
 
 Prototype status: M1 works end to end. Splits, windows, workspaces, OSC 7501
 agent status, durable sessions, a JSON RPC and scrollback search are
@@ -67,6 +67,7 @@ internal/pane        the pane daemon: PTY, VT screen, status and output ring
 internal/session     the state file model, the id scheme and its migration
 internal/wire        the socket wire contract
 internal/transport   the client side of the session socket
+internal/webui       the phone page: HTTP over the same socket primitives
 internal/box         the message box types, bounds and schema
 internal/osc         the OSC 7501 status filter and parser
 internal/notify      the desktop notification policy
@@ -102,6 +103,7 @@ dm man                  # the man page, docs/dm.1
 dm llms                 # the one-pass teaching document, docs/llms.txt
 dm html                 # the same surface as a page, opened in the browser
 dm html -o - > dm.html  # or write the page to stdout
+dm web                  # serve the session to a browser; see Web below
 ```
 
 Keys inside the TUI. `ctrl+b` arms the prefix and shows the action box,
@@ -172,6 +174,56 @@ sends `resize-split` with the two panes beside the divider and the ratio, at
 most every 30 ms plus a final call on release. Both sides keep at least three
 cells. A divider always belongs to dm, even when a pane claims the mouse: the
 app's PTY covers only its content rect, so the border press is not its event.
+
+## Web
+
+`dm web` serves a session to a browser. The page is a view of the socket
+contract, not a terminal: it reads panes through the same actions the CLI sends,
+so it owns no state, and it never resizes a pane. The page is embedded in the
+binary with no build step and no external asset. The session needs no attached
+client, so a phone can watch a desk nobody sits at.
+
+```sh
+dm web                                        # loopback only
+dm web --addr 100.71.227.52:8099              # the tailnet address a phone reaches
+dm web --addr 100.71.227.52:8099 --read-only  # no input, the box or actions
+```
+
+The token is the whole access model. `dm web` prints the URL with the token on
+it, and the page trades that token for a cookie on the first load. Pass `--token`
+to set one; leave it empty and a token is generated. A listener that is not
+loopback also prints the link as a QR code, so a phone scans it instead of
+typing it.
+
+The page has five parts:
+
+- the fleet: every pane in the session with its agent status, message, branch
+  and folder, the panes that want a decision first
+- the box: the newest entries, with a compose row that posts a key, a state and
+  a message through `msg-post`
+- one pane's text: the screen the pane printed, wrapped at the phone's width and
+  polled by text revision, with an input row that types into the pane, an action
+  row for split, zoom, next pane, rename and close, and a strip that walks the
+  window and the workspace
+- the action sheet: one large row per command, from the catalogue the page
+  fetches once, with a target picker for panes, windows and workspaces, the split
+  sites and the layout presets. A command that destroys something asks once,
+  naming its target
+- the picture grid: the active window's panes painted as blocks in the desk's
+  arrangement, one stream for every tile; a pane daemon that cannot answer
+  `screen-sub` paints `no picture` instead of a blank tile. A tile is a link
+  only when every tile is at least 44 points each way; a grid too dense for that
+  is a picture, and the pane list below it stays the way in
+
+A hidden page makes no request, arms no timer and acts on no reply: the polls
+stop, the picture stream closes, a rotation's repaint is cleared, and a reply
+that lands after the hide changes nothing until the tab comes back. A command
+that fails paints the daemon's message in the banner and changes nothing else.
+
+`--read-only` refuses every write: pane input, the box compose and every action.
+The page hides those commands: the action sheet, the pane action row, the send
+row and the compose. Everything that only reads stays: the fleet, the box, the
+pane text with its window strip, and the picture grid.
 
 ## Layouts
 

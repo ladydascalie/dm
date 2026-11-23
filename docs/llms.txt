@@ -20,6 +20,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm attach` | `[-s name] [-L layout [--force]]` | attach to a session, creating it if needed (alias: a) | `dm attach -s work` |
 | `dm new` | `[-s name] [-L layout [--force]]` | start a session without attaching | `dm new -s work` |
 | `dm ls` | `-` | list sessions with pane counts and project (alias: list-sessions) | `dm ls` |
+| `dm web` | `[-s name] [--addr host:port] [--token t] [--read-only]` | serve the session to a browser, for a phone on your tailnet | `dm web --addr 100.71.227.52:8099` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
 | `dm reset` | `[-s name \| --all] --force` | discard a session and its panes for a full restart | `dm reset -s work --force` |
@@ -31,8 +32,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm write-to` | `<pane> --msg T` | type text into a pane (--enter to accept) (alias: write) | `dm write-to w1p1 --msg 'ls -la' --enter` |
 | `dm split` | `<pane> --dir D` | split a pane: left right up down | `dm split w1p1 --dir right` |
 | `dm focus` | `<pane>` | focus a pane | `dm focus w1p2` |
-| `dm next-pane` | `-` | focus the next pane | `dm next-pane` |
-| `dm prev-pane` | `-` | focus the previous pane | `dm prev-pane` |
+| `dm next-pane, dm prev-pane` | `-` | focus the next or previous pane | `dm next-pane` |
 | `dm plugin list` | `-` | list the plugins the config declares | `dm plugin list` |
 | `dm plugin start` | `<name> [--split \| --window] [--target <pane>]` | open a plugin pane | `dm plugin start <name> [--split \| --window] [--target <pane>]` |
 | `dm rename-workspace` | `<ws> <name>` | rename a workspace | `dm rename-workspace s1 build` |

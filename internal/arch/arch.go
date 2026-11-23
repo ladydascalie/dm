@@ -52,6 +52,7 @@ var Layers = []Layer{
 			"dm/internal/server",
 			"dm/internal/transport",
 			"dm/internal/websession",
+			"dm/internal/webui",
 		},
 		MayImport: []string{"services", "presentation", "domain", "leaf"},
 	},
