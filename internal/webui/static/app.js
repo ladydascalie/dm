@@ -158,6 +158,7 @@ function paintFleet(f) {
     if (!f.panes.some((p) => p.id === pane.id)) closePane();
     else {
       renderPaneChrome();
+      syncAsk();
       // A pane the fleet now calls an agent may have written its first session
       // line since the last try, so the page asks again rather than staying on
       // the screen for good.
@@ -485,6 +486,14 @@ function paneRow(p) {
     st.append(document.createTextNode(state));
     title.append(st);
   }
+  // A pane waiting on the reader says so beside its own state: a question is
+  // work standing still, not work in progress.
+  if (p.ask) {
+    const q = el("span", "state blocked");
+    q.append(el("span", "dot blocked"));
+    q.append(document.createTextNode("question"));
+    title.append(q);
+  }
   row.append(title);
 
   // The facts, each printed once: the id unless it is the name above, the
@@ -690,9 +699,12 @@ function closeSheet() {
 
 // renderSheet paints the rows in the order the server sent them, with one
 // target picker per kind above the group that needs one.
-function renderSheet(rows) {
+function renderSheet(all) {
   const body = $("sheet-body");
   body.textContent = "";
+  // A row that can name no target is a tap with nothing behind it, so an
+  // ask-answer with no open ask is left out rather than offered empty.
+  const rows = all.filter((c) => c.id !== "ask-answer" || targetOptions("ask").length > 0);
   let group = "";
   for (const cmd of rows) {
     if (cmd.group !== group) {
@@ -728,9 +740,14 @@ function targetPicker(kind) {
 }
 
 // targetOptions lists the ids of one kind from the fleet, so the sheet names a
-// real pane, window or workspace and never a guess.
+// real pane, window, workspace or ask and never a guess.
 function targetOptions(kind) {
   const panes = (fleet && fleet.panes) || [];
+  if (kind === "ask") {
+    // The label names the pane that asked, which is how a reader tells two
+    // open questions apart.
+    return ((fleet && fleet.ask) || []).map((a) => ({ value: a.id, label: a.id + "  " + a.pane }));
+  }
   if (kind === "pane") {
     return panes.map((p) => {
       // One rule for the label: the id alone when it is the only name.
@@ -756,6 +773,12 @@ function ensureTarget(kind) {
 }
 
 function defaultTarget(kind) {
+  if (kind === "ask") {
+    // The open pane's own question first, then the oldest one listed.
+    const asks = (fleet && fleet.ask) || [];
+    const own = pane && asks.find((a) => a.pane === pane.id);
+    return (own || asks[0] || {}).id || "";
+  }
   const panes = (fleet && fleet.panes) || [];
   const at = panes.find((p) => p.focus) || panes.find((p) => pane && p.id === pane.id) || panes[0];
   if (!at) return "";
@@ -796,6 +819,15 @@ async function sheetSend(btn, cmd, extra) {
     // The box group points at the compose form rather than a second one.
     dismissSheet();
     focusCompose();
+    return;
+  }
+  if (cmd.id === "ask-answer") {
+    // An answer is a form, so the row opens the pane whose question it names
+    // rather than sending an answer nobody wrote.
+    const id = ensureTarget("ask");
+    const a = ((fleet && fleet.ask) || []).find((x) => x.id === id);
+    dismissSheet();
+    if (a) location.hash = paneHash(a.pane);
     return;
   }
   const body = { id: cmd.id };
@@ -998,6 +1030,7 @@ async function openPane(id, view) {
   $("send").style.display = fleet && fleet.readOnly ? "none" : "";
   setPaneState("", "");
   renderPaneChrome();
+  syncAsk();
   renderViewChrome();
   markFollow();
   // A pane with no session has nothing to read. The screen is then the whole
@@ -1639,6 +1672,8 @@ function closePane(updateHash = true) {
   pane = null;
   disarm();
   for (const box of ["text", "transcript", "activity"]) $(box).textContent = "";
+  askState = null;
+  paintAsk();
   $("views").classList.remove("show");
   $("pane-note").classList.remove("show");
   markFollow();
@@ -1648,6 +1683,312 @@ function closePane(updateHash = true) {
   if (updateHash) {
     history.replaceState(null, "", location.pathname + location.search + "#" + tab);
   }
+}
+
+// --- the ask form --------------------------------------------------------
+//
+// A pane whose agent asked a question wears the form above its views: one block
+// per question, the options as rows, a field for something else, and the two
+// answers the daemon takes, send and decline. The form is the pane's own, so it
+// is drawn only while the pane it belongs to is open.
+
+// askState is the form on screen: the ask it belongs to, one entry per
+// question, the preview rows the reader opened, the refusal a refused answer
+// left, and whether this page already answered it. It outlives a poll, so a
+// reader's typing is not lost while the fleet refreshes.
+let askState = null;
+
+// openAskFor is the question set the fleet lists for one pane. The snapshot
+// lists an answered ask until the agent closes it, and publishes no answer, so
+// this page treats it as open until it disappears or the daemon refuses.
+function openAskFor(id) {
+  const asks = (fleet && fleet.ask) || [];
+  return asks.find((a) => a.pane === id) || null;
+}
+
+// syncAsk keeps the form in step with the fleet. A poll that changes no ask
+// repaints nothing but the send control, so an open preview and a typed half
+// answer stay put.
+function syncAsk() {
+  if (!pane) {
+    askState = null;
+    paintAsk();
+    return;
+  }
+  const a = openAskFor(pane.id);
+  if (!a) {
+    askState = null;
+    paintAsk();
+    return;
+  }
+  const ro = !!(fleet && fleet.readOnly);
+  if (!askState || askState.id !== a.id) {
+    askState = {
+      id: a.id,
+      ask: a,
+      entries: (a.questions || []).map(() => ({ picks: [], text: "", open: new Set() })),
+      err: "",
+      done: "",
+      ro,
+    };
+    paintAsk();
+    return;
+  }
+  askState.ask = a;
+  if (askState.ro !== ro) {
+    askState.ro = ro;
+    paintAsk();
+    return;
+  }
+  refreshAskSend();
+}
+
+// askAnswered is the daemon's rule for one question said out loud: a
+// multi-select needs one pick or text, a single select needs exactly one of
+// them. The send control is disabled until every question meets it.
+function askAnswered(q, e) {
+  const picks = e.picks.length;
+  const text = e.text.trim() !== "";
+  if (q.multiSelect) return picks > 0 || text;
+  return (picks === 1) !== text;
+}
+
+function askComplete() {
+  if (!askState) return false;
+  const qs = askState.ask.questions || [];
+  return qs.every((q, i) => askAnswered(q, askState.entries[i]));
+}
+
+// refreshAskSend settles the one control the answers gate.
+function refreshAskSend() {
+  const btn = $("ask-send");
+  if (btn) btn.disabled = !askComplete();
+}
+
+// paintAsk rebuilds the form from the state on hand. It runs when the ask
+// changes, when a refusal lands and when an answer settles, never on a poll
+// that only moves the clock.
+function paintAsk() {
+  const box = $("ask");
+  box.textContent = "";
+  const a = askState && askState.ask;
+  box.classList.toggle("show", !!a);
+  if (!a) return;
+  const wrap = el("div", "ask");
+  const hd = el("div", "ask-hd");
+  hd.append(el("b", "", "asks you"));
+  hd.append(el("span", "", "a question"));
+  hd.append(el("span", "ago", agoOf(a.at)));
+  wrap.append(hd);
+  (a.questions || []).forEach((q, i) => wrap.append(askQuestion(q, i)));
+  if (askState.err) wrap.append(el("div", "ask-err", askState.err));
+  if (askState.done) {
+    wrap.append(el("div", "ask-done", askState.done));
+  } else if (askState.ro) {
+    wrap.append(el("div", "ask-hint", "read only: this question is answered at the desk"));
+  } else {
+    wrap.append(askControls());
+  }
+  box.append(wrap);
+  refreshAskSend();
+}
+
+// askQuestion is one question's block: its header, its text, the options, and
+// the field for something else.
+function askQuestion(q, i) {
+  const e = askState.entries[i];
+  const block = el("div", "ask-q");
+  block.append(el("div", "ask-qh", q.header || "question " + (i + 1)));
+  block.append(el("div", "ask-qt", q.question));
+  block.append(el("div", "ask-hint", q.multiSelect
+    ? "pick any that apply, or type something else"
+    : "pick one, or type something else"));
+  const opts = el("div", "ask-opts");
+  const input = el("input", "ask-text");
+  input.type = "text";
+  input.autocomplete = "off";
+  input.autocapitalize = "off";
+  input.spellcheck = false;
+  input.placeholder = "something else";
+  input.value = e.text;
+  input.addEventListener("input", () => {
+    e.text = input.value;
+    // A single-select question takes one option or text, never both, so
+    // typing clears the row the reader had picked.
+    if (!q.multiSelect && e.text.trim() !== "" && e.picks.length > 0) {
+      e.picks = [];
+      for (const row of opts.children) {
+        row.classList.remove("picked");
+        row.setAttribute("aria-checked", "false");
+        const tick = row.querySelector(".ask-tick");
+        if (tick) tick.textContent = "\u25cb";
+      }
+    }
+    refreshAskSend();
+  });
+  (q.options || []).forEach((o, j) => opts.append(askOption(q, i, o, j, input)));
+  block.append(opts);
+  block.append(input);
+  return block;
+}
+
+// askOption is one choice. A row is the tap target that picks it; the preview
+// is a button of its own inside the row, so reading it never picks anything.
+function askOption(q, i, o, j, input) {
+  const e = askState.entries[i];
+  const picked = e.picks.includes(j);
+  const row = el("div", "ask-opt");
+  row.setAttribute("role", q.multiSelect ? "checkbox" : "radio");
+  row.setAttribute("aria-checked", picked ? "true" : "false");
+  // A question already answered or one this page may not answer is a list to
+  // read, not a set of rows to tap.
+  const live = !askState.done && !askState.ro;
+  if (live) row.setAttribute("tabindex", "0");
+  row.classList.toggle("picked", picked);
+  const line = el("div", "ask-line");
+  line.append(el("span", "ask-tick", tickOf(q, picked)));
+  line.append(el("span", "ask-label", o.label));
+  row.append(line);
+  if (o.description) row.append(el("div", "ask-desc", o.description));
+  if (o.preview) {
+    const open = e.open.has(j);
+    const more = el("button", "ask-more", "preview");
+    more.type = "button";
+    more.setAttribute("aria-expanded", open ? "true" : "false");
+    const pre = el("pre", "ask-preview", o.preview);
+    pre.hidden = !open;
+    more.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (e.open.has(j)) e.open.delete(j);
+      else e.open.add(j);
+      pre.hidden = !e.open.has(j);
+      more.setAttribute("aria-expanded", pre.hidden ? "false" : "true");
+    });
+    row.append(more);
+    row.append(pre);
+  }
+  const pick = () => {
+    if (!live) return;
+    if (q.multiSelect) {
+      const at = e.picks.indexOf(j);
+      const on = at < 0;
+      if (on) e.picks.push(j);
+      else e.picks.splice(at, 1);
+      e.picks.sort((x, y) => x - y);
+      row.classList.toggle("picked", on);
+      row.setAttribute("aria-checked", on ? "true" : "false");
+      row.querySelector(".ask-tick").textContent = tickOf(q, on);
+    } else {
+      // A second tap on the chosen row clears it, so nobody has to type text
+      // to take back a pick.
+      const was = e.picks.length === 1 && e.picks[0] === j;
+      e.picks = was ? [] : [j];
+      if (!was) {
+        e.text = "";
+        input.value = "";
+      }
+      for (const other of row.parentNode.children) {
+        other.classList.remove("picked");
+        other.setAttribute("aria-checked", "false");
+        const tick = other.querySelector(".ask-tick");
+        if (tick) tick.textContent = tickOf(q, false);
+      }
+      if (!was) {
+        row.classList.add("picked");
+        row.setAttribute("aria-checked", "true");
+        row.querySelector(".ask-tick").textContent = tickOf(q, true);
+      }
+    }
+    refreshAskSend();
+  };
+  if (live) {
+    row.addEventListener("click", (ev) => {
+      // Reading the preview is its own tap, not a pick of the row it sits in.
+      if (ev.target.closest(".ask-more, .ask-preview")) return;
+      pick();
+    });
+    row.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      // The space is the pick here, not a scroll of the form.
+      ev.preventDefault();
+      pick();
+    });
+  }
+  return row;
+}
+
+// tickOf is the mark a row wears: a box for a multi-select and a circle for a
+// single one, open or filled.
+function tickOf(q, on) {
+  if (q.multiSelect) return on ? "\u2611" : "\u2610";
+  return on ? "\u25cf" : "\u25cb";
+}
+
+// askControls is send and decline. Send stays disabled until every question is
+// answered, because the daemon takes the answer all at once or not at all.
+function askControls() {
+  const box = el("div", "ask-controls");
+  const send = el("button", "send", "send");
+  send.type = "button";
+  send.id = "ask-send";
+  send.addEventListener("click", () => answerAsk(false));
+  const no = el("button", "", "decline");
+  no.type = "button";
+  no.addEventListener("click", () => answerAsk(true));
+  box.append(send, no);
+  return box;
+}
+
+// answerAsk sends the form's two answers. A refusal keeps its code in the
+// banner and in the form, and keeps every answer the reader gave; a success
+// settles the form until the ask leaves the fleet.
+async function answerAsk(cancel) {
+  if (!askState) return;
+  const at = askState;
+  const answer = cancel ? { cancel: true } : { items: entriesOf(at) };
+  let res;
+  try {
+    res = await fetchAPI("/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "ask-answer", target: at.ask.id, answer }),
+    });
+  } catch (e) {
+    applyReply(() => banner("answer failed: " + e));
+    return;
+  }
+  if (!res.ok) {
+    const why = (await res.text()).trim();
+    applyReply(() => {
+      banner(why);
+      if (askState === at) {
+        at.err = why;
+        paintAsk();
+      }
+    });
+    return;
+  }
+  applyReply(() => {
+    banner("");
+    if (askState === at) {
+      at.err = "";
+      at.done = cancel ? "declined" : "answered";
+      paintAsk();
+    }
+    loadFleet();
+  });
+}
+
+// entriesOf turns the form's answers into the daemon's items: one per
+// question, the picks and the custom text, and neither when the reader gave
+// none of that kind.
+function entriesOf(at) {
+  return at.entries.map((e, i) => {
+    const item = { questionIndex: i, optionIndexes: e.picks };
+    const text = e.text.trim();
+    if (text) item.text = text;
+    return item;
+  });
 }
 
 // --- the box compose -----------------------------------------------------

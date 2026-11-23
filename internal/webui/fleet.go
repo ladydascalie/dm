@@ -50,6 +50,38 @@ type fleetPane struct {
 	// keep the arrangement the desk shows. It is zero for a pane of another
 	// window or workspace.
 	Rect fleetRect `json:"rect,omitempty"`
+	// Ask is true when the session lists a question set on this pane, so a row
+	// waiting on the reader cannot pass for a pane at work.
+	Ask bool `json:"ask,omitempty"`
+}
+
+// fleetAsk is one question set the session lists, flattened for the page: the
+// id the answer names, the pane that asked, and the questions with their
+// options. It carries no answer field, because the snapshot publishes none, so
+// a reply to one ask cannot reach another row.
+type fleetAsk struct {
+	ID        string             `json:"id"`
+	Pane      string             `json:"pane"`
+	At        time.Time          `json:"at"`
+	Questions []fleetAskQuestion `json:"questions"`
+}
+
+// fleetAskQuestion is one question of a listed ask: its text, its header,
+// whether it takes several picks, and the options on offer. An empty option
+// list is a freeform question.
+type fleetAskQuestion struct {
+	Question    string           `json:"question"`
+	Header      string           `json:"header"`
+	MultiSelect bool             `json:"multiSelect,omitempty"`
+	Options     []fleetAskOption `json:"options"`
+}
+
+// fleetAskOption is one choice, with the description and the preview the form
+// shows once the reader asks for them.
+type fleetAskOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Preview     string `json:"preview,omitempty"`
 }
 
 // fleetRect is one pane's box, in the session's cell coordinates.
@@ -77,6 +109,9 @@ type fleetReply struct {
 	ReadOnly bool        `json:"readOnly"`
 	Panes    []fleetPane `json:"panes"`
 	Box      []fleetBox  `json:"box"`
+	// Ask lists the question sets the snapshot carries, oldest first, so the
+	// page draws an open one the moment it loads.
+	Ask []fleetAsk `json:"ask,omitempty"`
 	// Cols and Rows are the active window's grid, the frame every Rect above
 	// is measured in.
 	Cols int `json:"cols,omitempty"`
@@ -91,7 +126,7 @@ type fleetReply struct {
 // Each half answers on its own, so a box the daemon refuses still leaves the
 // fleet visible.
 func (h *Handler) fleet(w http.ResponseWriter, r *http.Request) {
-	out := fleetReply{Session: h.cfg.Session, ReadOnly: h.cfg.ReadOnly, Panes: []fleetPane{}, Box: []fleetBox{}, MaxPictures: maxThumbs}
+	out := fleetReply{Session: h.cfg.Session, ReadOnly: h.cfg.ReadOnly, Panes: []fleetPane{}, Box: []fleetBox{}, Ask: []fleetAsk{}, MaxPictures: maxThumbs}
 	if err := h.collectFleet(&out); err != nil {
 		out.Error = err.Error()
 	} else if err := h.collectBox(&out); err != nil && out.Error == "" {
@@ -124,6 +159,15 @@ func (h *Handler) collectFleet(out *fleetReply) error {
 		active[p.ID] = true
 		rects[p.ID] = fleetRect{X: p.Rect.X, Y: p.Rect.Y, W: p.Rect.W, H: p.Rect.H}
 	}
+	// The asks are collected before the rows, because a row carries whether
+	// one of them belongs to its pane.
+	asking := make(map[string]bool, len(res.Snapshot.Ask))
+	for _, a := range res.Snapshot.Ask {
+		asking[a.Pane] = true
+		out.Ask = append(out.Ask, fleetAsk{
+			ID: a.ID, Pane: a.Pane, At: a.At, Questions: fleetQuestions(a.Questions),
+		})
+	}
 	out.Cols, out.Rows = res.Snapshot.Cols, res.Snapshot.Rows
 	for _, p := range res.Snapshot.All {
 		out.Panes = append(out.Panes, fleetPane{
@@ -133,10 +177,37 @@ func (h *Handler) collectFleet(out *fleetReply) error {
 			Project: p.Project, ProjectAccent: p.ProjectAccent,
 			Window: p.Window, WindowName: p.WindowName, Cwd: p.Cwd, Branch: p.Branch,
 			Dirty: p.Dirty, Added: p.Added, Deleted: p.Deleted, Focus: p.Focus,
-			Active: active[p.ID], Rect: rects[p.ID],
+			Active: active[p.ID], Rect: rects[p.ID], Ask: asking[p.ID],
 		})
 	}
 	return nil
+}
+
+// fleetQuestions flattens one ask's questions into the page's shape.
+func fleetQuestions(qs []wire.AskQuestion) []fleetAskQuestion {
+	if len(qs) == 0 {
+		return []fleetAskQuestion{}
+	}
+	out := make([]fleetAskQuestion, len(qs))
+	for i, q := range qs {
+		out[i] = fleetAskQuestion{
+			Question: q.Question, Header: q.Header, MultiSelect: q.MultiSelect,
+			Options: fleetOptions(q.Options),
+		}
+	}
+	return out
+}
+
+// fleetOptions flattens one question's options into the page's shape.
+func fleetOptions(opts []wire.AskOption) []fleetAskOption {
+	if len(opts) == 0 {
+		return []fleetAskOption{}
+	}
+	out := make([]fleetAskOption, len(opts))
+	for i, o := range opts {
+		out[i] = fleetAskOption{Label: o.Label, Description: o.Description, Preview: o.Preview}
+	}
+	return out
 }
 
 // collectBox fills the message rows, newest first.

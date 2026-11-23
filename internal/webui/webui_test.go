@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"dm/internal/ask"
 	"dm/internal/box"
 	"dm/internal/paths"
 	"dm/internal/vt"
@@ -718,14 +719,21 @@ func sampleTarget(kind targetKind) string {
 		return "w2"
 	case targetWorkspace:
 		return "s1"
+	case targetAsk:
+		return "a1"
 	}
 	return ""
 }
 
+// sampleAnswer is one well formed ask-answer body: the answer to the one
+// question of the ask the page draws.
+const sampleAnswer = `{"items":[{"questionIndex":0,"optionIndexes":[1]}]}`
+
 // sampleRequest is one request body for a row: its id and a sample value for
-// every field the row names.
-func sampleRequest(cmd command) map[string]string {
-	body := map[string]string{"id": cmd.ID}
+// every field the row names. A field is a string except the answer body, which
+// is the object the daemon decodes.
+func sampleRequest(cmd command) map[string]any {
+	body := map[string]any{"id": cmd.ID}
 	for _, f := range cmd.Fields {
 		switch f {
 		case "target":
@@ -744,11 +752,19 @@ func sampleRequest(cmd command) map[string]string {
 			body[f] = "blocked"
 		case "key":
 			body[f] = "lane/x"
+		case "answer":
+			body[f] = json.RawMessage(sampleAnswer)
 		default:
 			panic("sampleRequest: no sample for field " + f)
 		}
 	}
 	return body
+}
+
+// sampleText reads one sample field that carries a string.
+func sampleText(req map[string]any, name string) string {
+	s, _ := req[name].(string)
+	return s
 }
 
 // TestEveryCommandReachesTheDaemon proves each catalogue row maps to one wire
@@ -779,7 +795,7 @@ func TestEveryCommandReachesTheDaemon(t *testing.T) {
 					t.Fatalf("the daemon would refuse the payload: %v", err)
 				}
 				post := parsed.(*box.PostReq)
-				if post.Key != req["key"] || post.Msg != req["msg"] || string(post.State) != req["state"] {
+				if post.Key != sampleText(req, "key") || post.Msg != sampleText(req, "msg") || string(post.State) != sampleText(req, "state") {
 					t.Fatalf("payload %+v", post)
 				}
 				if post.From != "" {
@@ -787,8 +803,25 @@ func TestEveryCommandReachesTheDaemon(t *testing.T) {
 				}
 				return
 			}
-			want := wire.Msg{Action: cmd.ID, Target: req["target"], Dir: req["site"],
-				Name: req["name"], Layout: req["layout"], Cwd: req["cwd"]}
+			if cmd.ID == "ask-answer" {
+				// The same rule for an answer: the daemon's decoder reads the
+				// body, so the form's payload is proved against it.
+				if got.Target != sampleText(req, "target") {
+					t.Fatalf("target %q, want the ask %q", got.Target, sampleText(req, "target"))
+				}
+				parsed, err := ask.ParseAnswer(got.Res)
+				if err != nil {
+					t.Fatalf("the daemon would refuse the answer: %v", err)
+				}
+				item := parsed.Items[0]
+				if len(parsed.Items) != 1 || item.QuestionIndex != 0 ||
+					len(item.OptionIndexes) != 1 || item.OptionIndexes[0] != 1 {
+					t.Fatalf("answer reached the socket as %+v", parsed)
+				}
+				return
+			}
+			want := wire.Msg{Action: cmd.ID, Target: sampleText(req, "target"), Dir: sampleText(req, "site"),
+				Name: sampleText(req, "name"), Layout: sampleText(req, "layout"), Cwd: sampleText(req, "cwd")}
 			got.Type, got.ID, got.Res = "", 0, nil
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("request reached the socket as %+v, want %+v", got, want)

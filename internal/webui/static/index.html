@@ -715,6 +715,95 @@
     padding: 9px 12px; font-size: 14px; min-height: 44px; min-width: 44px;
   }
   #send button.enter { border-color: var(--working); color: var(--working); }
+
+  /* The ask form sits above the views: a pane waiting on the reader says so on
+     the pane itself, and the box scrolls alone so a long question list cannot
+     take the whole phone. */
+  #ask {
+    display: none;
+    max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  #ask.show { display: block; }
+  #ask .ask { padding: 10px 12px 12px; }
+  #ask .ask-hd {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--dim);
+  }
+  #ask .ask-hd b { color: var(--fg); font-weight: 650; }
+  #ask .ask-hd .ago { margin-left: auto; }
+  #ask .ask-q { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+  #ask .ask-q:first-of-type { margin-top: 8px; padding-top: 0; border-top: 0; }
+  #ask .ask-qh {
+    font-size: 11px; font-weight: 650; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--accent-1);
+  }
+  #ask .ask-qt {
+    margin-top: 2px; font-size: 14.5px; line-height: 1.45; color: var(--fg);
+    overflow-wrap: anywhere;
+  }
+  #ask .ask-hint { margin-top: 3px; font-size: 11px; color: var(--dim); }
+  /* An option is one tap target: the label on its first line, the description
+     under it, and the preview behind its own button, which a tap on the row
+     never hits. */
+  #ask .ask-opt {
+    display: block; width: 100%; margin-top: 6px; padding: 8px 10px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    color: inherit; text-align: left; min-height: 44px;
+  }
+  #ask .ask-opt:active { border-color: var(--working); }
+  #ask .ask-opt.picked { border-color: var(--working); }
+  #ask .ask-line { display: flex; align-items: baseline; gap: 8px; }
+  #ask .ask-tick { flex: none; font-size: 13px; color: var(--dim); }
+  #ask .ask-opt.picked .ask-tick { color: var(--working); }
+  #ask .ask-label {
+    flex: 1 1 auto; min-width: 0;
+    font-size: 14px; font-weight: 600; overflow-wrap: anywhere;
+  }
+  #ask .ask-desc {
+    margin-top: 1px; font-size: 12.5px; color: var(--dim);
+    overflow-wrap: anywhere;
+  }
+  #ask .ask-more {
+    margin-top: 5px; background: none; border: 1px solid var(--line);
+    color: var(--dim); border-radius: 6px; padding: 3px 8px; font-size: 11.5px;
+    min-height: 30px;
+  }
+  #ask .ask-preview {
+    margin: 6px 0 0; padding: 6px 8px;
+    font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #a9b8c6; background: #0c1013;
+    border: 1px solid var(--line); border-radius: 7px;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 160px; overflow: auto;
+  }
+  #ask .ask-text {
+    display: block; width: 100%; margin-top: 8px;
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 10px; font-size: 15px; min-height: 44px;
+  }
+  #ask .ask-err {
+    margin-top: 10px; padding: 6px 8px;
+    border: 1px solid var(--error); border-radius: 6px;
+    color: var(--error); font-size: 12px; overflow-wrap: anywhere;
+  }
+  #ask .ask-controls {
+    display: grid; grid-template-columns: 1fr auto; gap: 6px;
+    margin-top: 10px;
+  }
+  #ask .ask-controls button {
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; font-size: 14px; min-height: 44px;
+  }
+  #ask .ask-controls button.send {
+    border-color: var(--working); color: var(--working); font-weight: 650;
+  }
+  #ask .ask-controls button[disabled] { opacity: .45; }
+  #ask .ask-done { margin-top: 8px; font-size: 12.5px; color: var(--done); }
 </style>
 </head>
 <body class="tab-panes">
@@ -783,6 +872,7 @@
     </div></div>
     <div id="pane-actions"></div>
     <div id="pane-note"></div>
+    <div id="ask"></div>
     <div id="screen" class="show-screen">
       <pre id="text" class="view"></pre>
       <div id="transcript" class="view"></div>
