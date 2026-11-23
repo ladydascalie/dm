@@ -721,11 +721,16 @@
     border: 1px solid var(--line); border-radius: 6px;
     padding: 9px 10px; font-size: 15px; min-height: 44px;
   }
+  /* The two buttons carry a glyph instead of a word, so the input takes the
+     width the words gave up. The glyph is decorative: the label and the title
+     are what a screen reader and a long press read. */
   #send button {
+    display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 12px; font-size: 14px; min-height: 44px; min-width: 44px;
+    padding: 0 10px; min-height: 44px; min-width: 44px;
   }
+  #send button svg { display: block; width: 22px; height: 22px; }
   #send button.enter { border-color: var(--working); color: var(--working); }
 
   /* The ask form sits above the views: a pane waiting on the reader says so on
@@ -838,6 +843,17 @@
   }
   #ask .ask-controls button[disabled] { opacity: .45; }
   #ask .ask-done { margin-top: 8px; font-size: 12.5px; color: var(--done); }
+
+  /* Safari zooms the page when a field takes focus with a font size under
+     16px, and the page stays scaled until a pinch brings it back. At a phone or
+     small tablet width every field a thumb can focus keeps 16, so the tap never
+     zooms; the rules above keep the desktop look. The width covers a phone on
+     its side as well as upright. Pinch stays enabled: the zoom is the symptom,
+     not the reader's setting. */
+  @media (max-width: 900px) {
+    #compose input, #compose select, #send input,
+    #ask .ask-text, #ask .ask-note, .targets select { font-size: 16px; }
+  }
 </style>
 </head>
 <body class="tab-panes">
@@ -915,10 +931,23 @@
     </div>
     <div id="send">
       <input id="send-image" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
-      <button id="send-attach" title="attach a picture the agent can read">pic</button>
+      <button id="send-attach" aria-label="attach a picture" title="attach a picture the agent can read">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <rect x="3" y="5" width="18" height="14" rx="2"/>
+          <circle cx="8.5" cy="10" r="1.5"/>
+          <path d="M21 16l-5-5-9 9"/>
+        </svg>
+      </button>
       <input id="send-text" type="text" autocomplete="off" autocapitalize="off"
              autocorrect="off" spellcheck="false" placeholder="type into the pane">
-      <button id="send-submit" class="enter">send</button>
+      <button id="send-submit" class="enter" aria-label="send" title="send the text and press enter">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M22 2 11 13"/>
+          <path d="M22 2 15 22 11 13 2 9 22 2z"/>
+        </svg>
+      </button>
     </div>
   </section>
 
