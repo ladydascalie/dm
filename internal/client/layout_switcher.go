@@ -110,6 +110,7 @@ func closeLayoutSwitcher(t *tui) {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // refresh re-reads the active window's pane ids and focus from the snapshot.

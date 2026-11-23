@@ -70,6 +70,24 @@ type RailItem struct {
 	Folded        bool
 	Focus         bool
 	Active        bool
+	// Ask is true when the session lists a question on this pane. The rail
+	// paints the badge, so a question in a window the reader is not looking at
+	// still says so without stealing the desk.
+	Ask bool
+}
+
+// askPanes is the set of panes the session lists a question on. The snapshot
+// carries the asks, so the rail reads them without the client handing anything
+// down.
+func askPanes(snap *wire.Snapshot) map[string]bool {
+	if snap == nil || len(snap.Ask) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(snap.Ask))
+	for _, a := range snap.Ask {
+		out[a.Pane] = true
+	}
+	return out
 }
 
 // WindowSource returns the pane a window's label and git context come from:
@@ -191,11 +209,13 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		}
 		return live(name)
 	}
+	asked := askPanes(snap)
 	if layout.RailCompact(snap.Rail) {
 		seen := map[string]int{}
 		out := make([]RailItem, 0, len(snap.All))
 		for _, p := range snap.All {
 			row := RailPaneRow(p)
+			row.Ask = asked[p.ID]
 			if p.Project != "" {
 				s, ok := seen[p.Project]
 				if !ok {
@@ -350,6 +370,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		}
 		row := RailPaneRow(p)
 		row.Project, row.ProjectAccent = project, slot
+		row.Ask = asked[p.ID]
 		out = append(out, row)
 	}
 	// The shelf section follows the last workspace, so a pane set aside keeps
@@ -365,6 +386,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 			for i, p := range shelf {
 				row := ShelfRow(p)
 				row.Focus = i == snap.ShelfActive
+				row.Ask = asked[p.ID]
 				out = append(out, row)
 			}
 		}
@@ -793,6 +815,9 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				{Text: string(m1), FG: colour},
 				{Text: mark, FG: colour},
 			}
+			if it.Ask {
+				left = append(left, segment.Seg{Text: "?", FG: p.BarAccent})
+			}
 		} else {
 			left = []segment.Seg{
 				{Text: "      ", FG: base},
@@ -805,6 +830,11 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			// pane name to the marker.
 			if pm := th.RailMarks.Pane; pm != "" && segment.SegCells(left)+2 <= w {
 				left = append(left, segment.Seg{Text: " " + pm, FG: p.RailDim})
+			}
+			// The ask badge rides the right edge, the way the window stats
+			// do, so a question never pushes a pane's name out of the row.
+			if it.Ask {
+				right = []segment.Seg{{Text: "?", FG: p.BarAccent, Bold: true}}
 			}
 		}
 	case ShelfHeader:
@@ -841,12 +871,18 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				{Text: string(m1), FG: colour},
 				{Text: mark, FG: colour},
 			}
+			if it.Ask {
+				left = append(left, segment.Seg{Text: "?", FG: p.BarAccent})
+			}
 		} else {
 			left = []segment.Seg{
 				{Text: "      ", FG: base},
 				{Text: glyph, FG: colour},
 				{Text: mark, FG: colour},
 				{Text: " " + it.Text, FG: base},
+			}
+			if it.Ask {
+				right = []segment.Seg{{Text: "?", FG: p.BarAccent, Bold: true}}
 			}
 		}
 	case Gap:

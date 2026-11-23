@@ -328,6 +328,7 @@ func (t *tui) closeMenu() {
 	t.mode = ""
 	t.inbuf = nil
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // menuKey consumes one key while the menu is open. The menu's own bindings win

@@ -103,8 +103,18 @@ type tui struct {
 	shelf *shelfView
 	// lsw is the open layout palette, nil when closed. It lives in mode
 	// "layout" and owns the keyboard while it is up.
-	lsw   *layoutSwitcher
-	dirty bool
+	lsw *layoutSwitcher
+	// ask is the ask float, nil when closed. It owns mode "ask": the focused
+	// pane's open question, one question at a time. askDeferred holds an ask
+	// that arrived while another overlay had the keyboard, and askAnswerID
+	// numbers the answer request whose reply the float reads.
+	ask         *askView
+	askDeferred bool
+	askAnswerID int
+	// readOnly marks a client that may read the session and not answer the
+	// questions in it: the ask float offers no send and no decline.
+	readOnly bool
+	dirty    bool
 
 	// out is the frame sink: a counting wrapper over os.Stdout in a session,
 	// a buffer in a test.
@@ -117,7 +127,7 @@ type tui struct {
 	// a copy rides OSC 52 or an external tool.
 	clipboard func(string) bool
 
-	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help"
+	mode     string // "" or "sessions" or "scroll" or "menu" or "rename" or "box" or "help" or "ask"
 	sessions []transport.SessionInfo
 	sel      int
 	menu     *menu
@@ -650,6 +660,8 @@ func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) {
 	t.expireArmed(now)
 	t.expirePrefix(now)
 	t.expireMode(now)
+	// An ask the overlay held back opens once the overlay is gone.
+	t.openDeferredAsk()
 	if t.flushIdle(now) {
 		t.dirty = true
 		pace.reset()
@@ -747,6 +759,10 @@ type Harness struct {
 	// page, passes the built-in defaults instead, so no path is read and no load
 	// error is toasted.
 	Keymap *keymap.Config
+	// ReadOnly mounts the client on a session it may read and not answer. The
+	// ask float offers no send and no decline there, so a viewer cannot answer
+	// a question put to the operator. No shipped harness sets it yet.
+	ReadOnly bool
 }
 
 // Attach runs one attached session over a connection the caller made. It
@@ -829,6 +845,7 @@ func attachConn(c *transport.Conn, h Harness, pace *pacer) (string, error) {
 		t.keymapSeam = true
 	}
 	t.keymap = cfg
+	t.readOnly = h.ReadOnly
 	t.histRows = cfg.HistoryLines()
 	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())
 	th := cfg.Theme()
@@ -1028,6 +1045,10 @@ func (t *tui) apply(m wire.Msg) {
 			t.keys.Sync(m.Snap)
 			t.dirty = true
 		}
+		// A question the session lists is session state, so the float follows
+		// every snapshot: it opens on the focused pane's ask and closes when
+		// the ask is answered or gone.
+		t.syncAsk()
 		t.dirty = true
 	case "sizer":
 		// The server says whether this client sizes the panes. A change to
@@ -1128,6 +1149,12 @@ func (t *tui) apply(m wire.Msg) {
 		// and opens nothing.
 		if m.Action == "float-open" && m.ID > 0 && m.ID == t.floatID {
 			t.takeFloatOpen(m)
+			break
+		}
+		// The answer's reply is the daemon's verdict on the float's send. A
+		// refusal keeps the float open with the code on it.
+		if m.Action == "ask-answer" && m.ID > 0 && m.ID == t.askAnswerID {
+			t.takeAskAnswer(m)
 			break
 		}
 		// A read reply carries the id its request named. Only the newest read

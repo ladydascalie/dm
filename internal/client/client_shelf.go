@@ -180,6 +180,7 @@ func (t *tui) closeShelfFloat() {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // summonShelf readies the active member's terminal at the box's size and asks

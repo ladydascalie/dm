@@ -11,7 +11,7 @@ Every dm process talks over a unix socket and nothing else: why the call crosses
 | workspace, window, rail | a workspace groups windows, a window is one tab of panes, the rail is the sidebar that lists them |
 | box, float | the box is the session's append-only message log; a box watcher is one reader's place in it (pane, key, cursor, parked); a float is a floating command pane, a process one client owns outside the layout |
 | ring, VT screen | the ring is a pane's scrollback buffer of raw output bytes; the VT screen is its emulated terminal, visible text plus modes |
-| snapshot, tree, status | a snapshot is the session's layout and pane facts (name, workspaces, windows, panes, focus, sizes); the tree is the layout tree of the active window; a status is `{state, message, app}`, a status word, a note and the reporting program |
+| snapshot, tree, status | a snapshot is the session's layout and pane facts (name, workspaces, windows, panes, focus, sizes) plus the listed asks, the questions an agent put to the reader; the tree is the layout tree of the active window; a status is `{state, message, app}`, a status word, a note and the reporting program |
 
 ## Why a message boundary
 
@@ -62,8 +62,9 @@ switches on `Action` alone (`internal/pane/pane.go:1277`). The server switches o
 `res` column names the keys of that reply's `res` object, and `none` means `res` is empty. The request and reply
 columns use the JSON keys from the envelope table (`target`, `msg`, `res`, `waitReason`), and `res{name,where}`
 means a `res` object with those keys. The server's `read` reply puts rows in `res.lines`; the pane's in `Lines`.
-The sender column names the caller: `cli` a `dm` verb, `tui` the client, `sib` a sibling server; `exec` no typed
-verb, only `dm exec '<json>'` (`internal/cli/cli.go:572`).
+The sender column names the caller: `cli` a `dm` verb, `tui` the client, `web` the phone page's action endpoint
+(`/api/action`, which sends the request the way the CLI does), `sib` a sibling server; `exec` no typed verb, only
+`dm exec '<json>'` (`internal/cli/cli.go:572`).
 
 | action | request fields | reply `res` | sender |
 | --- | --- | --- | --- |
@@ -113,7 +114,7 @@ verb, only `dm exec '<json>'` (`internal/cli/cli.go:572`).
 | `secret-sync` | `path`, `trust` | `mapping`, `registered`, `kept`, `files`, `warning`, `uncovered` | cli |
 | `ask-open` | `target`, `res{toolCallId,questions}` | `id` | cli |
 | `ask-await` | `target`, `res{timeoutMs}` | `pending`, or `answer` | cli |
-| `ask-answer` | `target`, `res{items,globalNote,cancel}` | the answer (`at`, `items`, `globalNote`, `cancel`) | cli |
+| `ask-answer` | `target`, `res{items,globalNote,cancel}` | the answer (`at`, `items`, `globalNote`, `cancel`) | cli, tui, web |
 | `ask-close` | `target` | `closed` (whether this close removed one) | cli |
 | `ask-list` | none | `asks` (an array of ask requests, answers included) | cli |
 | anything else | none | error `unknown action %q` (`internal/server/server_rpc.go:784`) | |

@@ -64,6 +64,7 @@ func closeSwitcher(t *tui) {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // dispatchPick turns a switcher row target into the action that goes there.

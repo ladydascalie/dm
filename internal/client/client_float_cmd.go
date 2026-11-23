@@ -302,6 +302,7 @@ func (t *tui) closeFloat() {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // splitMatches reports whether buf starts with one of the diff-split key's
