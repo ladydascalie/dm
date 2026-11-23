@@ -108,6 +108,19 @@ var cliCommands = []cliCommand{
 		group: groupSessions,
 	},
 	{
+		name:    "web",
+		args:    "[-s name] [--addr host:port] [--token t] [--read-only]",
+		summary: "serve the session to a browser, for a phone on your tailnet",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"addr", "host:port", "listen address"},
+			{"token", "t", "access token, generated when empty"},
+			{"read-only", "", "refuse keys and messages"},
+		},
+		example: "dm web --addr 100.71.227.52:8099",
+		group:   groupSessions,
+	},
+	{
 		name:    "kill",
 		args:    "[-s name]",
 		summary: "stop a session's server (panes survive)",

@@ -48,6 +48,9 @@ type cmdFlags struct {
 	upstream     string
 	header       string
 	to           string
+	addr         string
+	token        string
+	readOnly     bool
 	envs         []string
 	argv         []string
 	pluginSplit  bool
@@ -328,6 +331,12 @@ func (c *cmdFlags) register(name, desc string) {
 		c.fs.StringVar(&c.header, "header", "", desc)
 	case "to":
 		c.fs.StringVar(&c.to, "to", "", desc)
+	case "addr":
+		c.fs.StringVar(&c.addr, "addr", "127.0.0.1:8099", desc)
+	case "token":
+		c.fs.StringVar(&c.token, "token", "", desc)
+	case "read-only":
+		c.fs.BoolVar(&c.readOnly, "read-only", false, desc)
 	case "env":
 		c.fs.Var(repeatValue{&c.envs}, "env", desc)
 	case "argv":
@@ -428,6 +437,7 @@ var withValue = map[string]bool{
 	"-target": true, "--target": true,
 	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
 	"-to": true, "--to": true,
+	"-addr": true, "--addr": true, "-token": true, "--token": true,
 	"-L": true, "--L": true, "-layout": true, "--layout": true,
 }
 
@@ -484,6 +494,16 @@ func Run(argv []string) error {
 		_ = json.Unmarshal(m.Res, &res)
 		fmt.Println(res.Session)
 		return nil
+
+	case "web":
+		c := newFlagsAt(root, "web")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
+		return runWeb(c)
 
 	case "ls", "list-sessions":
 		c := newFlagsAt(root, "ls")

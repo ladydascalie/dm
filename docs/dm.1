@@ -39,6 +39,19 @@ Aliases: list-sessions.
 .br
 \fB--json\fP print JSON
 .TP
+\fBdm web [-s name] [--addr host:port] [--token t] [--read-only]\fP
+serve the session to a browser, for a phone on your tailnet
+.br
+\fB--s name\fP session name
+.br
+\fB--addr host:port\fP listen address
+.br
+\fB--token t\fP access token, generated when empty
+.br
+\fB--read-only\fP refuse keys and messages
+.br
+Example: \fBdm web --addr 100.71.227.52:8099\fP
+.TP
 \fBdm kill [-s name]\fP
 stop a session's server (panes survive)
 .br
