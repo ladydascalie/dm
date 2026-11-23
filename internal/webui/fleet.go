@@ -53,6 +53,10 @@ type fleetPane struct {
 	// Ask is true when the session lists a question set on this pane, so a row
 	// waiting on the reader cannot pass for a pane at work.
 	Ask bool `json:"ask,omitempty"`
+	// Shelf is true for a pane set aside. It keeps its PTY and its state but it
+	// is in no window, so Workspace and Window are empty and the row belongs to
+	// the shelf section rather than to a project.
+	Shelf bool `json:"shelf,omitempty"`
 }
 
 // fleetAsk is one question set the session lists, flattened for the page: the
@@ -152,10 +156,14 @@ func (h *Handler) collectFleet(out *fleetReply) error {
 	}
 	// Panes is the active window and All is the whole session. A row is active
 	// when both name the same pane, so a phone knows which one is on screen at
-	// the desk.
+	// the desk. Panes lists the shelf members as well, so a shelved pane is
+	// skipped here: it is in no window and the desk draws none of it.
 	active := make(map[string]bool, len(res.Snapshot.Panes))
 	rects := make(map[string]fleetRect, len(res.Snapshot.Panes))
 	for _, p := range res.Snapshot.Panes {
+		if p.Shelf {
+			continue
+		}
 		active[p.ID] = true
 		rects[p.ID] = fleetRect{X: p.Rect.X, Y: p.Rect.Y, W: p.Rect.W, H: p.Rect.H}
 	}
@@ -178,6 +186,7 @@ func (h *Handler) collectFleet(out *fleetReply) error {
 			Window: p.Window, WindowName: p.WindowName, Cwd: p.Cwd, Branch: p.Branch,
 			Dirty: p.Dirty, Added: p.Added, Deleted: p.Deleted, Focus: p.Focus,
 			Active: active[p.ID], Rect: rects[p.ID], Ask: asking[p.ID],
+			Shelf: p.Shelf,
 		})
 	}
 	return nil

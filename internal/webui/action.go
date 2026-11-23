@@ -81,6 +81,8 @@ var commands = []command{
 	{ID: "zoom-pane", Label: "zoom pane", Group: groupPanes},
 	{ID: "close-pane", Label: "close pane", Group: groupPanes, Target: targetPane,
 		Fields: []string{"target"}},
+	{ID: "pop-pane", Label: "pop pane", Group: groupPanes, Target: targetPane,
+		Fields: []string{"target"}},
 	{ID: "focus", Label: "focus pane", Group: groupPanes, Target: targetPane,
 		Fields: []string{"target"}},
 	{ID: "next-pane", Label: "next pane", Group: groupPanes},

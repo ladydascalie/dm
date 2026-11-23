@@ -35,6 +35,9 @@ let repaintTimer = null;
 // openShells names the projects whose shell panes are unfolded, so a poll does
 // not fold a list the reader just opened.
 const openShells = new Set();
+// shelfOpen is this page's answer to the shelf fold. It starts closed: a
+// shelved pane is work set aside, so the live fleet comes first on a phone.
+let shelfOpen = false;
 // seen is when this page first saw each pane's status and message, keyed by
 // pane id. A row has no timestamp of its own, so this is the fallback clock a
 // needs-you card measures from.
@@ -158,6 +161,7 @@ function paintFleet(f) {
     if (!f.panes.some((p) => p.id === pane.id)) closePane();
     else {
       renderPaneChrome();
+      renderPaneActions();
       syncAsk();
       // A pane the fleet now calls an agent may have written its first session
       // line since the last try, so the page asks again rather than staying on
@@ -319,11 +323,43 @@ function projectGroups(panes) {
 function renderPanes(f) {
   const box = $("panes");
   box.textContent = "";
-  if (f.panes.length === 0) {
+  // The shelf holds panes set aside: they belong to no project and to no
+  // window, so they sit under the fleet rather than inside a project section.
+  const live = f.panes.filter((p) => !p.shelf);
+  const shelved = f.panes.filter((p) => p.shelf);
+  if (live.length === 0 && shelved.length === 0) {
     box.append(el("div", "empty", "no panes"));
     return;
   }
-  for (const g of projectGroups(f.panes)) box.append(projectSection(g));
+  for (const g of projectGroups(live)) box.append(projectSection(g));
+  if (shelved.length > 0) box.append(shelfSection(shelved));
+}
+
+// shelfCount is the shelf heading's own summary: how many panes it sets aside.
+function shelfCount(n) {
+  return n + (n === 1 ? " shelved pane" : " shelved panes");
+}
+
+// shelfSection is the shelf: a heading with its count and a fold that starts
+// closed, then one row per shelved pane. A shelved pane still owns its PTY, so
+// its row opens exactly like a live one: the same transcript or screen, and the
+// same input row.
+function shelfSection(panes) {
+  const sec = el("section", "shelf");
+  const btn = el("button", "fold");
+  btn.type = "button";
+  btn.setAttribute("aria-expanded", shelfOpen ? "true" : "false");
+  btn.append(el("span", "caret", shelfOpen ? "\u25be" : "\u25b8"));
+  btn.append(el("span", "", "shelf"));
+  btn.append(el("span", "scount", shelfCount(panes.length)));
+  btn.addEventListener("click", () => {
+    shelfOpen = !shelfOpen;
+    dirty.panes = true;
+    renderVisible();
+  });
+  sec.append(btn);
+  if (shelfOpen) for (const p of panes) sec.append(paneRow(p));
+  return sec;
 }
 
 // hasSession is the fleet's answer to the only question the fold asks: does
@@ -473,7 +509,7 @@ function agoText(ms) {
 // paneRow is one pane: the name a person would use on the first line, its
 // state on the right of it, and the facts that place it on the second.
 function paneRow(p) {
-  const row = el("a", "row");
+  const row = el("a", "row" + (p.shelf ? " shelved" : ""));
   row.href = paneHash(p.id);
 
   const name = p.name || p.app || p.id;
@@ -501,6 +537,9 @@ function paneRow(p) {
   // tail. Each is a chip of its own, so a gap separates them and a line that
   // wraps leaves nothing dangling at its end.
   const where = el("div", "where");
+  // A shelved pane has no window to name, so the row says what it is instead:
+  // set aside and still running, not a pane the desk draws.
+  if (p.shelf) where.append(el("span", "mark-shelved", "shelved"));
   if (name !== p.id) where.append(el("span", "id", p.id));
   // Workspace then window, the way the rail names the pair.
   const window = p.windowName || p.window;
@@ -614,7 +653,9 @@ function disarm() {
 
 // sendBody runs one finished request and settles the view after it. Two
 // commands move the reader: close-pane empties the view it was looking at, and
-// new-window answers with the pane it opened, which the page then shows.
+// new-window answers with the pane it opened, which the page then shows. A pop
+// keeps the pane's id, so its hash still names it: the reloaded fleet is what
+// says which window it landed in, and nothing here holds an old place.
 async function sendBody(body) {
   const res = await runAction(body);
   if (res === null) return;
@@ -861,6 +902,10 @@ async function sheetSend(btn, cmd, extra) {
 const paneActions = [
   { label: "new window", body: () => ({ id: "new-window", cwd: paneCwd() }) },
   { label: "rename", body: () => ({ id: "set-pane-name", target: pane.id }) },
+  // pop is the shelf's own control: a shelved pane is the only one with a place
+  // to go back to, so the tap appears only while the pane is set aside. It is a
+  // write, so a read only page hides it with the rest of this row.
+  { label: "pop pane", body: () => ({ id: "pop-pane", target: pane.id }), shelved: true },
   { label: "close pane", body: () => ({ id: "close-pane", target: pane.id }), ask: () => "close " + pane.id + "?" },
 ];
 
@@ -874,7 +919,11 @@ function paneCwd() {
 function renderPaneActions() {
   const box = $("pane-actions");
   box.textContent = "";
+  // The fleet row is what says whether the open pane is set aside, so a pane
+  // that was popped loses its pop tap on the next reply.
+  const own = ((fleet && fleet.panes) || []).find((p) => pane && p.id === pane.id) || {};
   for (const act of paneActions) {
+    if (act.shelved && !own.shelf) continue;
     const btn = el("button", "", act.label);
     btn.addEventListener("click", () => {
       if (!pane) return;
@@ -1030,6 +1079,7 @@ async function openPane(id, view) {
   $("send").style.display = fleet && fleet.readOnly ? "none" : "";
   setPaneState("", "");
   renderPaneChrome();
+  renderPaneActions();
   syncAsk();
   renderViewChrome();
   markFollow();
