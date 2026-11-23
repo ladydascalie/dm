@@ -1479,3 +1479,158 @@ func TestThumbsCancelLeavesNothing(t *testing.T) {
 	_ = res.Body.Close()
 	waitGoroutines(t, base)
 }
+
+// pageSource is the page's markup as the build carries it. The fields a thumb
+// focuses and the composer's two controls live there, so a test reads them
+// where they live.
+func pageSource(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatalf("read the page: %v", err)
+	}
+	return string(b)
+}
+
+// pageRule is one style rule's text, from the selector to its closing brace.
+// The page's rules carry no nested braces, so the first closing brace at line
+// end ends the rule.
+func pageRule(t *testing.T, page, selector string) string {
+	t.Helper()
+	at := strings.Index(page, selector+" {")
+	if at < 0 {
+		t.Fatalf("no %s rule in the page", selector)
+	}
+	end := strings.Index(page[at:], "}")
+	if end < 0 {
+		t.Fatalf("the %s rule has no closing brace", selector)
+	}
+	return page[at : at+end]
+}
+
+// pageTag is one element's markup, from its opening tag to the tag that closes
+// it.
+func pageTag(t *testing.T, page, open string) string {
+	t.Helper()
+	at := strings.Index(page, open)
+	if at < 0 {
+		t.Fatalf("no %s in the page", open)
+	}
+	end := strings.Index(page[at:], ">")
+	if end < 0 {
+		t.Fatalf("%s has no end of tag", open)
+	}
+	return page[at : at+end+1]
+}
+
+// pageAttr is one attribute's value on an element's opening tag.
+func pageAttr(t *testing.T, tag, name string) string {
+	t.Helper()
+	at := strings.Index(tag, name+`="`)
+	if at < 0 {
+		t.Fatalf("no %s on %s", name, tag)
+	}
+	rest := tag[at+len(name)+2:]
+	end := strings.Index(rest, `"`)
+	if end < 0 {
+		t.Fatalf("%s has no closing quote on %s", name, tag)
+	}
+	return rest[:end]
+}
+
+// TestPageFieldsStaySixteenOnAPhone proves the page never leaves a focused
+// field under 16: a phone width rule lifts every field a thumb can focus to 16,
+// while the desktop rules keep their tighter size.
+func TestPageFieldsStaySixteenOnAPhone(t *testing.T) {
+	page := pageSource(t)
+	rule := pageRule(t, page, "@media (max-width: 900px)")
+	for _, field := range []string{"#compose input", "#compose select", "#send input",
+		"#ask .ask-text", "#ask .ask-note", ".targets select"} {
+		if !strings.Contains(rule, field) {
+			t.Fatalf("the phone rule lifts no %s to 16: %s", field, rule)
+		}
+	}
+	if !strings.Contains(rule, "font-size: 16px;") {
+		t.Fatalf("the phone rule carries no 16: %s", rule)
+	}
+	// The zoom is the symptom. Pinch stays enabled, so the viewport names no
+	// scale a reader cannot undo.
+	meta := pageTag(t, page, `<meta name="viewport"`)
+	if got := pageAttr(t, meta, "content"); !strings.Contains(got, "width=device-width") {
+		t.Fatalf("viewport %q", got)
+	}
+	for _, banned := range []string{"user-scalable=no", "maximum-scale"} {
+		if strings.Contains(page, banned) {
+			t.Fatalf("the page disables the reader's pinch with %s", banned)
+		}
+	}
+}
+
+// TestPageComposerButtonsCarryGlyphs proves the two composer controls carry a
+// glyph instead of a word: each keeps its id, its 44 by 44 minimum, an
+// aria-label and a title in words, and one decorative svg the reader never
+// hears.
+func TestPageComposerButtonsCarryGlyphs(t *testing.T) {
+	page := pageSource(t)
+	rule := pageRule(t, page, "#send button")
+	for _, want := range []string{"min-height: 44px", "min-width: 44px"} {
+		if !strings.Contains(rule, want) {
+			t.Fatalf("the composer buttons lost their %s: %s", want, rule)
+		}
+	}
+	for _, tc := range []struct{ id, label string }{
+		{"send-attach", "attach a picture"},
+		{"send-submit", "send"},
+	} {
+		tag := pageTag(t, page, `<button id="`+tc.id+`"`)
+		if got := pageAttr(t, tag, "aria-label"); got != tc.label {
+			t.Fatalf("%s aria-label %q, want %q", tc.id, got, tc.label)
+		}
+		if got := pageAttr(t, tag, "title"); got == "" {
+			t.Fatalf("%s carries no title", tc.id)
+		}
+		at := strings.Index(page[strings.Index(page, `<button id="`+tc.id+`"`):], "<svg")
+		if at < 0 {
+			t.Fatalf("%s carries no glyph", tc.id)
+		}
+		svg := page[strings.Index(page, `<button id="`+tc.id+`"`)+at:]
+		end := strings.Index(svg, "</svg>")
+		if end < 0 {
+			t.Fatalf("%s's glyph has no closing tag", tc.id)
+		}
+		if got := pageAttr(t, pageTag(t, svg[:end+len("</svg>")], "<svg"), "aria-hidden"); got != "true" {
+			t.Fatalf("%s's glyph is not decorative: aria-hidden %q", tc.id, got)
+		}
+	}
+	// No word is left inside the button, so a screen reader reads the label
+	// once and a sighted reader sees the glyph alone.
+	for _, id := range []string{"send-attach", "send-submit"} {
+		at := strings.Index(page, `<button id="`+id+`"`)
+		body := page[at+strings.Index(page[at:], ">")+1:]
+		body = body[:strings.Index(body, "</button>")]
+		if stem := strings.TrimSpace(body); !strings.HasPrefix(stem, "<svg") || !strings.HasSuffix(stem, "</svg>") {
+			t.Fatalf("%s carries words beside its glyph: %s", id, stem)
+		}
+	}
+}
+
+// TestPageComposerKeepsItsRow proves the icons changed no behaviour: the whole
+// row still leaves a read only page, enter still sends, and the input still
+// takes the width the two words gave up.
+func TestPageComposerKeepsItsRow(t *testing.T) {
+	src := appScript(t)
+	if !strings.Contains(src, `$("send").style.display = fleet && fleet.readOnly ? "none" : "";`) {
+		t.Fatal("the composer row no longer hides on a read only page")
+	}
+	if !strings.Contains(src, `$("send-text").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    sendText();`) {
+		t.Fatal("enter no longer sends from the composer input")
+	}
+	page := pageSource(t)
+	rule := pageRule(t, page, "#send input")
+	if !strings.Contains(rule, "flex: 1") || !strings.Contains(rule, "min-width: 0") {
+		t.Fatalf("the input no longer takes the width of the row: %s", rule)
+	}
+}
