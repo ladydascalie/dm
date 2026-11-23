@@ -5,12 +5,19 @@ package client
 // list rides every snapshot, so the client paints what session state already
 // carries and writes nothing back but the reader's answer.
 //
-// One question at a time: the header, the question, its options with their
-// description and preview, and on a single-select question a last row that
-// opens the client's input prompt. The float opens by itself on the focused
-// pane's open ask and closes when the ask is answered or gone. A pane that is
-// not focused gets a rail badge instead, so a question elsewhere cannot steal
-// the desk.
+// One question at a time, with a tab strip across the questions. A wide float
+// carries two panes inside its border: the question and its options on the
+// left, the hovered option's label, description and preview on the right. A
+// float narrower than askWideMin keeps one column and puts the preview under
+// its option, so a narrow terminal is no worse than it was.
+//
+// A note rides the answer item the question already sends (ask.Item.Notes), so
+// the float offers no store of its own: the draft is typed in the client's
+// input prompt and the send carries it.
+//
+// The float opens by itself on the focused pane's open ask and closes when the
+// ask is answered or gone. A pane that is not focused gets a rail badge
+// instead, so a question elsewhere cannot steal the desk.
 
 import (
 	"bytes"
@@ -38,6 +45,22 @@ const askFloatID = "ask"
 // question instead of a workspace.
 const askPromptKind = "ask"
 
+// askNoteKind is the same prompt carrying a note for the option under the
+// cursor. Its draft lands on the question's answer item, so the daemon stores
+// the note with the answer.
+const askNoteKind = "ask-note"
+
+const (
+	// askWideMin is the narrowest float that carries the context column.
+	// Below it the preview sits under its option, one column.
+	askWideMin = 90
+	// askContextMin is the narrowest context column, and askQuestionMin the
+	// narrowest option column. The context column is about 40% of the box
+	// and never squeezes the options below askQuestionMin.
+	askContextMin  = 30
+	askQuestionMin = 24
+)
+
 // askView is the open ask float: the listed ask it shows, the cursor and the
 // answers so far, and the float that draws them.
 type askView struct {
@@ -56,6 +79,10 @@ type askView struct {
 	pick  []int
 	multi [][]bool
 	texts []string
+	// notes is the note carried on each question's answer item, and noteRow
+	// the option it is drawn under, -1 while the question has none.
+	notes   []string
+	noteRow []int
 
 	// top is the first content row on screen, and note is the status row: an
 	// answer in flight or a refusal's code.
@@ -64,7 +91,8 @@ type askView struct {
 	// pending is true once an answer is on the wire and no snapshot has
 	// closed the ask yet, so a listed ask means the daemon took it.
 	pending bool
-	// readOnly hides send and decline: a read-only session never answers.
+	// readOnly hides notes, send and decline: a read-only session never
+	// answers.
 	readOnly bool
 	// float draws the view.
 	float *panel.FloatingPane
@@ -175,10 +203,10 @@ func (t *tui) openAskFloat(a *wire.Ask) {
 // closeAskFloat takes the float down and gives the keyboard back to the panes.
 // A prompt opened from the float closes with it.
 func (t *tui) closeAskFloat() {
-	// The answer prompt closes with the float. It runs first and finds no
-	// view, so it leaves mode empty instead of handing the keys back to an ask
-	// that is gone.
-	if t.mode == "rename" && t.renameKind == askPromptKind {
+	// The answer and note prompts close with the float. They run first and
+	// find no view, so they leave mode empty instead of handing the keys back
+	// to an ask that is gone.
+	if t.mode == "rename" && (t.renameKind == askPromptKind || t.renameKind == askNoteKind) {
 		t.ask = nil
 		t.closeRename()
 	}
@@ -203,8 +231,11 @@ func (v *askView) reset() {
 	v.pick = make([]int, n)
 	v.multi = make([][]bool, n)
 	v.texts = make([]string, n)
+	v.notes = make([]string, n)
+	v.noteRow = make([]int, n)
 	for i, q := range v.ask.Questions {
 		v.pick[i] = -1
+		v.noteRow[i] = -1
 		v.multi[i] = make([]bool, len(q.Options))
 	}
 	v.top = 0
@@ -349,6 +380,42 @@ func (t *tui) setAskText(i int, text string) {
 	t.dirty = true
 }
 
+// askNote opens the input prompt on the note for the option under the cursor.
+// The note rides the question's answer item, so nothing here reaches the store
+// before the send. n names the next question, so the note key is its shifted
+// form.
+func (t *tui) askNote() {
+	v := t.ask
+	if v == nil || t.readOnly || len(v.notes) == 0 {
+		return
+	}
+	if v.sel[v.q] >= len(v.question().Options) {
+		// The typed row is no option: a note belongs to one.
+		return
+	}
+	t.openRenamePromptFor(askNoteKind, v.id, v.notes[v.q])
+}
+
+// setAskNote lands the note prompt's draft on the question under it. The note
+// is drawn under the option the cursor was on, and an empty draft clears it.
+func (t *tui) setAskNote(i int, text string) {
+	v := t.ask
+	if v == nil || i < 0 || i >= len(v.notes) {
+		return
+	}
+	text = strings.TrimSpace(text)
+	v.notes[i] = text
+	if text == "" {
+		v.noteRow[i] = -1
+	} else {
+		v.noteRow[i] = v.sel[i]
+	}
+	if t.snap != nil {
+		v.fit(t.snap, t.theme())
+	}
+	t.dirty = true
+}
+
 // askSubmit sends the answers and waits for the daemon's verdict. A refused
 // answer keeps the float open with the code on it; the daemon pushes a snapshot
 // on success and the next sync closes the float.
@@ -364,7 +431,7 @@ func (t *tui) askSubmit() {
 	}
 	items := make([]ask.Item, len(v.ask.Questions))
 	for i, q := range v.ask.Questions {
-		it := ask.Item{QuestionIndex: i}
+		it := ask.Item{QuestionIndex: i, Notes: v.notes[i]}
 		if q.MultiSelect {
 			for j, on := range v.multi[i] {
 				if on {
@@ -470,8 +537,9 @@ func (t *tui) askKey() bool {
 			return true
 		}
 		if len(t.inbuf) < 3 && (bytes.HasPrefix([]byte("\x1b[A"), t.inbuf) ||
-			bytes.HasPrefix([]byte("\x1b[B"), t.inbuf)) {
-			// An arrow key is still arriving.
+			bytes.HasPrefix([]byte("\x1b[B"), t.inbuf) ||
+			bytes.HasPrefix([]byte("\x1b[Z"), t.inbuf)) {
+			// An arrow or shift-tab key is still arriving.
 			if !t.pending {
 				t.pending = true
 				t.escAt = time.Now()
@@ -490,6 +558,9 @@ func (t *tui) askKey() bool {
 			v.move(-1)
 		case "\x1b[B":
 			v.move(1)
+		case "\x1b[Z":
+			// Shift-tab steps back, wrapping like tab.
+			t.askStepQuestion(-1)
 		}
 		t.askFit()
 		return true
@@ -500,6 +571,14 @@ func (t *tui) askKey() bool {
 		t.inbuf = t.inbuf[1:]
 		t.pending = false
 		t.askSubmit()
+		return true
+	}
+	if t.inbuf[0] == '\t' {
+		// Tab is a control byte too: it moves to the next question.
+		t.inbuf = t.inbuf[1:]
+		t.pending = false
+		t.askStepQuestion(1)
+		t.askFit()
 		return true
 	}
 	r, size, ok, wait := textRune(t.inbuf)
@@ -525,6 +604,9 @@ func (t *tui) askKey() bool {
 	case 't':
 		t.openAskPrompt()
 		return true
+	case 'N':
+		t.askNote()
+		return true
 	case 'n':
 		t.askStepQuestion(1)
 	case 'p':
@@ -538,23 +620,15 @@ func (t *tui) askKey() bool {
 	return true
 }
 
-// askStepQuestion moves to the next or previous question and keeps the cursor
-// of each where the reader left it.
+// askStepQuestion moves to the next or previous question, wrapping, and keeps
+// the cursor of each where the reader left it.
 func (t *tui) askStepQuestion(d int) {
 	v := t.ask
-	if v == nil {
+	if v == nil || len(v.ask.Questions) == 0 {
 		return
 	}
-	v.q += d
-	if v.q < 0 {
-		v.q = 0
-	}
-	if v.q >= len(v.ask.Questions) {
-		v.q = len(v.ask.Questions) - 1
-	}
-	if v.q < 0 {
-		v.q = 0
-	}
+	n := len(v.ask.Questions)
+	v.q = ((v.q+d)%n + n) % n
 	v.note = ""
 }
 
@@ -571,14 +645,14 @@ func (t *tui) askFit() {
 
 // fit sizes the float to the current question, capped by the screen. The
 // content decides the height, so a short question reads in a short box and a
-// tall preview scrolls.
+// tall one is clamped by the layout that draws it.
 func (v *askView) fit(snap *wire.Snapshot, th theme.Theme) {
 	roomy := boxview.BoxViewRect(snap, 1<<8)
-	r := boxview.BoxViewRect(snap, len(v.lines(th, roomy.W)))
+	r := boxview.BoxViewRect(snap, v.height(th, roomy.W))
 	if r.W != roomy.W {
 		// A narrower box wraps more, so the height is recounted at the width
 		// the placement actually gives.
-		r = boxview.BoxViewRect(snap, len(v.lines(th, r.W)))
+		r = boxview.BoxViewRect(snap, v.height(th, r.W))
 	}
 	v.float.Rect = r
 	v.float.Title = v.title()
@@ -604,7 +678,12 @@ func (v *askView) hint() string {
 		{Keys: []string{"1-9"}, Label: "pick"},
 		space,
 		{Keys: []string{"t"}, Label: "type"},
-		{Keys: []string{"n", "p"}, Label: "question"},
+	}
+	if len(v.ask.Questions) > 1 {
+		hints = append(hints, ui.Hint{Keys: []string{"tab"}, Label: "question"})
+	}
+	if !v.readOnly {
+		hints = append(hints, ui.Hint{Keys: []string{"N"}, Label: "note"})
 	}
 	if v.readOnly {
 		return ui.Hints(hints)
@@ -614,7 +693,7 @@ func (v *askView) hint() string {
 		ui.Hint{Keys: []string{"esc"}, Label: "decline"},
 	)
 	limit := v.float.Rect.W - 2
-	for _, drop := range []string{"question", "type", "toggle", "pick", "move"} {
+	for _, drop := range []string{"question", "note", "type", "toggle", "pick", "move"} {
 		if limit < 0 || cells.Cells(ui.Hints(hints)) <= limit {
 			break
 		}
@@ -633,6 +712,56 @@ func (v *askView) hint() string {
 	return ui.Hints(hints)
 }
 
+// askShape is the float's interior split: the option column's width, the
+// context column's width, and the rows the tab strip takes. A zero rightW means
+// one column, the narrow layout.
+type askShape struct {
+	leftW  int
+	rightW int
+	tabs   int
+}
+
+// shape splits a width-cell interior. The context column is about 40% of the
+// box and never narrower than askContextMin, and the options keep at least
+// askQuestionMin cells beside it. Below askWideMin the float keeps one column,
+// so a narrow terminal is never worse than it was.
+func (v *askView) shape(width int) askShape {
+	sh := askShape{leftW: width}
+	if len(v.ask.Questions) > 1 {
+		// One tab per question needs a question to move between.
+		sh.tabs = 1
+	}
+	if width < askWideMin {
+		return sh
+	}
+	right := width * 2 / 5
+	if right < askContextMin {
+		right = askContextMin
+	}
+	if max := width - askQuestionMin - 1; right > max {
+		right = max
+	}
+	if right < 1 {
+		return sh
+	}
+	return askShape{leftW: width - right - 1, rightW: right, tabs: sh.tabs}
+}
+
+// height is the content rows the float needs at width cells: the taller of the
+// two panes, plus the tab strip. The right pane is counted unclamped, so a long
+// preview still opens a tall box; the screen cap and the pane's own clamp cut
+// it later.
+func (v *askView) height(th theme.Theme, width int) int {
+	sh := v.shape(width)
+	n := len(v.questionLines(th, sh.leftW, sh.rightW == 0))
+	if sh.rightW > 0 {
+		if m := len(v.contextLines(th, sh.rightW, 1<<8)); m > n {
+			n = m
+		}
+	}
+	return n + sh.tabs
+}
+
 // askLine is one painted row: a styled run and the choice row it belongs to,
 // -1 for prose.
 type askLine struct {
@@ -640,8 +769,10 @@ type askLine struct {
 	choice int
 }
 
-// lines builds the content rows for the question on screen at width cells.
-func (v *askView) lines(th theme.Theme, width int) []askLine {
+// questionLines builds the option column at width cells: the question, its
+// options one per row with the description, note and, in the narrow layout, the
+// preview under each. It carries no tab strip: the caller draws that.
+func (v *askView) questionLines(th theme.Theme, width int, withPreview bool) []askLine {
 	if len(v.ask.Questions) == 0 {
 		return nil
 	}
@@ -691,7 +822,10 @@ func (v *askView) lines(th theme.Theme, width int) []askLine {
 		if o.Description != "" {
 			block(o.Description, 6, "")
 		}
-		if o.Preview != "" {
+		if v.noteRow[v.q] == i && v.notes[v.q] != "" {
+			block("note: "+v.notes[v.q], 6, "")
+		}
+		if withPreview && o.Preview != "" {
 			block(o.Preview, 6, th.Glyphs.BorderVertical+" ")
 		}
 	}
@@ -726,6 +860,93 @@ func (v *askView) lines(th theme.Theme, width int) []askLine {
 	return out
 }
 
+// contextLines builds the context column at width cells: the label of the
+// option under the cursor as a heading, its description, and its preview on its
+// own lines. The pane is clamped to height rows, and a preview longer than the
+// room left ends on a count of the rows it hid. A hovered option with no
+// preview keeps the pane and says so, so the box never changes width as the
+// cursor moves.
+func (v *askView) contextLines(th theme.Theme, width, height int) []askLine {
+	p := th.Palette
+	text := func(s string, c theme.RGB) segment.Seg { return segment.Seg{Text: s, FG: c, BG: p.RailBG} }
+	q := v.question()
+	label := "Type something."
+	var preview []string
+	var head []askLine
+	if i := v.sel[v.q]; i >= 0 && i < len(q.Options) {
+		o := q.Options[i]
+		label = o.Label
+		if o.Description != "" {
+			for _, row := range askWrap(o.Description, width-2) {
+				head = append(head, askLine{segs: []segment.Seg{text(" "+row, p.RailDim)}, choice: -1})
+			}
+		}
+		if o.Preview != "" {
+			preview = strings.Split(o.Preview, "\n")
+		}
+	}
+	head = append([]askLine{{segs: []segment.Seg{
+		{Text: " " + label, FG: p.BarAccent, BG: p.RailBG, Bold: true},
+	}, choice: -1}}, head...)
+	if len(head) >= height {
+		return head[:height]
+	}
+	head = append(head, askLine{segs: []segment.Seg{text("", p.RailBG)}, choice: -1})
+	if len(preview) == 0 {
+		return append(head, askLine{segs: []segment.Seg{text(" no preview", p.RailDim)}, choice: -1})
+	}
+	budget := height - len(head)
+	if len(preview) <= budget {
+		for _, row := range preview {
+			head = append(head, askLine{segs: []segment.Seg{text(" "+row, p.RailDim)}, choice: -1})
+		}
+		return head
+	}
+	keep := budget - 1
+	if keep < 0 {
+		keep = 0
+	}
+	for _, row := range preview[:keep] {
+		head = append(head, askLine{segs: []segment.Seg{text(" "+row, p.RailDim)}, choice: -1})
+	}
+	more := fmt.Sprintf(" %s %d more lines", th.Glyphs.ElideMark(), len(preview)-keep)
+	return append(head, askLine{segs: []segment.Seg{text(more, p.RailDim)}, choice: -1})
+}
+
+// tabRow is the tab strip: one tab per question, the active one pointed at and
+// an answered one filled, so a form's progress reads at a glance.
+func (v *askView) tabRow(th theme.Theme) askLine {
+	p := th.Palette
+	segs := []segment.Seg{{Text: " ", FG: p.RailBG, BG: p.RailBG}}
+	for i, q := range v.ask.Questions {
+		name := q.Header
+		if name == "" {
+			name = fmt.Sprintf("Q%d", i+1)
+		}
+		point, fill, fg := " ", " ", p.RailDim
+		if i == v.q {
+			point, fg = th.Glyphs.ActiveMark, p.BarAccent
+		}
+		if v.answered(i) {
+			fill = th.Glyphs.Dirty
+		}
+		segs = append(segs,
+			segment.Seg{Text: point, FG: fg, BG: p.RailBG, Bold: i == v.q},
+			segment.Seg{Text: fill, FG: p.RailText, BG: p.RailBG},
+			segment.Seg{Text: fmt.Sprintf("%d %s  ", i+1, name), FG: fg, BG: p.RailBG, Bold: i == v.q},
+		)
+	}
+	return askLine{segs: segs, choice: -1}
+}
+
+// askWriteRow paints one line at x, y, clipped to width cells.
+func askWriteRow(b *bytes.Buffer, ln askLine, x, y, width int) {
+	fmt.Fprintf(b, "\x1b[%d;%dH", y+1, x+1)
+	for _, s := range segment.ClipSegs(ln.segs, width) {
+		segment.Write(b, s)
+	}
+}
+
 // askWrap is wrapLine as a row list: one row for text that fits, and a whole
 // row for an empty block, so a blank source line keeps its height.
 func askWrap(s string, width int) []string {
@@ -745,21 +966,77 @@ func (v *askView) paint(b *bytes.Buffer, r layout.Rect, th theme.Theme) {
 	if r.W < 1 || r.H < 1 {
 		return
 	}
-	lines := v.lines(th, r.W)
-	// Keep the cursor row on screen. The float refits on every key, so this
-	// only ever moves the window onto a row the content grew past.
+	sh := v.shape(r.W)
+	if sh.rightW <= 0 {
+		v.paintColumn(b, r, th, sh)
+		return
+	}
+	v.paintPanes(b, r, th, sh)
+}
+
+// paintColumn draws the narrow layout: the tab strip over the option column,
+// one window that scrolls.
+func (v *askView) paintColumn(b *bytes.Buffer, r layout.Rect, th theme.Theme, sh askShape) {
+	lines := v.questionLines(th, r.W, true)
+	if sh.tabs > 0 {
+		lines = append([]askLine{v.tabRow(th)}, lines...)
+	}
+	v.scrollTo(lines, r.H)
+	for row := 0; row < r.H; row++ {
+		i := v.top + row
+		if i >= len(lines) {
+			break
+		}
+		askWriteRow(b, lines[i], r.X, r.Y+row, r.W)
+		if n := r.W - segment.SegCells(segment.ClipSegs(lines[i].segs, r.W)); n > 0 {
+			segment.Write(b, segment.Seg{Text: strings.Repeat(" ", n), FG: th.Palette.RailBG, BG: th.Palette.RailBG})
+		}
+	}
+}
+
+// paintPanes draws the wide layout: the tab strip over two panes split by a
+// vertical rule. The option column scrolls under the cursor; the context column
+// stays on the option it reads.
+func (v *askView) paintPanes(b *bytes.Buffer, r layout.Rect, th theme.Theme, sh askShape) {
+	top := r.Y
+	if sh.tabs > 0 {
+		askWriteRow(b, v.tabRow(th), r.X, top, r.W)
+		top++
+	}
+	h := r.H - (top - r.Y)
+	left := v.questionLines(th, sh.leftW, false)
+	v.scrollTo(left, h)
+	right := v.contextLines(th, sh.rightW, h)
+	ruleX := r.X + sh.leftW
+	for row := 0; row < h; row++ {
+		y := top + row
+		if i := v.top + row; i < len(left) {
+			askWriteRow(b, left[i], r.X, y, sh.leftW)
+		}
+		fmt.Fprintf(b, "\x1b[%d;%dH", y+1, ruleX+1)
+		segment.Write(b, segment.Seg{Text: th.Glyphs.BorderVertical, FG: th.Palette.RailDim, BG: th.Palette.RailBG})
+		if row < len(right) {
+			askWriteRow(b, right[row], ruleX+1, y, sh.rightW)
+		}
+	}
+}
+
+// scrollTo keeps the cursor's row inside a window of h rows. The float refits
+// on every key, so this only ever moves the window onto a row the content grew
+// past.
+func (v *askView) scrollTo(lines []askLine, h int) {
 	for i, ln := range lines {
 		if ln.choice >= 0 && ln.choice == v.sel[v.q] {
 			if i < v.top {
 				v.top = i
 			}
-			if i >= v.top+r.H {
-				v.top = i - r.H + 1
+			if i >= v.top+h {
+				v.top = i - h + 1
 			}
 			break
 		}
 	}
-	maxTop := len(lines) - r.H
+	maxTop := len(lines) - h
 	if maxTop < 0 {
 		maxTop = 0
 	}
@@ -768,19 +1045,5 @@ func (v *askView) paint(b *bytes.Buffer, r layout.Rect, th theme.Theme) {
 	}
 	if v.top < 0 {
 		v.top = 0
-	}
-	for row := 0; row < r.H; row++ {
-		i := v.top + row
-		if i >= len(lines) {
-			break
-		}
-		fmt.Fprintf(b, "\x1b[%d;%dH", r.Y+row+1, r.X+1)
-		segs := segment.ClipSegs(lines[i].segs, r.W)
-		for _, s := range segs {
-			segment.Write(b, s)
-		}
-		if n := r.W - segment.SegCells(segs); n > 0 {
-			segment.Write(b, segment.Seg{Text: strings.Repeat(" ", n), FG: th.Palette.RailBG, BG: th.Palette.RailBG})
-		}
 	}
 }

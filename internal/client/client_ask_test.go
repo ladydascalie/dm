@@ -409,6 +409,7 @@ func TestAskFloatReadOnlyOffersNoAnswer(t *testing.T) {
 	}
 	feed(tui, "1\r")
 	feed(tui, "\x1b")
+	feed(tui, "N")
 	select {
 	case m := <-got:
 		t.Fatalf("a read-only client sent %+v", m)
@@ -416,6 +417,9 @@ func TestAskFloatReadOnlyOffersNoAnswer(t *testing.T) {
 	}
 	if tui.ask == nil {
 		t.Fatal("esc closed a read-only ask")
+	}
+	if tui.mode != "ask" || tui.ask.notes[0] != "" {
+		t.Fatalf("a read-only client opened the note prompt: mode %q", tui.mode)
 	}
 }
 
@@ -482,5 +486,274 @@ func TestAskFloatDefersToAnotherOverlay(t *testing.T) {
 	closeLayoutSwitcher(tui)
 	if tui.ask == nil || tui.mode != "ask" {
 		t.Fatalf("the ask did not open after the overlay closed: %v", tui.ask)
+	}
+}
+
+// askSizedTUI is askTUI on a screen of the given width, refitted, so a test
+// picks the wide layout or the narrow one by the width it asks for.
+func askSizedTUI(t *testing.T, questions []wire.AskQuestion, cols int) (*tui, chan wire.Msg) {
+	t.Helper()
+	tui, got := askTUI(t, questions)
+	tui.snap.Cols = cols
+	tui.askFit()
+	return tui, got
+}
+
+// askPanes reads the float's interior as three blocks: the option column, the
+// context column and the rule between them. leftW is the option column's width;
+// the rule is the cell after it.
+func askPanes(t *testing.T, v *askView, cols, rows, leftW int) (left, right, rule string) {
+	t.Helper()
+	screen := askFloatScreen(t, v, cols, rows)
+	r := v.float.Rect
+	var l, g, o strings.Builder
+	for y := r.Y; y < r.Y+r.H; y++ {
+		for x := r.X; x < r.X+r.W; x++ {
+			ch := switcherCell(screen, x, y)
+			if ch == 0 {
+				ch = ' '
+			}
+			switch {
+			case x-r.X < leftW:
+				l.WriteRune(ch)
+			case x-r.X == leftW:
+				g.WriteRune(ch)
+			default:
+				o.WriteRune(ch)
+			}
+		}
+		l.WriteString("\n")
+		g.WriteString("\n")
+		o.WriteString("\n")
+	}
+	return l.String(), o.String(), g.String()
+}
+
+// TestAskFloatWideDrawsBothPanes: a float of askWideMin or more splits into the
+// option column and a context column behind a vertical rule. The right pane
+// carries the hovered option's label, description and preview; the left one
+// carries no preview at all.
+func TestAskFloatWideDrawsBothPanes(t *testing.T) {
+	t.Parallel()
+	tui, _ := askSizedTUI(t, askQuestions(), 140)
+	v := tui.ask
+	r := v.float.Rect
+	if r.W < askWideMin {
+		t.Fatalf("float width = %d, want at least %d for the wide layout", r.W, askWideMin)
+	}
+	sh := v.shape(r.W)
+	if sh.rightW <= 0 {
+		t.Fatalf("shape(%d) = %+v, want a context column", r.W, sh)
+	}
+	if sh.rightW < askContextMin {
+		t.Fatalf("context column = %d, want at least %d", sh.rightW, askContextMin)
+	}
+	left, right, rule := askPanes(t, v, tui.snap.Cols, tui.snap.Rows, sh.leftW)
+	for _, want := range []string{"Which base branch?", "1. main", "2. develop", "the trunk"} {
+		if !strings.Contains(left, want) {
+			t.Fatalf("the option column does not draw %q:\n%s", want, left)
+		}
+	}
+	if strings.Contains(left, "a1b2c3") {
+		t.Fatalf("the option column draws the preview in the wide layout:\n%s", left)
+	}
+	for _, want := range []string{"main", "the trunk", "a1b2c3", "line two"} {
+		if !strings.Contains(right, want) {
+			t.Fatalf("the context column does not draw %q:\n%s", want, right)
+		}
+	}
+	glyph := theme.DefaultTheme().Glyphs.BorderVertical
+	ruled := 0
+	for _, row := range strings.Split(rule, "\n") {
+		if row == "" {
+			continue
+		}
+		if row != glyph {
+			t.Fatalf("the rule between the panes is not one vertical run: %q", row)
+		}
+		ruled++
+	}
+	if ruled < 4 {
+		t.Fatalf("the rule between the panes covers %d rows, want the pane's rows", ruled)
+	}
+
+	// The cursor on the option with no preview keeps the column and says so,
+	// so the box does not jump width as the cursor moves.
+	feed(tui, "j")
+	if v.float.Rect.W != r.W {
+		t.Fatalf("the float moved width to %d when the cursor moved", v.float.Rect.W)
+	}
+	_, right, _ = askPanes(t, v, tui.snap.Cols, tui.snap.Rows, sh.leftW)
+	for _, want := range []string{"develop", "integration", "no preview"} {
+		if !strings.Contains(right, want) {
+			t.Fatalf("the context column does not draw %q for an option with no preview:\n%s", want, right)
+		}
+	}
+}
+
+// TestAskFloatNarrowKeepsOneColumn: below askWideMin the float keeps today's
+// layout, the preview under its option in one column.
+func TestAskFloatNarrowKeepsOneColumn(t *testing.T) {
+	t.Parallel()
+	tui, _ := askSizedTUI(t, askQuestions(), 100)
+	v := tui.ask
+	r := v.float.Rect
+	if r.W >= askWideMin {
+		t.Fatalf("float width = %d, want the narrow layout", r.W)
+	}
+	if sh := v.shape(r.W); sh.rightW != 0 {
+		t.Fatalf("shape(%d) = %+v, want no context column", r.W, sh)
+	}
+	text := askScreenText(t, v, tui.snap.Cols, tui.snap.Rows)
+	for _, want := range []string{"1. main", "the trunk", "2. develop", "integration"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the narrow float does not draw %q:\n%s", want, text)
+		}
+	}
+	if !strings.Contains(text, "│ a1b2c3") || !strings.Contains(text, "│ line two") {
+		t.Fatalf("the narrow float does not draw the preview under its option:\n%s", text)
+	}
+	// The preview sits after the option it belongs to, not in a pane of its
+	// own.
+	if strings.Index(text, "a1b2c3") < strings.Index(text, "the trunk") {
+		t.Fatalf("the preview is drawn above the option it belongs to:\n%s", text)
+	}
+}
+
+// askTabText is the tab strip as one string.
+func askTabText(v *askView, th theme.Theme) string {
+	var b strings.Builder
+	for _, s := range v.tabRow(th).segs {
+		b.WriteString(s.Text)
+	}
+	return b.String()
+}
+
+// TestAskFloatTabsStepAndMarkAnswered: tab and shift-tab move between the
+// questions and wrap. A question with an answer keeps a filled marker in its
+// tab, so a form's progress reads at a glance.
+func TestAskFloatTabsStepAndMarkAnswered(t *testing.T) {
+	t.Parallel()
+	questions := []wire.AskQuestion{
+		{Question: "One?", Header: "First", Options: []wire.AskOption{{Label: "a"}}},
+		{Question: "Two?", Header: "Second", Options: []wire.AskOption{{Label: "b"}}},
+	}
+	tui, _ := askSizedTUI(t, questions, 100)
+	feed(tui, "\t")
+	if tui.ask.q != 1 {
+		t.Fatalf("tab left q = %d, want the second question", tui.ask.q)
+	}
+	feed(tui, "\t")
+	if tui.ask.q != 0 {
+		t.Fatalf("tab did not wrap: q = %d", tui.ask.q)
+	}
+	feed(tui, "\x1b[Z")
+	if tui.ask.q != 1 {
+		t.Fatalf("shift-tab from the first question did not wrap back: q = %d", tui.ask.q)
+	}
+
+	// The tab strip is the float's first interior row.
+	screen := askFloatScreen(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	r := tui.ask.float.Rect
+	top := boxScreenRow(screen, r.Y, r.X, r.W)
+	if !strings.Contains(top, "First") || !strings.Contains(top, "Second") {
+		t.Fatalf("the tab strip is not the top row: %q", top)
+	}
+
+	th := theme.DefaultTheme()
+	dirty := th.Glyphs.Dirty
+	if strings.Contains(askTabText(tui.ask, th), dirty) {
+		t.Fatalf("an unanswered form marks a tab as filled: %q", askTabText(tui.ask, th))
+	}
+	feed(tui, "1")
+	if !tui.ask.answered(1) {
+		t.Fatal("the pick did not answer the question")
+	}
+	if n := strings.Count(askTabText(tui.ask, th), dirty); n != 1 {
+		t.Fatalf("filled tabs = %d, want one for the answered question: %q", n, askTabText(tui.ask, th))
+	}
+}
+
+// TestAskFloatNoteAttachesEditsAndClears: the note key opens the input prompt
+// on the option under the cursor, the draft lands on the question's answer
+// item, a second press edits it, and an empty draft clears it.
+func TestAskFloatNoteAttachesEditsAndClears(t *testing.T) {
+	t.Parallel()
+	tui, _ := askSizedTUI(t, askQuestions(), 100)
+	feed(tui, "j")
+	if tui.ask.sel[0] != 1 {
+		t.Fatalf("cursor = %d, want the option with no preview", tui.ask.sel[0])
+	}
+	feed(tui, "N")
+	if tui.mode != "rename" || tui.renameKind != askNoteKind {
+		t.Fatalf("mode = %q kind = %q, want the note prompt", tui.mode, tui.renameKind)
+	}
+	feed(tui, "needs a rebase")
+	feed(tui, "\r")
+	if tui.mode != "ask" {
+		t.Fatalf("mode = %q, want the ask float back", tui.mode)
+	}
+	if tui.ask.notes[0] != "needs a rebase" || tui.ask.noteRow[0] != 1 {
+		t.Fatalf("note = %q row = %d, want the note on the option under the cursor",
+			tui.ask.notes[0], tui.ask.noteRow[0])
+	}
+	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	noteAt, rowAt := strings.Index(text, "note: needs a rebase"), strings.Index(text, "2. develop")
+	if noteAt < 0 {
+		t.Fatalf("the float does not draw the note:\n%s", text)
+	}
+	if noteAt < rowAt {
+		t.Fatalf("the note is drawn above the row it belongs to:\n%s", text)
+	}
+	if line := strings.TrimSpace(strings.Split(text[noteAt:], "\n")[0]); line != "note: needs a rebase" {
+		t.Fatalf("the note row = %q, want it on its own row", line)
+	}
+
+	// A second press edits the note it already carries.
+	feed(tui, "N")
+	if tui.renameDraft.String() != "needs a rebase" {
+		t.Fatalf("draft = %q, want the note under edit", tui.renameDraft.String())
+	}
+	feed(tui, "!")
+	feed(tui, "\r")
+	if tui.ask.notes[0] != "needs a rebase!" {
+		t.Fatalf("note = %q, want the edit landed", tui.ask.notes[0])
+	}
+
+	// An empty draft clears it, and the row goes with it.
+	feed(tui, "N")
+	for range "needs a rebase!" {
+		feed(tui, "\x7f")
+	}
+	feed(tui, "\r")
+	if tui.ask.notes[0] != "" || tui.ask.noteRow[0] != -1 {
+		t.Fatalf("note = %q row = %d, want it cleared", tui.ask.notes[0], tui.ask.noteRow[0])
+	}
+	if text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows); strings.Contains(text, "note: ") {
+		t.Fatalf("the cleared note is still drawn:\n%s", text)
+	}
+}
+
+// TestAskFloatNoteRidesTheAnswer: the note travels in the answer item the
+// daemon already accepts, beside the option the reader picked.
+func TestAskFloatNoteRidesTheAnswer(t *testing.T) {
+	t.Parallel()
+	tui, got := askSizedTUI(t, askQuestions(), 100)
+	feed(tui, "j")
+	feed(tui, "N")
+	feed(tui, "keep it")
+	feed(tui, "\r")
+	feed(tui, "2")
+	feed(tui, "\r")
+	req := askAnswer(t, nextBoxMsg(t, got))
+	if len(req.Items) != 1 {
+		t.Fatalf("answer = %+v, want one item", req)
+	}
+	it := req.Items[0]
+	if it.Notes != "keep it" {
+		t.Fatalf("notes = %q, want the note on the item", it.Notes)
+	}
+	if len(it.OptionIndexes) != 1 || it.OptionIndexes[0] != 1 {
+		t.Fatalf("item = %+v, want the option beside the note", it)
 	}
 }
