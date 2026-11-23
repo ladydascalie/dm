@@ -17,7 +17,21 @@
     --blocked: #ffb454;
     --done: #58d68d;
     --error: #ff6b6b;
+    /* The rail's six project accents, in slot order, so a project keeps the hue
+       the desk gave it. */
+    --accent-0: #bb9af7;
+    --accent-1: #6edceb;
+    --accent-2: #f08cd7;
+    --accent-3: #7ea9ff;
+    --accent-4: #f0a05a;
+    --accent-5: #8cd79b;
   }
+  .a0 { --acc: var(--accent-0); }
+  .a1 { --acc: var(--accent-1); }
+  .a2 { --acc: var(--accent-2); }
+  .a3 { --acc: var(--accent-3); }
+  .a4 { --acc: var(--accent-4); }
+  .a5 { --acc: var(--accent-5); }
   * { box-sizing: border-box; }
   body {
     margin: 0;
@@ -81,6 +95,97 @@
     box-shadow: inset 0 -2px 0 var(--working);
   }
   body.tab-panes #view-box, body.tab-box #view-panes { display: none; }
+
+  /* The needs-you strip rides in the sticky top bar: a pane that is blocked or
+     in error is never below a fold, and a sideways swipe walks the cards. One
+     card is one tap target that opens its pane. */
+  #needs {
+    display: none;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  #needs.show { display: flex; }
+  #needs::-webkit-scrollbar { display: none; }
+  #needs .card {
+    position: relative; flex: 0 0 auto;
+    width: min(84%, 320px);
+    display: block;
+    padding: 8px 10px 8px 14px;
+    background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+    min-height: 44px;
+    text-decoration: none; color: inherit;
+    overflow: hidden;
+  }
+  /* The project's accent stands on the card's edge, so a card names the
+     section it came from. */
+  #needs .card::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px; background: var(--acc);
+  }
+  #needs .card.blocked { border-color: var(--blocked); }
+  #needs .card.error { border-color: var(--error); }
+  #needs .card:active { background: var(--panel); }
+  #needs .chead { display: flex; align-items: baseline; gap: 6px; }
+  #needs .cname {
+    flex: 0 1 auto; min-width: 0;
+    font-size: 12px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #needs .cplace {
+    flex: 1 1 auto; min-width: 0;
+    font-size: 11px; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #needs .cwant { flex: none; font-size: 10px; }
+  #needs .ago { flex: none; font-size: 10px; color: var(--dim); }
+  /* The message is the reason the card exists, so it keeps two lines and no
+     more: a third line would push the next card out of the strip. */
+  #needs .cmsg {
+    margin-top: 2px;
+    font-size: 12px; line-height: 1.35; color: var(--fg);
+    overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  /* One section per project: its accent mark, its name, the count of what it
+     holds, then its rows. The rail's order decides the sections' order. */
+  .project { border-top: 1px solid var(--line); }
+  .project h2.proj {
+    display: flex; align-items: center; gap: 8px;
+    margin: 14px 12px 2px;
+    font-size: inherit; letter-spacing: 0; text-transform: none;
+  }
+  .project .mark {
+    flex: none; width: 4px; height: 12px; border-radius: 2px;
+    background: var(--acc);
+  }
+  .project .pname {
+    flex: 0 1 auto; min-width: 0;
+    font-size: 13px; font-weight: 600; color: var(--fg);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .project .pcount {
+    flex: 0 1 auto; margin-left: auto; min-width: 0;
+    font-size: 11px; font-weight: 400; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* The shell panes fold to one count line: a pane with no agent has no status
+     to paint and no work to report, so it keeps the way in without a row each. */
+  .fold {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; min-height: 44px;
+    padding: 8px 12px;
+    background: none; border: 0; border-top: 1px solid var(--line);
+    color: var(--dim); font: inherit; font-size: 12px; text-align: left;
+  }
+  .fold:active { background: var(--panel); }
+  .fold .caret { flex: none; font-size: 10px; }
 
   /* The picture grid: the active window's panes, in the arrangement the desk
      shows. A tile with no picture says so rather than staying blank. */
@@ -389,6 +494,7 @@
       <a id="tab-panes" href="#panes" role="tab" aria-selected="true">Panes</a>
       <a id="tab-box" href="#box" role="tab" aria-selected="false">Box</a>
     </nav>
+    <div id="needs"></div>
   </div>
   <div id="banner"></div>
 

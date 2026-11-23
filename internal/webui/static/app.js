@@ -28,6 +28,17 @@ const target = { pane: "", window: "", workspace: "" };
 const timers = { fleet: null, text: null };
 // repaintTimer is the one shot a rotation arms, held so a hide can clear it.
 let repaintTimer = null;
+// openShells names the projects whose shell panes are unfolded, so a poll does
+// not fold a list the reader just opened.
+const openShells = new Set();
+// seen is when this page first saw each pane's status and message, keyed by
+// pane id. A row has no timestamp of its own, so this is the fallback clock a
+// needs-you card measures from.
+const seen = new Map();
+// needCards maps a pane id to the card's ago line, so a poll that changes no
+// card still moves its clock and keeps the strip's sideways scroll.
+const needCards = new Map();
+let needKey = "";
 
 const $ = (id) => document.getElementById(id);
 
@@ -129,10 +140,12 @@ async function loadFleet() {
 function paintFleet(f) {
   fleet = f;
   banner(f.error || "");
+  noteSeen(f);
   // Both views are stale now; only the one on screen is painted.
   dirty.panes = true;
   dirty.box = true;
   renderVisible();
+  renderNeeds(f);
   if (thumbsOn() && tab === "panes") renderThumbs(f);
   $("session").textContent = "dm " + f.session;
   renderSummary(f);
@@ -250,20 +263,191 @@ function boxSummary(f) {
   return n + " waiting";
 }
 
-// renderPanes lists the fleet, blocked and error first: the rows that want a
-// decision are the ones a phone should show without scrolling.
+// ACCENTS is how many accent slots the rail carries. A project's carried slot
+// names its hue, and the page paints the same six colours.
+const ACCENTS = 6;
+
+// NEED_STATES are the two states that want a decision now. A pane in either one
+// is pinned in the strip, so it is never below a fold.
+const NEED_STATES = ["blocked", "error"];
+
+// accentOf is the class that carries a project's hue. Slot zero is the first
+// accent, and a row that carries no slot lands there too.
+function accentOf(p) {
+  const slot = (p.projectAccent || 0) % ACCENTS;
+  return "a" + (slot < 0 ? slot + ACCENTS : slot);
+}
+
+// sortWithin is one project's row order: the states that want a decision first,
+// then the id, which is the rail's own tie break.
+function sortWithin(a, b) {
+  const d = (STATE_RANK[stateOf(a)] ?? 5) - (STATE_RANK[stateOf(b)] ?? 5);
+  return d !== 0 ? d : a.id.localeCompare(b.id);
+}
+
+// projectGroups folds the fleet into one group per project, in the rail's own
+// order: the first pane's place decides where a project sits.
+function projectGroups(panes) {
+  const groups = new Map();
+  for (const p of panes) {
+    const key = p.project || "";
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, name: p.project || "no project", accent: accentOf(p), panes: [] };
+      groups.set(key, g);
+    }
+    g.panes.push(p);
+  }
+  return [...groups.values()];
+}
+
+// renderPanes lists the fleet by project. Every blocked or error pane is pinned
+// in the strip as well, so the rows a phone must not miss are on the first
+// screen whichever project owns them.
 function renderPanes(f) {
   const box = $("panes");
   box.textContent = "";
-  const panes = f.panes.slice().sort((a, b) => {
-    const d = (STATE_RANK[stateOf(a)] ?? 5) - (STATE_RANK[stateOf(b)] ?? 5);
-    return d !== 0 ? d : a.id.localeCompare(b.id);
-  });
-  if (panes.length === 0) {
+  if (f.panes.length === 0) {
     box.append(el("div", "empty", "no panes"));
     return;
   }
-  for (const p of panes) box.append(paneRow(p));
+  for (const g of projectGroups(f.panes)) box.append(projectSection(g));
+}
+
+// projectSection is one project: its accent mark, its name, the count of panes
+// and agents it holds, then its rows and its folded shells.
+function projectSection(g) {
+  const sec = el("section", "project");
+  const head = el("h2", "proj " + g.accent);
+  head.append(el("span", "mark"));
+  head.append(el("span", "pname", g.name));
+  head.append(el("span", "pcount", sectionCount(g.panes)));
+  sec.append(head);
+  const agents = g.panes.filter((p) => p.agent).sort(sortWithin);
+  const shells = g.panes.filter((p) => !p.agent);
+  for (const p of agents) sec.append(paneRow(p));
+  if (shells.length > 0) {
+    sec.append(shellFold(g, shells.length));
+    if (openShells.has(g.key)) for (const p of shells.sort(sortWithin)) sec.append(paneRow(p));
+  }
+  return sec;
+}
+
+// sectionCount is a project's own summary: how many panes it holds and how many
+// of them are an agent.
+function sectionCount(panes) {
+  const n = panes.length;
+  const agents = panes.filter((p) => p.agent).length;
+  return n + (n === 1 ? " pane" : " panes") + ", " + agents + (agents === 1 ? " agent" : " agents");
+}
+
+// shellFold is the line a project's shell panes fold to. It is one tap target
+// that opens their rows, so a folder is still reachable without a row each.
+function shellFold(g, count) {
+  const open = openShells.has(g.key);
+  const btn = el("button", "fold");
+  btn.type = "button";
+  btn.setAttribute("aria-expanded", open ? "true" : "false");
+  btn.append(el("span", "caret", open ? "\u25be" : "\u25b8"));
+  btn.append(el("span", "", count + (count === 1 ? " shell pane" : " shell panes")));
+  btn.addEventListener("click", () => {
+    if (open) openShells.delete(g.key);
+    else openShells.add(g.key);
+    dirty.panes = true;
+    renderVisible();
+  });
+  return btn;
+}
+
+// renderNeeds paints the needs-you strip: one card per blocked or error pane,
+// with the project, the place, the agent's message and how long it has wanted an
+// answer. A strip with nothing to say is absent.
+function renderNeeds(f) {
+  const box = $("needs");
+  const need = f.panes.filter((p) => NEED_STATES.includes(stateOf(p)));
+  need.sort((a, b) => {
+    const d = NEED_STATES.indexOf(stateOf(a)) - NEED_STATES.indexOf(stateOf(b));
+    return d !== 0 ? d : wantSince(a, f) - wantSince(b, f);
+  });
+  // The cards are rebuilt only when one of them changes; a poll that changes
+  // none only moves their clocks, so the strip keeps its sideways scroll.
+  const key = need.map((p) => p.id + ":" + stateOf(p) + ":" + (p.message || "")).join("|");
+  if (key === needKey) {
+    for (const p of need) {
+      const c = needCards.get(p.id);
+      if (c) c.ago.textContent = agoText(wantSince(p, f));
+    }
+    return;
+  }
+  needKey = key;
+  needCards.clear();
+  box.textContent = "";
+  if (need.length === 0) {
+    box.classList.remove("show");
+    return;
+  }
+  for (const p of need) {
+    const ago = el("span", "ago", agoText(wantSince(p, f)));
+    const card = el("a", "card " + accentOf(p) + " " + stateOf(p));
+    card.href = paneHash(p.id);
+    const head = el("div", "chead");
+    head.append(el("span", "cname", p.project || "no project"));
+    const place = placeOf(p);
+    if (place) head.append(el("span", "cplace", place));
+    head.append(el("span", "cwant state " + stateOf(p), stateOf(p)));
+    head.append(ago);
+    card.append(head);
+    card.append(el("div", "cmsg", p.message || "no message"));
+    needCards.set(p.id, { ago });
+    box.append(card);
+  }
+  box.classList.add("show");
+}
+
+// placeOf is a pane's place in the rail's own words: the workspace, then the
+// window inside it.
+function placeOf(p) {
+  const ws = p.workspaceName || p.workspace || "";
+  const win = p.windowName || p.window || "";
+  if (ws && win) return ws + " > " + win;
+  return ws || win;
+}
+
+// wantSince is when a pane began to want an answer. A box entry the pane wrote
+// carries the daemon's clock, so it answers first; a pane that wrote none falls
+// back to when this page first saw the state.
+function wantSince(p, f) {
+  let at = 0;
+  for (const e of f.box || []) {
+    if (e.from !== p.id || NEED_STATES.indexOf(e.state) < 0) continue;
+    const t = Date.parse(e.at) || 0;
+    if (t > at) at = t;
+  }
+  if (at > 0) return at;
+  const was = seen.get(p.id);
+  return was ? was.at : Date.now();
+}
+
+// noteSeen stamps each pane's state and message, so a card can say how long the
+// pane has been that way for as long as this page watches it.
+function noteSeen(f) {
+  const now = Date.now();
+  for (const p of f.panes) {
+    const sig = (p.status || "") + "\u0000" + (p.message || "");
+    const was = seen.get(p.id);
+    if (!was || was.sig !== sig) seen.set(p.id, { sig, at: now });
+  }
+}
+
+// agoText is a duration a thumb can read.
+function agoText(ms) {
+  const secs = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (secs < 45) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return Math.max(1, mins) + "m ago";
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return hours + "h ago";
+  return Math.round(hours / 24) + "d ago";
 }
 
 // paneRow is one pane: the name a person would use on the first line, its
