@@ -70,6 +70,22 @@ type askView struct {
 	float *panel.FloatingPane
 }
 
+// onScreen reports whether a pane is drawn in the active window. A pane of
+// another window still lists its ask in the snapshot, and the rail carries the
+// badge, but the desk should not paint a question over work the reader is in
+// the middle of.
+func onScreen(snap *wire.Snapshot, pane string) bool {
+	if snap == nil || pane == "" {
+		return false
+	}
+	for i := range snap.Panes {
+		if snap.Panes[i].ID == pane {
+			return true
+		}
+	}
+	return false
+}
+
 // askOnPane returns the ask the snapshot lists on pane, nil when the pane has
 // none. The list is oldest first, so a pane with two questions shows the first.
 func askOnPane(snap *wire.Snapshot, pane string) *wire.Ask {
@@ -93,6 +109,12 @@ func (t *tui) syncAsk() {
 		return
 	}
 	a := askOnPane(t.snap, t.snap.Focus)
+	if a != nil && !onScreen(t.snap, a.Pane) {
+		// The question belongs to a pane of another window. The rail badge
+		// names it and a jump from the rail focuses it; a float over a window
+		// the reader is not looking at is a surprise, not a prompt.
+		a = nil
+	}
 	if t.ask == nil {
 		if a == nil || a.ID == t.askClosed {
 			t.askDeferred = false

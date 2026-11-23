@@ -224,6 +224,30 @@ func TestAskFloatRefusalKeepsTheFloat(t *testing.T) {
 	}
 }
 
+// TestAskFloatOnlyOnTheScreen: a question on a pane of another window stays in
+// the rail and does not paint over the window the reader is in.
+func TestAskFloatOnlyOnTheScreen(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	// w9p1 is not a pane of the active window, so it is not on screen.
+	tui.snap.Ask = []wire.Ask{{
+		ID: "ask9", Pane: "w9p1", ToolCallID: "tc9", Questions: askQuestions(),
+	}}
+	tui.syncAsk()
+	if tui.ask != nil || tui.mode != "" {
+		t.Fatalf("an off-screen ask opened the float: %v, mode %q", tui.ask, tui.mode)
+	}
+	// The focused pane of the active window still opens it.
+	tui.snap.Ask = []wire.Ask{{
+		ID: "ask1", Pane: "w1p1", ToolCallID: "tc1", Questions: askQuestions(),
+	}}
+	tui.syncAsk()
+	if tui.ask == nil {
+		t.Fatal("an on-screen ask did not open the float")
+	}
+	_ = got
+}
+
 // TestAskFloatSettledElsewhereLetsGo: an ask answered on another surface is
 // refused with E_EXISTS, and that must free the desk instead of pinning a code
 // the reader cannot clear. The ask stays listed, so the float must also refuse
