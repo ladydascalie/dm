@@ -220,19 +220,24 @@ function renderSummary(f) {
   $("counts").textContent = tab === "box" ? boxSummary(f) : paneSummary(f);
 }
 
-// paneSummary names each state the fleet holds, blocked and error first.
+// paneSummary names each state the fleet holds, blocked and error first. It
+// counts the same five words a row paints, and names the panes leaving that
+// column empty as well, so the line matches the list a thumb scrolls.
 function paneSummary(f) {
   const counts = {};
+  let quiet = 0;
   for (const p of f.panes) {
-    const s = p.status || "note";
-    counts[s] = (counts[s] || 0) + 1;
+    const s = stateOf(p);
+    if (s) counts[s] = (counts[s] || 0) + 1;
+    else quiet++;
   }
   const order = ["blocked", "error", "working", "done", "note"];
   const parts = [];
   for (const s of order) {
     if (counts[s]) parts.push(counts[s] + " " + s);
   }
-  return parts.length > 0 ? parts.join("  ") : "no agents";
+  if (quiet > 0) parts.push(quiet + " no agent");
+  return parts.length > 0 ? parts.join("  ") : "no panes";
 }
 
 // boxSummary counts the entries that want an answer: the lanes that left a
@@ -281,28 +286,23 @@ function paneRow(p) {
 
   // The facts, each printed once: the id unless it is the name above, the
   // place it sits in, the branch with its diff, and the folder trimmed to its
-  // tail.
+  // tail. Each is a chip of its own, so a gap separates them and a line that
+  // wraps leaves nothing dangling at its end.
   const where = el("div", "where");
-  let empty = true;
-  const fact = (node) => {
-    if (!empty) where.append(el("span", "sep", " \u00b7 "));
-    empty = false;
-    where.append(node);
-  };
-  if (name !== p.id) fact(el("span", "id", p.id));
+  if (name !== p.id) where.append(el("span", "id", p.id));
   // Workspace then window, the way the rail names the pair.
   const window = p.windowName || p.window;
   if (p.workspaceName || p.workspace) {
     const place = el("span", "", p.workspaceName || p.workspace);
     if (window) place.append(document.createTextNode(" > " + window));
-    fact(place);
+    where.append(place);
   } else if (window) {
-    fact(el("span", "", window));
+    where.append(el("span", "", window));
   }
   if (p.branch) {
     const branch = el("b", "", p.branch);
     if (p.dirty) branch.append(document.createTextNode(" +" + (p.added || 0) + "/-" + (p.deleted || 0)));
-    fact(branch);
+    where.append(branch);
   }
   if (p.cwd) {
     const cwd = el("span", "cwd");
@@ -312,9 +312,9 @@ function paneRow(p) {
     tail.textContent = p.cwd;
     cwd.append(tail);
     cwd.title = p.cwd;
-    fact(cwd);
+    where.append(cwd);
   }
-  if (!empty) row.append(where);
+  if (where.childNodes.length > 0) row.append(where);
 
   if (p.message) row.append(el("div", "msg", p.message));
   if (p.active) row.append(el("div", "msg", "on screen at the desk"));

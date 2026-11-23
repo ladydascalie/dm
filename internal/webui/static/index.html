@@ -45,7 +45,10 @@
      of title and buttons leaves the counts too narrow to read at 320. */
   header.fleet { display: block; }
   header.fleet .bar { display: flex; align-items: center; gap: 8px; }
-  header.fleet h1 { margin-right: auto; }
+  header.fleet h1 {
+    flex: 0 1 auto; min-width: 0; margin-right: auto;
+    overflow: hidden; text-overflow: ellipsis;
+  }
   header.fleet .counts {
     margin-top: 4px; font-size: 12px; color: var(--dim);
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
@@ -140,21 +143,29 @@
   }
   .row .title .state { flex: none; }
   .row .id { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); }
-  .row .msg { font-size: 13px; color: var(--dim); }
+  /* A message can carry a path with no break in it: break it inside the row,
+     whatever the width. The row is one tap target, so nothing in it may widen
+     the document and shrink the page. */
+  .row .msg { font-size: 13px; color: var(--dim); overflow-wrap: anywhere; }
+  /* The facts are chips: a gap says where one ends, so no separator can end a
+     line, and a fact that wraps is still a fact of this row. A chip never
+     shrinks, so a long line wraps instead of cutting a fact short. */
   .row .where {
+    display: flex; flex-wrap: wrap; gap: 2px 10px;
     margin-top: 1px;
     font-size: 11px; line-height: 1.45; color: var(--dim);
-    overflow-wrap: anywhere;
+  }
+  .row .where > * {
+    flex: 0 0 auto; max-width: 100%; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .row .where b { color: #9fb0bf; font-weight: 500; }
-  .row .where .sep { color: #3d4952; }
   /* A folder has no end worth trimming: keep its tail, which is the part that
      names the work, and let the head go. The box clips from the left, so the
      ellipsis lands there; the bdi keeps the path itself in reading order. */
   .row .where .cwd {
-    display: inline-block; max-width: 100%; vertical-align: bottom;
+    max-width: 100%;
     direction: rtl; text-align: left;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .row .where .cwd bdi { direction: ltr; unicode-bidi: isolate; }
   .state { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
