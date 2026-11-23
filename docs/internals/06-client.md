@@ -12,7 +12,7 @@ Every change of session state is a request to the server, never a local edit. Wh
 
 ## File map
 
-All paths are `internal/client/`. 20 files, 10986 lines without tests, measured at commit `b07e400` (2026-11-18). A bare `:N` on this page is a line in the file named just before it. `damage_test.go`, `shot_oracle_test.go` and `pace_loop_test.go` hold the client to its behaviour: they build a `tui` (the client model, `internal/client/client_model.go:60`) with its frame sink `t.out` pointed at a `bytes.Buffer`, and call `draw` or `tick` directly, so no terminal is involved.
+All paths are `internal/client/`. 24 files, 12833 lines without tests, measured at commit `9bd9849` (2026-11-23). A bare `:N` on this page is a line in the file named just before it. `damage_test.go`, `shot_oracle_test.go` and `pace_loop_test.go` hold the client to its behaviour: they build a `tui` (the client model, `internal/client/client_model.go:60`) with its frame sink `t.out` pointed at a `bytes.Buffer`, and call `draw` or `tick` directly, so no terminal is involved.
 
 | file | owns |
 | --- | --- |
@@ -25,6 +25,7 @@ All paths are `internal/client/`. 20 files, 10986 lines without tests, measured 
 | `command_palette.go`, `layout_switcher.go` | the two palettes (a centred list of commands, and of layouts) |
 | `client_floats.go`, `client_float.go`, `client_float_cmd.go` | the message view, keymap view, float stack, floating command |
 | `client_notify.go` | the notify catch-up, its toasts, the bar badge and the recent cache |
+| `client_ask.go` | the ask float: the focused pane's questions, its cursor, its answers and the `ask-answer` send |
 | `client_body_reader.go`, `client_clip.go`, `scroll_search.go` | body reader, clipboard, scrollback search |
 | `switcher_wire.go` | the dashboard (the full-screen table of every pane in the session, `internal/switcher/switcher.go:63`): open, close, pick |
 
@@ -72,7 +73,7 @@ flowchart TD
 `tui` (`internal/client/client_model.go:60`) holds three groups.
 
 - The server's truth: `snap` (a `wire.Snapshot` with the pane rects, the rail width, the focused pane, the zoom and the pane list, `internal/wire/wire.go:216`; zoom is the one pane drawn full screen) and `vts`, one `vt.Term` per visible pane. `hist` holds a pane's replay ring only after a scrollback entry asked for it: scrollback is the history above the live screen, entered by the scrollback action or the wheel, and the replay ring is the raw bytes of that history, which the server forwards untouched. The ring has three names here: the scroll ring the pane's daemon keeps, the replay ring the client receives, and the history ring a scrollback shows. `histMeta` records the rect and whether the reply landed.
-- Local overlays: `floats` (a `[]*panel.FloatingPane` stack; a float is a pane-shaped box with its own content, painted over the layout at an arbitrary rectangle, in no tree, `internal/panel/float.go:14`), `box` (the message view), `keys` (the keymap view), `lsw` and `cp` (the layout and command palettes), `sw` (the dashboard), `float` (the floating command), `menu` (a row menu), `toasts` and `mode`, the string that says which one owns the keyboard. The `keys` field is not the `keys` channel, and the `float` field is not the `float` mode.
+- Local overlays: `floats` (a `[]*panel.FloatingPane` stack; a float is a pane-shaped box with its own content, painted over the layout at an arbitrary rectangle, in no tree, `internal/panel/float.go:14`), `box` (the message view), `keys` (the keymap view), `lsw` and `cp` (the layout and command palettes), `sw` (the dashboard), `float` (the floating command), `ask` (the ask float, the focused pane's listed questions), `menu` (a row menu), `toasts` and `mode`, the string that says which one owns the keyboard. The `keys` field is not the `keys` channel, and the `float` field is not the `float` mode.
 - Paint memory: `last` (`internal/client/client_model.go:296`), one `paint` per band (the bytes a band wrote and the screen rows they cover), `rowsig` (one fingerprint per pane row) and `laysig` (the shape of the picture).
 
 A frame reads nothing from the server: it is computed from those fields alone, which is why every test can draw one without a socket.
@@ -100,7 +101,7 @@ The body ends with `cursorBlock` (`:540`). The frame opens with `ESC[?7l` to tur
 
 The handoff is one call: `t.km().Match("main", buf)` (`internal/keymap/config_model.go:327`). `"main"` is the keymap block name the client's own keys live in, and `km` is the keymap loaded from the config file `$XDG_CONFIG_HOME/dm/config.kdl` (written with the defaults on first run), or the built-in one when the file is missing. The call returns the action, the bytes consumed, and `Match`, `Partial` or `NoMatch`. `Partial` keeps the bytes and re-asks on the next read; `expireArmed` (`internal/client/client_input.go:741`) drops a stalled sequence after `escTimeout` (40ms, `internal/client/client_model.go:33`). A matched action goes to `runAction` (`internal/client/client_keys.go:802`), which either acts locally (`openBoxView`, `t.quit = true`, `disarm`) or sends a request through the functions `action` or `actionOn` (`:989`, `:997`). Those two are functions, not the keymap action and not the `action` field of a request.
 
-An unbound key notifies and disarms: it never reaches a pane, because dm is not a passthrough for keys it has claimed. Most overlays resolve keys through a keymap mode: `menu`, `picker`, `switcher`, `layout`, `scroll`, `rename`, `box` (the message view) and `help`. Two keymap mode names differ from the client's `mode` strings: the sessions picker is keymap mode `picker` and client mode `sessions`, and the dashboard is `switcher` and `dashboard`. The rest share one name: `menu`, `layout`, `scroll`, `rename`, `box` and `help`. The command palette has neither a `mode` nor a keymap mode, and the floating command reads its keys by hand inside its own `float` mode. A config file that predates a mode falls back to the built-in keymap, as `keymapKey` does for `help` (`internal/client/client_floats.go:376`).
+An unbound key notifies and disarms: it never reaches a pane, because dm is not a passthrough for keys it has claimed. Most overlays resolve keys through a keymap mode: `menu`, `picker`, `switcher`, `layout`, `scroll`, `rename`, `box` (the message view) and `help`. Two keymap mode names differ from the client's `mode` strings: the sessions picker is keymap mode `picker` and client mode `sessions`, and the dashboard is `switcher` and `dashboard`. The rest share one name: `menu`, `layout`, `scroll`, `rename`, `box` and `help`. The command palette has neither a `mode` nor a keymap mode, and the floating command and the ask float read their keys by hand, inside mode `float` and mode `ask`. A config file that predates a mode falls back to the built-in keymap, as `keymapKey` does for `help` (`internal/client/client_floats.go:376`).
 
 ## Overlays and the float layer
 
@@ -118,6 +119,18 @@ Every overlay is one field, one open and close pair, one key handler, one paint 
 | floating command | `openFloatFor` (`client_float_cmd.go:153`) | `float` | `floatKey` |
 | scrollback | `startScroll` (`client_input.go:1185`) | `scroll` | `scrollKey` |
 | rename prompt (a one-line input) | `openRenamePrompt` (`client_input.go:2667`) | `rename` | `renameKey` |
+| ask float | `syncAsk` on a snapshot (`client_ask.go`) | `ask` | `askKey` |
+
+The ask float is the one overlay nobody opens with a key: `syncAsk` (`client_ask.go`) runs on every snapshot, opens
+the float on the focused pane's listed ask (`Snap.Ask`, `internal/wire/wire.go:277`), refreshes it, and closes it
+when the ask is answered or gone. An ask that arrives while another overlay owns the keyboard waits
+(`askDeferred`), and each overlay close re-checks, so a question never paints over a desk in use. The float shows
+one question at a time and draws it from the snapshot alone: the header, the question, each option with its
+description and preview, and on a single-select question a last row that opens the one-line input for a typed
+answer (mode `rename` with kind `ask`, so the input has one implementation). A question on a pane that is not
+focused paints no float at all: that pane's rail row carries a `?` badge, filled from the same ask list
+(`rail.RailItem.Ask`). `enter` sends `ask-answer` with the items and `esc` sends it with `cancel:true`; the reply is
+the daemon's verdict, and a refusal leaves the float open with the code on it (`takeAskAnswer`).
 
 Two more keyboard owners are sub-modes, not overlays: the scrollback search (`openSearch`, `client_input.go:966`, mode `search`) and the prefix help box (`arm`, `client_keys.go:975`, no mode). Two overlays differ from the rest: the dashboard and the command palette are checked by pointer, not by `mode` (`processInput` tests `t.sw` and `t.cp` before it looks at `mode`), so they take the keyboard first. Every other overlay is checked by its `mode` string, which is the `mode` column above. The dashboard is the full-screen table of every pane in the session, with a preview band for the selected pane, and it takes its own `mode` only when it is full screen, because as a palette it leaves the panes live under it (`openSwitcher`, `switcher_wire.go:22`). It also keeps its own preview terminals (`swVT`) for panes outside the active window, filled by `screen` replies, because those panes have no bytes stream. Scrollback is a mode over a pane, not a float: `startScroll` asks for one `replay` ring and builds a tall `vt.Term` from it (`buildScroll`), a terminal as tall as the pane plus the history window in lines (`history-lines`, 10000 by default). The live pane keeps updating behind it and the tall terminal stays frozen, and `exitScroll` (`internal/client/client_input.go:1163`) drops the view, the offset and any search.
 
@@ -125,7 +138,7 @@ Every screen-owning mode hides the cursor; `cursorBlock` decides that from the m
 
 ## The rail
 
-The rail is server state and client paint: the server publishes the width (`Rail`, `RailWant`) and the panes the rows are built from (`Snapshot.All`, every pane in the session, `internal/wire/wire.go:225`), and enforces everything; the client groups those panes into project, workspace, window and pane rows, and the thin rail keeps one pane row per pane and no group row. It draws them with `rail.DrawRail` (`internal/rail/rail.go:896`), hit-tests with `rail.RailItemAt` (`:830`) and sends a request for every change. The rail hover is `railHoverRow` (`internal/client/client_input.go:2305`), which turns the pointer cell into an item row for the paint. The client never reorders the rail locally: it paints the drop marker, the insertion line where a dragged row would land, and waits for the snapshot.
+The rail is server state and client paint: the server publishes the width (`Rail`, `RailWant`) and the panes the rows are built from (`Snapshot.All`, every pane in the session, `internal/wire/wire.go:225`), and enforces everything; the client groups those panes into project, workspace, window and pane rows, and the thin rail keeps one pane row per pane and no group row. It draws them with `rail.DrawRail` (`internal/rail/rail.go:896`), hit-tests with `rail.RailItemAt` (`:830`) and sends a request for every change. The rail hover is `railHoverRow` (`internal/client/client_input.go:2305`), which turns the pointer cell into an item row for the paint. The client never reorders the rail locally: it paints the drop marker, the insertion line where a dragged row would land, and waits for the snapshot. A pane row whose pane the session lists a question on carries a `?` badge on its right edge, filled from the snapshot's asks, so a question in another window still says so without taking the desk.
 
 The rail's list can be taller than the sidebar, so the client keeps its own scroll offset in `railOff`, the first item row the paint shows. The wheel over the rail's columns turns it (`railWheel`), `rail.ClampOffset` (`internal/rail/rail.go`) holds it inside the list, and every hit test takes the offset, so a click lands on the row the operator sees. The offset is client view state like the hover, never server state: a snapshot that shortens the list clamps it.
 
@@ -174,3 +187,4 @@ A new frame row or band: write a draw function that uses absolute cursor moves, 
 
 - [Entry point and lifecycle](02-lifecycle.md), [The wire protocol](03-protocol.md), [The server](04-server.md), [The pane](05-pane.md)
 - [Layout](07-layout.md), [The box and the notify bus](08-surfaces.md), [Secrets](09-secrets.md), [Config and keymap](10-config.md), [Layers](11-layers.md)
+- [Asks](../../README.md#asks) for the feature from the operator's side: the three surfaces and the pi setup.

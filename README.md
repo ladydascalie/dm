@@ -68,6 +68,7 @@ internal/session     the state file model, the id scheme and its migration
 internal/wire        the socket wire contract
 internal/transport   the client side of the session socket
 internal/webui       the phone page: HTTP over the same socket primitives
+internal/ask         the questions an agent puts to the reader, their rules and codes
 internal/box         the message box types, bounds and schema
 internal/osc         the OSC 7501 status filter and parser
 internal/notify      the desktop notification policy
@@ -215,9 +216,11 @@ The page has five parts:
   a session holds text an agent read somewhere else. A thought and a tool call
   are one row each until a tap: the thought's own words, and the call's
   arguments above the output it answered with. One tap switches, and the
-  choice rides the address hash, so a reload lands on the same view. Every view
-  keeps the input row that types into the pane, with a `pic` button that
-  uploads a photo to the session's `uploads/` folder and types its path, which
+  choice rides the address hash, so a reload lands on the same view. A pane
+  whose agent asked the reader a question draws the ask form above its view,
+  whichever view is open; Asks below owns it. Every view keeps the input row
+  that types into the pane, with a `pic` button that uploads a photo to the
+  session's `uploads/` folder and types its path, which
   the agent opens with its own read tool, and one row of three commands:
   new window, which opens in the folder the pane stands in, rename, and close
   pane. A chevron in the header folds that row and the view switch away, because
@@ -245,6 +248,64 @@ that fails paints the daemon's message in the banner and changes nothing else.
 The page hides those commands: the action sheet, the pane action row, the send
 row and the compose. Everything that only reads stays: the fleet, the box, the
 three pane views, the fold and the picture grid.
+
+## Asks
+
+An ask is a question set an agent puts to the reader from a pane. One ask
+belongs to one tool call id, and carries one to many questions: a header, the
+question text, a multi-select flag and options with a label, a description and
+an optional preview. The store is session state, not pane state, so a client
+that attaches mid-question sees the open ones, and the ids it hands out are
+`a1`, `a2`, and so on. An answered ask stays listed until the agent closes it,
+and the snapshot carries no answer, so a client that attaches between the
+answer and the close draws the ask as open; `dm ask list` carries the answers
+themselves. The caps are the store's: 64 questions of 64 options.
+
+Three surfaces draw an ask from that one store.
+
+- The desk. The TUI paints the focused pane's ask as a float, one question at a
+  time: the header, the question, the options with their description and
+  preview, and on a single select a last `Type something.` row. `j`/`k` or the
+  arrows move, a digit picks that option, `space` picks on a single select and
+  toggles on a multi-select, `t` types a custom answer, `n`/`p` move between
+  questions, `enter` sends once every question is answered, and `esc` declines.
+  A pane that is not focused keeps only a `?` badge on its rail row, so a
+  question in another window cannot take the desk. The float closes on the next
+  snapshot once the ask is answered or gone. A refused answer keeps it open
+  with the daemon's code on it.
+- The phone. `dm web` paints the ask as a form above the pane's views: one
+  block per question, options as tappable rows, the description inline and the
+  preview behind its own toggle, a text field for something else on every
+  question, and several picks on a multi-select. Send stays disabled until
+  every question is answered. A refusal keeps its code in the banner and keeps
+  every answer. The fleet row of a pane with an open ask says so, and
+  `--read-only` shows the questions with no controls.
+- pi. The `ask-bridge` extension registers the tool `ask_user_question`, so an
+  agent asks with the shape it already writes: questions of question, header,
+  multi-select and options, up to four of each. It runs `dm ask open`, polls
+  `dm ask await` and then `dm ask close`, and returns the answers in the
+  envelope pi's tool result expects. With no `DM_PANE`, no `dm` on `PATH` or no
+  daemon it asks through pi's own `select` and `input` instead, and says which
+  path ran in the tool details.
+
+Esc declines an ask on every surface. The float sends the answer with
+`cancel:true`, the phone's decline sends the same, and a pi ask that is
+cancelled, or whose call is aborted, is declined too. A decline is an answer:
+the agent reads it and stops waiting.
+
+The CLI is the store's door: `dm ask list`, `dm ask open --pane <pane>
+--tool-call <id>`, `dm ask await <id>`, `dm ask answer <id>` and `dm ask close
+<id>`. A question set is too big for argv, so the bodies come on stdin.
+
+The pi extension is one symlink and one setting:
+
+```sh
+ln -s "$PWD/skills/ask-bridge/ask-bridge.ts" ~/.pi/agent/extensions/ask-bridge.ts
+```
+
+Drop `rpiv-ask-user-question` from `~/.pi/agent/settings.json` and restart pi.
+The tool name registers once, so rpiv's own `ask_user_question` is dropped
+rather than loaded beside this one.
 
 ## Layouts
 
@@ -1233,9 +1294,10 @@ Actions: `ping`, `list` (alias `ls`), `read`, `history`, `yank`, `replay`,
 `new-window`, `next-window`, `prev-window`, `select-window`, `new-workspace`,
 `next-workspace`, `prev-workspace`, `list-workspaces`, `list-panes`, `pane`,
 `toggle-fold`, `set-pane-name`, `focus-window`, `focus-workspace`,
-`close-workspace`, `rename-window`, `rename-workspace`, and the seven box
+`close-workspace`, `rename-window`, `rename-workspace`, the seven box
 actions `msg-post`, `msg-list`, `msg-wait`, `msg-sub`, `msg-clear`,
-`msg-watchers` and `msg-schema` below.
+`msg-watchers` and `msg-schema` below, and the five ask actions `ask-open`,
+`ask-await`, `ask-answer`, `ask-close` and `ask-list` under Asks.
 
 `swap-panes` trades two pane ids in place: `target` and `other` swap
 positions, every rectangle keeps its shape, and focus stays on the focused
