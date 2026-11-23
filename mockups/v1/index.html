@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm ask form · v1 today</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --accent:#7ac0eb; --edge:#78c8e1; --hint:#9599ae; --del:#ff7d7d;
+ --add:#78dc82; --work:#f5be50; --page:#0b0b0f; --rule:#3b3a48;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 26px;color:#7d8298;max-width:74ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:30px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:74ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+.frame{font-family:"DejaVu Sans Mono",ui-monospace,monospace;
+ font-size:13px;line-height:1.3;font-variant-ligatures:none;color:var(--text);
+ white-space:normal;display:inline-block}
+.top,.bot{display:flex;align-items:center;gap:0}
+.corner{color:var(--edge);font-weight:700}
+.lead{color:var(--edge);font-weight:700}
+.rule{flex:1 1 auto;height:2px;background:var(--edge);align-self:center;margin:0}
+.title{color:#fff;font-weight:700;white-space:pre}
+.hint{color:var(--hint);white-space:pre}
+.body{width:calc(96ch + 4px);border-left:2px solid var(--edge);border-right:2px solid var(--edge);
+ padding:2px 0 6px;overflow:hidden;background:var(--bg)}
+.split{display:flex}
+.col{flex:0 0 auto}
+.vr{flex:0 0 1px;background:#55596b}
+.row{white-space:pre;min-height:1.3em}
+.dim{color:var(--dim);white-space:pre}
+.acc{color:var(--accent)}
+.bold{font-weight:700}
+.txt{color:var(--text);white-space:pre}
+.hdr{color:var(--header);white-space:pre}
+
+/* one row of terminal text, one fixed line box, so a row cannot outgrow its slot */
+.row,.opt,.cont,.hline,.ph,.pb,.ctop,.cbot,.sect,.foot,.dline,.tabbar,.strip{
+ line-height:1.4;height:1.4em}
+</style>
+</head>
+<body>
+
+<h1>dm ask form · v1: what ships today</h1>
+<p class="sub">The baseline, drawn at 96 cells. The reference for every redesign below.</p>
+
+<h2>One question, wide</h2>
+<div class="frame">
+  <div class="top"><span class="corner">╭</span><span class="lead">─</span><span class="title"> ask w1p2  1/1 </span><span class="rule"></span><span class="corner">╮</span></div>
+  <div class="body">
+    <div class="split">
+      <div class="col" style="width:57ch">
+        <div class="row acc bold"> Rename</div>
+        <div class="row"> How far should the rename go?</div>
+        <div class="row"> </div>
+        <div class="row"><span class="acc">> </span><span class="dim">( ) </span><span class="txt bold">1. Rename the function only</span></div>
+        <div class="row dim">      Three call sites, one file.</div>
+        <div class="row"><span class="dim">  ( ) </span><span class="dim">2. Rename the parameter too</span></div>
+        <div class="row dim">      Two files, four call sites.</div>
+        <div class="row"><span class="dim">  ( ) </span><span class="dim">3. Leave the name alone</span></div>
+        <div class="row"><span class="dim">    Type something.</span></div>
+      </div>
+      <div class="vr"></div>
+      <div class="col" style="width:38ch">
+        <div class="row acc bold"> Rename the function only</div>
+        <div class="row dim"> Three call sites, one file.</div>
+        <div class="row"> </div>
+        <div class="row dim"> Freeze the signature.</div>
+        <div class="row dim"> Do not touch the params.</div>
+      </div>
+    </div>
+  </div>
+  <div class="bot"><span class="corner">╰</span><span class="hint">  j/k move  1-9 pick  space pick  t type  N note  enter send  esc decline </span><span class="rule"></span><span class="corner">╯</span></div>
+</div>
+<p class="note"><b>Where it is sparse:</b> four cells of gutter, a marker, a bracket pair and a dim label fill 57 cells, and the right column is empty under five of nine rows. The box has one hairline border and no hierarchy between question and options.</p>
+
+<h2>Two questions, the second one multi-select</h2>
+<div class="frame">
+  <div class="top"><span class="corner">╭</span><span class="lead">─</span><span class="title"> ask w1p2  2/2 </span><span class="rule"></span><span class="corner">╮</span></div>
+  <div class="body">
+    <div class="row"> <span class="acc bold">▸</span> <span class="acc bold">1 Scope  </span> <span class="txt">●</span><span class="dim bold">2 Tests  </span></div>
+    <div class="split">
+      <div class="col" style="width:57ch">
+        <div class="row acc bold"> Tests</div>
+        <div class="row"> Which suites should run after it?</div>
+        <div class="row"> </div>
+        <div class="row"><span class="acc">> </span><span class="dim">[ ] </span><span class="txt bold">1. Unit tests</span></div>
+        <div class="row dim">      go test ./internal/...</div>
+        <div class="row dim">      note: the ask package only</div>
+        <div class="row"><span class="dim">  [ ] </span><span class="dim">2. Blackbox tests</span></div>
+        <div class="row dim">      go test ./blackbox/...</div>
+        <div class="row"><span class="dim">  [ ] </span><span class="dim">3. None</span></div>
+      </div>
+      <div class="vr"></div>
+      <div class="col" style="width:38ch">
+        <div class="row acc bold"> Unit tests</div>
+        <div class="row dim"> go test ./internal/...</div>
+        <div class="row"> </div>
+        <div class="row dim"> no preview</div>
+      </div>
+    </div>
+  </div>
+  <div class="bot"><span class="corner">╰</span><span class="hint">  j/k move  1-9 pick  space toggle  t type  tab question  N note  enter send  esc decline </span><span class="rule"></span><span class="corner">╯</span></div>
+</div>
+
+</body>
+</html>

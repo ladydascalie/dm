@@ -730,7 +730,12 @@
     border: 1px solid var(--line); border-radius: 6px;
     padding: 0 10px; min-height: 44px; min-width: 44px;
   }
-  #send button svg { display: block; width: 22px; height: 22px; }
+  /* The two glyphs do not fill their grid equally: a paper plane reaches the
+     viewBox edges, a camera is a wide, short rectangle inside it. Equal boxes
+     therefore read as unequal icons, so each is sized to look the same weight. */
+  #send button svg { display: block; }
+  #send-attach svg { width: 23px; height: 23px; }
+  #send-submit svg { width: 20px; height: 20px; }
   #send button.enter { border-color: var(--working); color: var(--working); }
 
   /* The ask form sits above the views: a pane waiting on the reader says so on

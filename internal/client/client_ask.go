@@ -33,7 +33,6 @@ import (
 	"dm/internal/panel"
 	"dm/internal/segment"
 	"dm/internal/theme"
-	"dm/internal/ui"
 	"dm/internal/wire"
 )
 
@@ -59,6 +58,9 @@ const (
 	// and never squeezes the options below askQuestionMin.
 	askContextMin  = 30
 	askQuestionMin = 24
+	// askHelpExtra is how many rows taller than the option list the help pane
+	// may be. A long preview elides there instead of filling the terminal.
+	askHelpExtra = 2
 )
 
 // askView is the open ask float: the listed ask it shows, the cursor and the
@@ -665,74 +667,24 @@ func (v *askView) title() string {
 	return fmt.Sprintf(" ask %s  %d/%d ", v.pane, v.q+1, len(v.ask.Questions))
 }
 
-// hint is the bottom border: every key the float takes, cut down to the cells
-// the border has. Send and decline survive whatever happens.
-func (v *askView) hint() string {
-	q := v.question()
-	space := ui.Hint{Keys: []string{"space"}, Label: "pick"}
-	if q.MultiSelect {
-		space = ui.Hint{Keys: []string{"space"}, Label: "toggle"}
-	}
-	hints := []ui.Hint{
-		{Keys: []string{"j", "k"}, Label: "move"},
-		{Keys: []string{"1-9"}, Label: "pick"},
-		space,
-		{Keys: []string{"t"}, Label: "type"},
-	}
-	if len(v.ask.Questions) > 1 {
-		hints = append(hints, ui.Hint{Keys: []string{"tab"}, Label: "question"})
-	}
-	if !v.readOnly {
-		hints = append(hints, ui.Hint{Keys: []string{"N"}, Label: "note"})
-	}
-	if v.readOnly {
-		return ui.Hints(hints)
-	}
-	hints = append(hints,
-		ui.Hint{Keys: []string{"enter"}, Label: "send"},
-		ui.Hint{Keys: []string{"esc"}, Label: "decline"},
-	)
-	limit := v.float.Rect.W - 2
-	for _, drop := range []string{"question", "note", "type", "toggle", "pick", "move"} {
-		if limit < 0 || cells.Cells(ui.Hints(hints)) <= limit {
-			break
-		}
-		kept := make([]ui.Hint, 0, len(hints))
-		for _, h := range hints {
-			// The pick label names two hints: the digit row and the space
-			// key. The space key goes first, because the digits still name
-			// every option on the cramped border.
-			if h.Label == drop && !(drop == "pick" && len(h.Keys) > 0 && h.Keys[0] != "space") {
-				continue
-			}
-			kept = append(kept, h)
-		}
-		hints = kept
-	}
-	return ui.Hints(hints)
-}
+// hint is the bottom border. The footer inside the box carries every key as a
+// chip, so the border is left clean.
+func (v *askView) hint() string { return "" }
 
-// askShape is the float's interior split: the option column's width, the
-// context column's width, and the rows the tab strip takes. A zero rightW means
-// one column, the narrow layout.
+// askShape is the float's interior split: the option list's width and the help
+// pane's. A zero rightW is one column, the narrow layout.
 type askShape struct {
 	leftW  int
 	rightW int
-	tabs   int
 }
 
-// shape splits a width-cell interior. The context column is about 40% of the
-// box and never narrower than askContextMin, and the options keep at least
+// shape splits a width-cell interior. The help pane is about 40% of the box and
+// never narrower than askContextMin, and the options keep at least
 // askQuestionMin cells beside it. Below askWideMin the float keeps one column,
-// so a narrow terminal is never worse than it was.
+// so the help content folds under its option.
 func (v *askView) shape(width int) askShape {
-	sh := askShape{leftW: width}
-	if len(v.ask.Questions) > 1 {
-		// One tab per question needs a question to move between.
-		sh.tabs = 1
-	}
 	if width < askWideMin {
-		return sh
+		return askShape{leftW: width}
 	}
 	right := width * 2 / 5
 	if right < askContextMin {
@@ -742,214 +694,449 @@ func (v *askView) shape(width int) askShape {
 		right = max
 	}
 	if right < 1 {
-		return sh
+		return askShape{leftW: width}
 	}
-	return askShape{leftW: width - right - 1, rightW: right, tabs: sh.tabs}
+	return askShape{leftW: width - right - 1, rightW: right}
 }
 
-// height is the content rows the float needs at width cells: the taller of the
-// two panes, plus the tab strip. The right pane is counted unclamped, so a long
-// preview still opens a tall box; the screen cap and the pane's own clamp cut
-// it later.
-func (v *askView) height(th theme.Theme, width int) int {
-	sh := v.shape(width)
-	n := len(v.questionLines(th, sh.leftW, sh.rightW == 0))
-	if sh.rightW > 0 {
-		if m := len(v.contextLines(th, sh.rightW, 1<<8)); m > n {
-			n = m
-		}
-	}
-	return n + sh.tabs
-}
-
-// askLine is one painted row: a styled run and the choice row it belongs to,
-// -1 for prose.
+// askLine is one painted row: a styled run set, the choice row it belongs to
+// (-1 for prose) and the ground the row pads with. The ground rides on the row
+// so a band and a plain row can share one painter.
 type askLine struct {
 	segs   []segment.Seg
 	choice int
+	bg     theme.RGB
 }
 
-// questionLines builds the option column at width cells: the question, its
-// options one per row with the description, note and, in the narrow layout, the
-// preview under each. It carries no tab strip: the caller draws that.
-func (v *askView) questionLines(th theme.Theme, width int, withPreview bool) []askLine {
-	if len(v.ask.Questions) == 0 {
-		return nil
-	}
+// headLines is every row above the question: the tab band on a form, the header
+// band, and the rule under them. One band is always drawn, so the count has a
+// home even on a question with no header.
+func (v *askView) headLines(th theme.Theme, width int) []askLine {
 	p := th.Palette
-	q := v.question()
-	text := func(s string, c theme.RGB) segment.Seg { return segment.Seg{Text: s, FG: c, BG: p.RailBG} }
 	var out []askLine
-	prose := func(segs ...segment.Seg) { out = append(out, askLine{segs: segs, choice: -1}) }
-	blank := func() { prose(text("", p.RailBG)) }
-	// Rows of a block: every line of s at the indent, dim.
-	block := func(s string, indent int, prefix string) {
-		for _, row := range askWrap(s, width-indent-cells.Cells(prefix)) {
-			prose(text(strings.Repeat(" ", indent), p.RailDim),
-				text(prefix+row, p.RailDim))
-		}
+	multi := len(v.ask.Questions) > 1
+	if multi {
+		out = append(out, askLine{segs: v.tabRow(th, width), choice: -1, bg: p.RailFocusBG})
 	}
-	if q.Header != "" {
-		prose(segment.Seg{Text: " " + q.Header, FG: p.BarAccent, BG: p.RailBG, Bold: true})
+	if q := v.question(); !multi || q.Header != "" {
+		out = append(out, askLine{segs: v.headBand(q.Header, width, th), choice: -1, bg: p.RailFocusBG})
 	}
-	for _, row := range askWrap(q.Question, width-1) {
-		prose(text(" "+row, p.RailText))
-	}
-	blank()
-	for i, o := range q.Options {
-		cur := v.sel[v.q] == i
-		marker := text("  ", p.RailDim)
-		if cur {
-			marker = text("> ", p.BarAccent)
-		}
-		pick := text("( ) ", p.RailDim)
-		if q.MultiSelect {
-			pick = text("[ ] ", p.RailDim)
-			if v.multi[v.q][i] {
-				pick = text("[x] ", p.RailText)
-			}
-		} else if v.pick[v.q] == i {
-			pick = text("(x) ", p.RailText)
-		}
-		label := text(fmt.Sprintf("%d. %s", i+1, o.Label), p.RailDim)
-		if cur || v.pick[v.q] == i {
-			label = text(fmt.Sprintf("%d. %s", i+1, o.Label), p.RailText)
-			if cur {
-				label.Bold = true
-			}
-		}
-		out = append(out, askLine{segs: []segment.Seg{marker, pick, label}, choice: i})
-		if o.Description != "" {
-			block(o.Description, 6, "")
-		}
-		if v.noteRow[v.q] == i && v.notes[v.q] != "" {
-			block("note: "+v.notes[v.q], 6, "")
-		}
-		if withPreview && o.Preview != "" {
-			block(o.Preview, 6, th.Glyphs.BorderVertical+" ")
-		}
-	}
-	if !q.MultiSelect {
-		// The last row opens the input prompt, and shows the text once typed.
-		i := len(q.Options)
-		cur := v.sel[v.q] == i
-		marker := text("  ", p.RailDim)
-		if cur {
-			marker = text("> ", p.BarAccent)
-		}
-		label := segment.Seg{Text: "Type something.", FG: p.RailDim, BG: p.RailBG}
-		if cur {
-			label.FG = p.RailText
-			label.Bold = true
-		}
-		segs := []segment.Seg{marker, label}
-		if txt := v.texts[v.q]; txt != "" && v.pick[v.q] < 0 {
-			segs = append(segs, text("  "+txt, p.RailDim))
-		}
-		out = append(out, askLine{segs: segs, choice: i})
-	}
-	if len(q.Options) == 0 && q.MultiSelect {
-		prose(text(" no options: t types the answer", p.RailDim))
-	}
-	if v.note != "" {
-		blank()
-		for _, row := range askWrap(v.note, width-1) {
-			prose(text(" "+row, p.RailDiffDel))
-		}
-	}
-	return out
+	return append(out, v.ruleRow(th, width))
 }
 
-// contextLines builds the context column at width cells: the label of the
-// option under the cursor as a heading, its description, and its preview on its
-// own lines. The pane is clamped to height rows, and a preview longer than the
-// room left ends on a count of the rows it hid. A hovered option with no
-// preview keeps the pane and says so, so the box never changes width as the
-// cursor moves.
-func (v *askView) contextLines(th theme.Theme, width, height int) []askLine {
+// headBand is the question's header on its filled band, with the count at the
+// right edge. The band fills to the width, so a short header still reads as a
+// band and not as a stray word.
+func (v *askView) headBand(header string, width int, th theme.Theme) []segment.Seg {
 	p := th.Palette
-	text := func(s string, c theme.RGB) segment.Seg { return segment.Seg{Text: s, FG: c, BG: p.RailBG} }
-	q := v.question()
-	label := "Type something."
-	var preview []string
-	var head []askLine
-	if i := v.sel[v.q]; i >= 0 && i < len(q.Options) {
-		o := q.Options[i]
-		label = o.Label
-		if o.Description != "" {
-			for _, row := range askWrap(o.Description, width-2) {
-				head = append(head, askLine{segs: []segment.Seg{text(" "+row, p.RailDim)}, choice: -1})
-			}
-		}
-		if o.Preview != "" {
-			preview = strings.Split(o.Preview, "\n")
-		}
+	band := func(s string, fg theme.RGB, bold bool) segment.Seg {
+		return segment.Seg{Text: s, FG: fg, BG: p.RailFocusBG, Bold: bold}
 	}
-	head = append([]askLine{{segs: []segment.Seg{
-		{Text: " " + label, FG: p.BarAccent, BG: p.RailBG, Bold: true},
-	}, choice: -1}}, head...)
-	if len(head) >= height {
-		return head[:height]
+	segs := []segment.Seg{band(" ", p.RailBG, false), band(header, p.RailHeader, true)}
+	count := fmt.Sprintf("%d of %d", v.q+1, len(v.ask.Questions))
+	if pad := width - 1 - cells.Cells(header) - cells.Cells(count) - 1; pad > 0 {
+		segs = append(segs, band(strings.Repeat(" ", pad), p.RailBG, false))
 	}
-	head = append(head, askLine{segs: []segment.Seg{text("", p.RailBG)}, choice: -1})
-	if len(preview) == 0 {
-		return append(head, askLine{segs: []segment.Seg{text(" no preview", p.RailDim)}, choice: -1})
-	}
-	budget := height - len(head)
-	if len(preview) <= budget {
-		for _, row := range preview {
-			head = append(head, askLine{segs: []segment.Seg{text(" "+row, p.RailDim)}, choice: -1})
-		}
-		return head
-	}
-	keep := budget - 1
-	if keep < 0 {
-		keep = 0
-	}
-	for _, row := range preview[:keep] {
-		head = append(head, askLine{segs: []segment.Seg{text(" "+row, p.RailDim)}, choice: -1})
-	}
-	more := fmt.Sprintf(" %s %d more lines", th.Glyphs.ElideMark(), len(preview)-keep)
-	return append(head, askLine{segs: []segment.Seg{text(more, p.RailDim)}, choice: -1})
+	return append(segs, band(count+" ", p.RailDim, false))
 }
 
 // tabRow is the tab strip: one tab per question, the active one pointed at and
-// an answered one filled, so a form's progress reads at a glance.
-func (v *askView) tabRow(th theme.Theme) askLine {
+// an answered one filled, with the count at the right edge, so a form's
+// progress reads at a glance.
+func (v *askView) tabRow(th theme.Theme, width int) []segment.Seg {
 	p := th.Palette
-	segs := []segment.Seg{{Text: " ", FG: p.RailBG, BG: p.RailBG}}
+	band := func(s string, fg theme.RGB, bold bool) segment.Seg {
+		return segment.Seg{Text: s, FG: fg, BG: p.RailFocusBG, Bold: bold}
+	}
+	segs := []segment.Seg{band(" ", p.RailBG, false)}
 	for i, q := range v.ask.Questions {
 		name := q.Header
 		if name == "" {
 			name = fmt.Sprintf("Q%d", i+1)
 		}
-		point, fill, fg := " ", " ", p.RailDim
+		fg := p.RailDim
+		point, fill := " ", " "
 		if i == v.q {
-			point, fg = th.Glyphs.ActiveMark, p.BarAccent
+			fg, point = p.BarAccent, th.Glyphs.ActiveMark
 		}
 		if v.answered(i) {
 			fill = th.Glyphs.Dirty
 		}
 		segs = append(segs,
-			segment.Seg{Text: point, FG: fg, BG: p.RailBG, Bold: i == v.q},
-			segment.Seg{Text: fill, FG: p.RailText, BG: p.RailBG},
-			segment.Seg{Text: fmt.Sprintf("%d %s  ", i+1, name), FG: fg, BG: p.RailBG, Bold: i == v.q},
+			band(point, fg, i == v.q),
+			band(fill, p.RailText, false),
+			band(fmt.Sprintf("%d %s  ", i+1, name), fg, i == v.q),
 		)
 	}
-	return askLine{segs: segs, choice: -1}
+	count := fmt.Sprintf("%d of %d", v.q+1, len(v.ask.Questions))
+	if pad := width - segment.SegCells(segs) - cells.Cells(count) - 1; pad > 0 {
+		segs = append(segs, band(strings.Repeat(" ", pad), p.RailBG, false))
+	}
+	return append(segs, band(count+" ", p.RailDim, false))
 }
 
-// askWriteRow paints one line at x, y, clipped to width cells.
-func askWriteRow(b *bytes.Buffer, ln askLine, x, y, width int) {
+// ruleRow is one hairline across the interior, one cell clear of each border.
+func (v *askView) ruleRow(th theme.Theme, width int) askLine {
+	p := th.Palette
+	n := width - 2
+	if n < 0 {
+		n = 0
+	}
+	return askLine{
+		segs: []segment.Seg{
+			{Text: " ", FG: p.RailBG, BG: p.RailBG},
+			{Text: strings.Repeat(th.Glyphs.BorderHorizontal, n), FG: p.RailDim, BG: p.RailBG},
+		},
+		choice: -1,
+		bg:     p.RailBG,
+	}
+}
+
+// questionLines is the question block: its text wrapped to the width, then the
+// rule that opens the list.
+func (v *askView) questionLines(th theme.Theme, width int) []askLine {
+	p := th.Palette
+	var out []askLine
+	for _, row := range askWrap(v.question().Question, width-1) {
+		out = append(out, askLine{
+			segs: []segment.Seg{
+				{Text: " ", FG: p.RailBG, BG: p.RailBG},
+				{Text: row, FG: p.RailText, BG: p.RailBG},
+			},
+			choice: -1,
+			bg:     p.RailBG,
+		})
+	}
+	return append(out, v.ruleRow(th, width))
+}
+
+// listLines is the option column: one row per choice, the note under the option
+// it belongs to, and, in the narrow layout, the description of each option
+// under it. The preview is the help pane's business in the wide layout.
+func (v *askView) listLines(th theme.Theme, width int, withDescription bool) []askLine {
+	if len(v.ask.Questions) == 0 {
+		return nil
+	}
+	p := th.Palette
+	q := v.question()
+	var out []askLine
+	// row builds one option row: the accent bar's cell, then the runs, then the
+	// ground filled to the column width.
+	row := func(i int, segs []segment.Seg) askLine {
+		bg := p.RailBG
+		bar := segment.Seg{Text: " ", FG: p.RailBG, BG: p.RailBG}
+		if i == v.sel[v.q] {
+			bg = p.RailFocusBG
+			bar = segment.Seg{Text: th.Glyphs.WorkspaceBar, FG: p.BarAccent, BG: bg}
+		}
+		body := make([]segment.Seg, 0, len(segs)+1)
+		body = append(body, bar)
+		for _, s := range segs {
+			if s.BG == p.RailBG {
+				s.BG = bg
+			}
+			body = append(body, s)
+		}
+		return askLine{segs: body, choice: i, bg: bg}
+	}
+	// kid builds a row under the option at i: the bar's cell, the text at the
+	// given indent, dim.
+	kid := func(i, indent int, segs []segment.Seg) askLine {
+		bg := p.RailBG
+		bar := segment.Seg{Text: " ", FG: p.RailBG, BG: p.RailBG}
+		if i == v.sel[v.q] {
+			bg = p.RailFocusBG
+			bar = segment.Seg{Text: th.Glyphs.WorkspaceBar, FG: p.BarAccent, BG: bg}
+		}
+		body := []segment.Seg{bar, {Text: strings.Repeat(" ", indent), FG: p.RailBG, BG: bg}}
+		for _, s := range segs {
+			if s.BG == p.RailBG {
+				s.BG = bg
+			}
+			body = append(body, s)
+		}
+		return askLine{segs: body, choice: -1, bg: bg}
+	}
+	for i, o := range q.Options {
+		cur := v.sel[v.q] == i
+		label := segment.Seg{Text: fmt.Sprintf("%d  %s", i+1, o.Label), FG: p.RailDim, BG: p.RailBG}
+		if cur || (!q.MultiSelect && v.pick[v.q] == i) {
+			label.FG = p.RailText
+			label.Bold = cur
+		}
+		segs := []segment.Seg{}
+		if q.MultiSelect {
+			box := "[ ] "
+			if v.multi[v.q][i] {
+				box = "[x] "
+			}
+			fg := p.RailDim
+			if v.multi[v.q][i] {
+				fg = p.RailText
+			}
+			segs = append(segs, segment.Seg{Text: box, FG: fg, BG: p.RailBG})
+		}
+		out = append(out, row(i, append(segs, label)))
+		if withDescription && o.Description != "" {
+			for _, text := range askWrap(o.Description, width-5) {
+				out = append(out, kid(i, 4, []segment.Seg{{Text: text, FG: p.RailDim, BG: p.RailBG}}))
+			}
+		}
+		if v.noteRow[v.q] == i && v.notes[v.q] != "" {
+			for n, text := range askWrap(v.notes[v.q], width-10) {
+				segs := []segment.Seg{{Text: text, FG: p.RailDim, BG: p.RailBG}}
+				if n == 0 {
+					segs = append([]segment.Seg{{Text: "note: ", FG: p.RailHeader, BG: p.RailBG}}, segs...)
+				}
+				out = append(out, kid(i, 4, segs))
+			}
+		}
+	}
+	if !q.MultiSelect {
+		// The last row opens the input prompt, and shows the text once typed.
+		i := len(q.Options)
+		label := segment.Seg{Text: "+  Type something.", FG: p.RailDim, BG: p.RailBG}
+		if v.texts[v.q] != "" {
+			label.Text = "+  " + v.texts[v.q]
+		}
+		if v.sel[v.q] == i {
+			label.FG = p.RailText
+			label.Bold = true
+		}
+		out = append(out, row(i, []segment.Seg{label}))
+	} else if len(q.Options) == 0 {
+		out = append(out, kid(0, 1, []segment.Seg{{Text: "no options: t types the answer", FG: p.RailDim, BG: p.RailBG}}))
+	}
+	return out
+}
+
+// hovered is the option under the cursor, false while the cursor sits on the
+// typed row.
+func (v *askView) hovered() (wire.AskOption, bool) {
+	q := v.question()
+	if i := v.sel[v.q]; i >= 0 && i < len(q.Options) {
+		return q.Options[i], true
+	}
+	return wire.AskOption{}, false
+}
+
+// helpLines is the help pane: the hovered option's name on its band, its
+// description, and its preview. The pane is clamped to height rows; a preview
+// longer than the room left ends on a count of the rows it hid. The key hint
+// sits on the pane's last row when the room is there.
+func (v *askView) helpLines(th theme.Theme, width, height int) []askLine {
+	p := th.Palette
+	o, ok := v.hovered()
+	label := "Type something."
+	if ok {
+		label = o.Label
+	}
+	head := []askLine{
+		{
+			segs: []segment.Seg{
+				{Text: " ", FG: p.BarAccent, BG: p.RailHoverBG},
+				{Text: label, FG: p.BarAccent, BG: p.RailHoverBG, Bold: true},
+			},
+			choice: -1,
+			bg:     p.RailHoverBG,
+		},
+	}
+	hint := ""
+	if q := v.question(); q.MultiSelect {
+		hint = "space toggles the pick"
+	} else {
+		hint = "enter to pick and send"
+	}
+	hintLine := askLine{
+		segs:   []segment.Seg{{Text: " " + hint, FG: p.RailWindow, BG: p.RailBG}},
+		choice: -1,
+		bg:     p.RailBG,
+	}
+	var body []askLine
+	if ok && o.Description != "" {
+		for _, row := range askWrap(o.Description, width-2) {
+			body = append(body, askLine{
+				segs:   []segment.Seg{{Text: " " + row, FG: p.RailDim, BG: p.RailBG}},
+				choice: -1,
+				bg:     p.RailBG,
+			})
+		}
+	}
+	body = append(body, askLine{
+		segs:   []segment.Seg{{Text: " ", FG: p.RailBG, BG: p.RailBG}},
+		choice: -1,
+		bg:     p.RailBG,
+	})
+	if !ok || o.Preview == "" {
+		body = append(body, askLine{
+			segs:   []segment.Seg{{Text: " no preview", FG: p.RailDim, BG: p.RailBG}},
+			choice: -1,
+			bg:     p.RailBG,
+		})
+	} else {
+		for _, row := range strings.Split(o.Preview, "\n") {
+			body = append(body, askLine{
+				segs:   []segment.Seg{{Text: " " + row, FG: p.RailDim, BG: p.RailBG}},
+				choice: -1,
+				bg:     p.RailBG,
+			})
+		}
+	}
+	if height <= 0 {
+		return append(append(head, body...), hintLine)
+	}
+	if len(head)+len(body) < height {
+		// The hint pins to the pane's bottom row, and the rows between it and
+		// the body stay blank.
+		out := append(head, body...)
+		for len(out) < height-1 {
+			out = append(out, askLine{bg: p.RailBG, choice: -1})
+		}
+		return append(out, hintLine)
+	}
+	room := height - len(head)
+	if room <= 0 {
+		return head[:height]
+	}
+	if room == len(body) {
+		return append(head, body...)
+	}
+	keep := room - 1
+	out := append(head, body[:keep]...)
+	more := fmt.Sprintf(" %s %d more lines", th.Glyphs.ElideMark(), len(body)-keep)
+	return append(out, askLine{
+		segs:   []segment.Seg{{Text: more, FG: p.RailDim, BG: p.RailBG}},
+		choice: -1,
+		bg:     p.RailBG,
+	})
+}
+
+// previewLines is the narrow layout's preview block: the rule above it and the
+// hovered option's preview under it. An option with no preview has no block,
+// so a narrow float does not spend rows saying so.
+func (v *askView) previewLines(th theme.Theme, width int) []askLine {
+	o, ok := v.hovered()
+	if !ok || o.Preview == "" {
+		return nil
+	}
+	p := th.Palette
+	out := []askLine{v.ruleRow(th, width)}
+	for _, row := range askWrap(o.Preview, width-1) {
+		out = append(out, askLine{
+			segs:   []segment.Seg{{Text: " " + row, FG: p.RailDim, BG: p.RailBG}},
+			choice: -1,
+			bg:     p.RailBG,
+		})
+	}
+	return out
+}
+
+// tailLines is every row below the list: the rule under it, the status row when
+// the answer is in flight or refused, and the footer.
+func (v *askView) tailLines(th theme.Theme, width int) []askLine {
+	p := th.Palette
+	out := []askLine{v.ruleRow(th, width)}
+	if v.note != "" {
+		for _, row := range askWrap(v.note, width-1) {
+			out = append(out, askLine{
+				segs:   []segment.Seg{{Text: " " + row, FG: p.RailDiffDel, BG: p.RailBG}},
+				choice: -1,
+				bg:     p.RailBG,
+			})
+		}
+	}
+	return append(out, askLine{segs: v.footRow(th, width), choice: -1, bg: p.RailBG})
+}
+
+// askChip is one footer entry: the keys drawn as a filled chip and the word
+// that says what they do.
+type askChip struct{ keys, label string }
+
+// chips is the footer for the question on screen: every key the float takes,
+// send and decline included whenever the session may answer.
+func (v *askView) chips() []askChip {
+	q := v.question()
+	space := "pick"
+	if q.MultiSelect {
+		space = "toggle"
+	}
+	out := []askChip{
+		{"j k", "move"},
+		{"1-9", "pick"},
+		{"space", space},
+		{"t", "type"},
+	}
+	if len(v.ask.Questions) > 1 {
+		out = append(out, askChip{"tab", "question"})
+	}
+	if v.readOnly {
+		return out
+	}
+	return append(out,
+		askChip{"N", "note"},
+		askChip{"enter", "send"},
+		askChip{"esc", "decline"},
+	)
+}
+
+// footRow draws the footer, dropping the hints a narrow box cannot hold. Send
+// and decline survive whatever happens; the rest go in the order they matter.
+func (v *askView) footRow(th theme.Theme, width int) []segment.Seg {
+	p := th.Palette
+	chips := v.chips()
+	build := func(cs []askChip) []segment.Seg {
+		segs := []segment.Seg{{Text: " ", FG: p.RailBG, BG: p.RailBG}}
+		for i, c := range cs {
+			if i > 0 {
+				segs = append(segs, segment.Seg{Text: "  ", FG: p.RailBG, BG: p.RailBG})
+			}
+			segs = append(segs,
+				segment.Seg{Text: " " + c.keys + " ", FG: p.RailText, BG: p.RailHoverBG},
+				segment.Seg{Text: " " + c.label, FG: p.RailDim, BG: p.RailBG},
+			)
+		}
+		return segs
+	}
+	segs := build(chips)
+	for _, drop := range []string{"question", "note", "type", "toggle", "pick", "move"} {
+		if width < 0 || segment.SegCells(segs) <= width {
+			break
+		}
+		kept := make([]askChip, 0, len(chips))
+		for _, c := range chips {
+			if c.label == drop {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		chips = kept
+		segs = build(chips)
+	}
+	return segs
+}
+
+// paintLine writes one row at x, y, clipped to width cells and filled to the
+// width with the row's own ground.
+func paintLine(b *bytes.Buffer, ln askLine, x, y, width int) {
+	if width <= 0 {
+		return
+	}
 	fmt.Fprintf(b, "\x1b[%d;%dH", y+1, x+1)
-	for _, s := range segment.ClipSegs(ln.segs, width) {
+	clipped := segment.ClipSegs(ln.segs, width)
+	for _, s := range clipped {
 		segment.Write(b, s)
+	}
+	if n := width - segment.SegCells(clipped); n > 0 {
+		segment.Write(b, segment.Seg{Text: strings.Repeat(" ", n), FG: ln.bg, BG: ln.bg})
 	}
 }
 
 // askWrap is wrapLine as a row list: one row for text that fits, and a whole
 // row for an empty block, so a blank source line keeps its height.
 func askWrap(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
 	if s == "" {
 		return []string{""}
 	}
@@ -960,64 +1147,104 @@ func askWrap(s string, width int) []string {
 	return out
 }
 
-// paint draws the content window. Rows are placed absolutely inside the float,
-// so a scrolled view paints its new window whole.
+// fit sizes the float to the current question, capped by the screen. The
+// content decides the height, so a short question reads in a short box and a
+// tall one is clamped by the layout that draws it.
+func (v *askView) height(th theme.Theme, width int) int {
+	if len(v.ask.Questions) == 0 {
+		return 1
+	}
+	sh := v.shape(width)
+	n := len(v.headLines(th, width)) + len(v.questionLines(th, width))
+	list := len(v.listLines(th, sh.leftW, sh.rightW == 0))
+	if sh.rightW > 0 {
+		help := len(v.helpLines(th, sh.rightW, 0))
+		if help > list+askHelpExtra {
+			help = list + askHelpExtra
+		}
+		if help > list {
+			list = help
+		}
+	} else {
+		list += len(v.previewLines(th, width))
+	}
+	return n + list + len(v.tailLines(th, width))
+}
+
+// paint draws the content window: the bands, the question, the list beside the
+// help pane, and the footer. A box the layout clamped shorter than its content
+// keeps the footer and windows the list, so the cursor stays on screen.
 func (v *askView) paint(b *bytes.Buffer, r layout.Rect, th theme.Theme) {
-	if r.W < 1 || r.H < 1 {
+	if r.W < 1 || r.H < 1 || len(v.ask.Questions) == 0 {
 		return
 	}
 	sh := v.shape(r.W)
-	if sh.rightW <= 0 {
-		v.paintColumn(b, r, th, sh)
-		return
-	}
-	v.paintPanes(b, r, th, sh)
-}
-
-// paintColumn draws the narrow layout: the tab strip over the option column,
-// one window that scrolls.
-func (v *askView) paintColumn(b *bytes.Buffer, r layout.Rect, th theme.Theme, sh askShape) {
-	lines := v.questionLines(th, r.W, true)
-	if sh.tabs > 0 {
-		lines = append([]askLine{v.tabRow(th)}, lines...)
-	}
-	v.scrollTo(lines, r.H)
-	for row := 0; row < r.H; row++ {
-		i := v.top + row
-		if i >= len(lines) {
-			break
+	bottom := r.Y + r.H
+	y := r.Y
+	write := func(ln askLine) {
+		if y < bottom {
+			paintLine(b, ln, r.X, y, r.W)
 		}
-		askWriteRow(b, lines[i], r.X, r.Y+row, r.W)
-		if n := r.W - segment.SegCells(segment.ClipSegs(lines[i].segs, r.W)); n > 0 {
-			segment.Write(b, segment.Seg{Text: strings.Repeat(" ", n), FG: th.Palette.RailBG, BG: th.Palette.RailBG})
+		y++
+	}
+	for _, ln := range v.headLines(th, r.W) {
+		write(ln)
+	}
+	for _, ln := range v.questionLines(th, r.W) {
+		write(ln)
+	}
+	list := v.listLines(th, sh.leftW, sh.rightW == 0)
+	tail := v.tailLines(th, r.W)
+	if sh.rightW == 0 {
+		preview := v.previewLines(th, r.W)
+		avail := bottom - y - len(preview) - len(tail)
+		if avail < 0 {
+			avail = 0
+		}
+		v.scrollTo(list, avail)
+		for i := 0; i < avail && v.top+i < len(list); i++ {
+			write(list[v.top+i])
+		}
+		for _, ln := range preview {
+			write(ln)
+		}
+	} else {
+		help := v.helpLines(th, sh.rightW, 0)
+		wide := len(list)
+		if len(help) > wide {
+			wide = len(help)
+		}
+		if len(help) > len(list)+askHelpExtra {
+			wide = len(list) + askHelpExtra
+		}
+		if room := bottom - y - len(tail); wide > room {
+			wide = room
+		}
+		if wide < 0 {
+			wide = 0
+		}
+		v.scrollTo(list, wide)
+		help = v.helpLines(th, sh.rightW, wide)
+		for i := 0; i < wide && y < bottom; i++ {
+			if row := v.top + i; row < len(list) {
+				paintLine(b, list[row], r.X, y, sh.leftW)
+			} else {
+				paintLine(b, askLine{bg: th.Palette.RailBG, choice: -1}, r.X, y, sh.leftW)
+			}
+			fmt.Fprintf(b, "\x1b[%d;%dH", y+1, r.X+sh.leftW+1)
+			segment.Write(b, segment.Seg{
+				Text: th.Glyphs.BorderVertical, FG: th.Palette.RailDim, BG: th.Palette.RailBG,
+			})
+			if i < len(help) {
+				paintLine(b, help[i], r.X+sh.leftW+1, y, sh.rightW)
+			} else {
+				paintLine(b, askLine{bg: th.Palette.RailBG, choice: -1}, r.X+sh.leftW+1, y, sh.rightW)
+			}
+			y++
 		}
 	}
-}
-
-// paintPanes draws the wide layout: the tab strip over two panes split by a
-// vertical rule. The option column scrolls under the cursor; the context column
-// stays on the option it reads.
-func (v *askView) paintPanes(b *bytes.Buffer, r layout.Rect, th theme.Theme, sh askShape) {
-	top := r.Y
-	if sh.tabs > 0 {
-		askWriteRow(b, v.tabRow(th), r.X, top, r.W)
-		top++
-	}
-	h := r.H - (top - r.Y)
-	left := v.questionLines(th, sh.leftW, false)
-	v.scrollTo(left, h)
-	right := v.contextLines(th, sh.rightW, h)
-	ruleX := r.X + sh.leftW
-	for row := 0; row < h; row++ {
-		y := top + row
-		if i := v.top + row; i < len(left) {
-			askWriteRow(b, left[i], r.X, y, sh.leftW)
-		}
-		fmt.Fprintf(b, "\x1b[%d;%dH", y+1, ruleX+1)
-		segment.Write(b, segment.Seg{Text: th.Glyphs.BorderVertical, FG: th.Palette.RailDim, BG: th.Palette.RailBG})
-		if row < len(right) {
-			askWriteRow(b, right[row], ruleX+1, y, sh.rightW)
-		}
+	for _, ln := range tail {
+		write(ln)
 	}
 }
 

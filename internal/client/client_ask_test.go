@@ -145,8 +145,8 @@ func TestAskFloatDrawsQuestion(t *testing.T) {
 	tui, _ := askTUI(t, askQuestions())
 	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
 	for _, want := range []string{
-		"Branch", "Which base branch?", "1. main", "the trunk",
-		"a1b2c3", "line two", "2. develop", "integration", "Type something.",
+		"Branch", "Which base branch?", "1  main",
+		"a1b2c3", "line two", "2  develop", "the trunk", "integration", "Type something.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the float does not draw %q:\n%s", want, text)
@@ -403,9 +403,13 @@ func TestAskFloatReadOnlyOffersNoAnswer(t *testing.T) {
 	if tui.ask == nil {
 		t.Fatal("a read-only client drew no ask")
 	}
-	hint := tui.ask.float.Hint
-	if strings.Contains(hint, "send") || strings.Contains(hint, "decline") {
-		t.Fatalf("hint = %q, want no send and no decline", hint)
+	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	foot := strings.TrimSpace(strings.Split(text, "\n")[len(strings.Split(text, "\n"))-1])
+	if strings.Contains(foot, "send") || strings.Contains(foot, "decline") {
+		t.Fatalf("footer = %q, want no send and no decline", foot)
+	}
+	if !strings.Contains(foot, "move") || !strings.Contains(foot, "pick") {
+		t.Fatalf("footer = %q, want the keys a read-only session still takes", foot)
 	}
 	feed(tui, "1\r")
 	feed(tui, "\x1b")
@@ -549,10 +553,13 @@ func TestAskFloatWideDrawsBothPanes(t *testing.T) {
 		t.Fatalf("context column = %d, want at least %d", sh.rightW, askContextMin)
 	}
 	left, right, rule := askPanes(t, v, tui.snap.Cols, tui.snap.Rows, sh.leftW)
-	for _, want := range []string{"Which base branch?", "1. main", "2. develop", "the trunk"} {
+	for _, want := range []string{"Which base branch?", "1  main", "2  develop"} {
 		if !strings.Contains(left, want) {
 			t.Fatalf("the option column does not draw %q:\n%s", want, left)
 		}
+	}
+	if strings.Contains(left, "the trunk") {
+		t.Fatalf("the option column draws the description in the wide layout:\n%s", left)
 	}
 	if strings.Contains(left, "a1b2c3") {
 		t.Fatalf("the option column draws the preview in the wide layout:\n%s", left)
@@ -563,15 +570,19 @@ func TestAskFloatWideDrawsBothPanes(t *testing.T) {
 		}
 	}
 	glyph := theme.DefaultTheme().Glyphs.BorderVertical
-	ruled := 0
+	ruled, gap := 0, 0
 	for _, row := range strings.Split(rule, "\n") {
-		if row == "" {
-			continue
+		switch row {
+		case glyph:
+			if gap > 0 {
+				t.Fatalf("the rule between the panes has a hole in it")
+			}
+			ruled++
+		default:
+			if ruled > 0 {
+				gap++
+			}
 		}
-		if row != glyph {
-			t.Fatalf("the rule between the panes is not one vertical run: %q", row)
-		}
-		ruled++
 	}
 	if ruled < 4 {
 		t.Fatalf("the rule between the panes covers %d rows, want the pane's rows", ruled)
@@ -591,6 +602,37 @@ func TestAskFloatWideDrawsBothPanes(t *testing.T) {
 	}
 }
 
+// TestAskFloatChromeIsABandAndAFooter: the box reads top to bottom as the
+// status band, a rule, the question, a rule, the list beside the help pane, a
+// rule and the key chips, so the reader can see where the question ends and
+// where the keys live without reading the border.
+func TestAskFloatChromeIsABandAndAFooter(t *testing.T) {
+	t.Parallel()
+	tui, _ := askSizedTUI(t, askQuestions(), 140)
+	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	t.Logf("the ask float:\n%s", text)
+	rows := strings.Split(text, "\n")
+	if len(rows) < 8 {
+		t.Fatalf("the float draws %d rows, want the band, the question, the list and the footer", len(rows))
+	}
+	if !strings.Contains(rows[0], "Branch") || !strings.Contains(rows[0], "1 of 1") {
+		t.Fatalf("the first row = %q, want the header and the count on one band", rows[0])
+	}
+	rule := strings.Repeat(theme.DefaultTheme().Glyphs.BorderHorizontal, 8)
+	if !strings.Contains(rows[1], rule) {
+		t.Fatalf("the second row = %q, want the rule under the band", rows[1])
+	}
+	last := strings.TrimSpace(rows[len(rows)-1])
+	for _, want := range []string{"j k", "move", "enter", "send", "esc", "decline"} {
+		if !strings.Contains(last, want) {
+			t.Fatalf("the footer = %q, want %q", last, want)
+		}
+	}
+	if strings.TrimSpace(tui.ask.float.Hint) != "" {
+		t.Fatalf("hint = %q, want the border clean: the chips carry the keys", tui.ask.float.Hint)
+	}
+}
+
 // TestAskFloatNarrowKeepsOneColumn: below askWideMin the float keeps today's
 // layout, the preview under its option in one column.
 func TestAskFloatNarrowKeepsOneColumn(t *testing.T) {
@@ -605,13 +647,13 @@ func TestAskFloatNarrowKeepsOneColumn(t *testing.T) {
 		t.Fatalf("shape(%d) = %+v, want no context column", r.W, sh)
 	}
 	text := askScreenText(t, v, tui.snap.Cols, tui.snap.Rows)
-	for _, want := range []string{"1. main", "the trunk", "2. develop", "integration"} {
+	for _, want := range []string{"1  main", "the trunk", "2  develop", "integration"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the narrow float does not draw %q:\n%s", want, text)
 		}
 	}
-	if !strings.Contains(text, "│ a1b2c3") || !strings.Contains(text, "│ line two") {
-		t.Fatalf("the narrow float does not draw the preview under its option:\n%s", text)
+	if !strings.Contains(text, "a1b2c3") || !strings.Contains(text, "line two") {
+		t.Fatalf("the narrow float does not draw the preview under the list:\n%s", text)
 	}
 	// The preview sits after the option it belongs to, not in a pane of its
 	// own.
@@ -623,7 +665,7 @@ func TestAskFloatNarrowKeepsOneColumn(t *testing.T) {
 // askTabText is the tab strip as one string.
 func askTabText(v *askView, th theme.Theme) string {
 	var b strings.Builder
-	for _, s := range v.tabRow(th).segs {
+	for _, s := range v.tabRow(th, 1<<8) {
 		b.WriteString(s.Text)
 	}
 	return b.String()
@@ -698,7 +740,7 @@ func TestAskFloatNoteAttachesEditsAndClears(t *testing.T) {
 			tui.ask.notes[0], tui.ask.noteRow[0])
 	}
 	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
-	noteAt, rowAt := strings.Index(text, "note: needs a rebase"), strings.Index(text, "2. develop")
+	noteAt, rowAt := strings.Index(text, "note: needs a rebase"), strings.Index(text, "2  develop")
 	if noteAt < 0 {
 		t.Fatalf("the float does not draw the note:\n%s", text)
 	}

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm ask form · v3 bands</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --accent:#7ac0eb; --edge:#78c8e1; --hint:#9599ae; --del:#ff7d7d;
+ --add:#78dc82; --work:#f5be50; --page:#0b0b0f; --rule:#3b3a48; --card:#464556;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 26px;color:#7d8298;max-width:74ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:30px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:74ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+.frame{font-family:"DejaVu Sans Mono",ui-monospace,monospace;
+ font-size:13px;line-height:1.3;font-variant-ligatures:none;color:var(--text);
+ white-space:normal;display:inline-block}
+.bar{display:flex;align-items:center}
+.edge{color:var(--edge);font-weight:700}
+.rule{flex:1 1 auto;height:3px;background:var(--edge);align-self:center}
+.rule.thin{height:2px}
+.title{color:#fff;font-weight:700;white-space:pre}
+.hint{color:var(--hint);white-space:pre}
+.body{width:calc(96ch + 6px);border-left:3px solid var(--edge);border-right:3px solid var(--edge);
+ padding:0 0 6px;overflow:hidden;background:var(--bg)}
+.row{white-space:pre;min-height:1.3em}
+.split{display:flex}
+.col{flex:0 0 auto}
+.vr{flex:0 0 1px;background:#55596b}
+.dim{color:var(--dim);white-space:pre}
+.acc{color:var(--accent)}
+.bold{font-weight:700}
+.txt{color:var(--text);white-space:pre}
+.hdr{color:var(--header);white-space:pre}
+
+/* strips: tab bar under the title, rules between sections */
+.strip{background:var(--focus)}
+.strip .row,.strip{white-space:pre}
+.tabbar{display:flex;background:var(--focus);padding:1px 0}
+.tabbar .spacer{flex:1 1 auto}
+.count{color:var(--dim);padding-right:2ch}
+.sect{display:flex;align-items:center;background:var(--bg);padding:0 1ch}
+.sect .corner{color:var(--edge)}
+.sect .hair{flex:1 1 auto;height:1px;background:#55546a;align-self:center}
+
+/* one option row: band when selected, accent bar always on the cursor row */
+.opt{display:flex;align-items:center}
+.opt .mark{flex:0 0 1ch;color:transparent}
+.opt .rest{flex:1 1 auto;white-space:pre}
+.opt.sel{background:var(--focus)}
+.opt.sel .mark{color:var(--accent);font-weight:700}
+.opt.sel .rest{color:var(--text);font-weight:700}
+.opt.sel .rest .sub{color:var(--dim);font-weight:400}
+.opt.picked .rest{color:var(--text)}
+.opt.plain .rest{color:var(--dim)}
+.cont{display:flex;align-items:center}
+.cont .mark{flex:0 0 1ch;color:transparent}
+.cont .rest{flex:1 1 auto;white-space:pre;color:var(--dim)}
+
+/* side panel: filled header band */
+.pane{white-space:normal}
+.pane .ph{background:var(--hover);color:var(--accent);font-weight:700;white-space:pre}
+.pane .pb{color:var(--dim);white-space:pre}
+
+/* one row of terminal text, one fixed line box, so a row cannot outgrow its slot */
+.row,.opt,.cont,.hline,.ph,.pb,.ctop,.cbot,.sect,.foot,.dline,.tabbar,.strip{
+ line-height:1.4;height:1.4em}
+</style>
+</head>
+<body>
+
+<h1>dm ask form · v3: bands</h1>
+<p class="sub">Keeps the two-column shape and one row per option, then adds the hierarchy it is missing: a tab band under the title, a section rule, a filled band on the cursor row, a filled header on the preview pane, and keys as chips in the footer.</p>
+
+<h2>One question, wide</h2>
+<div class="frame">
+  <div class="bar"><span class="edge">╔</span><span class="edge">═</span><span class="title"> ask w1p2  1/1 </span><span class="rule"></span><span class="edge">╗</span></div>
+  <div class="body">
+    <div class="tabbar"><span> </span><span class="acc bold">▸</span><span class="acc bold"> 1 Scope  </span><span class="spacer"></span><span class="count">1 of 1  </span></div>
+    <div class="sect"><span class="hair"></span></div>
+    <div class="row acc bold"> SCOPE</div>
+    <div class="row"> How far should the rename go?</div>
+    <div class="row"> </div>
+    <div class="split">
+      <div class="col" style="width:57ch">
+        <div class="opt sel"><span class="mark">▐</span><span class="rest"> ▸ 1  Rename the function only</span></div>
+        <div class="cont"><span class="mark">▐</span><span class="rest">      Three call sites, one file.</span></div>
+        <div class="opt plain"><span class="mark">·</span><span class="rest">   2  Rename the parameter too</span></div>
+        <div class="cont"><span class="mark">·</span><span class="rest">      Two files, four call sites.</span></div>
+        <div class="opt plain"><span class="mark">·</span><span class="rest">   3  Leave the name alone</span></div>
+        <div class="opt plain"><span class="mark">·</span><span class="rest">   +  Type something.</span></div>
+      </div>
+      <div class="vr"></div>
+      <div class="col pane" style="width:38ch">
+        <div class="ph"> RENAME THE FUNCTION ONLY</div>
+        <div class="pb"> Three call sites, one file.</div>
+        <div class="pb"> </div>
+        <div class="pb"> Freeze the signature.</div>
+        <div class="pb"> Do not touch the params.</div>
+      </div>
+    </div>
+  </div>
+  <div class="bar"><span class="edge">╚</span><span class="hint">  j/k move  1-9 pick  space pick  t type  N note  enter send  esc decline </span><span class="rule"></span><span class="edge">╝</span></div>
+</div>
+<p class="note"><b>Cost:</b> two more bands and a section rule eat four rows of height. The double border is loud next to other floats, which all use a single line.</p>
+
+<h2>Two questions, the second one multi-select</h2>
+<div class="frame">
+  <div class="bar"><span class="edge">╔</span><span class="edge">═</span><span class="title"> ask w1p2  2/2 </span><span class="rule"></span><span class="edge">╗</span></div>
+  <div class="body">
+    <div class="tabbar"><span> </span><span class="dim bold">▸ 1 Scope  </span><span class="txt">●</span><span class="acc bold"> 2 Tests  </span><span class="spacer"></span><span class="count">2 of 2  </span></div>
+    <div class="sect"><span class="hair"></span></div>
+    <div class="row acc bold"> TESTS</div>
+    <div class="row"> Which suites should run after it?</div>
+    <div class="row"> </div>
+    <div class="split">
+      <div class="col" style="width:57ch">
+        <div class="opt sel"><span class="mark">▐</span><span class="rest"> ▸ [ ] 1  Unit tests</span></div>
+        <div class="cont"><span class="mark">▐</span><span class="rest">          go test ./internal/...</span></div>
+        <div class="cont"><span class="mark">▐</span><span class="rest">     <span class="hdr">note:</span> the ask package only</span></div>
+        <div class="opt plain"><span class="mark">·</span><span class="rest">     [ ] 2  Blackbox tests</span></div>
+        <div class="cont"><span class="mark">·</span><span class="rest">          go test ./blackbox/...</span></div>
+        <div class="opt plain"><span class="mark">·</span><span class="rest">     [ ] 3  None</span></div>
+      </div>
+      <div class="vr"></div>
+      <div class="col pane" style="width:38ch">
+        <div class="ph"> UNIT TESTS</div>
+        <div class="pb"> go test ./internal/...</div>
+        <div class="pb"> </div>
+        <div class="pb"> go test ./internal/ask/</div>
+        <div class="pb"> go test ./internal/client/</div>
+        <div class="pb"> </div>
+        <div class="pb"> space toggles the pick</div>
+      </div>
+    </div>
+  </div>
+  <div class="bar"><span class="edge">╚</span><span class="hint">  j/k move  1-9 pick  space toggle  t type  tab question  N note  enter send  esc decline </span><span class="rule"></span><span class="edge">╝</span></div>
+</div>
+
+</body>
+</html>

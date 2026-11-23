@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm ask form · v4 dense dock</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --accent:#7ac0eb; --edge:#78c8e1; --hint:#9599ae; --del:#ff7d7d;
+ --add:#78dc82; --work:#f5be50; --page:#0b0b0f; --rule:#3b3a48; --card:#464556;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 26px;color:#7d8298;max-width:74ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:30px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:74ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+.frame{font-family:"DejaVu Sans Mono",ui-monospace,monospace;
+ font-size:13px;line-height:1.3;font-variant-ligatures:none;color:var(--text);
+ white-space:normal;display:inline-block}
+.top,.bot{display:flex;align-items:center}
+.corner{color:var(--edge);font-weight:700}
+.lead{color:var(--edge);font-weight:700}
+.rule{flex:1 1 auto;height:2px;background:var(--edge);align-self:center}
+.title{color:#fff;font-weight:700;white-space:pre}
+.hint{color:var(--hint);white-space:pre}
+.body{width:calc(96ch + 4px);border-left:2px solid var(--edge);border-right:2px solid var(--edge);
+ padding:2px 0 6px;overflow:hidden;background:var(--bg)}
+.row{display:flex;white-space:pre;min-height:1.3em}
+.dim{color:var(--dim);white-space:pre}
+.acc{color:var(--accent)}
+.bold{font-weight:700}
+.txt{color:var(--text);white-space:pre}
+.hdr{color:var(--header);white-space:pre}
+.spacer{flex:1 1 auto}
+.hair{flex:1 1 auto;height:1px;background:#55546a;align-self:center}
+.head{display:flex;align-items:center}
+.head .mark{flex:0 0 1ch;color:transparent}
+.head .rest{flex:1 1 auto}
+.sect{padding:0 1ch}
+.rowline{display:flex;align-items:center}
+.opt{display:flex;align-items:center}
+.opt .mark{flex:0 0 1ch;color:transparent}
+.opt .rest{flex:0 0 34ch;white-space:pre;color:var(--dim)}
+.opt .meta{flex:1 1 auto;white-space:pre;color:var(--dim);padding-left:2ch}
+.opt.sel{background:var(--focus)}
+.opt.sel .mark{color:var(--accent);font-weight:700}
+.opt.sel .rest{color:var(--text);font-weight:700}
+.opt.sel .meta{color:var(--header);font-weight:400}
+.chip{background:#2a2937;border-radius:2px;padding:0 .7ch;color:var(--text)}
+.chip .l{color:var(--dim)}
+.foot{display:flex;align-items:center;gap:1ch;padding:0 1ch;white-space:pre;overflow:hidden}
+
+/* one row of terminal text, one fixed line box, so a row cannot outgrow its slot */
+.row,.opt,.cont,.hline,.ph,.pb,.ctop,.cbot,.sect,.foot,.dline,.tabbar,.strip{
+ line-height:1.4;height:1.4em}
+</style>
+</head>
+<body>
+
+<h1>dm ask form · v4: dense dock</h1>
+<p class="sub">No side column. Each option is one row with its description on the same line, the preview docks under a hairline at the bottom, and the footer carries keys as filled chips. The whole form stays inside a short terminal.</p>
+
+<h2>One question, wide</h2>
+<div class="frame">
+  <div class="top"><span class="corner">╭</span><span class="lead">─</span><span class="title"> ask w1p2  1/1 </span><span class="rule"></span><span class="corner">╮</span></div>
+  <div class="body">
+    <div class="row"><span class="hdr bold">  SCOPE</span><span class="spacer"></span><span class="dim">1 of 1  </span></div>
+    <div class="row" style="height:.4em"></div>
+    <div class="row">  How far should the rename go?</div>
+    <div class="row" style="height:.6em"></div>
+    <div class="row sect"><span class="hair"></span></div>
+    <div class="opt sel"><span class="mark">▌</span><span class="rest">1  Rename the function only</span><span class="meta">   Three call sites, one file.   </span></div>
+    <div class="opt"><span class="mark">·</span><span class="rest">2  Rename the parameter too</span><span class="meta">   Two files, four call sites.  </span></div>
+    <div class="opt"><span class="mark">·</span><span class="rest">3  Leave the name alone</span><span class="meta">                                </span></div>
+    <div class="opt"><span class="mark">·</span><span class="rest">+  Type something.</span><span class="meta">                                </span></div>
+    <div class="row sect"><span class="hair"></span></div>
+    <div class="row"> <span class="acc bold">PREVIEW</span><span class="dim">  Rename the function only</span></div>
+    <div class="row dim"> Freeze the signature. Do not touch the parameter list.</div>
+    <div class="row sect"><span class="hair"></span></div>
+    <div class="foot"><span class="chip">j k</span><span class="chip">1-9</span><span class="dim">pick</span><span class="chip">space</span><span class="dim">pick</span><span class="chip">t</span><span class="dim">type</span><span class="chip">N</span><span class="dim">note</span><span class="chip">enter</span><span class="dim">send</span><span class="chip">esc</span><span class="dim">decline</span></div>
+  </div>
+  <div class="bot"><span class="corner">╰</span><span class="rule"></span><span class="corner">╯</span></div>
+</div>
+<p class="note"><b>Cost:</b> the description shares the label row, so a long one is cut. The footer chips take the place of the border hint row, which is the one row every other float in dm uses.</p>
+
+<h2>Two questions, the second one multi-select</h2>
+<div class="frame">
+  <div class="top"><span class="corner">╭</span><span class="lead">─</span><span class="title"> ask w1p2  2/2 </span><span class="rule"></span><span class="corner">╮</span></div>
+  <div class="body">
+    <div class="row"><span class="dim">▸</span><span class="dim bold"> 1 Scope  </span><span class="txt">●</span><span class="acc bold"> 2 Tests  </span><span class="spacer"></span><span class="dim">2 of 2  </span></div>
+    <div class="row"><span class="hdr bold">  TESTS</span></div>
+    <div class="row" style="height:.4em"></div>
+    <div class="row">  Which suites should run after it?</div>
+    <div class="row" style="height:.6em"></div>
+    <div class="row sect"><span class="hair"></span></div>
+    <div class="opt sel"><span class="mark">▌</span><span class="rest">1  [ ] Unit tests</span><span class="meta">        go test ./internal/...   </span></div>
+    <div class="opt"><span class="mark">·</span><span class="rest">2  [ ] Blackbox tests</span><span class="meta">    go test ./blackbox/...   </span></div>
+    <div class="opt"><span class="mark">·</span><span class="rest">3  [ ] None</span><span class="meta">                                 </span></div>
+    <div class="row">  <span class="hdr">note:</span><span class="dim"> the ask package only</span></div>
+    <div class="row sect"><span class="hair"></span></div>
+    <div class="row"> <span class="acc bold">PREVIEW</span><span class="dim">  Unit tests</span></div>
+    <div class="row dim"> go test ./internal/...</div>
+    <div class="row dim"> space toggles the pick, tab moves to the next question</div>
+    <div class="row sect"><span class="hair"></span></div>
+    <div class="foot"><span class="chip">j k</span><span class="chip">1-9</span><span class="dim">pick</span><span class="chip">space</span><span class="dim">toggle</span><span class="chip">tab</span><span class="dim">question</span><span class="chip">N</span><span class="dim">note</span><span class="chip">enter</span><span class="dim">send</span><span class="chip">esc</span><span class="dim">decline</span></div>
+  </div>
+  <div class="bot"><span class="corner">╰</span><span class="rule"></span><span class="corner">╯</span></div>
+</div>
+
+</body>
+</html>
