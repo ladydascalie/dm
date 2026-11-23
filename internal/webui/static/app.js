@@ -241,14 +241,19 @@ async function runAction(body) {
   return text ? JSON.parse(text) : {};
 }
 
-// arm turns one button into its own question. The next tap on that button
-// sends; any other command first takes the question away.
-function arm(btn, question) {
-  armed = { el: btn, label: btn.textContent };
+// arm turns one button into its own question and freezes the request the
+// question names. The confirmation sends that request exactly, so a pane or
+// window that went away since gets the daemon's refusal, and no other one is
+// hit.
+function arm(btn, question, body) {
+  armed = { el: btn, label: btn.textContent, body };
   btn.textContent = question;
   btn.classList.add("armed");
 }
 
+// disarm restores the button and forgets the question. Every other command, a
+// new target, a new question and a sheet close run through here, so one voice
+// owns the armed state.
 function disarm() {
   if (!armed) return;
   armed.el.textContent = armed.label;
@@ -256,21 +261,28 @@ function disarm() {
   armed = null;
 }
 
-// dispatch sends one command. A command that destroys something asks once,
-// with its target named, and only the second tap sends. Nothing else asks.
-async function dispatch(btn, body, question) {
-  if (question) {
-    if (armed && armed.el === btn) {
-      disarm();
-    } else {
-      disarm();
-      arm(btn, question);
-      return;
-    }
-  }
+// sendBody runs one finished request and settles the view after it.
+async function sendBody(body) {
   const res = await runAction(body);
   if (res === null) return;
   if (body.id === "close-pane" && pane && body.target === pane.id) closePane();
+}
+
+// dispatch sends one command. A command that destroys something asks once, with
+// its target named, and only the second tap sends, exactly what was named.
+// Every other command takes the question away first.
+async function dispatch(btn, body, question) {
+  if (!question) {
+    disarm();
+    return sendBody(body);
+  }
+  if (armed && armed.el === btn) {
+    const frozen = armed.body;
+    disarm();
+    return sendBody(frozen);
+  }
+  disarm();
+  arm(btn, question, body);
 }
 
 // --- the sheet -----------------------------------------------------------
@@ -438,7 +450,12 @@ async function sheetSend(btn, cmd, extra) {
   Object.assign(body, extra);
   if ((cmd.fields || []).includes("name")) {
     const name = prompt(cmd.label + ": name");
-    if (name === null) return;
+    if (name === null) {
+      // A cancelled prompt sends nothing, and it is still another command: the
+      // question on the row goes with it.
+      disarm();
+      return;
+    }
     body.name = name;
   }
   const question = cmd.id === "close-pane" || cmd.id === "close-window"
@@ -467,11 +484,28 @@ const paneActions = [
 
 // actOnPane runs a command the server targets at the session's focus. The focus
 // goes to the open pane first, so a refused focus stops before the command.
+//
+// The view follows the desk after the command: next pane steps the session's
+// focus, and a phone that kept looking at the old pane would see nothing happen.
+// The fleet the command just refreshed names the pane the session now stands on,
+// so no extra request is needed.
 async function actOnPane(body) {
   if (!pane) return;
+  disarm();
   const focused = await runAction({ id: "focus", target: pane.id });
   if (focused === null) return;
-  await runAction(body);
+  const stepped = await runAction(body);
+  if (stepped === null) return;
+  const next = focusedPaneID();
+  if (next && pane && next !== pane.id) location.hash = "#pane=" + encodeURIComponent(next);
+}
+
+// focusedPaneID is the pane the session stands on: the active window's focus.
+// The fleet carries both flags, so one lookup answers it.
+function focusedPaneID() {
+  const panes = (fleet && fleet.panes) || [];
+  const at = panes.find((p) => p.active && p.focus) || panes.find((p) => p.focus);
+  return at ? at.id : "";
 }
 
 function renderPaneActions() {
@@ -484,7 +518,10 @@ function renderPaneActions() {
       const body = act.body();
       if (body.id === "set-pane-name") {
         const name = prompt("name for " + pane.id);
-        if (name === null) return;
+        if (name === null) {
+          disarm();
+          return;
+        }
         body.name = name;
       }
       if (act.focusFirst) {
@@ -615,6 +652,7 @@ function focusCompose() {
 // answered without typing into its pty.
 async function composePost(ev) {
   ev.preventDefault();
+  disarm();
   const key = $("compose-key").value.trim();
   const msg = $("compose-msg").value.trim();
   if (!key || !msg) {
@@ -630,6 +668,7 @@ async function composePost(ev) {
 
 function sendText(enter) {
   if (!pane) return;
+  disarm();
   const input = $("send-text");
   post("/api/msg", { pane: pane.id, text: input.value, enter });
   input.value = "";
