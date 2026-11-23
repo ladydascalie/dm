@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"net"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +18,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/paths"
+	"dm/internal/vt"
 	"dm/internal/wire"
 )
 
@@ -907,4 +910,291 @@ func TestCommandsListsTheCatalogue(t *testing.T) {
 			t.Fatalf("%s names %v, want %v", c.ID, c.Fields, want.Fields)
 		}
 	}
+}
+
+// --- the picture stream ---------------------------------------------------
+
+// fakePane answers a screen subscription with the screens it is given, then
+// closes. It is the pane daemon's side of the picture stream.
+func fakePane(t *testing.T, sock string, screens ...string) {
+	t.Helper()
+	listenUnix(t, sock, func(c net.Conn) {
+		for {
+			m, err := wire.ReadMsg(c)
+			if err != nil {
+				return
+			}
+			if m.Action != "screen-sub" {
+				continue
+			}
+			for _, text := range screens {
+				snap := testScreen(text)
+				_ = wire.WriteMsg(c, wire.Msg{Type: "screen", VTSnap: snap})
+			}
+			return
+		}
+	})
+}
+
+// silentPane accepts a screen subscription and answers nothing, the way a pane
+// daemon older than this build does. It holds the connection until the page
+// closes it.
+func silentPane(t *testing.T, sock string) {
+	t.Helper()
+	listenUnix(t, sock, func(c net.Conn) {
+		buf := make([]byte, 1)
+		for {
+			if _, err := c.Read(buf); err != nil {
+				return
+			}
+		}
+	})
+}
+
+// testScreen builds a one line snapshot carrying text.
+func testScreen(text string) *vt.Snapshot {
+	term := vt.NewTerm(len(text)+2, 1)
+	term.Write([]byte(text))
+	term.Flush()
+	return term.Snapshot()
+}
+
+// snapText joins a snapshot's rows into the text a renderer would paint.
+func snapText(snap *vt.Snapshot) string {
+	var b strings.Builder
+	for _, row := range snap.Lines {
+		for _, c := range row.Cells {
+			b.WriteString(c.Text)
+		}
+	}
+	return b.String()
+}
+
+// TestThumbsStreamsEveryPane proves the picture stream multiplexes the panes in
+// one response, so the page holds one connection for the grid.
+func TestThumbsStreamsEveryPane(t *testing.T) {
+	session := "main"
+	dir := root(t, session)
+	fakePane(t, paths.PaneSockAt(dir, session, "w1p1"), "left")
+	fakePane(t, paths.PaneSockAt(dir, session, "w1p2"), "right")
+
+	cfg := Config{Session: session, Root: dir, Token: "t"}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/thumbs?panes=w1p1,w1p2&t=t")
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	seen := map[string]string{}
+	scan := bufio.NewScanner(res.Body)
+	for scan.Scan() {
+		if d, ok := strings.CutPrefix(scan.Text(), "data: "); ok {
+			var ev shotEvent
+			if err := json.Unmarshal([]byte(d), &ev); err != nil {
+				t.Fatal(err)
+			}
+			if ev.Snap != nil {
+				seen[ev.Pane] = snapText(ev.Snap)
+			}
+		}
+		if len(seen) == 2 {
+			break
+		}
+	}
+	if !strings.Contains(seen["w1p1"], "left") || !strings.Contains(seen["w1p2"], "right") {
+		t.Fatalf("pictures %v", seen)
+	}
+}
+
+// TestThumbsReportASilentPane proves a pane daemon that cannot answer paints as
+// gone, so the tile says it has no picture instead of looking quiet.
+func TestThumbsReportASilentPane(t *testing.T) {
+	session := "main"
+	dir := root(t, session)
+	silentPane(t, paths.PaneSockAt(dir, session, "w1p1"))
+
+	cfg := Config{Session: session, Root: dir, Token: "t"}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/thumbs?panes=w1p1&t=t")
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	scan := bufio.NewScanner(res.Body)
+	for scan.Scan() {
+		d, ok := strings.CutPrefix(scan.Text(), "data: ")
+		if !ok {
+			continue
+		}
+		var ev shotEvent
+		if err := json.Unmarshal([]byte(d), &ev); err != nil {
+			t.Fatal(err)
+		}
+		if ev.Gone && ev.Pane == "w1p1" && ev.Snap == nil {
+			return
+		}
+	}
+	t.Fatal("the silent pane never reported gone")
+}
+
+// TestThumbsRefusesABadList proves only pane ids reach a socket path.
+func TestThumbsRefusesABadList(t *testing.T) {
+	cfg := Config{Session: "main", Root: root(t, "main"), Token: "t"}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+
+	for _, q := range []string{"", "panes=", "panes=../../etc", "panes=w1p1/../x"} {
+		res := get(t, srv.URL, "/api/thumbs?"+q+"&t=t")
+		_ = body(t, res)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("%q: status %d, want 400", q, res.StatusCode)
+		}
+	}
+}
+
+// getClose is get with a connection the server does not keep open, so a
+// goroutine count is not polluted by a pooled connection.
+func getClose(t *testing.T, url, query string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url+query, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Close = true
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+// waitGoroutines waits until the count falls to want, so a test can prove a
+// request left nothing behind without racing the scheduler.
+func waitGoroutines(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := runtime.NumGoroutine()
+		if got <= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d goroutines still running, want no more than %d", got, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestThumbsRefusedLeavesNothing proves a refused pane list subscribes no pane:
+// the count returns to where it stood before the server existed.
+func TestThumbsRefusedLeavesNothing(t *testing.T) {
+	cfg := Config{Session: "main", Root: root(t, "main"), Token: "t"}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+	// The baseline is the server at rest, so the count proves the refusals
+	// added nothing rather than that the server later went away.
+	base := runtime.NumGoroutine()
+
+	for _, q := range []string{"", "panes=", "panes=../../etc", "panes=w1p1/../x", "panes=a,b"} {
+		res := getClose(t, srv.URL, "/api/thumbs?"+q+"&t=t")
+		_ = body(t, res)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%q: status %d, want 400", q, res.StatusCode)
+		}
+	}
+	waitGoroutines(t, base)
+}
+
+// paneSockets serves panes for the stream tests and records every connection
+// it accepts, so a handler that fails to hang up is unblocked at cleanup
+// instead of wedging the suite.
+type paneSockets struct {
+	mu    sync.Mutex
+	conns []net.Conn
+}
+
+// answer serves sock with one screen carrying text, then closes.
+func (p *paneSockets) answer(t *testing.T, sock, text string) {
+	t.Helper()
+	listenUnix(t, sock, func(c net.Conn) {
+		p.track(c)
+		for {
+			m, err := wire.ReadMsg(c)
+			if err != nil {
+				return
+			}
+			if m.Action != "screen-sub" {
+				continue
+			}
+			_ = wire.WriteMsg(c, wire.Msg{Type: "screen", VTSnap: testScreen(text)})
+			return
+		}
+	})
+}
+
+// silent serves sock and answers nothing, holding the connection open.
+func (p *paneSockets) silent(t *testing.T, sock string) {
+	t.Helper()
+	listenUnix(t, sock, func(c net.Conn) {
+		p.track(c)
+		buf := make([]byte, 1)
+		for {
+			if _, err := c.Read(buf); err != nil {
+				return
+			}
+		}
+	})
+}
+
+func (p *paneSockets) track(c net.Conn) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.conns = append(p.conns, c)
+}
+
+// closeAll hangs up every subscription the test opened.
+func (p *paneSockets) closeAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, c := range p.conns {
+		_ = c.Close()
+	}
+}
+
+// TestThumbsCancelLeavesNothing proves a page that walks away frees every
+// subscription it held, the silent one included.
+func TestThumbsCancelLeavesNothing(t *testing.T) {
+	session := "main"
+	dir := root(t, session)
+	var panes paneSockets
+	panes.answer(t, paths.PaneSockAt(dir, session, "w1p1"), "left")
+	panes.silent(t, paths.PaneSockAt(dir, session, "w1p2"))
+
+	srv := httptest.NewServer(handler(Config{Session: session, Root: dir, Token: "t"}))
+	t.Cleanup(srv.Close)
+	// Registered after the server, so it runs first: a stream this test fails
+	// to close cannot hold the server's own Close open.
+	t.Cleanup(panes.closeAll)
+	// The baseline holds the two pane listeners and the server, so the only
+	// goroutines the wait can see are the ones the stream opened.
+	base := runtime.NumGoroutine()
+
+	res := get(t, srv.URL, "/api/thumbs?panes=w1p1,w1p2&t=t")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	// Wait for the first picture, so both subscriptions are open when the page
+	// leaves.
+	scan := bufio.NewScanner(res.Body)
+	for scan.Scan() {
+		if strings.Contains(scan.Text(), `"pane":"w1p1"`) {
+			break
+		}
+	}
+	_ = res.Body.Close()
+	waitGoroutines(t, base)
 }

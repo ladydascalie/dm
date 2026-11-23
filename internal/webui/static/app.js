@@ -76,6 +76,7 @@ async function loadFleet() {
   banner(f.error || "");
   renderPanes(f);
   renderBox(f);
+  if (thumbsOn()) renderThumbs(f);
   $("session").textContent = "dm " + f.session;
   renderCounts(f);
   // Read only offers nothing that writes, so the sheet and the compose go.
@@ -569,6 +570,209 @@ async function post(path, body) {
   }
 }
 
+// --- the pictures ---------------------------------------------------------
+//
+// A tile is the pane's screen painted as blocks: text in the foreground
+// colour, background where a cell has one. Glyphs at this size are noise, but
+// a diff's colour, a progress bar or an error still read at a glance.
+
+// BASE is the 16-colour ANSI palette a terminal starts from.
+const BASE = [
+  "#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
+  "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#ffffff",
+];
+
+// CUBE is the per-channel level of the 6x6x6 colour cube above index 16.
+const CUBE = [0, 95, 135, 175, 215, 255];
+
+// palette resolves a 256-colour index.
+function palette(n) {
+  if (n < 16) return BASE[n];
+  if (n < 232) {
+    const i = n - 16;
+    return "rgb(" + CUBE[Math.floor(i / 36)] + "," + CUBE[Math.floor(i / 6) % 6] + "," + CUBE[i % 6] + ")";
+  }
+  const v = 8 + (n - 232) * 10;
+  return "rgb(" + v + "," + v + "," + v + ")";
+}
+
+// decodeColour resolves the pane's packed colour: 0 default, 1+n a palette
+// index, and 1<<24|rgb a true colour. The packing is vt's; it is opaque here.
+function decodeColour(v) {
+  if (!v) return null;
+  if (v & 0x1000000) {
+    const rgb = (v & 0xffffff).toString(16).padStart(6, "0");
+    return "#" + rgb;
+  }
+  return palette(v - 1);
+}
+
+const DEFAULT_FG = "#d7dee5";
+const DEFAULT_BG = "#101418";
+
+// paintShot draws one snapshot into a canvas. Runs of equally styled cells
+// share one rectangle, so a screen of text costs a few fills per row.
+function paintShot(canvas, snap) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = canvas.clientWidth || 1;
+  const h = canvas.clientHeight || 1;
+  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = DEFAULT_BG;
+  ctx.fillRect(0, 0, w, h);
+
+  const cols = snap.cw || 1;
+  const rows = snap.ch || 1;
+  const cw = w / cols;
+  const ch = h / rows;
+  const styles = snap.y || [];
+
+  for (let y = 0; y < rows; y++) {
+    const row = snap.l[y];
+    if (!row || !row.c) continue;
+    for (let x = 0; x < row.c.length; x++) {
+      const cell = row.c[x];
+      if (cell === null || cell === "") continue;
+      if (typeof cell === "object" && cell.k) continue; // a wide cell's second slot
+      const text = typeof cell === "string" ? cell : (cell.c || "");
+      const st = typeof cell === "object" && cell.s ? styles[cell.s] : null;
+      const bg = (st && decodeColour(st.b)) || null;
+      const fg = (st && decodeColour(st.f)) || DEFAULT_FG;
+      if (bg) {
+        ctx.fillStyle = bg;
+        ctx.fillRect(Math.floor(x * cw), Math.floor(y * ch), Math.ceil(cw) + 1, Math.ceil(ch) + 1);
+      }
+      if (text.trim() !== "") {
+        ctx.fillStyle = fg;
+        ctx.fillRect(Math.floor(x * cw), Math.floor(y * ch) + 1, Math.max(1, cw - 0.5), Math.max(1, ch - 2));
+      }
+    }
+  }
+}
+
+// thumbState is the live picture view: the grid, its one stream and its tiles.
+const thumbState = { on: false, es: null, tiles: new Map() };
+
+// thumbsOn reports whether the picture grid is showing.
+function thumbsOn() {
+  return thumbState.on;
+}
+
+// renderThumbs builds the grid from the fleet's active window. Tiles keep the
+// arrangement the desk shows, normalised to the box the panes cover, so the
+// rail and the tab bar do not eat the phone's screen. One stream carries every
+// tile.
+function renderThumbs(f) {
+  const box = $("thumbs");
+  const panes = f.panes.filter((p) => p.active && p.rect && p.rect.w > 0 && p.rect.h > 0);
+  const wanted = panes.map((p) => p.id).join(",");
+  if (box.dataset.panes === wanted && thumbState.es) {
+    // Same panes, new boxes: the desk or a claim moved them, so move the tiles
+    // instead of rebuilding the grid and its stream.
+    positionTiles(panes);
+    return;
+  }
+  box.dataset.panes = wanted;
+  box.textContent = "";
+  thumbState.tiles.clear();
+  closePictures();
+  if (panes.length === 0) {
+    box.append(el("div", "empty", "no panes in the active window"));
+    return;
+  }
+
+  for (const p of panes) {
+    const tile = el("a", "tile");
+    tile.href = "#pane=" + encodeURIComponent(p.id);
+    const frame = el("div", "frame");
+    const label = el("div", "label", (p.name || p.app || p.id) + "  " + (p.status || "note"));
+    const canvas = el("canvas");
+    frame.append(label, canvas);
+    tile.append(frame);
+    box.append(tile);
+    thumbState.tiles.set(p.id, { tile, canvas, snap: null });
+  }
+  positionTiles(panes);
+
+  const es = new EventSource(api("/api/thumbs?panes=" + encodeURIComponent(wanted)));
+  thumbState.es = es;
+  es.addEventListener("shot", (ev) => {
+    const d = JSON.parse(ev.data);
+    const t = thumbState.tiles.get(d.pane);
+    if (!t || !d.snap) return;
+    t.tile.classList.remove("gone");
+    t.snap = d.snap;
+    paintShot(t.canvas, d.snap);
+  });
+  es.addEventListener("gone", (ev) => {
+    const d = JSON.parse(ev.data);
+    const t = thumbState.tiles.get(d.pane);
+    if (t) t.tile.classList.add("gone");
+  });
+  es.addEventListener("end", () => {
+    es.close();
+    if (thumbState.es === es) thumbState.es = null;
+  });
+}
+
+// closePictures hangs up the grid's stream and forgets the pane set, so a page
+// in a pocket holds no connection and no tile.
+function closePictures() {
+  if (thumbState.es) thumbState.es.close();
+  thumbState.es = null;
+  const box = $("thumbs");
+  box.dataset.panes = "";
+  thumbState.tiles.clear();
+}
+
+// positionTiles places the tiles by their boxes, normalised to the box the
+// panes cover, so the rail and the tab bar do not eat the phone's screen.
+function positionTiles(panes) {
+  let x0 = Infinity, y0 = Infinity, x1 = 0, y1 = 0;
+  for (const p of panes) {
+    x0 = Math.min(x0, p.rect.x);
+    y0 = Math.min(y0, p.rect.y);
+    x1 = Math.max(x1, p.rect.x + p.rect.w);
+    y1 = Math.max(y1, p.rect.y + p.rect.h);
+  }
+  const gw = x1 - x0 || 1;
+  const gh = y1 - y0 || 1;
+  for (const p of panes) {
+    const t = thumbState.tiles.get(p.id);
+    if (!t) continue;
+    t.tile.style.left = ((p.rect.x - x0) / gw) * 100 + "%";
+    t.tile.style.top = ((p.rect.y - y0) / gh) * 100 + "%";
+    t.tile.style.width = (p.rect.w / gw) * 100 + "%";
+    t.tile.style.height = (p.rect.h / gh) * 100 + "%";
+  }
+}
+
+// repaintThumbs repaints every tile from the last picture it had. A rotation
+// changes the canvas size without a new frame from a quiet pane, so without
+// this a rotated phone keeps a stretched or one pixel picture.
+function repaintThumbs() {
+  for (const t of thumbState.tiles.values()) {
+    if (t.snap) paintShot(t.canvas, t.snap);
+  }
+}
+
+// setThumbs shows or hides the picture grid and its stream.
+function setThumbs(on) {
+  thumbState.on = on;
+  document.body.classList.toggle("thumbs", on);
+  $("thumbs-toggle").classList.toggle("on", on);
+  if (!on) {
+    closePictures();
+    $("thumbs").textContent = "";
+    return;
+  }
+  if (fleet) renderThumbs(fleet);
+}
+
 // --- the clock -----------------------------------------------------------
 
 // startTimers arms the polls. A hidden page arms none, so a phone in a pocket
@@ -612,6 +816,17 @@ $("win-next").addEventListener("click", () => runAction({ id: "next-window" }));
 $("ws-prev").addEventListener("click", () => runAction({ id: "prev-workspace" }));
 $("ws-next").addEventListener("click", () => runAction({ id: "next-workspace" }));
 $("sheet-open").addEventListener("click", openSheet);
+$("thumbs-toggle").addEventListener("click", () => setThumbs(!thumbsOn()));
+window.addEventListener("orientationchange", () => {
+  // Text re-wraps on its own; only the pictures need repainting.
+  if (thumbsOn()) setTimeout(repaintThumbs, 250);
+});
+window.addEventListener("resize", () => {
+  if (fleet && thumbsOn()) {
+    renderThumbs(fleet);
+    repaintThumbs();
+  }
+});
 $("sheet-close").addEventListener("click", dismissSheet);
 $("sheet").addEventListener("click", (e) => {
   // A tap outside the panel is the sheet's own dismiss.
@@ -625,6 +840,7 @@ window.addEventListener("popstate", () => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     stopTimers();
+    closePictures();
     return;
   }
   loadFleet();
