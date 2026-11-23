@@ -162,7 +162,7 @@ function paintFleet(f) {
       // line since the last try, so the page asks again rather than staying on
       // the screen for good.
       const row = f.panes.find((p) => p.id === pane.id);
-      if (row && row.agent && pane.session === "none") pollSession();
+      if (row && hasSession(row) && pane.session === "none") pollSession();
     }
   }
 }
@@ -325,6 +325,14 @@ function renderPanes(f) {
   for (const g of projectGroups(f.panes)) box.append(projectSection(g));
 }
 
+// hasSession is the fleet's answer to the only question the fold asks: does
+// this pane have a session to read. The agent flag is a different question: a
+// pane can report a session and no status, and a pi pane that has written
+// nothing yet has neither.
+function hasSession(p) {
+  return !!p.session;
+}
+
 // projectSection is one project: its accent mark, its name, the count of panes
 // and agents it holds, then its rows and its folded shells.
 function projectSection(g) {
@@ -334,8 +342,8 @@ function projectSection(g) {
   head.append(el("span", "pname", g.name));
   head.append(el("span", "pcount", sectionCount(g.panes)));
   sec.append(head);
-  const agents = g.panes.filter((p) => p.agent).sort(sortWithin);
-  const shells = g.panes.filter((p) => !p.agent);
+  const agents = g.panes.filter(hasSession).sort(sortWithin);
+  const shells = g.panes.filter((p) => !hasSession(p));
   for (const p of agents) sec.append(paneRow(p));
   if (shells.length > 0) {
     sec.append(shellFold(g, shells.length));
@@ -345,10 +353,10 @@ function projectSection(g) {
 }
 
 // sectionCount is a project's own summary: how many panes it holds and how many
-// of them are an agent.
+// of them carry a session, which is what makes a pane an agent to the phone.
 function sectionCount(panes) {
   const n = panes.length;
-  const agents = panes.filter((p) => p.agent).length;
+  const agents = panes.filter(hasSession).length;
   return n + (n === 1 ? " pane" : " panes") + ", " + agents + (agents === 1 ? " agent" : " agents");
 }
 
@@ -994,10 +1002,11 @@ async function openPane(id, view) {
   renderPaneChrome();
   renderViewChrome();
   markFollow();
-  // A pane the fleet calls a shell has no session to read. The screen is then
-  // the whole view, and the probe would only cost a request.
-  if (row.agent === false) {
+  // A pane with no session has nothing to read. The screen is then the whole
+  // view, and the probe would only cost a request.
+  if (!hasSession(row)) {
     pane.session = "none";
+    pane.view = "screen";
     renderViewChrome();
     startTimers();
     await pollText();
@@ -1103,10 +1112,13 @@ function paintSession(at, d, why) {
   const first = at.session !== "ok";
   at.session = "ok";
   at.why = "";
-  // A session that turned up after the pane opened brings its transcript with
-  // it, unless the reader is the one who chose the screen.
+  // A session that turned up after the pane opened, or came back after a read
+  // that failed, brings its transcript with it, unless the reader is the one
+  // who chose the screen. The switch is painted before the turns so the
+  // transcript has a height to scroll in.
   if (first && !at.chosen && at.view === "screen") {
     at.view = "transcript";
+    renderViewChrome();
     markFollow();
   }
   if (d.rev) at.sessionRev = d.rev;
@@ -1122,11 +1134,18 @@ function paintSession(at, d, why) {
 }
 
 // dropToScreen puts the pane on the screen view and says why in one line. A
-// pane with no session has nothing to say, so the line stays empty.
+// pane with no session has nothing to say, so the line stays empty. A pane that
+// is already on the screen only takes the new line, so a retry that fails again
+// touches no view and starts no extra poll.
 function dropToScreen(why) {
   if (!pane) return;
-  pane.view = "screen";
+  const was = pane.view;
   pane.why = why || "";
+  if (was === "screen") {
+    renderViewChrome();
+    return;
+  }
+  pane.view = "screen";
   renderViewChrome();
   markFollow();
   startTimers();
@@ -1289,6 +1308,19 @@ function paintTranscript(at) {
   box.append(body);
 }
 
+// finishedSteps are a turn's finished steps. The payload copies the unfinished
+// step into live and leaves it at the end of steps as well, so the page drops
+// that copy and paints the live row once. A live step this page cannot find at
+// the end of the list keeps every step: a duplicate is better than a lost one.
+function finishedSteps(t) {
+  const steps = t.steps || [];
+  const live = t.live;
+  if (!live || steps.length === 0) return steps;
+  const last = steps[steps.length - 1];
+  const same = last.kind === live.kind && last.tool === live.tool && last.summary === live.summary;
+  return same ? steps.slice(0, steps.length - 1) : steps;
+}
+
 // turnBlock is one turn. The number counts within the window this page holds,
 // which is the last three turns of the session.
 function turnBlock(t, i, total, at) {
@@ -1299,7 +1331,7 @@ function turnBlock(t, i, total, at) {
   hd.append(el("span", "tnum", "turn " + (i + 1) + " of " + total));
   wrap.append(hd);
   if (t.ask) wrap.append(el("div", "you", t.ask));
-  (t.steps || []).forEach((s, j) => wrap.append(stepBlock(s, i + ":" + j, at)));
+  finishedSteps(t).forEach((s, j) => wrap.append(stepBlock(s, i + ":" + j, at)));
   if (t.live) wrap.append(liveRow(t.live));
   wrap.append(summaryRow(t.summary));
   return wrap;
@@ -1369,7 +1401,8 @@ function summaryRow(s) {
   const row = el("div", "turnft");
   if (!s) return row;
   const calls = el("span");
-  calls.append(el("b", "", (s.calls || 0) + " calls"));
+  const n = s.calls || 0;
+  calls.append(el("b", "", n + (n === 1 ? " call" : " calls")));
   calls.append(document.createTextNode(" "));
   if (s.errors) calls.append(el("span", "bad", s.errors + (s.errors === 1 ? " error" : " errors")));
   else calls.append(document.createTextNode("0 errors"));
@@ -1406,7 +1439,7 @@ function paintActivity(at) {
         "turn " + (i + 1) + " \u00b7 " + clockOf(t.at) + " \u00b7 " + agoOf(t.at)));
     }
     if (t.live) box.append(actRow(t.live, t.at, true));
-    for (const s of (t.steps || []).slice().reverse()) box.append(actRow(s, t.at, false));
+    for (const s of finishedSteps(t).slice().reverse()) box.append(actRow(s, t.at, false));
     box.append(askRow(t));
   }
 }
@@ -1504,10 +1537,16 @@ function durText(ms) {
   return (ms / 1000).toFixed(1) + "s";
 }
 
-// costText is the money a turn spent, in the dollars the session reports.
+// costText is the money a turn spent, in the dollars the session reports. A
+// cost below a cent keeps enough places to prove it is not zero: rounding
+// 0.00033 to three places printed $0.000, which reads as free. The ordinary
+// case stays short, and the padding zeros are trimmed off it.
 function costText(n) {
   if (!n) return "";
-  return "$" + (n < 0.1 ? n.toFixed(3) : n.toFixed(2));
+  if (n >= 0.1) return "$" + n.toFixed(2);
+  if (n < 0.0001) return "<$0.0001";
+  const places = n >= 0.01 ? 3 : n >= 0.001 ? 4 : 5;
+  return "$" + n.toFixed(places).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 // closePane stops the polls and, when asked, clears the address bar.
@@ -1844,8 +1883,17 @@ function startTimers() {
   if (document.hidden) return;
   timers.fleet = setInterval(loadFleet, REFRESH_MS);
   if (!pane) return;
-  if (pane.view === "screen") timers.text = setInterval(pollText, TEXT_POLL_MS);
-  else timers.session = setInterval(pollSession, TEXT_POLL_MS);
+  if (pane.view !== "screen") {
+    // The two session views read the session. A pane with no session has
+    // nothing to ask for, whatever view it is showing.
+    if (pane.session !== "none") timers.session = setInterval(pollSession, TEXT_POLL_MS);
+    return;
+  }
+  timers.text = setInterval(pollText, TEXT_POLL_MS);
+  // A session that failed to read is a state to retry, not a verdict: the pane
+  // keeps asking while it is open, so a file a live writer is in the middle of
+  // lands on the transcript again without the reader tapping anything.
+  if (pane.session === "failed") timers.session = setInterval(pollSession, TEXT_POLL_MS);
 }
 
 function stopTimers() {
