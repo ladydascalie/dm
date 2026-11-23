@@ -116,6 +116,7 @@ var flagDefaults = map[string]string{
 	"all": "false", "force": "false", "trust": "false", "action-json": "",
 	"argv": "", "split": "false", "window": "false", "target": "",
 	"addr": "127.0.0.1:8099", "token": "", "read-only": "false",
+	"pane": "", "tool-call": "",
 }
 
 // TestFlagDefaultsSurvivePerVerbRegistration proves the per-verb sets keep
@@ -155,6 +156,7 @@ var fieldFlag = map[string]string{
 	"to": "to", "envs": "env",
 	"argv":        "argv",
 	"pluginSplit": "split", "pluginWindow": "window", "target": "target",
+	"pane": "pane", "toolCall": "tool-call",
 	"addr": "addr", "token": "token", "readOnly": "read-only",
 }
 
@@ -273,7 +275,7 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 	// dispatches on args, so its rows are the union of its subverbs.
 	declaredOf := func(verb string) map[string]bool {
 		out := map[string]bool{}
-		grouped := verb == "msg" || verb == "secret" || verb == "plugin"
+		grouped := verb == "msg" || verb == "secret" || verb == "plugin" || verb == "ask"
 		for _, v := range clidoc.Verbs() {
 			if grouped && !strings.HasPrefix(v, verb+" ") {
 				continue
@@ -362,12 +364,12 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 				if skip[verb] {
 					continue // man, llms and html keep their own flag set
 				}
-				if verb == "msg" || verb == "secret" || verb == "plugin" {
+				if verb == "msg" || verb == "secret" || verb == "plugin" || verb == "ask" {
 					// The grouped case dispatches on args[0], so each
 					// subverb is checked against its own row, and the case
 					// body itself against the union.
 					reads := map[string]bool{}
-					walk(cc, reads, map[string]bool{"Run": true, "runBox": true, "runSecret": true, "runPlugin": true})
+					walk(cc, reads, map[string]bool{"Run": true, "runBox": true, "runSecret": true, "runPlugin": true, "runAsk": true})
 					for name := range reads {
 						if !declaredOf(verb)[name] {
 							t.Errorf("dm %s reads %q, which no %s row declares", verb, name, verb)
@@ -378,6 +380,8 @@ func TestEveryVerbReadsOnlyDeclaredFlags(t *testing.T) {
 						found += dispatch(readers["runBox"], "msg ")
 					case "secret":
 						found += dispatch(readers["runSecret"], "secret ")
+					case "ask":
+						found += dispatch(readers["runAsk"], "ask ")
 					default:
 						found += dispatch(readers["runPlugin"], "plugin ")
 					}

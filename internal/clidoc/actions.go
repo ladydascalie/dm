@@ -90,6 +90,12 @@ var actionExamples = []actionExample{
 	{"secret-hydrate", `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`},
 	{"secret-type", `{"action":"secret-type","name":"gh-cli","target":"w1p1"}`},
 	{"secret-sync", `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}`},
+
+	{"ask-open", `{"action":"ask-open","target":"w1p1","res":{"toolCallId":"toolu_1","questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}}`},
+	{"ask-await", `{"action":"ask-await","target":"a1","res":{"timeoutMs":25000}}`},
+	{"ask-answer", `{"action":"ask-answer","target":"a1","res":{"items":[{"questionIndex":0,"optionIndexes":[0]}]}}`},
+	{"ask-close", `{"action":"ask-close","target":"a1"}`},
+	{"ask-list", `{"action":"ask-list"}`},
 }
 
 // actionExampleOf returns the example body for an action name.

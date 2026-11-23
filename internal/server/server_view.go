@@ -136,6 +136,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		Pad:          s.cfg.Padding(),
 		Root:         cloneTree(win.Root),
 		Sync:         win.Sync,
+		Ask:          wireAsks(s.st.Ask),
 	}
 	for _, w := range s.st.ActiveWorkspace().Windows {
 		snap.Windows = append(snap.Windows, wire.WindowInfo{ID: w.ID, Name: w.Name, Named: w.Named, Layout: w.Layout})

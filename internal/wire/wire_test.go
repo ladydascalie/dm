@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"dm/internal/testutil"
 	"dm/internal/wire"
@@ -346,3 +347,43 @@ func TestTrustFieldDistinguishesAbsentFromFalse(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// TestSnapshotAskRoundTrip proves the snapshot carries the flattened asks with
+// the published field names, and that an empty store leaves the key out.
+func TestSnapshotAskRoundTrip(t *testing.T) {
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	in := wire.Snapshot{Session: "s", Ask: []wire.Ask{{
+		ID: "a1", Pane: "w1p1", ToolCallID: "toolu_1", At: at,
+		Questions: []wire.AskQuestion{{
+			Question: "Which base?", Header: "base", MultiSelect: true,
+			Options: []wire.AskOption{{Label: "main", Description: "the trunk", Preview: "a diff"}},
+		}},
+	}}}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, wire.Msg{Type: "snapshot", Snap: &in}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Snap == nil || len(out.Snap.Ask) != 1 {
+		t.Fatalf("ask round trip = %+v, want one ask", out.Snap)
+	}
+	got := out.Snap.Ask[0]
+	if got.ID != "a1" || got.Pane != "w1p1" || got.ToolCallID != "toolu_1" || !got.At.Equal(at) {
+		t.Errorf("ask = %+v", got)
+	}
+	if len(got.Questions) != 1 || !got.Questions[0].MultiSelect ||
+		len(got.Questions[0].Options) != 1 || got.Questions[0].Options[0].Preview != "a diff" {
+		t.Errorf("questions = %+v", got.Questions)
+	}
+
+	b, err := json.Marshal(wire.Snapshot{Session: "s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(b, []byte(`"ask"`)) {
+		t.Fatalf("an empty store kept the key: %s", b)
+	}
+}

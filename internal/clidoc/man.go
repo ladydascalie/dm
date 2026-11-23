@@ -80,6 +80,7 @@ var manActionNames = []string{
 	"secret-register", "secret-list", "secret-revoke",
 	"secret-use", "secret-hydrate", "secret-type",
 	"secret-sync",
+	"ask-open", "ask-await", "ask-answer", "ask-close", "ask-list",
 }
 
 // roffEscape makes text safe for a roff line. A backslash becomes \e, and a

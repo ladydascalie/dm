@@ -56,7 +56,7 @@ changed), `watch` (a box watcher changed), `msg` (box entry), `close` (session e
 
 ## The type and action matrix
 
-`handleReq` (`internal/server/server_rpc.go:15`) switches on `Action` and has 63 cases over 68 names; the pane
+`handleReq` (`internal/server/server_rpc.go:15`) switches on `Action` and has 71 cases over 76 names; the pane
 switches on `Action` alone (`internal/pane/pane.go:1277`). The server switches on `Type` first
 (`internal/server/server_view.go:732`). Every action ends in a `resp` frame except `msg-sub`, which streams; the
 `res` column names the keys of that reply's `res` object, and `none` means `res` is empty. The request and reply
@@ -111,7 +111,12 @@ verb, only `dm exec '<json>'` (`internal/cli/cli.go:572`).
 | `secret-type` | `name`, `target` | `pane`, `warning` | cli |
 | `secret-cover` | `res{session, valuesB64, values}` | `panes` (a count), `dropped` | sib |
 | `secret-sync` | `path`, `trust` | `mapping`, `registered`, `kept`, `files`, `warning`, `uncovered` | cli |
-| anything else | none | error `unknown action %q` (`internal/server/server_rpc.go:702`) | |
+| `ask-open` | `target`, `res{toolCallId,questions}` | `id` | cli |
+| `ask-await` | `target`, `res{timeoutMs}` | `pending`, or `answer` | cli |
+| `ask-answer` | `target`, `res{items,globalNote,cancel}` | the answer (`at`, `items`, `globalNote`, `cancel`) | cli |
+| `ask-close` | `target` | `closed` (whether this close removed one) | cli |
+| `ask-list` | none | `asks` (an array of ask requests, answers included) | cli |
+| anything else | none | error `unknown action %q` (`internal/server/server_rpc.go:784`) | |
 
 The layout verbs reply `none`: `focus`, `focus-window`, `focus-workspace`, `close-pane`, `close-window` and
 `close-workspace` take `target`; `focus-dir` takes `dir`; `move-window` and `move-workspace` take `target` and `dir`;

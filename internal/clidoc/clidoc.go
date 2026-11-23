@@ -45,6 +45,7 @@ const (
 	groupWindows  = "windows and workspaces"
 	groupObserve  = "observe"
 	groupBox      = "message box"
+	groupAsk      = "ask"
 	groupSecrets  = "secrets"
 	groupDocs     = "docs"
 )
@@ -61,6 +62,7 @@ var cliGroups = []struct {
 	{groupWindows, "Windows and workspaces"},
 	{groupObserve, "Observe"},
 	{groupBox, "Message box"},
+	{groupAsk, "Ask"},
 	{groupSecrets, "Secrets"},
 	{groupDocs, "Docs"},
 }
@@ -471,6 +473,66 @@ var cliCommands = []cliCommand{
 		group:   groupBox,
 	},
 
+	// The ask store, under dm ask: the questions an agent puts to the reader.
+	// A pi extension in a pane drives these verbs, because it has no other way
+	// in. The bodies come from stdin: a question set is too big for argv.
+	{
+		name:    "ask list",
+		args:    "[--json]",
+		summary: "print the questions the session lists, oldest first",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"json", "", "print JSON"},
+		},
+		group: groupAsk,
+	},
+	{
+		name:    "ask open",
+		args:    "--pane P --tool-call ID [--json]",
+		summary: "open an ask on a pane, reading {questions} on stdin",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"pane", "P", "pane the ask belongs to"},
+			{"tool-call", "ID", "the agent's tool call the questions belong to"},
+			{"json", "", "print JSON"},
+		},
+		example: `echo '{"questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}' | dm ask open --pane w1p1 --tool-call toolu_1`,
+		group:   groupAsk,
+	},
+	{
+		name:    "ask await",
+		args:    "<id> [--timeout 25s] [--json]",
+		summary: "block until the ask is answered, or print pending",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"timeout", "D", "wait timeout, capped at 25s"},
+			{"json", "", "print JSON"},
+		},
+		example: `dm ask await a1 --json`,
+		group:   groupAsk,
+	},
+	{
+		name:    "ask answer",
+		args:    "<id> [--json]",
+		summary: "answer an ask, reading {items,globalNote,cancel} on stdin",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"json", "", "print JSON"},
+		},
+		example: `echo '{"items":[{"questionIndex":0,"optionIndexes":[0]}]}' | dm ask answer a1`,
+		group:   groupAsk,
+	},
+	{
+		name:    "ask close",
+		args:    "<id> [--json]",
+		summary: "drop an ask from the store, idempotently",
+		flags: []cliFlag{
+			{"s", "name", "session name"},
+			{"json", "", "print JSON"},
+		},
+		group: groupAsk,
+	},
+
 	// Secrets: the registry, the proxy endpoint and the value's routes. A
 	// fetched value never reaches stdout, argv, a log or the state file.
 	{
@@ -749,6 +811,21 @@ func MsgSubcommands() string {
 	}
 	writeRows(&b, rows)
 	b.WriteString("\n  run dm help for every command, or dm msg <verb> -h for one verb.\n")
+	return b.String()
+}
+
+// AskSubcommands is the bare ask verb's help: one row per subverb.
+func AskSubcommands() string {
+	var b strings.Builder
+	b.WriteString("dm ask\n")
+	var rows []usageRow
+	for _, c := range cliCommands {
+		if strings.HasPrefix(c.name, "ask ") {
+			rows = append(rows, usageRow{c.line(), c.summary})
+		}
+	}
+	writeRows(&b, rows)
+	b.WriteString("\n  run dm help for every command, or dm ask <verb> -h for one verb.\n")
 	return b.String()
 }
 

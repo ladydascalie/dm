@@ -201,6 +201,8 @@ var llmsActionGroups = [][]string{
 	{"secret-register", "secret-list", "secret-revoke"},
 	{"secret-use", "secret-hydrate", "secret-type"},
 	{"secret-sync"},
+	{"ask-open", "ask-await"},
+	{"ask-answer", "ask-close", "ask-list"},
 }
 
 // LLMsText renders the whole page.
