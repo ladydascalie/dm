@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -14,8 +15,19 @@ import (
 )
 
 // maxThumbs bounds one thumbnail stream. A window with more panes than this
-// shows its first ones: the page is a phone, not a wall.
+// shows its first ones: the page is a phone, not a wall. The fleet reply
+// publishes the same number, so the page asks for exactly what it paints.
 const maxThumbs = 8
+
+// paneSilence is how long a pane may stay quiet after a subscription before the
+// stream reports it as gone. It is a variable so a test can sit on the edge
+// between the report and the pane's own answer.
+var paneSilence = 2 * time.Second
+
+// silenceGate, when a test installs one, holds a silence report between the
+// timer firing and its send. That is the window the report would fall through
+// if the stream did not wait for it, and the only way to hold it still.
+var silenceGate chan struct{}
 
 // shotEvent is one pane's picture on the thumbnail stream.
 type shotEvent struct {
@@ -34,9 +46,9 @@ type shotEvent struct {
 // output and the page never polls. The stream ends when every pane stops, which
 // lets the browser's own reconnect start a fresh set.
 func (h *Handler) thumbs(w http.ResponseWriter, r *http.Request) {
-	ids := paneList(r.URL.Query().Get("panes"))
-	if len(ids) == 0 || len(ids) > maxThumbs {
-		http.Error(w, "dm web: bad pane list", http.StatusBadRequest)
+	ids, err := paneList(r.URL.Query().Get("panes"))
+	if err != nil {
+		http.Error(w, "dm web: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	fl, ok := w.(http.Flusher)
@@ -51,7 +63,7 @@ func (h *Handler) thumbs(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			h.shots(ctx, id, events)
+			h.shots(ctx, id, &wg, events)
 		}(id)
 	}
 	go func() {
@@ -76,7 +88,9 @@ func (h *Handler) thumbs(w http.ResponseWriter, r *http.Request) {
 }
 
 // shots subscribes one pane and forwards its pictures until the context ends.
-func (h *Handler) shots(ctx context.Context, id string, out chan<- shotEvent) {
+// pending is the stream's wait group: the silence report joins it, so the event
+// channel cannot close under a send from the timer.
+func (h *Handler) shots(ctx context.Context, id string, pending *sync.WaitGroup, out chan<- shotEvent) {
 	c, err := net.DialTimeout("unix", paths.PaneSockAt(h.cfg.Root, h.cfg.Session, id), 2*time.Second)
 	if err != nil {
 		drop(ctx, out, id)
@@ -100,13 +114,29 @@ func (h *Handler) shots(ctx context.Context, id string, out chan<- shotEvent) {
 	// A pane daemon older than this build ignores the subscription and answers
 	// nothing, so silence is a fact worth painting: no picture, not a blank
 	// tile that looks like a quiet pane.
-	first := time.AfterFunc(2*time.Second, func() {
+	//
+	// The timer's wait entry is the permission to send: the channel closes only
+	// after every entry is done, so no send can race the close. stopSilent
+	// settles the entry exactly once. When Stop wins the callback never runs, so
+	// its Done is the stopper's; when Stop loses the callback is running and its
+	// own Done lands.
+	pending.Add(1)
+	silent := time.AfterFunc(paneSilence, func() {
+		defer pending.Done()
+		if silenceGate != nil {
+			<-silenceGate
+		}
 		select {
 		case out <- shotEvent{Pane: id, Gone: true}:
 		case <-ctx.Done():
 		}
 	})
-	defer first.Stop()
+	stopSilent := func() {
+		if silent.Stop() {
+			pending.Done()
+		}
+	}
+	defer stopSilent()
 	for {
 		m, err := wire.ReadMsg(c)
 		if err != nil {
@@ -116,7 +146,7 @@ func (h *Handler) shots(ctx context.Context, id string, out chan<- shotEvent) {
 		if m.Type != "screen" || m.VTSnap == nil {
 			continue
 		}
-		first.Stop()
+		stopSilent()
 		select {
 		case out <- shotEvent{Pane: id, Snap: m.VTSnap}:
 		case <-ctx.Done():
@@ -134,17 +164,25 @@ func drop(ctx context.Context, out chan<- shotEvent, id string) {
 	}
 }
 
-// paneList parses and validates the panes query. An id that is not a pane id
-// is dropped, so only the shape a socket name is built from survives.
-func paneList(q string) []string {
-	seen := make(map[string]bool)
+// paneList parses the panes query. An id that is not a pane id refuses the
+// whole list: a page that asks for a bad pane learns it, instead of painting a
+// tile that can never fill. A list longer than maxThumbs keeps its first ones,
+// as the limit promises, so a nine pane window paints eight tiles and not none.
+func paneList(q string) ([]string, error) {
+	seen := make(map[string]bool, maxThumbs)
 	out := make([]string, 0, maxThumbs)
 	for _, id := range strings.Split(q, ",") {
-		if !paneIDPattern.MatchString(id) || seen[id] {
+		if !paneIDPattern.MatchString(id) {
+			return nil, fmt.Errorf("bad pane id %q", id)
+		}
+		if seen[id] {
 			continue
 		}
 		seen[id] = true
+		if len(out) >= maxThumbs {
+			continue
+		}
 		out = append(out, id)
 	}
-	return out
+	return out, nil
 }

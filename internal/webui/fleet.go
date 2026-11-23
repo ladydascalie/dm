@@ -70,16 +70,19 @@ type fleetReply struct {
 	Box      []fleetBox  `json:"box"`
 	// Cols and Rows are the active window's grid, the frame every Rect above
 	// is measured in.
-	Cols  int    `json:"cols,omitempty"`
-	Rows  int    `json:"rows,omitempty"`
-	Error string `json:"error,omitempty"`
+	Cols int `json:"cols,omitempty"`
+	Rows int `json:"rows,omitempty"`
+	// MaxPictures is how many panes the picture stream carries, so the page
+	// asks for exactly the set it paints. One place decides the limit.
+	MaxPictures int    `json:"maxPictures"`
+	Error       string `json:"error,omitempty"`
 }
 
 // fleet collects one dashboard payload: the session's panes, then its box.
 // Each half answers on its own, so a box the daemon refuses still leaves the
 // fleet visible.
 func (h *Handler) fleet(w http.ResponseWriter, r *http.Request) {
-	out := fleetReply{Session: h.cfg.Session, ReadOnly: h.cfg.ReadOnly, Panes: []fleetPane{}, Box: []fleetBox{}}
+	out := fleetReply{Session: h.cfg.Session, ReadOnly: h.cfg.ReadOnly, Panes: []fleetPane{}, Box: []fleetBox{}, MaxPictures: maxThumbs}
 	if err := h.collectFleet(&out); err != nil {
 		out.Error = err.Error()
 	} else if err := h.collectBox(&out); err != nil && out.Error == "" {

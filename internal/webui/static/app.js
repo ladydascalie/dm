@@ -741,10 +741,6 @@ function paintShot(canvas, snap) {
   }
 }
 
-// MAX_THUMBS caps one grid: a window with more panes than this shows its first
-// ones, and the stream's own limit agrees.
-const MAX_THUMBS = 8;
-
 // thumbState is the live picture view: the grid, its one stream and its tiles.
 const thumbState = { on: false, es: null, tiles: new Map() };
 
@@ -759,9 +755,10 @@ function thumbsOn() {
 // tile.
 function renderThumbs(f) {
   const box = $("thumbs");
-  const panes = f.panes
-    .filter((p) => p.active && p.rect && p.rect.w > 0 && p.rect.h > 0)
-    .slice(0, MAX_THUMBS);
+  // The fleet publishes the stream's pane limit, so the grid asks for exactly
+  // the panes it paints, first ones first. One place decides; both agree.
+  let panes = f.panes.filter((p) => p.active && p.rect && p.rect.w > 0 && p.rect.h > 0);
+  if (f.maxPictures > 0) panes = panes.slice(0, f.maxPictures);
   const wanted = panes.map((p) => p.id).join(",");
   if (box.dataset.panes === wanted && thumbState.es) {
     // Same panes, new boxes: the desk or a claim moved them, so move the tiles

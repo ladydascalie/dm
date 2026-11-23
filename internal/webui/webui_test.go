@@ -3,6 +3,7 @@ package webui
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -206,6 +207,9 @@ func TestFleetPaintsTheSession(t *testing.T) {
 	}
 	if !got.ReadOnly {
 		t.Error("readOnly dropped")
+	}
+	if got.MaxPictures != maxThumbs {
+		t.Errorf("maxPictures = %d, want the stream's limit %d", got.MaxPictures, maxThumbs)
 	}
 	if got.Error != "" {
 		t.Fatalf("error %q", got.Error)
@@ -1048,6 +1052,155 @@ func TestThumbsRefusesABadList(t *testing.T) {
 	defer srv.Close()
 
 	for _, q := range []string{"", "panes=", "panes=../../etc", "panes=w1p1/../x"} {
+		res := get(t, srv.URL, "/api/thumbs?"+q+"&t=t")
+		_ = body(t, res)
+		if res.StatusCode != http.StatusBadRequest {
+			t.Errorf("%q: status %d, want 400", q, res.StatusCode)
+		}
+	}
+}
+
+// TestThumbsSilenceEdgeRace proves no send races the event channel's close: the
+// page hangs up at the instant the silence reports come due, so each pane's
+// report is in flight while the stream gives up its last subscription and
+// closes the channel. Run it under -race, repeated, to catch the interleaving.
+func TestThumbsSilenceEdgeRace(t *testing.T) {
+	old := paneSilence
+	paneSilence = time.Millisecond
+	t.Cleanup(func() { paneSilence = old })
+
+	session := "main"
+	dir := root(t, session)
+	ids := make([]string, 0, maxThumbs)
+	for i := 1; i <= maxThumbs; i++ {
+		id := fmt.Sprintf("w1p%d", i)
+		ids = append(ids, id)
+		// Silent, so every pane has a silence report due on the edge.
+		silentPane(t, paths.PaneSockAt(dir, session, id))
+	}
+	srv := httptest.NewServer(handler(Config{Session: session, Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	for i := 0; i < 100; i++ {
+		res := get(t, srv.URL, "/api/thumbs?panes="+strings.Join(ids, ",")+"&t=t")
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("iteration %d: status %d", i, res.StatusCode)
+		}
+		// Hang up as the reports come due: the cancel, the drops and the timer
+		// callbacks all land on the same edge.
+		time.Sleep(paneSilence)
+		_ = res.Body.Close()
+	}
+}
+
+// TestThumbsSilenceReportWaitsForTheClose proves the stream's close waits for a
+// silence report already on its way. The report is held at the edge, the pane
+// hangs up so the stream reaches its close, and the report is let go last. A
+// close that does not wait sends on the closed channel and panics the run.
+func TestThumbsSilenceReportWaitsForTheClose(t *testing.T) {
+	old := paneSilence
+	paneSilence = time.Millisecond
+	t.Cleanup(func() { paneSilence = old })
+
+	session := "main"
+	dir := root(t, session)
+	// The pane subscribes and hangs up late enough for the silence report to be
+	// on its way, and without ever sending a picture.
+	listenUnix(t, paths.PaneSockAt(dir, session, "w1p1"), func(c net.Conn) {
+		if _, err := wire.ReadMsg(c); err != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	})
+	srv := httptest.NewServer(handler(Config{Session: session, Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	gate := make(chan struct{})
+	silenceGate = gate
+	t.Cleanup(func() { silenceGate = nil })
+
+	// The page stays connected: the report must meet the close, not a cancel.
+	res := get(t, srv.URL, "/api/thumbs?panes=w1p1&t=t")
+	// The timer has fired and the report is held at the gate; the pane has hung
+	// up, so the stream reaches its close.
+	time.Sleep(100 * time.Millisecond)
+	close(gate)
+	// Give a close that did not wait time to take the report down with it.
+	time.Sleep(100 * time.Millisecond)
+	rest, err := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if err != nil {
+		t.Fatalf("read the stream: %v", err)
+	}
+	// Two reports: the pane's own hang-up, and the silence report the wait
+	// carried to the page before the end. A close that does not wait loses the
+	// second, or takes it down as a panic.
+	text := string(rest)
+	if n := strings.Count(text, "event: gone"); n != 2 {
+		t.Fatalf("%d silence reports reached the page, want the pane's and the timer's: %q", n, text)
+	}
+	if gone, end := strings.Index(text, "event: gone"), strings.Index(text, "event: end"); end < 0 || gone > end {
+		t.Fatalf("the stream ended before the report: %q", text)
+	}
+}
+
+// TestThumbsTrimsToTheLimit proves a window with more panes than the stream
+// carries keeps its first ones, as the limit's comment promises, instead of
+// painting nothing at all.
+func TestThumbsTrimsToTheLimit(t *testing.T) {
+	session := "main"
+	dir := root(t, session)
+	ids := make([]string, 0, maxThumbs+1)
+	for i := 1; i <= maxThumbs+1; i++ {
+		id := fmt.Sprintf("w1p%d", i)
+		ids = append(ids, id)
+		fakePane(t, paths.PaneSockAt(dir, session, id), id)
+	}
+	srv := httptest.NewServer(handler(Config{Session: session, Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/thumbs?panes="+strings.Join(ids, ",")+"&t=t")
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	seen := map[string]bool{}
+	scan := bufio.NewScanner(res.Body)
+	for scan.Scan() {
+		d, ok := strings.CutPrefix(scan.Text(), "data: ")
+		if !ok {
+			continue
+		}
+		var ev shotEvent
+		if err := json.Unmarshal([]byte(d), &ev); err != nil {
+			t.Fatal(err)
+		}
+		if ev.Snap != nil {
+			seen[ev.Pane] = true
+		}
+	}
+	if len(seen) != maxThumbs {
+		t.Fatalf("%d panes pictured, want the first %d: %v", len(seen), maxThumbs, seen)
+	}
+	for _, id := range ids[:maxThumbs] {
+		if !seen[id] {
+			t.Errorf("pane %s was dropped, want the first ones kept", id)
+		}
+	}
+	if seen[ids[maxThumbs]] {
+		t.Errorf("pane %s is past the limit and was still subscribed", ids[maxThumbs])
+	}
+}
+
+// TestThumbsRefusesABadIDInAList proves a bad id refuses the whole list rather
+// than vanishing, so a page that asks for a bad pane learns it.
+func TestThumbsRefusesABadIDInAList(t *testing.T) {
+	dir := root(t, "main")
+	fakePane(t, paths.PaneSockAt(dir, "main", "w1p1"), "left")
+	srv := httptest.NewServer(handler(Config{Session: "main", Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	for _, q := range []string{"panes=w1p1,../x", "panes=../x,w1p1", "panes=w1p1,,w1p2", "panes=w1p1,nope"} {
 		res := get(t, srv.URL, "/api/thumbs?"+q+"&t=t")
 		_ = body(t, res)
 		if res.StatusCode != http.StatusBadRequest {
