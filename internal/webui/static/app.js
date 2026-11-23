@@ -326,11 +326,11 @@ function renderPanes(f) {
 }
 
 // hasSession is the fleet's answer to the only question the fold asks: does
-// this pane have a session to read. The agent flag is a different question: a
-// pane can report a session and no status, and a pi pane that has written
-// nothing yet has neither.
+// this pane have a session to read. The field is the server's: hasSession, true
+// when the pane's snapshot carries a session file. The agent flag is a
+// different question, because a pane can report a session and no status.
 function hasSession(p) {
-  return !!p.session;
+  return !!p.hasSession;
 }
 
 // projectSection is one project: its accent mark, its name, the count of panes
@@ -983,9 +983,13 @@ async function openPane(id, view) {
     // a reply settles it, ok, none when the pane has no session, or failed when
     // the read was refused.
     session: "checking",
-    // chosen is true once the reader picked a view. Until then this page picks,
-    // so an agent pane lands on its transcript whenever the session shows up.
-    chosen: !!view,
+    // want is the view the link named, or empty for none: a link is a
+    // preference about a pane that has a session, not a claim that there is
+    // nothing to show. pick is the view the reader tapped, and a tap wins over
+    // the link for the rest of the pane's life, including after a read fails
+    // and the screen takes over for a moment.
+    want: view ? viewOf(view) : "",
+    pick: "",
     why: "",
     turns: [],
     sessionRev: "",
@@ -1112,14 +1116,18 @@ function paintSession(at, d, why) {
   const first = at.session !== "ok";
   at.session = "ok";
   at.why = "";
-  // A session that turned up after the pane opened, or came back after a read
-  // that failed, brings its transcript with it, unless the reader is the one
-  // who chose the screen. The switch is painted before the turns so the
-  // transcript has a height to scroll in.
-  if (first && !at.chosen && at.view === "screen") {
-    at.view = "transcript";
-    renderViewChrome();
-    markFollow();
+  // The view the reader asked for: a tap wins, then the view the link named,
+  // then the transcript. This is where a session that turned up after the pane
+  // opened, or came back after a read that failed, takes the reader to the view
+  // they meant. The switch is painted before the turns so the transcript has a
+  // height to scroll in.
+  if (first) {
+    const want = at.pick || at.want || "transcript";
+    if (want !== at.view) {
+      at.view = want;
+      renderViewChrome();
+      markFollow();
+    }
   }
   if (d.rev) at.sessionRev = d.rev;
   if (d.changed || !at.painted) {
@@ -1185,7 +1193,7 @@ function setView(view) {
   if (!pane) return;
   const want = pane.session === "none" ? "screen" : viewOf(view);
   if (want === pane.view) return;
-  pane.chosen = true;
+  pane.pick = want;
   pane.view = want;
   renderViewChrome();
   markFollow();
