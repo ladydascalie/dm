@@ -2,6 +2,7 @@ package webui
 
 import (
 	"encoding/json"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -219,6 +220,9 @@ func TestSessionRevTracksGrowth(t *testing.T) {
 	if again.Changed {
 		t.Fatal("changed = true for the rev the caller already has")
 	}
+	if len(again.Turns) != 0 {
+		t.Fatalf("an unchanged poll carried %d turns", len(again.Turns))
+	}
 
 	grow := append(fixture, []byte(`{"type":"message","timestamp":"2026-11-23T10:04:00.000Z","message":{"role":"user","content":"one more"}}`+"\n")...)
 	if err := os.WriteFile(file, grow, 0o600); err != nil {
@@ -230,6 +234,182 @@ func TestSessionRevTracksGrowth(t *testing.T) {
 	}
 	if !after.Changed {
 		t.Fatal("changed = false after the file grew")
+	}
+	if len(after.Turns) == 0 || after.Turns[len(after.Turns)-1].Ask != "one more" {
+		t.Fatalf("the appended poll did not carry the new turn: %+v", after.Turns)
+	}
+
+	// A truncate and rewrite moves the rev on the same path.
+	rewritten := []byte(`{"type":"session","version":3,"id":"sess-2","timestamp":"2026-11-23T12:00:00.000Z","cwd":"/tmp"}` + "\n")
+	if err := os.WriteFile(file, rewritten, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cut := poll("/api/session?pane=w122p1&t=t&since=" + after.Rev)
+	if cut.Rev == after.Rev {
+		t.Fatal("rev did not move when the file was truncated and rewritten")
+	}
+	if !cut.Changed || cut.SessionID != "sess-2" || len(cut.Turns) != 0 {
+		t.Fatalf("rewritten poll = %+v", cut)
+	}
+}
+
+// readFixture returns the small session fixture.
+func readFixture(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(testdataDir(t), "session.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// sessionPoll sends one session request and decodes the reply.
+func sessionPoll(t *testing.T, srv *httptest.Server, query string) sessionReply {
+	t.Helper()
+	res := get(t, srv.URL, query)
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	var out sessionReply
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestSessionPartialLastLine proves a poll that lands in the middle of pi's
+// append answers the turns before the half written line, not an error.
+func TestSessionPartialLastLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "session.jsonl")
+	partial := []byte(`{"type":"message","timestamp":"2026-11-23T10:05:00.000Z","message":{"role":"user","content":"half`)
+	if err := os.WriteFile(file, append(readFixture(t), partial...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := sessionServe(t, dir, []wire.AllPane{{ID: "w122p1", SessionFile: file}})
+
+	got := sessionPoll(t, srv, "/api/session?pane=w122p1&t=t")
+	if !got.Changed || len(got.Turns) != sessionTail {
+		t.Fatalf("partial-line poll = %+v", got)
+	}
+	if last := got.Turns[len(got.Turns)-1]; last.Ask != "thanks" {
+		t.Fatalf("last turn = %+v, want the complete turn before the partial line", last)
+	}
+}
+
+// TestSessionCorruptMiddleLine proves a complete line that is not JSON in the
+// middle of the file is still corruption: the file is refused, not trimmed.
+func TestSessionCorruptMiddleLine(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "session.jsonl")
+	content := `{"type":"session","id":"bad-mid"}` + "\n" +
+		`{"type":"message","timestamp":"2026-11-23T10:00:00.000Z","message":{"role":"user","content":"hi"}}` + "\n" +
+		"not json at all\n" +
+		`{"type":"message","timestamp":"2026-11-23T10:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"x"}]}}` + "\n"
+	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := sessionServe(t, dir, []wire.AllPane{{ID: "w122p1", SessionFile: file}})
+
+	res := get(t, srv.URL, "/api/session?pane=w122p1&t=t")
+	if res.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status %d, want 422", res.StatusCode)
+	}
+	if got := errorBody(t, res); !strings.HasPrefix(got, "session file is not JSONL") {
+		t.Fatalf("error = %q, want the JSONL refusal", got)
+	}
+}
+
+// TestSessionUnchangedSkipsTheRead proves the whole file is read and parsed
+// only when the rev moved: an unchanged poll answers a stat, the tail and no
+// turns, and never calls the read.
+func TestSessionUnchangedSkipsTheRead(t *testing.T) {
+	// Not parallel: it swaps the package's full-read seam.
+	dir := t.TempDir()
+	file := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(file, readFixture(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := sessionServe(t, dir, []wire.AllPane{{ID: "w122p1", SessionFile: file}})
+
+	reads := 0
+	orig := readSession
+	readSession = func(f *os.File) ([]byte, error) {
+		reads++
+		return orig(f)
+	}
+	t.Cleanup(func() { readSession = orig })
+
+	first := sessionPoll(t, srv, "/api/session?pane=w122p1&t=t")
+	if reads != 1 || len(first.Turns) != sessionTail {
+		t.Fatalf("first poll: %d reads, %d turns", reads, len(first.Turns))
+	}
+
+	res := get(t, srv.URL, "/api/session?pane=w122p1&t=t&since="+first.Rev)
+	body, err := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again sessionReply
+	if err := json.Unmarshal(body, &again); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 {
+		t.Fatalf("an unchanged poll performed %d full reads, want none after the first", reads)
+	}
+	if again.Changed || len(again.Turns) != 0 || len(body) > 300 {
+		t.Fatalf("unchanged poll = %d bytes %+v", len(body), again)
+	}
+
+	grow := append(readFixture(t), []byte(`{"type":"message","timestamp":"2026-11-23T10:04:00.000Z","message":{"role":"user","content":"one more"}}`+"\n")...)
+	if err := os.WriteFile(file, grow, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after := sessionPoll(t, srv, "/api/session?pane=w122p1&t=t&since="+first.Rev)
+	if reads != 2 || !after.Changed {
+		t.Fatalf("appended poll: %d reads, changed %v, want one more read", reads, after.Changed)
+	}
+}
+
+// TestFleetHasSession proves the fleet row says whether a pane has a session,
+// and says nothing for a pane without one. A session and an agent status are
+// different questions.
+func TestFleetHasSession(t *testing.T) {
+	t.Parallel()
+	dir := root(t, "main")
+	snap := wire.Snapshot{Session: "main", All: []wire.AllPane{
+		{ID: "w1p1", SessionFile: "/home/me/.pi/agent/sessions/s/s.jsonl"},
+		{ID: "w1p2"},
+	}}
+	fakeSession(t, dir, "main", snap, nil)
+	srv := httptest.NewServer(handler(Config{Session: "main", Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/fleet?t=t")
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got fleetReply
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Panes) != 2 {
+		t.Fatalf("%d panes, want 2", len(got.Panes))
+	}
+	if !got.Panes[0].HasSession {
+		t.Fatal("w1p1 reported a session and the row says none")
+	}
+	if got.Panes[1].HasSession {
+		t.Fatal("w1p2 reported no session and the row says one")
+	}
+	if strings.Contains(string(body), `"hasSession":false`) {
+		t.Fatal("the row without a session carries a false hasSession key")
 	}
 }
 

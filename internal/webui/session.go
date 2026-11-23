@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,22 +27,31 @@ const sessionTail = 3
 // count of lines left over rides in more, so the page can say what it cut.
 const stepOutput = 4000
 
+// revTail is how many trailing bytes the revision hashes. Enough to hold the
+// end of the last JSONL entry, so an append moves the hash even when the
+// filesystem's modification time is coarse.
+const revTail = 512
+
 var (
 	errNoSession  = errors.New("no session")
 	errRefused    = errors.New("session file refused")
 	errBadSession = errors.New("session file is not JSONL")
 )
 
-// sessionReply is one pane's agent session, rendered for the page. Rev is a
-// hash of the file the payload was built from, so an unchanged poll costs a
-// hash and the page skips the body.
+// sessionReply is one pane's agent session, rendered for the page. Rev
+// identifies the file's state, so an unchanged poll costs a stat and the page
+// skips the body. Turns is absent from an unchanged reply.
 type sessionReply struct {
 	Pane      string        `json:"pane"`
 	Rev       string        `json:"rev"`
 	Changed   bool          `json:"changed"`
-	SessionID string        `json:"sessionId"`
-	Turns     []sessionTurn `json:"turns"`
+	SessionID string        `json:"sessionId,omitempty"`
+	Turns     []sessionTurn `json:"turns,omitempty"`
 }
+
+// readSession is the full read the endpoint performs once the rev moved. It is
+// a variable so a test can count the reads; production reads the whole file.
+var readSession = func(f *os.File) ([]byte, error) { return io.ReadAll(f) }
 
 // sessionTurn is one user message and everything the agent did about it.
 type sessionTurn struct {
@@ -105,7 +115,29 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, statusFor(err), map[string]string{"error": err.Error()})
 		return
 	}
-	b, err := os.ReadFile(file)
+	f, err := os.Open(file)
+	if err != nil {
+		writeJSON(w, statusFor(err), map[string]string{"error": err.Error()})
+		return
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		writeJSON(w, statusFor(err), map[string]string{"error": err.Error()})
+		return
+	}
+	rev, err := revFor(f, fi.Size(), fi.ModTime())
+	if err != nil {
+		writeJSON(w, statusFor(err), map[string]string{"error": err.Error()})
+		return
+	}
+	// An unchanged file costs a stat and the tail read: the whole file is read
+	// and parsed only when the caller's rev is stale.
+	if since := r.URL.Query().Get("since"); since != "" && since == rev {
+		writeJSON(w, http.StatusOK, sessionReply{Pane: pane, Rev: rev})
+		return
+	}
+	b, err := readSession(f)
 	if err != nil {
 		writeJSON(w, statusFor(err), map[string]string{"error": err.Error()})
 		return
@@ -115,16 +147,41 @@ func (h *Handler) session(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, statusFor(err), map[string]string{"error": err.Error()})
 		return
 	}
-	sum := sha256.Sum256(b)
-	rev := hex.EncodeToString(sum[:])
-	since := r.URL.Query().Get("since")
 	writeJSON(w, http.StatusOK, sessionReply{
 		Pane:      pane,
 		Rev:       rev,
-		Changed:   since == "" || since != rev,
+		Changed:   true,
 		SessionID: id,
 		Turns:     turns,
 	})
+}
+
+// revFor identifies a file's state for the poll without reading all of it. The
+// input is the size, the modification time and a hash of the last bytes. Every
+// way a session file changes moves at least one part:
+//   - an append grows the size and moves the mtime;
+//   - a rewrite moves the mtime, and new trailing bytes move the hash;
+//   - a compaction truncates and rewrites, so the size and the trailing bytes
+//     both change.
+//
+// The parts cover each other: a same-size rewrite inside one mtime tick still
+// moves the tail hash, and an append of bytes identical to the old tail still
+// moves the size and the mtime.
+func revFor(f *os.File, size int64, mtime time.Time) (string, error) {
+	n := size
+	if n > revTail {
+		n = revTail
+	}
+	tail := make([]byte, n)
+	if n > 0 {
+		if _, err := f.ReadAt(tail, size-n); err != nil && !errors.Is(err, io.EOF) {
+			return "", err
+		}
+	}
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%d:%d:", size, mtime.UnixNano())
+	h.Write(tail)
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // statusFor maps a session read's refusal to the HTTP status the page expects.
@@ -270,18 +327,25 @@ type piBlock struct {
 }
 
 // parseSession reads the pi session JSONL into the tail of its turns, with
-// every tool call paired with the result that carries its id. A line that is
-// not JSON refuses the whole file: half a transcript is worse than none.
+// every tool call paired with the result that carries its id. pi appends one
+// entry per write and the write is not atomic, so a poll can land in the middle
+// of the final entry. A trailing line that is not complete JSON is that partial
+// append: it is dropped and the turns before it stand. A line that fails
+// anywhere else is corruption, and refusing the file says so.
 func parseSession(b []byte) (string, []sessionTurn, error) {
 	id := ""
 	var turns []sessionTurn
-	for i, line := range bytes.Split(b, []byte("\n")) {
+	lines := bytes.Split(b, []byte("\n"))
+	for i, line := range lines {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
 		}
 		var l sessionLine
 		if err := json.Unmarshal(line, &l); err != nil {
+			if i == len(lines)-1 {
+				break
+			}
 			return "", nil, fmt.Errorf("%w: line %d", errBadSession, i+1)
 		}
 		switch l.Type {
