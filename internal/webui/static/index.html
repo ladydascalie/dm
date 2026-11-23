@@ -243,11 +243,17 @@
   }
   .chips button:active { border-color: var(--working); color: var(--working); }
 
-  /* The terminal takes the whole screen once a pane is opened. */
+  /* The terminal takes the whole screen once a pane is opened. The height comes
+     from the dynamic viewport, so a browser's own bottom bar cannot sit over
+     the input row, and the safe area insets stay what the page already
+     respects. */
   #pane {
     position: fixed; inset: 0; z-index: 5;
+    height: 100vh;
+    height: 100dvh;
     display: none; flex-direction: column;
     background: var(--bg);
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
   #pane.open { display: flex; }
   #pane header { position: static; }
@@ -256,39 +262,63 @@
     color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
     min-height: 44px; min-width: 44px;
   }
-  /* The pane's own commands: one row, scrolled sideways at 320 points. */
+  /* The pane's own commands: three by two, so all six read at 320 points with
+     no sideways scrolling. The cells keep the order the list is built in. */
   #pane-actions {
-    display: flex; gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
     padding: 6px 8px;
-    overflow-x: auto;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
   #pane-actions button {
-    flex: none;
-    display: inline-flex; align-items: center;
+    display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 8px 12px; font-size: 13px; min-height: 44px; min-width: 44px;
+    padding: 8px 4px; font-size: 13px; min-height: 44px;
+    min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #pane-actions button.armed { border-color: var(--error); color: var(--error); }
-  /* The strip names where the session stands and walks it. */
+  /* The strip names the pane's place: which window, which workspace, and the
+     arrows that walk each. One row per place, so the words fit at 320. */
   #strip {
-    display: flex; gap: 10px;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, max-content) auto;
+    justify-content: start;
+    align-items: center;
+    gap: 4px 6px;
     padding: 6px 8px;
-    overflow-x: auto;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
-  #strip .grp { display: flex; align-items: center; gap: 4px; flex: none; }
-  #strip .name { font-size: 12px; color: var(--dim); white-space: nowrap; }
+  #strip .lbl {
+    font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--dim); white-space: nowrap;
+  }
+  #strip .name {
+    font-size: 12px; color: var(--dim);
+    min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  }
   #strip .name b { color: var(--fg); font-weight: 600; }
   #strip button {
     background: none; border: 1px solid var(--line); color: var(--fg);
     border-radius: 6px; min-width: 44px; height: 44px; font-size: 15px;
   }
+  /* The screen holds the text and the one control that floats over it. */
+  #screen { position: relative; display: flex; flex: 1; min-height: 0; }
+  #latest {
+    position: absolute; right: 10px; bottom: 10px;
+    display: none; align-items: center; justify-content: center;
+    min-height: 44px; min-width: 44px;
+    padding: 0 12px; font-size: 12px;
+    background: var(--panel); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  #latest.show { display: inline-flex; }
   #text {
-    flex: 1; min-height: 0;
+    flex: 1; min-width: 0; min-height: 0;
     margin: 0;
     padding: 8px 10px;
     overflow: auto;
@@ -372,18 +402,19 @@
     </header>
     <div id="pane-actions"></div>
     <div id="strip">
-      <span class="grp">
-        <button id="win-prev" title="previous window">‹</button>
-        <span class="name" id="strip-window"></span>
-        <button id="win-next" title="next window">›</button>
-      </span>
-      <span class="grp">
-        <button id="ws-prev" title="previous workspace">‹</button>
-        <span class="name" id="strip-workspace"></span>
-        <button id="ws-next" title="next workspace">›</button>
-      </span>
+      <span class="lbl">window</span>
+      <button id="win-prev" title="previous window">‹</button>
+      <span class="name" id="strip-window"></span>
+      <button id="win-next" title="next window">›</button>
+      <span class="lbl">workspace</span>
+      <button id="ws-prev" title="previous workspace">‹</button>
+      <span class="name" id="strip-workspace"></span>
+      <button id="ws-next" title="next workspace">›</button>
     </div>
-    <pre id="text"></pre>
+    <div id="screen">
+      <pre id="text"></pre>
+      <button id="latest" title="jump to the latest output">latest</button>
+    </div>
     <div id="send">
       <input id="send-text" type="text" autocomplete="off" autocapitalize="off"
              autocorrect="off" spellcheck="false" placeholder="type into the pane">

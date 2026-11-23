@@ -738,6 +738,7 @@ async function openPane(id) {
   $("pane").classList.add("open");
   $("send").style.display = fleet && fleet.readOnly ? "none" : "";
   $("pane-state").textContent = "";
+  markFollow();
   renderPaneChrome();
   await pollText();
   startTimers();
@@ -767,6 +768,34 @@ async function pollText() {
   applyReply(() => paintText(at, d));
 }
 
+// FOLLOW_GAP is how far from the bottom counts as reading back through the
+// text rather than following it.
+const FOLLOW_GAP = 48;
+
+// awayFromBottom reports whether the reader has scrolled up out of the follow.
+function awayFromBottom() {
+  const pre = $("text");
+  return pre.scrollHeight - pre.scrollTop - pre.clientHeight > FOLLOW_GAP;
+}
+
+// markFollow settles the follow state and the latest control from the reader's
+// place in the text. One rule owns both, so a scroll, a poll and a tap on the
+// control cannot disagree.
+function markFollow() {
+  const away = !!pane && awayFromBottom();
+  if (pane) pane.hold = away;
+  $("latest").classList.toggle("show", away);
+}
+
+// jumpLatest returns to the bottom and follows it again. The text keeps the
+// next tap: the control is only there while the reader is away from it.
+function jumpLatest() {
+  const pre = $("text");
+  pre.scrollTop = pre.scrollHeight;
+  if (pane) pane.hold = false;
+  $("latest").classList.remove("show");
+}
+
 // paintText applies one pane reply, and only to the pane that asked for it: a
 // reply that lands after another pane was opened is not painted into it.
 function paintText(at, d) {
@@ -780,6 +809,7 @@ function paintText(at, d) {
   // Follow the bottom, which is where a running agent's output is, unless the
   // reader scrolled up to read something.
   if (!at.hold) pre.scrollTop = pre.scrollHeight;
+  markFollow();
 }
 
 // closePane stops the poll and, when asked, clears the address bar.
@@ -788,6 +818,7 @@ function closePane(updateHash = true) {
   pane = null;
   disarm();
   $("text").textContent = "";
+  markFollow();
   $("pane").classList.remove("open");
   stopTimers();
   startTimers();
@@ -1138,9 +1169,9 @@ function route() {
 $("pane-close").addEventListener("click", () => closePane());
 $("text").addEventListener("scroll", () => {
   if (!pane) return;
-  const pre = $("text");
-  pane.hold = pre.scrollHeight - pre.scrollTop - pre.clientHeight > 48;
+  markFollow();
 });
+$("latest").addEventListener("click", jumpLatest);
 $("send-plain").addEventListener("click", () => sendText(false));
 $("send-enter").addEventListener("click", () => sendText(true));
 $("send-text").addEventListener("keydown", (e) => {
