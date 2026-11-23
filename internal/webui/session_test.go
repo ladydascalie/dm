@@ -103,6 +103,11 @@ func TestSessionTurns(t *testing.T) {
 	if turn.At != "2026-11-23T10:01:00Z" || turn.Ask != "list the pi session dir" {
 		t.Fatalf("turn header = %+v", turn)
 	}
+	// The ask carries its markup as well as its plain text: the transcript
+	// paints the first and the activity view the second.
+	if want := "<p>list the pi session dir</p>\n"; turn.AskHTML != want {
+		t.Fatalf("ask html = %q, want %q", turn.AskHTML, want)
+	}
 	var kinds []string
 	for _, s := range turn.Steps {
 		kinds = append(kinds, s.Kind)
@@ -112,9 +117,15 @@ func TestSessionTurns(t *testing.T) {
 	}
 	if s := turn.Steps[0]; s.MS != 6000 {
 		t.Fatalf("thinking ms = %d, want the assistant duration 6000", s.MS)
+	} else if s.Text != "I should run ls first." {
+		t.Fatalf("thought = %q, want the words the step folds behind a tap", s.Text)
+	} else if !strings.Contains(s.HTML, "I should run ls first.") {
+		t.Fatalf("thought html = %q", s.HTML)
 	}
 	if s := turn.Steps[1]; s.Text != "Running it now.\n" {
 		t.Fatalf("text = %q", s.Text)
+	} else if want := "<p>Running it now.</p>\n"; s.HTML != want {
+		t.Fatalf("step html = %q, want %q", s.HTML, want)
 	}
 
 	bash := turn.Steps[2]
@@ -130,6 +141,14 @@ func TestSessionTurns(t *testing.T) {
 	if bash.Output != "boom\n\nCommand exited with code 1" || bash.More != 0 {
 		t.Fatalf("bash output = %q more = %d", bash.Output, bash.More)
 	}
+	// The arguments ride with the step, indented, so a tap shows what the tool
+	// was told and not only what it answered.
+	if want := "{\n  \"command\": \"ls ~/.pi/agent/\"\n}"; bash.Args != want {
+		t.Fatalf("bash args = %q, want %q", bash.Args, want)
+	}
+	if bash.ArgsMore != 0 {
+		t.Fatalf("bash args more = %d, want nothing cut", bash.ArgsMore)
+	}
 
 	read := turn.Steps[3]
 	if read.Tool != "read" || read.Summary != "/home/b/.pi/agent/sessions/s.jsonl" || read.MS != 30 {
@@ -141,8 +160,8 @@ func TestSessionTurns(t *testing.T) {
 	if read.Exit != nil {
 		t.Fatalf("read exit = %v, want none: a non-bash tool has no exit code", *read.Exit)
 	}
-	if n := len([]rune(read.Output)); n != stepOutput {
-		t.Fatalf("read output = %d chars, want the %d-char cut", n, stepOutput)
+	if n := len([]rune(read.Output)); n != stepBody {
+		t.Fatalf("read output = %d chars, want the %d-char cut", n, stepBody)
 	}
 	if read.More != 12 {
 		t.Fatalf("read more = %d, want the 12 lines left over", read.More)

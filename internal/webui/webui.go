@@ -131,6 +131,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /api/commands", h.commands)
 	mux.HandleFunc("POST /api/action", h.action)
 	mux.HandleFunc("POST /api/msg", h.msg)
+	mux.HandleFunc("POST /api/upload", h.upload)
 	return h.auth(mux)
 }
 

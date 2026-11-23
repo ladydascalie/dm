@@ -168,8 +168,8 @@ function paintFleet(f) {
 }
 
 // applyReadOnly hides the commands that write, so the page never offers a tap
-// that answers 403. Views stay: the strip's arrows, the picture toggle and the
-// grid only read, and a read only page that hid them would hide the session
+// that answers 403. Views stay: the view switch, the picture toggle and the
+// fold only read, and a read only page that hid them would hide the session
 // itself.
 const writeControls = ["sheet-open", "compose", "send", "pane-actions"];
 
@@ -603,12 +603,15 @@ function disarm() {
   armed = null;
 }
 
-// sendBody runs one finished request and settles the view after it.
+// sendBody runs one finished request and settles the view after it. Two
+// commands move the reader: close-pane empties the view it was looking at, and
+// new-window answers with the pane it opened, which the page then shows.
 async function sendBody(body) {
   const res = await runAction(body);
   if (res === null) return;
   applyReply(() => {
     if (body.id === "close-pane" && pane && body.target === pane.id) closePane();
+    if (body.id === "new-window" && res.pane) location.hash = paneHash(res.pane);
   });
 }
 
@@ -819,45 +822,21 @@ async function sheetSend(btn, cmd, extra) {
 // paneActions are the pane's own commands, under its header. Each acts on the
 // open pane, so the phone never has to open the sheet for them.
 //
-// zoom-pane and next-pane carry no target on the wire: the server acts on the
-// active window's focus (server_rpc.go:319, :425). focusFirst sends focus for the
-// open pane first, so zoom zooms the pane on screen and next pane steps from the
-// pane on screen instead of from whatever the desk happened to focus.
+// A phone cannot show a split, so no split is offered here: the way to a
+// second place to work is another window, opened on the folder the open pane
+// is in. That is the one command that leaves this pane, so it is the one the
+// page follows.
 const paneActions = [
-  { label: "split right", body: () => ({ id: "split", target: pane.id, site: "right" }) },
-  { label: "split down", body: () => ({ id: "split", target: pane.id, site: "down" }) },
-  { label: "zoom", body: () => ({ id: "zoom-pane" }), focusFirst: true },
-  { label: "next pane", body: () => ({ id: "next-pane" }), focusFirst: true },
+  { label: "new window", body: () => ({ id: "new-window", cwd: paneCwd() }) },
   { label: "rename", body: () => ({ id: "set-pane-name", target: pane.id }) },
-  { label: "close", body: () => ({ id: "close-pane", target: pane.id }), ask: () => "close " + pane.id + "?" },
+  { label: "close pane", body: () => ({ id: "close-pane", target: pane.id }), ask: () => "close " + pane.id + "?" },
 ];
 
-// actOnPane runs a command the server targets at the session's focus. The focus
-// goes to the open pane first, so a refused focus stops before the command.
-//
-// The view follows the desk after the command: next pane steps the session's
-// focus, and a phone that kept looking at the old pane would see nothing happen.
-// The fleet the command just refreshed names the pane the session now stands on,
-// so no extra request is needed.
-async function actOnPane(body) {
-  if (!pane) return;
-  disarm();
-  const focused = await runAction({ id: "focus", target: pane.id });
-  if (focused === null) return;
-  const stepped = await runAction(body);
-  if (stepped === null) return;
-  applyReply(() => {
-    const next = focusedPaneID();
-    if (next && pane && next !== pane.id) location.hash = paneHash(next);
-  });
-}
-
-// focusedPaneID is the pane the session stands on: the active window's focus.
-// The fleet carries both flags, so one lookup answers it.
-function focusedPaneID() {
-  const panes = (fleet && fleet.panes) || [];
-  const at = panes.find((p) => p.active && p.focus) || panes.find((p) => p.focus);
-  return at ? at.id : "";
+// paneCwd is the folder the open pane stands in, which the fleet reports. An
+// empty answer is the daemon's to fill: new-window inherits the workspace's.
+function paneCwd() {
+  const own = ((fleet && fleet.panes) || []).find((p) => pane && p.id === pane.id) || {};
+  return own.cwd || "";
 }
 
 function renderPaneActions() {
@@ -876,49 +855,10 @@ function renderPaneActions() {
         }
         body.name = name;
       }
-      if (act.focusFirst) {
-        actOnPane(body);
-        return;
-      }
       dispatch(btn, body, act.ask ? act.ask() : "");
     });
     box.append(btn);
   }
-}
-
-// paneContext is the window and workspace the open pane belongs to. The strip
-// names this pane's place, not the session's focus: watching a pane must not
-// report another window, and must not move the desk to read it.
-function paneContext() {
-  const panes = (fleet && fleet.panes) || [];
-  return panes.find((p) => pane && p.id === pane.id) || panes.find((p) => p.active) || panes[0] || {};
-}
-
-// orderedIDs lists the window or workspace ids in counter order, so prev and
-// next follow the rail's order rather than the fleet's status sort.
-function orderedIDs(kind) {
-  const panes = (fleet && fleet.panes) || [];
-  const seen = new Set();
-  for (const p of panes) {
-    const id = kind === "window" ? p.window : p.workspace;
-    if (id) seen.add(id);
-  }
-  return [...seen].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
-}
-
-// stepPlace opens the pane of the neighbouring window or workspace. The strip
-// walks the session through the view alone: no command reaches the socket and
-// the desk keeps its focus.
-function stepPlace(kind, step) {
-  const ids = orderedIDs(kind);
-  const own = paneContext()[kind];
-  const at = ids.indexOf(own);
-  if (at < 0 || ids.length < 2) return;
-  const next = ids[(at + step + ids.length) % ids.length];
-  const panes = (fleet && fleet.panes) || [];
-  const inside = panes.filter((p) => (kind === "window" ? p.window : p.workspace) === next);
-  const pick = inside.find((p) => p.focus) || inside[0];
-  if (pick) location.hash = paneHash(pick.id);
 }
 
 function renderPaneChrome() {
@@ -927,19 +867,45 @@ function renderPaneChrome() {
   // The id is the title when the pane has no name, so it is not printed twice.
   const name = own.name || own.app || pane.id;
   $("pane-title").textContent = name === pane.id ? name : name + "  " + pane.id;
-  const at = paneContext();
-  setStripName("strip-window", at.window, at.windowName);
-  setStripName("strip-workspace", at.workspace, at.workspaceName);
   // The fleet names the pane's state every three seconds, so the header stays
   // honest on the two views that never read the pane's text.
   if (own.status !== undefined) setPaneState(stateOf(own), own.message || "");
 }
 
-function setStripName(id, code, name) {
-  const n = $(id);
-  n.textContent = "";
-  n.append(el("b", "", code || "-"));
-  if (name) n.append(document.createTextNode("  " + name));
+// --- the command bar -----------------------------------------------------
+//
+// Three rows sit above the text: the view switch, the six pane commands, and
+// the line that says why the screen is showing. On a phone that is still most
+// of the pane, so a chevron in the title row folds them onto that one row.
+// The device remembers the answer: a reader who wants the text wants it on
+// the next visit too.
+
+// COLLAPSE_KEY is where this device keeps its answer.
+const COLLAPSE_KEY = "dm.paneCollapsed";
+
+// storedCollapsed reads the device's answer. Storage that refuses writes, as a
+// private tab does, simply starts expanded.
+function storedCollapsed() {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+// setCollapsed folds or unfolds the bar. The chevron points the way its next
+// tap moves it, and aria-expanded says the same thing to a reader.
+function setCollapsed(on) {
+  $("pane").classList.toggle("collapsed", on);
+  const btn = $("pane-collapse");
+  btn.textContent = on ? "⌄" : "⌃";
+  btn.setAttribute("aria-expanded", on ? "false" : "true");
+  btn.title = on ? "show the command bar" : "hide the command bar";
+  try {
+    localStorage.setItem(COLLAPSE_KEY, on ? "1" : "0");
+  } catch (e) {
+    // A refused write costs the memory, not the fold.
+  }
 }
 
 // --- the three views -----------------------------------------------------
@@ -1338,26 +1304,79 @@ function turnBlock(t, i, total, at) {
   hd.append(el("span", "", clockOf(t.at)));
   hd.append(el("span", "tnum", "turn " + (i + 1) + " of " + total));
   wrap.append(hd);
-  if (t.ask) wrap.append(el("div", "you", t.ask));
+  if (t.ask) wrap.append(prose("you", t.askHtml, t.ask));
   finishedSteps(t).forEach((s, j) => wrap.append(stepBlock(s, i + ":" + j, at)));
   if (t.live) wrap.append(liveRow(t.live));
   wrap.append(summaryRow(t.summary));
   return wrap;
 }
 
+// prose paints one piece of agent prose. The daemon renders the markdown, so
+// the page never parses any: html is what it sent, and text is the fallback for
+// a render that produced nothing.
+function prose(cls, html, text) {
+  const box = el("div", cls + " md");
+  if (html) box.innerHTML = html;
+  else box.textContent = text || "";
+  return box;
+}
+
 // stepBlock is one step of a turn: prose as itself, a thought as one collapsed
 // row with its duration, and a tool as its name, the argument that matters, its
 // duration and its outcome.
 function stepBlock(s, key, at) {
-  if (s.kind === "text") return el("p", "say", s.text || "");
-  if (s.kind === "thinking") {
-    const row = el("div", "thinkrow");
-    row.append(el("span", "chev", "\u25b8"));
-    row.append(el("b", "", "thought"));
-    row.append(el("span", "", durText(s.ms)));
-    return row;
-  }
+  if (s.kind === "text") return prose("say", s.html, s.text);
+  if (s.kind === "thinking") return thoughtBlock(s, key, at);
   return toolStep(s, key, at);
+}
+
+// thoughtBlock is one thought: a row carrying its duration, and under it the
+// words themselves once a tap asks for them. A session that recorded no words
+// keeps the row as a line, because there is nothing to open.
+function thoughtBlock(s, key, at) {
+  const has = !!(s.html || s.text);
+  const open = has && at.open.has(key);
+  const wrap = el("div", "think");
+  wrap.classList.toggle("open", open);
+  const row = has ? el("button", "thinkrow") : el("div", "thinkrow");
+  if (has) row.type = "button";
+  row.append(el("span", "chev", "\u25b8"));
+  row.append(el("b", "", "thought"));
+  row.append(el("span", "dia", durText(s.ms)));
+  if (!has) {
+    wrap.append(row);
+    return wrap;
+  }
+  row.title = open ? "fold the thought" : "read the thought";
+  row.setAttribute("aria-expanded", open ? "true" : "false");
+  wrap.append(row);
+  if (open) {
+    const body = prose("thinktext", s.html, s.text);
+    if (s.more) body.append(el("div", "more", moreText(s.more).trim()));
+    wrap.append(body);
+  }
+  // A link inside a thought is for following, not for folding the row it sits
+  // in, so the tap that lands on one keeps its own meaning.
+  wrap.addEventListener("click", (e) => {
+    if (e.target.closest("a")) return;
+    toggleRow(at, key);
+  });
+  return wrap;
+}
+
+// toggleRow remembers one row's open state for the life of the view and paints
+// it again: the thought's words only exist in the paint that opens them, so a
+// class change alone would look like a dead tap.
+function toggleRow(at, key) {
+  if (at.open.has(key)) at.open.delete(key);
+  else at.open.add(key);
+  paintTurns();
+}
+
+// moreText is the trailer a cut body carries, so a reader knows the rest was
+// clipped rather than lost.
+function moreText(n) {
+  return "\n" + n + (n === 1 ? " more line" : " more lines");
 }
 
 // toolStep is one tool call. A step that carries output is one tap target that
@@ -1365,10 +1384,15 @@ function stepBlock(s, key, at) {
 // is a line, not a control.
 function toolStep(s, key, at) {
   const bad = s.ok === false;
-  const outs = !!s.output;
+  // A call opens when it has anything to show: the arguments it was told, or
+  // the output it answered with.
+  const outs = !!s.output || !!s.args;
   const open = outs && at.open.has(key);
   const step = outs ? el("button", "step openable") : el("div", "step");
-  if (outs) step.type = "button";
+  if (outs) {
+    step.type = "button";
+    step.setAttribute("aria-expanded", open ? "true" : "false");
+  }
   step.classList.toggle("bad", bad);
   step.classList.toggle("open", open);
   step.append(el("span", "ic", iconOf(s)));
@@ -1379,13 +1403,21 @@ function toolStep(s, key, at) {
   step.append(t);
   step.append(el("span", "dur", durText(s.ms) + (bad && s.exit !== undefined ? " \u00b7 exit " + s.exit : "")));
   if (outs) {
-    const out = el("pre", "out", s.output);
-    if (s.more) out.append(el("span", "more", "\n" + s.more + (s.more === 1 ? " more line" : " more lines")));
-    step.append(out);
-    step.addEventListener("click", () => {
-      if (at.open.has(key)) at.open.delete(key);
-      else at.open.add(key);
-      step.classList.toggle("open");
+    if (s.args) {
+      const args = el("pre", "args", s.args);
+      if (s.argsMore) args.append(el("span", "more", moreText(s.argsMore)));
+      step.append(args);
+    }
+    if (s.output) {
+      const out = el("pre", "out", s.output);
+      if (s.more) out.append(el("span", "more", moreText(s.more)));
+      step.append(out);
+    }
+    // A link can only come from the arguments, and following one is not the
+    // same tap as folding the call.
+    step.addEventListener("click", (e) => {
+      if (e.target.closest("a")) return;
+      toggleRow(at, key);
     });
   }
   return step;
@@ -1608,6 +1640,34 @@ function sendText(enter) {
   const input = $("send-text");
   post("/api/msg", { pane: pane.id, text: input.value, enter });
   input.value = "";
+}
+
+// attachImage sends one picture to the daemon and puts the path it answers in
+// the input. A pane cannot receive a picture, and pi's read tool sends these
+// four types as attachments, so a path is the whole handoff: the reader adds
+// the words that say what to do with it, then sends.
+async function attachImage(file) {
+  if (!file || !pane) return;
+  banner("");
+  let res;
+  try {
+    res = await fetchAPI("/api/upload", {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+  } catch (e) {
+    banner("picture failed: " + e);
+    return;
+  }
+  if (!res.ok) {
+    banner("picture failed: " + (await res.text()));
+    return;
+  }
+  const doc = await res.json();
+  const input = $("send-text");
+  input.value = input.value ? input.value + " " + doc.path : doc.path;
+  input.focus();
 }
 
 // post writes one key message into the pane and reports a refusal in the
@@ -1930,6 +1990,9 @@ function route() {
 }
 
 $("pane-close").addEventListener("click", () => closePane());
+$("pane-collapse").addEventListener("click", () => {
+  setCollapsed(!$("pane").classList.contains("collapsed"));
+});
 // Every view scrolls on its own, and the follow rule reads whichever is on
 // screen.
 for (const box of ["text", "transcript", "activity"]) {
@@ -1941,16 +2004,19 @@ for (const box of ["text", "transcript", "activity"]) {
 $("latest").addEventListener("click", jumpLatest);
 $("send-plain").addEventListener("click", () => sendText(false));
 $("send-enter").addEventListener("click", () => sendText(true));
+$("send-attach").addEventListener("click", () => $("send-image").click());
+$("send-image").addEventListener("change", (e) => {
+  const file = e.target.files && e.target.files[0];
+  // The input is emptied so the same picture picked twice still fires.
+  e.target.value = "";
+  attachImage(file);
+});
 $("send-text").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
     sendText(true);
   }
 });
-$("win-prev").addEventListener("click", () => stepPlace("window", -1));
-$("win-next").addEventListener("click", () => stepPlace("window", 1));
-$("ws-prev").addEventListener("click", () => stepPlace("workspace", -1));
-$("ws-next").addEventListener("click", () => stepPlace("workspace", 1));
 $("sheet-open").addEventListener("click", openSheet);
 $("thumbs-toggle").addEventListener("click", () => setThumbs(!thumbsOn()));
 window.addEventListener("orientationchange", () => {
@@ -1997,6 +2063,7 @@ document.addEventListener("visibilitychange", () => {
   startTimers();
 });
 
+setCollapsed(storedCollapsed());
 renderPaneActions();
 
 // The address bar carries the tab, so a reload lands where the reader stood; a

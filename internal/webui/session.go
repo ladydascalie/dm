@@ -23,9 +23,10 @@ import (
 // a conversation, not its whole history.
 const sessionTail = 3
 
-// stepOutput is how many characters of a tool's output one step carries. The
-// count of lines left over rides in more, so the page can say what it cut.
-const stepOutput = 4000
+// stepBody is how many characters of one body a step carries: a tool's output,
+// a call's arguments or a thought. The count of lines left over rides in the
+// step's more field, so the page can say what it cut.
+const stepBody = 4000
 
 // revTail is how many trailing bytes the revision hashes. Enough to hold the
 // end of the last JSONL entry, so an append moves the hash even when the
@@ -55,9 +56,12 @@ var readSession = func(f *os.File) ([]byte, error) { return io.ReadAll(f) }
 
 // sessionTurn is one user message and everything the agent did about it.
 type sessionTurn struct {
-	At    string        `json:"at"`
-	Ask   string        `json:"ask"`
-	Steps []sessionStep `json:"steps"`
+	At  string `json:"at"`
+	Ask string `json:"ask"`
+	// AskHTML is the ask rendered as the page paints it, and Ask stays for the
+	// views that want one line of plain text.
+	AskHTML string        `json:"askHtml,omitempty"`
+	Steps   []sessionStep `json:"steps"`
 	// Live is the newest unfinished step, absent when every step settled.
 	Live    *sessionStep   `json:"live,omitempty"`
 	Summary sessionSummary `json:"summary"`
@@ -69,15 +73,22 @@ type sessionTurn struct {
 // sessionStep is one assistant content block, or the result a tool call
 // produced.
 type sessionStep struct {
-	Kind    string `json:"kind"`
-	Text    string `json:"text,omitempty"`
+	Kind string `json:"kind"`
+	Text string `json:"text,omitempty"`
+	// HTML is Text rendered for the transcript. Text stays for the activity
+	// view, which flattens every step to one plain line.
+	HTML    string `json:"html,omitempty"`
 	MS      int64  `json:"ms,omitempty"`
 	Tool    string `json:"tool,omitempty"`
 	Summary string `json:"summary,omitempty"`
 	OK      *bool  `json:"ok,omitempty"`
 	Exit    *int   `json:"exit,omitempty"`
 	Output  string `json:"output,omitempty"`
-	More    int    `json:"more,omitempty"`
+	// Args is the call's arguments, printed as the JSON they are, so a tap
+	// shows what the tool was told and not only what it answered.
+	Args     string `json:"args,omitempty"`
+	ArgsMore int    `json:"argsMore,omitempty"`
+	More     int    `json:"more,omitempty"`
 }
 
 // sessionSummary counts one turn: the calls it made, how many failed, how long
@@ -386,11 +397,13 @@ func newTurn(l sessionLine) sessionTurn {
 	if t, err := time.Parse(time.RFC3339Nano, at); err == nil {
 		at = t.Format(time.RFC3339Nano)
 	}
+	ask := userText(l.Message.Content)
 	return sessionTurn{
-		At:    at,
-		Ask:   userText(l.Message.Content),
-		Steps: []sessionStep{},
-		calls: map[string]int{},
+		At:      at,
+		Ask:     ask,
+		AskHTML: markdownHTML(ask),
+		Steps:   []sessionStep{},
+		calls:   map[string]int{},
 	}
 }
 
@@ -429,15 +442,30 @@ func (t *sessionTurn) addAssistant(m *piMessage) {
 			if strings.TrimSpace(b.Text) == "" {
 				continue
 			}
-			t.Steps = append(t.Steps, sessionStep{Kind: "text", Text: b.Text})
+			t.Steps = append(t.Steps, sessionStep{
+				Kind: "text",
+				Text: b.Text,
+				HTML: markdownHTML(b.Text),
+			})
 		case "thinking":
-			t.Steps = append(t.Steps, sessionStep{Kind: "thinking", MS: m.DurationMs})
+			if strings.TrimSpace(b.Thinking) == "" {
+				continue
+			}
+			thought, more := cutBody(b.Thinking)
+			t.Steps = append(t.Steps, sessionStep{
+				Kind: "thinking",
+				MS:   m.DurationMs,
+				Text: thought,
+				HTML: markdownHTML(thought),
+				More: more,
+			})
 		case "toolCall":
 			step := sessionStep{
 				Kind:    "tool",
 				Tool:    b.Name,
 				Summary: toolSummary(b.Name, b.Arguments),
 			}
+			step.Args, step.ArgsMore = prettyArgs(b.Arguments)
 			t.calls[b.ID] = len(t.Steps)
 			t.Steps = append(t.Steps, step)
 			t.Summary.Calls++
@@ -481,7 +509,7 @@ func (t *sessionTurn) addResult(m *piMessage) {
 		}
 		st.Exit = &exit
 	}
-	st.Output, st.More = cutOutput(text)
+	st.Output, st.More = cutBody(text)
 }
 
 // finish marks the newest unfinished step of the newest turn: a tool call
@@ -509,6 +537,20 @@ func blocksText(raw json.RawMessage) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+// prettyArgs prints a call's arguments the way a reader expects to see JSON:
+// indented, with the cut the other bodies carry so a write tool's whole file
+// cannot land in one step.
+func prettyArgs(args json.RawMessage) (string, int) {
+	if len(args) == 0 {
+		return "", 0
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, args, "", "  "); err != nil {
+		return "", 0
+	}
+	return cutBody(buf.String())
 }
 
 // toolSummary picks the one argument that says what a call did. A tool with
@@ -568,17 +610,17 @@ func exitFromText(text string) (int, bool) {
 	return n, true
 }
 
-// cutOutput keeps the head of a tool's output at stepOutput characters and
-// counts the lines left over.
-func cutOutput(text string) (string, int) {
+// cutBody keeps the head of one body at stepBody characters and counts the
+// lines left over.
+func cutBody(text string) (string, int) {
 	r := []rune(text)
-	if len(r) <= stepOutput {
+	if len(r) <= stepBody {
 		return text, 0
 	}
-	rest := strings.TrimRight(string(r[stepOutput:]), "\n")
+	rest := strings.TrimRight(string(r[stepBody:]), "\n")
 	more := 0
 	if rest != "" {
 		more = strings.Count(rest, "\n") + 1
 	}
-	return string(r[:stepOutput]), more
+	return string(r[:stepBody]), more
 }

@@ -209,10 +209,19 @@ The page has five parts:
   revision. A pane that reported a session opens on the transcript and offers
   every view. A pane that reported none, a shell for example, opens on the
   screen and offers no other view. A transcript that cannot be read shows the
-  screen and one line saying why. One tap switches, and the choice rides the
-  address hash, so a reload lands on the same view. Every view keeps the input
-  row that types into the pane, the action row for split, zoom, next pane,
-  rename and close, and the strip that walks the window and the workspace
+  screen and one line saying why. Agent prose is markdown, and the daemon
+  renders it with goldmark, so a table, a fence and a list read as themselves
+  instead of as punctuation; raw HTML and a scripting link are dropped, because
+  a session holds text an agent read somewhere else. A thought and a tool call
+  are one row each until a tap: the thought's own words, and the call's
+  arguments above the output it answered with. One tap switches, and the
+  choice rides the address hash, so a reload lands on the same view. Every view
+  keeps the input row that types into the pane, with a `pic` button that
+  uploads a photo to the session's `uploads/` folder and types its path, which
+  the agent opens with its own read tool, and one row of three commands:
+  new window, which opens in the folder the pane stands in, rename, and close
+  pane. A chevron in the header folds that row and the view switch away, because
+  the bar took half a phone's pane; the device remembers the answer
 - the action sheet: one large row per command, from the catalogue the page
   fetches once, with a target picker for panes, windows and workspaces, the split
   sites and the layout presets. A command that destroys something asks once,
@@ -231,7 +240,7 @@ that fails paints the daemon's message in the banner and changes nothing else.
 `--read-only` refuses every write: pane input, the box compose and every action.
 The page hides those commands: the action sheet, the pane action row, the send
 row and the compose. Everything that only reads stays: the fleet, the box, the
-three pane views with their window strip, and the picture grid.
+three pane views, the fold and the picture grid.
 
 ## Layouts
 

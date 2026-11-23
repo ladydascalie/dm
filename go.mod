@@ -8,6 +8,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.7.0
 	github.com/creack/pty v1.1.24
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/image v0.43.0
 	golang.org/x/term v0.47.0
 )

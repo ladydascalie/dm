@@ -398,6 +398,21 @@
     color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
     min-height: 44px; min-width: 44px;
   }
+  /* Three rows of controls sit above the text, and on a phone that is still
+     most of the pane. The chevron folds them onto the title row, and the
+     device keeps the answer, so a reader who wants the text gets it on the
+     next visit too. */
+  #pane .collapse {
+    flex: none;
+    background: none; border: 1px solid var(--line);
+    color: var(--fg); border-radius: 6px; padding: 4px 10px; font-size: 14px;
+    line-height: 1; min-height: 44px; min-width: 44px;
+  }
+  /* Folded, the bar takes no room at all. The switch and the note carry their
+     own display rules, so each one is named here to win over them. */
+  #pane.collapsed #views,
+  #pane.collapsed #pane-actions,
+  #pane.collapsed #pane-note { display: none; }
   /* The view switch: transcript, activity, screen, one tap apart. It is absent
      for a pane whose session cannot be read, because the screen is then the
      only honest view. */
@@ -433,8 +448,8 @@
     border-bottom: 1px solid var(--line);
   }
   #pane-note.show { display: block; }
-  /* The pane's own commands: three by two, so all six read at 320 points with
-     no sideways scrolling. The cells keep the order the list is built in. */
+  /* The pane's own commands: one row of three, so they all read at 320 points
+     with no sideways scrolling. The cells keep the order the list is built in. */
   #pane-actions {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -452,31 +467,6 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #pane-actions button.armed { border-color: var(--error); color: var(--error); }
-  /* The strip names the pane's place: which window, which workspace, and the
-     arrows that walk each. One row per place, so the words fit at 320. */
-  #strip {
-    display: grid;
-    grid-template-columns: auto auto minmax(0, max-content) auto;
-    justify-content: start;
-    align-items: center;
-    gap: 4px 6px;
-    padding: 6px 8px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-  }
-  #strip .lbl {
-    font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--dim); white-space: nowrap;
-  }
-  #strip .name {
-    font-size: 12px; color: var(--dim);
-    min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  }
-  #strip .name b { color: var(--fg); font-weight: 600; }
-  #strip button {
-    background: none; border: 1px solid var(--line); color: var(--fg);
-    border-radius: 6px; min-width: 44px; height: 44px; font-size: 15px;
-  }
   /* The screen holds the text and the one control that floats over it. */
   #screen { position: relative; display: flex; flex: 1; min-height: 0; }
   #latest {
@@ -531,14 +521,70 @@
     font-size: 14.5px; line-height: 1.55; color: #cfd8e0;
     overflow-wrap: anywhere;
   }
+  /* Agent prose arrives as HTML the daemon rendered, so the transcript styles
+     what a conversation holds: headings, lists, quotes, tables and code fences.
+     A block keeps the reader's font size, because a phone reads in one column. */
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { margin: 0 0 10px; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+    margin: 14px 0 6px; line-height: 1.3; font-weight: 650; color: var(--fg);
+  }
+  .md h1 { font-size: 17px; }
+  .md h2 { font-size: 16px; }
+  .md h3 { font-size: 15px; }
+  .md h4, .md h5, .md h6 { font-size: 14px; }
+  .md ul, .md ol { margin: 0 0 10px; padding-left: 20px; }
+  .md li { margin: 3px 0; }
+  .md li > p { margin: 0 0 6px; }
+  .md blockquote {
+    margin: 0 0 10px; padding: 2px 0 2px 10px;
+    border-left: 2px solid var(--line); color: var(--dim);
+  }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+  .md a { color: var(--working); text-underline-offset: 2px; }
+  .md code {
+    font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #0c1013; border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 4px; overflow-wrap: anywhere;
+  }
+  .md pre {
+    margin: 0 0 10px; padding: 8px 10px;
+    background: #0c1013; border: 1px solid var(--line); border-radius: 7px;
+    overflow-x: auto;
+  }
+  .md pre code { background: none; border: 0; padding: 0; font-size: 12px; }
+  /* A table that does not fit scrolls inside its own box, so the transcript
+     never scrolls sideways with it. */
+  .md table {
+    display: block; width: 100%; overflow-x: auto;
+    border-collapse: collapse; margin: 0 0 10px; font-size: 13px;
+  }
+  .md th, .md td {
+    border: 1px solid var(--line); padding: 5px 8px;
+    text-align: left; vertical-align: top;
+  }
+  .md th { background: #171a24; font-weight: 600; color: var(--fg); }
+  .md img { max-width: 100%; height: auto; }
+  /* A thought is one row until a tap: the words are often long, and a reader
+     usually wants the answer rather than the reasoning that found it. */
   .thinkrow {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 0;
-    border-top: 1px solid var(--line);
-    font-size: 12px; color: var(--dim);
+    width: 100%; padding: 8px 0;
+    background: none; border: 0; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--dim); text-align: left;
   }
-  .thinkrow .chev { font-size: 10px; }
+  button.thinkrow { min-height: 44px; }
+  .thinkrow .chev { font-size: 10px; transition: transform .12s; }
+  .think.open .thinkrow .chev { transform: rotate(90deg); }
   .thinkrow b { font-weight: 500; }
+  .think.open .thinkrow b { color: var(--fg); }
+  .thinkrow .dia { margin-left: auto; }
+  .thinktext {
+    padding: 0 0 10px 18px;
+    font-size: 13.5px; color: var(--dim);
+  }
+  .thinktext .more { margin-top: 4px; font-size: 11.5px; opacity: .8; }
   /* A step that carries output is one tap target, so it keeps the 44 it needs
      even when its own line is shorter. */
   .step {
@@ -557,6 +603,20 @@
   }
   .step .t b { color: var(--accent-1); font-weight: 500; }
   .step .dur { font-size: 11px; color: var(--dim); white-space: nowrap; }
+  /* What the call was told, above what it answered: both are bodies the reader
+     asked for by tapping, so they share one shape. */
+  /* The arguments stay shut until the tap: a write tool's arguments can be a
+     whole file, and a folded row must stay one row. */
+  .step .args {
+    display: none;
+    grid-column: 2 / -1; margin: 4px 0 2px; padding: 6px 8px;
+    font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #a9b8c6;
+    background: #0c1013; border: 1px solid var(--line); border-radius: 7px;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    max-height: 116px; overflow: hidden;
+  }
+  .step .args .more { color: var(--dim); opacity: .8; }
   .step .out {
     grid-column: 2 / -1; margin: 4px 0 2px;
     font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -569,6 +629,7 @@
   .step.bad .t { color: #e5b3ae; }
   .step.bad .ic, .step.bad .dur { color: var(--error); }
   .step.bad .out { border-color: #43292c; color: #d8a7a2; }
+  .step.open .args { display: block; }
   .step.open .out { max-height: none; }
   .live {
     display: flex; align-items: baseline; gap: 9px;
@@ -696,6 +757,7 @@
     <header>
       <h1 id="pane-title">pane</h1>
       <span class="state" id="pane-state"><b id="pane-state-word"></b><span id="pane-state-msg"></span></span>
+      <button class="collapse" id="pane-collapse" aria-expanded="true" title="hide the command bar">⌃</button>
       <button class="close" id="pane-close">close</button>
     </header>
     <div id="views"><div class="seg" role="tablist">
@@ -704,16 +766,6 @@
       <a id="view-screen" role="tab" aria-selected="false">screen</a>
     </div></div>
     <div id="pane-actions"></div>
-    <div id="strip">
-      <span class="lbl">window</span>
-      <button id="win-prev" title="previous window">‹</button>
-      <span class="name" id="strip-window"></span>
-      <button id="win-next" title="next window">›</button>
-      <span class="lbl">workspace</span>
-      <button id="ws-prev" title="previous workspace">‹</button>
-      <span class="name" id="strip-workspace"></span>
-      <button id="ws-next" title="next workspace">›</button>
-    </div>
     <div id="pane-note"></div>
     <div id="screen" class="show-screen">
       <pre id="text" class="view"></pre>
@@ -722,6 +774,8 @@
       <button id="latest" title="jump to the latest output">latest</button>
     </div>
     <div id="send">
+      <input id="send-image" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+      <button id="send-attach" title="attach a picture the agent can read">pic</button>
       <input id="send-text" type="text" autocomplete="off" autocapitalize="off"
              autocorrect="off" spellcheck="false" placeholder="type into the pane">
       <button id="send-plain">send</button>
