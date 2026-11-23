@@ -232,7 +232,7 @@ func TestOSCSessionBadFrameIgnored(t *testing.T) {
 	for _, frame := range []string{
 		"\x1b]7502;id=abc\x07",
 		"\x1b]7502;session=!!!not-base64!!!;id=abc\x07",
-		"\x1b]7502;session=\x07",
+		"\x1b]7502;state=working\x07",
 	} {
 		f.Feed([]byte(frame), &out)
 	}
@@ -241,6 +241,55 @@ func TestOSCSessionBadFrameIgnored(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Fatalf("a bad frame leaked into the stream: %q", out.String())
+	}
+}
+
+// TestOSCSessionClear proves a frame with the session key and an empty value
+// clears the session: the callback receives the zero pair and the frame is
+// consumed rather than passed to the VT. An id on the clear frame goes with
+// the session, not with it.
+func TestOSCSessionClear(t *testing.T) {
+	var got []Session
+	f := &Filter{Session: func(s Session) { got = append(got, s) }}
+	var out bytes.Buffer
+
+	f.Feed([]byte("a\x1b]7502;session=;id=9f2\x07b"), &out)
+	if out.String() != "ab" {
+		t.Fatalf("the clear leaked into the stream: %q", out.String())
+	}
+	if len(got) != 1 || got[0] != (Session{}) {
+		t.Fatalf("clear = %+v, want the zero session", got)
+	}
+
+	// The ST terminator clears the same way.
+	f.Feed([]byte("\x1b]7502;session=\x1b\\"), &out)
+	if len(got) != 2 || got[1] != (Session{}) {
+		t.Fatalf("ST clear = %+v, want the zero session", got)
+	}
+}
+
+// TestParseSessionOutcomes proves the three outcomes are distinct: a session,
+// a clear, and nothing.
+func TestParseSessionOutcomes(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    Session
+		outcome SessionOutcome
+	}{
+		{"session=" + base64.StdEncoding.EncodeToString([]byte("/tmp/s.jsonl")) + ";id=9f2", Session{File: "/tmp/s.jsonl", ID: "9f2"}, SessionSet},
+		{"session=", Session{}, SessionClear},
+		{"session=;id=9f2", Session{}, SessionClear},
+		{"session=   ", Session{}, SessionClear},
+		{"id=9f2", Session{}, SessionNone},
+		{"session=!!!not-base64!!!", Session{}, SessionNone},
+		{"state=working", Session{}, SessionNone},
+		{"", Session{}, SessionNone},
+	}
+	for _, tc := range cases {
+		got, outcome := ParseSession(tc.in)
+		if outcome != tc.outcome || got != tc.want {
+			t.Errorf("ParseSession(%q) = %+v %d, want %+v %d", tc.in, got, outcome, tc.want, tc.outcome)
+		}
 	}
 }
 

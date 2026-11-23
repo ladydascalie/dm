@@ -74,3 +74,36 @@ func findRow(s wire.Snapshot, id string) *wire.AllPane {
 	}
 	return nil
 }
+
+// TestAllPaneSessionClear proves an empty session frame drops what the paneConn
+// kept, and the next snapshot carries no SessionFile for that pane.
+func TestAllPaneSessionClear(t *testing.T) {
+	t.Parallel()
+	f := newRowsFixture(t, "session-clear")
+	f.send(t, wire.Msg{Type: "session", Res: json.RawMessage(
+		`{"sessionFile":"/home/me/.pi/sessions/9f2.jsonl","sessionID":"9f2"}`)})
+	f.waitSnapshot(t, "the session", func(s wire.Snapshot) bool {
+		row := findRow(s, f.id)
+		return row != nil && row.SessionFile == "/home/me/.pi/sessions/9f2.jsonl"
+	})
+
+	f.send(t, wire.Msg{Type: "session", Res: json.RawMessage(
+		`{"sessionFile":"","sessionID":""}`)})
+	snap := f.waitSnapshot(t, "the dropped session", func(s wire.Snapshot) bool {
+		row := findRow(s, f.id)
+		return row != nil && row.SessionFile == "" && row.SessionID == ""
+	})
+	if row := findRow(snap, f.id); row == nil {
+		t.Fatal("the pane left the snapshot on a clear")
+	}
+
+	f.s.mu.Lock()
+	pc := f.s.panes[f.id]
+	f.s.mu.Unlock()
+	if pc == nil {
+		t.Fatal("the pane conn went away on a clear")
+	}
+	if file, id := pc.session(); file != "" || id != "" {
+		t.Fatalf("paneConn kept %q %q after the clear", file, id)
+	}
+}

@@ -1333,15 +1333,20 @@ func (p *paneProc) setStatus(st wire.Status) {
 // setSession records and publishes the session a program named on OSC 7502.
 // The frame is metadata, not output: the filter consumes it, so nothing here
 // is scrubbed or reaches the stream. The pane keeps the last value so a reader
-// that attaches after the report still sees it through the replay reply.
+// that attaches after the report still sees it through the replay reply. A
+// clear arrives as the zero Session: the pair goes and an empty frame tells
+// every reader, so a pane that fell back to a shell stops showing a
+// transcript.
 func (p *paneProc) setSession(s osc.Session) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.storeSessionLocked(s)
 }
 
-// storeSessionLocked records a session and publishes it when it changed. The
-// caller holds p.mu.
+// storeSessionLocked records a session and publishes it when it changed. A
+// clear stores the zero pair and publishes an empty frame; a clear on a pane
+// that already holds none changes nothing and wakes nobody. The caller holds
+// p.mu.
 func (p *paneProc) storeSessionLocked(s osc.Session) {
 	if p.sessionFile == s.File && p.sessionID == s.ID {
 		return

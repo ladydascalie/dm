@@ -16,6 +16,12 @@ func sessionFrame(file, id string) string {
 		";id=" + id + "\x1b\\"
 }
 
+// sessionClearFrame renders the OSC 7502 clear: the session key with an empty
+// value. The id rides along and goes with the session.
+func sessionClearFrame() string {
+	return "\x1b]7502;session=;id=9f2\x1b\\"
+}
+
 // TestSessionFramePushed proves the pane decodes a session report out of the
 // byte stream, publishes it to its subscribers, and keeps the last value so a
 // reader that attaches later draws it from the replay reply.
@@ -59,6 +65,73 @@ func TestSessionFramePushed(t *testing.T) {
 	}
 	if extra.SessionFile != file || extra.SessionID != id {
 		t.Fatalf("replay session = %+v, want the kept %q and %q", extra, file, id)
+	}
+}
+
+// TestSessionClearDropsIt proves a clear drops the pair the pane kept, pushes
+// the empty frame to its subscribers, and leaves the replay reply empty, so a
+// reader that attaches after the clear sees no session.
+func TestSessionClearDropsIt(t *testing.T) {
+	t.Parallel()
+	p, cli, msgs := yankPane(t, 60, 10)
+	p.adopted = make(chan struct{})
+	sub := subscriber(p)
+
+	feedStatus(t, p, sessionFrame("/home/me/.pi/sessions/9f2.jsonl", "9f2"), 1)
+	if m := waitSessionFrame(t, sub); m.Res == nil {
+		t.Fatal("the set frame carried no body")
+	}
+
+	feedStatus(t, p, sessionClearFrame(), 2)
+	m := waitSessionFrame(t, sub)
+	var got struct {
+		SessionFile string `json:"sessionFile"`
+		SessionID   string `json:"sessionID"`
+	}
+	if err := json.Unmarshal(m.Res, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionFile != "" || got.SessionID != "" {
+		t.Fatalf("clear frame = %+v, want the empty pair", got)
+	}
+
+	p.mu.Lock()
+	file, id := p.sessionFile, p.sessionID
+	p.mu.Unlock()
+	if file != "" || id != "" {
+		t.Fatalf("pane kept %q %q after the clear", file, id)
+	}
+
+	paneSend(t, cli, wire.Msg{Type: "req", Action: "replay", ID: 8})
+	reply := waitReplay(t, msgs)
+	var extra struct {
+		SessionFile string `json:"sessionFile"`
+		SessionID   string `json:"sessionID"`
+	}
+	if err := json.Unmarshal(reply.Res, &extra); err != nil {
+		t.Fatal(err)
+	}
+	if extra.SessionFile != "" || extra.SessionID != "" {
+		t.Fatalf("replay after the clear = %+v, want none", extra)
+	}
+}
+
+// TestSessionClearOnNoneChangesNothing proves a clear on a pane that never
+// reported a session stores nothing and wakes no subscriber.
+func TestSessionClearOnNoneChangesNothing(t *testing.T) {
+	t.Parallel()
+	p, _, _ := yankPane(t, 60, 10)
+	p.adopted = make(chan struct{})
+	sub := subscriber(p)
+
+	feedStatus(t, p, sessionClearFrame(), 1)
+	readNothing(t, sub)
+
+	p.mu.Lock()
+	file, id := p.sessionFile, p.sessionID
+	p.mu.Unlock()
+	if file != "" || id != "" {
+		t.Fatalf("a clear invented a session: %q %q", file, id)
 	}
 }
 

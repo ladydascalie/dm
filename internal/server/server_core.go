@@ -1075,6 +1075,8 @@ func (s *server) watchConn(id string, pc *paneConn) (exit bool) {
 				}
 			}
 		case "session":
+			// An empty pair is a clear: the agent that reported the session
+			// is gone, so the pane keeps none and the next snapshot says so.
 			var si struct {
 				SessionFile string `json:"sessionFile"`
 				SessionID   string `json:"sessionID"`
