@@ -37,9 +37,9 @@ connection, under a mutex (`transport.Conn.Send`, `internal/transport/transport.
 ## The envelope
 
 `wire.Msg` (`internal/wire/wire.go:17`) is the one envelope, both sockets, both directions. Its stale `Type` comment
-lists eleven values; the code sends nineteen. `req`, `resp` and `attach` are requests and replies; `keys` and
+lists eleven values; the code sends twenty. `req`, `resp` and `attach` are requests and replies; `keys` and
 `resize` carry a client's key bytes and size; the rest are pushes: `snapshot`, `screen` (VT screen), `replay` (ring),
-`bytes` (pty output), `status` (pane status), `cwd` (working directory), `title` (the pane's OSC title), `mode`
+`bytes` (pty output), `status` (pane status), `session` (the pane's OSC 7502 session file, empty when cleared), `cwd` (working directory), `title` (the pane's OSC title), `mode`
 (the pane's alt, mouse or paste mode changed), `exit` (pane exited), `scrub` (repainted screen), `box` (the box
 changed), `watch` (a box watcher changed), `msg` (box entry), `close` (session ended).
 

@@ -143,8 +143,13 @@ ESC ] 7502 ; session=<base64 path> ; id=<id> ESC \
 - `id=` is the session id in that file.
 - `BEL` and `ST` terminate the sequence. The pane consumes the frame, so it
   never reaches the screen.
-- A frame with no path, or a path that does not decode, is ignored. The pane
-  keeps the last good value.
+- A frame has three outcomes. A `session=` value that decodes names a session.
+  An empty `session=` value clears it, because the agent that wrote the file is
+  gone. A frame with no `session` key at all, or a value that does not decode, is
+  ignored, and the pane keeps the last good value.
+- Send the clear frame when your agent exits. If you do not, the pane keeps the
+  session it was given, and a viewer paints a transcript over a bare shell
+  prompt.
 - A session belongs to the running pane. dm never persists it. A restart or a
   respawn means the program starts a new session.
 - A program is free to emit nothing. A shell pane has no session, and that is
