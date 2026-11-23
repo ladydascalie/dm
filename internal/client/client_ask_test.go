@@ -224,6 +224,28 @@ func TestAskFloatRefusalKeepsTheFloat(t *testing.T) {
 	}
 }
 
+// TestAskFloatSettledElsewhereLetsGo: an ask answered on another surface is
+// refused with E_EXISTS, and that must free the desk instead of pinning a code
+// the reader cannot clear. The ask stays listed, so the float must also refuse
+// to reopen on the next snapshot.
+func TestAskFloatSettledElsewhereLetsGo(t *testing.T) {
+	t.Parallel()
+	tui, got := askTUI(t, askQuestions())
+	feed(tui, "1\r")
+	m := nextBoxMsg(t, got)
+	tui.apply(wire.Msg{
+		Type: "resp", Action: "ask-answer", ID: m.ID, OK: false,
+		Error: `ask: E_EXISTS: ask "a1" is already answered`,
+	})
+	if tui.ask != nil || tui.mode != "" {
+		t.Fatalf("an ask answered elsewhere kept the float: %v, mode %q", tui.ask, tui.mode)
+	}
+	tui.syncAsk()
+	if tui.ask != nil {
+		t.Fatal("the dismissed ask reopened on the next snapshot")
+	}
+}
+
 // TestAskFloatDeclineSendsCancel: esc sends the cancel answer, the same call
 // the terminal dialog makes, and the float stays until the store closes the
 // ask.

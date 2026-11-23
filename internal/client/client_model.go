@@ -111,6 +111,10 @@ type tui struct {
 	ask         *askView
 	askDeferred bool
 	askAnswerID int
+	// askClosed is the id of an ask this client put away itself. An answered
+	// ask stays listed until its owner closes it, and a float that could only
+	// leave on a snapshot would trap the desk when the owner is gone.
+	askClosed string
 	// readOnly marks a client that may read the session and not answer the
 	// questions in it: the ask float offers no send and no decline.
 	readOnly bool

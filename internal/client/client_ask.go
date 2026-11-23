@@ -94,7 +94,7 @@ func (t *tui) syncAsk() {
 	}
 	a := askOnPane(t.snap, t.snap.Focus)
 	if t.ask == nil {
-		if a == nil {
+		if a == nil || a.ID == t.askClosed {
 			t.askDeferred = false
 			return
 		}
@@ -369,6 +369,18 @@ func (t *tui) askDecline() {
 	t.sendAskAnswer(ask.AnswerReq{Cancel: true})
 }
 
+// dismissAsk puts the float down and remembers the id, so a listed ask this
+// client has finished with cannot reopen on the next snapshot. The case that
+// matters: an ask answered on another surface stays listed until its owner
+// closes it, and an owner that died never will.
+func (t *tui) dismissAsk() {
+	if t.ask == nil {
+		return
+	}
+	t.askClosed = t.ask.id
+	t.closeAskFloat()
+}
+
 // sendAskAnswer puts one answer on the wire and marks the float as waiting. A
 // session with no connection keeps the float and says so.
 func (t *tui) sendAskAnswer(req ask.AnswerReq) {
@@ -406,6 +418,12 @@ func (t *tui) takeAskAnswer(m wire.Msg) {
 		return
 	}
 	if m.OK {
+		return
+	}
+	// The ask is settled or gone: there is nothing left to answer, so the
+	// float leaves instead of showing a code the reader cannot clear.
+	if strings.Contains(m.Error, "E_EXISTS") || strings.Contains(m.Error, "not_found") {
+		t.dismissAsk()
 		return
 	}
 	v.pending = false
