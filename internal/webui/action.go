@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"dm/internal/ask"
 	"dm/internal/box"
 	"dm/internal/wire"
 )
@@ -22,6 +23,7 @@ const (
 	groupWindows    = "windows"
 	groupWorkspaces = "workspaces"
 	groupBox        = "box"
+	groupAsks       = "asks"
 )
 
 // targetKind is what a command's target names. Empty means the row takes none,
@@ -33,6 +35,7 @@ const (
 	targetPane      targetKind = "pane"
 	targetWindow    targetKind = "window"
 	targetWorkspace targetKind = "workspace"
+	targetAsk       targetKind = "ask"
 )
 
 // sites are the directions a split takes, the values of the request's site
@@ -139,6 +142,28 @@ var commands = []command{
 			m.Res = b
 			return nil
 		}},
+
+	// ask-answer takes the whole answer body as one object, because an answer
+	// is a list of items and the endpoint's other fields are strings. The
+	// daemon's own decoder reads this payload, so the form is checked against
+	// the contract the store enforces before the socket sees it.
+	{ID: "ask-answer", Label: "answer the ask", Group: groupAsks, Target: targetAsk,
+		Fields: []string{"target", "answer"},
+		apply: func(m *wire.Msg, q actionReq) error {
+			if len(q.answer) == 0 {
+				return fmt.Errorf("ask-answer needs an answer")
+			}
+			req, err := ask.ParseAnswer(q.answer)
+			if err != nil {
+				return err
+			}
+			b, err := json.Marshal(req)
+			if err != nil {
+				return err
+			}
+			m.Res = b
+			return nil
+		}},
 }
 
 // catalogue is the /api/commands payload: the rows, one per command.
@@ -170,22 +195,26 @@ type actionReq struct {
 	key    string
 	cwd    string
 	site   string
+	// answer is the ask-answer body: one object, kept raw because it is the
+	// daemon's shape and not a field of the endpoint's own.
+	answer json.RawMessage
 }
 
 // decodeAction reads one request body. The decoder refuses a field outside the
-// nine the endpoint publishes, and each row then refuses a field it does not
+// ten the endpoint publishes, and each row then refuses a field it does not
 // name, so a typo is the error it looks like.
 func decodeAction(r *http.Request) (actionReq, map[string]bool, error) {
 	var raw struct {
-		ID     *string `json:"id"`
-		Target *string `json:"target"`
-		Name   *string `json:"name"`
-		Layout *string `json:"layout"`
-		Msg    *string `json:"msg"`
-		State  *string `json:"state"`
-		Key    *string `json:"key"`
-		Cwd    *string `json:"cwd"`
-		Site   *string `json:"site"`
+		ID     *string          `json:"id"`
+		Target *string          `json:"target"`
+		Name   *string          `json:"name"`
+		Layout *string          `json:"layout"`
+		Msg    *string          `json:"msg"`
+		State  *string          `json:"state"`
+		Key    *string          `json:"key"`
+		Cwd    *string          `json:"cwd"`
+		Site   *string          `json:"site"`
+		Answer *json.RawMessage `json:"answer"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -213,6 +242,10 @@ func decodeAction(r *http.Request) (actionReq, map[string]bool, error) {
 	set("key", raw.Key, &q.key)
 	set("cwd", raw.Cwd, &q.cwd)
 	set("site", raw.Site, &q.site)
+	if raw.Answer != nil {
+		present["answer"] = true
+		q.answer = *raw.Answer
+	}
 	return q, present, nil
 }
 
@@ -317,6 +350,10 @@ func (c command) checkTarget(id string) error {
 		if !paneIDPattern.MatchString(id) {
 			return fmt.Errorf("bad pane id %q", id)
 		}
+	case targetAsk:
+		if !askIDPattern.MatchString(id) {
+			return fmt.Errorf("bad ask id %q", id)
+		}
 	case targetWindow, targetWorkspace:
 		m := windowOrWorkspaceID.FindStringSubmatch(id)
 		if m == nil {
@@ -335,6 +372,10 @@ func (c command) checkTarget(id string) error {
 
 // windowOrWorkspaceID is the shape of a window or workspace id: w1, w12, s1.
 var windowOrWorkspaceID = regexp.MustCompile(`^([ws])[0-9]+$`)
+
+// askIDPattern is the shape the store gives an ask: a1, a12. The counter only
+// moves forward, so an id names one ask for the life of the session.
+var askIDPattern = regexp.MustCompile(`^a[0-9]+$`)
 
 // oneOf reports whether v is in list.
 func oneOf(v string, list []string) bool {
