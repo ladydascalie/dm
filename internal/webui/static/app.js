@@ -171,7 +171,7 @@ function paintFleet(f) {
 // that answers 403. Views stay: the view switch, the picture toggle and the
 // fold only read, and a read only page that hid them would hide the session
 // itself.
-const writeControls = ["sheet-open", "compose", "send", "pane-actions"];
+const writeControls = ["sheet-open", "compose", "send", "pane-actions", "pane-stop"];
 
 function applyReadOnly(ro) {
   for (const id of writeControls) {
@@ -864,12 +864,40 @@ function renderPaneActions() {
 function renderPaneChrome() {
   if (!pane) return;
   const own = ((fleet && fleet.panes) || []).find((p) => p.id === pane.id) || {};
+  // A run the reader can see is a run they may need to stop: the phone has no
+  // Escape key, so the control appears exactly while there is something to stop.
+  const busy = own.status === "working" || own.status === "blocked";
+  $("pane-stop").classList.toggle("show", busy);
   // The id is the title when the pane has no name, so it is not printed twice.
   const name = own.name || own.app || pane.id;
   $("pane-title").textContent = name === pane.id ? name : name + "  " + pane.id;
   // The fleet names the pane's state every three seconds, so the header stays
   // honest on the two views that never read the pane's text.
   if (own.status !== undefined) setPaneState(stateOf(own), own.message || "");
+}
+
+// stopPane sends one escape. pi treats the same key two ways: it interrupts a
+// turn that is running, and it declines a question that is waiting, which is
+// what the reader means in both cases.
+async function stopPane() {
+  if (!pane) return;
+  disarm();
+  let res;
+  try {
+    res = await fetchAPI("/api/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pane: pane.id, key: "esc" }),
+    });
+  } catch (e) {
+    banner("stop failed: " + e);
+    return;
+  }
+  if (!res.ok) {
+    banner("stop failed: " + (await res.text()));
+    return;
+  }
+  banner("");
 }
 
 // --- the command bar -----------------------------------------------------
@@ -1316,9 +1344,25 @@ function turnBlock(t, i, total, at) {
 // a render that produced nothing.
 function prose(cls, html, text) {
   const box = el("div", cls + " md");
-  if (html) box.innerHTML = html;
-  else box.textContent = text || "";
+  if (html) {
+    box.innerHTML = html;
+    wrapTables(box);
+  } else {
+    box.textContent = text || "";
+  }
   return box;
+}
+
+// wrapTables puts a wide table in its own scroll box, so a table that does not
+// fit scrolls sideways by itself instead of carrying the whole transcript with
+// it. The wrapper is built here because the daemon sends the table as markdown
+// renders it, with no wrapper of its own.
+function wrapTables(box) {
+  for (const table of box.querySelectorAll("table")) {
+    const wrap = el("div", "tablewrap");
+    table.replaceWith(wrap);
+    wrap.append(table);
+  }
 }
 
 // stepBlock is one step of a turn: prose as itself, a thought as one collapsed
@@ -1634,11 +1678,14 @@ async function composePost(ev) {
   });
 }
 
-function sendText(enter) {
+// sendText types the input into the pane and presses enter. One button, one
+// meaning: the old pair differed only by whether the pane got the final enter,
+// and on a phone nobody wants to type a prompt without sending it.
+function sendText() {
   if (!pane) return;
   disarm();
   const input = $("send-text");
-  post("/api/msg", { pane: pane.id, text: input.value, enter });
+  post("/api/msg", { pane: pane.id, text: input.value, enter: true });
   input.value = "";
 }
 
@@ -1990,6 +2037,7 @@ function route() {
 }
 
 $("pane-close").addEventListener("click", () => closePane());
+$("pane-stop").addEventListener("click", stopPane);
 $("pane-collapse").addEventListener("click", () => {
   setCollapsed(!$("pane").classList.contains("collapsed"));
 });
@@ -2002,8 +2050,7 @@ for (const box of ["text", "transcript", "activity"]) {
   });
 }
 $("latest").addEventListener("click", jumpLatest);
-$("send-plain").addEventListener("click", () => sendText(false));
-$("send-enter").addEventListener("click", () => sendText(true));
+$("send-submit").addEventListener("click", () => sendText());
 $("send-attach").addEventListener("click", () => $("send-image").click());
 $("send-image").addEventListener("change", (e) => {
   const file = e.target.files && e.target.files[0];
@@ -2014,7 +2061,7 @@ $("send-image").addEventListener("change", (e) => {
 $("send-text").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    sendText(true);
+    sendText();
   }
 });
 $("sheet-open").addEventListener("click", openSheet);

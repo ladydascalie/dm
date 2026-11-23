@@ -221,7 +221,11 @@ The page has five parts:
   the agent opens with its own read tool, and one row of three commands:
   new window, which opens in the folder the pane stands in, rename, and close
   pane. A chevron in the header folds that row and the view switch away, because
-  the bar took half a phone's pane; the device remembers the answer
+  the bar took half a phone's pane; the device remembers the answer. While the
+  pane is working or blocked the header also carries `stop`, which sends Escape
+  to the pane through `/api/keys`: the same key interrupts a running turn and
+  declines a question that is waiting, so a run nobody can interrupt never owns
+  the desk until someone finds a keyboard
 - the action sheet: one large row per command, from the catalogue the page
   fetches once, with a target picker for panes, windows and workspaces, the split
   sites and the layout presets. A command that destroys something asks once,

@@ -398,6 +398,18 @@
     color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
     min-height: 44px; min-width: 44px;
   }
+  /* The stop control appears only while the pane is busy. A phone has no
+     Escape, and a run nobody can interrupt owns the desk until someone finds a
+     keyboard. */
+  #pane .stop {
+    display: none; flex: none;
+    background: none; border: 1px solid var(--line);
+    color: var(--error); border-radius: 6px; padding: 4px 10px; font-size: 13px;
+    min-height: 44px; min-width: 44px;
+  }
+  #pane .stop.show {
+    display: inline-flex; align-items: center; justify-content: center;
+  }
   /* Three rows of controls sit above the text, and on a phone that is still
      most of the pane. The chevron folds them onto the title row, and the
      device keeps the answer, so a reader who wants the text gets it on the
@@ -555,14 +567,17 @@
   }
   .md pre code { background: none; border: 0; padding: 0; font-size: 12px; }
   /* A table that does not fit scrolls inside its own box, so the transcript
-     never scrolls sideways with it. */
-  .md table {
-    display: block; width: 100%; overflow-x: auto;
-    border-collapse: collapse; margin: 0 0 10px; font-size: 13px;
-  }
+     never scrolls sideways with it. The box is the page's, not the table: a
+     table told to be a block loses the column widths its cells asked for. */
+  .tablewrap { margin: 0 0 10px; overflow-x: auto; }
+  .md table { border-collapse: collapse; font-size: 13px; }
+  /* The prose wraps anywhere so a long path cannot push the page sideways, and
+     a cell must not inherit that: a one-word column would collapse to one
+     letter per line. */
   .md th, .md td {
     border: 1px solid var(--line); padding: 5px 8px;
     text-align: left; vertical-align: top;
+    overflow-wrap: normal;
   }
   .md th { background: #171a24; font-weight: 600; color: var(--fg); }
   .md img { max-width: 100%; height: auto; }
@@ -758,6 +773,7 @@
       <h1 id="pane-title">pane</h1>
       <span class="state" id="pane-state"><b id="pane-state-word"></b><span id="pane-state-msg"></span></span>
       <button class="collapse" id="pane-collapse" aria-expanded="true" title="hide the command bar">⌃</button>
+      <button class="stop" id="pane-stop" title="interrupt the turn and stop the agent">stop</button>
       <button class="close" id="pane-close">close</button>
     </header>
     <div id="views"><div class="seg" role="tablist">
@@ -778,8 +794,7 @@
       <button id="send-attach" title="attach a picture the agent can read">pic</button>
       <input id="send-text" type="text" autocomplete="off" autocapitalize="off"
              autocorrect="off" spellcheck="false" placeholder="type into the pane">
-      <button id="send-plain">send</button>
-      <button id="send-enter" class="enter">enter</button>
+      <button id="send-submit" class="enter">send</button>
     </div>
   </section>
 

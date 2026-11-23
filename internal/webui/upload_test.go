@@ -52,7 +52,7 @@ func TestUploadStoresThePicture(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(dir, "uploads")
+	want := filepath.Join(dir, "sessions", "main", "uploads")
 	if filepath.Dir(got.Path) != want || !strings.HasSuffix(got.Path, ".png") {
 		t.Fatalf("path = %q, want one in %q ending .png", got.Path, want)
 	}

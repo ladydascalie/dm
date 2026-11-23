@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"dm/internal/paths"
 )
 
 // maxUpload is the largest picture the page may send. A phone photo is a few
@@ -48,7 +50,9 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("dm web: %s is not a picture: want png, jpeg, gif or webp", kind), http.StatusBadRequest)
 		return
 	}
-	dir := filepath.Join(h.cfg.Root, "uploads")
+	// The folder belongs to the session, so a photo of one session's work never
+	// turns up in another's folder.
+	dir := filepath.Join(paths.SessionDirAt(h.cfg.Root, h.cfg.Session), "uploads")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		http.Error(w, "dm web: "+err.Error(), http.StatusInternalServerError)
 		return
