@@ -52,7 +52,7 @@ process, so a restart reloads a layout, never a screen.
 ## The state file
 
 `state.json` sits in the session directory (`internal/paths/paths.go:69`) and
-holds `State` (`state.go:94`), in five groups:
+holds `State` (`state.go:94`), in six groups:
 
 | Group | Fields |
 |---|---|
@@ -60,6 +60,7 @@ holds `State` (`state.go:94`), in five groups:
 | Tree | workspaces, windows, each window's root, every `PaneState` |
 | Counters | `nextWorkspace`, `nextWindow`, `idVersion` |
 | Box | the message box, an append-only log any pane can post into, and `boxSeq`, the last sequence number it handed out |
+| Ask | the questions an agent puts to the reader, oldest first, each with its tool call and, once answered, the answer, plus `askSeq`, the last ask id it handed out |
 | Secrets | the registry, one record per secret: `tool`, the command that prints the value, `reference`, the address it resolves, `upstream`, the URL a request is forwarded to, `header`, the template the value is filled into. Never a value (`internal/session/secret.go:14`). The server runs one loopback proxy for these (`server_secrets.go:736`): a request on 127.0.0.1 under a secret's random path goes to that secret's `upstream` with the value in `header`, so a program uses the secret without holding it |
 
 `Save` (`state.go:216`) writes indented JSON to a temp file in the session

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"dm/internal/layout"
 	"dm/internal/vt"
@@ -269,6 +270,39 @@ type Snapshot struct {
 	// ShelfFolded hides the rail's shelf rows, the way a window's fold hides
 	// its panes.
 	ShelfFolded bool `json:"shelfFolded,omitempty"`
+	// Ask is every question the session lists: the open ones and the answered
+	// ones not yet closed, oldest first. It is the flattened wire shape, so a
+	// client that attaches mid-question draws the open ones at once. The
+	// answer rides the ask-list reply, not the snapshot.
+	Ask []Ask `json:"ask,omitempty"`
+}
+
+// Ask is one listed question set as the snapshot carries it: who asked, which
+// tool call it belongs to, and the questions. It is flattened, so the answer
+// and the pane's rendering state stay out of the snapshot.
+type Ask struct {
+	ID         string        `json:"id"`
+	Pane       string        `json:"pane"`
+	ToolCallID string        `json:"toolCallId"`
+	At         time.Time     `json:"at"`
+	Questions  []AskQuestion `json:"questions"`
+}
+
+// AskQuestion is one question of a listed ask, with the same field names as the
+// ask package's Question.
+type AskQuestion struct {
+	Question    string      `json:"question"`
+	Header      string      `json:"header"`
+	MultiSelect bool        `json:"multiSelect,omitempty"`
+	Options     []AskOption `json:"options"`
+}
+
+// AskOption is one choice of a listed question, with the same field names as
+// the ask package's Option.
+type AskOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+	Preview     string `json:"preview,omitempty"`
 }
 
 // MaxFrame is the largest frame the socket accepts, four bytes of length plus

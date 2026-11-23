@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"dm/internal/ask"
 	"dm/internal/layout"
 	"dm/internal/paths"
 )
@@ -695,5 +696,99 @@ func TestShelfClampAndPrune(t *testing.T) {
 	}
 	if st.ShelfActive != 0 || st.Shelf[0] != "a" {
 		t.Fatalf("active = %d (%q), want 0 and a", st.ShelfActive, st.Shelf[0])
+	}
+}
+
+// askState is a well-formed ask for the store tests.
+func askState(id, toolCall string) ask.Request {
+	return ask.Request{
+		ID: id, Pane: "w1p1", ToolCallID: toolCall,
+		Questions: []ask.Question{{
+			Question: "Which base?", Header: "base",
+			Options: []ask.Option{{Label: "main"}, {Label: "next"}},
+		}},
+	}
+}
+
+// TestAskDefaultsEmpty proves a state file written before asks existed loads
+// with an empty store and a zero counter.
+func TestAskDefaultsEmpty(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	const raw = `{
+  "name": "oldask",
+  "workspaces": [{"id": "s1", "name": "main",
+    "windows": [{"id": "w1", "name": "one", "root": {"pane": "w1p1"}, "focus": "w1p1"}],
+    "active": 0}],
+  "active": 0,
+  "cols": 80, "rows": 24,
+  "panes": {"w1p1": {}},
+  "nextWorkspace": 1, "nextWindow": 1, "idVersion": 2
+}`
+	if err := os.MkdirAll(paths.SessionDirAt(root, "oldask"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePathAt(root, "oldask"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(root, "oldask")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Ask) != 0 || got.AskSeq != 0 {
+		t.Fatalf("old state loaded asks %v seq %d, want an empty store", got.Ask, got.AskSeq)
+	}
+	if id := got.NewAskID(); id != "a1" {
+		t.Fatalf("first ask id = %q", id)
+	}
+}
+
+// TestAskRoundTripAndSeq proves an ask survives a save and load, the index
+// finds it, and the counter moves past a hand-edited id so no id is reused.
+func TestAskRoundTripAndSeq(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	st := NewStateAt(root, "askstore")
+	st.Ask = []ask.Request{askState("a4", "toolu_1")}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(root, "askstore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Ask) != 1 || got.Ask[0].Questions[0].Question != "Which base?" {
+		t.Fatalf("loaded asks = %+v", got.Ask)
+	}
+	if idx := got.AskIndex("a4"); idx != 0 {
+		t.Fatalf("AskIndex(a4) = %d, want 0", idx)
+	}
+	if idx := got.AskIndex("a9"); idx != -1 {
+		t.Fatalf("AskIndex(a9) = %d, want -1", idx)
+	}
+	// The counter loads past the listed id, so the next open cannot reuse a4.
+	if id := got.NewAskID(); id != "a5" {
+		t.Fatalf("next ask id = %q, want a5", id)
+	}
+}
+
+// TestLoadStateDropsBadAsks proves a hand-edited store costs its bad requests,
+// not the whole state file.
+func TestLoadStateDropsBadAsks(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	st := NewStateAt(root, "askbad")
+	st.Ask = []ask.Request{askState("a1", "toolu_1"), askState("", "toolu_2")}
+	// An ask with no questions cannot pass Validate.
+	st.Ask[1].Questions = nil
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStateAt(root, "askbad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Ask) != 1 || got.Ask[0].ID != "a1" {
+		t.Fatalf("loaded asks = %+v, want only a1", got.Ask)
 	}
 }

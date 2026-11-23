@@ -51,7 +51,7 @@ window holds a split tree of panes; a pane is one leaf; a pane daemon is the pro
 never blocks a pane read. Past the 1 MiB cap the client is marked stale and rebuilt from a snapshot
 and a screen per pane (`resyncClient`, `server_view.go:903`); a screen is a pane's terminal picture.
 
-## The twelve files
+## The thirteen files
 
 | file | owns |
 | --- | --- |
@@ -60,6 +60,7 @@ and a screen per pane (`resyncClient`, `server_view.go:903`); a screen is a pane
 | `server_mutate.go` | layout changes, `mutation`, `resync`, `writeTo`, `sendKeys` |
 | `server_view.go` | snapshot, size fit, `syncSizes`, screens, `reply`, `serve` |
 | `server_box.go` | box writes, waiters, subscribers, watches, trimming |
+| `server_ask.go` | the ask store: open, await, answer, close, list, and the snapshot's flattened asks |
 | `server_secrets.go` | registry, activation, proxy, cover (other sessions), type (into a pane), hydrate (to a file) |
 | `server_sync.go` | the `.dm-secrets.kdl` file the `secret-sync` action is pointed at: secrets to register, files to ingest |
 | `server_float.go` | floats and their lifetime |
@@ -84,7 +85,7 @@ flowchart LR
 
 `serve` (`server_view.go:706`) switches on `Type`: `attach` registers, `keys` writes to a pane or a
 float, `resize` refits, and `req` goes to `handleReq` (`server_rpc.go:15`), which switches on
-`Action`: 63 `case` clauses, 68 actions, five cases naming two each. A branch answers through
+`Action`: 71 `case` clauses, 76 actions, five cases naming two each. A branch answers through
 `s.reply` (`server_view.go:983`); the `msg-sub` action streams box entries and never answers.
 
 ## Mutation

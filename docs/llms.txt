@@ -56,6 +56,11 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm msg clear` | `[--key K \| --prefix P]` | clear one key, or a prefix branch, or the whole box | `dm msg clear --key build` |
 | `dm msg watchers` | `[--json]` | print the live watches | `dm msg watchers` |
 | `dm msg schema` | `-` | print the box schema the server serves | `dm msg schema` |
+| `dm ask list` | `[--json]` | print the questions the session lists, oldest first | `dm ask list [--json]` |
+| `dm ask open` | `--pane P --tool-call ID [--json]` | open an ask on a pane, reading {questions} on stdin | `echo '{"questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}' \| dm ask open --pane w1p1 --tool-call toolu_1` |
+| `dm ask await` | `<id> [--timeout 25s] [--json]` | block until the ask is answered, or print pending | `dm ask await a1 --json` |
+| `dm ask answer` | `<id> [--json]` | answer an ask, reading {items,globalNote,cancel} on stdin | `echo '{"items":[{"questionIndex":0,"optionIndexes":[0]}]}' \| dm ask answer a1` |
+| `dm ask close` | `<id> [--json]` | drop an ask from the store, idempotently | `dm ask close <id> [--json]` |
 | `dm secret register` | `<name> --tool op --ref R [--upstream URL --header T] [--env K=V]...` | register a secret: how to fetch it and where it rides | `dm secret register gh-cli --tool op --ref 'op://Personal/github/token' --upstream https://api.github.com --header 'Authorization: Bearer {}'` |
 | `dm secret list` | `-` | print registered secret names and references only | `dm secret list` |
 | `dm secret revoke` | `<name>` | remove a secret and drop its value everywhere | `dm secret revoke <name>` |
@@ -149,6 +154,8 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `secret-register`, `secret-list`, `secret-revoke` | `{"action":"secret-register","name":"gh-cli","tool":"op","ref":"op://Personal/gh/token"}`, `{"action":"secret-list"}`, `{"action":"secret-revoke","name":"gh-cli"}` |
 | `secret-use`, `secret-hydrate`, `secret-type` | `{"action":"secret-use","name":"gh-cli"}`, `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`, `{"action":"secret-type","name":"gh-cli","target":"w1p1"}` |
 | `secret-sync` | `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}` |
+| `ask-open`, `ask-await` | `{"action":"ask-open","target":"w1p1","res":{"toolCallId":"toolu_1","questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}}`, `{"action":"ask-await","target":"a1","res":{"timeoutMs":25000}}` |
+| `ask-answer`, `ask-close`, `ask-list` | `{"action":"ask-answer","target":"a1","res":{"items":[{"questionIndex":0,"optionIndexes":[0]}]}}`, `{"action":"ask-close","target":"a1"}`, `{"action":"ask-list"}` |
 
 ## Keys
 

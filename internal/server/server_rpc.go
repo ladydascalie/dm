@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 
+	"dm/internal/ask"
 	"dm/internal/box"
 	"dm/internal/layout"
 	"dm/internal/wire"
@@ -738,6 +739,47 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 
 	case "secret-sync":
 		s.secretSync(cl, m)
+
+	// The ask store: the questions an agent puts to the reader on a pane. The
+	// bodies come from internal/ask, so the CLI and the daemon decode one
+	// contract, and every refusal carries a machine-readable code.
+	case "ask-open":
+		req, err := ask.ParseOpen(m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		id, err := s.askOpen(m.Target, req)
+		s.reply(cl, m, ask.OpenReply{ID: id}, err)
+
+	case "ask-await":
+		req, err := ask.ParseAwait(m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		rep, err := s.askAwait(cl, m.Target, req.Wait())
+		if errors.Is(err, errAskGone) {
+			// The connection went, so there is no one to reply to.
+			return
+		}
+		s.reply(cl, m, rep, err)
+
+	case "ask-answer":
+		req, err := ask.ParseAnswer(m.Res)
+		if err != nil {
+			s.reply(cl, m, nil, err)
+			return
+		}
+		answer, err := s.askAnswer(m.Target, req)
+		s.reply(cl, m, answer, err)
+
+	case "ask-close":
+		closed, err := s.askClose(m.Target)
+		s.reply(cl, m, ask.ClosedReply{Closed: closed}, err)
+
+	case "ask-list":
+		s.reply(cl, m, ask.ListReply{Asks: s.askList()}, nil)
 
 	default:
 		s.reply(cl, m, nil, fmt.Errorf("unknown action %q", m.Action))

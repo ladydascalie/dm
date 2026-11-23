@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"dm/internal/ask"
 	"dm/internal/box"
 	"dm/internal/cells"
 	"dm/internal/clidoc"
@@ -56,6 +57,8 @@ type cmdFlags struct {
 	pluginSplit  bool
 	pluginWindow bool
 	target       string
+	pane         string
+	toolCall     string
 	seq          int
 	from         string
 	limit        int
@@ -114,7 +117,7 @@ func (c *cmdFlags) parse(args []string) error {
 	ordered := reorder(args)
 	_, pos, dangling := split(args)
 	verb := c.fs.Name()
-	if verb == "msg" || verb == "secret" || verb == "plugin" {
+	if verb == "msg" || verb == "secret" || verb == "plugin" || verb == "ask" {
 		// The subverb of a grouped verb is the first positional, read
 		// from the original argv order: reorder has moved a dangling
 		// value-taking flag in front of it, and reading the reordered
@@ -166,6 +169,10 @@ func (c *cmdFlags) parse(args []string) error {
 		}
 		if verb == "secret" {
 			fmt.Fprint(out, clidoc.SecretSubcommands())
+			return
+		}
+		if verb == "ask" {
+			fmt.Fprint(out, clidoc.AskSubcommands())
 			return
 		}
 		fmt.Fprint(out, clidoc.VerbHelp(verb))
@@ -347,6 +354,10 @@ func (c *cmdFlags) register(name, desc string) {
 		c.fs.BoolVar(&c.pluginWindow, "window", false, desc)
 	case "target":
 		c.fs.StringVar(&c.target, "target", "", desc)
+	case "pane":
+		c.fs.StringVar(&c.pane, "pane", "", desc)
+	case "tool-call":
+		c.fs.StringVar(&c.toolCall, "tool-call", "", desc)
 	default:
 		panic("cli: no field binding for flag " + name)
 	}
@@ -435,6 +446,8 @@ var withValue = map[string]bool{
 	"-env": true, "--env": true,
 	"-argv": true, "--argv": true,
 	"-target": true, "--target": true,
+	"-pane": true, "--pane": true,
+	"-tool-call": true, "--tool-call": true,
 	"-upstream": true, "--upstream": true, "-header": true, "--header": true,
 	"-to": true, "--to": true,
 	"-addr": true, "--addr": true, "-token": true, "--token": true,
@@ -876,6 +889,13 @@ func Run(argv []string) error {
 			return err
 		}
 		return runBox(c)
+
+	case "ask":
+		c := newFlagsAt(root, "ask")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		return runAsk(c)
 
 	case "list":
 		c := newFlagsAt(root, "list")
@@ -1725,6 +1745,297 @@ func boxSchemaVerb(c *cmdFlags) error {
 	}
 	fmt.Println(string(b))
 	return nil
+}
+
+// runAsk dispatches the ask verbs. Each one is a thin wrapper on one ask
+// action: the shapes come from ask.go, so the CLI carries no wire of its own.
+func runAsk(c *cmdFlags) error {
+	if len(c.args) == 0 {
+		fmt.Print(clidoc.AskSubcommands())
+		return nil
+	}
+	switch c.args[0] {
+	case "list":
+		return askListVerb(c)
+	case "open":
+		return askOpenVerb(c)
+	case "await":
+		return askAwaitVerb(c)
+	case "answer":
+		return askAnswerVerb(c)
+	case "close":
+		return askCloseVerb(c)
+	}
+	return fmt.Errorf("ask: unknown verb %q: want list, open, await, answer or close", c.args[0])
+}
+
+// askID reads the id a verb takes as its one positional and checks its shape,
+// so a bad id fails here with a non-zero exit before the request goes out.
+func askID(c *cmdFlags, verb string) (string, error) {
+	if len(c.args) < 2 {
+		return "", fmt.Errorf("ask %s needs an id", verb)
+	}
+	if len(c.args) > 2 {
+		return "", fmt.Errorf("ask %s: unexpected argument %q", verb, c.args[2])
+	}
+	id := c.args[1]
+	if err := ask.CheckID(id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// askBody reads the body a verb decodes from stdin. A body that is missing or
+// blank is refused here, so a verb never sends an empty request by accident.
+func askBody(verb string) ([]byte, error) {
+	b, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return nil, fmt.Errorf("ask %s: read body: %w", verb, err)
+	}
+	if strings.TrimSpace(string(b)) == "" {
+		return nil, fmt.Errorf("ask %s: no body on stdin", verb)
+	}
+	return b, nil
+}
+
+// askListVerb prints every listed ask, oldest first, or the reply unchanged on
+// --json. One row is ID PANE STATE TOOLCALL QUESTION.
+func askListVerb(c *cmdFlags) error {
+	if len(c.args) > 1 {
+		return fmt.Errorf("ask list: unexpected argument %q", c.args[1])
+	}
+	m, err := transport.RPC(c.session, wire.Msg{Action: "ask-list"})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
+	var rep ask.ListReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	askPrint(rep.Asks)
+	return nil
+}
+
+// askOpenVerb opens an ask on a pane. The pane and the tool call are flags and
+// the questions come from stdin, because a question set is too big for argv.
+func askOpenVerb(c *cmdFlags) error {
+	if len(c.args) > 1 {
+		return fmt.Errorf("ask open: unexpected argument %q", c.args[1])
+	}
+	if c.pane == "" {
+		return fmt.Errorf("ask open needs --pane")
+	}
+	if c.toolCall == "" {
+		return fmt.Errorf("ask open needs --tool-call")
+	}
+	if err := ask.CheckToolCallID(c.toolCall); err != nil {
+		return err
+	}
+	body, err := askBody("open")
+	if err != nil {
+		return err
+	}
+	req, err := ask.ParseQuestions(body)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(ask.OpenReq{ToolCallID: c.toolCall, Questions: req.Questions})
+	if err != nil {
+		return err
+	}
+	m, err := transport.RPC(c.session, wire.Msg{Action: "ask-open", Target: c.pane, Res: raw})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
+	var rep ask.OpenReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	fmt.Println(rep.ID)
+	return nil
+}
+
+// askAwaitVerb parks until the ask is answered or the wait passes, then prints
+// the answer, or pending when nobody answered. The daemon bounds the wait, so
+// the client deadline is the bound plus a minute.
+func askAwaitVerb(c *cmdFlags) error {
+	id, err := askID(c, "await")
+	if err != nil {
+		return err
+	}
+	req := &ask.AwaitReq{TimeoutMs: int(c.timeout / time.Millisecond)}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	m, err := rpcWithin(c.session, wire.Msg{Action: "ask-await", Target: id, Res: raw}, req.Wait()+time.Minute)
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
+	var rep ask.AwaitReply
+	if err := json.Unmarshal(m.Res, &rep); err != nil {
+		return err
+	}
+	if rep.Pending {
+		fmt.Println("pending")
+		return nil
+	}
+	if rep.Answer == nil {
+		return fmt.Errorf("ask await: reply carried neither pending nor an answer")
+	}
+	askPrintAnswer(rep.Answer)
+	return nil
+}
+
+// askAnswerVerb answers one ask. The all-or-nothing rule is the daemon's, so a
+// bad answer comes back as invalid_answer with a non-zero exit.
+func askAnswerVerb(c *cmdFlags) error {
+	id, err := askID(c, "answer")
+	if err != nil {
+		return err
+	}
+	body, err := askBody("answer")
+	if err != nil {
+		return err
+	}
+	req, err := ask.ParseAnswer(body)
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	m, err := transport.RPC(c.session, wire.Msg{Action: "ask-answer", Target: id, Res: raw})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+		return nil
+	}
+	var answer ask.Answer
+	if err := json.Unmarshal(m.Res, &answer); err != nil {
+		return err
+	}
+	askPrintAnswer(&answer)
+	return nil
+}
+
+// askCloseVerb drops one ask. It is idempotent, so closing an id that names
+// nothing still exits zero.
+func askCloseVerb(c *cmdFlags) error {
+	id, err := askID(c, "close")
+	if err != nil {
+		return err
+	}
+	m, err := transport.RPC(c.session, wire.Msg{Action: "ask-close", Target: id})
+	if err != nil {
+		return err
+	}
+	if !m.OK {
+		return fmt.Errorf("%s", m.Error)
+	}
+	if c.jsonOut {
+		fmt.Println(string(m.Res))
+	}
+	return nil
+}
+
+// askPrint writes one row per listed ask as ID PANE STATE TOOLCALL QUESTION.
+// STATE is open, cancelled or answered; an answered ask stays listed until it
+// is closed, so a reader can see the outcome.
+func askPrint(asks []ask.Request) {
+	if len(asks) == 0 {
+		return
+	}
+	states := make([]string, len(asks))
+	idW, paneW, stateW, toolW := 0, 0, 0, 0
+	for i, a := range asks {
+		states[i] = askState(a)
+		idW = max(idW, cells.Cells(a.ID))
+		paneW = max(paneW, cells.Cells(a.Pane))
+		stateW = max(stateW, cells.Cells(states[i]))
+		toolW = max(toolW, cells.Cells(a.ToolCallID))
+	}
+	for i, a := range asks {
+		first := ""
+		if len(a.Questions) > 0 {
+			first = a.Questions[0].Question
+		}
+		line := fmt.Sprintf("%s %s %s %s", cells.Pad(a.ID, idW),
+			cells.Pad(a.Pane, paneW), cells.Pad(states[i], stateW), cells.Pad(a.ToolCallID, toolW))
+		if first != "" {
+			line += " " + first
+		}
+		fmt.Println(strings.TrimRight(line, " "))
+	}
+}
+
+// askState is one ask's outcome as a reader names it.
+func askState(a ask.Request) string {
+	if a.Answer == nil {
+		return "open"
+	}
+	if a.Answer.Cancel {
+		return "cancelled"
+	}
+	return "answered"
+}
+
+// askPrintAnswer writes one answer as a row per question: the question index,
+// the option indexes or the custom text, and the notes when it carries them.
+// A cancelled answer prints one word.
+func askPrintAnswer(a *ask.Answer) {
+	if a.Cancel {
+		fmt.Println("cancelled")
+		return
+	}
+	for _, it := range a.Items {
+		choice := it.Text
+		if len(it.OptionIndexes) > 0 {
+			indexes := make([]string, len(it.OptionIndexes))
+			for i, n := range it.OptionIndexes {
+				indexes[i] = strconv.Itoa(n)
+			}
+			choice = strings.Join(indexes, ",")
+			if it.Text != "" {
+				choice += " " + it.Text
+			}
+		}
+		line := fmt.Sprintf("%d %s", it.QuestionIndex, choice)
+		if it.Notes != "" {
+			line += " " + it.Notes
+		}
+		fmt.Println(strings.TrimRight(line, " "))
+	}
+	if a.Note != "" {
+		fmt.Println(a.Note)
+	}
 }
 
 // rpcWithin is rpc with a read deadline the caller sets, because a blocking

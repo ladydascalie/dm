@@ -6,7 +6,9 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 
+	"dm/internal/ask"
 	"dm/internal/box"
 	"dm/internal/layout"
 	"dm/internal/paths"
@@ -137,6 +139,15 @@ type State struct {
 	// written before the registry existed loads with zero, an empty registry.
 	Secrets []*Secret `json:"secrets,omitempty"`
 
+	// Ask is the session's questions for the reader: the open ones and the
+	// answered ones not yet closed, oldest first. They live here the way box
+	// entries do, so a client that attaches mid-question sees the open ones.
+	// AskSeq is the last ask id handed out; it only grows, so a closed ask's id
+	// is never reused. A state file written before asks existed loads with
+	// both zero, an empty store.
+	Ask    []ask.Request `json:"ask,omitempty"`
+	AskSeq int           `json:"askSeq,omitempty"`
+
 	// Shelf holds the panes set aside: each keeps its id, its PaneState and
 	// its PTY, but sits in no window's tree and has no rect. The slice order
 	// is the order the shelf shows them. ShelfActive indexes the member the
@@ -146,6 +157,23 @@ type State struct {
 	Shelf       []string `json:"shelf,omitempty"`
 	ShelfActive int      `json:"shelfActive,omitempty"`
 	ShelfFolded bool     `json:"shelfFolded,omitempty"`
+}
+
+// NewAskID hands out the next ask id: a1, a2, and so on. The counter only
+// moves forward, so a closed ask's id is never handed out again.
+func (st *State) NewAskID() string {
+	st.AskSeq++
+	return "a" + strconv.Itoa(st.AskSeq)
+}
+
+// AskIndex is the index of the ask with this id, or -1 when the store has none.
+func (st *State) AskIndex(id string) int {
+	for i := range st.Ask {
+		if st.Ask[i].ID == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // ShelfIndex is the index of id in the shelf, or -1 when it is not a member.
@@ -386,6 +414,18 @@ func LoadStateAt(root, name string) (*State, error) {
 		}
 	}
 	changed := false
+	if n := st.dropBadAsks(); n > 0 {
+		log.Printf("ask: dropped %d invalid requests on load", n)
+		changed = true
+	}
+	// A hand-edited file can carry an ask id the counter never reached. Bump
+	// the counter past it, so the next open cannot reuse a listed id.
+	for _, a := range st.Ask {
+		if n, err := strconv.Atoi(strings.TrimPrefix(a.ID, "a")); err == nil && n > st.AskSeq {
+			st.AskSeq = n
+			changed = true
+		}
+	}
 	if n := st.dropBadSecrets(); n > 0 {
 		logDroppedSecrets(n)
 		changed = true
@@ -495,6 +535,27 @@ func (st *State) dropBadBoxEntries() int {
 		}
 	}
 	st.Box = kept
+	return bad
+}
+
+// dropBadAsks removes requests that fail the ask contract and reports how many
+// went, so LoadState can name them in one log line. A hand-edited or truncated
+// state file costs its bad requests, not the whole store.
+func (st *State) dropBadAsks() int {
+	if len(st.Ask) == 0 {
+		return 0
+	}
+	kept := st.Ask[:0]
+	for i := range st.Ask {
+		if st.Ask[i].Validate() == nil {
+			kept = append(kept, st.Ask[i])
+		}
+	}
+	bad := len(st.Ask) - len(kept)
+	st.Ask = kept
+	if len(st.Ask) == 0 {
+		st.Ask = nil
+	}
 	return bad
 }
 

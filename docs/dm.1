@@ -343,6 +343,53 @@ print the box schema the server serves
 .br
 \fB--s name\fP session name
 .TP
+\fBdm ask list [--json]\fP
+print the questions the session lists, oldest first
+.br
+\fB--s name\fP session name
+.br
+\fB--json\fP print JSON
+.TP
+\fBdm ask open --pane P --tool-call ID [--json]\fP
+open an ask on a pane, reading {questions} on stdin
+.br
+\fB--s name\fP session name
+.br
+\fB--pane P\fP pane the ask belongs to
+.br
+\fB--tool-call ID\fP the agent's tool call the questions belong to
+.br
+\fB--json\fP print JSON
+.br
+Example: \fBecho '{"questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}' | dm ask open --pane w1p1 --tool-call toolu_1\fP
+.TP
+\fBdm ask await <id> [--timeout 25s] [--json]\fP
+block until the ask is answered, or print pending
+.br
+\fB--s name\fP session name
+.br
+\fB--timeout D\fP wait timeout, capped at 25s
+.br
+\fB--json\fP print JSON
+.br
+Example: \fBdm ask await a1 --json\fP
+.TP
+\fBdm ask answer <id> [--json]\fP
+answer an ask, reading {items,globalNote,cancel} on stdin
+.br
+\fB--s name\fP session name
+.br
+\fB--json\fP print JSON
+.br
+Example: \fBecho '{"items":[{"questionIndex":0,"optionIndexes":[0]}]}' | dm ask answer a1\fP
+.TP
+\fBdm ask close <id> [--json]\fP
+drop an ask from the store, idempotently
+.br
+\fB--s name\fP session name
+.br
+\fB--json\fP print JSON
+.TP
 \fBdm secret register <name> --tool op --ref R [--upstream URL --header T] [--env K=V]...\fP
 register a secret: how to fetch it and where it rides
 .br
@@ -850,6 +897,31 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBsecret-sync\fP
 .nf
 {"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}
+.fi
+.TP
+\fBask-open\fP
+.nf
+{"action":"ask-open","target":"w1p1","res":{"toolCallId":"toolu_1","questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}}
+.fi
+.TP
+\fBask-await\fP
+.nf
+{"action":"ask-await","target":"a1","res":{"timeoutMs":25000}}
+.fi
+.TP
+\fBask-answer\fP
+.nf
+{"action":"ask-answer","target":"a1","res":{"items":[{"questionIndex":0,"optionIndexes":[0]}]}}
+.fi
+.TP
+\fBask-close\fP
+.nf
+{"action":"ask-close","target":"a1"}
+.fi
+.TP
+\fBask-list\fP
+.nf
+{"action":"ask-list"}
 .fi
 .SH KEYS
 The default keymap. A key label is the key pressed after the prefix key.

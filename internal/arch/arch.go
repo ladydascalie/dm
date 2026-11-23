@@ -78,6 +78,7 @@ var Layers = []Layer{
 	{
 		Name: "domain",
 		Packages: []string{
+			"dm/internal/ask",
 			"dm/internal/box",
 			"dm/internal/keymap",
 			"dm/internal/layout",

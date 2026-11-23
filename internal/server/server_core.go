@@ -455,6 +455,11 @@ type server struct {
 	// wake every one; a waiter re-checks under s.mu, so the wakeup is a hint.
 	boxWaiters map[*boxWaiter]bool
 
+	// askWaiters holds the ask-await calls blocked right now. An answer and a
+	// close wake every one; a waiter re-checks under s.mu, so the wakeup is a
+	// hint. Memory only: a restart drops the waiters and the caller retries.
+	askWaiters map[*askWaiter]bool
+
 	// watches is the presence registry: the live reads, keyed by pane and
 	// filter. It is memory only. A restart forgets it and the next reads
 	// rebuild it, so it never reaches state.json.
