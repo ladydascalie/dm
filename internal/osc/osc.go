@@ -16,10 +16,13 @@ import (
 type Filter struct {
 	buf    []byte
 	Status func(wire.Status)
-	Query  func()
-	Reply  func(string)
-	Cursor func() (row, col int)
-	FG, BG string
+	// Session is called with the decoded OSC 7502 report: the file a pane's
+	// agent writes its structured session to, and the session id.
+	Session func(Session)
+	Query   func()
+	Reply   func(string)
+	Cursor  func() (row, col int)
+	FG, BG  string
 	// CursorFG is the cursor colour OSC 12 reports. Empty falls back to
 	// TermCursor, so a future cursor-colour track only fills this field.
 	CursorFG string
@@ -43,7 +46,10 @@ const (
 	replyDA2   = "\x1b[>0;10;1c"
 )
 
-var oscPrefix = []byte("\x1b]7501;")
+var (
+	oscPrefix        = []byte("\x1b]7501;")
+	oscSessionPrefix = []byte("\x1b]7502;")
+)
 
 func (f *Filter) Feed(p []byte, out *bytes.Buffer) {
 	f.buf = append(f.buf, p...)
@@ -131,6 +137,17 @@ func (f *Filter) handleOSC(seq []byte) bool {
 				return true
 			}
 		}
+	}
+	if bytes.HasPrefix(seq, oscSessionPrefix) {
+		payload := seq[len(oscSessionPrefix):]
+		payload = bytes.TrimSuffix(payload, []byte("\x1b\\"))
+		payload = bytes.TrimSuffix(payload, []byte{0x07})
+		if s, ok := ParseSession(string(payload)); ok && f.Session != nil {
+			f.Session(s)
+		}
+		// The frame names the session and nothing else: it is consumed even
+		// when it does not decode, so the VT never sees it.
+		return true
 	}
 	if bytes.HasPrefix(seq, oscPrefix) {
 		payload := seq[len(oscPrefix):]
@@ -267,6 +284,45 @@ func normaliseState(s string) string {
 		return s
 	}
 	return "unknown"
+}
+
+// Session is the decoded OSC 7502 frame: the file a pane's agent writes its
+// structured session to, and the id that session holds. The file is the path
+// itself, decoded, not the base64 the frame carries.
+type Session struct {
+	File string
+	ID   string
+}
+
+// ParseSession accepts the OSC 7502 wire format, `session=<b64 path>;id=<id>`.
+// The path is base64 because a path holds characters the frame cannot carry.
+// A frame with no path, or one whose path does not decode, names no session:
+// ok is false and the caller drops it. An id alone is not a session either, so
+// a partial frame never reaches a reader.
+func ParseSession(s string) (Session, bool) {
+	var out Session
+	havePath := false
+	for _, pair := range strings.Split(strings.TrimSpace(s), ";") {
+		k, v, found := strings.Cut(strings.TrimSpace(pair), "=")
+		if !found {
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "session":
+			b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(v))
+			if err != nil {
+				return Session{}, false
+			}
+			out.File = string(b)
+			havePath = true
+		case "id":
+			out.ID = strings.TrimSpace(v)
+		}
+	}
+	if !havePath || out.File == "" {
+		return Session{}, false
+	}
+	return out, true
 }
 
 // ParseStatus accepts the OSC 7501 wire format, `state=working:app=pi:msg=<b64>`,
