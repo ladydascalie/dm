@@ -450,6 +450,37 @@ func (t *tui) processInput() {
 			}
 			continue
 		}
+		if t.mode == "ask" {
+			// While the ask float is up every key belongs to it: nothing
+			// reaches a pane. A lone esc declines the ask, so it skips the
+			// paste marker check: a bare esc is not the start of one. A mouse
+			// event and a paste are swallowed whole, because the float takes
+			// keys and no pointer.
+			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+				if !t.askKey() {
+					return
+				}
+				continue
+			}
+			if _, n, ok := parseMouse(t.inbuf); ok {
+				t.inbuf = t.inbuf[n:]
+				continue
+			} else if n == 0 {
+				return // partial sequence, wait for the rest
+			}
+			if _, n, started := t.takePaste(); started {
+				if n == 0 {
+					t.holdPaste(time.Now())
+					return
+				}
+				t.inbuf = append([]byte(nil), t.inbuf[n:]...)
+				continue
+			}
+			if !t.askKey() {
+				return
+			}
+			continue
+		}
 		if t.mode == "float" {
 			// The float owns the keyboard: the bytes go to the command, and
 			// the prefix alone is the client's. A lone esc is the esc key, so
@@ -819,6 +850,9 @@ func (t *tui) expireMode(now time.Time) bool {
 		closeBoxView(t)
 	case "help":
 		closeKeymapView(t)
+	case "ask":
+		// A stalled escape was never the decline key: the reader pressed esc
+		// and something followed. Drop the bytes and keep the ask open.
 	case "rename":
 		t.closeRename()
 	case "search":
@@ -1215,6 +1249,7 @@ func (t *tui) exitScroll() {
 	t.mode = ""
 	t.inbuf = nil
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // startScroll puts a pane in scrollback. The client keeps no history until the
@@ -2757,6 +2792,7 @@ func (t *tui) closePicker() {
 	t.mode = ""
 	t.inbuf = nil
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // openRenamePrompt takes over input for the active workspace's label. The
@@ -2817,8 +2853,10 @@ func (t *tui) openRenamePromptFor(kind, id, current string) {
 	t.dirty = true
 }
 
-// closeRename drops the prompt and its draft, whatever it held.
+// closeRename drops the prompt and its draft, whatever it held. The answer
+// prompt closes back onto the ask float it was opened from, which is still up.
 func (t *tui) closeRename() {
+	kind := t.renameKind
 	t.mode = ""
 	t.renameDraft.SetValue("")
 	t.renameID = ""
@@ -2826,6 +2864,11 @@ func (t *tui) closeRename() {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	if kind == askPromptKind && t.ask != nil {
+		t.mode = "ask"
+		t.askFit()
+	}
+	t.openDeferredAsk()
 }
 
 // submitRename sends the trimmed draft to the server and closes the prompt. An
@@ -2840,6 +2883,17 @@ func (t *tui) submitRename() {
 	name := strings.TrimSpace(t.renameDraft.String())
 	target := t.renameID
 	kind := t.renameKind
+	if kind == askPromptKind {
+		// The draft is the question's custom answer, not a name: nothing
+		// goes on the wire here, the float's send does that.
+		q := 0
+		if t.ask != nil {
+			q = t.ask.q
+		}
+		t.closeRename()
+		t.setAskText(q, name)
+		return
+	}
 	action := "rename-workspace"
 	switch kind {
 	case "window":

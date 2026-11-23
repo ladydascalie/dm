@@ -135,6 +135,7 @@ func closeCommandPalette(t *tui) {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // paletteArrowUp returns the length of the up-arrow sequence at the head of

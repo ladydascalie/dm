@@ -129,7 +129,8 @@ func renameBoxGeometry(cols, rows, rail int) (layout.Rect, bool) {
 
 // drawRename paints the rename prompt as a floating pane over the pane area.
 // The title names the action, the kind and the id: a project is set, not
-// renamed, so that title reads "set project <id>". The hint names the keys the
+// renamed, so that title reads "set project <id>", and the ask float's answer
+// prompt reads "answer". The hint names the keys the
 // rename keymap binds to submit and cancel, and the one input row holds the
 // label, the draft and the caret. The row is the ui.Input component: the draft
 // takes what is left and loses its head first, so a long name still shows its
@@ -149,8 +150,13 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id strin
 		return
 	}
 	title := "rename " + k + " " + id
-	if k == "project" {
+	switch k {
+	case "project":
 		title = "set project " + id
+	case askPromptKind:
+		// The answer prompt is not a rename: it names the question it
+		// answers, and the ask float under it stays on screen.
+		title = "answer"
 	}
 	f := &panel.FloatingPane{
 		ID:    "rename",
@@ -187,11 +193,14 @@ func renameHint(km *keymap.Config) string {
 
 // renameInputRow paints the rename float's one input row: the dim label, the
 // draft and the caret. The label names the kind: a project prompt reads
-// "project: ", every other kind " name: ".
+// "project: ", an answer prompt "answer: ", every other kind " name: ".
 func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, kind string, draft ui.Input) {
 	label := " name: "
-	if kind == "project" {
+	switch kind {
+	case "project":
 		label = "project: "
+	case askPromptKind:
+		label = "answer: "
 	}
 	ui.DrawInput(buf, th, ui.InputProps{
 		Rect:   r,

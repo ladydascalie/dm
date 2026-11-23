@@ -64,6 +64,7 @@ func closeBoxView(t *tui) {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // boxRequest asks the server for the whole log. The reply carries the entries
@@ -368,6 +369,7 @@ func closeKeymapView(t *tui) {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.openDeferredAsk()
 }
 
 // keymapKey consumes one key while the keymap view is up. Every key belongs to
