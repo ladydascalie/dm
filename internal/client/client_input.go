@@ -2853,8 +2853,9 @@ func (t *tui) openRenamePromptFor(kind, id, current string) {
 	t.dirty = true
 }
 
-// closeRename drops the prompt and its draft, whatever it held. The answer
-// prompt closes back onto the ask float it was opened from, which is still up.
+// closeRename drops the prompt and its draft, whatever it held. The answer and
+// note prompts close back onto the ask float they were opened from, which is
+// still up.
 func (t *tui) closeRename() {
 	kind := t.renameKind
 	t.mode = ""
@@ -2864,7 +2865,7 @@ func (t *tui) closeRename() {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
-	if kind == askPromptKind && t.ask != nil {
+	if (kind == askPromptKind || kind == askNoteKind) && t.ask != nil {
 		t.mode = "ask"
 		t.askFit()
 	}
@@ -2883,14 +2884,18 @@ func (t *tui) submitRename() {
 	name := strings.TrimSpace(t.renameDraft.String())
 	target := t.renameID
 	kind := t.renameKind
-	if kind == askPromptKind {
-		// The draft is the question's custom answer, not a name: nothing
-		// goes on the wire here, the float's send does that.
+	if kind == askPromptKind || kind == askNoteKind {
+		// The draft is the question's custom answer or its note, not a name:
+		// nothing goes on the wire here, the float's send does that.
 		q := 0
 		if t.ask != nil {
 			q = t.ask.q
 		}
 		t.closeRename()
+		if kind == askNoteKind {
+			t.setAskNote(q, name)
+			return
+		}
 		t.setAskText(q, name)
 		return
 	}
