@@ -1544,7 +1544,7 @@ func pageAttr(t *testing.T, tag, name string) string {
 func TestPageFieldsStaySixteenOnAPhone(t *testing.T) {
 	page := pageSource(t)
 	rule := pageRule(t, page, "@media (max-width: 900px)")
-	for _, field := range []string{"#compose input", "#compose select", "#send input",
+	for _, field := range []string{"#compose input", "#compose select", "#send textarea",
 		"#ask .ask-text", "#ask .ask-note", ".targets select"} {
 		if !strings.Contains(rule, field) {
 			t.Fatalf("the phone rule lifts no %s to 16: %s", field, rule)
@@ -1615,22 +1615,93 @@ func TestPageComposerButtonsCarryGlyphs(t *testing.T) {
 }
 
 // TestPageComposerKeepsItsRow proves the icons changed no behaviour: the whole
-// row still leaves a read only page, enter still sends, and the input still
-// takes the width the two words gave up.
+// row still leaves a read only page, and the field still takes the width the
+// two words gave up.
 func TestPageComposerKeepsItsRow(t *testing.T) {
 	src := appScript(t)
 	if !strings.Contains(src, `$("send").style.display = fleet && fleet.readOnly ? "none" : "";`) {
 		t.Fatal("the composer row no longer hides on a read only page")
 	}
-	if !strings.Contains(src, `$("send-text").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    sendText();`) {
-		t.Fatal("enter no longer sends from the composer input")
-	}
 	page := pageSource(t)
-	rule := pageRule(t, page, "#send input")
+	rule := pageRule(t, page, "#send textarea")
 	if !strings.Contains(rule, "flex: 1") || !strings.Contains(rule, "min-width: 0") {
-		t.Fatalf("the input no longer takes the width of the row: %s", rule)
+		t.Fatalf("the field no longer takes the width of the row: %s", rule)
+	}
+}
+
+// TestPageComposerIsATextarea proves the composer takes a block: it is a
+// textarea one row tall at rest, its placeholder is unchanged, enter inserts a
+// newline instead of sending, and the height it keeps at rest is the height the
+// old input had.
+func TestPageComposerIsATextarea(t *testing.T) {
+	page := pageSource(t)
+	tag := pageTag(t, page, `<textarea id="send-text"`)
+	if got := pageAttr(t, tag, "rows"); got != "1" {
+		t.Fatalf("the composer rests at %q rows, want 1", got)
+	}
+	if got := pageAttr(t, tag, "placeholder"); got != "type into the pane" {
+		t.Fatalf("the placeholder = %q, want the one it always carried", got)
+	}
+	rule := pageRule(t, page, "#send textarea")
+	for _, want := range []string{"min-height: 44px", "max-height: 30vh", "resize: none", "overflow-y: hidden"} {
+		if !strings.Contains(rule, want) {
+			t.Fatalf("the composer lost its %s: %s", want, rule)
+		}
+	}
+	src := appScript(t)
+	if strings.Contains(src, `$("send-text").addEventListener("keydown"`) {
+		t.Fatal("the composer still intercepts a key, so enter no longer inserts a newline")
+	}
+	if !strings.Contains(src, `$("send-text").addEventListener("input", sendGrow);`) {
+		t.Fatal("the composer does not refit itself as the reader types")
+	}
+}
+
+// TestPageComposerGrowthRule proves the composer grows by its own row height to
+// six rows, or stops at 30vh of the window, whichever comes first, and scrolls
+// inside itself past that.
+func TestPageComposerGrowthRule(t *testing.T) {
+	src := appScript(t)
+	for _, want := range []string{"const SEND_ROWS = 6;", "const SEND_VH = 0.3;"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("the composer's growth cap lost %q", want)
+		}
+	}
+	body := funcSource(t, src, "sendGrow")
+	for _, want := range []string{
+		"Math.min(SEND_ROWS * line + pad + edge, window.innerHeight * SEND_VH)",
+		`box.style.overflowY = want > cap ? "auto" : "hidden";`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("sendGrow lost %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestPageSendPastesABlock proves the send control's two shapes: a single line
+// goes as one typed write with its enter, exactly as before, and a block with a
+// newline goes as one paste followed by one enter, so the program takes the
+// block whole and submits once. An empty composer sends nothing.
+func TestPageSendPastesABlock(t *testing.T) {
+	body := funcSource(t, appScript(t), "sendText")
+	for _, want := range []string{
+		"if (!pane || !text) return;",
+		`if (text.includes("\n")) {`,
+		`{ pane: pane.id, text, paste: true }`,
+		`{ pane: pane.id, text: "", enter: true }`,
+		`{ pane: pane.id, text, enter: true }`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("sendText lost %q:\n%s", want, body)
+		}
+	}
+	// A single line is sent once, not as a paste.
+	at := strings.Index(body, "} else {")
+	if at < 0 {
+		t.Fatalf("sendText has no single line path:\n%s", body)
+	}
+	line := body[at+len("} else {"):]
+	if strings.Contains(line[:strings.Index(line, "}")], "paste") {
+		t.Fatalf("the single line path pastes:\n%s", line)
 	}
 }

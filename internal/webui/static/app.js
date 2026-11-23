@@ -2105,15 +2105,50 @@ async function composePost(ev) {
   });
 }
 
-// sendText types the input into the pane and presses enter. One button, one
-// meaning: the old pair differed only by whether the pane got the final enter,
-// and on a phone nobody wants to type a prompt without sending it.
-function sendText() {
-  if (!pane) return;
-  disarm();
+// SEND_ROWS is how many rows the composer grows to before it scrolls inside
+// itself. SEND_VH caps that on a short window first, so a landscape phone never
+// gives the composer half the screen.
+const SEND_ROWS = 6;
+const SEND_VH = 0.3;
+
+// sendGrow fits the composer to its text: one row at rest, which is the height
+// the row always had, then a row per line up to six rows or 30vh, then the box
+// scrolls inside itself. The cap is computed here as well as in the page's
+// stylesheet, because the overflow answer is this function's.
+function sendGrow() {
+  const box = $("send-text");
+  const cs = getComputedStyle(box);
+  const line = parseFloat(cs.lineHeight) || 21;
+  const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const edge = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+  const cap = Math.min(SEND_ROWS * line + pad + edge, window.innerHeight * SEND_VH);
+  // auto first: scrollHeight then reports the text's own height, not the height
+  // the last call pinned.
+  box.style.height = "auto";
+  const want = box.scrollHeight + edge;
+  box.style.height = Math.min(want, cap) + "px";
+  box.style.overflowY = want > cap ? "auto" : "hidden";
+}
+
+// sendText sends what the composer holds. One line goes as a typed command, the
+// way it always did: the text, then one enter. A block with a newline goes as
+// one paste and then one enter, so the program receives the block whole and
+// submits once. A paste that failed is not followed by the enter: that would
+// submit whatever the pane already holds.
+async function sendText() {
   const input = $("send-text");
-  post("/api/msg", { pane: pane.id, text: input.value, enter: true });
+  const text = input.value;
+  if (!pane || !text) return;
+  disarm();
+  if (text.includes("\n")) {
+    if (await post("/api/msg", { pane: pane.id, text, paste: true })) {
+      await post("/api/msg", { pane: pane.id, text: "", enter: true });
+    }
+  } else {
+    await post("/api/msg", { pane: pane.id, text, enter: true });
+  }
   input.value = "";
+  sendGrow();
 }
 
 // attachImage sends one picture to the daemon and puts the path it answers in
@@ -2141,11 +2176,13 @@ async function attachImage(file) {
   const doc = await res.json();
   const input = $("send-text");
   input.value = input.value ? input.value + " " + doc.path : doc.path;
+  sendGrow();
   input.focus();
 }
 
-// post writes one key message into the pane and reports a refusal in the
-// banner.
+// post writes one key message into the pane, reports a refusal in the banner
+// and answers whether it landed, so a caller that sends two frames in order can
+// stop at the first one that failed.
 async function post(path, body) {
   try {
     const res = await fetchAPI(path, {
@@ -2153,10 +2190,15 @@ async function post(path, body) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) banner(await res.text());
-    else banner("");
+    if (!res.ok) {
+      banner(await res.text());
+      return false;
+    }
+    banner("");
+    return true;
   } catch (e) {
     banner("send failed: " + e);
+    return false;
   }
 }
 
@@ -2485,15 +2527,15 @@ $("send-image").addEventListener("change", (e) => {
   e.target.value = "";
   attachImage(file);
 });
-$("send-text").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    sendText();
-  }
-});
+// Enter inserts a newline in the textarea and sends nothing: a phone that
+// types a block needs the newline more than it needs the early submit. The send
+// control is what sends, and it sends the block as one paste.
+$("send-text").addEventListener("input", sendGrow);
 $("sheet-open").addEventListener("click", openSheet);
 $("thumbs-toggle").addEventListener("click", () => setThumbs(!thumbsOn()));
 window.addEventListener("orientationchange", () => {
+  // The composer's cap is a share of the window, so it is refitted at once.
+  sendGrow();
   // Text re-wraps on its own; only the pictures need repainting. The handle is
   // held so a hide inside the window clears it: a hidden page runs no timer.
   if (document.hidden || !thumbsOn()) return;

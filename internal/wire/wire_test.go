@@ -415,3 +415,36 @@ func TestSnapshotAskRoundTrip(t *testing.T) {
 		t.Fatalf("an empty store kept the key: %s", b)
 	}
 }
+
+// TestPasteRoundTrip proves the paste flag survives the frame and that an
+// unset flag leaves the key out, so a typed write stays byte-identical on the
+// wire to the frames a client sent before the flag existed.
+func TestPasteRoundTrip(t *testing.T) {
+	in := wire.Msg{Type: "req", Action: "write-to", Target: "w1p1", Msg: "one\ntwo", Paste: true}
+	var buf bytes.Buffer
+	if err := wire.WriteMsg(&buf, in); err != nil {
+		t.Fatal(err)
+	}
+	out, err := wire.ReadMsg(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Action != "write-to" || out.Msg != "one\ntwo" || !out.Paste {
+		t.Fatalf("round trip = %+v, want the paste flag kept", out)
+	}
+	if out.Enter {
+		t.Fatal("a paste round trip grew an enter")
+	}
+
+	b, err := json.Marshal(wire.Msg{Type: "req", Action: "write-to", Msg: "ls"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["paste"]; ok {
+		t.Fatalf("an unset paste kept the key: %s", b)
+	}
+}

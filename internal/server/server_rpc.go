@@ -240,7 +240,7 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		if m.Action == "exec" {
 			m.Enter = true
 		}
-		if err := s.writeTo(m.Target, m.Msg, m.Enter); err != nil {
+		if err := s.writeTo(m.Target, m.Msg, writeOpts{enter: m.Enter, paste: m.Paste}); err != nil {
 			s.reply(cl, m, nil, err)
 			return
 		}
