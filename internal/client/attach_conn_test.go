@@ -65,6 +65,9 @@ func TestAttachConnRunsWithNoTerminal(t *testing.T) {
 	// Attach loads the keymap from the config path, which writes a file when
 	// it is missing. Keep the operator's own config out of it.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	// Attach also reads the saved preferences from the state tree. Keep the
+	// operator's own prefs out of it.
+	t.Setenv("DM_STATE", t.TempDir())
 
 	out := &syncBuffer{}
 	size := &fakeSize{cols: 80, rows: 24}

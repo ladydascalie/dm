@@ -632,7 +632,10 @@ func (t *tui) switcherKey() bool {
 		t.sw.DeleteWord()
 		t.dirty = true
 	case "sort":
-		t.sw.CycleSort()
+		// The cycle repaints the table in the new ordering; the mode it landed
+		// on is written to the prefs file best effort, so the next run opens in
+		// it.
+		t.saveDashboardSort(t.sw.CycleSort())
 		t.dirty = true
 	case "peek":
 		t.sw.TogglePreview()

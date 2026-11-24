@@ -150,6 +150,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"diff-command":      `diff-command "git diff --stat"`,
 		"web-addr":          `web-addr "100.71.227.52:8099"`,
 		"dashboard-layout":  `dashboard-layout "float"`,
+		"dashboard-peek":    `dashboard-peek "right"`,
 		"shelf-layout":      `shelf-layout "pane"`,
 		"shelf-size":        `shelf-size 35`,
 		"float-shadow":      `float-shadow "on"`,
@@ -221,6 +222,17 @@ func TestConfigNodesParse(t *testing.T) {
 	if cfg.DashboardFullScreen() {
 		t.Error("DashboardFullScreen = true, want the float layout")
 	}
+	if cfg.DashboardPeekDown() {
+		t.Error("DashboardPeekDown = true, want the right band")
+	}
+	// The node's other value: down is the default the table names.
+	down, err := keymap.ParseConfig(`dashboard-peek "down"`)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if !down.DashboardPeekDown() {
+		t.Error("DashboardPeekDown = false, want the down band")
+	}
 	if cfg.ShelfCentered() {
 		t.Error("ShelfCentered = true, want the pane layout")
 	}
@@ -266,6 +278,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"diff-command":      `"hunk diff"`,
 		"web-addr":          `"` + keymap.DefaultWebAddr + `"`,
 		"dashboard-layout":  `"float"`,
+		"dashboard-peek":    `"down"`,
 		"shelf-layout":      `"centered"`,
 		"shelf-size":        "80",
 		"float-shadow":      `"off"`,

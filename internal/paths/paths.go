@@ -73,6 +73,10 @@ func StatePathAt(root, name string) string {
 // StatePath is the session's state file.
 func StatePath(name string) string { return StatePathAt(StateDir(), name) }
 
+// PrefsPath is the client's preferences file, under the state root. It holds
+// what the operator chose in the TUI and wants back on the next run.
+func PrefsPath() string { return filepath.Join(StateDir(), "prefs.json") }
+
 // FolderName is the default window label for a directory: its last path
 // element, with the filesystem root spelled out.
 func FolderName(dir string) string {
