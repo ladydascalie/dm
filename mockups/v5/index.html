@@ -72,6 +72,18 @@ h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
 
 .row,.opt,.kid,.hline,.ph,.pb,.pk,.sect,.foot,.head,.tabs,.line{
  line-height:1.4;height:1.4em}
+
+/* the desk's status strip, one row, with the question pinned at its right edge */
+.strip{margin-top:6px;width:96ch;display:flex;align-items:center;background:var(--bg);
+ border-left:2px solid transparent;border-right:2px solid transparent;padding:0 1ch;
+ font-family:"DejaVu Sans Mono",ui-monospace,monospace;font-size:13px;line-height:1.4;white-space:pre}
+.strip .w{color:var(--dim)}
+.strip .f{background:var(--focus);color:var(--text);padding:0 1ch}
+.strip .sp{flex:1 1 auto}
+.strip .bg{color:var(--del);font-weight:700}
+.strip .ask{color:var(--text)}
+.strip .n{color:var(--dim)}
+.strip .k{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -105,11 +117,11 @@ h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
       </div>
     </div>
     <div class="sect"><span class="hair"></span></div>
-    <div class="foot"><span class="chip">j k</span><span class="lbl">move</span><span class="chip">1-9</span><span class="lbl">pick</span><span class="chip">space</span><span class="lbl">pick</span><span class="chip">t</span><span class="lbl">type</span><span class="chip">N</span><span class="lbl">note</span><span class="chip">enter</span><span class="lbl">send</span><span class="chip">esc</span><span class="lbl">decline</span></div>
+    <div class="foot"><span class="chip">j k</span><span class="lbl">move</span><span class="chip">1-9</span><span class="lbl">pick</span><span class="chip">space</span><span class="lbl">pick</span><span class="chip">t</span><span class="lbl">type</span><span class="chip">N</span><span class="lbl">note</span><span class="chip">A</span><span class="lbl">hide</span><span class="chip">enter</span><span class="lbl">send</span><span class="chip">esc</span><span class="lbl">decline</span></div>
   </div>
   <div class="bot"><span class="corner">╰</span><span class="rule"></span><span class="corner">╯</span></div>
 </div>
-<p class="note"><b>Height:</b> the help pane is capped at the list height plus two rows, so a long preview elides instead of filling the terminal. Four options, one question, one footer: thirteen interior rows. The blank rows under a short list are the only waste left.</p>
+<p class="note"><b>Height:</b> the box reserves one size for the whole ask, thirteen interior rows by default, taken from the tallest question and the tallest help it can show. The footer pins to the bottom, so the spare rows land in the columns as room. A list that outruns them scrolls under the cursor, and the help pane elides with a count.</p>
 
 <h2>Two questions, the second one multi-select</h2>
 <div class="frame">
@@ -117,7 +129,6 @@ h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
   <div class="body">
     <div class="tabs"><span class="dim">▸</span><span class="dim bold"> 1 Scope  </span><span class="txt">●</span><span class="acc bold"> 2 Tests  </span><span class="spacer"></span><span class="dim">2 of 2</span></div>
     <div class="sect"><span class="hair"></span></div>
-    <div class="head"><span class="hdr bold">TESTS</span></div>
     <div class="row"> Which suites should run after it?</div>
     <div class="sect"><span class="hair"></span></div>
     <div class="split">
@@ -138,10 +149,18 @@ h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
       </div>
     </div>
     <div class="sect"><span class="hair"></span></div>
-    <div class="foot"><span class="chip">j k</span><span class="lbl">move</span><span class="chip">1-9</span><span class="lbl">pick</span><span class="chip">space</span><span class="lbl">toggle</span><span class="chip">tab</span><span class="lbl">question</span><span class="chip">N</span><span class="lbl">note</span><span class="chip">enter</span><span class="lbl">send</span><span class="chip">esc</span><span class="lbl">decline</span></div>
+    <div class="foot"><span class="chip">j k</span><span class="lbl">move</span><span class="chip">1-9</span><span class="lbl">pick</span><span class="chip">space</span><span class="lbl">toggle</span><span class="chip">tab</span><span class="lbl">question</span><span class="chip">N</span><span class="lbl">note</span><span class="chip">A</span><span class="lbl">hide</span><span class="chip">enter</span><span class="lbl">send</span><span class="chip">esc</span><span class="lbl">decline</span></div>
   </div>
   <div class="bot"><span class="corner">╰</span><span class="rule"></span><span class="corner">╯</span></div>
 </div>
+
+<h2>The status strip while the question is hidden</h2>
+<div class="strip">
+  <span class="w">1  dm  2  web   │  </span><span class="f">● w1p8 working</span>
+  <span class="sp"></span>
+  <span class="bg">▲</span><span class="ask"> ask w1p8</span><span class="n"> 2/2</span><span class="k"> A</span>
+</div>
+<p class="note"><b>The pinned chip</b> names the pane, the place in the ask and the key that brings the float back. It sits on the strip's right edge, where nothing elides it, and it goes away the moment the box returns.</p>
 
 <h2>Narrow, 72 cells: the help pane folds under the list</h2>
 <div class="frame">
@@ -161,11 +180,11 @@ h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
     <div class="pb" style="color:var(--dim)">Freeze the signature.</div>
     <div class="pb" style="color:var(--dim)">Do not touch the parameter list.</div>
     <div class="sect"><span class="hair"></span></div>
-    <div class="foot"><span class="chip">j k</span><span class="lbl">move</span><span class="chip">1-9</span><span class="lbl">pick</span><span class="chip">t</span><span class="lbl">type</span><span class="chip">enter</span><span class="lbl">send</span><span class="chip">esc</span><span class="lbl">decline</span></div>
+    <div class="foot"><span class="chip">j k</span><span class="lbl">move</span><span class="chip">1-9</span><span class="lbl">pick</span><span class="chip">t</span><span class="lbl">type</span><span class="chip">A</span><span class="lbl">hide</span><span class="chip">enter</span><span class="lbl">send</span><span class="chip">esc</span><span class="lbl">decline</span></div>
   </div>
   <div class="bot"><span class="corner">╰</span><span class="rule"></span><span class="corner">╯</span></div>
 </div>
-<p class="note"><b>Below 90 cells</b> the help pane has no room, so the description and preview sit under their option, exactly as v1 does today. The footer drops the keys that no longer fit.</p>
+<p class="note"><b>A hides the float</b> and the same key brings it back with the answers so far, so the reader can scroll the pane and reread the question first. The ask stays listed while it is hidden, so the pane keeps its rail badge.<br><b>Below 90 cells</b> the help pane has no room, so the description and preview sit under their option, exactly as v1 does today. The footer drops the keys that no longer fit.</p>
 
 </body>
 </html>
