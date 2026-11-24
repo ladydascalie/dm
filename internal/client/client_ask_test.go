@@ -838,6 +838,56 @@ func TestAskFloatSingleSelectShowsItsPick(t *testing.T) {
 	}
 }
 
+// TestAskFloatPickWearsTheSettledColour: a chosen option is coloured, not just
+// boxed, so a pick reads as an answer at a glance. The cursor keeps the text
+// colour, so the two states never look the same.
+func TestAskFloatPickWearsTheSettledColour(t *testing.T) {
+	t.Parallel()
+	th := theme.DefaultTheme()
+	tui, _ := askTUI(t, askQuestions())
+	feed(tui, "2")
+	lines := tui.ask.listLines(th, 60, false)
+	fg := func(i int) (box, label theme.RGB) {
+		t.Helper()
+		for _, ln := range lines {
+			if ln.choice != i {
+				continue
+			}
+			return ln.segs[1].FG, ln.segs[2].FG
+		}
+		t.Fatalf("no row for option %d", i)
+		return theme.RGB{}, theme.RGB{}
+	}
+	if box, label := fg(1); box != th.Palette.RailDiffAdd || label != th.Palette.RailDiffAdd {
+		t.Fatalf("the pick is not in the settled colour: box %v label %v", box, label)
+	}
+	// The colour stays while the cursor stands on the pick; the weight is what
+	// the cursor adds.
+	for _, ln := range lines {
+		if ln.choice == 1 && !ln.segs[2].Bold {
+			t.Fatal("the cursor is on the pick and the label is not bold")
+		}
+	}
+	if box, label := fg(0); box != th.Palette.RailDim || label != th.Palette.RailDim {
+		t.Fatalf("the unpicked row carries the pick's colour: box %v label %v", box, label)
+	}
+	// The cursor alone does not take the settled colour: move onto the empty
+	// row and it reads as the cursor, not as an answer.
+	feed(tui, "k")
+	lines = tui.ask.listLines(th, 60, false)
+	for _, ln := range lines {
+		if ln.choice != 0 {
+			continue
+		}
+		if ln.segs[1].FG != th.Palette.RailDim {
+			t.Fatalf("the cursor row's mark took the pick colour: %v", ln.segs[1].FG)
+		}
+		if ln.segs[2].FG != th.Palette.RailText {
+			t.Fatalf("the cursor row's label is not the text colour: %v", ln.segs[2].FG)
+		}
+	}
+}
+
 // TestAskFloatLongListKeepsTheFooter: a list taller than the screen windows
 // under a footer that stays put, so the keys and the count are never the rows
 // that get cut. The cursor's row rides the window.

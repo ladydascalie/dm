@@ -987,14 +987,21 @@ func (v *askView) listLines(th theme.Theme, width int, withDescription bool) []a
 		case !q.MultiSelect && v.pick[v.q] == i:
 			box, on = "[●] ", true
 		}
+		// A pick wears the theme's settled green, so it reads as an answer and
+		// not as a cursor: the band and the pointer are where the reader is,
+		// the mark and its colour are what they said.
 		boxFG := p.RailDim
 		if on {
-			boxFG = p.RailText
+			boxFG = p.RailDiffAdd
 		}
 		label := segment.Seg{Text: fmt.Sprintf("%d  %s", i+1, o.Label), FG: p.RailDim, BG: p.RailBG}
-		if cur || on {
-			label.FG = p.RailText
-			label.Bold = cur
+		switch {
+		case on:
+			// The colour survives the cursor: what is picked stays green
+			// whether the reader is standing on it or has moved on.
+			label.FG, label.Bold = p.RailDiffAdd, cur
+		case cur:
+			label.FG, label.Bold = p.RailText, true
 		}
 		segs := []segment.Seg{{Text: box, FG: boxFG, BG: p.RailBG}, label}
 		out = append(out, row(i, segs))
