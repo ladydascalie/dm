@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dm web · v1 today</title>
+<style>
+:root{
+ --bg:#101418; --panel:#171d23; --line:#263039; --fg:#d7dee5; --dim:#7d8b98;
+ --working:#63a9ff; --blocked:#ffb454; --done:#58d68d; --error:#ff6b6b; --acc:#bb9af7;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 60px;background:#0a0d10;color:#c2cbd4;
+ font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{font-size:19px;margin:0 0 4px;color:#eef2f6;font-weight:650}
+.sub{margin:0 0 24px;color:#7d8b98;max-width:70ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#63707c;
+ margin:26px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8b98;max-width:70ch;font-size:13px}
+.note b{color:#a9b6c2;font-weight:550}
+
+/* the phone, as the page draws it today */
+.phone{width:420px;background:var(--bg);color:var(--fg);
+ font:15px/1.4 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+ border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ph{display:flex;align-items:baseline;gap:8px;padding:10px 12px;
+ background:var(--panel);border-bottom:1px solid var(--line)}
+.ph h3{margin:0;font-size:15px;font-weight:600}
+.state{font-size:12px;color:var(--blocked)}
+.state .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+ background:var(--blocked);margin-right:5px;vertical-align:1px}
+.ph .sp{flex:1}
+.ph button{font:13px/1 ui-sans-serif,system-ui,sans-serif;color:var(--fg);
+ background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
+.acts{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.acts button{flex:1;font:13px/1 ui-sans-serif,system-ui,sans-serif;color:var(--fg);
+ background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:9px 6px}
+
+.ask{background:var(--panel);border-bottom:1px solid var(--line);padding:10px 12px 12px}
+.ask-hd{display:flex;gap:8px;align-items:baseline;font-size:11px;
+ letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+.ask-hd b{color:var(--fg)}
+.ask-hd .ago{margin-left:auto}
+.ask-q{margin-top:12px}
+.ask-qh{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--acc)}
+.ask-qt{margin-top:4px;font-size:15px}
+.ask-hint{margin-top:3px;font-size:11px;color:var(--dim)}
+.ask-opt{margin-top:8px;padding:9px 10px;border:1px solid var(--line);
+ border-radius:8px;background:var(--bg)}
+.ask-opt.picked{border-color:var(--acc)}
+.ask-line{display:flex;gap:8px;align-items:baseline}
+.ask-tick{color:var(--acc);font-size:13px}
+.ask-label{font-weight:550}
+.ask-desc{margin:3px 0 0 21px;font-size:12.5px;color:var(--dim)}
+.ask-text{margin-top:10px;width:100%;font:14px/1.4 ui-sans-serif,system-ui,sans-serif;
+ color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px}
+.ask-controls{display:flex;gap:8px;margin-top:12px}
+.ask-controls button{flex:1;padding:10px;border-radius:8px;font:600 14px/1 ui-sans-serif,system-ui,sans-serif}
+.ask-controls .send{background:var(--working);color:#08121c;border:1px solid var(--working)}
+.ask-controls button:not(.send){background:var(--bg);color:var(--fg);border:1px solid var(--line)}
+
+.seg{display:flex;border-bottom:1px solid var(--line);background:var(--panel)}
+.seg a{flex:1;text-align:center;padding:9px 6px;font-size:13px;color:var(--dim);
+ text-decoration:none;border-left:1px solid var(--line)}
+.seg a:first-child{border-left:0}
+.seg a[aria-selected="true"]{color:var(--fg);background:var(--bg)}
+
+.screen{background:var(--bg);padding:10px 12px}
+.screen pre{margin:0;white-space:pre-wrap;word-break:break-word;
+ font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg)}
+.screen .dim{color:var(--dim)}
+
+.send{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line);background:var(--panel)}
+.send input{flex:1;min-width:0;background:var(--bg);color:var(--fg);
+ border:1px solid var(--line);border-radius:6px;padding:9px 10px;font-size:15px;min-height:44px}
+.send button{display:inline-flex;align-items:center;justify-content:center;
+ background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;
+ padding:0 10px;min-height:44px;min-width:44px}
+.send button.enter{border-color:var(--working);color:var(--working)}
+.send svg{width:20px;height:20px}
+</style>
+</head>
+<body>
+<h1>dm web · v1: today</h1>
+<p class="sub">The phone page as it stands: sans serif, rounded cards, hairline borders, a coloured state chip and a pill composer. The reference for the skin below.</p>
+
+<h2>A pane with a question</h2>
+<div class="phone">
+  <div class="ph">
+    <h3>w1p1</h3>
+    <span class="state"><span class="dot"></span>blocked</span>
+    <span class="state" style="color:var(--blocked)"><span class="dot"></span>question</span>
+    <span class="sp"></span>
+    <button>⌃</button><button>close</button>
+  </div>
+  <div class="acts"><button>new window</button><button>rename</button><button>close pane</button></div>
+
+  <div class="ask">
+    <div class="ask-hd"><b>asks you</b><span>a question</span><span class="ago">2m ago</span></div>
+    <div class="ask-q">
+      <div class="ask-qh">Branch</div>
+      <div class="ask-qt">Which branch should the landing start from?</div>
+      <div class="ask-hint">pick one, or type something else</div>
+      <div class="ask-opt picked">
+        <div class="ask-line"><span class="ask-tick">●</span><span class="ask-label">main</span></div>
+        <div class="ask-desc">the trunk every lane rebases onto</div>
+      </div>
+      <div class="ask-opt">
+        <div class="ask-line"><span class="ask-tick" style="color:var(--dim)">○</span><span class="ask-label">origin/main</span></div>
+        <div class="ask-desc">the remote tip, fetched just now</div>
+      </div>
+      <input class="ask-text" placeholder="something else">
+      <div class="ask-controls"><button class="send">send</button><button>decline</button></div>
+    </div>
+  </div>
+
+  <div class="seg"><a aria-selected="true">transcript</a><a>activity</a><a>screen</a></div>
+  <div class="screen"><pre>$ go test ./...
+ok  <span class="dim">dm/internal/client</span>
+ok  <span class="dim">dm/internal/server</span>
+<span class="dim">?   dm/internal/ask    [no test files]</span>
+$ <span class="dim">▍</span></pre></div>
+
+  <div class="send">
+    <button title="attach a picture">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><circle cx="7.5" cy="9.5" r="1.8"/><path d="M22 16.5l-4.5-4.5L6 20"/></svg>
+    </button>
+    <input placeholder="type into the pane">
+    <button class="enter" title="send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2z"/></svg>
+    </button>
+  </div>
+</div>
+<p class="note"><b>What reads as "web app":</b> 15px sans serif, 6 to 8px radii, hairline 1px borders, a translucent-looking status chip, and a bar of equal rounded buttons whose labels are lowercase sentences.</p>
+
+</body>
+</html>
