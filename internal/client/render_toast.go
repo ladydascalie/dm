@@ -11,9 +11,10 @@ import (
 	"dm/internal/wire"
 )
 
-// toastMaxWidth caps a toast's interior in cells, so one long message cannot
-// stretch the box across the screen.
-const toastMaxWidth = 40
+// toastWidth is the interior width of every toast in cells. A fixed width keeps
+// the box, the stack and the gauge in one place: a short message pads out and a
+// long one elides, so a toast never changes size under the operator's eye.
+const toastWidth = 40
 
 // toastLine is one content row of a toast: its text and the colour it paints in.
 type toastLine struct {
@@ -39,11 +40,13 @@ type toastBox struct {
 }
 
 // newToastBox lays one toast out for a screen maxCols wide on the float ground,
-// so a stack of three never reads as three coloured blocks. A notify toast names
-// its state and the entry's topic in the top border, in the state's colour, and
-// draws the gauge in the same colour: the bottom border is the track, and the run
-// still to live is the bright part of it. A plain toast keeps the dim border and
-// a dim gauge, and carries its message alone.
+// so a stack of three never reads as three coloured blocks. Every box is the same
+// three rows: the title in the top border, one message row, the gauge in the
+// bottom border. A notify toast names its state and the entry's topic in the top
+// border, in the state's colour, and draws the gauge in the same colour: the
+// bottom border is the track, and the run still to live is the bright part of it.
+// A plain toast keeps the dim border and a dim gauge, and carries its message
+// alone.
 func newToastBox(th theme.Theme, x toast, maxCols int) toastBox {
 	dim := th.Palette.RailDim.FG()
 	b := toastBox{
@@ -69,23 +72,10 @@ func newToastBox(th theme.Theme, x toast, maxCols int) toastBox {
 		b.border = st.Colour.FG()
 		b.gauge = st.Colour.FG()
 	}
-	if x.text != "" {
-		b.rows = append(b.rows, toastLine{text: x.text, fg: th.Palette.RailText.FG()})
-	}
-	// The box is as wide as its widest row; a title keeps its one-cell margin on
-	// each side, so it asks for two cells more than its text.
-	b.width = cells.Cells(b.title)
-	if b.title != "" {
-		b.width += 2
-	}
-	for _, r := range b.rows {
-		if n := cells.Cells(r.text); n > b.width {
-			b.width = n
-		}
-	}
-	if b.width > toastMaxWidth {
-		b.width = toastMaxWidth
-	}
+	// The message always takes the one interior row, empty or not, so every
+	// toast is the same three rows and the stack never moves.
+	b.rows = []toastLine{{text: x.text, fg: th.Palette.RailText.FG()}}
+	b.width = toastWidth
 	if b.width > maxCols-2 {
 		b.width = maxCols - 2
 	}
@@ -168,14 +158,15 @@ func (b toastBox) draw(buf *bytes.Buffer, th theme.Theme, col, top, bottom int) 
 }
 
 // drawToasts paints the toast stack in the bottom-right corner, just above the
-// status bar: newest at the bottom, each toast a small closed box on the float
-// ground, the state's mark, name and topic in the top border, the message inside
-// and the life it has left drawn along the bottom border. A box is as wide as its
-// widest row, clamped first to toastMaxWidth and then to the screen; a longer row
-// is truncated with an ellipsis on a cluster boundary. Boxes sit a one-row gap
-// apart so the stack reads as separate popups. Only rows above the bar are used,
-// and a stack that does not fit above the bar drops its oldest boxes rather than
-// overflowing, so the bar and the pointer gestures over the panes are untouched.
+// status bar: newest at the bottom, each toast a fixed-size closed box on the
+// float ground, the state's mark, name and topic in the top border, the message
+// inside and the life it has left drawn along the bottom border. Every box is
+// toastWidth cells wide, clamped to the screen, and three rows tall; a longer
+// title or message is truncated with an ellipsis on a cluster boundary. Boxes sit
+// a one-row gap apart so the stack reads as separate popups. Only rows above the
+// bar are used, and a stack that does not fit above the bar drops its oldest
+// boxes rather than overflowing, so the bar and the pointer gestures over the
+// panes are untouched.
 func drawToasts(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, toasts []toast) {
 	if snap == nil || len(toasts) == 0 || snap.Cols < 3 || snap.Rows < 3 {
 		return

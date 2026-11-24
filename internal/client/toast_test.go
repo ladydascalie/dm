@@ -236,7 +236,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			snap := &wire.Snapshot{Cols: 40, Rows: 8}
+			snap := &wire.Snapshot{Cols: 100, Rows: 8}
 			tui := &tui{}
 			tui.notify(c.text)
 			var b bytes.Buffer
@@ -247,14 +247,13 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 				t.Fatalf("row = %d, want %d", row, snap.Rows-2)
 			}
 			// The cursor sits on the left border, so the box is Cols-col+1
-			// cells wide: the text's cells plus its two border cells.
-			if w, want := snap.Cols-col+1, cells.Cells(c.text)+2; w != want {
-				t.Fatalf("box width = %d, want %d for %d cells of text",
-					w, want, cells.Cells(c.text))
+			// cells wide: every toast is the same width.
+			if w, want := snap.Cols-col+1, toastWidth+2; w != want {
+				t.Fatalf("box width = %d, want the fixed %d", w, want)
 			}
-			// The interior is the text alone: the body ground, bright text,
-			// then the right border, with no padding and no dropped glyph.
-			want := panelBG + brightText + c.text + "\x1b[0m" + panelBG + dimBorder + theme.DefaultTheme().Glyphs.BorderVertical
+			// The interior is the text padded out to the fixed width: no
+			// dropped glyph, no doubled one.
+			want := panelBG + brightText + cells.Pad(c.text, toastWidth) + "\x1b[0m" + panelBG + dimBorder + theme.DefaultTheme().Glyphs.BorderVertical
 			if !strings.Contains(out, want) {
 				t.Fatalf("interior is not the whole text %q: %q", c.text, out)
 			}
@@ -262,8 +261,8 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 	}
 }
 
-// A toast longer than the cap is cut to the cap with an ellipsis, and the box
-// never grows past the cap.
+// A message wider than the box is cut with an ellipsis, and the box never grows
+// past its fixed width.
 func TestDrawToastsCapsWidth(t *testing.T) {
 	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 8}
@@ -273,20 +272,20 @@ func TestDrawToastsCapsWidth(t *testing.T) {
 	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
 	out := b.String()
 	// The ellipsis is the last cell of the interior, inside the box.
-	head := strings.Repeat("x", toastMaxWidth-1) + cells.Ellipsis
+	head := strings.Repeat("x", toastWidth-1) + cells.Ellipsis
 	if !strings.Contains(out, head) {
 		t.Fatalf("toast is not truncated with an ellipsis at the cap: %q", out)
 	}
-	if strings.Contains(out, strings.Repeat("x", toastMaxWidth)) {
+	if strings.Contains(out, strings.Repeat("x", toastWidth)) {
 		t.Fatalf("toast kept more than the cap: %q", out)
 	}
 	_, col := toastRow(t, out, head)
-	if w := snap.Cols - col + 1; w != toastMaxWidth+2 {
-		t.Fatalf("box width = %d, want %d", w, toastMaxWidth+2)
+	if w := snap.Cols - col + 1; w != toastWidth+2 {
+		t.Fatalf("box width = %d, want %d", w, toastWidth+2)
 	}
 }
 
-// A toast under the cap renders whole, and its box is the text plus borders.
+// A toast under the cap renders whole, padded out to the fixed width.
 func TestDrawToastsKeepsShortToastWhole(t *testing.T) {
 	t.Parallel()
 	snap := &wire.Snapshot{Cols: 100, Rows: 8}
@@ -302,8 +301,8 @@ func TestDrawToastsKeepsShortToastWhole(t *testing.T) {
 		t.Fatalf("short toast gained an ellipsis: %q", out)
 	}
 	_, col := toastRow(t, out, "saved 3 files")
-	if w := snap.Cols - col + 1; w != cells.Cells("saved 3 files")+2 {
-		t.Fatalf("box width = %d, want %d", w, cells.Cells("saved 3 files")+2)
+	if w := snap.Cols - col + 1; w != toastWidth+2 {
+		t.Fatalf("box width = %d, want the fixed %d", w, toastWidth+2)
 	}
 }
 
@@ -323,8 +322,8 @@ func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
 		t.Fatalf("no toast interior in %q", out)
 	}
 	got := strings.TrimRight(out[at+len(brightText):at+end], " ")
-	if n := cells.Cells(got); n > toastMaxWidth {
-		t.Fatalf("interior paints %d cells, want at most %d", n, toastMaxWidth)
+	if n := cells.Cells(got); n > toastWidth {
+		t.Fatalf("interior paints %d cells, want at most %d", n, toastWidth)
 	}
 	if !strings.HasSuffix(got, cells.Ellipsis) {
 		t.Fatalf("interior %q does not end with the ellipsis", got)
@@ -340,7 +339,7 @@ func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
 // glyphs, the text row inside, no padding row.
 func TestDrawToastsPaintsClosedBox(t *testing.T) {
 	t.Parallel()
-	snap := &wire.Snapshot{Cols: 40, Rows: 9}
+	snap := &wire.Snapshot{Cols: 100, Rows: 9}
 	th := theme.DefaultTheme()
 	g := th.Glyphs
 	tui := &tui{}
@@ -348,8 +347,7 @@ func TestDrawToastsPaintsClosedBox(t *testing.T) {
 	var b bytes.Buffer
 	drawToasts(&b, th, snap, tui.toasts)
 	out := b.String()
-	w := cells.Cells("saved 3 files") + 2
-	edge := strings.Repeat(g.BorderHorizontal, w-2)
+	edge := strings.Repeat(g.BorderHorizontal, toastWidth)
 	if !strings.Contains(out, g.BorderTopLeft+edge+g.BorderTopRight) {
 		t.Fatalf("the box has no closed top border: %q", out)
 	}
@@ -358,7 +356,7 @@ func TestDrawToastsPaintsClosedBox(t *testing.T) {
 		t.Fatalf("the bottom border is %q, want %q", got, want)
 	}
 	want := "\x1b[0m" + panelBG + dimBorder + g.BorderVertical + "\x1b[0m" + panelBG + brightText +
-		"saved 3 files\x1b[0m" + panelBG + dimBorder + g.BorderVertical + "\x1b[0m"
+		cells.Pad("saved 3 files", toastWidth) + "\x1b[0m" + panelBG + dimBorder + g.BorderVertical + "\x1b[0m"
 	if !strings.Contains(out, want) {
 		t.Fatalf("the text row is not framed on both sides: %q", out)
 	}
@@ -409,11 +407,9 @@ func TestDrawToastsSeparatesBoxes(t *testing.T) {
 		t.Fatalf("a cursor paints on the gap row %d", r)
 	}
 	g := theme.DefaultTheme().Glyphs
-	// Each box draws its top border and its fresh gauge across the interior.
-	want := 0
-	for _, text := range []string{"older", "newer"} {
-		want += 2 * cells.Cells(text)
-	}
+	// Each box draws its top border and its fresh gauge across the interior,
+	// clamped to the screen the two of them share.
+	want := 4 * (snap.Cols - 2)
 	if got := strings.Count(out, g.BorderHorizontal); got != want {
 		t.Fatalf("horizontal glyphs = %d, want %d for two boxes and their gauges: %q", got, want, out)
 	}
@@ -492,9 +488,9 @@ func TestDrawToastsNamesStateInBorder(t *testing.T) {
 	}
 }
 
-// An entry with no message is two rows: the top border names the state and the
-// topic, and the bottom border is the gauge, with no empty row between them.
-func TestDrawToastsEmptyMessageKeepsTwoRows(t *testing.T) {
+// An entry with no message still takes the one interior row, empty: the box
+// keeps the size every other toast has, so the stack never moves.
+func TestDrawToastsEmptyMessageKeepsTheRow(t *testing.T) {
 	t.Parallel()
 	th := theme.DefaultTheme()
 	snap := &wire.Snapshot{Cols: 40, Rows: 10}
@@ -509,9 +505,9 @@ func TestDrawToastsEmptyMessageKeepsTwoRows(t *testing.T) {
 	if strings.Contains(out, ":") {
 		t.Fatalf("an empty message left punctuation behind: %q", out)
 	}
-	// The box is two rows: the top border and the gauge under it.
-	if rows := drawRows(t, out); len(rows) != 2 {
-		t.Fatalf("the box paints %d rows, want the border and the gauge: %v", len(rows), rows)
+	// The box is three rows: the border, the empty message row and the gauge.
+	if rows := drawRows(t, out); len(rows) != 3 {
+		t.Fatalf("the box paints %d rows, want the border, the row and the gauge: %v", len(rows), rows)
 	}
 	// The bottom border sits on the newest box's row, just above the bar.
 	if want := snap.Rows - 1; !strings.Contains(out, "\x1b["+strconv.Itoa(want)+";") {
@@ -557,7 +553,7 @@ func TestDrawToastsPlainHasNoTitle(t *testing.T) {
 	var b bytes.Buffer
 	drawToasts(&b, th, snap, tui.toasts)
 	out := b.String()
-	edge := strings.Repeat(g.BorderHorizontal, cells.Cells("copied 5 chars"))
+	edge := strings.Repeat(g.BorderHorizontal, snap.Cols-2)
 	if !strings.Contains(out, g.BorderTopLeft+edge+g.BorderTopRight) {
 		t.Fatalf("a plain toast grew a title bar: %q", out)
 	}

@@ -1174,9 +1174,11 @@ is how a pasted mysql statement showed up as `0~SET GLOBAL ...;1~`.
 Small actions answer with a toast, not text in the status bar: the bar's right
 block is reserved for the scroll position, the search match and the divider
 hint. The client keeps up to three, each with the time it was raised, and
-draws them bottom right just above the bar, newest at the bottom. A toast is a
-small closed box on the float ground, as wide as its longest row plus the two
-border cells, clamped to the screen, and its bottom border is the gauge: one
+draws them bottom right just above the bar, newest at the bottom. Every toast is
+the same size: 40 cells of interior plus the two border cells, clamped to a
+narrow screen, and three rows, so a short message pads out, a long one elides
+with an ellipsis on a cluster boundary, and the stack never moves. A toast is a
+small closed box on the float ground, and its bottom border is the gauge: one
 track as wide as the interior, the part still to run drawn in the toast's
 colour and the rest left dim, so the bright run shrinks from the right as the
 toast counts down and the box is gone when it has run out. The track is what
@@ -1184,12 +1186,12 @@ makes the fraction readable: a bright run alone reads as a stray mark once it
 is short. A plain toast holds one row of bright text inside a dim border and a
 dim gauge. An entry posted under `notify/` raises a toast that names the
 entry's state and topic in the top border, in the state's own glyph and colour,
-and holds the message bright inside; an entry with no message is that border
-and the gauge, with no colon and no empty row. The state's colour stays on the
-border, the title and the gauge, so three stacked toasts read as three quiet
-panels instead of three colour blocks. A repeat of the newest announcement
-within one second is the same toast, and every toast expires after three
-seconds, its gauge one cell of colour at the end. Copying raises one, as does a failed request, an unknown key, an
+and holds the message bright inside; an entry with no message keeps the empty
+row, so the box does not change size. The state's colour stays on the border,
+the title and the gauge, so three stacked toasts read as three quiet panels
+instead of three colour blocks. A repeat of the newest announcement within one
+second is the same toast, and every toast expires after three seconds, its
+gauge one cell of colour at the end. Copying raises one, as does a failed request, an unknown key, an
 empty scrollback and a pane exit.
 
 System notifications are for the events worth interrupting for. A pane that
