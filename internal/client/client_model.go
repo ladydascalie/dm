@@ -44,11 +44,13 @@ const (
 	termGrace = 300 * time.Millisecond
 
 	// toastMax is how many toasts the stack holds, toastLifetime how long each
-	// one lives, and toastDedupe how close a repeat must be to join the last
-	// toast instead of raising a new one.
+	// one lives, toastDedupe how close a repeat must be to join the last toast
+	// instead of raising a new one, and toastDrip how long each cell of the
+	// drain band stands still.
 	toastMax      = 3
 	toastLifetime = 3 * time.Second
 	toastDedupe   = time.Second
+	toastDrip     = 50 * time.Millisecond
 
 	// idleFlush is how long a pane's output must be quiet before its pending
 	// grapheme cluster is placed. The parser holds a cluster until the next
@@ -462,12 +464,17 @@ type panePaint struct {
 // toast is one short message for the operator. A plain toast carries text
 // alone; a notify toast also carries the entry's state and topic, so its box
 // can name the state in the border and the topic above the message. Its time
-// is when it was raised, so the stack can expire it.
+// is when it was raised, so the stack can expire it, and left is the fraction of
+// its life still to run, which sets how much of the drain band stays coloured.
+// step is the drip the band was last painted at, so a tick inside the same drip
+// leaves the frame alone.
 type toast struct {
 	text  string
 	state string
 	topic string
 	at    time.Time
+	left  float64
+	step  int
 }
 
 // notify raises a plain toast: a client message with no entry behind it. The
@@ -491,6 +498,7 @@ func (t *tui) pushToast(x toast) {
 		return
 	}
 	x.at = time.Now()
+	x.left = 1
 	if n := len(t.toasts); n > 0 {
 		if last := t.toasts[n-1]; last.same(x) && x.at.Sub(last.at) < toastDedupe {
 			return
@@ -510,22 +518,29 @@ func (x toast) same(y toast) bool {
 	return x.text == y.text && x.state == y.state && x.topic == y.topic
 }
 
-// expireToasts drops the toasts past toastLifetime.
+// expireToasts drops the toasts past toastLifetime and advances the drain band
+// of the ones still up. The band stands still for toastDrip per step, so a tick
+// that lands inside the same step marks nothing dirty; the width is painted from
+// left, so a ticker the idle decay slowed still lands on the right cell.
 func (t *tui) expireToasts(now time.Time) {
 	if len(t.toasts) == 0 {
 		return
 	}
 	kept := t.toasts[:0]
 	for _, x := range t.toasts {
-		if now.Sub(x.at) < toastLifetime {
-			kept = append(kept, x)
+		age := now.Sub(x.at)
+		if age >= toastLifetime {
+			t.dirty = true
+			continue
 		}
-	}
-	if len(kept) == len(t.toasts) {
-		return
+		if step := int(age / toastDrip); step != x.step {
+			x.step = step
+			t.dirty = true
+		}
+		x.left = 1 - float64(age)/float64(toastLifetime)
+		kept = append(kept, x)
 	}
 	t.toasts = kept
-	t.dirty = true
 }
 
 // Run owns the terminal. A session switch returns to this loop with a new
@@ -675,14 +690,19 @@ func (t *tui) tick(now time.Time, pace *pacer, sink *frameSink) {
 		t.dirty = true
 		pace.reset()
 	}
-	if !t.dirty {
+	if t.dirty {
+		if pace.shouldDraw(now, true) {
+			t.frame(now, pace, sink)
+		}
+	} else if len(t.toasts) == 0 {
 		pace.decay(now)
-		return
 	}
-	if !pace.shouldDraw(now, true) {
-		return
+	if len(t.toasts) > 0 {
+		// A live toast drains on its own clock, so the ticker stays at the
+		// floor while one is up: a frame that carried no band change, or one
+		// still owed, must not slow the band.
+		pace.floor()
 	}
-	t.frame(now, pace, sink)
 }
 
 // wake runs after input, a message, a resize or a session switch: it floors the

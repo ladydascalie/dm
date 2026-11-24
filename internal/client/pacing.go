@@ -69,6 +69,12 @@ func (p *pacer) decay(now time.Time) {
 	}
 }
 
+// floor pins the interval to the floor without counting a wake. A toast's drain
+// band changes on its own clock, so the loop keeps waking at the floor while one
+// is up: the idle decay would otherwise stretch a 50ms step to 250ms and the
+// band would jump instead of drain.
+func (p *pacer) floor() { p.gap = paceFloor }
+
 // reset returns the interval to the floor after a wake: input, a message, a
 // resize or an idle flush.
 func (p *pacer) reset() {

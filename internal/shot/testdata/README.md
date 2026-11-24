@@ -29,6 +29,7 @@ Top level is `{ "scenes": [ ... ] }`. Each scene is flat:
 | `activeWindow` | int | index into `windows` |
 | `focus` | string | focused pane id |
 | `toast` | string | optional toast text |
+| `toastLeft` | float | optional fraction of the toast's life still to run, 0..1; sets how much of its drain band stays coloured. Absent means a fresh toast |
 | `float` | object | optional `{id, x, y, w, h, content}` floating pane |
 | `floatShadow` | bool | optional; turn the config's float-shadow node on, so the scene paints the floats' drop shadow |
 | `switcher` | bool | optional; open the switcher |

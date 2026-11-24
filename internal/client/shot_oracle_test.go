@@ -178,7 +178,13 @@ func buildSceneTUI(t *testing.T, sc shot.Scene, th theme.Theme) (*tui, *bytes.Bu
 		tr.vts[p.ID] = v
 	}
 	if sc.Toast != "" || sc.ToastTopic != "" {
-		tr.toasts = []toast{{text: sc.Toast, state: sc.ToastState, topic: sc.ToastTopic}}
+		// A scene's toast is fresh unless it names how much life is left, so a
+		// scene can pin a partly drained band.
+		left := sc.ToastLeft
+		if left == 0 {
+			left = 1
+		}
+		tr.toasts = []toast{{text: sc.Toast, state: sc.ToastState, topic: sc.ToastTopic, left: left}}
 	}
 	if sc.Float != nil {
 		fr := layout.Rect{X: sc.Float.X, Y: sc.Float.Y, W: sc.Float.W, H: sc.Float.H}

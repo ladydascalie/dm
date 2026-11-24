@@ -367,7 +367,8 @@
       "focus": "a",
       "toast": "gate green",
       "toastState": "done",
-      "toastTopic": "notify/demo"
+      "toastTopic": "notify/demo",
+      "toastLeft": 0.45
     }
   ]
 }

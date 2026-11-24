@@ -28,7 +28,11 @@ type Scene struct {
 	// state names the box's top border and the topic sits above the message.
 	ToastState string `json:"toastState,omitempty"`
 	ToastTopic string `json:"toastTopic,omitempty"`
-	Float      *Float `json:"float,omitempty"`
+	// ToastLeft is the fraction of the toast's life still to run, which sets
+	// how much of its drain band is still coloured. A scene that leaves it out
+	// draws a fresh toast with a full band.
+	ToastLeft float64 `json:"toastLeft,omitempty"`
+	Float     *Float  `json:"float,omitempty"`
 	// FloatShadow turns the config's float-shadow node on, so a scene
 	// exercises the drop shadow the floats paint.
 	FloatShadow bool      `json:"floatShadow,omitempty"`

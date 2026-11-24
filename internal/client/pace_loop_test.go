@@ -185,3 +185,39 @@ func TestTickMessageStreamStillDraws(t *testing.T) {
 		t.Fatalf("cell col 9, row 0 = %q after the tick, want こ: the idle flush did not run", got)
 	}
 }
+
+// TestTickToastHoldsTheFloor proves a live toast keeps the ticker at the floor:
+// its drain band steps on its own clock, so an idle decay would starve it and
+// the band would jump five cells at a time.
+func TestTickToastHoldsTheFloor(t *testing.T) {
+	t.Parallel()
+	f, pace, sink, out := newPaceTUI(t)
+	now := time.Unix(1000, 0)
+
+	f.tui.notify("saved 3 files")
+	// The tick body owns the clock, so the toast is raised on it.
+	f.tui.toasts[0].at = now
+	f.tui.tick(now, pace, sink)
+	if out.Len() == 0 {
+		t.Fatal("the toast drew nothing")
+	}
+	for i := 0; i < 5; i++ {
+		now = now.Add(pace.interval())
+		out.Reset()
+		f.tui.tick(now, pace, sink)
+		if got := pace.interval(); got != paceFloor {
+			t.Fatalf("interval with a toast up = %v, want the floor %v", got, paceFloor)
+		}
+	}
+	// Once the toast has run out the loop is free to slow down again.
+	now = now.Add(toastLifetime)
+	f.tui.tick(now, pace, sink)
+	if len(f.tui.toasts) != 0 {
+		t.Fatalf("toasts = %d, want the stack empty", len(f.tui.toasts))
+	}
+	now = now.Add(pace.interval())
+	f.tui.tick(now, pace, sink)
+	if got := pace.interval(); got <= paceFloor {
+		t.Fatalf("interval after the stack emptied = %v, want above the floor %v", got, paceFloor)
+	}
+}
