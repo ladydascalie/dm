@@ -466,6 +466,88 @@ func fakeRead(t *testing.T, rootDir, session string, lines []string, st wire.Sta
 	})
 }
 
+// fakeHistory answers the history action a scrollback request sends, with the
+// rows it is given. A request that names a count the rows do not fill says the
+// pane held no more, which is what the daemon does.
+func fakeHistory(t *testing.T, rootDir, session string, lines []string) {
+	t.Helper()
+	listenUnix(t, paths.ServerSockAt(rootDir, session), func(c net.Conn) {
+		for {
+			m, err := wire.ReadMsg(c)
+			if err != nil {
+				return
+			}
+			if m.Action != "history" {
+				_ = wire.WriteMsg(c, wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, OK: false, Error: "test: no action " + m.Action})
+				continue
+			}
+			res, _ := json.Marshal(map[string]any{"lines": lines})
+			_ = wire.WriteMsg(c, wire.Msg{Type: "resp", Action: m.Action, ID: m.ID, OK: true, Res: res})
+		}
+	})
+}
+
+// TestHistoryServesTheRowsAboveTheScreen proves the scrollback rides the same
+// shaping as the screen, and that a reply which filled the request says there
+// may be older rows behind it.
+func TestHistoryServesTheRowsAboveTheScreen(t *testing.T) {
+	session := "main"
+	dir := root(t, session)
+	rows := []string{"one", strings.Repeat("\u2500", 30), "", "", "two", "", ""}
+	fakeHistory(t, dir, session, rows)
+	srv := httptest.NewServer(handler(Config{Session: session, Root: dir, Token: "t"}))
+	defer srv.Close()
+
+	res := get(t, srv.URL, "/api/history?pane=w1p1&n=7&t=t")
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	var got historyReply
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Lines) != 4 {
+		t.Fatalf("lines = %q, want the long rule cut and the blank run collapsed", got.Lines)
+	}
+	if got.Lines[0] != "one" || got.Lines[3] != "two" {
+		t.Fatalf("lines = %q, want the oldest row first", got.Lines)
+	}
+	if !got.More {
+		t.Fatal("a reply that filled the request says there is nothing older")
+	}
+
+	// A reply shorter than the request ends the climb.
+	res = get(t, srv.URL, "/api/history?pane=w1p1&n=200&t=t")
+	defer func() { _ = res.Body.Close() }()
+	var small historyReply
+	if err := json.NewDecoder(res.Body).Decode(&small); err != nil {
+		t.Fatal(err)
+	}
+	if small.More {
+		t.Fatal("a short reply claims older rows behind it")
+	}
+}
+
+// TestHistoryRefusesABadRequest proves the guards run before the daemon is
+// asked: a pane id that is not one, and a count that is not a positive number.
+func TestHistoryRefusesABadRequest(t *testing.T) {
+	cfg := Config{Session: "main", Root: root(t, "main"), Token: "t"}
+	srv := httptest.NewServer(handler(cfg))
+	defer srv.Close()
+	for _, q := range []string{
+		"/api/history?pane=../x&t=t",
+		"/api/history?pane=w1p1&n=zero&t=t",
+		"/api/history?pane=w1p1&n=-3&t=t",
+	} {
+		res := get(t, srv.URL, q)
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s: status %d, want 400", q, res.StatusCode)
+		}
+	}
+}
+
 // TestTextReadsThePane proves the pane view is the text the pane printed: blank
 // rows under the prompt are dropped, and the status rides along.
 func TestTextReadsThePane(t *testing.T) {
@@ -1490,6 +1572,23 @@ func pageSource(t *testing.T) string {
 		t.Fatalf("read the page: %v", err)
 	}
 	return string(b)
+}
+
+// TestPageCarriesTheOutsideMarks proves the page has the two places a question
+// shows outside the rows themselves: a favicon link the script swaps, and the
+// rules that settle a form which closed under the reader.
+func TestPageCarriesTheOutsideMarks(t *testing.T) {
+	t.Parallel()
+	page := pageSource(t)
+	for _, want := range []string{
+		`<link id="icon" rel="icon"`,
+		"#ask .ask-gone",
+		".ask.settled",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the page misses %q", want)
+		}
+	}
 }
 
 // pageRule is one style rule's text, from the selector to its closing brace.

@@ -26,6 +26,70 @@ type textReply struct {
 	Message string   `json:"message,omitempty"`
 }
 
+// historyStep is the first scrollback a reader gets, and historyMax the most
+// one request may ask for. A request asks for the last n rows above the screen,
+// so the page climbs by growing n rather than by asking for an offset.
+const (
+	historyStep = 200
+	historyMax  = 2000
+)
+
+// historyReply is the rows above a pane's screen, shaped like the screen's own
+// text so the two join without a seam. More is true while the pane may hold
+// rows older than the reply's first one.
+type historyReply struct {
+	Pane  string   `json:"pane"`
+	Lines []string `json:"lines"`
+	More  bool     `json:"more,omitempty"`
+}
+
+// history serves the rows above the pane's screen: the desk's scrollback, for a
+// phone that can only scroll the text it was given. A pane on the alternate
+// screen has no scrollback, and the daemon says so.
+func (h *Handler) history(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("pane")
+	if !paneIDPattern.MatchString(id) {
+		http.Error(w, "dm web: bad pane id", http.StatusBadRequest)
+		return
+	}
+	n := historyStep
+	if v := r.URL.Query().Get("n"); v != "" {
+		got, err := strconv.Atoi(v)
+		if err != nil || got <= 0 {
+			http.Error(w, "dm web: bad row count", http.StatusBadRequest)
+			return
+		}
+		n = got
+	}
+	if n > historyMax {
+		n = historyMax
+	}
+	m, err := h.rpc(wire.Msg{Action: "history", Target: id, Count: n})
+	if err != nil {
+		http.Error(w, "dm web: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	if !m.OK {
+		http.Error(w, "dm web: "+m.Error, http.StatusBadGateway)
+		return
+	}
+	var res struct {
+		Lines []string `json:"lines"`
+	}
+	if err := json.Unmarshal(m.Res, &res); err != nil {
+		http.Error(w, "dm web: history reply: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	// The count is judged before shaping: a reply that filled the request may
+	// have older rows behind it, whatever the shaping left.
+	more := len(res.Lines) >= n
+	if lines := shapeText(res.Lines); len(lines) > 0 {
+		writeJSON(w, http.StatusOK, historyReply{Pane: id, Lines: lines, More: more})
+		return
+	}
+	writeJSON(w, http.StatusOK, historyReply{Pane: id, More: more})
+}
+
 // text serves one pane's screen as text. It reads the pane through the read
 // action, which is the primitive the CLI uses, so nothing here depends on the
 // pane being drawn at a particular size.

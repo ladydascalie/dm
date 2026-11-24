@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <title>dm</title>
+<link id="icon" rel="icon" href="data:,">
 <style>
   :root {
     --bg: #101418;
@@ -855,6 +856,11 @@
   }
   #ask .ask-controls button[disabled] { opacity: .45; }
   #ask .ask-done { margin-top: 8px; font-size: 12.5px; color: var(--done); }
+  /* A question that closed before the reader answered is not a success: the
+     blocked colour says a decision left without them. */
+  #ask .ask-gone { margin-top: 8px; font-size: 12.5px; color: var(--blocked); }
+  #ask .ask.settled .ask-opt, #ask .ask.settled .ask-text { opacity: .6; }
+  #ask .ask.settled .ask-opt { cursor: default; }
 
   /* Safari zooms the page when a field takes focus with a font size under
      16px, and the page stays scaled until a pinch brings it back. At a phone or

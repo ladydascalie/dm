@@ -216,6 +216,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.Handle("GET /static/", noStore(http.StripPrefix("/static/", http.FileServerFS(files))))
 	mux.HandleFunc("GET /api/fleet", h.fleet)
 	mux.HandleFunc("GET /api/text", h.text)
+	mux.HandleFunc("GET /api/history", h.history)
 	mux.HandleFunc("GET /api/session", h.session)
 	mux.HandleFunc("GET /api/thumbs", h.thumbs)
 	mux.HandleFunc("GET /api/commands", h.commands)

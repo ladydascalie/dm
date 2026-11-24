@@ -341,11 +341,15 @@ func TestAskNoteIsNotASendGate(t *testing.T) {
 
 // TestAskNoteHidesInReadOnly proves a read-only page carries the question with
 // no note field: the field is appended under the read-only guard, so a page
-// that may not answer cannot take a note either.
+// that may not answer cannot take a note either. A settled form is guarded the
+// same way, and keeps the note the reader typed as a line of its own.
 func TestAskNoteHidesInReadOnly(t *testing.T) {
 	q := funcSource(t, appScript(t), "askQuestion")
-	if !strings.Contains(q, "if (!askState.ro) block.append(askNote(i));") {
+	if !strings.Contains(q, "if (!askState.ro && !askState.settled) block.append(askNote(i));") {
 		t.Fatalf("the note field is not behind the read-only guard:\n%s", q)
+	}
+	if !strings.Contains(q, `else if (askState.settled && e.note.trim() !== "")`) {
+		t.Fatalf("a settled form drops the note the reader typed:\n%s", q)
 	}
 }
 

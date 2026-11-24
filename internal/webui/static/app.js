@@ -2,6 +2,15 @@
 // Everything arrives already shaped by the server, so this file only paints.
 
 const REFRESH_MS = 3000;
+// MARK_MS is the hidden page's slow clock. A hidden tab arms no view timers, but
+// it still answers one question: is something waiting on me? One fleet request
+// a minute is the whole cost, and it is what lets the tab title carry a mark.
+const MARK_MS = 60000;
+// HISTORY_STEP is how many rows of scrollback one climb asks for, and
+// HISTORY_MAX the most a phone will hold. The daemon answers with the last n
+// rows above the screen, so the page climbs by growing n, never by offset.
+const HISTORY_STEP = 200;
+const HISTORY_MAX = 2000;
 // TEXT_POLL_MS is the cadence one pane is read at. The session read rides the
 // same cadence the pane text had before the views, and only one of them runs:
 // the view on screen decides which.
@@ -29,7 +38,7 @@ let armed = null;
 const target = { pane: "", window: "", workspace: "" };
 // timers holds the polls while the page is visible, and nothing at all while
 // it is hidden.
-const timers = { fleet: null, text: null, session: null };
+const timers = { fleet: null, text: null, session: null, mark: null };
 // repaintTimer is the one shot a rotation arms, held so a hide can clear it.
 let repaintTimer = null;
 // openShells names the projects whose shell panes are unfolded, so a poll does
@@ -120,6 +129,45 @@ function applyReply(work) {
   return work();
 }
 
+// paintWaiting marks a question outside the page itself: the tab title and the
+// favicon. The strip and the rows live inside a page the reader has to be
+// looking at, and a phone in a pocket is not looking at it.
+function paintWaiting(f) {
+  const n = ((f && f.ask) || []).length;
+  const base = "dm " + ((f && f.session) || "");
+  document.title = n === 0 ? base : "\u25cf " + base + (n > 1 ? " (" + n + ")" : "");
+  paintIcon(n > 0);
+}
+
+// paintIcon swaps the favicon between a quiet dot and the blocked mark's
+// colour. The state is kept, so a poll that changes nothing rebuilds nothing.
+let iconWaiting = null;
+function paintIcon(waiting) {
+  if (iconWaiting === waiting) return;
+  iconWaiting = waiting;
+  const dot = waiting ? "#ffb454" : "#647b8c";
+  const r = waiting ? 8 : 5;
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+    '<rect width="32" height="32" rx="7" fill="#101418"/>' +
+    '<circle cx="16" cy="16" r="' + r + '" fill="' + dot + '"/></svg>';
+  const link = $("icon");
+  if (link) link.href = "data:image/svg+xml," + encodeURIComponent(svg);
+}
+
+// pollMarks is the hidden page's one request: the fleet, for the title and the
+// icon alone. A visible page skips it, because the ordinary fleet poll already
+// keeps those fresh.
+async function pollMarks() {
+  if (!document.hidden) return;
+  try {
+    const res = await fetchAPI("/api/fleet");
+    if (res.ok) paintWaiting(await res.json());
+  } catch (e) {
+    // A mark is a courtesy. It never paints a banner, so a session that went
+    // away while the phone slept still recovers on the next attach.
+  }
+}
+
 // loadFleet asks for the fleet and applies the reply. A hidden tab does not
 // poll: a phone in a pocket should not keep a session awake for a screen nobody
 // reads.
@@ -146,6 +194,7 @@ async function loadFleet() {
 // that lands after the hide paints nothing and builds no grid.
 function paintFleet(f) {
   fleet = f;
+  paintWaiting(f);
   banner(f.error || "");
   noteSeen(f);
   // Both views are stale now; only the one on screen is painted.
@@ -420,7 +469,9 @@ function shellFold(g, count) {
 // answer. A strip with nothing to say is absent.
 function renderNeeds(f) {
   const box = $("needs");
-  const need = f.panes.filter((p) => NEED_STATES.includes(stateOf(p)));
+  // A pane carrying a question wants a person whatever its state word says, so
+  // the question joins the states that need one.
+  const need = f.panes.filter((p) => p.ask || NEED_STATES.includes(stateOf(p)));
   need.sort((a, b) => {
     const d = NEED_STATES.indexOf(stateOf(a)) - NEED_STATES.indexOf(stateOf(b));
     return d !== 0 ? d : wantSince(a, f) - wantSince(b, f);
@@ -450,7 +501,8 @@ function renderNeeds(f) {
     head.append(el("span", "cname", p.project || "no project"));
     const place = placeOf(p);
     if (place) head.append(el("span", "cplace", place));
-    head.append(el("span", "cwant state " + stateOf(p), stateOf(p)));
+    const want = p.ask ? "blocked" : stateOf(p);
+    head.append(el("span", "cwant state " + want, p.ask ? "question" : want));
     head.append(ago);
     card.append(head);
     card.append(el("div", "cmsg", p.message || "no message"));
@@ -1074,6 +1126,14 @@ async function openPane(id, view) {
     open: new Set(),
     hold: false,
     painted: false,
+    // hist is the scrollback the reader climbed to, oldest first, and histN the
+    // width of the request that fetched it: it outlives a poll, so a screen
+    // that changes does not drop the rows above it. histDone says the pane has
+    // no older rows, and histBusy stops a second climb while one is running.
+    hist: [],
+    histN: 0,
+    histDone: false,
+    histBusy: false,
   };
   $("pane").classList.add("open");
   $("send").style.display = fleet && fleet.readOnly ? "none" : "";
@@ -1330,11 +1390,59 @@ function paintText(at, d) {
   at.textRev = d.rev;
   setPaneState(d.state, d.message);
   if (!d.changed) return;
-  const pre = $("text");
-  pre.textContent = (d.lines || []).join("\n");
+  at.text = d.lines || [];
+  paintScreenText(at);
   // Follow the bottom, which is where a running agent's output is, unless the
   // reader scrolled up to read something.
-  if (at.view === "screen" && !at.hold) pre.scrollTop = pre.scrollHeight;
+  if (at.view === "screen" && !at.hold) $("text").scrollTop = $("text").scrollHeight;
+  markFollow();
+}
+
+// paintScreenText writes the scrollback and the screen as one block. A reader
+// who climbed keeps the rows they were reading in place: the text above them
+// grew, so the box scrolls by the same amount.
+function paintScreenText(at) {
+  const pre = $("text");
+  const fromBottom = pre.scrollHeight - pre.scrollTop;
+  const rows = (at.hist || []).concat(at.text || []);
+  pre.textContent = rows.join("\n");
+  if ((at.hist || []).length > 0) pre.scrollTop = Math.max(0, pre.scrollHeight - fromBottom);
+}
+
+// loadOlder climbs one step further up the pane's scrollback. A refusal (a pane
+// on the alternate screen, a pane that went away) ends the climb quietly: the
+// screen below is still the whole answer the page can give.
+async function loadOlder() {
+  if (!pane || pane.view !== "screen" || pane.histBusy || pane.histDone) return;
+  if (document.hidden) return;
+  const at = pane;
+  const n = Math.min(HISTORY_MAX, (at.histN || 0) + HISTORY_STEP);
+  at.histBusy = true;
+  let res;
+  try {
+    res = await fetchAPI("/api/history?pane=" + encodeURIComponent(at.id) + "&n=" + n);
+  } catch (e) {
+    at.histBusy = false;
+    return;
+  }
+  if (!res.ok) {
+    at.histBusy = false;
+    at.histDone = true;
+    return;
+  }
+  let d;
+  try {
+    d = await res.json();
+  } catch (e) {
+    at.histBusy = false;
+    return;
+  }
+  at.histBusy = false;
+  if (pane !== at) return;
+  at.hist = d.lines || [];
+  at.histN = n;
+  at.histDone = !d.more;
+  paintScreenText(at);
   markFollow();
 }
 
@@ -1749,8 +1857,8 @@ function closePane(updateHash = true) {
 let askState = null;
 
 // openAskFor is the question set the fleet lists for one pane. The snapshot
-// lists an answered ask until the agent closes it, and publishes no answer, so
-// this page treats it as open until it disappears or the daemon refuses.
+// lists open asks only, so a settled ask leaves the fleet at once: this page
+// can only tell it is over, never why.
 function openAskFor(id) {
   const asks = (fleet && fleet.ask) || [];
   return asks.find((a) => a.pane === id) || null;
@@ -1767,6 +1875,17 @@ function syncAsk() {
   }
   const a = openAskFor(pane.id);
   if (!a) {
+    // The ask left the fleet: this page's own answer settled it, or another
+    // client answered it, or the agent withdrew it. A reader with words typed
+    // keeps them on screen, frozen, rather than losing them to a form that
+    // vanishes under their hands.
+    if (askState && !askState.done && askDirty(askState)) {
+      if (!askState.settled) {
+        askState.settled = true;
+        paintAsk();
+      }
+      return;
+    }
     askState = null;
     paintAsk();
     return;
@@ -1791,6 +1910,13 @@ function syncAsk() {
     return;
   }
   refreshAskSend();
+}
+
+// askDirty reports whether the reader has given the form anything, a pick, a
+// typed answer or a note. An untouched form can be taken away; a filled one
+// cannot, because what is in it exists nowhere else.
+function askDirty(at) {
+  return at.entries.some((e) => e.picks.length > 0 || e.text.trim() !== "" || e.note.trim() !== "");
 }
 
 // askAnswered is the daemon's rule for one question said out loud: a
@@ -1825,6 +1951,7 @@ function paintAsk() {
   box.classList.toggle("show", !!a);
   if (!a) return;
   const wrap = el("div", "ask");
+  wrap.classList.toggle("settled", !!askState.settled);
   const hd = el("div", "ask-hd");
   hd.append(el("b", "", "asks you"));
   hd.append(el("span", "", "a question"));
@@ -1834,6 +1961,10 @@ function paintAsk() {
   if (askState.err) wrap.append(el("div", "ask-err", askState.err));
   if (askState.done) {
     wrap.append(el("div", "ask-done", askState.done));
+  } else if (askState.settled) {
+    wrap.append(el("div", "ask-gone", "this question is no longer open"));
+    wrap.append(el("div", "ask-hint",
+      "another client answered it, or the agent withdrew it. Your draft was not sent."));
   } else if (askState.ro) {
     wrap.append(el("div", "ask-hint", "read only: this question is answered at the desk"));
   } else {
@@ -1861,6 +1992,9 @@ function askQuestion(q, i) {
   input.spellcheck = false;
   input.placeholder = "something else";
   input.value = e.text;
+  // A question this page may not answer, or one already settled, is a record of
+  // what the reader typed, not a field to keep typing in.
+  if (askState.done || askState.ro || askState.settled) input.readOnly = true;
   input.addEventListener("input", () => {
     e.text = input.value;
     // A single-select question takes one option or text, never both, so
@@ -1880,8 +2014,10 @@ function askQuestion(q, i) {
   block.append(opts);
   block.append(input);
   // A read-only page carries no note field: the note is one of the controls a
-  // reader at the desk owns, so it leaves with send and decline.
-  if (!askState.ro) block.append(askNote(i));
+  // reader at the desk owns, so it leaves with send and decline. A settled form
+  // keeps the note the reader typed and offers no field to edit it in.
+  if (!askState.ro && !askState.settled) block.append(askNote(i));
+  else if (askState.settled && e.note.trim() !== "") block.append(el("div", "ask-hint", "note: " + e.note.trim()));
   return block;
 }
 
@@ -1924,7 +2060,7 @@ function askOption(q, i, o, j, input) {
   row.setAttribute("aria-checked", picked ? "true" : "false");
   // A question already answered or one this page may not answer is a list to
   // read, not a set of rows to tap.
-  const live = !askState.done && !askState.ro;
+  const live = !askState.done && !askState.ro && !askState.settled;
   if (live) row.setAttribute("tabindex", "0");
   row.classList.toggle("picked", picked);
   const line = el("div", "ask-line");
@@ -2464,6 +2600,10 @@ function setThumbs(on) {
 // arms none, so a phone in a pocket makes no request and runs no timer.
 function startTimers() {
   stopTimers();
+  // The mark clock runs whether or not the page is visible: it is the one thing
+  // a hidden tab still does, so a reader learns a question landed while they
+  // were in another app.
+  timers.mark = setInterval(pollMarks, MARK_MS);
   if (document.hidden) return;
   timers.fleet = setInterval(loadFleet, REFRESH_MS);
   if (!pane) return;
@@ -2516,6 +2656,10 @@ for (const box of ["text", "transcript", "activity"]) {
   $(box).addEventListener("scroll", () => {
     if (!pane || activeScroll() !== $(box)) return;
     markFollow();
+    // The screen view holds the scrollback above it, so the top of the box is
+    // how a reader asks for older rows. The view stays where it was: the rows
+    // that arrive land above it.
+    if (box === "text" && $(box).scrollTop <= 0) loadOlder();
   });
 }
 $("latest").addEventListener("click", jumpLatest);
