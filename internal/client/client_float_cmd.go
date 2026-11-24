@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
@@ -222,7 +223,9 @@ func (t *tui) takeFloatOpen(m wire.Msg) {
 }
 
 // setBorders writes the border title and hint from the label and whether the
-// child is still running.
+// child is still running. The hint is one hint bar, so the float wears the same
+// caps and pipes as every other surface. The panel fits it to the border row,
+// so the clip here only keeps the title.
 func (f *floatView) setBorders() {
 	title := " " + f.label + " "
 	if f.exited {
@@ -230,14 +233,17 @@ func (f *floatView) setBorders() {
 	}
 	f.float.Title = cells.Clip(title, f.float.Rect.W-2)
 	if f.exited {
-		f.float.Hint = " exited · any key closes "
+		f.float.Hint = &hintbar.Bar{Hints: []hintbar.Hint{
+			{Keys: []string{"any key"}, Label: "closes"},
+		}}
 		return
 	}
+	hints := []hintbar.Hint{}
 	if f.diff && f.splitName != "" {
-		f.float.Hint = " " + f.splitName + " opens split · " + f.prefix + " kills the float "
-		return
+		hints = append(hints, hintbar.Hint{Keys: []string{f.splitName}, Label: "opens split"})
 	}
-	f.float.Hint = " " + f.prefix + " kills the float · keys go to the command "
+	hints = append(hints, hintbar.Hint{Keys: []string{f.prefix}, Label: "kills the float"})
+	f.float.Hint = &hintbar.Bar{Hints: hints}
 }
 
 // applyFloatBytes paints the child's output into the float's own terminal. The

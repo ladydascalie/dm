@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/hintbar"
 	"dm/internal/layout"
+	"dm/internal/segment"
 	"dm/internal/theme"
 	"dm/internal/vt"
 )
@@ -63,7 +65,7 @@ func panelScreen(t *testing.T, cols, rows int, draw func(*bytes.Buffer)) *vt.Ter
 func TestPanelWithoutTitle(t *testing.T) {
 	r := layout.Rect{X: 3, Y: 2, W: 6, H: 3}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{}, nil, true, func(w *bytes.Buffer, inner layout.Rect) {
 			fmt.Fprintf(w, "\x1b[%d;%dHAB", inner.Y+1, inner.X+1)
 		})
 	})
@@ -84,18 +86,71 @@ func TestPanelWithoutTitle(t *testing.T) {
 	}
 }
 
-// TestPanelTitleAndHint paints both labels on the border rows, one cell clear of
-// each corner, so neither label eats a corner.
-func TestPanelTitleAndHint(t *testing.T) {
-	r := layout.Rect{X: 3, Y: 2, W: 8, H: 3}
-	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "hint", false, nil)
+// TestPanelTitleAndBar paints the title on the top border row and a hint bar on
+// the bottom one, both one cell clear of a corner, so neither eats one. The bar
+// covers the rule cells it needs and leaves the rest of the row the rule.
+func TestPanelTitleAndBar(t *testing.T) {
+	r := layout.Rect{X: 3, Y: 2, W: 16, H: 3}
+	screen := panelScreen(t, 24, 10, func(b *bytes.Buffer) {
+		hint := &hintbar.Bar{Hints: []hintbar.Hint{{Keys: []string{"esc"}, Label: "close"}}}
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, hint, false, nil)
 	})
-	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭─title──╮"; got != want {
+	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭─title──────────╮"; got != want {
 		t.Fatalf("title row = %q, want %q", got, want)
 	}
-	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰─hint───╯"; got != want {
-		t.Fatalf("hint row = %q, want %q", got, want)
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰─ esc  close────╯"; got != want {
+		t.Fatalf("hint row = %q, want the bar between the rules %q", got, want)
+	}
+}
+
+// TestPanelBarKeepsTheCorners: a bar wider than the row it rides clips to the
+// interior minus two, so both corners keep their rune and no cap covers one.
+func TestPanelBarKeepsTheCorners(t *testing.T) {
+	r := layout.Rect{X: 3, Y: 2, W: 12, H: 2}
+	screen := panelScreen(t, 24, 10, func(b *bytes.Buffer) {
+		hint := &hintbar.Bar{Hints: []hintbar.Hint{
+			{Keys: []string{"j/k"}, Label: "move"},
+			{Keys: []string{"esc"}, Label: "close"},
+		}}
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{}, hint, false, nil)
+	})
+	row := []rune(panelRow(screen, r.Y+r.H, r.X-1, r.W+2))
+	if row[0] != '╰' {
+		t.Fatalf("bottom row = %q, want the left corner", string(row))
+	}
+	if row[len(row)-1] != '╯' {
+		t.Fatalf("bottom row = %q, want the right corner", string(row))
+	}
+	if row[1] != '─' {
+		t.Fatalf("bottom row = %q, want the rule cell beside the corner", string(row))
+	}
+}
+
+// TestPanelNilBarLeavesTheRule: a nil bar paints no hint, so the bottom row is a
+// plain rule between its corners.
+func TestPanelNilBarLeavesTheRule(t *testing.T) {
+	r := layout.Rect{X: 3, Y: 2, W: 6, H: 2}
+	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{}, nil, false, nil)
+	})
+	if got, want := panelRow(screen, r.Y+r.H, r.X-1, r.W+2), "╰──────╯"; got != want {
+		t.Fatalf("bottom row = %q, want %q", got, want)
+	}
+}
+
+// TestPanelBarCarriesNoStatus: a border placement carries no right status, so a
+// bar with one paints only its hints.
+func TestPanelBarCarriesNoStatus(t *testing.T) {
+	r := layout.Rect{X: 3, Y: 2, W: 20, H: 2}
+	screen := panelScreen(t, 30, 10, func(b *bytes.Buffer) {
+		hint := &hintbar.Bar{
+			Hints: []hintbar.Hint{{Keys: []string{"esc"}}},
+			Right: []segment.Seg{{Text: "recent 40%"}},
+		}
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{}, hint, false, nil)
+	})
+	if got := panelRow(screen, r.Y+r.H, r.X-1, r.W+2); strings.Contains(got, "recent") {
+		t.Fatalf("bottom row = %q, want no status on a border", got)
 	}
 }
 
@@ -104,7 +159,7 @@ func TestPanelTitleAndHint(t *testing.T) {
 func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 	r := layout.Rect{X: 3, Y: 2, W: 2, H: 2}
 	screen := panelScreen(t, 20, 10, func(b *bytes.Buffer) {
-		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "hint", true, nil)
+		PaintPanel(b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, nil, true, nil)
 	})
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭──╮"; got != want {
 		t.Fatalf("top row = %q, want the plain border %q", got, want)
@@ -122,7 +177,7 @@ func TestPanelDropsTitleWhenNarrow(t *testing.T) {
 func TestPanelTruncatesTitleAtThreeWide(t *testing.T) {
 	r := layout.Rect{X: 4, Y: 3, W: 3, H: 2}
 	var b bytes.Buffer
-	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, "", false, nil)
+	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{Text: "title", Style: PanelTitleStyle}, nil, false, nil)
 	screen := panelFilled(t, 20, 10, b.Bytes())
 	if got, want := panelRow(screen, r.Y-1, r.X-1, r.W+2), "╭─t─╮"; got != want {
 		t.Fatalf("title row = %q, want the title cut to its one cell %q", got, want)
@@ -152,7 +207,7 @@ func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 		Text:  " title ",
 		Style: "\x1b[0m\x1b[90m",
 		Fill:  theme.DefaultTheme().Glyphs.BorderHorizontal,
-	}, "", false, nil)
+	}, nil, false, nil)
 	out := b.String()
 	// The style carries the panel ground, so the fill glyphs are opaque too.
 	if want := "\x1b[0m\x1b[90m" + theme.DefaultTheme().Palette.RailBG.BG() + "\x1b[3;4H╭ title ───╮"; !strings.HasPrefix(out, want) {
@@ -182,7 +237,7 @@ func TestPanelFillTitleRowWritesOnce(t *testing.T) {
 func TestPanelClipsInterior(t *testing.T) {
 	r := layout.Rect{X: 4, Y: 3, W: 4, H: 2}
 	var b bytes.Buffer
-	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{Text: "T", Style: PanelTitleStyle}, "", true, func(w *bytes.Buffer, inner layout.Rect) {
+	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{Text: "T", Style: PanelTitleStyle}, nil, true, func(w *bytes.Buffer, inner layout.Rect) {
 		// Past the right edge, the row would run over the border.
 		fmt.Fprintf(w, "\x1b[%d;%dHABCDEFG", inner.Y+1, inner.X+1)
 		// Above, below and left of the box.

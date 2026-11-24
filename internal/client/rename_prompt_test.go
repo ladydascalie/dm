@@ -362,8 +362,8 @@ func TestRenamePromptDrawsTheBox(t *testing.T) {
 	if got := renameFloatRow(p, box.Y-1, box.X-1, box.W+2); !strings.Contains(got, "rename workspace s1") {
 		t.Fatalf("title row = %q, want the kind and the id", got)
 	}
-	if got := renameFloatRow(p, box.Y+box.H, box.X-1, box.W+2); !strings.Contains(got, "enter  esc") {
-		t.Fatalf("hint row = %q, want enter and esc", got)
+	if got := renameFloatRow(p, box.Y+box.H, box.X-1, box.W+2); !strings.Contains(got, " enter ") || !strings.Contains(got, " esc ") {
+		t.Fatalf("hint row = %q, want the enter and esc caps", got)
 	}
 	row := renameFloatRow(p, box.Y, box.X, box.W)
 	if !strings.HasPrefix(row, " name: main") {
@@ -444,7 +444,7 @@ func TestRenamePromptBandRepaints(t *testing.T) {
 	}
 
 	first := renamePromptVisible(f.frame())
-	for _, want := range []string{"rename workspace s1", " name: ", "main", "enter  esc"} {
+	for _, want := range []string{"rename workspace s1", " name: ", "main", " enter ", " esc "} {
 		if !strings.Contains(first, want) {
 			t.Fatalf("prompt is missing %q: %q", want, first)
 		}

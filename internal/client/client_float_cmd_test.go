@@ -129,7 +129,7 @@ func TestFloatReplyOpens(t *testing.T) {
 	if got := tui.float.float.Title; !strings.Contains(got, " git ") {
 		t.Fatalf("title = %q, want the label, the command's first word", got)
 	}
-	if got := tui.float.float.Hint; !strings.Contains(got, "ctrl+b kills the float") {
+	if got := barText(tui.float.float.Hint, 200); !strings.Contains(got, "ctrl+b  kills the float") {
 		t.Fatalf("hint = %q, want the kill key", got)
 	}
 }
@@ -223,7 +223,7 @@ func TestFloatExitKeepsScreen(t *testing.T) {
 	if got := tui.float.float.Title; !strings.Contains(got, "exited") {
 		t.Fatalf("title = %q, want the exited note", got)
 	}
-	if got := tui.float.float.Hint; !strings.Contains(got, "any key closes") {
+	if got := barText(tui.float.float.Hint, 200); !strings.Contains(got, "any key  closes") {
 		t.Fatalf("hint = %q, want the any key note", got)
 	}
 	if out := tui.float.vt.Grid().Text(0); !strings.Contains(out, "hi") {

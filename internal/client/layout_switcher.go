@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/theme"
-	"dm/internal/ui"
 	"dm/internal/wire"
 )
 
@@ -68,7 +68,6 @@ type layoutPalette struct {
 	rect    layout.Rect
 	preview layout.Rect // the preview band; empty when the screen dropped it
 	listY   int
-	footY   int
 }
 
 // openLayoutSwitcher raises the layout palette over the live panes. A second
@@ -222,27 +221,33 @@ func layoutPaneArea(win *wire.Snapshot) layout.Rect {
 	return layout.PaneAreaForWithTabBar(win.Cols, win.Rows, win.Rail)
 }
 
-// layoutFooterText is the palette's footer line: the dropped-preview note on a
-// screen too small for the floor preview, the one-pane line on a window with a
-// single pane, and the key hint otherwise. The hint names the layout keymap's
-// pick and close keys, so a rebind moves it.
-func layoutFooterText(show bool, paneCount int, km *keymap.Config) string {
+// layoutTitle is the palette's top border: the word, then the note a screen too
+// small for the floor preview or a window with one pane needs said. The note
+// rode the footer row before the hint moved to the border, and it needs a home
+// the row no longer offers.
+func layoutTitle(show bool, paneCount int) string {
 	switch {
 	case !show:
-		return "no room here for the preview"
+		return " layout · no room for the preview "
 	case paneCount < 2:
-		return "one pane: every layout is this"
+		return " layout · one pane: every layout is this "
 	}
+	return " layout "
+}
+
+// layoutHint is the palette's bottom border: the layout keymap's pick and close
+// keys, so a rebind moves it.
+func layoutHint(km *keymap.Config) *hintbar.Bar {
 	key := func(action string) string {
 		if km == nil {
 			return ""
 		}
 		return km.Key("layout", action)
 	}
-	return ui.Hints([]ui.Hint{
+	return &hintbar.Bar{Hints: []hintbar.Hint{
 		{Keys: []string{key("pick")}, Label: "pick"},
 		{Keys: []string{key("close-esc")}, Label: "close"},
-	})
+	}}
 }
 
 // layoutPaletteGeom places the palette, centred, sized to the wider of the
@@ -290,18 +295,18 @@ func layoutPaletteGeom(win *wire.Snapshot, paneCount int, km *keymap.Config) lay
 		pw, ph = 0, 0
 	}
 
-	show := fits && win.Cols >= pw+2 && win.Rows >= ph+layoutRowCount+3
+	show := fits && win.Cols >= pw+2 && win.Rows >= ph+layoutRowCount+2
 	// The palette is as wide as its widest column: the list, the preview or
-	// the footer line.
+	// the title with its note.
 	w := layoutListW
 	if show && pw > w {
 		w = pw
 	}
-	if n := cells.Cells(layoutFooterText(show, paneCount, km)); n > w {
+	if n := cells.Cells(layoutTitle(show, paneCount)); n > w {
 		w = n
 	}
-	w += 2                  // the borders
-	h := layoutRowCount + 1 // the list and the footer
+	w += 2 // the borders
+	h := layoutRowCount
 	if show {
 		h += ph
 	}
@@ -333,7 +338,6 @@ func layoutPaletteGeom(win *wire.Snapshot, paneCount int, km *keymap.Config) lay
 		}
 	}
 	g.listY = g.rect.Y + 1 + g.preview.H
-	g.footY = g.listY + layoutRowCount
 	return g
 }
 
@@ -404,10 +408,10 @@ func (t *tui) layoutMouse(ev mouseEvent, x, y int) {
 }
 
 // drawLayoutSwitcher paints the palette: a bordered panel with the preview
-// band on top, the six rows under it and a footer. The row the selection sits
-// on is highlighted; the row matching the window's stored layout name carries
-// the current mark; on a one-pane window every preset row dims and the footer
-// says why.
+// band on top, the six rows under it and the keys on the bottom border. The row
+// the selection sits on is highlighted; the row matching the window's stored
+// layout name carries the current mark; on a one-pane window every preset row
+// dims and the title says why.
 func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l *layoutSwitcher, km *keymap.Config) {
 	g := layoutPaletteGeom(win, len(l.panes), km)
 	if g.rect.W < 1 || l == nil {
@@ -415,10 +419,10 @@ func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l
 	}
 	inner := layout.Rect{X: g.rect.X + 1, Y: g.rect.Y + 1, W: g.rect.W - 2, H: g.rect.H - 2}
 	panel.PaintPanel(buf, th, inner, panel.PanelTitle{
-		Text:  th.Glyphs.BorderHorizontal + " layout ",
+		Text:  th.Glyphs.BorderHorizontal + layoutTitle(g.preview.W > 0, len(l.panes)),
 		Style: "\x1b[0m\x1b[90m" + groundSGR(th.Palette.RailBG),
 		Fill:  th.Glyphs.BorderHorizontal,
-	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
+	}, layoutHint(km), false, func(b *bytes.Buffer, r layout.Rect) {
 		// PaintPanel fills the interior with the rail ground; the boxes and
 		// rows paint their own grounds on top of it.
 		if g.preview.W > 0 {
@@ -454,9 +458,6 @@ func drawLayoutSwitcher(buf *bytes.Buffer, th theme.Theme, win *wire.Snapshot, l
 			}
 			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", g.listY+i+1, r.X+1, colour, line)
 		}
-		foot := layoutFooterText(g.preview.W > 0, len(l.panes), km)
-		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s%s", g.footY+1, r.X+1,
-			groundSGR(th.Palette.RailBG), cells.Pad(foot, r.W))
 	})
 	buf.WriteString("\x1b[0m")
 }

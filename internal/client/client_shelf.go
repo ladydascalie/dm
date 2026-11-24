@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
@@ -255,7 +256,11 @@ func (t *tui) shelfBorders() {
 	}
 	sv.float.Title = cells.Clip(title, sv.float.Rect.W-2)
 	prefix := t.km().PrefixName()
-	sv.float.Hint = cells.Clip(" "+prefix+" F closes · "+prefix+" n/p moves · "+prefix+" G pops ", sv.float.Rect.W-2)
+	sv.float.Hint = &hintbar.Bar{Hints: []hintbar.Hint{
+		{Keys: []string{prefix + " F"}, Label: "closes"},
+		{Keys: []string{prefix + " n/p"}, Label: "moves"},
+		{Keys: []string{prefix + " G"}, Label: "pops"},
+	}}
 }
 
 // shelfPaint is the shelf float's content painter: the chip strip on its first

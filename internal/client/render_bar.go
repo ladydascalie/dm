@@ -31,7 +31,7 @@ func drawMenu(buf *bytes.Buffer, th theme.Theme, m *menu) {
 		Text:  th.Glyphs.BorderHorizontal + " " + m.title + " ",
 		Style: "\x1b[0m\x1b[90m",
 		Fill:  th.Glyphs.BorderHorizontal,
-	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
+	}, nil, false, func(b *bytes.Buffer, r layout.Rect) {
 		for i, it := range m.items {
 			line := cells.Pad(" "+cells.Pad(it.label, 22)+" "+cells.Pad(it.key, 4), r.W)
 			colour := "\x1b[0m\x1b[90m"

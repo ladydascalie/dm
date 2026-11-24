@@ -10,12 +10,13 @@ import (
 	"testing"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/rail"
+	"dm/internal/segment"
 	"dm/internal/testutil"
 	"dm/internal/theme"
-	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -107,6 +108,17 @@ func switcherText(screen *vt.Term, x, y, w int) string {
 		b.WriteString(c)
 	}
 	return strings.TrimRight(b.String(), " ")
+}
+
+// switcherFoot is the footer text the hint bar paints at width, on the ASCII
+// glyph set the switcher draws with.
+func switcherFoot(hints []hintbar.Hint, right string, width int) string {
+	th := theme.DefaultTheme().For(theme.GlyphASCII)
+	bar := hintbar.Bar{Hints: hints}
+	if right != "" {
+		bar.Right = []segment.Seg{{Text: right, FG: th.Palette.RailDim, BG: th.Palette.RailBG}}
+	}
+	return bar.Text(width, th)
 }
 
 // switcherMoves lists the cursor moves a float wrote as zero-based row, col.
@@ -267,13 +279,13 @@ func TestSwitcherDrawFrame(t *testing.T) {
 			t.Fatalf("rule cell %d,%d = %q, want |", l.ruleX, y, c)
 		}
 	}
-	// The footer names every key the dashboard takes, then the ordering and the
-	// preview's share at the right edge.
-	wantLeft := "enter pick | esc close | 1-9 jump | i copy id | d diff | " +
-		"/ filter | s sort | p peek | +/- size | ctrl+u/ctrl+d scroll | D diff split"
-	wantRight := "recent 20%"
-	wantFoot := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
-	if foot := switcherText(screen, l.inner.X, l.footY, l.inner.W); foot != wantFoot {
+	// The footer names every key the dashboard takes as one hint bar, then the
+	// ordering and the preview's share at the right edge.
+	wantFoot := switcherFoot(switcherHints(keymap.LoadDefault()), "recent 20%", l.inner.W)
+	if !strings.Contains(wantFoot, "enter  pick |  esc  close |  1-9  jump") {
+		t.Fatalf("want foot = %q, want the hint caps", wantFoot)
+	}
+	if foot := switcherText(screen, l.inner.X, l.footY, l.inner.W); foot != strings.TrimRight(wantFoot, " ") {
 		t.Fatalf("footer = %q, want %q", foot, wantFoot)
 	}
 }
@@ -349,46 +361,41 @@ func TestSwitcherDrawFootDropsHints(t *testing.T) {
 	l := switcherLayoutOf(s, snap)
 	_, _, _, screen := drawFloat(t, s, snap, nil)
 	foot := switcherText(screen, l.inner.X, l.footY, l.inner.W)
-	wantLeft := "enter pick | esc close | 1-9 jump | i copy id | d diff | / filter"
-	wantRight := "recent 60%"
-	want := wantLeft + strings.Repeat(" ", l.inner.W-cells.Cells(wantLeft)-cells.Cells(wantRight)) + wantRight
+	want := strings.TrimRight(switcherFoot(switcherHints(keymap.LoadDefault()), "recent 60%", l.inner.W), " ")
 	if foot != want {
 		t.Fatalf("footer = %q, want %q", foot, want)
 	}
-	for _, gone := range []string{"s sort", "p peek", "+/- size", "ctrl+u/ctrl+d scroll"} {
+	for _, want := range []string{"1-9  jump", "i  copy id", "d  diff"} {
+		if !strings.Contains(foot, want) {
+			t.Fatalf("footer = %q, misses %q", foot, want)
+		}
+	}
+	for _, gone := range []string{"s  sort", "p  peek", "+/-  size", "scroll"} {
 		if strings.Contains(foot, gone) {
 			t.Fatalf("footer kept %q: %q", gone, foot)
 		}
 	}
 }
 
-// TestSwitcherDrawFootFoldsControlKeys checks a footer too narrow for the
-// spelled-out keys retries with the caret form, so the scroll reminder keeps
-// the cells the full key name would spend. A wide footer keeps the full name.
-func TestSwitcherDrawFootFoldsControlKeys(t *testing.T) {
-	// 139 columns leaves the hints 125 cells once the mode text and its gap
-	// are paid for: one cell short of the spelled-out keys, exact for the
-	// folded ones.
+// TestSwitcherDrawFootKeepsTheFullKeyName checks the footer names a control
+// chord in full: the bar fits the hints and drops whole ones from the tail, so
+// it never folds a key name to buy a cell. A narrow footer loses the scroll
+// reminder before it renames it.
+func TestSwitcherDrawFootKeepsTheFullKeyName(t *testing.T) {
 	s, snap := switcherOn(139, 30)
 	l := switcherLayoutOf(s, snap)
 	_, _, _, screen := drawFloat(t, s, snap, nil)
 	foot := switcherText(screen, l.inner.X, l.footY, l.inner.W)
-	if !strings.Contains(foot, "^u/^d scroll") {
-		t.Fatalf("narrow footer = %q, want ^u/^d scroll", foot)
-	}
-	if strings.Contains(foot, "ctrl+u") {
-		t.Fatalf("narrow footer kept the full key name: %q", foot)
+	if strings.Contains(foot, "^u/^d") {
+		t.Fatalf("narrow footer = %q, want no folded key", foot)
 	}
 
 	wide, wsnap := switcherOn(200, 40)
 	wl := switcherLayoutOf(wide, wsnap)
 	_, _, _, wscreen := drawFloat(t, wide, wsnap, nil)
 	wfoot := switcherText(wscreen, wl.inner.X, wl.footY, wl.inner.W)
-	if !strings.Contains(wfoot, "ctrl+u/ctrl+d scroll") {
+	if !strings.Contains(wfoot, "ctrl+u/ctrl+d  scroll") {
 		t.Fatalf("wide footer = %q, want ctrl+u/ctrl+d scroll", wfoot)
-	}
-	if strings.Contains(wfoot, "^u/^d") {
-		t.Fatalf("wide footer folded a key that fits: %q", wfoot)
 	}
 }
 
@@ -676,13 +683,13 @@ func TestSwitcherHintNamesTheKeymap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse test keymap: %v", err)
 	}
-	if got, want := switcherHint(200, cfg), "ctrl+p pick | ctrl+q close | f filter"; got != want {
+	if got, want := switcherFoot(switcherHints(cfg), "", 200), " ctrl+p  pick |  ctrl+q  close |  f  filter"; got != want {
 		t.Fatalf("footer = %q, want %q", got, want)
 	}
 	if got, want := switcherIdleHint(cfg), "press f to filter"; got != want {
 		t.Fatalf("idle query row = %q, want %q", got, want)
 	}
-	if got := switcherHint(200, nil); got != "" {
+	if got := switcherFoot(switcherHints(nil), "", 200); got != "" {
 		t.Fatalf("footer without a config = %q, want empty", got)
 	}
 }
@@ -958,78 +965,73 @@ func TestSwitcherDrawPeekDownScroll(t *testing.T) {
 	check("L85", "L99")
 }
 
-// TestSwitcherDrawFootGround paints the whole footer row on the rail hover
-// ground and lays the hints out as segments: the keys in the bar accent and
-// bold, the labels in the rail text, and the separators in the rail dim.
+// TestSwitcherDrawFootGround paints the footer row on the rail background: the
+// caps carry the hover ground, the labels and the pipes sit on the row ground,
+// and the row wears no full-width band. The pipe is the derived faint tone, not
+// the rail dim.
 func TestSwitcherDrawFootGround(t *testing.T) {
 	s, snap := switcherOn(80, 24)
 	l := switcherLayoutOf(s, snap)
 	_, _, _, screen := drawFloat(t, s, snap, nil)
 	th := theme.DefaultTheme()
+	rail := switcherVTColor(th.Palette.RailBG)
 	hover := switcherVTColor(th.Palette.RailHoverBG)
+	// No row band: the row's own ground is the rail background.
 	for x := l.inner.X; x < l.inner.X+l.inner.W; x++ {
-		if c := screen.Grid().Cell(x, l.footY); c.Style.Bg != hover {
-			t.Fatalf("footer cell %d background = %+v, want the rail hover ground", x, c.Style.Bg)
+		if c := screen.Grid().Cell(x, l.footY); c.Style.Bg != rail && c.Style.Bg != hover {
+			t.Fatalf("footer cell %d background = %+v, want the rail ground or a cap", x, c.Style.Bg)
 		}
 	}
-	// The first hint's key is bold in the bar accent, and its label is the
-	// rail text on the same ground.
-	key := screen.Grid().Cell(l.inner.X, l.footY)
-	if key.Content != "e" || key.Style.Fg != switcherVTColor(th.Palette.BarAccent) || key.Style.Attrs&vt.Bold == 0 {
-		t.Fatalf("first key cell = %q %+v, want a bold bar-accent key", key.Content, key.Style)
+	// The first cap is one space of padding, the key in the rail text, bold,
+	// on the hover ground.
+	key := screen.Grid().Cell(l.inner.X+1, l.footY)
+	if key.Content != "e" || key.Style.Fg != switcherVTColor(th.Palette.RailText) || key.Style.Attrs&vt.Bold == 0 {
+		t.Fatalf("first key cell = %q %+v, want a bold rail-text key", key.Content, key.Style)
 	}
-	label := screen.Grid().Cell(l.inner.X+6, l.footY)
+	if key.Style.Bg != hover {
+		t.Fatalf("cap ground = %+v, want the hover ground", key.Style.Bg)
+	}
+	// The label sits one space after the cap, in the rail text on the row
+	// ground.
+	label := screen.Grid().Cell(l.inner.X+8, l.footY)
 	if label.Content != "p" || label.Style.Fg != switcherVTColor(th.Palette.RailText) || label.Style.Attrs&vt.Bold != 0 {
 		t.Fatalf("label cell = %q %+v, want the rail text in the row's weight", label.Content, label.Style)
 	}
-	// The separator between the first two hints is a rail-dim bar with the
-	// spaces around it.
-	sep := switcherText(screen, l.inner.X+10, l.footY, 3)
-	if sep != " |" {
-		t.Fatalf("separator = %q, want a bar between the hints' spaces", sep)
+	if label.Style.Bg != rail {
+		t.Fatalf("label ground = %+v, want the rail background", label.Style.Bg)
 	}
-	if c := screen.Grid().Cell(l.inner.X+12, l.footY); c.Style.Fg != switcherVTColor(th.Palette.RailDim) {
-		t.Fatalf("separator bar colour = %+v, want the rail dim", c.Style.Fg)
+	// The pipe between the first two hints is one space either side, in the
+	// derived faint tone, on the rail background.
+	if sep := switcherText(screen, l.inner.X+12, l.footY, 3); sep != " |" {
+		t.Fatalf("separator = %q, want a pipe between the hints' spaces", sep)
 	}
-	// The mode text keeps the rail dim on the same ground, and the row ends at
+	pipe := screen.Grid().Cell(l.inner.X+13, l.footY)
+	if pipe.Style.Fg != switcherVTColor(hintbar.PipeColour(th)) || pipe.Style.Bg != rail {
+		t.Fatalf("pipe style = %+v, want the faint tone on the rail background", pipe.Style)
+	}
+	// The mode text keeps the rail dim on the row ground, and the row ends at
 	// the inner rect's last cell.
 	right := screen.Grid().Cell(l.inner.X+l.inner.W-1, l.footY)
-	if right.Style.Fg != switcherVTColor(th.Palette.RailDim) || right.Style.Bg != hover {
-		t.Fatalf("footer right end = %+v, want the rail dim on the hover ground", right.Style)
+	if right.Style.Fg != switcherVTColor(th.Palette.RailDim) || right.Style.Bg != rail {
+		t.Fatalf("footer right end = %+v, want the rail dim on the rail ground", right.Style)
 	}
 	if c := screen.Grid().Cell(l.inner.X+l.inner.W, l.footY); c.Content != "|" {
 		t.Fatalf("cell past the footer = %q, want the box border", c.Content)
 	}
 }
 
-// TestSwitcherHintMeasuresSeparators pins the fit rule with the separators in
-// it: two hints cost their own cells and the run between them, and one cell
-// short of that drops the second hint whole.
-func TestSwitcherHintMeasuresSeparators(t *testing.T) {
-	km := keymap.LoadDefault()
-	hints := switcherHints(km)
-	first, second := ui.Hints(hints[:1]), ui.Hints(hints[1:2])
-	room := cells.Cells(first) + cells.Cells(switcherHintSep) + cells.Cells(second)
-	if got, want := switcherHint(room, km), first+switcherHintSep+second; got != want {
-		t.Fatalf("hints at %d cells = %q, want %q", room, got, want)
+// TestSwitcherFootIsOneBar pins the footer to the component: the row the
+// switcher paints is the cells the bar reports, and the row stops there.
+func TestSwitcherFootIsOneBar(t *testing.T) {
+	s, snap := switcherOn(80, 24)
+	l := switcherLayoutOf(s, snap)
+	_, _, _, screen := drawFloat(t, s, snap, nil)
+	bar := hintbar.Bar{Hints: switcherHints(keymap.LoadDefault())}
+	if n := bar.Cells(l.inner.W, theme.DefaultTheme().For(theme.GlyphASCII)); n >= l.inner.W {
+		t.Fatalf("the bar fits the whole row (%d cells), so the status has no space", n)
 	}
-	if got := switcherHint(room-1, km); got != first {
-		t.Fatalf("hints at %d cells = %q, want the first hint alone", room-1, got)
-	}
-	// The fold retry measures the separators too: the whole list at the folded
-	// width keeps every hint, one cell under it drops the last.
-	folded := make([]ui.Hint, len(hints))
-	for i, h := range hints {
-		keys := make([]string, len(h.Keys))
-		for j, k := range h.Keys {
-			keys[j] = ui.ShortKey(k)
-		}
-		folded[i] = ui.Hint{Keys: keys, Label: h.Label}
-	}
-	full := cells.Cells(switcherHint(100000, km))
-	foldWidth := full - (cells.Cells("ctrl+u/ctrl+d scroll") - cells.Cells("^u/^d scroll"))
-	if got := switcherHint(foldWidth-1, km); !strings.Contains(got, "^u/^d scroll") {
-		t.Fatalf("folded hints at %d cells = %q, want the folded scroll reminder", foldWidth-1, got)
+	if got := switcherText(screen, l.inner.X, l.footY, l.inner.W); !strings.HasSuffix(got, "recent 60%") {
+		t.Fatalf("footer = %q, want the status at its right edge", got)
 	}
 }
 

@@ -296,8 +296,8 @@ func TestLayoutPreviewBandDropsOnSmallScreen(t *testing.T) {
 	l := &layoutSwitcher{panes: []string{"a"}, focus: "a"}
 	var out bytes.Buffer
 	drawLayoutSwitcher(&out, theme.DefaultTheme(), snap, l, keymap.LoadDefault())
-	if s := out.String(); !strings.Contains(s, "no room here for the preview") {
-		t.Fatalf("footer = %q, want the dropped-preview note", s)
+	if s := out.String(); !strings.Contains(s, "no room for the preview") {
+		t.Fatalf("title = %q, want the dropped-preview note", s)
 	}
 }
 

@@ -76,8 +76,8 @@ func readerScreen(t *testing.T, r *bodyReader, cols, rows int) *vt.Term {
 func TestBodyReaderOpensOnEnter(t *testing.T) {
 	t.Parallel()
 	tui := openBoxWith(t, bodyEntries())
-	if !strings.Contains(tui.box.Float.Hint, "enter body") {
-		t.Fatalf("hint = %q, want the affordance", tui.box.Float.Hint)
+	if got := barText(tui.box.Float.Hint, tui.box.Float.Rect.W-2); !strings.Contains(got, "enter  body") {
+		t.Fatalf("hint = %q, want the affordance", got)
 	}
 	feed(tui, "\r")
 	if tui.reader == nil {
@@ -160,8 +160,8 @@ func TestSummaryOnlyEntryReads(t *testing.T) {
 		{Seq: 10, Key: "notify/w3p1", State: box.StateBlocked, From: "w3p1", Msg: "needs you"},
 	}
 	tui := openBoxWith(t, entries)
-	if !strings.Contains(tui.box.Float.Hint, "enter body") {
-		t.Fatalf("hint = %q, want the reader affordance on a summary", tui.box.Float.Hint)
+	if got := barText(tui.box.Float.Hint, tui.box.Float.Rect.W-2); !strings.Contains(got, "enter  body") {
+		t.Fatalf("hint = %q, want the reader affordance on a summary", got)
 	}
 	feed(tui, "\r")
 	if tui.reader == nil {
@@ -178,8 +178,8 @@ func TestEmptyEntryOpensNothing(t *testing.T) {
 	tui := openBoxWith(t, []box.Entry{
 		{Seq: 10, Key: "notify/w3p1", State: box.StateWorking, From: "w3p1"},
 	})
-	if strings.Contains(tui.box.Float.Hint, "enter body") {
-		t.Fatalf("hint = %q, want no reader affordance for an empty entry", tui.box.Float.Hint)
+	if got := barText(tui.box.Float.Hint, tui.box.Float.Rect.W-2); strings.Contains(got, "body") {
+		t.Fatalf("hint = %q, want no reader affordance for an empty entry", got)
 	}
 	feed(tui, "\r")
 	if tui.reader != nil {
@@ -197,8 +197,8 @@ func TestBodyReaderSelectionAndHint(t *testing.T) {
 	if !ok || e.Seq != 7 {
 		t.Fatalf("selected = %+v ok %v, want seq 7", e, ok)
 	}
-	if !strings.Contains(tui.box.Float.Hint, "enter body") {
-		t.Fatalf("hint = %q, want the reader affordance on a summary", tui.box.Float.Hint)
+	if got := barText(tui.box.Float.Hint, tui.box.Float.Rect.W-2); !strings.Contains(got, "enter  body") {
+		t.Fatalf("hint = %q, want the reader affordance on a summary", got)
 	}
 	feed(tui, "\r")
 	if tui.reader == nil {

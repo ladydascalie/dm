@@ -82,8 +82,9 @@ internal/theme       the palette, glyphs and theme file parser
 internal/kdl         the KDL tokenizer shared by keymap and theme
 internal/cells       cell-width measuring and clipping
 internal/segment     a styled run of text
+internal/hintbar     the one key-hint row: caps, labels and faint pipes
 internal/panel       the bordered box painter
-internal/ui          the scrolling window, the message list, the hint row and the one-line input
+internal/ui          the scrolling window, the message list and the one-line input
 internal/vt          VT replay and screen serialisation
 internal/paths       the session filesystem layout
 internal/testutil    test helpers shared by more than one package
@@ -1223,8 +1224,12 @@ buffer. `internal/client/render_pane.go` owns the pane painters: `drawPane`,
 
 `cells` measures and cuts: cell width, clipping, padding and elision. `segment`
 is a styled run: text, foreground, background, weight and the pin mark.
-`panel` builds a box: `PaintPanel` clips the interior to a rect and writes the
-title and hint rows, and `DrawPaneBox` paints the border around content.
+`hintbar` builds the one key-hint row: a filled cap around each key, its label
+after it and a faint pipe between the hints, fitted to the cells the caller
+gives it. Every shortcut row on every surface is that bar.
+`panel` builds a box: `PaintPanel` clips the interior to a rect, writes the
+title row and paints a hint bar on the bottom border, and `DrawPaneBox` paints
+the border around content.
 
 `ui` is the package of values a view shares: a component is a value plus a
 pure draw. The client keeps the state. There is no retained tree.
@@ -1232,9 +1237,7 @@ pure draw. The client keeps the state. There is no retained tree.
 `ui.Viewport` is the scrolling window a list draws through: row count, height,
 offset and selection, with the steps that move it and keep the selection in
 view. It replaces the offset and selection arithmetic each float and table
-writes for itself. `ui.Hints` lays one row of key hints out as plain text. It
-replaces the hint string each view builds by hand. Neither writes an escape
-sequence.
+writes for itself. Neither writes an escape sequence.
 
 `ui.MessageList` is the list behind the message view: the entries, the topic
 filter, the selection window, the read mark and the row painter. `Set`,

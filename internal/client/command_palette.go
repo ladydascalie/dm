@@ -8,6 +8,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/configdoc"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/palette"
@@ -352,14 +353,17 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 		Text:  th.Glyphs.BorderHorizontal + " palette ",
 		Style: "\x1b[0m\x1b[90m" + groundSGR(th.Palette.RailBG),
 		Fill:  th.Glyphs.BorderHorizontal,
-	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
+	}, nil, false, func(b *bytes.Buffer, r layout.Rect) {
 		// PaintPanel fills the interior with the rail ground; the query and
 		// the rows paint their own grounds on top of it.
-		hint := ""
+		hint := 0
 		if !cp.help {
-			hint = paletteHelpHint
+			hint = paletteHelpBar.Cells(r.W, th)
 		}
 		cx, cy = paintPaletteQuery(b, th, cp.pal.Search.Input, r, hint)
+		if hint > 0 {
+			hintbar.Line(b, th, r.X+r.W-hint, r.Y, hint, paletteHelpBar)
+		}
 		paintPaletteRows(b, th, cp, rows, r)
 	})
 	if cp.help {
@@ -373,10 +377,11 @@ func drawCommandPalette(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, w
 // to, and the widest box it opens at.
 const paletteHelpWidth = 56
 
-// paletteHelpHint is the query line's right-edge signpost: ? explains the
+// paletteHelpBar is the query line's right-edge signpost: ? explains the
 // command under the selection. The palette owns that key and the keymap binds
-// no action to it, so it stays literal.
-var paletteHelpHint = ui.Hints([]ui.Hint{{Keys: []string{"?"}, Label: "help"}})
+// no action to it, so it stays literal. It is a one-hint bar painted inline, so
+// it wears the same cap as every other hint row.
+var paletteHelpBar = hintbar.Bar{Hints: []hintbar.Hint{{Keys: []string{"?"}, Label: "help"}}}
 
 // paintPaletteHelp paints the help float for the selected command: a small
 // panel centred over the palette, carrying the command's key, its name and
@@ -414,7 +419,7 @@ func paintPaletteHelp(buf *bytes.Buffer, th theme.Theme, cp *commandPalette, g l
 		Text:  th.Glyphs.BorderHorizontal + " " + cmd.Name + " ",
 		Style: "\x1b[0m\x1b[90m" + groundSGR(th.Palette.RailBG),
 		Fill:  th.Glyphs.BorderHorizontal,
-	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
+	}, nil, false, func(b *bytes.Buffer, r layout.Rect) {
 		fmt.Fprintf(b, "\x1b[%d;%dH", r.Y+1, r.X+1)
 		b.WriteString("\x1b[0m")
 		b.WriteString(th.Palette.RailBG.BG())
@@ -475,17 +480,17 @@ func paletteWrap(s string, w int) []string {
 // prompt, the query text and the signpost, on the rail ground. It returns the
 // cell the terminal parks its cursor on, which is the cell after the query.
 //
-// The signpost and its two cells of gutter are the row's trailing text, so the
-// signpost sits two cells clear of the right edge and the query's room is the
-// row minus the prompt, the signpost, the gutter and the ground cell the
-// component keeps before the signpost. The row's cells are the ones the
-// hand-written painter drew, except at the exact fill, where the component
-// clips the query rather than glue it to the signpost. No caret glyph: the
-// palette shows the terminal cursor.
-func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, in ui.Input, r layout.Rect, hint string) (cx, cy int) {
+// The signpost and its one cell of gutter are reserved as the row's trailing
+// text, so the input keeps the query off them and the bar paints over the
+// gutter's cells afterwards. The query's room is the row minus the prompt, the
+// signpost, the gutter and the ground cell the component keeps before the
+// signpost. The row's cells are the ones the hand-written painter drew, except
+// at the exact fill, where the component clips the query rather than glue it to
+// the signpost. No caret glyph: the palette shows the terminal cursor.
+func paintPaletteQuery(buf *bytes.Buffer, th theme.Theme, in ui.Input, r layout.Rect, hint int) (cx, cy int) {
 	trailing := ""
-	if hint != "" {
-		trailing = hint + "  "
+	if hint > 0 {
+		trailing = strings.Repeat(" ", hint+1)
 	}
 	return ui.DrawInput(buf, th, ui.InputProps{
 		Rect:     r,

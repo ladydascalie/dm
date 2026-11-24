@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"dm/internal/box"
-	"dm/internal/cells"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/testutil"
@@ -119,7 +118,7 @@ func TestBoxViewListsNewestFirst(t *testing.T) {
 	if !strings.Contains(last, "build failed") || !strings.Contains(last, "error") {
 		t.Fatalf("oldest row = %q, want the last entry", last)
 	}
-	if got := boxScreenRow(screen, r.Y+r.H, r.X+2, r.W-2); !strings.Contains(got, "esc close") {
+	if got := boxScreenRow(screen, r.Y+r.H, r.X+2, r.W-2); !strings.Contains(got, "esc  close") {
 		t.Fatalf("hint = %q, want the close key", got)
 	}
 
@@ -692,23 +691,25 @@ func TestReaderRectKeepsATallList(t *testing.T) {
 	}
 }
 
-// TestBoxHintDropsHintsOnANarrowFloat: a cramped border keeps move, body,
-// clear, watch and close, and drops the wider hints whole.
+// TestBoxHintDropsHintsOnANarrowFloat: a cramped border keeps the move, body,
+// watch and close hints and drops the rest whole, widest worth last.
 func TestBoxHintDropsHintsOnANarrowFloat(t *testing.T) {
 	t.Parallel()
 	snap := &wire.Snapshot{Cols: 64, Rows: 30}
 	b := NewBoxView(snap, theme.DefaultTheme(), keymap.LoadDefault())
 	b.Set([]box.Entry{{Seq: 1, Key: "lane/a", Msg: "text"}}, theme.DefaultTheme())
-	got := b.Float.Hint
-	for _, want := range []string{"move", "body", "clear", "watch", "close"} {
+	got := b.Float.Hint.Text(b.Float.Rect.W-2, theme.DefaultTheme())
+	for _, want := range []string{"move", "body", "watch", "close"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("hint = %q, misses %q on a narrow float", got, want)
 		}
 	}
-	if strings.Contains(got, "clear all") {
-		t.Fatalf("hint = %q, want the widest hint dropped first", got)
+	for _, gone := range []string{"clear all", "clear", "pane", "notify"} {
+		if strings.Contains(got, gone) {
+			t.Fatalf("hint = %q, want %q dropped on a narrow float", got, gone)
+		}
 	}
-	if cells.Cells(got) > b.Float.Rect.W+2 {
-		t.Fatalf("hint = %q is %d cells, the border holds %d", got, cells.Cells(got), b.Float.Rect.W+2)
+	if n := b.Float.Hint.Cells(b.Float.Rect.W-2, theme.DefaultTheme()); n > b.Float.Rect.W-2 {
+		t.Fatalf("hint is %d cells, the border bar holds %d", n, b.Float.Rect.W-2)
 	}
 }

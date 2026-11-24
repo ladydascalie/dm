@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/boxview"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/keymapview"
 	"dm/internal/layout"
@@ -16,6 +17,14 @@ import (
 	"dm/internal/theme"
 	"dm/internal/wire"
 )
+
+// barText is the plain text a hint bar paints at width on the default theme.
+func barText(bar *hintbar.Bar, width int) string {
+	if bar == nil {
+		return ""
+	}
+	return bar.Text(width, theme.DefaultTheme())
+}
 
 // hintKeymap parses one overlay mode whose keys are all rebound, so a test can
 // tell a derived hint from the literal one.
@@ -40,17 +49,18 @@ func TestBoxHintNamesTheKeymap(t *testing.T) {
 	}`)
 	snap := &wire.Snapshot{Cols: 100, Rows: 30}
 	b := boxview.NewBoxView(snap, theme.DefaultTheme(), cfg)
-	if got, want := b.Float.Hint, "n/a move  ctrl+w watch  ctrl+q close"; got != want {
+	wide := b.Float.Rect.W - 2
+	if got, want := barText(b.Float.Hint, wide), " n/a  move │  ctrl+w  watch │  ctrl+q  close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	b.Set(make([]box.Entry, 0), theme.DefaultTheme())
 	b.TogglePage(theme.DefaultTheme())
-	if got, want := b.Float.Hint, "n/a move  ctrl+w log  ctrl+q close"; got != want {
+	if got, want := barText(b.Float.Hint, wide), " n/a  move │  ctrl+w  log │  ctrl+q  close"; got != want {
 		t.Fatalf("page hint = %q, want %q", got, want)
 	}
 	// A reload swaps the config, and the border follows it in place.
 	b.SetKeymap(keymap.LoadDefault())
-	if got := b.Float.Hint; !strings.Contains(got, "j/k move") || !strings.Contains(got, "esc close") {
+	if got := barText(b.Float.Hint, wide); !strings.Contains(got, "j/k  move") || !strings.Contains(got, "esc  close") {
 		t.Fatalf("hint after a reload = %q, want the default keys", got)
 	}
 }
@@ -67,11 +77,12 @@ func TestReaderHintNamesTheKeymap(t *testing.T) {
 	}`)
 	e := box.Entry{Seq: 1, Key: "lane/a", Body: "text"}
 	r := newBodyReader(e, layout.Rect{X: 2, Y: 2, W: 40, H: 6}, theme.DefaultTheme(), cfg)
-	if got, want := r.Float.Hint, "n/a scroll  ctrl+q back"; got != want {
+	wide := r.Float.Rect.W - 2
+	if got, want := barText(r.Float.Hint, wide), " n/a  scroll │  ctrl+q  back"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	r.SetKeymap(keymap.LoadDefault())
-	if got, want := r.Float.Hint, "j/k scroll  esc back"; got != want {
+	if got, want := barText(r.Float.Hint, wide), " j/k  scroll │  esc  back"; got != want {
 		t.Fatalf("hint after a reload = %q, want %q", got, want)
 	}
 }
@@ -91,11 +102,12 @@ func TestMessageHintNamesOnlyTheBoxKeymap(t *testing.T) {
 	}`)
 	b := boxview.NewBoxView(&wire.Snapshot{Cols: 100, Rows: 30}, theme.DefaultTheme(), cfg)
 	b.Set([]box.Entry{{Seq: 1, Key: "lane/a", Body: "text"}}, theme.DefaultTheme())
-	if got, want := b.Float.Hint, "n/a move  e body  f notify  w watch  ctrl+q close"; got != want {
+	wide := b.Float.Rect.W - 2
+	if got, want := barText(b.Float.Hint, wide), " n/a  move │  e  body │  w  watch │  f  notify │  ctrl+q  close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	b.SetKeymap(keymap.LoadDefault())
-	if got := b.Float.Hint; !strings.Contains(got, "j/k move") || !strings.Contains(got, "m notify") || !strings.Contains(got, "enter body") {
+	if got := barText(b.Float.Hint, wide); !strings.Contains(got, "j/k  move") || !strings.Contains(got, "m  notify") || !strings.Contains(got, "enter  body") {
 		t.Fatalf("hint after a reload = %q, want the default keys", got)
 	}
 }
@@ -110,29 +122,33 @@ func TestSessionsHintNamesTheKeymap(t *testing.T) {
 		"pick" "ctrl+p"
 		"close-esc" "ctrl+q"
 	}`)
-	if got, want := sessionsHint(cfg), "n/a move  ctrl+p switch  ctrl+q cancel"; got != want {
+	if got, want := barText(sessionsHint(cfg), 80), " n/a  move │  ctrl+p  switch │  ctrl+q  cancel"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
-	if got, want := sessionsHint(keymap.LoadDefault()), "j/k move  enter switch  esc cancel"; got != want {
+	if got, want := barText(sessionsHint(keymap.LoadDefault()), 80), " j/k  move │  enter  switch │  esc  cancel"; got != want {
 		t.Fatalf("default hint = %q, want %q", got, want)
 	}
 }
 
-// TestLayoutHintNamesTheKeymap: the layout picker's footer names the layout
-// keymap's keys, and its two notes stay whole.
+// TestLayoutHintNamesTheKeymap: the layout picker's border names the layout
+// keymap's keys, and the two notes that used to share the footer row move into
+// the title.
 func TestLayoutHintNamesTheKeymap(t *testing.T) {
 	t.Parallel()
 	cfg := hintKeymap(t, `keymap "layout" {
 		"pick" "ctrl+p"
 		"close-esc" "ctrl+q"
 	}`)
-	if got, want := layoutFooterText(true, 2, cfg), "ctrl+p pick  ctrl+q close"; got != want {
+	if got, want := barText(layoutHint(cfg), 80), " ctrl+p  pick │  ctrl+q  close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
-	if got, want := layoutFooterText(false, 2, cfg), "no room here for the preview"; got != want {
+	if got, want := layoutTitle(true, 2), " layout "; got != want {
+		t.Fatalf("title = %q, want %q", got, want)
+	}
+	if got, want := layoutTitle(false, 2), " layout · no room for the preview "; got != want {
 		t.Fatalf("dropped-preview note = %q, want %q", got, want)
 	}
-	if got, want := layoutFooterText(true, 1, cfg), "one pane: every layout is this"; got != want {
+	if got, want := layoutTitle(true, 1), " layout · one pane: every layout is this "; got != want {
 		t.Fatalf("one-pane note = %q, want %q", got, want)
 	}
 }
@@ -146,7 +162,7 @@ func TestRenameHintNamesTheKeymap(t *testing.T) {
 		"submit" "ctrl+s"
 		"cancel" "ctrl+q"
 	}`)
-	if got, want := renameHint(cfg), "ctrl+s  ctrl+q"; got != want {
+	if got, want := barText(renameHint(cfg), 80), " ctrl+s  │  ctrl+q "; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	// The review's counter-example: a user block that rebinds submit only. The
@@ -159,7 +175,7 @@ func TestRenameHintNamesTheKeymap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPath: %v", err)
 	}
-	if got, want := renameHint(merged), "ctrl+s  esc"; got != want {
+	if got, want := barText(renameHint(merged), 80), " ctrl+s  │  esc "; got != want {
 		t.Fatalf("merged hint = %q, want %q", got, want)
 	}
 
@@ -168,30 +184,26 @@ func TestRenameHintNamesTheKeymap(t *testing.T) {
 	var b bytes.Buffer
 	drawRename(&b, theme.DefaultTheme(), snap, "s1", inputOf("main"), false, cfg)
 	win := renamePromptVisible(b.String())
-	if !strings.Contains(win, "ctrl+s  ctrl+q") {
+	if !strings.Contains(win, "ctrl+s") || !strings.Contains(win, "ctrl+q") {
 		t.Fatalf("drawn prompt = %q, want the rebound hint", win)
 	}
-	if strings.Contains(win, "enter  esc") {
+	if strings.Contains(win, "enter") {
 		t.Fatalf("drawn prompt = %q, the literal keys survived", win)
 	}
 }
 
-// TestOverlayHintsArePlainRows: the rows the client owns spell their one or two
-// keys through ui.Hints, so nothing carries outer padding and nothing carries
-// an escape.
+// TestOverlayHintsArePlainRows: the rows the client owns are hint bars, so each
+// prints its caps and its pipe and nothing carries an escape.
 func TestOverlayHintsArePlainRows(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ name, got, want string }{
-		{"palette", paletteHelpHint, "? help"},
-		{"rename", renameHint(keymap.LoadDefault()), "enter  esc"},
-		{"help box", helpBoxHint(keymap.LoadDefault()), "esc  f/F/G shelf  A ask"},
+		{"palette", barText(&paletteHelpBar, 80), " ?  help"},
+		{"rename", barText(renameHint(keymap.LoadDefault()), 80), " enter  │  esc "},
+		{"help box", barText(helpBoxHint(keymap.LoadDefault()), 80), " esc  │  f/F/G  shelf │  A  ask"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
 			t.Fatalf("%s hint = %q, want %q", c.name, c.got, c.want)
-		}
-		if strings.HasPrefix(c.got, " ") || strings.HasSuffix(c.got, " ") {
-			t.Fatalf("%s hint = %q, want no outer padding", c.name, c.got)
 		}
 		if strings.ContainsRune(c.got, 0x1b) {
 			t.Fatalf("%s hint = %q, want plain text", c.name, c.got)
@@ -229,9 +241,9 @@ func TestRefreshHintsMovesOpenFloats(t *testing.T) {
 	tui.refreshHints(cfg)
 
 	for name, hint := range map[string]string{
-		"box":    tui.box.Float.Hint,
-		"keys":   tui.keys.Float.Hint,
-		"reader": tui.reader.Float.Hint,
+		"box":    barText(tui.box.Float.Hint, 200),
+		"keys":   barText(tui.keys.Float.Hint, 200),
+		"reader": barText(tui.reader.Float.Hint, 200),
 	} {
 		if !strings.Contains(hint, "n/a") {
 			t.Fatalf("%s hint = %q, want the rebound scroll pair", name, hint)
