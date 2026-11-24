@@ -1119,6 +1119,10 @@ Set the host:port dm web listens on. It applies only when --addr is not passed, 
 Value: \fI"full" or "float"\fP. Default: \fI"float"\fP.
 Draw the dashboard over the whole screen, or as a palette centred over the panes.
 .TP
+\fBdashboard-peek\fP
+Value: \fI"right" or "down"\fP. Default: \fI"down"\fP.
+Set where the dashboard preview band sits: under the table, or beside it on the right. The peek key still shows and hides the band.
+.TP
 \fBshelf-layout\fP
 Value: \fI"centered" or "pane"\fP. Default: \fI"centered"\fP.
 Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both.
@@ -1373,7 +1377,7 @@ Unix socket one pane's mux listens on.
 Pane output log.
 .TP
 \fB$XDG_CONFIG_HOME/dm/config.kdl\fP
-Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, web-addr, dashboard-layout, shelf-layout, shelf-size, float-shadow and theme name; written on first run.
+Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.
 .TP
 \fB$XDG_CONFIG_HOME/dm/themes/<name>.kdl\fP
 Theme palette, accents, glyphs and state styles.

@@ -208,6 +208,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			}
 			cfg.dashFullSet = true
 			i += 2
+		case "dashboard-peek":
+			if cfg.dashPeekSet {
+				return fmt.Errorf("line %d: duplicate dashboard-peek node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted side after dashboard-peek", t.Line)
+			}
+			v := toks[i+1]
+			switch v.Value {
+			case "down":
+				cfg.dashPeekRight = false
+			case "right":
+				cfg.dashPeekRight = true
+			default:
+				return fmt.Errorf("line %d: dashboard-peek must be \"right\" or \"down\", got %q", v.Line, v.Value)
+			}
+			cfg.dashPeekSet = true
+			i += 2
 		case "float-shadow":
 			if cfg.floatShadowSet {
 				return fmt.Errorf("line %d: duplicate float-shadow node", t.Line)
@@ -823,6 +841,11 @@ const (
 // preview band takes when it opens.
 const defaultDashboardPreview = 40
 
+// defaultDashboardPeekDown is the built-in side of the dashboard preview band:
+// under the table, where a wide terminal has rows to spare. A config without
+// the node reports it.
+const defaultDashboardPeekDown = true
+
 // The shelf float's placement and share. A centred shelf takes
 // defaultShelfSize percent of the pane area, never under minShelfSize. The
 // placement defaults to centred: the shelf is a tray over the work, not a
@@ -971,6 +994,8 @@ diff-command "hunk diff"
 // Set the drop shadow the floats paint beside and under their box.
 float-shadow "off"
 dashboard-layout "float"
+// Set the side of the dashboard preview band: under the table, or beside it on the right.
+dashboard-peek "down"
 // The shelf float centres over the pane area and takes this share of it.
 // "pane" lays it over the focused pane instead.
 shelf-layout "centered"

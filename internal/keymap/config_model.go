@@ -91,13 +91,19 @@ type Config struct {
 	// dashFull is the dashboard's shape: true takes the whole screen, false
 	// centres the palette over the panes. dashFullSet separates the default
 	// from a config that never named the node.
+	dashFull    bool
+	dashFullSet bool
+	// dashPeekRight is the dashboard preview band's side: true puts it beside
+	// the table on the right, false under it. The zero value is the down band,
+	// which is the default. dashPeekSet separates the default from a config
+	// that never named the node.
+	dashPeekRight bool
+	dashPeekSet   bool
 	// floatShadow is the drop shadow the floats paint beside and under their
 	// box. floatShadowSet separates the default from a config that never
 	// named the node.
 	floatShadow    bool
 	floatShadowSet bool
-	dashFull       bool
-	dashFullSet    bool
 	// shelfCentered places the shelf float: true centres it over the pane
 	// area, false lays it over the focused pane. shelfCenteredSet separates the
 	// default from a config that never named the node.
@@ -330,6 +336,16 @@ func (c *Config) Plugin(name string) (Plugin, bool) {
 	}
 	p, ok := c.plugins[name]
 	return p, ok
+}
+
+// DashboardPeekDown reports whether the dashboard's preview band sits under the
+// table rather than beside it on the right. A config without the node reports
+// the built-in default, which is the down band.
+func (c *Config) DashboardPeekDown() bool {
+	if c == nil || !c.dashPeekSet {
+		return defaultDashboardPeekDown
+	}
+	return !c.dashPeekRight
 }
 
 // DashboardFullScreen reports whether the dashboard takes the whole screen. A

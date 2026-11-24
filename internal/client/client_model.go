@@ -16,6 +16,7 @@ import (
 	"dm/internal/keymapview"
 	"dm/internal/layout"
 	"dm/internal/panel"
+	"dm/internal/paths"
 	"dm/internal/rail"
 	"dm/internal/switcher"
 	"dm/internal/theme"
@@ -125,7 +126,13 @@ type tui struct {
 	// readOnly marks a client that may read the session and not answer the
 	// questions in it: the ask float offers no send and no decline.
 	readOnly bool
-	dirty    bool
+	// prefs is what the operator chose last run and wants back on the next
+	// one, and prefsPath is the file it came from. An empty path means there
+	// is no filesystem to read or write: a browser page supplies its own
+	// keymap, so nothing is loaded and nothing is saved.
+	prefs     prefs
+	prefsPath string
+	dirty     bool
 
 	// out is the frame sink: a counting wrapper over os.Stdout in a session,
 	// a buffer in a test.
@@ -869,6 +876,12 @@ func attachConn(c *transport.Conn, h Harness, pace *pacer) (string, error) {
 		if err != nil {
 			t.notify(err.Error())
 		}
+		// A client that reads the config also has the state tree, so the
+		// choices the operator saved last run are read once, here, for the
+		// whole session. A harness that supplies the keymap has no files to
+		// read, so a page reads and writes nothing.
+		t.prefsPath = paths.PrefsPath()
+		t.prefs = loadPrefs(t.prefsPath)
 	} else {
 		// Nothing on disk owns the keymap, so a reload has nothing to re-read.
 		t.keymapSeam = true

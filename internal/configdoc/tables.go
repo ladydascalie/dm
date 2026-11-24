@@ -89,6 +89,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Draw the dashboard over the whole screen, or as a palette centred over the panes.",
 	},
 	{
+		Name:    "dashboard-peek",
+		Value:   `"right" or "down"`,
+		Default: `"down"`,
+		Desc:    "Set where the dashboard preview band sits: under the table, or beside it on the right. The peek key still shows and hides the band.",
+	},
+	{
 		Name:    "shelf-layout",
 		Value:   `"centered" or "pane"`,
 		Default: `"centered"`,
@@ -187,7 +193,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, web-addr, dashboard-layout, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{

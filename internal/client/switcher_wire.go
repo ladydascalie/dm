@@ -28,13 +28,16 @@ func openSwitcher(t *tui) {
 		return
 	}
 	t.sw = switcher.NewSwitcher(layout.Rect{W: t.snap.Cols, H: t.snap.Rows}, t.snap)
-	// The config picks the shape and the share the band opens at, and zero
-	// opens the table alone. A reload does not move an open dashboard: both are
-	// read when it opens, the way the ordering is.
+	// The ordering is the one the operator left the dashboard in last run, and
+	// the config picks the shape, the share the band opens at and its side.
+	// Zero opens the table alone. A reload does not move an open dashboard:
+	// every one of these is read when it opens.
+	t.sw.SetSort(switcher.ParseSortMode(t.prefs.DashboardSort))
 	full := true
 	if km := t.km(); km != nil {
 		full = km.DashboardFullScreen()
 		t.sw.SetPreviewShare(km.DashboardPreview())
+		t.sw.SetPeekDown(km.DashboardPeekDown())
 	}
 	t.sw.SetFullScreen(full)
 	if full {

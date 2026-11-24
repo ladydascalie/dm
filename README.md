@@ -383,6 +383,7 @@ optional and each one overrides its built-in value.
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
 | `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
 | `dashboard-layout` | `"full"` or `"float"` | `"float"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
+| `dashboard-peek` | `"right"` or `"down"` | `"down"` | Set where the dashboard preview band sits: under the table, or beside it on the right. The peek key still shows and hides the band. |
 | `shelf-layout` | `"centered"` or `"pane"` | `"centered"` | Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both. |
 | `shelf-size` | an integer from 20 to 100 | `80` | Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept. |
 | `float-shadow` | `"off"` or `"on"` | `"off"` | Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane. |
@@ -650,7 +651,9 @@ not check a user theme: its contrast is the author's.
 per pane. It is native: no child process and no PTY. It draws as a palette
 centred over the panes by default; `dashboard-layout "full"` takes the whole
 screen instead and leaves the panes live under it. The default order is
-recent, the newest agent status change first.
+recent, the newest agent status change first, and the ordering is remembered
+across restarts: the `s` key saves the mode it lands on in `prefs.json` under
+the state directory.
 
 The columns are the jump key, the project, the agent label, git, the status,
 the time since the last status change and the OSC window title. The label is
@@ -659,7 +662,10 @@ for the lines the tree gains and loses, or `clean`, and a dash outside a
 repository. The status cell carries the state glyph and its word; a pane that
 never reported a state reads as a shell. The age is seconds under a minute,
 then minutes, hours and days, and a dash when the server has no stamp. The
-title is the program's own window title, elided to its column.
+title is the program's own window title, elided to its column. A pane with an
+open question leads its agent cell with `?`, the same ask mark the rail paints.
+Shelved panes sit after every live pane, in their own section under a `shelf`
+header.
 
 The letters are keys. The digits pick: `1` to `9` select that row and go to
 its pane. `j` and `k`, the arrows, or ctrl+n and ctrl+p move the selection, and
@@ -680,15 +686,17 @@ smallest pane id first inside a group and the panes outside a project last.
 Status puts the states that want attention first: blocked, error, working,
 done, idle, unknown, then a shell.
 
-The right of the screen previews the selected pane's live screen: from the
-local VT in the active window, and from a screen request elsewhere. A read
-paints the far pane first, then the client asks the server for that pane's
-screen every 250 ms while it stays selected. ctrl+u and ctrl+d scroll it toward
-older and newer rows, `+` and `-` resize the band, and `p` peeks: it hides the
-band so the table takes the full width. A float under 10 rows or 60 columns
-drops the band whatever the toggle says. The `dashboard-preview` config node
-sets the share the band opens at, from 0 for the table alone to 100; the band
-keeps its own 20 to 85 range, and the peek key uses the configured share.
+A band under the table previews the selected pane's live screen: from the
+local VT in the active window, and from a screen request elsewhere. The
+`dashboard-peek "right"` config node puts the band beside the table on the
+right instead, and an absent node keeps it under the table. A read paints the
+far pane first, then the client asks the server for that pane's screen every
+250 ms while it stays selected. ctrl+u and ctrl+d scroll it toward older and
+newer rows, `+` and `-` resize the band, and `p` peeks: it hides the band so
+the table takes the full width. A float under 10 rows or 60 columns drops the
+band whatever the toggle says. The `dashboard-preview` config node sets the
+share the band opens at, from 0 for the table alone to 100; the band keeps its
+own 20 to 85 range, and the peek key uses the configured share.
 
 `i` copies the selected pane's id and leaves the dashboard up, so the next
 command can name the pane. The footer says `i copy id`. `d` runs the diff

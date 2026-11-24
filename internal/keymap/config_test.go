@@ -1175,6 +1175,42 @@ func TestConfigDashboardLayout(t *testing.T) {
 	}
 }
 
+// TestConfigDashboardPeek reads the dashboard preview band's side: the
+// default, both values, the values it rejects and the duplicate rule.
+func TestConfigDashboardPeek(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"absent", `prefix "ctrl+b"`, true},
+		{"down", `dashboard-peek "down"`, true},
+		{"right", `dashboard-peek "right"`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.DashboardPeekDown(); got != c.want {
+				t.Fatalf("DashboardPeekDown() = %v, want %v", got, c.want)
+			}
+		})
+	}
+	if !LoadDefault().DashboardPeekDown() {
+		t.Fatal("LoadDefault().DashboardPeekDown() = false, want the down band")
+	}
+	for _, bad := range []string{`dashboard-peek "left"`, `dashboard-peek 1`} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	if _, err := parseConfig("dashboard-peek \"down\"\ndashboard-peek \"right\""); err == nil {
+		t.Fatal("parseConfig accepted two dashboard-peek nodes")
+	}
+}
+
 // TestConfigShelfPlacement reads the shelf float's placement and share: the
 // defaults, both layouts, the size bounds it rejects, and the duplicate rule.
 func TestConfigShelfPlacement(t *testing.T) {

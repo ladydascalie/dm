@@ -39,6 +39,18 @@ func TestStateDirHomeFallback(t *testing.T) {
 	}
 }
 
+func TestPrefsPathMovesWithDMState(t *testing.T) {
+	t.Setenv("DM_STATE", "/st")
+	t.Setenv("XDG_STATE_HOME", "")
+	if got := PrefsPath(); got != "/st/prefs.json" {
+		t.Fatalf("PrefsPath() = %q, want /st/prefs.json", got)
+	}
+	t.Setenv("DM_STATE", "/other")
+	if got := PrefsPath(); got != "/other/prefs.json" {
+		t.Fatalf("PrefsPath() = %q, want /other/prefs.json", got)
+	}
+}
+
 func TestSessionPaths(t *testing.T) {
 	t.Setenv("DM_STATE", "/st")
 	t.Setenv("XDG_STATE_HOME", "")
