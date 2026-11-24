@@ -808,6 +808,36 @@ func TestAskFloatOneSizeForTheWholeAsk(t *testing.T) {
 	}
 }
 
+// TestAskFloatSingleSelectShowsItsPick: a single-select option wears its mark
+// like a multi-select one, so a pick left behind the cursor still reads as a
+// pick. The band says where the cursor is; the box says what is chosen.
+func TestAskFloatSingleSelectShowsItsPick(t *testing.T) {
+	t.Parallel()
+	tui, _ := askTUI(t, askQuestions())
+	text := func() string { return askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows) }
+	if got := text(); !strings.Contains(got, "[ ] 1  main") || !strings.Contains(got, "[ ] 2  develop") {
+		t.Fatalf("an unpicked single select does not show its empty marks:\n%s", got)
+	}
+	feed(tui, "2")
+	got := text()
+	t.Logf("after picking the second option:\n%s", got)
+	if !strings.Contains(got, "[●] 2  develop") {
+		t.Fatalf("the pick does not show a filled mark:\n%s", got)
+	}
+	if strings.Contains(got, "[●] 1  main") {
+		t.Fatalf("a pick leaked onto the other row:\n%s", got)
+	}
+	// The cursor can leave the pick without changing it.
+	feed(tui, "k")
+	got = text()
+	if !strings.Contains(got, "[●] 2  develop") {
+		t.Fatalf("moving the cursor dropped the pick:\n%s", got)
+	}
+	if !strings.Contains(got, "[ ] 1  main") {
+		t.Fatalf("the cursor row lost its empty mark:\n%s", got)
+	}
+}
+
 // TestAskFloatLongListKeepsTheFooter: a list taller than the screen windows
 // under a footer that stays put, so the keys and the count are never the rows
 // that get cut. The cursor's row rides the window.

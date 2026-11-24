@@ -924,6 +924,10 @@ func (v *askView) questionLines(th theme.Theme, width int) []askLine {
 	return append(out, v.ruleRow(th, width))
 }
 
+// optionIndent is the column an option's label starts in: the cursor bar, the
+// mark's four cells and the number's three.
+const optionIndent = 7
+
 // listLines is the option column: one row per choice, the note under the option
 // it belongs to, and, in the narrow layout, the description of each option
 // under it. The preview is the help pane's business in the wide layout.
@@ -973,36 +977,39 @@ func (v *askView) listLines(th theme.Theme, width int, withDescription bool) []a
 	}
 	for i, o := range q.Options {
 		cur := v.sel[v.q] == i
+		// Every option carries its mark, single select included: the band and
+		// the pointer say where the cursor is, and the box says what is
+		// chosen, so a pick left behind the cursor still reads as one.
+		box, on := "[ ] ", false
+		switch {
+		case q.MultiSelect && v.multi[v.q][i]:
+			box, on = "[x] ", true
+		case !q.MultiSelect && v.pick[v.q] == i:
+			box, on = "[●] ", true
+		}
+		boxFG := p.RailDim
+		if on {
+			boxFG = p.RailText
+		}
 		label := segment.Seg{Text: fmt.Sprintf("%d  %s", i+1, o.Label), FG: p.RailDim, BG: p.RailBG}
-		if cur || (!q.MultiSelect && v.pick[v.q] == i) {
+		if cur || on {
 			label.FG = p.RailText
 			label.Bold = cur
 		}
-		segs := []segment.Seg{}
-		if q.MultiSelect {
-			box := "[ ] "
-			if v.multi[v.q][i] {
-				box = "[x] "
-			}
-			fg := p.RailDim
-			if v.multi[v.q][i] {
-				fg = p.RailText
-			}
-			segs = append(segs, segment.Seg{Text: box, FG: fg, BG: p.RailBG})
-		}
-		out = append(out, row(i, append(segs, label)))
+		segs := []segment.Seg{{Text: box, FG: boxFG, BG: p.RailBG}, label}
+		out = append(out, row(i, segs))
 		if withDescription && o.Description != "" {
-			for _, text := range askWrap(o.Description, width-5) {
-				out = append(out, kid(i, 4, []segment.Seg{{Text: text, FG: p.RailDim, BG: p.RailBG}}))
+			for _, text := range askWrap(o.Description, width-8) {
+				out = append(out, kid(i, optionIndent, []segment.Seg{{Text: text, FG: p.RailDim, BG: p.RailBG}}))
 			}
 		}
 		if v.noteRow[v.q] == i && v.notes[v.q] != "" {
-			for n, text := range askWrap(v.notes[v.q], width-10) {
+			for n, text := range askWrap(v.notes[v.q], width-13) {
 				segs := []segment.Seg{{Text: text, FG: p.RailDim, BG: p.RailBG}}
 				if n == 0 {
 					segs = append([]segment.Seg{{Text: "note: ", FG: p.RailHeader, BG: p.RailBG}}, segs...)
 				}
-				out = append(out, kid(i, 4, segs))
+				out = append(out, kid(i, optionIndent, segs))
 			}
 		}
 	}
@@ -1017,7 +1024,10 @@ func (v *askView) listLines(th theme.Theme, width int, withDescription bool) []a
 			label.FG = p.RailText
 			label.Bold = true
 		}
-		out = append(out, row(i, []segment.Seg{label}))
+		out = append(out, row(i, []segment.Seg{
+			{Text: strings.Repeat(" ", len("[ ] ")), FG: p.RailBG, BG: p.RailBG},
+			label,
+		}))
 	} else if len(q.Options) == 0 {
 		out = append(out, kid(0, 1, []segment.Seg{{Text: "no options: t types the answer", FG: p.RailDim, BG: p.RailBG}}))
 	}
