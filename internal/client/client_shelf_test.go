@@ -395,6 +395,44 @@ func TestRailShelfHeaderFolds(t *testing.T) {
 	}
 }
 
+// TestRailShelfHeaderBodySummons proves a click on the header's body, the mark
+// and the name beside the caret, opens the shelf float the way the status
+// bar's chip does, so the mark the row paints answers a click.
+func TestRailShelfHeaderBodySummons(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	row := -1
+	var header rail.RailItem
+	for i, it := range rail.RailItems(tui.snap) {
+		if it.Kind == rail.ShelfHeader {
+			row, header = i, it
+		}
+	}
+	if row < 0 {
+		t.Fatal("the rail has no shelf header")
+	}
+	// The mark's column follows the bar, the caret, the space and the
+	// name, so the test presses the cell the frame paints it in.
+	left, _, _ := rail.RailRow(tui.theme(), header, tui.snap.Rail-1, false, tui.glyphSet())
+	if len(left) < 4 {
+		t.Fatalf("the header composed %d runs, want the caret, the name and the mark", len(left))
+	}
+	mark := 1 + segment.SegCells(left[:3])
+	tui.handleMouse(mouseEvent{btn: 0, x: mark + 1, y: row + 1})
+	if tui.shelf == nil || tui.mode != "shelf" {
+		t.Fatalf("a mark click left shelf %v in mode %q, want the float open", tui.shelf, tui.mode)
+	}
+	drainSummon(t, tui, got)
+
+	// The space right of the caret is body too, and a second press closes
+	// the float the first one opened.
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: row + 1})
+	if tui.shelf != nil || tui.mode != "" {
+		t.Fatalf("a body click left shelf %v in mode %q, want the float closed", tui.shelf, tui.mode)
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestShelfDrawsAFrame proves a session with a shelf paints: the rail's section
 // header and the bar's chip reach the frame, and the open float paints its
 // strip and the member's screen without a terminal of its own.

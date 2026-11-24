@@ -941,8 +941,8 @@ func RailPaneAt(snap *wire.Snapshot, x, y, off int) string {
 
 // RailShelfAt returns the shelved pane whose row is under x,y, or "" for any
 // other row. A click on the row focuses that member: the server moves the
-// shelf's active index and leaves the window focus alone. The section header
-// answers nothing, so its caret folds and its body is inert.
+// shelf's active index and leaves the window focus alone. A shelf row answers;
+// a row above it does not.
 func RailShelfAt(snap *wire.Snapshot, x, y, off int) string {
 	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return ""
@@ -953,6 +953,30 @@ func RailShelfAt(snap *wire.Snapshot, x, y, off int) string {
 		return ""
 	}
 	return items[i].Pane
+}
+
+// RailShelfHeaderAt reports whether x,y is the body of the shelf section
+// header, the part right of the fold caret. A press there summons the shelf
+// float, the same answer the status bar's shelf chip gives, so the mark the
+// header paints is a control and not decoration. The caret cell belongs to the
+// fold, and no other row answers. The thin rail paints no section header, so
+// it never answers.
+func RailShelfHeaderAt(snap *wire.Snapshot, x, y, off int) bool {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
+		return false
+	}
+	if layout.RailCompact(snap.Rail) {
+		return false
+	}
+	// Cell 0 is the project bar and cell 1 the caret, so the body starts
+	// at cell 2. The rest of the row, the name, the mark and the count,
+	// belongs to the body.
+	if x < 2 {
+		return false
+	}
+	items := RailItems(snap)
+	i := railItemRow(snap, y, off)
+	return i >= 0 && items[i].Kind == ShelfHeader
 }
 
 // RailWindowAt returns the window whose row is under x,y, for a focus click. A

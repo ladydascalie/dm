@@ -1344,6 +1344,18 @@ func TestRailShelfSection(t *testing.T) {
 			if id := RailFoldAt(snap, 1, len(items)-1-len(tc.panes), 0); id != wire.ShelfFoldTarget {
 				t.Fatalf("fold at the header caret = %q, want %q", id, wire.ShelfFoldTarget)
 			}
+			// Only the body right of the caret summons the float: the caret
+			// cell folds, and a member row answers its own id.
+			headerRow := len(items) - 1 - len(tc.panes)
+			if RailShelfHeaderAt(snap, 1, headerRow, 0) {
+				t.Fatal("RailShelfHeaderAt answered the caret cell")
+			}
+			if !RailShelfHeaderAt(snap, 6, headerRow, 0) {
+				t.Fatal("RailShelfHeaderAt refused the header body")
+			}
+			if !tc.folded && RailShelfHeaderAt(snap, 6, len(items)-1, 0) {
+				t.Fatal("RailShelfHeaderAt answered a member row")
+			}
 			if tc.folded {
 				return
 			}

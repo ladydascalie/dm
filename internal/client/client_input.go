@@ -3613,6 +3613,14 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
+		if rail.RailShelfHeaderAt(t.snap, x, y, t.railOff) {
+			// The header's body summons the shelf float, the way the
+			// status bar's chip does. The mark the row paints is a
+			// control, so a press on it answers.
+			t.clearRailPress()
+			t.shelfToggle()
+			return true
+		}
 		if id := rail.RailWindowAt(t.snap, x, y, t.railOff); id != "" {
 			// A window row focuses the first available pane in that window,
 			// which also makes the window active. A second press on the same
