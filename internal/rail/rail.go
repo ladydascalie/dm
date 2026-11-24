@@ -165,7 +165,10 @@ type Drop struct {
 // column: one pane row per pane, in snapshot order, whatever the fold. It has
 // no workspace row, no window row, no note row and no gap row. Its pane rows
 // still carry their project and accent, so the bar ties them to their
-// project even when no project row is drawn.
+// project even when no project row is drawn. Shelved panes are in no window,
+// so the server lists them in All with an empty workspace and window and the
+// shelf section names them below. They are skipped here, or their empty
+// workspace would paint a nameless group row that folds nothing.
 func RailItems(snap *wire.Snapshot) []RailItem {
 	if snap == nil {
 		return nil
@@ -214,6 +217,9 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		seen := map[string]int{}
 		out := make([]RailItem, 0, len(snap.All))
 		for _, p := range snap.All {
+			if p.Shelf {
+				continue
+			}
 			row := RailPaneRow(p)
 			row.Ask = asked[p.ID]
 			if p.Project != "" {
@@ -233,6 +239,9 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 	first := map[string]int{}
 	withBranch := map[string]int{}
 	for i, p := range snap.All {
+		if p.Shelf {
+			continue
+		}
 		panes[p.Workspace]++
 		if _, ok := first[p.Window]; !ok {
 			first[p.Window] = i
@@ -273,7 +282,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 	seen := map[string]bool{}
 	slotsFor := map[string]int{}
 	for _, p := range snap.All {
-		if seen[p.Workspace] {
+		if p.Shelf || seen[p.Workspace] {
 			continue
 		}
 		seen[p.Workspace] = true
@@ -286,6 +295,9 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 	folded := false
 	slot := 0
 	for _, p := range snap.All {
+		if p.Shelf {
+			continue
+		}
 		if p.Workspace != ws {
 			if ws != "" && !folded {
 				gap := RailItem{Kind: Gap}

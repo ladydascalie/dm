@@ -1283,6 +1283,37 @@ func shelfSnap(rail int) *wire.Snapshot {
 	return snap
 }
 
+// TestRailSkipsShelfMembersInAll proves the workspace walk ignores the shelf
+// entries the server appends to All. A shelved pane is in no window, so it
+// carries an empty workspace and window; grouping it would paint a nameless
+// group row, folded, holding a count and nothing to unfold.
+func TestRailSkipsShelfMembersInAll(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	for _, rail := range []int{layout.DefaultRail, layout.CollapsedRail} {
+		snap := shelfSnap(rail)
+		want := RailItems(snap)
+		// The server lists each shelf member after the window rows, with no
+		// workspace and no window of its own.
+		for _, p := range ShelfPanes(snap) {
+			snap.All = append(snap.All, wire.AllPane{ID: p.ID, Name: p.Name, Status: p.Status, Shelf: true})
+		}
+		got := RailItems(snap)
+		if len(got) != len(want) {
+			t.Fatalf("rail %d: %d rows with the shelf in All, want the %d a live-only list has", rail, len(got), len(want))
+		}
+		for i := range got {
+			if got[i].Kind != want[i].Kind || got[i].Text != want[i].Text || got[i].Count != want[i].Count {
+				t.Fatalf("rail %d row %d = %+v, want %+v", rail, i, got[i], want[i])
+			}
+		}
+		for _, it := range got {
+			if it.Kind == Workspace && it.Text == "" {
+				t.Fatalf("rail %d painted a nameless workspace row: %+v", rail, it)
+			}
+		}
+	}
+}
+
 // TestRailShelfSection proves the shelf section follows the last workspace with
 // one row per member, marks the active member, folds whole, and never answers a
 // live pane's hit test.
