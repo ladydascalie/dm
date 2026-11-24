@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dm hint bar · v2</title>
+<style>
+:root{
+  --bg:#0a0d10; --rail:#14131a; --focus:#1f1e27; --hover:#21202d;
+  --text:#e9eaf1; --dim:#8f93a8; --header:#a6a9bd; --acc:#7ac0eb;
+  --faint:#4b4d5a; --line:#2b3742; --hard:#070a0d; --green:#78dc82; --red:#ff7d7d;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 70px;background:var(--bg);color:#c2cbd4;
+  font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{font-size:19px;margin:0 0 4px;color:#eef2f6;font-weight:650}
+.sub{margin:0 0 8px;color:#7d8b98;max-width:80ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#63707c;
+  margin:34px 0 10px;font-weight:650}
+h3{font-size:13px;margin:0 0 6px;color:#c9d3dd;font-weight:600}
+p.note{margin:8px 0 0;color:#7d8b98;max-width:80ch;font-size:13px}
+p.note b{color:#a9b6c2;font-weight:550}
+.grid{display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start}
+.card{flex:0 0 auto}
+.term{background:var(--rail);border:1px solid var(--line);border-radius:3px;
+  box-shadow:4px 4px 0 0 var(--hard);overflow:hidden}
+.term .cap{background:#171d23;border-bottom:1px solid var(--line);
+  padding:5px 10px;color:#7d8b98;font:11px/1.2 var(--mono);letter-spacing:.03em}
+.term pre{margin:0;padding:12px 14px;color:var(--text);font:13px/1.5 var(--mono);
+  white-space:pre;overflow-x:auto}
+.term pre.tight{padding:10px 12px}
+.k{color:var(--acc);font-weight:600}
+.l{color:var(--text)}
+.p{color:var(--faint)}
+.d{color:var(--dim)}
+.h{color:var(--header)}
+.band{background:var(--hover)}
+.keycap{background:var(--hover);color:var(--text);font-weight:600}
+.keycap.acc{color:var(--acc)}
+.sel{background:var(--focus)}
+.green{color:var(--green)}
+.red{color:var(--red)}
+.rule{color:var(--dim)}
+.tag{display:inline-block;font:10px/1.4 var(--mono);letter-spacing:.06em;
+  text-transform:uppercase;color:#63707c;border:1px solid var(--line);
+  border-radius:2px;padding:1px 6px;margin-bottom:7px}
+.code{background:#11161b;border:1px solid var(--line);border-radius:3px;
+  padding:12px 14px;font:12px/1.55 var(--mono);color:#b9c5d1;white-space:pre;overflow-x:auto}
+.code .c{color:#6d7d8c}
+.callout{border-left:2px solid var(--acc);padding:2px 0 2px 12px;margin:12px 0;
+  color:#a9b6c2;max-width:82ch;font-size:13px}
+.callout b{color:#e9eaf1}
+table{border-collapse:collapse;margin:10px 0 0;font-size:13px}
+th,td{text-align:left;padding:6px 14px 6px 0;vertical-align:top;border-bottom:1px solid #1b232b}
+th{color:#7d8b98;font-weight:550;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+td code{font:12px var(--mono);color:#b9c5d1}
+.stack{display:flex;flex-direction:column;gap:18px}
+.swatch{display:inline-block;width:11px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:6px}
+</style>
+</head>
+<body>
+
+<h1>dm hint bar · v2</h1>
+<p class="sub">B chosen: key caps and pipes, with the pipe made faint. One component for every shortcut row.</p>
+<div class="callout"><b>What changed from v1.</b> Style B is now the only style: a filled cap around each key, the label after it, a pipe between hints. The pipe is a derived faint tone (<span style="color:var(--faint)">#4b4d5a</span>, 45% from rail background toward rail dim), not rail dim itself. The caps carry the hover ground, so a full-row band is gone: the row ground stays rail background and the caps are the common background. Border placement still saves the row.</div>
+
+<h2>The bar</h2>
+<div class="term"><div class="cap">anatomy</div><pre><span class="keycap"> enter </span> <span class="l">pick</span><span class="p"> │ </span><span class="keycap"> esc </span> <span class="l">close</span><span class="p"> │ </span><span class="keycap"> j/k </span> <span class="l">move</span><span class="p"> │ </span><span class="keycap"> 1-9 </span> <span class="l">jump</span></pre></div>
+<p class="note">Cap: one space of padding either side of the key, hover ground, key in rail text (bar accent on the dashboard where the key is the point). Label: one space after the cap, rail text. Pipe: one space either side, faint. Multi-key tokens stay whole: <span class="k">j/k</span>, <span class="d">ctrl+u/ctrl+d</span>.</p>
+
+<h2>v1 A against v2 B</h2>
+<div class="grid stack">
+  <div class="card">
+    <span class="tag">v1 · band and pipes</span>
+    <div class="term"><div class="cap">for reference</div><pre><span class="band"><span class="k">enter</span> <span class="l">pick</span><span class="p"> | </span><span class="k">esc</span> <span class="l">close</span><span class="p"> | </span><span class="k">j/k</span> <span class="l">move</span><span class="p"> | </span><span class="k">/</span> <span class="l">filter</span> </span></pre></div>
+  </div>
+  <div class="card">
+    <span class="tag">v2 · B, faint pipe</span>
+    <div class="term"><div class="cap">the chosen bar</div><pre><span class="keycap"> enter </span> <span class="l">pick</span><span class="p"> │ </span><span class="keycap"> esc </span> <span class="l">close</span><span class="p"> │ </span><span class="keycap"> j/k </span> <span class="l">move</span><span class="p"> │ </span><span class="keycap"> / </span> <span class="l">filter</span></pre></div>
+    <p class="note">The caps do the boxing the band used to do. The row is calmer, and the bar costs two more cells per hint.</p>
+  </div>
+</div>
+
+<h2>Pipe tone</h2>
+<p class="note">Four tones on the rail background. The chosen one is 45%. Fainter than 35% reads as a scratch on the terminal; brighter than 60% competes with the label.</p>
+<div class="term"><div class="cap">tone strip</div><pre><span class="keycap"> esc </span> <span class="l">close</span><span style="color:#8f93a8"> │ </span><span class="keycap"> j/k </span> <span class="l">move</span><span style="color:#6d707e"> │ </span><span class="keycap"> / </span> <span class="l">filter</span><span style="color:#4b4d5a"> │ </span><span class="keycap"> ? </span> <span class="l">help</span><span style="color:#343540"> │ </span><span class="keycap"> A </span> <span class="l">ask</span></pre>
+<p class="note" style="margin-top:6px">rail dim 100% · 60% · <b style="color:#c9d3dd">45% chosen</b> · 30%</p></div>
+
+<h2>Placement</h2>
+<p class="note">The same bar paints in one of two places. Placement decides the row cost, not the look.</p>
+<div class="grid">
+  <div class="card">
+    <span class="tag">border · costs 0 rows</span>
+    <div class="term"><div class="cap">prefix help box · 84 cells</div><pre class="tight">╭ prefix ──────────────────────────────────────────────────────────────────╮
+│ <span class="h">FOCUS</span>                                                                    │
+│   <span class="k">ctrl+b</span> <span class="l">↑/↓/←/→ focus pane</span>     <span class="k">ctrl+b z</span> <span class="l">zoom pane</span>                    │
+│   <span class="k">ctrl+b</span> <span class="l">n/p next/prev pane</span>      <span class="k">ctrl+b x</span> <span class="l">close pane</span>                   │
+│                                                                          │
+│ <span class="h">PANES</span>                                                                    │
+│   <span class="k">ctrl+b %</span> <span class="l">split right</span>           <span class="k">ctrl+b "</span> <span class="l">split down</span>                   │
+│   <span class="k">ctrl+b S</span> <span class="l">shelf</span>                 <span class="k">ctrl+b F</span> <span class="l">shelf float</span>                  │
+╰─<span class="keycap"> esc </span> <span class="p">│</span><span class="keycap"> f/F/G </span> <span class="l">shelf</span> <span class="p">│</span><span class="keycap"> A </span> <span class="l">ask</span>────────────────────────────────────────────────╯</pre></div>
+    <p class="note">The bar replaces the middle of the bottom rule. Every interior row stays content. This is the box from the screenshot.</p>
+  </div>
+  <div class="card">
+    <span class="tag">row · costs 1 row</span>
+    <div class="term"><div class="cap">dashboard · 84 cells, right status</div><pre class="tight"><span class="keycap"> enter </span> <span class="l">pick</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">close</span> <span class="p">│</span><span class="keycap"> 1-9 </span> <span class="l">jump</span> <span class="p">│</span><span class="keycap"> i </span> <span class="l">copy id</span>                          <span class="d">recent 40%</span></pre></div>
+    <p class="note">A row has no border to ride, so it owns a line. The right status is pinned and never dropped.</p>
+  </div>
+</div>
+
+<h2>In context</h2>
+<p class="note">B throughout. Border bar where the box has a bottom rule; row bar only where there is no box.</p>
+<div class="grid stack">
+
+  <div class="card">
+    <span class="tag">prefix help box</span>
+    <div class="term"><div class="cap">prefix, armed · border bar</div><pre class="tight">╭ prefix ──────────────────────────────────────────────────────────────────╮
+│ <span class="h">FOCUS</span>                                                                    │
+│   <span class="k">ctrl+b</span> <span class="l">↑/↓/←/→ focus pane</span>     <span class="k">ctrl+b z</span> <span class="l">zoom pane</span>                    │
+│   <span class="k">ctrl+b</span> <span class="l">n/p next/prev pane</span>      <span class="k">ctrl+b x</span> <span class="l">close pane</span>                   │
+│ <span class="h">PANES</span>                                                                    │
+│   <span class="k">ctrl+b %</span> <span class="l">split right</span>           <span class="k">ctrl+b "</span> <span class="l">split down</span>                   │
+│   <span class="k">ctrl+b S</span> <span class="l">shelf</span>                 <span class="k">ctrl+b F</span> <span class="l">shelf float</span>                  │
+╰─<span class="keycap"> esc </span> <span class="p">│</span><span class="keycap"> f/F/G </span> <span class="l">shelf</span> <span class="p">│</span><span class="keycap"> A </span> <span class="l">ask</span>────────────────────────────────────────────────╯</pre></div>
+  </div>
+
+  <div class="card">
+    <span class="tag">session picker</span>
+    <div class="term"><div class="cap">switch session · border bar, tee removed</div><pre class="tight">╭─ switch session ────────────────────────╮
+│ <span class="sel"><span class="l">&gt; main         live  now              </span></span>│
+│ <span class="d">  work         live                     </span>│
+│ <span class="d">  old          dead                     </span>│
+│                                         │
+╰─<span class="keycap"> j/k </span> <span class="l">move</span> <span class="p">│</span><span class="keycap"> enter </span> <span class="l">switch</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">cancel</span>─────────╯</pre></div>
+    <p class="note">One row saved: the hint row and its tee collapse into the bottom rule.</p>
+  </div>
+
+  <div class="card">
+    <span class="tag">layout palette</span>
+    <div class="term"><div class="cap">prefix L · border bar</div><pre class="tight">╭─ layout ────────────────────────────────╮
+│  <span class="d">┌──────────────┐</span>                        │
+│  <span class="d">│</span>              <span class="d">│</span>   <span class="sel"><span class="l">&gt; even-horizontal      </span></span> │
+│  <span class="d">└──────────────┘</span>   <span class="d">  even-vertical        </span> │
+│                     <span class="d">  main-horizontal       </span> │
+│                     <span class="d">  main-vertical         </span> │
+│                     <span class="d">  tiled                 </span> │
+│                     <span class="l">  (custom)        now </span> │
+╰─<span class="keycap"> enter </span> <span class="l">pick</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">close</span>──────────────────╯</pre></div>
+    <p class="note">One row saved. The footer's preview note moves into the title or a width notice.</p>
+  </div>
+
+  <div class="card">
+    <span class="tag">ask float · wide</span>
+    <div class="term"><div class="cap">ask w1p2 · border bar, keep on send and decline</div><pre class="tight">╭ answer w1p2 ─────────────────────────────────────────────────────────────╮
+│ <span class="h">Branch</span>                                                                   │
+│                                                                          │
+│ Which base branch?                                                       │
+│ ──────────────────────────────────────────────────────────────────────── │
+│ <span class="sel"><span class="l">▌ [<span class="green">●</span>] 1  main                                                          </span></span> │
+│ <span class="d">▌ [ ] 2  develop                                                       </span> │
+│ <span class="d">▌ +  Type something.                                                   </span> │
+╰─<span class="keycap"> j/k </span> <span class="l">move</span> <span class="p">│</span><span class="keycap"> 1-9 </span> <span class="l">pick</span> <span class="p">│</span><span class="keycap"> space </span> <span class="l">pick</span> <span class="p">│</span><span class="keycap"> t </span> <span class="l">type</span> <span class="p">│</span><span class="keycap"> enter </span> <span class="l">send</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">decline</span>──────╯</pre></div>
+    <p class="note">One row saved: the interior footer row is gone, so the option list gets it back.</p>
+  </div>
+
+  <div class="card">
+    <span class="tag">ask float · 60 cells</span>
+    <div class="term" style="width:60ch"><div class="cap">ask · narrow, tail hints dropped whole</div><pre class="tight" style="width:60ch">╭ answer w1p2 ────────────────────────────╮
+│ Which base branch?                      │
+│ ─────────────────────────────────────── │
+│ <span class="sel"><span class="l">▌ [<span class="green">●</span>] 1  main                        </span></span> │
+│ <span class="d">▌ [ ] 2  develop                     </span> │
+╰─<span class="keycap"> j/k </span> <span class="l">move</span> <span class="p">│</span><span class="keycap"> enter </span> <span class="l">send</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">decline</span>─────╯</pre></div>
+    <p class="note">Pick, type and note drop first. Send and decline carry a keep flag, so the two that end the form survive.</p>
+  </div>
+
+  <div class="card">
+    <span class="tag">message view</span>
+    <div class="term"><div class="cap">box view · border bar</div><pre class="tight">╭─ messages ──────────────────────────────╮
+│ <span class="h">14:02</span> <span class="l">w2p1</span> <span class="d">done</span>   tests pass                │
+│ <span class="h">13:58</span> <span class="l">w1p2</span> <span class="d">working</span> tuning the retry          │
+│ <span class="sel"><span class="l">&gt; 13:51 w2p1 blocked  needs a decision       </span></span> │
+│ <span class="h">13:44</span> <span class="l">w3p1</span> <span class="d">idle</span>    waiting                   │
+╰─<span class="keycap"> j/k </span> <span class="l">move</span> <span class="p">│</span><span class="keycap"> b </span> <span class="l">body</span> <span class="p">│</span><span class="keycap"> p </span> <span class="l">pane</span> <span class="p">│</span><span class="keycap"> m </span> <span class="l">notify</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">close</span>─────────╯</pre></div>
+  </div>
+
+  <div class="card">
+    <span class="tag">keymap view</span>
+    <div class="term"><div class="cap">keymaps · border bar</div><pre class="tight">╭─ keymaps ───────────────────────────────╮
+│ <span class="h">main</span>                                      │
+│   <span class="k">ctrl+b a</span>       <span class="l">open the dashboard</span>          │
+│   <span class="k">ctrl+b ?</span>       <span class="l">this view</span>                    │
+│   <span class="k">ctrl+b c</span>       <span class="l">new window</span>                    │
+╰─<span class="keycap"> j/k </span> <span class="l">scroll</span> <span class="p">│</span><span class="keycap"> g/G </span> <span class="l">ends</span> <span class="p">│</span><span class="keycap"> / </span> <span class="l">search</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">close</span>─────╯</pre></div>
+  </div>
+
+  <div class="card">
+    <span class="tag">rename prompt</span>
+    <div class="term"><div class="cap">rename · bare keys, no labels</div><pre class="tight">╭ rename workspace w2 ────────────╮
+│ <span class="d"> name: w2▏</span>                      │
+╰─<span class="keycap"> enter </span> <span class="p">│</span><span class="keycap"> esc </span>───────────────╯</pre></div>
+    <p class="note">A hint with no label keeps just its cap. The bar drops no separator for it.</p>
+  </div>
+
+  <div class="card">
+    <span class="tag">floating command</span>
+    <div class="term"><div class="cap">diff float · border bar</div><pre class="tight">╭ hunk diff · w2p1 ───────────────────────╮
+│ <span class="d">diff --git a/internal/switcher/switcher.go</span> │
+│ <span class="red">-  prev := s.Target()</span>                     │
+│ <span class="green">+  prev := s.Selected()</span>                   │
+╰─<span class="keycap"> ctrl+b </span> <span class="l">kills the float</span>───────────────╯</pre></div>
+  </div>
+
+  <div class="card">
+    <span class="tag">command palette</span>
+    <div class="term"><div class="cap">palette · inline on the query row</div><pre class="tight">╭─ palette ───────────────────────────────╮
+│ &gt; sw<span class="d">▏</span>                          <span class="keycap"> ? </span> <span class="l">help</span> │
+│ <span class="sel"><span class="l">&gt; switcher        open the dashboard  </span></span> │
+│ <span class="d">  switch-session  jump to a session   </span> │
+╰──<span class="keycap"> enter </span> <span class="l">run</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">close</span>─────────────╯</pre></div>
+    <p class="note">The query row keeps its signpost; the border carries the rest.</p>
+  </div>
+
+</div>
+
+<h2>Narrow rule</h2>
+<p class="note">Drop whole hints from the tail, except a keep hint. A cap is never split and a pipe never survives its hint. Multi-key tokens stay whole.</p>
+<div class="grid stack">
+  <div class="card"><span class="tag">84 cells</span>
+    <div class="term"><div class="cap">prefix help</div><pre class="tight">╰─<span class="keycap"> esc </span> <span class="p">│</span><span class="keycap"> f/F/G </span> <span class="l">shelf</span> <span class="p">│</span><span class="keycap"> A </span> <span class="l">ask</span>────────────────────────────────────────────────╯</pre></div>
+  </div>
+  <div class="card"><span class="tag">60 cells</span>
+    <div class="term" style="width:60ch"><div class="cap">ask float</div><pre class="tight" style="width:60ch">╰─<span class="keycap"> j/k </span> <span class="l">move</span> <span class="p">│</span><span class="keycap"> enter </span> <span class="l">send</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">decline</span>─────╯</pre></div>
+  </div>
+  <div class="card"><span class="tag">44 cells</span>
+    <div class="term" style="width:44ch"><div class="cap">ask float</div><pre class="tight" style="width:44ch">╰─<span class="keycap"> enter </span> <span class="l">send</span> <span class="p">│</span><span class="keycap"> esc </span> <span class="l">decline</span>──╯</pre></div>
+  </div>
+</div>
+
+<h2>Component sketch</h2>
+<div class="code"><span class="c">// internal/hintbar</span>
+type Hint struct {
+    Keys  []string <span class="c">// one token when joined: "j/k", "ctrl+u/ctrl+d"</span>
+    Label string   <span class="c">// empty for a bare key hint, as rename uses</span>
+    Keep  bool     <span class="c">// survives a narrow bar; the rest drop from the tail</span>
+}
+
+type Bar struct {
+    Hints []Hint
+    Right []segment.Seg <span class="c">// optional status, right aligned on a row</span>
+}
+
+<span class="c">// Segments fits the hints into width cells and lays out caps, labels and
+// faint pipes. A caller paints the row itself; the panel paints a border bar
+// inside its bottom rule and leaves the corners alone.</span>
+func (b Bar) Segments(width int, th theme.Theme) []segment.Seg
+func (b Bar) Cells(width int, th theme.Theme) int
+
+<span class="c">// panel gains a structured hint, and no caller builds a hint string again.</span>
+type FloatingPane struct {
+    <span class="c">// ...</span>
+    Hint *hintbar.Bar
+}</div>
+
+<h2>Conversion list</h2>
+<table>
+<tr><th>surface</th><th>today</th><th>new</th></tr>
+<tr><td>prefix help box</td><td>dim string, border</td><td>border bar</td></tr>
+<tr><td>session picker</td><td>dim string, interior row + tee</td><td>border bar, one row saved</td></tr>
+<tr><td>layout palette</td><td>dim string, footer row</td><td>border bar, one row saved</td></tr>
+<tr><td>rename prompt</td><td>dim keys, border</td><td>border bar, bare caps</td></tr>
+<tr><td>message view, reader</td><td>dim string, border</td><td>border bar</td></tr>
+<tr><td>keymap view</td><td>dim string, border</td><td>border bar</td></tr>
+<tr><td>command palette</td><td>plain "? help" on the query row</td><td>inline bar on the query row</td></tr>
+<tr><td>shelf float</td><td>string with middots</td><td>border bar</td></tr>
+<tr><td>floating command</td><td>string with middots</td><td>border bar</td></tr>
+<tr><td>ask float</td><td>key caps, interior footer row</td><td>border bar, keep on send and decline</td></tr>
+<tr><td>dashboard</td><td>band row, own segment code</td><td>row bar, same component</td></tr>
+</table>
+
+<h2>Open questions</h2>
+<p class="note">Note the element you mean, or send an empty review if this is the shape.<br>
+<b>1.</b> Border placement for the session picker and layout palette, where it saves a row? The picker loses its tee; the palette loses its footer line (its "preview dropped" note needs a new home).<br>
+<b>2.</b> Labels at rail text, as here, or one step dimmer so the caps lead harder?<br>
+<b>3.</b> The dashboard's row loses its full band and gains caps. Keep it that way, or keep the band there and make the caps a lighter derived ground?<br>
+<b>4.</b> The cap ground is rail hover. On the border row it reads as a small inset block; is that enough contrast, or should a border bar use the focus ground?<br>
+<b>5.</b> Ask float: the two that end the form survive at 44 cells. Is that enough, or does "hide" need to survive too?</p>
+
+</body>
+</html>
