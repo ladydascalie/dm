@@ -611,7 +611,7 @@ var helpRows = []helpRow{
 	{[]string{"notification-centre"}, "notifications"},
 	{[]string{"toggle-rail"}, "cycle rail: full, thin, hidden"},
 	{[]string{"detach", "detach-alt"}, "detach"},
-	{[]string{"send-prefix"}, "send prefix"},
+	{[]string{"toggle-ask"}, "show / hide question"},
 	{[]string{"reload"}, "reload config"},
 }
 

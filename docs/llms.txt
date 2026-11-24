@@ -191,7 +191,7 @@ The prefix key is `ctrl+b` by default. A key label is the key pressed after the 
 | `N` | `notification-centre` | notifications |
 | `b` | `toggle-rail` | cycle rail: full, thin, hidden |
 | `d / q` | `detach / detach-alt` | detach |
-| `ctrl+b` | `send-prefix` | send prefix |
+| `A` | `toggle-ask` | show / hide question |
 | `ctrl+r` | `reload` | reload config |
 
 ## Sidebar

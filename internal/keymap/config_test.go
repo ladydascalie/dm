@@ -499,7 +499,7 @@ func TestConfigHelpRows(t *testing.T) {
 		{"N", "notifications"},
 		{"b", "cycle rail: full, thin, hidden"},
 		{"d / q", "detach"},
-		{"ctrl+b", "send prefix"},
+		{"A", "show / hide question"},
 		{"ctrl+r", "reload config"},
 	}
 	if got := LoadDefault().HelpRows(); !reflect.DeepEqual(got, want) {
@@ -509,7 +509,7 @@ func TestConfigHelpRows(t *testing.T) {
 	src := `prefix "ctrl+a"
 keymap "main" {
 	"split-right" "S"
-	"send-prefix" "prefix"
+	"toggle-ask" "Q"
 }`
 	cfg, err := parseConfig(src)
 	if err != nil {
@@ -522,8 +522,8 @@ keymap "main" {
 	if rows[0][0] != "S" || rows[0][1] != "split right" {
 		t.Errorf("row 0 = %#v, want S / split right", rows[0])
 	}
-	if rows[1][0] != "ctrl+a" || rows[1][1] != "send prefix" {
-		t.Errorf("row 1 = %#v, want ctrl+a / send prefix", rows[1])
+	if rows[1][0] != "Q" || rows[1][1] != "show / hide question" {
+		t.Errorf("row 1 = %#v, want Q / show / hide question", rows[1])
 	}
 }
 

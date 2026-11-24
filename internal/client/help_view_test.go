@@ -494,9 +494,10 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value. It
-// moved when the footer became a hint bar: the table itself is unchanged,
-// because a shelf row would push the last section off a 100x40 screen.
-const helpBoxDefaultSHA256 = "2283250472d36f0655e8b21c7dcf87acf3468677878cb3d847da3ee19570cb6a"
+// moved when the footer became a hint bar, and again when the send prefix row
+// made way for the question float's toggle: the table stays at 35 rows, because
+// one more would push the last section off a 100x40 screen.
+const helpBoxDefaultSHA256 = "e15c442e745dbc84337bbeac72bef2da873fb205502696afe51eaac6ba72403f"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the
