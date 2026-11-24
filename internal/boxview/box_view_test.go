@@ -662,20 +662,28 @@ func TestBoxViewEmptyNoteNamesTheFilter(t *testing.T) {
 	}
 }
 
-// TestBoxViewRectHeight: the caller's cap replaces the message box's own, and
-// the screen still keeps its six rows, so the ask float can reserve more rows
-// than a log box without leaving the desk.
-func TestBoxViewRectHeight(t *testing.T) {
+// TestBoxViewRectWith: the caller's cap replaces the message box's own in both
+// dimensions, and the screen still keeps its six cells, so the ask float can
+// reserve more rows and take more columns than a log box without leaving the
+// desk. An empty dimension keeps the message box's own.
+func TestBoxViewRectWith(t *testing.T) {
 	t.Parallel()
-	snap := &wire.Snapshot{Cols: 100, Rows: 60}
-	if got := BoxViewRect(snap, 40); got.H != boxViewMaxRows {
-		t.Fatalf("BoxViewRect height = %d, want the message box cap %d", got.H, boxViewMaxRows)
+	snap := &wire.Snapshot{Cols: 220, Rows: 60}
+	if got := BoxViewRect(snap, 40); got.H != boxViewMaxRows || got.W != boxViewMaxCols {
+		t.Fatalf("BoxViewRect = %+v, want the message box caps %d and %d", got, boxViewMaxCols, boxViewMaxRows)
 	}
-	if got := BoxViewRectHeight(snap, 40, 40); got.H != 40 {
-		t.Fatalf("BoxViewRectHeight height = %d, want 40", got.H)
+	if got := BoxViewRectWith(snap, 40, BoxSize{Rows: 40, Cols: 120}); got.H != 40 || got.W != 120 {
+		t.Fatalf("BoxViewRectWith = %+v, want 40 rows and 120 columns", got)
 	}
-	if got := BoxViewRectHeight(snap, 100, 100); got.H != snap.Rows-6 {
-		t.Fatalf("BoxViewRectHeight height = %d, want the screen less six rows", got.H)
+	if got := BoxViewRectWith(snap, 100, BoxSize{Rows: 100, Cols: 240}); got.H != snap.Rows-6 || got.W != snap.Cols-6 {
+		t.Fatalf("BoxViewRectWith = %+v, want the screen less six cells", got)
+	}
+	// A zero dimension is the screen's own, which is what the ask float takes.
+	if got := BoxViewRectWith(snap, 40, BoxSize{Cols: 120}); got.H != 40 {
+		t.Fatalf("BoxViewRectWith height = %d, want the content's 40", got.H)
+	}
+	if got := BoxViewRectWith(snap, 40, BoxSize{Rows: 40}); got.W != snap.Cols-6 {
+		t.Fatalf("BoxViewRectWith width = %d, want the screen less six columns", got.W)
 	}
 }
 

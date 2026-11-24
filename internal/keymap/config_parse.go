@@ -207,6 +207,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.askRows = n
 			cfg.askRowsSet = true
 			i += 2
+		case "ask-cols":
+			if cfg.askColsSet {
+				return fmt.Errorf("line %d: duplicate ask-cols node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after ask-cols", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: ask-cols must be a number, got %q", v.Line, v.Value)
+			}
+			if n < minAskCols || n > maxAskCols {
+				return fmt.Errorf("line %d: ask-cols must be %d to %d, got %d", v.Line, minAskCols, maxAskCols, n)
+			}
+			cfg.askCols = n
+			cfg.askColsSet = true
+			i += 2
 
 		case "dashboard-layout":
 			if cfg.dashFullSet {
@@ -877,13 +895,17 @@ const (
 // defaultPaletteRows is the built-in command palette row cap.
 const defaultPaletteRows = 10
 
-// The ask float's interior floor: ask-rows rows, never under minAskRows and
-// never past maxAskRows. The detail pane fills the rows the floor leaves, so a
-// taller box reads more of a long description or preview before it elides.
+// The ask float's box: ask-rows interior rows and ask-cols columns, never under
+// the floor and never past the ceiling of either. The detail pane fills the rows
+// the floor leaves, so a taller box reads more of a long description or preview
+// before it elides.
 const (
 	defaultAskRows = 30
 	minAskRows     = 8
 	maxAskRows     = 64
+	defaultAskCols = 96
+	minAskCols     = 40
+	maxAskCols     = 240
 )
 
 // defaultDiffCommand is the built-in command the dashboard diff key runs in a
@@ -1018,6 +1040,8 @@ palette-rows 10
 // The ask float reserves at least this many interior rows. Its detail pane fills
 // the rows the floor leaves, so a taller box reads more of a long preview.
 ask-rows 30
+// The ask float is at most this many columns wide.
+ask-cols 96
 
 // The diff key runs this in a floating pane through sh -c, in the selected pane folder.
 diff-command "hunk diff"

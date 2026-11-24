@@ -1354,6 +1354,43 @@ func TestConfigAskRows(t *testing.T) {
 	}
 }
 
+// TestConfigAskCols reads the ask float's column cap: the node, the default, and
+// the bounds it rejects.
+func TestConfigAskCols(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultAskCols},
+		{"floor", `ask-cols 40`, 40},
+		{"wide", `ask-cols 120`, 120},
+		{"ceiling", `ask-cols 240`, 240},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.AskCols(); got != c.want {
+				t.Fatalf("AskCols() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().AskCols(); got != defaultAskCols {
+		t.Fatalf("LoadDefault().AskCols() = %d, want %d", got, defaultAskCols)
+	}
+	for _, bad := range []string{"ask-cols 39", "ask-cols 241", "ask-cols wide"} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	if _, err := parseConfig("ask-cols 96\nask-cols 120"); err == nil {
+		t.Fatal("parseConfig accepted a duplicate ask-cols node")
+	}
+}
+
 // TestConfigDashboardPreview reads the dashboard's starting preview share: the
 // node, the default, the zero that hides the band, and the bounds it rejects.
 func TestConfigDashboardPreview(t *testing.T) {

@@ -97,9 +97,20 @@ func (b *BoxView) SetKeymap(km *keymap.Config) {
 	b.Float.Hint = b.hint()
 }
 
-// boxViewMaxRows is the tallest the message box stands, whatever the screen
-// offers: a log reads in a box, not over the whole desk.
-const boxViewMaxRows = 22
+// The message box's own cap, whatever the screen offers: a log reads in a box,
+// not over the whole desk.
+const (
+	boxViewMaxRows = 22
+	boxViewMaxCols = 96
+)
+
+// BoxSize caps a float's box before the screen's own margins: Rows is the
+// tallest and Cols the widest it may stand. A zero field leaves that dimension
+// to the screen. Both margins are six cells.
+type BoxSize struct {
+	Rows int
+	Cols int
+}
 
 // BoxViewRect is where the float sits: centred over the pane area, one cell
 // clear of the rail, at most 96 columns and boxViewMaxRows rows. The height
@@ -107,20 +118,20 @@ const boxViewMaxRows = 22
 // reads in a short box and a list longer than the cap scrolls. A parked watch
 // exists before the first entry, so the watcher page sizes itself from n too.
 func BoxViewRect(snap *wire.Snapshot, n int) layout.Rect {
-	return BoxViewRectHeight(snap, n, boxViewMaxRows)
+	return BoxViewRectWith(snap, n, BoxSize{Rows: boxViewMaxRows, Cols: boxViewMaxCols})
 }
 
-// BoxViewRectHeight is BoxViewRect with a height cap the caller names, so a view
-// with a floor of its own can stand taller than the message box: the screen
-// still keeps six rows and the width stays at 96 columns.
-func BoxViewRectHeight(snap *wire.Snapshot, n, maxRows int) layout.Rect {
+// BoxViewRectWith is BoxViewRect with a cap the caller names, so a view with a
+// floor and a width of its own can stand taller and wider than the message box.
+// The screen still keeps six rows and six columns.
+func BoxViewRectWith(snap *wire.Snapshot, n int, cap BoxSize) layout.Rect {
 	left := snap.Rail
 	if left < 0 {
 		left = 0
 	}
 	w := snap.Cols - left - 6
-	if w > 96 {
-		w = 96
+	if cap.Cols > 0 && w > cap.Cols {
+		w = cap.Cols
 	}
 	if w < 20 {
 		w = snap.Cols - left - 2
@@ -129,8 +140,8 @@ func BoxViewRectHeight(snap *wire.Snapshot, n, maxRows int) layout.Rect {
 		w = snap.Cols - 2
 	}
 	h := snap.Rows - 6
-	if h > maxRows {
-		h = maxRows
+	if cap.Rows > 0 && h > cap.Rows {
+		h = cap.Rows
 	}
 	if n < h {
 		h = n

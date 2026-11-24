@@ -102,9 +102,11 @@ type askView struct {
 	top     int
 	helpTop int
 	note    string
-	// minRows is the fewest interior rows the float reserves, from the
-	// config's ask-rows. The detail fills whatever it leaves.
+	// minRows is the fewest interior rows the float reserves and cols the
+	// widest it may stand, from the config's ask-rows and ask-cols. The detail
+	// fills whatever the floor leaves.
 	minRows int
+	cols    int
 	// pending is true once an answer is on the wire and no snapshot has
 	// closed the ask yet, so a listed ask means the daemon took it.
 	pending bool
@@ -190,6 +192,7 @@ func (t *tui) syncAsk() {
 	}
 	t.ask.ask = *a
 	t.ask.minRows = t.km().AskRows()
+	t.ask.cols = t.km().AskCols()
 	t.ask.fit(t.snap, t.theme())
 	t.dirty = true
 }
@@ -210,7 +213,10 @@ func (t *tui) overlayBusy() bool {
 
 // openAskFloat puts the float on the desk and gives it the keyboard.
 func (t *tui) openAskFloat(a *wire.Ask) {
-	v := &askView{id: a.ID, pane: a.Pane, ask: *a, readOnly: t.readOnly, minRows: t.km().AskRows()}
+	v := &askView{
+		id: a.ID, pane: a.Pane, ask: *a, readOnly: t.readOnly,
+		minRows: t.km().AskRows(), cols: t.km().AskCols(),
+	}
 	v.reset()
 	v.float = &panel.FloatingPane{ID: askFloatID, Active: true}
 	v.float.Paint = func(b *bytes.Buffer, r layout.Rect) { v.paint(b, r, t.theme()) }
@@ -797,14 +803,16 @@ func (t *tui) askFit() {
 // content decides the height, so a short question reads in a short box and a
 // tall one is clamped by the layout that draws it.
 func (v *askView) fit(snap *wire.Snapshot, th theme.Theme) {
-	// The detail reserves its own floor, so the box may stand taller than the
-	// message box's cap: the screen keeps six rows, which is the only limit here.
-	roomy := boxview.BoxViewRectHeight(snap, 1<<8, snap.Rows)
-	r := boxview.BoxViewRectHeight(snap, v.needHeight(th, roomy.W), snap.Rows)
+	// The box reserves its own floor and takes its own width, so it may stand
+	// taller and wider than the message box. The screen keeps its six cells and
+	// is the only limit on the rows.
+	cap := boxview.BoxSize{Cols: v.maxCols()}
+	roomy := boxview.BoxViewRectWith(snap, 1<<8, cap)
+	r := boxview.BoxViewRectWith(snap, v.needHeight(th, roomy.W), cap)
 	if r.W != roomy.W {
 		// A narrower box wraps more, so the height is recounted at the width
 		// the placement actually gives.
-		r = boxview.BoxViewRectHeight(snap, v.needHeight(th, r.W), snap.Rows)
+		r = boxview.BoxViewRectWith(snap, v.needHeight(th, r.W), cap)
 	}
 	v.float.Rect = r
 	v.float.Title = v.title()
@@ -1417,6 +1425,15 @@ func (v *askView) floor() int {
 		return v.minRows
 	}
 	return (*keymap.Config)(nil).AskRows()
+}
+
+// maxCols is the widest the float may stand: the config's ask-cols, or the
+// built-in default when the view was made without one.
+func (v *askView) maxCols() int {
+	if v.cols > 0 {
+		return v.cols
+	}
+	return (*keymap.Config)(nil).AskCols()
 }
 
 // paint draws the box: the bands and the question from the top, the closing rule

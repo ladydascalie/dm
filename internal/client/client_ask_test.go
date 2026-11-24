@@ -1233,6 +1233,40 @@ func TestAskFloatNarrowKeepsOneColumn(t *testing.T) {
 	}
 }
 
+// TestAskFloatColsFollowTheConfig: ask-cols sets the width the float may take,
+// so a wide terminal reads a wide detail column, and the default keeps the
+// message box's 96-column line length.
+func TestAskFloatColsFollowTheConfig(t *testing.T) {
+	t.Parallel()
+	questions := []wire.AskQuestion{{
+		Question: "Pick one", Header: "Pick",
+		Options: []wire.AskOption{{Label: "alpha", Description: "the first", Preview: askLongPreview(20)}},
+	}}
+	width := func(src string) int {
+		tui, _ := askTUI(t, questions)
+		tui.snap.Cols, tui.snap.Rows = 220, 60
+		cfg, err := keymap.ParseConfig(src)
+		if err != nil {
+			t.Fatalf("ParseConfig: %v", err)
+		}
+		tui.keymap = cfg
+		// A reload lands on the open float through the next snapshot.
+		tui.syncAsk()
+		return tui.ask.float.Rect.W
+	}
+	if got := width(`prefix "ctrl+b"`); got != 96 {
+		t.Fatalf("default float width = %d, want the 96-column cap", got)
+	}
+	if got := width(`ask-cols 160`); got != 160 {
+		t.Fatalf("float width = %d, want ask-cols 160", got)
+	}
+	// The screen is the last word: six columns stay clear of its edge, and the
+	// rail's 34 columns are not the box's to take.
+	if got := width(`ask-cols 240`); got != 220-34-6 {
+		t.Fatalf("float width = %d, want the screen and rail less six columns", got)
+	}
+}
+
 // askTabText is the tab strip as one string.
 func askTabText(v *askView, th theme.Theme) string {
 	var b strings.Builder
