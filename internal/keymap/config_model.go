@@ -95,6 +95,10 @@ type Config struct {
 	askRowsSet bool
 	askCols    int
 	askColsSet bool
+	// askSplit is the share of the ask box the detail column takes, in percent.
+	// askSplitSet separates the default from a config that never named it.
+	askSplit    int
+	askSplitSet bool
 	// dashFull is the dashboard's shape: true takes the whole screen, false
 	// centres the palette over the panes. dashFullSet separates the default
 	// from a config that never named the node.
@@ -268,6 +272,22 @@ func (c *Config) AskCols() int {
 		return maxAskCols
 	}
 	return c.askCols
+}
+
+// AskSplit returns the share of the ask box the detail column takes, in percent,
+// clamped to the range the parser accepts. A config without the node reports the
+// built-in default.
+func (c *Config) AskSplit() int {
+	if c == nil || !c.askSplitSet {
+		return defaultAskSplit
+	}
+	if c.askSplit < minAskSplit {
+		return minAskSplit
+	}
+	if c.askSplit > maxAskSplit {
+		return maxAskSplit
+	}
+	return c.askSplit
 }
 
 func (c *Config) DashboardPreview() int {

@@ -396,6 +396,7 @@ optional and each one overrides its built-in value.
 | `dashboard-preview` | an integer from 0 to 100 | `40` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
 | `ask-rows` | an integer from 8 to 64 | `30` | Set the fewest interior rows the ask float reserves. Its detail pane fills the rows the floor leaves, so a taller box reads more of a long description or preview before it elides. |
 | `ask-cols` | an integer from 40 to 240 | `96` | Set the widest the ask float may stand, in columns. It still keeps six columns clear of the screen edge. |
+| `ask-split` | an integer from 20 to 80 | `60` | Set the share of the ask box's width the detail column takes, in percent. The options are labels on one row each, so the detail column takes the larger half. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |

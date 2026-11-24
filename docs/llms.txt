@@ -216,6 +216,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `palette-rows` | an integer of at least 1 | `10` | Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer. |
 | `ask-rows` | an integer from 8 to 64 | `30` | Set the fewest interior rows the ask float reserves. The detail pane fills the rows the floor leaves, so a taller box reads more of a long description or preview before it elides. |
 | `ask-cols` | an integer from 40 to 240 | `96` | Set the widest the ask float may stand, in columns. The float still keeps six columns clear of the screen edge, so a value wider than the terminal only uses what is there. |
+| `ask-split` | an integer from 20 to 80 | `60` | Set the share of the ask box's width the detail column takes, in percent. The options are labels on one row each, so the detail column, which carries the description and the preview, takes the larger half. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder. |
 | `web-addr` | a quoted host:port, as in "100.71.227.52:8099" | `"127.0.0.1:8099"` | Set the host:port dm web listens on. It applies only when --addr is not passed, so an explicit flag always wins. An absent or empty node keeps the loopback default; a value that is not host:port is refused when the config loads. |
 | `dashboard-layout` | "full" or "float" | `"float"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. |
@@ -449,7 +450,7 @@ The marks are defined by the semantic prompts proposal: https://gitlab.freedeskt
 | `$DM_STATE/sessions/<name>/server.sock` | Unix socket the session server listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.sock` | Unix socket one pane's mux listens on. |
 | `$DM_STATE/sessions/<name>/panes/<id>.log` | Pane output log. |
-| `$XDG_CONFIG_HOME/dm/config.kdl` | Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run. |
+| `$XDG_CONFIG_HOME/dm/config.kdl` | Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run. |
 | `$XDG_CONFIG_HOME/dm/themes/<name>.kdl` | Theme palette, accents, glyphs and state styles. |
 | `$XDG_CONFIG_HOME/dm/layouts/<name>.json` | A captured layout: workspaces, windows, split trees and each pane's launch cwd and argv. Written by dm layout save. |
 

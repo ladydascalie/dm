@@ -225,6 +225,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.askCols = n
 			cfg.askColsSet = true
 			i += 2
+		case "ask-split":
+			if cfg.askSplitSet {
+				return fmt.Errorf("line %d: duplicate ask-split node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after ask-split", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: ask-split must be a number, got %q", v.Line, v.Value)
+			}
+			if n < minAskSplit || n > maxAskSplit {
+				return fmt.Errorf("line %d: ask-split must be %d to %d, got %d", v.Line, minAskSplit, maxAskSplit, n)
+			}
+			cfg.askSplit = n
+			cfg.askSplitSet = true
+			i += 2
 
 		case "dashboard-layout":
 			if cfg.dashFullSet {
@@ -906,6 +924,12 @@ const (
 	defaultAskCols = 96
 	minAskCols     = 40
 	maxAskCols     = 240
+	// ask-split is the share of the box the detail column takes, in percent. The
+	// options are labels on one row each; the detail carries the prose and the
+	// previews, so it gets the larger half.
+	defaultAskSplit = 60
+	minAskSplit     = 20
+	maxAskSplit     = 80
 )
 
 // defaultDiffCommand is the built-in command the dashboard diff key runs in a
@@ -1042,6 +1066,8 @@ palette-rows 10
 ask-rows 30
 // The ask float is at most this many columns wide.
 ask-cols 96
+// The share of the ask box's width the detail column takes.
+ask-split 60
 
 // The diff key runs this in a floating pane through sh -c, in the selected pane folder.
 diff-command "hunk diff"

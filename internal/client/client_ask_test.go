@@ -1204,6 +1204,43 @@ func TestAskFloatDetailStartsAtTheOptionUnderTheCursor(t *testing.T) {
 	}
 }
 
+// TestAskFloatSplitFollowsTheConfig: the detail column takes ask-split of the
+// box, 60% by default, and the options keep their floor beside it.
+func TestAskFloatSplitFollowsTheConfig(t *testing.T) {
+	t.Parallel()
+	questions := []wire.AskQuestion{{
+		Question: "Pick one", Header: "Pick",
+		Options: []wire.AskOption{{Label: "alpha", Description: "the first"}},
+	}}
+	shapeAt := func(src string, cols int) askShape {
+		tui, _ := askTUI(t, questions)
+		tui.snap.Cols, tui.snap.Rows = cols, 40
+		cfg, err := keymap.ParseConfig(src)
+		if err != nil {
+			t.Fatalf("ParseConfig: %v", err)
+		}
+		tui.keymap = cfg
+		// A reload lands on the open float through the next snapshot.
+		tui.syncAsk()
+		return tui.ask.shape(tui.ask.float.Rect.W)
+	}
+	// 96 columns: the detail takes 57 and the options 38, the mockup's split.
+	if got := shapeAt(`prefix "ctrl+b"`, 200); got.rightW != 57 || got.leftW != 38 {
+		t.Fatalf("shape = %+v, want the detail 57 and the options 38", got)
+	}
+	if got := shapeAt(`ask-split 70`, 200); got.rightW != 67 || got.leftW != 28 {
+		t.Fatalf("shape = %+v at ask-split 70, want the detail 67 and the options 28", got)
+	}
+	// The option column keeps its floor however far the detail is pushed.
+	if got := shapeAt(`ask-split 80`, 200); got.leftW < askQuestionMin {
+		t.Fatalf("shape = %+v, want the options at least %d cells", got, askQuestionMin)
+	}
+	// And the detail keeps its own floor when the box is narrow.
+	if got := shapeAt("ask-cols 90\nask-split 20", 200); got.rightW != askContextMin {
+		t.Fatalf("shape = %+v, want the detail on its floor %d", got, askContextMin)
+	}
+}
+
 // TestAskFloatNarrowKeepsOneColumn: below askWideMin the float keeps today's
 // layout, the preview under its option in one column.
 func TestAskFloatNarrowKeepsOneColumn(t *testing.T) {

@@ -1391,6 +1391,44 @@ func TestConfigAskCols(t *testing.T) {
 	}
 }
 
+// TestConfigAskSplit reads the ask box's detail share: the node, the default, and
+// the bounds it rejects.
+func TestConfigAskSplit(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"absent", `prefix "ctrl+b"`, defaultAskSplit},
+		{"floor", `ask-split 20`, 20},
+		{"even", `ask-split 50`, 50},
+		{"seventy", `ask-split 70`, 70},
+		{"ceiling", `ask-split 80`, 80},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.AskSplit(); got != c.want {
+				t.Fatalf("AskSplit() = %d, want %d", got, c.want)
+			}
+		})
+	}
+	if got := LoadDefault().AskSplit(); got != defaultAskSplit {
+		t.Fatalf("LoadDefault().AskSplit() = %d, want %d", got, defaultAskSplit)
+	}
+	for _, bad := range []string{"ask-split 19", "ask-split 81", "ask-split half"} {
+		if _, err := parseConfig(bad); err == nil {
+			t.Fatalf("parseConfig accepted %q", bad)
+		}
+	}
+	if _, err := parseConfig("ask-split 60\nask-split 70"); err == nil {
+		t.Fatal("parseConfig accepted a duplicate ask-split node")
+	}
+}
+
 // TestConfigDashboardPreview reads the dashboard's starting preview share: the
 // node, the default, the zero that hides the band, and the bounds it rejects.
 func TestConfigDashboardPreview(t *testing.T) {

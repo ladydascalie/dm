@@ -83,6 +83,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the widest the ask float may stand, in columns. The float still keeps six columns clear of the screen edge, so a value wider than the terminal only uses what is there.",
 	},
 	{
+		Name:    "ask-split",
+		Value:   "an integer from 20 to 80",
+		Default: "60",
+		Desc:    "Set the share of the ask box's width the detail column takes, in percent. The options are labels on one row each, so the detail column, which carries the description and the preview, takes the larger half.",
+	},
+	{
 		Name:    "diff-command",
 		Value:   "a quoted shell command",
 		Default: `"hunk diff"`,
@@ -205,7 +211,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{

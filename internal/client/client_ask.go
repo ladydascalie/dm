@@ -102,11 +102,13 @@ type askView struct {
 	top     int
 	helpTop int
 	note    string
-	// minRows is the fewest interior rows the float reserves and cols the
-	// widest it may stand, from the config's ask-rows and ask-cols. The detail
-	// fills whatever the floor leaves.
+	// minRows is the fewest interior rows the float reserves, cols the widest
+	// it may stand and split the share of that width the detail column takes,
+	// from the config's ask-rows, ask-cols and ask-split. The detail fills
+	// whatever the floor leaves.
 	minRows int
 	cols    int
+	split   int
 	// pending is true once an answer is on the wire and no snapshot has
 	// closed the ask yet, so a listed ask means the daemon took it.
 	pending bool
@@ -193,6 +195,7 @@ func (t *tui) syncAsk() {
 	t.ask.ask = *a
 	t.ask.minRows = t.km().AskRows()
 	t.ask.cols = t.km().AskCols()
+	t.ask.split = t.km().AskSplit()
 	t.ask.fit(t.snap, t.theme())
 	t.dirty = true
 }
@@ -215,7 +218,7 @@ func (t *tui) overlayBusy() bool {
 func (t *tui) openAskFloat(a *wire.Ask) {
 	v := &askView{
 		id: a.ID, pane: a.Pane, ask: *a, readOnly: t.readOnly,
-		minRows: t.km().AskRows(), cols: t.km().AskCols(),
+		minRows: t.km().AskRows(), cols: t.km().AskCols(), split: t.km().AskSplit(),
 	}
 	v.reset()
 	v.float = &panel.FloatingPane{ID: askFloatID, Active: true}
@@ -862,15 +865,16 @@ type askShape struct {
 	rightW int
 }
 
-// shape splits a width-cell interior. The help pane is about 40% of the box and
-// never narrower than askContextMin, and the options keep at least
-// askQuestionMin cells beside it. Below askWideMin the float keeps one column,
-// so the help content folds under its option.
+// shape splits a width-cell interior. The help pane takes the config's share of
+// the box, 60% by default, and never fewer than askContextMin cells, while the
+// options keep at least askQuestionMin beside it: the detail carries the prose
+// and the previews, so it takes the larger half. Below askWideMin the float
+// keeps one column, so the help content folds under its option.
 func (v *askView) shape(width int) askShape {
 	if width < askWideMin {
 		return askShape{leftW: width}
 	}
-	right := width * 2 / 5
+	right := width * v.detailShare() / 100
 	if right < askContextMin {
 		right = askContextMin
 	}
@@ -1434,6 +1438,16 @@ func (v *askView) maxCols() int {
 		return v.cols
 	}
 	return (*keymap.Config)(nil).AskCols()
+}
+
+// detailShare is the share of the width the detail column takes, in percent:
+// the config's ask-split, or the built-in default when the view was made
+// without one.
+func (v *askView) detailShare() int {
+	if v.split > 0 {
+		return v.split
+	}
+	return (*keymap.Config)(nil).AskSplit()
 }
 
 // paint draws the box: the bands and the question from the top, the closing rule
