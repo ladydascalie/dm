@@ -129,6 +129,12 @@ const (
 	CodeInvalidAnswer = "invalid_answer"
 )
 
+// SettleGrace is how long a settled ask stays in the store after its answer.
+// The owner reads the answer through ask-await and closes the ask afterwards,
+// so this is the room a slow owner gets before the store drops the entry on its
+// own. An ask nobody has answered is never dropped: a reader may still take it.
+const SettleGrace = 10 * time.Minute
+
 // DefaultAwait is how long ask-await parks before it answers pending. It is
 // short enough that a bridge can loop on it without holding a tool call open
 // for minutes.

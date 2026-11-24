@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"log"
 	"time"
 
 	"dm/internal/ask"
@@ -208,17 +209,62 @@ func (s *server) pushAskLocked() {
 // entries are stamped.
 func askTime() time.Time { return time.Now().UTC().Truncate(time.Second) }
 
-// wireAsks flattens the store into the snapshot shape.
+// askReapInterval is how often the store sweeps the settled asks it no longer
+// needs. A sweep that drops nothing costs one lock and no write.
+const askReapInterval = time.Minute
+
+// reapAsks drops the settled asks past ask.SettleGrace and reports how many it
+// removed. An answered ask is kept for its owner to read through ask-await and
+// to close, but an owner that died before the close would otherwise leave the
+// entry in the session file for good.
+func (s *server) reapAsks(now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var kept []ask.Request
+	dropped := 0
+	for _, a := range s.st.Ask {
+		if a.Answer != nil && now.Sub(a.Answer.At) > ask.SettleGrace {
+			dropped++
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if dropped == 0 {
+		return 0, nil
+	}
+	s.st.Ask = kept
+	err := s.st.Save()
+	s.pushAskLocked()
+	return dropped, err
+}
+
+// reapAsksLoop sweeps the store until the process ends.
+func (s *server) reapAsksLoop() {
+	t := time.NewTicker(askReapInterval)
+	defer t.Stop()
+	for range t.C {
+		if _, err := s.reapAsks(time.Now().UTC()); err != nil {
+			log.Printf("ask reap: %v", err)
+		}
+	}
+}
+
+// wireAsks flattens the store's open asks into the snapshot shape. A settled
+// ask is not listed: it is kept for its owner to read and to close, and no
+// client presents it again.
 func wireAsks(asks []ask.Request) []wire.Ask {
 	if len(asks) == 0 {
 		return nil
 	}
-	out := make([]wire.Ask, len(asks))
-	for i, a := range asks {
-		out[i] = wire.Ask{
+	var out []wire.Ask
+	for _, a := range asks {
+		if a.Answer != nil {
+			continue
+		}
+		out = append(out, wire.Ask{
 			ID: a.ID, Pane: a.Pane, ToolCallID: a.ToolCallID, At: a.At,
 			Questions: wireQuestions(a.Questions),
-		}
+		})
 	}
 	return out
 }

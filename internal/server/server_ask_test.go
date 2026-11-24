@@ -244,6 +244,51 @@ func TestAskAnswerRefusals(t *testing.T) {
 	}
 }
 
+// TestAskReapDropsSettledAsks: an answered ask is kept long enough for its
+// owner to read and close it, then dropped. An ask nobody answered is never
+// dropped: a reader may still take it.
+func TestAskReapDropsSettledAsks(t *testing.T) {
+	t.Parallel()
+	s, pane := askServer(t)
+	id := askOpen(t, s, pane, "toolu_1")
+
+	// A day later an open ask is still waiting on a reader.
+	if n, err := s.reapAsks(time.Now().UTC().Add(24 * time.Hour)); err != nil || n != 0 {
+		t.Fatalf("reap of an open ask = %d, %v, want it kept", n, err)
+	}
+
+	if m := askCall(t, s, nil, nil, "ask-answer", id, askGoodAnswer); !m.OK {
+		t.Fatalf("ask-answer: %s", m.Error)
+	}
+	s.mu.Lock()
+	settled := s.st.Ask[0].Answer.At
+	s.mu.Unlock()
+
+	// Inside the grace the outcome is still there for its owner.
+	if n, err := s.reapAsks(settled.Add(ask.SettleGrace - time.Second)); err != nil || n != 0 {
+		t.Fatalf("reap inside the grace = %d, %v, want it kept", n, err)
+	}
+	// Past it the entry goes, and the store is saved without it.
+	if n, err := s.reapAsks(settled.Add(ask.SettleGrace + time.Second)); err != nil || n != 1 {
+		t.Fatalf("reap past the grace = %d, %v, want one dropped", n, err)
+	}
+	if m := askCall(t, s, nil, nil, "ask-list", "", `{}`); !m.OK {
+		t.Fatalf("ask-list: %s", m.Error)
+	} else {
+		var rep ask.ListReply
+		if err := json.Unmarshal(m.Res, &rep); err != nil {
+			t.Fatalf("ask-list reply: %v", err)
+		}
+		if len(rep.Asks) != 0 {
+			t.Fatalf("ask-list = %+v, want the settled ask dropped", rep.Asks)
+		}
+	}
+	// A second sweep finds nothing to do.
+	if n, err := s.reapAsks(settled.Add(2 * ask.SettleGrace)); err != nil || n != 0 {
+		t.Fatalf("second reap = %d, %v, want no change", n, err)
+	}
+}
+
 // TestAskAnswerRefusesAMalformedBody proves a body the decoder rejects is
 // invalid_payload, before the ask is even looked up.
 func TestAskAnswerRefusesAMalformedBody(t *testing.T) {
@@ -257,8 +302,10 @@ func TestAskAnswerRefusesAMalformedBody(t *testing.T) {
 	}
 }
 
-// TestAskAnAnsweredAskStaysListedUntilClosed proves the outcome is readable
-// after the answer and gone after the close, and that a close is idempotent.
+// TestAskAnAnsweredAskStaysListedUntilClosed proves the outcome is readable by
+// its owner after the answer, leaves every client's snapshot at once, and is
+// gone after the close. A client that attaches after the answer must not be
+// asked the question again, so the snapshot lists open asks only.
 func TestAskAnAnsweredAskStaysListedUntilClosed(t *testing.T) {
 	t.Parallel()
 	s, pane := askServer(t)
@@ -278,8 +325,8 @@ func TestAskAnAnsweredAskStaysListedUntilClosed(t *testing.T) {
 	if len(rep.Asks) != 1 || rep.Asks[0].Answer == nil {
 		t.Fatalf("ask-list = %+v, want one answered ask", rep.Asks)
 	}
-	if snap := snapshot(s); len(snap.Ask) != 1 {
-		t.Fatalf("snapshot carries %d asks, want the answered one", len(snap.Ask))
+	if snap := snapshot(s); len(snap.Ask) != 0 {
+		t.Fatalf("snapshot carries %d asks, want none: the question is answered", len(snap.Ask))
 	}
 
 	m = askCall(t, s, nil, nil, "ask-close", id, `{}`)

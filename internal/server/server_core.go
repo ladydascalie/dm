@@ -680,6 +680,12 @@ func Run(args []string) error {
 	}
 	_ = os.Chmod(sock, 0o600)
 	writePID(filepath.Join(st.SessionDir(), "server.pid"))
+	// A session resumed long after it settled drops its stale answers before
+	// the first client attaches, then keeps sweeping.
+	if _, err := s.reapAsks(time.Now().UTC()); err != nil {
+		log.Printf("ask reap: %v", err)
+	}
+	go s.reapAsksLoop()
 	close(started)
 
 	log.Printf("session %q listening on %s", *name, sock)
