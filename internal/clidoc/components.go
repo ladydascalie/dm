@@ -126,12 +126,16 @@ s.Next()`,
 	id:    "box",
 	name:  "Box",
 	pkg:   "internal/panel",
-	summary: "A box is one bordered panel: a title, a hint, a focus style and " +
-		"one content source. The border, the labels and the ground are the panel's; " +
-		"the content is the caller's. The float is the same value with a placement.",
+	summary: "A box is one bordered panel: a title, a hint bar, a focus style " +
+		"and one content source. The border, the title and the hint row are the " +
+		"panel's; the content is the caller's. The float is the same value with a " +
+		"placement.",
 	usage: `f := panel.FloatingPane{
     ID: "box", Rect: inner, Active: true,
-    Title: " message box ", Hint: " esc close ",
+    Title: " message box ",
+    Hint: &hintbar.Bar{Hints: []hintbar.Hint{
+        {Keys: []string{"esc"}, Label: "close"},
+    }},
     Paint: func(buf *bytes.Buffer, r layout.Rect) {
         // write rows inside r
     },
@@ -143,12 +147,12 @@ f.Draw(buf, th)`,
 		{"VT", "*vt.Term", "nil", "The terminal the float shows, when a terminal is the content."},
 		{"Active", "bool", "false", "The focused border style."},
 		{"Title", "string", `""`, "The top border label."},
-		{"Hint", "string", `""`, "The bottom border label."},
+		{"Hint", "*hintbar.Bar", "nil", "The bottom border's hint bar, fitted to the row on every frame. A nil bar paints no hint."},
 		{"Paint", "func(*bytes.Buffer, layout.Rect)", "nil", "The content painter, one rect inside the border."},
 	},
 	focus: "The app sets Active. The float never reads a key or a keymap.",
-	compose: "The content is a terminal or a paint func. The border, the labels and the " +
-		"ground are drawn around it; the panel never centres itself.",
+	compose: "The content is a terminal or a paint func. The border, the title, the " +
+		"hint row and the ground are drawn around it; the panel never centres itself.",
 }, {
 	level: "component",
 	draw:  "Draw",
