@@ -905,6 +905,10 @@
   html[data-skin="tui"] *,
   html[data-skin="tui"] *::before,
   html[data-skin="tui"] *::after { border-radius: 0 !important; }
+  /* The one shape the sweep must not take: a running tool call is a border
+     turning round a circle, and a square does not turn. The state dots stay
+     square with the rest. */
+  html[data-skin="tui"] .spin { border-radius: 50% !important; }
 
   /* header, tab strip and the two switches */
   html[data-skin="tui"] header { padding: .5lh 1ch; }
