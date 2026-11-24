@@ -154,6 +154,9 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id strin
 		// The answer prompt is not a rename: it names the question it
 		// answers, and the ask float under it stays on screen.
 		title = "answer"
+	case askNoteKind:
+		// A note is not a rename either: it rides the answer the float sends.
+		title = "note"
 	}
 	f := &panel.FloatingPane{
 		ID:    "rename",
@@ -198,6 +201,8 @@ func renameInputRow(buf *bytes.Buffer, th theme.Theme, r layout.Rect, kind strin
 		label = "project: "
 	case askPromptKind:
 		label = "answer: "
+	case askNoteKind:
+		label = "note: "
 	}
 	ui.DrawInput(buf, th, ui.InputProps{
 		Rect:   r,

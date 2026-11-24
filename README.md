@@ -267,14 +267,17 @@ Three surfaces draw an ask from that one store.
 - The desk. The TUI paints the focused pane's ask as a float, one question at a
   time: the header, the question, the options with their description and
   preview, and on a single select a last `Type something.` row. `j`/`k` or the
-  arrows move, a digit picks that option, `space` picks on a single select and
-  toggles on a multi-select, `t` types a custom answer, `n`/`p` move between
-  questions, `enter` sends once every question is answered, and `esc` declines.
-  A description or preview taller than its pane scrolls with `J`/`K`, and the
-  row the pane elides to counts the rows it hides above and below the window,
-  so nothing in an option's detail is unreachable. The box reserves at least
-  `ask-rows` interior rows, and the detail pane fills whatever that floor
-  leaves.
+  arrows move, `J`/`K` scroll the detail, a digit picks that option, `space`
+  picks on a single select and toggles on a multi-select, `t` types a custom
+  answer, `n` attaches a note to the option under the cursor, `tab` and
+  shift-tab move between questions, `A` puts the box away, `enter` sends once
+  every question is answered, and `esc` declines. Those keys take rows of their
+  own above the closing rule and wrap to the box's width, so every binding is on
+  screen at any width; the border is a plain rule. A description or preview
+  taller than its pane scrolls with `J`/`K`, and the row the pane elides to
+  counts the rows it hides above and below the window, so nothing in an option's
+  detail is unreachable. The box reserves at least `ask-rows` interior rows, and
+  the detail pane fills whatever that floor leaves.
   A pane that is not focused keeps only a `?` badge on its rail row, so a
   question in another window cannot take the desk. The float closes on the next
   snapshot once the ask is answered or gone. A refused answer keeps it open

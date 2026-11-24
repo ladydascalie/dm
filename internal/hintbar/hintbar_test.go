@@ -156,6 +156,50 @@ func TestFitDropsFromTheTail(t *testing.T) {
 	}
 }
 
+// TestRowsWrapAndKeepEverything: a block of rows holds the whole hint list,
+// in order, with a pipe between the hints of a row and none at a row's end. No
+// hint drops, and a row never paints past the width.
+func TestRowsWrapAndKeepEverything(t *testing.T) {
+	th := th()
+	bar := Bar{Hints: []Hint{
+		{Keys: []string{"j/k"}, Label: "move"},
+		{Keys: []string{"J/K"}, Label: "detail"},
+		{Keys: []string{"space"}, Label: "pick"},
+		{Keys: []string{"t"}, Label: "type"},
+		{Keys: []string{"enter"}, Label: "send"},
+		{Keys: []string{"esc"}, Label: "decline"},
+	}}
+	// Forty cells cannot hold the whole list on one row.
+	rows := bar.Rows(40, th)
+	if len(rows) < 2 {
+		t.Fatalf("rows = %d at 40 cells, want the list wrapped", len(rows))
+	}
+	var joined []string
+	for _, row := range rows {
+		if got := segment.SegCells(row); got > 40 {
+			t.Fatalf("row %q is %d cells, want at most 40", text(row), got)
+		}
+		if got := text(row); strings.HasSuffix(got, " │ ") || strings.HasPrefix(got, " │ ") {
+			t.Fatalf("row = %q, want no pipe at either end", got)
+		}
+		joined = append(joined, text(row))
+	}
+	all := strings.Join(strings.Fields(strings.Join(joined, " ")), " ")
+	for _, want := range []string{"j/k move", "J/K detail", "space pick", "t type", "enter send", "esc decline"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("the rows miss %q:\n%s", want, all)
+		}
+	}
+	// A row wide enough for the list is one row, so a wide box costs nothing.
+	if rows := bar.Rows(200, th); len(rows) != 1 {
+		t.Fatalf("rows = %d at 200 cells, want one", len(rows))
+	}
+	// An unbound hint paints nothing and takes no row of its own.
+	if rows := (Bar{Hints: []Hint{{Keys: []string{"x"}}, {Label: "gone"}}}).Rows(200, th); len(rows) != 1 {
+		t.Fatalf("rows = %d for an unbound hint, want one", len(rows))
+	}
+}
+
 // TestKeepSurvives: the drops skip a Keep hint, so the keys a caller pins stay
 // on a narrow row.
 func TestKeepSurvives(t *testing.T) {

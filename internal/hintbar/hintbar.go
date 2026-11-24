@@ -84,6 +84,43 @@ func (b Bar) Segments(width int, th theme.Theme) []segment.Seg {
 	return out
 }
 
+// Rows lays the hints out as whole rows of at most width cells, in the order
+// they were given, so a caller that owns a block of rows paints every key
+// instead of dropping the ones a single row cannot hold. Nothing drops here: the
+// rows grow to fit the list. A hint wider than width alone is laid on a row of
+// its own and clipped by the painter.
+func (b Bar) Rows(width int, th theme.Theme) [][]segment.Seg {
+	if width <= 0 {
+		return nil
+	}
+	sep := []segment.Seg{pipe(th)}
+	sepCells := segment.SegCells(sep)
+	var rows [][]segment.Seg
+	var row []segment.Seg
+	cells := 0
+	for _, h := range b.Hints {
+		segs := hintSegs(h, th)
+		if len(segs) == 0 {
+			continue
+		}
+		n := segment.SegCells(segs)
+		switch {
+		case len(row) == 0:
+			row, cells = segs, n
+		case cells+sepCells+n <= width:
+			row = append(append(row, sep...), segs...)
+			cells += sepCells + n
+		default:
+			rows = append(rows, row)
+			row, cells = segs, n
+		}
+	}
+	if len(row) > 0 {
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // Cells is the painted width of the fitted bar.
 func (b Bar) Cells(width int, th theme.Theme) int {
 	return segment.SegCells(b.Segments(width, th))

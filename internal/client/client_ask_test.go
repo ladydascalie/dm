@@ -498,8 +498,8 @@ func TestAskFloatMultiSelectToggles(t *testing.T) {
 	}
 }
 
-// TestAskFloatQuestionStep: n and p move between questions and keep each
-// question's cursor.
+// TestAskFloatQuestionStep: tab and shift-tab move between questions and keep
+// each question's cursor.
 func TestAskFloatQuestionStep(t *testing.T) {
 	t.Parallel()
 	questions := []wire.AskQuestion{
@@ -507,38 +507,38 @@ func TestAskFloatQuestionStep(t *testing.T) {
 		{Question: "Two?", Header: "Second", Options: []wire.AskOption{{Label: "b"}}},
 	}
 	tui, _ := askTUI(t, questions)
-	feed(tui, "n")
+	feed(tui, "\t")
 	if tui.ask.q != 1 {
 		t.Fatalf("q = %d, want the second question", tui.ask.q)
 	}
 	if !strings.Contains(tui.ask.float.Title, "2/2") {
 		t.Fatalf("title = %q, want the question count", tui.ask.float.Title)
 	}
-	feed(tui, "p")
+	feed(tui, "\x1b[Z")
 	if tui.ask.q != 0 {
 		t.Fatalf("q = %d, want the first question", tui.ask.q)
 	}
 }
 
-// TestAskFloatBorderDropsTheTailHints: a narrow float loses the hints it
-// cannot hold from the tail, and the two keys that end the form survive, so the
-// reader can always send or decline.
-func TestAskFloatBorderDropsTheTailHints(t *testing.T) {
+// TestAskFloatKeysWrapToTheWidth: the key rows hold every binding a narrow float
+// can take, wrapping onto as many rows as the width needs. Nothing drops, so a
+// key the reader is told about is a key that is on screen.
+func TestAskFloatKeysWrapToTheWidth(t *testing.T) {
 	t.Parallel()
 	tui, _ := askTUI(t, askQuestions())
 	tui.snap.Rail = 0
 	tui.snap.Cols = 44
 	tui.askFit()
-	border := askBorderRow(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
-	for _, want := range []string{"enter", "send", "esc", "decline"} {
-		if !strings.Contains(border, want) {
-			t.Fatalf("border = %q, misses %q", border, want)
+	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	for _, want := range []string{"j/k", "move", "J/K", "detail", "1-9", "pick",
+		"space", "t", "type", "A", "hide", "n", "note", "enter", "send", "esc", "decline"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the box misses %q on a narrow float:\n%s", want, text)
 		}
 	}
-	for _, gone := range []string{"move", "pick", "type", "hide", "note"} {
-		if strings.Contains(border, gone) {
-			t.Fatalf("border = %q, want %q dropped on a narrow float", border, gone)
-		}
+	// The rows wrap: one row cannot hold them at 44 cells.
+	if rows := tui.ask.hint().Rows(tui.ask.float.Rect.W-2, theme.DefaultTheme()); len(rows) < 2 {
+		t.Fatalf("the keys fit one row at %d cells, want them wrapped", tui.ask.float.Rect.W)
 	}
 }
 
@@ -555,16 +555,16 @@ func TestAskFloatReadOnlyOffersNoAnswer(t *testing.T) {
 	if tui.ask == nil {
 		t.Fatal("a read-only client drew no ask")
 	}
-	border := askBorderRow(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
-	if strings.Contains(border, "send") || strings.Contains(border, "decline") {
-		t.Fatalf("border = %q, want no send and no decline", border)
+	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	if strings.Contains(text, "send") || strings.Contains(text, "decline") {
+		t.Fatalf("the box = %q, want no send and no decline", text)
 	}
-	if !strings.Contains(border, "move") || !strings.Contains(border, "pick") {
-		t.Fatalf("border = %q, want the keys a read-only session still takes", border)
+	if !strings.Contains(text, "move") || !strings.Contains(text, "pick") {
+		t.Fatalf("the box = %q, want the keys a read-only session still takes", text)
 	}
 	feed(tui, "1\r")
 	feed(tui, "\x1b")
-	feed(tui, "N")
+	feed(tui, "n")
 	select {
 	case m := <-got:
 		t.Fatalf("a read-only client sent %+v", m)
@@ -762,9 +762,9 @@ func TestAskFloatWideDrawsBothPanes(t *testing.T) {
 }
 
 // TestAskFloatChromeIsABandAndABorder: the box reads top to bottom as the
-// status band, a rule, the question, a rule, the list beside the help pane and
-// a closing rule. The keys ride the bottom border, so the interior spends no
-// row on a footer and the list keeps the row it took.
+// status band, a rule, the question, a rule, the list beside the help pane, a
+// closing rule and the key rows. The keys take whole interior rows, so every
+// binding is painted whatever the box width, and the border stays a plain rule.
 func TestAskFloatChromeIsABandAndABorder(t *testing.T) {
 	t.Parallel()
 	tui, _ := askSizedTUI(t, askQuestions(), 140)
@@ -781,23 +781,31 @@ func TestAskFloatChromeIsABandAndABorder(t *testing.T) {
 	if !strings.Contains(rows[1], rule) {
 		t.Fatalf("the second row = %q, want the rule under the band", rows[1])
 	}
-	last := rows[len(rows)-1]
-	if !strings.Contains(last, rule) {
-		t.Fatalf("the last interior row = %q, want the closing rule", last)
-	}
-	for _, key := range []string{"j/k", "enter", "esc"} {
-		if strings.Contains(last, key) {
-			t.Fatalf("the last interior row = %q, want no key row inside the box", last)
+	// The closing rule sits above the key rows, which end the interior.
+	closing := -1
+	for i, row := range rows {
+		if strings.Contains(row, rule) {
+			closing = i
 		}
 	}
-	// The keys ride the bottom border, one cell clear of the corner.
+	if closing < 0 {
+		t.Fatalf("no closing rule in the box:\n%s", text)
+	}
+	footer := strings.Join(rows[closing+1:], "\n")
+	for _, want := range []string{" j/k ", " enter ", " esc "} {
+		if !strings.Contains(footer, want) {
+			t.Fatalf("the key rows = %q, want the cap %q", footer, want)
+		}
+	}
+	if strings.Contains(footer, rule) {
+		t.Fatalf("the key rows = %q, want them under the closing rule", footer)
+	}
+	// The border is a plain rule: no hint rides it any more.
 	r := tui.ask.float.Rect
 	screen := askFloatScreen(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
 	border := boxScreenRow(screen, r.Y+r.H, r.X-1, r.W+2)
-	for _, want := range []string{" j/k ", " enter ", " esc "} {
-		if !strings.Contains(border, want) {
-			t.Fatalf("the bottom border = %q, want the cap %q", border, want)
-		}
+	if strings.Contains(border, "j/k") {
+		t.Fatalf("the bottom border = %q, want a plain rule", border)
 	}
 }
 
@@ -954,13 +962,13 @@ func TestAskFloatLongListKeepsTheFooter(t *testing.T) {
 		return strings.TrimSpace(rows[len(rows)-1])
 	}
 	keys := func() string {
-		return askBorderRow(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+		return askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
 	}
-	if border := keys(); !strings.Contains(border, "enter") || !strings.Contains(border, "decline") {
-		t.Fatalf("the border = %q, want the keys on the last row", border)
+	if text := keys(); !strings.Contains(text, "enter") || !strings.Contains(text, "decline") {
+		t.Fatalf("the box = %q, want the keys on its last rows", text)
 	}
 	if foot := last(); strings.Contains(foot, "enter") || strings.Contains(foot, "send") {
-		t.Fatalf("the last interior row = %q, want the closing rule", foot)
+		t.Fatalf("the last interior row = %q, want a key row", foot)
 	}
 	for range 13 {
 		feed(tui, "j")
@@ -968,8 +976,8 @@ func TestAskFloatLongListKeepsTheFooter(t *testing.T) {
 	if !strings.Contains(askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows), "option 14") {
 		t.Fatalf("the cursor row left the window")
 	}
-	if border := keys(); !strings.Contains(border, "enter") {
-		t.Fatalf("the border = %q after the list scrolled, want it in place", border)
+	if text := keys(); !strings.Contains(text, "enter") || !strings.Contains(text, "j/k") {
+		t.Fatalf("the box = %q after the list scrolled, want its keys in place", text)
 	}
 }
 
@@ -1098,8 +1106,8 @@ func TestAskFloatDetailScrollsTheWidePane(t *testing.T) {
 	if strings.Contains(text(), "line 20") {
 		t.Fatalf("the whole preview fitted, so there is nothing to scroll:\n%s", text())
 	}
-	if border := askBorderRow(t, v, tui.snap.Cols, tui.snap.Rows); !strings.Contains(border, "detail") {
-		t.Fatalf("border = %q, want the key that scrolls the detail", border)
+	if got := text(); !strings.Contains(got, "detail") {
+		t.Fatalf("the key rows = %q, want the key that scrolls the detail", got)
 	}
 	feed(tui, "J")
 	if v.helpTop != 1 {
@@ -1368,7 +1376,7 @@ func TestAskFloatNoteAttachesEditsAndClears(t *testing.T) {
 	if tui.ask.sel[0] != 1 {
 		t.Fatalf("cursor = %d, want the option with no preview", tui.ask.sel[0])
 	}
-	feed(tui, "N")
+	feed(tui, "n")
 	if tui.mode != "rename" || tui.renameKind != askNoteKind {
 		t.Fatalf("mode = %q kind = %q, want the note prompt", tui.mode, tui.renameKind)
 	}
@@ -1394,7 +1402,7 @@ func TestAskFloatNoteAttachesEditsAndClears(t *testing.T) {
 	}
 
 	// A second press edits the note it already carries.
-	feed(tui, "N")
+	feed(tui, "n")
 	if tui.renameDraft.String() != "needs a rebase" {
 		t.Fatalf("draft = %q, want the note under edit", tui.renameDraft.String())
 	}
@@ -1405,7 +1413,7 @@ func TestAskFloatNoteAttachesEditsAndClears(t *testing.T) {
 	}
 
 	// An empty draft clears it, and the row goes with it.
-	feed(tui, "N")
+	feed(tui, "n")
 	for range "needs a rebase!" {
 		feed(tui, "\x7f")
 	}
@@ -1424,7 +1432,7 @@ func TestAskFloatNoteRidesTheAnswer(t *testing.T) {
 	t.Parallel()
 	tui, got := askSizedTUI(t, askQuestions(), 100)
 	feed(tui, "j")
-	feed(tui, "N")
+	feed(tui, "n")
 	feed(tui, "keep it")
 	feed(tui, "\r")
 	feed(tui, "2")

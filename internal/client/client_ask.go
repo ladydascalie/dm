@@ -6,9 +6,10 @@ package client
 // carries and writes nothing back but the reader's answer.
 //
 // The box reads top to bottom as bands and rules: a filled band carrying the
-// tabs and the count, a rule, the question, a rule, the list and a closing rule.
-// The keys ride the bottom border as one hint bar, so the interior spends no row
-// on them. A wide float splits the
+// tabs and the count, a rule, the question, a rule, the list, a closing rule and
+// the key rows. The keys take whole rows of their own above the closing rule, so
+// every binding is on screen at any width: a border bar could only hold half of
+// them at ask-cols 96, and it dropped whichever came last. A wide float splits the
 // middle: the options on the left, one row each, and a help pane on the right
 // holding the hovered option's name, description and preview. The box reserves
 // at least the config's ask-rows interior rows, and the help pane fills the rows
@@ -744,16 +745,12 @@ func (t *tui) askKey() bool {
 	case 'K':
 		t.askScrollDetail(-1)
 		return true
-	case 'N':
+	case 'n':
 		t.askNote()
 		return true
 	case 'A':
 		t.toggleAsk()
 		return true
-	case 'n':
-		t.askStepQuestion(1)
-	case 'p':
-		t.askStepQuestion(-1)
 	default:
 		if r >= '1' && r <= '9' {
 			t.askPick(int(r - '1'))
@@ -819,7 +816,8 @@ func (v *askView) fit(snap *wire.Snapshot, th theme.Theme) {
 	}
 	v.float.Rect = r
 	v.float.Title = v.title()
-	v.float.Hint = v.hint()
+	// The keys are interior rows now, so the border is a plain rule.
+	v.float.Hint = nil
 }
 
 // title is the top border: the pane the ask came from and how far through the
@@ -852,7 +850,7 @@ func (v *askView) hint() *hintbar.Bar {
 		return &hintbar.Bar{Hints: hints}
 	}
 	return &hintbar.Bar{Hints: append(hints,
-		hintbar.Hint{Keys: []string{"N"}, Label: "note"},
+		hintbar.Hint{Keys: []string{"n"}, Label: "note"},
 		hintbar.Hint{Keys: []string{"enter"}, Label: "send", Keep: true},
 		hintbar.Hint{Keys: []string{"esc"}, Label: "decline", Keep: true},
 	)}
@@ -1310,12 +1308,16 @@ func (v *askView) previewLines(th theme.Theme, width, max int) []askLine {
 	return out
 }
 
-// tailLines is every row below the list: the rule under it and the status row
-// when the answer is in flight or refused. The keys ride the border, so the
-// tail spends no row on them.
+// tailLines is every row below the list: the rule under it, the keys as whole
+// rows, and the status row when the answer is in flight or refused. The key rows
+// wrap to the width, so no binding drops off a narrow box.
 func (v *askView) tailLines(th theme.Theme, width int) []askLine {
 	p := th.Palette
 	out := []askLine{v.ruleRow(th, width)}
+	for _, row := range v.hint().Rows(width-2, th) {
+		segs := append([]segment.Seg{{Text: " ", FG: p.RailBG, BG: p.RailBG}}, row...)
+		out = append(out, askLine{segs: segs, choice: -1, bg: p.RailBG})
+	}
 	if v.note != "" {
 		for _, row := range askWrap(v.note, width-1) {
 			out = append(out, askLine{

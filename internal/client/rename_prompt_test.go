@@ -381,6 +381,26 @@ func TestRenamePromptDrawsTheBox(t *testing.T) {
 	}
 }
 
+// The ask float's answer and note prompts are not renames: each names what it
+// carries, so a note prompt cannot be mistaken for an action on the ask.
+func TestRenamePromptNamesTheAskPrompts(t *testing.T) {
+	t.Parallel()
+	snap := testutil.TestSnapshot(&layout.Node{Pane: "a"}, 80, 12, nil)
+	cases := []struct{ kind, title, label string }{
+		{askPromptKind, "answer", " answer: "},
+		{askNoteKind, "note", " note: "},
+	}
+	for _, c := range cases {
+		box, p := renameFloatPaint(t, snap, "a1", "hold", c.kind)
+		if got := renameFloatRow(p, box.Y-1, box.X-1, box.W+2); !strings.Contains(got, c.title) {
+			t.Fatalf("%s: title row = %q, want %q", c.kind, got, c.title)
+		}
+		if got := renameFloatRow(p, box.Y, box.X, box.W); !strings.HasPrefix(got, strings.TrimSpace(c.label)) {
+			t.Fatalf("%s: input row = %q, want the label %q", c.kind, got, c.label)
+		}
+	}
+}
+
 // A narrow box keeps every painted cell inside it, cuts a wide rune whole and
 // keeps the caret on screen.
 func TestRenamePromptDrawFitsNarrowBox(t *testing.T) {
