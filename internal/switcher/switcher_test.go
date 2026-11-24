@@ -512,6 +512,7 @@ func TestSwitcherPreviewToggle(t *testing.T) {
 // holds and to the bottom of them.
 func TestSwitcherScrollPreview(t *testing.T) {
 	s := switcherFull(160, 30)
+	s.SetPeekDown(false)
 	lines := make([]string, 100)
 	for i := range lines {
 		lines[i] = "line"
@@ -577,5 +578,241 @@ func TestPaneItemPinnedAccent(t *testing.T) {
 	p.ProjectAccentSet = false
 	if it := paneItem(p); it.ProjectAccent != rail.RailAccentSlot("a") {
 		t.Fatalf("fallback ProjectAccent = %d, want %d", it.ProjectAccent, rail.RailAccentSlot("a"))
+	}
+}
+
+// TestSwitcherParseSortMode pins the saved names and the fallback: an unknown
+// name is the default, so a config the client cannot read still opens recent.
+func TestSwitcherParseSortMode(t *testing.T) {
+	cases := []struct {
+		in   string
+		want SortMode
+	}{
+		{"recent", SortRecent},
+		{"project", SortProject},
+		{"status", SortStatus},
+		{"", SortRecent},
+		{"nonsense", SortRecent},
+		{"Project", SortRecent},
+		{" status", SortRecent},
+	}
+	for _, c := range cases {
+		if got := ParseSortMode(c.in); got != c.want {
+			t.Fatalf("ParseSortMode(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// TestSwitcherSetSort switches the ordering the way the client does after it
+// reads the saved mode: the rows rebuild and the selected pane stays selected.
+func TestSwitcherSetSort(t *testing.T) {
+	s := switcherFull(160, 30)
+	s.Jump(3)
+	if s.Target() != "w2p2" {
+		t.Fatalf("jump 3 selects %q, want w2p2", s.Target())
+	}
+	s.SetSort(SortProject)
+	if s.SortMode() != SortProject {
+		t.Fatalf("SetSort(project) left the mode at %v", s.SortMode())
+	}
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p2", "w2p1", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("project order = %v, want %v", got, want)
+	}
+	if s.Target() != "w2p2" {
+		t.Fatalf("SetSort moved the selection to %q, want w2p2", s.Target())
+	}
+	s.SetSort(SortStatus)
+	if got, want := switcherRowIDs(s), []string{"w2p1", "w1p1", "w2p2", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("status order = %v, want %v", got, want)
+	}
+	if s.Target() != "w2p2" {
+		t.Fatalf("SetSort moved the selection to %q, want w2p2", s.Target())
+	}
+	// Setting the mode it already has keeps both the rows and the selection.
+	s.SetSort(SortStatus)
+	if got := s.Target(); got != "w2p2" {
+		t.Fatalf("a repeated SetSort selects %q, want w2p2", got)
+	}
+	s.SetSort(SortRecent)
+	if got, want := switcherRowIDs(s), []string{"w1p1", "w2p1", "w2p2", "w3p1", "w4p1"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("recent order again = %v, want %v", got, want)
+	}
+	// A saved mode read from a file is the same call.
+	s.SetSort(ParseSortMode("project"))
+	if s.SortMode() != SortProject {
+		t.Fatalf("SetSort(ParseSortMode(project)) left the mode at %v", s.SortMode())
+	}
+}
+
+// switcherShelfSnap is switcherSnap with the pane that leads the recent and the
+// status ordering set aside: it would sort first on its own, so the shelf is the
+// only thing that puts it last.
+func switcherShelfSnap() *wire.Snapshot {
+	snap := switcherSnap()
+	for i := range snap.All {
+		if snap.All[i].ID == "w1p1" {
+			snap.All[i].Shelf = true
+		}
+	}
+	return snap
+}
+
+// TestSwitcherShelfSortsLast proves a shelved row sorts after every live pane in
+// every mode, whatever the mode's comparator says, and that ShelfStart is where
+// it begins.
+func TestSwitcherShelfSortsLast(t *testing.T) {
+	want := map[SortMode][]string{
+		SortRecent:  {"w2p1", "w2p2", "w3p1", "w4p1", "w1p1"},
+		SortProject: {"w2p2", "w2p1", "w3p1", "w4p1", "w1p1"},
+		SortStatus:  {"w2p1", "w2p2", "w3p1", "w4p1", "w1p1"},
+	}
+	snap := switcherShelfSnap()
+	snap.Cols, snap.Rows = 160, 30
+	s := NewSwitcher(layout.Rect{W: 160, H: 30}, snap)
+	for _, mode := range []SortMode{SortRecent, SortProject, SortStatus} {
+		s.SetSort(mode)
+		got := switcherRowIDs(s)
+		if !reflect.DeepEqual(got, want[mode]) {
+			t.Fatalf("%v order = %v, want %v", mode, got, want[mode])
+		}
+		if start := s.ShelfStart(); start != 4 {
+			t.Fatalf("%v ShelfStart = %d, want 4", mode, start)
+		}
+		// Every row from ShelfStart on is shelved, and none before it.
+		for i, id := range got {
+			target := i >= 4
+			if (id == "w1p1") != target {
+				t.Fatalf("%v row %d (%s) sits on the wrong side of the shelf", mode, i, id)
+			}
+		}
+	}
+}
+
+// TestSwitcherShelfStartWithNoShelf: a table with nothing shelved reports -1,
+// and so does a query that keeps no shelved row.
+func TestSwitcherShelfStartWithNoShelf(t *testing.T) {
+	s := switcherFull(160, 30)
+	if got := s.ShelfStart(); got != -1 {
+		t.Fatalf("ShelfStart with no shelf = %d, want -1", got)
+	}
+	// A query that keeps a shelved row starts the shelf where that row is.
+	shelf := switcherShelfSnap()
+	shelf.Cols, shelf.Rows = 160, 30
+	s = NewSwitcher(layout.Rect{W: 160, H: 30}, shelf)
+	switcherType(s, "serve")
+	if got := s.ShelfStart(); got != 0 {
+		t.Fatalf("ShelfStart with only the shelved pane kept = %d, want 0", got)
+	}
+	// A query that keeps live rows only hides the shelf.
+	switcherType(s, "docs")
+	if got := s.ShelfStart(); got != -1 {
+		t.Fatalf("ShelfStart with no shelved row kept = %d, want -1", got)
+	}
+}
+
+// TestSwitcherSyncAsks records the panes the snapshot lists a question on, so
+// the row can mark them, and clears the set with a snapshot that lists none.
+func TestSwitcherSyncAsks(t *testing.T) {
+	snap := switcherSnap()
+	snap.Ask = []wire.Ask{{ID: "a1", Pane: "w2p1"}, {ID: "a2", Pane: "w3p1"}}
+	s := NewSwitcher(layout.Rect{W: 160, H: 30}, snap)
+	if !s.asks["w2p1"] || !s.asks["w3p1"] {
+		t.Fatalf("asks = %v, want the two panes the snapshot lists", s.asks)
+	}
+	if s.asks["w1p1"] {
+		t.Fatalf("asks = %v, want no mark on a pane without a question", s.asks)
+	}
+	// A snapshot that lists no question clears the set.
+	s.Sync(switcherSnap())
+	if len(s.asks) != 0 {
+		t.Fatalf("asks after a snapshot with none = %v, want empty", s.asks)
+	}
+	// Answering the last question and syncing drops it, and a nil snapshot
+	// drops every mark too.
+	s.Sync(&wire.Snapshot{Cols: 160, Rows: 30, Ask: []wire.Ask{{ID: "a3", Pane: "w1p1"}}})
+	if !s.asks["w1p1"] {
+		t.Fatal("a new question did not mark its pane")
+	}
+	s.Sync(nil)
+	if len(s.asks) != 0 {
+		t.Fatalf("asks after a nil snapshot = %v, want empty", s.asks)
+	}
+}
+
+// TestSwitcherPeekOrientation: the band sits under the table by default, which
+// is what the shipped config asks for, and the right split stays available.
+func TestSwitcherPeekOrientation(t *testing.T) {
+	s := switcherFull(160, 30)
+	if !s.PeekDown() {
+		t.Fatal("the preview splits on the right by default")
+	}
+	s.SetPeekDown(false)
+	if s.PeekDown() {
+		t.Fatal("SetPeekDown(false) left the band under the table")
+	}
+	s.SetPeekDown(true)
+	if !s.PeekDown() {
+		t.Fatal("SetPeekDown(true) left the band beside the table")
+	}
+}
+
+// TestSwitcherScrollPreviewDown checks the scroll clamps to the band under the
+// table, whose height is the ratio's share of the body rather than the whole of
+// it.
+func TestSwitcherScrollPreviewDown(t *testing.T) {
+	s := switcherFull(160, 30)
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	s.SetPreview(1, "w1p1")
+	s.AcceptPreview(1, lines)
+	band := s.previewRows()
+	if want := downBandRows(s.bodyRows(), previewRatioDefault); band != want || band != 15 {
+		t.Fatalf("band rows = %d, want %d (15 for a 25-row body at 60%%)", band, want)
+	}
+	if got := s.ScrollPreview(1000); got != len(lines)-band {
+		t.Fatalf("scroll up = %d, want %d", got, len(lines)-band)
+	}
+	if got := s.ScrollPreview(-1000); got != 0 {
+		t.Fatalf("scroll down = %d, want the newest row", got)
+	}
+	// The band's share follows the ratio, so the clamp follows it too.
+	s.ResizePreview(-20)
+	if got, want := s.previewRows(), downBandRows(s.bodyRows(), s.PreviewRatio()); got != want {
+		t.Fatalf("band rows at a narrower ratio = %d, want %d", got, want)
+	}
+	if got := s.ScrollPreview(1000); got != len(lines)-s.previewRows() {
+		t.Fatalf("scroll at a narrower ratio = %d, want %d", got, len(lines)-s.previewRows())
+	}
+}
+
+// TestSwitcherDownBandRows pins the band's floors: three table rows above the
+// rule, three band rows below it, and no band in a body too short for both.
+func TestSwitcherDownBandRows(t *testing.T) {
+	cases := []struct {
+		body  int
+		ratio int
+		want  int
+	}{
+		{body: 0, want: 0},
+		{body: 6, want: 0},
+		{body: 7, ratio: 60, want: 3},
+		{body: 7, ratio: 85, want: 3},
+		{body: 25, ratio: 60, want: 15},
+		{body: 25, ratio: 20, want: 5},
+		{body: 25, ratio: 85, want: 21},
+		{body: 40, ratio: 85, want: 34},
+	}
+	for _, c := range cases {
+		if got := downBandRows(c.body, c.ratio); got != c.want {
+			t.Fatalf("downBandRows(%d, %d) = %d, want %d", c.body, c.ratio, got, c.want)
+		}
+		// The table always keeps its floor when a band exists.
+		if band := downBandRows(c.body, c.ratio); band > 0 {
+			if table := c.body - band - 1; table < 3 {
+				t.Fatalf("downBandRows(%d, %d) leaves %d table rows", c.body, c.ratio, table)
+			}
+		}
 	}
 }
