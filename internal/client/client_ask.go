@@ -6,8 +6,9 @@ package client
 // carries and writes nothing back but the reader's answer.
 //
 // The box reads top to bottom as bands and rules: a filled band carrying the
-// tabs and the count, a rule, the question, a rule, the list, a rule, then the
-// keys as chips on a footer row inside the border. A wide float splits the
+// tabs and the count, a rule, the question, a rule, the list and a closing rule.
+// The keys ride the bottom border as one hint bar, so the interior spends no row
+// on them. A wide float splits the
 // middle: the options on the left, one row each, and a help pane on the right
 // holding the hovered option's name, description and preview. The pane grows at
 // most askHelpExtra rows past the list, so a long preview elides instead of
@@ -32,6 +33,7 @@ import (
 	"dm/internal/ask"
 	"dm/internal/boxview"
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/segment"
@@ -65,8 +67,9 @@ const (
 	// may be. A long preview elides there instead of filling the terminal.
 	askHelpExtra = 2
 	// askMinRows is the interior the float reserves whatever the ask holds, so
-	// the box keeps one size from the first question to the last.
-	askMinRows = 13
+	// the box keeps one size from the first question to the last. The keys
+	// ride the border now, so the row the footer took is the content's.
+	askMinRows = 12
 	// askPreviewMax caps the narrow layout's preview block. A longer preview
 	// ends on a count of the rows it hid.
 	askPreviewMax = 5
@@ -781,9 +784,34 @@ func (v *askView) title() string {
 	return fmt.Sprintf(" ask %s  %d/%d ", v.pane, v.q+1, len(v.ask.Questions))
 }
 
-// hint is the bottom border. The footer inside the box carries every key as a
-// chip, so the border is left clean.
-func (v *askView) hint() string { return "" }
+// hint is the bottom border: every key the float takes, in the order they are
+// worth cells. Send and decline carry Keep, so the two keys that end the form
+// survive a narrow border; the rest drop from the tail.
+func (v *askView) hint() *hintbar.Bar {
+	q := v.question()
+	space := "pick"
+	if q.MultiSelect {
+		space = "toggle"
+	}
+	hints := []hintbar.Hint{
+		{Keys: []string{"j/k"}, Label: "move"},
+		{Keys: []string{"1-9"}, Label: "pick"},
+		{Keys: []string{"space"}, Label: space},
+		{Keys: []string{"t"}, Label: "type"},
+	}
+	if len(v.ask.Questions) > 1 {
+		hints = append(hints, hintbar.Hint{Keys: []string{"tab"}, Label: "question"})
+	}
+	hints = append(hints, hintbar.Hint{Keys: []string{"A"}, Label: "hide"})
+	if v.readOnly {
+		return &hintbar.Bar{Hints: hints}
+	}
+	return &hintbar.Bar{Hints: append(hints,
+		hintbar.Hint{Keys: []string{"N"}, Label: "note"},
+		hintbar.Hint{Keys: []string{"enter"}, Label: "send", Keep: true},
+		hintbar.Hint{Keys: []string{"esc"}, Label: "decline", Keep: true},
+	)}
+}
 
 // askShape is the float's interior split: the option list's width and the help
 // pane's. A zero rightW is one column, the narrow layout.
@@ -1171,8 +1199,9 @@ func (v *askView) previewLines(th theme.Theme, width int) []askLine {
 	return out
 }
 
-// tailLines is every row below the list: the rule under it, the status row when
-// the answer is in flight or refused, and the footer.
+// tailLines is every row below the list: the rule under it and the status row
+// when the answer is in flight or refused. The keys ride the border, so the
+// tail spends no row on them.
 func (v *askView) tailLines(th theme.Theme, width int) []askLine {
 	p := th.Palette
 	out := []askLine{v.ruleRow(th, width)}
@@ -1185,75 +1214,7 @@ func (v *askView) tailLines(th theme.Theme, width int) []askLine {
 			})
 		}
 	}
-	return append(out, askLine{segs: v.footRow(th, width), choice: -1, bg: p.RailBG})
-}
-
-// askChip is one footer entry: the keys drawn as a filled chip and the word
-// that says what they do.
-type askChip struct{ keys, label string }
-
-// chips is the footer for the question on screen: every key the float takes,
-// send and decline included whenever the session may answer.
-func (v *askView) chips() []askChip {
-	q := v.question()
-	space := "pick"
-	if q.MultiSelect {
-		space = "toggle"
-	}
-	out := []askChip{
-		{"j k", "move"},
-		{"1-9", "pick"},
-		{"space", space},
-		{"t", "type"},
-	}
-	if len(v.ask.Questions) > 1 {
-		out = append(out, askChip{"tab", "question"})
-	}
-	out = append(out, askChip{"A", "hide"})
-	if v.readOnly {
-		return out
-	}
-	return append(out,
-		askChip{"N", "note"},
-		askChip{"enter", "send"},
-		askChip{"esc", "decline"},
-	)
-}
-
-// footRow draws the footer, dropping the hints a narrow box cannot hold. Send
-// and decline survive whatever happens; the rest go in the order they matter.
-func (v *askView) footRow(th theme.Theme, width int) []segment.Seg {
-	p := th.Palette
-	chips := v.chips()
-	build := func(cs []askChip) []segment.Seg {
-		segs := []segment.Seg{{Text: " ", FG: p.RailBG, BG: p.RailBG}}
-		for i, c := range cs {
-			if i > 0 {
-				segs = append(segs, segment.Seg{Text: "  ", FG: p.RailBG, BG: p.RailBG})
-			}
-			segs = append(segs,
-				segment.Seg{Text: " " + c.keys + " ", FG: p.RailText, BG: p.RailHoverBG},
-				segment.Seg{Text: " " + c.label, FG: p.RailDim, BG: p.RailBG},
-			)
-		}
-		return segs
-	}
-	segs := build(chips)
-	for _, drop := range []string{"question", "note", "hide", "type", "toggle", "pick", "move"} {
-		if width < 0 || segment.SegCells(segs) <= width {
-			break
-		}
-		kept := make([]askChip, 0, len(chips))
-		for _, c := range chips {
-			if c.label == drop {
-				continue
-			}
-			kept = append(kept, c)
-		}
-		chips = kept
-		segs = build(chips)
-	}
-	return segs
+	return out
 }
 
 // paintLine writes one row at x, y, clipped to width cells and filled to the
@@ -1338,10 +1299,10 @@ func (v *askView) needHeight(th theme.Theme, width int) int {
 	return n
 }
 
-// paint draws the box: the bands and the question from the top, the footer
+// paint draws the box: the bands and the question from the top, the closing rule
 // pinned to the bottom, and the split taking every row in between. The reserved
 // height therefore shows as room in the columns, not as dead rows after the
-// footer, and a box the screen clamped short keeps its keys.
+// tail, and the keys ride the border where no clamp can drop them.
 func (v *askView) paint(b *bytes.Buffer, r layout.Rect, th theme.Theme) {
 	if r.W < 1 || r.H < 1 || len(v.ask.Questions) == 0 {
 		return

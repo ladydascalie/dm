@@ -10,6 +10,7 @@ import (
 
 	"dm/internal/cells"
 	"dm/internal/configdoc"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/testutil"
@@ -271,7 +272,7 @@ func TestCommandPaletteDraw(t *testing.T) {
 		t.Fatal("the palette painted no cursor cell")
 	}
 	out := buf.String()
-	for _, want := range []string{"palette", "> ", "send-prefix", "? help"} {
+	for _, want := range []string{"palette", "> ", "send-prefix", " ? ", " help"} {
 		if !bytes.Contains([]byte(out), []byte(want)) {
 			t.Fatalf("the palette draw misses %q", want)
 		}
@@ -280,7 +281,7 @@ func TestCommandPaletteDraw(t *testing.T) {
 	feed(tui, "?")
 	buf.Reset()
 	drawCommandPalette(&buf, tui.theme(), tui.cp, tui.snap)
-	if bytes.Contains(buf.Bytes(), []byte("? help")) {
+	if bytes.Contains(buf.Bytes(), []byte(" help")) {
 		t.Fatal("the ? signpost stayed up under the help float")
 	}
 }
@@ -349,23 +350,26 @@ func TestCommandPaletteCursorStaysInsideRow(t *testing.T) {
 	// The signpost and its two cells of gutter end the row, and the value keeps
 	// the cell before the signpost for ground: a query that fills the line
 	// parks the cursor on that cell, never under the signpost.
-	if cx > g.X+g.W-2-cells.Cells(paletteHelpHint)-2 {
+	if cx > g.X+g.W-2-paletteHelpBar.Cells(g.W-2, theme.DefaultTheme())-1 {
 		t.Fatalf("cursor column = %d, under the ? signpost", cx)
 	}
 }
 
-// TestCommandPaletteQueryRowPaintsTheOldCells: the query row is the row eddc70d
-// painted. The caller passes the signpost and its two cells of gutter as the
-// trailing text, so the signpost sits two cells clear of the right edge and the
-// query keeps the rest of the line.
-func TestCommandPaletteQueryRowPaintsTheOldCells(t *testing.T) {
+// TestCommandPaletteQueryRowReservesTheSignpost: the query row keeps the
+// signpost's cells and its gutter clear of the query, and the signpost is a
+// one-hint bar painted over them rather than plain text.
+func TestCommandPaletteQueryRowReservesTheSignpost(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	paintPaletteQuery(&buf, theme.DefaultTheme(), inputOf("send"), layout.Rect{W: 20, H: 1}, "? help")
+	r := layout.Rect{W: 20, H: 1}
+	th := theme.DefaultTheme()
+	n := paletteHelpBar.Cells(r.W, th)
+	paintPaletteQuery(&buf, th, inputOf("send"), r, n)
+	hintbar.Line(&buf, th, r.X+r.W-n, r.Y, n, paletteHelpBar)
 	term := vt.NewTerm(20, 1)
 	term.Write(buf.Bytes())
 	term.Flush()
-	if got, want := term.Grid().Text(0), "> send      ? help"; got != want {
+	if got, want := term.Grid().Text(0), "> send       ?  help"; got != want {
 		t.Fatalf("query row = %q, want %q", got, want)
 	}
 }

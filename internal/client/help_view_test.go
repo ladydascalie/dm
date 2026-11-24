@@ -178,7 +178,7 @@ func TestHelpBoxSizesToWidestRowAt100x40(t *testing.T) {
 	if got := helpBoxRowText(p, y0, x0+2, x1-1); !strings.HasPrefix(got, "prefix") {
 		t.Fatalf("title row = %q, want it to read prefix", got)
 	}
-	if got := helpBoxRowText(p, y1, x0+2, x1-1); !strings.HasPrefix(got, "esc") {
+	if got := helpBoxRowText(p, y1, x0+2, x1-1); !strings.HasPrefix(got, " esc ") {
 		t.Fatalf("hint row = %q, want it to read esc", got)
 	}
 }
@@ -494,10 +494,9 @@ keymap "main" {
 // helpBoxDefaultSHA256 is the sha256 of the default help box at 100x30. A
 // config without tags must paint these exact bytes: same cells, same colours,
 // same order. Regenerate it by running the test and copying the got value. It
-// moved when the footer started naming the shelf keys: the table itself is
-// unchanged, because a shelf row would push the last section off a 100x40
-// screen.
-const helpBoxDefaultSHA256 = "e11a161dda990edc793c9efefb6ec17e18aa219a266df84bd72089fca19f1fc0"
+// moved when the footer became a hint bar: the table itself is unchanged,
+// because a shelf row would push the last section off a 100x40 screen.
+const helpBoxDefaultSHA256 = "2283250472d36f0655e8b21c7dcf87acf3468677878cb3d847da3ee19570cb6a"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the
@@ -536,7 +535,7 @@ func TestHelpBoxFooterCarriesTheShelfKeys(t *testing.T) {
 	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, cfg))
 	x0, _, x1, y1 := helpBoxBounds(t, p)
 	hint := helpBoxRowText(p, y1, x0+2, x1-1)
-	for _, want := range []string{"esc", "f/F/G shelf", "A ask"} {
+	for _, want := range []string{"esc", "f/F/G  shelf", "A  ask"} {
 		if !strings.Contains(hint, want) {
 			t.Fatalf("help footer = %q, want %q in it", hint, want)
 		}
@@ -551,7 +550,7 @@ keymap "main" {
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
-	if got := helpBoxHint(rc); !strings.Contains(got, "ctrl+s/ctrl+t/ctrl+p shelf") {
+	if got := barText(helpBoxHint(rc), 200); !strings.Contains(got, "ctrl+s/ctrl+t/ctrl+p  shelf") {
 		t.Fatalf("remapped footer = %q, want the rebound shelf keys", got)
 	}
 }

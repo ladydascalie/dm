@@ -63,6 +63,7 @@ var Layers = []Layer{
 			"dm/internal/clidoc",
 			"dm/internal/configdoc",
 			"dm/internal/esctest",
+			"dm/internal/hintbar",
 			"dm/internal/keymapview",
 			"dm/internal/palette",
 			"dm/internal/panel",

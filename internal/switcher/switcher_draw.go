@@ -7,13 +7,13 @@ import (
 	"strings"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/rail"
 	"dm/internal/segment"
 	"dm/internal/theme"
-	"dm/internal/ui"
 	"dm/internal/vt"
 	"dm/internal/wire"
 )
@@ -257,7 +257,7 @@ func DrawSwitcher(buf *bytes.Buffer, th theme.Theme, s *Switcher, snap *wire.Sna
 		return l.r.X, l.r.Y
 	}
 	cols := switcherColumns(l.listW)
-	panel.PaintPanel(buf, th, l.inner, panel.PanelTitle{}, "", true, func(b *bytes.Buffer, _ layout.Rect) {
+	panel.PaintPanel(buf, th, l.inner, panel.PanelTitle{}, nil, true, func(b *bytes.Buffer, _ layout.Rect) {
 		cx, cy = paintSwitcherQuery(b, th, s, l, km)
 		paintSwitcherHead(b, th, l, cols)
 		paintSwitcherBody(b, th, s, vts, l, cols, paint, set)
@@ -634,17 +634,17 @@ func paintRuleCell(buf *bytes.Buffer, th theme.Theme, x, y int) {
 
 // switcherHints is the footer's key hints in the order they are worth cells,
 // each naming the key the switcher keymap binds to its action. A hint whose
-// action the config leaves unbound carries no key and drops out whole. A
-// narrow float keeps the head of the list and drops the rest, so it loses the
-// scroll reminder before it loses the jump keys.
-func switcherHints(km *keymap.Config) []ui.Hint {
+// action the config leaves unbound carries no key and drops out whole. The bar
+// fits the list and drops whole hints from the tail, so a narrow float loses
+// the scroll reminder before it loses the jump keys.
+func switcherHints(km *keymap.Config) []hintbar.Hint {
 	key := func(action string) string {
 		if km == nil {
 			return ""
 		}
 		return km.Key("switcher", action)
 	}
-	return []ui.Hint{
+	return []hintbar.Hint{
 		{Keys: []string{key("pick")}, Label: "pick"},
 		{Keys: []string{key("close-esc")}, Label: "close"},
 		{Keys: []string{jumpSpan(km)}, Label: "jump"},
@@ -673,127 +673,26 @@ func jumpSpan(km *keymap.Config) string {
 	return first + "-" + last
 }
 
-// switcherHintSep is the gap the footer paints between two hints. It is part
-// of what the narrowing rule measures, so a hint costs its own cells and this
-// run when another hint precedes it.
-const switcherHintSep = " | "
-
-// switcherHint fits the hints into room cells and drops the ones that do not
-// fit. It tries the full key names first and, only when the row would lose a
-// hint, retries with the control chords folded to ^x: a narrow footer can
-// afford the caret but not the word. It never ends on half a hint: a key that
-// does not fit is not named.
-func switcherHint(room int, km *keymap.Config) string {
-	kept := switcherKeptHints(room, km)
-	parts := make([]string, 0, len(kept))
-	for _, h := range kept {
-		parts = append(parts, ui.Hints([]ui.Hint{h}))
-	}
-	return strings.Join(parts, switcherHintSep)
-}
-
-// switcherHintSegs lays the kept hints out as the footer paints them: each key
-// in the bar accent and bold, each label in the rail text, and the separator
-// between hints in the rail dim.
-func switcherHintSegs(th theme.Theme, room int, km *keymap.Config) []segment.Seg {
-	pal := th.Palette
-	kept := switcherKeptHints(room, km)
-	var out []segment.Seg
-	for i, h := range kept {
-		if i > 0 {
-			out = append(out, segment.Seg{Text: switcherHintSep, FG: pal.RailDim})
-		}
-		keys := make([]string, 0, len(h.Keys))
-		for _, k := range h.Keys {
-			if k != "" {
-				keys = append(keys, k)
-			}
-		}
-		out = append(out, segment.Seg{Text: strings.Join(keys, "/"), FG: pal.BarAccent, Bold: true})
-		if h.Label != "" {
-			out = append(out, segment.Seg{Text: " " + h.Label, FG: pal.RailText})
-		}
-	}
-	return out
-}
-
-// switcherKeptHints is the head of the hint list that fits in room cells, with
-// the control chords folded only when the whole list would lose a hint.
-func switcherKeptHints(room int, km *keymap.Config) []ui.Hint {
-	hints := switcherHints(km)
-	if kept, whole := fitHints(hints, room); whole {
-		return kept
-	}
-	short := make([]ui.Hint, len(hints))
-	for i, h := range hints {
-		keys := make([]string, len(h.Keys))
-		for j, k := range h.Keys {
-			keys[j] = ui.ShortKey(k)
-		}
-		short[i] = ui.Hint{Keys: keys, Label: h.Label}
-	}
-	kept, _ := fitHints(short, room)
-	return kept
-}
-
-// fitHints keeps the longest head of hints that fits in room cells, the
-// separator's cells included, and reports whether every hint was kept.
-func fitHints(hints []ui.Hint, room int) ([]ui.Hint, bool) {
-	var kept []ui.Hint
-	used := 0
-	for _, hint := range hints {
-		text := ui.Hints([]ui.Hint{hint})
-		if text == "" {
-			continue
-		}
-		need := cells.Cells(text)
-		if len(kept) > 0 {
-			need += cells.Cells(switcherHintSep)
-		}
-		if used+need > room {
-			return kept, false
-		}
-		kept = append(kept, hint)
-		used += need
-	}
-	return kept, true
-}
-
-// paintSwitcherFoot paints the hint row at the bottom of the box on the rail's
-// hover ground: the hints as styled segments on the left, the ordering with the
-// preview's share in the rail dim on the right, and the padding between them.
+// paintSwitcherFoot paints the hint row at the bottom of the box: one hintbar
+// row on the rail background, the hints on the left and the ordering with the
+// preview's share pinned at the right edge. The row carries no band; the caps
+// are the only filled cells.
 func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout, km *keymap.Config) {
 	if l.footY <= l.queryY || !l.hasRow(l.footY) || l.inner.W <= 0 {
 		return
 	}
-	ground := th.Palette.RailHoverBG
-	right := s.mode.String()
-	if s.PreviewOn() {
-		right += " " + strconv.Itoa(s.ratio) + "%"
-	}
-	room := l.inner.W - cells.Cells(right) - 2
-	if room < 0 {
-		right, room = "", l.inner.W
-	}
-	left := switcherHintSegs(th, room, km)
-	pad := l.inner.W - segment.SegCells(left) - cells.Cells(right)
-	if pad < 0 {
-		pad = 0
+	bar := hintbar.Bar{Hints: switcherHints(km)}
+	if right := s.mode.String(); right != "" || s.PreviewOn() {
+		if s.PreviewOn() {
+			right += " " + strconv.Itoa(s.ratio) + "%"
+		}
+		bar.Right = []segment.Seg{{Text: right, FG: th.Palette.RailDim, BG: th.Palette.RailBG}}
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH", l.footY+1, l.inner.X+1)
 	buf.WriteString("\x1b[0m")
-	buf.WriteString(ground.BG())
-	writeSwitcherRuns(buf, left, ground, false)
-	buf.WriteString("\x1b[0m")
-	buf.WriteString(ground.BG())
-	if pad > 0 {
-		buf.WriteString(strings.Repeat(" ", pad))
-	}
-	if right != "" {
-		buf.WriteString("\x1b[0m")
-		buf.WriteString(ground.BG())
-		buf.WriteString(th.Palette.RailDim.FG())
-		buf.WriteString(right)
+	buf.WriteString(th.Palette.RailBG.BG())
+	for _, seg := range bar.Segments(l.inner.W, th) {
+		segment.Write(buf, seg)
 	}
 	buf.WriteString("\x1b[0m")
 }

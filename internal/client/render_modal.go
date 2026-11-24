@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
@@ -15,18 +16,19 @@ import (
 	"dm/internal/wire"
 )
 
-// drawSessions paints the centred session picker. The panel owns the border, the
-// title row and the interior clip; the picker owns its rows, the selection
-// highlight, the tee row that crosses the border and the key hint under it. The
-// title row is a fill row: dim, and its trailing cells are spaces rather than
-// the border rune, so the row is one write and its cells are the picker's.
+// drawSessions paints the centred session picker. The panel owns the border,
+// the title row, the interior clip and the key hint on the bottom border; the
+// picker owns its rows and the selection highlight. The title row is a fill
+// row: dim, and its trailing cells are spaces rather than the border rune, so
+// the row is one write and its cells are the picker's. The hint rides the
+// border, so the picker spends no interior row on it.
 func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []transport.SessionInfo, sel int, current string, km *keymap.Config) {
 	g := th.Glyphs
 	w := 46
 	if w > cols-2 {
 		w = cols - 2
 	}
-	h := len(sessions) + 5
+	h := len(sessions) + 3
 	x := (cols - w) / 2
 	y := (rows - h) / 2
 	if x < 0 {
@@ -35,12 +37,12 @@ func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []
 	if y < 0 {
 		y = 0
 	}
-	inner := layout.Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 2}
+	inner := layout.Rect{X: x + 1, Y: y + 1, W: w - 2, H: len(sessions) + 1}
 	panel.PaintPanel(buf, th, inner, panel.PanelTitle{
 		Text:  g.BorderHorizontal + " switch session ",
 		Style: "\x1b[0m\x1b[90m",
 		Fill:  " ",
-	}, "", false, func(b *bytes.Buffer, r layout.Rect) {
+	}, sessionsHint(km), false, func(b *bytes.Buffer, r layout.Rect) {
 		for i, s := range sessions {
 			mark := " "
 			if i == sel {
@@ -61,28 +63,23 @@ func drawSessions(buf *bytes.Buffer, th theme.Theme, cols, rows int, sessions []
 			line := cells.Pad(mark+" "+cells.Pad(s.Name, 18)+" "+cells.Pad(state, 4)+" "+cells.Pad(now, 3), r.W)
 			fmt.Fprintf(b, "\x1b[%d;%dH%s%s", r.Y+i+1, r.X+1, colour, line)
 		}
-		hint := cells.Pad(sessionsHint(km), r.W)
-		fmt.Fprintf(b, "\x1b[%d;%dH\x1b[0m\x1b[90m%s", r.Y+len(sessions)+2, r.X+1, hint)
 	})
-	fmt.Fprintf(buf, "\x1b[%d;%dH%s%s%s", y+len(sessions)+2, x+1,
-		g.BorderTeeLeft, strings.Repeat(g.BorderHorizontal, w-2), g.BorderTeeRight)
-	buf.WriteString("\x1b[0m")
 }
 
-// sessionsHint is the picker's footnote, named from the picker keymap so a
+// sessionsHint is the picker's bottom border, named from the picker keymap so a
 // rebind moves it.
-func sessionsHint(km *keymap.Config) string {
+func sessionsHint(km *keymap.Config) *hintbar.Bar {
 	key := func(action string) string {
 		if km == nil {
 			return ""
 		}
 		return km.Key("picker", action)
 	}
-	return ui.Hints([]ui.Hint{
+	return &hintbar.Bar{Hints: []hintbar.Hint{
 		{Keys: []string{key("down"), key("up")}, Label: "move"},
 		{Keys: []string{key("pick")}, Label: "switch"},
 		{Keys: []string{key("close-esc")}, Label: "cancel"},
-	})
+	}}
 }
 
 // renamePromptWidth is the inner width the rename float asks for. A narrower
@@ -178,17 +175,17 @@ func drawRename(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, id strin
 // renameHint is the prompt's bottom border: the keys the rename keymap binds to
 // submit and cancel, so a rebind moves the hint with the keys the prompt
 // dispatches on.
-func renameHint(km *keymap.Config) string {
+func renameHint(km *keymap.Config) *hintbar.Bar {
 	key := func(action string) string {
 		if km == nil {
 			return ""
 		}
 		return km.Key("rename", action)
 	}
-	return ui.Hints([]ui.Hint{
+	return &hintbar.Bar{Hints: []hintbar.Hint{
 		{Keys: []string{key("submit")}},
 		{Keys: []string{key("cancel")}},
-	})
+	}}
 }
 
 // renameInputRow paints the rename float's one input row: the dim label, the
@@ -238,7 +235,7 @@ func drawSearchPrompt(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, dr
 // columns. The box stays clear of the rail, the toast row and the status bar:
 // it gives up columns, then its trailing rows, before it paints over any of
 // them.
-func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, hint string, keys []keymap.HelpEntry, notes []string) {
+func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, hint *hintbar.Bar, keys []keymap.HelpEntry, notes []string) {
 	g, ok := helpBoxGeometry(cols, rows, keys, notes)
 	if !ok {
 		return
@@ -266,8 +263,8 @@ func drawHelp(buf *bytes.Buffer, th theme.Theme, cols, rows int, shadow bool, hi
 // The shelf keeps no row of its own in the table: the whole default table has
 // to fit a 100x40 screen, and one more row pushes the last section off it. The
 // footer carries the three keys instead, so the overlay still names them.
-func helpBoxHint(cfg *keymap.Config) string {
-	hints := []ui.Hint{{Keys: []string{"esc"}}}
+func helpBoxHint(cfg *keymap.Config) *hintbar.Bar {
+	hints := []hintbar.Hint{{Keys: []string{"esc"}}}
 	var shelf []string
 	for _, action := range []string{"shelve-pane", "toggle-shelf", "pop-pane"} {
 		if k := cfg.Key("main", action); k != "" {
@@ -275,14 +272,14 @@ func helpBoxHint(cfg *keymap.Config) string {
 		}
 	}
 	if len(shelf) > 0 {
-		hints = append(hints, ui.Hint{Keys: shelf, Label: "shelf"})
+		hints = append(hints, hintbar.Hint{Keys: shelf, Label: "shelf"})
 	}
 	// The ask toggle rides here too: one more table row pushes the last
 	// section off a 100x40 screen.
 	if k := cfg.Key("main", "toggle-ask"); k != "" {
-		hints = append(hints, ui.Hint{Keys: []string{k}, Label: "ask"})
+		hints = append(hints, hintbar.Hint{Keys: []string{k}, Label: "ask"})
 	}
-	return ui.Hints(hints)
+	return &hintbar.Bar{Hints: hints}
 }
 
 // displayRow is one row of the help box: a category header or a key-action pair.

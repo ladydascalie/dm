@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
@@ -324,26 +325,26 @@ func (k *KeymapView) title() string {
 // the query is typed, or the match keys after enter keeps it. The scroll,
 // search and close keys come from the help keymap; the two keys the search
 // itself owns, enter and esc, are the client's own and stay literal.
-func (k *KeymapView) hint() string {
+func (k *KeymapView) hint() *hintbar.Bar {
 	switch {
 	case k.Searching:
-		return ui.Hints([]ui.Hint{
+		return &hintbar.Bar{Hints: []hintbar.Hint{
 			{Keys: []string{"enter"}, Label: "keep"},
 			{Keys: []string{"esc"}, Label: "clear"},
-		})
+		}}
 	case !k.Search.Input.Empty():
-		return ui.Hints([]ui.Hint{
+		return &hintbar.Bar{Hints: []hintbar.Hint{
 			{Keys: []string{k.key("next-match"), k.key("prev-match")}, Label: "next"},
 			{Keys: []string{k.key("search")}, Label: "edit"},
 			{Keys: []string{k.key("close-esc")}, Label: "close"},
-		})
+		}}
 	default:
-		return ui.Hints([]ui.Hint{
+		return &hintbar.Bar{Hints: []hintbar.Hint{
 			{Keys: []string{k.key("down"), k.key("up")}, Label: "scroll"},
 			{Keys: []string{k.key("top"), k.key("bottom")}, Label: "ends"},
 			{Keys: []string{k.key("search")}, Label: "search"},
 			{Keys: []string{k.key("close-esc")}, Label: "close"},
-		})
+		}}
 	}
 }
 

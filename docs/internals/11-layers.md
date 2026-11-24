@@ -37,7 +37,7 @@ carry many real edges, and the generated page counts every one of them. The two
 | --- | --- | --- |
 | entry | entry, services, presentation, domain, leaf, tooling | `dm`, `cmd/dm-wasm`, `cmd/esctest-harness` |
 | services | services, presentation, domain, leaf | `internal/cli`, `internal/client`, `internal/pane`, `internal/proxy`, `internal/server`, `internal/transport`, `internal/websession`, `internal/webui` |
-| presentation | presentation, domain, leaf | `internal/boxview`, `internal/clidoc`, `internal/configdoc`, `internal/esctest`, `internal/keymapview`, `internal/palette`, `internal/panel`, `internal/rail`, `internal/segment`, `internal/shot`, `internal/switcher`, `internal/testutil`, `internal/ui` |
+| presentation | presentation, domain, leaf | `internal/boxview`, `internal/clidoc`, `internal/configdoc`, `internal/esctest`, `internal/hintbar`, `internal/keymapview`, `internal/palette`, `internal/panel`, `internal/rail`, `internal/segment`, `internal/shot`, `internal/switcher`, `internal/testutil`, `internal/ui` |
 | domain | domain, leaf | `internal/ask`, `internal/box`, `internal/keymap`, `internal/layout`, `internal/layoutdoc`, `internal/notify`, `internal/osc`, `internal/secrets`, `internal/session`, `internal/theme`, `internal/vt`, `internal/wire` |
 | leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/lesson`, `internal/paths`, `internal/ptyspawn`, `internal/redact`, `internal/webshell`, `internal/wlabel` |
 | tooling | tooling, domain, leaf | `internal/arch`, `internal/archdoc` |
@@ -63,9 +63,10 @@ service. A service may not import entry either: `main.go:1` and
 refuses that import, and the model repeats the ban so a future entry point that
 is not a program keeps it.
 
-**presentation** turns state into output. Seven packages draw the screen:
+**presentation** turns state into output. Eight packages draw the screen:
 `internal/panel`, `internal/rail`, `internal/switcher`, `internal/boxview`,
-`internal/keymapview`, `internal/segment`, `internal/ui`. The other six do not:
+`internal/hintbar`, `internal/keymapview`, `internal/segment`, `internal/ui`.
+The other six do not:
 `internal/clidoc` renders the help, man and llms text, `internal/configdoc`
 holds the config surface as plain data, `internal/esctest` drives the escape
 harness, `internal/palette` filters the command palette rows, `internal/shot`

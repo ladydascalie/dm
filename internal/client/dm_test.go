@@ -90,11 +90,12 @@ func TestDrawSessionsWidth(t *testing.T) {
 	drawSessions(&buf, theme.DefaultTheme(), cols, rows, sessions, 1, "alpha", keymap.LoadDefault())
 	screen := panelFilled(t, cols, rows, buf.Bytes())
 
-	// The picker is 46 wide and centred: its top row, one row per session, the
-	// tee row, the key hint and its bottom row.
+	// The picker is 46 wide and centred: its top row, one row per session, a
+	// blank row and its bottom row. The key hint rides the bottom border, so
+	// there is no tee row and no interior hint row.
 	w := 46
 	x := (cols - w) / 2
-	y := (rows - (len(sessions) + 5)) / 2
+	y := (rows - (len(sessions) + 3)) / 2
 	edges := []struct {
 		row         int
 		left, right rune
@@ -102,9 +103,8 @@ func TestDrawSessionsWidth(t *testing.T) {
 		{y, []rune(theme.DefaultTheme().Glyphs.BorderTopLeft)[0], []rune(theme.DefaultTheme().Glyphs.BorderTopRight)[0]},
 		{y + 1, []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0], []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0]},
 		{y + 2, []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0], []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0]},
-		{y + 3, []rune(theme.DefaultTheme().Glyphs.BorderTeeLeft)[0], []rune(theme.DefaultTheme().Glyphs.BorderTeeRight)[0]},
-		{y + 4, []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0], []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0]},
-		{y + 5, []rune(theme.DefaultTheme().Glyphs.BorderBottomLeft)[0], []rune(theme.DefaultTheme().Glyphs.BorderBottomRight)[0]},
+		{y + 3, []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0], []rune(theme.DefaultTheme().Glyphs.BorderVertical)[0]},
+		{y + 4, []rune(theme.DefaultTheme().Glyphs.BorderBottomLeft)[0], []rune(theme.DefaultTheme().Glyphs.BorderBottomRight)[0]},
 	}
 	for _, e := range edges {
 		if got := panelChar(screen, x, e.row); got != e.left {
@@ -118,7 +118,7 @@ func TestDrawSessionsWidth(t *testing.T) {
 	for row := 0; row < rows; row++ {
 		for col := 0; col < cols; col++ {
 			got := panelChar(screen, col, row)
-			in := row >= y && row <= y+5 && col >= x && col < x+w
+			in := row >= y && row <= y+4 && col >= x && col < x+w
 			if in && got == 'X' {
 				t.Fatalf("row %d leaves cell %d of the box unpainted", row, col)
 			}

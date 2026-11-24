@@ -23,6 +23,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
@@ -514,54 +515,49 @@ func (b *BoxView) title() string {
 // hint is the float's bottom border: the keys the view takes, every one named
 // from the box keymap, so a rebind moves the hint. The entry keys show only
 // while the log page has a row to act on: the watcher page has no selection.
-// A float too narrow for the whole row drops hints left to right, so the keys
-// that move, read and close survive a cramped border.
-func (b *BoxView) hint() string {
-	move := ui.Hint{Keys: []string{b.key("down"), b.key("up")}, Label: "move"}
-	closeHint := ui.Hint{Keys: []string{b.key("close-esc")}, Label: "close"}
+//
+// The bar drops hints from the tail on a narrow border, so the least useful
+// hint sits nearest the tail. Move, body and close carry Keep, so the keys a
+// cramped box still needs survive whatever the width drops. The droppable
+// hints are ordered by reverse worth, which keeps the old drop order: clear all
+// goes first, then notify or all, then pane, then clear, then watch.
+func (b *BoxView) hint() *hintbar.Bar {
+	keep := func(h hintbar.Hint) hintbar.Hint {
+		h.Keep = true
+		return h
+	}
+	move := keep(hintbar.Hint{Keys: []string{b.key("down"), b.key("up")}, Label: "move"})
+	closeHint := keep(hintbar.Hint{Keys: []string{b.key("close-esc")}, Label: "close"})
 	if b.page {
-		return ui.Hints([]ui.Hint{move,
+		return &hintbar.Bar{Hints: []hintbar.Hint{
+			move,
 			{Keys: []string{b.key("toggle-page")}, Label: "log"},
 			closeHint,
-		})
+		}}
 	}
-	hints := []ui.Hint{move}
+	hints := []hintbar.Hint{move}
 	if e, ok := b.Selected(); ok {
 		if e.Msg != "" || e.Body != "" {
-			hints = append(hints, ui.Hint{Keys: []string{b.key("body")}, Label: "body"})
+			hints = append(hints, keep(hintbar.Hint{Keys: []string{b.key("body")}, Label: "body"}))
 		}
-		hints = append(hints,
-			ui.Hint{Keys: []string{b.key("jump-pane")}, Label: "pane"},
-			ui.Hint{Keys: []string{b.key("clear-entry")}, Label: "clear"},
-			ui.Hint{Keys: []string{b.key("clear-filter")}, Label: "clear all"},
-		)
 	}
 	label := "notify"
 	if b.list.Filter != "" {
 		label = "all"
 	}
 	hints = append(hints,
-		ui.Hint{Keys: []string{b.key("filter-notify")}, Label: label},
-		ui.Hint{Keys: []string{b.key("toggle-page")}, Label: "watch"},
-		closeHint,
+		hintbar.Hint{Keys: []string{b.key("toggle-page")}, Label: "watch"},
+		hintbar.Hint{Keys: []string{b.key("clear-entry")}, Label: "clear"},
 	)
-	// The border row fits the float's width plus its two corners. Drop the
-	// least useful hints, in this order, until the row fits; the move, body
-	// and close hints stay whatever happens.
-	limit := b.Float.Rect.W + 2
-	for _, drop := range []string{"clear all", "notify", "all", "pane", "clear", "watch"} {
-		if cells.Cells(ui.Hints(hints)) <= limit {
-			break
-		}
-		kept := hints[:0:0]
-		for _, h := range hints {
-			if h.Label != drop {
-				kept = append(kept, h)
-			}
-		}
-		hints = kept
+	if _, ok := b.Selected(); ok {
+		hints = append(hints,
+			hintbar.Hint{Keys: []string{b.key("jump-pane")}, Label: "pane"},
+			hintbar.Hint{Keys: []string{b.key("filter-notify")}, Label: label},
+			hintbar.Hint{Keys: []string{b.key("clear-filter")}, Label: "clear all"},
+		)
 	}
-	return ui.Hints(hints)
+	hints = append(hints, closeHint)
+	return &hintbar.Bar{Hints: hints}
 }
 
 // key is the key the box keymap shows for action. A view without a config

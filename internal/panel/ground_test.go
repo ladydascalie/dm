@@ -24,7 +24,7 @@ func itoa(n int) string {
 func TestPanelOwnsAGround(t *testing.T) {
 	r := layout.Rect{X: 3, Y: 2, W: 12, H: 5}
 	var b bytes.Buffer
-	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{}, "", false, func(buf *bytes.Buffer, inner layout.Rect) {
+	PaintPanel(&b, theme.DefaultTheme(), r, PanelTitle{}, nil, false, func(buf *bytes.Buffer, inner layout.Rect) {
 		// The painter moves to the interior's first cell, writes one glyph
 		// and leaves the rest alone. The rest must still be opaque.
 		buf.WriteString("\x1b[" + itoa(inner.Y+1) + ";" + itoa(inner.X+1) + "H")

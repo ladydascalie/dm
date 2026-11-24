@@ -13,6 +13,7 @@ import (
 	"dm/internal/box"
 	"dm/internal/boxview"
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
@@ -186,17 +187,17 @@ func closeBodyReader(t *tui) {
 
 // readerHint is the overlay's bottom border: the box keymap's scroll pair and
 // close key, with the reader's own word for the close. A rebind moves it.
-func readerHint(km *keymap.Config) string {
+func readerHint(km *keymap.Config) *hintbar.Bar {
 	key := func(action string) string {
 		if km == nil {
 			return ""
 		}
 		return km.Key("box", action)
 	}
-	return ui.Hints([]ui.Hint{
+	return &hintbar.Bar{Hints: []hintbar.Hint{
 		{Keys: []string{key("down"), key("up")}, Label: "scroll"},
 		{Keys: []string{key("close-esc")}, Label: "back"},
-	})
+	}}
 }
 
 // SetKeymap renames the reader's hint from a new config, so a reload that

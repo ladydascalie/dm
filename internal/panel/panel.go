@@ -8,15 +8,14 @@ import (
 	"strings"
 
 	"dm/internal/cells"
+	"dm/internal/hintbar"
 	"dm/internal/layout"
+	"dm/internal/segment"
 	"dm/internal/theme"
 )
 
-// The two border-row label styles: a title reads bright, a hint dim.
-const (
-	PanelTitleStyle = "\x1b[97m"
-	PanelHintStyle  = "\x1b[90m"
-)
+// PanelTitleStyle is the border-row label style: a title reads bright.
+const PanelTitleStyle = "\x1b[97m"
 
 // PanelTitle is a panel's top border row. Text is the row's label and Fill is
 // the glyph the row continues with after it, so a caller whose title row is not
@@ -35,15 +34,17 @@ type PanelTitle struct {
 
 // PaintPanel paints one bordered box and nothing outside it. rect is the
 // interior: the border sits one cell around it, the title on the row above and
-// the hint on the row below, both one cell clear of a corner and clipped to the
-// interior, so a label never eats a corner. paint, when set, writes the inside
+// the hint bar on the row below. The title is a label clipped to the interior.
+// The bar is a hintbar.Bar fitted to the interior width minus two and painted
+// one cell clear of the left corner, so its caps replace the rule cells and the
+// rest of the row stays the rule; a nil bar paints no hint. paint, when set, writes the inside
 // with absolute moves; the panel clips it to rect, so an interior painter that
 // writes past its box cannot reach the border or the cells beside it.
 //
 // The painter holds no state and keeps no buffer between frames: the clip needs
 // to see a whole run before it can cut it, so it collects the inside in a
 // scratch buffer and throws it away. Only buf reaches the frame.
-func PaintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title PanelTitle, hint string, active bool, paint func(*bytes.Buffer, layout.Rect)) {
+func PaintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title PanelTitle, hint *hintbar.Bar, active bool, paint func(*bytes.Buffer, layout.Rect)) {
 	if rect.W <= 0 || rect.H <= 0 || rect.X < 1 || rect.Y < 1 {
 		return
 	}
@@ -67,7 +68,7 @@ func PaintPanel(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, title Panel
 		DrawPaneBox(buf, th, rect, active)
 		paintBorderText(buf, rect, rect.Y-1, title.Text, title.Style)
 	}
-	paintBorderText(buf, rect, rect.Y+rect.H, hint, PanelHintStyle)
+	paintBorderBar(buf, th, rect, rect.Y+rect.H, hint)
 }
 
 // paintTitleRow writes the top border row as one run: the left corner, the
@@ -80,6 +81,26 @@ func paintTitleRow(buf *bytes.Buffer, th theme.Theme, rect layout.Rect, t PanelT
 	}
 	fmt.Fprintf(buf, "%s%s\x1b[%d;%dH%s%s%s", t.Style, groundSGR(th), rect.Y, rect.X,
 		th.Glyphs.BorderTopLeft, row, th.Glyphs.BorderTopRight)
+}
+
+// paintBorderBar writes a hint bar into row y of the border around r, one cell
+// clear of the left corner and fitted to the interior width minus two, so the
+// corners keep their rule. It runs after the border, so a cap replaces the rule
+// cell under it and every other cell the bar leaves stays the rule. A bar
+// carries no right status on a border: the row's right edge belongs to the box.
+func paintBorderBar(buf *bytes.Buffer, th theme.Theme, r layout.Rect, y int, bar *hintbar.Bar) {
+	if bar == nil || r.W < 3 || y < 0 {
+		return
+	}
+	runs := hintbar.Bar{Hints: bar.Hints}.Segments(r.W-2, th)
+	if len(runs) == 0 {
+		return
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, r.X+2)
+	for _, s := range runs {
+		segment.Write(buf, s)
+	}
+	buf.WriteString("\x1b[0m")
 }
 
 // paintBorderText writes a label into row y of the border around r, one cell

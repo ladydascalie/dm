@@ -186,7 +186,7 @@ func TestKeymapViewPaints(t *testing.T) {
 		}
 	}
 	hint := keymapScreenRow(screen, r.Y+r.H, r.X+1, r.W-2)
-	if !strings.Contains(hint, "j/k scroll") || !strings.Contains(hint, "esc close") {
+	if !strings.Contains(hint, "j/k  scroll") || !strings.Contains(hint, "esc  close") {
 		t.Fatalf("hint = %q, want the scroll and close keys", hint)
 	}
 
@@ -251,7 +251,7 @@ func TestKeymapSearch(t *testing.T) {
 	if got := k.title(); !strings.Contains(got, "1/") {
 		t.Fatalf("title = %q, want the match position", got)
 	}
-	if got := k.hint(); !strings.Contains(got, "n/N") {
+	if got := k.hint().Text(k.Float.Rect.W-2, theme.DefaultTheme()); !strings.Contains(got, "n/N") {
 		t.Fatalf("hint = %q, want the next/prev keys", got)
 	}
 	first := k.Search.Matches[0]
@@ -345,11 +345,12 @@ func TestKeymapViewHintNamesTheKeymap(t *testing.T) {
 		"close-esc" "ctrl+q"
 	}`)
 	k := NewKeymapView(snap, keymap.LoadDefault())
-	if got, want := k.Float.Hint, "j/k scroll  g/G ends  / search  esc close"; got != want {
+	wide := k.Float.Rect.W - 2
+	if got, want := k.Float.Hint.Text(wide, theme.DefaultTheme()), " j/k  scroll │  g/G  ends │  /  search │  esc  close"; got != want {
 		t.Fatalf("hint = %q, want %q", got, want)
 	}
 	k.SetKeymap(cfg)
-	if got, want := k.Float.Hint, "n/a scroll  t/B ends  f search  ctrl+q close"; got != want {
+	if got, want := k.Float.Hint.Text(wide, theme.DefaultTheme()), " n/a  scroll │  t/B  ends │  f  search │  ctrl+q  close"; got != want {
 		t.Fatalf("hint after SetKeymap = %q, want %q", got, want)
 	}
 }

@@ -511,15 +511,14 @@ func TestViewHintNamesOnlyBoxKeys(t *testing.T) {
 			bound[name] = true
 		}
 	}
-	hint := tui.box.Float.Hint
-	if hint == "" {
+	bar := tui.box.Float.Hint
+	if bar == nil || len(bar.Hints) == 0 {
 		t.Fatal("the view has no hint")
 	}
-	for _, part := range strings.Split(hint, "  ") {
-		keys := strings.SplitN(part, " ", 2)[0]
-		for _, key := range strings.Split(keys, "/") {
-			if !bound[key] {
-				t.Fatalf("hint key %q in %q is not a box keymap key", key, hint)
+	for _, h := range bar.Hints {
+		for _, key := range h.Keys {
+			if key != "" && !bound[key] {
+				t.Fatalf("hint key %q is not a box keymap key", key)
 			}
 		}
 	}

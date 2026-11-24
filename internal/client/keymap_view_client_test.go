@@ -68,7 +68,7 @@ func TestKeymapSearchInput(t *testing.T) {
 	if tui.keys == nil || !tui.keys.Searching {
 		t.Fatal("slash did not start a search")
 	}
-	if got := keymapHint(t, tui.keys, 100, 30); !strings.Contains(got, "enter keep") {
+	if got := keymapHint(t, tui.keys, 100, 30); !strings.Contains(got, "enter  keep") {
 		t.Fatalf("search hint = %q, want enter keep", got)
 	}
 	for _, b := range []byte("split") {

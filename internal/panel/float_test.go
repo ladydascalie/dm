@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"dm/internal/hintbar"
 	"dm/internal/layout"
 	"dm/internal/theme"
 )
@@ -39,7 +40,7 @@ func TestHelpBoxFloatPaint(t *testing.T) {
 		ID:    "help",
 		Rect:  want,
 		Title: "prefix",
-		Hint:  "esc",
+		Hint:  &hintbar.Bar{Hints: []hintbar.Hint{{Keys: []string{"esc"}}}},
 		Paint: func(buf *bytes.Buffer, inner layout.Rect) {
 			calls++
 			if inner != want {
