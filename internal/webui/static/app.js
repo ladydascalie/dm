@@ -951,9 +951,11 @@ async function sheetSend(btn, cmd, extra) {
 // second place to work is another window, opened on the folder the open pane
 // is in. That is the one command that leaves this pane, so it is the one the
 // page follows.
+// The row a thumb reaches for holds work, not housekeeping: a phone opens a
+// window or closes a pane. Rename stays in the sheet's command list, where the
+// rare verbs live.
 const paneActions = [
   { label: "new window", body: () => ({ id: "new-window", cwd: paneCwd() }) },
-  { label: "rename", body: () => ({ id: "set-pane-name", target: pane.id }) },
   // pop is the shelf's own control: a shelved pane is the only one with a place
   // to go back to, so the tap appears only while the pane is set aside. It is a
   // write, so a read only page hides it with the rest of this row.
@@ -1040,6 +1042,37 @@ async function stopPane() {
 // of the pane, so a chevron in the title row folds them onto that one row.
 // The device remembers the answer: a reader who wants the text wants it on
 // the next visit too.
+
+// SKIN_KEY is where this device keeps its page skin. The terminal coat is a
+// preference, not a replacement: the page ships as it was, and one root
+// attribute turns the coat on. A refused read, as in a private tab, is the
+// plain page.
+const SKIN_KEY = "dm.skin";
+
+// storedSkin reads the device's answer.
+function storedSkin() {
+  try {
+    return localStorage.getItem(SKIN_KEY) === "tui";
+  } catch (e) {
+    return false;
+  }
+}
+
+// setSkin turns the coat on or off and remembers the answer. The stylesheet
+// does the work; this only names the state and keeps the switch honest.
+function setSkin(on) {
+  document.documentElement.dataset.skin = on ? "tui" : "";
+  const btn = $("skin-toggle");
+  if (btn) {
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+    btn.title = on ? "plain skin" : "terminal skin";
+  }
+  try {
+    localStorage.setItem(SKIN_KEY, on ? "tui" : "plain");
+  } catch (e) {
+    // A refused write costs the memory, not the coat.
+  }
+}
 
 // COLLAPSE_KEY is where this device keeps its answer.
 const COLLAPSE_KEY = "dm.paneCollapsed";
@@ -2695,6 +2728,9 @@ window.addEventListener("resize", () => {
   renderThumbs(fleet);
   repaintThumbs();
 });
+$("skin-toggle").addEventListener("click", () => {
+  setSkin(document.documentElement.dataset.skin !== "tui");
+});
 $("sheet-close").addEventListener("click", dismissSheet);
 $("sheet").addEventListener("click", (e) => {
   // A tap outside the panel is the sheet's own dismiss.
@@ -2728,6 +2764,10 @@ renderPaneActions();
 
 // The address bar carries the tab, so a reload lands where the reader stood; a
 // page opened without one starts on the panes.
+// The head script already applied the remembered skin before the first paint;
+// this puts the switch in step with it, and lets a link carry the choice.
+const wantSkin = new URLSearchParams(location.search).get("skin");
+setSkin(wantSkin === "tui" ? true : wantSkin === "plain" ? false : storedSkin());
 route();
 if (!location.hash) {
   history.replaceState(null, "", location.pathname + location.search + "#" + tab);

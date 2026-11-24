@@ -6,6 +6,16 @@
 <meta name="color-scheme" content="dark">
 <title>dm</title>
 <link id="icon" rel="icon" href="data:,">
+<script>
+  // The skin is a device preference, so the attribute has to be on the root
+  // before the first paint: a page that painted plain and swapped after the
+  // script ran would flash.
+  try {
+    if (localStorage.getItem("dm.skin") === "tui") document.documentElement.dataset.skin = "tui";
+  } catch (e) {
+    // Storage that refuses reads simply gets the page as it ships.
+  }
+</script>
 <style>
   :root {
     --bg: #101418;
@@ -872,6 +882,145 @@
     #compose input, #compose select, #send textarea,
     #ask .ask-text, #ask .ask-note, .targets select { font-size: 16px; }
   }
+
+  /* --- the terminal skin -------------------------------------------------
+     A coat, not a replacement: every rule below starts with the root
+     attribute, so the page ships exactly as it was and the switch in the
+     header puts this on. The attribute is written before the first paint by
+     the script in the head, and remembered on the device. */
+  html[data-skin="tui"] {
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --accent: #7ac0eb;
+    --hard: #070a0d;
+    --focus: #1b2530;
+  }
+  /* One face, one size, no rounded corner anywhere: the skin's whole premise.
+     The radius sweep is blunt on purpose, because a single rounded chip would
+     be the one thing that reads as a web page. */
+  html[data-skin="tui"] body { font: 13px/1.5 var(--mono); }
+  html[data-skin="tui"] button,
+  html[data-skin="tui"] input,
+  html[data-skin="tui"] select,
+  html[data-skin="tui"] textarea { font-family: var(--mono); }
+  html[data-skin="tui"] *,
+  html[data-skin="tui"] *::before,
+  html[data-skin="tui"] *::after { border-radius: 0 !important; }
+
+  /* header, tab strip and the two switches */
+  html[data-skin="tui"] header { padding: .5lh 1ch; }
+  html[data-skin="tui"] header h1 { font-size: 13px; font-weight: 700; }
+  html[data-skin="tui"] header h1::before { content: "["; color: var(--dim); }
+  html[data-skin="tui"] header h1::after { content: "]"; color: var(--dim); }
+  html[data-skin="tui"] .bar button {
+    min-height: 36px; padding: 0 1ch; text-transform: uppercase;
+    font-size: 11px; letter-spacing: .06em;
+  }
+  html[data-skin="tui"] .tabs a {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 44px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em;
+  }
+  html[data-skin="tui"] .tabs a[aria-selected="true"] {
+    color: var(--accent); box-shadow: inset 0 2px 0 0 var(--accent);
+  }
+  html[data-skin="tui"] #skin-toggle[aria-pressed="true"] {
+    color: var(--accent); border-color: var(--accent);
+  }
+
+  /* the fleet */
+  html[data-skin="tui"] #needs .card { box-shadow: inset 3px 0 0 0 var(--accent); }
+  html[data-skin="tui"] .counts { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+  html[data-skin="tui"] #needs .cwant,
+  html[data-skin="tui"] .state {
+    text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em;
+  }
+  html[data-skin="tui"] .row .title .state { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
+  html[data-skin="tui"] .row .title .name { font-weight: 700; }
+  html[data-skin="tui"] .row .id { color: var(--dim); }
+  html[data-skin="tui"] .project h2.proj { text-transform: uppercase; font-size: 10.5px; letter-spacing: .08em; }
+
+  /* the pane: header, actions, view tabs */
+  html[data-skin="tui"] #pane header h1::before { content: "["; color: var(--dim); }
+  html[data-skin="tui"] #pane header h1::after { content: "]"; color: var(--dim); }
+  html[data-skin="tui"] #pane-state { text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em; }
+  html[data-skin="tui"] #pane .close,
+  html[data-skin="tui"] #pane .collapse,
+  html[data-skin="tui"] #pane .stop { min-height: 36px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+  html[data-skin="tui"] #pane-actions button {
+    min-height: 44px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em;
+  }
+  html[data-skin="tui"] #views .seg a {
+    display: flex; align-items: center; justify-content: center; min-height: 44px;
+    text-transform: uppercase; font-size: 11px; letter-spacing: .06em;
+  }
+  html[data-skin="tui"] #views .seg a[aria-selected="true"] {
+    color: var(--accent); box-shadow: inset 0 2px 0 0 var(--accent);
+  }
+
+  /* the ask form: a label row, a labelled rule, option rows, a bracket mark */
+  /* The skin's controls are taller, so the capped panel gives them back the
+     rows they spend: a short form fits whole and a long one still scrolls
+     under its sticky send row. */
+  html[data-skin="tui"] #ask { max-height: 60vh; }
+  html[data-skin="tui"] #ask .ask { padding: .5lh 1ch; }
+  html[data-skin="tui"] #ask .ask-hd {
+    text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em;
+  }
+  html[data-skin="tui"] #ask .ask-hd b { color: var(--accent); }
+  /* The label opens a rule, the way a desk section header does. */
+  html[data-skin="tui"] #ask .ask-qh {
+    color: var(--accent); text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em;
+    display: flex; align-items: center; gap: 1ch;
+  }
+  html[data-skin="tui"] #ask .ask-qh::after {
+    content: ""; flex: 1; height: 1px; background: #3a4a57;
+  }
+  html[data-skin="tui"] #ask .ask-hint { font-size: 11px; }
+  html[data-skin="tui"] #ask .ask-opt {
+    border: 0; border-top: 1px solid var(--line); background: transparent;
+    padding: .25lh 1ch; margin-top: 0;
+  }
+  html[data-skin="tui"] #ask .ask-opt.picked {
+    background: var(--focus); box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+  html[data-skin="tui"] #ask .ask-opt.picked .ask-label { font-weight: 700; }
+  html[data-skin="tui"] #ask .ask-label { font-size: 13px; font-weight: 400; }
+  html[data-skin="tui"] #ask .ask-qt { font-size: 13.5px; }
+  html[data-skin="tui"] #ask .ask-opt:active { background: var(--focus); }
+  /* The glyph gives way to the box: the row says whether it wants one answer or
+     any, so the mark can be the squared one in both cases. */
+  html[data-skin="tui"] #ask .ask-tick { font-size: 0; color: var(--accent); }
+  html[data-skin="tui"] #ask .ask-tick::before { content: "[ ]"; font-size: 12.5px; }
+  html[data-skin="tui"] #ask .ask-opt[role="radio"].picked .ask-tick::before { content: "[\25cf]"; }
+  html[data-skin="tui"] #ask .ask-opt[role="checkbox"].picked .ask-tick::before { content: "[x]"; }
+  html[data-skin="tui"] #ask .ask-desc { font-size: 12px; }
+  html[data-skin="tui"] #ask .ask-text,
+  html[data-skin="tui"] #ask .ask-note { min-height: 44px; font-family: var(--mono); }
+  html[data-skin="tui"] #ask .ask-controls button {
+    flex: 1; min-height: 44px; text-transform: uppercase;
+    font-size: 11px; letter-spacing: .06em; font-weight: 400;
+  }
+  html[data-skin="tui"] #ask .ask-controls .send { color: var(--accent); border-color: var(--accent); }
+  html[data-skin="tui"] #ask .ask-gone { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+
+  /* the composer: one prompt row, two square targets */
+  html[data-skin="tui"] #send { border-top: 1px solid var(--line); }
+  html[data-skin="tui"] #send input { min-height: 44px; font-family: var(--mono); }
+  html[data-skin="tui"] #send button { min-width: 44px; width: 44px; min-height: 44px; padding: 0; }
+  html[data-skin="tui"] #send button svg { width: 18px; height: 18px; }
+
+  /* the sheet and the box's composer */
+  html[data-skin="tui"] #sheet .panel { border: 1px solid var(--line); box-shadow: 4px 4px 0 0 var(--hard); }
+  html[data-skin="tui"] #sheet-body h2,
+  html[data-skin="tui"] #sheet .panel > header h1 {
+    text-transform: uppercase; font-size: 11px; letter-spacing: .08em;
+  }
+  html[data-skin="tui"] .cmd > button { min-height: 44px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+  html[data-skin="tui"] .chips button,
+  html[data-skin="tui"] #compose button,
+  html[data-skin="tui"] #compose input,
+  html[data-skin="tui"] #compose select { min-height: 40px; }
+  html[data-skin="tui"] .chips button { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
+  html[data-skin="tui"] #latest { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
 </style>
 </head>
 <body class="tab-panes">
@@ -881,6 +1030,7 @@
         <h1 id="session">dm</h1>
         <button id="sheet-open" class="sheet-open">actions</button>
         <button id="thumbs-toggle" class="toggle">pictures</button>
+        <button id="skin-toggle" class="toggle" aria-pressed="false" title="terminal skin">tui</button>
       </div>
       <div class="counts" id="counts"></div>
     </header>

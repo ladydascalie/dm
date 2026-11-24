@@ -1591,6 +1591,54 @@ func TestPageCarriesTheOutsideMarks(t *testing.T) {
 	}
 }
 
+// TestPageCarriesTheTerminalSkin proves the skin is a coat and not a
+// replacement: a switch in the header, a root attribute, a key the device
+// remembers, and every rule it adds scoped to that attribute. A rule that
+// escaped the scope would dress the page it promises not to touch.
+func TestPageCarriesTheTerminalSkin(t *testing.T) {
+	t.Parallel()
+	page := pageSource(t)
+	for _, want := range []string{
+		`<button id="skin-toggle"`,
+		`localStorage.getItem("dm.skin")`,
+		`html[data-skin="tui"] body`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the page misses %q", want)
+		}
+	}
+	at := strings.Index(page, "--- the terminal skin")
+	if at < 0 {
+		t.Fatal("the page carries no terminal skin block")
+	}
+	block := page[at:]
+	for _, line := range strings.Split(block, "\n") {
+		rule := strings.TrimSpace(line)
+		if !strings.HasSuffix(rule, "{") || strings.HasPrefix(rule, "/*") {
+			continue
+		}
+		if !strings.HasPrefix(rule, `html[data-skin="tui"]`) {
+			t.Fatalf("the skin's rule %q is not scoped to the attribute", rule)
+		}
+	}
+}
+
+// TestSetSkinRemembersTheChoice proves the switch writes the attribute the
+// stylesheet reads and stores the answer, so a phone keeps the coat across
+// visits and a reader who never taps it keeps the page as it ships.
+func TestSetSkinRemembersTheChoice(t *testing.T) {
+	t.Parallel()
+	src := funcSource(t, appScript(t), "setSkin")
+	for _, want := range []string{
+		`document.documentElement.dataset.skin`,
+		`localStorage.setItem(SKIN_KEY`,
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("setSkin misses %q:\n%s", want, src)
+		}
+	}
+}
+
 // pageRule is one style rule's text, from the selector to its closing brace.
 // The page's rules carry no nested braces, so the first closing brace at line
 // end ends the rule.
