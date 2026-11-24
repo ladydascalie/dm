@@ -66,8 +66,10 @@ func TestAttachBoxReadsASummary(t *testing.T) {
 	a.waitContains(t, "notifications")
 	a.write("\r")
 	// The reader title names the entry, and the hint is the reader's own: the
-	// list page's hint says "move".
-	a.waitContains(t, "j/k scroll")
+	// list page's hint says "move" and the reader's says "scroll". The bar
+	// writes every run with its own styling, so the cap and its label never
+	// arrive as one string. The label is the stable part of the row.
+	a.waitContains(t, " scroll")
 	a.waitContains(t, "NEEDS-YOU-NOW")
 }
 
