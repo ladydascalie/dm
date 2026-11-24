@@ -102,10 +102,14 @@ type switcherLayout struct {
 	footY  int         // the footer hint row, -1 when the float has no room
 	listW  int         // the table's width
 
-	preview bool
-	ruleX   int // the vertical rule between the table and the preview
-	prevX   int // the preview band's first column
-	prevW   int // the preview band's width
+	preview bool // the band is shown
+	down    bool // the band sits under the table rather than beside it
+	ruleX   int  // the vertical rule between the table and the preview
+	ruleY   int  // the horizontal rule above the band under the table
+	prevX   int  // the preview band's first column
+	prevY   int  // the preview band's first row
+	prevW   int  // the preview band's width
+	prevH   int  // the preview band's height
 }
 
 // hasRow reports whether a row falls inside the inner rect.
@@ -141,22 +145,43 @@ func switcherLayoutOf(s *Switcher, snap *wire.Snapshot) switcherLayout {
 			l.bodyH = 0
 		}
 	}
-	if s.PreviewOn() {
-		prevW := l.inner.W * s.ratio / 100
-		listW := l.inner.W - prevW - 1
-		if listW < 12 {
-			// A table narrower than this cannot name its columns, so the
-			// preview gives way instead of eating it.
-			listW = 12
-			prevW = l.inner.W - listW - 1
+	if !s.PreviewOn() {
+		return l
+	}
+	if s.peekDown {
+		// The band takes its share of the body height, and the rule above it
+		// is one row. A body with no room for the table floor, the rule and
+		// the band floor keeps no band at all.
+		avail := 0
+		if l.footY >= 0 {
+			avail = l.footY - l.bodyY
 		}
-		if prevW >= 4 && listW >= 4 {
-			l.preview = true
-			l.listW = listW
-			l.prevW = prevW
-			l.ruleX = l.inner.X + listW
-			l.prevX = l.ruleX + 1
+		band := downBandRows(avail, s.ratio)
+		if band <= 0 {
+			return l
 		}
+		l.preview, l.down = true, true
+		l.prevX, l.prevW, l.prevH = l.inner.X, l.inner.W, band
+		l.ruleY = l.bodyY + avail - 1 - band
+		l.prevY = l.ruleY + 1
+		l.bodyH = l.ruleY - l.bodyY
+		return l
+	}
+	prevW := l.inner.W * s.ratio / 100
+	listW := l.inner.W - prevW - 1
+	if listW < 12 {
+		// A table narrower than this cannot name its columns, so the
+		// preview gives way instead of eating it.
+		listW = 12
+		prevW = l.inner.W - listW - 1
+	}
+	if prevW >= 4 && listW >= 4 {
+		l.preview = true
+		l.listW = listW
+		l.prevW, l.prevH = prevW, l.bodyH
+		l.ruleX = l.inner.X + listW
+		l.prevX = l.ruleX + 1
+		l.prevY = l.bodyY
 	}
 	return l
 }
@@ -301,7 +326,7 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 				buf.WriteString(strings.Repeat(" ", n))
 			}
 			buf.WriteString("\x1b[0m")
-			if l.preview {
+			if l.preview && !l.down {
 				paintRuleCell(buf, th, l.ruleX, y)
 				paintSwitcherBlankRow(buf, th, y, l.prevX, l.prevW)
 			}
@@ -335,8 +360,9 @@ func paintSwitcherQuery(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switch
 		cx = x
 	}
 	// The columns right of the table still belong to this row, so paint them:
-	// the rule keeps the split visible and the preview stays blank.
-	if l.preview {
+	// the rule keeps the split visible and the preview stays blank. A band
+	// under the table owns no columns here, so the row is already whole.
+	if l.preview && !l.down {
 		paintRuleCell(buf, th, l.ruleX, y)
 		fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.prevX+1)
 		buf.WriteString("\x1b[0m")
@@ -374,49 +400,115 @@ func paintSwitcherHead(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols
 		buf.WriteString(strings.Repeat(" ", n))
 	}
 	buf.WriteString("\x1b[0m")
-	if l.preview {
+	if l.preview && !l.down {
 		paintRuleCell(buf, th, l.ruleX, l.headY)
 		paintSwitcherBlankRow(buf, th, l.headY, l.prevX, l.prevW)
 	}
 }
 
-// paintSwitcherBody paints the table rows and, on the right of the split, the
-// selected pane's screen.
+// paintSwitcherBody paints the table rows, the shelf section header when a
+// shelved row is in the list, and the selected pane's screen in its band.
 func paintSwitcherBody(buf *bytes.Buffer, th theme.Theme, s *Switcher, vts map[string]*vt.Term, l switcherLayout, cols [7]int, paint PanePainter, set theme.GlyphSet) {
+	// The shelf header is one visual row that is not a pane row: it moves the
+	// selection past itself and adds one to the list, so the window keeps the
+	// selected pane on screen across the boundary.
+	shelf := s.ShelfStart()
+	header := shelf >= 0 && shelf < len(s.rows)
+	sel := s.Search.Cursor
+	n := len(s.rows)
+	if header {
+		n++
+		if sel >= shelf {
+			sel++
+		}
+	}
 	// The body height is the window's height: sizing it here keeps a resize
 	// and the selection in one place. The selection is the Search's cursor,
 	// so a redraw never scrolls on its own.
-	s.vp.Sel = s.Search.Cursor
-	s.vp.N, s.vp.H = len(s.rows), l.bodyH
+	s.vp.Sel = sel
+	s.vp.N, s.vp.H = n, l.bodyH
 	s.vp.Ensure()
 	now := switcherNow().Unix()
 	for i := 0; i < l.bodyH; i++ {
 		y := l.bodyY + i
-		idx := s.vp.Off + i
-		if idx >= 0 && idx < len(s.rows) {
-			selected := idx == s.vp.Sel
-			paintSwitcherRow(buf, th, l, cols, s.rows[idx], idx+1, selected, set, now, y)
-		} else {
-			paintSwitcherBlankRow(buf, th, y, l.inner.X, l.listW)
+		vis := s.vp.Off + i
+		switch {
+		case header && vis == shelf:
+			paintSwitcherShelf(buf, th, l, y)
+		default:
+			idx := vis
+			if header && vis > shelf {
+				idx--
+			}
+			if idx >= 0 && idx < len(s.rows) {
+				selected := vis == s.vp.Sel
+				id := s.rows[idx].ID
+				paintSwitcherRow(buf, th, l, cols, s.rows[idx], idx+1, selected, s.asks[id], set, now, y)
+			} else {
+				paintSwitcherBlankRow(buf, th, y, l.inner.X, l.listW)
+			}
 		}
-		if l.preview {
+		if l.preview && !l.down {
 			paintRuleCell(buf, th, l.ruleX, y)
 		}
 	}
-	if l.preview {
-		paintSwitcherPreview(buf, th, s, vts, layout.Rect{X: l.prevX, Y: l.bodyY, W: l.prevW, H: l.bodyH}, paint)
+	if l.preview && l.down {
+		paintSwitcherRule(buf, th, l)
 	}
+	if l.preview {
+		band := layout.Rect{X: l.prevX, Y: l.prevY, W: l.prevW, H: l.prevH}
+		paintSwitcherPreview(buf, th, s, vts, band, paint)
+	}
+}
+
+// paintSwitcherShelf paints the shelf section header: the word in the rail's
+// header colour on the left and the rest of the table row a rail-dim rule, all
+// on the rail ground. It wears no jump digit, so the pane after it keeps the
+// number its index gives it.
+func paintSwitcherShelf(buf *bytes.Buffer, th theme.Theme, l switcherLayout, y int) {
+	w := l.listW
+	if w <= 0 {
+		return
+	}
+	pal := th.Palette
+	name := cells.Clip("shelf", w)
+	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.inner.X+1)
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(pal.RailBG.BG())
+	buf.WriteString(pal.RailHeader.FG())
+	buf.WriteString(name)
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(pal.RailBG.BG())
+	buf.WriteString(pal.RailDim.FG())
+	if n := w - cells.Cells(name); n > 0 {
+		buf.WriteString(strings.Repeat(th.Glyphs.BorderHorizontal, n))
+	}
+	buf.WriteString("\x1b[0m")
+}
+
+// paintSwitcherRule paints the horizontal rule between the table and the band
+// under it.
+func paintSwitcherRule(buf *bytes.Buffer, th theme.Theme, l switcherLayout) {
+	if l.inner.W <= 0 {
+		return
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH", l.ruleY+1, l.inner.X+1)
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(th.Palette.RailBG.BG())
+	buf.WriteString(th.Palette.RailDim.FG())
+	buf.WriteString(strings.Repeat(th.Glyphs.BorderHorizontal, l.inner.W))
+	buf.WriteString("\x1b[0m")
 }
 
 // paintSwitcherRow paints one pane row: the jump key, project, agent label, git
 // state, status, age and title, each elided to its column. The selected row
 // wears the focus ground across the whole table.
-func paintSwitcherRow(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols [7]int, p wire.AllPane, jump int, selected bool, set theme.GlyphSet, now int64, y int) {
+func paintSwitcherRow(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols [7]int, p wire.AllPane, jump int, selected, ask bool, set theme.GlyphSet, now int64, y int) {
 	ground := th.Palette.RailBG
 	if selected {
 		ground = th.Palette.RailFocusBG
 	}
-	cellsOf := switcherRowCells(th, set, p, jump, now)
+	cellsOf := switcherRowCells(th, set, p, ask, jump, now)
 	fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, l.inner.X+1)
 	buf.WriteString("\x1b[0m")
 	buf.WriteString(ground.BG())
@@ -440,8 +532,10 @@ func paintSwitcherRow(buf *bytes.Buffer, th theme.Theme, l switcherLayout, cols 
 	buf.WriteString("\x1b[0m")
 }
 
-// switcherRowCells composes the seven column runs of one pane row.
-func switcherRowCells(th theme.Theme, set theme.GlyphSet, p wire.AllPane, jump int, now int64) [7][]segment.Seg {
+// switcherRowCells composes the seven column runs of one pane row. A pane with
+// an open question leads its agent cell with the ask mark, the same mark the
+// rail paints, so the question never hides the pane's name.
+func switcherRowCells(th theme.Theme, set theme.GlyphSet, p wire.AllPane, ask bool, jump int, now int64) [7][]segment.Seg {
 	pal := th.Palette
 	var out [7][]segment.Seg
 	jumpText := ""
@@ -462,6 +556,9 @@ func switcherRowCells(th theme.Theme, set theme.GlyphSet, p wire.AllPane, jump i
 	}
 	out[1] = []segment.Seg{{Text: project, FG: projectFG}}
 	out[2] = []segment.Seg{{Text: paneLabel(p), FG: pal.RailText}}
+	if ask {
+		out[2] = append([]segment.Seg{{Text: "? ", FG: pal.BarAccent, Bold: true}}, out[2]...)
+	}
 	out[3] = paneGit(th, p)
 	state := paneState(p)
 	style := rail.StateStyle(th, state).For(set)
@@ -576,15 +673,56 @@ func jumpSpan(km *keymap.Config) string {
 	return first + "-" + last
 }
 
+// switcherHintSep is the gap the footer paints between two hints. It is part
+// of what the narrowing rule measures, so a hint costs its own cells and this
+// run when another hint precedes it.
+const switcherHintSep = " | "
+
 // switcherHint fits the hints into room cells and drops the ones that do not
 // fit. It tries the full key names first and, only when the row would lose a
 // hint, retries with the control chords folded to ^x: a narrow footer can
 // afford the caret but not the word. It never ends on half a hint: a key that
 // does not fit is not named.
 func switcherHint(room int, km *keymap.Config) string {
+	kept := switcherKeptHints(room, km)
+	parts := make([]string, 0, len(kept))
+	for _, h := range kept {
+		parts = append(parts, ui.Hints([]ui.Hint{h}))
+	}
+	return strings.Join(parts, switcherHintSep)
+}
+
+// switcherHintSegs lays the kept hints out as the footer paints them: each key
+// in the bar accent and bold, each label in the rail text, and the separator
+// between hints in the rail dim.
+func switcherHintSegs(th theme.Theme, room int, km *keymap.Config) []segment.Seg {
+	pal := th.Palette
+	kept := switcherKeptHints(room, km)
+	var out []segment.Seg
+	for i, h := range kept {
+		if i > 0 {
+			out = append(out, segment.Seg{Text: switcherHintSep, FG: pal.RailDim})
+		}
+		keys := make([]string, 0, len(h.Keys))
+		for _, k := range h.Keys {
+			if k != "" {
+				keys = append(keys, k)
+			}
+		}
+		out = append(out, segment.Seg{Text: strings.Join(keys, "/"), FG: pal.BarAccent, Bold: true})
+		if h.Label != "" {
+			out = append(out, segment.Seg{Text: " " + h.Label, FG: pal.RailText})
+		}
+	}
+	return out
+}
+
+// switcherKeptHints is the head of the hint list that fits in room cells, with
+// the control chords folded only when the whole list would lose a hint.
+func switcherKeptHints(room int, km *keymap.Config) []ui.Hint {
 	hints := switcherHints(km)
-	if text, whole := fitHints(hints, room); whole {
-		return text
+	if kept, whole := fitHints(hints, room); whole {
+		return kept
 	}
 	short := make([]ui.Hint, len(hints))
 	for i, h := range hints {
@@ -594,13 +732,13 @@ func switcherHint(room int, km *keymap.Config) string {
 		}
 		short[i] = ui.Hint{Keys: keys, Label: h.Label}
 	}
-	text, _ := fitHints(short, room)
-	return text
+	kept, _ := fitHints(short, room)
+	return kept
 }
 
-// fitHints keeps the longest head of hints that fits in room cells and
-// reports whether every hint was kept.
-func fitHints(hints []ui.Hint, room int) (string, bool) {
+// fitHints keeps the longest head of hints that fits in room cells, the
+// separator's cells included, and reports whether every hint was kept.
+func fitHints(hints []ui.Hint, room int) ([]ui.Hint, bool) {
 	var kept []ui.Hint
 	used := 0
 	for _, hint := range hints {
@@ -610,23 +748,25 @@ func fitHints(hints []ui.Hint, room int) (string, bool) {
 		}
 		need := cells.Cells(text)
 		if len(kept) > 0 {
-			need += 2
+			need += cells.Cells(switcherHintSep)
 		}
 		if used+need > room {
-			return ui.Hints(kept), false
+			return kept, false
 		}
 		kept = append(kept, hint)
 		used += need
 	}
-	return ui.Hints(kept), true
+	return kept, true
 }
 
-// paintSwitcherFoot paints the hint row at the bottom of the box: the keys on
-// the left and the ordering with the preview's share on the right.
+// paintSwitcherFoot paints the hint row at the bottom of the box on the rail's
+// hover ground: the hints as styled segments on the left, the ordering with the
+// preview's share in the rail dim on the right, and the padding between them.
 func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switcherLayout, km *keymap.Config) {
 	if l.footY <= l.queryY || !l.hasRow(l.footY) || l.inner.W <= 0 {
 		return
 	}
+	ground := th.Palette.RailHoverBG
 	right := s.mode.String()
 	if s.PreviewOn() {
 		right += " " + strconv.Itoa(s.ratio) + "%"
@@ -635,20 +775,23 @@ func paintSwitcherFoot(buf *bytes.Buffer, th theme.Theme, s *Switcher, l switche
 	if room < 0 {
 		right, room = "", l.inner.W
 	}
-	left := switcherHint(room, km)
-	pad := l.inner.W - cells.Cells(left) - cells.Cells(right)
+	left := switcherHintSegs(th, room, km)
+	pad := l.inner.W - segment.SegCells(left) - cells.Cells(right)
 	if pad < 0 {
 		pad = 0
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH", l.footY+1, l.inner.X+1)
 	buf.WriteString("\x1b[0m")
-	buf.WriteString(th.Palette.RailBG.BG())
-	buf.WriteString(th.Palette.RailDim.FG())
-	buf.WriteString(left)
-	buf.WriteString(strings.Repeat(" ", pad))
+	buf.WriteString(ground.BG())
+	writeSwitcherRuns(buf, left, ground, false)
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(ground.BG())
+	if pad > 0 {
+		buf.WriteString(strings.Repeat(" ", pad))
+	}
 	if right != "" {
 		buf.WriteString("\x1b[0m")
-		buf.WriteString(th.Palette.RailBG.BG())
+		buf.WriteString(ground.BG())
 		buf.WriteString(th.Palette.RailDim.FG())
 		buf.WriteString(right)
 	}

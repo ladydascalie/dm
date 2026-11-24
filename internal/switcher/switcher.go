@@ -41,6 +41,20 @@ func (m SortMode) String() string {
 // nextSort is the mode CycleSort lands on.
 func (m SortMode) nextSort() SortMode { return (m + 1) % 3 }
 
+// ParseSortMode maps a saved mode name to its mode: "recent", "project" and
+// "status" take their own, and anything else is the default. The client reads
+// the mode the config saved and calls SetSort with it; the switcher itself
+// never reads or writes a file.
+func ParseSortMode(s string) SortMode {
+	switch s {
+	case "project":
+		return SortProject
+	case "status":
+		return SortStatus
+	}
+	return SortRecent
+}
+
 // The preview band's share of the body, in percent, and the bounds
 // ResizePreview keeps it in.
 const (
@@ -91,6 +105,17 @@ type Switcher struct {
 	ratio     int
 	offset    int
 	previewOn bool
+	// peekDown is the preview band's orientation: under the table (the
+	// default) or beside it on the right.
+	peekDown bool
+
+	// shelf is the index in rows of the first shelved row, -1 when no row is
+	// shelved. rebuild keeps it, so the painter never scans the list.
+	shelf int
+
+	// asks is the set of panes the snapshot lists a question on, so a row can
+	// lead its agent cell with the ask mark.
+	asks map[string]bool
 
 	// The preview request: whether one is outstanding, the newest request id,
 	// the pane it asked for, and the lines the server sent for it.
@@ -105,7 +130,10 @@ type Switcher struct {
 // caller that has no snapshot yet, and the snapshot's size wins once there is
 // one.
 func NewSwitcher(rect layout.Rect, snap *wire.Snapshot) *Switcher {
-	s := &Switcher{Rect: rect, vp: ui.Viewport{Sel: -1}, ratio: previewRatioDefault, previewOn: true, full: true}
+	s := &Switcher{
+		Rect: rect, vp: ui.Viewport{Sel: -1}, ratio: previewRatioDefault,
+		previewOn: true, peekDown: true, shelf: -1, full: true,
+	}
 	s.Sync(snap)
 	return s
 }
@@ -147,6 +175,7 @@ func (s *Switcher) Sync(snap *wire.Snapshot) {
 		}
 		s.all = append(s.all, snap.All...)
 	}
+	s.asks = askPanes(snap)
 	if s.asked && !s.hasPane(s.pane) {
 		s.asked, s.pane, s.lines, s.offset = false, "", nil, 0
 	}
@@ -236,6 +265,14 @@ func (s *Switcher) RowCount() int {
 	return len(s.rows)
 }
 
+// ShelfStart is the index in the pane rows of the first shelved row, -1 when no
+// shelved row is in the list. Shelved rows sort after every live pane, so it is
+// also where the drawer inserts the shelf section header. The header is not a
+// pane row, which is why the index counts panes only.
+func (s *Switcher) ShelfStart() int {
+	return s.shelf
+}
+
 // Move steps the selection d rows and stops at either end of the table. The
 // painter keeps the window on the cursor at the next draw, so the ends hold
 // without a wrap.
@@ -280,10 +317,16 @@ func (s *Switcher) SortMode() SortMode {
 // CycleSort moves to the next ordering, keeps the selected pane selected, and
 // returns the mode it landed on.
 func (s *Switcher) CycleSort() SortMode {
-	s.mode = s.mode.nextSort()
+	s.SetSort(s.mode.nextSort())
+	return s.mode
+}
+
+// SetSort switches the ordering, rebuilds the rows in it and keeps the selected
+// pane selected. The client calls it with the mode the config saved.
+func (s *Switcher) SetSort(mode SortMode) {
+	s.mode = mode
 	prev := s.Target()
 	s.rebuild(s.Search.Cursor, prev)
-	return s.mode
 }
 
 // PreviewRatio is the preview band's share of the body, in percent.
@@ -335,6 +378,18 @@ func (s *Switcher) TogglePreview() bool {
 	return s.previewOn
 }
 
+// SetPeekDown chooses the preview band's orientation: under the table when on,
+// beside it on the right when off. A body too short for both drops the band
+// either way.
+func (s *Switcher) SetPeekDown(on bool) {
+	s.peekDown = on
+}
+
+// PeekDown reports whether the band sits under the table rather than beside it.
+func (s *Switcher) PeekDown() bool {
+	return s.peekDown
+}
+
 // PreviewOffset is how many rows the preview is scrolled up from the bottom of
 // its content. It is zero at the newest row.
 func (s *Switcher) PreviewOffset() int {
@@ -344,7 +399,7 @@ func (s *Switcher) PreviewOffset() int {
 // ScrollPreview moves the preview d rows, positive toward older rows, and
 // clamps it between the newest row and the oldest one the read lines hold.
 func (s *Switcher) ScrollPreview(d int) int {
-	max := len(s.lines) - s.bodyRows()
+	max := len(s.lines) - s.previewRows()
 	if max < 0 {
 		max = 0
 	}
@@ -414,6 +469,7 @@ func (s *Switcher) rebuild(old int, keep string) {
 	for _, i := range s.Search.Matches {
 		s.rows = append(s.rows, s.all[i])
 	}
+	s.shelf = shelfRow(s.rows)
 	if keep != "" {
 		for i, p := range s.rows {
 			if p.ID == keep {
@@ -431,10 +487,15 @@ func (s *Switcher) rebuild(old int, keep string) {
 // order.
 func (s *Switcher) sortRows() {
 	matches := s.Search.Matches
+	// The shelf sorts after every live pane whatever the mode's comparator
+	// says, so the section stays one block at the end of the table.
 	switch s.mode {
 	case SortProject:
 		sort.SliceStable(matches, func(i, j int) bool {
 			a, b := s.all[matches[i]], s.all[matches[j]]
+			if a.Shelf != b.Shelf {
+				return !a.Shelf
+			}
 			if (a.Project == "") != (b.Project == "") {
 				return a.Project != ""
 			}
@@ -445,13 +506,44 @@ func (s *Switcher) sortRows() {
 		})
 	case SortStatus:
 		sort.SliceStable(matches, func(i, j int) bool {
-			return statusRank(s.all[matches[i]].Status) < statusRank(s.all[matches[j]].Status)
+			a, b := s.all[matches[i]], s.all[matches[j]]
+			if a.Shelf != b.Shelf {
+				return !a.Shelf
+			}
+			return statusRank(a.Status) < statusRank(b.Status)
 		})
 	default:
 		sort.SliceStable(matches, func(i, j int) bool {
-			return s.all[matches[i]].StatusChangedAt > s.all[matches[j]].StatusChangedAt
+			a, b := s.all[matches[i]], s.all[matches[j]]
+			if a.Shelf != b.Shelf {
+				return !a.Shelf
+			}
+			return a.StatusChangedAt > b.StatusChangedAt
 		})
 	}
+}
+
+// shelfRow is the index of the first shelved row, -1 when none is shelved.
+func shelfRow(rows []wire.AllPane) int {
+	for i, p := range rows {
+		if p.Shelf {
+			return i
+		}
+	}
+	return -1
+}
+
+// askPanes is the set of panes the snapshot lists a question on. A nil snapshot
+// and a snapshot with no asks both give no set, so the mark clears with them.
+func askPanes(snap *wire.Snapshot) map[string]bool {
+	if snap == nil || len(snap.Ask) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(snap.Ask))
+	for _, a := range snap.Ask {
+		out[a.Pane] = true
+	}
+	return out
 }
 
 // paneIDLess orders two pane ids the way the project sort shows them inside a
@@ -586,6 +678,38 @@ func (s *Switcher) bodyRows() int {
 		return 0
 	}
 	return s.Rect.H - 5
+}
+
+// previewRows is how many rows the preview band holds in either orientation:
+// the whole body beside the table, its share of the body under it. A scroll
+// clamps to it, so the model never agrees with a band the painter did not draw.
+func (s *Switcher) previewRows() int {
+	body := s.bodyRows()
+	if body <= 0 {
+		return 0
+	}
+	if s.peekDown {
+		return downBandRows(body, s.ratio)
+	}
+	return body
+}
+
+// downBandRows is the height of the band under the table in a body of h rows:
+// the ratio's share, clamped so the table keeps three rows above the rule and
+// the band keeps three below it. A body too short for both holds no band.
+func downBandRows(h, ratio int) int {
+	const tableFloor, bandFloor = 3, 3
+	if h < tableFloor+bandFloor+1 {
+		return 0
+	}
+	band := h * ratio / 100
+	if band < bandFloor {
+		band = bandFloor
+	}
+	if max := h - tableFloor - 1; band > max {
+		band = max
+	}
+	return band
 }
 
 // matchPane scores a pane against the query and reports whether it matches. The
