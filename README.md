@@ -1175,20 +1175,21 @@ Small actions answer with a toast, not text in the status bar: the bar's right
 block is reserved for the scroll position, the search match and the divider
 hint. The client keeps up to three, each with the time it was raised, and
 draws them bottom right just above the bar, newest at the bottom. A toast is a
-small closed box, as wide as its longest row plus the two border cells, clamped
-to the screen, with a drain band on the row above its top border: the band is
-as wide as the box and its coloured cells are the life the toast has left, so
-it shrinks from the right as the toast counts down and the box is gone when the
-colour is. A plain toast holds one row of bright text on the neutral float
-ground, a dim border and a dim band. An entry posted under `notify/` raises a
-toast that names the entry's state in the top border, in the state's own glyph
-and colour, tints its body with the same colour, fills the band with it, and
-holds the topic dim above the bright message; an entry with no message is that
-border, the topic and the bottom border, with no colon and no empty row. The
-tint is a small mix into the rail background, chosen so the dim topic keeps
-WCAG AA contrast on every built-in state. A repeat of the newest announcement
+small closed box on the float ground, as wide as its longest row plus the two
+border cells, clamped to the screen, and its bottom border is the gauge: one
+track as wide as the interior, the part still to run drawn in the toast's
+colour and the rest left dim, so the bright run shrinks from the right as the
+toast counts down and the box is gone when it has run out. The track is what
+makes the fraction readable: a bright run alone reads as a stray mark once it
+is short. A plain toast holds one row of bright text inside a dim border and a
+dim gauge. An entry posted under `notify/` raises a toast that names the
+entry's state and topic in the top border, in the state's own glyph and colour,
+and holds the message bright inside; an entry with no message is that border
+and the gauge, with no colon and no empty row. The state's colour stays on the
+border, the title and the gauge, so three stacked toasts read as three quiet
+panels instead of three colour blocks. A repeat of the newest announcement
 within one second is the same toast, and every toast expires after three
-seconds, its band one cell of colour at the end. Copying raises one, as does a failed request, an unknown key, an
+seconds, its gauge one cell of colour at the end. Copying raises one, as does a failed request, an unknown key, an
 empty scrollback and a pane exit.
 
 System notifications are for the events worth interrupting for. A pane that

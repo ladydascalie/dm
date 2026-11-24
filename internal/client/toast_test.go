@@ -24,23 +24,12 @@ func toastParts(x toast) string {
 }
 
 // The default theme's escapes the toast box paints with: the dim border, the
-// bright message, and the body background a plain toast and a notify toast each
-// paint.
+// bright message, and the panel ground every toast sits on.
 var (
 	dimBorder  = theme.DefaultTheme().Palette.RailDim.FG()
 	brightText = theme.DefaultTheme().Palette.RailText.FG()
-	plainBG    = theme.DefaultTheme().Palette.RailFocusBG.BG()
+	panelBG    = theme.DefaultTheme().Palette.RailFocusBG.BG()
 )
-
-// tintBG is the body background a toast in this state paints: the state colour
-// mixed into the rail background.
-func tintBG(th theme.Theme, state string) string {
-	st, ok := th.States[state]
-	if !ok {
-		st = th.States["unknown"]
-	}
-	return blend(th.Palette.RailBG, st.Colour, toastTint).BG()
-}
 
 func toastTexts(t *tui) []string {
 	out := make([]string, 0, len(t.toasts))
@@ -265,7 +254,7 @@ func TestDrawToastsSizesByCells(t *testing.T) {
 			}
 			// The interior is the text alone: the body ground, bright text,
 			// then the right border, with no padding and no dropped glyph.
-			want := plainBG + brightText + c.text + "\x1b[0m" + plainBG + dimBorder + theme.DefaultTheme().Glyphs.BorderVertical
+			want := panelBG + brightText + c.text + "\x1b[0m" + panelBG + dimBorder + theme.DefaultTheme().Glyphs.BorderVertical
 			if !strings.Contains(out, want) {
 				t.Fatalf("interior is not the whole text %q: %q", c.text, out)
 			}
@@ -329,7 +318,7 @@ func TestDrawToastsElidesOnClusterBounds(t *testing.T) {
 	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
 	out := b.String()
 	at := strings.Index(out, brightText)
-	end := strings.Index(out[at:], "\x1b[0m"+plainBG+dimBorder)
+	end := strings.Index(out[at:], "\x1b[0m"+panelBG+dimBorder)
 	if at < 0 || end < 0 {
 		t.Fatalf("no toast interior in %q", out)
 	}
@@ -364,15 +353,16 @@ func TestDrawToastsPaintsClosedBox(t *testing.T) {
 	if !strings.Contains(out, g.BorderTopLeft+edge+g.BorderTopRight) {
 		t.Fatalf("the box has no closed top border: %q", out)
 	}
-	if !strings.Contains(out, g.BorderBottomLeft+edge+g.BorderBottomRight) {
-		t.Fatalf("the box has no closed bottom border: %q", out)
+	textRow, _ := toastRow(t, out, "saved 3 files")
+	if got, want := rowGlyphs(t, out, textRow+1), g.BorderBottomLeft+edge+g.BorderBottomRight; got != want {
+		t.Fatalf("the bottom border is %q, want %q", got, want)
 	}
-	want := "\x1b[0m" + plainBG + dimBorder + g.BorderVertical + "\x1b[0m" + plainBG + brightText +
-		"saved 3 files\x1b[0m" + plainBG + dimBorder + g.BorderVertical + "\x1b[0m"
+	want := "\x1b[0m" + panelBG + dimBorder + g.BorderVertical + "\x1b[0m" + panelBG + brightText +
+		"saved 3 files\x1b[0m" + panelBG + dimBorder + g.BorderVertical + "\x1b[0m"
 	if !strings.Contains(out, want) {
 		t.Fatalf("the text row is not framed on both sides: %q", out)
 	}
-	// The four rows are consecutive and share one column: the box is tight.
+	// The three rows are consecutive and share one column: the box is tight.
 	rows := map[int]bool{}
 	col := -1
 	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
@@ -385,8 +375,8 @@ func TestDrawToastsPaintsClosedBox(t *testing.T) {
 			t.Fatalf("box rows do not share column %d: found %d", col, c)
 		}
 	}
-	if len(rows) != 4 {
-		t.Fatalf("the box paints %d rows, want the band, the top, the text and the bottom: %v", len(rows), rows)
+	if len(rows) != 3 {
+		t.Fatalf("the box paints %d rows, want the top, the text and the bottom: %v", len(rows), rows)
 	}
 	_, textCol := toastRow(t, out, "saved 3 files")
 	if textCol != col {
@@ -407,8 +397,8 @@ func TestDrawToastsSeparatesBoxes(t *testing.T) {
 	out := b.String()
 	oldRow, _ := toastRow(t, out, "older")
 	newRow, _ := toastRow(t, out, "newer")
-	if newRow-oldRow != 5 {
-		t.Fatalf("text rows %d and %d, want a bottom, a gap, a band and a top between", oldRow, newRow)
+	if newRow-oldRow != 4 {
+		t.Fatalf("text rows %d and %d, want a bottom, a gap and a top between", oldRow, newRow)
 	}
 	// The gap row between the boxes carries no glyph.
 	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
@@ -418,8 +408,17 @@ func TestDrawToastsSeparatesBoxes(t *testing.T) {
 		}
 		t.Fatalf("a cursor paints on the gap row %d", r)
 	}
-	if strings.Count(out, theme.DefaultTheme().Glyphs.BorderHorizontal) != 2*(cells.Cells("older")+2-2)+2*(cells.Cells("newer")+2-2) {
-		t.Fatalf("the horizontal border count does not match two closed boxes: %q", out)
+	g := theme.DefaultTheme().Glyphs
+	// Each box draws its top border and its fresh gauge across the interior.
+	want := 0
+	for _, text := range []string{"older", "newer"} {
+		want += 2 * cells.Cells(text)
+	}
+	if got := strings.Count(out, g.BorderHorizontal); got != want {
+		t.Fatalf("horizontal glyphs = %d, want %d for two boxes and their gauges: %q", got, want, out)
+	}
+	if got := strings.Count(out, g.BorderTopLeft); got != 2 {
+		t.Fatalf("boxes opened = %d, want two closed boxes: %q", got, out)
 	}
 }
 
@@ -493,9 +492,9 @@ func TestDrawToastsNamesStateInBorder(t *testing.T) {
 	}
 }
 
-// An entry with no message is one interior row: the topic between the borders,
-// with no colon and no empty row behind it.
-func TestDrawToastsEmptyMessageKeepsOneRow(t *testing.T) {
+// An entry with no message is two rows: the top border names the state and the
+// topic, and the bottom border is the gauge, with no empty row between them.
+func TestDrawToastsEmptyMessageKeepsTwoRows(t *testing.T) {
 	t.Parallel()
 	th := theme.DefaultTheme()
 	snap := &wire.Snapshot{Cols: 40, Rows: 10}
@@ -504,16 +503,15 @@ func TestDrawToastsEmptyMessageKeepsOneRow(t *testing.T) {
 	var b bytes.Buffer
 	drawToasts(&b, th, snap, tui.toasts)
 	out := b.String()
-	if !strings.Contains(out, "notify/demo") {
-		t.Fatalf("the topic is missing from the box: %q", out)
+	if want := th.States["done"].Glyph + " done notify/demo"; !strings.Contains(out, want) {
+		t.Fatalf("the top border does not name %q: %q", want, out)
 	}
 	if strings.Contains(out, ":") {
 		t.Fatalf("an empty message left punctuation behind: %q", out)
 	}
-	// The box is four rows: the band, the top border, the topic, the bottom
-	// border.
-	if rows := drawRows(t, out); len(rows) != 4 {
-		t.Fatalf("the box paints %d rows, want the band, the border, the topic and the border: %v", len(rows), rows)
+	// The box is two rows: the top border and the gauge under it.
+	if rows := drawRows(t, out); len(rows) != 2 {
+		t.Fatalf("the box paints %d rows, want the border and the gauge: %v", len(rows), rows)
 	}
 	// The bottom border sits on the newest box's row, just above the bar.
 	if want := snap.Rows - 1; !strings.Contains(out, "\x1b["+strconv.Itoa(want)+";") {
@@ -521,9 +519,9 @@ func TestDrawToastsEmptyMessageKeepsOneRow(t *testing.T) {
 	}
 }
 
-// A notify toast stacks the topic above the message: the topic dim, the message
-// bright, both inside the border.
-func TestDrawToastsStacksTopicAboveMessage(t *testing.T) {
+// A notify toast names the state and the topic in the top border, in the state's
+// colour, and holds the message bright inside the box on the float ground.
+func TestDrawToastsNamesTopicInBorder(t *testing.T) {
 	t.Parallel()
 	th := theme.DefaultTheme()
 	g := th.Glyphs
@@ -534,21 +532,17 @@ func TestDrawToastsStacksTopicAboveMessage(t *testing.T) {
 	drawToasts(&b, th, snap, tui.toasts)
 	out := b.String()
 	border := th.States["blocked"].Colour.FG()
-	bg := tintBG(th, "blocked")
-	topicRow := "\x1b[0m" + bg + border + g.BorderVertical + "\x1b[0m" + bg + dimBorder + "notify/demo"
-	if !strings.Contains(out, topicRow) {
-		t.Fatalf("the topic does not sit dim inside the border: %q", out)
+	title := " " + th.States["blocked"].Glyph + " blocked notify/demo "
+	if !strings.Contains(out, border+g.BorderTopLeft+title) {
+		t.Fatalf("the top border does not name the state and topic in the border's colour: %q", out)
 	}
-	msgRow := "\x1b[0m" + bg + border + g.BorderVertical + "\x1b[0m" + bg + brightText + "waiting on tests"
+	msgRow := "\x1b[0m" + panelBG + border + g.BorderVertical + "\x1b[0m" + panelBG + brightText + "waiting on tests"
 	if !strings.Contains(out, msgRow) {
 		t.Fatalf("the message does not sit bright inside the border: %q", out)
 	}
-	if topicAt, msgAt := strings.Index(out, topicRow), strings.Index(out, msgRow); topicAt > msgAt {
-		t.Fatalf("the message paints above the topic: %q", out)
-	}
-	// Five rows: band, border, topic, message, border.
-	if rows := drawRows(t, out); len(rows) != 5 {
-		t.Fatalf("the box paints %d rows, want the band, the border, both rows and the border: %v", len(rows), rows)
+	// Three rows: the border, the message, the gauge.
+	if rows := drawRows(t, out); len(rows) != 3 {
+		t.Fatalf("the box paints %d rows, want the border, the message and the gauge: %v", len(rows), rows)
 	}
 }
 
@@ -582,117 +576,183 @@ func TestDrawToastsNarrowScreenClosesBox(t *testing.T) {
 	var b bytes.Buffer
 	drawToasts(&b, th, snap, tui.toasts)
 	out := b.String()
-	title := th.States["done"].Glyph + " done"
+	title := th.States["done"].Glyph + " done notify/demo"
 	want := g.BorderTopLeft + " " + cells.Elide(title, snap.Cols-4) + " " + g.BorderTopRight
 	if !strings.Contains(out, want) {
 		t.Fatalf("the top border is not closed inside the screen %q: %q", want, out)
 	}
 	// The box fills the screen: its left border sits in column 1.
-	if head := ";1H\x1b[0m" + tintBG(th, "done") + th.States["done"].Colour.FG() + g.BorderTopLeft; !strings.Contains(out, head) {
+	if head := ";1H\x1b[0m" + panelBG + th.States["done"].Colour.FG() + g.BorderTopLeft; !strings.Contains(out, head) {
 		t.Fatalf("the box does not start in column 1: %q", out)
 	}
-	if !strings.Contains(out, g.BorderBottomLeft+strings.Repeat(g.BorderHorizontal, snap.Cols-2)+g.BorderBottomRight) {
-		t.Fatalf("the bottom border is not closed across the screen: %q", out)
+	if got, want := rowGlyphs(t, out, snap.Rows-1), g.BorderBottomLeft+strings.Repeat(g.BorderHorizontal, snap.Cols-2)+g.BorderBottomRight; got != want {
+		t.Fatalf("the bottom border is %q, want %q", got, want)
 	}
 }
 
-// bandFill finds the toast's drain band row and returns how many cells it
-// filled with the band's colour, from the escape that opens it.
-func bandFill(t *testing.T, out, band string) (row, fill int) {
+// sgr matches one SGR escape, so a test can read a row's glyphs alone.
+var sgr = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// rowGlyphs returns the plain glyphs one drawn row carries, found by the cursor
+// position that places it. Every row of a toast is placed by its own cursor.
+func rowGlyphs(t *testing.T, out string, row int) string {
 	t.Helper()
-	head := "\x1b[0m" + band
+	at := -1
 	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
-		if !strings.HasPrefix(out[m[1]:], head) {
+		r, _ := strconv.Atoi(out[m[2]:m[3]])
+		if r == row {
+			at = m[1]
+			break
+		}
+	}
+	if at < 0 {
+		t.Fatalf("no cursor places row %d in %q", row, out)
+	}
+	rest := out[at:]
+	if next := cursorAt.FindStringIndex(rest); next != nil {
+		rest = rest[:next[0]]
+	}
+	return sgr.ReplaceAllString(rest, "")
+}
+
+// gaugeRuns finds the newest toast's bottom border and returns its screen row,
+// the cells still painted in the gauge colour and the cells left in the border's.
+func gaugeRuns(t *testing.T, out, gauge, border, track string) (row, lit, dim int) {
+	t.Helper()
+	g := theme.DefaultTheme().Glyphs
+	corner := "\x1b[0m" + panelBG + border + g.BorderBottomLeft
+	litHead := "\x1b[0m" + panelBG + gauge
+	dimHead := "\x1b[0m" + panelBG + track
+	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
+		rest := out[m[1]:]
+		if !strings.HasPrefix(rest, corner) {
 			continue
 		}
 		row, _ = strconv.Atoi(out[m[2]:m[3]])
-		rest := out[m[1]+len(head):]
+		rest = rest[len(corner):]
+		if gauge == track {
+			// One run covers the whole track: the toast has no state colour.
+			if !strings.HasPrefix(rest, litHead) {
+				t.Fatalf("the gauge does not open with its colour: %q", rest)
+			}
+			rest = rest[len(litHead):]
+			stop := strings.Index(rest, "\x1b[0m")
+			if stop < 0 {
+				t.Fatalf("the gauge track has no terminator: %q", rest)
+			}
+			return row, cells.Cells(strings.TrimSuffix(rest[:stop], g.BorderBottomRight)), 0
+		}
+		if !strings.HasPrefix(rest, litHead) {
+			t.Fatalf("the gauge does not open with its colour: %q", rest)
+		}
+		rest = rest[len(litHead):]
 		stop := strings.Index(rest, "\x1b[0m")
 		if stop < 0 {
-			t.Fatalf("the drain band has no terminator: %q", out)
+			t.Fatalf("the gauge has no end: %q", rest)
 		}
-		return row, cells.Cells(rest[:stop])
+		lit = cells.Cells(rest[:stop])
+		rest = rest[stop:]
+		if n := len(dimHead); strings.HasPrefix(rest, dimHead) {
+			rest = rest[n:]
+			stop := strings.Index(rest, "\x1b[0m")
+			if stop < 0 {
+				t.Fatalf("the gauge track has no terminator: %q", rest)
+			}
+			dim = cells.Cells(rest[:stop])
+		}
+		return row, lit, dim
 	}
-	t.Fatalf("no drain band in %q", out)
-	return 0, 0
+	t.Fatalf("no gauge in %q", out)
+	return 0, 0, 0
 }
 
-// A fresh toast drains its whole band, and the band is one row above the top
-// border, as wide as the box.
-func TestDrawToastsBandStartsFullAboveBorder(t *testing.T) {
+// A fresh toast colours its whole gauge, and the gauge is the bottom border: the
+// track spans the interior, so the fraction is readable at any width.
+func TestDrawToastsGaugeStartsFull(t *testing.T) {
 	t.Parallel()
 	th := theme.DefaultTheme()
-	g := th.Glyphs
 	snap := &wire.Snapshot{Cols: 40, Rows: 9}
 	tui := &tui{}
 	tui.notifyEntry(box.Entry{Key: "notify/demo", State: box.StateDone, Msg: "gate green"})
 	var b bytes.Buffer
 	drawToasts(&b, th, snap, tui.toasts)
 	out := b.String()
-	boxWidth := max(cells.Cells("notify/demo"), cells.Cells("gate green"))
-	row, fill := bandFill(t, out, th.States["done"].Colour.BG())
-	if fill != boxWidth+2 {
-		t.Fatalf("band fills %d cells, want the whole box %d wide", fill, boxWidth+2)
+	boxWidth := newToastBox(th, tui.toasts[0], snap.Cols).width
+	row, lit, dim := gaugeRuns(t, out, th.States["done"].Colour.FG(), th.States["done"].Colour.FG(), dimBorder)
+	if lit != boxWidth || dim != 0 {
+		t.Fatalf("gauge = %d lit, %d dim, want the whole track of %d lit", lit, dim, boxWidth)
 	}
-	// The top border sits on the row under the band, at the same column.
-	top := row + 1
-	head := "\x1b[" + strconv.Itoa(top) + ";" + strconv.Itoa(snap.Cols-boxWidth-1) + "H\x1b[0m" +
-		tintBG(th, "done") + th.States["done"].Colour.FG() + g.BorderTopLeft
-	if !strings.Contains(out, head) {
-		t.Fatalf("the top border is not under the band: %q", out)
+	// The gauge is the row under the message, and the newest box ends on the row
+	// just above the bar.
+	textRow, _ := toastRow(t, out, "gate green")
+	if row != textRow+1 {
+		t.Fatalf("gauge row = %d, want the row under the message %d", row, textRow+1)
+	}
+	if row != snap.Rows-1 {
+		t.Fatalf("the newest gauge row = %d, want %d", row, snap.Rows-1)
 	}
 }
 
-// A toast half through its life drains half its band, from the right: the left
-// cells keep the colour and the rest falls back to the body's ground.
-func TestDrawToastsBandDrainsFromTheRight(t *testing.T) {
+// A toast half through its life drains half its gauge, from the right: the left
+// cells keep the state's colour and the rest falls back to the border's.
+func TestDrawToastsGaugeDrainsFromTheRight(t *testing.T) {
 	t.Parallel()
 	th := theme.DefaultTheme()
 	snap := &wire.Snapshot{Cols: 40, Rows: 9}
 	full := newToastBox(th, toast{text: "saved 3 files", left: 1}, snap.Cols)
 	half := newToastBox(th, toast{text: "saved 3 files", left: 0.5}, snap.Cols)
-	if got, want := full.filled(), half.width+2; got != want {
-		t.Fatalf("a fresh band fills %d cells, want %d", got, want)
+	if got, want := full.filled(), full.width; got != want {
+		t.Fatalf("a fresh gauge colours %d cells, want %d", got, want)
 	}
-	if got, want := half.filled(), int(math.Round(0.5*float64(half.width+2))); got != want {
-		t.Fatalf("a half-drained band fills %d cells, want %d", got, want)
+	if got, want := half.filled(), int(math.Round(0.5*float64(half.width))); got != want {
+		t.Fatalf("a half-drained gauge colours %d cells, want %d", got, want)
 	}
-	// One cell of colour at the very end of the life, so the band never blinks
+	// One cell of colour at the very end of the life, so the gauge never blinks
 	// out before the box does.
 	if got := (toastBox{width: 20, left: 0.001}).filled(); got != 1 {
-		t.Fatalf("a nearly spent band fills %d cells, want 1", got)
+		t.Fatalf("a nearly spent gauge colours %d cells, want 1", got)
 	}
 	if got := (toastBox{width: 20, left: 0}).filled(); got != 0 {
-		t.Fatalf("a spent band fills %d cells, want none", got)
+		t.Fatalf("a spent gauge colours %d cells, want none", got)
 	}
+	// A toast with a state has two gauge colours, so the drawn split is
+	// readable: the life left, then the spent track.
 	var b bytes.Buffer
-	drawToasts(&b, th, snap, []toast{{text: "saved 3 files", left: 0.5}})
-	out := b.String()
-	_, fill := bandFill(t, out, th.Palette.RailDim.BG())
-	if fill != half.filled() {
-		t.Fatalf("the drawn band fills %d cells, want %d", fill, half.filled())
+	drawToasts(&b, th, snap, []toast{{text: "gate green", state: "done", left: 0.5}})
+	drawn := newToastBox(th, toast{text: "gate green", state: "done", left: 0.5}, snap.Cols)
+	_, lit, dim := gaugeRuns(t, b.String(), th.States["done"].Colour.FG(), th.States["done"].Colour.FG(), dimBorder)
+	if lit != drawn.filled() {
+		t.Fatalf("the drawn gauge colours %d cells, want %d", lit, drawn.filled())
+	}
+	if lit+dim != drawn.width {
+		t.Fatalf("gauge = %d lit, %d dim, want the whole track of %d", lit, dim, drawn.width)
 	}
 }
 
-// A plain toast carries the neutral float ground and a dim band, so a client
-// message keeps a quiet box.
-func TestDrawToastsPlainBandAndBodyAreNeutral(t *testing.T) {
+// Every toast sits on the float ground, whatever its state: a stack of three is
+// three quiet panels, and the state's colour stays in the border and the gauge.
+func TestDrawToastsSitOnOneGround(t *testing.T) {
 	t.Parallel()
 	th := theme.DefaultTheme()
-	snap := &wire.Snapshot{Cols: 40, Rows: 8}
+	snap := &wire.Snapshot{Cols: 40, Rows: 12}
+	tui := &tui{}
+	tui.notify("copied 5 chars")
+	tui.notifyEntry(box.Entry{Key: "notify/demo", State: box.StateBlocked, Msg: "waiting on tests"})
+	tui.notifyEntry(box.Entry{Key: "notify/demo", State: box.StateDone, Msg: "gate green"})
 	var b bytes.Buffer
-	drawToasts(&b, th, snap, []toast{{text: "copied 5 chars", left: 1}})
+	drawToasts(&b, th, snap, tui.toasts)
 	out := b.String()
-	if _, fill := bandFill(t, out, th.Palette.RailDim.BG()); fill != cells.Cells("copied 5 chars")+2 {
-		t.Fatalf("the plain band fills %d cells, want the whole box", fill)
+	// Every row of every box opens with the panel ground, and no state colour
+	// reaches a background: the tint is gone.
+	for _, m := range cursorAt.FindAllStringSubmatchIndex(out, -1) {
+		if !strings.HasPrefix(out[m[1]:], "\x1b[0m"+panelBG) {
+			t.Fatalf("a box row does not sit on the panel ground: %q", out[m[1]:])
+		}
 	}
-	if !strings.Contains(out, "\x1b[0m"+plainBG+dimBorder+th.Glyphs.BorderVertical) {
-		t.Fatalf("the plain box does not sit on the float ground: %q", out)
-	}
-	b.Reset()
-	drawToasts(&b, th, snap, []toast{{text: "gate green", state: "done", left: 1}})
-	if out := b.String(); !strings.Contains(out, "\x1b[0m"+tintBG(th, "done")) {
-		t.Fatalf("a notify box does not carry its state's tint: %q", out)
+	for state := range th.States {
+		if bg := th.States[state].Colour.BG(); strings.Contains(out, bg) {
+			t.Fatalf("the %s toast paints a tinted body: %q", state, out)
+		}
 	}
 }
 
@@ -722,28 +782,5 @@ func TestExpireToastsDrainsBandByDrip(t *testing.T) {
 	tui.expireToasts(raised.Add(toastLifetime/2 + toastDrip))
 	if !tui.dirty {
 		t.Fatal("the next drip marked nothing dirty")
-	}
-}
-
-// The dim topic row and the bright message keep WCAG AA on every tint a toast
-// body paints, so the state's colour never costs the text its contrast.
-func TestToastContrast(t *testing.T) {
-	t.Parallel()
-	th := theme.DefaultTheme()
-	grounds := map[string]theme.RGB{
-		"plain": th.Palette.RailFocusBG,
-	}
-	for state := range th.States {
-		grounds[state] = blend(th.Palette.RailBG, th.States[state].Colour, toastTint)
-	}
-	for name, bg := range grounds {
-		for fgName, fg := range map[string]theme.RGB{
-			"text": th.Palette.RailText,
-			"dim":  th.Palette.RailDim,
-		} {
-			if r := theme.Contrast(fg, bg); r < 4.5 {
-				t.Fatalf("%s on the %s toast = %.2f:1, want >= 4.5:1", fgName, name, r)
-			}
-		}
 	}
 }
