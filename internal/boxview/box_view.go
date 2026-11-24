@@ -97,12 +97,23 @@ func (b *BoxView) SetKeymap(km *keymap.Config) {
 	b.Float.Hint = b.hint()
 }
 
+// boxViewMaxRows is the tallest the message box stands, whatever the screen
+// offers: a log reads in a box, not over the whole desk.
+const boxViewMaxRows = 22
+
 // BoxViewRect is where the float sits: centred over the pane area, one cell
-// clear of the rail, at most 96 columns and 22 rows. The height follows n, the
-// larger of the entry count and the watch count, so a short list reads in a
-// short box and a list longer than the cap scrolls. A parked watch exists
-// before the first entry, so the watcher page sizes itself from n too.
+// clear of the rail, at most 96 columns and boxViewMaxRows rows. The height
+// follows n, the larger of the entry count and the watch count, so a short list
+// reads in a short box and a list longer than the cap scrolls. A parked watch
+// exists before the first entry, so the watcher page sizes itself from n too.
 func BoxViewRect(snap *wire.Snapshot, n int) layout.Rect {
+	return BoxViewRectHeight(snap, n, boxViewMaxRows)
+}
+
+// BoxViewRectHeight is BoxViewRect with a height cap the caller names, so a view
+// with a floor of its own can stand taller than the message box: the screen
+// still keeps six rows and the width stays at 96 columns.
+func BoxViewRectHeight(snap *wire.Snapshot, n, maxRows int) layout.Rect {
 	left := snap.Rail
 	if left < 0 {
 		left = 0
@@ -118,8 +129,8 @@ func BoxViewRect(snap *wire.Snapshot, n int) layout.Rect {
 		w = snap.Cols - 2
 	}
 	h := snap.Rows - 6
-	if h > 22 {
-		h = 22
+	if h > maxRows {
+		h = maxRows
 	}
 	if n < h {
 		h = n

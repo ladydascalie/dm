@@ -272,7 +272,9 @@ Three surfaces draw an ask from that one store.
   questions, `enter` sends once every question is answered, and `esc` declines.
   A description or preview taller than its pane scrolls with `J`/`K`, and the
   row the pane elides to counts the rows it hides above and below the window,
-  so nothing in an option's detail is unreachable.
+  so nothing in an option's detail is unreachable. The box reserves at least
+  `ask-rows` interior rows, and the detail pane fills whatever that floor
+  leaves.
   A pane that is not focused keeps only a `?` badge on its rail row, so a
   question in another window cannot take the desk. The float closes on the next
   snapshot once the ask is answered or gone. A refused answer keeps it open
@@ -392,6 +394,7 @@ optional and each one overrides its built-in value.
 | `shelf-size` | an integer from 20 to 100 | `80` | Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept. |
 | `float-shadow` | `"off"` or `"on"` | `"off"` | Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane. |
 | `dashboard-preview` | an integer from 0 to 100 | `40` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
+| `ask-rows` | an integer from 8 to 64 | `30` | Set the fewest interior rows the ask float reserves. Its detail pane fills the rows the floor leaves, so a taller box reads more of a long description or preview before it elides. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |

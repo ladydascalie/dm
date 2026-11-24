@@ -88,6 +88,10 @@ type Config struct {
 	// separates the default from a config that never named the node.
 	paletteRows    int
 	paletteRowsSet bool
+	// askRows is the fewest interior rows the ask float reserves. askRowsSet
+	// separates the default from a config that never named the node.
+	askRows    int
+	askRowsSet bool
 	// dashFull is the dashboard's shape: true takes the whole screen, false
 	// centres the palette over the panes. dashFullSet separates the default
 	// from a config that never named the node.
@@ -229,6 +233,22 @@ func (c *Config) PaletteRows() int {
 		return 1
 	}
 	return c.paletteRows
+}
+
+// AskRows returns the fewest interior rows the ask float reserves, clamped to
+// the range the parser accepts. A config without the node reports the built-in
+// default.
+func (c *Config) AskRows() int {
+	if c == nil || !c.askRowsSet {
+		return defaultAskRows
+	}
+	if c.askRows < minAskRows {
+		return minAskRows
+	}
+	if c.askRows > maxAskRows {
+		return maxAskRows
+	}
+	return c.askRows
 }
 
 func (c *Config) DashboardPreview() int {

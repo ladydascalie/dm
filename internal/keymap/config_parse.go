@@ -189,6 +189,24 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.paletteRows = n
 			cfg.paletteRowsSet = true
 			i += 2
+		case "ask-rows":
+			if cfg.askRowsSet {
+				return fmt.Errorf("line %d: duplicate ask-rows node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) {
+				return fmt.Errorf("line %d: expected a number after ask-rows", t.Line)
+			}
+			v := toks[i+1]
+			n, err := strconv.Atoi(v.Value)
+			if err != nil {
+				return fmt.Errorf("line %d: ask-rows must be a number, got %q", v.Line, v.Value)
+			}
+			if n < minAskRows || n > maxAskRows {
+				return fmt.Errorf("line %d: ask-rows must be %d to %d, got %d", v.Line, minAskRows, maxAskRows, n)
+			}
+			cfg.askRows = n
+			cfg.askRowsSet = true
+			i += 2
 
 		case "dashboard-layout":
 			if cfg.dashFullSet {
@@ -859,6 +877,15 @@ const (
 // defaultPaletteRows is the built-in command palette row cap.
 const defaultPaletteRows = 10
 
+// The ask float's interior floor: ask-rows rows, never under minAskRows and
+// never past maxAskRows. The detail pane fills the rows the floor leaves, so a
+// taller box reads more of a long description or preview before it elides.
+const (
+	defaultAskRows = 30
+	minAskRows     = 8
+	maxAskRows     = 64
+)
+
 // defaultDiffCommand is the built-in command the dashboard diff key runs in a
 // floating pane.
 const defaultDiffCommand = "hunk diff"
@@ -988,6 +1015,9 @@ glyphs "auto"
 dashboard-preview 40
 // The command palette shows at most this many entries before it scrolls.
 palette-rows 10
+// The ask float reserves at least this many interior rows. Its detail pane fills
+// the rows the floor leaves, so a taller box reads more of a long preview.
+ask-rows 30
 
 // The diff key runs this in a floating pane through sh -c, in the selected pane folder.
 diff-command "hunk diff"

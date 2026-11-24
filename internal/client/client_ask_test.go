@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dm/internal/ask"
+	"dm/internal/keymap"
 	"dm/internal/switcher"
 	"dm/internal/theme"
 	"dm/internal/vt"
@@ -814,9 +815,13 @@ func TestAskFloatOneSizeForTheWholeAsk(t *testing.T) {
 		}},
 	}
 	tui, _ := askSizedTUI(t, questions, 140)
+	// A screen tall enough for the floor, so the screen is not the cap under
+	// test here.
+	tui.snap.Rows = 60
+	tui.askFit()
 	h := tui.ask.float.Rect.H
-	if h < askMinRows {
-		t.Fatalf("float height = %d, want at least the reserved %d", h, askMinRows)
+	if floor := tui.km().AskRows(); h < floor {
+		t.Fatalf("float height = %d, want at least the reserved %d", h, floor)
 	}
 	check := func(what string) {
 		t.Helper()
@@ -968,33 +973,98 @@ func TestAskFloatLongListKeepsTheFooter(t *testing.T) {
 	}
 }
 
-// TestAskFloatHelpPaneElidesALongPreview: the help pane grows at most
-// askHelpExtra rows past the list, and a preview that does not fit ends on the
-// count of rows it hid instead of pushing the footer off the screen.
-func TestAskFloatHelpPaneElidesALongPreview(t *testing.T) {
+// TestAskFloatHelpPaneFillsTheFloor: the box reserves the configured floor and
+// the help pane takes every row it leaves, so a long preview reads in the tall
+// box instead of sitting beside blank rows. A preview that still does not fit
+// ends on the count of rows it hid.
+func TestAskFloatHelpPaneFillsTheFloor(t *testing.T) {
 	t.Parallel()
-	long := strings.Join([]string{"line 01", "line 02", "line 03", "line 04", "line 05",
-		"line 06", "line 07", "line 08", "line 09", "line 10", "line 11", "line 12"}, "\n")
 	tui, _ := askSizedTUI(t, []wire.AskQuestion{{
 		Question: "Pick one", Header: "Pick",
 		Options: []wire.AskOption{
-			{Label: "alpha", Description: "the first", Preview: long},
+			{Label: "alpha", Description: "the first", Preview: askLongPreview(60)},
 			{Label: "beta"},
 		},
 	}}, 140)
+	// A screen tall enough for the floor, so the floor is what gets drawn.
+	tui.snap.Rows = 60
+	tui.askFit()
 	v := tui.ask
-	sh := v.shape(v.float.Rect.W)
-	list := len(v.listLines(theme.DefaultTheme(), sh.leftW, false))
-	help := v.helpLines(theme.DefaultTheme(), sh.rightW, list+askHelpExtra)
-	if len(help) != list+askHelpExtra {
-		t.Fatalf("the help pane carries %d rows, want %d", len(help), list+askHelpExtra)
+	th := theme.DefaultTheme()
+	floor := v.floor()
+	if got := v.float.Rect.H; got != floor {
+		t.Fatalf("float height = %d, want the floor %d", got, floor)
+	}
+	w := v.float.Rect.W
+	room := floor - len(v.headLines(th, w)) - len(v.questionLines(th, w)) - len(v.tailLines(th, w))
+	if room <= len(v.listLines(th, v.shape(w).leftW, false)) {
+		t.Fatalf("the floor leaves %d rows for the detail, no more than the list", room)
+	}
+	if help := v.helpLines(th, v.shape(w).rightW, room); len(help) != room {
+		t.Fatalf("the help pane carries %d rows, want the %d the floor leaves", len(help), room)
 	}
 	text := askScreenText(t, v, tui.snap.Cols, tui.snap.Rows)
 	if !strings.Contains(text, "more lines") {
 		t.Fatalf("the help pane hides the preview without a count:\n%s", text)
 	}
-	if strings.Contains(text, "line 12") {
-		t.Fatalf("the help pane drew past its budget:\n%s", text)
+	if strings.Contains(text, "line 60") {
+		t.Fatalf("the help pane drew past the floor:\n%s", text)
+	}
+}
+
+// TestAskFloatOptionsOutrankTheFloor: the floor is a floor, not a cap. A
+// question with more options than the floor has rows grows the box and keeps
+// every option row, so the detail's budget never cuts the list.
+func TestAskFloatOptionsOutrankTheFloor(t *testing.T) {
+	t.Parallel()
+	var options []wire.AskOption
+	for i := 1; i <= 26; i++ {
+		options = append(options, wire.AskOption{Label: fmt.Sprintf("option %02d", i)})
+	}
+	tui, _ := askTUI(t, []wire.AskQuestion{{
+		Question: "Which one?", Header: "Pick", Options: options,
+	}})
+	tui.snap.Cols, tui.snap.Rows = 140, 60
+	tui.askFit()
+	floor := tui.ask.floor()
+	if got := tui.ask.float.Rect.H; got <= floor {
+		t.Fatalf("float height = %d, want more than the floor %d for 26 options", got, floor)
+	}
+	if got := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows); !strings.Contains(got, "option 26") {
+		t.Fatalf("the last option is not on the first screen:\n%s", got)
+	}
+}
+
+// TestAskFloatRowsFollowTheConfig: ask-rows sets the floor, and a taller floor
+// shows more of a long preview, so the box's height is the operator's choice.
+func TestAskFloatRowsFollowTheConfig(t *testing.T) {
+	t.Parallel()
+	questions := []wire.AskQuestion{{
+		Question: "Pick one", Header: "Pick",
+		Options: []wire.AskOption{{Label: "alpha", Preview: askLongPreview(60)}},
+	}}
+	seen := func(src string) (height int, text string) {
+		tui, _ := askSizedTUI(t, questions, 140)
+		// A tall screen, so the box shows the floor rather than the screen's.
+		tui.snap.Rows = 60
+		tui.askFit()
+		cfg, err := keymap.ParseConfig(src)
+		if err != nil {
+			t.Fatalf("ParseConfig: %v", err)
+		}
+		tui.keymap = cfg
+		// A reload lands on the open float through the next snapshot.
+		tui.syncAsk()
+		return tui.ask.float.Rect.H, askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	}
+	shortH, shortText := seen(`ask-rows 10`)
+	tallH, tallText := seen(`ask-rows 30`)
+	if shortH != 10 || tallH != 30 {
+		t.Fatalf("float heights = %d and %d, want 10 and 30", shortH, tallH)
+	}
+	count := func(s string) int { return strings.Count(s, "line ") }
+	if count(tallText) <= count(shortText) {
+		t.Fatalf("the taller box shows %d preview rows, the shorter %d", count(tallText), count(shortText))
 	}
 }
 
@@ -1070,7 +1140,7 @@ func TestAskFloatDetailScrollsTheNarrowPreview(t *testing.T) {
 	t.Parallel()
 	tui, _ := askSizedTUI(t, []wire.AskQuestion{{
 		Question: "Pick one", Header: "Pick",
-		Options: []wire.AskOption{{Label: "alpha", Preview: askLongPreview(12)}},
+		Options: []wire.AskOption{{Label: "alpha", Preview: askLongPreview(40)}},
 	}}, 100)
 	v := tui.ask
 	if sh := v.shape(v.float.Rect.W); sh.rightW != 0 {
@@ -1088,16 +1158,16 @@ func TestAskFloatDetailScrollsTheNarrowPreview(t *testing.T) {
 	if v.float.Rect != start {
 		t.Fatalf("the float resized under the scroll: %+v, want %+v", v.float.Rect, start)
 	}
-	for range 20 {
+	for range 40 {
 		feed(tui, "J")
 	}
-	if got := text(); !strings.Contains(got, "line 12") {
+	if got := text(); !strings.Contains(got, "line 40") {
 		t.Fatalf("the last row of the preview is not reachable:\n%s", got)
 	}
 	if v.float.Rect != start {
 		t.Fatalf("the float resized at the end of the scroll: %+v, want %+v", v.float.Rect, start)
 	}
-	for range 20 {
+	for range 40 {
 		feed(tui, "K")
 	}
 	if got := text(); !strings.Contains(got, "line 01") {

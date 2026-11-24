@@ -10,12 +10,13 @@ package client
 // The keys ride the bottom border as one hint bar, so the interior spends no row
 // on them. A wide float splits the
 // middle: the options on the left, one row each, and a help pane on the right
-// holding the hovered option's name, description and preview. The pane grows at
-// most askHelpExtra rows past the list, so a long preview elides instead of
-// filling the terminal. A preview past that room scrolls in place with J/K, so
-// the rows the pane hides are one keypress away instead of lost. Below
-// askWideMin the help content folds under the list and the descriptions sit
-// under their options.
+// holding the hovered option's name, description and preview. The box reserves
+// at least the config's ask-rows interior rows, and the help pane fills the rows
+// that floor leaves, so a tall box shows a long preview rather than blank
+// columns. What still does not fit scrolls in place with J/K, so the rows the
+// pane elides to a count are one keypress away instead of lost. Below askWideMin
+// the help content folds under the list and the descriptions sit under their
+// options.
 //
 // A note rides the answer item the question already sends (ask.Item.Notes), so
 // the float offers no store of its own: the draft is typed in the client's
@@ -36,6 +37,7 @@ import (
 	"dm/internal/boxview"
 	"dm/internal/cells"
 	"dm/internal/hintbar"
+	"dm/internal/keymap"
 	"dm/internal/layout"
 	"dm/internal/panel"
 	"dm/internal/segment"
@@ -65,15 +67,9 @@ const (
 	// and never squeezes the options below askQuestionMin.
 	askContextMin  = 30
 	askQuestionMin = 24
-	// askHelpExtra is how many rows taller than the option list the help pane
-	// may be. A long preview elides there instead of filling the terminal.
-	askHelpExtra = 2
-	// askMinRows is the interior the float reserves whatever the ask holds, so
-	// the box keeps one size from the first question to the last. The keys
-	// ride the border now, so the row the footer took is the content's.
-	askMinRows = 12
-	// askPreviewMax caps the narrow layout's preview block. A longer preview
-	// ends on a count of the rows it hid.
+	// askPreviewMax is the narrow layout's preview block at its smallest. The
+	// float's floor can give it more rows; a longer preview ends on a count of
+	// the rows it hid.
 	askPreviewMax = 5
 )
 
@@ -106,6 +102,9 @@ type askView struct {
 	top     int
 	helpTop int
 	note    string
+	// minRows is the fewest interior rows the float reserves, from the
+	// config's ask-rows. The detail fills whatever it leaves.
+	minRows int
 	// pending is true once an answer is on the wire and no snapshot has
 	// closed the ask yet, so a listed ask means the daemon took it.
 	pending bool
@@ -190,6 +189,7 @@ func (t *tui) syncAsk() {
 		return
 	}
 	t.ask.ask = *a
+	t.ask.minRows = t.km().AskRows()
 	t.ask.fit(t.snap, t.theme())
 	t.dirty = true
 }
@@ -210,7 +210,7 @@ func (t *tui) overlayBusy() bool {
 
 // openAskFloat puts the float on the desk and gives it the keyboard.
 func (t *tui) openAskFloat(a *wire.Ask) {
-	v := &askView{id: a.ID, pane: a.Pane, ask: *a, readOnly: t.readOnly}
+	v := &askView{id: a.ID, pane: a.Pane, ask: *a, readOnly: t.readOnly, minRows: t.km().AskRows()}
 	v.reset()
 	v.float = &panel.FloatingPane{ID: askFloatID, Active: true}
 	v.float.Paint = func(b *bytes.Buffer, r layout.Rect) { v.paint(b, r, t.theme()) }
@@ -797,12 +797,14 @@ func (t *tui) askFit() {
 // content decides the height, so a short question reads in a short box and a
 // tall one is clamped by the layout that draws it.
 func (v *askView) fit(snap *wire.Snapshot, th theme.Theme) {
-	roomy := boxview.BoxViewRect(snap, 1<<8)
-	r := boxview.BoxViewRect(snap, v.needHeight(th, roomy.W))
+	// The detail reserves its own floor, so the box may stand taller than the
+	// message box's cap: the screen keeps six rows, which is the only limit here.
+	roomy := boxview.BoxViewRectHeight(snap, 1<<8, snap.Rows)
+	r := boxview.BoxViewRectHeight(snap, v.needHeight(th, roomy.W), snap.Rows)
 	if r.W != roomy.W {
 		// A narrower box wraps more, so the height is recounted at the width
 		// the placement actually gives.
-		r = boxview.BoxViewRect(snap, v.needHeight(th, r.W))
+		r = boxview.BoxViewRectHeight(snap, v.needHeight(th, r.W), snap.Rows)
 	}
 	v.float.Rect = r
 	v.float.Title = v.title()
@@ -1237,12 +1239,30 @@ func (v *askView) clampHelpTop(max int) int {
 	return v.helpTop
 }
 
+// previewRows is how many preview rows the narrow block may show: askPreviewMax,
+// or more when the float's floor leaves the room, so a taller box reads more of a
+// long preview before it elides.
+func (v *askView) previewRows(th theme.Theme, width int) int {
+	used := len(v.headLines(th, width)) + len(v.questionLines(th, width)) +
+		len(v.listLines(th, width, true)) + len(v.tailLines(th, width))
+	// The rule above the block and the count row under it take their own rows.
+	room := v.floor() - used - 2
+	if room < askPreviewMax {
+		return askPreviewMax
+	}
+	return room
+}
+
 // previewLines is the narrow layout's preview block: the rule above it and the
-// hovered option's preview under it. An option with no preview has no block, so
-// a narrow float does not spend rows saying so. A preview past askPreviewMax
-// rows scrolls under the same offset as the wide pane, and its last row counts
-// the rows the window hides, so the block keeps one height while it scrolls.
-func (v *askView) previewLines(th theme.Theme, width int) []askLine {
+// hovered option's preview under it, at most max rows of preview. An option with
+// no preview has no block, so a narrow float does not spend rows saying so. A
+// preview past max rows scrolls under the same offset as the wide pane, and its
+// last row counts the rows the window hides, so the block keeps one height while
+// it scrolls.
+func (v *askView) previewLines(th theme.Theme, width, max int) []askLine {
+	if max < 1 {
+		max = 1
+	}
 	o, ok := v.hovered()
 	if !ok || o.Preview == "" {
 		v.helpTop = 0
@@ -1252,23 +1272,23 @@ func (v *askView) previewLines(th theme.Theme, width int) []askLine {
 	rows := askWrap(o.Preview, width-1)
 	out := []askLine{v.ruleRow(th, width)}
 	top := 0
-	if len(rows) <= askPreviewMax {
+	if len(rows) <= max {
 		v.helpTop = 0
 	} else {
-		top = v.clampHelpTop(len(rows) - askPreviewMax)
+		top = v.clampHelpTop(len(rows) - max)
 	}
-	for i := top; i < len(rows) && i < top+askPreviewMax; i++ {
+	for i := top; i < len(rows) && i < top+max; i++ {
 		out = append(out, askLine{
 			segs:   []segment.Seg{{Text: " " + rows[i], FG: p.RailDim, BG: p.RailBG}},
 			choice: -1,
 			bg:     p.RailBG,
 		})
 	}
-	below := len(rows) - top - askPreviewMax
+	below := len(rows) - top - max
 	if below < 0 {
 		below = 0
 	}
-	if len(rows) > askPreviewMax {
+	if len(rows) > max {
 		out = append(out, askLine{
 			segs:   []segment.Seg{{Text: helpMore(th, below, top), FG: p.RailDim, BG: p.RailBG}},
 			choice: -1,
@@ -1337,28 +1357,36 @@ func (v *askView) height(th theme.Theme, width int) int {
 	}
 	sh := v.shape(width)
 	n := len(v.headLines(th, width)) + len(v.questionLines(th, width))
+	tail := len(v.tailLines(th, width))
 	list := len(v.listLines(th, sh.leftW, sh.rightW == 0))
+	// room is what the floor leaves the columns once the bands, the question
+	// and the closing rule have their rows. The detail may take all of it, so a
+	// taller box reads more of a long description or preview before it elides.
+	room := v.floor() - n - tail
+	if room < list {
+		room = list
+	}
 	if sh.rightW > 0 {
 		help := len(v.helpLines(th, sh.rightW, 0))
-		if help > list+askHelpExtra {
-			help = list + askHelpExtra
+		if help > room {
+			help = room
 		}
 		if help > list {
 			list = help
 		}
 	} else {
-		list += len(v.previewLines(th, width))
+		list += len(v.previewLines(th, width, v.previewRows(th, width)))
 	}
-	return n + list + len(v.tailLines(th, width))
+	return n + list + tail
 }
 
 // needHeight is the interior the float reserves for the whole ask: the tallest
-// question, at its tallest hovered option, and never below askMinRows. The box
-// is therefore one size from the first question to the last, and a cursor move
-// or a tab never resizes it.
+// question, at its tallest hovered option, and never below the configured floor.
+// The box is therefore one size from the first question to the last, and a
+// cursor move or a tab never resizes it.
 func (v *askView) needHeight(th theme.Theme, width int) int {
 	if len(v.ask.Questions) == 0 {
-		return askMinRows
+		return v.floor()
 	}
 	savedQ, savedSel := v.q, append([]int(nil), v.sel...)
 	savedTop := v.helpTop
@@ -1376,10 +1404,19 @@ func (v *askView) needHeight(th theme.Theme, width int) int {
 			}
 		}
 	}
-	if n < askMinRows {
-		n = askMinRows
+	if n < v.floor() {
+		n = v.floor()
 	}
 	return n
+}
+
+// floor is the fewest interior rows the float reserves: the config's ask-rows,
+// or the built-in default when the view was made without one.
+func (v *askView) floor() int {
+	if v.minRows > 0 {
+		return v.minRows
+	}
+	return (*keymap.Config)(nil).AskRows()
 }
 
 // paint draws the box: the bands and the question from the top, the closing rule
@@ -1428,7 +1465,13 @@ func (v *askView) paint(b *bytes.Buffer, r layout.Rect, th theme.Theme) {
 // room the split leaves.
 func (v *askView) paintColumn(b *bytes.Buffer, r layout.Rect, th theme.Theme, y, split int, sh askShape) {
 	list := v.listLines(th, sh.leftW, true)
-	preview := v.previewLines(th, r.W)
+	// The block takes what the floor leaves and never more than the split has:
+	// a screen-clamped box shows fewer rows than the floor asked for.
+	max := v.previewRows(th, r.W)
+	if spare := split - len(list) - 2; max > spare {
+		max = spare
+	}
+	preview := v.previewLines(th, r.W, max)
 	avail := split - len(preview)
 	if avail < 0 {
 		avail = 0

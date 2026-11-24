@@ -662,6 +662,23 @@ func TestBoxViewEmptyNoteNamesTheFilter(t *testing.T) {
 	}
 }
 
+// TestBoxViewRectHeight: the caller's cap replaces the message box's own, and
+// the screen still keeps its six rows, so the ask float can reserve more rows
+// than a log box without leaving the desk.
+func TestBoxViewRectHeight(t *testing.T) {
+	t.Parallel()
+	snap := &wire.Snapshot{Cols: 100, Rows: 60}
+	if got := BoxViewRect(snap, 40); got.H != boxViewMaxRows {
+		t.Fatalf("BoxViewRect height = %d, want the message box cap %d", got.H, boxViewMaxRows)
+	}
+	if got := BoxViewRectHeight(snap, 40, 40); got.H != 40 {
+		t.Fatalf("BoxViewRectHeight height = %d, want 40", got.H)
+	}
+	if got := BoxViewRectHeight(snap, 100, 100); got.H != snap.Rows-6 {
+		t.Fatalf("BoxViewRectHeight height = %d, want the screen less six rows", got.H)
+	}
+}
+
 // TestReaderRectFloor: a short list still gives the reader a full overlay, so
 // a body is not hidden behind a one-row window.
 func TestReaderRectFloor(t *testing.T) {

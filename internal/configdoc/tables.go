@@ -71,6 +71,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer.",
 	},
 	{
+		Name:    "ask-rows",
+		Value:   "an integer from 8 to 64",
+		Default: "30",
+		Desc:    "Set the fewest interior rows the ask float reserves. The detail pane fills the rows the floor leaves, so a taller box reads more of a long description or preview before it elides.",
+	},
+	{
 		Name:    "diff-command",
 		Value:   "a quoted shell command",
 		Default: `"hunk diff"`,
@@ -193,7 +199,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{
