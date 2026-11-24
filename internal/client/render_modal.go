@@ -277,6 +277,11 @@ func helpBoxHint(cfg *keymap.Config) string {
 	if len(shelf) > 0 {
 		hints = append(hints, ui.Hint{Keys: shelf, Label: "shelf"})
 	}
+	// The ask toggle rides here too: one more table row pushes the last
+	// section off a 100x40 screen.
+	if k := cfg.Key("main", "toggle-ask"); k != "" {
+		hints = append(hints, ui.Hint{Keys: []string{k}, Label: "ask"})
+	}
 	return ui.Hints(hints)
 }
 

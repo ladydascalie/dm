@@ -922,6 +922,10 @@ func (t *tui) runAction(name string) {
 		// The same float, opened on the notify branch. The action name stays,
 		// so the N key and existing configs keep working.
 		openBoxView(t, box.NotifyPrefix)
+	case "toggle-ask":
+		// Puts the question float away so the pane takes the keys again, then
+		// brings it back with the picks it kept.
+		t.toggleAsk()
 	case "help":
 		openKeymapView(t)
 		t.disarm()

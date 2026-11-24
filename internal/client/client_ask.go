@@ -5,11 +5,14 @@ package client
 // list rides every snapshot, so the client paints what session state already
 // carries and writes nothing back but the reader's answer.
 //
-// One question at a time, with a tab strip across the questions. A wide float
-// carries two panes inside its border: the question and its options on the
-// left, the hovered option's label, description and preview on the right. A
-// float narrower than askWideMin keeps one column and puts the preview under
-// its option, so a narrow terminal is no worse than it was.
+// The box reads top to bottom as bands and rules: a filled band carrying the
+// tabs and the count, a rule, the question, a rule, the list, a rule, then the
+// keys as chips on a footer row inside the border. A wide float splits the
+// middle: the options on the left, one row each, and a help pane on the right
+// holding the hovered option's name, description and preview. The pane grows at
+// most askHelpExtra rows past the list, so a long preview elides instead of
+// filling the terminal. Below askWideMin the help content folds under the list
+// and the descriptions sit under their options.
 //
 // A note rides the answer item the question already sends (ask.Item.Notes), so
 // the float offers no store of its own: the draft is typed in the client's
@@ -61,6 +64,12 @@ const (
 	// askHelpExtra is how many rows taller than the option list the help pane
 	// may be. A long preview elides there instead of filling the terminal.
 	askHelpExtra = 2
+	// askMinRows is the interior the float reserves whatever the ask holds, so
+	// the box keeps one size from the first question to the last.
+	askMinRows = 13
+	// askPreviewMax caps the narrow layout's preview block. A longer preview
+	// ends on a count of the rows it hid.
+	askPreviewMax = 5
 )
 
 // askView is the open ask float: the listed ask it shows, the cursor and the
@@ -146,7 +155,7 @@ func (t *tui) syncAsk() {
 		a = nil
 	}
 	if t.ask == nil {
-		if a == nil || a.ID == t.askClosed {
+		if a == nil || a.ID == t.askClosed || a.ID == t.askHidden {
 			t.askDeferred = false
 			return
 		}
@@ -165,6 +174,12 @@ func (t *tui) syncAsk() {
 		// client already answered still carries no answer in the snapshot, so
 		// its presence after a send is the daemon's verdict.
 		t.closeAskFloat()
+		return
+	}
+	if a.ID == t.askHidden {
+		// The reader put the question out of the way. The view keeps its
+		// picks and its cursor, so the toggle brings the same form back.
+		t.ask.ask = *a
 		return
 	}
 	t.ask.ask = *a
@@ -213,6 +228,9 @@ func (t *tui) closeAskFloat() {
 		t.closeRename()
 	}
 	t.RemoveFloatingPane(askFloatID)
+	if t.ask != nil && t.askHidden == t.ask.id {
+		t.askHidden = ""
+	}
 	t.ask = nil
 	t.askDeferred = false
 	t.mode = ""
@@ -222,6 +240,95 @@ func (t *tui) closeAskFloat() {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+}
+
+// barAskOf is the question the status strip pins: the focused pane's open ask
+// while its float is out of the way. The box is louder than any chip when it is
+// up, and the rail badge names an ask on another pane, so the strip carries the
+// one case neither covers.
+func (t *tui) barAskOf() barAsk {
+	if t.snap == nil {
+		return barAsk{}
+	}
+	if t.ask != nil && t.askHidden != t.ask.id {
+		return barAsk{}
+	}
+	a := askOnPane(t.snap, t.snap.Focus)
+	if a == nil || !onScreen(t.snap, a.Pane) {
+		return barAsk{}
+	}
+	index := 1
+	if t.ask != nil && t.ask.id == a.ID {
+		index = t.ask.q + 1
+	}
+	key := "A"
+	if km := t.km(); km != nil {
+		if k := km.Key("main", "toggle-ask"); k != "" {
+			key = k
+		}
+	}
+	return barAsk{pane: a.Pane, index: index, total: len(a.Questions), key: key}
+}
+
+// toggleAsk puts the question float away, or brings it back. Hiding keeps the
+// view, so the picks and the cursor survive, and leaves the desk to the reader:
+// the pane takes the keys again, so they can scroll back and reread what the
+// question is about. The pane keeps its rail badge while the ask is hidden.
+func (t *tui) toggleAsk() {
+	// A hidden view is still t.ask, so the hidden mark is what tells the two
+	// states apart.
+	if t.ask != nil && t.askHidden != t.ask.id {
+		t.hideAsk()
+		return
+	}
+	t.showAsk()
+}
+
+// hideAsk takes the float off the desk without dropping the ask. Nothing
+// reached the store when it appeared, so nothing has to be undone here.
+func (t *tui) hideAsk() {
+	if t.ask == nil {
+		return
+	}
+	t.askHidden = t.ask.id
+	t.RemoveFloatingPane(askFloatID)
+	t.askDeferred = false
+	t.mode = ""
+	// The key that hid it may still be arriving as one sequence: drop the
+	// buffer so it cannot leak a byte into the pane.
+	t.inbuf = nil
+	t.pending = false
+	t.dirty = true
+}
+
+// showAsk puts a hidden ask back, or opens the focused pane's ask when the
+// reader reaches for one that is not up. A settled ask never comes back.
+func (t *tui) showAsk() {
+	if t.snap == nil {
+		return
+	}
+	a := askOnPane(t.snap, t.snap.Focus)
+	if a == nil || a.ID == t.askClosed {
+		return
+	}
+	if !onScreen(t.snap, a.Pane) {
+		return
+	}
+	if t.ask != nil && t.ask.id == a.ID {
+		// The view survived the hide: put its float back and keep the picks.
+		t.askHidden = ""
+		t.ask.ask = *a
+		t.AddFloatingPane(t.ask.float)
+		t.mode = "ask"
+		t.armed = false
+		t.inbuf = nil
+		t.pending = false
+		t.ask.fit(t.snap, t.theme())
+		t.dirty = true
+		return
+	}
+	t.askHidden = ""
+	t.openAskFloat(a)
 }
 
 // reset sizes the per-question state to the ask's questions and clears every
@@ -469,6 +576,7 @@ func (t *tui) dismissAsk() {
 		return
 	}
 	t.askClosed = t.ask.id
+	t.askHidden = ""
 	t.closeAskFloat()
 }
 
@@ -519,6 +627,9 @@ func (t *tui) takeAskAnswer(m wire.Msg) {
 	}
 	v.pending = false
 	v.note = m.Error
+	if t.askHidden == v.id {
+		t.showAsk()
+	}
 	t.dirty = true
 }
 
@@ -609,6 +720,9 @@ func (t *tui) askKey() bool {
 	case 'N':
 		t.askNote()
 		return true
+	case 'A':
+		t.toggleAsk()
+		return true
 	case 'n':
 		t.askStepQuestion(1)
 	case 'p':
@@ -650,11 +764,11 @@ func (t *tui) askFit() {
 // tall one is clamped by the layout that draws it.
 func (v *askView) fit(snap *wire.Snapshot, th theme.Theme) {
 	roomy := boxview.BoxViewRect(snap, 1<<8)
-	r := boxview.BoxViewRect(snap, v.height(th, roomy.W))
+	r := boxview.BoxViewRect(snap, v.needHeight(th, roomy.W))
 	if r.W != roomy.W {
 		// A narrower box wraps more, so the height is recounted at the width
 		// the placement actually gives.
-		r = boxview.BoxViewRect(snap, v.height(th, r.W))
+		r = boxview.BoxViewRect(snap, v.needHeight(th, r.W))
 	}
 	v.float.Rect = r
 	v.float.Title = v.title()
@@ -714,12 +828,12 @@ type askLine struct {
 func (v *askView) headLines(th theme.Theme, width int) []askLine {
 	p := th.Palette
 	var out []askLine
-	multi := len(v.ask.Questions) > 1
-	if multi {
+	if len(v.ask.Questions) > 1 {
+		// The strip names every question, so the header band would only
+		// repeat the active one.
 		out = append(out, askLine{segs: v.tabRow(th, width), choice: -1, bg: p.RailFocusBG})
-	}
-	if q := v.question(); !multi || q.Header != "" {
-		out = append(out, askLine{segs: v.headBand(q.Header, width, th), choice: -1, bg: p.RailFocusBG})
+	} else {
+		out = append(out, askLine{segs: v.headBand(v.question().Header, width, th), choice: -1, bg: p.RailFocusBG})
 	}
 	return append(out, v.ruleRow(th, width))
 }
@@ -1020,8 +1134,17 @@ func (v *askView) previewLines(th theme.Theme, width int) []askLine {
 		return nil
 	}
 	p := th.Palette
+	rows := askWrap(o.Preview, width-1)
 	out := []askLine{v.ruleRow(th, width)}
-	for _, row := range askWrap(o.Preview, width-1) {
+	for i, row := range rows {
+		if i == askPreviewMax {
+			more := fmt.Sprintf(" %s %d more lines", th.Glyphs.ElideMark(), len(rows)-i)
+			return append(out, askLine{
+				segs:   []segment.Seg{{Text: more, FG: p.RailDim, BG: p.RailBG}},
+				choice: -1,
+				bg:     p.RailBG,
+			})
+		}
 		out = append(out, askLine{
 			segs:   []segment.Seg{{Text: " " + row, FG: p.RailDim, BG: p.RailBG}},
 			choice: -1,
@@ -1069,6 +1192,7 @@ func (v *askView) chips() []askChip {
 	if len(v.ask.Questions) > 1 {
 		out = append(out, askChip{"tab", "question"})
 	}
+	out = append(out, askChip{"A", "hide"})
 	if v.readOnly {
 		return out
 	}
@@ -1098,7 +1222,7 @@ func (v *askView) footRow(th theme.Theme, width int) []segment.Seg {
 		return segs
 	}
 	segs := build(chips)
-	for _, drop := range []string{"question", "note", "type", "toggle", "pick", "move"} {
+	for _, drop := range []string{"question", "note", "hide", "type", "toggle", "pick", "move"} {
 		if width < 0 || segment.SegCells(segs) <= width {
 			break
 		}
@@ -1171,9 +1295,36 @@ func (v *askView) height(th theme.Theme, width int) int {
 	return n + list + len(v.tailLines(th, width))
 }
 
-// paint draws the content window: the bands, the question, the list beside the
-// help pane, and the footer. A box the layout clamped shorter than its content
-// keeps the footer and windows the list, so the cursor stays on screen.
+// needHeight is the interior the float reserves for the whole ask: the tallest
+// question, at its tallest hovered option, and never below askMinRows. The box
+// is therefore one size from the first question to the last, and a cursor move
+// or a tab never resizes it.
+func (v *askView) needHeight(th theme.Theme, width int) int {
+	if len(v.ask.Questions) == 0 {
+		return askMinRows
+	}
+	savedQ, savedSel := v.q, append([]int(nil), v.sel...)
+	defer func() { v.q, v.sel = savedQ, savedSel }()
+	n := 0
+	for i := range v.ask.Questions {
+		v.q = i
+		for j := 0; j <= len(v.ask.Questions[i].Options); j++ {
+			v.sel[i] = j
+			if h := v.height(th, width); h > n {
+				n = h
+			}
+		}
+	}
+	if n < askMinRows {
+		n = askMinRows
+	}
+	return n
+}
+
+// paint draws the box: the bands and the question from the top, the footer
+// pinned to the bottom, and the split taking every row in between. The reserved
+// height therefore shows as room in the columns, not as dead rows after the
+// footer, and a box the screen clamped short keeps its keys.
 func (v *askView) paint(b *bytes.Buffer, r layout.Rect, th theme.Theme) {
 	if r.W < 1 || r.H < 1 || len(v.ask.Questions) == 0 {
 		return
@@ -1193,58 +1344,74 @@ func (v *askView) paint(b *bytes.Buffer, r layout.Rect, th theme.Theme) {
 	for _, ln := range v.questionLines(th, r.W) {
 		write(ln)
 	}
-	list := v.listLines(th, sh.leftW, sh.rightW == 0)
 	tail := v.tailLines(th, r.W)
+	tailY := bottom - len(tail)
+	split := tailY - y
+	if split < 0 {
+		split = 0
+	}
 	if sh.rightW == 0 {
-		preview := v.previewLines(th, r.W)
-		avail := bottom - y - len(preview) - len(tail)
-		if avail < 0 {
-			avail = 0
-		}
-		v.scrollTo(list, avail)
-		for i := 0; i < avail && v.top+i < len(list); i++ {
-			write(list[v.top+i])
-		}
-		for _, ln := range preview {
-			write(ln)
-		}
+		v.paintColumn(b, r, th, y, split, sh)
 	} else {
-		help := v.helpLines(th, sh.rightW, 0)
-		wide := len(list)
-		if len(help) > wide {
-			wide = len(help)
-		}
-		if len(help) > len(list)+askHelpExtra {
-			wide = len(list) + askHelpExtra
-		}
-		if room := bottom - y - len(tail); wide > room {
-			wide = room
-		}
-		if wide < 0 {
-			wide = 0
-		}
-		v.scrollTo(list, wide)
-		help = v.helpLines(th, sh.rightW, wide)
-		for i := 0; i < wide && y < bottom; i++ {
-			if row := v.top + i; row < len(list) {
-				paintLine(b, list[row], r.X, y, sh.leftW)
-			} else {
-				paintLine(b, askLine{bg: th.Palette.RailBG, choice: -1}, r.X, y, sh.leftW)
-			}
-			fmt.Fprintf(b, "\x1b[%d;%dH", y+1, r.X+sh.leftW+1)
-			segment.Write(b, segment.Seg{
-				Text: th.Glyphs.BorderVertical, FG: th.Palette.RailDim, BG: th.Palette.RailBG,
-			})
-			if i < len(help) {
-				paintLine(b, help[i], r.X+sh.leftW+1, y, sh.rightW)
-			} else {
-				paintLine(b, askLine{bg: th.Palette.RailBG, choice: -1}, r.X+sh.leftW+1, y, sh.rightW)
-			}
-			y++
+		v.paintPanes(b, r, th, y, split, sh)
+	}
+	for i, ln := range tail {
+		if at := tailY + i; at >= 0 && at < bottom {
+			paintLine(b, ln, r.X, at, r.W)
 		}
 	}
-	for _, ln := range tail {
-		write(ln)
+}
+
+// paintColumn draws the narrow layout: the list, then the hovered option's
+// preview under a rule. The list windows under the cursor when it outruns the
+// room the split leaves.
+func (v *askView) paintColumn(b *bytes.Buffer, r layout.Rect, th theme.Theme, y, split int, sh askShape) {
+	list := v.listLines(th, sh.leftW, true)
+	preview := v.previewLines(th, r.W)
+	avail := split - len(preview)
+	if avail < 0 {
+		avail = 0
+	}
+	v.scrollTo(list, avail)
+	for i := 0; i < avail && v.top+i < len(list); i++ {
+		paintLine(b, list[v.top+i], r.X, y+i, r.W)
+	}
+	at := y + avail
+	for _, ln := range preview {
+		if at >= y+split {
+			break
+		}
+		paintLine(b, ln, r.X, at, r.W)
+		at++
+	}
+}
+
+// paintPanes draws the wide layout: the option column behind a vertical rule
+// and the help pane beside it. The list windows under the cursor; the help pane
+// stays on the option it reads and elides what it cannot show.
+func (v *askView) paintPanes(b *bytes.Buffer, r layout.Rect, th theme.Theme, y, split int, sh askShape) {
+	list := v.listLines(th, sh.leftW, false)
+	help := v.helpLines(th, sh.rightW, split)
+	v.scrollTo(list, split)
+	for i := 0; i < split; i++ {
+		at := y + i
+		if at >= r.Y+r.H {
+			break
+		}
+		if row := v.top + i; row < len(list) {
+			paintLine(b, list[row], r.X, at, sh.leftW)
+		} else {
+			paintLine(b, askLine{bg: th.Palette.RailBG, choice: -1}, r.X, at, sh.leftW)
+		}
+		fmt.Fprintf(b, "\x1b[%d;%dH", at+1, r.X+sh.leftW+1)
+		segment.Write(b, segment.Seg{
+			Text: th.Glyphs.BorderVertical, FG: th.Palette.RailDim, BG: th.Palette.RailBG,
+		})
+		if i < len(help) {
+			paintLine(b, help[i], r.X+sh.leftW+1, at, sh.rightW)
+		} else {
+			paintLine(b, askLine{bg: th.Palette.RailBG, choice: -1}, r.X+sh.leftW+1, at, sh.rightW)
+		}
 	}
 }
 

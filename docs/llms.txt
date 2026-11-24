@@ -273,6 +273,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | `main` | `toggle-rail` | `b` |
 | `main` | `message-box` | `m` |
 | `main` | `notification-centre` | `N` |
+| `main` | `toggle-ask` | `A` |
 | `main` | `detach` | `d` |
 | `main` | `detach-alt` | `q` |
 | `main` | `window-1` | `1` |

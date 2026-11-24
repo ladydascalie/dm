@@ -243,6 +243,7 @@ var ActionDesc = map[string]string{
 	"toggle-rail":         "Cycle the rail between full, thin and hidden.",
 	"message-box":         "Open the message box.",
 	"notification-centre": "Open the message box filtered to notify/ entries.",
+	"toggle-ask":          "Put the question float away so the pane takes the keys again, or bring it back with the answers so far.",
 	"detach":              "Detach the client and leave the session running.",
 	"detach-alt":          "Detach the client and leave the session running; alternative key.",
 	"window-1":            "Select window 1 in the active workspace.",

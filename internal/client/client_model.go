@@ -115,6 +115,11 @@ type tui struct {
 	// ask stays listed until its owner closes it, and a float that could only
 	// leave on a snapshot would trap the desk when the owner is gone.
 	askClosed string
+	// askHidden is the id of an ask the reader put out of the way with the
+	// toggle key. The float is off the desk and its picks are kept, so the
+	// reader can scroll or reread the pane before answering, and the same key
+	// brings the form back.
+	askHidden string
 	// readOnly marks a client that may read the session and not answer the
 	// questions in it: the ask float offers no send and no decline.
 	readOnly bool

@@ -6,6 +6,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -267,6 +268,134 @@ func TestAskFloatSettledElsewhereLetsGo(t *testing.T) {
 	tui.syncAsk()
 	if tui.ask != nil {
 		t.Fatal("the dismissed ask reopened on the next snapshot")
+	}
+}
+
+// TestAskFloatHidesAndComesBack: the toggle key takes the float off the desk,
+// leaves the ask listed, gives the keys back to the pane so the reader can
+// scroll, and brings the same form back with the picks it held. A snapshot that
+// arrives while it is hidden does not reopen it.
+func TestAskFloatHidesAndComesBack(t *testing.T) {
+	t.Parallel()
+	tui, got := askTUI(t, askQuestions())
+	feed(tui, "1")
+	if tui.ask.pick[0] != 0 {
+		t.Fatalf("pick = %d, want the first option chosen", tui.ask.pick[0])
+	}
+	feed(tui, "A")
+	if tui.ask == nil {
+		t.Fatal("the hidden ask lost its view")
+	}
+	if tui.mode != "" {
+		t.Fatalf("mode = %q, want the desk to have the keys back", tui.mode)
+	}
+	if tui.askHidden != "ask1" {
+		t.Fatalf("askHidden = %q, want the ask remembered", tui.askHidden)
+	}
+	if len(tui.floats) != 0 {
+		t.Fatalf("the hidden ask still draws %d floats", len(tui.floats))
+	}
+	// The ask is still listed, and the snapshot that lists it does not reopen
+	// the float: the reader put it away on purpose.
+	tui.syncAsk()
+	if tui.mode != "" || len(tui.floats) != 0 {
+		t.Fatalf("a snapshot reopened a hidden ask: mode %q floats %d", tui.mode, len(tui.floats))
+	}
+	// The desk is usable: a key now belongs to the focused pane, not the ask.
+	select {
+	case <-got:
+	default:
+	}
+
+	// The same key brings it back, picks intact.
+	tui.runAction("toggle-ask")
+	if tui.ask == nil || tui.mode != "ask" || len(tui.floats) != 1 {
+		t.Fatalf("the toggle did not bring the ask back: mode %q floats %d", tui.mode, len(tui.floats))
+	}
+	if tui.askHidden != "" {
+		t.Fatalf("askHidden = %q after the ask came back", tui.askHidden)
+	}
+	if tui.ask.pick[0] != 0 {
+		t.Fatalf("pick = %d after the ask came back, want the reader's choice kept", tui.ask.pick[0])
+	}
+	// The action hides it again, and the float's own A key does the same.
+	tui.runAction("toggle-ask")
+	if tui.mode != "" || tui.askHidden != "ask1" {
+		t.Fatalf("the second toggle left mode %q hidden %q", tui.mode, tui.askHidden)
+	}
+}
+
+// TestAskFloatHiddenIsOnTheStatusStrip: while the float is up the box is the
+// only notice the reader needs. Once it is hidden the strip pins the pane, the
+// place in the ask and the key that brings it back, so a question out of sight
+// is never a question forgotten.
+func TestAskFloatHiddenIsOnTheStatusStrip(t *testing.T) {
+	t.Parallel()
+	questions := []wire.AskQuestion{
+		{Question: "One?", Header: "First", Options: []wire.AskOption{{Label: "a"}}},
+		{Question: "Two?", Header: "Second", Options: []wire.AskOption{{Label: "b"}}},
+	}
+	tui, _ := askTUI(t, questions)
+	th := theme.DefaultTheme()
+	set := theme.GlyphNerd
+	strip := func() string {
+		badge := tui.barBadgeOf(th, set)
+		badge.ask = tui.barAskOf()
+		var b bytes.Buffer
+		drawBar(&b, th, &wire.Snapshot{Cols: 100, Rows: 24}, false, "", set, badge)
+		return b.String()
+	}
+	if got := strip(); strings.Contains(got, " ask ") {
+		t.Fatalf("the strip names the ask while its float is up: %q", got)
+	}
+	feed(tui, "\t") // stand on the second question
+	feed(tui, "A")
+	got := strip()
+	for _, want := range []string{"ask w1p1", "2/2", "A"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the strip = %q, want %q in it", got, want)
+		}
+	}
+	// The chip is pinned: a narrow strip keeps it and gives up the left block.
+	narrow := func() string {
+		badge := tui.barBadgeOf(th, set)
+		badge.ask = tui.barAskOf()
+		var b bytes.Buffer
+		drawBar(&b, th, &wire.Snapshot{Cols: 24, Rows: 24}, false, "", set, badge)
+		return b.String()
+	}()
+	if !strings.Contains(narrow, "ask w1p1") {
+		t.Fatalf("a 24-cell strip dropped the question: %q", narrow)
+	}
+	// Bringing it back takes the chip away again.
+	tui.runAction("toggle-ask")
+	if got := strip(); strings.Contains(got, " ask ") {
+		t.Fatalf("the strip still names the ask after the float came back: %q", got)
+	}
+}
+
+// TestAskFloatHideKeepsThePane: hiding drops the ask's claim on the keyboard
+// and nothing else. No answer left the client, and the store still lists the
+// question.
+func TestAskFloatHideKeepsThePane(t *testing.T) {
+	t.Parallel()
+	tui, got := askTUI(t, askQuestions())
+	feed(tui, "A")
+	select {
+	case m := <-got:
+		t.Fatalf("hiding sent %+v", m)
+	default:
+	}
+	if len(tui.snap.Ask) != 1 {
+		t.Fatalf("the ask left the snapshot: %+v", tui.snap.Ask)
+	}
+	// A dismissal is final; a hide is not. Pressing A on a settled ask does
+	// not resurrect it.
+	tui.dismissAsk()
+	tui.askHidden = "ask1"
+	tui.runAction("toggle-ask")
+	if tui.ask != nil {
+		t.Fatal("the toggle reopened an ask the reader dismissed")
 	}
 }
 
@@ -630,6 +759,118 @@ func TestAskFloatChromeIsABandAndAFooter(t *testing.T) {
 	}
 	if strings.TrimSpace(tui.ask.float.Hint) != "" {
 		t.Fatalf("hint = %q, want the border clean: the chips carry the keys", tui.ask.float.Hint)
+	}
+}
+
+// TestAskFloatOneSizeForTheWholeAsk: the box reserves its height from the
+// tallest question and the tallest help it can show, so a tab or a cursor move
+// never resizes it, and the count is drawn on one band only.
+func TestAskFloatOneSizeForTheWholeAsk(t *testing.T) {
+	t.Parallel()
+	questions := []wire.AskQuestion{
+		{Question: "Short?", Header: "One", Options: []wire.AskOption{{Label: "a"}}},
+		{Question: "Long?", Header: "Two", Options: []wire.AskOption{
+			{Label: "b", Description: "a description", Preview: "line one\nline two"},
+			{Label: "c", Description: "another description"},
+			{Label: "d"},
+		}},
+	}
+	tui, _ := askSizedTUI(t, questions, 140)
+	h := tui.ask.float.Rect.H
+	if h < askMinRows {
+		t.Fatalf("float height = %d, want at least the reserved %d", h, askMinRows)
+	}
+	check := func(what string) {
+		t.Helper()
+		if got := tui.ask.float.Rect.H; got != h {
+			t.Fatalf("%s resized the box: %d, want %d", what, got, h)
+		}
+	}
+	for range 3 {
+		feed(tui, "j")
+		check("a cursor move")
+	}
+	feed(tui, "\t")
+	check("tab")
+	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
+	t.Logf("the second question:\n%s", text)
+	if n := strings.Count(text, "2 of 2"); n != 1 {
+		t.Fatalf("the count appears %d times on the second question, want one:\n%s", n, text)
+	}
+	if strings.Contains(text, "Two") && strings.Count(text, "Two") != 1 {
+		// The header names the question once, in its tab.
+		t.Fatalf("the header is repeated outside its tab:\n%s", text)
+	}
+	feed(tui, "\t")
+	check("tab back")
+	if n := strings.Count(askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows), "1 of 2"); n != 1 {
+		t.Fatalf("the count appears %d times on the first question, want one", n)
+	}
+}
+
+// TestAskFloatLongListKeepsTheFooter: a list taller than the screen windows
+// under a footer that stays put, so the keys and the count are never the rows
+// that get cut. The cursor's row rides the window.
+func TestAskFloatLongListKeepsTheFooter(t *testing.T) {
+	t.Parallel()
+	var options []wire.AskOption
+	for i := 1; i <= 14; i++ {
+		options = append(options, wire.AskOption{Label: fmt.Sprintf("option %02d", i)})
+	}
+	tui, _ := askTUI(t, []wire.AskQuestion{{
+		Question: "Which one?", Header: "Pick", Options: options,
+	}})
+	tui.snap.Cols, tui.snap.Rows = 100, 18
+	tui.askFit()
+	r := tui.ask.float.Rect
+	if r.Y+r.H > tui.snap.Rows {
+		t.Fatalf("the float reaches row %d on a %d-row screen", r.Y+r.H, tui.snap.Rows)
+	}
+	last := func() string {
+		rows := strings.Split(askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows), "\n")
+		return strings.TrimSpace(rows[len(rows)-1])
+	}
+	if foot := last(); !strings.Contains(foot, "enter") || !strings.Contains(foot, "decline") {
+		t.Fatalf("the footer = %q, want it on the last row", foot)
+	}
+	for range 13 {
+		feed(tui, "j")
+	}
+	if !strings.Contains(askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows), "option 14") {
+		t.Fatalf("the cursor row left the window")
+	}
+	if foot := last(); !strings.Contains(foot, "enter") {
+		t.Fatalf("the footer = %q after the list scrolled, want it in place", foot)
+	}
+}
+
+// TestAskFloatHelpPaneElidesALongPreview: the help pane grows at most
+// askHelpExtra rows past the list, and a preview that does not fit ends on the
+// count of rows it hid instead of pushing the footer off the screen.
+func TestAskFloatHelpPaneElidesALongPreview(t *testing.T) {
+	t.Parallel()
+	long := strings.Join([]string{"line 01", "line 02", "line 03", "line 04", "line 05",
+		"line 06", "line 07", "line 08", "line 09", "line 10", "line 11", "line 12"}, "\n")
+	tui, _ := askSizedTUI(t, []wire.AskQuestion{{
+		Question: "Pick one", Header: "Pick",
+		Options: []wire.AskOption{
+			{Label: "alpha", Description: "the first", Preview: long},
+			{Label: "beta"},
+		},
+	}}, 140)
+	v := tui.ask
+	sh := v.shape(v.float.Rect.W)
+	list := len(v.listLines(theme.DefaultTheme(), sh.leftW, false))
+	help := v.helpLines(theme.DefaultTheme(), sh.rightW, list+askHelpExtra)
+	if len(help) != list+askHelpExtra {
+		t.Fatalf("the help pane carries %d rows, want %d", len(help), list+askHelpExtra)
+	}
+	text := askScreenText(t, v, tui.snap.Cols, tui.snap.Rows)
+	if !strings.Contains(text, "more lines") {
+		t.Fatalf("the help pane hides the preview without a count:\n%s", text)
+	}
+	if strings.Contains(text, "line 12") {
+		t.Fatalf("the help pane drew past its budget:\n%s", text)
 	}
 }
 

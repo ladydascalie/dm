@@ -497,7 +497,7 @@ keymap "main" {
 // moved when the footer started naming the shelf keys: the table itself is
 // unchanged, because a shelf row would push the last section off a 100x40
 // screen.
-const helpBoxDefaultSHA256 = "1406c47cd80737c5e8d8b29fd5fcf753134b198676624cfb163fbd01f83854c3"
+const helpBoxDefaultSHA256 = "e11a161dda990edc793c9efefb6ec17e18aa219a266df84bd72089fca19f1fc0"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the
@@ -536,7 +536,7 @@ func TestHelpBoxFooterCarriesTheShelfKeys(t *testing.T) {
 	p := helpBoxParse(t, helpBoxDraw(t, 100, 40, cfg))
 	x0, _, x1, y1 := helpBoxBounds(t, p)
 	hint := helpBoxRowText(p, y1, x0+2, x1-1)
-	for _, want := range []string{"esc", "f/F/G shelf"} {
+	for _, want := range []string{"esc", "f/F/G shelf", "A ask"} {
 		if !strings.Contains(hint, want) {
 			t.Fatalf("help footer = %q, want %q in it", hint, want)
 		}

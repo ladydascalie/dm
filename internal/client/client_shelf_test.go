@@ -606,7 +606,7 @@ func TestShelfUnboundChordConsumesTheWholeKey(t *testing.T) {
 // snapshot: the fitted block, elision included.
 func barLeftCells(tui *tui) int {
 	th, set := tui.theme(), tui.glyphSet()
-	budget := barLeftBudget(th, tui.snap, tui.armed, tui.barInfo(), tui.barBadgeOf(th, set))
+	budget := barLeftBudget(th, tui.snap, set, tui.armed, tui.barInfo(), tui.barBadgeOf(th, set))
 	return segment.SegCells(barLeftFor(th, tui.snap, set).fit(th, budget))
 }
 

@@ -184,7 +184,7 @@ func TestOverlayHintsArePlainRows(t *testing.T) {
 	cases := []struct{ name, got, want string }{
 		{"palette", paletteHelpHint, "? help"},
 		{"rename", renameHint(keymap.LoadDefault()), "enter  esc"},
-		{"help box", helpBoxHint(keymap.LoadDefault()), "esc  f/F/G shelf"},
+		{"help box", helpBoxHint(keymap.LoadDefault()), "esc  f/F/G shelf  A ask"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {

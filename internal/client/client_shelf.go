@@ -487,7 +487,7 @@ func (t *tui) shelfChipSpan() (int, int) {
 		return 0, 0
 	}
 	th, set := t.theme(), t.glyphSet()
-	budget := barLeftBudget(th, t.snap, t.armed, t.barInfo(), t.barBadgeOf(th, set))
+	budget := barLeftBudget(th, t.snap, set, t.armed, t.barInfo(), t.barBadgeOf(th, set))
 	l := barLeftFor(th, t.snap, set)
 	segs := l.fit(th, budget)
 	return l.shelfSpan(segment.SegCells(segs))

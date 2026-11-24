@@ -25,7 +25,7 @@ var configTestDefaultActions = map[string][]string{
 		"zoom-pane", "new-window", "next-window", "prev-window", "new-workspace",
 		"next-workspace", "switcher", "picker", "command-palette",
 		"rename-workspace", "set-project",
-		"toggle-rail", "message-box", "detach", "detach-alt",
+		"toggle-rail", "message-box", "toggle-ask", "detach", "detach-alt",
 		"window-1", "window-2", "window-3", "window-4", "window-5",
 		"window-6", "window-7", "window-8", "window-9", "window-10",
 		"help", "dismiss-esc", "focus-up-arrow", "focus-down-arrow",

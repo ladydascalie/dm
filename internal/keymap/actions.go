@@ -53,6 +53,7 @@ var builtinActions = map[string]bool{
 	"toggle-rail":         true,
 	"message-box":         true,
 	"notification-centre": true,
+	"toggle-ask":          true,
 	"detach":              true,
 	"detach-alt":          true,
 	"window-1":            true,

@@ -1024,6 +1024,7 @@ keymap "main" {
     "toggle-rail" "b"
     "message-box" "m"
     "notification-centre" "N"
+    "toggle-ask" "A"
     "detach" "d"
     "detach-alt" "q"
     "window-1" "1"
