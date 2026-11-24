@@ -998,6 +998,142 @@ func TestAskFloatHelpPaneElidesALongPreview(t *testing.T) {
 	}
 }
 
+// askLongPreview is n numbered preview rows, one line each.
+func askLongPreview(n int) string {
+	var lines []string
+	for i := 1; i <= n; i++ {
+		lines = append(lines, fmt.Sprintf("line %02d", i))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// TestAskFloatDetailScrollsTheWidePane: a preview the help pane cannot hold is
+// reachable with J and K instead of lost, and the box keeps its height while
+// the pane scrolls.
+func TestAskFloatDetailScrollsTheWidePane(t *testing.T) {
+	t.Parallel()
+	tui, _ := askSizedTUI(t, []wire.AskQuestion{{
+		Question: "Pick one", Header: "Pick",
+		Options: []wire.AskOption{{Label: "alpha", Description: "the first", Preview: askLongPreview(20)}},
+	}}, 140)
+	v := tui.ask
+	if sh := v.shape(v.float.Rect.W); sh.rightW == 0 {
+		t.Fatalf("float width %d, want the wide layout", v.float.Rect.W)
+	}
+	start := v.float.Rect
+	text := func() string { return askScreenText(t, v, tui.snap.Cols, tui.snap.Rows) }
+	if !strings.Contains(text(), "more lines") {
+		t.Fatalf("the pane does not count the rows it hides:\n%s", text())
+	}
+	if strings.Contains(text(), "line 20") {
+		t.Fatalf("the whole preview fitted, so there is nothing to scroll:\n%s", text())
+	}
+	if border := askBorderRow(t, v, tui.snap.Cols, tui.snap.Rows); !strings.Contains(border, "detail") {
+		t.Fatalf("border = %q, want the key that scrolls the detail", border)
+	}
+	feed(tui, "J")
+	if v.helpTop != 1 {
+		t.Fatalf("helpTop = %d after one J, want 1", v.helpTop)
+	}
+	if got := text(); !strings.Contains(got, "1 above") {
+		t.Fatalf("the pane does not count the row it scrolled past:\n%s", got)
+	}
+	if v.float.Rect != start {
+		t.Fatalf("the float resized under the scroll: %+v, want %+v", v.float.Rect, start)
+	}
+	for range 40 {
+		feed(tui, "J")
+	}
+	if got := text(); !strings.Contains(got, "line 20") {
+		t.Fatalf("the last row of the preview is not reachable:\n%s", got)
+	}
+	if got := text(); !strings.Contains(got, "more lines above") {
+		t.Fatalf("the last window does not count the rows above it:\n%s", got)
+	}
+	if v.float.Rect != start {
+		t.Fatalf("the float resized at the end of the scroll: %+v, want %+v", v.float.Rect, start)
+	}
+	for range 40 {
+		feed(tui, "K")
+	}
+	if v.helpTop != 0 {
+		t.Fatalf("helpTop = %d after K past the top, want 0", v.helpTop)
+	}
+	if got := text(); !strings.Contains(got, "line 01") {
+		t.Fatalf("the first row of the preview is not back:\n%s", got)
+	}
+}
+
+// TestAskFloatDetailScrollsTheNarrowPreview: the narrow float's preview block
+// scrolls under the same keys, so neither layout loses the rows it hides.
+func TestAskFloatDetailScrollsTheNarrowPreview(t *testing.T) {
+	t.Parallel()
+	tui, _ := askSizedTUI(t, []wire.AskQuestion{{
+		Question: "Pick one", Header: "Pick",
+		Options: []wire.AskOption{{Label: "alpha", Preview: askLongPreview(12)}},
+	}}, 100)
+	v := tui.ask
+	if sh := v.shape(v.float.Rect.W); sh.rightW != 0 {
+		t.Fatalf("float width %d, want the narrow layout", v.float.Rect.W)
+	}
+	start := v.float.Rect
+	text := func() string { return askScreenText(t, v, tui.snap.Cols, tui.snap.Rows) }
+	if !strings.Contains(text(), "more lines") {
+		t.Fatalf("the block does not count the rows it hides:\n%s", text())
+	}
+	feed(tui, "J")
+	if got := text(); !strings.Contains(got, "line 02") || !strings.Contains(got, "1 above") {
+		t.Fatalf("the block did not scroll under J:\n%s", got)
+	}
+	if v.float.Rect != start {
+		t.Fatalf("the float resized under the scroll: %+v, want %+v", v.float.Rect, start)
+	}
+	for range 20 {
+		feed(tui, "J")
+	}
+	if got := text(); !strings.Contains(got, "line 12") {
+		t.Fatalf("the last row of the preview is not reachable:\n%s", got)
+	}
+	if v.float.Rect != start {
+		t.Fatalf("the float resized at the end of the scroll: %+v, want %+v", v.float.Rect, start)
+	}
+	for range 20 {
+		feed(tui, "K")
+	}
+	if got := text(); !strings.Contains(got, "line 01") {
+		t.Fatalf("the first row of the preview is not back:\n%s", got)
+	}
+}
+
+// TestAskFloatDetailStartsAtTheOptionUnderTheCursor: the scroll belongs to the
+// option it was made on, so a cursor move puts the pane back to the top of the
+// next option's detail.
+func TestAskFloatDetailStartsAtTheOptionUnderTheCursor(t *testing.T) {
+	t.Parallel()
+	tui, _ := askSizedTUI(t, []wire.AskQuestion{{
+		Question: "Pick one", Header: "Pick",
+		Options: []wire.AskOption{
+			{Label: "alpha", Preview: askLongPreview(20)},
+			{Label: "beta"},
+		},
+	}}, 140)
+	feed(tui, "J")
+	if tui.ask.helpTop != 1 {
+		t.Fatalf("helpTop = %d after one J, want 1", tui.ask.helpTop)
+	}
+	feed(tui, "j")
+	if tui.ask.helpTop != 0 {
+		t.Fatalf("helpTop = %d on the next option, want 0", tui.ask.helpTop)
+	}
+	if got := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows); !strings.Contains(got, "no preview") {
+		t.Fatalf("the pane does not read the option under the cursor:\n%s", got)
+	}
+	feed(tui, "k")
+	if strings.Contains(askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows), "1 above") {
+		t.Fatalf("the scroll survived the cursor coming back")
+	}
+}
+
 // TestAskFloatNarrowKeepsOneColumn: below askWideMin the float keeps today's
 // layout, the preview under its option in one column.
 func TestAskFloatNarrowKeepsOneColumn(t *testing.T) {

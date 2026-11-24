@@ -12,8 +12,10 @@ package client
 // middle: the options on the left, one row each, and a help pane on the right
 // holding the hovered option's name, description and preview. The pane grows at
 // most askHelpExtra rows past the list, so a long preview elides instead of
-// filling the terminal. Below askWideMin the help content folds under the list
-// and the descriptions sit under their options.
+// filling the terminal. A preview past that room scrolls in place with J/K, so
+// the rows the pane hides are one keypress away instead of lost. Below
+// askWideMin the help content folds under the list and the descriptions sit
+// under their options.
 //
 // A note rides the answer item the question already sends (ask.Item.Notes), so
 // the float offers no store of its own: the draft is typed in the client's
@@ -98,10 +100,12 @@ type askView struct {
 	notes   []string
 	noteRow []int
 
-	// top is the first content row on screen, and note is the status row: an
+	// top is the first content row on screen, helpTop the first row of a
+	// detail the pane scrolls to with J/K, and note the status row: an
 	// answer in flight or a refusal's code.
-	top  int
-	note string
+	top     int
+	helpTop int
+	note    string
 	// pending is true once an answer is on the wire and no snapshot has
 	// closed the ask yet, so a listed ask means the daemon took it.
 	pending bool
@@ -351,6 +355,7 @@ func (v *askView) reset() {
 		v.multi[i] = make([]bool, len(q.Options))
 	}
 	v.top = 0
+	v.helpTop = 0
 	v.note = ""
 	v.pending = false
 }
@@ -420,6 +425,8 @@ func (v *askView) move(d int) {
 	if v.sel[v.q] >= n {
 		v.sel[v.q] = n - 1
 	}
+	// The detail belongs to the hovered option, so it starts at its top.
+	v.helpTop = 0
 }
 
 // askChoose is the pick key: it sets a single-select answer, or toggles one row
@@ -433,6 +440,8 @@ func (t *tui) askChoose(row int) {
 	if row < 0 || row >= v.choices(q) {
 		return
 	}
+	// The detail belongs to the hovered option, so it starts at its top.
+	v.helpTop = 0
 	if row == len(q.Options) && !q.MultiSelect {
 		t.openAskPrompt()
 		return
@@ -720,6 +729,12 @@ func (t *tui) askKey() bool {
 	case 't':
 		t.openAskPrompt()
 		return true
+	case 'J':
+		t.askScrollDetail(1)
+		return true
+	case 'K':
+		t.askScrollDetail(-1)
+		return true
 	case 'N':
 		t.askNote()
 		return true
@@ -748,7 +763,23 @@ func (t *tui) askStepQuestion(d int) {
 	}
 	n := len(v.ask.Questions)
 	v.q = ((v.q+d)%n + n) % n
+	v.helpTop = 0
 	v.note = ""
+}
+
+// askScrollDetail scrolls the detail window by d rows. The top stops here,
+// because there is nothing above it; the bottom is clamped by the draw, which is
+// the first place that knows how many rows the pane was given.
+func (t *tui) askScrollDetail(d int) {
+	v := t.ask
+	if v == nil {
+		return
+	}
+	v.helpTop += d
+	if v.helpTop < 0 {
+		v.helpTop = 0
+	}
+	t.askFit()
 }
 
 // askFit refits the float to the current question's rows and repaints.
@@ -795,6 +826,7 @@ func (v *askView) hint() *hintbar.Bar {
 	}
 	hints := []hintbar.Hint{
 		{Keys: []string{"j/k"}, Label: "move"},
+		{Keys: []string{"J/K"}, Label: "detail"},
 		{Keys: []string{"1-9"}, Label: "pick"},
 		{Keys: []string{"space"}, Label: space},
 		{Keys: []string{"t"}, Label: "type"},
@@ -1080,9 +1112,10 @@ func (v *askView) hovered() (wire.AskOption, bool) {
 }
 
 // helpLines is the help pane: the hovered option's name on its band, its
-// description, and its preview. The pane is clamped to height rows; a preview
-// longer than the room left ends on a count of the rows it hid. The key hint
-// sits on the pane's last row when the room is there.
+// description, and its preview. The pane is clamped to height rows, and the
+// body windows under the reader's scroll: a preview longer than the room left
+// ends on a count of the rows it hides, above and below the window. The key
+// hint sits on the pane's last row when the room is there.
 func (v *askView) helpLines(th theme.Theme, width, height int) []askLine {
 	p := th.Palette
 	o, ok := v.hovered()
@@ -1147,6 +1180,7 @@ func (v *askView) helpLines(th theme.Theme, width, height int) []askLine {
 	if len(head)+len(body) < height {
 		// The hint pins to the pane's bottom row, and the rows between it and
 		// the body stay blank.
+		v.helpTop = 0
 		out := append(head, body...)
 		for len(out) < height-1 {
 			out = append(out, askLine{bg: p.RailBG, choice: -1})
@@ -1158,40 +1192,85 @@ func (v *askView) helpLines(th theme.Theme, width, height int) []askLine {
 		return head[:height]
 	}
 	if room == len(body) {
+		v.helpTop = 0
 		return append(head, body...)
 	}
+	// The body outruns the room. The window starts where the reader scrolled
+	// it, and its last row counts the rows it hides on either side.
 	keep := room - 1
-	out := append(head, body[:keep]...)
-	more := fmt.Sprintf(" %s %d more lines", th.Glyphs.ElideMark(), len(body)-keep)
-	return append(out, askLine{
-		segs:   []segment.Seg{{Text: more, FG: p.RailDim, BG: p.RailBG}},
+	top := v.clampHelpTop(len(body) - keep)
+	return append(append(head, body[top:top+keep]...), askLine{
+		segs:   []segment.Seg{{Text: helpMore(th, len(body)-top-keep, top), FG: p.RailDim, BG: p.RailBG}},
 		choice: -1,
 		bg:     p.RailBG,
 	})
 }
 
+// helpMore is the row that says a pane hides lines: below counts the rows under
+// the window and above the rows it scrolled past. Every wording names the lines,
+// so the row reads as a count and not as content.
+func helpMore(th theme.Theme, below, above int) string {
+	mark := th.Glyphs.ElideMark()
+	switch {
+	case below <= 0:
+		return fmt.Sprintf(" %s %d more lines above", mark, above)
+	case above <= 0:
+		return fmt.Sprintf(" %s %d more lines", mark, below)
+	default:
+		return fmt.Sprintf(" %s %d more lines, %d above", mark, below, above)
+	}
+}
+
+// clampHelpTop holds the detail's scroll offset inside max rows and returns it,
+// so a scroll past the end stops on the last window instead of counting into
+// nothing.
+func (v *askView) clampHelpTop(max int) int {
+	if max < 0 {
+		max = 0
+	}
+	if v.helpTop > max {
+		v.helpTop = max
+	}
+	if v.helpTop < 0 {
+		v.helpTop = 0
+	}
+	return v.helpTop
+}
+
 // previewLines is the narrow layout's preview block: the rule above it and the
-// hovered option's preview under it. An option with no preview has no block,
-// so a narrow float does not spend rows saying so.
+// hovered option's preview under it. An option with no preview has no block, so
+// a narrow float does not spend rows saying so. A preview past askPreviewMax
+// rows scrolls under the same offset as the wide pane, and its last row counts
+// the rows the window hides, so the block keeps one height while it scrolls.
 func (v *askView) previewLines(th theme.Theme, width int) []askLine {
 	o, ok := v.hovered()
 	if !ok || o.Preview == "" {
+		v.helpTop = 0
 		return nil
 	}
 	p := th.Palette
 	rows := askWrap(o.Preview, width-1)
 	out := []askLine{v.ruleRow(th, width)}
-	for i, row := range rows {
-		if i == askPreviewMax {
-			more := fmt.Sprintf(" %s %d more lines", th.Glyphs.ElideMark(), len(rows)-i)
-			return append(out, askLine{
-				segs:   []segment.Seg{{Text: more, FG: p.RailDim, BG: p.RailBG}},
-				choice: -1,
-				bg:     p.RailBG,
-			})
-		}
+	top := 0
+	if len(rows) <= askPreviewMax {
+		v.helpTop = 0
+	} else {
+		top = v.clampHelpTop(len(rows) - askPreviewMax)
+	}
+	for i := top; i < len(rows) && i < top+askPreviewMax; i++ {
 		out = append(out, askLine{
-			segs:   []segment.Seg{{Text: " " + row, FG: p.RailDim, BG: p.RailBG}},
+			segs:   []segment.Seg{{Text: " " + rows[i], FG: p.RailDim, BG: p.RailBG}},
+			choice: -1,
+			bg:     p.RailBG,
+		})
+	}
+	below := len(rows) - top - askPreviewMax
+	if below < 0 {
+		below = 0
+	}
+	if len(rows) > askPreviewMax {
+		out = append(out, askLine{
+			segs:   []segment.Seg{{Text: helpMore(th, below, top), FG: p.RailDim, BG: p.RailBG}},
 			choice: -1,
 			bg:     p.RailBG,
 		})
@@ -1282,7 +1361,11 @@ func (v *askView) needHeight(th theme.Theme, width int) int {
 		return askMinRows
 	}
 	savedQ, savedSel := v.q, append([]int(nil), v.sel...)
-	defer func() { v.q, v.sel = savedQ, savedSel }()
+	savedTop := v.helpTop
+	// The detail is measured from its first row, so scrolling inside it never
+	// changes the height the box reserves.
+	v.helpTop = 0
+	defer func() { v.q, v.sel, v.helpTop = savedQ, savedSel, savedTop }()
 	n := 0
 	for i := range v.ask.Questions {
 		v.q = i

@@ -270,6 +270,9 @@ Three surfaces draw an ask from that one store.
   arrows move, a digit picks that option, `space` picks on a single select and
   toggles on a multi-select, `t` types a custom answer, `n`/`p` move between
   questions, `enter` sends once every question is answered, and `esc` declines.
+  A description or preview taller than its pane scrolls with `J`/`K`, and the
+  row the pane elides to counts the rows it hides above and below the window,
+  so nothing in an option's detail is unreachable.
   A pane that is not focused keeps only a `?` badge on its rail row, so a
   question in another window cannot take the desk. The float closes on the next
   snapshot once the ask is answered or gone. A refused answer keeps it open
