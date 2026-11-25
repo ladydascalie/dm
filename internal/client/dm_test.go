@@ -426,9 +426,10 @@ func TestRailShellHasNoStateGlyph(t *testing.T) {
 	}
 }
 
-// TestRailAgentMarker proves the full rail paints no agent mark: the state
-// glyph is the row's only icon, and a pane with no name still falls back to its
-// app and then to its id. The thin rail keeps its three cells and its marker.
+// TestRailAgentMarker proves the full rail paints the agent mark in one indent
+// cell, so a pane running pi still reads as pi, and that a shell leaves that cell
+// blank. A pane with no name still falls back to its app and then its id. The
+// thin rail keeps its three cells and its marker.
 func TestRailAgentMarker(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	agent := testutil.RailOnePane("idle", "", 20, 40, 6)
@@ -437,8 +438,8 @@ func TestRailAgentMarker(t *testing.T) {
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), agent, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out := b.String()
-	if strings.Contains(out, "\u258e") {
-		t.Fatalf("agent row still carries the agent marker: %q", out)
+	if !strings.Contains(out, "\u258e") {
+		t.Fatalf("agent row lost the agent marker: %q", out)
 	}
 	if !strings.Contains(out, "pi") {
 		t.Fatalf("agent row does not show the app: %q", out)

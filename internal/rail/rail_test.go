@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"dm/internal/cells"
 	"dm/internal/layout"
@@ -223,13 +224,16 @@ func TestRailRowSegments(t *testing.T) {
 			left, right, tail, wantLeft)
 	}
 
-	// A focused pane row is six cells of indent and the name on rail text, with
-	// the state glyph alone at the margin: no agent mark, no dot. The focus fill
-	// and the row's bold are the writer's, not the composition's.
+	// A focused pane row is four cells of indent, the agent mark, a space and the
+	// name on rail text, with the state glyph alone at the margin: no dot. The
+	// focus fill and the row's bold are the writer's, not the composition's.
 	pane := railRowFind(t, items, Pane, "pi")
+	agentMark, _ := utf8.DecodeRuneInString(RailMark(true, pane.App, theme.GlyphUnicode))
 	left, right, tail = RailRow(th, pane, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
-		{Text: "      ", FG: p.RailText},
+		{Text: "    ", FG: p.RailText},
+		{Text: string(agentMark), FG: p.RailHeader},
+		{Text: " ", FG: p.RailText},
 		{Text: "pi", FG: p.RailText},
 	}
 	wantRight = []railSeg{state("working")}
@@ -337,15 +341,14 @@ func TestRailRowLevelsDiffer(t *testing.T) {
 	if !strings.HasPrefix(winLine, "  "+th.Glyphs.FoldOpen) {
 		t.Fatalf("window row does not start with the caret indent: %q", winLine)
 	}
-	// A pane row is six cells of indent and then the name: no agent mark and no
-	// dot, because the state glyph is the row's only icon.
-	if !strings.HasPrefix(paneLine, "      pi") {
-		t.Fatalf("pane row does not start with the six cell indent: %q", paneLine)
+	// A pane row is four cells of indent, the agent mark in one cell, a space and
+	// then the name at column 7: no dot. The mark is what says the pane runs pi.
+	agent := strings.TrimSpace(RailMark(true, "", theme.GlyphUnicode))
+	if !strings.HasPrefix(paneLine, "    "+agent+" pi") {
+		t.Fatalf("pane row does not start with the indent and the agent mark: %q", paneLine)
 	}
-	for _, icon := range []string{th.RailMarks.Pane, strings.TrimSpace(RailMark(true, "", theme.GlyphUnicode))} {
-		if icon != "" && strings.Contains(strings.TrimPrefix(paneLine, "      "), icon) {
-			t.Fatalf("pane row still carries the icon %q: %q", icon, paneLine)
-		}
+	if th.RailMarks.Pane != "" && strings.Contains(strings.TrimPrefix(paneLine, "    "+agent+" "), th.RailMarks.Pane) {
+		t.Fatalf("pane row still carries the dot %q: %q", th.RailMarks.Pane, paneLine)
 	}
 }
 

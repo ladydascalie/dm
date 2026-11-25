@@ -7,6 +7,7 @@ package rail
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"dm/internal/layout"
 	"dm/internal/segment"
@@ -118,8 +119,9 @@ func TestRailRowCounts(t *testing.T) {
 
 // TestRailRowSilences is rule 2: no clean word, no dirty dot, no unknown mark
 // and no pane level dot. A pane whose state is unknown or empty paints an empty
-// state cell, and a pane row carries no agent mark: the state glyph is the row's
-// only icon.
+// state cell. A pane row carries the agent mark in one indent cell, so the rail
+// still says which terminal runs pi, and the state glyph stays alone at the
+// margin.
 func TestRailRowSilences(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
@@ -140,15 +142,26 @@ func TestRailRowSilences(t *testing.T) {
 		}
 	}
 
-	// No unknown mark, no agent mark and no dot on a pane row: six cells of
-	// indent, the name, and the state glyph at the margin, or an empty cell
-	// when the pane has no state to report.
+	// No unknown mark and no dot on a pane row: four cells of indent, the agent
+	// mark in one cell, a space, the name, and the state glyph at the margin, or
+	// an empty state cell when the pane has no state to report.
+	agentMark, _ := utf8.DecodeRuneInString(RailMark(true, "", theme.GlyphUnicode))
 	for _, status := range []string{"unknown", ""} {
 		pane := RailItem{Kind: Pane, Text: "pi", Pane: "w1p1", Status: status, Agent: true}
 		left, right, tail := RailRow(th, pane, layout.DefaultRail, false, theme.GlyphUnicode)
-		want := []railSeg{{Text: "      ", FG: th.Palette.RailDim}, {Text: "pi", FG: th.Palette.RailDim}}
-		if len(left) != len(want) || left[0] != want[0] || left[1] != want[1] {
-			t.Fatalf("pane row with status %q = %+v, want the indent and the name alone", status, left)
+		want := []railSeg{
+			{Text: "    ", FG: th.Palette.RailDim},
+			{Text: string(agentMark), FG: th.Palette.RailHeader},
+			{Text: " ", FG: th.Palette.RailDim},
+			{Text: "pi", FG: th.Palette.RailDim},
+		}
+		if len(left) != len(want) {
+			t.Fatalf("pane row with status %q = %+v, want four runs", status, left)
+		}
+		for i := range want {
+			if left[i] != want[i] {
+				t.Fatalf("pane row with status %q run %d = %+v, want %+v", status, i, left[i], want[i])
+			}
 		}
 		if tail != nil {
 			t.Fatalf("pane row kept a tail: %+v", tail)
@@ -169,16 +182,23 @@ func TestRailRowSilences(t *testing.T) {
 		if strings.Contains(text, th.RailMarks.Pane) {
 			t.Fatalf("pane row %q still paints the dot: %q", it.Text, text)
 		}
-		if strings.Contains(text, strings.TrimSpace(RailMark(it.Agent, it.App, theme.GlyphUnicode))) &&
-			RailMark(it.Agent, it.App, theme.GlyphUnicode) != "  " {
-			t.Fatalf("pane row %q still paints an agent mark: %q", it.Text, text)
+		// The agent mark is back by design: it is the one cue that says which
+		// terminal runs pi, and it costs an indent cell rather than a column.
+		wantMark := " "
+		if it.Agent {
+			m, _ := utf8.DecodeRuneInString(RailMark(it.Agent, it.App, theme.GlyphUnicode))
+			wantMark = string(m)
+		}
+		if !strings.Contains(text, "    "+wantMark+" ") {
+			t.Fatalf("pane row %q = %q, want the indent and the agent mark %q", it.Text, text, wantMark)
 		}
 	}
 }
 
-// TestRailRowPaneShape is rule 3: a pane row is six cells of indent, no icon,
-// the name at column 7, and the state glyph at the margin. A focused pane row is
-// bold and lit, and the thin rail keeps its own three cells.
+// TestRailRowPaneShape is rule 3: a pane row is four cells of indent, the agent
+// mark in the fifth, a space, the name at column 7, and the state glyph at the
+// margin. A focused pane row is bold and lit, and the thin rail
+// keeps its own three cells.
 func TestRailRowPaneShape(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
@@ -195,25 +215,28 @@ func TestRailRowPaneShape(t *testing.T) {
 		t.Fatal("the fixture has no pane row")
 	}
 	term := railTerm(t, snap, theme.GlyphUnicode)
-	// The bar owns column 0, so the six cell indent puts the name's first cell
-	// in column 7, one cell right of a window row's label.
+	// The bar owns column 0, so the four cell indent and the agent mark put the
+	// name's first cell in column 7, one cell right of a window row's label.
 	if c := cellOf(term, 7, row); c.Char != 'p' {
 		t.Fatalf("pane name starts %q at column 7, want p", c.Char)
 	}
-	for x := 1; x < 6; x++ {
+	agentMark, _ := utf8.DecodeRuneInString(RailMark(pane.Agent, pane.App, theme.GlyphUnicode))
+	if c := cellOf(term, 5, row); c.Char != agentMark {
+		t.Fatalf("the agent cell = %q at column 5, want %q", c.Char, agentMark)
+	}
+	for _, x := range []int{1, 2, 3, 4, 6} {
 		if c := cellOf(term, x, row); !thinBlank(c) {
 			t.Fatalf("pane row holds %q in the indent cell %d", c.Char, x)
 		}
 	}
-	// The state glyph is the row's last content cell, and it is the row's only
-	// icon.
+	// The state glyph is the row's last content cell.
 	state, _ := RailGlyph(th, pane.Status, theme.GlyphUnicode)
 	if c := cellOf(term, snap.Rail-2, row); string(c.Char) != state {
 		t.Fatalf("the state cell = %q, want %q", c.Char, state)
 	}
 	left, right, _ := RailRow(th, pane, layout.DefaultRail, false, theme.GlyphUnicode)
 	if n := segment.SegCells(left); n != 6+segment.SegCells([]segment.Seg{{Text: pane.Text}}) {
-		t.Fatalf("the pane row's left run is %d cells, want the indent and the name", n)
+		t.Fatalf("the pane row's left run is %d cells, want two cells of indent, the mark, a space and the name", n)
 	}
 	if len(right) != 1 || right[0].Text != state {
 		t.Fatalf("the pane row's right run = %+v, want the state alone", right)

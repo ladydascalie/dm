@@ -1047,10 +1047,21 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			}
 			break
 		}
-		// Six cells of indent, no icon, the name from column 7, and the state
-		// glyph alone at the margin: the glyph is the row's only icon.
+		// Four cells of indent, the agent mark in one cell, a space, then the
+		// name from column 7: the mark takes an indent cell rather than a new
+		// column, so a pane row costs no more width than the silent version. It
+		// sits under the window label's first letter, and a shell leaves it
+		// blank because a shell is not an agent. The state glyph stays alone at
+		// the margin.
+		mark := " "
+		if it.Agent {
+			m, _ := utf8.DecodeRuneInString(RailMark(it.Agent, it.App, set))
+			mark = string(m)
+		}
 		left = []segment.Seg{
-			{Text: "      ", FG: base},
+			{Text: "    ", FG: base},
+			{Text: mark, FG: p.RailHeader},
+			{Text: " ", FG: base},
 			{Text: it.Text, FG: base},
 		}
 		right = []segment.Seg{railStateSeg(th, it.Status, set)}
