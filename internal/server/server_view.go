@@ -237,6 +237,12 @@ func (s *server) fillPaneFactsLocked(info *wire.AllPane) {
 		info.Dirty = gi.dirty
 		info.Added = gi.added
 		info.Deleted = gi.deleted
+		info.Head = gi.head
+		info.HeadSubject = gi.headSubject
+		info.Upstream = gi.upstream
+		info.Ahead = gi.ahead
+		info.Behind = gi.behind
+		info.Files = gi.files
 	}
 	if pc := s.panes[info.ID]; pc != nil {
 		pst := pc.status()

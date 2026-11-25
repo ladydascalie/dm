@@ -43,6 +43,7 @@ var asciiGlyphs = map[string]string{
 	"▾": "v", "▸": ">", "▌": "|", "●": "*", "○": "o",
 	"▲": "!", "✓": "+", "✕": "x", "▶": ">",
 	"⧉": "S",
+	"⎇": "g",
 	"…": ">",
 	"░": ":",
 }
@@ -84,6 +85,7 @@ func (g Glyphs) For(set GlyphSet) Glyphs {
 	g.ActiveMark = ASCII(g.ActiveMark)
 	g.WorkspaceBar = ASCII(g.WorkspaceBar)
 	g.Dirty = ASCII(g.Dirty)
+	g.GitMark = ASCII(g.GitMark)
 	g.SyncMark = ASCII(g.SyncMark)
 	g.Shadow = ASCII(g.Shadow)
 	return g
@@ -116,9 +118,9 @@ func (s StateStyle) For(set GlyphSet) StateStyle {
 }
 
 // For returns the theme with every glyph resolved for a set: the structural
-// glyphs, the rail marks, the state marks, and the Nerd fold carets folded into
-// the plain ones. A caller that resolves once at load never has to thread the
-// set through the painters.
+// glyphs, the rail marks, the state marks, and the Nerd fold carets and git
+// mark folded into the plain ones. A caller that resolves once at load never has
+// to thread the set through the painters.
 func (t Theme) For(set GlyphSet) Theme {
 	t.Glyphs = t.Glyphs.For(set)
 	t.RailMarks = t.RailMarks.For(set)
@@ -131,6 +133,9 @@ func (t Theme) For(set GlyphSet) Theme {
 		}
 		if t.Glyphs.NerdSyncMark != "" {
 			t.Glyphs.SyncMark = t.Glyphs.NerdSyncMark
+		}
+		if t.Glyphs.NerdGitMark != "" {
+			t.Glyphs.GitMark = t.Glyphs.NerdGitMark
 		}
 	}
 	states := make(map[string]StateStyle, len(t.States))
