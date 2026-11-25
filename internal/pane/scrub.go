@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"dm/internal/secrets"
 )
 
 // The scrub stage sits at the end of the pane's output filter chain, after
@@ -17,25 +19,26 @@ import (
 // Replacement is length preserving on purpose: produced counts published
 // bytes, and the anchor and yank offsets are positions in that same stream.
 // A stage that shortened or lengthened chunks would move every mark.
-
-const (
-	// redactByte replaces every byte of a matched secret.
-	redactByte = '*'
-)
+//
+// The rule itself lives in secrets, which holds the one matcher the box and
+// ask stores use too: the bounds, the value forms, the leftmost-longest order
+// and the redaction byte. This type adds only what a stream needs: the
+// carry between chunks and the reveal switch.
 
 // The scrub bounds are shared policy: the server reads them to warn the
-// operator when a value cannot be redacted, so a short pin never echoes
-// unredacted while the surface reports success.
+// operator when a value cannot be redacted, and the box and ask stores hold
+// the same list, so a short pin never echoes unredacted on one surface while
+// another redacts it.
 const (
 	// MinSecretLen keeps a value out of the list when it is too short to
 	// redact safely: a one or two byte value would blot most of the pane's
 	// ordinary output.
-	MinSecretLen = 4
+	MinSecretLen = secrets.MinRedactLen
 	// MaxSecretLen bounds one value's length, so a bad push cannot make the
 	// pane scan unbounded data per chunk.
-	MaxSecretLen = 4096
+	MaxSecretLen = secrets.MaxRedactLen
 	// MaxSecrets bounds the list.
-	MaxSecrets = 256
+	MaxSecrets = secrets.MaxRedactValues
 )
 
 // scrubber holds the pane's secret values and redacts them from the output
@@ -64,22 +67,8 @@ type scrubber struct {
 // costs one of the cap's places and not two. An empty list turns the stage
 // into a pass-through that still drains any bytes a previous list held back.
 func (s *scrubber) set(values []string) {
-	vals := make([][]byte, 0, len(values))
-	maxLen := 0
-	used := 0
-	for _, v := range values {
-		if used == MaxSecrets {
-			break
-		}
-		if len(v) < MinSecretLen || len(v) > MaxSecretLen {
-			continue
-		}
-		used++
-		for _, form := range valueForms(v) {
-			vals = append(vals, []byte(form))
-			maxLen = max(maxLen, len(form))
-		}
-	}
+	vals := secrets.Needles(values)
+	maxLen := secrets.Longest(vals)
 	s.mu.Lock()
 	s.vals, s.maxLen = vals, maxLen
 	s.mu.Unlock()
@@ -113,23 +102,6 @@ func (s *scrubber) screenValues() []string {
 		}
 	}
 	return out
-}
-
-// valueForms lists the spellings a value can take in the output stream. The
-// pty rewrites every LF to CRLF on output, so a value holding a newline is
-// never matched byte for byte by the raw form: the CRLF form is what the
-// stream actually carries. Both are returned, because the raw form costs
-// nothing when the value has no newline and covers a stream the pty did not
-// translate; the two forms of one value are matched independently and the
-// longest match at an offset wins, so an overlap redacts the larger span.
-//
-// The derived form is at most twice its value, so a list at MaxSecretLen
-// keeps the scan and the hold-back bounded by twice the shared cap.
-func valueForms(v string) []string {
-	if !strings.Contains(v, "\n") {
-		return []string{v}
-	}
-	return []string{v, strings.ReplaceAll(v, "\n", "\r\n")}
 }
 
 // toggle flips the redaction switch and reports the new state: true when
@@ -175,14 +147,14 @@ func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 	// hold-back below takes them from the match start. That is what keeps a
 	// short value that is a proper prefix of a long one from finalising at a
 	// chunk boundary.
-	pos := redactInto(out, vals, data, false)
+	pos := secrets.RedactInto(out, vals, data, false)
 	// Only the bytes a next chunk could complete wait in carry: the longest
 	// suffix of the unemitted data that is a proper prefix of some value.
 	// A tail that cannot begin a match flows with zero delay, the same rule
 	// the OSC filter applies to partial sequences.
 	hold := 0
 	if maxLen > 1 {
-		hold = holdBack(vals, maxLen, data[pos:])
+		hold = secrets.HoldBack(vals, maxLen, data[pos:])
 	}
 	cut := len(data) - hold
 	if cut < 0 {
@@ -193,25 +165,6 @@ func (s *scrubber) feed(b []byte, out *bytes.Buffer) {
 	}
 	out.Write(data[pos:cut])
 	s.carry = append(s.carry, data[cut:]...)
-}
-
-// holdBack returns the length of the longest suffix of data that is a
-// proper prefix of some value in vals, capped at maxLen-1 because a proper
-// prefix is never a whole value. Zero means nothing is held back.
-func holdBack(vals [][]byte, maxLen int, data []byte) int {
-	lim := len(data)
-	if lim > maxLen-1 {
-		lim = maxLen - 1
-	}
-	for k := lim; k > 0; k-- {
-		tail := data[len(data)-k:]
-		for _, v := range vals {
-			if len(v) > k && bytes.HasPrefix(v, tail) {
-				return k
-			}
-		}
-	}
-	return 0
 }
 
 // flush drains the held-back bytes at the end of the stream. No chunk
@@ -230,7 +183,7 @@ func (s *scrubber) flush(out *bytes.Buffer) {
 		out.Write(data)
 		return
 	}
-	pos := redactInto(out, vals, data, true)
+	pos := secrets.RedactInto(out, vals, data, true)
 	out.Write(data[pos:])
 }
 
@@ -250,17 +203,9 @@ func (s *scrubber) redactText(text string) string {
 		return text
 	}
 	s.mu.Lock()
-	vals, maxLen := s.vals, s.maxLen
+	vals := s.vals
 	s.mu.Unlock()
-	if maxLen == 0 || len(vals) == 0 {
-		return text
-	}
-	data := []byte(text)
-	var out bytes.Buffer
-	out.Grow(len(data))
-	pos := redactInto(&out, vals, data, true)
-	out.Write(data[pos:])
-	return out.String()
+	return secrets.RedactText(text, vals)
 }
 
 // scrubBytes rewrites the bytes a pane already published. It is the toggle's
@@ -276,89 +221,9 @@ func (s *scrubber) scrubBytes(data []byte) []byte {
 		return data
 	}
 	s.mu.Lock()
-	vals, maxLen := s.vals, s.maxLen
+	vals := s.vals
 	s.mu.Unlock()
-	if maxLen == 0 || len(vals) == 0 {
-		return data
-	}
-	var out bytes.Buffer
-	out.Grow(len(data))
-	pos := redactInto(&out, vals, data, true)
-	out.Write(data[pos:])
-	return out.Bytes()
-}
-
-// redactInto writes data with every value replaced by the same number of
-// redaction bytes and returns the offset it stopped emitting at: every byte
-// before it is on the wire, redacted or not, and the bytes from it on are not.
-// That is the end of the last finalised match, the start of a match the data
-// cannot yet settle, or zero when no value matched.
-//
-// Matching is leftmost-longest: at each position the match that starts first
-// wins, and among values that start at the same offset the longest wins. The
-// longest rule is load bearing, not a tie-break: the server pushes values in
-// name order, so a value that is a proper prefix of another one arrives
-// first, and redacting only the prefix would publish the longer value's tail
-// in the clear.
-//
-// The longest rule only holds over the bytes in hand. A chunk can end inside a
-// longer value that starts at the same offset, and then the shorter value is
-// the only complete match: finalising it would put its redaction on the wire
-// and flush the longer value's tail after it. So a match whose bytes are a
-// proper prefix of a longer value is not finalised while more data can come:
-// the scan stops before it and the caller holds the bytes from the match start
-// for the next chunk. final says no more data can come (a flush, or a whole
-// status text), so the longest complete match is the answer and the hold ends.
-func redactInto(out *bytes.Buffer, vals [][]byte, data []byte, final bool) int {
-	pos := 0
-	for {
-		at, n := nextMatch(vals, data, pos)
-		if at < 0 {
-			return pos
-		}
-		if !final && extendsPast(vals, data[at:]) {
-			return pos
-		}
-		out.Write(data[pos:at])
-		writeRedacted(out, n)
-		pos = at + n
-	}
-}
-
-// extendsPast reports whether data is a proper prefix of a registered value,
-// so a next chunk could still complete a longer match at the same offset.
-func extendsPast(vals [][]byte, data []byte) bool {
-	for _, v := range vals {
-		if len(v) > len(data) && bytes.HasPrefix(v, data) {
-			return true
-		}
-	}
-	return false
-}
-
-// nextMatch returns the offset and the length of the leftmost, longest value
-// match at or after pos, or -1 when no value matches.
-func nextMatch(vals [][]byte, data []byte, pos int) (at, n int) {
-	at, n = -1, 0
-	for _, v := range vals {
-		i := bytes.Index(data[pos:], v)
-		if i < 0 {
-			continue
-		}
-		got := pos + i
-		if at < 0 || got < at || (got == at && len(v) > n) {
-			at, n = got, len(v)
-		}
-	}
-	return at, n
-}
-
-// writeRedacted appends n redaction bytes, one per secret byte, so the
-// output length stays the stream's length.
-func writeRedacted(out *bytes.Buffer, n int) {
-	for range n {
-		out.WriteByte(redactByte)
-	}
+	return secrets.RedactBytes(data, vals)
 }
 
 // secretValues reads a set-secrets request body:

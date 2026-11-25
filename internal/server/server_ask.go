@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dm/internal/ask"
+	"dm/internal/secrets"
 	"dm/internal/wire"
 )
 
@@ -80,7 +81,12 @@ func (s *server) askOpen(pane string, req *ask.OpenReq) (string, error) {
 			return "", ask.Refuse(ask.CodeExists, "ask %q already covers tool call %q", s.st.Ask[i].ID, req.ToolCallID)
 		}
 	}
-	if err := ask.CheckRoom(s.st.Ask, req); err != nil {
+	// The questions are scrubbed before the cost check, so the cap measures
+	// what is stored and a value never reaches state.json or a snapshot. The
+	// scrub keeps every byte length, so the cost is the same either way.
+	needles := s.scrubNeedlesLocked()
+	questions := scrubQuestions(req.Questions, needles)
+	if err := ask.CheckRoom(s.st.Ask, &ask.OpenReq{ToolCallID: req.ToolCallID, Questions: questions}); err != nil {
 		return "", err
 	}
 	id := s.st.NewAskID()
@@ -89,7 +95,7 @@ func (s *server) askOpen(pane string, req *ask.OpenReq) (string, error) {
 		Pane:       pane,
 		ToolCallID: req.ToolCallID,
 		At:         askTime(),
-		Questions:  req.Questions,
+		Questions:  questions,
 	})
 	err := s.st.Save()
 	s.pushAskLocked()
@@ -187,16 +193,63 @@ func (s *server) askAnswer(id string, req *ask.AnswerReq) (*ask.Answer, error) {
 	if err := ask.ValidateAnswer(r.Questions, req); err != nil {
 		return nil, err
 	}
+	// The reader's own text is scrubbed the same way: an answer that quotes a
+	// value is stored in state.json and rides every snapshot, and the ask store
+	// is a surface another program reads unasked. The scrub keeps every byte
+	// length, so the rules that validated the text still hold.
+	needles := s.scrubNeedlesLocked()
 	r.Answer = &ask.Answer{
 		At:     askTime(),
 		Cancel: req.Cancel,
-		Items:  req.Items,
-		Note:   req.Note,
+		Items:  scrubAnswerItems(req.Items, needles),
+		Note:   secrets.RedactText(req.Note, needles),
 	}
 	s.askWakeLocked()
 	err := s.st.Save()
 	s.pushAskLocked()
 	return r.Answer, err
+}
+
+// scrubQuestions returns a copy of qs with every operator-visible string
+// scrubbed: the question, the header, and each option's label, description and
+// preview. The copy is what enters the store, so the request's own slices are
+// never aliased into state. A nil option list stays nil; an empty list stays
+// empty.
+func scrubQuestions(qs []ask.Question, needles [][]byte) []ask.Question {
+	out := make([]ask.Question, len(qs))
+	for i, q := range qs {
+		out[i] = q
+		out[i].Question = secrets.RedactText(q.Question, needles)
+		out[i].Header = secrets.RedactText(q.Header, needles)
+		if q.Options == nil {
+			continue
+		}
+		opts := make([]ask.Option, len(q.Options))
+		for j, o := range q.Options {
+			opts[j] = ask.Option{
+				Label:       secrets.RedactText(o.Label, needles),
+				Description: secrets.RedactText(o.Description, needles),
+				Preview:     secrets.RedactText(o.Preview, needles),
+			}
+		}
+		out[i].Options = opts
+	}
+	return out
+}
+
+// scrubAnswerItems returns a copy of items with the reader's text and notes
+// scrubbed. The option indexes are positions, not text, and stay as they are.
+func scrubAnswerItems(items []ask.Item, needles [][]byte) []ask.Item {
+	if items == nil {
+		return nil
+	}
+	out := make([]ask.Item, len(items))
+	for i, it := range items {
+		out[i] = it
+		out[i].Text = secrets.RedactText(it.Text, needles)
+		out[i].Notes = secrets.RedactText(it.Notes, needles)
+	}
+	return out
 }
 
 // askClose drops one ask from the store and reports whether it removed one. It
