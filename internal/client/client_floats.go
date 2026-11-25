@@ -347,6 +347,8 @@ func openKeymapView(t *tui) {
 		closeKeymapView(t)
 		return
 	}
+	// The help view takes the desk, so the facts box stands down under it.
+	t.takeDesk()
 	t.keys = keymapview.NewKeymapView(t.snap, t.km())
 	t.AddFloatingPane(t.keys.Float)
 	t.mode = "help"

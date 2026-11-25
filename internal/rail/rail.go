@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,7 +58,18 @@ type RailItem struct {
 	Count      int
 	Added      int
 	Deleted    int
-	Accent     int // an accent slot, resolved against the theme by the painter
+	// Head is the short sha of the commit the row's HEAD names and HeadSubject
+	// its subject. Upstream is the ref the branch tracks; Ahead and Behind
+	// count the commits each side has that the other does not. Files counts the
+	// files the working tree changes. A window row carries them, so the git
+	// float reads the same probe the row was painted from.
+	Head        string
+	HeadSubject string
+	Upstream    string
+	Ahead       int
+	Behind      int
+	Files       int
+	Accent      int // an accent slot, resolved against the theme by the painter
 	// Project is the project the row belongs to, empty outside a project.
 	// ProjectAccent is that project's accent slot, set on every row of the
 	// group so the painter can tie them with one bar.
@@ -138,11 +150,13 @@ func WindowVars(snap *wire.Snapshot, w wire.WindowInfo) wlabel.Vars {
 // Paint is one frame of the rail's own state: Off is the first item row
 // painted on the rail's first line, the client's scroll offset; Hover is the
 // item row the pointer rests on, -1 when none; Drop is the live drag's hint,
-// nil when none.
+// nil when none; Open is the window whose git mark a float has open, empty when
+// none.
 type Paint struct {
 	Off   int
 	Hover int
 	Drop  *Drop
+	Open  string
 }
 
 // Drop is the live drag's paint hint: Row is the items row the drop boundary
@@ -363,6 +377,12 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 				item.Dirty = src.Dirty
 				item.Added = src.Added
 				item.Deleted = src.Deleted
+				item.Head = src.Head
+				item.HeadSubject = src.HeadSubject
+				item.Upstream = src.Upstream
+				item.Ahead = src.Ahead
+				item.Behind = src.Behind
+				item.Files = src.Files
 				item.Message = src.Message
 			}
 			item.Label = wlabel.Render(snap.WindowLabel, WindowVars(snap, wire.WindowInfo{ID: p.Window, Name: p.WindowName, Named: p.WindowNamed}))
@@ -706,6 +726,26 @@ const windowChrome = 4
 // cells.
 const gitMarkCells = 3
 
+// gitMarkRot is how far the mark's rest colour walks from the bar accent toward
+// the rail's ground. The hue survives at this distance, so the mark reads as the
+// rail's own accent, and its value drops enough that the counts still lead. The
+// pointer takes the glyph back to full accent and an open float inverts it.
+const gitMarkRot = 0.7
+
+// gitMarkQuiet is the quiet accent a git mark rests in.
+func gitMarkQuiet(p theme.Palette) theme.RGB {
+	return mixRGB(p.BarAccent, p.RailBG, gitMarkRot)
+}
+
+// mixRGB walks one colour toward another by rot, the way hintbar derives its
+// pipe tone.
+func mixRGB(from, to theme.RGB, rot float64) theme.RGB {
+	walk := func(a, b int) int {
+		return int(math.Round(float64(a) + (float64(b)-float64(a))*rot))
+	}
+	return theme.RGB{R: walk(from.R, to.R), G: walk(from.G, to.G), B: walk(from.B, to.B)}
+}
+
 // RailRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and set are the rail's own switches.
@@ -801,10 +841,11 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				}
 			}
 			if it.InRepo {
+				quiet := gitMarkQuiet(p)
 				right = append(right,
-					segment.Seg{Text: " ", FG: p.BarAccent},
-					segment.Seg{Text: g.GitMark, FG: p.BarAccent},
-					segment.Seg{Text: " ", FG: p.BarAccent},
+					segment.Seg{Text: " ", FG: quiet},
+					segment.Seg{Text: g.GitMark, FG: quiet},
+					segment.Seg{Text: " ", FG: quiet},
 				)
 			}
 		}
@@ -1023,6 +1064,74 @@ func RailWindowAt(snap *wire.Snapshot, x, y, off int) string {
 	return items[i].Window
 }
 
+// railWindowIndex returns the item row that draws a window's line, or -1 when
+// no drawn row carries it. A folded window still draws its row; a folded
+// project or workspace hides it.
+func railWindowIndex(items []RailItem, window string) int {
+	for i := range items {
+		if items[i].Kind == Window && items[i].Window == window {
+			return i
+		}
+	}
+	return -1
+}
+
+// railGitMarkItem is the row under y, and whether it is a window row inside a
+// repository: the one row kind that paints a git mark. Every mark rule reads
+// this, so the hit test and the float anchor cannot disagree about which rows
+// carry one.
+func railGitMarkItem(snap *wire.Snapshot, y, off int) (RailItem, bool) {
+	if snap == nil || snap.Rail <= 0 || layout.RailCompact(snap.Rail) {
+		return RailItem{}, false
+	}
+	i := railItemRow(snap, y, off)
+	if i < 0 {
+		return RailItem{}, false
+	}
+	it := RailItems(snap)[i]
+	if it.Kind != Window || !it.InRepo {
+		return RailItem{}, false
+	}
+	return it, true
+}
+
+// RailWindowItem returns the rail row that draws a window, and false when no
+// drawn row carries it: a folded project or workspace hides its windows. A
+// folded window still draws its row, so it answers. A git float reads its facts
+// from this row, the same one the mark was painted on.
+func RailWindowItem(snap *wire.Snapshot, window string) (RailItem, bool) {
+	if snap == nil || snap.Rail <= 0 || window == "" || layout.RailCompact(snap.Rail) {
+		return RailItem{}, false
+	}
+	items := RailItems(snap)
+	i := railWindowIndex(items, window)
+	if i < 0 {
+		return RailItem{}, false
+	}
+	return items[i], true
+}
+
+// RailGitMarkRow is the screen row the window's git mark is painted on, or -1
+// when the mark is not on the visible rail: no drawn row carries the window, the
+// window's directory is outside git, the rail is thin, or the row is scrolled
+// out of the item rows. The float anchors on this row and the hit test resolves
+// its rows the same way, so the box and the mark cannot part.
+func RailGitMarkRow(snap *wire.Snapshot, window string, off int) int {
+	if snap == nil || snap.Rail <= 0 || window == "" || layout.RailCompact(snap.Rail) {
+		return -1
+	}
+	items := RailItems(snap)
+	i := railWindowIndex(items, window)
+	if i < 0 || !items[i].InRepo {
+		return -1
+	}
+	y := i - off
+	if y < 0 || y >= snap.Rows-2 {
+		return -1
+	}
+	return y
+}
+
 // RailGitMarkAt returns the window whose git mark is under x,y, or "" for any
 // other cell, row or rail. The mark closes a window row inside a repository as
 // a space, the glyph and a space, so it is the last three cells before the grip
@@ -1033,16 +1142,8 @@ func RailGitMarkAt(snap *wire.Snapshot, x, y, off int) string {
 	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
 		return ""
 	}
-	if layout.RailCompact(snap.Rail) {
-		return ""
-	}
-	items := RailItems(snap)
-	i := railItemRow(snap, y, off)
-	if i < 0 {
-		return ""
-	}
-	it := items[i]
-	if it.Kind != Window || !it.InRepo {
+	it, ok := railGitMarkItem(snap, y, off)
+	if !ok {
 		return ""
 	}
 	// The grip strip holds the rail's last column, so the row composes one
@@ -1196,8 +1297,11 @@ func ClampOffset(snap *wire.Snapshot, off int) int {
 // A left run is elided with an ellipsis before the right-aligned stats give up
 // a cell, so the stats survive a narrow rail. A Paint carries the frame's
 // scroll offset, the row the pointer rests on (-1 when none) and the live
-// drag's hint (nil when none). The hovered row paints RailHoverBG, with the
-// focused pane row keeping its stronger ground. The rows of a lifted window
+// drag's hint (nil when none) and the window whose git mark a float has open
+// (empty when none). The hovered row paints RailHoverBG, with the focused pane
+// row keeping its stronger ground. A git mark rests in the quiet accent, takes
+// the full accent under the pointer, and inverts while its float is up, so one
+// mark at most ever says which box is open. The rows of a lifted window
 // or workspace dim out of place, and the row the drop boundary rests above is
 // replaced by an insertion line in the dragged project's accent, so the
 // landing spot reads between the rows instead of lighting one.
@@ -1223,6 +1327,11 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 	for y := 0; y < rows; y++ {
 		var left, right, tail []segment.Seg
 		bg, bold := p.RailBG, false
+		// markAt is the first run of a git mark that survived the row's width,
+		// -1 when the row carries none or dropped it whole. markOpen says the
+		// mark is the one the open float belongs to.
+		markAt := -1
+		markOpen := false
 		// The grip strip owns the rail's last column above the control row, so
 		// no row paints there and the hover line never covers a label.
 		rowW := w
@@ -1254,6 +1363,13 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			// carries is in the air, so nothing under it answers.
 			lift := drop != nil && ((drop.Lift != "" && it.Window == drop.Lift) ||
 				(drop.LiftWs != "" && it.Workspace == drop.LiftWs)) && it.Kind != Gap
+			// The git mark closes the right run as a space, the glyph and a
+			// space. A row too narrow for the right run dropped the mark whole,
+			// so the glyph's cell is the proof that it is there to paint.
+			if !compact && it.Kind == Window && it.InRepo && len(right) >= gitMarkCells &&
+				right[len(right)-2].Text == th.Glyphs.GitMark {
+				markAt = len(right) - gitMarkCells
+			}
 			switch {
 			case lift:
 				bg, bold = p.RailBG, false
@@ -1261,6 +1377,14 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 				bg, bold = p.RailFocusBG, true
 			case i == hover && it.Kind != Gap:
 				bg = p.RailHoverBG
+			}
+			if markAt >= 0 && it.Window == paint.Open && paint.Open != "" && !lift {
+				markOpen = true
+			}
+			if markAt >= 0 && i == hover && !lift {
+				// The pointer takes the glyph back to the full accent. The
+				// three cells sit on the row's hover ground already.
+				right[markAt+1].FG = p.BarAccent
 			}
 			if lift {
 				for i := range left {
@@ -1303,7 +1427,15 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 		if n := rowW - leftCells - rightCells; n > 0 {
 			buf.WriteString(strings.Repeat(" ", n))
 		}
-		for _, s := range right {
+		for j, s := range right {
+			if markOpen && j >= markAt && j < markAt+gitMarkCells {
+				// The open mark inverts: the box fills with the accent and
+				// the glyph takes the rail's ground. Only the open window's
+				// mark is ever in this state.
+				s.FG, s.BG = p.RailBG, p.BarAccent
+				segment.Write(buf, s)
+				continue
+			}
 			WriteRailSeg(buf, s, bg, bold)
 		}
 		if y < controlAt {

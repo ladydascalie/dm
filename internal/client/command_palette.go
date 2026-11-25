@@ -120,6 +120,8 @@ func openCommandPalette(t *tui) {
 	if g := commandPaletteGeom(t.snap, len(commands), t.km().PaletteRows()); g.W < 1 || g.H < 1 {
 		return
 	}
+	// The palette takes the desk, so the facts box stands down under it.
+	t.takeDesk()
 	t.cp = &commandPalette{pal: palette.New(commands), total: len(commands), capRows: t.km().PaletteRows()}
 	t.disarm()
 	t.dirty = true

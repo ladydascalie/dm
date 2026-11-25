@@ -167,7 +167,9 @@ func TestRailRowSegments(t *testing.T) {
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: "rail", FG: theme.DefaultTheme().Palette.RailWindow},
 	}
-	markFG := theme.DefaultTheme().Palette.BarAccent
+	// The mark rests in the quiet accent: the bar accent walked toward the
+	// rail's ground, so it reads as an affordance beside the counts.
+	markFG := gitMarkQuiet(theme.DefaultTheme().Palette)
 	wantRight = []railSeg{
 		{Text: "\u25cf", FG: theme.DefaultTheme().Palette.RailWorking},
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
@@ -351,10 +353,11 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 		{Text: " ", FG: th.Palette.RailDim},
 		{Text: "-4", FG: th.Palette.RailDiffDel},
 	}
+	quiet := gitMarkQuiet(th.Palette)
 	gitMark := []railSeg{
-		{Text: " ", FG: th.Palette.BarAccent},
-		{Text: th.Glyphs.GitMark, FG: th.Palette.BarAccent},
-		{Text: " ", FG: th.Palette.BarAccent},
+		{Text: " ", FG: quiet},
+		{Text: th.Glyphs.GitMark, FG: quiet},
+		{Text: " ", FG: quiet},
 	}
 	fullWithMark := append(append([]railSeg{}, full...), gitMark...)
 

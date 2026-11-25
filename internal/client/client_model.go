@@ -107,6 +107,10 @@ type tui struct {
 	// lsw is the open layout palette, nil when closed. It lives in mode
 	// "layout" and owns the keyboard while it is up.
 	lsw *layoutSwitcher
+	// git is the git facts float, nil when closed. It carries no mode: it
+	// takes no keys but esc, so the desk keeps typing under it. It follows the
+	// rail's git mark and closes when that mark leaves the rail.
+	git *gitFloat
 	// ask is the ask float, nil when closed. It owns mode "ask": the focused
 	// pane's open question, one question at a time. askDeferred holds an ask
 	// that arrived while another overlay had the keyboard, and askAnswerID
@@ -980,6 +984,8 @@ func (t *tui) apply(m wire.Msg) {
 		t.snap.WindowLabel = t.km().WindowLabel()
 		t.updatePadHover(t.mouseX, t.mouseY)
 		t.updateRailHover()
+		// The list, the rail and the folds under the open facts box moved.
+		t.syncGit()
 		// railWant remembers the last expanded width only, so a collapse or a
 		// hide does not replace it with the thin width or zero.
 		switch {

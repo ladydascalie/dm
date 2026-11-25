@@ -44,6 +44,10 @@ func (t *tui) draw() {
 	if win == nil || win.Cols < 1 || win.Rows < 1 {
 		return
 	}
+	// The facts box is anchored on the rail row that owns its mark. The row
+	// moves with a scroll, a fold and the terminal, so the box re-places itself
+	// before the bands are laid out, and leaves when its row is gone.
+	t.syncGit()
 
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.
@@ -59,7 +63,9 @@ func (t *tui) draw() {
 	// The rail grip paints the same heavy line as a split divider, over the
 	// strip its grab zone covers.
 	drawDivider(&div, th, t.padZone, t.padAxis)
-	rail.DrawRail(&railBuf, th, win, t.glyphSet(), rail.Paint{Off: t.railOff, Hover: t.railHoverRow(), Drop: t.railDrop()})
+	rail.DrawRail(&railBuf, th, win, t.glyphSet(), rail.Paint{
+		Off: t.railOff, Hover: t.railHoverRow(), Drop: t.railDrop(), Open: t.gitOpen(),
+	})
 	DrawTabBar(&tabBar, th, win, tabWidthFor(t.km()))
 	badge := t.barBadgeOf(th, t.glyphSet())
 	badge.ask = t.barAskOf()
