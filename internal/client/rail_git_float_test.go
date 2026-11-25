@@ -714,8 +714,9 @@ type gitDeskSurface struct {
 	open func(t *tui)
 }
 
-// gitDeskSurfaces is the five surfaces the one-at-a-time rule covers, each with
-// its own open path.
+// gitDeskSurfaces is every surface the one-at-a-time rule covers, each with its
+// own open path. The toasts and the armed prefix help panel are absent on
+// purpose: neither owns the keys, so neither takes the desk.
 func gitDeskSurfaces() []gitDeskSurface {
 	return []gitDeskSurface{
 		{"dashboard", func(t *tui) { openSwitcher(t) }},
@@ -723,6 +724,19 @@ func gitDeskSurfaces() []gitDeskSurface {
 		{"help", func(t *tui) { openKeymapView(t) }},
 		{"sessions", func(t *tui) { t.openPicker() }},
 		{"layout", func(t *tui) { openLayoutSwitcher(t) }},
+		{"search", func(t *tui) {
+			// The query row lives on the scrollback band, so the pane needs a
+			// real rect and the tall terminal behind it.
+			t.snap.Panes[0].Rect = layout.Rect{X: t.snap.Rail, Y: 0, W: 40, H: 8}
+			t.histRows = 40
+			p := t.paneByID("w1p1")
+			t.scrollVT = vt.NewTerm(p.Rect.W, p.Rect.H+t.histWindow())
+			t.scrollVT.Write([]byte("ROW-001\r\nROW-002\r\nROW-003"))
+			t.scrollVT.Flush()
+			t.scroll = p.ID
+			t.mode = "scroll"
+			t.openSearch()
+		}},
 	}
 }
 

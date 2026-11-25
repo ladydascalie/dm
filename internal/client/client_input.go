@@ -1048,6 +1048,9 @@ func (t *tui) openSearch() {
 	if t.scroll == "" || t.scrollVT == nil {
 		return
 	}
+	// The query row takes every key and paints over the desk, so it takes the
+	// desk too: the facts box stands down rather than being cut by the row.
+	t.takeDesk()
 	if t.search == nil {
 		t.search = &scrollSearch{}
 	}
