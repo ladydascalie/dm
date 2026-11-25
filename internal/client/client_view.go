@@ -130,6 +130,12 @@ func (t *tui) draw() {
 			panel.PaintShadow(&fb, th, f.Rect, win.Cols, win.Rows)
 		}
 		f.Draw(&fb, th)
+		if t.git != nil && f.ID == gitFloatID {
+			// The panel's box pass owns the corner cell, so the grip is painted
+			// over it here, in the float's own bytes, so a moved grip repaints
+			// with the frame that moved it.
+			t.paintGitGrip(&fb, th, f.Rect)
+		}
 		floatBufs = append(floatBufs, fb)
 		floatPaints = append(floatPaints, t.last.floatPaint(f.ID))
 	}

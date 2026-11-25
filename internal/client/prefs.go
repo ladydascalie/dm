@@ -16,6 +16,13 @@ type prefs struct {
 	// switcher's footer shows: "recent", "project" or "status". An empty or
 	// unknown name opens the dashboard on recent.
 	DashboardSort string `json:"dashboardSort"`
+	// GitBoxCols and GitBoxRows are the git facts box's size: the outside
+	// width and the interior row count a drag left. One size serves every
+	// window. Zero in either means automatic, which is what a first run and a
+	// wiped prefs file get, so the box hugs its facts until the operator drags
+	// it.
+	GitBoxCols int `json:"gitBoxCols"`
+	GitBoxRows int `json:"gitBoxRows"`
 }
 
 // loadPrefs reads the prefs file at path. A missing, unreadable or malformed

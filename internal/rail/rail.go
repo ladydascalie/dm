@@ -61,14 +61,16 @@ type RailItem struct {
 	// Head is the short sha of the commit the row's HEAD names and HeadSubject
 	// its subject. Upstream is the ref the branch tracks; Ahead and Behind
 	// count the commits each side has that the other does not. Files counts the
-	// files the working tree changes. A window row carries them, so the git
-	// float reads the same probe the row was painted from.
+	// files the working tree changes and FileNames lists the first of them in
+	// git's order. A window row carries them, so the git float reads the same
+	// probe the row was painted from.
 	Head        string
 	HeadSubject string
 	Upstream    string
 	Ahead       int
 	Behind      int
 	Files       int
+	FileNames   []string
 	Accent      int // an accent slot, resolved against the theme by the painter
 	// Project is the project the row belongs to, empty outside a project.
 	// ProjectAccent is that project's accent slot, set on every row of the
@@ -383,6 +385,7 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 				item.Ahead = src.Ahead
 				item.Behind = src.Behind
 				item.Files = src.Files
+				item.FileNames = src.FileNames
 				item.Message = src.Message
 			}
 			item.Label = wlabel.Render(snap.WindowLabel, WindowVars(snap, wire.WindowInfo{ID: p.Window, Name: p.WindowName, Named: p.WindowNamed}))

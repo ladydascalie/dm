@@ -243,6 +243,7 @@ func (s *server) fillPaneFactsLocked(info *wire.AllPane) {
 		info.Ahead = gi.ahead
 		info.Behind = gi.behind
 		info.Files = gi.files
+		info.FileNames = gi.fileNames
 	}
 	if pc := s.panes[info.ID]; pc != nil {
 		pst := pc.status()

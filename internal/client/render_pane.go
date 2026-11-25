@@ -347,6 +347,11 @@ func drawGrips(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot) {
 // drawDivider paints the hovered divider: heavy line glyphs over both border
 // cells, so the grab target is visible before the press.
 func drawDivider(buf *bytes.Buffer, th theme.Theme, z layout.Rect, axis string) {
+	// The facts box's grip shows the hint of a divider without one: a rule
+	// painted through the box would read as a split it does not have.
+	if axis == gitPadAxis {
+		return
+	}
 	if z.W <= 0 || z.H <= 0 {
 		return
 	}
