@@ -27,6 +27,8 @@ func openSwitcher(t *tui) {
 	if t.snap == nil || t.snap.Cols < 1 || t.snap.Rows < 1 {
 		return
 	}
+	// The dashboard takes the desk, so the facts box stands down under it.
+	t.takeDesk()
 	t.sw = switcher.NewSwitcher(layout.Rect{W: t.snap.Cols, H: t.snap.Rows}, t.snap)
 	// The ordering is the one the operator left the dashboard in last run, and
 	// the config picks the shape, the share the band opens at and its side.

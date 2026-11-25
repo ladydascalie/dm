@@ -135,3 +135,153 @@ func TestRailGitMarkAt(t *testing.T) {
 		t.Fatalf("mark under a one-row offset = %q, want w1", got)
 	}
 }
+
+// railPaintTerm draws the rail with a given paint state and replays it, so a
+// test reads the cells the frame left behind.
+func railPaintTerm(t *testing.T, snap *wire.Snapshot, set theme.GlyphSet, paint Paint) *vt.Term {
+	t.Helper()
+	var b bytes.Buffer
+	DrawRail(&b, theme.DefaultTheme().For(set), snap, set, paint)
+	term := vt.NewTerm(snap.Cols, snap.Rows)
+	term.Write(b.Bytes())
+	term.Flush()
+	return term
+}
+
+// gitTwoMarkSnap is two windows inside a repo, so one mark can be open while
+// the other keeps its rest state.
+func gitTwoMarkSnap(rail int) *wire.Snapshot {
+	snap := railRowSnap(rail)
+	snap.Rows = 12
+	for i := range snap.All {
+		snap.All[i].InRepo = true
+	}
+	return snap
+}
+
+// TestRailGitMarkStates proves the mark's three states: the glyph in the quiet
+// accent at rest, the full accent under the pointer, and the accent filling its
+// three cells with the glyph in the rail's ground while a float has it open. An
+// open mark leaves the other mark alone, so only one mark ever says which box is
+// up.
+func TestRailGitMarkStates(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	snap := gitTwoMarkSnap(layout.DefaultRail)
+	glyph := th.Glyphs.GitMark
+	// The grip strip owns the rail's last column, so the mark's glyph sits two
+	// cells before it.
+	gx := snap.Rail - 3
+	one, two := 1, 4
+	if got := RailGitMarkRow(snap, "w1", 0); got != one {
+		t.Fatalf("w1 mark row = %d, want %d", got, one)
+	}
+	if got := RailGitMarkRow(snap, "w2", 0); got != two {
+		t.Fatalf("w2 mark row = %d, want %d", got, two)
+	}
+	quiet := railColour(gitMarkQuiet(th.Palette))
+	ground := railColour(th.Palette.RailBG)
+	accent := railColour(th.Palette.BarAccent)
+	hover := railColour(th.Palette.RailHoverBG)
+
+	// Rest: the glyph in the quiet accent on the rail's own ground.
+	term := railPaintTerm(t, snap, theme.GlyphUnicode, Paint{Hover: -1})
+	if c := cellOf(term, gx, one); c.Char != []rune(glyph)[0] || c.FG != quiet || c.BG != ground {
+		t.Fatalf("rest mark = %+v, want %q in the quiet accent on the rail ground", c, glyph)
+	}
+	// Hover: the three cells take the rail hover ground and the glyph the full
+	// accent.
+	term = railPaintTerm(t, snap, theme.GlyphUnicode, Paint{Hover: one})
+	for x := gx - 1; x <= gx+1; x++ {
+		if c := cellOf(term, x, one); c.BG != hover {
+			t.Fatalf("hovered mark cell %d ground = %+v, want the hover ground", x, c.BG)
+		}
+	}
+	if c := cellOf(term, gx, one); c.FG != accent {
+		t.Fatalf("hovered glyph colour = %+v, want the full accent", c.FG)
+	}
+	// Open: the box fills with the accent and the glyph takes the rail ground.
+	// The other mark stays at rest.
+	term = railPaintTerm(t, snap, theme.GlyphUnicode, Paint{Hover: -1, Open: "w1"})
+	for x := gx - 1; x <= gx+1; x++ {
+		if c := cellOf(term, x, one); c.BG != accent {
+			t.Fatalf("open mark cell %d ground = %+v, want the accent", x, c.BG)
+		}
+	}
+	if c := cellOf(term, gx, one); c.FG != ground {
+		t.Fatalf("open glyph colour = %+v, want the rail ground", c.FG)
+	}
+	if c := cellOf(term, gx, two); c.FG != quiet || c.BG != ground {
+		t.Fatalf("the other mark = %+v, want its rest state while w1 is open", c)
+	}
+}
+
+// TestRailGitMarkRow proves the float's anchor and the mark's hit test resolve
+// one row: the drawn window row answers on both, a folded window inside a repo
+// still draws its mark, a folded workspace hides it, a scroll moves it and takes
+// it off the rail, and a directory outside git has none.
+func TestRailGitMarkRow(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := gitTwoMarkSnap(layout.DefaultRail)
+	markX := snap.Rail - gitMarkCells
+
+	row := RailGitMarkRow(snap, "w1", 0)
+	if row != 1 {
+		t.Fatalf("w1 anchor row = %d, want 1", row)
+	}
+	if got := RailGitMarkAt(snap, markX, row, 0); got != "w1" {
+		t.Fatalf("hit test on the anchor row = %q, want w1", got)
+	}
+
+	// A folded window inside a repo still draws its row, so its mark is still
+	// on the rail and still answers.
+	snap.All[1].WindowUnfolded = false
+	if got := RailGitMarkRow(snap, "w2", 0); got != 4 {
+		t.Fatalf("folded window anchor row = %d, want 4", got)
+	}
+	if got := RailGitMarkAt(snap, markX, 4, 0); got != "w2" {
+		t.Fatalf("folded window hit test = %q, want w2", got)
+	}
+	snap.All[1].WindowUnfolded = true
+
+	// A folded workspace hides its windows, so nothing is drawn and nothing
+	// answers.
+	snap.All[2].WorkspaceUnfolded = false
+	if got := RailGitMarkRow(snap, "w3", 0); got != -1 {
+		t.Fatalf("folded workspace anchor row = %d, want -1", got)
+	}
+	if got := RailGitMarkAt(snap, markX, 0, 0); got != "" {
+		t.Fatalf("folded workspace hit test = %q, want empty", got)
+	}
+	snap.All[2].WorkspaceUnfolded = true
+
+	// A scroll moves the anchor with the row and takes it off the rail.
+	if got := RailGitMarkRow(snap, "w1", 1); got != 0 {
+		t.Fatalf("anchor under a one row scroll = %d, want 0", got)
+	}
+	if got := RailGitMarkRow(snap, "w1", 4); got != -1 {
+		t.Fatalf("anchor past the rail = %d, want -1", got)
+	}
+	if got := RailGitMarkRow(snap, "w1", len(RailItems(snap))); got != -1 {
+		t.Fatalf("anchor past the last row = %d, want -1", got)
+	}
+
+	// Outside git there is no mark, so there is no anchor.
+	out := gitTwoMarkSnap(layout.DefaultRail)
+	out.All[1].InRepo = false
+	if got := RailGitMarkRow(out, "w2", 0); got != -1 {
+		t.Fatalf("outside git anchor row = %d, want -1", got)
+	}
+	if it, ok := RailWindowItem(out, "w2"); !ok || it.InRepo {
+		t.Fatalf("window item outside git = %+v, %v", it, ok)
+	}
+
+	// The thin rail draws no window row.
+	thin := gitTwoMarkSnap(layout.CollapsedRail)
+	if got := RailGitMarkRow(thin, "w1", 0); got != -1 {
+		t.Fatalf("thin rail anchor row = %d, want -1", got)
+	}
+	if _, ok := RailWindowItem(thin, "w1"); ok {
+		t.Fatal("the thin rail answered a window row")
+	}
+}
