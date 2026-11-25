@@ -8,15 +8,15 @@ Outside `internal/` sit `dm`, `blackbox`, `cmd/dm-wasm` and `cmd/esctest-harness
 ## Layers
 
 A layer is a set of packages that may import each other. The model is the
-list of layers in `internal/arch/arch.go:39`, and each layer names the
+list of layers in `internal/arch/arch.go#Layers`, and each layer names the
 layers it may import: that list is the rule. `internal/arch` turns the
 model into a test that fails the import which leaves the allowed shape
-(`internal/arch/arch_test.go:17`). This page is the graph that rule
+(`internal/arch/arch_test.go#TestArchitecture`). This page is the graph that rule
 produces. The reason for each layer and how to add one live in
 [the layers page](../11-layers.md).
 
 `entry` is the layer of the programs: `dm`, `cmd/dm-wasm` and `cmd/esctest-harness`
-(`main.go:1`, `cmd/esctest-harness/main.go:5`). Nothing imports a program,
+(`main.go#main`, `cmd/esctest-harness/main.go#main`). Nothing imports a program,
 and a program may import every layer, so the diagram puts `entry` at the
 top.
 

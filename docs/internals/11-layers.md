@@ -2,9 +2,9 @@
 
 The module splits into six layers, and every package sits in exactly one of
 them. A layer may import itself and the layers below it, never upward. The
-model is the layer data in `internal/arch/arch.go:39`. The package graph is the
+model is the layer data in `internal/arch/arch.go#Layers`. The package graph is the
 tree's real imports: 122 edges, which `internal/arch.Load` reads. A Go test,
-`TestArchitecture` (`internal/arch/arch_test.go:17`), turns each layer into an
+`TestArchitecture` (`internal/arch/arch_test.go#TestArchitecture`), turns each layer into an
 import rule and fails on a violation; that test is the gate. `internal/archdoc`
 groups the graph's edges by the model and renders the generated page. No
 reviewer reads them all; the gate does.
@@ -58,8 +58,8 @@ and nothing native. Entry may import anything, so its row lists the whole stack.
 terminal, `internal/cli` parses the command line, `internal/transport` dials the
 session socket, `internal/proxy` serves the loopback capability endpoint, and
 `internal/webui` serves the phone page. No package below entry imports a
-service. A service may not import entry either: `main.go:1` and
-`cmd/esctest-harness/main.go:5` are `package main`, so the go tool already
+service. A service may not import entry either: `main.go#main` and
+`cmd/esctest-harness/main.go#main` are `package main`, so the go tool already
 refuses that import, and the model repeats the ban so a future entry point that
 is not a program keeps it.
 
@@ -74,7 +74,7 @@ rasterises a cell grid to a PNG, `internal/testutil` holds the test helpers. A
 presentation package may not import a service, so a view that would dial the
 socket is a build failure, not a review comment. Services may import
 presentation: `internal/client` paints the rows that `internal/palette` filters
-(`internal/client/command_palette.go:502`) and renders with `internal/boxview`
+(`internal/client/command_palette.go#paintPaletteRows`) and renders with `internal/boxview`
 and `internal/ui`.
 
 **domain** holds the state, the data types and the rules that need no screen:
@@ -82,10 +82,10 @@ and `internal/ui`.
 `internal/vt`, `internal/theme`, `internal/keymap`, `internal/box`,
 `internal/notify`, `internal/osc`, `internal/secrets`. A domain package may not
 import presentation. A wire message can carry a `*vt.Snapshot`
-(`internal/wire/wire.go:85`) and each snapshot row carries `SnapshotCell`
-values (`internal/vt/snapshot.go:48`), because `vt` is a domain package too. A
+(`internal/wire/wire.go#Msg`) and each snapshot row carries `SnapshotCell`
+values (`internal/vt/snapshot.go#SnapshotRow`), because `vt` is a domain package too. A
 wire frame, one length-prefixed JSON message on the socket
-(`internal/wire/wire.go:252`), never carries a `boxview` or a `panel`.
+(`internal/wire/wire.go#WriteMsg`), never carries a `boxview` or a `panel`.
 
 **leaf** packages import nothing from the module: `internal/cells`,
 `internal/paths`, `internal/kdl`, `internal/browser`, `internal/wlabel`,
@@ -101,12 +101,18 @@ neither may reach into services or presentation.
 ## How to run the gate
 
 The gate shells out to the Go toolchain. `internal/arch.Load` finds the module
-root with `go env GOMOD` (`internal/arch/arch.go:198`) and runs
+root with `go env GOMOD` (`internal/arch/arch.go#moduleRoot`) and runs
 `go list -f '{{.ImportPath}} {{join .Imports " "}}' ./...` in it
-(`internal/arch/arch.go:176`). It reads the package list and the non-test
+(`internal/arch/arch.go#load`). It reads the package list and the non-test
 imports from the stdout of that one command, caches them for the test process,
 and stops. The gate needs the Go toolchain and a `go.mod`; it does not compile
-the code. Its only new dependency is `github.com/arch-go/arch-go`, imported by
+the code.
+
+The gate covers non-test imports only. `internal/arch.Load` runs `go list`
+without `-test`, so the graph it reads is the build graph, and an import that only a test
+file makes is invisible to it. The exclusion is deliberate: a test file that
+reaches up a layer may exist today, so turning the gate on for test imports is
+its own change, with its own fallout, and not part of this one. Its only new dependency is `github.com/arch-go/arch-go`, imported by
 the test file alone, so no arch-go code reaches the `dm` binary.
 
 ```
@@ -138,7 +144,8 @@ exist, and when a rule selects no package at all.
 - **Test imports.** The rules read the non-test import list. `dm/blackbox`
   sits in the leaf, and its test files import `dm/internal/cells`,
   `dm/internal/notify`, `dm/internal/vt` and `dm/internal/wire`. The leaf
-  forbids those imports and the gate cannot see them.
+  forbids those imports and the gate cannot see them, because the graph is
+  built without `-test` (see "How to run the gate").
 - **Cycles.** arch-go deprecated `CyclesRule` in v1.4.0. The tree is a DAG
   today; the gate would not notice a cycle between two packages of one layer.
 - **Direction inside a layer.** Two domain packages may import each other. The
@@ -150,7 +157,7 @@ exist, and when a rule selects no package at all.
 ## Adding a package
 
 1. Add the package to the lowest layer that satisfies its imports, in
-   `internal/arch/arch.go:39`.
+   `internal/arch/arch.go#Layers`.
 2. Run `go test ./internal/arch -count=1`. An unassigned package fails there and
    prints its own import path.
 3. Run `make docs-internals`. Then update the table on this page until
