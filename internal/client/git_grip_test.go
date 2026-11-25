@@ -14,6 +14,7 @@ import (
 	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/vt"
+	"dm/internal/wire"
 )
 
 // gitBoxTUI opens the box on w1 and returns it with the box's grip cell, zero
@@ -422,4 +423,62 @@ func TestGitFloatGripPaintAndHint(t *testing.T) {
 			}
 		}
 	}
+}
+
+// gitWheelProbe is the review's probe shape: a pane under the box with a real
+// rect that claims the mouse, so a wheel it receives comes back as keys.
+func gitWheelProbe(t *testing.T) (*tui, chan wire.Msg) {
+	t.Helper()
+	tui, got := gitFloatTUI(t, 100, 30, 20)
+	tui.snap.Panes[0].Rect = layout.Rect{X: 20, Y: 0, W: 79, H: 28}
+	tui.snap.Panes[0].Mouse = true
+	return tui, got
+}
+
+// TestGitBoxLetsTheWheelThrough proves the box owns the press and the grip, and
+// not the wheel: a wheel turn on a box cell reaches the pane under it, a wheel
+// turn outside the box still does, and neither closes the box, while a press on
+// the box stays inert and the grip still starts a drag.
+func TestGitBoxLetsTheWheelThrough(t *testing.T) {
+	t.Parallel()
+	tui, got := gitWheelProbe(t)
+	gitMarkClick(tui, rail.RailGitMarkRow(tui.snap, "w1", 0))
+	if tui.git == nil {
+		t.Fatal("the mark click opened no box")
+	}
+	r := tui.git.float.Rect
+
+	// A wheel turn on a box cell goes through to the pane.
+	tui.handleMouse(mouseEvent{btn: 64, x: r.X + 3, y: r.Y + 2})
+	if m := testutil.NextMsg(t, got); m.Type != "keys" || len(m.Keys) == 0 {
+		t.Fatalf("wheel over the box sent %+v, want the keys of the pane under it", m)
+	}
+	if tui.git == nil {
+		t.Fatal("a wheel over the box closed it")
+	}
+
+	// A wheel turn outside the box still reaches the pane.
+	tui.handleMouse(mouseEvent{btn: 64, x: r.X + r.W + 6, y: r.Y + 2})
+	if m := testutil.NextMsg(t, got); m.Type != "keys" || len(m.Keys) == 0 {
+		t.Fatalf("wheel outside the box sent %+v, want the keys of the pane", m)
+	}
+
+	// A press on the box stays inert: the box stays up and nothing is sent.
+	gitPressAt(tui, r.X+3, r.Y+2)
+	if tui.git == nil {
+		t.Fatal("a press on the box body closed it")
+	}
+	if tui.press != nil || tui.selText != nil || tui.git.resizing {
+		t.Fatalf("a press on the box started press=%+v selection=%+v resize=%v",
+			tui.press, tui.selText, tui.git.resizing)
+	}
+	gitReleaseAt(tui, r.X+3, r.Y+2)
+	testutil.NoMsg(t, got)
+
+	// The grip still starts a drag.
+	gitPressAt(tui, r.X+r.W, r.Y+r.H)
+	if !tui.git.resizing {
+		t.Fatal("the press on the grip started no resize")
+	}
+	testutil.NoMsg(t, got)
 }

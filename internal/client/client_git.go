@@ -314,7 +314,9 @@ func gitGripCell(r layout.Rect) layout.Rect {
 // the grip starts a resize, and every other event there does nothing at all, so
 // a click on the box never lands on the pane or the rail standing under it. A
 // drag in flight keeps the pointer wherever it goes, so the box's edges still
-// follow it past the terminal's.
+// follow it past the terminal's. The wheel is the one exception: it never acts
+// on the box, and the pane under it keeps scrolling while the pointer rests
+// there.
 func (t *tui) gitMouse(ev mouseEvent, x, y int) bool {
 	v := t.git
 	if v == nil {
@@ -336,11 +338,12 @@ func (t *tui) gitMouse(ev mouseEvent, x, y int) bool {
 		}
 		return true
 	}
-	if !gitBoxAt(v.float.Rect, x, y) {
+	// A wheel over the box is not the box's: only a press and the grip are, so
+	// the pane under the pointer keeps scrolling while the box stands there.
+	if !gitBoxAt(v.float.Rect, x, y) || ev.btn&64 != 0 {
 		return false
 	}
-	if ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release &&
-		gitGripAt(v.float.Rect, x, y) {
+	if ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release && gitGripAt(v.float.Rect, x, y) {
 		t.gitResizePress(x, y)
 	}
 	return true
