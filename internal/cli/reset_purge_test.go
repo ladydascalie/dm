@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"dm/internal/paths"
@@ -209,6 +210,67 @@ func TestPurgeSkipsLivePanes(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("purge removed a skipped session dir: %v", err)
+	}
+}
+
+// holdSessionLock takes an exclusive flock on a session's server.lock and
+// returns the open file that holds it. flock belongs to the open file
+// description, so a lock this process takes blocks another attempt in the same
+// process: purge meets the holder exactly as it meets another process's.
+func holdSessionLock(t *testing.T, dir string) *os.File {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Join(dir, "server.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		t.Fatalf("take the session lock: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+// TestPurgeRefusesAHeldLock proves a purge that cannot prove no server is live
+// removes nothing: a session with no pid file and no live process, but a held
+// lock, is skipped by both the real run and the dry run.
+func TestPurgeRefusesAHeldLock(t *testing.T) {
+	t.Setenv("DM_STATE", t.TempDir())
+	dir := deadSession(t, "held")
+	holder := holdSessionLock(t, dir)
+	out := testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"purge", "--dry-run"}); err != nil {
+			t.Fatalf("dm purge --dry-run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "skip held: session lock held") {
+		t.Fatalf("dm purge --dry-run printed %q", out)
+	}
+	out = testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"purge"}); err != nil {
+			t.Fatalf("dm purge: %v", err)
+		}
+	})
+	if !strings.Contains(out, "skip held: session lock held") {
+		t.Fatalf("dm purge printed %q", out)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("purge removed a session whose lock is held: %v", err)
+	}
+	// The holder exits; the next purge removes the directory once.
+	if err := holder.Close(); err != nil {
+		t.Fatalf("release the lock: %v", err)
+	}
+	out = testutil.CaptureStdout(t, func() {
+		if err := Run([]string{"purge"}); err != nil {
+			t.Fatalf("dm purge: %v", err)
+		}
+	})
+	if !strings.Contains(out, "purged held") {
+		t.Fatalf("dm purge after the holder exited printed %q", out)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("purged session dir still exists: %v", err)
 	}
 }
 

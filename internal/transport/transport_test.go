@@ -55,6 +55,10 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// fakeLock holds the session lock the fake server took, for the life of the
+// process.
+var fakeLock *os.File
+
 // hasFlag reports whether name appears in args as a bare flag.
 func hasFlag(args []string, name string) bool {
 	for _, a := range args {
@@ -81,6 +85,20 @@ func flagValue(args []string, name string) string {
 // It runs in a spawned child, so it resolves its state root from the child
 // env's DM_STATE, which EnsureAt or the spawning test pins to the root.
 func fakeServer(name string) {
+	// A real server locks its session before it listens and holds the lock for
+	// its whole life. The fake does the same, so reset and purge meet the lock
+	// exactly as they meet a real server's. fakeLock keeps the fd open: a flock
+	// belongs to the open file description, so closing it would release the
+	// lock.
+	lf, err := os.OpenFile(filepath.Join(paths.SessionDir(name), "server.lock"),
+		os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		os.Exit(1)
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		os.Exit(1)
+	}
+	fakeLock = lf
 	sock := paths.ServerSock(name)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -612,6 +630,191 @@ func TestResetSessionStopsEverythingAndRemovesTheDir(t *testing.T) {
 	}
 	if err := ResetSessionAt(root, "nosuch"); err == nil || !strings.Contains(err.Error(), "no session") {
 		t.Fatalf("ResetSession on a missing session = %v, want a no-session error", err)
+	}
+}
+
+// holdLockAt takes an exclusive flock on a session's server.lock and returns
+// the open file that holds it. flock belongs to the open file description, so
+// a lock this process takes blocks another attempt in the same process: the
+// code under test meets the holder exactly as it meets another process's.
+func holdLockAt(t *testing.T, dir string) *os.File {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Join(dir, "server.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		t.Fatalf("take the session lock: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+// TestResetRefusesAHeldLockWithNoPidFile is the review's trigger without the
+// SIGSTOP: a live holder owns server.lock while server.pid is missing, so the
+// pid file says "no server" and only the lock tells the truth. Reset must
+// refuse and leave every byte of the directory alone.
+func TestResetRefusesAHeldLockWithNoPidFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := paths.SessionDirAt(root, "held")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(state, []byte(`{"session":"held"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	holdLockAt(t, dir)
+	err := ResetSessionAt(root, "held")
+	if err == nil {
+		t.Fatal("reset removed a session whose lock another process holds")
+	}
+	if !strings.Contains(err.Error(), "locked") {
+		t.Fatalf("reset on a held lock = %v, want a locked-session refusal", err)
+	}
+	if _, err := os.Stat(state); err != nil {
+		t.Fatalf("reset removed the state file under a held lock: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "server.lock")); err != nil {
+		t.Fatalf("reset removed the held lock file: %v", err)
+	}
+}
+
+// TestResetRemovesOnceTheLockHolderExits proves the refusal is not permanent:
+// once the holder lets go, one reset removes the directory, and a second reset
+// finds nothing to remove.
+func TestResetRemovesOnceTheLockHolderExits(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := paths.SessionDirAt(root, "held")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	holder := holdLockAt(t, dir)
+	if err := ResetSessionAt(root, "held"); err == nil {
+		t.Fatal("reset removed a session whose lock another process holds")
+	}
+	if err := holder.Close(); err != nil {
+		t.Fatalf("release the lock: %v", err)
+	}
+	if err := ResetSessionAt(root, "held"); err != nil {
+		t.Fatalf("reset after the holder exited: %v", err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("reset left the session directory behind: %v", err)
+	}
+	if err := ResetSessionAt(root, "held"); err == nil || !strings.Contains(err.Error(), "no session") {
+		t.Fatalf("second reset = %v, want a no-session error", err)
+	}
+}
+
+// TestResetKillsALiveServerWithNoPidFile is the review's trigger as a unit: a
+// live dm server owns the lock while its pid file is gone, so the pid file says
+// "no server". Reset must find the server by the lock it holds, kill it and
+// remove the directory once.
+func TestResetKillsALiveServerWithNoPidFile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dropSessionAt(t, root, "nopid")
+	dir := paths.SessionDirAt(root, "nopid")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := exec.Command(exe, "__server", "-s", "nopid")
+	// The child fakeServer resolves its paths from DM_STATE; pin the child's
+	// copy to root. Child env, not t.Setenv, so this test stays parallel.
+	srv.Env = envWithRoot(root)
+	srv.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := srv.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Process.Kill() })
+	awaitSubcommand(t, srv.Process.Pid, "__server")
+	// The lock is the only evidence left once the pid file goes, so wait for it.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		held, err := paths.SessionLockHeld(root, "nopid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if held {
+			break
+		}
+		if !processAlive(srv.Process.Pid) {
+			t.Fatal("the fake server exited before it took the lock")
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the fake server never took the lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.Remove(filepath.Join(dir, "server.pid")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ResetSessionAt(root, "nopid"); err != nil {
+		t.Fatalf("ResetSession: %v", err)
+	}
+	_ = srv.Wait()
+	if processAlive(srv.Process.Pid) {
+		t.Fatal("reset left the server the pid file could not name")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("reset left the session directory behind: %v", err)
+	}
+}
+
+// TestResetSIGKILLsAServerThatHoldsTheLock pins the escalation reset's docs
+// promise: a server that ignores SIGTERM keeps the lock, so reset's second stop
+// attempt SIGKILLs it, then takes the lock and removes the directory.
+func TestResetSIGKILLsAServerThatHoldsTheLock(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dropSessionAt(t, root, "hard")
+	dir := paths.SessionDirAt(root, "hard")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hard := exec.Command(exe, "__server", "-s", "hard", "--hard")
+	hard.Env = envWithRoot(root)
+	hard.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := hard.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = hard.Process.Kill() })
+	// The pid file appears after Listen, and the child registers its SIGTERM
+	// handler before it listens, so a pid file means SIGTERM will be ignored.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := readPID(filepath.Join(dir, "server.pid")); ok {
+			break
+		}
+		if !processAlive(hard.Process.Pid) {
+			t.Fatal("the hard server exited before it could listen")
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the hard server never wrote its pid file")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := ResetSessionAt(root, "hard"); err != nil {
+		t.Fatalf("ResetSession: %v", err)
+	}
+	_ = hard.Wait()
+	if processAlive(hard.Process.Pid) {
+		t.Fatal("reset left a server that ignored SIGTERM")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("reset left the session directory behind: %v", err)
 	}
 }
 

@@ -264,7 +264,8 @@ func KillSessionAt(root, name string) error {
 func ResetSession(name string) error { return ResetSessionAt(paths.StateDir(), name) }
 
 // ResetSessionAt is ResetSession with an explicit state root instead of
-// paths.StateDir().
+// paths.StateDir(). It holds server.lock across the reap and the removal, so no
+// other process can start or purge the session while its directory is going.
 func ResetSessionAt(root, name string) error {
 	if !paths.ValidSessionName(name) {
 		return fmt.Errorf("invalid session name %q", name)
@@ -276,12 +277,150 @@ func ResetSessionAt(root, name string) error {
 		}
 		return err
 	}
+	// The pid file is a hint, never the decision. A server that has not written
+	// it yet, or whose file was removed, still holds the lock; stopServer cannot
+	// see it and signals nothing.
 	stopServer(dir)
+	lock, err := lockSession(root, name, lockWait)
+	if errors.Is(err, paths.ErrSessionLocked) {
+		// The lock is still held after the stop attempt, so the server either
+		// ignored SIGTERM or was never named by the pid file. Reset's contract is
+		// to destroy the session, so it escalates: it finds the dm server by the
+		// lock it holds and SIGKILLs it, and a second stop attempt covers a pid
+		// file that names a server which started after the first. A holder that
+		// is not this session's dm server answers to no signal here, and the
+		// retry refuses below.
+		stopLockHolders(dir, name)
+		stopServer(dir)
+		lock, err = lockSession(root, name, lockWait)
+	}
+	if err != nil {
+		if errors.Is(err, paths.ErrSessionLocked) {
+			return fmt.Errorf("session %q is locked by a live process; not reset", name)
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no session %q", name)
+		}
+		return err
+	}
+	// The lock stays held across the reap and the removal. The lock file is
+	// inside the directory, so the removal takes it in the same step: no spawn
+	// can create a second lock inode while the first is still there, and the
+	// Release that follows closes an fd on an inode nobody can reach.
+	defer func() { _ = lock.Release() }()
 	reapPanes(dir)
 	return os.RemoveAll(dir)
 }
 
-// stopServer ends the session's server and waits for the process to go.
+// lockWait bounds how long reset waits for a session lock to come free after it
+// has stopped the server. The wait exists for the kernel, not the server: a
+// SIGKILLed multithreaded process can read as dead in procfs while one of its
+// threads still holds the lock's open file description, and the lock is what
+// decides.
+const lockWait = 500 * time.Millisecond
+
+// lockSession takes the session lock, polling up to d so a process that has
+// just been killed has time to drop its last reference to the lock. A single
+// non-blocking attempt would refuse a session reset has already ended.
+func lockSession(root, name string, d time.Duration) (*paths.SessionLock, error) {
+	deadline := time.Now().Add(d)
+	for {
+		lock, err := paths.LockSession(root, name)
+		if err == nil || !errors.Is(err, paths.ErrSessionLocked) || time.Now().After(deadline) {
+			return lock, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// stopLockHolders SIGKILLs every dm server that holds this session's lock. It
+// reaches the server the pid file cannot name: one that has not written its pid
+// file yet, or whose file was removed. A holder that is not this session's dm
+// server is left alone, so a foreign flock still stops reset cold at the lock.
+func stopLockHolders(dir, name string) {
+	for _, pid := range lockHolderPIDs(dir) {
+		if !isDMProcess(pid, "__server") || !serverForSession(pid, name) {
+			continue
+		}
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		waitGone(pid, time.Second)
+	}
+}
+
+// lockHolderPIDs returns the pids that have the session's lock file open. It
+// reads procfs fd tables rather than /proc/locks so a holder whose lock file
+// was already unlinked is still named: the fd link carries the path it was
+// opened under, with a " (deleted)" suffix once the inode is gone.
+func lockHolderPIDs(dir string) []int {
+	lock, err := filepath.Abs(filepath.Join(dir, "server.lock"))
+	if err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		fds, err := os.ReadDir(filepath.Join("/proc", e.Name(), "fd"))
+		if err != nil {
+			continue
+		}
+		for _, fd := range fds {
+			target, err := os.Readlink(filepath.Join("/proc", e.Name(), "fd", fd.Name()))
+			if err != nil {
+				continue
+			}
+			if target == lock || strings.HasPrefix(target, lock+" ") {
+				out = append(out, pid)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// serverForSession reports whether pid's command line names this session. A dm
+// server is "__server -s <name>", and the name is what keeps one session's reset
+// from signalling another's server.
+func serverForSession(pid int, name string) bool {
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil {
+		return false
+	}
+	args := strings.Split(strings.TrimRight(string(b), "\x00"), "\x00")
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-s" {
+			return args[i+1] == name
+		}
+	}
+	return false
+}
+
+// RemoveSessionAt removes a dead session's directory under the session lock. A
+// purge that cannot prove no server is live removes nothing: it returns
+// paths.ErrSessionLocked and leaves the directory untouched.
+func RemoveSessionAt(root, name string) error {
+	if !paths.ValidSessionName(name) {
+		return fmt.Errorf("invalid session name %q", name)
+	}
+	lock, err := paths.LockSession(root, name)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	return os.RemoveAll(paths.SessionDirAt(root, name))
+}
+
+// stopServer ends the server the pid file names and waits for the process to go.
+// A missing or foreign pid file is not proof that no server is live: a server
+// that has not written its pid file yet, or whose file was removed, is invisible
+// here and this returns without signalling. Callers decide liveness from the
+// session lock, not from this.
 func stopServer(dir string) {
 	pid, ok := readPID(filepath.Join(dir, "server.pid"))
 	if !ok {
