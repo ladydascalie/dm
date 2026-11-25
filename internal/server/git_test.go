@@ -3,9 +3,11 @@ package server
 import (
 	"dm/internal/session"
 	"dm/internal/testutil"
+	"dm/internal/wire"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -32,7 +34,8 @@ func TestGitStateReachesAll(t *testing.T) {
 				branch: "dm-git", worktree: "dm-git-w1",
 				root:  "/work/dm",
 				dirty: true, added: 7, deleted: 3, files: 2,
-				head: "abc1234", headSubject: "fix the rail",
+				fileNames: []string{"server_labels.go", "image.png"},
+				head:      "abc1234", headSubject: "fix the rail",
 				upstream: "origin/dm-git", ahead: 4, behind: 1,
 			}
 		}
@@ -47,7 +50,8 @@ func TestGitStateReachesAll(t *testing.T) {
 				got.Cwd != "/work/dm" || got.Root != "/work/dm" ||
 				!got.Dirty || got.Deleted != 3 || got.Files != 2 ||
 				got.Head != "abc1234" || got.HeadSubject != "fix the rail" ||
-				got.Upstream != "origin/dm-git" || got.Ahead != 4 || got.Behind != 1 {
+				got.Upstream != "origin/dm-git" || got.Ahead != 4 || got.Behind != 1 ||
+				!slices.Equal(got.FileNames, []string{"server_labels.go", "image.png"}) {
 				t.Fatalf("All pane git state = %+v", got)
 			}
 			break
@@ -73,23 +77,27 @@ func TestGitStateReachesAll(t *testing.T) {
 func TestGitStateOutsideRepo(t *testing.T) {
 	t.Parallel()
 	got := detectGit(t.TempDir())
-	if got != (gitInfo{}) {
+	if !sameGit(got, gitInfo{}) {
 		t.Fatalf("non-repo git info = %+v, want zero", got)
 	}
 }
 
 // TestParseNumstat sums a normal line, counts nothing for a binary file's dash
-// counts, counts the binary file itself, and skips a blank line.
+// counts, counts the binary file itself, lists every path in git's order, and
+// skips a blank line.
 func TestParseNumstat(t *testing.T) {
 	t.Parallel()
 	out := []byte("12\t4\tserver.go\n-\t-\tlogo.png\n\n3\t0\tproto.go\n")
-	added, deleted, files := parseNumstat(out)
+	added, deleted, files, names := parseNumstat(out)
 	if added != 15 || deleted != 4 || files != 3 {
 		t.Fatalf("parseNumstat = %d added, %d deleted, %d files, want 15, 4, 3",
 			added, deleted, files)
 	}
-	if a, d, n := parseNumstat([]byte("\n")); a != 0 || d != 0 || n != 0 {
-		t.Fatalf("parseNumstat on a blank line = %d, %d, %d", a, d, n)
+	if want := []string{"server.go", "logo.png", "proto.go"}; !slices.Equal(names, want) {
+		t.Fatalf("parseNumstat names = %q, want %q", names, want)
+	}
+	if a, d, n, names := parseNumstat([]byte("\n")); a != 0 || d != 0 || n != 0 || len(names) != 0 {
+		t.Fatalf("parseNumstat on a blank line = %d, %d, %d, %q", a, d, n, names)
 	}
 }
 
@@ -201,7 +209,7 @@ func TestDetectGitReal(t *testing.T) {
 
 	// A plain directory is outside git and returns the zero value, so it
 	// reports no root.
-	if got := detectGit(t.TempDir()); got != (gitInfo{}) || got.root != "" {
+	if got := detectGit(t.TempDir()); !sameGit(got, gitInfo{}) || got.root != "" {
 		t.Fatalf("plain directory = %+v, want zero and no root", got)
 	}
 }
@@ -210,6 +218,8 @@ func TestDetectGitReal(t *testing.T) {
 // can drive detectGit through answers real git only gives in a special
 // repository. DM_STUB_UNBORN fails the log line and DM_STUB_NOUPSTREAM fails
 // the two upstream commands, the way an unborn HEAD and an untracked branch do.
+// DM_STUB_BINARY adds a binary line, DM_STUB_MANY a tree past the name cap, and
+// DM_STUB_CLEAN an empty numstat report.
 func stubProbeGit(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
@@ -221,6 +231,16 @@ case "$*" in
 "status --porcelain=v1 -z --untracked-files=no")
 	printf ' M file.txt\0' ;;
 "diff --numstat HEAD")
+	if [ -n "$DM_STUB_CLEAN" ]; then exit 0; fi
+	if [ -n "$DM_STUB_BINARY" ]; then
+		printf '2\t1\tfile.txt\n-\t-\tlogo v2.png\n'
+		exit 0
+	fi
+	if [ -n "$DM_STUB_MANY" ]; then
+		i=1
+		while [ $i -le 20 ]; do printf '1\t0\tf%02d.txt\n' "$i"; i=$((i + 1)); done
+		exit 0
+	fi
 	printf '2\t1\tfile.txt\n3\t0\tnew.txt\n' ;;
 "log -1 --format=%h%x00%s")
 	if [ -n "$DM_STUB_UNBORN" ]; then exit 128; fi
@@ -251,10 +271,11 @@ func TestDetectGitFacts(t *testing.T) {
 	want := gitInfo{
 		branch: "main", root: "/work/repo", inRepo: true,
 		dirty: true, added: 5, deleted: 1, files: 2,
-		head: "abc1234", headSubject: "fix the rail",
+		fileNames: []string{"file.txt", "new.txt"},
+		head:      "abc1234", headSubject: "fix the rail",
 		upstream: "origin/main", ahead: 5, behind: 2,
 	}
-	if got := detectGit("/work/repo"); got != want {
+	if got := detectGit("/work/repo"); !sameGit(got, want) {
 		t.Fatalf("normal probe = %+v, want %+v", got, want)
 	}
 
@@ -285,6 +306,120 @@ func TestDetectGitFacts(t *testing.T) {
 			t.Fatalf("unborn HEAD lost the other facts: %+v", got)
 		}
 	})
+}
+
+// TestDetectGitFileNames drives the changed-path list: git's order, a binary
+// file listed by name, a tree past the cap cut to whole names, and an unchanged
+// tree listing nothing.
+func TestDetectGitFileNames(t *testing.T) {
+	stubProbeGit(t)
+
+	got := detectGit("/work/repo")
+	if want := []string{"file.txt", "new.txt"}; !slices.Equal(got.fileNames, want) {
+		t.Fatalf("changed paths = %q, want %q in git's order", got.fileNames, want)
+	}
+
+	t.Run("binary", func(t *testing.T) {
+		t.Setenv("DM_STUB_BINARY", "1")
+		got := detectGit("/work/repo")
+		// A path with a space arrives whole: the parser cuts on tabs, not on
+		// the spaces inside a name.
+		if want := []string{"file.txt", "logo v2.png"}; !slices.Equal(got.fileNames, want) {
+			t.Fatalf("binary paths = %q, want %q", got.fileNames, want)
+		}
+		if got.files != 2 || got.added != 2 || got.deleted != 1 {
+			t.Fatalf("binary tree = %+v, want 2 files and only the counted lines", got)
+		}
+	})
+
+	t.Run("capped", func(t *testing.T) {
+		t.Setenv("DM_STUB_MANY", "1")
+		got := detectGit("/work/repo")
+		if len(got.fileNames) != gitFileNamesMax {
+			t.Fatalf("big tree lists %d paths, want %d", len(got.fileNames), gitFileNamesMax)
+		}
+		if got.fileNames[0] != "f01.txt" || got.fileNames[gitFileNamesMax-1] != "f16.txt" {
+			t.Fatalf("big tree paths = %q, want f01.txt through f16.txt",
+				got.fileNames)
+		}
+		// The cap drops names; it never stops the count.
+		if got.files != 20 {
+			t.Fatalf("big tree files = %d, want 20", got.files)
+		}
+	})
+
+	t.Run("unchanged", func(t *testing.T) {
+		t.Setenv("DM_STUB_CLEAN", "1")
+		got := detectGit("/work/repo")
+		if len(got.fileNames) != 0 || got.files != 0 || got.added != 0 || got.deleted != 0 {
+			t.Fatalf("unchanged tree = %+v, want no paths and no counts", got)
+		}
+	})
+}
+
+// TestSameGitFileSet proves the cache's comparison sees a moved file set as a
+// change and an identical answer as none, so loadGit pushes a snapshot for the
+// first and stays quiet for the second.
+func TestSameGitFileSet(t *testing.T) {
+	t.Parallel()
+	base := gitInfo{branch: "main", root: "/work/dm", inRepo: true, files: 2,
+		fileNames: []string{"a.go", "b.go"}}
+	same := gitInfo{branch: "main", root: "/work/dm", inRepo: true, files: 2,
+		fileNames: []string{"a.go", "b.go"}}
+	if !sameGit(base, same) {
+		t.Fatal("an identical answer compared unequal")
+	}
+	renamed := base
+	renamed.fileNames = []string{"a.go", "c.go"}
+	if sameGit(base, renamed) {
+		t.Fatal("a changed name compared equal")
+	}
+	reordered := base
+	reordered.fileNames = []string{"b.go", "a.go"}
+	if sameGit(base, reordered) {
+		t.Fatal("a reordered file set compared equal")
+	}
+	dropped := base
+	dropped.fileNames, dropped.files = []string{"a.go"}, 1
+	if sameGit(base, dropped) {
+		t.Fatal("a shorter file set compared equal")
+	}
+}
+
+// TestLoadGitPushesOnFileSetChange proves the push decision at the cache: the
+// first answer pushes a snapshot, an identical answer pushes none, and a moved
+// file set pushes one even though the counts did not move.
+func TestLoadGitPushesOnFileSetChange(t *testing.T) {
+	t.Parallel()
+	st := session.NewStateAt(t.TempDir(), "pushfiles")
+	id := testutil.RootPane(st)
+	st.Panes[id].Cwd = "/work/dm"
+	s := railServer(st)
+	_, conn := boxAttach(t, s)
+	const cwd = "/work/dm"
+
+	first := gitInfo{branch: "main", root: "/work/dm", inRepo: true, files: 2,
+		fileNames: []string{"a.go", "b.go"}}
+	s.detect = stubDetect(first)
+	s.loadGit(cwd)
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if m, err := wire.ReadMsg(conn); err != nil || m.Type != "snapshot" {
+		t.Fatalf("the first answer pushed %q, %v, want a snapshot", m.Type, err)
+	}
+
+	s.loadGit(cwd)
+	_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if m, err := wire.ReadMsg(conn); err == nil {
+		t.Fatalf("an identical answer pushed %q", m.Type)
+	}
+
+	s.detect = stubDetect(gitInfo{branch: "main", root: "/work/dm", inRepo: true,
+		files: 2, fileNames: []string{"a.go", "c.go"}})
+	s.loadGit(cwd)
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if m, err := wire.ReadMsg(conn); err != nil || m.Type != "snapshot" {
+		t.Fatalf("a changed file set pushed %q, %v, want a snapshot", m.Type, err)
+	}
 }
 
 // TestDetectGitTimeout pins the timeout classification: a git that hangs until

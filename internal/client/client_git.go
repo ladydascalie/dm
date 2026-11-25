@@ -4,13 +4,16 @@ package client
 // beside the rail on the row that owns the mark. The facts ride the rail row the
 // mark was painted on, so the box and the row never read two different probes.
 // One float at a time: a click on another mark moves it, a click on its own mark
-// closes it.
+// closes it. Its bottom-right corner is a grip: a drag sizes the box and the
+// size outlives the box in the prefs, and a click of the grip puts the size back
+// to automatic. A box taller than its facts lists the changed files.
 
 import (
 	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"dm/internal/cells"
 	"dm/internal/hintbar"
@@ -42,13 +45,27 @@ const (
 	// fewer rows than the two together has no room to stand the box beside the
 	// bar, so no box opens there.
 	gitChromeRows = 3
+	// gitMaxSavedCols and gitMaxSavedRows bound a remembered size. A value past
+	// them is one no drag could have made, so the box opens automatic instead.
+	gitMaxSavedCols = 400
+	gitMaxSavedRows = 200
 )
 
-// gitFloat is the open facts box: the window whose mark opened it and the
-// panel that draws it.
+// gitFloat is the open facts box: the window whose mark opened it, the panel
+// that draws it and the state of a grip drag.
 type gitFloat struct {
 	window string
 	float  *panel.FloatingPane
+	// resizing is a drag of the grip in flight. top is the box's outer top row
+	// at the press, pressX and pressY the grip cell, and at the drag's own
+	// clock. moved records that the pointer left that cell, so a press and
+	// release on one cell is a reset and a drag is a size.
+	resizing bool
+	moved    bool
+	top      int
+	pressX   int
+	pressY   int
+	at       time.Time
 }
 
 // gitMarkPress is the mark's left click: it opens the box on that window, moves
@@ -89,6 +106,10 @@ func (t *tui) closeGitFloat() {
 	}
 	t.RemoveFloatingPane(gitFloatID)
 	t.git = nil
+	if t.padAxis == gitPadAxis {
+		// The hover that said resize went with the grip it named.
+		t.padZone, t.padAxis = layout.Rect{}, ""
+	}
 	t.dirty = true
 }
 
@@ -136,7 +157,7 @@ func (t *tui) syncGit() {
 	}
 	th := t.theme()
 	title := th.Glyphs.GitMark + " " + gitLabel(it)
-	rect := gitRect(t.snap, th, it, row)
+	rect := t.gitRect(t.snap, th, it, row)
 	if v.float.Title != title {
 		v.float.Title = title
 		t.dirty = true
@@ -152,13 +173,28 @@ func (t *tui) syncGit() {
 // the terminal at the bottom and the right. The bottom clamp keeps the box's
 // bottom border on Rows-2 at most, because Rows-1 is the status bar. The box
 // opens over the layout and never over the rail, so the mark and its row stay
-// readable.
-func gitRect(snap *wire.Snapshot, th theme.Theme, it rail.RailItem, row int) layout.Rect {
+// readable. A remembered size overrides the automatic one the facts ask for.
+func (t *tui) gitRect(snap *wire.Snapshot, th theme.Theme, it rail.RailItem, row int) layout.Rect {
 	// The rect is the interior and the border sits one cell out on every side,
-	// so the outside box is boxW by gitRows+2 and its left border lands on the
-	// column the rail ends at.
-	boxW := gitWidth(th, it)
-	h := gitRows
+	// so the outside box is boxW by h+2 and its left border lands on the column
+	// the rail ends at.
+	boxW, h := t.gitSavedSize()
+	if boxW == 0 {
+		boxW, h = gitWidth(th, it), gitRows
+	}
+	// A row with no changed names has nothing to show below its facts, so it
+	// keeps the facts height instead of growing empty.
+	if len(it.FileNames) == 0 {
+		h = gitRows
+	}
+	// A remembered height still leaves the status bar its row, however short
+	// the terminal it opens on turns out to be.
+	if max := snap.Rows - gitChromeRows; h > max {
+		h = max
+	}
+	if h < gitRows {
+		h = gitRows
+	}
 	// x and y are the outer box's top left corner. The box opens beside the
 	// rail and on the mark's row, and the two clamps keep it on the terminal
 	// at the right and the bottom. A terminal too narrow for the box beside the
@@ -224,6 +260,200 @@ func gitLabel(it rail.RailItem) string {
 		}
 	}
 	return it.Window
+}
+
+// gitSavedSize is the size the prefs remember: the outside width and the
+// interior height, zero zero for automatic. A value no drag could have made, so
+// a malformed, negative or absurd one, reads as automatic: a preference never
+// fails a start and never toasts.
+func (t *tui) gitSavedSize() (cols, rows int) {
+	c, r := t.prefs.GitBoxCols, t.prefs.GitBoxRows
+	if c < gitMinCols || c > gitMaxSavedCols || r < gitRows || r > gitMaxSavedRows {
+		return 0, 0
+	}
+	return c, r
+}
+
+// setGitSize remembers the box's size for the next open and every window. Zero
+// in either bound is the automatic size. A drag sets it on every motion and
+// saves it once, on release, so a drag costs one write rather than one a frame.
+func (t *tui) setGitSize(cols, rows int) {
+	t.prefs.GitBoxCols, t.prefs.GitBoxRows = cols, rows
+}
+
+// saveGitSize writes the remembered size through the atomic prefs save. A client
+// with no prefs file, such as a browser page, and a read-only client keep the
+// size for this session and write nothing: a size is a convenience, never a disk
+// error to toast.
+func (t *tui) saveGitSize() {
+	if t.prefsPath == "" || t.readOnly {
+		return
+	}
+	_ = savePrefs(t.prefsPath, t.prefs)
+}
+
+// gitGripAt reports whether x,y is the box's one drag handle: the bottom-right
+// corner cell of the frame.
+func gitGripAt(r layout.Rect, x, y int) bool {
+	return x == r.X+r.W && y == r.Y+r.H
+}
+
+// gitBoxAt reports whether x,y is a cell of the box's frame, borders included,
+// so the box can claim the pointer over the cells it covers.
+func gitBoxAt(r layout.Rect, x, y int) bool {
+	return x >= r.X-1 && x <= r.X+r.W && y >= r.Y-1 && y <= r.Y+r.H
+}
+
+// gitGripCell is the grip in terminal cells, which the hover zone and the drag
+// read back from the rect after every resize.
+func gitGripCell(r layout.Rect) layout.Rect {
+	return layout.Rect{X: r.X + r.W, Y: r.Y + r.H, W: 1, H: 1}
+}
+
+// gitMouse lets the facts box own the pointer inside its frame: a left press on
+// the grip starts a resize, and every other event there does nothing at all, so
+// a click on the box never lands on the pane or the rail standing under it. A
+// drag in flight keeps the pointer wherever it goes, so the box's edges still
+// follow it past the terminal's. The wheel is the one exception: it never acts
+// on the box, and the pane under it keeps scrolling while the pointer rests
+// there.
+func (t *tui) gitMouse(ev mouseEvent, x, y int) bool {
+	v := t.git
+	if v == nil {
+		return false
+	}
+	if v.resizing {
+		switch {
+		case ev.release:
+			t.gitResizeEnd(x, y)
+		case ev.btn&32 == 0:
+			// The button went away without its release: the size it reached
+			// stands and the grip lets go.
+			v.resizing, v.moved = false, false
+			t.saveGitSize()
+			t.updatePadHover(x, y)
+			t.dirty = true
+		default:
+			t.gitDragTo(x, y, false)
+		}
+		return true
+	}
+	// A wheel over the box is not the box's: only a press and the grip are, so
+	// the pane under the pointer keeps scrolling while the box stands there.
+	if !gitBoxAt(v.float.Rect, x, y) || ev.btn&64 != 0 {
+		return false
+	}
+	if ev.btn&3 == 0 && ev.btn&32 == 0 && !ev.release && gitGripAt(v.float.Rect, x, y) {
+		t.gitResizePress(x, y)
+	}
+	return true
+}
+
+// gitResizePress starts a drag of the grip. It records the box's outer top row,
+// which the height is measured from, and the cell the press landed on, so a
+// press that never leaves it is a reset rather than a drag.
+func (t *tui) gitResizePress(x, y int) {
+	v := t.git
+	if v == nil {
+		return
+	}
+	v.resizing, v.moved = true, false
+	v.at = time.Time{}
+	v.top = v.float.Rect.Y - 1
+	v.pressX, v.pressY = x, y
+	t.dirty = true
+}
+
+// gitResizeEnd ends a drag of the grip. A drag that moved keeps the size it
+// reached; a press and release on the grip cell with no movement puts the box
+// back to its automatic size, so the operator can get the hugging box back.
+func (t *tui) gitResizeEnd(x, y int) {
+	v := t.git
+	if v == nil {
+		return
+	}
+	if v.moved || x != v.pressX || y != v.pressY {
+		t.gitDragTo(x, y, true)
+	} else {
+		t.setGitSize(0, 0)
+	}
+	v.resizing, v.moved = false, false
+	t.saveGitSize()
+	t.syncGit()
+	// The hint follows the pointer again: a release away from the grip leaves
+	// none, and the bar stops saying what the grip does.
+	t.updatePadHover(x, y)
+	t.dirty = true
+}
+
+// gitDragTo sizes the box from the pointer: its right border follows the
+// pointer's column and its bottom border the pointer's row, measured from the
+// box's left and top borders. It is local and sends nothing. Unless forced it
+// applies at most once every dragEvery; a release forces the last size through,
+// so a fast drag never lands short.
+func (t *tui) gitDragTo(x, y int, force bool) {
+	v := t.git
+	if v == nil || t.snap == nil || !v.resizing {
+		return
+	}
+	if x != v.pressX || y != v.pressY {
+		v.moved = true
+	}
+	if !force && !v.at.IsZero() && time.Since(v.at) < dragEvery {
+		return
+	}
+	v.at = time.Now()
+	// The left border stays on the rail, so the pointer's column names the right
+	// border and the cells between the two are the outside width. The rows
+	// between the top border and the pointer's row, less the bottom border
+	// itself, are the interior height.
+	cols := x - t.snap.Rail + 1
+	if cols < gitMinCols {
+		cols = gitMinCols
+	}
+	if max := t.snap.Cols - t.snap.Rail; max >= gitMinCols && cols > max {
+		cols = max
+	}
+	rows := y - v.top - 1
+	if rows < gitRows {
+		rows = gitRows
+	}
+	if max := t.snap.Rows - gitChromeRows - v.top; max >= gitRows && rows > max {
+		rows = max
+	}
+	t.setGitSize(cols, rows)
+	t.syncGit()
+	// The hint follows the grip the drag moved: the status bar keeps saying
+	// what the pointer holds until it lets go.
+	if t.git != nil {
+		t.padZone, t.padAxis = gitGripCell(t.git.float.Rect), gitPadAxis
+	}
+	t.dirty = true
+}
+
+// paintGitGrip paints the grip over the box's bottom-right corner: the theme's
+// grip glyph in the rail's dim, and in the rail accent while the pointer rests
+// on it or drags it. The panel's box pass owns that corner, so the box paints
+// the grip itself, after the panel, and the corner rule steps aside for it.
+func (t *tui) paintGitGrip(buf *bytes.Buffer, th theme.Theme, r layout.Rect) {
+	fg := th.Palette.RailDim
+	if t.gitGripHot(r) {
+		fg = th.Palette.BarAccent
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+r.H+1, r.X+r.W+1)
+	segment.Write(buf, segment.Seg{Text: th.Glyphs.Grip, FG: fg})
+}
+
+// gitGripHot reports whether the grip answers: the pointer rests on it, or a
+// drag the grip started is in flight.
+func (t *tui) gitGripHot(r layout.Rect) bool {
+	if t.git == nil {
+		return false
+	}
+	if t.git.resizing {
+		return true
+	}
+	return t.mouseSeen && gitGripAt(r, t.mouseX, t.mouseY)
 }
 
 // gitHint is the box's bottom border: how the box leaves, in the voice the ask
@@ -325,10 +555,18 @@ func gitFileCount(n int) string {
 	return strconv.Itoa(n) + " files"
 }
 
+// gitMoreFiles is the last row of a file list the box cannot show whole.
+func gitMoreFiles(n int) string {
+	if n == 1 {
+		return "1 more file"
+	}
+	return strconv.Itoa(n) + " more files"
+}
+
 // paintGitFloat paints the facts inside the box: one fact a row, the key in the
 // rail's dim and the value in its text. A value longer than the box elides with
 // the set's mark and never wraps, so the box keeps one row a fact however narrow
-// it stands.
+// it stands. A box with rows to spare lists the changed names under the facts.
 func (t *tui) paintGitFloat(b *bytes.Buffer, r layout.Rect) {
 	if t.git == nil || t.snap == nil {
 		return
@@ -342,7 +580,8 @@ func (t *tui) paintGitFloat(b *bytes.Buffer, r layout.Rect) {
 	if budget < 1 {
 		return
 	}
-	for i, fact := range gitFacts(th, it) {
+	facts := gitFacts(th, it)
+	for i, fact := range facts {
 		if i >= r.H {
 			return
 		}
@@ -358,5 +597,57 @@ func (t *tui) paintGitFloat(b *bytes.Buffer, r layout.Rect) {
 		for _, s := range value {
 			segment.Write(b, s)
 		}
+	}
+	t.paintGitFiles(b, r, th, it, len(facts))
+}
+
+// paintGitFiles paints the changed names the box has rows for: a rule row under
+// the facts, then one row a name, then a last row counting the names the box
+// could not show. The names come from the rail row the facts come from, so the
+// box can never list a file the row did not carry. A row with no names, and a
+// box with no spare rows, paints none of this: the facts alone are the box.
+func (t *tui) paintGitFiles(b *bytes.Buffer, r layout.Rect, th theme.Theme, it rail.RailItem, used int) {
+	rows := r.H - used - 1
+	if rows < 1 || len(it.FileNames) == 0 {
+		return
+	}
+	y := r.Y + used
+	// The rule separates the list from the facts, so the box reads as two parts
+	// rather than one loose column.
+	fmt.Fprintf(b, "\x1b[%d;%dH", y+1, r.X+1)
+	segment.Write(b, segment.Seg{Text: strings.Repeat(th.Glyphs.DividerRow, r.W), FG: th.Palette.RailDim})
+	// The probe counts every changed file, not only the names it lists, so a
+	// list the box cuts short still ends by saying how many are out of sight.
+	total := it.Files
+	if total < len(it.FileNames) {
+		total = len(it.FileNames)
+	}
+	shown := len(it.FileNames)
+	moreRow := 0
+	if total > rows {
+		moreRow = 1
+		if shown > rows-1 {
+			shown = rows - 1
+		}
+	}
+	for i := 0; i < shown; i++ {
+		t.gitFileLine(b, th, r, y+1+i, it.FileNames[i])
+	}
+	if moreRow == 1 {
+		t.gitFileLine(b, th, r, y+1+shown, gitMoreFiles(total-shown))
+	}
+}
+
+// gitFileLine paints one name on row row of the box: one cell in from the
+// border, in the rail's dim, elided with the set's mark so a long path never
+// wraps or pushes the box past the width the drag left it.
+func (t *tui) gitFileLine(b *bytes.Buffer, th theme.Theme, r layout.Rect, row int, name string) {
+	fmt.Fprintf(b, "\x1b[%d;%dH", row+1, r.X+1)
+	segs := []segment.Seg{{Text: " " + name, FG: th.Palette.RailDim}}
+	if segment.SegCells(segs) > r.W {
+		segs = segment.ElideSegs(th, segs, r.W)
+	}
+	for _, s := range segs {
+		segment.Write(b, s)
 	}
 }
