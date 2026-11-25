@@ -298,6 +298,15 @@ func (t *tui) paneWantsPaste(pane string) bool {
 
 func (t *tui) processInput() {
 	for len(t.inbuf) > 0 {
+		// The facts box sits on top of every layer, so esc reaches it first:
+		// it closes the box and goes no further, so the pane and an overlay
+		// under it never see the key. The box binds no other escape.
+		if t.git != nil && len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
+			t.inbuf = nil
+			t.pending = false
+			t.closeGitFloat()
+			continue
+		}
 		if !t.termOff {
 			if kind, value, n, started := takeOSCReply(t.inbuf); started {
 				if n == 0 {
@@ -2145,6 +2154,14 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	t.updateLinkHover(x, y, ev.btn&16 != 0)
 	t.updatePadHover(x, y)
 	t.updateRailHover()
+	// A left press anywhere but a git mark closes the facts box. A press on the
+	// mark is the mark's business: railClick opens, moves or closes the box for
+	// it, so this must not take the press first. The press itself is not
+	// swallowed: one click both dismisses the box and does what it always did.
+	if t.git != nil && ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release &&
+		rail.RailGitMarkAt(t.snap, x, y, t.railOff) == "" {
+		t.closeGitFloat()
+	}
 	if t.mode == "layout" {
 		t.layoutMouse(ev, x, y)
 		return
@@ -2444,6 +2461,9 @@ func (t *tui) railWheel(ev mouseEvent, x, y int) bool {
 	}
 	t.railOff = rail.ClampOffset(t.snap, t.railOff+step)
 	t.updateRailHover()
+	// The facts box follows the row it describes. A scroll that takes the row
+	// off the rail closes it.
+	t.syncGit()
 	t.dirty = true
 	return true
 }
@@ -3571,6 +3591,15 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			if t.conn != nil {
 				t.toggleRailControl()
 			}
+			return true
+		}
+		// The git mark is checked before the row it closes: the mark's cells are
+		// the window row's cells, so the window branch would focus the window
+		// for a press that asked for facts. A press on the mark opens the box,
+		// moves it, or closes it, and touches nothing else.
+		if id := rail.RailGitMarkAt(t.snap, x, y, t.railOff); id != "" {
+			t.clearRailPress()
+			t.gitMarkPress(id)
 			return true
 		}
 		if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok && it.Kind == rail.Project {
