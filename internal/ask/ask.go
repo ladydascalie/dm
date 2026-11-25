@@ -127,6 +127,9 @@ const (
 	// CodeInvalidAnswer is a well-formed answer that does not satisfy the
 	// questions.
 	CodeInvalidAnswer = "invalid_answer"
+	// CodeFull is an open the store has no room for: it would pass the listed
+	// count or the listed bytes.
+	CodeFull = "E_FULL"
 )
 
 // SettleGrace is how long a settled ask stays in the store after its answer.
@@ -151,6 +154,56 @@ const (
 	MaxLine       = 1000
 	MaxLong       = 16000
 )
+
+// The store caps. Every listed ask rides in each snapshot and each save, so the
+// store as a whole needs a bound and not only one ask. A full store stays a
+// quarter of the 1 MiB one outbound frame may carry, so a listing can never
+// blank a client. The byte cap is the box's own MaxBytes: one store, one
+// budget.
+const (
+	// MaxListed is how many asks one session lists, answered ones still
+	// waiting for their close included.
+	MaxListed = 64
+	// MaxListedBytes is the snapshot cost every listed ask may add up to.
+	MaxListedBytes = 256 << 10
+)
+
+// QuestionsCost is the snapshot cost of a question set: every byte of the
+// question, header, option label, description and preview it carries. Ids are
+// fixed overhead and an answer is not part of a snapshot, so neither counts.
+func QuestionsCost(qs []Question) int {
+	n := 0
+	for _, q := range qs {
+		n += len(q.Question) + len(q.Header)
+		for _, o := range q.Options {
+			n += len(o.Label) + len(o.Description) + len(o.Preview)
+		}
+	}
+	return n
+}
+
+// StoreCost is the snapshot cost of every listed ask.
+func StoreCost(listed []Request) int {
+	n := 0
+	for _, a := range listed {
+		n += QuestionsCost(a.Questions)
+	}
+	return n
+}
+
+// CheckRoom refuses an open that would put the listed store past either cap.
+// listed is the store as it stands, answered asks included. A refusal is the
+// caller's to return before it gives the ask an id or touches the file, so a
+// refused open leaves the store exactly as it was.
+func CheckRoom(listed []Request, req *OpenReq) error {
+	if len(listed) >= MaxListed {
+		return Refuse(CodeFull, "the store lists %d asks, cap is %d", len(listed), MaxListed)
+	}
+	if cost := StoreCost(listed) + QuestionsCost(req.Questions); cost > MaxListedBytes {
+		return Refuse(CodeFull, "the ask would make the store %d bytes, cap is %d", cost, MaxListedBytes)
+	}
+	return nil
+}
 
 // Error is a refusal with a machine-readable code.
 type Error struct {

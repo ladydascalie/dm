@@ -741,6 +741,7 @@ func (s *server) removeWorkspaceLocked(idx int) []*paneConn {
 			kill = append(kill, pc)
 		}
 		delete(s.st.Panes, pid)
+		s.dropPaneAsksLocked(pid)
 	}
 	return kill
 }
@@ -820,6 +821,7 @@ func (s *server) closeWindow(id string) error {
 			kill = append(kill, pc)
 		}
 		delete(s.st.Panes, pid)
+		s.dropPaneAsksLocked(pid)
 	}
 	s.mu.Unlock()
 	killPanes(kill)
@@ -1177,10 +1179,12 @@ func (s *server) closePane(target string) error {
 		// the normal path, which drops the window and ends the session when
 		// nothing is left, exactly like a shell exiting.
 		pc := s.panes[target]
-		s.mu.Unlock()
 		if pc == nil {
+			s.mu.Unlock()
 			return fmt.Errorf("no pane %q", target)
 		}
+		s.dropPaneAsksLocked(target)
+		s.mu.Unlock()
 		_ = pc.send(wire.Msg{Action: "kill"})
 		return nil
 	}
@@ -1212,6 +1216,7 @@ func (s *server) closePane(target string) error {
 		kill = append(kill, pc)
 	}
 	delete(s.st.Panes, target)
+	s.dropPaneAsksLocked(target)
 	return nil
 }
 

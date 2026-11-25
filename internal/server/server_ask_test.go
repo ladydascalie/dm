@@ -4,8 +4,11 @@ package server
 // one ask, and the snapshot that carries the list.
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -417,4 +420,158 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("condition never held")
+}
+
+// askReq is the smallest valid open request for the store cap tests.
+func askReq(toolCall string) *ask.OpenReq {
+	return &ask.OpenReq{ToolCallID: toolCall, Questions: []ask.Question{{
+		Question: "Which base?", Header: "base",
+		Options: []ask.Option{{Label: "main"}, {Label: "next"}},
+	}}}
+}
+
+// TestAskOpenRefusesPastListedCap proves the store takes MaxListed asks and
+// refuses the next one with E_FULL without touching the file, and that the
+// asks listed before the cap still answer and close.
+func TestAskOpenRefusesPastListedCap(t *testing.T) {
+	t.Parallel()
+	s, pane := askServer(t)
+	first := ""
+	for i := 0; i < ask.MaxListed; i++ {
+		id, err := s.askOpen(pane, askReq(fmt.Sprintf("toolu_%d", i)))
+		if err != nil {
+			t.Fatalf("open %d: %v", i+1, err)
+		}
+		if i == 0 {
+			first = id
+		}
+	}
+	before, err := os.ReadFile(s.st.StatePath())
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if _, err := s.askOpen(pane, askReq("toolu_over")); !ask.CodeIs(err, ask.CodeFull) {
+		t.Fatalf("open past the cap: err = %v, want %s", err, ask.CodeFull)
+	}
+	after, err := os.ReadFile(s.st.StatePath())
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Error("a refused open rewrote the state file")
+	}
+	if list := s.askList(); len(list) != ask.MaxListed {
+		t.Errorf("the store lists %d asks, want %d", len(list), ask.MaxListed)
+	}
+	if _, err := s.askAnswer(first, &ask.AnswerReq{Cancel: true}); err != nil {
+		t.Fatalf("answer an ask listed before the cap: %v", err)
+	}
+	if closed, err := s.askClose(first); err != nil || !closed {
+		t.Fatalf("close an ask listed before the cap: closed=%v err=%v", closed, err)
+	}
+	if _, err := s.askOpen(pane, askReq("toolu_after")); err != nil {
+		t.Fatalf("open after a close freed room: %v", err)
+	}
+}
+
+// TestAskOpenRefusesOverBudgetAsk proves the store's byte budget refuses an
+// ask whose question text would push the listing past it, and leaves the store
+// as it stood.
+func TestAskOpenRefusesOverBudgetAsk(t *testing.T) {
+	t.Parallel()
+	s, pane := askServer(t)
+	kept, err := s.askOpen(pane, askReq("toolu_small"))
+	if err != nil {
+		t.Fatalf("open a small ask: %v", err)
+	}
+	opts := make([]ask.Option, ask.MaxOptions)
+	for i := range opts {
+		opts[i] = ask.Option{Label: "o", Preview: strings.Repeat("p", 4096)}
+	}
+	big := &ask.OpenReq{ToolCallID: "toolu_big", Questions: []ask.Question{{Question: "q", Options: opts}}}
+	if _, err := s.askOpen(pane, big); !ask.CodeIs(err, ask.CodeFull) {
+		t.Fatalf("over-budget open: err = %v, want %s", err, ask.CodeFull)
+	}
+	if list := s.askList(); len(list) != 1 || list[0].ID != kept {
+		t.Fatalf("store after the refusal = %+v", list)
+	}
+	st, err := session.LoadStateAt(s.st.Dir(), s.st.Name)
+	if err != nil {
+		t.Fatalf("reload state: %v", err)
+	}
+	if len(st.Ask) != 1 || st.Ask[0].ID != kept {
+		t.Fatalf("state file after the refusal = %+v", st.Ask)
+	}
+}
+
+// TestClosePaneDropsItsAsks proves a closed pane takes its asks with it,
+// answered or not, and that the state file shrinks when they go.
+func TestClosePaneDropsItsAsks(t *testing.T) {
+	t.Parallel()
+	s := boxServer(t)
+	a, b := twoPaneSession(t, s)
+	kept, err := s.askOpen(a, askReq("toolu_a"))
+	if err != nil {
+		t.Fatalf("open on the kept pane: %v", err)
+	}
+	if _, err := s.askOpen(b, askReq("toolu_b")); err != nil {
+		t.Fatalf("open on the closed pane: %v", err)
+	}
+	answered, err := s.askOpen(b, askReq("toolu_c"))
+	if err != nil {
+		t.Fatalf("open an answered ask on the closed pane: %v", err)
+	}
+	if _, err := s.askAnswer(answered, &ask.AnswerReq{Cancel: true}); err != nil {
+		t.Fatalf("answer on the closed pane: %v", err)
+	}
+	before, err := os.Stat(s.st.StatePath())
+	if err != nil {
+		t.Fatalf("stat state: %v", err)
+	}
+	if err := s.mutation(func() error { return s.closePane(b) }); err != nil {
+		t.Fatalf("closePane: %v", err)
+	}
+	if list := s.askList(); len(list) != 1 || list[0].ID != kept {
+		t.Fatalf("store after the close = %+v, want only %s", list, kept)
+	}
+	st, err := session.LoadStateAt(s.st.Dir(), s.st.Name)
+	if err != nil {
+		t.Fatalf("reload state: %v", err)
+	}
+	if len(st.Ask) != 1 || st.Ask[0].ID != kept {
+		t.Fatalf("state file after the close = %+v, want only %s", st.Ask, kept)
+	}
+	after, err := os.Stat(s.st.StatePath())
+	if err != nil {
+		t.Fatalf("stat state: %v", err)
+	}
+	if after.Size() >= before.Size() {
+		t.Errorf("state file did not shrink: %d bytes before, %d after", before.Size(), after.Size())
+	}
+}
+
+// TestPaneExitDropsItsAsks proves a pane that dies takes its asks with it, so a
+// ghost cannot outlive the pane that owns it.
+func TestPaneExitDropsItsAsks(t *testing.T) {
+	t.Parallel()
+	s := boxServer(t)
+	a, b := twoPaneSession(t, s)
+	kept, err := s.askOpen(a, askReq("toolu_a"))
+	if err != nil {
+		t.Fatalf("open on the kept pane: %v", err)
+	}
+	if _, err := s.askOpen(b, askReq("toolu_b")); err != nil {
+		t.Fatalf("open on the dying pane: %v", err)
+	}
+	s.paneExited(b)
+	if list := s.askList(); len(list) != 1 || list[0].ID != kept {
+		t.Fatalf("store after the exit = %+v, want only %s", list, kept)
+	}
+	st, err := session.LoadStateAt(s.st.Dir(), s.st.Name)
+	if err != nil {
+		t.Fatalf("reload state: %v", err)
+	}
+	if len(st.Ask) != 1 || st.Ask[0].ID != kept {
+		t.Fatalf("state file after the exit = %+v, want only %s", st.Ask, kept)
+	}
 }
