@@ -2,10 +2,10 @@
 
 Words first. The *box* is one append-only log per session, a *frame* is one message over the socket the client
 attaches to, and an *entry* is one line of the box. A *session* is one directory under dm's state directory, one
-`state.json` and one server process (`internal/paths/paths.go:20`). A *workspace* is a named set of *windows*, and a
-window is one arrangement of panes the workspace shows at a time (`internal/session/state.go:37`). A *pane* is one
+`state.json` and one server process (`internal/paths/paths.go#StateDir`). A *workspace* is a named set of *windows*, and a
+window is one arrangement of panes the workspace shows at a time (`internal/session/state.go#Workspace`). A *pane* is one
 terminal in that arrangement, run by a daemon of its own, and its id is a window number plus a pane number: `w3p1`
-is window 3, pane 1 (`internal/session/state.go:102`). A *client* is the TUI the operator attaches. The *rail* is
+is window 3, pane 1 (`internal/session/state.go#State.Panes`). A *client* is the TUI the operator attaches. The *rail* is
 the sidebar that client draws. A *glyph* is the one character the rail paints for a pane. A *cursor* is a log
 position a reader has already handled.
 
@@ -20,55 +20,55 @@ Three reads look at the log, and none consumes an entry: *list* (`msg-list`: the
 are wire requests; the CLI verbs are `dm msg list`, `dm msg wait` and `dm msg sub`.
 
 Two caps bound the log: `MaxEntries` 1000 and `MaxBytes` 256 KiB, and `State.TrimBox`
-(`internal/session/state.go:392`) drops the oldest entries until both fit. Outside the caps, the only removal a
-request makes is `msg-clear` (`box.ClearReq`, `box.go:137`), which drops the entries it names, and it never resets
+(`internal/session/state.go#State.TrimBox`) drops the oldest entries until both fit. Outside the caps, the only removal a
+request makes is `msg-clear` (`box.ClearReq`, `internal/box/box.go#ClearReq`), which drops the entries it names, and it never resets
 the sequence. `clear` is also an OSC 7501 pane word, defined below, so the action and the word are two different
 things.
 
 ## An entry and its key
 
-`box.Entry` (`internal/box/box.go:46`). Every field travels, because the tags carry no `omitempty`, so a reader can
+`box.Entry` (`internal/box/box.go#Entry`). Every field travels, because the tags carry no `omitempty`, so a reader can
 tell an empty key from a missing one. A field may still be empty: `from` is empty when the poster is not a pane, and
 `body` is empty in the normal case.
 
 | field | meaning | rule |
 | --- | --- | --- |
 | `seq`, `at` | log sequence from 1, UTC post time to the second | set by the server |
-| `from` | the posting pane's id, `w3p1` | empty unless the poster is a pane; else `box.PaneIDShape` (`box.go:486`) checks the shape and the server looks the id up in the session tree, the panes of the layout in `State` (`state.go:94`) |
+| `from` | the posting pane's id, `w3p1` | empty unless the poster is a pane; else `box.PaneIDShape` (`internal/box/box.go#PaneIDShape`) checks the shape and the server looks the id up in the session tree, the panes of the layout in `State` (`internal/session/state.go#State`) |
 | `key` | the topic | 128 bytes (`MaxKey`) |
-| `state` | `note`, `working`, `blocked`, `done` or `error` | one of five, `box.go:86` |
+| `state` | `note`, `working`, `blocked`, `done` or `error` | one of five, `internal/box/box.go#States` |
 | `msg` | the summary line a list prints | 2000 bytes (`MaxMsg`) |
 | `body` | the long text `dm msg show` prints raw | 16 KiB (`MaxBody`) |
 
-`CheckText` (`box.go:422`) caps the bytes, demands valid UTF-8 and refuses control characters, because an entry
+`CheckText` (`internal/box/box.go#CheckText`) caps the bytes, demands valid UTF-8 and refuses control characters, because an entry
 prints on one row.
 
 A key is a flat string of at most 128 bytes, and the code never parses a hierarchy. A *branch* is a prefix of a key,
 such as `lane/`, and a read names one exact key or one branch: `key` and `keyPrefix` are two fields of every read
-request, and naming both is an error (`box.CheckTopic`, `box.go:386`). `box.Match` (`box.go:407`) applies up to
+request, and naming both is an error (`box.CheckTopic`, `internal/box/box.go#CheckTopic`). `box.Match` (`internal/box/box.go#Match`) applies up to
 three checks and changes nothing: the exact `key`, the `keyPrefix` as a `strings.HasPrefix`, and the `afterSeq`
-cursor. So a list, a wait and a subscribe all see the same entries. `box.ParseReq` (`box.go:283`) is the one decoder
+cursor. So a list, a wait and a subscribe all see the same entries. `box.ParseReq` (`internal/box/box.go#ParseReq`) is the one decoder
 the server calls for a box request: it builds the request, rejects an unknown field and validates the values.
 
 Three branches are convention, and the repository README (`README.md:1239`, `README.md:1303`) shows their use:
 `lane/<id>`, `msg/<name>`, `reply/<pane>`. A fourth, `plugin/<name>/...`, is reserved for plugins
 (`PLUGINS.md:117`), the `...` meaning any depth. One branch belongs to the code: `box.NotifyPrefix` is `notify/`,
-and `box.IsNotifyTopic` (`box.go:39`) is the check a *renderer* runs to decide whether it renders the entry. A
+and `box.IsNotifyTopic` (`internal/box/box.go#IsNotifyTopic`) is the check a *renderer* runs to decide whether it renders the entry. A
 renderer is one surface that turns entries into what the operator sees: a popup, the rail, or the desktop notifier.
 
 ## The store, its waiters and its watches
 
 The log lives in the state file, `state.json` in the session directory, fields `State.Box` and `State.BoxSeq`
-(`internal/session/state.go:132`). `s` is the server (`internal/server/server_core.go:402`), which holds the state
-as `s.st` and guards it with the mutex `s.mu`. `boxStoreLocked` (`internal/server/server_box.go:35`) appends, trims,
+(`internal/session/state.go#State.Box`). `s` is the server (`internal/server/server_core.go#server`), which holds the state
+as `s.st` and guards it with the mutex `s.mu`. `boxStoreLocked` (`internal/server/server_box.go#server.boxStoreLocked`) appends, trims,
 wakes the waiters, saves and broadcasts `{"type":"box"}`, all under `s.mu`; a failed save keeps the entry in memory
-and returns the error. That frame is one `wire.Msg` (`internal/wire/wire.go:17`), the one envelope struct every
-frame uses. `LoadStateAt` (`state.go:260`) drops the rows that fail `Entry.Validate` (`box.go:460`) instead of the
+and returns the error. That frame is one `wire.Msg` (`internal/wire/wire.go#Msg`), the one envelope struct every
+frame uses. `LoadStateAt` (`internal/session/state.go#LoadStateAt`) drops the rows that fail `Entry.Validate` (`internal/box/box.go#Entry.Validate`) instead of the
 whole box.
 
-`boxWait` (`server_box.go:313`) blocks with no lock held. It reads the log for a matching entry under `s.mu`,
+`boxWait` (`internal/server/server_box.go#server.boxWait`) blocks with no lock held. It reads the log for a matching entry under `s.mu`,
 registers a `boxWaiter` before unlocking, and re-checks on every wakeup. A post nudges each waiter into a one-slot
-channel; a full slot drops the nudge, so the re-check plus `boxPollWait` (`server_box.go:148`) bounds the loss: a
+channel; a full slot drops the nudge, so the re-check plus `boxPollWait` (`internal/server/server_box.go#boxPollWait`) bounds the loss: a
 missed nudge costs one 100ms poll, and the same poll peeks at the unix socket the client attached on, so a client
 that hung up frees its waiter.
 
@@ -76,38 +76,38 @@ that hung up frees its waiter.
 the cursor, and `state` when the wait names one state. Without `afterSeq` the wait returns the newest entry under
 the topic, but only when its state satisfies the wait: a *status board*, the newest-wins read. With `afterSeq` it
 returns the oldest entry past the cursor: a *stream*, so a subscribing client sees every entry once, in order.
-`boxSub` (`server_box.go:387`) is that stream: it delivers into the server's per-client queue (`client.deliver`,
-`server_core.go:208`), and a full queue rolls the cursor back and ends the stream with `errBoxGone`, so a reconnect
+`boxSub` (`internal/server/server_box.go#server.boxSub`) is that stream: it delivers into the server's per-client queue (`client.deliver`,
+`internal/server/server_core.go#client.deliver`), and a full queue rolls the cursor back and ends the stream with `errBoxGone`, so a reconnect
 resumes at that entry.
 
 A read from a pane leaves a *watch*: one registry entry holding the pane, its filter, the highest `seq` served and
-whether it is parked (`box.Watch`, `box.go:63`). A watch is *parked* while the read it belongs to still blocks: a
+whether it is parked (`box.Watch`, `internal/box/box.go#Watch`). A watch is *parked* while the read it belongs to still blocks: a
 `msg-wait` that has not returned, or a `msg-sub` still streaming. The registry lives in server memory only.
-`boxExpireLocked` (`server_box.go:212`) drops a watch whose pane left the session tree (the workspaces, windows and
-panes in `State`, `state.go:94`) and an unparked one older than `boxWatchTTL`, ten minutes; a parked watch never
+`boxExpireLocked` (`internal/server/server_box.go#server.boxExpireLocked`) drops a watch whose pane left the session tree (the workspaces, windows and
+panes in `State`, `internal/session/state.go#State`) and an unparked one older than `boxWatchTTL`, ten minutes; a parked watch never
 ages out, and a change pushes `{"type":"watch"}`. That watch is not the pane watcher, which is `watcherLoop`
-(`server_core.go:897`), one loop per pane daemon connection.
+(`internal/server/server_core.go#server.watcherLoop`), one loop per pane daemon connection.
 
 ## Notify: a policy over the log
 
 A desktop notification is not a box feature. `notify/` keys are ordinary entries, and the server's notify renderer
 turns them into desktop notifications. The *bridge* is the producer: the server function that posts a pane state
-report on `notify/<pane>` (`internal/server/notify_server.go:21`). Three gates decide a popup.
+report on `notify/<pane>` (`internal/server/notify_server.go#server.notifyPaneState`). Three gates decide a popup.
 
-1. The transition gate. `notify.StateChange` (`internal/notify/notify.go:21`) fires only when the new state
+1. The transition gate. `notify.StateChange` (`internal/notify/notify.go#StateChange`) fires only when the new state
    differs from the old and is `blocked`, `done` or `error`. The server's pane connection reader, `watchConn`
-   (`server_core.go:975`), applies the gate before it posts, so a program that reports `blocked` every second
+   (`internal/server/server_core.go#server.watchConn`), applies the gate before it posts, so a program that reports `blocked` every second
    posts once. That gate is the dedupe: a repeat is not a change.
-2. The urgency gate. `notify.Urgent` (`notify.go:37`) admits `blocked` and `error` only. A `done` entry is
+2. The urgency gate. `notify.Urgent` (`internal/notify/notify.go#Urgent`) admits `blocked` and `error` only. A `done` entry is
    logged and never interrupts, so an entry can pass one gate and fail the other.
-3. The suppression gate. `notifyBoxEntryLocked` (`server_box.go:66`) stays silent when the topic names the
+3. The suppression gate. `notifyBoxEntryLocked` (`internal/server/server_box.go#server.notifyBoxEntryLocked`) stays silent when the topic names the
    pane the operator is looking at: the form `notify/<pane>`, with that pane focused in the active window
-   (`operatorSeesLocked`, `notify_server.go:10`). A bare `notify/` names no pane.
+   (`operatorSeesLocked`, `internal/server/notify_server.go#server.operatorSeesLocked`). A bare `notify/` names no pane.
 
 The box is a log with no opinion about a desktop, so the policy lives apart: `internal/box` imports the standard
 library only and never shells out, while the notify package owns the `notify-send` call (`notify.Send`,
-`notify.go:77`). A host with no `notify-send` logs the failure and keeps the entry. The client applies the same
-suppression rule to its toasts (`internal/client/client_notify.go:43`): a toast is the popup the client raises for a
+`internal/notify/notify.go#Send`). A host with no `notify-send` logs the failure and keeps the entry. The client applies the same
+suppression rule to its toasts (`internal/client/client_notify.go#tui.notifySuppress`): a toast is the popup the client raises for a
 `notify/` entry it has not seen, and it drops the toast for the focused pane.
 
 ## OSC 7501 and pane status
@@ -115,15 +115,15 @@ suppression rule to its toasts (`internal/client/client_notify.go:43`): a toast 
 An *agent* is a program running in a pane that reports its own state, such as `pi`. It reports on its own stdout
 with an escape sequence: `ESC ] 7501 ; state=working:app=pi:msg=<base64> ST`, terminated by `ST` or BEL. The payload
 is `key=value` pairs separated by `:`, so `app` is the reporting program's name, and `msg` is base64 so a message
-can carry a `:` without splitting the pair list. `osc.Filter.Feed` (`internal/osc/osc.go:48`) sits in the pane
-daemon's read loop (`paneProc.readLoop`, `internal/pane/pane.go:876`), the loop that reads the pane's pseudoterminal
+can carry a `:` without splitting the pair list. `osc.Filter.Feed` (`internal/osc/osc.go#Filter.Feed`) sits in the pane
+daemon's read loop (`paneProc.readLoop`, `internal/pane/pane.go#paneProc.readLoop`), the loop that reads the pane's pseudoterminal
 (the PTY). The filter holds a partial sequence between reads and passes every other byte through. `handleOSC`
-(`osc.go:105`) matches `oscPrefix` (`osc.go:46`) and calls `Status`.
+(`internal/osc/osc.go#Filter.handleOSC`) matches `oscPrefix` (`internal/osc/osc.go#oscPrefix`) and calls `Status`.
 
-`osc.ParseStatus` (`osc.go:276`) accepts three shapes: the keyed form above, the JSON form
+`osc.ParseStatus` (`internal/osc/osc.go#ParseStatus`) accepts three shapes: the keyed form above, the JSON form
 `{"state":"working","message":"done"}` that dm accepted before, and a bare state word such as `blocked`.
-`knownState` (`osc.go:254`) is the closed set a pane can report: `idle`, `working`, `blocked`, `done`, `error`,
-`unknown`. `normaliseState` (`osc.go:265`) maps `clear` and any unknown word to `unknown`, so a report can never put
+`knownState` (`internal/osc/osc.go#knownState`) is the closed set a pane can report: `idle`, `working`, `blocked`, `done`, `error`,
+`unknown`. `normaliseState` (`internal/osc/osc.go#normaliseState`) maps `clear` and any unknown word to `unknown`, so a report can never put
 free text into a word the rail prints. `clear` is the report format's removal word: nothing is left of the report,
 so the pane shows `unknown`. The sets differ on purpose: `idle` and `clear` are not box states, `note` is not a pane
 status, and the bridge posts only `blocked`, `done` and `error`.
@@ -143,25 +143,25 @@ flowchart TD
   I --> J["urgency and suppression gates decide the popup"]
 ```
 
-The *pane daemon* owns one pane's PTY (`paneProc`, `internal/pane/pane.go:33`), and it *redacts* the status text: it
+The *pane daemon* owns one pane's PTY (`paneProc`, `internal/pane/pane.go#paneProc`), and it *redacts* the status text: it
 replaces every secret value the session registered with a marker (`scrubber.redactText`,
-`internal/pane/scrub.go:248`), and [Secrets](09-secrets.md) owns how one is registered. The server's `paneConn` is
-its record of the connection to that daemon, and `pushSnapshot` (`server_view.go:528`) broadcasts the *snapshot*,
-the whole layout, focus and pane list a client draws from. `RailGlyph` (`internal/rail/rail.go:465`) reads one glyph
-and colour per state from `theme.States` (`internal/theme/theme.go:170`), the map a `states` block in the theme file
-(`$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, `internal/theme/theme.go:496`) overrides. Every state has a Nerd Font form
-except `shell`, the state of a pane that runs a shell with no agent to report. `RailMark` (`rail.go:476`) draws the
+`internal/pane/scrub.go#scrubber.redactText`), and [Secrets](09-secrets.md) owns how one is registered. The server's `paneConn` is
+its record of the connection to that daemon, and `pushSnapshot` (`internal/server/server_view.go#server.pushSnapshot`) broadcasts the *snapshot*,
+the whole layout, focus and pane list a client draws from. `RailGlyph` (`internal/rail/rail.go#RailGlyph`) reads one glyph
+and colour per state from `theme.States` (`internal/theme/theme.go#Theme.States`), the map a `states` block in the theme file
+(`$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, `internal/theme/theme.go#LoadThemeFile`) overrides. Every state has a Nerd Font form
+except `shell`, the state of a pane that runs a shell with no agent to report. `RailMark` (`internal/rail/rail.go#RailMark`) draws the
 agent mark, the two-cell prefix of a rail row: an agent icon, the bar glyph an agent gets on a plain terminal, or a
 shell icon for a pane with no agent. The state glyph sits in the third cell. A shell that never reported leaves that
-cell blank, because `RailRow` (`rail.go:564`) draws nothing there rather than a question mark about nothing.
+cell blank, because `RailRow` (`internal/rail/rail.go#RailRow`) draws nothing there rather than a question mark about nothing.
 
 ## Where to add the next one
 
-- A new box state starts at `box.States` (`box.go:86`) and stops there: the decoder, `box.ParseState`
-  (`box.go:101`), its error text and the schema enum (`box.Schema`, `box.go:521`) all read that slice, and
-  `box.ValidateReq` (`box.go:314`) accepts its name.
-- A new pane status starts at `knownState` (`internal/osc/osc.go:254`), then needs a `states` entry in the
-  theme file (`theme.States`, `theme.go:170`) and a decision about `notify.StateChange`.
+- A new box state starts at `box.States` (`internal/box/box.go#States`) and stops there: the decoder, `box.ParseState`
+  (`internal/box/box.go#ParseState`), its error text and the schema enum (`box.Schema`, `internal/box/box.go#Schema`) all read that slice, and
+  `box.ValidateReq` (`internal/box/box.go#ValidateReq`) accepts its name.
+- A new pane status starts at `knownState` (`internal/osc/osc.go#knownState`), then needs a `states` entry in the
+  theme file (`theme.States`, `internal/theme/theme.go#Theme.States`) and a decision about `notify.StateChange`.
 - A new notification rule goes in `notify.Urgent`, in `notify.StateChange` or in `notifyBoxEntryLocked`,
   never in `internal/box`.
 

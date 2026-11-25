@@ -6,8 +6,8 @@ Every dm process talks over a unix socket and nothing else: why the call crosses
 
 | term | meaning |
 | --- | --- |
-| session, server, sibling | a session is one server and the panes it owns, under `sessions/<name>/`; the server owns its layout, its `state.json` file and client connections; a sibling is another session under the same dm state dir (`$DM_STATE`, else `$XDG_STATE_HOME/dm`, else `~/.local/state/dm`, `internal/paths/paths.go:12`) |
-| pane, pane id | a pane is one process running a program (a shell by default) in a rectangle of the layout; its id is `w` + window number + `p` + pane number, e.g. `w1p2` (`internal/session/state.go:102`) |
+| session, server, sibling | a session is one server and the panes it owns, under `sessions/<name>/`; the server owns its layout, its `state.json` file and client connections; a sibling is another session under the same dm state dir (`$DM_STATE`, else `$XDG_STATE_HOME/dm`, else `~/.local/state/dm`, `internal/paths/paths.go#StateDir`) |
+| pane, pane id | a pane is one process running a program (a shell by default) in a rectangle of the layout; its id is `w` + window number + `p` + pane number, e.g. `w1p2` (`internal/session/state.go#State`) |
 | workspace, window, rail | a workspace groups windows, a window is one tab of panes, the rail is the sidebar that lists them |
 | box, float | the box is the session's append-only message log; a box watcher is one reader's place in it (pane, key, cursor, parked); a float is a floating command pane, a process one client owns outside the layout |
 | ring, VT screen | the ring is a pane's scrollback buffer of raw output bytes; the VT screen is its emulated terminal, visible text plus modes |
@@ -17,26 +17,26 @@ Every dm process talks over a unix socket and nothing else: why the call crosses
 
 dm is five kinds of process: a session server, one daemon per pane, the TUI (`internal/client`), the CLI, and a
 sibling session's server. They are separate processes with no shared address space, so a call cannot be a function
-call; it becomes a message. A pane outlives its server (`internal/pane/pane.go:32`), the CLI starts the server on a
-failed dial (`internal/transport/transport.go:53`), and a sibling server reaches in over the socket
-(`internal/server/server_secrets.go:369`). The boundary costs three things. Serialisation: an encode, a decode,
+call; it becomes a message. A pane outlives its server (`internal/pane/pane.go#paneProc`), the CLI starts the server on a
+failed dial (`internal/transport/transport.go#EnsureAt`), and a sibling server reaches in over the socket
+(`internal/server/server_secrets.go#server.coverSession`). The boundary costs three things. Serialisation: an encode, a decode,
 often a re-encode, and a `read` (the screen) or `replay` (the scrollback) reply carries a whole screen or ring, the
-ring at most 8 MiB (`ringMax`, `internal/pane/pane.go:375`), under the 16 MiB frame. A new failure mode: a peer can
+ring at most 8 MiB (`ringMax`, `internal/pane/pane.go#ringMax`), under the 16 MiB frame. A new failure mode: a peer can
 be absent, wedged, or torn mid-frame, and a stream cannot resynchronise, so a timed-out write poisons that pane
-connection for good (`internal/server/server_core.go:110`). No compile-time link: the action is a string in a
+connection for good (`internal/server/server_core.go#paneConn.send`). No compile-time link: the action is a string in a
 `switch` on each side, so an action typo is a runtime error and a field-name typo is dropped by `json.Unmarshal` in
 silence.
 
 ## The frame
 
 One frame is a 4-byte big-endian uint32 length, then that many bytes of JSON: no newline, no other delimiter
-(`internal/wire/wire.go:252`, `:270`). `wire.MaxFrame` is `16 << 20` (`:249`). `WriteMsg` refuses a bigger payload
+(`internal/wire/wire.go#WriteMsg`, `internal/wire/wire.go#ReadMsg`). `wire.MaxFrame` is `16 << 20` (`internal/wire/wire.go#MaxFrame`). `WriteMsg` refuses a bigger payload
 before writing it, and `ReadMsg` refuses a zero or oversize length; a bad frame ends the connection. One writer per
-connection, under a mutex (`transport.Conn.Send`, `internal/transport/transport.go:30`).
+connection, under a mutex (`transport.Conn.Send`, `internal/transport/transport.go#Conn.Send`).
 
 ## The envelope
 
-`wire.Msg` (`internal/wire/wire.go:17`) is the one envelope, both sockets, both directions. Its stale `Type` comment
+`wire.Msg` (`internal/wire/wire.go#Msg`) is the one envelope, both sockets, both directions. Its stale `Type` comment
 lists eleven values; the code sends twenty. `req`, `resp` and `attach` are requests and replies; `keys` and
 `resize` carry a client's key bytes and size; the rest are pushes: `snapshot`, `screen` (VT screen), `replay` (ring),
 `bytes` (pty output), `status` (pane status), `session` (the pane's OSC 7502 session file, empty when cleared), `cwd` (working directory), `title` (the pane's OSC title), `mode`
@@ -56,15 +56,15 @@ changed), `watch` (a box watcher changed), `msg` (box entry), `close` (session e
 
 ## The type and action matrix
 
-`handleReq` (`internal/server/server_rpc.go:15`) switches on `Action` and has 71 cases over 76 names; the pane
-switches on `Action` alone (`internal/pane/pane.go:1277`). The server switches on `Type` first
-(`internal/server/server_view.go:732`). Every action ends in a `resp` frame except `msg-sub`, which streams; the
+`handleReq` (`internal/server/server_rpc.go#server.handleReq`) switches on `Action` and has 71 cases over 76 names; the pane
+switches on `Action` alone (`internal/pane/pane.go#paneProc.serve`). The server switches on `Type` first
+(`internal/server/server_view.go#server.serve`). Every action ends in a `resp` frame except `msg-sub`, which streams; the
 `res` column names the keys of that reply's `res` object, and `none` means `res` is empty. The request and reply
 columns use the JSON keys from the envelope table (`target`, `msg`, `res`, `waitReason`), and `res{name,where}`
 means a `res` object with those keys. The server's `read` reply puts rows in `res.lines`; the pane's in `Lines`.
 The sender column names the caller: `cli` a `dm` verb, `tui` the client, `web` the phone page's action endpoint
 (`/api/action`, which sends the request the way the CLI does), `sib` a sibling server; `exec` no typed verb, only
-`dm exec '<json>'` (`internal/cli/cli.go:572`).
+`dm exec '<json>'` (`internal/cli/cli.go#Run`).
 
 | action | request fields | reply `res` | sender |
 | --- | --- | --- | --- |
@@ -85,6 +85,7 @@ The sender column names the caller: `cli` a `dm` verb, `tui` the client, `web` t
 | `set-rail` | `index` | `rail` (the sidebar width in cells) | tui |
 | `move-pane` | `target`, `other`, `dir` | `pane` | exec |
 | `select-layout` | `layout` | `layout` | tui |
+| `layout` | none | `layout` (a layout document) | cli |
 | `new-window` | `name`, `cwd`, `nofocus`, `argv` | `window`, `pane` | cli, tui |
 | `new-workspace` | `name`, `window`, `cwd`, `project`, `nofocus`, `argv` | `workspace`, `window`, `pane` | tui |
 | `list-workspaces` | none | an array of `{id, name, project, active, windows}` | exec |
@@ -117,7 +118,7 @@ The sender column names the caller: `cli` a `dm` verb, `tui` the client, `web` t
 | `ask-answer` | `target`, `res{items,globalNote,cancel}` | the answer (`at`, `items`, `globalNote`, `cancel`) | cli, tui, web |
 | `ask-close` | `target` | `closed` (whether this close removed one) | cli |
 | `ask-list` | none | `asks` (an array of ask requests, answers included) | cli |
-| anything else | none | error `unknown action %q` (`internal/server/server_rpc.go:784`) | |
+| anything else | none | error `unknown action %q` (`internal/server/server_rpc.go#server.handleReq`) | |
 
 The ask store is bounded: one session lists at most 64 asks carrying at most 256 KiB of question, header, option, description and preview text (`internal/ask/ask.go`), a quarter of the 1 MiB a single outbound frame may hold. An `ask-open` past either bound is refused with `E_FULL` and leaves the store untouched. A closed or dead pane takes its asks with it, answered or not, so no ghost survives its pane; an answered ask is still reaped after `SettleGrace`.
 
@@ -139,13 +140,13 @@ the box the client draws. A plugin is a program the config declares with a name,
 ## The pane's own actions
 
 The pane takes 16 actions on its own socket, and the server keeps two channels to it. Most actions ride a one-shot
-dial: `paneRequest` (`internal/server/server_view.go:960`) dials `sessions/<name>/panes/<id>.sock` with a one second
-timeout, sends one request, and reads its reply under a two second deadline (`:962`, `:971`); `paneScreenRequest`
-(`:832`) and `readPaneReplay` (`:922`) do the same for a picture or a ring. The five push actions ride the persistent
-connection `adoptPane` builds (`internal/server/server_core.go:841`), written with `paneConn.send` (`:110`): `write`,
+dial: `paneRequest` (`internal/server/server_view.go#paneRequest`) dials `sessions/<name>/panes/<id>.sock` with a one second
+timeout, sends one request, and reads its reply under a two second deadline (`internal/server/server_view.go#paneRequest`); `paneScreenRequest`
+(`internal/server/server_view.go#paneScreenRequest`) and `readPaneReplay` (`internal/server/server_view.go#readPaneReplay`) do the same for a picture or a ring. The five push actions ride the persistent
+connection `adoptPane` builds (`internal/server/server_core.go#server.adoptPane`), written with `paneConn.send` (`internal/server/server_core.go#paneConn.send`): `write`,
 `resize`, `kill`, `set-secrets` and `term-colours`. A push is written, never read: one watcher goroutine per pane
-(`watcherLoop`, `internal/server/server_core.go:897`) reads the conn, and its `Type` switch has no `resp` case, so
-a `resp` the pane sends is dropped (`:975`). `dm wait` dials the pane itself (`internal/cli/cli.go:2199`).
+(`watcherLoop`, `internal/server/server_core.go#server.watcherLoop`) reads the conn, and its `Type` switch has no `resp` case, so
+a `resp` the pane sends is dropped (`internal/server/server_core.go#server.watchConn`). `dm wait` dials the pane itself (`internal/cli/cli.go#runWaitAt`).
 
 In a pane reply, `lines` and `st` are envelope fields (`Lines`, `St`) on `read` and `status`; `yank` and `wait`
 put their rows in `res`. A `screen` frame carries the VT screen as `VTSnap` (`vtsnap`); a `replay` frame carries the
@@ -168,10 +169,10 @@ ring as `Data` and the status as `St`.
 
 ## How a call is sent
 
-1. `EnsureAt` (`internal/transport/transport.go:53`) dials `sessions/<name>/server.sock`, or spawns the server;
-   `RPCAt` (`:142`) sets `Type: "req"`, `ID: 1` and a 10 s read deadline.
-2. `server.serve` (`internal/server/server_view.go:706`) takes `case "req"`, `handleReq` works, and `s.reply`
-   (`:983`) queues the reply through `client.deliver` (`internal/server/server_core.go:208`). `RPCAt` reads until
+1. `EnsureAt` (`internal/transport/transport.go#EnsureAt`) dials `sessions/<name>/server.sock`, or spawns the server;
+   `RPCAt` (`internal/transport/transport.go#RPCAt`) sets `Type: "req"`, `ID: 1` and a 10 s read deadline.
+2. `server.serve` (`internal/server/server_view.go#server.serve`) takes `case "req"`, `handleReq` works, and `s.reply`
+   (`internal/server/server_view.go#server.reply`) queues the reply through `client.deliver` (`internal/server/server_core.go#client.deliver`). `RPCAt` reads until
    `Type == "resp"`.
 
 ```mermaid
@@ -200,31 +201,31 @@ flowchart TD
     J -- unknown --> L["s.reply with unknown action"]
 ```
 
-**The split flow.** `dm split w1p1 --dir right`: `Run` (`:682`) sends `dir`, `handleReq`
-(`internal/server/server_rpc.go:300`) calls `s.split` (`internal/server/server_mutate.go:867`), which releases the
-layout lock, then `s.ensurePane` (`internal/server/server_core.go:774`) spawns the daemon. `s.reply` returns
-`pane: w1p2`. **Errors:** `printRPC` (`internal/cli/cli.go:1103`) turns a reply with `ok` false
+**The split flow.** `dm split w1p1 --dir right`: `Run` (`internal/cli/cli.go#Run`) sends `dir`, `handleReq`
+(`internal/server/server_rpc.go#server.handleReq`) calls `s.split` (`internal/server/server_mutate.go#server.split`), which releases the
+layout lock, then `s.ensurePane` (`internal/server/server_core.go#server.ensurePane`) spawns the daemon. `s.reply` returns
+`pane: w1p2`. **Errors:** `printRPC` (`internal/cli/cli.go#printRPC`) turns a reply with `ok` false
 into a Go error; a pane answers nothing to an unknown action, so `paneRequest` times out.
 
 ## What the protocol does not do
 
 - No version or handshake. `wire.Msg` carries no version or capability list, and `json.Unmarshal` drops a field the
-  reader does not know (`internal/wire/wire.go:284`). On the server socket a conn joins `s.clients` only after
-  `attach` (`internal/server/server_view.go:737`), and `broadcastLocked` sends to `s.clients` alone
-  (`internal/server/server_core.go:1156`). On the pane socket a conn is a subscriber at once: `serve` adds it to
-  `p.subs` (`internal/pane/pane.go:1281`), and the pane's broadcast writes to every conn there
-  (`internal/pane/pane.go:1035`), so a silent conn still reads the pane's frames.
-- No resync or auth: a bad frame ends the connection, and the socket is mode 0600 (`internal/pane/pane.go:689`).
+  reader does not know (`internal/wire/wire.go#ReadMsg`). On the server socket a conn joins `s.clients` only after
+  `attach` (`internal/server/server_view.go#server.serve`), and `broadcastLocked` sends to `s.clients` alone
+  (`internal/server/server_core.go#server.broadcastLocked`). On the pane socket a conn is a subscriber at once: `serve` adds it to
+  `p.subs` (`internal/pane/pane.go#paneProc.subs`), and the pane's broadcast writes to every conn there
+  (`internal/pane/pane.go#paneProc.broadcastLocked`), so a silent conn still reads the pane's frames.
+- No resync or auth: a bad frame ends the connection, and the socket is mode 0600 (`internal/pane/pane.go#Run`).
 
 ## Add an action
 
-1. Add a `case` to `handleReq` (`internal/server/server_rpc.go:15`) ending in `s.reply`, and wrap a layout change in
+1. Add a `case` to `handleReq` (`internal/server/server_rpc.go#server.handleReq`) ending in `s.reply`, and wrap a layout change in
    `s.mutation` (which saves) and `s.afterMutation` (which resyncs). A new `wire.Msg` field is additive and `omitempty`.
-2. If a pane must act, add the `case` to `paneProc.serve` (`internal/pane/pane.go:1277`) and call it through
+2. If a pane must act, add the `case` to `paneProc.serve` (`internal/pane/pane.go#paneProc.serve`) and call it through
    `paneRequest`; keep the reply a `resp` frame.
-3. Add the verb as a `case` in `Run` (`internal/cli/cli.go:426`) and a row to `cliCommands`
-   (`internal/clidoc/clidoc.go:68`), the name to `manActionNames` (`internal/clidoc/man.go:64`) and
-   `actionExamples` (`internal/clidoc/actions.go:16`), and a test to `internal/server/rpc_actions_test.go`;
+3. Add the verb as a `case` in `Run` (`internal/cli/cli.go#Run`) and a row to `cliCommands`
+   (`internal/clidoc/clidoc.go#cliCommands`), the name to `manActionNames` (`internal/clidoc/man.go#manActionNames`) and
+   `actionExamples` (`internal/clidoc/actions.go#actionExamples`), and a test to `internal/server/rpc_actions_test.go`;
    `TestUnknownActionFails` pins the default arm. Refresh `docs/` with `dm man -o docs/dm.1`,
    `dm llms -o docs/llms.txt` and `dm html -o docs/dm.html`.
 
@@ -232,4 +233,4 @@ into a Go error; a pane answers nothing to an unknown action, so `paneRequest` t
 
 Keep the frame, the envelope keys `type`, `action`, `id`, `ok`, `error` and `res`, and the `resp` shape, with new
 fields additive and `omitempty`. `Lines` stays in the envelope on the pane's `read` reply, pinned by
-`TestReadReplyStaysBackwardCompatible` (`internal/wire/wire_test.go:14`).
+`TestReadReplyStaysBackwardCompatible` (`internal/wire/wire_test.go#TestReadReplyStaysBackwardCompatible`).

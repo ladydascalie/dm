@@ -9,7 +9,7 @@ teardown word destroys, and what to run when a session is wedged.
 
 One session is one directory, one server and its pane daemons. The directory
 holds the layout; the panes hold the content. `paths.ValidSessionName`
-(`internal/paths/paths.go:36`) checks the name before any path is built.
+(`internal/paths/paths.go#ValidSessionName`) checks the name before any path is built.
 
 ```mermaid
 flowchart TD
@@ -24,25 +24,25 @@ flowchart TD
 
 Ids are `s<N>` for a workspace, `w<N>` for a window and `w<N>p<M>` for a pane,
 `M` counting per window, so a pane id names its window and never its workspace
-(`internal/session/state.go:441`). The rail is the client's left sidebar, one
+(`internal/session/state.go#State.NewWorkspaceID`). The rail is the client's left sidebar, one
 row per workspace, window and pane. A fold collapses a group of rail rows to its
 header, and an accent is the theme colour a rail group keeps.
 
-- **Workspace**, `Workspace` (`internal/session/state.go:37`): id, name, an
+- **Workspace**, `Workspace` (`internal/session/state.go#Workspace`): id, name, an
   optional project, a shared label: workspaces that carry the same label stay
   contiguous, its windows, the index of the window on screen, one fold flag.
-- **Window**, `Window` (`state.go:15`): id, name, whether the user named it, the
+- **Window**, `Window` (`internal/session/state.go#Window`): id, name, whether the user named it, the
   split tree in `Root` (a `layout.Node`: a split with `Kids` and `Sizes`, or one
   pane id), the focused pane, the pane counter, `Unfolded` (show its panes in the
   rail) and `Sync` (mirror every write to all its panes), and the last preset the
   `select-layout` command applied: `even-horizontal`, `even-vertical`,
   `main-horizontal`, `main-vertical` or `tiled`, empty after manual edits.
-- **Pane**, `PaneState` (`state.go:70`): what a restart needs. Shell, cwd, cols,
+- **Pane**, `PaneState` (`internal/session/state.go#PaneState`): what a restart needs. Shell, cwd, cols,
   rows, argv, the environment a plugin adds (a plugin is a pane a `plugin` block
   in `dm/config.kdl` under `$XDG_CONFIG_HOME` or `~/.config` declares,
-  `config_load.go:31`, `config_parse.go:530`), the agent name a `set-pane-name`
-  request set (`server_rpc.go:549`), the app name its program last reported
-  (`state.go:84`), whether it ever reported, and a `restarted` mark. The tree
+  `internal/keymap/config_load.go#defaultConfigPath`, `internal/keymap/config_parse.go#findPlugins`), the agent name a `set-pane-name`
+  request set (`internal/server/server_rpc.go#server.handleReq`), the app name its program last reported
+  (`internal/session/state.go#PaneState.App`), whether it ever reported, and a `restarted` mark. The tree
   names the pane by id; the `Panes` map holds its record.
 
 A pane's screen, the cell grid its terminal is showing, and its scrollback, the
@@ -51,8 +51,8 @@ process, so a restart reloads a layout, never a screen.
 
 ## The state file
 
-`state.json` sits in the session directory (`internal/paths/paths.go:69`) and
-holds `State` (`state.go:94`), in six groups:
+`state.json` sits in the session directory (`internal/paths/paths.go#StatePathAt`) and
+holds `State` (`internal/session/state.go#State`), in six groups:
 
 | Group | Fields |
 |---|---|
@@ -61,26 +61,26 @@ holds `State` (`state.go:94`), in six groups:
 | Counters | `nextWorkspace`, `nextWindow`, `idVersion` |
 | Box | the message box, an append-only log any pane can post into, and `boxSeq`, the last sequence number it handed out |
 | Ask | the questions an agent puts to the reader, oldest first, each with its tool call and, once answered, the answer, plus `askSeq`, the last ask id it handed out |
-| Secrets | the registry, one record per secret: `tool`, the command that prints the value, `reference`, the address it resolves, `upstream`, the URL a request is forwarded to, `header`, the template the value is filled into. Never a value (`internal/session/secret.go:14`). The server runs one loopback proxy for these (`server_secrets.go:736`): a request on 127.0.0.1 under a secret's random path goes to that secret's `upstream` with the value in `header`, so a program uses the secret without holding it |
+| Secrets | the registry, one record per secret: `tool`, the command that prints the value, `reference`, the address it resolves, `upstream`, the URL a request is forwarded to, `header`, the template the value is filled into. Never a value (`internal/session/secret.go#Secret`). The server runs one loopback proxy for these (`internal/server/server_secrets.go#server.secretProxyRegister`): a request on 127.0.0.1 under a secret's random path goes to that secret's `upstream` with the value in `header`, so a program uses the secret without holding it |
 
-`Save` (`state.go:216`) writes indented JSON to a temp file in the session
+`Save` (`internal/session/state.go#State.Save`) writes indented JSON to a temp file in the session
 directory, calls `Sync`, then renames it into place, so a reader sees the old
 file or the new one, never a torn one. The session's server is the only writer,
 and the flock in `server.Run` keeps it that way. Nothing takes a read lock, so
-`dm ls` reads a dead session's file directly (`internal/cli/cli.go:2021`). The
-server writes it at startup, before the socket exists (`server_core.go:645`);
-through `mutation`, which most mutating actions use (`server_mutate.go:300`); in a
+`dm ls` reads a dead session's file directly (`internal/cli/cli.go#sessionSummary`). The
+server writes it at startup, before the socket exists (`internal/server/server_core.go#Run`);
+through `mutation`, which most mutating actions use (`internal/server/server_mutate.go#server.mutation`); in a
 request handler that saves itself rather than through `mutation`: a rail change
-(`server_view.go:71`), a fold in `toggleFold` (`server_mutate.go:29`), a project
-fold (`server_mutate.go:61`), a pane cwd (`server_mutate.go:1149`), a status
-report (`server_view.go:202`), a pane exit (`server_view.go:368`), a box post
-(`server_box.go:54`), a box clear (`server_box.go:133`) and a size fit, which is
-why a detach rewrites it (`server_view.go:699`); and on load, when a migration
-changed anything (`state.go:318`). A migration is a load-time rewrite of an older
-state file (`state.go:292`).
+(`internal/server/server_view.go#server.setRail`), a fold in `toggleFold` (`internal/server/server_mutate.go#server.toggleFold`), a project
+fold (`internal/server/server_mutate.go#server.toggleProjectFold`), a pane cwd (`internal/server/server_mutate.go#server.setPaneCwd`), a status
+report (`internal/server/server_view.go#server.noteStatus`), a pane exit (`internal/server/server_view.go#server.paneExited`), a box post
+(`internal/server/server_box.go#server.boxStoreLocked`), a box clear (`internal/server/server_box.go#server.boxClear`) and a size fit, which is
+why a detach rewrites it (`internal/server/server_view.go#server.syncSizes`); and on load, when a migration
+changed anything (`internal/session/state.go#LoadStateAt`). A migration is a load-time rewrite of an older
+state file (`internal/session/state.go#LoadStateAt`).
 
-To add a field, extend `State` (`state.go:94`) or `PaneState` (`state.go:70`),
-default it in `LoadStateAt` (`state.go:260`), and make every mutation that
+To add a field, extend `State` (`internal/session/state.go#State`) or `PaneState` (`internal/session/state.go#PaneState`),
+default it in `LoadStateAt` (`internal/session/state.go#LoadStateAt`), and make every mutation that
 changes it save. The zero value must mean the old behaviour, as `railSet` does.
 
 ## Attach and detach
@@ -100,62 +100,62 @@ sequenceDiagram
 ```
 
 Attach registers a client and builds one snapshot, the layout and ids, not a
-backlog, the output it missed (`server_view.go:786`). The client asks for history
+backlog, the output it missed (`internal/server/server_view.go#server.attach`). The client asks for history
 with a `replay` request when it enters scrollback. Several clients may attach at
 once and share one layout: the largest terminal sets the size, and a smaller
 client's copy is clipped to its own screen (`README.md:1425`).
 
-Detach sends nothing. The client sets `quit` (`internal/client/client_keys.go:900`)
+Detach sends nothing. The client sets `quit` (`internal/client/client_keys.go#tui.runAction`)
 and closes the socket; the server's `serve` defer drops it, refits the remaining
-clients and pushes a snapshot (`server_view.go:709`). The client does not
-reconnect: a dead connection ends it (`internal/client/client_model.go:725`).
+clients and pushes a snapshot (`internal/server/server_view.go#server.serve`). The client does not
+reconnect: a dead connection ends it (`internal/client/client_model.go#runSession`).
 
 ## What survives a crash
 
 | Crash | Panes | Session directory | Recovery |
 |---|---|---|---|
 | the server dies or exits | keep running, sockets intact | untouched | the client exits; the next dial spawns a server that adopts each pane |
-| a pane daemon dies | its shell loses the pty and exits | kept, and `state.json` is rewritten when the record goes (`server_view.go:368`) | the server's watch loop re-dials a lost connection (`server_core.go:897`); when that re-dial is refused or finds the socket gone, the record goes and the split collapses (`server_core.go:913`), and focus moves to a neighbour |
-| the last pane exits | none left | removed by `endSession` (`server_view.go:462`) | the session is gone |
-| machine reboot | gone | intact | fresh panes spawn from the state, each marked `restarted` (`server_core.go:799`) |
+| a pane daemon dies | its shell loses the pty and exits | kept, and `state.json` is rewritten when the record goes (`internal/server/server_view.go#server.paneExited`) | the server's watch loop re-dials a lost connection (`internal/server/server_core.go#server.watcherLoop`); when that re-dial is refused or finds the socket gone, the record goes and the split collapses (`internal/server/server_core.go#server.watcherLoop`), and focus moves to a neighbour |
+| the last pane exits | none left | removed by `endSession` (`internal/server/server_view.go#server.endSession`) | the session is gone |
+| machine reboot | gone | intact | fresh panes spawn from the state, each marked `restarted` (`internal/server/server_core.go#server.ensurePane`) |
 
 Adoption is the whole trick: the server dials `panes/<id>.sock` before it
-considers a spawn (`server_core.go:790`), so a surviving daemon keeps its screen,
+considers a spawn (`internal/server/server_core.go#server.ensurePane`), so a surviving daemon keeps its screen,
 its ring and the terminal colours it answers the OSC 10 and OSC 11 queries with.
 
 ## Kill, reset, purge, and the pane's own reap
 
 | Word or actor | What it does | Panes | Session directory |
 |---|---|---|---|
-| `dm kill` | SIGTERM to the pid in `server.pid`, after checking `/proc` names `__server` (`internal/transport/transport.go:207`) | survive | kept |
-| `dm reset --force` | SIGTERM, then SIGKILL the server, reap every pane group, remove the directory (`transport.go:233`) | killed | removed |
-| `dm purge` | remove a directory whose server does not answer and whose pids are dead (`internal/cli/cli.go:1802`) | already gone | removed |
-| the pane, every 5 s | checks its own socket path (`internal/pane/pane.go:845`); if it is gone or names another file, kill its shell group and exit | itself | untouched |
+| `dm kill` | SIGTERM to the pid in `server.pid`, after checking `/proc` names `__server` (`internal/transport/transport.go#KillSessionAt`) | survive | kept |
+| `dm reset --force` | SIGTERM, then SIGKILL the server, reap every pane group, remove the directory (`internal/transport/transport.go#ResetSessionAt`) | killed | removed |
+| `dm purge` | remove a directory whose server does not answer and whose pids are dead (`internal/cli/cli.go#runPurge`) | already gone | removed |
+| the pane, every 5 s | checks its own socket path (`internal/pane/pane.go#paneProc.reapOrphans`); if it is gone or names another file, kill its shell group and exit | itself | untouched |
 
 To reap a pane is to kill its shell's process group and then the daemon. `reset`
 needs `--force`, else it prints the plan, one `would reset <name>` line per
-session, and refuses (`cli.go:1778`). `purge` skips a session whose socket
+session, and refuses (`internal/cli/cli.go#runReset`). `purge` skips a session whose socket
 answers, then one whose `server.pid` names a running process, then one whose
-`panes/*.sock.pid` names a running process (`cli.go:1813`). `reapPanes` reads
-`panes/*.sock.pid`, kills each shell group, then the daemon (`transport.go:271`).
+`panes/*.sock.pid` names a running process (`internal/cli/cli.go#runPurge`). `reapPanes` reads
+`panes/*.sock.pid`, kills each shell group, then the daemon (`internal/transport/transport.go#reapPanes`).
 
 ## The id scheme
 
 A fresh state starts at `s1` and `w1`, and the first window mints `w1p1`
-(`state.go:455`). Counters only move forward, so a closed id is never reused and
+(`internal/session/state.go#Window.NewPaneID`). Counters only move forward, so a closed id is never reused and
 a script can hold one across a restart. `idVersion` marks the scheme. A state
 file whose `idVersion` is below 2 is renumbered once at load: workspaces and
 windows in slice order, panes in tree order, every focus and every `Panes` key
-remapped (`state.go:462`). The same load renames legacy numeric window names
-after their folder, the last element of the focused pane's cwd (`state.go:302`,
-`paths.go:78`), and rewrites the file once.
+remapped (`internal/session/state.go#State.MigrateIDs`). The same load renames legacy numeric window names
+after their folder, the last element of the focused pane's cwd (`internal/session/state.go#LoadStateAt`,
+`internal/paths/paths.go#FolderName`), and rewrites the file once.
 
 ## When a session is wedged
 
 1. `dm ls` shows `live` or `dead` per session, and reads a dead one's state file
-   without spawning a server (`cli.go:1969`).
+   without spawning a server (`internal/cli/cli.go#runLs`).
 2. Read `sessions/<name>/server.log` and `panes/<id>.log`. `EnsureAt` quotes the
-   log tail in its own error (`internal/transport/transport.go:106`).
+   log tail in its own error (`internal/transport/transport.go#EnsureAt`).
 3. `dm kill -s <name>` (`-s` names the session, on every word that takes one)
    stops a hung server and leaves the panes adoptable. The next `dm` restarts the
    server and reconnects them.
@@ -165,7 +165,7 @@ after their folder, the last element of the focused pane's cwd (`state.go:302`,
 
 `dm list -s <name>` lists the panes of one session, so it needs a server and
 spawns a missing one. An RPC to a live but silent server fails on a ten second
-read deadline (`transport.go:153`).
+read deadline (`internal/transport/transport.go#RPCAt`).
 
 ## See also
 

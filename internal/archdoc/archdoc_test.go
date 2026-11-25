@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"dm/internal/arch"
@@ -58,4 +59,20 @@ func TestPageTable(t *testing.T) {
 // package directory.
 func moduleFile(path string) string {
 	return filepath.Join("..", "..", filepath.FromSlash(path))
+}
+
+// TestCitations resolves every citation under docs/internals: the file must
+// exist and the symbol must be declared in it. A line number is not an anchor.
+func TestCitations(t *testing.T) {
+	bad, err := CheckCitations(moduleFile(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bad) > 0 {
+		lines := make([]string, len(bad))
+		for i, e := range bad {
+			lines[i] = e.String()
+		}
+		t.Fatalf("%d citation(s) do not resolve:\n%s", len(bad), strings.Join(lines, "\n"))
+	}
 }

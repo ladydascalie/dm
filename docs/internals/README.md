@@ -20,14 +20,30 @@ record in it, a window is a record in a workspace, and a window holds a tree
 whose leaves are panes. A pane runs one program in a PTY. A PTY, or
 pseudo-terminal, is the terminal device a program reads keys from and writes
 output to: the pane daemon holds the master end, the program holds the slave
-end, and keys and output cross between them (`internal/pane/pane.go:802`,
-`internal/pane/pane.go:31`). 02 defines the four nouns and says what each
+end, and keys and output cross between them (`internal/pane/pane.go#paneProc.startShell`,
+`internal/pane/pane.go#paneProc`). 02 defines the four nouns and says what each
 teardown word destroys: `kill`, `reset`, `purge` and `reap`.
 
 The audience is a Go developer who has never seen this repo. Every page below
-cites a file and a line for each claim, so you can check the claim against the
-tree. The tree does not restate README.md, does not document a generated
-snapshot by hand, and does not claim behaviour that no source supports.
+cites the file and the declaration behind each claim, so you can check the claim
+against the tree. The tree does not restate README.md, does not document a
+generated snapshot by hand, and does not claim behaviour that no source
+supports.
+
+## How a citation is written
+
+Every claim cites `path#symbol`: the file from the module root, a `#`, then the
+declaration in it. `internal/pane/pane.go#paneProc` is the type, a method is
+`Type.Method` (`internal/session/state.go#State.Save`), a struct field is
+`Type.Field` (`internal/session/state.go#PaneState.App`), and a file's package
+clause or package comment is `#package`. A bare `server_core.go` names a file
+whose base name is unique in the tree.
+
+The line number is deliberately absent. It is not an anchor: the next commit
+that inserts a function above the cited one moves it, and the citation then
+points at unrelated code. The symbol is the anchor, and `TestCitations` in
+`internal/archdoc` resolves every citation in this tree: the file must exist and
+the symbol must be declared in it. A `path:line` token fails the same test.
 
 ## Reading order
 
@@ -47,31 +63,31 @@ before any change that crosses a process.
    authoritative state. This page shows the twelve files that divide that work.
 5. [The pane daemon](05-pane.md). Read fifth because the pane owns the PTY and
    the screen. The screen is the terminal emulator the pane builds from PTY
-   bytes (`internal/vt/term.go:6`), and the scroll ring is the fixed-size byte
-   buffer that holds the recent output (`internal/pane/pane.go:394`). This
+   bytes (`internal/vt/term.go#Term`), and the scroll ring is the fixed-size byte
+   buffer that holds the recent output (`internal/pane/pane.go#scrollRing`). This
    page explains the process that outlives the server.
 6. [The client](06-client.md). Read sixth because it is the largest package and
    the one that turns frames into a screen. The loop, the damage diff, and the
    overlay layer.
 7. [Layout](07-layout.md). Read seventh because a window is a tree and a rect.
-   A rect is a cell rectangle on screen (`internal/layout/layout.go:17`): an
+   A rect is a cell rectangle on screen (`internal/layout/layout.go#Rect`): an
    origin and a width and height counted in cells. This page gives the
    arithmetic from terminal size to pane cells.
 8. [Surfaces](08-surfaces.md). Read eighth for the outward paths: the box, the
    notify bus and the OSC 7501 status that reaches the rail. The box is a
-   per-session log any pane may append to (`internal/box/box.go:3`), the notify
+   per-session log any pane may append to (`internal/box/box.go#package`), the notify
    bus is the `notify/` branch of that log, where an entry may become a desktop
    popup that the server draws with `notify-send`
-   (`internal/notify/notify.go:107`), the rail is the sidebar the client draws
-   (`internal/rail/rail.go:22`), and OSC 7501 is the terminal escape sequence a
-   program prints to report its own status (`internal/osc/osc.go:46`).
+   (`internal/notify/notify.go#SystemNotify`), the rail is the sidebar the client draws
+   (`internal/rail/rail.go#DrawRail`), and OSC 7501 is the terminal escape sequence a
+   program prints to report its own status (`internal/osc/osc.go#oscPrefix`).
 9. [Secrets](09-secrets.md). Read ninth before you pass a credential to a
    child. This page states the threat model and the redaction rule.
 10. [Config and the CLI surface](10-config.md). Read tenth when you add a verb,
     a default key binding or a theme key. The CLI table is the single source
     for four outputs: the help text, the man page, `docs/llms.txt` and
-    `docs/dm.html` (`internal/clidoc/clidoc.go:8`,
-    `internal/clidoc/html.go:13`).
+    `docs/dm.html` (`internal/clidoc/clidoc.go#package`,
+    `internal/clidoc/html.go#HTMLPage`).
 11. [Layers](11-layers.md). Read last as the map of the map. It is the rule set
     that the other pages must not violate, and the generated graph sits beside
     it.
@@ -146,7 +162,7 @@ pages that mirror it. Run them before you hand a change over.
 | Command | What it proves |
 | --- | --- |
 | `go test ./internal/arch/...` | Every package sits in one layer and no import points upward. A failure names the importer, the import and the rule. |
-| `go test ./internal/archdoc/...` | The generated graph is current and the table in 11 matches the model. |
+| `go test ./internal/archdoc/...` | The generated graph is current, the table in 11 matches the model, and every citation in this tree resolves to a declaration. |
 
 `make docs-internals` proves nothing: it rewrites
 `docs/internals/generated/package-graph.md` from `internal/arch`. Run it after a
@@ -162,8 +178,8 @@ go test ./internal/cli -run 'TestManPageMatchesSnapshot|TestLLMSTextMatchesSnaps
 
 A failure prints the command that rewrites the stale file: `dm man -o
 docs/dm.1`, `dm llms -o docs/llms.txt` or `dm html -o docs/dm.html`. Follow
-that message. Do not edit a snapshot by hand. None of these checks reads pages
-01 to 10: a reader checks those against the files they cite.
+that message. Do not edit a snapshot by hand. The citation check reads pages 01
+to 11 and this page; the snapshot gate checks the CLI pages, not this tree.
 
 ## See also
 

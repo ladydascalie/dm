@@ -1,5 +1,6 @@
 // Package archdoc renders the generated package graph page from the layer model
-// in internal/arch.
+// in internal/arch, checks the layer table of the prose page against the same
+// model, and resolves every citation in docs/internals.
 //
 // Run "make docs-internals" after a change to the model or the tree.
 package archdoc
@@ -53,15 +54,15 @@ func writeSummary(out *bytes.Buffer, graph *arch.Graph, lay layering) {
 func writeLayers(out *bytes.Buffer) {
 	out.WriteString("## Layers\n\n")
 	out.WriteString("A layer is a set of packages that may import each other. The model is the\n")
-	out.WriteString("list of layers in `internal/arch/arch.go:39`, and each layer names the\n")
+	out.WriteString("list of layers in `internal/arch/arch.go#Layers`, and each layer names the\n")
 	out.WriteString("layers it may import: that list is the rule. `internal/arch` turns the\n")
 	out.WriteString("model into a test that fails the import which leaves the allowed shape\n")
-	out.WriteString("(`internal/arch/arch_test.go:17`). This page is the graph that rule\n")
+	out.WriteString("(`internal/arch/arch_test.go#TestArchitecture`). This page is the graph that rule\n")
 	out.WriteString("produces. The reason for each layer and how to add one live in\n")
 	out.WriteString("[the layers page](../11-layers.md).\n\n")
 	if entry, ok := arch.LayerNamed("entry"); ok {
 		fmt.Fprintf(out, "`entry` is the layer of the programs: %s\n", codeList(entry.Packages))
-		out.WriteString("(`main.go:1`, `cmd/esctest-harness/main.go:5`). Nothing imports a program,\n")
+		out.WriteString("(`main.go#main`, `cmd/esctest-harness/main.go#main`). Nothing imports a program,\n")
 		out.WriteString("and a program may import every layer, so the diagram puts `entry` at the\n")
 		out.WriteString("top.\n\n")
 	}
