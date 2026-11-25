@@ -313,6 +313,18 @@ func (s *server) scrubValuesLocked() ([]string, int) {
 	return values, dropped
 }
 
+// scrubNeedlesLocked prepares this session's live values for text redaction:
+// the same values the panes get, prepared by the same rule in secrets, so text
+// redacted here is redacted exactly as the pane's screen redacts it and a
+// replacement keeps every byte length the box caps and the ask cost measure.
+// The foreign values a sibling asked this session to cover are left out: they
+// belong to a sibling session, and the box and the ask store hold text an
+// agent or the operator put there. The caller holds s.mu.
+func (s *server) scrubNeedlesLocked() [][]byte {
+	values, _, _ := s.secretValuesLocked()
+	return secrets.Needles(values)
+}
+
 // siblingDialTimeout bounds one dial to a sibling session's server or pane
 // socket. A dead socket refuses at once; the timeout only bounds a socket
 // that answers slowly.

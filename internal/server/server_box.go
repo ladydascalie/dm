@@ -9,6 +9,7 @@ import (
 
 	"dm/internal/box"
 	"dm/internal/notify"
+	"dm/internal/secrets"
 	"dm/internal/wire"
 )
 
@@ -32,10 +33,18 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 // state. The caller holds s.mu and renders any notify/ entry itself through
 // notifyBoxEntryLocked, so a caller that already made the suppression decision
 // can keep it.
+//
+// The message and the body are scrubbed with the live values before the entry
+// is stored, so the state file, the log every client lists and the desktop
+// notification never hold a value. Scrubbing at display time would not do: the
+// entry is in state.json the moment it is appended, and that file outlives the
+// registry. The replacement keeps every byte length, so the box caps measure
+// exactly what a raw entry would.
 func (s *server) boxStoreLocked(req *box.PostReq) (box.Entry, error) {
 	if req.From != "" && !s.paneInTreeLocked(req.From) {
 		return box.Entry{}, fmt.Errorf("box: no pane %q", req.From)
 	}
+	needles := s.scrubNeedlesLocked()
 	s.st.BoxSeq++
 	e := box.Entry{
 		Seq:   s.st.BoxSeq,
@@ -43,8 +52,8 @@ func (s *server) boxStoreLocked(req *box.PostReq) (box.Entry, error) {
 		From:  req.From,
 		Key:   req.Key,
 		State: req.State,
-		Msg:   req.Msg,
-		Body:  req.Body,
+		Msg:   secrets.RedactText(req.Msg, needles),
+		Body:  secrets.RedactText(req.Body, needles),
 	}
 	s.st.Box = append(s.st.Box, e)
 	s.st.TrimBox()

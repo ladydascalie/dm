@@ -31,12 +31,13 @@ import (
 // paneProc is one pane daemon: it owns the PTY, the VT screen, the status and
 // the scroll ring. The session server comes and goes; this process does not.
 type paneProc struct {
-	id      string
-	session string
-	sock    string
-	shell   string
-	cwd     string // where the shell is now, not where it started; guarded by mu
-	title   string // the last OSC window title reported; guarded by mu
+	id       string
+	session  string
+	sock     string
+	shell    string
+	cwd      string // where the shell is now, not where it started; guarded by mu
+	title    string // the last scrubbed OSC window title; guarded by mu
+	titleRaw string // the last OSC window title a program set; guarded by mu
 
 	// shellMu guards ptmx and cmd: the daemon starts the shell only after
 	// the server's adopted set arrives, so a serve goroutine can reach the
@@ -1308,10 +1309,24 @@ func (p *paneProc) sampleCwd(pid int) {
 
 // sampleTitle reports the shell's OSC window title when it moved. A program
 // that never sets one reports nothing, so the pane keeps an empty title.
+//
+// The title is a program-controlled string the snapshot, the desk rail and
+// every reader draw, so it is scrubbed with the pane's value list here, at the
+// one point every later reader passes through, the way setStatus scrubs the
+// message and the app. The scrub and the store are one step under the pane's
+// lock, the same order setStatus holds: a set that landed between them would
+// install a new list and the report would store the raw text with no later set
+// to revisit it.
 func (p *paneProc) sampleTitle() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	title := p.vt.Title()
+	p.titleRaw = p.vt.Title()
+	p.storeTitleLocked(p.scrub.redactText(p.titleRaw))
+}
+
+// storeTitleLocked records a title and publishes it when it changed. The
+// caller holds p.mu and passes a title already scrubbed with the current list.
+func (p *paneProc) storeTitleLocked(title string) {
 	if title == p.title {
 		return
 	}
@@ -1365,13 +1380,14 @@ func (p *paneProc) storeSessionLocked(s osc.Session) {
 	})})
 }
 
-// setSecrets installs a value list and re-applies it to the stored status. It
-// is the one writer's other half: a status stored before the set was scrubbed
-// with an empty list, and the text is what the reads draw from, so the new list
-// has to reach it too. The list, the rescrub and the store are one step under
-// the pane's lock, so a report cannot scrub on the old list and store after the
-// rescrub has looked. The status is republished only when the text changed, so
-// a push that exposes nothing is not a wake-up for every client.
+// setSecrets installs a value list and re-applies it to the stored status and
+// title. It is the one writer's other half: a status or title stored before
+// the set was scrubbed with an empty list, and that text is what the reads
+// draw from, so the new list has to reach them too. The list, the rescrub and
+// the store are one step under the pane's lock, so a report cannot scrub on the
+// old list and store after the rescrub has looked. The status and the title are
+// republished only when the text changed, so a push that exposes nothing is not
+// a wake-up for every client.
 //
 // The lock order is the pane's then the scrubber's. Nothing takes them the
 // other way: the filter and the read loop scrub before they take p.mu.
@@ -1380,6 +1396,7 @@ func (p *paneProc) setSecrets(values []string) {
 	defer p.mu.Unlock()
 	p.scrub.set(values)
 	p.storeStatusLocked(p.scrubbedStatusLocked(p.st))
+	p.storeTitleLocked(p.scrub.redactText(p.titleRaw))
 }
 
 // scrubbedStatusLocked scrubs a status's message and app with the current
@@ -1505,7 +1522,7 @@ func (p *paneProc) serve(c net.Conn) {
 			p.mu.Lock()
 			text := screenText(p.vt)
 			st := p.st
-			title := p.vt.Title()
+			title := p.scrub.redactText(p.vt.Title())
 			dead := p.dead
 			p.mu.Unlock()
 			lines := splitLines(text)
@@ -1580,7 +1597,7 @@ func (p *paneProc) serve(c net.Conn) {
 			data := p.ring.Bytes()
 			st := p.st
 			dead := p.dead
-			title := p.vt.Title()
+			title := p.scrub.redactText(p.vt.Title())
 			sessionFile, sessionID := p.sessionFile, p.sessionID
 			alt, mouse, paste := modeInfo(p.vt.Grid().Modes())
 			p.mu.Unlock()
