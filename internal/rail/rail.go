@@ -757,7 +757,17 @@ func railGitCount(n int) string {
 		suffix string
 	}{{1000, "k"}, {1000000, "M"}, {1000000000, "G"}}
 	for _, u := range units {
-		if v := (n + u.div/2) / u.div; v < 1000 || u.suffix == "G" {
+		v := (n + u.div/2) / u.div
+		if u.suffix == "G" {
+			// G is the last unit, so a count of a thousand G or more clamps to
+			// 999G: the column stays six cells wide rather than growing a
+			// seventh for a number no reader can use.
+			if v > 999 {
+				v = 999
+			}
+			return strconv.Itoa(v) + u.suffix
+		}
+		if v < 1000 {
 			return strconv.Itoa(v) + u.suffix
 		}
 	}
@@ -814,12 +824,24 @@ func windowLabelText(it RailItem) string {
 }
 
 // railTailFits reports whether a window row of width w can keep a right run of
-// rightCells beside its whole label. It is the rent every right-aligned run of a
-// window row pays: a run that does not fit stands down whole rather than take a
-// cell from the name. The ladder asks it for the field first, then for the mark,
-// then lets the label elide.
+// rightCells beside its whole label. It is the rent the field pays: a field that
+// does not fit beside the name stands down whole rather than take a cell from
+// it, so the label elides before the field is squeezed.
 func railTailFits(it RailItem, w, rightCells int) bool {
 	return windowChrome+cells.Cells(windowLabelText(it))+rightCells+rowGapCells <= w
+}
+
+// railMarginFits reports whether a window row of width w can keep a right run of
+// rightCells beside a label that may elide but must still keep half the row. It
+// is the rent the mark pays, and it is cheaper than the field's: the mark comes
+// after the label's suffix in the ladder, so it is the last thing a narrow row
+// gives up.
+func railMarginFits(it RailItem, w, rightCells int) bool {
+	budget := w - rightCells - rowGapCells
+	if windowChrome+cells.Cells(windowLabelText(it)) <= budget {
+		return true
+	}
+	return budget-windowChrome >= (w+1)/2
 }
 
 // railMarkShown reports whether a window row's git mark has something to say:
@@ -832,9 +854,10 @@ func railMarkShown(it RailItem) bool {
 
 // railWindowTail composes the right run of a window row: the git field when the
 // row is in a repository, the mark cell, one cell of air and the state at the
-// margin. The ladder drops the field whole first, then the mark, so the label
-// loses no cell to a field the row cannot hold. It returns the run and the index
-// of the mark cell in it, -1 when the ladder dropped the mark.
+// margin. The ladder drops the field whole first and the mark last, so a narrow
+// row keeps its way into the facts box and elides its name instead. It returns
+// the run and the index of the mark cell in it, -1 when the ladder dropped the
+// mark.
 func railWindowTail(th theme.Theme, it RailItem, w int, set theme.GlyphSet) ([]segment.Seg, int) {
 	p := th.Palette
 	state := railStateSeg(th, it.State, set)
@@ -850,7 +873,7 @@ func railWindowTail(th theme.Theme, it RailItem, w int, set theme.GlyphSet) ([]s
 		right := append(railGitField(th, it), mark, air, state)
 		return right, gitFieldCells
 	}
-	if railTailFits(it, w, gitMarkCells+gitAirCells+1) {
+	if railMarginFits(it, w, gitMarkCells+gitAirCells+1) {
 		return []segment.Seg{mark, air, state}, 0
 	}
 	return []segment.Seg{state}, -1
@@ -957,13 +980,14 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				caret = g.FoldClosed
 			}
 
+			// The row is the caret, a space and the name: no bullet after it.
+			// A workspace reads as a project does, and only the caret and the
+			// name say which level a row is. The theme keeps RailMarks and its
+			// parser; the rail paints neither mark now.
 			left = []segment.Seg{
 				{Text: caret, FG: name},
 				{Text: " ", FG: name},
 				{Text: it.Text, FG: name, Bold: true},
-			}
-			if mark := th.RailMarks.Workspace; mark != "" {
-				left = append(left, segment.Seg{Text: " " + mark, FG: name})
 			}
 			right = railGroupTail(th, it, it.Folded, set)
 		}
@@ -982,8 +1006,8 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			}
 			// A window row closes with the git field, the mark, one cell of air
 			// and the state at the margin. The ladder drops the field whole
-			// first and the mark second, so a narrow row keeps its name and its
-			// state.
+			// first and the mark last, so a narrow row keeps the way into the
+			// facts box and elides its name instead.
 			right, _ = railWindowTail(th, it, w, set)
 		}
 	case WindowNote:
@@ -1051,40 +1075,31 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				{Text: it.Text, FG: base, Bold: true},
 				{Text: " " + ShelfMark(set), FG: base},
 			}
-			right = []segment.Seg{{Text: strconv.Itoa(it.Count), FG: p.RailDim}}
+			// A folded section carries the count of what it hides, the way a
+			// folded project or workspace does. An open one lists its members,
+			// so it needs no count to say so.
+			if it.Folded {
+				right = []segment.Seg{{Text: strconv.Itoa(it.Count), FG: p.RailDim}}
+			}
 		}
 	case Shelf:
-		// A shelved pane keeps the pane row's shape: the agent mark, the
-		// state glyph and the name, so its state reads at a glance.
+		// A shelved pane takes the pane row's shape: six cells of indent, no
+		// icon, the name and the state in the margin cell, so the shelf reads
+		// as the live rows above it do and no row has two shapes.
 		base := p.RailDim
 		if it.Focus {
 			base = p.RailText
 		}
-		mark, colour := RailGlyph(th, it.Status, set)
-		if !it.Agent && (it.Status == "" || it.Status == "unknown") {
-			mark = " "
+		left = []segment.Seg{
+			{Text: "      ", FG: base},
+			{Text: it.Text, FG: base},
 		}
-		glyph := RailMark(it.Agent, it.App, set)
-		if compact {
-			m1, _ := utf8.DecodeRuneInString(glyph)
-			left = []segment.Seg{
-				RailBar(th, it),
-				{Text: string(m1), FG: colour},
-				{Text: mark, FG: colour},
-			}
-			if it.Ask {
-				left = append(left, segment.Seg{Text: "?", FG: p.BarAccent})
-			}
-		} else {
-			left = []segment.Seg{
-				{Text: "      ", FG: base},
-				{Text: glyph, FG: colour},
-				{Text: mark, FG: colour},
-				{Text: " " + it.Text, FG: base},
-			}
-			if it.Ask {
-				right = []segment.Seg{{Text: "?", FG: p.BarAccent, Bold: true}}
-			}
+		right = []segment.Seg{railStateSeg(th, it.Status, set)}
+		if it.Ask {
+			right = append([]segment.Seg{
+				{Text: "?", FG: p.BarAccent, Bold: true},
+				{Text: " ", FG: p.RailDim},
+			}, right...)
 		}
 	case Gap:
 		// The rail background and nothing else.
@@ -1249,10 +1264,10 @@ func RailWindowItem(snap *wire.Snapshot, window string) (RailItem, bool) {
 }
 
 // railGitMarkKept reports whether the ladder keeps a window row's mark at item
-// width itemW: the whole label must fit beside the mark, one cell of air and the
-// state.
+// width itemW: the label fits beside the mark, one cell of air and the state, or
+// keeps half the row when it has to elide.
 func railGitMarkKept(it RailItem, itemW int) bool {
-	return railTailFits(it, itemW, gitMarkCells+gitAirCells+1)
+	return railMarginFits(it, itemW, gitMarkCells+gitAirCells+1)
 }
 
 // railGitMarkCol is the screen column of a window row's mark cell for a rail w

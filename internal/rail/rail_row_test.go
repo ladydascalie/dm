@@ -232,6 +232,86 @@ func TestRailRowPaneShape(t *testing.T) {
 	}
 }
 
+// TestRailShelfRowShape proves the shelf follows the pane row: six cells of
+// indent, the name and the state in the margin cell, with no agent mark and no
+// dot. The section header carries its count only while the shelf is folded.
+func TestRailShelfRowShape(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	snap := shelfSnap(layout.DefaultRail)
+	items := RailItems(snap)
+
+	shelfRows := 0
+	for _, it := range items {
+		if it.Kind != Shelf {
+			continue
+		}
+		shelfRows++
+		left, right, tail := RailRow(th, it, layout.DefaultRail, false, theme.GlyphUnicode)
+		want := []railSeg{
+			{Text: "      ", FG: th.Palette.RailDim},
+			{Text: it.Text, FG: th.Palette.RailDim},
+		}
+		if it.Focus {
+			want[0].FG, want[1].FG = th.Palette.RailText, th.Palette.RailText
+		}
+		if len(left) != len(want) || left[0] != want[0] || left[1] != want[1] {
+			t.Fatalf("shelf row %q = %+v, want the indent and the name alone", it.Text, left)
+		}
+		if tail != nil {
+			t.Fatalf("shelf row %q kept a tail: %+v", it.Text, tail)
+		}
+		if len(right) != 1 || right[0].Text != railStateSeg(th, it.Status, theme.GlyphUnicode).Text {
+			t.Fatalf("shelf row %q = %+v, want the state alone at the margin", it.Text, right)
+		}
+		text := railSegTextsJoined(left) + railSegTextsJoined(right)
+		for _, gone := range []string{th.RailMarks.Pane, strings.TrimSpace(RailMark(it.Agent, it.App, theme.GlyphUnicode))} {
+			if gone != "" && strings.Contains(strings.TrimPrefix(text, "      "), gone) {
+				t.Fatalf("shelf row %q still carries %q: %q", it.Text, gone, text)
+			}
+		}
+	}
+	if shelfRows != 2 {
+		t.Fatalf("the fixture drew %d shelf rows, want 2", shelfRows)
+	}
+	// The drawn state sits in the rail's last content cell, like every other
+	// row.
+	term := railTerm(t, snap, theme.GlyphUnicode)
+	for y, it := range items {
+		if it.Kind != Shelf {
+			continue
+		}
+		want := railStateSeg(th, it.Status, theme.GlyphUnicode).Text
+		if got := cellOf(term, snap.Rail-2, y).Char; string(got) != want {
+			t.Fatalf("shelf row %q at y=%d paints %q at the margin, want %q", it.Text, y, got, want)
+		}
+	}
+
+	// The header counts what it hides while it is folded, and paints no count
+	// while its rows are on the rail.
+	for _, folded := range []bool{false, true} {
+		snap := shelfSnap(layout.DefaultRail)
+		snap.ShelfFolded = folded
+		var header RailItem
+		for _, it := range RailItems(snap) {
+			if it.Kind == ShelfHeader {
+				header = it
+			}
+		}
+		if header.Count != 2 {
+			t.Fatalf("the header counts %d members, want 2", header.Count)
+		}
+		_, right, _ := RailRow(th, header, layout.DefaultRail, false, theme.GlyphUnicode)
+		got := railSegTextsJoined(right)
+		if folded && got != "2" {
+			t.Fatalf("a folded header paints %q, want its count", got)
+		}
+		if !folded && right != nil {
+			t.Fatalf("an open header paints %+v, want no count", right)
+		}
+	}
+}
+
 // TestRailRowStateRollup is rule 4: every row's state glyph is the worst state
 // of its members and sits in the rail's last content cell. A window row rolls up
 // its panes, a workspace row its windows and a project row its workspaces, and an

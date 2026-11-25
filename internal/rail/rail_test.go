@@ -159,7 +159,6 @@ func TestRailRowSegments(t *testing.T) {
 		{Text: "\u25be", FG: p.RailText},
 		{Text: " ", FG: p.RailText},
 		{Text: "main", FG: p.RailText, Bold: true},
-		{Text: " " + th.RailMarks.Workspace, FG: p.RailText},
 	}
 	wantRight := []railSeg{state("working")}
 	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) || tail != nil {
@@ -303,10 +302,11 @@ func TestRailRowSegments(t *testing.T) {
 	}
 }
 
-// TestRailRowLevelsDiffer proves the rail gives each row level its own look:
-// the workspace row wears its bullet, the window row a caret after the bar, and
-// the pane row six cells of indent with no icon at all. The three composed rows
-// differ, and a pane row's only icon is its state glyph.
+// TestRailRowLevelsDiffer proves the rail gives each row level its own look: a
+// project and a workspace row are a caret and a name, the window row indents its
+// caret, and the pane row is six cells of indent with no icon at all. The three
+// composed rows differ, and no row paints a bullet. A pane row's only icon is its
+// state glyph.
 func TestRailRowLevelsDiffer(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
@@ -323,8 +323,10 @@ func TestRailRowLevelsDiffer(t *testing.T) {
 		t.Fatalf("rows are not distinct: workspace %q, window %q, pane %q",
 			wsLine, winLine, paneLine)
 	}
-	if !strings.Contains(wsLine, th.RailMarks.Workspace) {
-		t.Fatalf("workspace row lacks its mark %q: %q", th.RailMarks.Workspace, wsLine)
+	// A workspace row paints no bullet: it reads as a project row does, and
+	// only the caret and the name say which level it is.
+	if th.RailMarks.Workspace != "" && strings.Contains(wsLine, th.RailMarks.Workspace) {
+		t.Fatalf("workspace row still paints the mark %q: %q", th.RailMarks.Workspace, wsLine)
 	}
 	if !strings.Contains(winLine, th.Glyphs.FoldOpen) {
 		t.Fatalf("window row lacks the caret %q: %q", th.Glyphs.FoldOpen, winLine)
@@ -348,8 +350,9 @@ func TestRailRowLevelsDiffer(t *testing.T) {
 }
 
 // TestRailRowLadder proves the order a row gives things up: the git field stands
-// down whole first, then the mark, then the label's suffix. The state keeps the
-// margin at every width, and a row never paints a mark beside an elided label.
+// down whole first, then the label elides, and the mark goes last, so a narrow
+// row keeps its way into the facts box. The state keeps the margin at every
+// width.
 func TestRailRowLadder(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
@@ -394,44 +397,65 @@ func TestRailRowLadder(t *testing.T) {
 		t.Fatalf("the right run at 24 item cells = %q, want the mark, the air and the state", got)
 	}
 
-	// The ladder in order, over the widths a rail can take.
+	// The mark outranks the label: a label too long for the row elides while the
+	// mark stays, at the same 26 rail cells. The mark is the only way into the
+	// facts box, so it is the last thing the row gives up.
+	long := row
+	long.Label = strings.Repeat("n", 22)
+	left, right, tail = RailRow(th, long, 24, false, theme.GlyphUnicode)
+	if !strings.Contains(railSegTextsJoined(left), th.Glyphs.Ellipsis) {
+		t.Fatalf("a long label at 24 item cells = %q, want it elided", railSegTextsJoined(left))
+	}
+	if !strings.Contains(railSegTextsJoined(right), th.Glyphs.GitMark) {
+		t.Fatalf("a long label at 24 item cells lost the mark: %+v", right)
+	}
+	if n := segment.SegCells(left) + segment.SegCells(right); n > 24 {
+		t.Fatalf("the elided row writes %d cells of 24: %+v / %+v", n, left, right)
+	}
+	if got := right[len(right)-1].Text; got != state {
+		t.Fatalf("the elided row's state = %q, want %q at the margin", got, state)
+	}
+
+	// The ladder in order, over the widths a rail can take. A twelve cell label
+	// shows all three steps in the widths a rail uses: the field from 32 cells,
+	// the label elided from 20 down, and the mark from 17 down.
 	var fieldAt, markAt, elideAt []int
+	step := long
+	step.Label = strings.Repeat("n", 12)
 	for w := 2; w <= 40; w++ {
-		l, r, _ := RailRow(th, row, w, false, theme.GlyphUnicode)
-		text := railSegTextsJoined(l)
-		if strings.Contains(railSegTextsJoined(r), "+") {
+		left, right, _ := RailRow(th, step, w, false, theme.GlyphUnicode)
+		text := railSegTextsJoined(left)
+		if strings.Contains(railSegTextsJoined(right), "+") {
 			fieldAt = append(fieldAt, w)
 		}
-		if strings.Contains(railSegTextsJoined(r), th.Glyphs.GitMark) {
+		if strings.Contains(railSegTextsJoined(right), th.Glyphs.GitMark) {
 			markAt = append(markAt, w)
-			if strings.Contains(text, th.Glyphs.Ellipsis) {
-				t.Fatalf("at %d cells a mark stands beside an elided label: %q / %q", w, text, railSegTextsJoined(r))
-			}
 		}
 		if strings.Contains(text, th.Glyphs.Ellipsis) {
 			elideAt = append(elideAt, w)
 		}
-		if len(r) == 0 || r[len(r)-1].Text != state {
-			t.Fatalf("at %d cells the state is not the margin: %+v", w, r)
+		if len(right) == 0 || right[len(right)-1].Text != state {
+			t.Fatalf("at %d cells the state is not the margin: %+v", w, right)
 		}
-		if n := segment.SegCells(l) + segment.SegCells(r); n > w {
-			t.Fatalf("at %d cells the row writes %d: %+v / %+v", w, n, l, r)
+		if n := segment.SegCells(left) + segment.SegCells(right); n > w {
+			t.Fatalf("at %d cells the row writes %d: %+v / %+v", w, n, left, right)
 		}
 	}
 	if len(fieldAt) == 0 || len(markAt) == 0 || len(elideAt) == 0 {
 		t.Fatalf("nothing dropped: field %v mark %v elide %v", fieldAt, markAt, elideAt)
 	}
-	// The field goes at a wider rail than the mark, and the mark at a wider one
-	// than the elision: the row gives up its width in that order.
-	if fieldAt[0] <= markAt[0] || markAt[0] <= elideAt[0] {
-		t.Fatalf("ladder out of order: field from %d, mark from %d, elision from %d",
-			fieldAt[0], markAt[0], elideAt[0])
+	// The field goes at the widest rail, the label elides next, and the mark
+	// goes last: the order is the one the plan names. The narrowest rail that
+	// still elides is where the elision begins, and the mark must still be on
+	// the row there.
+	elides := elideAt[len(elideAt)-1]
+	if fieldAt[0] <= elides {
+		t.Fatalf("the field stands down at %d cells, before the label elides at %d",
+			fieldAt[0], elides)
 	}
-	// The label elides before it goes: a row too narrow for the mark still
-	// names a shortened label, and only a row with no cells left loses it.
-	l, _, _ := RailRow(th, row, 6, false, theme.GlyphUnicode)
-	if got := railSegTextsJoined(l); !strings.Contains(got, th.Glyphs.Ellipsis) {
-		t.Fatalf("the narrowest row = %q, want the label's elision mark", got)
+	if markAt[0] > elides {
+		t.Fatalf("the mark stands down at %d cells, before the label elides at %d",
+			markAt[0], elides)
 	}
 }
 

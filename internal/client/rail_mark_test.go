@@ -5,6 +5,7 @@ package client
 // facts box stays reachable.
 
 import (
+	"strings"
 	"testing"
 
 	"dm/internal/rail"
@@ -92,5 +93,40 @@ func TestGitMarkHoverReachesACleanRow(t *testing.T) {
 	tui.handleMouse(mouseEvent{btn: 0, x: x + 1, y: row + 1})
 	if tui.git != nil {
 		t.Fatalf("the second press left the box up: %+v", tui.git)
+	}
+}
+
+// TestGitMarkOutranksALongLabel proves the mark is still there when the label
+// gives way: at 26 rail cells a window whose label is too long for the row
+// elides the label and keeps the mark, and a click on that mark opens the facts
+// box.
+func TestGitMarkOutranksALongLabel(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	tui, _ := gitFloatTUI(t, 100, 16, 26)
+	// A literal label of 22 cells is longer than the row can hold beside the
+	// mark, so the mark outranks it.
+	tui.snap.WindowLabel = strings.Repeat("n", 22)
+	row := rail.RailGitMarkRow(tui.snap, "w1", 0)
+	if row < 0 {
+		t.Fatalf("the long label dropped the mark: %+v", rail.RailItems(tui.snap))
+	}
+	x := gitMarkCol(tui.snap, row)
+	if x < 0 {
+		t.Fatal("the long label left no mark cell")
+	}
+	term := gitScreen(tui)
+	glyph := []rune(tui.theme().Glyphs.GitMark)[0]
+	if got := termCell(term, x, row).Char; got != glyph {
+		t.Fatalf("the row paints %q in the mark cell, want %q", got, glyph)
+	}
+	if got := railRowText(term, row, tui.snap.Rail); !strings.Contains(got, "\u2026") {
+		t.Fatalf("the long label at 26 cells = %q, want it elided", got)
+	}
+	// The click still opens the box, so the facts box has an entry point on a
+	// narrow rail.
+	tui.handleMouse(mouseEvent{btn: 0, x: x + 1, y: row + 1})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: x + 1, y: row + 1})
+	if tui.git == nil || tui.git.window != "w1" {
+		t.Fatalf("the mark click opened %+v, want w1", tui.git)
 	}
 }

@@ -107,7 +107,8 @@ func TestRailWindowRowOutsideRepoPaintsNoMark(t *testing.T) {
 // TestRailGitCount is the formatter's table: up to four digits read as
 // themselves, and past that one whole unit, k then M then G, rounded to the
 // nearest one. A count that rounds up to a thousand of its unit moves up, and a
-// count past 999G has no bigger unit to move to.
+// count of a thousand G or more clamps to 999G, so its column is always six
+// cells wide.
 func TestRailGitCount(t *testing.T) {
 	tests := []struct {
 		n    int
@@ -122,11 +123,20 @@ func TestRailGitCount(t *testing.T) {
 		{999999, "1M"},
 		{1000000, "1M"},
 		{1000000000, "1G"},
-		{1000000000000, "1000G"},
+		{1000000000000, "999G"},
+		{10000000000000, "999G"},
 	}
+	th := theme.DefaultTheme()
 	for _, tc := range tests {
 		if got := railGitCount(tc.n); got != tc.want {
 			t.Fatalf("railGitCount(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+		// A count never grows its column: the field is two six cell columns for
+		// every value the formatter can return.
+		for _, seg := range railGitField(th, RailItem{Added: tc.n, Deleted: tc.n}) {
+			if n := segment.SegCells([]segment.Seg{seg}); n != gitFieldCols {
+				t.Fatalf("count %d paints a %d cell column %q, want %d", tc.n, n, seg.Text, gitFieldCols)
+			}
 		}
 	}
 }

@@ -155,7 +155,7 @@ of indent and the pane's name, and the state glyph sits alone in the rail's last
 icon. A project, workspace or window row rolls its members' worst state up to that same cell. A pane that never
 reported and a pane whose state is unknown leave the cell blank, because `RailRow` (`internal/rail/rail.go#RailRow`)
 draws nothing there rather than a question mark about nothing. `RailMark` (`internal/rail/rail.go#RailMark`) draws the
-agent mark, the two-cell prefix a thin rail row and a shelf row keep: an agent icon, the bar glyph an agent gets on a
+agent mark, the two-cell prefix a thin rail row keeps: an agent icon, the bar glyph an agent gets on a
 plain terminal, or a shell icon for a pane with no agent.
 
 ## Where to add the next one
