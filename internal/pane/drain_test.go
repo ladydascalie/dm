@@ -63,6 +63,28 @@ func stallBurst(t *testing.T, cli net.Conn) {
 	}
 }
 
+// waitPtyQueueEmpty blocks until the pty writer has taken every queued frame,
+// so the next frame is queued rather than dropped. The queue holds frames only
+// while the writer is behind, so an empty queue means the writer has caught up
+// with everything sent so far. A fixed sleep cannot stand in for this: on a
+// loaded machine the writer stays behind for longer than any sleep, and a frame
+// that arrives at a full queue is dropped, which reads exactly like a real
+// wedge, the failure this test exists to catch.
+func waitPtyQueueEmpty(t *testing.T, p *paneProc, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		n := len(p.writes)
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the pty queue still holds %d frames after %v", n, within)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // drainSocket pings and reads the reply inside window, so a test can prove
 // the serve loop still reads its socket. The server bounds one push with
 // paneSendTimeout; the window sits far inside it.
@@ -150,7 +172,10 @@ func TestStalledPtyRecoversWithoutLosingTheSocket(t *testing.T) {
 			}
 		}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the backlog to leave the queue before sending the marker. A
+	// marker that arrives at a full queue is the frame the writer drops, and
+	// the test would then blame the backlog for a drop it caused itself.
+	waitPtyQueueEmpty(t, p, 5*time.Second)
 	paneSend(t, cli, wire.Msg{Type: "req", Action: "write", Msg: "late"})
 	select {
 	case ok := <-found:

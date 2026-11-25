@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 	"syscall"
@@ -110,10 +111,23 @@ func waitPidGone(t *testing.T, pid int) {
 
 // TestFloatOpenEchoesToOwner: `echo hi` reaches the owning client as bytes and
 // one exit frame follows, naming the float.
+//
+// The reply comes from the request's goroutine and the bytes and exit from the
+// float's read loop, so neither order is promised: the exit can arrive before
+// the reply. The test reads until both are in. Every failure names the step the
+// test had reached, so a red run says where the frame sequence stopped instead
+// of only that a frame looked wrong.
+//
+// The child outlives its one line for 200 ms on purpose. The server closes the
+// float's pty as soon as cmd.Wait returns, and a pty discards whatever its
+// reader has not taken when the child's side goes: a child that writes and
+// exits at once loses its last line to the scheduler about one run in twenty
+// under load, which says nothing about this test. The wait here is the child's,
+// not the test's: the test still waits for the frame.
 func TestFloatOpenEchoesToOwner(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	s, pane := floatServer(t, "floatecho", dir, "echo hi")
+	s, pane := floatServer(t, "floatecho", dir, "echo hi; sleep 0.2")
 	cl, cli := floatClient(t, s)
 
 	s.handleReq(cl, wire.Msg{
@@ -122,35 +136,44 @@ func TestFloatOpenEchoesToOwner(t *testing.T) {
 	})
 	var reply *wire.Msg
 	var out []byte
-	readFloatFrame(t, cli, func(m wire.Msg) bool {
+	sawExit := false
+	step := "waiting for the first frame"
+	where := func() string {
+		return fmt.Sprintf("step %q: reply %v, %d output bytes, exit %v", step, reply != nil, len(out), sawExit)
+	}
+	_ = cli.SetReadDeadline(time.Now().Add(10 * time.Second))
+	for reply == nil || !sawExit {
+		m, err := wire.ReadMsg(cli)
+		if err != nil {
+			t.Fatalf("float f1: read a frame at %s: %v", where(), err)
+		}
 		switch m.Type {
 		case "resp":
 			got := m
 			reply = &got
+			step = "waiting for the float's output and exit"
 		case "bytes":
 			if m.Target != "f1" {
-				t.Fatalf("bytes target = %q, want f1", m.Target)
+				t.Fatalf("float f1: bytes target = %q, want f1", m.Target)
 			}
 			out = append(out, m.Data...)
+			step = "waiting for the float's exit"
 		case "exit":
 			if m.Target != "f1" {
-				t.Fatalf("exit target = %q, want f1", m.Target)
+				t.Fatalf("float f1: exit target = %q, want f1", m.Target)
 			}
-			return true
+			sawExit = true
+			step = "waiting for the reply to float-open"
 		}
-		return false
-	})
-	if reply == nil {
-		t.Fatal("no reply to float-open")
 	}
 	if !reply.OK || reply.Action != "float-open" || reply.ID != 7 || reply.Float != "f1" {
-		t.Fatalf("reply = %+v, want a good float-open resp for id 7 and float f1", reply)
+		t.Fatalf("float f1: reply at %s = %+v, want a good float-open resp for id 7 and float f1", where(), *reply)
 	}
 	if !strings.Contains(string(reply.Res), "echo hi") {
-		t.Fatalf("reply res = %s, want the command", reply.Res)
+		t.Fatalf("float f1: reply res at %s = %s, want the command", where(), reply.Res)
 	}
 	if !strings.Contains(string(out), "hi") {
-		t.Fatalf("output = %q, want the echo", out)
+		t.Fatalf("float f1: the exit frame arrived at %s and the read loop delivered nothing; a child that exits at once loses its last line because the pty is closed before the read loop drains it", where())
 	}
 	waitFloatGone(t, s, "f1")
 }
