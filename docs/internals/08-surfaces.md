@@ -150,10 +150,13 @@ its record of the connection to that daemon, and `pushSnapshot` (`internal/serve
 the whole layout, focus and pane list a client draws from. `RailGlyph` (`internal/rail/rail.go#RailGlyph`) reads one glyph
 and colour per state from `theme.States` (`internal/theme/theme.go#Theme.States`), the map a `states` block in the theme file
 (`$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, `internal/theme/theme.go#LoadThemeFile`) overrides. Every state has a Nerd Font form
-except `shell`, the state of a pane that runs a shell with no agent to report. `RailMark` (`internal/rail/rail.go#RailMark`) draws the
-agent mark, the two-cell prefix of a rail row: an agent icon, the bar glyph an agent gets on a plain terminal, or a
-shell icon for a pane with no agent. The state glyph sits in the third cell. A shell that never reported leaves that
-cell blank, because `RailRow` (`internal/rail/rail.go#RailRow`) draws nothing there rather than a question mark about nothing.
+except `shell`, the state of a pane that runs a shell with no agent to report. On the full rail a pane row is six cells
+of indent and the pane's name, and the state glyph sits alone in the rail's last content cell: it is the row's only
+icon. A project, workspace or window row rolls its members' worst state up to that same cell. A pane that never
+reported and a pane whose state is unknown leave the cell blank, because `RailRow` (`internal/rail/rail.go#RailRow`)
+draws nothing there rather than a question mark about nothing. `RailMark` (`internal/rail/rail.go#RailMark`) draws the
+agent mark, the two-cell prefix a thin rail row keeps: an agent icon, the bar glyph an agent gets on a
+plain terminal, or a shell icon for a pane with no agent.
 
 ## Where to add the next one
 

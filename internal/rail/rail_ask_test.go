@@ -30,8 +30,13 @@ func TestRailAskBadge(t *testing.T) {
 	}
 	th := theme.DefaultTheme()
 	_, right, _ := RailRow(th, asked, layout.DefaultRail, false, theme.GlyphUnicode)
-	if len(right) == 0 || !strings.Contains(right[len(right)-1].Text, "?") {
-		t.Fatalf("the badge is not on the right edge: %+v", right)
+	if got := strings.Join(railSegTexts(right), ""); !strings.Contains(got, "?") {
+		t.Fatalf("the badge is not on the row: %+v", right)
+	}
+	// The state owns the margin, so the badge stands one cell left of it.
+	state, _ := RailGlyph(th, "working", theme.GlyphUnicode)
+	if len(right) == 0 || right[len(right)-1].Text != state {
+		t.Fatalf("the state is not at the margin beside the badge: %+v", right)
 	}
 	// The badge paints on the pane's own row of the drawn rail.
 	row := -1

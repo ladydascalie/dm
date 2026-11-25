@@ -229,32 +229,40 @@ func railRowText(screen *vt.Term, y, w int) string {
 	return b.String()
 }
 
-// TestRailGripHoverKeepsStats proves the grip strip never eats a rail label:
-// the strip owns the rail's last column, so hovering it and leaving it leaves
-// the row's right-aligned stats whole.
+// TestRailGripHoverKeepsStats proves the grip strip never eats a rail row's
+// margin: the strip owns the rail's last column, so hovering it and leaving it
+// leaves the state glyph in the last content cell and the git field whole.
 func TestRailGripHoverKeepsStats(t *testing.T) {
-	t.Parallel()
-	f := newFrameTUI(t, 100, 30, 20)
+	t.Setenv("DM_NERD", "0")
+	f := newFrameTUI(t, 100, 30, 26)
 	f.snap.All[0].InRepo = true
 	f.snap.All[0].Branch = "main"
+	f.snap.All[0].Status = "working"
+	f.snap.All[0].Added, f.snap.All[0].Deleted = 12, 4
+	th := theme.DefaultTheme()
 	screen := vt.NewTerm(100, 30)
 	replay := func() {
 		screen.Write([]byte(f.frame()))
 		screen.Flush()
 	}
-	// Row 1 is the window line, the row that carries the git stats.
-	replay()
-	if got := railRowText(screen, 1, 20); !strings.Contains(got, "clean") {
-		t.Fatalf("window row = %q, want clean", got)
+	state, _ := rail.RailGlyph(th, f.snap.All[0].Status, f.tui.glyphSet())
+	check := func(when string) {
+		t.Helper()
+		// Row 1 is the window line, the row that carries the git field.
+		if got := termCell(screen, f.snap.Rail-2, 1).Char; string(got) != state {
+			t.Fatalf("%s: the state at the margin = %q, want %q", when, got, state)
+		}
+		if got := railRowText(screen, 1, f.snap.Rail); !strings.Contains(got, "+12") {
+			t.Fatalf("%s: the window row = %q, want the git field", when, got)
+		}
 	}
-	f.tui.handleMouse(mouseEvent{btn: 35, x: 20, y: 5})
 	replay()
-	if got := railRowText(screen, 1, 20); !strings.Contains(got, "clean") {
-		t.Fatalf("hovered window row = %q, want clean", got)
-	}
+	check("at rest")
+	// The grip strip is the rail's last column.
+	f.tui.handleMouse(mouseEvent{btn: 35, x: f.snap.Rail, y: 5})
+	replay()
+	check("hovering the grip")
 	f.tui.handleMouse(mouseEvent{btn: 35, x: 3, y: 5})
 	replay()
-	if got := railRowText(screen, 1, 20); !strings.Contains(got, "clean") {
-		t.Fatalf("window row after hover = %q, want clean", got)
-	}
+	check("after the hover")
 }

@@ -77,7 +77,7 @@ func TestThemeReachesPainters(t *testing.T) {
 		t.Fatalf("accents = %v, want 16,17,18 and 19,20,21", th.Accents)
 	}
 
-	// The glyphs reach the grips and the dirty dot.
+	// The glyphs reach the grips.
 	root := &layout.Node{
 		Dir: "row", Sizes: []float64{0.5, 0.5},
 		Kids: []*layout.Node{{Pane: "a"}, {Pane: "b"}},
@@ -86,9 +86,6 @@ func TestThemeReachesPainters(t *testing.T) {
 	drawGrips(&grips, th, &wire.Snapshot{Cols: 40, Rows: 10, Root: root})
 	if !strings.Contains(grips.String(), "@") || strings.Contains(grips.String(), "•") {
 		t.Fatalf("grips = %q, want the themed @ only", grips.String())
-	}
-	if segs := rail.RailStats(th, rail.RailItem{Kind: rail.Window, InRepo: true, Dirty: true}, theme.GlyphUnicode); len(segs) == 0 || segs[0].Text != "o" {
-		t.Fatalf("dirty dot = %+v, want the themed o", segs)
 	}
 
 	// The states reach the glyph and the colour.
@@ -170,9 +167,11 @@ func TestThemeRailRowGlyph(t *testing.T) {
 	th.States["working"] = theme.StateStyle{Glyph: "W", NerdGlyph: "W", Colour: theme.RGB{R: 1, G: 2, B: 3}}
 	items := rail.RailItems(testutil.AgentRail("working"))
 	pane := railRowFind(t, items, rail.Pane, "w1p1")
-	left, _, _ := rail.RailRow(th, pane, layout.DefaultRail, false, theme.GlyphUnicode)
+	// The state glyph is the row's only icon and sits at the margin, so the
+	// themed glyph arrives in the right run.
+	_, right, _ := rail.RailRow(th, pane, layout.DefaultRail, false, theme.GlyphUnicode)
 	found := false
-	for _, s := range left {
+	for _, s := range right {
 		if s.Text == "W" {
 			found = true
 			if s.FG != (theme.RGB{R: 1, G: 2, B: 3}) {
@@ -180,11 +179,11 @@ func TestThemeRailRowGlyph(t *testing.T) {
 			}
 		}
 		if s.Text == "●" {
-			t.Fatalf("built-in glyph still composed: %+v", left)
+			t.Fatalf("built-in glyph still composed: %+v", right)
 		}
 	}
 	if !found {
-		t.Fatalf("themed state glyph not composed: %+v", left)
+		t.Fatalf("themed state glyph not composed: %+v", right)
 	}
 	if got, colour := rail.RailGlyph(th, "working", theme.GlyphNerd); got != "W" || colour != (theme.RGB{R: 1, G: 2, B: 3}) {
 		t.Fatalf("nerd glyph = %q/%v, want W/1,2,3", got, colour)
