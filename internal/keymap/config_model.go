@@ -619,7 +619,9 @@ var helpRows = []helpRow{
 // the columns, keyed by the label of the row it belongs to. A caveat lives
 // here and not in the label, so it never widens the action column and never
 // pushes the box from two columns to one at 120 columns.
-var helpNotes = map[string]string{}
+var helpNotes = map[string]string{
+	"toggle secret redaction": "toggle secret redaction: edit in place, not a control",
+}
 
 // HelpActions returns the action names the help row with the given label
 // groups. It returns nil when no row carries the label.

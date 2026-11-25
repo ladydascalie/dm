@@ -496,8 +496,9 @@ keymap "main" {
 // same order. Regenerate it by running the test and copying the got value. It
 // moved when the footer became a hint bar, and again when the send prefix row
 // made way for the question float's toggle: the table stays at 35 rows, because
-// one more would push the last section off a 100x40 screen.
-const helpBoxDefaultSHA256 = "e15c442e745dbc84337bbeac72bef2da873fb205502696afe51eaac6ba72403f"
+// one more would push the last section off a 100x40 screen. It moved once more
+// when the toggle-secrets caveat came back as a note row under the columns.
+const helpBoxDefaultSHA256 = "934eb0766db4a5b7ff8a03f25d6a3c70a2a28fff4efd20ed8433e548fd955ed4"
 
 // TestHelpBoxDefaultBytesFrozen proves the default config paints a stable
 // help box. The five layout and session actions carry their section tags; the
