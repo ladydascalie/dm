@@ -282,11 +282,13 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			s.reply(cl, m, nil, fmt.Errorf("toggle-secrets runs from the interactive client only"))
 			return
 		}
+		// The default target and its liveness are one read of the state:
+		// ActiveWindow and the pane map are both written under s.mu.
+		s.mu.Lock()
 		id := m.Target
 		if id == "" {
 			id = s.st.ActiveWindow().Focus
 		}
-		s.mu.Lock()
 		_, live := s.panes[id]
 		s.mu.Unlock()
 		if !live {
@@ -556,19 +558,18 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.reply(cl, m, map[string]any{"panes": s.paneList()}, nil)
 
 	case "pane":
-		ws, w, ok := s.findPane(m.Target)
+		place, ok := s.findPane(m.Target)
 		if !ok {
 			s.reply(cl, m, nil, fmt.Errorf("no pane %q", m.Target))
 			return
 		}
-		ps := s.st.Panes[m.Target]
 		res := map[string]any{
-			"id": m.Target, "workspace": ws.ID, "window": w.ID,
-			"workspaceName": ws.Name, "windowName": w.Name,
+			"id": m.Target, "workspace": place.WorkspaceID, "window": place.WindowID,
+			"workspaceName": place.WorkspaceName, "windowName": place.WindowName,
 		}
-		if ps != nil {
-			res["name"] = ps.Name
-			res["cwd"] = ps.Cwd
+		if place.Saved {
+			res["name"] = place.Name
+			res["cwd"] = place.Cwd
 		}
 		s.reply(cl, m, res, nil)
 
@@ -584,6 +585,10 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			if err := checkName(m.Name); err != nil {
 				return err
 			}
+			// The pane map is written by adopt and close under s.mu, so this
+			// mutation takes it for its own read and write.
+			s.mu.Lock()
+			defer s.mu.Unlock()
 			ps := s.st.Panes[m.Target]
 			if ps == nil {
 				return fmt.Errorf("no pane %q", m.Target)
