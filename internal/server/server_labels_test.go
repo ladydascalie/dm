@@ -59,7 +59,7 @@ func TestSlowProbeKeepsLastGood(t *testing.T) {
 	if e == nil {
 		t.Fatal("a timed-out probe dropped the cache entry")
 	}
-	if e.info != goodGit {
+	if !sameGit(e.info, goodGit) {
 		t.Fatalf("timed-out probe stored %+v, want the last good answer %+v", e.info, goodGit)
 	}
 	if !e.stale {
@@ -85,7 +85,7 @@ func TestNotARepoReplacesCache(t *testing.T) {
 	if e == nil {
 		t.Fatal("a real answer dropped the cache entry")
 	}
-	if e.info != (gitInfo{}) {
+	if !sameGit(e.info, gitInfo{}) {
 		t.Fatalf("a real not-a-repo answer stored %+v, want the zero value", e.info)
 	}
 	if e.stale {
@@ -116,7 +116,7 @@ func TestFreshAnswerReplacesCache(t *testing.T) {
 	s.loadGit(cwd)
 
 	e := getEntry(s, cwd)
-	if e == nil || e.info != fresh || e.stale {
+	if e == nil || !sameGit(e.info, fresh) || e.stale {
 		t.Fatalf("entry after a fresh answer = %+v stale=%v, want %+v unpinned", e, e.stale, fresh)
 	}
 }

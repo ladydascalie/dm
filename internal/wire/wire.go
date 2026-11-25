@@ -213,6 +213,11 @@ type AllPane struct {
 	// Files counts the files the working tree changes against HEAD, so a
 	// reader can tell one edited line from a hundred edited files.
 	Files int `json:"files,omitempty"`
+	// FileNames lists the changed paths in the order git prints them, capped
+	// at 16 whole names. Files still counts every changed file, so a reader can
+	// say how many the list leaves out. A binary file's path is listed even
+	// though its line counts are empty.
+	FileNames []string `json:"fileNames,omitempty"`
 	// WindowUnfolded is the rail fold state of the pane's window.
 	WindowUnfolded bool `json:"windowUnfolded,omitempty"`
 	// WorkspaceUnfolded is the rail fold state of the pane's workspace.

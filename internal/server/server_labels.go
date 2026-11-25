@@ -43,8 +43,14 @@ type gitInfo struct {
 	dirty   bool
 	added   int
 	deleted int
-	// files counts the files the working tree changes against HEAD.
+	// files counts the files the working tree changes against HEAD, whether or
+	// not fileNames lists them.
 	files int
+	// fileNames is the changed paths git prints, in its order, capped at
+	// gitFileNamesMax whole names. A name the cap leaves out is dropped, never
+	// cut: a path can be long and the snapshot is sent per pane, so an unbounded
+	// list is a frame budget problem rather than a rendering one.
+	fileNames []string
 	// head is the short sha HEAD names and headSubject its subject. Both are
 	// empty on an unborn HEAD, which has no commit to name.
 	head        string
@@ -86,10 +92,37 @@ func timedOut(err error) bool {
 	return errors.Is(err, errGitTimeout)
 }
 
-// parseNumstat sums a git diff --numstat report and counts the files it names.
-// A binary file prints a dash instead of a count; that column adds nothing to
-// the sums, but the file still counts.
-func parseNumstat(out []byte) (added, deleted, files int) {
+// sameGit reports whether two probes answer the same thing. gitInfo holds the
+// changed names in a slice, so it is not comparable with ==, and loadGit still
+// needs the whole answer to decide whether a snapshot is worth pushing: a moved
+// file set pushes one, an identical answer pushes none.
+func sameGit(a, b gitInfo) bool {
+	if a.branch != b.branch || a.worktree != b.worktree ||
+		a.root != b.root || a.inRepo != b.inRepo || a.dirty != b.dirty ||
+		a.added != b.added || a.deleted != b.deleted || a.files != b.files ||
+		a.head != b.head || a.headSubject != b.headSubject ||
+		a.upstream != b.upstream || a.ahead != b.ahead ||
+		a.behind != b.behind || a.timeout != b.timeout ||
+		len(a.fileNames) != len(b.fileNames) {
+		return false
+	}
+	for i := range a.fileNames {
+		if a.fileNames[i] != b.fileNames[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// gitFileNamesMax caps the changed paths a probe keeps. Truncation drops whole
+// names past the cap, so no path ever arrives cut in half.
+const gitFileNamesMax = 16
+
+// parseNumstat sums a git diff --numstat report, counts every file it names and
+// collects the first gitFileNamesMax paths in the order git prints them. A
+// binary file prints a dash instead of a count; that column adds nothing to the
+// sums, but the file still counts and its path is still listed.
+func parseNumstat(out []byte) (added, deleted, files int, names []string) {
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
@@ -102,8 +135,15 @@ func parseNumstat(out []byte) (added, deleted, files int) {
 		if n, err := strconv.Atoi(f[1]); err == nil {
 			deleted += n
 		}
+		// The path follows the two counts, cut on tabs: a rename prints one
+		// name for two paths and a path may hold a space of its own.
+		if len(names) < gitFileNamesMax {
+			if p := strings.SplitN(line, "\t", 3); len(p) == 3 {
+				names = append(names, p[2])
+			}
+		}
 	}
-	return added, deleted, files
+	return added, deleted, files, names
 }
 
 // detectGit is a variable so tests can stub git.
@@ -151,7 +191,7 @@ var detectGit = func(cwd string) gitInfo {
 		info.timeout = timedOut(err)
 		return info
 	}
-	info.added, info.deleted, info.files = parseNumstat(ns)
+	info.added, info.deleted, info.files, info.fileNames = parseNumstat(ns)
 	// The head line and the upstream counts are extra facts, not extra
 	// answers: an unborn HEAD has no log line and a branch with no upstream
 	// fails both commands, and each failure is a real answer. Only the one
@@ -297,7 +337,7 @@ func (s *server) loadGit(cwd string) {
 		e.stale = true
 		e.at, e.loading = time.Now(), false
 	} else {
-		changed = e.info != info
+		changed = !sameGit(e.info, info)
 		e.info, e.at, e.loading, e.stale = info, time.Now(), false, false
 	}
 	s.branchMu.Unlock()
