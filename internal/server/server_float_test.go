@@ -360,10 +360,15 @@ func TestFloatOpenCommandRuns(t *testing.T) {
 	s, pane := floatServer(t, "floatcmd", dir, "echo diff")
 	cl, cli := floatClient(t, s)
 
+	// The child outlives its line by 200 ms: the server closes the float's
+	// pty as soon as cmd.Wait returns, and a pty drops what its reader has not
+	// taken, so a child that exits at once loses its own output. That is the
+	// product race TestFloatOpenEchoesToOwner names; this child's wait takes
+	// the scheduler out of this test's assertion.
 	s.handleReq(cl, wire.Msg{
 		Type: "req", Action: "float-open", ID: 5, Target: pane, Float: "f1",
 		Cols: 80, Rows: 24,
-		Res: json.RawMessage(`{"command":"echo run"}`),
+		Res: json.RawMessage(`{"command":"echo run; sleep 0.2"}`),
 	})
 	var reply *wire.Msg
 	var out []byte

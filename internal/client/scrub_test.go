@@ -3,6 +3,7 @@ package client
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"dm/internal/vt"
 	"dm/internal/wire"
@@ -71,12 +72,17 @@ func TestScrubFrameDropsTheCachedRing(t *testing.T) {
 	if tui.scrollVT != nil {
 		t.Fatal("the revealed scrollback is still built")
 	}
+	// The request leaves under the conn's write lock and arrives on the
+	// reading goroutine, which hands it here a moment after the write: a
+	// zero-width window would read the send as a dropped frame whenever that
+	// goroutine loses the CPU, which is what a busy suite does. The wait is
+	// the proof, the bound is only its failure.
 	select {
 	case m := <-sent:
 		if m.Type != "req" || m.Action != "replay" || m.Target != "a" {
 			t.Fatalf("client sent %+v, want a replay request for the pane", m)
 		}
-	default:
+	case <-time.After(3 * time.Second):
 		t.Fatal("client never asked the pane for the scrubbed ring")
 	}
 }
