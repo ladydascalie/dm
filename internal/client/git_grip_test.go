@@ -11,6 +11,7 @@ import (
 
 	"dm/internal/layout"
 	"dm/internal/rail"
+	"dm/internal/segment"
 	"dm/internal/testutil"
 	"dm/internal/theme"
 	"dm/internal/vt"
@@ -481,4 +482,116 @@ func TestGitBoxLetsTheWheelThrough(t *testing.T) {
 		t.Fatal("the press on the grip started no resize")
 	}
 	testutil.NoMsg(t, got)
+}
+
+// TestGitBoxPaintsOnItsGround proves the box has no black holes: every interior
+// cell, the file rows and the rule included, sits on the panel's ground, and the
+// grip cell does too. segment.Write always writes a background, so a run that
+// never sets one paints true black through the panel's fill.
+func TestGitBoxPaintsOnItsGround(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	ground := vt.RGBColor(uint8(th.Palette.RailBG.R), uint8(th.Palette.RailBG.G), uint8(th.Palette.RailBG.B))
+	tui, _, _ := gitBoxTUI(t, 100, 20, 20)
+	// A tall box, so the rule row and the names are painted as well.
+	tui.setGitSize(gitMinCols, 14)
+	tui.syncGit()
+	r := tui.git.float.Rect
+	term := gitScreen(tui)
+	for y := r.Y; y < r.Y+r.H; y++ {
+		for x := r.X; x < r.X+r.W; x++ {
+			if got := termCell(term, x, y).BG; got != ground {
+				t.Fatalf("cell %d,%d bg = %v, want the box ground %v", x, y, got, ground)
+			}
+		}
+	}
+	// The grip owns the bottom right corner of the border.
+	if got := termCell(term, r.X+r.W, r.Y+r.H).BG; got != ground {
+		t.Fatalf("grip cell bg = %v, want the box ground %v", got, ground)
+	}
+}
+
+// TestGitBoxColourHierarchy proves the box reads in layers instead of one weight:
+// the sha recedes under its subject, the diff counts carry the diff colours, the
+// file count and a clean state stay quiet, a dirty state is the rail's amber, and
+// an arrow is coloured only when it carries commits.
+func TestGitBoxColourHierarchy(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	p := th.Palette
+	snap := gitFloatSnap(100, 20, 20)
+	byKey := func(window string) map[string][]segment.Seg {
+		t.Helper()
+		it, ok := rail.RailWindowItem(snap, window)
+		if !ok {
+			t.Fatalf("no rail row for %s", window)
+		}
+		out := map[string][]segment.Seg{}
+		for _, f := range gitFacts(th, it) {
+			out[f.key] = f.value
+		}
+		return out
+	}
+	fgOf := func(segs []segment.Seg, want string) theme.RGB {
+		t.Helper()
+		for _, s := range segs {
+			if s.Text == want {
+				return s.FG
+			}
+		}
+		t.Fatalf("no run %q in %+v", want, segs)
+		return theme.RGB{}
+	}
+
+	dirty := byKey("w1")
+	if got := fgOf(dirty["head"], "deadb33f"); got != p.RailDim {
+		t.Errorf("sha = %v, want the dim tone", got)
+	}
+	if got := fgOf(dirty["head"], "fix rail elision"); got != p.RailText {
+		t.Errorf("subject = %v, want the text tone", got)
+	}
+	if got := fgOf(dirty["changes"], "+12"); got != p.RailDiffAdd {
+		t.Errorf("+12 = %v, want the add tone", got)
+	}
+	if got := fgOf(dirty["changes"], "-3"); got != p.RailDiffDel {
+		t.Errorf("-3 = %v, want the del tone", got)
+	}
+	if got := fgOf(dirty["changes"], "4 files"); got != p.RailDim {
+		t.Errorf("file count = %v, want the dim tone", got)
+	}
+	if got := fgOf(dirty["state"], "dirty"); got != p.RailWorking {
+		t.Errorf("dirty = %v, want the working tone", got)
+	}
+	if got := fgOf(dirty["upstream"], "\u21912"); got != p.RailDiffAdd {
+		t.Errorf("ahead 2 = %v, want the add tone", got)
+	}
+	if got := fgOf(dirty["upstream"], "\u21930"); got != p.RailDim {
+		t.Errorf("behind 0 = %v, want the dim tone", got)
+	}
+
+	clean := byKey("w2")
+	if got := fgOf(clean["state"], "clean"); got != p.RailDim {
+		t.Errorf("clean = %v, want the dim tone", got)
+	}
+	if got := fgOf(clean["changes"], "none"); got != p.RailDim {
+		t.Errorf("changes none = %v, want the dim tone", got)
+	}
+	if got := fgOf(clean["upstream"], "(none)"); got != p.RailDim {
+		t.Errorf("upstream none = %v, want the dim tone", got)
+	}
+}
+
+// TestGroundGitSegs proves the ground pass covers every run, including one an
+// elision produced.
+func TestGroundGitSegs(t *testing.T) {
+	th := theme.DefaultTheme()
+	segs := groundGitSegs(th, []segment.Seg{
+		{Text: "a", FG: th.Palette.RailText},
+		{Text: "b", FG: th.Palette.RailDim, BG: th.Palette.RailFocusBG},
+	})
+	for i, s := range segs {
+		if s.BG != th.Palette.RailBG {
+			t.Fatalf("run %d bg = %v, want the box ground", i, s.BG)
+		}
+	}
 }

@@ -441,7 +441,7 @@ func (t *tui) paintGitGrip(buf *bytes.Buffer, th theme.Theme, r layout.Rect) {
 		fg = th.Palette.BarAccent
 	}
 	fmt.Fprintf(buf, "\x1b[%d;%dH", r.Y+r.H+1, r.X+r.W+1)
-	segment.Write(buf, segment.Seg{Text: th.Glyphs.Grip, FG: fg})
+	segment.Write(buf, segment.Seg{Text: th.Glyphs.Grip, FG: fg, BG: th.Palette.RailBG})
 }
 
 // gitGripHot reports whether the grip answers: the pointer rests on it, or a
@@ -475,6 +475,17 @@ type gitFact struct {
 	value []segment.Seg
 }
 
+// groundGitSegs puts every run of the box on the box's ground. PaintPanel fills
+// the interior with the rail ground before the content paints, and segment.Write
+// always writes a background, so a run left on the zero RGB punches a black hole
+// through the fill. One call per painted run keeps the box one colour.
+func groundGitSegs(th theme.Theme, segs []segment.Seg) []segment.Seg {
+	for i := range segs {
+		segs[i].BG = th.Palette.RailBG
+	}
+	return segs
+}
+
 // gitFacts is the box's content, read from the rail row that opened it. A fact
 // the probe did not answer says (none) in dim: never a zero, and never a clean
 // tree it did not see.
@@ -496,9 +507,15 @@ func gitFacts(th theme.Theme, it rail.RailItem) []gitFact {
 	if it.Branch == "" {
 		branch = dim("(detached)")
 	}
+	// The sha recedes so the subject leads, and a missing subject leaves the
+	// sha alone rather than trailing two spaces.
 	head := none
 	if it.Head != "" {
-		head = text(strings.TrimRight(it.Head+"  "+it.HeadSubject, " "))
+		head = []segment.Seg{
+			{Text: it.Head, FG: p.RailDim},
+			{Text: "  ", FG: p.RailDim},
+			{Text: it.HeadSubject, FG: p.RailText},
+		}
 	}
 	// A change is a line count and a file count. A row with neither says none,
 	// so a zero never reads as work.
@@ -516,26 +533,36 @@ func gitFacts(th theme.Theme, it rail.RailItem) []gitFact {
 		if len(changes) > 0 {
 			changes = append(changes, segment.Seg{Text: "  ", FG: p.RailDim})
 		}
-		changes = append(changes, segment.Seg{Text: gitFileCount(it.Files), FG: p.RailText})
+		changes = append(changes, segment.Seg{Text: gitFileCount(it.Files), FG: p.RailDim})
 	}
 	if len(changes) == 0 {
-		changes = text("none")
+		changes = dim("none")
 	}
-	state := text("clean")
+	// The state reads the way the rail's own dot reads: amber for a dirty tree,
+	// quiet for a clean one, so the box and the row agree at a glance.
+	state := dim("clean")
 	if it.Dirty {
-		state = text("dirty")
+		state = []segment.Seg{{Text: "dirty", FG: p.RailWorking}}
 	}
 	upstream := none
 	if it.Upstream != "" {
 		// The tracking ref, then the commits HEAD has that the upstream does
-		// not and the reverse. Both counts are real answers here, so a zero
-		// reads as one.
+		// not and the reverse. Both counts are real answers, so a zero reads as
+		// one, but a zero standing on its own is noise: an arrow takes a colour
+		// only when it carries commits.
+		ahead, behind := p.RailDim, p.RailDim
+		if it.Ahead > 0 {
+			ahead = p.RailDiffAdd
+		}
+		if it.Behind > 0 {
+			behind = p.RailText
+		}
 		upstream = []segment.Seg{
 			{Text: it.Upstream, FG: p.RailText},
 			{Text: "  ", FG: p.RailDim},
-			{Text: "\u2191" + strconv.Itoa(it.Ahead), FG: p.RailDiffAdd},
+			{Text: "\u2191" + strconv.Itoa(it.Ahead), FG: ahead},
 			{Text: " ", FG: p.RailDim},
-			{Text: "\u2193" + strconv.Itoa(it.Behind), FG: p.RailDim},
+			{Text: "\u2193" + strconv.Itoa(it.Behind), FG: behind},
 		}
 	}
 	return []gitFact{
@@ -588,14 +615,16 @@ func (t *tui) paintGitFloat(b *bytes.Buffer, r layout.Rect) {
 		}
 		fmt.Fprintf(b, "\x1b[%d;%dH", r.Y+i+1, r.X+1)
 		key := " " + fact.key + strings.Repeat(" ", gitKeyCol-2-cells.Cells(fact.key)) + " "
-		segment.Write(b, segment.Seg{Text: key, FG: th.Palette.RailDim})
+		for _, s := range groundGitSegs(th, []segment.Seg{{Text: key, FG: th.Palette.RailDim}}) {
+			segment.Write(b, s)
+		}
 		value := fact.value
 		if segment.SegCells(value) > budget {
 			// A value that does not fit ends in the set's mark: it never
 			// wraps, so the box keeps one row a fact.
 			value = segment.ElideSegs(th, value, budget)
 		}
-		for _, s := range value {
+		for _, s := range groundGitSegs(th, value) {
 			segment.Write(b, s)
 		}
 	}
@@ -616,7 +645,9 @@ func (t *tui) paintGitFiles(b *bytes.Buffer, r layout.Rect, th theme.Theme, it r
 	// The rule separates the list from the facts, so the box reads as two parts
 	// rather than one loose column.
 	fmt.Fprintf(b, "\x1b[%d;%dH", y+1, r.X+1)
-	segment.Write(b, segment.Seg{Text: strings.Repeat(th.Glyphs.DividerRow, r.W), FG: th.Palette.RailDim})
+	for _, s := range groundGitSegs(th, []segment.Seg{{Text: strings.Repeat(th.Glyphs.DividerRow, r.W), FG: th.Palette.RailDim}}) {
+		segment.Write(b, s)
+	}
 	// The probe counts every changed file, not only the names it lists, so a
 	// list the box cuts short still ends by saying how many are out of sight.
 	total := it.Files
@@ -648,7 +679,7 @@ func (t *tui) gitFileLine(b *bytes.Buffer, th theme.Theme, r layout.Rect, row in
 	if segment.SegCells(segs) > r.W {
 		segs = segment.ElideSegs(th, segs, r.W)
 	}
-	for _, s := range segs {
+	for _, s := range groundGitSegs(th, segs) {
 		segment.Write(b, s)
 	}
 }
