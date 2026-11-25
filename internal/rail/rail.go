@@ -701,6 +701,11 @@ func RailBar(th theme.Theme, it RailItem) segment.Seg {
 // rent is measured against them.
 const windowChrome = 4
 
+// gitMarkCells is the width a window row's git mark spends: a space, the glyph
+// and a space. It closes the row, so wave two's hit box is the same three
+// cells.
+const gitMarkCells = 3
+
 // RailRow composes one sidebar row at width w. left is the row's own run,
 // right the run pinned to the right edge and tail the run that follows left
 // and yields first. compact and set are the rail's own switches.
@@ -770,31 +775,37 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 				{Text: " ", FG: base},
 				{Text: label, FG: base},
 			}
-			// The branch trails the folder in dim grey, and only when it says
-			// something the label does not.
-			if it.Branch != "" && it.Branch != label {
-				tail = []segment.Seg{
-					{Text: "  ", FG: p.RailDim},
-					{Text: it.Branch, FG: p.RailDim},
-				}
-			}
 			right = RailStats(th, it, set)
+			// A window row inside a repository closes with the git mark: a
+			// space, the glyph and a space, the last three cells of the row.
+			// The mark never elides and never loses a cell, so the stats and
+			// the label share what is left.
+			markCells := 0
+			if it.InRepo {
+				markCells = gitMarkCells
+			}
 			// The stats tail pays rent in label. It renders whole while the
-			// label fits beside it, and when the label must elide, only
-			// while the elided label still keeps half the row. A tail that
-			// fails the rent stands down whole, so the rail never renders a
-			// truncated pair such as "+1 -": a dirty row shows nothing,
-			// because "clean" would lie, and a clean row's "clean" sits
-			// under the same rent, so a narrow rail ends at the label alone.
-			// The tail drops before the branch, which the ladder below drops
-			// before the label elides.
+			// label fits beside it and the mark, and when the label must
+			// elide, only while the elided label still keeps half the row. A
+			// tail that fails the rent stands down whole, so the rail never
+			// renders a truncated pair such as "+1 -": a dirty row shows
+			// nothing, because "clean" would lie, and a clean row's "clean"
+			// sits under the same rent, so a narrow rail ends at the label
+			// and the mark. The tail drops before the label elides.
 			if pair := segment.SegCells(right); pair > 0 {
 				label := segment.SegCells(left)
 				// One more cell goes to the separation before the right edge.
-				budget := w - pair - 1
+				budget := w - pair - markCells - 1
 				if label > budget && budget-windowChrome < (w+1)/2 {
 					right = nil
 				}
+			}
+			if it.InRepo {
+				right = append(right,
+					segment.Seg{Text: " ", FG: p.BarAccent},
+					segment.Seg{Text: g.GitMark, FG: p.BarAccent},
+					segment.Seg{Text: " ", FG: p.BarAccent},
+				)
 			}
 		}
 	case WindowNote:
@@ -909,8 +920,8 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 	if rightCells > 0 && budget > 0 {
 		budget--
 	}
-	// The folder outranks the branch: a window line gives up the branch tail
-	// whole, and only then elides the folder.
+	// A row gives up its tail whole before the left run elides, so a tail is
+	// never truncated.
 	tailCells := segment.SegCells(tail)
 	leftCells := segment.SegCells(left) + tailCells
 	if tailCells > 0 && leftCells > budget {
@@ -1010,6 +1021,37 @@ func RailWindowAt(snap *wire.Snapshot, x, y, off int) string {
 		return ""
 	}
 	return items[i].Window
+}
+
+// RailGitMarkAt returns the window whose git mark is under x,y, or "" for any
+// other cell, row or rail. The mark closes a window row inside a repository as
+// a space, the glyph and a space, so it is the last three cells before the grip
+// strip owns the rail's last column. A directory outside git paints no mark, a
+// pane row paints none, and a row the fold hides is not drawn, so none of them
+// answer. The thin rail has no window row, so it never answers.
+func RailGitMarkAt(snap *wire.Snapshot, x, y, off int) string {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
+		return ""
+	}
+	if layout.RailCompact(snap.Rail) {
+		return ""
+	}
+	items := RailItems(snap)
+	i := railItemRow(snap, y, off)
+	if i < 0 {
+		return ""
+	}
+	it := items[i]
+	if it.Kind != Window || !it.InRepo {
+		return ""
+	}
+	// The grip strip holds the rail's last column, so the row composes one
+	// cell narrower and the mark ends there.
+	end := snap.Rail - 1
+	if x < end-gitMarkCells || x >= end {
+		return ""
+	}
+	return it.Window
 }
 
 // RailWorkspaceAt returns the workspace whose row is under x,y. The thin rail

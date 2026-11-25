@@ -30,8 +30,9 @@ type branchEntry struct {
 }
 
 // gitInfo is what the rail shows for a working directory: the branch, for a
-// linked worktree its own folder name, the repository root, and the
-// uncommitted change counts.
+// linked worktree its own folder name, the repository root, the uncommitted
+// change counts, the commit HEAD names, and how the branch stands against its
+// upstream.
 type gitInfo struct {
 	branch   string
 	worktree string
@@ -42,6 +43,18 @@ type gitInfo struct {
 	dirty   bool
 	added   int
 	deleted int
+	// files counts the files the working tree changes against HEAD.
+	files int
+	// head is the short sha HEAD names and headSubject its subject. Both are
+	// empty on an unborn HEAD, which has no commit to name.
+	head        string
+	headSubject string
+	// upstream is the full ref the branch tracks, empty when it tracks
+	// nothing. ahead and behind count the commits HEAD has that the upstream
+	// does not, and the reverse.
+	upstream string
+	ahead    int
+	behind   int
 	// timeout marks an inconclusive probe: git hit the one second limit, so
 	// nothing here was observed. The cache keeps the previous answer and pins
 	// it stale instead of reading the zero value as clean or outside a repo.
@@ -73,14 +86,16 @@ func timedOut(err error) bool {
 	return errors.Is(err, errGitTimeout)
 }
 
-// parseNumstat sums a git diff --numstat report. A binary file prints a dash
-// instead of a count; that column adds nothing.
-func parseNumstat(out []byte) (added, deleted int) {
+// parseNumstat sums a git diff --numstat report and counts the files it names.
+// A binary file prints a dash instead of a count; that column adds nothing to
+// the sums, but the file still counts.
+func parseNumstat(out []byte) (added, deleted, files int) {
 	for _, line := range strings.Split(string(out), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 2 {
 			continue
 		}
+		files++
 		if n, err := strconv.Atoi(f[0]); err == nil {
 			added += n
 		}
@@ -88,7 +103,7 @@ func parseNumstat(out []byte) (added, deleted int) {
 			deleted += n
 		}
 	}
-	return added, deleted
+	return added, deleted, files
 }
 
 // detectGit is a variable so tests can stub git.
@@ -136,7 +151,38 @@ var detectGit = func(cwd string) gitInfo {
 		info.timeout = timedOut(err)
 		return info
 	}
-	info.added, info.deleted = parseNumstat(ns)
+	info.added, info.deleted, info.files = parseNumstat(ns)
+	// The head line and the upstream counts are extra facts, not extra
+	// answers: an unborn HEAD has no log line and a branch with no upstream
+	// fails both commands, and each failure is a real answer. Only the one
+	// second limit leaves the probe inconclusive.
+	if log, err := gitOutput(cwd, "log", "-1", "--format=%h%x00%s"); err != nil {
+		if timedOut(err) {
+			info.timeout = true
+			return info
+		}
+	} else if head, subject, ok := strings.Cut(strings.TrimRight(string(log), "\n"), "\x00"); ok {
+		info.head, info.headSubject = head, subject
+	}
+	if up, err := gitOutput(cwd, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err != nil {
+		if timedOut(err) {
+			info.timeout = true
+			return info
+		}
+	} else {
+		info.upstream = strings.TrimSpace(string(up))
+	}
+	// The left count is what the upstream has that HEAD does not, so it is
+	// behind; the right count is what HEAD has that the upstream does not.
+	if counts, err := gitOutput(cwd, "rev-list", "--left-right", "--count", "@{u}...HEAD"); err != nil {
+		if timedOut(err) {
+			info.timeout = true
+			return info
+		}
+	} else if f := strings.Fields(string(counts)); len(f) == 2 {
+		info.behind, _ = strconv.Atoi(f[0])
+		info.ahead, _ = strconv.Atoi(f[1])
+	}
 	return info
 }
 
