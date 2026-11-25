@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm rail · v2 · the proposal</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --win:#9599ae; --accent:#7ac0eb; --add:#78dc82; --del:#ff7d7d;
+ --work:#f5be50; --idle:#78c8e1; --block:#ff6e6e; --done:#6ee191; --page:#0b0b0f;
+ --rule:#2b2a37; --a1:#bb9af7; --a2:#6edceb; --a3:#f08cd7; --a4:#7ea9ff; --a5:#f0a05a;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:24px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 8px;color:#7d8298;max-width:84ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:34px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:84ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+.facts{color:#7d8298;font-size:12.5px;max-width:84ch}
+code{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;color:#a8adc4}
+
+/* The rail at the terminal's own metrics: Meslo Nerd Font Mono, 1.5 line
+   height, one cell per glyph. 34 interior cells, then the grip strip column. */
+/* A flex column, so the newlines between rows are not text: with
+   white-space:pre on this box every newline became a blank line and every row
+   rendered twice as tall as a terminal row. */
+.rail{font-family:"MesloLGL Nerd Font Mono","MesloLGLDZ Nerd Font Mono",
+ "Symbols Nerd Font Mono","DejaVu Sans Mono",monospace;
+ font-size:15px;line-height:1.5;font-variant-ligatures:none;
+ display:flex;flex-direction:column;
+ background:var(--bg);width:40ch;padding:2px 0 3px;color:var(--text)}
+.row{display:flex;align-items:center;line-height:1.5}
+.row .bar{flex:0 0 1ch}
+.row .l{flex:0 0 auto;white-space:pre}
+.row .sp{flex:1 1 auto;min-width:1ch}
+.row .tail{flex:0 0 auto;white-space:pre;padding-right:1ch}
+.row.sel{background:var(--focus)}
+.row.sel .l{font-weight:700}
+.row.sel .tail{font-weight:700}
+.dim{color:var(--dim)}
+.hdr{color:var(--header)}
+.win{color:var(--win)}
+.txt{color:var(--text)}
+.add{color:var(--add)}
+.del{color:var(--del)}
+.work{color:var(--work)}
+.idle{color:var(--idle)}
+.block{color:var(--block)}
+.done{color:var(--done)}
+.bold{font-weight:700}
+.p1{color:var(--a1)}.p2{color:var(--a2)}.p3{color:var(--a3)}
+.p4{color:var(--a4)}.p5{color:var(--a5)}
+.mark{color:#5f7d90}
+.ask{color:var(--accent);font-weight:700}
+
+.ruler{font-family:"DejaVu Sans Mono",monospace;font-size:12px;line-height:1.4;
+ color:#4d5165;white-space:pre;margin-top:6px}
+.colmap{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;line-height:1.55;
+ color:#8f93a8;white-space:pre;background:#101017;padding:10px 12px;margin-top:10px;
+ border-left:2px solid var(--rule)}
+.colmap b{color:#c9ccda;font-weight:550}
+
+.pair{display:flex;gap:46px;flex-wrap:wrap;align-items:flex-start;margin-top:8px}
+.tag{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6a6e82;
+ margin:0 0 6px;font-weight:650}
+.caption{margin:8px 0 0;color:#6a6e82;font-size:12px;max-width:48ch}
+.cols{display:flex;gap:46px;flex-wrap:wrap;align-items:flex-start}
+table{border-collapse:collapse;font-size:13px;margin-top:10px;max-width:96ch}
+th,td{text-align:left;padding:5px 20px 5px 0;border-bottom:1px solid #1d1c26;
+ vertical-align:top}
+th{color:#6a6e82;font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:650}
+td.n{color:#e9eaf1;font-variant-numeric:tabular-nums}
+td.good{color:var(--add)}
+ul{margin:8px 0 0;padding-left:20px;color:#8f93a8;max-width:84ch}
+li{margin:5px 0}
+li b{color:#a8adc4;font-weight:550}
+.row.sel .l, .row.sel .tail { font-weight: 700 }
+.kind{display:flex;gap:28px;align-items:baseline;flex-wrap:wrap;margin:14px 0 0}
+.kind .rail{width:40ch}
+.kind .what{color:#8f93a8;font-size:12.5px;max-width:44ch}
+.kind .what b{color:#a8adc4;font-weight:550}
+.cellcount{color:#6a6e82;font-size:12px;margin-top:4px}
+</style>
+
+
+</head>
+<body>
+
+<h1>dm rail · v2 · the proposal</h1>
+<p class="sub">v1 measured what is busy. This is what I would change, drawn the same way: same grid, same glyphs, same 40 cells, so a row can be compared against v1 cell for cell. Three changes to the content, one to the type, and one lever deliberately left out.</p>
+
+<h2>The changes, in one list</h2>
+<ul>
+  <li><b>A. Drop what restates the tree.</b> No <code>clean</code>, no workspace or project count unless the row is folded, no workspace bullet, no pane dot.</li>
+  <li><b>B. One icon per pane.</b> The state mark keeps column 7; the agent mark goes; the pane name starts at column 10 instead of 11 and the dot after it goes.</li>
+  <li><b>C. A label elides its shared prefix before it elides its tail.</b> A window under <code>durability-and-flakes</code> whose folder also starts with it reads <code>w10 &hellip;-w1</code>, and only when the row would otherwise not fit.</li>
+  <li><b>E. The project name is not bold.</b> Weight is reserved for the level you act on: the workspace. The accent colour already says "project".</li>
+  <li><b>Not taken: collapsed windows.</b> Drawn at the end so you can see the alternative, not applied.</li>
+</ul>
+
+<h2>1. The proposal, the whole session</h2>
+<div class="rail">
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="p4">dm</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="txt bold">main</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w1 dm</span></span><span class="sp"></span><span class="tail"><span class="work">&#x25cf;</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="mark">&#xe702;</span></span></div>
+  <div class="row sel"><span class="bar p4">&#9612;</span><span class="l">      <span class="work">&#xf013;</span>  <span class="txt">w1</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">      <span class="dim">&#xf128;</span>  <span class="dim">w1p7</span></span><span class="sp"></span><span class="tail ask">?</span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w10 &hellip;-w1</span></span><span class="sp"></span><span class="tail"><span class="work">&#x25cf;</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="mark">&#xe702;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">      <span class="work">&#xf013;</span>  <span class="dim">w1-h7</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">      <span class="done">&#xf00c;</span>  <span class="dim">w3-h7</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">suite-tail</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w11 suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="mark">&#xe702;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">      <span class="block">&#xf071;</span>  <span class="dim">w1-y8</span></span><span class="sp"></span><span class="tail ask">?</span></div>
+  <div class="row"><span class="bar p2">&#9612;</span><span class="l">&#xf0d7; <span class="p2">console</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p2">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w6 ll-frontend</span></span><span class="sp"></span><span class="tail"><span class="mark">&#xe702;</span></span></div>
+  <div class="row"><span class="bar p2">&#9612;</span><span class="l">      <span class="work">&#xf013;</span>  <span class="dim">pi</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">&#xf0d7; <span class="p5">lb-key-dot</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w8 lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="mark">&#xe702;</span></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w9 lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="mark">&#xe702;</span></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">shelf</span> <span class="dim">&#xf0c5;</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">      <span class="dim">&#x25b6;</span>  <span class="dim">w1p3</span></span><span class="sp"></span><span class="tail"></span></div>
+</div>
+<p class="note"><b>20 rows, the same 20 as v1.</b> Ink per row is what changed: a window row now carries its label and its git facts and nothing else, and a pane row is one mark and a name.</p>
+
+<h2>2. One row of each kind, specified</h2>
+
+<div class="kind">
+  <div class="rail" style="width:40ch">
+    <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="p4">dm</span></span><span class="sp"></span><span class="tail"></span></div>
+  </div>
+  <div class="what"><b>project</b><br>bar, caret, accent name, no count. Weight is regular, so the eye does not stop here on the way to a workspace.</div>
+</div>
+
+<div class="kind">
+  <div class="rail" style="width:40ch">
+    <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="txt bold">main</span></span><span class="sp"></span><span class="tail"></span></div>
+    <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0da; <span class="hdr bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail dim">3</span></div>
+  </div>
+  <div class="what"><b>workspace</b><br>bar, caret, bold name. The count appears only when folded, where it is the only evidence of what is hidden.</div>
+</div>
+
+<div class="kind">
+  <div class="rail" style="width:40ch">
+    <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w1 dm</span></span><span class="sp"></span><span class="tail"><span class="work">&#x25cf;</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="mark">&#xe702;</span></span></div>
+    <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w11 suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="mark">&#xe702;</span></span></div>
+  </div>
+  <div class="what"><b>window</b><br>caret, label, then git facts only when there are any. A clean window ends at the git mark, which stays because it is the click target for the facts box.</div>
+</div>
+
+<div class="kind">
+  <div class="rail" style="width:40ch">
+    <div class="row sel"><span class="bar p4">&#9612;</span><span class="l">      <span class="work">&#xf013;</span>  <span class="txt">w1</span></span><span class="sp"></span><span class="tail"></span></div>
+    <div class="row"><span class="bar p4">&#9612;</span><span class="l">      <span class="dim">&#xf128;</span>  <span class="dim">w1p7</span></span><span class="sp"></span><span class="tail ask">?</span></div>
+    <div class="row"><span class="bar p4">&#9612;</span><span class="l">      <span class="dim">&#x25b6;</span>  <span class="dim">w1p9</span></span><span class="sp"></span><span class="tail"></span></div>
+  </div>
+  <div class="what"><b>pane</b><br>state mark in column 7, two spaces, name at column 10. Gear working, check done, warning blocked, circle idle, question unknown, triangle shell. The focused row is bold and lit.</div>
+</div>
+
+<h2>3. States</h2>
+<div class="cols">
+  <div>
+    <div class="rail" style="width:32ch">
+      <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0da; <span class="hdr bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail dim">3</span></div>
+      <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0da; <span class="hdr bold">suite-tail</span></span><span class="sp"></span><span class="tail dim">1</span></div>
+      <div class="row"><span class="bar p5">&#9612;</span><span class="l">&#xf0d7; <span class="p5">lb-key-dot</span></span><span class="sp"></span><span class="tail"></span></div>
+      <div class="row"><span class="bar p5">&#9612;</span><span class="l">  &#xf0da; <span class="win">w8 lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="del">&#xf071;</span> <span class="mark">&#xe702;</span></span></div>
+    </div>
+    <p class="caption">folded rows carry the only counts in the rail, and a folded window keeps its facts so a blocked pane is still visible</p>
+  </div>
+  <div>
+    <div class="rail" style="width:32ch">
+      <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="p4">dm</span></span><span class="sp"></span><span class="tail"></span></div>
+      <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="txt bold">main</span></span><span class="sp"></span><span class="tail"></span></div>
+      <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w1 dm</span></span><span class="sp"></span><span class="tail"><span class="work">&#x25cf;</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="mark">&#xe702;</span></span></div>
+      <div class="row sel"><span class="bar p4">&#9612;</span><span class="l">      <span class="work">&#xf013;</span>  <span class="txt">w1</span></span><span class="sp"></span><span class="tail ask">?</span></div>
+    </div>
+    <p class="caption">the focused pane is bold and lit; an ask badge rides the right edge of the pane and says a question is waiting</p>
+  </div>
+</div>
+
+<h2>4. The same rail at 26 cells</h2>
+<div class="rail" style="width:27ch">
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="p4">dm</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="txt bold">main</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w1 dm</span></span><span class="sp"></span><span class="tail"><span class="work">&#x25cf;</span> <span class="mark">&#xe702;</span></span></div>
+  <div class="row sel"><span class="bar p4">&#9612;</span><span class="l">      <span class="work">&#xf013;</span>  <span class="txt">w1</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">durability-and&hellip;</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w10 &hellip;-w1</span></span><span class="sp"></span><span class="tail"><span class="work">&#x25cf;</span> <span class="mark">&#xe702;</span></span></div>
+</div>
+<p class="note"><b>Rent, in this order:</b> git line counts, then the git mark, then the label's suffix, then the label's shared prefix, then the workspace name. One icon per pane and no dot buys four cells on every pane row, which is where a 26 cell rail hurts most.</p>
+
+<h2>5. What this costs, in cells</h2>
+<table>
+  <tr><th>row</th><th>v1</th><th>v2</th><th>saved</th><th>note</th></tr>
+  <tr><td>clean window, short label</td><td class="n">24</td><td class="n">16</td><td class="n good">8</td><td><code>clean</code> and its gap, plus the dot on nothing</td></tr>
+  <tr><td>dirty window, long label</td><td class="n">45</td><td class="n">26</td><td class="n good">19</td><td>label fits whole once <code>clean</code> and the prefix go</td></tr>
+  <tr><td>workspace row</td><td class="n">19</td><td class="n">15</td><td class="n good">4</td><td>count and bullet</td></tr>
+  <tr><td>pane row</td><td class="n">18</td><td class="n">13</td><td class="n good">5</td><td>agent mark, the second icon cell, the dot</td></tr>
+  <tr><td>project row</td><td class="n">10</td><td class="n">8</td><td class="n good">2</td><td>count</td></tr>
+</table>
+<p class="note"><b>Nothing new in the wire.</b> Every change is in <code>rail.RailRow</code> and the label rendering: no probe, no field, no option. The only behavioural rule is the count, which now depends on <code>Folded</code>.</p>
+
+<h2>6. Not taken: collapsed windows</h2>
+<p class="note">The biggest row saving is hiding the panes of every window except the active one. I am not proposing it against these changes, because it changes how the rail is read rather than how much ink it spends, and it makes one more click necessary. Drawn here so the choice is visible.</p>
+<div class="rail">
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="p4">dm</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="txt bold">main</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w1 dm</span></span><span class="sp"></span><span class="tail"><span class="work">&#x25cf;</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="mark">&#xe702;</span></span></div>
+  <div class="row sel"><span class="bar p4">&#9612;</span><span class="l">      <span class="work">&#xf013;</span>  <span class="txt">w1</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0da; <span class="win">w10 &hellip;-w1</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf013;</span><span class="done">&#xf00c;</span><span class="dim">&#xf128;</span>  <span class="mark">&#xe702;</span></span></div>
+</div>
+<p class="note"><b>What it buys:</b> twelve fewer rows in this fixture. <b>What it costs:</b> a pane's name is one click away, and the pips have to carry four states in three cells. My recommendation is to take v2 first, live with it for a week, and only then ask whether the rows still feel long.</p>
+
+<h2>7. What I need from you</h2>
+<ul>
+  <li><b>Lever C, the elided prefix.</b> Take it or drop it. It is the only change here that removes information rather than ink.</li>
+  <li><b>Lever E, the project name's weight.</b> If the accent alone does not read as "project", the fallback is to indent workspaces by two, at a cost of two cells on every workspace row.</li>
+  <li><b>Anything in v1 you want kept</b> that v2 dropped: the bullet, the pane dot, or the workspace count when unfolded.</li>
+</ul>
+
+</body>
+</html>

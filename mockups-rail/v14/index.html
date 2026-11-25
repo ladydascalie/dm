@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm rail · v14 · a six cell field with units</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --win:#9599ae; --accent:#7ac0eb; --add:#78dc82; --del:#ff7d7d;
+ --work:#f5be50; --idle:#78c8e1; --block:#ff6e6e; --done:#6ee191; --page:#0b0b0f;
+ --rule:#2b2a37; --a1:#bb9af7; --a2:#6edceb; --a3:#f08cd7; --a4:#7ea9ff; --a5:#f0a05a;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:24px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 8px;color:#7d8298;max-width:84ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:34px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:84ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+.facts{color:#7d8298;font-size:12.5px;max-width:84ch}
+code{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;color:#a8adc4}
+
+/* The rail at the terminal's own metrics: Meslo Nerd Font Mono, 1.5 line
+   height, one cell per glyph. 34 interior cells, then the grip strip column. */
+/* A flex column, so the newlines between rows are not text: with
+   white-space:pre on this box every newline became a blank line and every row
+   rendered twice as tall as a terminal row. */
+.rail{font-family:"MesloLGL Nerd Font Mono","MesloLGLDZ Nerd Font Mono",
+ "Symbols Nerd Font Mono","DejaVu Sans Mono",monospace;
+ font-size:15px;line-height:1.5;font-variant-ligatures:none;
+ display:flex;flex-direction:column;
+ background:var(--bg);width:40ch;padding:2px 0 3px;color:var(--text)}
+.row{display:flex;align-items:center;line-height:1.5}
+.row .bar{flex:0 0 1ch}
+.row .l{flex:0 0 auto;white-space:pre}
+.row .sp{flex:1 1 auto;min-width:1ch}
+.row .tail{flex:0 0 auto;white-space:pre;padding-right:1ch}
+.row.sel{background:var(--focus)}
+.row.sel .l{font-weight:700}
+.row.sel .tail{font-weight:700}
+.dim{color:var(--dim)}
+.hdr{color:var(--header)}
+.win{color:var(--win)}
+.txt{color:var(--text)}
+.add{color:var(--add)}
+.del{color:var(--del)}
+.work{color:var(--work)}
+.idle{color:var(--idle)}
+.block{color:var(--block)}
+.done{color:var(--done)}
+.bold{font-weight:700}
+.p1{color:var(--a1)}.p2{color:var(--a2)}.p3{color:var(--a3)}
+.p4{color:var(--a4)}.p5{color:var(--a5)}
+.mark{color:#5f7d90}
+.ask{color:var(--accent);font-weight:700}
+
+.ruler{font-family:"DejaVu Sans Mono",monospace;font-size:12px;line-height:1.4;
+ color:#4d5165;white-space:pre;margin-top:6px}
+.colmap{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;line-height:1.55;
+ color:#8f93a8;white-space:pre;background:#101017;padding:10px 12px;margin-top:10px;
+ border-left:2px solid var(--rule)}
+.colmap b{color:#c9ccda;font-weight:550}
+
+.pair{display:flex;gap:46px;flex-wrap:wrap;align-items:flex-start;margin-top:8px}
+.tag{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6a6e82;
+ margin:0 0 6px;font-weight:650}
+.caption{margin:8px 0 0;color:#6a6e82;font-size:12px;max-width:48ch}
+.cols{display:flex;gap:46px;flex-wrap:wrap;align-items:flex-start}
+table{border-collapse:collapse;font-size:13px;margin-top:10px;max-width:96ch}
+th,td{text-align:left;padding:5px 20px 5px 0;border-bottom:1px solid #1d1c26;
+ vertical-align:top}
+th{color:#6a6e82;font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:650}
+td.n{color:#e9eaf1;font-variant-numeric:tabular-nums}
+td.good{color:var(--add)}
+ul{margin:8px 0 0;padding-left:20px;color:#8f93a8;max-width:84ch}
+li{margin:5px 0}
+li b{color:#a8adc4;font-weight:550}
+
+.row.sel .l, .row.sel .tail { font-weight: 700 }
+.row .tail { white-space: pre }
+.nums { font-variant-numeric: tabular-nums }
+.add { color: var(--add) }
+.del { color: var(--del) }
+.sub { min-height: 4.2em; margin-bottom: 0 }
+.verdict { min-height: 8em; max-width: 84ch; color: #8f93a8; font-size: 13px; margin-top: 16px }
+.verdict b { color: #a8adc4; font-weight: 550 }
+.note { margin-top: 10px; max-width: 62ch }
+</style>
+</head>
+<body>
+<h1>dm rail · v14 · a six cell field, with units</h1>
+<p class="sub">Six cells per column, sign included. Up to four digits reads as itself; past that the number is written in one decimal of a unit, so <code>12345</code> is <code>+12.3k</code> and <code>1234567</code> is <code>+1.2M</code>. The magnitude survives and the column never widens. The box still holds the exact number. Numbers, then the mark, then the state at the margin.</p>
+<div class="rail">
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="p4">dm</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">main</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w1 dm</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">+12   </span><span class="del">-3    </span></span> <span class="mark">&#xe702;</span> <span class="work">&#xf013;</span></span></div>
+  <div class="row sel"><span class="bar p4">&#9612;</span><span class="l">    <span class="txt">w1</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">    <span class="dim">w1p7</span></span><span class="sp"></span><span class="tail"><span class="work"></span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w10 &hellip;-w1</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">+12   </span><span class="del">-3    </span></span> <span class="mark">&#xe702;</span> <span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">    <span class="dim">w1-h7</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">    <span class="dim">w3-h7</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf00c;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">suite-tail</span></span><span class="sp"></span><span class="tail"><span class="block">&#xf071;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w11 suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">      </span><span class="del">      </span></span> <span class="mark"> </span> <span class="block">&#xf071;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">    <span class="dim">w1-y8</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf071;</span></span></div>
+  <div class="row"><span class="bar p2">&#9612;</span><span class="l">&#xf0d7; <span class="p2">console</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p2">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">console</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p2">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w6 ll-frontend</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">      </span><span class="del">      </span></span> <span class="mark"> </span> <span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p2">&#9612;</span><span class="l">    <span class="dim">pi</span></span><span class="sp"></span><span class="tail"><span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">&#xf0d7; <span class="p5">lb-key-dot</span></span><span class="sp"></span><span class="tail"></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">&#xf0d7; <span class="hdr bold">lb-key-dot</span></span><span class="sp"></span><span class="tail"><span class="block">&#xf071;</span></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w8 lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">+3760 </span><span class="del">-1    </span></span> <span class="mark">&#xe702;</span> <span class="block">&#xf071;</span></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w9 lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">      </span><span class="del">      </span></span> <span class="mark"> </span> <span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p5">&#9612;</span><span class="l">    <span class="dim">w1p3</span></span><span class="sp"></span><span class="tail"><span class="dim">&#x25b6;</span></span></div>
+</div>
+<div class="verdict">
+<p><b>22 rows, three with something to see.</b> A dirty row shows its two counts and its mark; a clean row draws both fields empty and keeps the columns still.</p>
+<p><b>Why units and not an ellipsis:</b> an elided count says only "bigger than this column", which is not what you scan for. <code>+1.2M</code> says how big, in the cell it has.</p>
+<p><b>The box is the exact answer.</b> The rail rounds to read; the facts box carries the precise added and removed line counts for the row you are on.</p>
+</div>
+
+<h2>Across magnitudes</h2>
+<div class="rail">
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w1 dm</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">+12   </span><span class="del">-3    </span></span> <span class="mark">&#xe702;</span> <span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w2 api</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">+1234 </span><span class="del">-3214 </span></span> <span class="mark">&#xe702;</span> <span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w3 big</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">+12.3k</span><span class="del">-98.8k</span></span> <span class="mark">&#xe702;</span> <span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w4 huge</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">+1.2M </span><span class="del">-98.8M</span></span> <span class="mark">&#xe702;</span> <span class="work">&#xf013;</span></span></div>
+  <div class="row"><span class="bar p4">&#9612;</span><span class="l">  &#xf0d7; <span class="win">w5 quiet</span></span><span class="sp"></span><span class="tail"><span class="nums"><span class="add">      </span><span class="del">      </span></span> <span class="mark"> </span> <span class="work">&#xf013;</span></span></div>
+</div>
+<p class="note">Four sizes and a quiet row: the two signs, the mark and the state sit in the same cells on every row. The rounding is one decimal below a hundred units, whole units above it, so <code>+1.2k</code>, <code>+12k</code>, <code>+123k</code>, <code>+1.2M</code>.</p>
+
+<h2>The rule, stated once</h2>
+<ul>
+  <li><b>Six and six.</b> Two fields, one sign each, four digits each. Nothing widens the rail for a number.</li>
+  <li><b>Units past four digits.</b> <code>k</code>, then <code>M</code>, then <code>G</code>. One decimal below a hundred, none above, and a trailing <code>.0</code> is dropped.</li>
+  <li><b>The order is numbers, mark, state.</b> Mark before state; the margin keeps its single meaning.</li>
+  <li><b>Absence is information.</b> A blank field and a blank mark say the worktree is clean and nothing is waiting.</li>
+</ul>
+</body>
+</html>
