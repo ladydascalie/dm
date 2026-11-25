@@ -6,13 +6,13 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	"dm/internal/kdl"
 	"dm/internal/keymap"
 	"dm/internal/theme"
-	"dm/internal/wlabel"
 )
 
 // TestActionDesc proves every action the built-in keymap binds has a
@@ -265,33 +265,50 @@ func TestConfigNodesParse(t *testing.T) {
 }
 
 // TestConfigNodeDefaults proves the built-in default each table row names is
-// the one the code uses.
+// the one the shipped default config uses. Every value it can read comes from
+// keymap.LoadDefault(), which parses defaultConfigKDL, so a changed default
+// fails here instead of leaving the page lying with a green gate. A node with
+// no getter keeps its literal: theme names no default theme, and keymap is the
+// shipped table itself.
 func TestConfigNodeDefaults(t *testing.T) {
+	cfg := keymap.LoadDefault()
+	either := func(on bool, yes, no string) string {
+		if on {
+			return yes
+		}
+		return no
+	}
+	declared := func(n int) string {
+		if n == 0 {
+			return "none"
+		}
+		return strconv.Itoa(n) + " in the shipped default"
+	}
 	want := map[string]string{
-		"prefix":            `"` + keymap.LoadDefault().PrefixName() + `"`,
-		"default-fold":      `"unfold"`,
-		"tab-min-width":     "8",
-		"tab-max-width":     "20",
-		"padding":           "0",
-		"history-lines":     "10000",
-		"glyphs":            `"auto"`,
-		"window-label":      `"` + wlabel.Default + `"`,
-		"dashboard-preview": "40",
-		"palette-rows":      "10",
-		"ask-rows":          "30",
-		"ask-cols":          "96",
-		"ask-split":         "60",
-		"diff-command":      `"hunk diff"`,
-		"web-addr":          `"` + keymap.DefaultWebAddr + `"`,
-		"dashboard-layout":  `"float"`,
-		"dashboard-peek":    `"down"`,
-		"shelf-layout":      `"centered"`,
-		"shelf-size":        "80",
-		"float-shadow":      `"off"`,
+		"prefix":            `"` + cfg.PrefixName() + `"`,
+		"default-fold":      either(cfg.DefaultFold(), `"unfold"`, `"fold"`),
+		"tab-min-width":     strconv.Itoa(cfg.TabMinWidth()),
+		"tab-max-width":     strconv.Itoa(cfg.TabMaxWidth()),
+		"padding":           strconv.Itoa(cfg.Padding()),
+		"history-lines":     strconv.Itoa(cfg.HistoryLines()),
+		"glyphs":            `"` + cfg.GlyphSet().String() + `"`,
+		"window-label":      `"` + cfg.WindowLabel() + `"`,
+		"dashboard-preview": strconv.Itoa(cfg.DashboardPreview()),
+		"palette-rows":      strconv.Itoa(cfg.PaletteRows()),
+		"ask-rows":          strconv.Itoa(cfg.AskRows()),
+		"ask-cols":          strconv.Itoa(cfg.AskCols()),
+		"ask-split":         strconv.Itoa(cfg.AskSplit()),
+		"diff-command":      `"` + cfg.DiffCommand() + `"`,
+		"web-addr":          `"` + cfg.WebAddr() + `"`,
+		"dashboard-layout":  either(cfg.DashboardFullScreen(), `"full"`, `"float"`),
+		"dashboard-peek":    either(cfg.DashboardPeekDown(), `"down"`, `"right"`),
+		"shelf-layout":      either(cfg.ShelfCentered(), `"centered"`, `"pane"`),
+		"shelf-size":        strconv.Itoa(cfg.ShelfSize()),
+		"float-shadow":      either(cfg.FloatShadow(), `"on"`, `"off"`),
 		"theme":             "",
 		"keymap":            "the built-in table",
-		"command":           "none",
-		"plugin":            "none",
+		"command":           declared(len(cfg.Commands())),
+		"plugin":            declared(len(cfg.Plugins())),
 	}
 	for _, n := range ConfigNodes {
 		if got, ok := want[n.Name]; !ok {
