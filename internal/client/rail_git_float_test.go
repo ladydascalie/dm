@@ -709,23 +709,39 @@ func TestGitFloatMenuTakesTheDesk(t *testing.T) {
 	}
 }
 
-// TestGitHintNamesTheMark proves the bottom border says how the mark's own box
-// closes, and that the whole bar fits the box's narrowest bottom row.
-func TestGitHintNamesTheMark(t *testing.T) {
+// TestGitHintNamesTheCorner proves the bottom border names the grip the box
+// carries, not the rail mark that opened it, and that the ladder keeps esc when
+// the border is too narrow for both.
+func TestGitHintNamesTheCorner(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
-	// The narrowest box: the outside floor, both borders, and the two cells the
-	// border bar keeps clear of the corners.
-	width := gitMinCols - 4
 	bar := gitHint()
-	text := bar.Text(width, th)
-	for _, want := range []string{"esc", "close", "click", "mark"} {
+	// A normal box: the outside width it hugs for a short value.
+	wide := 38
+	text := bar.Text(wide, th)
+	for _, want := range []string{"esc", "close", "drag", "corner"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("hint = %q, want it to name %q", text, want)
 		}
 	}
-	if got := bar.Cells(width, th); got > width {
+	if got := bar.Cells(wide, th); got > wide {
 		t.Fatalf("hint = %q at %d cells, wider than the bottom row allows", text, got)
+	}
+	// The narrowest box: the outside floor, both borders, and the two cells the
+	// border bar keeps clear of the corners. The corner is dropped there and esc
+	// survives.
+	narrow := gitMinCols - 4
+	text = bar.Text(narrow, th)
+	for _, want := range []string{"esc", "close"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("hint = %q, want it to keep %q at the floor", text, want)
+		}
+	}
+	if strings.Contains(text, "corner") {
+		t.Fatalf("hint = %q, want the corner dropped at the floor", text)
+	}
+	if got := bar.Cells(narrow, th); got > narrow {
+		t.Fatalf("hint = %q at %d cells, wider than the nearest bottom row allows", text, got)
 	}
 
 	// The narrowest box paints the whole bar on its bottom border.
@@ -739,9 +755,8 @@ func TestGitHintNamesTheMark(t *testing.T) {
 		t.Fatalf("box width = %d, want the floor %d", got, gitMinCols)
 	}
 	border := gitRowText(gitScreen(tui), rect.Y+rect.H, rect.X-1, rect.W+2)
-	if !strings.Contains(border, "click") || !strings.Contains(border, "mark") ||
-		!strings.Contains(border, "esc") {
-		t.Fatalf("bottom border = %q, want the whole hint", border)
+	if !strings.Contains(border, "esc") || !strings.Contains(border, "close") {
+		t.Fatalf("bottom border = %q, want the keep hint", border)
 	}
 }
 

@@ -456,15 +456,16 @@ func (t *tui) gitGripHot(r layout.Rect) bool {
 	return t.mouseSeen && gitGripAt(r, t.mouseX, t.mouseY)
 }
 
-// gitHint is the box's bottom border: how the box leaves, in the voice the ask
-// float's hint bar uses. esc and the mark are the two ways the box always
-// offers, and the two together fill the narrowest border exactly, so neither is
-// ever dropped: a click on the mark that opened the box closes it again. esc
-// keeps a Keep so it survives even a row shorter than the minimum.
+// gitHint is the box's bottom border: how the box leaves and how it grows, in
+// the voice the ask float's hint bar uses. It names the corner rather than the
+// mark, because the grip is the one affordance on the box itself; clicking the
+// rail's mark again still closes it, it is just not advertised. The two hints
+// fit a normal border; at the box's width floor the bar drops the corner and
+// keeps esc, and the grip still answers the pointer there.
 func gitHint() *hintbar.Bar {
 	return &hintbar.Bar{Hints: []hintbar.Hint{
 		{Keys: []string{"esc"}, Label: "close", Keep: true},
-		{Keys: []string{"click"}, Label: "mark"},
+		{Keys: []string{"drag"}, Label: "corner"},
 	}}
 }
 
