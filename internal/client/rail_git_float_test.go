@@ -41,6 +41,12 @@ func gitFloatSnap(cols, rows, railWidth int) *wire.Snapshot {
 			Cwd: "/work/lb-key-dot-w1", Root: "/work/lb-key-dot-w1",
 			Worktree: "lb-key-dot-w1", Branch: "lb-key-dot/w1", InRepo: true,
 			Dirty: true, Added: 12, Deleted: 3, Files: 4,
+			FileNames: []string{
+				"internal/client/client_git.go",
+				"internal/client/client_input.go",
+				"internal/rail/rail.go",
+				"internal/client/prefs.go",
+			},
 			Head: "deadb33f", HeadSubject: "fix rail elision",
 			Upstream: "origin/lb-key-dot/w1", Ahead: 2, Behind: 0,
 		},
@@ -493,6 +499,8 @@ func gitSweepSnap(cols, rows, railWidth int) *wire.Snapshot {
 			Worktree: "wt-" + strconv.Itoa(i+1), Branch: "b/w" + strconv.Itoa(i+1),
 			InRepo: true, Head: "abc1234", HeadSubject: "sweep the rail",
 			Upstream: "origin/main", Ahead: 1,
+			Files:     2,
+			FileNames: []string{"internal/rail/rail.go", "internal/client/client_git.go"},
 		})
 	}
 	return snap
@@ -566,58 +574,88 @@ func TestGitFloatGeometrySweep(t *testing.T) {
 		maxRail := layout.MaxRail(cols)
 		for railWidth := 5; railWidth <= maxRail; railWidth++ {
 			for _, rows := range []int{8, 9, 12, 17, 33} {
-				snap := gitSweepSnap(cols, rows, railWidth)
-				tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: &bytes.Buffer{}}
-				window, row := gitLowestMark(t, snap)
-				gitMarkClick(tui, row)
-				if rows < gitRows+gitChromeRows {
-					if tui.git != nil || len(tui.floats) != 0 {
-						t.Fatalf("%dx%d rail %d: the box opened on a terminal too short for it",
-							cols, rows, railWidth)
-					}
-					continue
-				}
-				if tui.git == nil || tui.git.window != window {
-					t.Fatalf("%dx%d rail %d: the mark on row %d opened %+v, want %q",
-						cols, rows, railWidth, row, tui.git, window)
-				}
-				rect := tui.git.float.Rect
-				if got := rect.Y + rect.H; got > rows-2 {
-					t.Fatalf("%dx%d rail %d: bottom border row = %d, past the status bar at %d",
-						cols, rows, railWidth, got, rows-1)
-				}
-				if got := rect.X + rect.W; got > cols-1 {
-					t.Fatalf("%dx%d rail %d: right border column = %d, past the terminal at %d",
-						cols, rows, railWidth, got, cols-1)
-				}
-				if got := rect.X - 1; got < railWidth {
-					t.Fatalf("%dx%d rail %d: box left border = %d, over the rail",
-						cols, rows, railWidth, got)
-				}
-				// The frame leaves the rail's own cells as the rail painted
-				// them: the grip strip's last column belongs to the divider,
-				// so the rail's cells are columns 0..Rail-2 through the band's
-				// rows.
-				frame := gitScreen(tui)
-				var railBuf bytes.Buffer
-				th := tui.theme()
-				rail.DrawRail(&railBuf, th, snap, tui.glyphSet(), rail.Paint{
-					Off: tui.railOff, Hover: tui.railHoverRow(), Drop: tui.railDrop(),
-					Open: tui.gitOpen(),
-				})
-				ref := vt.NewTerm(cols, rows)
-				ref.Write(railBuf.Bytes())
-				ref.Flush()
-				for y := 0; y < rows-1; y++ {
-					for x := 0; x < railWidth-1; x++ {
-						got, want := termCell(frame, x, y), termCell(ref, x, y)
-						if got.Char != want.Char || got.FG != want.FG || got.BG != want.BG {
-							t.Fatalf("%dx%d rail %d: the box painted the rail cell %d,%d: %+v, want %+v",
-								cols, rows, railWidth, x, y, got, want)
-						}
-					}
+				for _, dragged := range []bool{false, true} {
+					gitSweepCase(t, cols, rows, railWidth, dragged)
 				}
 			}
+		}
+	}
+}
+
+// gitSweepCase holds the box's frame rules on one geometry, at the automatic
+// size and at a size a drag left: as wide as the terminal and as tall as it, so
+// the clamps carry the frame rather than the facts.
+func gitSweepCase(t *testing.T, cols, rows, railWidth int, dragged bool) {
+	t.Helper()
+	snap := gitSweepSnap(cols, rows, railWidth)
+	tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: &bytes.Buffer{}}
+	if dragged {
+		// A remembered size is never below the floor: a drag cannot make one,
+		// and the box reads a value it could not have made as automatic.
+		tui.prefs = prefs{GitBoxCols: max(cols, gitMinCols), GitBoxRows: max(rows, gitRows)}
+	}
+	window, row := gitLowestMark(t, snap)
+	gitMarkClick(tui, row)
+	if rows < gitRows+gitChromeRows {
+		if tui.git != nil || len(tui.floats) != 0 {
+			t.Fatalf("%dx%d rail %d dragged=%v: the box opened on a terminal too short for it",
+				cols, rows, railWidth, dragged)
+		}
+		return
+	}
+	if tui.git == nil || tui.git.window != window {
+		t.Fatalf("%dx%d rail %d dragged=%v: the mark on row %d opened %+v, want %q",
+			cols, rows, railWidth, dragged, row, tui.git, window)
+	}
+	rect := tui.git.float.Rect
+	if got := rect.Y + rect.H; got > rows-2 {
+		t.Fatalf("%dx%d rail %d dragged=%v: bottom border row = %d, past the status bar at %d",
+			cols, rows, railWidth, dragged, got, rows-1)
+	}
+	if got := rect.Y - 1; got < 0 {
+		t.Fatalf("%dx%d rail %d dragged=%v: top border row = %d, above the terminal",
+			cols, rows, railWidth, dragged, got)
+	}
+	if got := rect.X + rect.W; got > cols-1 {
+		t.Fatalf("%dx%d rail %d dragged=%v: right border column = %d, past the terminal at %d",
+			cols, rows, railWidth, dragged, got, cols-1)
+	}
+	if got := rect.X - 1; got < railWidth {
+		t.Fatalf("%dx%d rail %d dragged=%v: box left border = %d, over the rail",
+			cols, rows, railWidth, dragged, got)
+	}
+	// The frame leaves the rail's own cells as the rail painted them: the grip
+	// strip's last column belongs to the divider, so the rail's cells are
+	// columns 0..Rail-2 through the band's rows.
+	frame := gitScreen(tui)
+	var railBuf bytes.Buffer
+	th := tui.theme()
+	rail.DrawRail(&railBuf, th, snap, tui.glyphSet(), rail.Paint{
+		Off: tui.railOff, Hover: tui.railHoverRow(), Drop: tui.railDrop(),
+		Open: tui.gitOpen(),
+	})
+	ref := vt.NewTerm(cols, rows)
+	ref.Write(railBuf.Bytes())
+	ref.Flush()
+	for y := 0; y < rows-1; y++ {
+		for x := 0; x < railWidth-1; x++ {
+			got, want := termCell(frame, x, y), termCell(ref, x, y)
+			if got.Char != want.Char || got.FG != want.FG || got.BG != want.BG {
+				t.Fatalf("%dx%d rail %d dragged=%v: the box painted the rail cell %d,%d: %+v, want %+v",
+					cols, rows, railWidth, dragged, x, y, got, want)
+			}
+		}
+	}
+	// A dragged size is what the frame was drawn from, so the clamps were the
+	// ones carrying it rather than the facts.
+	if dragged {
+		if got, room := rect.W+2, cols-railWidth; got <= gitMinCols && room > gitMinCols {
+			t.Fatalf("%dx%d rail %d dragged: the box stayed at its floor, %d cells in %d",
+				cols, rows, railWidth, got, room)
+		}
+		if rows > gitRows+gitChromeRows && rect.H <= gitRows {
+			t.Fatalf("%dx%d rail %d dragged: the tall box kept the facts height %d",
+				cols, rows, railWidth, rect.H)
 		}
 	}
 }

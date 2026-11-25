@@ -2157,6 +2157,12 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	t.updateLinkHover(x, y, ev.btn&16 != 0)
 	t.updatePadHover(x, y)
 	t.updateRailHover()
+	// The facts box owns the pointer over the cells it covers. Its grip resizes
+	// it, and a press anywhere else on it does nothing, so a click on the box
+	// never lands on the pane or the rail standing under it.
+	if t.gitMouse(ev, x, y) {
+		return
+	}
 	// A left press anywhere but a git mark closes the facts box. A press on the
 	// mark is the mark's business: railClick opens, moves or closes the box for
 	// it, so this must not take the press first. The press itself is not
@@ -2492,6 +2498,10 @@ func (t *tui) updateRailHover() {
 // as the rail's own, so the frame shows the hint without a split divider.
 const railPadAxis = "rail"
 
+// gitPadAxis is the padAxis of a hover over the facts box's grip. It shows the
+// same resize hint and paints no divider through the box.
+const gitPadAxis = "git"
+
 // railGripAt reports whether x,y is the rail's grab strip: its last column,
 // above the row the rail keeps free for its bottom control.
 func railGripAt(snap *wire.Snapshot, x, y int) bool {
@@ -2509,6 +2519,11 @@ type dragStart struct {
 	rect   layout.Rect
 	zone   layout.Rect
 }
+
+// dragEvery is how often a drag applies the pointer's position. Motion arrives
+// many times a cell, and neither a split, the rail nor the facts box needs each
+// one.
+const dragEvery = 30 * time.Millisecond
 
 // dragPress decides whether a left press at x,y starts a divider drag. The
 // split's own rect is used for the ratio, so nested splits keep their full
@@ -2552,11 +2567,19 @@ func (t *tui) updatePadHover(x, y int) {
 	var zone layout.Rect
 	axis := ""
 	if t.snap != nil && !t.dragging && !t.railDragging && t.mode == "" {
-		if ds, ok := dragPress(t.snap, x, y); ok {
-			zone, axis = ds.zone, ds.axis
-		} else if railGripAt(t.snap, x, y) {
-			// The grip is a grab strip too: same hint, no divider painted.
-			zone, axis = layout.Rect{X: t.snap.Rail - 1, Y: 0, W: 1, H: t.snap.Rows - 2}, railPadAxis
+		switch {
+		case t.git != nil && gitGripAt(t.git.float.Rect, x, y):
+			// The box's grip is a grab strip too: same hint, and no divider
+			// painted through the box.
+			zone, axis = gitGripCell(t.git.float.Rect), gitPadAxis
+		case t.git != nil && gitBoxAt(t.git.float.Rect, x, y):
+			// The rest of the box is no divider and no rail either.
+		default:
+			if ds, ok := dragPress(t.snap, x, y); ok {
+				zone, axis = ds.zone, ds.axis
+			} else if railGripAt(t.snap, x, y) {
+				zone, axis = layout.Rect{X: t.snap.Rail - 1, Y: 0, W: 1, H: t.snap.Rows - 2}, railPadAxis
+			}
 		}
 	}
 	if zone == t.padZone && axis == t.padAxis {
@@ -2601,7 +2624,7 @@ func (t *tui) dragTo(x, y int, force bool) {
 	if off > t.dragSpace-5 {
 		off = t.dragSpace - 5
 	}
-	if !force && !t.dragAt.IsZero() && time.Since(t.dragAt) < 30*time.Millisecond {
+	if !force && !t.dragAt.IsZero() && time.Since(t.dragAt) < dragEvery {
 		return
 	}
 	t.dragAt = time.Now()
@@ -2644,7 +2667,7 @@ func (t *tui) railDragTo(x int, force bool) {
 	if w == t.railWidth {
 		return
 	}
-	if !force && !t.railDragAt.IsZero() && time.Since(t.railDragAt) < 30*time.Millisecond {
+	if !force && !t.railDragAt.IsZero() && time.Since(t.railDragAt) < dragEvery {
 		return
 	}
 	t.railDragAt = time.Now()
