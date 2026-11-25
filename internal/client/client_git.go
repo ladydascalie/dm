@@ -37,6 +37,11 @@ const (
 	// gitRows is how many facts the box lists: worktree, branch, head,
 	// changes, state and upstream.
 	gitRows = 6
+	// gitChromeRows is what the box needs beyond its facts: the top border, the
+	// bottom border and the status bar row it must leave alone. A terminal with
+	// fewer rows than the two together has no room to stand the box beside the
+	// bar, so no box opens there.
+	gitChromeRows = 3
 )
 
 // gitFloat is the open facts box: the window whose mark opened it and the
@@ -98,15 +103,17 @@ func (t *tui) gitOpen() string {
 
 // syncGit anchors the open box on the window's mark and closes it when that mark
 // is no longer drawn: a fold hid the row, the rail scrolled it out, the list
-// shrank or the rail went thin. It reads the row through the same rule the hit
-// test does, so the box and the mark cannot part.
+// shrank or the rail went thin. A terminal too short to stand the box beside
+// the status bar has no honest anchor either, so it closes there rather than
+// painting a border over the bar. It reads the row through the same rule the
+// hit test does, so the box and the mark cannot part.
 func (t *tui) syncGit() {
 	v := t.git
 	if v == nil {
 		return
 	}
 	row := -1
-	if t.snap != nil {
+	if t.snap != nil && t.snap.Rows >= gitRows+gitChromeRows {
 		row = rail.RailGitMarkRow(t.snap, v.window, t.railOff)
 	}
 	if row < 0 {
@@ -133,8 +140,10 @@ func (t *tui) syncGit() {
 
 // gitRect is the box's interior rect: its left edge one cell right of the rail
 // and its top edge on the row that owns the mark, clamped so the box stays on
-// the terminal at the bottom and the right. The box opens over the layout and
-// never over the rail, so the mark and its row stay readable.
+// the terminal at the bottom and the right. The bottom clamp keeps the box's
+// bottom border on Rows-2 at most, because Rows-1 is the status bar. The box
+// opens over the layout and never over the rail, so the mark and its row stay
+// readable.
 func gitRect(snap *wire.Snapshot, th theme.Theme, it rail.RailItem, row int) layout.Rect {
 	// The rect is the interior and the border sits one cell out on every side,
 	// so the outside box is boxW by gitRows+2 and its left border lands on the
@@ -158,8 +167,11 @@ func gitRect(snap *wire.Snapshot, th theme.Theme, it rail.RailItem, row int) lay
 		boxW = 3
 	}
 	w := boxW - 2
+	// The box's outside height is h plus both borders, and the status bar owns
+	// the terminal's last row, so the lowest its top edge may stand is
+	// Rows-(h+3).
 	y := row
-	if max := snap.Rows - (h + 2); y > max {
+	if max := snap.Rows - (h + gitChromeRows); y > max {
 		y = max
 	}
 	if y < 0 {
@@ -206,11 +218,14 @@ func gitLabel(it rail.RailItem) string {
 }
 
 // gitHint is the box's bottom border: how the box leaves, in the voice the ask
-// float's hint bar uses. esc keeps its cells on a narrow border.
+// float's hint bar uses. esc and the mark are the two ways the box always
+// offers, and the two together fill the narrowest border exactly, so neither is
+// ever dropped: a click on the mark that opened the box closes it again. esc
+// keeps a Keep so it survives even a row shorter than the minimum.
 func gitHint() *hintbar.Bar {
 	return &hintbar.Bar{Hints: []hintbar.Hint{
 		{Keys: []string{"esc"}, Label: "close", Keep: true},
-		{Keys: []string{"click"}, Label: "elsewhere"},
+		{Keys: []string{"click"}, Label: "mark"},
 	}}
 }
 

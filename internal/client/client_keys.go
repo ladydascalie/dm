@@ -227,8 +227,11 @@ func (t *tui) hintedItems(items []menuItem) []menuItem {
 }
 
 // openMenuAt places a menu with its title and items at a zero-based terminal
-// point, clamped to the screen, and takes over input.
+// point, clamped to the screen, and takes over input. One surface at a time: a
+// menu takes the desk, so the git facts box stands down rather than being
+// painted over by the menu's rows.
 func (t *tui) openMenuAt(title string, items []menuItem, x, y int) {
+	t.closeGitFloat()
 	w := 34
 	if w > t.snap.Cols-2 {
 		w = t.snap.Cols - 2

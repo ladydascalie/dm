@@ -2196,11 +2196,18 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			return
 		}
 		if ev.btn&3 == 0 && ev.btn&64 == 0 && !ev.release {
-			// Left press: a row runs, an outside point closes the menu and
-			// keeps going, so one click both dismisses and focuses.
+			// Left press: a menu row runs. A press on a git mark belongs to
+			// the menu, so it puts the menu away and opens nothing: the mark's
+			// box waits for the next press rather than toggling on the click
+			// that dismissed the menu. Any other outside point closes the menu
+			// and keeps going, so one click both dismisses and focuses.
 			if row >= 0 {
 				t.menuPick(row)
 				t.swallowRelease = true
+				return
+			}
+			if rail.RailGitMarkAt(t.snap, x, y, t.railOff) != "" {
+				t.closeMenu()
 				return
 			}
 			if inside {

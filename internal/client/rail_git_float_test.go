@@ -6,6 +6,7 @@ package client
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -91,14 +92,21 @@ func gitMarkClick(tui *tui, y int) {
 	tui.handleMouse(mouseEvent{btn: 0, release: true, x: x, y: y + 1})
 }
 
-// gitScreen replays one frame into a terminal, so a test reads what the box
-// painted and where.
-func gitScreen(tui *tui) *vt.Term {
-	tui.out.(*bytes.Buffer).Reset()
+// gitPaint draws one frame into term, so a test replays a sequence the way the
+// terminal sees it.
+func gitPaint(tui *tui, term *vt.Term) {
+	buf := tui.out.(*bytes.Buffer)
+	buf.Reset()
 	tui.draw()
-	term := vt.NewTerm(tui.snap.Cols, tui.snap.Rows)
-	term.Write(tui.out.(*bytes.Buffer).Bytes())
+	term.Write(buf.Bytes())
 	term.Flush()
+}
+
+// gitScreen replays one frame into a fresh terminal, so a test reads what the
+// box painted and where.
+func gitScreen(tui *tui) *vt.Term {
+	term := vt.NewTerm(tui.snap.Cols, tui.snap.Rows)
+	gitPaint(tui, term)
 	return term
 }
 
@@ -272,7 +280,9 @@ func TestGitFloatClickElsewhereCloses(t *testing.T) {
 // scroll takes the row off the rail.
 func TestGitFloatRailScrollCloses(t *testing.T) {
 	t.Parallel()
-	tui, _ := gitFloatTUI(t, 100, 6, 20)
+	// Nine rows is the shortest terminal the box stands on, and the list runs
+	// past the seven item rows it leaves, so a wheel turn takes the mark off.
+	tui, _ := gitFloatTUI(t, 100, 9, 20)
 	row := rail.RailGitMarkRow(tui.snap, "w1", 0)
 	if row != 1 {
 		t.Fatalf("w1 mark row = %d, want 1", row)
@@ -453,5 +463,239 @@ func TestGitFloatWidthCapAndElision(t *testing.T) {
 		if row := gitRowText(term, rect.Y+i, rect.X, rect.W); !strings.HasPrefix(row, " ") {
 			t.Fatalf("fact row %d = %q, want a keyed row", i, row)
 		}
+	}
+}
+
+// gitSweepSnap is a rail of windows inside one repository, more of them than any
+// sweep rail can show, so the lowest drawn mark is always there to open.
+func gitSweepSnap(cols, rows, railWidth int) *wire.Snapshot {
+	snap := &wire.Snapshot{
+		Cols: cols, Rows: rows, Rail: railWidth,
+		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
+	}
+	snap.Panes = []wire.PaneInfo{{ID: "w1p1"}}
+	for i := 0; i < 8; i++ {
+		snap.All = append(snap.All, wire.AllPane{
+			ID:        "w1p" + strconv.Itoa(i+1),
+			Name:      "p" + strconv.Itoa(i+1),
+			Workspace: "s1", WorkspaceName: "main",
+			Window: "w" + strconv.Itoa(i+1), WindowName: "win" + strconv.Itoa(i+1),
+			WorkspaceActive: true, WindowActive: true,
+			WorkspaceUnfolded: true, WindowUnfolded: true,
+			Cwd: "/work/wt-" + strconv.Itoa(i+1), Root: "/work/wt-" + strconv.Itoa(i+1),
+			Worktree: "wt-" + strconv.Itoa(i+1), Branch: "b/w" + strconv.Itoa(i+1),
+			InRepo: true, Head: "abc1234", HeadSubject: "sweep the rail",
+			Upstream: "origin/main", Ahead: 1,
+		})
+	}
+	return snap
+}
+
+// gitLowestMark is the window whose mark sits on the lowest item row the rail
+// draws, and that row.
+func gitLowestMark(t *testing.T, snap *wire.Snapshot) (string, int) {
+	t.Helper()
+	for y := snap.Rows - 3; y >= 0; y-- {
+		if w := rail.RailGitMarkAt(snap, snap.Rail-3, y, 0); w != "" {
+			return w, y
+		}
+	}
+	t.Fatalf("the rail draws no mark: %+v", snap)
+	return "", -1
+}
+
+// TestGitFloatStatusBarBoundary proves the box leaves the status bar alone and
+// closes where it cannot. Nine rows is the shortest terminal that stands the
+// box: its bottom border lands on Rows-2 and the bar keeps every cell. Eight
+// rows has no honest anchor, so the mark opens nothing at all.
+func TestGitFloatStatusBarBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		rows int
+		open bool
+	}{
+		{gitRows + gitChromeRows, true},
+		{gitRows + gitChromeRows - 1, false},
+	} {
+		tui, _ := gitFloatTUI(t, 100, tc.rows, 20)
+		row := rail.RailGitMarkRow(tui.snap, "w1", 0)
+		if row < 0 {
+			t.Fatalf("rows %d: the fixture draws no mark for w1", tc.rows)
+		}
+		gitMarkClick(tui, row)
+		if !tc.open {
+			if tui.git != nil || len(tui.floats) != 0 {
+				t.Fatalf("rows %d: the box opened on a terminal too short for it: %+v",
+					tc.rows, tui.git)
+			}
+			continue
+		}
+		if tui.git == nil {
+			t.Fatalf("rows %d: the mark opened no box", tc.rows)
+		}
+		rect := tui.git.float.Rect
+		if got := rect.Y + rect.H; got != tc.rows-2 {
+			t.Fatalf("rows %d: bottom border row = %d, want exactly %d",
+				tc.rows, got, tc.rows-2)
+		}
+		// The status bar keeps every cell it painted before the box opened.
+		term := gitScreen(tui)
+		before := gitRowText(term, tc.rows-1, 0, tui.snap.Cols)
+		tui.closeGitFloat()
+		gitPaint(tui, term)
+		if after := gitRowText(term, tc.rows-1, 0, tui.snap.Cols); after != before {
+			t.Fatalf("rows %d: the box painted on the status bar: %q, want %q",
+				tc.rows, after, before)
+		}
+	}
+}
+
+// TestGitFloatGeometrySweep holds the box's frame rules across rail widths,
+// terminal widths and row counts: it stays on the terminal at the right, its
+// bottom border never reaches the status bar, it never covers the rail's own
+// cells, and a terminal too short to stand it opens nothing.
+func TestGitFloatGeometrySweep(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	for _, cols := range []int{20, 47, 74, 101, 160} {
+		maxRail := layout.MaxRail(cols)
+		for railWidth := 5; railWidth <= maxRail; railWidth++ {
+			for _, rows := range []int{8, 9, 12, 17, 33} {
+				snap := gitSweepSnap(cols, rows, railWidth)
+				tui := &tui{snap: snap, vts: map[string]*vt.Term{}, out: &bytes.Buffer{}}
+				window, row := gitLowestMark(t, snap)
+				gitMarkClick(tui, row)
+				if rows < gitRows+gitChromeRows {
+					if tui.git != nil || len(tui.floats) != 0 {
+						t.Fatalf("%dx%d rail %d: the box opened on a terminal too short for it",
+							cols, rows, railWidth)
+					}
+					continue
+				}
+				if tui.git == nil || tui.git.window != window {
+					t.Fatalf("%dx%d rail %d: the mark on row %d opened %+v, want %q",
+						cols, rows, railWidth, row, tui.git, window)
+				}
+				rect := tui.git.float.Rect
+				if got := rect.Y + rect.H; got > rows-2 {
+					t.Fatalf("%dx%d rail %d: bottom border row = %d, past the status bar at %d",
+						cols, rows, railWidth, got, rows-1)
+				}
+				if got := rect.X + rect.W; got > cols-1 {
+					t.Fatalf("%dx%d rail %d: right border column = %d, past the terminal at %d",
+						cols, rows, railWidth, got, cols-1)
+				}
+				if got := rect.X - 1; got < railWidth {
+					t.Fatalf("%dx%d rail %d: box left border = %d, over the rail",
+						cols, rows, railWidth, got)
+				}
+				// The frame leaves the rail's own cells as the rail painted
+				// them: the grip strip's last column belongs to the divider,
+				// so the rail's cells are columns 0..Rail-2 through the band's
+				// rows.
+				frame := gitScreen(tui)
+				var railBuf bytes.Buffer
+				th := tui.theme()
+				rail.DrawRail(&railBuf, th, snap, tui.glyphSet(), rail.Paint{
+					Off: tui.railOff, Hover: tui.railHoverRow(), Drop: tui.railDrop(),
+					Open: tui.gitOpen(),
+				})
+				ref := vt.NewTerm(cols, rows)
+				ref.Write(railBuf.Bytes())
+				ref.Flush()
+				for y := 0; y < rows-1; y++ {
+					for x := 0; x < railWidth-1; x++ {
+						got, want := termCell(frame, x, y), termCell(ref, x, y)
+						if got.Char != want.Char || got.FG != want.FG || got.BG != want.BG {
+							t.Fatalf("%dx%d rail %d: the box painted the rail cell %d,%d: %+v, want %+v",
+								cols, rows, railWidth, x, y, got, want)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestGitFloatMenuTakesTheDesk proves one surface at a time in both directions:
+// opening the window row's menu takes the box down and leaves none of it
+// painted, and a press on the mark while the menu is up puts the menu away and
+// opens nothing, so the next press opens the box.
+func TestGitFloatMenuTakesTheDesk(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	tui, _ := gitFloatTUI(t, 100, 16, 20)
+	gitMarkClick(tui, rail.RailGitMarkRow(tui.snap, "w1", 0))
+	if tui.git == nil {
+		t.Fatal("the mark click opened no box")
+	}
+	rect := tui.git.float.Rect
+	if row := gitRowText(gitScreen(tui), rect.Y, rect.X, rect.W); !strings.Contains(row, "worktree") {
+		t.Fatalf("frame with the box open = %q, want a fact row", row)
+	}
+
+	// The window row's menu takes the desk.
+	tui.handleMouse(mouseEvent{btn: 2, x: 5, y: 2})
+	if tui.mode != "menu" || tui.menu == nil {
+		t.Fatalf("right press on the window row: mode=%q menu=%+v", tui.mode, tui.menu)
+	}
+	if tui.git != nil || len(tui.floats) != 0 {
+		t.Fatalf("the menu left the box up: git=%+v floats=%+v", tui.git, tui.floats)
+	}
+	// No border and no fact of the box is painted: a session that never opened
+	// it draws the same screen, down to the cell.
+	other, _ := gitFloatTUI(t, 100, 16, 20)
+	other.handleMouse(mouseEvent{btn: 2, x: 5, y: 2})
+	if a, b := screenString(gitScreen(tui)), screenString(gitScreen(other)); a != b {
+		t.Fatalf("the box is still painted under the menu:\n%s\nwant\n%s", a, b)
+	}
+
+	// A press on the mark under the menu puts the menu away and opens nothing.
+	markX := tui.snap.Rail - 2
+	tui.handleMouse(mouseEvent{btn: 0, x: markX, y: 2})
+	if tui.mode != "" || tui.menu != nil {
+		t.Fatalf("the mark press left the menu up: mode=%q", tui.mode)
+	}
+	if tui.git != nil || len(tui.floats) != 0 {
+		t.Fatalf("the press that dismissed the menu opened the box: %+v", tui.git)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: markX, y: 2})
+	// The next press opens it.
+	tui.handleMouse(mouseEvent{btn: 0, x: markX, y: 2})
+	if tui.git == nil || tui.git.window != "w1" {
+		t.Fatalf("the next mark press opened %+v, want w1", tui.git)
+	}
+}
+
+// TestGitHintNamesTheMark proves the bottom border says how the mark's own box
+// closes, and that the whole bar fits the box's narrowest bottom row.
+func TestGitHintNamesTheMark(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	// The narrowest box: the outside floor, both borders, and the two cells the
+	// border bar keeps clear of the corners.
+	width := gitMinCols - 4
+	bar := gitHint()
+	text := bar.Text(width, th)
+	for _, want := range []string{"esc", "close", "click", "mark"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("hint = %q, want it to name %q", text, want)
+		}
+	}
+	if got := bar.Cells(width, th); got > width {
+		t.Fatalf("hint = %q at %d cells, wider than the bottom row allows", text, got)
+	}
+
+	// The narrowest box paints the whole bar on its bottom border.
+	tui, _ := gitFloatTUI(t, 20+gitMinCols, 12, 20)
+	gitMarkClick(tui, rail.RailGitMarkRow(tui.snap, "w1", 0))
+	if tui.git == nil {
+		t.Fatal("the mark opened no box")
+	}
+	rect := tui.git.float.Rect
+	if got := rect.W + 2; got != gitMinCols {
+		t.Fatalf("box width = %d, want the floor %d", got, gitMinCols)
+	}
+	border := gitRowText(gitScreen(tui), rect.Y+rect.H, rect.X-1, rect.W+2)
+	if !strings.Contains(border, "click") || !strings.Contains(border, "mark") ||
+		!strings.Contains(border, "esc") {
+		t.Fatalf("bottom border = %q, want the whole hint", border)
 	}
 }
