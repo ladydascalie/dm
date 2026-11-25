@@ -6,6 +6,8 @@ package client
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -213,25 +215,30 @@ func TestGitFloatEscCloses(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
-// TestGitFloatEscBeatsTheMenu proves esc reaches the facts box before an overlay
-// under it: the box closes and the menu stays up.
-func TestGitFloatEscBeatsTheMenu(t *testing.T) {
+// TestGitFloatEscBeatsTheRenamePrompt proves esc reaches the facts box before a
+// surface that can stand with it: the box closes and the prompt keeps its mode.
+// Delete the box's esc branch from processInput and the prompt takes the key, so
+// this test fails.
+func TestGitFloatEscBeatsTheRenamePrompt(t *testing.T) {
 	t.Parallel()
 	tui, got := gitFloatTUI(t, 100, 12, 20)
 	gitMarkClick(tui, rail.RailGitMarkRow(tui.snap, "w1", 0))
-	// A right press on the window row opens its menu over the open box.
-	tui.handleMouse(mouseEvent{btn: 2, x: 5, y: 2})
-	if tui.mode != "menu" || tui.menu == nil {
-		t.Fatalf("right press on the window row: mode=%q menu=%+v", tui.mode, tui.menu)
+	if tui.git == nil {
+		t.Fatal("the mark click opened no box")
+	}
+	tui.openRenamePrompt()
+	if tui.mode != "rename" {
+		t.Fatalf("the prompt opened mode %q, want rename", tui.mode)
 	}
 	testutil.NoMsg(t, got)
 	feed(tui, "\x1b")
 	if tui.git != nil {
 		t.Fatalf("esc left the facts box open: %+v", tui.git)
 	}
-	if tui.mode != "menu" || tui.menu == nil {
-		t.Fatalf("esc closed the menu under the box: mode=%q", tui.mode)
+	if tui.mode != "rename" {
+		t.Fatalf("esc closed the prompt under the box: mode=%q", tui.mode)
 	}
+	testutil.NoMsg(t, got)
 }
 
 // TestGitFloatFoldCloses proves a fold that stops drawing the row closes the
@@ -697,5 +704,70 @@ func TestGitHintNamesTheMark(t *testing.T) {
 	if !strings.Contains(border, "click") || !strings.Contains(border, "mark") ||
 		!strings.Contains(border, "esc") {
 		t.Fatalf("bottom border = %q, want the whole hint", border)
+	}
+}
+
+// gitDeskSurface is one surface that owns the desk, with the way a client opens
+// it.
+type gitDeskSurface struct {
+	name string
+	open func(t *tui)
+}
+
+// gitDeskSurfaces is the five surfaces the one-at-a-time rule covers, each with
+// its own open path.
+func gitDeskSurfaces() []gitDeskSurface {
+	return []gitDeskSurface{
+		{"dashboard", func(t *tui) { openSwitcher(t) }},
+		{"palette", func(t *tui) { openCommandPalette(t) }},
+		{"help", func(t *tui) { openKeymapView(t) }},
+		{"sessions", func(t *tui) { t.openPicker() }},
+		{"layout", func(t *tui) { openLayoutSwitcher(t) }},
+	}
+}
+
+// TestGitFloatDeskSurfacesTakeItDown proves one surface at a time across every
+// overlay that owns the desk. Opening one closes the facts box, and the frame
+// carries no cell of it: the screen a session that never opened the box paints
+// is the screen the reader gets, down to the cell.
+func TestGitFloatDeskSurfacesTakeItDown(t *testing.T) {
+	// The session picker reads the state directory, so the test owns one and
+	// plants a session in it.
+	state := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(state, "sessions", "work"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DM_STATE", state)
+	for _, surface := range gitDeskSurfaces() {
+		t.Run(surface.name, func(t *testing.T) {
+			// opened clicked the mark and left the box up; plain clicked the
+			// same mark and put the box away, so both carry the same pointer
+			// and the same rail hover, and the box is the only difference.
+			opened, _ := gitFloatTUI(t, 100, 16, 20)
+			row := rail.RailGitMarkRow(opened.snap, "w1", 0)
+			gitMarkClick(opened, row)
+			if opened.git == nil {
+				t.Fatal("the mark click opened no box")
+			}
+			surface.open(opened)
+			if opened.git != nil {
+				t.Fatalf("the %s left the box up: %+v", surface.name, opened.git)
+			}
+			for _, f := range opened.floats {
+				if f.ID == gitFloatID {
+					t.Fatalf("the %s left the facts float in the stack", surface.name)
+				}
+			}
+
+			plain, _ := gitFloatTUI(t, 100, 16, 20)
+			gitMarkClick(plain, rail.RailGitMarkRow(plain.snap, "w1", 0))
+			plain.closeGitFloat()
+			surface.open(plain)
+
+			if a, b := screenString(gitScreen(opened)), screenString(gitScreen(plain)); a != b {
+				t.Fatalf("the box is still painted under the %s:\n%s\nwant\n%s",
+					surface.name, a, b)
+			}
+		})
 	}
 }

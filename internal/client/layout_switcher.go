@@ -84,6 +84,9 @@ func openLayoutSwitcher(t *tui) {
 	if len(panes) == 0 {
 		return
 	}
+	// The layout palette takes the desk, so the facts box stands down under
+	// it.
+	t.takeDesk()
 	l := &layoutSwitcher{panes: panes, focus: t.snap.Focus}
 	l.sel = l.currentRow(t.snap)
 	t.lsw = l

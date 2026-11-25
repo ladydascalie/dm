@@ -92,6 +92,15 @@ func (t *tui) closeGitFloat() {
 	t.dirty = true
 }
 
+// takeDesk hands the desk to a surface that owns it: the git facts box stands
+// down rather than being painted through the surface's rows. Every open path
+// that takes the desk calls this one helper, so the rule is stated once and the
+// surfaces cannot drift apart. The ask float is left alone: it is added to the
+// float stack after the box, so it paints on top of it and needs no hand-over.
+func (t *tui) takeDesk() {
+	t.closeGitFloat()
+}
+
 // gitOpen is the window whose git mark the box has open, "" when none, so the
 // rail inverts one mark and never two.
 func (t *tui) gitOpen() string {

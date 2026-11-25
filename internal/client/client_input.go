@@ -2803,6 +2803,8 @@ func (t *tui) openPicker() {
 		t.disarm()
 		return
 	}
+	// The session list takes the desk, so the facts box stands down under it.
+	t.takeDesk()
 	t.sessions = sessions
 	t.sel = 0
 	for i, s := range sessions {
