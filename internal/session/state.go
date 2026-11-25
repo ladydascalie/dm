@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -388,6 +389,36 @@ func (st *State) Save() error {
 	return nil
 }
 
+// checkLoadedTree refuses a nil workspace, window or pane. A JSON null in a
+// hand-edited or foreign-written state file unmarshals to a nil pointer, and
+// every pass that follows (the repair drops, the id migration, the grouping,
+// the numeric window rename) dereferences the tree. The check therefore runs
+// once here, where the file is accepted, not at each use. Naming the collection
+// and the index turns a panic into a diagnostic the operator can act on.
+func (st *State) checkLoadedTree() error {
+	for i, ws := range st.Workspaces {
+		if ws == nil {
+			return fmt.Errorf("%s: workspaces[%d] is null", st.StatePath(), i)
+		}
+		for j, w := range ws.Windows {
+			if w == nil {
+				return fmt.Errorf("%s: workspaces[%d].windows[%d] is null", st.StatePath(), i, j)
+			}
+		}
+	}
+	var nullPanes []string
+	for id, ps := range st.Panes {
+		if ps == nil {
+			nullPanes = append(nullPanes, id)
+		}
+	}
+	if len(nullPanes) > 0 {
+		sort.Strings(nullPanes)
+		return fmt.Errorf("%s: panes[%q] is null", st.StatePath(), nullPanes[0])
+	}
+	return nil
+}
+
 // LoadStateAt reads the state file for name from the state tree rooted at
 // root. The returned state carries root, so its own Save and path methods
 // stay inside that tree.
@@ -404,6 +435,9 @@ func LoadStateAt(root, name string) (*State, error) {
 		st.Panes = map[string]*PaneState{}
 	}
 	st.Name = name
+	if err := st.checkLoadedTree(); err != nil {
+		return nil, err
+	}
 	if n := st.dropBadBoxEntries(); n > 0 {
 		log.Printf("box: dropped %d invalid entries on load", n)
 	}

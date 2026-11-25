@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -790,5 +791,51 @@ func TestLoadStateDropsBadAsks(t *testing.T) {
 	}
 	if len(got.Ask) != 1 || got.Ask[0].ID != "a1" {
 		t.Fatalf("loaded asks = %+v, want only a1", got.Ask)
+	}
+}
+
+// writeRawState writes body as the state file for name, so a test can hand the
+// loader a shape no State literal produces: encoding/json turns a null element
+// into a nil pointer.
+func writeRawState(t *testing.T, root, name, body string) {
+	t.Helper()
+	if err := os.MkdirAll(paths.SessionDirAt(root, name), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StatePathAt(root, name), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestLoadStateRejectsNullElements proves the loader refuses a null workspace,
+// window or pane instead of panicking: a hand edit or a foreign writer gets a
+// diagnostic that names the collection and the index.
+func TestLoadStateRejectsNullElements(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"workspace no ids", `{"workspaces":[null]}`, "workspaces[0]"},
+		{"workspace v2", `{"idVersion":2,"workspaces":[null]}`, "workspaces[0]"},
+		{"window no ids", `{"workspaces":[{"id":"s1","name":"main","windows":[null]}]}`, "workspaces[0].windows[0]"},
+		{"window v2", `{"idVersion":2,"workspaces":[{"id":"s1","name":"main","windows":[null]}]}`, "workspaces[0].windows[0]"},
+		{"pane no ids", `{"panes":{"w1p1":null}}`, `panes["w1p1"]`},
+		{"pane v2", `{"idVersion":2,"panes":{"w1p1":null}}`, `panes["w1p1"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			writeRawState(t, root, "nullified", tc.body)
+			st, err := LoadStateAt(root, "nullified")
+			if err == nil {
+				t.Fatalf("LoadStateAt succeeded with %+v, want an error", st)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want it to name %s", err, tc.want)
+			}
+		})
 	}
 }
