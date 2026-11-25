@@ -130,13 +130,19 @@ func (s *server) paneHistory(id string, n int) ([]string, error) {
 	}
 	// The tall replay must use the pane's own PTY size, not its layout rect:
 	// a pane in an inactive workspace keeps its 80x24 PTY until it is shown.
+	// Copy the size under the lock, because syncSizes writes it there; a
+	// pointer kept past the unlock reads a torn Cols and Rows.
 	s.mu.Lock()
 	ps := s.st.Panes[id]
+	width, height := 0, 0
+	if ps != nil {
+		width, height = ps.Cols, ps.Rows
+	}
 	s.mu.Unlock()
-	if ps == nil || ps.Cols <= 0 || ps.Rows <= 0 {
+	if width <= 0 || height <= 0 {
 		return nil, fmt.Errorf("no pane %q", id)
 	}
-	r := layout.Rect{W: ps.Cols, H: ps.Rows}
+	r := layout.Rect{W: width, H: height}
 	rp := readPaneReplay(s.st, id)
 	if !rp.ok {
 		return nil, fmt.Errorf("no pane %q", id)
@@ -234,20 +240,18 @@ func (s *server) writeTo(id, text string, o writeOpts) error {
 		return fmt.Errorf("no pane %q", id)
 	}
 	s.mu.Lock()
-	dsts := s.syncPaneIDsLocked(id)
+	dsts, synced := s.syncDestsLocked(id)
 	s.mu.Unlock()
-	if len(dsts) == 0 {
+	if !synced {
 		err := pc.send(wire.Msg{Action: "write", Msg: text, Enter: o.enter, Paste: o.paste})
 		if err != nil {
 			s.rearmPaneWatcher(id)
 		}
 		return err
 	}
-	for _, pid := range dsts {
-		if p := s.panes[pid]; p != nil {
-			if err := p.send(wire.Msg{Action: "write", Msg: text, Enter: o.enter, Paste: o.paste}); err != nil {
-				s.rearmPaneWatcher(pid)
-			}
+	for _, p := range dsts {
+		if err := p.send(wire.Msg{Action: "write", Msg: text, Enter: o.enter, Paste: o.paste}); err != nil {
+			s.rearmPaneWatcher(p.id)
 		}
 	}
 	return nil
@@ -271,29 +275,45 @@ func (s *server) syncPaneIDsLocked(id string) []string {
 	return nil
 }
 
+// syncDestsLocked resolves a synced write's destinations to their live pane
+// connections, in tree order, so the caller sends after dropping the lock. A
+// window that is not synced returns false; the caller then writes to the
+// target alone. The caller holds s.mu.
+func (s *server) syncDestsLocked(id string) ([]*paneConn, bool) {
+	ids := s.syncPaneIDsLocked(id)
+	if ids == nil {
+		return nil, false
+	}
+	dsts := make([]*paneConn, 0, len(ids))
+	for _, pid := range ids {
+		if pc := s.panes[pid]; pc != nil {
+			dsts = append(dsts, pc)
+		}
+	}
+	return dsts, true
+}
+
 // sendKeys delivers a keys frame to the pane named by id, or to every live
 // pane of its window, in tree order, when that window is synced. The target
 // pane must be live, exactly as the single-pane path requires.
 func (s *server) sendKeys(id string, keys []byte) error {
 	s.mu.Lock()
 	pc := s.panes[id]
-	dsts := s.syncPaneIDsLocked(id)
+	dsts, synced := s.syncDestsLocked(id)
 	s.mu.Unlock()
 	if pc == nil {
 		return fmt.Errorf("no pane %q", id)
 	}
-	if len(dsts) == 0 {
+	if !synced {
 		err := pc.send(wire.Msg{Action: "write", Keys: keys})
 		if err != nil {
 			s.rearmPaneWatcher(id)
 		}
 		return err
 	}
-	for _, pid := range dsts {
-		if p := s.panes[pid]; p != nil {
-			if err := p.send(wire.Msg{Action: "write", Keys: keys}); err != nil {
-				s.rearmPaneWatcher(pid)
-			}
+	for _, p := range dsts {
+		if err := p.send(wire.Msg{Action: "write", Keys: keys}); err != nil {
+			s.rearmPaneWatcher(p.id)
 		}
 	}
 	return nil
@@ -429,19 +449,46 @@ func (s *server) workspaceList() []wsInfo {
 	return out
 }
 
-// findPane locates a pane anywhere in the session. Panes outside the active
-// window are still addressable, which is what a background layout needs.
-func (s *server) findPane(id string) (*session.Workspace, *session.Window, bool) {
+// panePlace is the locked copy of where a pane sits in the session: the
+// workspace and window ids and names, and the pane's saved name and cwd. It
+// is a value, not a pointer into the state, so a caller can build a reply
+// from it after the lock is gone without racing a later mutation. Saved is
+// false when the pane has no PaneState yet, and the reply then omits the
+// name and cwd as it always has.
+type panePlace struct {
+	WorkspaceID   string
+	WorkspaceName string
+	WindowID      string
+	WindowName    string
+	Name          string
+	Cwd           string
+	Saved         bool
+}
+
+// findPane locates a pane anywhere in the session and copies what a caller
+// needs under one lock section. Panes outside the active window are still
+// addressable, which is what a background layout needs.
+func (s *server) findPane(id string) (panePlace, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, ws := range s.st.Workspaces {
 		for _, w := range ws.Windows {
-			if layout.FindLeaf(w.Root, id) {
-				return ws, w, true
+			if !layout.FindLeaf(w.Root, id) {
+				continue
 			}
+			p := panePlace{
+				WorkspaceID:   ws.ID,
+				WorkspaceName: ws.Name,
+				WindowID:      w.ID,
+				WindowName:    w.Name,
+			}
+			if ps := s.st.Panes[id]; ps != nil {
+				p.Name, p.Cwd, p.Saved = ps.Name, ps.Cwd, true
+			}
+			return p, true
 		}
 	}
-	return nil, nil, false
+	return panePlace{}, false
 }
 
 func (s *server) focusWindow(id string) error {
