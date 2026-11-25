@@ -317,6 +317,9 @@ func (s *server) paneExited(id string) {
 	// A shelf member's exit leaves the shelf: a row naming a dead id would
 	// focus nothing. The active index follows the member it named.
 	s.st.DropShelf(id)
+	// The pane's asks go with it, answered or not: nobody can answer a dead
+	// pane, so a listed ask would be a ghost.
+	asksDropped := s.dropPaneAsksLocked(id)
 
 	found, emptyWindow := false, false
 	// The window this exit empties, so the shelf can refill it below.
@@ -357,6 +360,10 @@ func (s *server) paneExited(id string) {
 		// path a close-pane kill takes. The daemon's own cleanup removes only
 		// the socket, so remove the socket and its pid file here: a close must
 		// not leave the pid file in the session dir.
+		if asksDropped {
+			_ = s.st.Save()
+			s.pushAskLocked()
+		}
 		s.mu.Unlock()
 		_ = os.Remove(old)
 		_ = os.Remove(old + ".pid")

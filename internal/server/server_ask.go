@@ -80,6 +80,9 @@ func (s *server) askOpen(pane string, req *ask.OpenReq) (string, error) {
 			return "", ask.Refuse(ask.CodeExists, "ask %q already covers tool call %q", s.st.Ask[i].ID, req.ToolCallID)
 		}
 	}
+	if err := ask.CheckRoom(s.st.Ask, req); err != nil {
+		return "", err
+	}
 	id := s.st.NewAskID()
 	s.st.Ask = append(s.st.Ask, ask.Request{
 		ID:         id,
@@ -91,6 +94,35 @@ func (s *server) askOpen(pane string, req *ask.OpenReq) (string, error) {
 	err := s.st.Save()
 	s.pushAskLocked()
 	return id, err
+}
+
+// dropPaneAsksLocked drops every ask a pane owns, answered or not, and reports
+// whether it removed one. A closed or lost pane can no longer answer, so an ask
+// left behind would be a ghost: still listed, still in the state file, still
+// answerable from the phone. The caller holds s.mu and saves the state; the
+// snapshot is the caller's push.
+func (s *server) dropPaneAsksLocked(pane string) bool {
+	if pane == "" || len(s.st.Ask) == 0 {
+		return false
+	}
+	kept := s.st.Ask[:0]
+	dropped := false
+	for _, a := range s.st.Ask {
+		if a.Pane == pane {
+			dropped = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if !dropped {
+		return false
+	}
+	s.st.Ask = kept
+	if len(s.st.Ask) == 0 {
+		s.st.Ask = nil
+	}
+	s.askWakeLocked()
+	return true
 }
 
 // askAwait parks until the ask is answered, closed or the wait passes. It holds

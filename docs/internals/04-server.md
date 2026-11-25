@@ -60,7 +60,7 @@ and a screen per pane (`resyncClient`, `server_view.go:903`); a screen is a pane
 | `server_mutate.go` | layout changes, `mutation`, `resync`, `writeTo`, `sendKeys` |
 | `server_view.go` | snapshot, size fit, `syncSizes`, screens, `reply`, `serve` |
 | `server_box.go` | box writes, waiters, subscribers, watches, trimming |
-| `server_ask.go` | the ask store: open, await, answer, close, list, and the snapshot's flattened asks |
+| `server_ask.go` | the ask store: open, await, answer, close, list, the store's cap and pane prune, and the snapshot's flattened asks |
 | `server_secrets.go` | registry, activation, proxy, cover (other sessions), type (into a pane), hydrate (to a file) |
 | `server_sync.go` | the `.dm-secrets.kdl` file the `secret-sync` action is pointed at: secrets to register, files to ingest |
 | `server_float.go` | floats and their lifetime |

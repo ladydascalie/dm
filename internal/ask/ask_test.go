@@ -338,3 +338,50 @@ func TestCheckID(t *testing.T) {
 		}
 	}
 }
+
+// TestQuestionsCost proves the cap counts the fields a snapshot carries, the
+// way the review measured it, and no others.
+func TestQuestionsCost(t *testing.T) {
+	qs := []Question{{
+		Question: "qq", Header: "hh",
+		Options: []Option{
+			{Label: "l", Description: "dd", Preview: "pp"},
+			{Label: "ll"},
+		},
+	}}
+	want := 2 + 2 + 1 + 2 + 2 + 2
+	if got := QuestionsCost(qs); got != want {
+		t.Errorf("QuestionsCost = %d, want %d", got, want)
+	}
+	list := []Request{{Questions: qs}, {Questions: []Question{{Question: "abc"}}}}
+	if got := StoreCost(list); got != want+3 {
+		t.Errorf("StoreCost = %d, want %d", got, want+3)
+	}
+}
+
+// TestCheckRoom proves the store caps refuse the ask past either bound with
+// E_FULL, and that an ask inside both bounds is accepted.
+func TestCheckRoom(t *testing.T) {
+	one := &OpenReq{ToolCallID: "t", Questions: []Question{{Question: "q"}}}
+	if err := CheckRoom(nil, one); err != nil {
+		t.Fatalf("CheckRoom of an empty store: %v", err)
+	}
+	listed := make([]Request, MaxListed)
+	for i := range listed {
+		listed[i] = Request{ID: "a", Questions: one.Questions}
+	}
+	if err := CheckRoom(listed[:MaxListed-1], one); err != nil {
+		t.Errorf("the ask before the count cap: %v", err)
+	}
+	if err := CheckRoom(listed, one); !CodeIs(err, CodeFull) {
+		t.Errorf("the ask past the count cap: err = %v, want %s", err, CodeFull)
+	}
+	opts := make([]Option, MaxOptions)
+	for i := range opts {
+		opts[i] = Option{Label: "o", Preview: strings.Repeat("p", 4096)}
+	}
+	big := &OpenReq{ToolCallID: "t", Questions: []Question{{Question: "q", Options: opts}}}
+	if err := CheckRoom(nil, big); !CodeIs(err, CodeFull) {
+		t.Errorf("the ask past the byte cap: err = %v, want %s", err, CodeFull)
+	}
+}

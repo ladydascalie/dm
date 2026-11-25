@@ -119,6 +119,8 @@ The sender column names the caller: `cli` a `dm` verb, `tui` the client, `web` t
 | `ask-list` | none | `asks` (an array of ask requests, answers included) | cli |
 | anything else | none | error `unknown action %q` (`internal/server/server_rpc.go:784`) | |
 
+The ask store is bounded: one session lists at most 64 asks carrying at most 256 KiB of question, header, option, description and preview text (`internal/ask/ask.go`), a quarter of the 1 MiB a single outbound frame may hold. An `ask-open` past either bound is refused with `E_FULL` and leaves the store untouched. A closed or dead pane takes its asks with it, answered or not, so no ghost survives its pane; an answered ask is still reaped after `SettleGrace`.
+
 The layout verbs reply `none`: `focus`, `focus-window`, `focus-workspace`, `close-pane`, `close-window` and
 `close-workspace` take `target`; `focus-dir` takes `dir`; `move-window` and `move-workspace` take `target` and `dir`;
 `next-pane`, `prev-pane`, `next-window`, `prev-window`, `next-workspace` and `prev-workspace` take nothing;
