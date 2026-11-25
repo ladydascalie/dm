@@ -321,6 +321,14 @@ func TestRailGlyphPerState(t *testing.T) {
 		var b bytes.Buffer
 		rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(c.status), theme.GlyphUnicode, rail.Paint{Hover: -1})
 		out := b.String()
+		if c.status == "" || c.status == "unknown" {
+			// The rail paints no mark for a state it does not have: the cell is
+			// blank, even though RailGlyph still names the unknown form.
+			if strings.Contains(out, c.glyph) {
+				t.Fatalf("status %q still paints %q: %q", c.status, c.glyph, out)
+			}
+			continue
+		}
 		if !painted(out, c.glyph, paramOf(colour, false)) {
 			t.Fatalf("status %q not drawn as %q in %v: %q", c.status, c.glyph, colour, out)
 		}
@@ -392,54 +400,51 @@ func TestRailAccent(t *testing.T) {
 	}
 }
 
-// TestRailShellHasNoStateGlyph keeps the state column blank for a pane that is
-// not an agent: it has no status to report, so the question mark would ask
-// about nothing.
+// TestRailShellHasNoStateGlyph keeps the state cell blank for a pane with no
+// state to report, and for an agent whose state has not arrived: the question
+// mark would ask about a state the pane does not have.
 func TestRailShellHasNoStateGlyph(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	for _, status := range []string{"", "unknown"} {
-		var b bytes.Buffer
-		rail.DrawRail(&b, theme.DefaultTheme(), testutil.RailOnePane(status, "w1p1", 20, 40, 6), theme.GlyphUnicode, rail.Paint{Hover: -1})
-		vt := vt.NewTerm(40, 6)
-		vt.Write(b.Bytes())
-		vt.Flush()
-		glyph, text := termCell(vt, 9, 2).Char, termCell(vt, 11, 2).Char
-		if glyph != ' ' || text != 'w' {
-			t.Fatalf("shell row status %q = %q at 8, %q at 10: want a blank cell",
-				status, glyph, text)
+		for _, agent := range []bool{false, true} {
+			snap := testutil.RailOnePane(status, "w1p1", 20, 40, 6)
+			snap.All[0].Agent = agent
+			var b bytes.Buffer
+			rail.DrawRail(&b, theme.DefaultTheme(), snap, theme.GlyphUnicode, rail.Paint{Hover: -1})
+			vt := vt.NewTerm(40, 6)
+			vt.Write(b.Bytes())
+			vt.Flush()
+			// The state is the rail's last content cell and the name starts
+			// seven cells in, after the bar and the indent.
+			if glyph := termCell(vt, 18, 2).Char; glyph != ' ' {
+				t.Fatalf("agent=%v status %q paints %q at the margin, want a blank cell", agent, status, glyph)
+			}
+			if text := termCell(vt, 7, 2).Char; text != 'w' {
+				t.Fatalf("agent=%v status %q: the name starts %q at column 7, want w", agent, status, text)
+			}
 		}
-	}
-
-	// An agent that has not reported yet still asks with the question mark.
-	var b bytes.Buffer
-	rail.DrawRail(&b, theme.DefaultTheme(), testutil.AgentRail(""), theme.GlyphUnicode, rail.Paint{Hover: -1})
-	vt := vt.NewTerm(40, 6)
-	vt.Write(b.Bytes())
-	vt.Flush()
-	glyph := termCell(vt, 9, 2).Char
-	if glyph != '?' {
-		t.Fatalf("agent row without a status = %q at 8, want ?", glyph)
 	}
 }
 
-// TestRailAgentMarker separates agents from shells. An agent gets a bar in the
-// two cells a shell leaves blank, and its app= stands in for a missing name.
+// TestRailAgentMarker proves the full rail paints no agent mark: the state
+// glyph is the row's only icon, and a pane with no name still falls back to its
+// app and then to its id. The thin rail keeps its three cells and its marker.
 func TestRailAgentMarker(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
-	agent := testutil.RailOnePane("unknown", "", 20, 40, 6)
+	agent := testutil.RailOnePane("idle", "", 20, 40, 6)
 	agent.All[0].Agent = true
 	agent.All[0].App = "pi"
 	var b bytes.Buffer
 	rail.DrawRail(&b, theme.DefaultTheme(), agent, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out := b.String()
-	if !strings.Contains(out, "\u258e") {
-		t.Fatalf("agent row has no marker: %q", out)
+	if strings.Contains(out, "\u258e") {
+		t.Fatalf("agent row still carries the agent marker: %q", out)
 	}
 	if !strings.Contains(out, "pi") {
 		t.Fatalf("agent row does not show the app: %q", out)
 	}
 
-	shell := testutil.RailOnePane("unknown", "", 20, 40, 6)
+	shell := testutil.RailOnePane("idle", "", 20, 40, 6)
 	b.Reset()
 	rail.DrawRail(&b, theme.DefaultTheme(), shell, theme.GlyphUnicode, rail.Paint{Hover: -1})
 	out = b.String()
@@ -450,20 +455,16 @@ func TestRailAgentMarker(t *testing.T) {
 		t.Fatalf("shell row does not fall back to the pane id: %q", out)
 	}
 
-	// The thin rail keeps the marker and the glyph in their columns.
-	thin := testutil.RailOnePane("working", "alpha", layout.CollapsedRail, 40, 6)
+	// The thin rail keeps its composition: the bar, the agent glyph and the
+	// state in three cells.
+	thin := testutil.RailOnePane("idle", "pi", layout.CollapsedRail, 40, 6)
 	thin.All[0].Agent = true
 	b.Reset()
 	rail.DrawRail(&b, theme.DefaultTheme(), thin, theme.GlyphUnicode, rail.Paint{Hover: -1})
-	vt := vt.NewTerm(40, 6)
-	vt.Write(b.Bytes())
-	vt.Flush()
-	bar, glyph := termCell(vt, 1, 0).Char, termCell(vt, 2, 0).Char
-	if bar != '\u258e' || glyph != '●' {
-		t.Fatalf("thin agent row = %q at 1, %q at 2", bar, glyph)
+	if !strings.Contains(b.String(), "\u258e") {
+		t.Fatalf("the thin rail lost the agent marker: %q", b.String())
 	}
 }
-
 func TestRailHit(t *testing.T) {
 	t.Parallel()
 	snap := testutil.RailTestSnapshot(10)
@@ -616,7 +617,8 @@ func railTree(rail int) *wire.Snapshot {
 
 // TestRailWorkspaceHasNoAccent proves the rail no longer paints a workspace's
 // own hue: the project owns the colour, and an untagged workspace paints none.
-// The pane count still sits at the right edge and the gap row stays empty.
+// An open workspace paints no count, its state sits at the margin, and the gap
+// row stays empty.
 func TestRailWorkspaceHasNoAccent(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railTree(layout.DefaultRail)
@@ -640,16 +642,19 @@ func TestRailWorkspaceHasNoAccent(t *testing.T) {
 	vt := vt.NewTerm(100, 12)
 	vt.Write(b.Bytes())
 	vt.Flush()
-	// The grip strip owns the rail's last column, so the count ends one cell in.
-	count := termCell(vt, layout.DefaultRail-2, 0).Char
+	// The grip strip owns the rail's last column, so the state ends one cell in.
+	state := termCell(vt, layout.DefaultRail-2, 0).Char
 	gapRow := true
 	for x := 0; x < layout.DefaultRail; x++ {
 		if g := termCell(vt, x, 4); g.Char != 0 && g.Char != ' ' {
 			gapRow = false
 		}
+		if g := termCell(vt, x, 0); g.Char >= '0' && g.Char <= '9' {
+			t.Fatalf("the open workspace row paints the count %q at %d", g.Char, x)
+		}
 	}
-	if count != '1' {
-		t.Fatalf("workspace count at the right edge = %q, want 1", count)
+	if state != '●' {
+		t.Fatalf("workspace state at the margin = %q, want the working glyph", state)
 	}
 	if !gapRow {
 		t.Fatal("gap row is not empty")

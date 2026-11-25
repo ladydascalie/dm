@@ -30,6 +30,9 @@ func gitFloatSnap(cols, rows, railWidth int) *wire.Snapshot {
 	snap := &wire.Snapshot{
 		Cols: cols, Rows: rows, Rail: railWidth,
 		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
+		// A short label keeps the mark on the rail at the widths these tests
+		// use: the long folder name would make the ladder drop it.
+		WindowLabel: "{{.Name}}",
 	}
 	snap.Panes = []wire.PaneInfo{{ID: "w1p1", Status: "working"}}
 	snap.All = []wire.AllPane{
@@ -91,13 +94,29 @@ func gitFloatTUI(t *testing.T, cols, rows, railWidth int) (*tui, chan wire.Msg) 
 	return tui, got
 }
 
+// gitMarkCol is the column the rail paints the git mark of row y in, found
+// through the hit test so a click follows the cell rather than a fixed offset
+// from the rail's edge. It reports -1 when the row paints no mark.
+func gitMarkCol(snap *wire.Snapshot, y int) int {
+	for x := 0; x < snap.Rail; x++ {
+		if rail.RailGitMarkAt(snap, x, y, 0) != "" {
+			return x
+		}
+	}
+	return -1
+}
+
 // gitMarkClick sends one left click, press and release, on the git mark of the
-// rail row y (zero based). The glyph sits two cells before the rail's last
-// column, which the grip strip owns.
+// rail row y (zero based).
 func gitMarkClick(tui *tui, y int) {
-	x := tui.snap.Rail - 2
-	tui.handleMouse(mouseEvent{btn: 0, x: x, y: y + 1})
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: x, y: y + 1})
+	x := gitMarkCol(tui.snap, y)
+	if x < 0 {
+		return
+	}
+	// The event carries one based cells; the hit test names a zero based
+	// column.
+	tui.handleMouse(mouseEvent{btn: 0, x: x + 1, y: y + 1})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: x + 1, y: y + 1})
 }
 
 // gitPaint draws one frame into term, so a test replays a sequence the way the
@@ -166,7 +185,7 @@ func TestGitMarkClickOpensTheFloat(t *testing.T) {
 	th := tui.theme()
 	accent := vt.RGBColor(uint8(th.Palette.BarAccent.R), uint8(th.Palette.BarAccent.G), uint8(th.Palette.BarAccent.B))
 	ground := vt.RGBColor(uint8(th.Palette.RailBG.R), uint8(th.Palette.RailBG.G), uint8(th.Palette.RailBG.B))
-	if c := termCell(gitScreen(tui), tui.snap.Rail-3, row); c.BG != accent || c.FG != ground {
+	if c := termCell(gitScreen(tui), gitMarkCol(tui.snap, row), row); c.BG != accent || c.FG != ground {
 		t.Fatalf("open mark = %+v, want the glyph in the rail ground on the accent", c)
 	}
 
@@ -485,6 +504,7 @@ func gitSweepSnap(cols, rows, railWidth int) *wire.Snapshot {
 	snap := &wire.Snapshot{
 		Cols: cols, Rows: rows, Rail: railWidth,
 		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
+		WindowLabel: "{{.Name}}",
 	}
 	snap.Panes = []wire.PaneInfo{{ID: "w1p1"}}
 	for i := 0; i < 8; i++ {
@@ -511,11 +531,10 @@ func gitSweepSnap(cols, rows, railWidth int) *wire.Snapshot {
 func gitLowestMark(t *testing.T, snap *wire.Snapshot) (string, int) {
 	t.Helper()
 	for y := snap.Rows - 3; y >= 0; y-- {
-		if w := rail.RailGitMarkAt(snap, snap.Rail-3, y, 0); w != "" {
-			return w, y
+		if x := gitMarkCol(snap, y); x >= 0 {
+			return rail.RailGitMarkAt(snap, x, y, 0), y
 		}
 	}
-	t.Fatalf("the rail draws no mark: %+v", snap)
 	return "", -1
 }
 
@@ -595,6 +614,15 @@ func gitSweepCase(t *testing.T, cols, rows, railWidth int, dragged bool) {
 		tui.prefs = prefs{GitBoxCols: max(cols, gitMinCols), GitBoxRows: max(rows, gitRows)}
 	}
 	window, row := gitLowestMark(t, snap)
+	if row < 0 {
+		// The ladder dropped the mark at this width, so the row has no anchor
+		// and no press can open a box.
+		gitMarkClick(tui, snap.Rows-3)
+		if tui.git != nil || len(tui.floats) != 0 {
+			t.Fatalf("%dx%d rail %d: a rail with no mark opened a box", cols, rows, railWidth)
+		}
+		return
+	}
 	gitMarkClick(tui, row)
 	if rows < gitRows+gitChromeRows {
 		if tui.git != nil || len(tui.floats) != 0 {
@@ -693,17 +721,20 @@ func TestGitFloatMenuTakesTheDesk(t *testing.T) {
 	}
 
 	// A press on the mark under the menu puts the menu away and opens nothing.
-	markX := tui.snap.Rail - 2
-	tui.handleMouse(mouseEvent{btn: 0, x: markX, y: 2})
+	markX := gitMarkCol(tui.snap, 1)
+	if markX < 0 {
+		t.Fatal("the fixture draws no mark")
+	}
+	tui.handleMouse(mouseEvent{btn: 0, x: markX + 1, y: 2})
 	if tui.mode != "" || tui.menu != nil {
 		t.Fatalf("the mark press left the menu up: mode=%q", tui.mode)
 	}
 	if tui.git != nil || len(tui.floats) != 0 {
 		t.Fatalf("the press that dismissed the menu opened the box: %+v", tui.git)
 	}
-	tui.handleMouse(mouseEvent{btn: 0, release: true, x: markX, y: 2})
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: markX + 1, y: 2})
 	// The next press opens it.
-	tui.handleMouse(mouseEvent{btn: 0, x: markX, y: 2})
+	tui.handleMouse(mouseEvent{btn: 0, x: markX + 1, y: 2})
 	if tui.git == nil || tui.git.window != "w1" {
 		t.Fatalf("the next mark press opened %+v, want w1", tui.git)
 	}
