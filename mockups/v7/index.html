@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm rail git target · v7</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --accent:#7ac0eb; --edge:#78c8e1; --hint:#9599ae; --del:#ff7d7d;
+ --add:#78dc82; --work:#f5be50; --page:#0b0b0f; --rule:#55546a;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 26px;color:#7d8298;max-width:78ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:32px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:78ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+pre.code{margin:8px 0 0;color:#7d8298;font-size:12.5px;
+ font-family:"DejaVu Sans Mono",ui-monospace,monospace;white-space:pre}
+
+/* one terminal cell grid, shared by the rail and the float */
+.mono{font-family:"DejaVu Sans Mono",ui-monospace,monospace;font-size:13px;
+ line-height:1.4;font-variant-ligatures:none;white-space:pre;color:var(--text)}
+/* the Nerd Font mark needs the real font to draw; the page falls back to tofu
+   on a box without one, which is exactly what the ascii set exists to avoid */
+.nf{font-family:"MesloLGL Nerd Font Mono","MesloLGLDZ Nerd Font Mono",
+ "Symbols Nerd Font Mono","DejaVu Sans Mono",monospace}
+
+.rail{border-left:2px solid var(--accent);border-right:1px solid #2b2a37;
+ background:var(--bg);padding:2px 0}
+.row{display:flex;align-items:center;height:1.4em}
+.row .l{flex:0 0 auto;white-space:pre}
+.row .sp{flex:1 1 auto;min-width:1ch}
+.row .tail{flex:0 0 auto;white-space:pre;padding-right:1ch}
+.row.cur{background:var(--focus);box-shadow:inset 3px 0 0 0 var(--accent)}
+.dim{color:var(--dim)}
+.hint{color:var(--hint)}
+.acc{color:var(--accent)}
+.txt{color:var(--text)}
+.add{color:var(--add)}
+.del{color:var(--del)}
+.work{color:var(--work)}
+.bold{font-weight:700}
+.hdr{color:var(--header)}
+.bar{color:var(--accent);font-weight:700}
+
+/* the target: one glyph in a three cell hit box */
+.git{color:var(--accent);font-weight:700;padding:0 1ch;border-radius:2px}
+.git.rest{color:#6f8fa8}
+.git.hover{background:var(--hover);color:var(--accent)}
+.git.on{background:var(--accent);color:#14131a}
+
+/* the float */
+.float{border:1px solid #3b3a4d;background:#191822;box-shadow:0 6px 22px #0006;
+ padding:3px 0 4px;min-width:38ch}
+.float .frow{display:flex;gap:1ch;padding:0 1ch}
+.float .fk{flex:0 0 10ch;color:var(--dim)}
+.float .fv{flex:0 0 auto;color:var(--text)}
+.float .fh{padding:0 1ch 3px;color:var(--accent);font-weight:700;white-space:pre}
+.float .ftip{margin-top:4px;padding:3px 1ch 0;border-top:1px solid #2b2a37;
+ color:var(--hint);font-size:12.5px}
+.float .stale{color:var(--work)}
+.pointer{flex:0 0 auto;color:var(--accent)}
+
+.stage{display:flex;align-items:flex-start;gap:0}
+.caption{margin:6px 0 0;color:#6a6e82;font-size:12px}
+.cols{display:flex;gap:44px;flex-wrap:wrap;align-items:flex-start}
+
+/* the glyph table */
+table{border-collapse:collapse;font-size:13px;margin-top:6px}
+th,td{text-align:left;padding:4px 18px 4px 0;border-bottom:1px solid #23222e;
+ vertical-align:middle}
+th{color:#6a6e82;font-size:11px;letter-spacing:.09em;text-transform:uppercase;
+ font-weight:650}
+td.glyph{font-size:18px;line-height:1.2}
+.ruler{color:#4d5165;font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>dm rail · git target and float · v7</h1>
+<p class="sub">The target is a glyph now, not the word in brackets. The Nerd Font git icon when the set is nerd, <span class="acc">⎇</span> otherwise, <span class="acc">g</span> in ascii. The hit box is three cells, so the row gains four back and the mark still reads as a thing you can click.</p>
+
+<h2>1. The target, one row per glyph set</h2>
+<table>
+  <tr><th>set</th><th>mark</th><th>code point</th><th>row, 34 cells</th></tr>
+  <tr>
+    <td class="acc">nerd</td>
+    <td class="glyph nf">&#xe702;</td>
+    <td class="dim">U+E702 &nbsp;nf-dev-git</td>
+    <td class="mono"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span> <span class="sp"></span><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="git nf">&#xe702;</span></td>
+  </tr>
+  <tr>
+    <td class="acc">unicode</td>
+    <td class="glyph">&#x2387;</td>
+    <td class="dim">U+2387 &nbsp;alternative key</td>
+    <td class="mono"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span> <span class="sp"></span><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="git">&#x2387;</span></td>
+  </tr>
+  <tr>
+    <td class="acc">ascii</td>
+    <td class="glyph mono">g</td>
+    <td class="dim">0x67</td>
+    <td class="mono"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span> <span class="sp"></span><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="git">g</span></td>
+  </tr>
+</table>
+<p class="note"><b>Same pair pattern the theme already carries</b> for the fold carets and the sync mark: a <span class="acc">git-mark</span> key, a <span class="acc">nerd-git-mark</span> key, and <span class="acc">Theme.For</span> swapping the Nerd form in when the set is nerd. The ascii form comes from the existing <span class="acc">asciiGlyphs</span> table, so a box with no Nerd Font still gets a mark. <span class="acc">internal/theme/glyphs_test.go</span> already asserts one cell per glyph, and all three pass it.</p>
+
+<h2>2. Three states of the target</h2>
+<div class="cols">
+  <div class="mono rail" style="width:34ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="git rest nf">&#xe702;</span></span></div>
+  </div>
+  <p class="caption">rest. The mark is quiet, the counts carry the reading.<br>The dot and the counts stay the only colour on the row.</p>
+
+  <div class="mono rail" style="width:34ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="git hover nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="git rest nf">&#xe702;</span></span></div>
+  </div>
+  <p class="caption">hover. The three cell box paints, the glyph goes full accent.<br>Same hit box the pane row already has.</p>
+
+  <div class="mono rail" style="width:34ch">
+    <div class="row cur"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="git on nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="git rest nf">&#xe702;</span></span></div>
+  </div>
+  <p class="caption">open. The glyph inverts, so the target says which float is up.<br>Only one target is ever open.</p>
+</div>
+<p class="note"><b>Quiet at rest is the point.</b> A five cell word chip competed with the counts for the same attention. Three cells of dim accent read as affordance, not as data, and a dirty row still leads with the amber dot.</p>
+
+<h2>3. The float, anchored on the row</h2>
+<div class="stage">
+  <div class="mono rail" style="width:34ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l">  ▾ <span class="txt">w10</span> <span class="dim">durability-and-flakes-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span></span></div>
+    <div class="row cur"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="git on nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l">  ▾ <span class="txt">w1</span> <span class="dim">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">w1-fh</span></span></div>
+    <div class="row"><span class="l">  ▾ <span class="txt">w9</span> <span class="dim">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">w1-7b</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="git rest nf">&#xe702;</span></span></div>
+  </div>
+  <div class="pointer nf" style="padding-top:calc(1.4em*2)">──▶</div>
+  <div class="mono float" style="margin-top:calc(1.4em*2 - 6px)">
+    <div class="fh"><span class="nf">&#xe702;</span> lb-key-dot-w1</div>
+    <div class="frow"><span class="fk">worktree</span><span class="fv">lb-key-dot-w1</span></div>
+    <div class="frow"><span class="fk">branch</span><span class="fv">lb-key-dot/w1</span></div>
+    <div class="frow"><span class="fk">head</span><span class="fv">deadb33f  fix rail elision</span></div>
+    <div class="frow"><span class="fk">changes</span><span class="fv"><span class="add">+12</span> <span class="del">-3</span>   4 files</span></div>
+    <div class="frow"><span class="fk">state</span><span class="fv">dirty</span></div>
+    <div class="frow"><span class="fk">upstream</span><span class="fv">origin/lb-key-dot/w1  <span class="add">↑2</span> <span class="dim">↓0</span></span></div>
+    <div class="ftip">esc, click elsewhere, or click the mark again</div>
+  </div>
+</div>
+<p class="note"><b>Anchor.</b> The float's top edge sits on the row that owns it, and the pointer meets the mark. It opens to the right of the rail, over the layout, and it never covers the row it describes. Its width follows the longest value, capped at 44 cells, so the head subject elides rather than wrapping. The title carries the same glyph, so the float and its target share one mark.</p>
+
+<h2>4. The four states a row can be in</h2>
+<div class="cols">
+
+  <div>
+    <div class="mono rail" style="width:32ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span> <span class="git rest nf">&#xe702;</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px">
+      <div class="fh"><span class="nf">&#xe702;</span> lb-key-dot-w1</div>
+      <div class="frow"><span class="fk">worktree</span><span class="fv">lb-key-dot-w1</span></div>
+      <div class="frow"><span class="fk">branch</span><span class="fv">lb-key-dot/w1</span></div>
+      <div class="frow"><span class="fk">head</span><span class="fv">deadb33f  fix rail elision</span></div>
+      <div class="frow"><span class="fk">changes</span><span class="fv"><span class="add">+12</span> <span class="del">-3</span>   4 files</span></div>
+      <div class="frow"><span class="fk">state</span><span class="fv">dirty</span></div>
+      <div class="frow"><span class="fk">upstream</span><span class="fv">origin/lb-key-dot/w1  <span class="add">↑2</span> <span class="dim">↓0</span></span></div>
+    </div>
+    <p class="caption">a lane worktree with work in it</p>
+  </div>
+
+  <div>
+    <div class="mono rail" style="width:32ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span> <span class="git rest nf">&#xe702;</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px">
+      <div class="fh"><span class="nf">&#xe702;</span> suite-tail-w1</div>
+      <div class="frow"><span class="fk">worktree</span><span class="fv">suite-tail-w1</span></div>
+      <div class="frow"><span class="fk">branch</span><span class="fv">suite-tail/w1</span></div>
+      <div class="frow"><span class="fk">head</span><span class="fv">8a98d9d  land suite-tail</span></div>
+      <div class="frow"><span class="fk">changes</span><span class="fv">none</span></div>
+      <div class="frow"><span class="fk">state</span><span class="fv">clean</span></div>
+      <div class="frow"><span class="fk">upstream</span><span class="fv">(none)</span></div>
+    </div>
+    <p class="caption">clean, and the branch was never pushed</p>
+  </div>
+
+  <div>
+    <div class="mono rail" style="width:32ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">console</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span> <span class="git rest nf">&#xe702;</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px">
+      <div class="fh"><span class="nf">&#xe702;</span> console</div>
+      <div class="frow"><span class="fk">worktree</span><span class="fv dim">(main checkout)</span></div>
+      <div class="frow"><span class="fk">branch</span><span class="fv dim">(detached)</span></div>
+      <div class="frow"><span class="fk">head</span><span class="fv">4c1f0aa  bump vt</span></div>
+      <div class="frow"><span class="fk">changes</span><span class="fv">none</span></div>
+      <div class="frow"><span class="fk">state</span><span class="fv">clean</span></div>
+      <div class="frow"><span class="fk">upstream</span><span class="fv">(none)</span></div>
+    </div>
+    <p class="caption">detached HEAD, the case the rail prints nothing for now</p>
+  </div>
+
+  <div>
+    <div class="mono rail" style="width:32ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">bin</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px;min-width:32ch">
+      <div class="fh"><span class="nf">&#xe702;</span> bin</div>
+      <div class="frow"><span class="fk">state</span><span class="fv dim">not a repository</span></div>
+    </div>
+    <p class="caption">no repo, so no mark at all. Absent, not dead.</p>
+  </div>
+
+</div>
+<p class="note"><b>No invented answers.</b> A fact the probe did not return prints a question mark and turns amber, never a zero and never "clean". The rail already keeps a stale answer on a one second timeout (<span class="acc">internal/server/server_labels.go</span>), so the float shows the same facts the row was painted from, marked <span class="stale">stale</span> in the footer when the probe timed out.</p>
+
+<h2>5. Narrow rail: what stands down, in order</h2>
+<div class="cols">
+
+  <div class="mono rail" style="width:34ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span> <span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail"><span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+1</span> <span class="git rest nf">&#xe702;</span></span></div>
+  </div>
+
+  <div class="mono rail" style="width:26ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durability-and…</span></span><span class="sp"></span><span class="tail"><span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="git rest nf">&#xe702;</span></span></div>
+  </div>
+
+  <div class="mono rail" style="width:18ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-d</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durabil</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="git rest nf">&#xe702;</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-t</span></span><span class="sp"></span><span class="tail"><span class="git rest nf">&#xe702;</span></span></div>
+  </div>
+
+</div>
+<p class="note"><b>Ladder.</b> 34 cells: counts stand down, the dot and the mark hold. 26: the label elides to keep half the row. 18: the mark costs three cells, so it survives where the five cell word did not. Below 18 the mark drops and the row is what it is today. The mark never renders half, because it is one glyph.</p>
+
+<h2>6. What the click does</h2>
+<pre class="code">click the mark      the float opens on that row, the mark inverts
+click another mark  the float moves, one float per rail, never two
+click elsewhere     the float closes
+esc                 the float closes and returns focus to the pane it came from
+rail scroll         the float follows its row, and closes when the row leaves the view</pre>
+<p class="note"><b>Pointer events only.</b> No prefix key is taken. The chip is one more hit box beside the ones panes, windows and workspace folds already carry, and a click on the mark must not also focus the window. The float is the same <span class="acc">panel.FloatingPane</span> the ask form uses, so the outline, shadow and dismissal path are shared.</p>
+
+<h2>7. Cost, in the code we have</h2>
+<pre class="code">theme.Glyphs     GitMark, NerdGitMark, asciiGlyphs entry: "g"     (3 consts)
+theme keys       git-mark, nerd-git-mark, the fold caret pair
+wire.Pane        head sha, head subject, ahead, behind           (omitempty)
+server_labels.go one more probe: log -1, rev-list --left-right
+rail.RailStats   drop the branch segment, append the mark
+float            a small facts renderer over panel.FloatingPane</pre>
+<p class="note"><b>The probe is the only real cost.</b> A rail line is painted from the cached <span class="acc">gitInfo</span>, and the head subject plus upstream counts need one more git call per worktree. Two options: fold them into the existing <span class="acc">rev-parse</span> round trip with <span class="acc">git log -1 --format=%h %s</span> and a separate <span class="acc">rev-list --left-right --count @{u}...HEAD</span>, or fetch them lazily on the click and paint the float from a fresh probe. Lazy is cheaper and the click already costs a round trip, but the float then differs from the row on a stale cache. Say which you want and the next version shows it.</p>
+
+</body>
+</html>

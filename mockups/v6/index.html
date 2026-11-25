@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm rail git target · v6</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --accent:#7ac0eb; --edge:#78c8e1; --hint:#9599ae; --del:#ff7d7d;
+ --add:#78dc82; --work:#f5be50; --page:#0b0b0f; --rule:#55546a;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:26px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 26px;color:#7d8298;max-width:78ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:32px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:78ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+pre.code{margin:8px 0 0;color:#7d8298;font-size:12.5px;
+ font-family:"DejaVu Sans Mono",ui-monospace,monospace;white-space:pre}
+
+/* one terminal cell grid, shared by the rail and the float */
+.mono{font-family:"DejaVu Sans Mono",ui-monospace,monospace;font-size:13px;
+ line-height:1.4;font-variant-ligatures:none;white-space:pre;color:var(--text)}
+
+.rail{border-left:2px solid var(--accent);border-right:1px solid #2b2a37;
+ background:var(--bg);padding:2px 0}
+.row{display:flex;align-items:center;height:1.4em}
+.row .l{flex:0 0 auto;white-space:pre}
+.row .sp{flex:1 1 auto;min-width:1ch}
+.row .tail{flex:0 0 auto;white-space:pre;padding-right:1ch}
+.row.cur{background:var(--focus);box-shadow:inset 3px 0 0 0 var(--accent)}
+.dim{color:var(--dim)}
+.hint{color:var(--hint)}
+.acc{color:var(--accent)}
+.txt{color:var(--text)}
+.add{color:var(--add)}
+.del{color:var(--del)}
+.work{color:var(--work)}
+.bold{font-weight:700}
+.hdr{color:var(--header)}
+.bar{color:var(--accent);font-weight:700}
+.count{color:var(--dim)}
+
+/* the clickable target */
+.chipgit{background:#2a2937;border-radius:2px;padding:0 .6ch;color:var(--accent);
+ font-weight:700;box-shadow:inset 0 -1px 0 0 #3b3a4d}
+.chipgit.on{background:var(--accent);color:#14131a;box-shadow:none}
+
+/* the float */
+.float{border:1px solid #3b3a4d;background:#191822;box-shadow:0 6px 22px #0006;
+ padding:3px 0 4px;min-width:38ch}
+.float .frow{display:flex;gap:1ch;padding:0 1ch}
+.float .fk{flex:0 0 10ch;color:var(--dim)}
+.float .fv{flex:0 0 auto;color:var(--text)}
+.float .fh{padding:0 1ch 3px;color:var(--accent);font-weight:700;white-space:pre}
+.float .ftip{margin-top:4px;padding:3px 1ch 0;border-top:1px solid #2b2a37;
+ color:var(--hint);font-size:12.5px}
+.float .stale{color:var(--work)}
+.wrap{display:flex;align-items:flex-start}
+.pointer{flex:0 0 auto;color:var(--accent);padding-top:0}
+
+.stage{display:flex;align-items:flex-start;gap:0}
+.caption{margin:6px 0 0;color:#6a6e82;font-size:12px}
+.cols{display:flex;gap:46px;flex-wrap:wrap;align-items:flex-start}
+</style>
+</head>
+<body>
+
+<h1>dm rail · git target and float</h1>
+<p class="sub">The rail keeps the dirty dot and the +/- counts and stops printing the branch. Git detail moves to a clickable <span class="chipgit">[git]</span> target at the right edge of each window row, which opens a facts float beside the rail. A linked worktree no longer prints the same string twice, because the branch leaves the row.</p>
+
+<h2>1. The row, today and proposed</h2>
+<div class="cols">
+
+  <div>
+    <div class="mono rail" style="width:42ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">lb-key-dot/w1</span>  <span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span></span></div>
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">suite-tail/w1</span>  <span class="dim">clean</span></span></div>
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">console</span></span><span class="sp"></span><span class="tail"><span class="dim">main</span>  <span class="dim">clean</span></span></div>
+    </div>
+    <p class="caption">today: 42 cells, and the branch takes 15 of them</p>
+  </div>
+
+  <div>
+    <div class="mono rail" style="width:38ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="chipgit">[git]</span></span></div>
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="chipgit">[git]</span></span></div>
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">console</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="chipgit">[git]</span></span></div>
+    </div>
+    <p class="caption">proposed: 38 cells, and the chip is the last thing to go</p>
+  </div>
+
+</div>
+<p class="note"><b>Rent.</b> The chip is the rightmost element, so it survives every elision the counts already survive. Order of sacrifice stays as it is today: first the stats tail, then the label elides, the chip holds the right edge while the label keeps half the row. The dot stays even when the counts stand down, so a dirty window never reads clean.</p>
+
+<h2>2. The float, anchored on the row</h2>
+<div class="stage">
+  <div class="mono rail" style="width:38ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="chipgit">[git]</span></span></div>
+    <div class="row"><span class="l">  ▾ <span class="txt">w10</span> <span class="dim">durability-and-flakes-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span></span></div>
+    <div class="row cur"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span>  <span class="chipgit on">[git]</span></span></div>
+    <div class="row"><span class="l">  ▾ <span class="txt">w1</span> <span class="dim">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">w1-fh</span></span></div>
+    <div class="row"><span class="l">  ▾ <span class="txt">w9</span> <span class="dim">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">w1-7b</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span>  <span class="chipgit">[git]</span></span></div>
+  </div>
+  <div class="pointer" style="padding-top:calc(1.4em*2)">──▶</div>
+  <div class="mono float" style="margin-top:calc(1.4em*2 - 6px)">
+    <div class="fh">git  lb-key-dot-w1</div>
+    <div class="frow"><span class="fk">worktree</span><span class="fv">lb-key-dot-w1</span></div>
+    <div class="frow"><span class="fk">branch</span><span class="fv">lb-key-dot/w1</span></div>
+    <div class="frow"><span class="fk">head</span><span class="fv">deadb33f  fix rail elision</span></div>
+    <div class="frow"><span class="fk">changes</span><span class="fv"><span class="add">+12</span> <span class="del">-3</span>   4 files</span></div>
+    <div class="frow"><span class="fk">state</span><span class="fv">dirty</span></div>
+    <div class="frow"><span class="fk">upstream</span><span class="fv">origin/lb-key-dot/w1  <span class="add">↑2</span> <span class="dim">↓0</span></span></div>
+    <div class="ftip">esc, click elsewhere, or click the target again</div>
+  </div>
+</div>
+<p class="note"><b>Anchor.</b> The float's top edge sits on the row that owns it, and the pointer meets the chip. It opens to the right of the rail, over the layout, and it never covers the row it describes. Its width follows the longest value, capped at 44 cells, so the head subject elides with an ellipsis rather than wrapping.</p>
+
+<h2>3. The four states a row can be in</h2>
+<div class="cols">
+
+  <div>
+    <div class="mono rail" style="width:34ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span> <span class="chipgit">[git]</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px">
+      <div class="fh">git  lb-key-dot-w1</div>
+      <div class="frow"><span class="fk">worktree</span><span class="fv">lb-key-dot-w1</span></div>
+      <div class="frow"><span class="fk">branch</span><span class="fv">lb-key-dot/w1</span></div>
+      <div class="frow"><span class="fk">head</span><span class="fv">deadb33f  fix rail elision</span></div>
+      <div class="frow"><span class="fk">changes</span><span class="fv"><span class="add">+12</span> <span class="del">-3</span>   4 files</span></div>
+      <div class="frow"><span class="fk">state</span><span class="fv">dirty</span></div>
+      <div class="frow"><span class="fk">upstream</span><span class="fv">origin/lb-key-dot/w1  <span class="add">↑2</span> <span class="dim">↓0</span></span></div>
+    </div>
+    <p class="caption">a lane worktree with work in it</p>
+  </div>
+
+  <div>
+    <div class="mono rail" style="width:34ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span> <span class="chipgit">[git]</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px">
+      <div class="fh">git  suite-tail-w1</div>
+      <div class="frow"><span class="fk">worktree</span><span class="fv">suite-tail-w1</span></div>
+      <div class="frow"><span class="fk">branch</span><span class="fv">suite-tail/w1</span></div>
+      <div class="frow"><span class="fk">head</span><span class="fv">8a98d9d  land suite-tail</span></div>
+      <div class="frow"><span class="fk">changes</span><span class="fv">none</span></div>
+      <div class="frow"><span class="fk">state</span><span class="fv">clean</span></div>
+      <div class="frow"><span class="fk">upstream</span><span class="fv">(none)</span></div>
+    </div>
+    <p class="caption">clean, and the branch was never pushed</p>
+  </div>
+
+  <div>
+    <div class="mono rail" style="width:34ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">console</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span> <span class="chipgit">[git]</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px">
+      <div class="fh">git  console</div>
+      <div class="frow"><span class="fk">worktree</span><span class="fv dim">(main checkout)</span></div>
+      <div class="frow"><span class="fk">branch</span><span class="fv dim">(detached)</span></div>
+      <div class="frow"><span class="fk">head</span><span class="fv">4c1f0aa  bump vt</span></div>
+      <div class="frow"><span class="fk">changes</span><span class="fv">none</span></div>
+      <div class="frow"><span class="fk">state</span><span class="fv">clean</span></div>
+      <div class="frow"><span class="fk">upstream</span><span class="fv">(none)</span></div>
+    </div>
+    <p class="caption">detached HEAD, the case the rail prints nothing for now</p>
+  </div>
+
+  <div>
+    <div class="mono rail" style="width:34ch">
+      <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">bin</span></span><span class="sp"></span><span class="tail"><span class="dim">clean</span></span></div>
+    </div>
+    <div class="mono float" style="margin-top:8px;min-width:34ch">
+      <div class="fh">git  bin</div>
+      <div class="frow"><span class="fk">state</span><span class="fv dim">not a repository</span></div>
+    </div>
+    <p class="caption">no repo, so no target at all. The chip is absent, not dead.</p>
+  </div>
+
+</div>
+<p class="note"><b>No invented answers.</b> A fact the probe did not return prints a question mark and turns amber, never a zero and never "clean". The rail already keeps a stale answer on a one second timeout (<span class="acc">internal/server/server_labels.go</span>), so the float shows the same facts the row was painted from, marked <span class="stale">stale</span> in the footer when the probe timed out.</p>
+
+<h2>4. Narrow rail: what stands down, in order</h2>
+<div class="cols">
+
+  <div class="mono rail" style="width:34ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+12</span> <span class="del">-3</span> <span class="chipgit">[git]</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durability-and-flakes</span></span><span class="sp"></span><span class="tail"><span class="chipgit">[git]</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="add">+1</span> <span class="chipgit">[git]</span></span></div>
+  </div>
+
+  <div class="mono rail" style="width:26ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-dot-w1</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="chipgit">[git]</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durability-and…</span></span><span class="sp"></span><span class="tail"><span class="chipgit">[git]</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-tail-w1</span></span><span class="sp"></span><span class="tail"><span class="chipgit">[git]</span></span></div>
+  </div>
+
+  <div class="mono rail" style="width:20ch">
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">lb-key-do…</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="chipgit">[git]</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">durabili…</span></span><span class="sp"></span><span class="tail"><span class="work">⬤</span> <span class="chipgit">[git]</span></span></div>
+    <div class="row"><span class="l"><span class="bar">▾</span> <span class="txt bold">suite-ta…</span></span><span class="sp"></span><span class="tail"><span class="chipgit">[git]</span></span></div>
+  </div>
+
+</div>
+<p class="note"><b>Ladder.</b> 34 cells: counts stand down, the dot and the chip hold. 26: the label elides to keep half the row. 20: the chip sits directly after the label with one space, so it costs 6 cells and still fits. Below 20 the chip drops and the row is what it is today. The chip never renders half, so there is no truncated <span class="dim">[gi</span>.</p>
+
+<h2>5. What the click does</h2>
+<pre class="code">click the chip      the float opens on that row, the chip paints filled
+click another chip  the float moves, one float per rail, never two
+click elsewhere     the float closes
+esc                 the float closes and returns focus to the pane it came from
+rail scroll         the float follows its row, and closes when the row leaves the view</pre>
+<p class="note"><b>Pointer events only.</b> No prefix key is taken. The rail already carries click targets for panes, windows and workspace folds, so the chip is one more hit box, and a click on the chip must not also focus the window. The float is the same <span class="acc">panel.FloatingPane</span> the ask form uses, so the outline, shadow and dismissal path are shared.</p>
+
+<h2>6. Cost, in the code we have</h2>
+<pre class="code">wire.Pane         head sha, head subject, ahead, behind   (new fields, omitempty)
+server_labels.go  one more probe: log -1, rev-list --left-right, upstream
+rail.RailStats    drop the branch segment, append the chip
+rail line         chip is one more right-hand segment, same rent ladder
+float             a small facts renderer over panel.FloatingPane</pre>
+<p class="note"><b>The probe is the only real cost.</b> A rail line is painted from the cached <span class="acc">gitInfo</span>, and the head subject plus upstream counts need one more git call per worktree. Two options: fold them into the existing <span class="acc">rev-parse</span> round trip with <span class="acc">git log -1 --format=%h %s</span> and a separate <span class="acc">rev-list --left-right --count @{u}...HEAD</span>, or fetch them lazily on the click and paint the float from a fresh probe. Lazy is cheaper and the click already costs a round trip, but the float then differs from the row on a stale cache. Say which you want and the next version shows it.</p>
+
+</body>
+</html>
