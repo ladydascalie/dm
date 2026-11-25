@@ -113,8 +113,8 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			s.reply(cl, m, nil, fmt.Errorf("pane %q sent no screen", m.Target))
 			return
 		}
-		cl.deliver(wire.Msg{Type: "screen", Target: m.Target, VTSnap: got.VTSnap, Res: got.Res})
-		s.reply(cl, m, map[string]any{"pane": m.Target}, nil)
+		s.sendPicture(cl, wire.Msg{Type: "screen", Target: m.Target, VTSnap: got.VTSnap, Res: got.Res},
+			m, map[string]any{"pane": m.Target})
 
 	case "history":
 		lines, err := s.paneHistory(m.Target, m.Count)
@@ -219,8 +219,11 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 			pc.alt, pc.mouse = rp.alt, rp.mouse
 		}
 		s.mu.Unlock()
-		cl.deliver(wire.Msg{Type: "replay", Target: m.Target, Data: rp.data, St: &rp.st})
-		s.reply(cl, m, map[string]any{"pane": m.Target}, nil)
+		// The ring is one picture: it may exceed the output bound, and a ring
+		// the wire cannot carry answers an error. A dropped ring with an OK
+		// reply is what left `dm history` silent.
+		s.sendPicture(cl, wire.Msg{Type: "replay", Target: m.Target, Data: rp.data, St: &rp.st},
+			m, map[string]any{"pane": m.Target})
 
 	case "status":
 		s.mu.Lock()

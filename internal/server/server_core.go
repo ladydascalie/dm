@@ -176,9 +176,27 @@ type termColours struct {
 	fg, bg string
 }
 
-// outboundBytes bounds what one client may have queued, in bytes. A client
-// past the bound is not reading: it gets a fresh picture instead of a backlog.
+// outboundBytes bounds what one client may have queued of the output stream,
+// in bytes. A client past the bound is not reading: it gets a fresh picture
+// instead of a backlog.
 const outboundBytes = 1 << 20
+
+// controlBytes bounds what one client may have queued of pictures: the
+// snapshot, a pane screen, the scrub repaint and the replay ring. The stream
+// and the pictures are priced apart on purpose. Pane output is cheap and
+// constant, and dropping it costs nothing because the next screen rebuilds it;
+// a picture is one bounded thing a client needs to paint or a caller asked for,
+// and dropping it to keep room for output is what blanked every client. One
+// wire frame fits in this bound, so the biggest picture the wire carries can
+// always queue.
+const controlBytes = wire.MaxFrame
+
+// errPictureTooBig is the refusal a picture over wire.MaxFrame reports. A frame
+// the wire cannot carry is an error for its caller, never a silent drop.
+var errPictureTooBig = errors.New("picture exceeds the wire frame limit")
+
+// errClientGone is the refusal a frame gets once the client has shut down.
+var errClientGone = errors.New("client is gone")
 
 // reflowSettle is the quiet period after the last width change before the
 // server asks the affected panes to reflow. It is a var so a test can shorten
@@ -200,11 +218,20 @@ type client struct {
 	paused bool
 
 	queue  []wire.Msg
-	costs  []int // per-queue-frame price, parallel to queue
-	qbytes int
+	costs  []int  // per-queue-frame price, parallel to queue
+	ctrl   []bool // per-queue-frame kind: a picture, priced apart from the stream
+	qbytes int    // queued output-stream bytes
+	cbytes int    // queued picture bytes
 	// stale records that the queue overflowed and queued frames were
 	// dropped. The writer resyncs from a picture once the queue drains.
 	stale bool
+	// armed records that one repair is owed or running. One overflow arms one
+	// resync: a client that cannot absorb a repair must not re-dial every pane
+	// on every push.
+	armed bool
+	// resyncing is true while the rebuild hook runs. The pictures that pass
+	// queues are the repair itself, so the picture bound does not drop them.
+	resyncing bool
 	// resync is the server's rebuild hook: one snapshot, then one screen per
 	// pane. It is nil until the client attaches.
 	resync func()
@@ -225,60 +252,114 @@ func newClient(c net.Conn) *client {
 }
 
 // deliver queues a frame and reports whether it went into the queue. A frame
-// for a closed client, or one bigger than the whole outbound bound, is dropped,
+// for a closed client, or one bigger than the bound its kind carries, is dropped,
 // and a caller that owns a cursor must not advance past it. It never writes the
 // socket and never waits on it: a stalled client must not block the pane read
 // loop.
 func (c *client) deliver(m wire.Msg) bool {
-	c.mu.Lock()
-	queued := c.enqueueLocked(m)
-	c.mu.Unlock()
-	return queued
+	ok, _ := c.enqueue(m)
+	return ok
 }
 
-// enqueueLocked appends m to the queue under the byte bound and reports whether
-// it queued. On overflow it drops the queued "bytes" frames, marks the client
-// stale and stops queueing output, so the writer resyncs from the pane screens
-// instead of replaying a backlog.
-func (c *client) enqueueLocked(m wire.Msg) bool {
+// deliverErr queues a frame and reports why it stayed out. A caller that hands
+// the client one picture answers this error instead of a false OK.
+func (c *client) deliverErr(m wire.Msg) error {
+	_, err := c.enqueue(m)
+	return err
+}
+
+func (c *client) enqueue(m wire.Msg) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.enqueueLocked(m)
+}
+
+// enqueueLocked appends m to the queue under the budget of its kind and reports
+// whether it queued, with the reason a picture stayed out. Output overflow
+// drops the queued "bytes" frames and marks the client stale, so the writer
+// resyncs from the pane screens instead of replaying a backlog. A picture is
+// priced at its real size, may spend up to wire.MaxFrame, and is never dropped
+// to satisfy the output bound. The caller holds c.mu.
+func (c *client) enqueueLocked(m wire.Msg) (bool, error) {
 	if c.cond == nil {
 		c.cond = sync.NewCond(&c.mu)
 	}
 	if c.closed {
-		return false
+		return false, errClientGone
 	}
+	ctrl := controlFrame(m)
 	if c.stale && m.Type == "bytes" {
 		// The client already owes itself a picture. Queueing more output
 		// would only rebuild the backlog the overflow threw away.
-		return false
+		return false, nil
 	}
 	n := msgBytes(m)
+	if ctrl {
+		if n > wire.MaxFrame {
+			// The wire cannot carry it, so it never ships. The refusal is not
+			// an overflow and arms nothing: a resync that queued nothing would
+			// arm itself again, which is the loop the writer must not run.
+			return false, fmt.Errorf("%w: %d bytes, the wire carries %d", errPictureTooBig, n, wire.MaxFrame)
+		}
+		if c.cbytes+n > controlBytes && !c.resyncing {
+			// The client is not draining its pictures, so they go and the one
+			// repair rebuilds the picture it owes from the panes. The frame in
+			// hand still queues whole: the client ends on the newest picture.
+			c.dropPicturesLocked()
+			c.armResyncLocked()
+		}
+		c.pushLocked(m, n, true)
+		return true, nil
+	}
 	if c.qbytes+n > outboundBytes {
 		// Every queued output frame is a backlog, and the resync below sends
 		// a screen per pane, so the backlog goes.
 		c.dropBytesLocked()
-		c.stale = true
-		for c.qbytes+n > outboundBytes && len(c.queue) > 0 {
+		c.armResyncLocked()
+		for c.qbytes+n > outboundBytes && len(c.queue) > 0 && !c.ctrl[0] {
 			c.popLocked()
 		}
-		if n > outboundBytes {
-			// A single frame bigger than the whole bound never ships; the
-			// resync rebuilds it piecemeal.
-			return false
+		if c.qbytes+n > outboundBytes {
+			// What is left is a picture, and a picture never goes to make room
+			// for output. The repair rebuilds this client anyway.
+			return false, nil
 		}
 	}
+	c.pushLocked(m, n, false)
+	return true, nil
+}
+
+// pushLocked appends a frame and its price to the queue. The caller holds c.mu.
+func (c *client) pushLocked(m wire.Msg, n int, ctrl bool) {
 	c.queue = append(c.queue, m)
 	c.costs = append(c.costs, n)
-	c.qbytes += n
+	c.ctrl = append(c.ctrl, ctrl)
+	if ctrl {
+		c.cbytes += n
+	} else {
+		c.qbytes += n
+	}
 	c.startWriter()
 	c.cond.Broadcast()
-	return true
+}
+
+// armResyncLocked marks the client stale so the writer rebuilds its picture
+// once the queue drains. One overflow arms one repair: a repair already owed or
+// running is not armed again, so no overflow can turn into a resync loop. The
+// caller holds c.mu.
+func (c *client) armResyncLocked() {
+	if c.armed {
+		return
+	}
+	c.armed = true
+	c.stale = true
 }
 
 // dropBytesLocked removes every queued "bytes" frame. The caller holds c.mu.
 func (c *client) dropBytesLocked() {
 	kept := c.queue[:0]
 	keptCosts := c.costs[:0]
+	keptCtrl := c.ctrl[:0]
 	for i, m := range c.queue {
 		if m.Type == "bytes" {
 			c.qbytes -= c.costs[i]
@@ -286,19 +367,43 @@ func (c *client) dropBytesLocked() {
 		}
 		kept = append(kept, m)
 		keptCosts = append(keptCosts, c.costs[i])
+		keptCtrl = append(keptCtrl, c.ctrl[i])
 	}
-	c.queue = kept
-	c.costs = keptCosts
+	c.queue, c.costs, c.ctrl = kept, keptCosts, keptCtrl
+}
+
+// dropPicturesLocked removes every queued picture, so the newest one is what
+// the client ends on. The caller holds c.mu.
+func (c *client) dropPicturesLocked() {
+	kept := c.queue[:0]
+	keptCosts := c.costs[:0]
+	keptCtrl := c.ctrl[:0]
+	for i, m := range c.queue {
+		if c.ctrl[i] {
+			c.cbytes -= c.costs[i]
+			continue
+		}
+		kept = append(kept, m)
+		keptCosts = append(keptCosts, c.costs[i])
+		keptCtrl = append(keptCtrl, false)
+	}
+	c.queue, c.costs, c.ctrl = kept, keptCosts, keptCtrl
 }
 
 // popLocked removes the head frame and clears its slot, so a lagging client
 // does not pin the buffers of frames it already sent. The caller holds c.mu.
 func (c *client) popLocked() wire.Msg {
 	m := c.queue[0]
+	ctrl, n := c.ctrl[0], c.costs[0]
 	c.queue[0] = wire.Msg{}
 	c.queue = c.queue[1:]
-	c.qbytes -= c.costs[0]
 	c.costs = c.costs[1:]
+	c.ctrl = c.ctrl[1:]
+	if ctrl {
+		c.cbytes -= n
+	} else {
+		c.qbytes -= n
+	}
 	return m
 }
 
@@ -340,8 +445,10 @@ func (c *client) next() (wire.Msg, bool) {
 	}
 }
 
-// takeResync reports the server hook to run once a stale queue has drained.
-// The caller runs the hook off c.mu, because it queues frames again.
+// takeResync reports the server hook to run once a stale queue has drained,
+// wrapped so one run owns the resyncing flag. The caller runs it off c.mu,
+// because it queues frames again. The run pays the armed flag: one overflow
+// buys one repair, and a later overflow is free to arm a fresh one.
 func (c *client) takeResync() func() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -349,7 +456,15 @@ func (c *client) takeResync() func() {
 		return nil
 	}
 	c.stale = false
-	return c.resync
+	c.resyncing = true
+	fn := c.resync
+	return func() {
+		fn()
+		c.mu.Lock()
+		c.resyncing = false
+		c.armed = false
+		c.mu.Unlock()
+	}
 }
 
 // setResync installs the rebuild hook the writer runs after an overflow.
@@ -383,18 +498,20 @@ func (c *client) shutdown() {
 	c.closed = true
 	c.queue = nil
 	c.costs = nil
+	c.ctrl = nil
 	c.qbytes = 0
+	c.cbytes = 0
 	if c.cond != nil {
 		c.cond.Broadcast()
 	}
 	c.mu.Unlock()
 }
 
-// queuedBytes reports what the client still owes the wire.
+// queuedBytes reports what the client still owes the wire, stream and pictures.
 func (c *client) queuedBytes() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.qbytes
+	return c.qbytes + c.cbytes
 }
 
 // queuedFrames reports how many frames are waiting on the writer.
@@ -404,10 +521,21 @@ func (c *client) queuedFrames() int {
 	return len(c.queue)
 }
 
+// controlFrame reports whether m carries one bounded picture rather than a
+// slice of the output stream: a snapshot (the resync picture is one of these),
+// a pane screen, the scrub repaint and the replay ring. A picture spends the
+// picture budget and may reach wire.MaxFrame; everything else spends the output
+// budget and is replaced by the resync when it overflows.
+func controlFrame(m wire.Msg) bool {
+	return m.Type == "replay" || m.Snap != nil || m.VTSnap != nil
+}
+
 // msgBytes counts what a frame costs on the wire, near enough to bound it.
 // A snapshot or screen frame carries its payload in Snap or VTSnap, so both
 // are marshalled here to price them: an unpriced snapshot would queue at 64
-// bytes against the outbound bound no matter how big it sends as.
+// bytes against its bound no matter how big it sends as. A picture is priced
+// the same way and by the same function; the split is in what the price
+// spends, not in how it is counted.
 func msgBytes(m wire.Msg) int {
 	n := 64 + len(m.Data) + len(m.Keys) + len(m.Msg) + len(m.Name) + len(m.Res)
 	if m.Snap != nil {
