@@ -54,14 +54,27 @@ func pump(cli net.Conn) chan wire.Msg {
 	return msgs
 }
 
-// collectBytes gathers every bytes frame's payload from a channel until it
-// closes, so a test can compare what one subscriber received against the
-// stream the pane published.
-func collectBytes(msgs chan wire.Msg) []byte {
+// readBytes gathers bytes frames until it has n bytes, so a test waits for the
+// stream to arrive instead of closing the conn and hoping the subscriber's
+// writer had finished. The writer takes the last frame off the queue and is
+// writing it when the test closes the client end: the write fails, that frame
+// never reaches the pump, and the pane counts an eviction the test caused. The
+// wait is the proof, the bound is only its failure.
+func readBytes(t *testing.T, msgs chan wire.Msg, n int, what string) []byte {
+	t.Helper()
 	var got bytes.Buffer
-	for m := range msgs {
-		if m.Type == "bytes" {
-			got.Write(m.Data)
+	deadline := time.After(5 * time.Second)
+	for got.Len() < n {
+		select {
+		case m, ok := <-msgs:
+			if !ok {
+				t.Fatalf("%s ended after %d bytes, want %d", what, got.Len(), n)
+			}
+			if m.Type == "bytes" {
+				got.Write(m.Data)
+			}
+		case <-deadline:
+			t.Fatalf("%s received %d bytes, want %d in order", what, got.Len(), n)
 		}
 	}
 	return got.Bytes()
@@ -155,10 +168,10 @@ func TestBroadcastEvictsAStuckSubscriber(t *testing.T) {
 		t.Fatalf("ring holds %d bytes, want %d: the eviction disturbed it", p.ring.Len(), min(total, ringDefault))
 	}
 
-	_ = healthyEnd.Close()
-	if got := collectBytes(healthyMsgs); !bytes.Equal(got, want) {
+	if got := readBytes(t, healthyMsgs, len(want), "the healthy subscriber"); !bytes.Equal(got, want) {
 		t.Fatalf("the healthy subscriber received %d bytes, want %d in order", len(got), len(want))
 	}
+	_ = healthyEnd.Close()
 
 	// The evicted client reconnects and starts fresh: a new conn works.
 	_, freshEnd := subPipe(t, p, 0)
@@ -207,10 +220,10 @@ func TestBroadcastEvictsOnSendDeadline(t *testing.T) {
 	}
 	closedSoon(t, slowEnd, time.Second, "the timed-out subscriber")
 
-	_ = healthyEnd.Close()
-	if got := collectBytes(healthyMsgs); !bytes.Equal(got, want) {
+	if got := readBytes(t, healthyMsgs, len(want), "the healthy subscriber"); !bytes.Equal(got, want) {
 		t.Fatalf("the healthy subscriber received %d bytes, want %d in order", len(got), len(want))
 	}
+	_ = healthyEnd.Close()
 }
 
 // TestSubscriberDisconnectIsNotAnEviction proves a subscriber that leaves the
