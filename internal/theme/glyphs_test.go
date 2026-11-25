@@ -30,7 +30,7 @@ func TestGlyphSetsAreOneCell(t *testing.T) {
 			"tee-left": g.BorderTeeLeft, "tee-right": g.BorderTeeRight,
 			"fold-open": g.FoldOpen, "fold-closed": g.FoldClosed,
 			"active-mark": g.ActiveMark, "workspace-bar": g.WorkspaceBar, "dirty": g.Dirty,
-			"git-mark": g.GitMark, "nerd-git-mark": g.NerdGitMark,
+			"git-mark": g.GitMark, "git-mark-nerd": g.NerdGitMark,
 			"sync-mark": g.SyncMark,
 		}
 		for name, glyph := range structural {

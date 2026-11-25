@@ -503,8 +503,7 @@ func ThemeKeys() []ThemeKey {
 		{"glyphs", "active-mark", d.Glyphs.ActiveMark, "Mark beside the active window."},
 		{"glyphs", "workspace-bar", d.Glyphs.WorkspaceBar, "Bar beside the active workspace."},
 		{"glyphs", "dirty", d.Glyphs.Dirty, "Dirty worktree dot."},
-		{"glyphs", "git-mark", d.Glyphs.GitMark, "Git mark at the end of a window row; also replaces the Nerd Font form."},
-		{"glyphs", "nerd-git-mark", d.Glyphs.NerdGitMark, "Nerd Font git mark at the end of a window row."},
+		{"glyphs", "git-mark", d.Glyphs.GitMark, "Git mark at the end of a window row; every set draws it, and the Nerd Font form applies when the glyph set is nerd."},
 		{"glyphs", "shadow", d.Glyphs.Shadow, "Drop shadow mark beside and under a float."},
 	}
 	for _, name := range stateNames {
@@ -565,7 +564,6 @@ glyphs {
     "workspace-bar"       "▌"
     "dirty"               "●"
     "git-mark"            "⎇"
-    "nerd-git-mark"       ""
     "shadow"              "░"
 }
 

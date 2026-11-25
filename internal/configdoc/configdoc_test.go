@@ -367,6 +367,9 @@ func TestThemeSampleKDL(t *testing.T) {
 			t.Errorf("ThemeSampleKDL does not name %s", name)
 		}
 	}
+	if !named["glyphs.git-mark"] {
+		t.Error("ThemeSampleKDL does not name the git mark, the one glyph key that carries a Nerd Font form")
+	}
 }
 
 // TestEnvVars proves every variable in the table is read by os.Getenv in a
@@ -446,12 +449,13 @@ func TestFilesConfigKDL(t *testing.T) {
 }
 
 // sampleDefaultTheme is the theme a file that names every key at its default
-// paints. An explicit fold caret or state glyph also replaces its Nerd Font
-// form.
+// paints. An explicit fold caret, git mark or state glyph also replaces its
+// Nerd Font form.
 func sampleDefaultTheme() theme.Theme {
 	d := theme.DefaultTheme()
 	d.Glyphs.NerdFoldOpen = d.Glyphs.FoldOpen
 	d.Glyphs.NerdFoldClosed = d.Glyphs.FoldClosed
+	d.Glyphs.NerdGitMark = d.Glyphs.GitMark
 	for name, style := range d.States {
 		style.NerdGlyph = style.Glyph
 		d.States[name] = style

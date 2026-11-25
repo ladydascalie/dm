@@ -476,8 +476,6 @@ func (g *Glyphs) set(key, val string) bool {
 	case "git-mark":
 		g.GitMark = val
 		g.NerdGitMark = val
-	case "nerd-git-mark":
-		g.NerdGitMark = val
 	default:
 		return false
 	}

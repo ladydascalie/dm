@@ -147,14 +147,8 @@ func TestThemeGlyphs(t *testing.T) {
 	}
 }
 
-// TestThemeStates proves a state block overrides one field and keeps the other,
-// and that a theme glyph replaces both the Unicode and the Nerd form.
-
-// TestThemeStates proves a state block overrides one field and keeps the other,
-// and that a theme glyph replaces both the Unicode and the Nerd form.
-// TestThemeGitMark proves the git mark has two keys: "git-mark" sets both
-// forms, the way an explicit fold caret does, and "nerd-git-mark" sets the Nerd
-// form alone.
+// TestThemeGitMark proves the git mark key sets the theme glyph and its Nerd
+// Font form together, the way an explicit fold caret does.
 func TestThemeGitMark(t *testing.T) {
 	th, err := parseTheme(`glyphs { "git-mark" "@" }`)
 	if err != nil {
@@ -164,16 +158,6 @@ func TestThemeGitMark(t *testing.T) {
 	want.Glyphs.GitMark, want.Glyphs.NerdGitMark = "@", "@"
 	if !reflect.DeepEqual(th, want) {
 		t.Fatalf("git-mark theme = %+v, want %+v", th.Glyphs, want.Glyphs)
-	}
-
-	th, err = parseTheme(`glyphs { "nerd-git-mark" "#" }`)
-	if err != nil {
-		t.Fatalf("parseTheme: %v", err)
-	}
-	want = DefaultTheme()
-	want.Glyphs.NerdGitMark = "#"
-	if !reflect.DeepEqual(th, want) {
-		t.Fatalf("nerd-git-mark theme = %+v, want %+v", th.Glyphs, want.Glyphs)
 	}
 }
 
@@ -203,6 +187,8 @@ func TestGitMarkFor(t *testing.T) {
 	}
 }
 
+// TestThemeStates proves a state block overrides one field and keeps the other,
+// and that a theme glyph replaces both the Unicode and the Nerd form.
 func TestThemeStates(t *testing.T) {
 	th, err := parseTheme(`states {
 	"working" {
