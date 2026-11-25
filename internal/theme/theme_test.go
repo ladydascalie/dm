@@ -57,6 +57,8 @@ func TestThemeDefaults(t *testing.T) {
 		ActiveMark:        "▸",
 		WorkspaceBar:      "▌",
 		Dirty:             "●",
+		GitMark:           "⎇",
+		NerdGitMark:       "\ue702",
 		SyncMark:          "⧉",
 		NerdSyncMark:      "\uf0e2",
 		Shadow:            "░",
@@ -150,6 +152,57 @@ func TestThemeGlyphs(t *testing.T) {
 
 // TestThemeStates proves a state block overrides one field and keeps the other,
 // and that a theme glyph replaces both the Unicode and the Nerd form.
+// TestThemeGitMark proves the git mark has two keys: "git-mark" sets both
+// forms, the way an explicit fold caret does, and "nerd-git-mark" sets the Nerd
+// form alone.
+func TestThemeGitMark(t *testing.T) {
+	th, err := parseTheme(`glyphs { "git-mark" "@" }`)
+	if err != nil {
+		t.Fatalf("parseTheme: %v", err)
+	}
+	want := DefaultTheme()
+	want.Glyphs.GitMark, want.Glyphs.NerdGitMark = "@", "@"
+	if !reflect.DeepEqual(th, want) {
+		t.Fatalf("git-mark theme = %+v, want %+v", th.Glyphs, want.Glyphs)
+	}
+
+	th, err = parseTheme(`glyphs { "nerd-git-mark" "#" }`)
+	if err != nil {
+		t.Fatalf("parseTheme: %v", err)
+	}
+	want = DefaultTheme()
+	want.Glyphs.NerdGitMark = "#"
+	if !reflect.DeepEqual(th, want) {
+		t.Fatalf("nerd-git-mark theme = %+v, want %+v", th.Glyphs, want.Glyphs)
+	}
+}
+
+// TestGitMarkFor proves the set resolution of the git mark: ascii substitutes,
+// nerd takes the Nerd Font form, and unicode keeps the theme's glyph. An
+// explicit git-mark wins in every set.
+func TestGitMarkFor(t *testing.T) {
+	th := DefaultTheme()
+	cases := map[GlyphSet]string{
+		GlyphUnicode: "⎇",
+		GlyphASCII:   "g",
+		GlyphNerd:    "\ue702",
+	}
+	for set, want := range cases {
+		if got := th.For(set).Glyphs.GitMark; got != want {
+			t.Fatalf("git mark for set %v = %q, want %q", set, got, want)
+		}
+	}
+	explicit := DefaultTheme()
+	if !explicit.Glyphs.set("git-mark", "G") {
+		t.Fatal("git-mark is not a glyph key")
+	}
+	for _, set := range []GlyphSet{GlyphUnicode, GlyphASCII, GlyphNerd, GlyphAuto} {
+		if got := explicit.For(set).Glyphs.GitMark; got != "G" {
+			t.Fatalf("explicit git mark for set %v = %q, want G", set, got)
+		}
+	}
+}
+
 func TestThemeStates(t *testing.T) {
 	th, err := parseTheme(`states {
 	"working" {

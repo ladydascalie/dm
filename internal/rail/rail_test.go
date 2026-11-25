@@ -16,9 +16,9 @@ import (
 )
 
 // railRowSnap is a rail with every row kind on it: a workspace header, an
-// unfolded window line with a folder, a branch and its stats, that window's
-// note, the focused pane, a folded window line, the gap, and a second
-// workspace. Rows 8 and up are past the last item.
+// unfolded window line with a folder, its stats and the git mark, that
+// window's note, the focused pane, a folded window line outside a repo, the
+// gap, and a second workspace. Rows 8 and up are past the last item.
 func railRowSnap(rail int) *wire.Snapshot {
 	snap := &wire.Snapshot{
 		Cols: 100, Rows: 10, Rail: rail,
@@ -157,8 +157,8 @@ func TestRailRowSegments(t *testing.T) {
 			left, right, tail, wantLeft, wantRight)
 	}
 
-	// An unfolded window line carries the caret, the folder, the branch tail
-	// and the stats.
+	// An unfolded window line carries the caret, the folder, the stats and
+	// the git mark.
 	win := railRowFind(t, items, Window, "one")
 	left, right, tail = RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
@@ -167,25 +167,27 @@ func TestRailRowSegments(t *testing.T) {
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailWindow},
 		{Text: "rail", FG: theme.DefaultTheme().Palette.RailWindow},
 	}
-	wantTail := []railSeg{
-		{Text: "  ", FG: theme.DefaultTheme().Palette.RailDim},
-		{Text: "dm-rail", FG: theme.DefaultTheme().Palette.RailDim},
-	}
+	markFG := theme.DefaultTheme().Palette.BarAccent
 	wantRight = []railSeg{
 		{Text: "\u25cf", FG: theme.DefaultTheme().Palette.RailWorking},
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
 		{Text: "+12", FG: theme.DefaultTheme().Palette.RailDiffAdd},
 		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
 		{Text: "-4", FG: theme.DefaultTheme().Palette.RailDiffDel},
+		{Text: " ", FG: markFG},
+		{Text: theme.DefaultTheme().Glyphs.GitMark, FG: markFG},
+		{Text: " ", FG: markFG},
 	}
-	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) ||
-		!reflect.DeepEqual(tail, wantTail) {
-		t.Fatalf("window line = %+v / %+v / %+v, want %+v / %+v / %+v",
-			left, right, tail, wantLeft, wantRight, wantTail)
+	if !reflect.DeepEqual(left, wantLeft) || !reflect.DeepEqual(right, wantRight) || tail != nil {
+		t.Fatalf("window line = %+v / %+v / %+v, want %+v / %+v / nil",
+			left, right, tail, wantLeft, wantRight)
+	}
+	if strings.Contains(strings.Join(railSegTexts(left), ""), "dm-rail") {
+		t.Fatalf("window line still paints the branch: %+v", left)
 	}
 
 	// A folded window line flips the caret and keeps its folder. It has no
-	// branch and no stats outside a repo.
+	// stats and no git mark outside a repo.
 	folded := railRowFind(t, items, Window, "two")
 	left, right, tail = RailRow(theme.DefaultTheme(), folded, layout.DefaultRail, false, theme.GlyphUnicode)
 	wantLeft = []railSeg{
@@ -334,56 +336,59 @@ func TestRailRowLevelsDiffer(t *testing.T) {
 }
 
 // TestRailRowElidesBeforeStats keeps the rule the narrow rail lives by: the
-// stats tail stands down first, then the branch yields whole, then the label
-// elides, and the stats never lose a cell.
+// stats tail stands down first, then the label elides, and the git mark keeps
+// its three cells at every width.
 func TestRailRowElidesBeforeStats(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	snap := railRowSnap(12)
 	items := RailItems(snap)
 	win := railRowFind(t, items, Window, "one")
+	th := theme.DefaultTheme()
 	full := []railSeg{
-		{Text: "\u25cf", FG: theme.DefaultTheme().Palette.RailWorking},
-		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
-		{Text: "+12", FG: theme.DefaultTheme().Palette.RailDiffAdd},
-		{Text: " ", FG: theme.DefaultTheme().Palette.RailDim},
-		{Text: "-4", FG: theme.DefaultTheme().Palette.RailDiffDel},
+		{Text: "\u25cf", FG: th.Palette.RailWorking},
+		{Text: " ", FG: th.Palette.RailDim},
+		{Text: "+12", FG: th.Palette.RailDiffAdd},
+		{Text: " ", FG: th.Palette.RailDim},
+		{Text: "-4", FG: th.Palette.RailDiffDel},
 	}
+	gitMark := []railSeg{
+		{Text: " ", FG: th.Palette.BarAccent},
+		{Text: th.Glyphs.GitMark, FG: th.Palette.BarAccent},
+		{Text: " ", FG: th.Palette.BarAccent},
+	}
+	fullWithMark := append(append([]railSeg{}, full...), gitMark...)
 
-	// At the default width the branch fits beside the folder and the pair.
-	left, right, tail := RailRow(theme.DefaultTheme(), win, layout.DefaultRail, false, theme.GlyphUnicode)
-	if tail == nil {
-		t.Fatalf("branch dropped at %d columns: %+v", layout.DefaultRail, left)
-	}
-	if !reflect.DeepEqual(right, full) {
-		t.Fatalf("stats at %d columns = %+v, want the whole pair", layout.DefaultRail, right)
-	}
-
-	// Twenty columns: the folder fits beside the pair, so the branch goes
-	// whole and the folder stays intact.
-	left, right, tail = RailRow(theme.DefaultTheme(), win, 20, false, theme.GlyphUnicode)
+	// At the default width the pair and the mark render beside the folder.
+	left, right, tail := RailRow(th, win, layout.DefaultRail, false, theme.GlyphUnicode)
 	if tail != nil {
-		t.Fatalf("branch survived at 20 columns: %+v", tail)
+		t.Fatalf("window row kept a tail: %+v", tail)
 	}
-	if !reflect.DeepEqual(right, full) {
-		t.Fatalf("stats at 20 columns = %+v, want the whole pair", right)
+	if !reflect.DeepEqual(right, fullWithMark) {
+		t.Fatalf("stats at %d columns = %+v, want the whole pair and the mark",
+			layout.DefaultRail, right)
+	}
+
+	// Twenty columns: the folder fits beside the pair and the mark, and the
+	// folder stays intact.
+	left, right, tail = RailRow(th, win, 20, false, theme.GlyphUnicode)
+	if !reflect.DeepEqual(right, fullWithMark) {
+		t.Fatalf("stats at 20 columns = %+v, want the whole pair and the mark", right)
 	}
 	if strings.Contains(railRowComposed(left, tail, right, 20), "\u2026") {
 		t.Fatalf("folder elided while it fit: %q", railRowComposed(left, tail, right, 20))
 	}
 
-	// Twelve columns: the branch yields whole and the folder stays intact.
-	left, right, tail = RailRow(theme.DefaultTheme(), win, 12, false, theme.GlyphUnicode)
-	if tail != nil {
-		t.Fatalf("branch survived at 12 columns: %+v", tail)
+	// Twelve columns: the pair stands down, the mark keeps its three cells
+	// and the folder stays intact.
+	left, right, tail = RailRow(th, win, 12, false, theme.GlyphUnicode)
+	if !reflect.DeepEqual(right, gitMark) {
+		t.Fatalf("stats at 12 columns = %+v, want the mark alone", right)
 	}
-	if right != nil {
-		t.Fatalf("stats survived at 12 columns: %+v", right)
-	}
-	if got := railRowComposed(left, tail, right, 12); got != "  \u25be rail" {
-		t.Fatalf("row at 12 columns = %q, want %q", got, "  \u25be rail")
+	if strings.Contains(railRowComposed(left, tail, right, 12), "\u2026") {
+		t.Fatalf("folder elided while it fit: %q", railRowComposed(left, tail, right, 12))
 	}
 
-	// At every width the window row either keeps the whole pair or drops it
+	// At every width the window row keeps the mark, either stats set is
 	// whole, it never writes past the rail, and it composes what the rail
 	// paints.
 	for w := 1; w <= 40; w++ {
@@ -396,11 +401,10 @@ func TestRailRowElidesBeforeStats(t *testing.T) {
 		// The grip strip owns the rail's last column, so the row composes at w-1,
 		// and the project bar takes column 0 of that.
 		rowW := w - 1
-		th := theme.DefaultTheme()
 		bar := []railSeg{RailBar(th, it)}
 		left, right, tail = RailRow(th, it, rowW-1, layout.RailCompact(w), theme.GlyphUnicode)
-		if right != nil && !reflect.DeepEqual(right, full) {
-			t.Fatalf("stats at %d columns = %+v, want the whole pair or none", w, right)
+		if !reflect.DeepEqual(right, fullWithMark) && !reflect.DeepEqual(right, gitMark) {
+			t.Fatalf("right at %d columns = %+v, want the whole pair and the mark, or the mark alone", w, right)
 		}
 		if n := len(bar) + segment.SegCells(left) + segment.SegCells(tail) + segment.SegCells(right); n > rowW {
 			t.Fatalf("row at %d columns is %d cells: %+v / %+v / %+v",
@@ -661,7 +665,7 @@ func TestRailASCIIGlyphs(t *testing.T) {
 	var b bytes.Buffer
 	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphASCII), snap, theme.GlyphASCII, Paint{Hover: -1})
 	out := b.String()
-	for _, glyph := range []string{"▾", "▸", "•", "·", "●", "○", "▲", "✓", "✕", "▶", "▌"} {
+	for _, glyph := range []string{"▾", "▸", "•", "·", "●", "○", "▲", "✓", "✕", "▶", "▌", "⎇"} {
 		if strings.Contains(out, glyph) {
 			t.Fatalf("ascii rail carries %q", glyph)
 		}
@@ -1137,109 +1141,100 @@ func TestRailProjectAccentCarried(t *testing.T) {
 }
 
 // TestRailStatsTailPaysRent proves the window row's stats tail stands down
-// before it starves the label. The tail renders while the label fits beside
-// it, and while a label that must elide still keeps half the row; it yields
-// before the branch, the branch before the label, and no width ever renders
-// a truncated pair.
+// before it starves the label. The tail renders while the label fits beside it
+// and the git mark, and while a label that must elide still keeps half the
+// row; it yields before the label, the mark keeps its three cells, and no
+// width ever renders a truncated pair.
 func TestRailStatsTailPaysRent(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	th := theme.DefaultTheme()
+	mark := " " + th.Glyphs.GitMark + " "
 
 	// A wide pair: the dirty dot plus "+12 -4", eight cells, beside a
 	// six-cell label. Four cells of chrome put the label block at ten.
 	wide := RailItem{
 		Kind: Window, Text: "two", Label: "window",
-		Branch: "b", InRepo: true, Dirty: true,
-		Added: 12, Deleted: 4,
+		InRepo: true, Dirty: true, Added: 12, Deleted: 4,
 	}
 	const pair = "\u25cf +12 -4"
 
-	// Eighteen columns: the pair would elide the label below half the row,
-	// so it stands down and the short branch keeps the cells it gave back.
-	// The tail drops before the branch.
-	left, right, tail := RailRow(th, wide, 18, false, theme.GlyphUnicode)
-	if right != nil {
-		t.Fatalf("pair survived a row it starved: %+v", right)
+	// Twenty-one columns: the pair would elide the label below half the row,
+	// so it stands down and the mark holds the right edge alone.
+	left, right, tail := RailRow(th, wide, 21, false, theme.GlyphUnicode)
+	if tail != nil {
+		t.Fatalf("window row kept a tail: %+v", tail)
 	}
-	if tail == nil {
-		t.Fatalf("branch dropped beside a standing-down tail: %+v", left)
+	if got := strings.Join(railSegTexts(right), ""); got != mark {
+		t.Fatalf("right at 21 columns = %q, want the mark alone %q", got, mark)
 	}
-
-	// The same row with a long branch: the branch yields before the label,
-	// and the label stays intact.
-	longBranch := wide
-	longBranch.Branch = "feature/long"
-	left, right, tail = RailRow(th, longBranch, 18, false, theme.GlyphUnicode)
-	if right != nil || tail != nil {
-		t.Fatalf("tails survived a row they starved: right %+v tail %+v", right, tail)
-	}
-	if strings.Contains(railSegTextsJoined(left), "\u2026") {
-		t.Fatalf("label elided while it fit: %v", left)
+	if strings.Contains(strings.Join(railSegTexts(left), ""), "\u2026") {
+		t.Fatalf("label elided while it fit: %+v", left)
 	}
 
-	// A long label pins the half: at twenty-four columns the seven-cell
-	// pair renders and the label elides to exactly twelve cells, half the
-	// row. One below, the pair stands down and the label alone elides.
+	// Twenty-two columns: the pair fits beside the whole label and the mark.
+	left, right, tail = RailRow(th, wide, 22, false, theme.GlyphUnicode)
+	if got := strings.Join(railSegTexts(right), ""); got != pair+mark {
+		t.Fatalf("right at 22 columns = %q, want the whole pair and the mark", got)
+	}
+
+	// A long label pins the half: at thirty columns the seven-cell pair
+	// renders and the label elides to half the row beside the mark. One
+	// below, the pair stands down and the label keeps the cells it gave back.
 	tall := RailItem{
 		Kind: Window, Text: "two", Label: strings.Repeat("w", 40),
-		Branch: "feature/long", InRepo: true, Dirty: true,
-		Added: 1, Deleted: 1,
+		InRepo: true, Dirty: true, Added: 1, Deleted: 1,
 	}
 	const small = "\u25cf +1 -1"
-	left, right, tail = RailRow(th, tall, 24, false, theme.GlyphUnicode)
-	if got := strings.Join(railSegTexts(right), ""); got != small {
-		t.Fatalf("stats beside a long label = %q, want the whole pair %q", got, small)
+	left, right, tail = RailRow(th, tall, 30, false, theme.GlyphUnicode)
+	if got := strings.Join(railSegTexts(right), ""); got != small+mark {
+		t.Fatalf("right beside a long label = %q, want the whole pair and the mark", got)
 	}
-	if n := segment.SegCells(left); n != 16 || n-windowChrome != 12 {
-		t.Fatalf("elided label kept %d of 24 cells, want exactly half", n-windowChrome)
+	if n := segment.SegCells(left); n != 19 || n-windowChrome < 15 {
+		t.Fatalf("elided label kept %d cells, want half the row", n-windowChrome)
 	}
-	left, right, tail = RailRow(th, tall, 23, false, theme.GlyphUnicode)
-	if right != nil {
-		t.Fatalf("pair survived one below the floor: %+v", right)
+	left, right, tail = RailRow(th, tall, 29, false, theme.GlyphUnicode)
+	if got := strings.Join(railSegTexts(right), ""); got != mark {
+		t.Fatalf("right one below the floor = %q, want the mark alone", got)
 	}
-	if n := segment.SegCells(left); n != 23 {
-		t.Fatalf("label alone kept %d of 23 cells, want the whole row", n)
+	if n := segment.SegCells(left); n != 25 {
+		t.Fatalf("label alone kept %d cells of 29, want 25 beside the mark", n)
 	}
 
-	// A label that fits keeps its tail: the clean word renders beside it,
-	// the way a twenty-column rail has always shown it.
-	clean := RailItem{Kind: Window, Text: "two", Label: "window", Branch: "b", InRepo: true}
-	left, right, tail = RailRow(th, clean, 18, false, theme.GlyphUnicode)
-	if got := strings.Join(railSegTexts(right), ""); got != "clean" {
-		t.Fatalf("clean tail beside a fitting label = %q, want clean", got)
+	// A label that fits keeps the clean word beside it and the mark.
+	clean := RailItem{Kind: Window, Text: "two", Label: "window", InRepo: true}
+	left, right, tail = RailRow(th, clean, 22, false, theme.GlyphUnicode)
+	if got := strings.Join(railSegTexts(right), ""); got != "clean"+mark {
+		t.Fatalf("clean tail beside a fitting label = %q, want clean and the mark", got)
 	}
 
 	// Full width renders as it always did. The long label elides exactly as
-	// it did, keeping its half beside the whole pair.
+	// it did, keeping its half beside the whole pair and the mark.
 	left, right, tail = RailRow(th, tall, 32, false, theme.GlyphUnicode)
-	if got := strings.Join(railSegTexts(right), ""); got != small {
-		t.Fatalf("stats at full width = %q, want the whole pair", got)
+	if got := strings.Join(railSegTexts(right), ""); got != small+mark {
+		t.Fatalf("stats at full width = %q, want the whole pair and the mark", got)
 	}
-	if n := segment.SegCells(left); n != 24 || n-windowChrome < 16 {
-		t.Fatalf("elided label kept %d of 32 cells, want at least half", n-windowChrome)
+	if n := segment.SegCells(left); n != 21 || n-windowChrome < 16 {
+		t.Fatalf("elided label kept %d cells of 32, want at least half", n-windowChrome)
 	}
-	// And a row with room keeps pair, branch and label whole.
-	left, right, tail = RailRow(th, longBranch, 34, false, theme.GlyphUnicode)
-	if got := strings.Join(railSegTexts(right), ""); got != pair {
-		t.Fatalf("stats at 34 columns = %q, want the whole pair", got)
+	// And a row with room keeps the pair, the label and the mark whole.
+	left, right, tail = RailRow(th, wide, 34, false, theme.GlyphUnicode)
+	if got := strings.Join(railSegTexts(right), ""); got != pair+mark {
+		t.Fatalf("stats at 34 columns = %q, want the whole pair and the mark", got)
 	}
-	if tail == nil {
-		t.Fatalf("branch dropped at 34 columns: %+v", left)
-	}
-	if strings.Contains(railSegTextsJoined(left), "\u2026") {
-		t.Fatalf("label elided while it fit: %v", left)
+	if strings.Contains(strings.Join(railSegTexts(left), ""), "\u2026") {
+		t.Fatalf("label elided while it fit: %+v", left)
 	}
 
-	// No width renders a truncated tail: the pair and "clean" go whole or
-	// the right edge stays empty.
+	// No width renders a truncated tail: the pair and "clean" go whole, the
+	// mark always keeps its three cells.
 	for _, tc := range []struct {
 		name string
 		it   RailItem
 		want map[string]bool
 	}{
-		{"dirty", tall, map[string]bool{"": true, small: true}},
+		{"dirty", tall, map[string]bool{mark: true, small + mark: true}},
 		{"clean", func() RailItem { c := tall; c.Dirty, c.Added, c.Deleted = false, 0, 0; return c }(),
-			map[string]bool{"": true, "clean": true}},
+			map[string]bool{mark: true, "clean" + mark: true}},
 	} {
 		for w := 1; w <= 40; w++ {
 			if layout.RailCompact(w) {
@@ -1247,7 +1242,7 @@ func TestRailStatsTailPaysRent(t *testing.T) {
 			}
 			_, right, _ := RailRow(th, tc.it, w, false, theme.GlyphUnicode)
 			if got := strings.Join(railSegTexts(right), ""); !tc.want[got] {
-				t.Fatalf("%s tail at %d columns = %q, want whole or nothing", tc.name, w, got)
+				t.Fatalf("%s tail at %d columns = %q, want whole or the mark alone", tc.name, w, got)
 			}
 		}
 	}

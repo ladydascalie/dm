@@ -34,7 +34,9 @@ func getEntry(s *server, cwd string) *branchEntry {
 // goodGit is a last good answer the tests keep alive across a timeout.
 var goodGit = gitInfo{
 	branch: "main", root: "/work/dm", inRepo: true,
-	dirty: true, added: 7, deleted: 3,
+	dirty: true, added: 7, deleted: 3, files: 2,
+	head: "abc1234", headSubject: "fix the rail",
+	upstream: "origin/main", ahead: 4, behind: 1,
 }
 
 // TestSlowProbeKeepsLastGood pins the timeout rule: a probe that hits the one

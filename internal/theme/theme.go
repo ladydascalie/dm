@@ -91,7 +91,7 @@ type Palette struct {
 // Glyphs are the structural decorators: the drag grip, the divider hover
 // marks, the box, menu, picker and help borders and tees, the rail's fold
 // carets in both forms, the active-window mark, the workspace bar, the dirty
-// dot, the elision mark and the float's drop shadow.
+// dot, the git mark, the elision mark and the float's drop shadow.
 type Glyphs struct {
 	Grip              string
 	DividerRow        string
@@ -111,6 +111,11 @@ type Glyphs struct {
 	ActiveMark        string
 	WorkspaceBar      string
 	Dirty             string
+	// GitMark is the mark that closes a window row inside a repository.
+	// NerdGitMark is its Nerd Font form, chosen by Theme.For the way a state
+	// mark chooses one.
+	GitMark     string
+	NerdGitMark string
 	// SyncMark is the synchronize-panes mark in the status bar's focus chip.
 	// NerdSyncMark is its Nerd Font form, chosen by Theme.For the way a state
 	// mark chooses one.
@@ -178,6 +183,8 @@ func DefaultTheme() Theme {
 			ActiveMark:        "▸",
 			WorkspaceBar:      "▌",
 			Dirty:             "●",
+			GitMark:           "⎇",
+			NerdGitMark:       "\ue702",
 			SyncMark:          "⧉",
 			NerdSyncMark:      "\uf0e2",
 			Shadow:            "░",
@@ -466,6 +473,11 @@ func (g *Glyphs) set(key, val string) bool {
 		g.Shadow = val
 	case "dirty":
 		g.Dirty = val
+	case "git-mark":
+		g.GitMark = val
+		g.NerdGitMark = val
+	case "nerd-git-mark":
+		g.NerdGitMark = val
 	default:
 		return false
 	}

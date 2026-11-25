@@ -31,7 +31,9 @@ func TestGitStateReachesAll(t *testing.T) {
 			return gitInfo{
 				branch: "dm-git", worktree: "dm-git-w1",
 				root:  "/work/dm",
-				dirty: true, added: 7, deleted: 3,
+				dirty: true, added: 7, deleted: 3, files: 2,
+				head: "abc1234", headSubject: "fix the rail",
+				upstream: "origin/dm-git", ahead: 4, behind: 1,
 			}
 		}
 		return gitInfo{}
@@ -43,7 +45,9 @@ func TestGitStateReachesAll(t *testing.T) {
 			got := snap.All[0]
 			if got.Branch != "dm-git" || got.Worktree != "dm-git-w1" ||
 				got.Cwd != "/work/dm" || got.Root != "/work/dm" ||
-				!got.Dirty || got.Deleted != 3 {
+				!got.Dirty || got.Deleted != 3 || got.Files != 2 ||
+				got.Head != "abc1234" || got.HeadSubject != "fix the rail" ||
+				got.Upstream != "origin/dm-git" || got.Ahead != 4 || got.Behind != 1 {
 				t.Fatalf("All pane git state = %+v", got)
 			}
 			break
@@ -75,16 +79,17 @@ func TestGitStateOutsideRepo(t *testing.T) {
 }
 
 // TestParseNumstat sums a normal line, counts nothing for a binary file's dash
-// counts, and skips a blank line.
+// counts, counts the binary file itself, and skips a blank line.
 func TestParseNumstat(t *testing.T) {
 	t.Parallel()
 	out := []byte("12\t4\tserver.go\n-\t-\tlogo.png\n\n3\t0\tproto.go\n")
-	added, deleted := parseNumstat(out)
-	if added != 15 || deleted != 4 {
-		t.Fatalf("parseNumstat = %d added, %d deleted, want 15, 4", added, deleted)
+	added, deleted, files := parseNumstat(out)
+	if added != 15 || deleted != 4 || files != 3 {
+		t.Fatalf("parseNumstat = %d added, %d deleted, %d files, want 15, 4, 3",
+			added, deleted, files)
 	}
-	if a, d := parseNumstat([]byte("\n")); a != 0 || d != 0 {
-		t.Fatalf("parseNumstat on a blank line = %d, %d", a, d)
+	if a, d, n := parseNumstat([]byte("\n")); a != 0 || d != 0 || n != 0 {
+		t.Fatalf("parseNumstat on a blank line = %d, %d, %d", a, d, n)
 	}
 }
 
@@ -199,6 +204,87 @@ func TestDetectGitReal(t *testing.T) {
 	if got := detectGit(t.TempDir()); got != (gitInfo{}) || got.root != "" {
 		t.Fatalf("plain directory = %+v, want zero and no root", got)
 	}
+}
+
+// stubProbeGit puts a git on PATH that answers the probe's commands, so a test
+// can drive detectGit through answers real git only gives in a special
+// repository. DM_STUB_UNBORN fails the log line and DM_STUB_NOUPSTREAM fails
+// the two upstream commands, the way an unborn HEAD and an untracked branch do.
+func stubProbeGit(t *testing.T) {
+	t.Helper()
+	bin := t.TempDir()
+	script := `#!/bin/sh
+shift 2
+case "$*" in
+"rev-parse --abbrev-ref HEAD --show-toplevel --git-dir --git-common-dir")
+	printf 'main\n/work/repo\n/work/repo/.git\n/work/repo/.git\n' ;;
+"status --porcelain=v1 -z --untracked-files=no")
+	printf ' M file.txt\0' ;;
+"diff --numstat HEAD")
+	printf '2\t1\tfile.txt\n3\t0\tnew.txt\n' ;;
+"log -1 --format=%h%x00%s")
+	if [ -n "$DM_STUB_UNBORN" ]; then exit 128; fi
+	printf 'abc1234\0fix the rail\n' ;;
+"rev-parse --abbrev-ref --symbolic-full-name @{u}")
+	if [ -n "$DM_STUB_NOUPSTREAM" ]; then exit 128; fi
+	printf 'origin/main\n' ;;
+"rev-list --left-right --count @{u}...HEAD")
+	if [ -n "$DM_STUB_NOUPSTREAM" ]; then exit 128; fi
+	printf '2\t5\n' ;;
+*)
+	exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestDetectGitFacts drives the probe through a stubbed git. A failure that is
+// not a timeout is a real answer: an unborn HEAD leaves the head fields empty
+// and an untracked branch leaves the upstream counts empty, and neither marks
+// the probe inconclusive.
+func TestDetectGitFacts(t *testing.T) {
+	stubProbeGit(t)
+
+	want := gitInfo{
+		branch: "main", root: "/work/repo", inRepo: true,
+		dirty: true, added: 5, deleted: 1, files: 2,
+		head: "abc1234", headSubject: "fix the rail",
+		upstream: "origin/main", ahead: 5, behind: 2,
+	}
+	if got := detectGit("/work/repo"); got != want {
+		t.Fatalf("normal probe = %+v, want %+v", got, want)
+	}
+
+	t.Run("no upstream", func(t *testing.T) {
+		t.Setenv("DM_STUB_NOUPSTREAM", "1")
+		got := detectGit("/work/repo")
+		if got.timeout {
+			t.Fatalf("a missing upstream marked the probe inconclusive: %+v", got)
+		}
+		if got.upstream != "" || got.ahead != 0 || got.behind != 0 {
+			t.Fatalf("no upstream = %+v, want the counts left empty", got)
+		}
+		if got.head != "abc1234" || got.headSubject != "fix the rail" {
+			t.Fatalf("no upstream lost the head line: %+v", got)
+		}
+	})
+
+	t.Run("unborn head", func(t *testing.T) {
+		t.Setenv("DM_STUB_UNBORN", "1")
+		got := detectGit("/work/repo")
+		if got.timeout {
+			t.Fatalf("an unborn HEAD marked the probe inconclusive: %+v", got)
+		}
+		if got.head != "" || got.headSubject != "" {
+			t.Fatalf("unborn HEAD = %+v, want the head line left empty", got)
+		}
+		if !got.inRepo || got.upstream != "origin/main" || got.ahead != 5 {
+			t.Fatalf("unborn HEAD lost the other facts: %+v", got)
+		}
+	})
 }
 
 // TestDetectGitTimeout pins the timeout classification: a git that hangs until

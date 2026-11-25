@@ -200,6 +200,19 @@ type AllPane struct {
 	Dirty   bool `json:"dirty,omitempty"`
 	Added   int  `json:"added,omitempty"`
 	Deleted int  `json:"deleted,omitempty"`
+	// Head is the short sha of the commit HEAD names, and HeadSubject its
+	// subject. Both are empty on an unborn HEAD, which has no commit yet.
+	Head        string `json:"head,omitempty"`
+	HeadSubject string `json:"headSubject,omitempty"`
+	// Upstream is the full ref the branch tracks, such as origin/main. It is
+	// empty when the branch tracks nothing. Ahead and Behind count the commits
+	// HEAD has that the upstream does not, and the reverse.
+	Upstream string `json:"upstream,omitempty"`
+	Ahead    int    `json:"ahead,omitempty"`
+	Behind   int    `json:"behind,omitempty"`
+	// Files counts the files the working tree changes against HEAD, so a
+	// reader can tell one edited line from a hundred edited files.
+	Files int `json:"files,omitempty"`
 	// WindowUnfolded is the rail fold state of the pane's window.
 	WindowUnfolded bool `json:"windowUnfolded,omitempty"`
 	// WorkspaceUnfolded is the rail fold state of the pane's workspace.
