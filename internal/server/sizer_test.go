@@ -125,9 +125,10 @@ func (d *sizerDaemon) reflows() int {
 // sizerFixture is one server with two layout panes side by side, each behind a
 // fake daemon, and the real serve loop for every client.
 type sizerFixture struct {
-	s      *server
-	a, b   string
-	demons map[string]*sizerDaemon
+	s       *server
+	a, b    string
+	demons  map[string]*sizerDaemon
+	clients []*sizerClient
 }
 
 func newSizerFixture(t *testing.T, name string) *sizerFixture {
@@ -155,16 +156,15 @@ func newSizerFixture(t *testing.T, name string) *sizerFixture {
 		// The client cleanups have closed their conns by now. Let each serve
 		// loop finish its detach bookkeeping before the temp dir goes: a
 		// detach that reverts a claim saves state, and a save that lands after
-		// the removal fails the test.
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			f.s.mu.Lock()
-			n := len(f.s.clients)
-			f.s.mu.Unlock()
-			if n == 0 {
-				break
+		// the removal fails the test. The serve loop closes its own side of
+		// the conn as its last act, so that close is the signal that no write
+		// to the state directory is left.
+		for _, c := range f.clients {
+			select {
+			case <-c.served:
+			case <-time.After(3 * time.Second):
+				t.Errorf("a client serve loop never finished its detach")
 			}
-			time.Sleep(time.Millisecond)
 		}
 		f.s.mu.Lock()
 		for _, pc := range f.s.panes {
@@ -175,19 +175,38 @@ func newSizerFixture(t *testing.T, name string) *sizerFixture {
 	return f
 }
 
+// servedConn is the server side of a client conn. The serve loop closes it as
+// its last act, after the detach bookkeeping and the state save that goes with
+// it, so a fixture that waits for the close cannot remove the state directory
+// under a write.
+type servedConn struct {
+	net.Conn
+	served chan struct{}
+	once   sync.Once
+}
+
+func (c *servedConn) Close() error {
+	c.once.Do(func() { close(c.served) })
+	return c.Conn.Close()
+}
+
 // client attaches a client to the fixture's serve loop and collects the frames
 // the server sends it.
 type sizerClient struct {
 	conn   net.Conn
 	frames chan wire.Msg
+	// served closes when the serve loop returns.
+	served chan struct{}
 }
 
 func (f *sizerFixture) client(t *testing.T, cols, rows int) *sizerClient {
 	t.Helper()
 	srv, cli := net.Pipe()
-	go f.s.serve(srv)
+	served := &servedConn{Conn: srv, served: make(chan struct{})}
+	go f.s.serve(served)
 	t.Cleanup(func() { _ = cli.Close() })
-	c := &sizerClient{conn: cli, frames: make(chan wire.Msg, 256)}
+	c := &sizerClient{conn: cli, frames: make(chan wire.Msg, 256), served: served.served}
+	f.clients = append(f.clients, c)
 	go func() {
 		for {
 			m, err := wire.ReadMsg(cli)
@@ -249,23 +268,6 @@ func (f *sizerFixture) waitClients(t *testing.T, n int) {
 	t.Fatalf("the server never held %d clients", n)
 }
 
-// drain discards every frame until the server has been quiet for quiet, so a
-// test reads the frames one claim produced and not the tail of an earlier
-// settle.
-func (c *sizerClient) drain(t *testing.T, quiet time.Duration) {
-	t.Helper()
-	for {
-		select {
-		case _, ok := <-c.frames:
-			if !ok {
-				return
-			}
-		case <-time.After(quiet):
-			return
-		}
-	}
-}
-
 // screen waits for the next screen frame for a pane and proves it carries cols
 // x rows. It reports how many screen frames for that pane it read on the way,
 // and fails on one at another size: a client that is not the sizer never
@@ -314,6 +316,82 @@ func (c *sizerClient) expectNoScreen(t *testing.T, id string, wait time.Duration
 			return
 		}
 	}
+}
+
+// readScreen reads the next screen frame for a pane, whatever size it carries.
+// The attach asks for its picture on a fresh connection, so that request can
+// beat the resize that follows it, and the answer then carries the size the
+// pane held before the attach. Only the picture handshake is about the size the
+// pane holds now, so an attach picture is read by target alone.
+func (c *sizerClient) readScreen(t *testing.T, id string) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case m, ok := <-c.frames:
+			if !ok {
+				t.Fatalf("the client conn closed before a screen frame for %s", id)
+			}
+			if m.Type != "screen" || m.Target != id {
+				continue
+			}
+			if m.VTSnap == nil {
+				t.Fatalf("a screen frame for %s carried no snapshot", id)
+			}
+			return
+		case <-deadline:
+			t.Fatalf("no screen frame for %s arrived", id)
+		}
+	}
+}
+
+// waitScreens reads frames for a pane until it has taken n screen frames for it
+// and proves each carries cols x rows. It is how a test consumes the pictures
+// an attach already owed the client, so the next frame it reads is the one the
+// step under test costs.
+func (c *sizerClient) waitScreens(t *testing.T, id string, n, cols, rows int) {
+	t.Helper()
+	got := 0
+	deadline := time.After(3 * time.Second)
+	for got < n {
+		select {
+		case m, ok := <-c.frames:
+			if !ok {
+				t.Fatalf("the client conn closed after %d of %d screen frames for %s", got, n, id)
+			}
+			if m.Type != "screen" || m.Target != id {
+				continue
+			}
+			if m.VTSnap == nil {
+				t.Fatalf("a screen frame for %s carried no snapshot", id)
+			}
+			if m.VTSnap.Cols != cols || m.VTSnap.Rows != rows {
+				t.Fatalf("%s screen is %dx%d, want %dx%d", id, m.VTSnap.Cols, m.VTSnap.Rows, cols, rows)
+			}
+			got++
+		case <-deadline:
+			t.Fatalf("%d of %d %dx%d screen frames for %s arrived", got, n, cols, rows, id)
+		}
+	}
+}
+
+// settlePicture runs at once the picture handshake the server has armed for a
+// pane, and reports whether one was armed. Every size change arms one; running
+// it here rather than waiting for the timer keeps the frames a step costs in
+// the test's hands. A timer also races the resize it belongs to: the resize
+// rides the pane's own conn while the handshake dials a fresh one, so on a
+// loaded machine the pane can answer the handshake before it has taken the
+// resize, and the picture then carries the size the pane is about to leave.
+func (f *sizerFixture) settlePicture(t *testing.T, id string) bool {
+	t.Helper()
+	f.s.mu.Lock()
+	armed := f.s.reflowWait[id]
+	f.s.mu.Unlock()
+	if !armed {
+		return false
+	}
+	f.s.settleReflow()
+	return true
 }
 
 // waitSize waits until the daemon holds cols x rows and reports the size it had
@@ -523,6 +601,11 @@ func TestNonSizerClaimIsRefused(t *testing.T) {
 func TestClaimHeightReachesNonSizer(t *testing.T) {
 	t.Parallel()
 	f := newSizerFixture(t, "sizerheight")
+	// This test runs every picture handshake itself, once the pane holds the
+	// size the handshake is about, so it parks the settle timer. The other
+	// sizer tests read sizes and resize counts, not pictures, and keep the
+	// fixture's short settle.
+	f.s.reflowSettle = time.Hour
 	first := f.client(t, 100, 30)
 	if !first.waitSizer(t, true) {
 		t.Fatal("the first client to attach was not made the sizing client")
@@ -530,6 +613,15 @@ func TestClaimHeightReachesNonSizer(t *testing.T) {
 	f.waitClients(t, 1)
 	rect := rectOf(t, f.s, f.a)
 	f.waitSize(t, f.a, rect.W, rect.H)
+	// The attach owed this client one picture for the pane, and the size
+	// change from the pane's empty state to its rectangle armed one more
+	// handshake. Read both here: a frame still in flight when a claim is
+	// measured reads as the claim's own.
+	first.readScreen(t, f.a)
+	if !f.settlePicture(t, f.a) {
+		t.Fatal("the attach's size change armed no picture handshake")
+	}
+	first.waitScreens(t, f.a, 1, rect.W, rect.H)
 
 	second := f.client(t, 100, 30)
 	if !second.waitSizer(t, true) {
@@ -540,10 +632,12 @@ func TestClaimHeightReachesNonSizer(t *testing.T) {
 	}
 	f.waitClients(t, 2)
 	f.waitSize(t, f.a, rect.W, rect.H)
-	// The attach shrank the pane back to its rectangle, which is a width
-	// change of its own. Let that settle finish before a claim is measured.
-	first.drain(t, 100*time.Millisecond)
-	t.Logf("no claim yet: %s %dx%d, first client drained", f.a, rect.W, rect.H)
+	// The second attach arms a handshake only if it moved a size. Run it if it
+	// did, so its picture is read here rather than as a claim's.
+	if f.settlePicture(t, f.a) {
+		first.waitScreens(t, f.a, 1, rect.W, rect.H)
+	}
+	t.Logf("no claim yet: %s %dx%d, every attach picture read", f.a, rect.W, rect.H)
 
 	// oneClaim sends one claim and proves the frames it costs: one resize to
 	// the pane, one picture handshake, and one screen for the non-sizer.
@@ -553,10 +647,16 @@ func TestClaimHeightReachesNonSizer(t *testing.T) {
 		reflows := f.demons[f.a].reflows()
 		second.send(t, wire.Msg{Type: "resize", Target: f.a, Cols: cols, Rows: rows})
 		f.waitSize(t, f.a, cols, rows)
-		if n := first.screen(t, f.a, cols, rows); n != 1 {
-			t.Fatalf("the %dx%d claim sent %d screen frames for %s, want 1", cols, rows, n, f.a)
+		// The pane holds the claimed size, so the picture the claim armed is
+		// the claimed grid. Run it now and read the one frame it owes: a
+		// second frame for this pane before it is the previous claim's, and
+		// the next claim's screen() call counts it.
+		if !f.settlePicture(t, f.a) {
+			t.Fatalf("the %dx%d claim armed no picture handshake", cols, rows)
 		}
-		first.expectNoScreen(t, f.a, 60*time.Millisecond)
+		if n := first.screen(t, f.a, cols, rows); n != 1 {
+			t.Fatalf("%s owed one %dx%d screen frame per claim, read %d", f.a, cols, rows, n)
+		}
 		if got := f.demons[f.a].resizes(); got != resizes+1 {
 			t.Fatalf("the %dx%d claim sent the pane %d resize frames, want 1", cols, rows, got-resizes)
 		}
@@ -571,4 +671,10 @@ func TestClaimHeightReachesNonSizer(t *testing.T) {
 	// Height only, smaller then larger: each owes the non-sizer one frame.
 	oneClaim(60, 16, "height-only")
 	oneClaim(60, 30, "height-only")
+
+	// Every handshake the test ran has been answered and every frame it owes
+	// has been read. A frame that arrives now is a second picture for one
+	// handshake, which is the claim the old fixed window could not tell apart
+	// from a slow one.
+	first.expectNoScreen(t, f.a, 100*time.Millisecond)
 }
