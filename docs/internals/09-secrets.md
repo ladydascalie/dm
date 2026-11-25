@@ -69,12 +69,12 @@ screen, the ring, a broadcast (`bytes` frame) and a read-back (`read` reply).
 - Bounds live in one place: 4 bytes minimum, 4096 maximum, 256 values (`internal/pane/scrub.go#MinSecretLen`), and
   the daemon warns with the same constants, naming the secret and its length, never the value
   (`secretBoundsWarning`, `internal/server/server_secrets.go#secretBoundsWarning`).
-- Replacement keeps the length, one `*` per value byte (`internal/pane/scrub.go#writeRedacted`), because the pane's
+- Replacement keeps the length, one `*` per value byte (`internal/secrets/redact.go#writeRedacted`), because the pane's
   output is addressed by byte position: a published byte count, the anchor a client's copy starts from and
   the offsets a yank returns are all positions in that stream.
 - Matching is leftmost-longest. A proper prefix of a longer value is held back until the next chunk
-  (`redactInto`, `internal/pane/scrub.go#redactInto`). A value with a newline is matched in its CRLF form too,
-  because the pty rewrites LF to CRLF on the way out (`valueForms`, `internal/pane/scrub.go#valueForms`). The OSC
+  (`RedactInto`, `internal/secrets/redact.go#RedactInto`). A value with a newline is matched in its CRLF form too,
+  because the pty rewrites LF to CRLF on the way out (`valueForms`, `internal/secrets/redact.go#valueForms`). The OSC
   7501 status message and its app name are scrubbed by `redactText` (`internal/pane/scrub.go#scrubber.redactText`), outside
   the stream, because the filter decodes them first.
 
