@@ -2155,8 +2155,9 @@ func runReset(c *cmdFlags) error {
 }
 
 // runPurge removes dead sessions whose server and panes are gone. A session
-// that still answers on its socket, or whose server or a pane process is
-// alive, is left alone and reported.
+// that still answers on its socket, holds its session lock, or whose server or
+// a pane process is alive, is left alone and reported. Every removal takes the
+// lock first, so a purge can never delete a live session's directory.
 func runPurge(c *cmdFlags) error {
 	sessions, err := transport.ListSessions()
 	if err != nil {
@@ -2168,6 +2169,21 @@ func runPurge(c *cmdFlags) error {
 			continue
 		}
 		dir := paths.SessionDirAt(c.root, s.Name)
+		if c.dry {
+			// A held lock is the one truth a dry run can read without changing
+			// the tree: the probe never creates the lock file.
+			held, err := paths.SessionLockHeld(c.root, s.Name)
+			if err != nil {
+				fmt.Printf("error purging %s: %v\n", s.Name, err)
+				continue
+			}
+			if held {
+				fmt.Printf("skip %s: session lock held\n", s.Name)
+				continue
+			}
+		}
+		// Pid files are a hint. The lock is the decision: a held lock means a
+		// live server owns the directory, whatever the pid files say.
 		if pidAlive(filepath.Join(dir, "server.pid")) {
 			fmt.Printf("skip %s: server pid alive\n", s.Name)
 			continue
@@ -2181,7 +2197,11 @@ func runPurge(c *cmdFlags) error {
 			purged++
 			continue
 		}
-		if err := os.RemoveAll(dir); err != nil {
+		if err := transport.RemoveSessionAt(c.root, s.Name); err != nil {
+			if errors.Is(err, paths.ErrSessionLocked) {
+				fmt.Printf("skip %s: session lock held\n", s.Name)
+				continue
+			}
 			fmt.Printf("error purging %s: %v\n", s.Name, err)
 			continue
 		}

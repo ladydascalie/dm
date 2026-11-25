@@ -527,7 +527,9 @@ func (s *server) exitFunc() func(int) {
 var endSessionExit = os.Exit
 
 // endSession closes every client, removes the session directory and exits. A
-// session with no panes is gone, the same way tmux ends one.
+// session with no panes is gone, the same way tmux ends one. Removing the
+// directory is legal here because this server holds the session lock, and it is
+// the only legal case: nothing else can be inside the directory to race.
 func (s *server) endSession() {
 	s.mu.Lock()
 	s.ending = true
@@ -553,11 +555,15 @@ func (s *server) endSession() {
 	}
 
 	// Remove the session before closing the listener: accepting goroutine wakes
-	// on the closed listener and may exit the process immediately.
+	// on the closed listener and may exit the process immediately. The lock is
+	// held across the removal; the check guards the one case the lock cannot: a
+	// successor that took the path while this server was on its way out.
 	st := s.st
-	_ = os.Remove(st.ServerSock())
-	_ = os.Remove(filepath.Join(st.SessionDir(), "server.pid"))
-	_ = os.RemoveAll(st.SessionDir())
+	if s.ownsDirectory() {
+		_ = os.Remove(st.ServerSock())
+		_ = os.Remove(filepath.Join(st.SessionDir(), "server.pid"))
+		_ = os.RemoveAll(st.SessionDir())
+	}
 	for _, c := range clients {
 		_ = c.c.Close()
 	}
@@ -565,6 +571,15 @@ func (s *server) endSession() {
 		_ = s.ln.Close()
 	}
 	s.exitFunc()(0)
+}
+
+// ownsDirectory reports whether the session directory is still the one this
+// server locked. A successor can only own the path if the lock file's inode
+// changed under us, and removing that directory would delete a session this
+// process never owned. A server built without Run holds no lock: nothing else
+// can be at the path, which is the test seam.
+func (s *server) ownsDirectory() bool {
+	return s.lock == nil || s.lock.StillOurs()
 }
 
 // terminate is the SIGTERM handler: it closes the clients, removes the

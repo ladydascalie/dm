@@ -557,11 +557,16 @@ type server struct {
 	cfg     *keymap.Config
 	panes   map[string]*paneConn
 	clients map[*client]bool
-	cols    int
-	rows    int
-	ln      net.Listener
-	ending  bool            // session is shutting down; accept errors are expected
-	adopt   map[string]bool // panes loaded from disk: a fresh spawn is a restart
+	// lock is the session lock this server took at startup, held for the
+	// process's whole life. endSession checks it still owns the path before it
+	// removes the directory. It is nil only for a server a test builds without
+	// Run, which holds no directory of its own.
+	lock   *paths.SessionLock
+	cols   int
+	rows   int
+	ln     net.Listener
+	ending bool            // session is shutting down; accept errors are expected
+	adopt  map[string]bool // panes loaded from disk: a fresh spawn is a restart
 
 	// paneSpawn serialises ensurePane per pane id, so two clients racing on
 	// one missing pane spawn one daemon and adopt one socket. The map itself
@@ -704,15 +709,14 @@ func Run(args []string) error {
 	if err := os.MkdirAll(filepath.Join(paths.SessionDirAt(root, *name), "panes"), 0o700); err != nil {
 		return err
 	}
-	lockPath := filepath.Join(paths.SessionDirAt(root, *name), "server.lock")
-	lf, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := paths.LockSession(root, *name)
 	if err != nil {
+		if errors.Is(err, paths.ErrSessionLocked) {
+			return fmt.Errorf("session %q already has a server", *name)
+		}
 		return err
 	}
-	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return fmt.Errorf("session %q already has a server", *name)
-	}
-	defer func() { _ = lf.Close() }()
+	defer func() { _ = lock.Release() }()
 
 	st, fromDisk, err := loadState(root, *name, *layoutPath)
 	if err != nil {
@@ -730,6 +734,7 @@ func Run(args []string) error {
 		log.Printf("keymap: %v", cfgErr)
 	}
 	s := newServer(st, cfg, adopt)
+	s.lock = lock
 	// A pending settle must not outlive the accept loop. endSession exits the
 	// process before this defer runs, so it stops the timer itself.
 	defer s.stopReflow()
