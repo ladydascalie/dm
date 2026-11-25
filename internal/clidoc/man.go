@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-19"
+const manDate = "2026-11-25"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -72,7 +72,7 @@ var manActionNames = []string{
 	"focus-window", "focus-workspace", "close-workspace",
 	"rename-window", "rename-workspace", "set-project",
 	"swap-panes", "move-pane", "move-window", "move-workspace",
-	"select-layout", "synchronize-panes",
+	"select-layout", "layout", "synchronize-panes",
 	"float-open", "float-close",
 	"shelve-pane", "pop-pane",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",

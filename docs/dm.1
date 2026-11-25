@@ -1,4 +1,4 @@
-.TH DM 1 "2026-11-19" "dm" "User Commands"
+.TH DM 1 "2026-11-25" "dm" "User Commands"
 .SH NAME
 dm \- durable terminal multiplexer
 .SH SYNOPSIS
@@ -802,6 +802,11 @@ The action field names one of these. Each example is one JSON object, carrying o
 \fBselect-layout\fP
 .nf
 {"action":"select-layout","layout":"next"}
+.fi
+.TP
+\fBlayout\fP
+.nf
+{"action":"layout"}
 .fi
 .TP
 \fBsynchronize-panes\fP

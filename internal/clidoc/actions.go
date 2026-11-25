@@ -66,6 +66,7 @@ var actionExamples = []actionExample{
 	{"move-window", `{"action":"move-window","target":"w1","dir":"down"}`},
 	{"move-workspace", `{"action":"move-workspace","target":"s1","dir":"down"}`},
 	{"select-layout", `{"action":"select-layout","layout":"next"}`},
+	{"layout", `{"action":"layout"}`},
 	{"synchronize-panes", `{"action":"synchronize-panes","on":true}`},
 	{"float-open", `{"action":"float-open","float":"f1","target":"w1p1","command":"tig"}`},
 	{"float-close", `{"action":"float-close","float":"f1"}`},

@@ -121,6 +121,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `[` | scrollback (also the mouse wheel) |
 | `[` then `/` | search the scrollback, live screen included |
 | `[` then `n` / `N` | older / newer search match, wrapping |
+| `y` / `Y` | copy the focused pane's output / screen |
 | `i` | copy the focused pane's id |
 | `h j k l` or arrows | focus pane left / down / up / right |
 | `n` / `p` | next / previous pane |
@@ -140,12 +141,15 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `s` | switch session (picker: j/k, enter, esc) |
 | `K` | command palette: type to filter every action, enter runs it, esc closes, ? explains the selection |
 | `S` | synchronize panes |
+| `ctrl+g` | toggle secret redaction; it is not a security control |
 | `a` | dashboard: every pane in a full-screen table |
 | `m` | message box: the session's log as a floating pane |
 | `N` | message box opened on the `notify/` entries, the notification filter on |
+| `A` | show or hide the question float |
 | `?` | all keymaps, in a floating pane |
 | `)` | next workspace |
 | `r` | rename the active workspace |
+| `P` | set the active workspace's project, or clear it |
 | `b` | cycle the sidebar: full, thin, hidden |
 | `ctrl+r` | reload config.kdl and its theme |
 | `d` / `q` | detach |
@@ -397,13 +401,16 @@ optional and each one overrides its built-in value.
 | `shelf-size` | an integer from 20 to 100 | `80` | Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept. |
 | `float-shadow` | `"off"` or `"on"` | `"off"` | Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane. |
 | `dashboard-preview` | an integer from 0 to 100 | `40` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
+| `palette-rows` | an integer of at least 1 | `10` | Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer. |
 | `ask-rows` | an integer from 8 to 64 | `30` | Set the fewest interior rows the ask float reserves. Its detail pane fills the rows the floor leaves, so a taller box reads more of a long description or preview before it elides. |
 | `ask-cols` | an integer from 40 to 240 | `96` | Set the widest the ask float may stand, in columns. It still keeps six columns clear of the screen edge. |
 | `ask-split` | an integer from 20 to 80 | `60` | Set the share of the ask box's width the detail column takes, in percent. The options are labels on one row each, so the detail column takes the larger half. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
+| `web-addr` | a quoted host:port, as in `"100.71.227.52:8099"` | `"127.0.0.1:8099"` | Set the host:port `dm web` listens on when `--addr` is not passed. An absent or empty node keeps the loopback default. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 | `command` | a quoted name and a `{ run "..." }` block | none | Define a command a keymap can run; bind `command:<name>` to a key, and the row runs the run text in a floating pane. |
+| `plugin` | a quoted name matching `[A-Za-z0-9_-]+` and a `{ exec ... where ... }` block | none | Declare a plugin a keymap can run; bind `plugin:<name>` to a key. The contract is in `PLUGINS.md`. |
 
 ### Commands
 
