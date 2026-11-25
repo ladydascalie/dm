@@ -1106,6 +1106,17 @@ func (s *server) reply(cl *client, m wire.Msg, res any, err error) {
 	cl.deliver(out)
 }
 
+// sendPicture hands the client one picture and answers the request. A picture
+// this client cannot take is the request's failure: a frame over the wire limit
+// or a client that is gone answers an error, never a false OK.
+func (s *server) sendPicture(cl *client, picture wire.Msg, req wire.Msg, res any) {
+	if err := cl.deliverErr(picture); err != nil {
+		s.reply(cl, req, nil, fmt.Errorf("%s %s: %w", picture.Type, picture.Target, err))
+		return
+	}
+	s.reply(cl, req, res, nil)
+}
+
 func jsonRaw(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
