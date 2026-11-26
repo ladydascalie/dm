@@ -1175,25 +1175,36 @@ async function swRegistration() {
   }
 }
 
-// loadNotify reads the device's real subscription and repairs the stored flag
-// from it, so a subscription cleared in the browser's settings does not leave
-// the switch claiming to be on.
+// loadNotify reads the device's real subscription and hands it to dm again.
+//
+// The device is the truth source, but a subscription is only worth anything
+// where dm has the row: a delivery comes from dm's store, never from the
+// browser. So the load POSTs whatever the device holds, which the endpoint
+// takes idempotently by endpoint, and the switch records on only when dm
+// answers. That repairs a subscription kept through a failed drop and a row dm
+// lost in one place, and it never claims a phone dm cannot reach.
 async function loadNotify() {
   if (!notifySupported()) {
     notifyOn = false;
     paintNotify();
     return;
   }
-  let known = storedNotify();
+  let sub = null;
   try {
     const reg = await swRegistration();
-    const sub = reg ? await reg.pushManager.getSubscription() : null;
-    known = !!sub;
+    sub = reg ? await reg.pushManager.getSubscription() : null;
   } catch (e) {
-    // A browser that refuses to answer leaves the stored answer in place.
+    // A browser that refuses to answer leaves nothing to hand dm.
+    sub = null;
   }
-  notifyOn = known;
-  setStoredNotify(known);
+  notifyOn = false;
+  // A refused or unasked permission cannot show a notification, so a
+  // subscription under it is not worth the write.
+  if (sub && Notification.permission === "granted") {
+    const post = await postSubscription(sub);
+    notifyOn = !!post && post.ok;
+  }
+  setStoredNotify(notifyOn);
   paintNotify();
 }
 
@@ -1227,6 +1238,25 @@ async function dropSubscription(sub) {
   }
 }
 
+// postSubscription hands one subscription to dm and returns the reply, or null
+// when the request never landed. The endpoint is idempotent by endpoint, so a
+// second POST for the same phone replaces the row instead of adding one.
+async function postSubscription(sub) {
+  try {
+    return await fetchAPI("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: sub.endpoint,
+        p256dh: b64url(sub.getKey("p256dh")),
+        auth: b64url(sub.getKey("auth")),
+      }),
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
 // subscribePush registers the worker, asks for permission and hands the
 // subscription to dm. The registration and the ask both start before the first
 // await, because iOS drops a permission request that does not come straight
@@ -1256,28 +1286,14 @@ async function subscribePush() {
       applicationServerKey: fromB64url(config.publicKey),
     });
   }
-  let post = null;
-  try {
-    post = await fetchAPI("/api/push/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        endpoint: sub.endpoint,
-        p256dh: b64url(sub.getKey("p256dh")),
-        auth: b64url(sub.getKey("auth")),
-      }),
-    });
-  } catch (e) {
-    // A dropped connection, a tailnet reconnect and a browser that aborted the
-    // request are one case with a refusal: dm does not have the phone.
-    post = null;
-  }
+  // A dropped connection, a tailnet reconnect and a browser that aborted the
+  // request are one case with a refusal: dm does not have the phone.
+  const post = await postSubscription(sub);
   if (!post || !post.ok) {
     // dm kept nothing, so the browser is asked for nothing back. A device that
-    // held the subscription would read on at the next load, and nothing would
-    // repair it: dm has no row to deliver to, and the switch reads the device.
-    // A drop that fails is the one case the page cannot repair, so it says so
-    // instead of pretending the device is off.
+    // keeps the subscription is not lost: the next load hands it to dm again
+    // and records on only when dm takes it. A drop that fails is the case this
+    // tap cannot repair, so it says so instead of pretending the device is off.
     const reason = post ? await post.text() : "cannot reach the session";
     const dropped = await dropSubscription(sub);
     banner("notifications failed: " + reason +
