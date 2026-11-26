@@ -16,6 +16,10 @@ boot notice sits in `internal/client`
 
 ## Cutting a release
 
+The runbook is a repo skill, `.agents/skills/dm-release/SKILL.md`, which pi
+loads when it works in this checkout. It carries the checklist, the commands
+and the recovery paths. This page carries the design.
+
 Cut the tag on `main` and push it:
 
 ```sh
@@ -65,6 +69,12 @@ bullet per commit, oldest first, the short sha in parentheses, and the
 `type:` or `type(scope):` prefix stripped. A merge or a landing commit keeps
 its subject whole under Other, because that subject is the record of what
 landed. The workflow resolves the previous tag as the nearest tag behind the
+
+A curated body wins over the generated one. `docs/releases/<tag>.md` is copied
+into the release verbatim when it exists, and only a release without it falls
+back to the commit range. The first tag needs one, because there is no
+previous tag to bound the list, and any release whose story is not its commit
+list deserves one (`docs/releases/v0.1.0.md`).
 new one and passes both to the script.
 
 `make dist` builds the same matrix locally, so a lane can prove the pipeline

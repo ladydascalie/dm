@@ -151,12 +151,22 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --tags --force --quiet
-          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
-          if [ -z "$prev" ]; then
-            prev="$(git tag --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)"
+          # A curated body wins over the generated one: docs/releases/v<tag>.md
+          # is written by hand for a release whose story is not its commit
+          # list, which is every first tag and any release that needs a
+          # headline. Without it the body is the commit range.
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            echo "notes: $notes"
+            cp "$notes" "${RUNNER_TEMP}/notes.md"
+          else
+            prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+            if [ -z "$prev" ]; then
+              prev="$(git tag --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)"
+            fi
+            echo "notes: ${prev:-the first release}..${GITHUB_REF_NAME}"
+            bash scripts/release-notes.sh "$prev" "$GITHUB_REF_NAME" > "${RUNNER_TEMP}/notes.md"
           fi
-          echo "notes: ${prev:-the first release}..${GITHUB_REF_NAME}"
-          bash scripts/release-notes.sh "$prev" "$GITHUB_REF_NAME" > "${RUNNER_TEMP}/notes.md"
           cat "${RUNNER_TEMP}/notes.md"
 
       - name: create the release
