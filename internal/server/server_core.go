@@ -1214,7 +1214,7 @@ func (s *server) watchConn(id string, pc *paneConn) (exit bool) {
 				s.noteStatus(id, *m.St)
 				s.noteStatusChange(id, from, to)
 				s.pushSnapshot()
-				if notify.StateChange(from, to) {
+				if notify.StateChange(from, to, message) {
 					s.notifyPaneState(id, to, message)
 				}
 			}

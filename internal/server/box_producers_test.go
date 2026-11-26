@@ -77,6 +77,52 @@ func TestNotifyPaneStatePostsAndDispatches(t *testing.T) {
 	}
 }
 
+// A pane's notify topic is a status, not a stream: a second report replaces the
+// first, so the branch stays bounded by pane count instead of by turn count. A
+// fleet reporting a state every turn would otherwise spend the box's shared cap
+// on its own history.
+func TestNotifyPaneStateReplacesThePaneRow(t *testing.T) {
+	// No desktop popup: this test is about the box rows, and a forked notifier
+	// would outlive the test and land in the next test's stub log.
+	t.Setenv("DM_NOTIFY", "0")
+	s := boxServer(t)
+	focus := s.st.ActiveWindow().Focus
+
+	s.notifyPaneState(focus, "blocked", "needs review")
+	s.notifyPaneState(focus, "error", "wedge")
+	other := "w1p2"
+	s.notifyPaneState(other, "blocked", "second pane")
+
+	entries := notifyEntries(t, s)
+	if len(entries) != 2 {
+		t.Fatalf("logged = %+v, want one row per pane", entries)
+	}
+	// Newest first: the other pane's row is the newer one.
+	if entries[0].Key != "notify/"+other {
+		t.Fatalf("entries = %+v, want the newest post first", entries[0])
+	}
+	if entries[1].Key != "notify/"+focus || string(entries[1].State) != "error" || entries[1].Msg != "wedge" {
+		t.Fatalf("row = %+v, want the pane's latest state only", entries[1])
+	}
+}
+
+// A repeat report for the same pane keeps one row, and the row carries the
+// newest message.
+func TestNotifyPaneStateKeepsOneRowThroughARepeat(t *testing.T) {
+	// No desktop popup, for the reason in the test above.
+	t.Setenv("DM_NOTIFY", "0")
+	s := boxServer(t)
+	focus := s.st.ActiveWindow().Focus
+
+	s.notifyPaneState(focus, "blocked", "needs review")
+	s.notifyPaneState(focus, "blocked", "still waiting")
+
+	entries := notifyEntries(t, s)
+	if len(entries) != 1 || entries[0].Msg != "still waiting" {
+		t.Fatalf("entries = %+v, want one row carrying the newest message", entries)
+	}
+}
+
 // The same post for the pane the operator is looking at pops nothing and
 // still logs.
 func TestNotifyPaneStateSuppressedWhenFocused(t *testing.T) {

@@ -64,24 +64,27 @@ func stillNotify(t *testing.T, log string, want int, wait time.Duration) {
 	}
 }
 
-// A transition notifies only when the new state is worth interrupting for and
-// differs from the old one.
+// A transition notifies only when the new state is worth interrupting for,
+// differs from the old one, and, for done, carries something to say.
 func TestNotifyStateChange(t *testing.T) {
 	for _, c := range []struct {
 		from, to string
+		message  string
 		want     bool
 	}{
-		{"", "blocked", true},
-		{"idle", "blocked", true},
-		{"working", "done", true},
-		{"working", "error", true},
-		{"blocked", "blocked", false},
-		{"done", "done", false},
-		{"blocked", "working", false},
-		{"idle", "clear", false},
+		{"", "blocked", "", true},
+		{"idle", "blocked", "needs review", true},
+		{"working", "done", "built ok", true},
+		{"working", "error", "wedge", true},
+		{"working", "done", "", false},
+		{"working", "done", "  \n\t ", false},
+		{"blocked", "blocked", "again", false},
+		{"done", "done", "again", false},
+		{"blocked", "working", "", false},
+		{"idle", "clear", "", false},
 	} {
-		if got := StateChange(c.from, c.to); got != c.want {
-			t.Fatalf("StateChange(%q, %q) = %v, want %v", c.from, c.to, got, c.want)
+		if got := StateChange(c.from, c.to, c.message); got != c.want {
+			t.Fatalf("StateChange(%q, %q, %q) = %v, want %v", c.from, c.to, c.message, got, c.want)
 		}
 	}
 }

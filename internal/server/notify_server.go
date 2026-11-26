@@ -14,14 +14,16 @@ func (s *server) operatorSeesLocked(id string) bool {
 	return s.st.ActiveWindow().Focus == id
 }
 
-// notifyPaneState posts a pane state change onto the pane's notify topic.
-// watchPane calls it only for a transition into blocked, done or error, so the
-// state is always a legal box state. The renderer hooked into boxPost owns
-// the desktop notification and its suppression; this is the producer only.
+// notifyPaneState writes a pane state change as the pane's notify state. The
+// caller applies the transition filter, so the state is always a legal box
+// state. boxReplace makes the topic one row per pane: a status replaces its own
+// older row, so a fleet reporting a state every turn cannot fill the box's
+// shared cap with its history. The renderer hooked into the post owns the
+// desktop notification and its suppression; this is the producer only.
 func (s *server) notifyPaneState(id, state, message string) {
 	// A failed save keeps the entry in memory and the renderer still pops; the
 	// producer has no caller to tell.
-	_, _ = s.boxPost(&box.PostReq{
+	_, _ = s.boxReplace(&box.PostReq{
 		Key:   box.NotifyPrefix + id,
 		State: box.State(state),
 		Msg:   message,

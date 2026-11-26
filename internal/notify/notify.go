@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -15,16 +16,20 @@ import (
 // must not leave a process behind forever.
 const notifyTimeout = 5 * time.Second
 
-// StateChange reports whether a pane transition to state is worth
-// interrupting the operator for: blocked, done or error, and only from a
-// different state, so a repeated report notifies once.
-func StateChange(from, to string) bool {
+// StateChange reports whether a pane transition to state is worth an entry on
+// the pane's notify topic. Blocked and error are, from a different state.
+// Done is, only when the report carries a message: a bare done ends every
+// agent turn, so an entry per turn would spend the box's shared cap on rows
+// that say nothing, and the rail and the bar already show the pane finished.
+func StateChange(from, to, message string) bool {
 	if from == to {
 		return false
 	}
 	switch to {
-	case "blocked", "done", "error":
+	case "blocked", "error":
 		return true
+	case "done":
+		return strings.TrimSpace(message) != ""
 	}
 	return false
 }

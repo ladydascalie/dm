@@ -1477,23 +1477,47 @@ func TestPaneSurvivesATornFrameAndIsReadopted(t *testing.T) {
 // returns how many wedge entries name the pane.
 func wedgeWait(t *testing.T, s *server, id string, want int) int {
 	t.Helper()
+	_, n := wedgeRow(t, s, id, 0)
 	deadline := time.Now().Add(5 * time.Second)
-	n := 0
-	for time.Now().Before(deadline) {
-		s.mu.Lock()
-		n = 0
-		for _, e := range s.st.Box {
-			if e.Key == box.NotifyPrefix+id && e.State == box.StateError {
-				n++
-			}
+	for n < want && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		_, n = wedgeRow(t, s, id, 0)
+	}
+	return n
+}
+
+// wedgeRow reads the pane's wedge row and its seq. The notify topic holds one
+// row per pane, so a re-arm replaces the row and moves the seq instead of
+// appending a second one; after is the seq the caller already saw.
+func wedgeRow(t *testing.T, s *server, id string, after int) (int, int) {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, seq := 0, 0
+	for _, e := range s.st.Box {
+		if e.Key == box.NotifyPrefix+id && e.State == box.StateError {
+			n++
+			seq = e.Seq
 		}
-		s.mu.Unlock()
-		if n >= want {
-			return n
+	}
+	if after > 0 && seq <= after {
+		return n, 0
+	}
+	return n, seq
+}
+
+// wedgeMove waits for the pane's wedge row to be replaced by a newer one.
+func wedgeMove(t *testing.T, s *server, id string, after int) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if n, seq := wedgeRow(t, s, id, after); n == 1 && seq > after {
+			return seq
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return n
+	_, seq := wedgeRow(t, s, id, after)
+	return seq
 }
 
 func TestWatcherWedgesAfterThreeFailedRedials(t *testing.T) {
@@ -1590,6 +1614,7 @@ func TestWedgeRearmsOnASecretAction(t *testing.T) {
 	if n := wedgeWait(t, s, id, 1); n != 1 {
 		t.Fatalf("wedge entries = %d, want 1", n)
 	}
+	_, first := wedgeRow(t, s, id, 0)
 
 	// The explicit secret action re-arms the watcher: the push reports the
 	// pane, the watcher runs its capped loop again, and the wedge signal
@@ -1618,8 +1643,13 @@ func TestWedgeRearmsOnASecretAction(t *testing.T) {
 	if !found {
 		t.Fatalf("uncovered = %v, want the wedged pane", res.Uncovered)
 	}
-	if n := wedgeWait(t, s, id, 2); n != 2 {
-		t.Fatalf("wedge entries = %d, want 2 after the re-arm", n)
+	// One row per pane: the re-arm replaces the row, so the seq moves and the
+	// count stays one.
+	if seq := wedgeMove(t, s, id, first); seq <= first {
+		t.Fatalf("wedge seq = %d, want a newer row than %d after the re-arm", seq, first)
+	}
+	if n, _ := wedgeRow(t, s, id, 0); n != 1 {
+		t.Fatalf("wedge rows = %d, want one row per pane", n)
 	}
 	s.mu.Lock()
 	inTree := s.paneInTreeLocked(id)

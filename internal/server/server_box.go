@@ -29,6 +29,33 @@ func (s *server) boxPost(req *box.PostReq) (box.Entry, error) {
 	return e, err
 }
 
+// boxReplace stores the request as the current state of its key: every earlier
+// entry under the same key goes first, under the same lock, so the topic holds
+// one row per key instead of one per change. The notify branch uses it, because
+// a pane's notify topic is a status and not a stream, and a fleet that reports a
+// state every turn would otherwise spend the box's shared cap on its history.
+func (s *server) boxReplace(req *box.PostReq) (box.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]box.Entry, 0, len(s.st.Box))
+	for _, e := range s.st.Box {
+		if e.Key == req.Key {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	if len(kept) == 0 {
+		kept = nil
+	}
+	s.st.Box = kept
+	e, err := s.boxStoreLocked(req)
+	if box.IsNotifyTopic(e.Key) {
+		pane := strings.TrimPrefix(e.Key, box.NotifyPrefix)
+		s.notifyBoxEntryLocked(e, pane != "" && s.operatorSeesLocked(pane))
+	}
+	return e, err
+}
+
 // boxStoreLocked appends the request as one entry, trims the log and saves
 // state. The caller holds s.mu and renders any notify/ entry itself through
 // notifyBoxEntryLocked, so a caller that already made the suppression decision
