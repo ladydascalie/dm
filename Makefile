@@ -32,7 +32,8 @@ help:
 		gremlins "mutation-test every package, fail on survivors; records sha, date and packages in $(GREMLINS_MANIFEST)" \
 		gremlins-pkg "mutation-test one package, e.g. PKG=pane; drops the manifest, so the results no longer claim one run" \
 		gremlins-check "$$note" \
-		docs-internals "regenerate docs/internals/generated/package-graph.md"
+		docs-internals "regenerate docs/internals/generated/package-graph.md" \
+		provision-check "fail unless this checkout's extension and skill are linked into the harness"
 
 .PHONY: test
 test:
@@ -97,6 +98,12 @@ gremlins-check:
 		exit 1; \
 	fi; \
 	echo "gremlins-check: results recorded at $$recorded ($$when), current HEAD"
+
+# Local, never a gate: the links live in the operator's home, which CI does not
+# have. A symlink cannot go stale, so this catches a one-time setup state only.
+.PHONY: provision-check
+provision-check:
+	go run . provision --check
 
 .PHONY: docs-internals
 docs-internals:

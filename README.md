@@ -1723,6 +1723,31 @@ the log is reported once, on the first frame of the stream. A slow reader can
 miss frames: a frame that cannot enter the client's queue ends the connection
 instead of blocking the server. Reconnecting resumes at the last printed entry.
 
+## Teaching a harness
+
+An agent harness runs in a pane and learns dm by reading. `dm provision`
+installs the reading, and the tools, in one step:
+
+```sh
+dm provision              # link the extension and the skill into ~/.pi/agent
+dm provision --check      # exit 1 unless both links are in place and inside this repo
+dm provision --print      # say what a run would do, write nothing
+dm provision --uninstall  # remove a link it made, never a file you put there
+```
+
+Both artefacts are symlinks into this checkout, so an edit here is live in the
+harness at once and nothing can go stale.
+
+- `skills/dm-agent/dm-agent.ts` registers four tools, `dm_layout`, `dm_pane`,
+  `dm_box` and `dm_turn`, each an action enum over `dm ... --json`. They are
+  `model-only`, so a codemode script cannot reach the mux.
+- `skills/dm-fleet/SKILL.md` carries the judgement a tool schema cannot: when
+  to split, when a lane is worth it, and the `lane/` box protocol.
+
+`dm llms` carries the mechanical surface and needs no install. pi is the only
+adapter today. The link rules live in `internal/provision` and know nothing
+about harnesses, so a second one is one file.
+
 ## Durability
 
 Two processes per session:
