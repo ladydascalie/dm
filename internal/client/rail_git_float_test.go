@@ -397,9 +397,11 @@ func TestGitFloatPaintsTheFacts(t *testing.T) {
 			t.Fatalf("%s row = %q, want %q", want.key, row, want.value)
 		}
 	}
-	it, ok := rail.RailWindowItem(tui.snap, "w1")
+	// The box is keyed by pane, so its title names the pane's folder, not the
+	// window's label.
+	it, ok := rail.RailPaneItem(tui.snap, "w1p1")
 	if !ok {
-		t.Fatal("the snapshot carries no w1 row")
+		t.Fatal("the snapshot carries no w1p1 row")
 	}
 	want := tui.theme().Glyphs.GitMark + " " + gitLabel(it)
 	if title := gitRowText(term, rect.Y-1, rect.X, rect.W+2); !strings.Contains(title, want) {

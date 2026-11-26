@@ -157,7 +157,22 @@ row costs no more width than the silent version; a shell leaves that cell blank,
 reported and a pane whose state is unknown leave the cell blank, because `RailRow` (`internal/rail/rail.go#RailRow`)
 draws nothing there rather than a question mark about nothing. `RailMark` (`internal/rail/rail.go#RailMark`) draws the
 agent mark: an agent icon, the bar glyph an agent gets on a plain terminal, or a shell icon for a pane with no agent.
-The full rail paints its first cell, the thin rail its two cells.
+The full rail paints the mark in one cell of the pane row's indent.
+
+The thin rail is five content cells and the grip strip (`layout.CollapsedRail`, `internal/layout/layout.go#CollapsedRail`): the
+project bar, the agent mark, the git cell, the state glyph and the question badge. The agent mark takes the rail's dim
+tone, so the state glyph is the one coloured cell on the row, and unknown and empty states leave it blank. The git cell
+carries the one cell mark the full rail paints, in the same quiet accent, and every thin pane row inside a repository
+carries one, because that rail draws no window row to hoist the facts to. The badge has a cell of its own instead of
+landing on the grip strip. A rail the screen caps below the thin width gives cells up in one order: the badge first,
+then the git cell, then the agent mark and the bar, and the state last. The state is only present while the row has a
+content cell: a rail of two cells still says how the pane is doing, and a rail of one leaves the grip strip the only
+column and paints nothing.
+
+Git facts are per pane in the wire (`wire.AllPane`, `internal/wire/wire.go#AllPane`), so the rail never hoists them
+further than a row: a window row carries its source pane's, a thin row its own, and a pane row in a repository of its
+own carries its own mark. The facts box reads one pane, whichever mark opened it, and stands on the row that mark was
+painted on (`gitFloat`, `internal/client/client_git.go#gitFloat`).
 
 ## Where to add the next one
 

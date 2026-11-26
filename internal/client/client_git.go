@@ -1,8 +1,9 @@
 package client
 
-// The git facts float: what the rail's git mark stands for on one window, drawn
-// beside the rail on the row that owns the mark. The facts ride the rail row the
-// mark was painted on, so the box and the row never read two different probes.
+// The git facts float: what a pane's git mark stands for, drawn beside the rail
+// on the row that owns the mark. The box is keyed by pane: its title, its facts
+// and its place all come from the pane, whether a window mark or the pane row's
+// own mark opened it, so the box and the row never read two different probes.
 // One float at a time: a click on another mark moves it, a click on its own mark
 // closes it. Its bottom-right corner is a grip: a drag sizes the box and the
 // size outlives the box in the prefs, and a click of the grip puts the size back
@@ -51,9 +52,14 @@ const (
 	gitMaxSavedRows = 200
 )
 
-// gitFloat is the open facts box: the window whose mark opened it, the panel
-// that draws it and the state of a grip drag.
+// gitFloat is the open facts box: the pane whose facts it shows, the window
+// whose mark opened it, the panel that draws it and the state of a grip drag.
 type gitFloat struct {
+	// pane is the pane the box reads, and names the title and every fact in it.
+	pane string
+	// window is the window whose mark opened the box, empty when the pane row's
+	// own mark did. The box hangs from that mark's row, so it stands where the
+	// click was.
 	window string
 	float  *panel.FloatingPane
 	// resizing is a drag of the grip in flight. top is the box's outer top row
@@ -68,14 +74,36 @@ type gitFloat struct {
 	at       time.Time
 }
 
-// gitMarkPress is the mark's left click: it opens the box on that window, moves
-// an open box to it, or closes the box when its own mark was clicked. One mark
-// is open at a time, so a second mark never adds a second box.
-func (t *tui) gitMarkPress(window string) {
-	if window == "" {
+// gitWindowMarkPress is a click on a window's git mark: the box opens on that
+// window's source pane, which is the pane the window row's facts come from, and
+// hangs from the window's own row.
+func (t *tui) gitWindowMarkPress(window string) {
+	if window == "" || t.snap == nil {
 		return
 	}
-	if t.git != nil && t.git.window == window {
+	src, ok := rail.WindowSource(t.snap, window)
+	if !ok {
+		return
+	}
+	t.gitMarkPress(src.ID, window)
+}
+
+// gitPaneMarkPress is a click on a pane row's own git mark: the box opens on
+// that pane and hangs from its row. The pane is the one the click names, never
+// its window's source pane, so a window whose panes sit in two repositories can
+// show either one's facts.
+func (t *tui) gitPaneMarkPress(pane string) {
+	if pane == "" {
+		return
+	}
+	t.gitMarkPress(pane, "")
+}
+
+// gitMarkPress is the mark's left click: it opens the box on one pane's facts,
+// moves an open box to it, or closes the box when the same mark was clicked.
+// One mark is open at a time, so a second mark never adds a second box.
+func (t *tui) gitMarkPress(pane, window string) {
+	if t.git != nil && t.git.pane == pane && t.git.window == window {
 		t.closeGitFloat()
 		return
 	}
@@ -83,7 +111,7 @@ func (t *tui) gitMarkPress(window string) {
 	if t.snap == nil {
 		return
 	}
-	v := &gitFloat{window: window}
+	v := &gitFloat{pane: pane, window: window}
 	v.float = &panel.FloatingPane{
 		ID:     gitFloatID,
 		Active: true,
@@ -131,12 +159,22 @@ func (t *tui) gitOpen() string {
 	return t.git.window
 }
 
-// syncGit anchors the open box on the window's mark and closes it when that mark
-// is no longer drawn: a fold hid the row, the rail scrolled it out, the list
-// shrank or the rail went thin. A terminal too short to stand the box beside
-// the status bar has no honest anchor either, so it closes there rather than
-// painting a border over the bar. It reads the row through the same rule the
-// hit test does, so the box and the mark cannot part.
+// gitOpenPane is the pane whose own git mark the box has open, "" when a window
+// mark opened it or no box is up.
+func (t *tui) gitOpenPane() string {
+	if t.git == nil || t.git.window != "" {
+		return ""
+	}
+	return t.git.pane
+}
+
+// syncGit anchors the open box on the mark that opened it and closes it when
+// that mark is no longer drawn: a fold hid the row, the rail scrolled it out,
+// the list shrank, the rail went thin under a window mark or the ladder dropped
+// the cell. A terminal too short to stand the box beside the status bar has no
+// honest anchor either, so it closes there rather than painting a border over
+// the bar. It reads the mark's row through the same rule the hit test does, so
+// the box and the mark cannot part.
 func (t *tui) syncGit() {
 	v := t.git
 	if v == nil {
@@ -144,13 +182,17 @@ func (t *tui) syncGit() {
 	}
 	row := -1
 	if t.snap != nil && t.snap.Rows >= gitRows+gitChromeRows {
-		row = rail.RailGitMarkRow(t.snap, v.window, t.railOff)
+		if v.window != "" {
+			row = rail.RailGitMarkRow(t.snap, v.window, t.railOff)
+		} else {
+			row = rail.RailPaneGitMarkRow(t.snap, v.pane, t.railOff)
+		}
 	}
 	if row < 0 {
 		t.closeGitFloat()
 		return
 	}
-	it, ok := rail.RailWindowItem(t.snap, v.window)
+	it, ok := rail.RailPaneItem(t.snap, v.pane)
 	if !ok {
 		t.closeGitFloat()
 		return
@@ -599,7 +641,7 @@ func (t *tui) paintGitFloat(b *bytes.Buffer, r layout.Rect) {
 	if t.git == nil || t.snap == nil {
 		return
 	}
-	it, ok := rail.RailWindowItem(t.snap, t.git.window)
+	it, ok := rail.RailPaneItem(t.snap, t.git.pane)
 	if !ok {
 		return
 	}

@@ -302,7 +302,8 @@ func TestGitFloatListsTheFiles(t *testing.T) {
 	tui, _ := gitFloatTUI(t, 100, 20, 20)
 	tui.prefs = prefs{GitBoxCols: 40, GitBoxRows: 12}
 	gitMarkClick(tui, rail.RailGitMarkRow(tui.snap, "w1", 0))
-	it, ok := rail.RailWindowItem(tui.snap, "w1")
+	// The box reads the window's source pane, so its names come from that pane.
+	it, ok := rail.RailPaneItem(tui.snap, "w1p1")
 	if !ok || len(it.FileNames) == 0 {
 		t.Fatalf("the fixture carries no changed names: %+v", it.FileNames)
 	}
@@ -520,11 +521,11 @@ func TestGitBoxColourHierarchy(t *testing.T) {
 	th := theme.DefaultTheme()
 	p := th.Palette
 	snap := gitFloatSnap(100, 20, 20)
-	byKey := func(window string) map[string][]segment.Seg {
+	byKey := func(pane string) map[string][]segment.Seg {
 		t.Helper()
-		it, ok := rail.RailWindowItem(snap, window)
+		it, ok := rail.RailPaneItem(snap, pane)
 		if !ok {
-			t.Fatalf("no rail row for %s", window)
+			t.Fatalf("no rail row for pane %s", pane)
 		}
 		out := map[string][]segment.Seg{}
 		for _, f := range gitFacts(th, it) {
@@ -543,7 +544,7 @@ func TestGitBoxColourHierarchy(t *testing.T) {
 		return theme.RGB{}
 	}
 
-	dirty := byKey("w1")
+	dirty := byKey("w1p1")
 	if got := fgOf(dirty["head"], "deadb33f"); got != p.RailDim {
 		t.Errorf("sha = %v, want the dim tone", got)
 	}
@@ -569,7 +570,7 @@ func TestGitBoxColourHierarchy(t *testing.T) {
 		t.Errorf("behind 0 = %v, want the dim tone", got)
 	}
 
-	clean := byKey("w2")
+	clean := byKey("w2p1")
 	if got := fgOf(clean["state"], "clean"); got != p.RailDim {
 		t.Errorf("clean = %v, want the dim tone", got)
 	}
