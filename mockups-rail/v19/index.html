@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dm rail · v19 · the thin rail, same rules</title>
+<style>
+:root{
+ --bg:#14131a; --focus:#1f1e27; --hover:#21202d; --text:#e9eaf1; --dim:#8f93a8;
+ --header:#a6a9bd; --win:#9599ae; --accent:#7ac0eb; --add:#78dc82; --del:#ff7d7d;
+ --work:#f5be50; --idle:#78c8e1; --block:#ff6e6e; --done:#6ee191; --page:#0b0b0f;
+ --rule:#2b2a37; --a1:#bb9af7; --a2:#6edceb; --a3:#f08cd7; --a4:#7ea9ff; --a5:#f0a05a;
+}
+*{box-sizing:border-box}
+body{margin:0;padding:24px 30px 70px;background:var(--page);color:#c2c5d4;
+ font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.55}
+h1{font-size:19px;margin:0 0 4px;color:#eef0f6;font-weight:650}
+.sub{margin:0 0 8px;color:#7d8298;max-width:84ch}
+h2{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#6a6e82;
+ margin:34px 0 10px;font-weight:650}
+.note{margin:10px 0 0;color:#7d8298;max-width:84ch;font-size:13px}
+.note b{color:#a8adc4;font-weight:550}
+.facts{color:#7d8298;font-size:12.5px;max-width:84ch}
+code{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;color:#a8adc4}
+
+/* The rail at the terminal's own metrics: Meslo Nerd Font Mono, 1.5 line
+   height, one cell per glyph. 34 interior cells, then the grip strip column. */
+/* A flex column, so the newlines between rows are not text: with
+   white-space:pre on this box every newline became a blank line and every row
+   rendered twice as tall as a terminal row. */
+.rail{font-family:"MesloLGL Nerd Font Mono","MesloLGLDZ Nerd Font Mono",
+ "Symbols Nerd Font Mono","DejaVu Sans Mono",monospace;
+ font-size:15px;line-height:1.5;font-variant-ligatures:none;
+ display:flex;flex-direction:column;
+ background:var(--bg);width:40ch;padding:2px 0 3px;color:var(--text)}
+.row{display:flex;align-items:center;line-height:1.5}
+.row .bar{flex:0 0 1ch}
+.row .l{flex:0 0 auto;white-space:pre}
+.row .sp{flex:1 1 auto;min-width:1ch}
+.row .tail{flex:0 0 auto;white-space:pre;padding-right:1ch}
+.row.sel{background:var(--focus)}
+.row.sel .l{font-weight:700}
+.row.sel .tail{font-weight:700}
+.dim{color:var(--dim)}
+.hdr{color:var(--header)}
+.win{color:var(--win)}
+.txt{color:var(--text)}
+.add{color:var(--add)}
+.del{color:var(--del)}
+.work{color:var(--work)}
+.idle{color:var(--idle)}
+.block{color:var(--block)}
+.done{color:var(--done)}
+.bold{font-weight:700}
+.p1{color:var(--a1)}.p2{color:var(--a2)}.p3{color:var(--a3)}
+.p4{color:var(--a4)}.p5{color:var(--a5)}
+.mark{color:#5f7d90}
+.ask{color:var(--accent);font-weight:700}
+
+.ruler{font-family:"DejaVu Sans Mono",monospace;font-size:12px;line-height:1.4;
+ color:#4d5165;white-space:pre;margin-top:6px}
+.colmap{font-family:"DejaVu Sans Mono",monospace;font-size:12.5px;line-height:1.55;
+ color:#8f93a8;white-space:pre;background:#101017;padding:10px 12px;margin-top:10px;
+ border-left:2px solid var(--rule)}
+.colmap b{color:#c9ccda;font-weight:550}
+
+.pair{display:flex;gap:46px;flex-wrap:wrap;align-items:flex-start;margin-top:8px}
+.tag{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#6a6e82;
+ margin:0 0 6px;font-weight:650}
+.caption{margin:8px 0 0;color:#6a6e82;font-size:12px;max-width:48ch}
+.cols{display:flex;gap:46px;flex-wrap:wrap;align-items:flex-start}
+table{border-collapse:collapse;font-size:13px;margin-top:10px;max-width:96ch}
+th,td{text-align:left;padding:5px 20px 5px 0;border-bottom:1px solid #1d1c26;
+ vertical-align:top}
+th{color:#6a6e82;font-size:11px;letter-spacing:.09em;text-transform:uppercase;font-weight:650}
+td.n{color:#e9eaf1;font-variant-numeric:tabular-nums}
+td.good{color:var(--add)}
+ul{margin:8px 0 0;padding-left:20px;color:#8f93a8;max-width:84ch}
+li{margin:5px 0}
+li b{color:#a8adc4;font-weight:550}
+
+.thin { display: flex; flex-direction: column; gap: 6px; background: var(--bg);
+  padding: 14px 16px; width: max-content; border-left: 2px solid var(--accent) }
+.trow { display: flex; font-family: "MesloLGL Nerd Font Mono", "MesloLGLDZ Nerd Font Mono",
+  "Symbols Nerd Font Mono", "DejaVu Sans Mono", monospace; font-size: 30px;
+  line-height: 1.25; white-space: pre }
+.trow .bar { width: 1ch }
+.pair { display: flex; gap: 60px; align-items: flex-start; margin-top: 8px }
+.caption { color: #7d8298; font-size: 12.5px; max-width: 34ch; margin: 8px 0 0 }
+h2 { margin: 30px 0 8px }
+.sub { min-height: 4.2em; margin-bottom: 0 }
+.verdict { min-height: 7em; max-width: 84ch; color: #8f93a8; font-size: 13px; margin-top: 18px }
+.verdict b { color: #a8adc4; font-weight: 550 }
+ul { margin: 8px 0 0; padding-left: 20px; color: #8f93a8; max-width: 84ch }
+li { margin: 5px 0 }
+li b { color: #a8adc4; font-weight: 550 }
+</style>
+</head>
+<body>
+<h1>dm rail · v19 · the thin rail, same rules</h1>
+<p class="sub">Four cells: project bar, agent mark, state, grip strip. Two of the full rail's rules transfer without costing a cell, and one cannot. Left column is today, right is the proposal. Rows are, in order: working, done, blocked, idle, unknown, shell, and a pane with a question waiting.</p>
+
+<div class="pair">
+  <div>
+    <p class="tag">today</p>
+    <div class="thin"><div class="trow"><span class="bar p4">&#9612;</span><span class="work">π</span><span class="work">&#xf013;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="done">π</span><span class="done">&#xf00c;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="block">π</span><span class="block">&#xf071;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="idle">π</span><span class="idle">&#xf111;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">π</span><span class="dim">&#xf128;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">&#xf120;</span><span class="dim"> </span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="work">π</span><span class="work">&#xf013;</span><span class="ask">?</span></div></div>
+    <p class="caption">The mark carries the state colour, so a working pi is two amber cells. Unknown paints a question mark.</p>
+  </div>
+  <div>
+    <p class="tag">proposed</p>
+    <div class="thin"><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">π</span><span class="work">&#xf013;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">π</span><span class="done">&#xf00c;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">π</span><span class="block">&#xf071;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">π</span><span class="idle">&#xf111;</span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">π</span><span class="dim"> </span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">&#xf120;</span><span class="dim"> </span><span class="dim"> </span></div><div class="trow"><span class="bar p4">&#9612;</span><span class="dim">π</span><span class="work">&#xf013;</span><span class="ask">?</span></div></div>
+    <p class="caption">The mark is neutral, the state cell is the only colour, and unknown is silent. Same four cells.</p>
+  </div>
+</div>
+
+<h2>What transfers, and what cannot</h2>
+<ul>
+  <li><b>Colour means state.</b> The agent mark goes neutral, so the state cell is the only coloured cell in the thin rail, exactly as the margin is the only coloured cell in the full one. Two amber cells became one, and a red row is now unmistakable at this size.</li>
+  <li><b>Unknown is silent.</b> The question mark goes, so a pane that has not reported looks like a pane with nothing to say. A gap in a four cell column is louder than a glyph that means "no glyph".</li>
+  <li><b>The mark before the state stays.</b> Bar, mark, state, then the badge in the fourth cell when a question is waiting. Nothing moves.</li>
+  <li><b>What cannot transfer.</b> The git field has no room, and git is a window fact while a thin rail row is a pane. If you want git in the thin rail it would have to be a tint or a glyph sharing the state cell, which is the one thing you have twice rejected. I left it out.</li>
+  <li><b>The shell keeps its terminal icon.</b> A shell has no state to report, so if its mark went blank the row would be two empty cells and the blur would say nothing at all.</li>
+</ul>
+
+<h2>The one open question</h2>
+<p class="note">Should a focused pane's mark brighten to rail text, the way the full rail's focused name does? Today the mark is the state colour on every row, so focus is invisible in the thin rail except for the hover ground. Brightening it costs no cell and gives the thin rail the same "where am I" cue the full one has. Say yes and it goes in the same change.</p>
+
+</body>
+</html>
