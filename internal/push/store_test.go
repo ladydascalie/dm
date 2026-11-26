@@ -221,3 +221,89 @@ func TestStoreFailedWriteKeepsMemory(t *testing.T) {
 		t.Errorf("List after a failed write = %+v, want %+v", got, before)
 	}
 }
+
+// TestStoreModeRepairedOnLoad proves a store file whose mode was widened is
+// pulled back to 0600 on load: it holds every phone's auth secret and p256dh.
+func TestStoreModeRepairedOnLoad(t *testing.T) {
+	path := storePath(t)
+	store, err := push.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := store.Add(sub("https://push.example.com/a", "phone")); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("widen mode: %v", err)
+	}
+	reloaded, err := push.Load(path)
+	if err != nil {
+		t.Fatalf("Load after chmod 0644: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("mode after load = %o, want 600", mode)
+	}
+	if got := reloaded.List(); len(got) != 1 || got[0].Endpoint != "https://push.example.com/a" {
+		t.Errorf("reload = %+v, want the one stored entry", got)
+	}
+}
+
+// TestStoreFailedOpenLeavesState proves a directory that cannot be opened fails
+// the write before the rename: memory and the file keep the old entries, and a
+// later Add from the same store still holds both.
+func TestStoreFailedOpenLeavesState(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open a directory that lacks read permission")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "subscriptions.json")
+	store, err := push.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	first := sub("https://push.example.com/a", "phone")
+	if err := store.Add(first); err != nil {
+		t.Fatalf("Add first: %v", err)
+	}
+	// Write and search, but no read, so the directory opens with EACCES while a
+	// temp file can still be created in it.
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	second := sub("https://push.example.com/b", "phone")
+	if err := store.Add(second); err == nil {
+		t.Fatal("Add returned no error in a directory that cannot be opened")
+	}
+	if got := store.List(); !reflect.DeepEqual(got, []push.Subscription{first}) {
+		t.Errorf("memory after the failed write = %+v, want only the first entry", got)
+	}
+
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := push.Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := reloaded.List(); !reflect.DeepEqual(got, []push.Subscription{first}) {
+		t.Errorf("file after the failed write = %+v, want only the first entry", got)
+	}
+
+	// The store still holds the first entry, so this write keeps both.
+	if err := store.Add(second); err != nil {
+		t.Fatalf("Add after the failed write: %v", err)
+	}
+	reloaded, err = push.Load(path)
+	if err != nil {
+		t.Fatalf("reload after the later Add: %v", err)
+	}
+	if got := reloaded.List(); !reflect.DeepEqual(got, []push.Subscription{first, second}) {
+		t.Errorf("file after the later Add = %+v, want both entries", got)
+	}
+}

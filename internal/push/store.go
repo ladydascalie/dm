@@ -22,10 +22,11 @@ type Store struct {
 }
 
 // Load reads the subscription file at path. A missing file is an empty store,
-// because a fresh install has no phones yet. A file that cannot be read or
-// parsed is an error: an unreadable store must not look like an empty one, or
-// the next Add would overwrite subscriptions that were only temporarily
-// unreachable.
+// because a fresh install has no phones yet. A readable file whose mode was
+// widened is pulled back to 0600, the same way the key file is. A file that
+// cannot be read or parsed is an error: an unreadable store must not look like
+// an empty one, or the next Add would overwrite subscriptions that were only
+// temporarily unreachable.
 func Load(path string) (*Store, error) {
 	store := &Store{path: path, subs: []Subscription{}}
 	raw, err := os.ReadFile(path)
@@ -34,6 +35,9 @@ func Load(path string) (*Store, error) {
 		return store, nil
 	case err != nil:
 		return nil, fmt.Errorf("push: read subscriptions %s: %w", path, err)
+	}
+	if err := tightenMode(path); err != nil {
+		return nil, err
 	}
 	if err := json.Unmarshal(raw, &store.subs); err != nil {
 		return nil, fmt.Errorf("push: parse subscriptions %s: %w", path, err)

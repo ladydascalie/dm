@@ -207,3 +207,42 @@ func TestKeysModeRepairedOnLoad(t *testing.T) {
 		t.Errorf("public key changed while repairing the mode")
 	}
 }
+
+// TestKeysFailedOpenLeavesNoKeyFile proves the key path has the store's shape:
+// a directory that cannot be opened fails the write before the rename, so no
+// key file appears, and the next call generates and stores one.
+func TestKeysFailedOpenLeavesNoKeyFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can open a directory that lacks read permission")
+	}
+	dir := filepath.Join(t.TempDir(), "keys")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "vapid.json")
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	if _, err := push.LoadOrCreateKeys(path); err == nil {
+		t.Fatal("LoadOrCreateKeys returned no error in a directory that cannot be opened")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, len(entries))
+		for i, entry := range entries {
+			names[i] = entry.Name()
+		}
+		t.Errorf("directory holds %v after the failed write, want nothing", names)
+	}
+	if _, err := push.LoadOrCreateKeys(path); err != nil {
+		t.Fatalf("LoadOrCreateKeys after the failure: %v", err)
+	}
+}

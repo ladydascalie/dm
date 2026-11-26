@@ -39,8 +39,9 @@ type keyFile struct {
 // LoadOrCreateKeys returns the VAPID key pair stored at path. It generates a
 // P-256 pair on first use and writes it through a temp file and a rename at
 // mode 0600. A pair already on disk is reused, never replaced: a rotation would
-// invalidate every subscription the phone holds. A file that exists but does
-// not parse is an error, not an invitation to overwrite it.
+// invalidate every subscription the phone holds. A file whose mode was widened
+// is pulled back to 0600. A file that exists but does not parse is an error,
+// not an invitation to overwrite it.
 func LoadOrCreateKeys(path string) (*Keys, error) {
 	raw, err := os.ReadFile(path)
 	switch {
@@ -49,7 +50,7 @@ func LoadOrCreateKeys(path string) (*Keys, error) {
 	case err != nil:
 		return nil, fmt.Errorf("push: read VAPID keys %s: %w", path, err)
 	}
-	if err := tightenKeyMode(path); err != nil {
+	if err := tightenMode(path); err != nil {
 		return nil, err
 	}
 	var file keyFile
@@ -63,19 +64,20 @@ func LoadOrCreateKeys(path string) (*Keys, error) {
 	return keys, nil
 }
 
-// tightenKeyMode pulls a key file back to 0600. The pair is written at 0600,
-// but a copy, an editor or a backup tool can widen the mode; a private VAPID key
-// another user can read breaks every subscription just as a rotation would.
-func tightenKeyMode(path string) error {
+// tightenMode pulls a secrets file back to 0600. The key file and the store are
+// written at 0600, but a copy, an editor or a backup tool can widen the mode; a
+// file another user can read exposes the VAPID private key, or every phone's
+// auth secret and p256dh.
+func tightenMode(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
-		return fmt.Errorf("push: stat VAPID keys %s: %w", path, err)
+		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
 	if info.Mode().Perm() == 0o600 {
 		return nil
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("push: set VAPID key mode %s: %w", path, err)
+		return fmt.Errorf("push: set mode %s: %w", path, err)
 	}
 	return nil
 }
