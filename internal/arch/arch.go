@@ -103,6 +103,7 @@ var Layers = []Layer{
 			"dm/internal/kdl",
 			"dm/internal/lesson",
 			"dm/internal/paths",
+			"dm/internal/provision",
 			"dm/internal/ptyspawn",
 			"dm/internal/push",
 			"dm/internal/redact",
