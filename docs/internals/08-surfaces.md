@@ -165,8 +165,9 @@ tone, so the state glyph is the one coloured cell on the row, and unknown and em
 carries the one cell mark the full rail paints, in the same quiet accent, and every thin pane row inside a repository
 carries one, because that rail draws no window row to hoist the facts to. The badge has a cell of its own instead of
 landing on the grip strip. A rail the screen caps below the thin width gives cells up in one order: the badge first,
-then the git cell, then the agent mark and the bar, and the state last, so no rail a client opens leaves the row
-silent about how the pane is doing.
+then the git cell, then the agent mark and the bar, and the state last. The state is only present while the row has a
+content cell: a rail of two cells still says how the pane is doing, and a rail of one leaves the grip strip the only
+column and paints nothing.
 
 Git facts are per pane in the wire (`wire.AllPane`, `internal/wire/wire.go#AllPane`), so the rail never hoists them
 further than a row: a window row carries its source pane's, a thin row its own, and a pane row in a repository of its
