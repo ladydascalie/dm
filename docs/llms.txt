@@ -24,6 +24,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
 | `dm reset` | `[-s name \| --all] --force` | discard a session and its panes for a full restart | `dm reset -s work --force` |
+| `dm upgrade` | `[--check] [--force]` | move this binary to the latest release | `dm upgrade --check` |
 | `dm exec` | `'<json>' [-s name]` | send an action as JSON | `dm exec '{"action":"split","target":"w1p1","dir":"right"}'` |
 | `dm layout save` | `<name> [-s name] [--force]` | capture a session's shape as a named layout file | `dm layout save work -s base` |
 | `dm layout ls` | `-` | list layout files with their workspace, window and pane counts | `dm layout ls` |
@@ -68,6 +69,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm secret hydrate` | `<name> --to P` | fetch a secret and write it to a file at 0600 | `dm secret hydrate <name> --to P` |
 | `dm secret type` | `<name> --to PANE` | fetch a secret and type it into a pane | `dm secret type gh-cli --to w1p1` |
 | `dm secret sync` | `[--from M] [--trust]` | apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere | `dm secret sync` |
+| `dm version` | `[--json]` | print the version, commit and platform | `dm version [--json]` |
 | `dm man` | `[-o path]` | print the man page, or write it to a file | `dm man -o dm.1` |
 | `dm llms` | `[-o path]` | print llms.txt, or write it to a file | `dm llms -o llms.txt` |
 | `dm html` | `[-o path]` | open this page as HTML in a browser, or write it to a file | `dm html -o dm.html` |
