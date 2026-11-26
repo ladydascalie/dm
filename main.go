@@ -7,6 +7,7 @@ import (
 
 	"dm/internal/cli"
 	"dm/internal/clidoc"
+	"dm/internal/client"
 	"dm/internal/pane"
 	"dm/internal/server"
 )
@@ -23,6 +24,9 @@ func main() {
 			return
 		case "__probe":
 			exit(runProbe(args[1:]))
+			return
+		case "__update-check":
+			client.RunUpdateCheck()
 			return
 		case "-h", "--help", "help":
 			if len(args) == 1 {

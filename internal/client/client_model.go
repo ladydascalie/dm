@@ -22,6 +22,7 @@ import (
 	"dm/internal/theme"
 	"dm/internal/transport"
 	"dm/internal/ui"
+	"dm/internal/version"
 	"dm/internal/vt"
 	"dm/internal/wire"
 
@@ -599,6 +600,16 @@ func RunWithLayout(name, layoutPath string) error {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
 		return fmt.Errorf("dm needs a terminal; use dm exec or dm read otherwise")
+	}
+	// The update notice is one line on stderr, before the alternate screen, so
+	// it survives on exit. A stale cache leaves a detached refresh behind; the
+	// attach never waits for it and a failed spawn is not a failure to attach.
+	stateDir := paths.StateDir()
+	if line := updateNotice(stateDir, version.Version, time.Now()); line != "" {
+		fmt.Fprintln(os.Stderr, line)
+	}
+	if shouldCheck(stateDir, time.Now()) {
+		spawnUpdateCheck()
 	}
 	// The chrome and the pane content both step down to what the outer
 	// terminal can show. Set once, before the first frame.

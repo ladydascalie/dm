@@ -107,6 +107,8 @@ var Layers = []Layer{
 			"dm/internal/ptyspawn",
 			"dm/internal/push",
 			"dm/internal/redact",
+			"dm/internal/release",
+			"dm/internal/version",
 			"dm/internal/webshell",
 			"dm/internal/wlabel",
 		},

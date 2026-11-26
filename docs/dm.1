@@ -71,6 +71,15 @@ discard a session and its panes for a full restart
 .br
 \fB--force\fP confirm the discard
 .TP
+\fBdm upgrade [--check] [--force]\fP
+move this binary to the latest release
+.br
+\fB--check\fP report whether a newer release exists, and write nothing
+.br
+\fB--force\fP install even from a dev build, or when already current
+.br
+Example: \fBdm upgrade --check\fP
+.TP
 \fBdm exec '<json>' [-s name]\fP
 send an action as JSON
 .br
@@ -450,6 +459,11 @@ apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact 
 \fB--trust\fP trust a mapping outside the config directory: allow secret blocks and file paths anywhere
 .br
 Example: \fBdm secret sync\fP
+.TP
+\fBdm version [--json]\fP
+print the version, commit and platform
+.br
+\fB--json\fP print JSON
 .TP
 \fBdm man [-o path]\fP
 print the man page, or write it to a file
