@@ -72,6 +72,7 @@ internal/ask         the questions an agent puts to the reader, their rules and 
 internal/box         the message box types, bounds and schema
 internal/osc         the OSC 7501 status filter and parser
 internal/notify      the desktop notification policy
+internal/push        the VAPID keys, the subscription store, Web Push encryption
 internal/layout      the split tree and pane geometry
 internal/rail        the sidebar painter
 internal/switcher    the dashboard model and painter
@@ -253,6 +254,55 @@ that fails paints the daemon's message in the banner and changes nothing else.
 The page hides those commands: the action sheet, the pane action row, the send
 row and the compose. Everything that only reads stays: the fleet, the box, the
 three pane views, the fold and the picture grid.
+
+### Push
+
+Push carries the same interruption to the phone, and the daemon owns the
+decision: it is a second renderer of the `notify/` entry, beside the desktop
+pop. An entry reaches the phone when its state is `blocked` or `error`, and not
+when it is `done`, and an entry for the pane an attached client is looking at
+pops nothing, on the desk or on the phone. A pane that blocks while the operator
+is away buzzes the phone; that same pane with a client watching it stays quiet.
+The title is the pane and the state, as the desktop pop titles it, and the body
+is the entry's message. A tap on the notification opens the page on that pane.
+
+Push needs the phone to trust the page, because a browser subscribes only from a
+secure context: `dm web` must answer on an https name. `tailscale serve`
+terminates that name in front of the loopback listener, and the tailnet
+certificate is enough. A plain `http://` tailnet address is not. The daemon does
+the sending, so `dm web` has to be running when a pane changes state, and the
+phone has to stay subscribed. Each urgent entry then costs one request per
+subscribed device, at most eight, sent off the server's lock under a 15 second
+bound, so a slow push service cannot hold the desk.
+
+iOS ships push for a home-screen web app only, from 16.4 on, so the app is
+installed once by hand:
+
+1. Delete the icon already on the home screen. An icon added before this works
+   opens a Safari tab and cannot subscribe.
+2. Open `dm web`'s URL in Safari. Another browser cannot add the app.
+3. Tap Share, then Add to Home Screen.
+4. Open dm from the new icon. It runs standalone, with no Safari chrome, and
+   that standalone page is the one allowed to notify.
+5. Tap `notify` in the fleet header and allow notifications when the phone asks.
+   The button reads `on` once the subscription is stored, `off` when the device
+   holds none, `denied` when permission was refused, and `unsupported` where
+   the browser has no push at all. A tap while it reads `on` unsubscribes, and
+   the phone stops buzzing.
+
+The subscription and the key pair live in the session directory:
+
+```
+sessions/<name>/webpush.json   the subscriptions, one entry per device
+sessions/<name>/webpush.key    the VAPID key pair, mode 0600
+```
+
+`webpush.json` is a phone's capability to receive, and `webpush.key` signs every
+push. Deleting `webpush.key` invalidates every subscription already handed out,
+because the next pair signs with a key the phone never saw, so delete it only to
+revoke every device at once, and tap `notify` on each device again afterwards. A
+push service that answers `410 Gone` prunes that subscription from
+`webpush.json` on its own, so a phone that was wiped leaves no dead entry.
 
 ## Asks
 
@@ -1723,6 +1773,8 @@ State lives in `$DM_STATE`, else `$XDG_STATE_HOME/dm`, else
 
 ```
 sessions/<name>/state.json           layout, focus, names, cwd, the box
+sessions/<name>/webpush.json         the phone push subscriptions
+sessions/<name>/webpush.key          the VAPID key pair that signs them
 sessions/<name>/server.sock          RPC and client socket
 sessions/<name>/server.pid           the server process id
 sessions/<name>/server.log           server stderr
