@@ -93,16 +93,18 @@ func readKeys(path string) (*Keys, error) {
 	return keys, nil
 }
 
-// tightenMode pulls a secrets file back to 0600. The key file and the store are
-// written at 0600, but a copy, an editor or a backup tool can widen the mode; a
-// file another user can read exposes the VAPID private key, or every phone's
-// auth secret and p256dh.
+// tightenMode repairs a secrets file whose mode grants more than 0600. The key
+// file and the store are written at 0600, but an editor or a backup tool can
+// widen the mode, and a file another user can read exposes the VAPID private
+// key, or every phone's auth secret and p256dh. A narrower mode, such as 0400,
+// is left alone: an operator who made the file read-only means it, and widening
+// it back would undo that.
 func tightenMode(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
-	if info.Mode().Perm() == 0o600 {
+	if info.Mode().Perm()&^0o600 == 0 {
 		return nil
 	}
 	if err := os.Chmod(path, 0o600); err != nil {

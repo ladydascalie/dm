@@ -342,3 +342,50 @@ func TestLoadOrCreateKeysConcurrent(t *testing.T) {
 		t.Errorf("stored public key = %q, want the one every caller returned %q", onDisk.PublicKey(), want)
 	}
 }
+
+// TestKeysNarrowModeLeftAlone proves a mode narrower than 0600 is the
+// operator's choice and no reader widens it. An operator who makes the pair
+// read-only to stop a rewrite keeps that protection; only a mode that grants
+// bits beyond 0600 is repaired.
+func TestKeysNarrowModeLeftAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vapid.json")
+	first, err := push.LoadOrCreateKeys(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKeys: %v", err)
+	}
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatalf("narrow mode: %v", err)
+	}
+
+	loaded, err := push.LoadKeys(path)
+	if err != nil {
+		t.Fatalf("LoadKeys on a 0400 file: %v", err)
+	}
+	if got := loaded.PublicKey(); got != first.PublicKey() {
+		t.Errorf("LoadKeys public key = %q, want %q", got, first.PublicKey())
+	}
+	if mode := fileMode(t, path); mode != 0o400 {
+		t.Errorf("mode after LoadKeys = %o, want 400", mode)
+	}
+
+	second, err := push.LoadOrCreateKeys(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKeys on a 0400 file: %v", err)
+	}
+	if got := second.PublicKey(); got != first.PublicKey() {
+		t.Errorf("LoadOrCreateKeys public key = %q, want the stored %q", got, first.PublicKey())
+	}
+	if mode := fileMode(t, path); mode != 0o400 {
+		t.Errorf("mode after LoadOrCreateKeys = %o, want 400", mode)
+	}
+}
+
+// fileMode returns the permission bits of path.
+func fileMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.Mode().Perm()
+}

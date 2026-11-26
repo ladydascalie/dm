@@ -103,6 +103,12 @@ func (s *Store) Add(sub Subscription) error {
 func (s *Store) Remove(endpoint string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Probe the store before the lock file. lockFile creates the directory, and
+	// a Remove on a session that was reset must not recreate it: dm ls lists
+	// every directory under sessions, so an empty one is a phantom session.
+	if _, err := os.Stat(s.path); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
 	lock, err := lockFile(s.path)
 	if err != nil {
 		return false, err
