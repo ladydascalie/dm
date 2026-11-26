@@ -23,11 +23,17 @@ Symlink the extension where pi loads extensions:
 
 | action | dm command | reply |
 | --- | --- | --- |
-| `list` | `dm list --json` | the snapshot |
+| `list` | `dm list --json` | one line per pane, and the snapshot in `details` |
 | `split` | `dm split <pane> --dir D --json` | `{"pane":"w1p2"}` |
 | `window` | `dm new-window --argv CMD...` | `{"window":"w2","pane":"w2p1"}` |
 | `focus` | `dm focus <pane>` | the server reply |
 | `kill` | `dm exec '{"action":"close-pane","target":P}'` | the server reply |
+
+`list` prints one line per pane: a focus star, the id, the project, the branch,
+the status, then the shelf mark, the dirty counts and the app. `full: true`
+prints dm's raw snapshot instead. The snapshot itself always rides in `details`
+and `structuredContent`, so a script reads the whole object without asking for
+it: on a twelve pane session the lines are 7371 bytes down to about 450.
 
 clidoc has no `--json` on `new-window` or `focus`, and no close verb at all.
 The CLI prints the server's reply as JSON anyway, so the action reads it.

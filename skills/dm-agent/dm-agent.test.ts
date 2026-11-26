@@ -242,19 +242,32 @@ test("registers four tools, each with an action enum and self-naming guidelines"
 	assert.equal(box.tools.size, 4);
 });
 
-test("layout list prints the snapshot JSON from dm list --json", async (t) => {
+
+test("layout list prints one line per pane, and full prints the snapshot", async (t) => {
 	const box = sandbox(t);
-	box.resp("list", { snapshot: { panes: [{ id: "w1p1", focus: true }] } });
+	const snapshot = {
+		all: [
+			{ id: "w13p1", focus: true, project: "dm", branch: "main", status: "working", app: "pi" },
+			{ id: "w2p2", project: "publisher", branch: "main", dirty: true, added: 207, deleted: 6, shelf: true },
+		],
+	};
+	box.resp("list", { snapshot });
 
 	const result = await run(box, "dm_layout", { action: "list" });
 
 	assert.deepEqual(box.calls().map((c) => c.argv), [["list", "--json"]]);
 	assert.equal(result.isError, undefined);
-	assert.deepEqual(result.details.snapshot, { panes: [{ id: "w1p1", focus: true }] });
-	assert.match(result.content[0].text, /w1p1/);
-	// A script reads structuredContent, not the prose in content.
+	// One line per pane, with the focus star and the marks that change a decision.
+	assert.equal(
+		result.content[0].text,
+		"*w13p1 dm main working pi\n w2p2 publisher main - shelf dirty 207+ 6-",
+	);
+	// The whole object still reaches a script, which is the point of the split.
+	assert.deepEqual(result.details.snapshot, snapshot);
 	assert.deepEqual(result.structuredContent, result.details);
-	assert.deepEqual((result.structuredContent as any).snapshot, { panes: [{ id: "w1p1", focus: true }] });
+
+	const full = await run(box, "dm_layout", { action: "list", full: true });
+	assert.equal(full.content[0].text, JSON.stringify({ snapshot }));
 });
 
 test("layout split names the pane and the direction", async (t) => {

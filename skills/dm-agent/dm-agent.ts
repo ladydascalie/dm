@@ -77,6 +77,11 @@ const layoutParameters = {
 			items: { type: "string" },
 			description: "Program the new window runs, program first. Empty means the login shell.",
 		},
+		full: {
+			type: "boolean",
+			description:
+				"list only: print dm's raw snapshot JSON instead of one line per pane. A script reads the snapshot from structuredContent without it.",
+		},
 	},
 	required: ["action"],
 	additionalProperties: false,
@@ -360,7 +365,9 @@ async function runLayout(exec: Exec, p: Params, signal?: AbortSignal): Promise<T
 		const bad = failed(c);
 		if (bad) return toolError(bad, { action, argv: c.argv });
 		const reply = parseJSON<any>(c, "dm list");
-		return ok(c.stdout.trim(), { action, argv: c.argv, snapshot: reply.snapshot ?? reply });
+		const snapshot = reply.snapshot ?? reply;
+		if (p.full === true) return ok(c.stdout.trim(), { action, argv: c.argv, snapshot });
+		return ok(paneLines(snapshot), { action, argv: c.argv, snapshot });
 	}
 
 	if (action === "split") {
@@ -402,6 +409,30 @@ async function runLayout(exec: Exec, p: Params, signal?: AbortSignal): Promise<T
 	}
 
 	return toolError(`unknown action ${action}`, { action });
+}
+
+/**
+ * paneLines renders one line per pane: the id, then the project, branch and
+ * status, then the marks that change a decision (shelf, a dirty tree, the app
+ * the pane runs). `dm list --json` is 7 kB of daemon detail for a twelve pane
+ * session; this is the slice a model needs to choose a pane. A script still
+ * gets the whole object in structuredContent.
+ */
+function paneLines(snapshot: any): string {
+	const panes: any[] = Array.isArray(snapshot?.all) ? snapshot.all : [];
+	if (panes.length === 0) return "(no panes)";
+	return panes
+		.map((q) => {
+			const mark = q.focus ? "*" : " ";
+			const head = [q.project ?? "-", q.branch ?? "-", q.status ?? "-"].join(" ");
+			const marks = [
+				q.shelf ? "shelf" : "",
+				q.dirty ? `dirty ${q.added ?? 0}+ ${q.deleted ?? 0}-` : "",
+				q.app ?? "",
+			].filter(Boolean);
+			return `${mark}${q.id} ${head}${marks.length > 0 ? " " + marks.join(" ") : ""}`;
+		})
+		.join("\n");
 }
 
 // dm_pane: one pane's screen, input, wait and status.
@@ -656,7 +687,7 @@ export default function (pi: ExtensionAPI) {
 			name: "dm_layout",
 			label: "dm layout",
 			description:
-				"List, split, open, focus or close the panes and windows of a dm session. Every action runs one dm command and returns the JSON reply.",
+				"List, split, open, focus or close the panes and windows of a dm session. List prints one line per pane; full prints the raw snapshot.",
 			promptSnippet: "List, split, open, focus or close dm panes and windows when the work needs another terminal.",
 			promptGuidelines: LAYOUT_GUIDELINES,
 			parameters: layoutParameters,
