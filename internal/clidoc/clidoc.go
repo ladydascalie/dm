@@ -148,6 +148,17 @@ var cliCommands = []cliCommand{
 		group: groupSessions,
 	},
 	{
+		name:    "upgrade",
+		args:    "[--check] [--force]",
+		summary: "move this binary to the latest release",
+		flags: []cliFlag{
+			{"check", "", "report whether a newer release exists, and write nothing"},
+			{"force", "", "install even from a dev build, or when already current"},
+		},
+		example: "dm upgrade --check",
+		group:   groupSessions,
+	},
+	{
 		name:    "exec",
 		args:    "'<json>' [-s name]",
 		summary: "send an action as JSON",
@@ -606,6 +617,13 @@ var cliCommands = []cliCommand{
 	},
 
 	// Documentation.
+	{
+		name:    "version",
+		args:    "[--json]",
+		summary: "print the version, commit and platform",
+		flags:   []cliFlag{{"json", "", "print JSON"}},
+		group:   groupDocs,
+	},
 	{
 		name:    "man",
 		args:    "[-o path]",

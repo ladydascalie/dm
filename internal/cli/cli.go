@@ -562,6 +562,16 @@ func Run(argv []string) error {
 		}
 		return runReset(c)
 
+	case "upgrade":
+		c := newFlagsAt(root, "upgrade")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
+		return runUpgrade(c)
+
 	case "purge":
 		c := newFlagsAt(root, "purge")
 		if err := c.parse(argv[1:]); err != nil {
@@ -581,6 +591,16 @@ func Run(argv []string) error {
 			return err
 		}
 		return runProvision(c)
+
+	case "version":
+		c := newFlagsAt(root, "version")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
+		return runVersion(c)
 
 	case "man":
 		fs := flag.NewFlagSet("man", flag.ExitOnError)
