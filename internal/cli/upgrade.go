@@ -57,15 +57,16 @@ func runVersion(c *cmdFlags) error {
 }
 
 // runUpgrade replaces the running binary with the latest release. --check
-// reports and writes nothing. --force installs even when the build carries no
-// release stamp or is already current.
+// reports and writes nothing. --force reinstalls when the latest release is
+// already the version on disk.
+//
+// A build with no release stamp reports "dev" and has no version to compare, so
+// it is treated as older than any release and replaced: `go install` in a
+// checkout must not leave the operator with a binary that refuses to move.
 func runUpgrade(c *cmdFlags) error {
 	target, err := installedBinary()
 	if err != nil {
 		return err
-	}
-	if !version.IsRelease(version.Version) && !c.force {
-		return fmt.Errorf("upgrade: %s: dm %s is a dev build, it has no release to move to; pass --force to install the latest release anyway", target, version.String())
 	}
 	ctx := context.Background()
 	reader := release.NewReader()
@@ -77,7 +78,9 @@ func runUpgrade(c *cmdFlags) error {
 	if to == "" {
 		return fmt.Errorf("upgrade: the latest release carries no tag")
 	}
-	current := version.Compare(to, version.Version) <= 0
+	// A dev build has no version to compare, so only a release build can be
+	// current. This is what makes `dm upgrade` work after `go install`.
+	current := version.IsRelease(version.Version) && version.Compare(to, version.Version) <= 0
 	if c.check {
 		if current {
 			fmt.Printf("dm %s is current\n", version.String())

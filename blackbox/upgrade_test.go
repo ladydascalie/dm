@@ -157,18 +157,34 @@ func TestUpgrade(t *testing.T) {
 		}
 	})
 
-	t.Run("dev build is refused", func(t *testing.T) {
+	// A dev build carries no version to compare, so it is older than every
+	// release by definition. `go install` in a checkout must not strand the
+	// operator on a binary that refuses to move.
+	t.Run("dev build is upgraded", func(t *testing.T) {
 		own := newInstall(t, dev)
 		before := digest(t, own.real)
-		out, err := runInstall(own, rel, "upgrade")
-		if err == nil {
-			t.Fatalf("upgrade of a dev build exited 0:\n%s", out)
+		out, err := runInstall(own, rel, "upgrade", "--check")
+		if err != nil {
+			t.Fatalf("upgrade --check on a dev build: %v\n%s", err, out)
 		}
-		if !strings.Contains(out, "dev build") || !strings.Contains(out, own.real) {
-			t.Fatalf("upgrade of a dev build printed %q, want the dev refusal naming %s", out, own.real)
+		if want := "dm dev to 9.9.9 is available\n"; out != want {
+			t.Fatalf("upgrade --check = %q, want %q", out, want)
 		}
 		if after := digest(t, own.real); after != before {
-			t.Fatalf("a refused upgrade changed the binary: %s -> %s", before, after)
+			t.Fatalf("--check of a dev build changed the binary: %s -> %s", before, after)
+		}
+		out, err = runInstall(own, rel, "upgrade")
+		if err != nil {
+			t.Fatalf("upgrade of a dev build: %v\n%s", err, out)
+		}
+		if !strings.Contains(out, "dm dev to 9.9.9\n") || !strings.Contains(out, "installed "+own.real) {
+			t.Fatalf("upgrade of a dev build printed %q, want the move and the path", out)
+		}
+		if got, want := digest(t, own.real), digest(t, fresh); got != want {
+			t.Fatalf("a dev build was not replaced by the release: %s, want %s", got, want)
+		}
+		if target, err := os.Readlink(own.link); err != nil || target != "../real/dm" {
+			t.Fatalf("symlink after a dev upgrade = %q, %v; want ../real/dm", target, err)
 		}
 	})
 

@@ -47,9 +47,9 @@ release over the binary you ran, after checking the tarball's sha256, and
 `dm upgrade --check` only reports. A session that is already running keeps the
 old binary until it restarts, so upgrade at a moment you can detach. Set
 `DM_NO_UPDATE_CHECK=1` to stop the check; it also stays quiet on CI and in a
-build that carries no version stamp. A `dev` build refuses to upgrade itself,
-because it has no release to move to, and `dm upgrade --force` installs the
-latest release anyway.
+build that carries no version stamp. A `dev` build has no version to compare, so
+`dm upgrade` treats it as older than any release and installs the latest one;
+`--force` reinstalls when you already run the latest.
 
 ## Docs
 

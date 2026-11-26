@@ -132,14 +132,16 @@ row lives in the documentation group of the command table
 running file resolved through every symlink
 (`internal/cli/upgrade.go#installedBinary`), so an install that is a link into
 a `bin` directory keeps the link: the resolved file is replaced, not the link.
-A build that is not a release is refused before any network call, naming the
-resolved path, unless `--force` is passed
-(`internal/cli/upgrade.go#runUpgrade`).
+A build with no release stamp reports `dev`, which has no version to compare, so
+only a release build can be current: `dm upgrade` treats a `dev` build as older
+than every release and replaces it (`internal/cli/upgrade.go#runUpgrade`). That
+is what keeps `go install` in a checkout from stranding the operator on a binary
+that will not move.
 
 The verb reads the newest release from the releases base and strips the leading
 `v` from the tag (`internal/release/release.go#Reader.Latest`). It reports
 `dm <version> is current` when the latest tag is not newer, and stops unless
-`--force`. `--check` prints either `dm <version> is current` or
+`--force`, which reinstalls the same release. `--check` prints either `dm <version> is current` or
 `dm <version> to <to> is available` and exits 0 without writing anything.
 
 An install runs these steps in this order

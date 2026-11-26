@@ -153,7 +153,7 @@ var cliCommands = []cliCommand{
 		summary: "move this binary to the latest release",
 		flags: []cliFlag{
 			{"check", "", "report whether a newer release exists, and write nothing"},
-			{"force", "", "install even from a dev build, or when already current"},
+			{"force", "", "reinstall even when already current"},
 		},
 		example: "dm upgrade --check",
 		group:   groupSessions,
