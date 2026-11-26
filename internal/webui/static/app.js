@@ -1118,6 +1118,11 @@ const NOTIFY_KEY = "dm.notify";
 let notifyOn = false;
 let notifyBusy = false;
 
+// notifyEpoch counts the answers a tap has overtaken. The load asks dm about a
+// subscription and waits for the reply; a tap that lands while it waits settles
+// the same question, so the reply is stale and must not overwrite the tap.
+let notifyEpoch = 0;
+
 // notifySupported reports whether this browser has the three APIs a
 // subscription needs. A page opened in a plain tab on a phone that never
 // installed it has no PushManager, and no Notification means no permission.
@@ -1186,9 +1191,13 @@ async function swRegistration() {
 async function loadNotify() {
   if (!notifySupported()) {
     notifyOn = false;
+    setStoredNotify(false);
     paintNotify();
     return;
   }
+  // The epoch this answer belongs to. A tap bumps it, so a reply that arrives
+  // after a tap was asked for before the tap decided and is dropped.
+  const epoch = notifyEpoch;
   let sub = null;
   try {
     const reg = await swRegistration();
@@ -1197,14 +1206,21 @@ async function loadNotify() {
     // A browser that refuses to answer leaves nothing to hand dm.
     sub = null;
   }
-  notifyOn = false;
+  // The answer is computed here and assigned once, below. The record, the
+  // stored flag and the button then change together, so nothing reads a
+  // half-applied state: an assign before the await would leave the button
+  // saying on while the record said off, and a tap in that window would do the
+  // opposite of what the button shows.
+  let on = false;
   // A refused or unasked permission cannot show a notification, so a
   // subscription under it is not worth the write.
   if (sub && Notification.permission === "granted") {
     const post = await postSubscription(sub);
-    notifyOn = !!post && post.ok;
+    on = !!post && post.ok;
   }
-  setStoredNotify(notifyOn);
+  if (epoch !== notifyEpoch) return;
+  notifyOn = on;
+  setStoredNotify(on);
   paintNotify();
 }
 
@@ -1345,6 +1361,9 @@ async function toggleNotify() {
     banner("this browser cannot subscribe to notifications");
     return;
   }
+  // A load already waiting for dm is answering a question this tap settles, so
+  // its reply is stale from here on.
+  notifyEpoch++;
   notifyBusy = true;
   try {
     if (notifyOn) await unsubscribePush();

@@ -21,12 +21,15 @@ const notifyHarness = `
 const NOTIFY_KEY = "dm.notify";
 let notifyOn = false;
 let notifyBusy = false;
+let notifyEpoch = 0;
 
 // world is what the scenario set up and what the page did to it. attempts
 // records every request the page started, posts only those dm answered.
 const world = {
   refusesDrop: false,
   postFails: false,
+  holdPost: false,
+  releasePost: null,
   attempts: [],
   posts: [],
   banners: [],
@@ -82,6 +85,17 @@ async function fetchAPI(path) {
   world.attempts.push(path);
   if (path === "/api/push/config") {
     return { ok: true, async json() { return { enabled: true, publicKey: "BAQE" }; } };
+  }
+  if (path === "/api/push/subscribe" && world.holdPost && !world.releasePost) {
+    // The reply waits until the scenario releases it, so a tap can overtake it.
+    // Only the first POST is held: a later one belongs to a tap that has
+    // already decided the question.
+    return await new Promise((resolve) => {
+      world.releasePost = () => {
+        world.posts.push(path);
+        resolve({ ok: true, status: 204, async text() { return ""; } });
+      };
+    });
   }
   if (path === "/api/push/subscribe" && world.postFails) {
     throw new TypeError("network error");
@@ -160,6 +174,43 @@ if (scenario === "subscribe-rejected") {
   want(notifyOn === false, "notifyOn = " + notifyOn + ", want false");
   want(memory.get(NOTIFY_KEY) === "off", "stored = " + memory.get(NOTIFY_KEY) + ", want off");
   want(button.dataset.state === "denied", "the button reads " + button.dataset.state + ", want denied");
+} else if (scenario === "load-normal") {
+  // An un-overtaken load records on once dm takes the subscription.
+  notifyOn = false;
+  memory.set(NOTIFY_KEY, "off");
+  paintNotify();
+  await loadNotify();
+  want(world.posts.includes("/api/push/subscribe"), "posts = " + JSON.stringify(world.posts) + ", want the load to hand the subscription to dm");
+  want(notifyOn === true, "notifyOn = " + notifyOn + ", want true");
+  want(memory.get(NOTIFY_KEY) === "on", "stored = " + memory.get(NOTIFY_KEY) + ", want on");
+  want(button.dataset.state === "on", "the button reads " + button.dataset.state + ", want on");
+} else if (scenario === "load-overtaken") {
+  // The load's POST is in flight and a tap turns notifications off. The button
+  // reads on until the reply lands, and the tap must win: a stale reply cannot
+  // overwrite the record the tap just made.
+  notifyOn = true;
+  memory.set(NOTIFY_KEY, "on");
+  paintNotify();
+  world.holdPost = true;
+  const loading = loadNotify();
+  for (let i = 0; i < 200 && !world.releasePost; i++) await Promise.resolve();
+  want(!!world.releasePost, "the load never reached its POST");
+  want(notifyOn === true, "duringLoad notifyOn = " + notifyOn + ", want true: nothing is recorded before the reply");
+  want(button.dataset.state === "on", "duringLoad the button reads " + button.dataset.state + ", want on");
+
+  await toggleNotify();
+  want(world.posts.includes("/api/push/unsubscribe"), "posts = " + JSON.stringify(world.posts) + ", want the tap's unsubscribe");
+  want(notifyOn === false, "afterTap notifyOn = " + notifyOn + ", want false");
+  want(memory.get(NOTIFY_KEY) === "off", "afterTap stored = " + memory.get(NOTIFY_KEY) + ", want off");
+  want(button.dataset.state === "off", "afterTap the button reads " + button.dataset.state + ", want off");
+
+  // The reply lands now, one network round trip late.
+  world.holdPost = false;
+  world.releasePost();
+  await loading;
+  want(notifyOn === false, "afterLoad notifyOn = " + notifyOn + ", want false: a stale reply overwrote the tap");
+  want(memory.get(NOTIFY_KEY) === "off", "afterLoad stored = " + memory.get(NOTIFY_KEY) + ", want off");
+  want(button.dataset.state === "off", "afterLoad the button reads " + button.dataset.state + ", want off");
 } else if (scenario === "tap-off-refused") {
   // The device refuses the drop, so dm must keep the row and the switch must
   // stay on: dm cannot reach a phone that still holds the subscription.
@@ -255,6 +306,15 @@ func TestReloadRecordsOffWhenThePostFails(t *testing.T) { notifyTap(t, "reload-p
 // TestReloadPostsNothingWhenPermissionIsDenied proves a refused permission
 // writes nothing to dm: a subscription under it can show no notification.
 func TestReloadPostsNothingWhenPermissionIsDenied(t *testing.T) { notifyTap(t, "reload-denied") }
+
+// TestLoadRecordsOnWhenDmTakesTheSubscription proves the ordinary load still
+// records on once dm has the row.
+func TestLoadRecordsOnWhenDmTakesTheSubscription(t *testing.T) { notifyTap(t, "load-normal") }
+
+// TestLoadReplyDoesNotOverwriteATap proves the button, the record and the
+// stored flag change together after the load's reply, and that a reply a tap
+// overtook is dropped: the tap's off survives.
+func TestLoadReplyDoesNotOverwriteATap(t *testing.T) { notifyTap(t, "load-overtaken") }
 
 // TestUnsubscribeKeepsTheSwitchOnWhenTheDeviceRefuses proves a refused
 // unsubscribe() leaves dm's row alone and the switch on. Dropping the row would
