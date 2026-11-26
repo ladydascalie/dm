@@ -2083,6 +2083,10 @@ const TOOL_ICONS = {
   edit: "\u270e",
   codemode: "\u2630",
   ask_user_question: "?",
+  dm_turn: "?",
+  dm_box: "\u2261",
+  dm_layout: "\u25ab",
+  dm_pane: "\u25a7",
 };
 
 function iconOf(s) {

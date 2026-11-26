@@ -574,7 +574,7 @@ func toolSummary(name string, args json.RawMessage) string {
 		return str("path")
 	case "codemode":
 		return str("code")
-	case "ask_user_question":
+	case "ask_user_question", "dm_turn":
 		if q := firstQuestion(m); q != "" {
 			return q
 		}
@@ -583,7 +583,8 @@ func toolSummary(name string, args json.RawMessage) string {
 	return ""
 }
 
-// firstQuestion returns the first question of an ask_user_question call.
+// firstQuestion returns the first question of an ask call, whether the retired
+// ask_user_question tool or dm_turn carried it.
 func firstQuestion(m map[string]any) string {
 	qs, _ := m["questions"].([]any)
 	if len(qs) == 0 {
