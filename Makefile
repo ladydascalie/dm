@@ -14,6 +14,13 @@ GREMLINS_MANIFEST := $(GREMLINS_OUT)/manifest.txt
 
 GO_TEST_PKGS = $(shell go list ./... 2>/dev/null | wc -l)
 
+# The release matrix. `make dist` builds and tars every row; the workflow in
+# .github/workflows/release.yaml runs the same four. VERSION stamps the
+# version, and "git describe --tags --always" stands in when it is unset.
+DIST_PAIRS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+VERSION ?=
+DIST_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null || printf none)
+
 .PHONY: help
 help:
 	@if [ -f $(GREMLINS_MANIFEST) ]; then \
@@ -33,6 +40,8 @@ help:
 		gremlins-pkg "mutation-test one package, e.g. PKG=pane; drops the manifest, so the results no longer claim one run" \
 		gremlins-check "$$note" \
 		docs-internals "regenerate docs/internals/generated/package-graph.md" \
+		dist "build and tar $(DIST_PAIRS) into out/, then write out/checksums.txt" \
+		release-check "go test the release packages, then make dist" \
 		provision-check "fail unless this checkout's extension and skill are linked into the harness"
 
 .PHONY: test
@@ -98,6 +107,38 @@ gremlins-check:
 		exit 1; \
 	fi; \
 	echo "gremlins-check: results recorded at $$recorded ($$when), current HEAD"
+
+# dist builds the whole matrix locally, so a lane and the operator can prove
+# what the workflow does without GitHub. The tarballs hold one file, dm, at the
+# archive root, and checksums.txt is sha256sum format: "cd out && sha256sum -c
+# checksums.txt" proves the four.
+.PHONY: dist
+dist:
+	@set -e; \
+	trap 'rm -f out/dm' EXIT; \
+	rm -f out/dm out/checksums.txt out/dm_*.tar.gz; \
+	ver='$(VERSION)'; \
+	if [ -z "$$ver" ]; then ver=$$(git describe --tags --always 2>/dev/null || true); fi; \
+	ver=$$(printf '%s' "$$ver" | sed 's/^v//'); \
+	if [ -z "$$ver" ]; then ver=dev; fi; \
+	echo "dist: version $$ver commit $(DIST_COMMIT)"; \
+	mkdir -p out; \
+	for pair in $(DIST_PAIRS); do \
+		goos=$${pair%%/*}; goarch=$${pair##*/}; \
+		CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go build -trimpath \
+			-ldflags "-s -w -X dm/internal/version.Version=$$ver -X dm/internal/version.Commit=$(DIST_COMMIT)" \
+			-o out/dm . ; \
+		tar -czf out/dm_$${goos}_$${goarch}.tar.gz -C out dm; \
+		echo "dist: dm_$${goos}_$${goarch}.tar.gz"; \
+	done; \
+	rm -f out/dm; \
+	( cd out && sha256sum dm_*.tar.gz > checksums.txt ); \
+	ls -l out/dm_*.tar.gz out/checksums.txt
+
+.PHONY: release-check
+release-check:
+	go test ./internal/version/ ./internal/release/
+	$(MAKE) dist
 
 # Local, never a gate: the links live in the operator's home, which CI does not
 # have. A symlink cannot go stale, so this catches a one-time setup state only.

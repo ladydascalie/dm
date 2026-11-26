@@ -1,0 +1,150 @@
+# Cut a dm release: build the matrix, stamp the version into every binary,
+# publish the tarballs, their checksums and the notes.
+#
+# A tag publish leaves a GitHub release. A workflow_dispatch run builds the same
+# four archives and stops: it leaves them on the run and creates no release.
+#
+# The asset names, the matrix and the stamp are the contract the rest of dm
+# reads: internal/release names dm_<goos>_<goarch>.tar.gz, and the archive holds
+# one file, dm, at its root.
+name: release
+
+on:
+  push:
+    # v<major>.<minor>.<patch>, a prerelease suffix allowed. The glob is the
+    # tag filter Actions offers; the "tag shape" step below is the exact check.
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: tag shape
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$GITHUB_REF_NAME is not v<major>.<minor>.<patch>"
+            exit 1
+          fi
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          commit="$(git rev-parse --short HEAD)"
+          go build -trimpath -ldflags "-s -w -X dm/internal/version.Version=${version} -X dm/internal/version.Commit=${commit}" -o out/dm .
+          tar -czf "dm_${GOOS}_${GOARCH}.tar.gz" -C out dm
+          tar tzf "dm_${GOOS}_${GOARCH}.tar.gz"
+
+      # The tarball above is stripped, so a stamp that never reached the binary
+      # would still ship. Build the runner's own binary unstripped and ask it
+      # what version it carries: a broken stamp fails the run here, before any
+      # artifact exists to publish.
+      - name: stamp reached the binary
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          commit="$(git rev-parse --short HEAD)"
+          go build -ldflags "-X dm/internal/version.Version=${version} -X dm/internal/version.Commit=${commit}" -o dm .
+          out="$(./dm version)"
+          echo "$out"
+          case "$out" in
+            *"$version"*) ;;
+            *)
+              echo "::error::the stamp did not reach the binary: dm version does not name ${version}"
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dm_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dm_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish
+    needs: build
+    # A dispatch run publishes nothing: the artifacts stay on the run.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: four tarballs
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          count="$(ls -1 dm_*.tar.gz | wc -l)"
+          if [ "$count" -ne 4 ]; then
+            echo "::error::${count} tarballs, want 4: a build job did not upload"
+            exit 1
+          fi
+
+      - name: checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          sha256sum dm_*.tar.gz > checksums.txt
+          cat checksums.txt
+          sha256sum -c checksums.txt
+
+      - name: notes
+        run: |
+          set -euo pipefail
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          bash scripts/release-notes.sh "$prev" "$GITHUB_REF_NAME" > "${RUNNER_TEMP}/notes.md"
+          cat "${RUNNER_TEMP}/notes.md"
+
+      - name: create the release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "${RUNNER_TEMP}/notes.md" \
+            dm_*.tar.gz checksums.txt
