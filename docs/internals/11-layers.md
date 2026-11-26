@@ -39,7 +39,7 @@ carry many real edges, and the generated page counts every one of them. The two
 | services | services, presentation, domain, leaf | `internal/cli`, `internal/client`, `internal/pane`, `internal/proxy`, `internal/server`, `internal/transport`, `internal/websession`, `internal/webui` |
 | presentation | presentation, domain, leaf | `internal/boxview`, `internal/clidoc`, `internal/configdoc`, `internal/esctest`, `internal/hintbar`, `internal/keymapview`, `internal/palette`, `internal/panel`, `internal/rail`, `internal/segment`, `internal/shot`, `internal/switcher`, `internal/testutil`, `internal/ui` |
 | domain | domain, leaf | `internal/ask`, `internal/box`, `internal/keymap`, `internal/layout`, `internal/layoutdoc`, `internal/notify`, `internal/osc`, `internal/secrets`, `internal/session`, `internal/theme`, `internal/vt`, `internal/wire` |
-| leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/lesson`, `internal/paths`, `internal/ptyspawn`, `internal/push`, `internal/redact`, `internal/webshell`, `internal/wlabel` |
+| leaf | nothing | `blackbox`, `internal/browser`, `internal/cells`, `internal/kdl`, `internal/lesson`, `internal/paths`, `internal/provision`, `internal/ptyspawn`, `internal/push`, `internal/redact`, `internal/webshell`, `internal/wlabel` |
 | tooling | tooling, domain, leaf | `internal/arch`, `internal/archdoc` |
 
 The Packages column drops the `dm/` module prefix, so `blackbox` is `dm/blackbox`.
@@ -89,12 +89,14 @@ wire frame, one length-prefixed JSON message on the socket
 
 **leaf** packages import nothing from the module: `internal/cells`,
 `internal/paths`, `internal/kdl`, `internal/browser`, `internal/wlabel`,
-`internal/redact`, `internal/push`, and `dm/blackbox`. Most are primitives used
-from everywhere, so an import out of a leaf would close a cycle through most of
-the tree: the most expensive cycle in the model. `internal/browser` is a
-standalone tool: it opens a URL in the default browser. `internal/push` is Web
-Push on the standard library alone: the VAPID key pair, the subscription store,
-the RFC 8291 payload and the RFC 8292 headers.
+`internal/redact`, `internal/push`, `internal/provision`, and `dm/blackbox`.
+Most are primitives used from everywhere, so an import out of a leaf would close
+a cycle through most of the tree: the most expensive cycle in the model.
+`internal/browser` is a standalone tool: it opens a URL in the default browser.
+`internal/push` is Web Push on the standard library alone: the VAPID key pair,
+the subscription store, the RFC 8291 payload and the RFC 8292 headers.
+`internal/provision` links the two teaching artefacts into one harness, so the
+link rules stay harness-free and pi is one adapter file.
 
 **tooling** is offline. `internal/arch` runs the Go toolchain and holds the
 model, `internal/archdoc` renders the docs from it. Neither runs in `dm`, so
