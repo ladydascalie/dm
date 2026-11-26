@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
 	"image"
@@ -206,10 +207,20 @@ func loopbackHost(host string) bool {
 }
 
 // pushP256DH reports whether raw is the phone's public key: base64url of a
-// 65-byte uncompressed P-256 point.
+// 65-byte uncompressed P-256 point that is on the curve.
+//
+// The curve matters as much as the length. The sender builds the encrypted
+// body from this point before it calls the push service, so a point that is not
+// on P-256 makes every delivery fail without a 404 or a 410 to prune it: the row
+// would stay and fail forever. A real browser never sends one; only a client
+// holding the token can.
 func pushP256DH(raw string) bool {
 	b, err := decodePushBase64(raw)
-	return err == nil && len(b) == 65 && b[0] == 0x04
+	if err != nil || len(b) != 65 || b[0] != 0x04 {
+		return false
+	}
+	_, err = ecdh.P256().NewPublicKey(b)
+	return err == nil
 }
 
 // pushAuth reports whether raw is the phone's auth secret: base64url of 16

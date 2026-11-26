@@ -1213,6 +1213,18 @@ function fromB64url(text) {
   return out;
 }
 
+// dropSubscription removes the device's subscription after dm refused it or
+// could not be reached, so the next load cannot read the switch as on from a
+// device dm has no row for. A browser that refuses the drop leaves the device
+// holding a subscription the next tap finds and posts again.
+async function dropSubscription(sub) {
+  try {
+    await sub.unsubscribe();
+  } catch (e) {
+    // Nothing better is left to do: the next tap posts the device again.
+  }
+}
+
 // subscribePush registers the worker, asks for permission and hands the
 // subscription to dm. The registration and the ask both start before the first
 // await, because iOS drops a permission request that does not come straight
@@ -1242,20 +1254,29 @@ async function subscribePush() {
       applicationServerKey: fromB64url(config.publicKey),
     });
   }
-  const post = await fetchAPI("/api/push/subscribe", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      endpoint: sub.endpoint,
-      p256dh: b64url(sub.getKey("p256dh")),
-      auth: b64url(sub.getKey("auth")),
-    }),
-  });
-  if (!post.ok) {
-    // The server kept nothing, so the browser keeps nothing either: the switch
-    // reads the device, and it would otherwise read on.
-    await sub.unsubscribe();
-    banner("notifications failed: " + (await post.text()));
+  let post = null;
+  try {
+    post = await fetchAPI("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: sub.endpoint,
+        p256dh: b64url(sub.getKey("p256dh")),
+        auth: b64url(sub.getKey("auth")),
+      }),
+    });
+  } catch (e) {
+    // A dropped connection, a tailnet reconnect and a browser that aborted the
+    // request are one case with a refusal: dm does not have the phone.
+    post = null;
+  }
+  if (!post || !post.ok) {
+    // dm kept nothing, so the browser keeps nothing either. A device that held
+    // the subscription would read on at the next load, and nothing would repair
+    // it: dm has no row to deliver to, and the switch reads the device.
+    await dropSubscription(sub);
+    banner("notifications failed: " +
+      (post ? await post.text() : "cannot reach the session"));
     return;
   }
   notifyOn = true;
@@ -1264,19 +1285,24 @@ async function subscribePush() {
 }
 
 // unsubscribePush drops the subscription on the device first, then tells dm.
-// The local call is the one that must succeed: a server that is down keeps a
-// dead entry it prunes when the push service answers 410.
+// The device is what the switch reads, so the drop comes first even when the
+// request never arrives; dm prunes a dead row when the push service answers
+// 410.
 async function unsubscribePush() {
   const reg = await swRegistration();
   const sub = reg ? await reg.pushManager.getSubscription() : null;
   if (sub) {
     const endpoint = sub.endpoint;
-    await sub.unsubscribe();
-    await fetchAPI("/api/push/unsubscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint: endpoint }),
-    });
+    await dropSubscription(sub);
+    try {
+      await fetchAPI("/api/push/unsubscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: endpoint }),
+      });
+    } catch (e) {
+      // The device is off either way; dm prunes the dead row on a 410.
+    }
   }
   notifyOn = false;
   setStoredNotify(false);

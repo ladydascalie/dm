@@ -1,6 +1,8 @@
 package webui
 
 import (
+	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -23,14 +25,15 @@ func pushServer(t *testing.T) (*httptest.Server, string) {
 	return srv, paths.SessionDirAt(cfg.Root, cfg.Session)
 }
 
-// subPoint is a valid p256dh: base64url of a 65-byte uncompressed point.
-func subPoint() string {
-	point := make([]byte, 65)
-	point[0] = 0x04
-	for i := 1; i < len(point); i++ {
-		point[i] = byte(i)
+// subPoint is a valid p256dh: base64url of a real 65-byte uncompressed point.
+// The point has to be on P-256, because the endpoint checks the curve.
+func subPoint(t *testing.T) string {
+	t.Helper()
+	key, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return base64.RawURLEncoding.EncodeToString(point)
+	return base64.RawURLEncoding.EncodeToString(key.PublicKey().Bytes())
 }
 
 // subAuth is a valid auth secret: base64url of 16 bytes.
@@ -122,7 +125,8 @@ func TestPushConfigWithoutAKeyFile(t *testing.T) {
 func TestPushSubscribeStoresThePhone(t *testing.T) {
 	srv, dir := pushServer(t)
 	endpoint := "https://push.example.com/abc"
-	res := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, subPoint(), subAuth()))
+	point := subPoint(t)
+	res := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, point, subAuth()))
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusNoContent {
 		t.Fatalf("status %d, want 204: %s", res.StatusCode, body(t, res))
@@ -131,7 +135,7 @@ func TestPushSubscribeStoresThePhone(t *testing.T) {
 	if len(subs) != 1 || subs[0].Endpoint != endpoint {
 		t.Fatalf("store = %+v, want the one endpoint", subs)
 	}
-	if subs[0].Auth != subAuth() || subs[0].P256DH != subPoint() {
+	if subs[0].Auth != subAuth() || subs[0].P256DH != point {
 		t.Fatalf("store kept %+v, want the keys the page sent", subs[0])
 	}
 	if subs[0].At.IsZero() {
@@ -144,13 +148,13 @@ func TestPushSubscribeStoresThePhone(t *testing.T) {
 func TestPushSubscribeReplacesTheEndpoint(t *testing.T) {
 	srv, dir := pushServer(t)
 	endpoint := "https://push.example.com/abc"
-	first := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, subPoint(), subAuth()))
+	first := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, subPoint(t), subAuth()))
 	_ = first.Body.Close()
 	if first.StatusCode != http.StatusNoContent {
 		t.Fatalf("first status %d", first.StatusCode)
 	}
 	other := base64.RawURLEncoding.EncodeToString([]byte("fedcba9876543210"))
-	second := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, subPoint(), other))
+	second := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, subPoint(t), other))
 	defer func() { _ = second.Body.Close() }()
 	if second.StatusCode != http.StatusNoContent {
 		t.Fatalf("second status %d", second.StatusCode)
@@ -169,7 +173,7 @@ func TestPushSubscribeReplacesTheEndpoint(t *testing.T) {
 func TestPushUnsubscribeIsIdempotent(t *testing.T) {
 	srv, dir := pushServer(t)
 	endpoint := "https://push.example.com/abc"
-	sub := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, subPoint(), subAuth()))
+	sub := post(t, srv.URL+"/api/push/subscribe?t=t", subBody(endpoint, subPoint(t), subAuth()))
 	_ = sub.Body.Close()
 
 	gone := post(t, srv.URL+"/api/push/unsubscribe?t=t", map[string]string{"endpoint": endpoint})
@@ -196,6 +200,9 @@ func TestPushSubscribeRejectsMalformedBodies(t *testing.T) {
 	taggedPoint := base64.RawURLEncoding.EncodeToString(append([]byte{0x05}, make([]byte, 64)...))
 	// 15 bytes of auth.
 	shortAuth := base64.RawURLEncoding.EncodeToString(make([]byte, 15))
+	// The reviewer's value: the right length and tag, and not a point on P-256,
+	// so every delivery to it would fail with no 410 to prune the row.
+	offCurve := base64.RawURLEncoding.EncodeToString(append([]byte{0x04}, make([]byte, 64)...))
 
 	cases := []struct {
 		name string
@@ -203,17 +210,18 @@ func TestPushSubscribeRejectsMalformedBodies(t *testing.T) {
 	}{
 		{name: "empty", body: ""},
 		{name: "not json", body: "endpoint=https://push.example.com/a"},
-		{name: "no endpoint", body: `{"p256dh":"` + subPoint() + `","auth":"` + subAuth() + `"}`},
-		{name: "relative endpoint", body: `{"endpoint":"/push/a","p256dh":"` + subPoint() + `","auth":"` + subAuth() + `"}`},
-		{name: "no scheme", body: `{"endpoint":"push.example.com/a","p256dh":"` + subPoint() + `","auth":"` + subAuth() + `"}`},
-		{name: "plain http", body: `{"endpoint":"http://push.example.com/a","p256dh":"` + subPoint() + `","auth":"` + subAuth() + `"}`},
-		{name: "other scheme", body: `{"endpoint":"ftp://push.example.com/a","p256dh":"` + subPoint() + `","auth":"` + subAuth() + `"}`},
+		{name: "no endpoint", body: `{"p256dh":"` + subPoint(t) + `","auth":"` + subAuth() + `"}`},
+		{name: "relative endpoint", body: `{"endpoint":"/push/a","p256dh":"` + subPoint(t) + `","auth":"` + subAuth() + `"}`},
+		{name: "no scheme", body: `{"endpoint":"push.example.com/a","p256dh":"` + subPoint(t) + `","auth":"` + subAuth() + `"}`},
+		{name: "plain http", body: `{"endpoint":"http://push.example.com/a","p256dh":"` + subPoint(t) + `","auth":"` + subAuth() + `"}`},
+		{name: "other scheme", body: `{"endpoint":"ftp://push.example.com/a","p256dh":"` + subPoint(t) + `","auth":"` + subAuth() + `"}`},
 		{name: "no p256dh", body: `{"endpoint":"https://push.example.com/a","auth":"` + subAuth() + `"}`},
 		{name: "short p256dh", body: `{"endpoint":"https://push.example.com/a","p256dh":"` + shortPoint + `","auth":"` + subAuth() + `"}`},
 		{name: "untagged p256dh", body: `{"endpoint":"https://push.example.com/a","p256dh":"` + taggedPoint + `","auth":"` + subAuth() + `"}`},
 		{name: "p256dh not base64url", body: `{"endpoint":"https://push.example.com/a","p256dh":"!!!!","auth":"` + subAuth() + `"}`},
-		{name: "short auth", body: `{"endpoint":"https://push.example.com/a","p256dh":"` + subPoint() + `","auth":"` + shortAuth + `"}`},
-		{name: "auth not base64url", body: `{"endpoint":"https://push.example.com/a","p256dh":"` + subPoint() + `","auth":"!!!!"}`},
+		{name: "point not on curve", body: `{"endpoint":"https://push.example.com/a","p256dh":"` + offCurve + `","auth":"` + subAuth() + `"}`},
+		{name: "short auth", body: `{"endpoint":"https://push.example.com/a","p256dh":"` + subPoint(t) + `","auth":"` + shortAuth + `"}`},
+		{name: "auth not base64url", body: `{"endpoint":"https://push.example.com/a","p256dh":"` + subPoint(t) + `","auth":"!!!!"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,7 +273,7 @@ func TestPushSubscribeReportsAFailedWrite(t *testing.T) {
 	if out := config(t, srv); !out.Enabled {
 		t.Error("enabled = false, want the pair read from the file")
 	}
-	res := post(t, srv.URL+"/api/push/subscribe?t=t", subBody("https://push.example.com/a", subPoint(), subAuth()))
+	res := post(t, srv.URL+"/api/push/subscribe?t=t", subBody("https://push.example.com/a", subPoint(t), subAuth()))
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status %d, want 500: %s", res.StatusCode, body(t, res))
@@ -284,7 +292,7 @@ func TestPushEndpointsNeedTheToken(t *testing.T) {
 			return get(t, srv.URL+"/api/push/config", "")
 		}},
 		{name: "subscribe", do: func() *http.Response {
-			return post(t, srv.URL+"/api/push/subscribe", subBody("https://push.example.com/a", subPoint(), subAuth()))
+			return post(t, srv.URL+"/api/push/subscribe", subBody("https://push.example.com/a", subPoint(t), subAuth()))
 		}},
 		{name: "unsubscribe", do: func() *http.Response {
 			return post(t, srv.URL+"/api/push/unsubscribe", map[string]string{"endpoint": "https://push.example.com/a"})
