@@ -69,6 +69,9 @@ type cmdFlags struct {
 	all          bool
 	force        bool
 	trust        bool
+	check        bool
+	print        bool
+	uninstall    bool
 	args         []string
 	root         string
 	// usage overrides the flag set's usage printer. The bare-word fallback
@@ -359,6 +362,12 @@ func (c *cmdFlags) register(name, desc string) {
 		c.fs.StringVar(&c.pane, "pane", "", desc)
 	case "tool-call":
 		c.fs.StringVar(&c.toolCall, "tool-call", "", desc)
+	case "check":
+		c.fs.BoolVar(&c.check, "check", false, desc)
+	case "print":
+		c.fs.BoolVar(&c.print, "print", false, desc)
+	case "uninstall":
+		c.fs.BoolVar(&c.uninstall, "uninstall", false, desc)
 	default:
 		panic("cli: no field binding for flag " + name)
 	}
@@ -562,6 +571,16 @@ func Run(argv []string) error {
 			return err
 		}
 		return runPurge(c)
+
+	case "provision":
+		c := newFlagsAt(root, "provision")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
+		return runProvision(c)
 
 	case "man":
 		fs := flag.NewFlagSet("man", flag.ExitOnError)
