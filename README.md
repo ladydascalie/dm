@@ -1740,8 +1740,9 @@ Both artefacts are symlinks into this checkout, so an edit here is live in the
 harness at once and nothing can go stale.
 
 - `skills/dm-agent/dm-agent.ts` registers four tools, `dm_layout`, `dm_pane`,
-  `dm_box` and `dm_turn`, each an action enum over `dm ... --json`. They are
-  `model-only`, so a codemode script cannot reach the mux.
+  `dm_box` and `dm_turn`, each an action enum over `dm ... --json`. `dm_turn`
+  is `model-only` because it asks the operator. The other three stay `direct`,
+  so a codemode script reaches them for a filtered tree read or a box loop.
 - `skills/dm-fleet/SKILL.md` carries the judgement a tool schema cannot: when
   to split, when a lane is worth it, and the `lane/` box protocol.
 
