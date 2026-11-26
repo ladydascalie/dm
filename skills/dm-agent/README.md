@@ -80,21 +80,26 @@ own `timeout` runs out, and reports `pending` once it does. Give `pane` on
 
 ## Reaching the tools
 
-`dm_turn` is `model-only`, which is pi's rule for a tool that asks the user:
-declared to the model and never callable from a script. The other three are
-`direct`, so a codemode script can call them while they stay declared. That is
-the point of the split: a filtered tree read or a box loop belongs in a script,
-where it costs one line of context instead of the whole JSON.
+`dm_turn` is `model-only`, pi's rule for a tool that asks the user. The other
+three are `direct`: declared to the model and callable from a codemode script,
+and pi appends the note that says so to their descriptions.
+
+Scripting is not how a fleet is supervised. `dungeon_watch` already keeps the
+cursor, resets a stale one and returns one line per lane event, so a hand-
+written loop over `dm_box wait` would be the same job done worse.
+
+A script earns its place on the question no digest answers: which panes sit in
+this window, which changed branch, which carry a dirty tree and an open ask.
+`dm list --json` is 7408 bytes on a quiet session, and a script returns the slice.
 
 ```js
-// one blocked lane, without the tree or the event list in context
-for (;;) {
-  const r = await tools.dm_box({ action: "wait", prefix: "lane/", state: "blocked", timeout: 55 });
-  if (!r.entry) continue;                                  // a timeout lands as no entry
-  const p = await tools.dm_pane({ action: "read", pane: r.entry.from, lines: 8 });
-  text(`${r.entry.key} ${r.entry.msg}` + "\n" + p.lines.join("\n"));
-}
+const { snapshot } = await tools.dm_layout({ action: "list" });
+text(snapshot.all
+  .filter((p) => !p.shelf && p.inRepo)
+  .map((p) => `${p.id} ${p.project} ${p.branch}${p.dirty ? " dirty" : ""}`)
+  .join("\n"));
 ```
+
 
 ## Results
 

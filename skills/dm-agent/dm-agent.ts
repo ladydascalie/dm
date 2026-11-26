@@ -630,11 +630,6 @@ async function guard(action: string, fn: () => Promise<ToolResult>): Promise<Too
 	}
 }
 
-// exposureFor names how the model reaches one tool. dm_turn asks the operator,
-// so pi's own rule makes it model-only: declared and never callable from a
-// script. The other three are plumbing, so they stay direct: declared to the
-// model and callable from a codemode script, which is where a filtered box
-// loop or a tree read belongs, instead of in the context window.
 // replySchema describes what a call hands back. A codemode script reads
 // structuredContent, which is the same object as details, so the parsed reply
 // reaches a script as fields instead of prose it would have to parse.
@@ -644,6 +639,11 @@ const replySchema = {
 	description: "The parsed dm reply, the same object as details.",
 };
 
+// exposureFor names how the model reaches one tool. dm_turn asks the operator,
+// so pi's own rule makes it model-only: declared and never callable from a
+// script. The other three are plumbing, so they stay direct: declared to the
+// model and callable from a codemode script, which is where a filtered tree
+// read or a join over dm's state belongs, instead of in the context window.
 function exposureFor(name: string): "direct" | "model-only" {
 	return name === "dm_turn" ? "model-only" : "direct";
 }
