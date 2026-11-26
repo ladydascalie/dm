@@ -5,8 +5,12 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sync"
 	"testing"
 
 	"dm/internal/push"
@@ -54,12 +58,9 @@ func TestKeysFile(t *testing.T) {
 	if mode := info.Mode().Perm(); mode != 0o600 {
 		t.Errorf("mode = %o, want 600", mode)
 	}
-	entries, err := os.ReadDir(filepath.Dir(path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 1 || entries[0].Name() != "vapid.json" {
-		t.Errorf("directory holds %d entries, want only vapid.json", len(entries))
+	names := dirNames(t, filepath.Dir(path))
+	if want := []string{"vapid.json", "vapid.json.lock"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("directory holds %v, want %v", names, want)
 	}
 }
 
@@ -210,7 +211,8 @@ func TestKeysModeRepairedOnLoad(t *testing.T) {
 
 // TestKeysFailedOpenLeavesNoKeyFile proves the key path has the store's shape:
 // a directory that cannot be opened fails the write before the rename, so no
-// key file appears, and the next call generates and stores one.
+// key file appears and only the lock file is left behind, and the next call
+// generates and stores one.
 func TestKeysFailedOpenLeavesNoKeyFile(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root can open a directory that lacks read permission")
@@ -231,18 +233,159 @@ func TestKeysFailedOpenLeavesNoKeyFile(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		names := make([]string, len(entries))
-		for i, entry := range entries {
-			names[i] = entry.Name()
-		}
-		t.Errorf("directory holds %v after the failed write, want nothing", names)
+	names := dirNames(t, dir)
+	if want := []string{"vapid.json.lock"}; !reflect.DeepEqual(names, want) {
+		t.Errorf("directory holds %v after the failed write, want only the lock file %v", names, want)
 	}
 	if _, err := push.LoadOrCreateKeys(path); err != nil {
 		t.Fatalf("LoadOrCreateKeys after the failure: %v", err)
 	}
+}
+
+// TestLoadKeysMissing proves a reader never mints a pair: the daemon asks for
+// the pair dm web generated and must not create one for a phone that never
+// subscribed.
+func TestLoadKeysMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vapid.json")
+	_, err := push.LoadKeys(path)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("LoadKeys on a missing file = %v, want fs.ErrNotExist", err)
+	}
+	if names := dirNames(t, dir); len(names) != 0 {
+		t.Errorf("LoadKeys left %v behind, want an untouched directory", names)
+	}
+}
+
+// TestLoadKeysReturnsCreatedKey proves a reader sees the pair the creator wrote,
+// and that reading it rewrites nothing.
+func TestLoadKeysReturnsCreatedKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vapid.json")
+	created, err := push.LoadOrCreateKeys(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKeys: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read key file: %v", err)
+	}
+	loaded, err := push.LoadKeys(path)
+	if err != nil {
+		t.Fatalf("LoadKeys: %v", err)
+	}
+	if got, want := loaded.PublicKey(), created.PublicKey(); got != want {
+		t.Errorf("LoadKeys public key = %q, want the creator's %q", got, want)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read key file again: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("LoadKeys rewrote the key file")
+	}
+}
+
+// TestLoadKeysCorruptFile proves a reader reports a damaged file instead of
+// minting a pair over it.
+func TestLoadKeysCorruptFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vapid.json")
+	const damaged = "{not json"
+	if err := os.WriteFile(path, []byte(damaged), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := push.LoadKeys(path); err == nil {
+		t.Fatal("LoadKeys returned no error for a corrupt file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read key file: %v", err)
+	}
+	if string(raw) != damaged {
+		t.Errorf("LoadKeys overwrote the damaged file")
+	}
+}
+
+// TestLoadOrCreateKeysConcurrent proves the key lock serializes generation: N
+// callers on a fresh path all get the one pair the first of them wrote. Without
+// the lock, two callers that both see no file each generate a pair, and the
+// loser returns a key that is not on disk.
+func TestLoadOrCreateKeysConcurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vapid.json")
+	const callers = 8
+	keys := make([]*push.Keys, callers)
+	errs := make([]error, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			keys[i], errs[i] = push.LoadOrCreateKeys(path)
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("caller %d: %v", i, err)
+		}
+	}
+	want := keys[0].PublicKey()
+	for i, got := range keys {
+		if got.PublicKey() != want {
+			t.Errorf("caller %d got public key %q, want %q: a racing caller minted a pair", i, got.PublicKey(), want)
+		}
+	}
+	onDisk, err := push.LoadKeys(path)
+	if err != nil {
+		t.Fatalf("LoadKeys: %v", err)
+	}
+	if onDisk.PublicKey() != want {
+		t.Errorf("stored public key = %q, want the one every caller returned %q", onDisk.PublicKey(), want)
+	}
+}
+
+// TestKeysNarrowModeLeftAlone proves a mode narrower than 0600 is the
+// operator's choice and no reader widens it. An operator who makes the pair
+// read-only to stop a rewrite keeps that protection; only a mode that grants
+// bits beyond 0600 is repaired.
+func TestKeysNarrowModeLeftAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vapid.json")
+	first, err := push.LoadOrCreateKeys(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKeys: %v", err)
+	}
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatalf("narrow mode: %v", err)
+	}
+
+	loaded, err := push.LoadKeys(path)
+	if err != nil {
+		t.Fatalf("LoadKeys on a 0400 file: %v", err)
+	}
+	if got := loaded.PublicKey(); got != first.PublicKey() {
+		t.Errorf("LoadKeys public key = %q, want %q", got, first.PublicKey())
+	}
+	if mode := fileMode(t, path); mode != 0o400 {
+		t.Errorf("mode after LoadKeys = %o, want 400", mode)
+	}
+
+	second, err := push.LoadOrCreateKeys(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKeys on a 0400 file: %v", err)
+	}
+	if got := second.PublicKey(); got != first.PublicKey() {
+		t.Errorf("LoadOrCreateKeys public key = %q, want the stored %q", got, first.PublicKey())
+	}
+	if mode := fileMode(t, path); mode != 0o400 {
+		t.Errorf("mode after LoadOrCreateKeys = %o, want 400", mode)
+	}
+}
+
+// fileMode returns the permission bits of path.
+func fileMode(t *testing.T, path string) os.FileMode {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.Mode().Perm()
 }

@@ -42,12 +42,41 @@ type keyFile struct {
 // invalidate every subscription the phone holds. A file whose mode was widened
 // is pulled back to 0600. A file that exists but does not parse is an error,
 // not an invitation to overwrite it.
+//
+// The read-or-create runs under the lock file beside path, so two processes
+// that start together cannot both find no pair and both generate one: the later
+// one reads the pair the earlier one wrote.
 func LoadOrCreateKeys(path string) (*Keys, error) {
-	raw, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	lock, err := lockFile(path)
+	if err != nil {
+		return nil, err
+	}
+	defer lock.release()
+	return loadOrCreateKeys(path)
+}
+
+// loadOrCreateKeys reads the pair, or generates one when the file is absent.
+// It runs with the lock held, so a pair another process just wrote is the one
+// it returns.
+func loadOrCreateKeys(path string) (*Keys, error) {
+	keys, err := readKeys(path)
+	if errors.Is(err, fs.ErrNotExist) {
 		return generateKeys(path)
-	case err != nil:
+	}
+	return keys, err
+}
+
+// LoadKeys returns the VAPID key pair stored at path. It never creates one: a
+// missing file reports fs.ErrNotExist, so a daemon that only delivers cannot
+// mint a pair for a phone that never subscribed. It takes no lock, because it
+// never writes the file, and it repairs a widened mode like every other read.
+func LoadKeys(path string) (*Keys, error) { return readKeys(path) }
+
+// readKeys reads and parses the pair at path, pulling a widened mode back to
+// 0600. A missing file reports fs.ErrNotExist through the wrap.
+func readKeys(path string) (*Keys, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
 		return nil, fmt.Errorf("push: read VAPID keys %s: %w", path, err)
 	}
 	if err := tightenMode(path); err != nil {
@@ -64,16 +93,18 @@ func LoadOrCreateKeys(path string) (*Keys, error) {
 	return keys, nil
 }
 
-// tightenMode pulls a secrets file back to 0600. The key file and the store are
-// written at 0600, but a copy, an editor or a backup tool can widen the mode; a
-// file another user can read exposes the VAPID private key, or every phone's
-// auth secret and p256dh.
+// tightenMode repairs a secrets file whose mode grants more than 0600. The key
+// file and the store are written at 0600, but an editor or a backup tool can
+// widen the mode, and a file another user can read exposes the VAPID private
+// key, or every phone's auth secret and p256dh. A narrower mode, such as 0400,
+// is left alone: an operator who made the file read-only means it, and widening
+// it back would undo that.
 func tightenMode(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("push: stat %s: %w", path, err)
 	}
-	if info.Mode().Perm() == 0o600 {
+	if info.Mode().Perm()&^0o600 == 0 {
 		return nil
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
