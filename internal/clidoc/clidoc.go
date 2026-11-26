@@ -628,6 +628,18 @@ var cliCommands = []cliCommand{
 		example: "dm html -o dm.html",
 		group:   groupDocs,
 	},
+	{
+		name:    "provision",
+		args:    "[--check | --print | --uninstall]",
+		summary: "link this checkout's extension and skill into the pi harness",
+		flags: []cliFlag{
+			{"check", "", "report each target and exit non-zero when one is not ok"},
+			{"print", "", "print the plan and write nothing"},
+			{"uninstall", "", "remove the links this checkout owns"},
+		},
+		example: "dm provision --check",
+		group:   groupDocs,
+	},
 }
 
 // usageHeader is the first line of the help text.
