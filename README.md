@@ -30,11 +30,26 @@ id, so a background workspace can be renamed.
 
 State written before this scheme is migrated once, in tree order, on load.
 
-## Build
+## Install
 
-```sh
-go build -o dm .
-```
+Download the tarball for your platform from the latest release:
+`dm_linux_amd64.tar.gz`, `dm_linux_arm64.tar.gz`, `dm_darwin_amd64.tar.gz` or
+`dm_darwin_arm64.tar.gz`. Untar it, put `dm` on your `PATH`, and run
+`dm provision` once to link the pi extension and the fleet skill into
+`~/.pi/agent`. Each release also carries `checksums.txt`, so `sha256sum -c`
+proves the tarball before you install it.
+
+## Updating
+
+An attach tells you when a newer release is out, in one line before the session
+draws: `dm 1.4.0 is out, run dm upgrade`. `dm upgrade` installs the latest
+release over the binary you ran, after checking the tarball's sha256, and
+`dm upgrade --check` only reports. A session that is already running keeps the
+old binary until it restarts, so upgrade at a moment you can detach. Set
+`DM_NO_UPDATE_CHECK=1` to stop the check; it also stays quiet on CI and in a
+build that carries no version stamp. A `dev` build refuses to upgrade itself,
+because it has no release to move to, and `dm upgrade --force` installs the
+latest release anyway.
 
 ## Docs
 

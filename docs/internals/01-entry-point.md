@@ -1,7 +1,8 @@
-# Entry point: one binary, three processes
+# Entry point: one binary, four processes
 
-`dm` is a single Go binary that runs as one of three processes: the client, the
-process that owns the terminal, the session server, or a pane daemon. A session
+`dm` is a single Go binary that runs as one of four processes: the client, the
+process that owns the terminal, the session server, a pane daemon, or the
+one-shot release check an attach leaves behind. A session
 is one named layout, with its own server, its pane daemons and its directory,
 `sessions/<name>` under the state root (`internal/paths/paths.go#SessionDirAt`), which is
 `$DM_STATE`, else `$XDG_STATE_HOME/dm`, else `~/.local/state/dm` (`internal/paths/paths.go#StateDir`).
@@ -9,13 +10,13 @@ A layout is a tree of workspaces; a workspace holds windows; a window splits
 into panes; and a pane is one terminal: a daemon that owns the shell and the
 socket the server dials to reach it (`internal/pane/pane.go#paneProc`). This page
 answers which command line word starts which one, who spawns whom, where the
-sockets live, and where you add a fourth process role.
+sockets live, and where you add a fifth process role.
 
-## The three roles
+## The four roles
 
 `main` in `main.go#main` switches on `os.Args[1]` before anything else and never
 returns to the CLI, the command parser behind every user-facing word
-(`cli.Run`, `internal/cli/cli.go#Run`), for the three sentinel words. A
+(`cli.Run`, `internal/cli/cli.go#Run`), for the four sentinel words. A
 sentinel word is a first argument that names a process role, never a command.
 
 | Word | Runs | Role | Starts |
@@ -23,6 +24,7 @@ sentinel word is a first argument that names a process role, never a command.
 | `__server` | `server.Run` (`internal/server/server_core.go#Run`) | one per session: the state (the saved layout and pane records, `state.json`), clients, a connection to each pane | pane daemons |
 | `__pane` | `pane.Run` (`internal/pane/pane.go#Run`) | one per pane: a pty (the pseudo-terminal the shell runs on), the screen (the cell grid parsed from its output), the ring of recent bytes (512 KiB by default, `internal/pane/pane.go#ringDefault`) | a shell or a named program |
 | `__probe` | `runProbe` (`probe.go#runProbe`) | a terminal test harness, no state, no daemon | nothing |
+| `__update-check` | `client.RunUpdateCheck` (`internal/client/update.go#RunUpdateCheck`) | a one-shot release refresh: one read of the latest tag, one cache write, then exit | nothing |
 | anything else, once `main`'s `help` branch has passed (`main.go#main`) | `cli.Run` (`internal/cli/cli.go#Run`) | the CLI, and the client for an attach | the server, on its first dial |
 
 `runProbe` writes the OSC 7501 query, `ESC ] 7501 ; ?`, which asks the terminal
