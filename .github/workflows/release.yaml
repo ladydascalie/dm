@@ -46,12 +46,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The glob above is loose on purpose: it only decides whether the run
+      # starts. This step is the rule, and it is written to accept nothing that
+      # version.IsRelease rejects, because a tag this step passes is stamped
+      # into the binary and dm upgrade refuses to move a version that is not a
+      # release. Semver identifiers are dot separated and non-empty, and a
+      # numeric field carries no leading zero.
       - name: tag shape
         if: github.ref_type == 'tag'
         run: |
           set -euo pipefail
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::$GITHUB_REF_NAME is not v<major>.<minor>.<patch>"
+          shape='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$GITHUB_REF_NAME" =~ $shape ]]; then
+            echo "::error::$GITHUB_REF_NAME is not v<major>.<minor>.<patch>, semver identifiers only"
             exit 1
           fi
 
@@ -104,9 +111,13 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
+      # The notes compare this tag with the previous one, so the runner needs
+      # the tags. fetch-depth: 0 already fetches all history and tags;
+      # fetch-tags: true states that dependency instead of relying on it.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/download-artifact@v4
         with:
@@ -131,10 +142,20 @@ jobs:
           cat checksums.txt
           sha256sum -c checksums.txt
 
+      # The previous release is the nearest tag behind this one. When the run
+      # carries no earlier tag, fetching them here keeps the notes honest even
+      # if the checkout action stops fetching tags, and the newest other tag
+      # stands in for a release cut from a branch that does not descend from
+      # the last one. No other tag at all is the first release: every commit.
       - name: notes
         run: |
           set -euo pipefail
+          git fetch --tags --force --quiet
           prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -z "$prev" ]; then
+            prev="$(git tag --sort=-v:refname | grep -vx "$GITHUB_REF_NAME" | head -1 || true)"
+          fi
+          echo "notes: ${prev:-the first release}..${GITHUB_REF_NAME}"
           bash scripts/release-notes.sh "$prev" "$GITHUB_REF_NAME" > "${RUNNER_TEMP}/notes.md"
           cat "${RUNNER_TEMP}/notes.md"
 
