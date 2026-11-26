@@ -113,18 +113,20 @@ func TestSendGone(t *testing.T) {
 	}
 }
 
-// TestSendServerError proves a 500 is an error that names the status and only
-// the first line of the body, and that no subscription secret leaks into it.
+// TestSendServerError proves a 500 is an error that names the status and holds
+// no part of the response body: a push service can echo the endpoint, which is
+// the phone's capability URL, and a 500 must not leak it.
 func TestSendServerError(t *testing.T) {
 	keys := newKeys(t)
 	ua := newUA(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		io.WriteString(w, "boom: the disk is on fire\nsecond line must not appear\n")
+		// The body names the request endpoint, as a real service might.
+		io.WriteString(w, "cannot deliver to https://"+r.Host+"/cap/secret-token\nsecond line must not appear\n")
 	}))
 	defer srv.Close()
 
-	sub := ua.subscription(srv.URL)
+	sub := ua.subscription(srv.URL + "/cap/secret-token")
 	sender := &push.Sender{Keys: keys, Subject: "mailto:ops@example.com"}
 	result, err := sender.Send(context.Background(), sub, push.Message{Title: "hi"})
 	if err == nil {
@@ -136,14 +138,12 @@ func TestSendServerError(t *testing.T) {
 	if result.Gone {
 		t.Errorf("Gone = true, want false")
 	}
-	for _, want := range []string{"500", "boom: the disk is on fire"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not name %q", err, want)
-		}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("error %q does not name the status", err)
 	}
-	for _, secret := range []string{"second line must not appear", sub.Auth, sub.P256DH} {
-		if strings.Contains(err.Error(), secret) {
-			t.Errorf("error carries %q: %v", secret, err)
+	for _, body := range []string{"cannot deliver to", "secret-token", "second line must not appear", sub.Endpoint, sub.Auth, sub.P256DH} {
+		if strings.Contains(err.Error(), body) {
+			t.Errorf("error carries %q: %v", body, err)
 		}
 	}
 }

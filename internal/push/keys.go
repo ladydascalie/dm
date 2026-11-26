@@ -49,6 +49,9 @@ func LoadOrCreateKeys(path string) (*Keys, error) {
 	case err != nil:
 		return nil, fmt.Errorf("push: read VAPID keys %s: %w", path, err)
 	}
+	if err := tightenKeyMode(path); err != nil {
+		return nil, err
+	}
 	var file keyFile
 	if err := json.Unmarshal(raw, &file); err != nil {
 		return nil, fmt.Errorf("push: parse VAPID keys %s: %w", path, err)
@@ -58,6 +61,23 @@ func LoadOrCreateKeys(path string) (*Keys, error) {
 		return nil, fmt.Errorf("push: VAPID keys %s: %w", path, err)
 	}
 	return keys, nil
+}
+
+// tightenKeyMode pulls a key file back to 0600. The pair is written at 0600,
+// but a copy, an editor or a backup tool can widen the mode; a private VAPID key
+// another user can read breaks every subscription just as a rotation would.
+func tightenKeyMode(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("push: stat VAPID keys %s: %w", path, err)
+	}
+	if info.Mode().Perm() == 0o600 {
+		return nil
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("push: set VAPID key mode %s: %w", path, err)
+	}
+	return nil
 }
 
 // PublicKey returns the base64url uncompressed point: the applicationServerKey

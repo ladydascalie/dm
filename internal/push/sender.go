@@ -1,7 +1,6 @@
 package push
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/ecdsa"
@@ -15,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -26,9 +24,9 @@ const (
 	// vapidExpiry bounds the VAPID token: RFC 8292 says no more than 24 hours,
 	// and the brief says 12.
 	vapidExpiry = 12 * time.Hour
-	// bodyLineLimit bounds how much of a failed response's body an error
-	// carries.
-	bodyLineLimit = 512
+	// drainLimit bounds how much of a response body is read to free the
+	// connection.
+	drainLimit = 512
 )
 
 // Sender delivers one Message to one Subscription: it encrypts the payload per
@@ -63,7 +61,8 @@ type Result struct {
 // Send encrypts msg for sub and posts it to the subscription endpoint. A 2xx
 // answer returns a Result and no error. A 404 or 410 returns a Result with Gone
 // set and no error. Every other non-2xx answer is an error that names the
-// status and the first line of the response body.
+// status and nothing from the response body: a push service can echo the
+// endpoint, and the endpoint is the phone's capability URL.
 func (s *Sender) Send(ctx context.Context, sub Subscription, msg Message) (Result, error) {
 	if s.Keys == nil || s.Keys.signer == nil || len(s.Keys.public) != keyIDSize {
 		return Result{}, errNoKeys
@@ -134,12 +133,9 @@ func (s *Sender) Send(ctx context.Context, sub Subscription, msg Message) (Resul
 		result.Gone = true
 		return result, nil
 	default:
-		detail := firstLine(resp.Body)
-		if detail == "" {
-			detail = http.StatusText(resp.StatusCode)
-		}
-		return result, fmt.Errorf("push: %s answered %d %s: %s",
-			endpoint.Host, resp.StatusCode, http.StatusText(resp.StatusCode), detail)
+		drain(resp.Body)
+		return result, fmt.Errorf("push: %s answered %d %s",
+			endpoint.Host, resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 }
 
@@ -212,17 +208,8 @@ func withoutURL(err error) error {
 	return err
 }
 
-// firstLine reads at most the first line of a response body.
-func firstLine(body io.Reader) string {
-	line, err := bufio.NewReader(io.LimitReader(body, bodyLineLimit)).ReadString('\n')
-	if err != nil && line == "" && !errors.Is(err, io.EOF) {
-		return ""
-	}
-	return strings.TrimSpace(line)
-}
-
 // drain reads a bounded prefix of a response body so the connection can be
 // reused.
 func drain(body io.Reader) {
-	io.Copy(io.Discard, io.LimitReader(body, bodyLineLimit))
+	io.Copy(io.Discard, io.LimitReader(body, drainLimit))
 }

@@ -180,3 +180,30 @@ func TestKeysMismatchedHalves(t *testing.T) {
 		t.Fatal("LoadOrCreateKeys accepted a public key that does not belong to the private key")
 	}
 }
+
+// TestKeysModeRepairedOnLoad proves a key file whose mode was widened is pulled
+// back to 0600 on load: the private half must not stay readable by others.
+func TestKeysModeRepairedOnLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vapid.json")
+	first, err := push.LoadOrCreateKeys(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKeys: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("widen mode: %v", err)
+	}
+	second, err := push.LoadOrCreateKeys(path)
+	if err != nil {
+		t.Fatalf("LoadOrCreateKeys after chmod 0644: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o600 {
+		t.Errorf("mode after load = %o, want 600", mode)
+	}
+	if first.PublicKey() != second.PublicKey() {
+		t.Errorf("public key changed while repairing the mode")
+	}
+}
