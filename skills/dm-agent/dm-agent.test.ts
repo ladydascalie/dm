@@ -16,17 +16,19 @@ import registerDM, { TOOL_NAMES } from "./dm-agent.ts";
 type Call = { argv: string[]; body: string };
 type ExecResult = { stdout: string; stderr: string; code: number; killed: boolean; truncated: boolean };
 type Tool = {
+	exposure?: string;
 	name: string;
 	parameters: any;
 	promptSnippet?: string;
 	promptGuidelines?: string[];
+	outputSchema?: any;
 	execute(
 		toolCallId: string,
 		params: unknown,
 		signal: AbortSignal | undefined,
 		onUpdate: unknown,
 		ctx: unknown,
-	): Promise<{ content: { type: string; text: string }[]; details: Record<string, any>; isError?: boolean }>;
+	): Promise<{ content: { type: string; text: string }[]; details: Record<string, any>; structuredContent?: Record<string, any>; isError?: boolean }>;
 };
 
 const FAKE_DM = `#!/usr/bin/env node
@@ -227,6 +229,16 @@ test("registers four tools, each with an action enum and self-naming guidelines"
 		assert.ok(guidelines.length > 0, name);
 		for (const line of guidelines) assert.match(line, new RegExp(name), name);
 	}
+	// dm_turn asks the operator, so pi keeps it out of scripts. The other three
+	// stay callable from codemode, where filtering a tree or looping on the box
+	// costs no context.
+	assert.equal(box.tool("dm_turn").exposure, "model-only");
+	for (const name of TOOL_NAMES) {
+		assert.equal(typeof box.tool(name).outputSchema, "object", name);
+	}
+	for (const name of ["dm_layout", "dm_pane", "dm_box"]) {
+		assert.equal(box.tool(name).exposure, "direct", name);
+	}
 	assert.equal(box.tools.size, 4);
 });
 
@@ -240,6 +252,9 @@ test("layout list prints the snapshot JSON from dm list --json", async (t) => {
 	assert.equal(result.isError, undefined);
 	assert.deepEqual(result.details.snapshot, { panes: [{ id: "w1p1", focus: true }] });
 	assert.match(result.content[0].text, /w1p1/);
+	// A script reads structuredContent, not the prose in content.
+	assert.deepEqual(result.structuredContent, result.details);
+	assert.deepEqual((result.structuredContent as any).snapshot, { panes: [{ id: "w1p1", focus: true }] });
 });
 
 test("layout split names the pane and the direction", async (t) => {

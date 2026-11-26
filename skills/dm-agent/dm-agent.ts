@@ -32,6 +32,7 @@ type Exec = (command: string, args: string[], options?: ExecOptions) => Promise<
 type ToolResult = {
 	content: { type: "text"; text: string }[];
 	details: Record<string, unknown>;
+	structuredContent?: Record<string, unknown>;
 	isError?: boolean;
 };
 
@@ -629,6 +630,24 @@ async function guard(action: string, fn: () => Promise<ToolResult>): Promise<Too
 	}
 }
 
+// exposureFor names how the model reaches one tool. dm_turn asks the operator,
+// so pi's own rule makes it model-only: declared and never callable from a
+// script. The other three are plumbing, so they stay direct: declared to the
+// model and callable from a codemode script, which is where a filtered box
+// loop or a tree read belongs, instead of in the context window.
+// replySchema describes what a call hands back. A codemode script reads
+// structuredContent, which is the same object as details, so the parsed reply
+// reaches a script as fields instead of prose it would have to parse.
+const replySchema = {
+	type: "object",
+	additionalProperties: true,
+	description: "The parsed dm reply, the same object as details.",
+};
+
+function exposureFor(name: string): "direct" | "model-only" {
+	return name === "dm_turn" ? "model-only" : "direct";
+}
+
 export default function (pi: ExtensionAPI) {
 	const exec = pi.exec.bind(pi) as Exec;
 
@@ -682,7 +701,8 @@ export default function (pi: ExtensionAPI) {
 			description: tool.description,
 			promptSnippet: tool.promptSnippet,
 			promptGuidelines: tool.promptGuidelines,
-			exposure: "model-only",
+			exposure: exposureFor(tool.name),
+			outputSchema: replySchema,
 			parameters: tool.parameters,
 			async execute(
 				toolCallId: string,
@@ -691,7 +711,8 @@ export default function (pi: ExtensionAPI) {
 			): Promise<ToolResult> {
 				const action = typeof params?.action === "string" ? params.action : "";
 				if (!action) return toolError("action is required", { action });
-				return guard(action, () => tool.run(params, toolCallId, signal));
+				const res = await guard(action, () => tool.run(params, toolCallId, signal));
+				return { ...res, structuredContent: res.details };
 			},
 		} as never);
 	}

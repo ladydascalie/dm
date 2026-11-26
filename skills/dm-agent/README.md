@@ -78,11 +78,29 @@ clidoc caps one await at 25 seconds. The tool chains calls until the caller's
 own `timeout` runs out, and reports `pending` once it does. Give `pane` on
 `ask`. Give `askId` on `answer` and `await`.
 
+## Reaching the tools
+
+`dm_turn` is `model-only`, which is pi's rule for a tool that asks the user:
+declared to the model and never callable from a script. The other three are
+`direct`, so a codemode script can call them while they stay declared. That is
+the point of the split: a filtered tree read or a box loop belongs in a script,
+where it costs one line of context instead of the whole JSON.
+
+```js
+// one blocked lane, without the tree or the event list in context
+for (;;) {
+  const r = await tools.dm_box({ action: "wait", prefix: "lane/", state: "blocked", timeout: 55 });
+  if (!r.entry) continue;                                  // a timeout lands as no entry
+  const p = await tools.dm_pane({ action: "read", pane: r.entry.from, lines: 8 });
+  text(`${r.entry.key} ${r.entry.msg}` + "\n" + p.lines.join("\n"));
+}
+```
+
 ## Results
 
-A success returns a short text line and the parsed reply in `details`. A nonzero
-dm exit, a killed command, or a reply that is not JSON returns a tool error
-carrying dm's own text.
+A success returns a short text line and the parsed reply in `details`, which is
+also the `structuredContent` a script receives. A nonzero dm exit, a killed
+command, or a reply that is not JSON returns a tool error carrying dm's own text.
 
 ## Test
 
