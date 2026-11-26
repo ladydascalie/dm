@@ -456,8 +456,8 @@ func TestRailAgentMarker(t *testing.T) {
 		t.Fatalf("shell row does not fall back to the pane id: %q", out)
 	}
 
-	// The thin rail keeps its composition: the bar, the agent glyph and the
-	// state in three cells.
+	// The thin rail keeps its composition: the bar, the agent mark, the git
+	// cell, the state and the badge in five cells.
 	thin := testutil.RailOnePane("idle", "pi", layout.CollapsedRail, 40, 6)
 	thin.All[0].Agent = true
 	b.Reset()
@@ -790,8 +790,9 @@ func TestRailCollapsed(t *testing.T) {
 			glyphX = x
 		}
 	}
-	if glyphX != 2 {
-		t.Fatalf("state glyph at x=%d, want 2", glyphX)
+	// The bar, the agent mark and the git cell stand before the state.
+	if glyphX != 3 {
+		t.Fatalf("state glyph at x=%d, want 3", glyphX)
 	}
 	if got := rail.RailPaneAt(snap, 2, 0, 0); got != "w1p1" {
 		t.Fatalf("thin rail hit = %q, want w1p1", got)

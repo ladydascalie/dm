@@ -446,8 +446,8 @@ func TestRailGitMarkRow(t *testing.T) {
 	if got := RailGitMarkRow(out, "w2", 0); got != -1 {
 		t.Fatalf("outside git anchor row = %d, want -1", got)
 	}
-	if it, ok := RailWindowItem(out, "w2"); !ok || it.InRepo {
-		t.Fatalf("window item outside git = %+v, %v", it, ok)
+	if it := railWindowRow(t, out, "w2"); it.InRepo {
+		t.Fatalf("window row outside git = %+v", it)
 	}
 
 	// A rail too narrow for the mark beside the label drops it, so the box has
@@ -462,7 +462,199 @@ func TestRailGitMarkRow(t *testing.T) {
 	if got := RailGitMarkRow(thin, "w1", 0); got != -1 {
 		t.Fatalf("thin rail anchor row = %d, want -1", got)
 	}
-	if _, ok := RailWindowItem(thin, "w1"); ok {
-		t.Fatal("the thin rail answered a window row")
+	for _, it := range RailItems(thin) {
+		if it.Kind == Window {
+			t.Fatalf("the thin rail drew a window row: %+v", it)
+		}
 	}
+}
+
+// paneMarkSnap is one window with three panes in two repositories: pi and beta
+// sit in the repository the window line speaks for, gamma in one of its own.
+// Only gamma's row carries a mark.
+func paneMarkSnap(rail int) *wire.Snapshot {
+	snap := &wire.Snapshot{
+		Session: "x", Cols: 100, Rows: 12, Rail: rail,
+		Root: &layout.Node{Pane: "w1p1"}, Focus: "w1p1",
+		WindowLabel: "{{.Name}}",
+	}
+	pane := func(id, name, cwd, root, branch string) wire.AllPane {
+		return wire.AllPane{
+			ID: id, Name: name, Status: "idle",
+			Workspace: "s1", WorkspaceName: "main", Window: "w1", WindowName: "one",
+			WorkspaceActive: true, WindowActive: true,
+			WorkspaceUnfolded: true, WindowUnfolded: true,
+			Cwd: cwd, Root: root, Branch: branch, InRepo: true,
+		}
+	}
+	snap.All = []wire.AllPane{
+		pane("w1p1", "pi", "/work/dm", "/work/dm", "dm"),
+		pane("w1p2", "beta", "/work/dm/internal", "/work/dm", "dm"),
+		pane("w1p3", "gamma", "/work/web", "/work/web", "web"),
+	}
+	snap.All[0].Agent, snap.All[0].Focus, snap.All[0].Status = true, true, "working"
+	// The pane in its own repository has work in the tree, so its mark is
+	// painted at rest.
+	snap.All[2].Dirty, snap.All[2].Added, snap.All[2].Deleted = true, 4, 1
+	return snap
+}
+
+// paneMarkRow is the drawn item row of a pane.
+func paneMarkRow(t *testing.T, snap *wire.Snapshot, pane string) int {
+	t.Helper()
+	for i, it := range RailItems(snap) {
+		if it.Kind == Pane && it.Pane == pane {
+			return i
+		}
+	}
+	t.Fatalf("the rail draws no row for pane %q", pane)
+	return -1
+}
+
+// TestRailPaneMarkOnlyOnADifferingRepo proves the pane mark appears on exactly
+// the pane rows whose repository root differs from the window's source pane. A
+// window whose panes share one repository paints exactly what it always did, so
+// the common case costs no cell.
+func TestRailPaneMarkOnlyOnADifferingRepo(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	snap := paneMarkSnap(layout.DefaultRail)
+	marks := map[string]bool{}
+	for _, it := range RailItems(snap) {
+		if it.Kind == Pane {
+			marks[it.Pane] = it.PaneMark
+		}
+	}
+	if marks["w1p1"] || marks["w1p2"] {
+		t.Fatalf("a pane in the window's own repository carries a mark: %+v", marks)
+	}
+	if !marks["w1p3"] {
+		t.Fatalf("the pane in its own repository carries no mark: %+v", marks)
+	}
+
+	// The drawn cell: the mark on gamma's row, nothing on the rows beside it.
+	term := railTerm(t, snap, theme.GlyphUnicode)
+	markX := snap.Rail - 2 - gitMarkCells
+	for _, pane := range []string{"w1p1", "w1p2", "w1p3"} {
+		row := paneMarkRow(t, snap, pane)
+		got := cellOf(term, markX, row).Char
+		if pane == "w1p3" {
+			if string(got) != th.Glyphs.GitMark {
+				t.Fatalf("the differing pane paints %q in the mark cell, want %q", got, th.Glyphs.GitMark)
+			}
+			if c := cellOf(term, markX, row); c.FG != railColour(gitMarkQuiet(th.Palette)) {
+				t.Fatalf("the pane mark colour = %v, want the quiet accent", c.FG)
+			}
+			if id := RailPaneGitMarkAt(snap, markX, row, 0); id != "w1p3" {
+				t.Fatalf("RailPaneGitMarkAt(%d,%d) = %q, want w1p3", markX, row, id)
+			}
+			continue
+		}
+		if string(got) == th.Glyphs.GitMark {
+			t.Fatalf("the pane %q shares the window's repository and paints a mark", pane)
+		}
+		if id := RailPaneGitMarkAt(snap, markX, row, 0); id != "" {
+			t.Fatalf("the pane %q shares the window's repository and answered %q", pane, id)
+		}
+	}
+	// The state keeps the margin on every pane row, marked or not.
+	state, _ := RailGlyph(th, "working", theme.GlyphUnicode)
+	if got := cellOf(term, snap.Rail-2, paneMarkRow(t, snap, "w1p1")).Char; string(got) != state {
+		t.Fatalf("the source pane's state cell = %q, want %q", got, state)
+	}
+	if got := cellOf(term, snap.Rail-2, paneMarkRow(t, snap, "w1p3")).Char; got == 0 {
+		t.Fatalf("the marked pane row lost its state cell")
+	}
+
+	// A pane outside a repository has no mark of its own: there is no second
+	// repository to name.
+	out := paneMarkSnap(layout.DefaultRail)
+	out.All[2].InRepo, out.All[2].Root = false, ""
+	if row := paneMarkRow(t, out, "w1p3"); row >= 0 {
+		if id := RailPaneGitMarkAt(out, markX, row, 0); id != "" {
+			t.Fatalf("a pane outside git answered %q", id)
+		}
+		for _, it := range RailItems(out) {
+			if it.Kind == Pane && it.PaneMark {
+				t.Fatalf("a pane outside git carries a mark: %+v", it)
+			}
+		}
+	}
+
+	// The thin rail has no window row to hoist the facts to, so every pane in
+	// a repository is its own mark there.
+	thin := paneMarkSnap(layout.CollapsedRail)
+	for _, it := range RailItems(thin) {
+		if it.Kind == Pane && !it.PaneMark {
+			t.Fatalf("thin rail pane %q carries no mark in a repository", it.Pane)
+		}
+	}
+}
+
+// TestRailPaneMarkLadder proves the pane mark's rent: the state never drops,
+// the mark drops before the label elides, and the label elides before the state
+// goes. The cell the hit test answers is the cell the mark is painted in.
+func TestRailPaneMarkLadder(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	state, _ := RailGlyph(th, "idle", theme.GlyphUnicode)
+	markAt, elideAt := []int{}, []int{}
+	for w := 8; w <= 40; w++ {
+		snap := paneMarkSnap(w)
+		row := paneMarkRow(t, snap, "w1p3")
+		it := RailItems(snap)[row]
+		left, right, _ := RailRow(th, it, w-2, false, theme.GlyphUnicode)
+		// The state is the margin cell at every width.
+		if len(right) == 0 || right[len(right)-1].Text != state {
+			t.Fatalf("rail %d: the pane row's state is not at the margin: %+v", w, right)
+		}
+		painted := strings.Contains(railSegTextsJoined(right), th.Glyphs.GitMark)
+		answered := -1
+		for x := 0; x < w; x++ {
+			if RailPaneGitMarkAt(snap, x, row, 0) != "" {
+				if answered >= 0 {
+					t.Fatalf("rail %d: two cells answer, %d and %d", w, answered, x)
+				}
+				answered = x
+			}
+		}
+		if painted != (answered >= 0) {
+			t.Fatalf("rail %d: the mark is painted %v and answered at %d", w, painted, answered)
+		}
+		if painted {
+			markAt = append(markAt, w)
+		}
+		if strings.Contains(railSegTextsJoined(left), th.Glyphs.Ellipsis) {
+			elideAt = append(elideAt, w)
+		}
+	}
+	if len(markAt) == 0 || len(elideAt) == 0 {
+		t.Fatalf("nothing dropped: mark %v elide %v", markAt, elideAt)
+	}
+	// The mark gives way before the label elides, so no width both elides the
+	// name and keeps the mark, and every width wide enough for a whole label
+	// keeps it.
+	for _, w := range elideAt {
+		for _, m := range markAt {
+			if m == w {
+				t.Fatalf("rail %d elides the label and keeps the mark", w)
+			}
+		}
+	}
+	if last := elideAt[len(elideAt)-1]; markAt[0] <= last {
+		t.Fatalf("the label elides up to %d and the mark is kept from %d", last, markAt[0])
+	}
+}
+
+// railWindowRow is the row the rail draws for a window, or a failure when no
+// drawn row carries it.
+func railWindowRow(t *testing.T, snap *wire.Snapshot, window string) RailItem {
+	t.Helper()
+	for _, it := range RailItems(snap) {
+		if it.Kind == Window && it.Window == window {
+			return it
+		}
+	}
+	t.Fatalf("the rail draws no row for window %q", window)
+	return RailItem{}
 }

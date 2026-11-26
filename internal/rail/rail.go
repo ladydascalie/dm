@@ -95,6 +95,11 @@ type RailItem struct {
 	// paints the badge, so a question in a window the reader is not looking at
 	// still says so without stealing the desk.
 	Ask bool
+	// PaneMark is true when a pane row carries a git mark of its own: the pane
+	// sits in a repository the window row does not speak for, so the row says
+	// which repo it is in. The thin rail has no window row to hoist the facts
+	// to, so there every pane row inside a repository is its own mark.
+	PaneMark bool
 }
 
 // askPanes is the set of panes the session lists a question on. The snapshot
@@ -159,13 +164,15 @@ func WindowVars(snap *wire.Snapshot, w wire.WindowInfo) wlabel.Vars {
 // Paint is one frame of the rail's own state: Off is the first item row
 // painted on the rail's first line, the client's scroll offset; Hover is the
 // item row the pointer rests on, -1 when none; Drop is the live drag's hint,
-// nil when none; Open is the window whose git mark a float has open, empty when
-// none.
+// nil when none; Open is the window whose git mark a float has open and OpenPane
+// the pane whose own mark a float has open, both empty when none. One box at a
+// time means at most one of the two is set.
 type Paint struct {
-	Off   int
-	Hover int
-	Drop  *Drop
-	Open  string
+	Off      int
+	Hover    int
+	Drop     *Drop
+	Open     string
+	OpenPane string
 }
 
 // Drop is the live drag's paint hint: Row is the items row the drop boundary
@@ -245,6 +252,10 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 			}
 			row := RailPaneRow(p)
 			row.Ask = asked[p.ID]
+			// The thin rail draws panes and nothing else, so the window line
+			// has nowhere to hoist the facts to and every pane in a repository
+			// says its own.
+			row.PaneMark = p.InRepo
 			if p.Project != "" {
 				s, ok := seen[p.Project]
 				if !ok {
@@ -453,6 +464,17 @@ func RailItems(snap *wire.Snapshot) []RailItem {
 		row := RailPaneRow(p)
 		row.Project, row.ProjectAccent = project, slot
 		row.Ask = asked[p.ID]
+		// The window line already speaks for its source pane's repository, so
+		// only a pane whose repository root differs carries a mark of its own.
+		// A window whose panes share one repository paints exactly what it
+		// always did.
+		if p.InRepo {
+			srcRoot := ""
+			if src, ok := source(p.Window); ok {
+				srcRoot = src.Root
+			}
+			row.PaneMark = p.Root != srcRoot
+		}
 		out = append(out, row)
 	}
 	// The shelf section follows the last workspace, so a pane set aside keeps
@@ -565,7 +587,10 @@ func ShelfRow(p wire.PaneInfo) RailItem {
 }
 
 // RailPaneRow is the pane row both rails draw. The label falls back from the
-// pane name to its app to its id.
+// pane name to its app to its id. The row carries the pane's own git facts, as
+// a window row carries its source pane's, so a facts box opened from the row
+// reads the pane it describes. Folder is the pane's folder below its repository
+// root, which is the name that box takes.
 func RailPaneRow(p wire.AllPane) RailItem {
 	label := p.Name
 	if label == "" {
@@ -578,7 +603,28 @@ func RailPaneRow(p wire.AllPane) RailItem {
 		Kind: Pane, Text: label, Pane: p.ID, PaneName: p.Name,
 		Window: p.Window, WindowName: p.WindowName, Workspace: p.Workspace,
 		Status: p.Status, Agent: p.Agent, Focus: p.Focus, App: p.App,
+		Folder: RailFolder(p.Cwd, p.Root), Cwd: p.Cwd,
+		Branch: p.Branch, Worktree: p.Worktree, InRepo: p.InRepo,
+		Dirty: p.Dirty, Added: p.Added, Deleted: p.Deleted,
+		Head: p.Head, HeadSubject: p.HeadSubject, Upstream: p.Upstream,
+		Ahead: p.Ahead, Behind: p.Behind, Files: p.Files, FileNames: p.FileNames,
 	}
+}
+
+// RailPaneItem returns the row a pane's git facts are read from, and false when
+// the snapshot no longer carries the pane. It builds the row the pane would get
+// whether or not the rail draws it: a folded window hides its pane rows, and a
+// box a window mark opened still reads its source pane.
+func RailPaneItem(snap *wire.Snapshot, pane string) (RailItem, bool) {
+	if snap == nil || pane == "" {
+		return RailItem{}, false
+	}
+	for _, p := range snap.All {
+		if p.ID == pane {
+			return RailPaneRow(p), true
+		}
+	}
+	return RailItem{}, false
 }
 
 // RailFolder is the folder a window line shows for a pane: its path below the
@@ -690,13 +736,13 @@ func RailGlyph(th theme.Theme, status string, set theme.GlyphSet) (glyph string,
 	return style.Glyph, style.Colour
 }
 
-// RailMark is the two-cell prefix a thin rail row and a shelf row carry: an
-// agent icon, a shell icon, or the fallback agent bar. The status glyph lands
-// in the third cell either way. The full rail's pane row paints no mark at all.
-// Every icon here is from the Font Awesome 4 range that even old Nerd Font
-// patches carry; newer code points such as the FA5 robot render as tofu. The
-// pi agent is the one exception: its Nerd mark is the plain Greek letter pi,
-// which every font has.
+// RailMark is the mark a pane row carries: an agent icon, a shell icon, or the
+// fallback agent bar. A thin rail row takes its first cell and puts the state
+// glyph two cells later; the full rail's pane row takes its first cell and puts
+// the name after it. Every icon here is from the Font Awesome 4 range that even
+// old Nerd Font patches carry; newer code points such as the FA5 robot render
+// as tofu. The pi agent is the one exception: its Nerd mark is the plain Greek
+// letter pi, which every font has.
 func RailMark(agent bool, app string, set theme.GlyphSet) string {
 	switch {
 	case agent && app == "pi" && set == theme.GlyphNerd:
@@ -879,6 +925,170 @@ func railWindowTail(th theme.Theme, it RailItem, w int, set theme.GlyphSet) ([]s
 	return []segment.Seg{state}, -1
 }
 
+// railPaneMarkCells is the right run of a pane row beside its own mark: the
+// state at the margin, and the badge and the air after it when the pane has a
+// question on it. The mark stands in the cell before the state either way.
+func railPaneMarkCells(it RailItem) int {
+	n := 1
+	if it.Ask {
+		n += 2
+	}
+	return n
+}
+
+// railPaneMarkFits reports whether a pane row of width w keeps its own git mark
+// beside a label that is whole. The mark drops before the label elides, so it
+// stays only while the name needs no elision to pay for it, and the state never
+// drops at all.
+func railPaneMarkFits(it RailItem, w int) bool {
+	return paneChrome+cells.Cells(it.Text)+railPaneMarkCells(it)+gitMarkCells+rowGapCells <= w
+}
+
+// railPaneTail composes the right run of a pane row: the ask badge when the
+// pane carries one, the pane's own git mark when the row sits in a repository
+// the window line does not speak for, and the state at the margin. It returns
+// the run and the index of the mark cell in it, -1 when the row carries none or
+// the ladder dropped it.
+func railPaneTail(th theme.Theme, it RailItem, w int, set theme.GlyphSet) ([]segment.Seg, int) {
+	p := th.Palette
+	var right []segment.Seg
+	if it.Ask {
+		// The badge stands left of everything, so the state keeps the margin
+		// and a question never pushes a pane's name out.
+		right = append(right,
+			segment.Seg{Text: "?", FG: p.BarAccent, Bold: true},
+			segment.Seg{Text: " ", FG: p.RailDim})
+	}
+	markAt := -1
+	if it.PaneMark && railPaneMarkFits(it, w) {
+		mark := segment.Seg{Text: " ", FG: gitMarkQuiet(p)}
+		if railMarkShown(it) {
+			mark.Text = th.Glyphs.GitMark
+		}
+		markAt = len(right)
+		right = append(right, mark)
+	}
+	return append(right, railStateSeg(th, it.Status, set)), markAt
+}
+
+// thinRowSegs composes the five content cells of a thin rail row: the project
+// bar, the agent mark, the git cell, the state and the question badge. The agent
+// mark takes the rail's dim tone, so the state is the one coloured cell that
+// says how the pane is doing. A pane that never reported and a shell leave the
+// state cell blank, the same silence the full rail keeps, and a shell keeps its
+// terminal mark: the mark says what runs in the pane, never how it is.
+func thinRowSegs(th theme.Theme, it RailItem, set theme.GlyphSet) []segment.Seg {
+	p, g := th.Palette, th.Glyphs
+	// The mark takes its first cell: an agent's icon, or a shell's terminal,
+	// which the glyph set decides.
+	m, _ := utf8.DecodeRuneInString(RailMark(it.Agent, it.App, set))
+	agent := string(m)
+	git := segment.Seg{Text: " ", FG: gitMarkQuiet(p)}
+	if it.PaneMark && it.InRepo && railMarkShown(it) {
+		git.Text = g.GitMark
+	}
+	badge := segment.Seg{Text: " ", FG: p.RailDim}
+	if it.Ask {
+		badge = segment.Seg{Text: "?", FG: p.BarAccent, Bold: true}
+	}
+	return []segment.Seg{
+		RailBar(th, it),
+		{Text: agent, FG: p.RailDim},
+		git,
+		railStateSeg(th, it.Status, set),
+		badge,
+	}
+}
+
+// railPaneMarkCol is the screen column of a pane row's own git mark in a rail w
+// cells wide: the third cell of a thin row, and in the full rail the cell before
+// the state, measured from the rail's right edge past the grip strip. The second
+// value reports whether the row carries the mark at all.
+func railPaneMarkCol(it RailItem, w int, compact bool) (int, bool) {
+	if compact {
+		// A thin row composes five cells and paints nothing else, so a rail
+		// too narrow for them has elided the row and carries no mark.
+		if w-1 < thinRowCells {
+			return 0, false
+		}
+		return thinGitCell, true
+	}
+	// The grip strip owns the last column, so the row composes w-2 cells and
+	// its right run ends on the state at the margin. The mark stands in the
+	// cell before the state.
+	if !it.PaneMark || !railPaneMarkFits(it, w-2) {
+		return 0, false
+	}
+	return w - 2 - gitMarkCells, true
+}
+
+// railPaneMarkItem is the pane row under y that carries a git mark of its own:
+// a pane in a repository of its own in the full rail, and any pane in a
+// repository in the thin rail. Every pane mark rule reads this, so the hit test
+// and the float anchor cannot disagree about which rows carry one.
+func railPaneMarkItem(snap *wire.Snapshot, y, off int) (RailItem, bool) {
+	if snap == nil || snap.Rail <= 0 {
+		return RailItem{}, false
+	}
+	i := railItemRow(snap, y, off)
+	if i < 0 {
+		return RailItem{}, false
+	}
+	it := RailItems(snap)[i]
+	if it.Kind != Pane || !it.PaneMark || !it.InRepo {
+		return RailItem{}, false
+	}
+	return it, true
+}
+
+// RailPaneGitMarkAt returns the pane whose own git mark is under x,y, or "" for
+// any other cell, row or rail. A pane row carries the mark when it sits in a
+// repository the window line does not speak for, and in the thin rail in any
+// repository, because that rail has no window row to hoist the facts to. The
+// cell answers whether the glyph is painted or the row is clean, so the facts
+// box is always reachable from the row it describes, and a row too narrow to
+// keep the mark beside its whole label has dropped it and answers nothing.
+func RailPaneGitMarkAt(snap *wire.Snapshot, x, y, off int) string {
+	if snap == nil || snap.Rail <= 0 || x < 0 || x >= snap.Rail {
+		return ""
+	}
+	it, ok := railPaneMarkItem(snap, y, off)
+	if !ok {
+		return ""
+	}
+	if col, kept := railPaneMarkCol(it, snap.Rail, layout.RailCompact(snap.Rail)); !kept || x != col {
+		return ""
+	}
+	return it.Pane
+}
+
+// RailPaneGitMarkRow is the screen row the pane's own git mark is painted on, or
+// -1 when the mark is not on the visible rail: the snapshot carries no such
+// pane, the pane is outside a repository or in its window's own repository, the
+// ladder dropped the mark or the row is scrolled out of the item rows. The float
+// anchors on this row and the hit test resolves its rows the same way, so the
+// box and the mark cannot part.
+func RailPaneGitMarkRow(snap *wire.Snapshot, pane string, off int) int {
+	if snap == nil || snap.Rail <= 0 || pane == "" {
+		return -1
+	}
+	compact := layout.RailCompact(snap.Rail)
+	for i, it := range RailItems(snap) {
+		if it.Kind != Pane || it.Pane != pane {
+			continue
+		}
+		if _, kept := railPaneMarkCol(it, snap.Rail, compact); !kept {
+			return -1
+		}
+		y := i - off
+		if y < 0 || y >= snap.Rows-2 {
+			return -1
+		}
+		return y
+	}
+	return -1
+}
+
 // RailAccentColour is the theme colour for an accent slot. A slot outside
 // the theme, such as one a hand-edited state file carried, falls back to the
 // dim rail colour instead of indexing past the palette. The switcher paints
@@ -891,10 +1101,10 @@ func RailAccentColour(th theme.Theme, slot int) theme.RGB {
 }
 
 // RailBar is the bar cell of an item row: the theme's workspace-bar glyph
-// in the row's project accent, or a blank outside a project. The full rail
-// paints it in column 0; the thin rail paints it between the agent mark and
-// the state glyph. It sits before the row's own runs, and the row composes
-// one cell narrower to keep the right edge stable.
+// in the row's project accent, or a blank outside a project. Both rails paint
+// it in the row's first cell, before the agent mark. The full rail draws it in
+// the writer's column, so its rows compose one cell narrower to keep the right
+// edge stable.
 func RailBar(th theme.Theme, it RailItem) segment.Seg {
 	if it.Project == "" {
 		return segment.Seg{Text: " ", FG: th.Palette.RailDim}
@@ -920,6 +1130,15 @@ const (
 	// rowGapCells is the one cell between a row's left run and its right run,
 	// so a label never touches the run beside it.
 	rowGapCells = 1
+	// paneChrome is the cells a pane row spends before its name: four cells of
+	// indent, the agent mark and the space after it.
+	paneChrome = 6
+	// thinRowCells is what a thin rail row composes: the bar, the agent mark,
+	// the git cell, the state and the badge.
+	thinRowCells = 5
+	// thinGitCell is the cell of a thin row that carries the pane's own git
+	// mark: the third, one cell right of the agent mark and left of the state.
+	thinGitCell = 2
 )
 
 // gitMarkRot is how far the mark's rest colour walks from the bar accent toward
@@ -1024,35 +1243,19 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			base = p.RailText
 		}
 		if compact {
-			// The thin rail keeps its three cells: the bar, the agent glyph and
-			// the state.
-			mark, colour := RailGlyph(th, it.Status, set)
-			// The thin rail keeps its composition and its silence: a shell
-			// with no state leaves the cell blank, the way it always did.
-			if !it.Agent && (it.Status == "" || it.Status == "unknown") {
-				mark = " "
-			}
-			glyph := RailMark(it.Agent, it.App, set)
-			// The bar goes full left, the agent mark gives up its trailing
-			// space to sit between the bar and the state glyph, so the state
-			// glyph keeps its column.
-			m1, _ := utf8.DecodeRuneInString(glyph)
-			left = []segment.Seg{
-				RailBar(th, it),
-				{Text: string(m1), FG: colour},
-				{Text: mark, FG: colour},
-			}
-			if it.Ask {
-				left = append(left, segment.Seg{Text: "?", FG: p.BarAccent})
-			}
+			// The thin rail keeps five cells and nothing else: the bar, the
+			// agent mark, the git cell, the state and the badge. It has no
+			// room for a name, so the row is all it can say.
+			left = thinRowSegs(th, it, set)
 			break
 		}
 		// Four cells of indent, the agent mark in one cell, a space, then the
 		// name from column 7: the mark takes an indent cell rather than a new
 		// column, so a pane row costs no more width than the silent version. It
 		// sits under the window label's first letter, and a shell leaves it
-		// blank because a shell is not an agent. The state glyph stays alone at
-		// the margin.
+		// blank because a shell is not an agent. The state glyph keeps the
+		// margin, with the pane's own git mark in the cell before it when the
+		// pane sits in a repository of its own.
 		mark := " "
 		if it.Agent {
 			m, _ := utf8.DecodeRuneInString(RailMark(it.Agent, it.App, set))
@@ -1064,15 +1267,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			{Text: " ", FG: base},
 			{Text: it.Text, FG: base},
 		}
-		right = []segment.Seg{railStateSeg(th, it.Status, set)}
-		if it.Ask {
-			// The badge stands one cell left of the state, so the state keeps
-			// the margin and a question never pushes a pane's name out.
-			right = append([]segment.Seg{
-				{Text: "?", FG: p.BarAccent, Bold: true},
-				{Text: " ", FG: p.RailDim},
-			}, right...)
-		}
+		right, _ = railPaneTail(th, it, w, set)
 	case ShelfHeader:
 		if !compact {
 			base := p.RailHeader
@@ -1094,6 +1289,13 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			}
 		}
 	case Shelf:
+		if compact {
+			// A shelf row in the thin rail takes the thin row's composition.
+			// A shelved pane arrives as a PaneInfo, which carries no
+			// repository, so its git cell stays blank.
+			left = thinRowSegs(th, it, set)
+			break
+		}
 		// A shelved pane takes the pane row's shape: six cells of indent, no
 		// icon, the name and the state in the margin cell, so the shelf reads
 		// as the live rows above it do and no row has two shapes.
@@ -1256,22 +1458,6 @@ func railGitMarkItem(snap *wire.Snapshot, y, off int) (RailItem, bool) {
 		return RailItem{}, false
 	}
 	return it, true
-}
-
-// RailWindowItem returns the rail row that draws a window, and false when no
-// drawn row carries it: a folded project or workspace hides its windows. A
-// folded window still draws its row, so it answers. A git float reads its facts
-// from this row, the same one the mark was painted on.
-func RailWindowItem(snap *wire.Snapshot, window string) (RailItem, bool) {
-	if snap == nil || snap.Rail <= 0 || window == "" || layout.RailCompact(snap.Rail) {
-		return RailItem{}, false
-	}
-	items := RailItems(snap)
-	i := railWindowIndex(items, window)
-	if i < 0 {
-		return RailItem{}, false
-	}
-	return items[i], true
 }
 
 // railGitMarkKept reports whether the ladder keeps a window row's mark at item
@@ -1483,9 +1669,9 @@ func ClampOffset(snap *wire.Snapshot, off int) int {
 // A right run stands down whole before the left run elides, so the rail never
 // paints half a field, and a window row's ladder gives up the field before the
 // mark and the mark before the label. A Paint carries the frame's
-// scroll offset, the row the pointer rests on (-1 when none) and the live
-// drag's hint (nil when none) and the window whose git mark a float has open
-// (empty when none). The hovered row paints RailHoverBG, with the focused pane
+// scroll offset, the row the pointer rests on (-1 when none), the live drag's
+// hint (nil when none), and the window and the pane whose git marks a float has
+// open (empty when none). The hovered row paints RailHoverBG, with the focused pane
 // row keeping its stronger ground. A git mark rests in the quiet accent, takes
 // the full accent under the pointer, and inverts while its float is up, so one
 // mark at most ever says which box is open. The rows of a lifted window
@@ -1514,10 +1700,14 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 	for y := 0; y < rows; y++ {
 		var left, right, tail []segment.Seg
 		bg, bold := p.RailBG, false
-		// markAt is the first run of a git mark that survived the row's width,
-		// -1 when the row carries none or dropped it whole. markOpen says the
-		// mark is the one the open float belongs to.
+		// markAt is the run a git mark that survived the row's width sits in,
+		// -1 when the row carries none or dropped it whole; markLeft says the
+		// run is in the row's left run rather than its right, and markPane says
+		// the mark names a pane rather than a window. markOpen says the mark is
+		// the one the open float belongs to.
 		markAt := -1
+		markLeft := false
+		markPane := false
 		markOpen := false
 		// The grip strip owns the rail's last column above the control row, so
 		// no row paints there and the hover line never covers a label.
@@ -1558,6 +1748,21 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 				len(right) >= gitMarkCells+gitAirCells+1 {
 				markAt = len(right) - (gitMarkCells + gitAirCells + 1)
 			}
+			// A pane row in a repository of its own carries its own mark: the
+			// third cell of a thin row, and in the full rail the cell before
+			// the state. The same rule decides it here and in the hit test.
+			if it.Kind == Pane && it.PaneMark && it.InRepo {
+				if compact {
+					// A thin row composes exactly five cells; a rail too
+					// narrow for them elides the run and carries no mark.
+					if len(left) == thinRowCells {
+						markAt, markLeft = thinGitCell, true
+					}
+				} else if _, at := railPaneTail(th, it, itemW, set); at >= 0 && len(right) > at {
+					markAt = at
+				}
+				markPane = markAt >= 0
+			}
 			switch {
 			case lift:
 				bg, bold = p.RailBG, false
@@ -1566,16 +1771,26 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 			case i == hover && it.Kind != Gap:
 				bg = p.RailHoverBG
 			}
-			if markAt >= 0 && it.Window == paint.Open && paint.Open != "" && !lift {
-				markOpen = true
+			if markAt >= 0 && !lift {
+				// One box at a time: a window mark says so on its own row and a
+				// pane's own mark says so on its row.
+				if markPane {
+					markOpen = paint.OpenPane != "" && paint.OpenPane == it.Pane
+				} else {
+					markOpen = paint.Open != "" && paint.Open == it.Window
+				}
 			}
 			if markAt >= 0 && (i == hover || markOpen) && !lift {
 				// A clean row paints no mark until the pointer rests on it or
 				// its box is open, so the facts box always has a cell to open
 				// from and keep. The pointer takes the glyph to the full
 				// accent; the open mark inverts below.
-				right[markAt].Text = th.Glyphs.GitMark
-				right[markAt].FG = p.BarAccent
+				runs := right
+				if markLeft {
+					runs = left
+				}
+				runs[markAt].Text = th.Glyphs.GitMark
+				runs[markAt].FG = p.BarAccent
 			}
 			if lift {
 				for i := range left {
@@ -1602,33 +1817,41 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 				FG:   th.Accents[drop.Accent%len(th.Accents)],
 			}}
 			right, tail = nil, nil
+			markAt, markLeft, markPane = -1, false, false
 			bg, bold = p.RailBG, false
 		}
 		leftCells := segment.SegCells(left) + segment.SegCells(tail)
 		rightCells := segment.SegCells(right)
+		// writeRuns paints one run of the row. openAt names the run of the open
+		// mark, which inverts: the box fills with the accent and the glyph takes
+		// the rail's ground. Only the open mark is ever in that state.
+		writeRuns := func(runs []segment.Seg, openAt int) {
+			for j, s := range runs {
+				if markOpen && j == openAt {
+					s.FG, s.BG = p.RailBG, p.BarAccent
+					segment.Write(buf, s)
+					continue
+				}
+				WriteRailSeg(buf, s, bg, bold)
+			}
+		}
+		openLeft, openRight := -1, -1
+		if markOpen {
+			if markLeft {
+				openLeft = markAt
+			} else {
+				openRight = markAt
+			}
+		}
 		fmt.Fprintf(buf, "\x1b[%d;1H", y+1)
 		buf.WriteString("\x1b[0m")
 		buf.WriteString(bg.BG())
-		for _, s := range left {
-			WriteRailSeg(buf, s, bg, bold)
-		}
-		for _, s := range tail {
-			WriteRailSeg(buf, s, bg, bold)
-		}
+		writeRuns(left, openLeft)
+		writeRuns(tail, -1)
 		if n := rowW - leftCells - rightCells; n > 0 {
 			buf.WriteString(strings.Repeat(" ", n))
 		}
-		for j, s := range right {
-			if markOpen && j == markAt {
-				// The open mark inverts: the box fills with the accent and
-				// the glyph takes the rail's ground. Only the open window's
-				// mark is ever in this state.
-				s.FG, s.BG = p.RailBG, p.BarAccent
-				segment.Write(buf, s)
-				continue
-			}
-			WriteRailSeg(buf, s, bg, bold)
-		}
+		writeRuns(right, openRight)
 		if y < controlAt {
 			fmt.Fprintf(buf, "\x1b[%d;%dH", y+1, w)
 			buf.WriteString("\x1b[0m")

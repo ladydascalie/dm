@@ -1061,3 +1061,72 @@ func TestPruneLeafCollapses(t *testing.T) {
 		})
 	}
 }
+
+// TestCollapsedRailWidth pins the thin rail's width: five content cells, the
+// project bar, the agent mark, the git cell, the state glyph and the question
+// badge, and the grip strip. The one cell the badge costs is the whole point of
+// the width, so a rail that stops short of it is the wrong rail.
+func TestCollapsedRailWidth(t *testing.T) {
+	if CollapsedRail != 6 {
+		t.Fatalf("CollapsedRail = %d, want six: five content cells and the grip strip", CollapsedRail)
+	}
+	if !RailCompact(CollapsedRail) {
+		t.Fatalf("a %d cell rail is not the thin rail", CollapsedRail)
+	}
+	if RailCompact(CollapsedRail + 1) {
+		t.Fatalf("a %d cell rail is the thin rail", CollapsedRail+1)
+	}
+	if RailCompact(0) {
+		t.Fatalf("a hidden rail is the thin rail")
+	}
+	// The thin rail leaves the pane area every cell it takes.
+	area := PaneAreaFor(80, 24, CollapsedRail)
+	if area.X != CollapsedRail {
+		t.Fatalf("the pane area starts at %d with the thin rail, want %d", area.X, CollapsedRail)
+	}
+}
+
+// TestEffectiveRailLiftsAStoredThinWidth is the migration rule for a rail stored
+// as a width: a build whose thin rail was narrower saved four, and four must
+// open as today's thin rail rather than a rail too narrow to paint one. Zero
+// stays hidden and a width at or above the thin rail is untouched.
+func TestEffectiveRailLiftsAStoredThinWidth(t *testing.T) {
+	const cols = 120
+	for _, tc := range []struct {
+		name string
+		rail int
+		want int
+	}{
+		{"a stored four", 4, CollapsedRail},
+		{"a stored five", 5, CollapsedRail},
+		{"a stored six", 6, CollapsedRail},
+		{"one below the thin rail", CollapsedRail - 1, CollapsedRail},
+		{"one above the thin rail", CollapsedRail + 1, CollapsedRail + 1},
+		{"the default", DefaultRail, DefaultRail},
+		{"hidden", 0, 0},
+		{"a negative width", -4, 0},
+		{"past the screen", 400, MaxRail(cols)},
+	} {
+		if got := EffectiveRail(cols, tc.rail); got != tc.want {
+			t.Fatalf("%s: EffectiveRail(%d, %d) = %d, want %d", tc.name, cols, tc.rail, got, tc.want)
+		}
+	}
+	// A stored four is the thin rail after the clamp, not a rail of three
+	// content cells, and it still hides nothing.
+	for _, stored := range []int{4, 5, 6} {
+		got := EffectiveRail(cols, stored)
+		if !RailCompact(got) {
+			t.Fatalf("a stored %d opened as %d, which is not the thin rail", stored, got)
+		}
+		if got < CollapsedRail {
+			t.Fatalf("a stored %d opened as %d, narrower than the thin rail", stored, got)
+		}
+	}
+	// A screen too narrow for the thin rail gets what it can give, and the rail
+	// stays the thin one so nothing paints a name into three cells.
+	narrow := EffectiveRail(12, 4)
+	if narrow != MaxRail(12) || !RailCompact(narrow) {
+		t.Fatalf("a four cell rail on a twelve column screen = %d, want the thin rail clamped to %d",
+			narrow, MaxRail(12))
+	}
+}
