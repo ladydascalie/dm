@@ -71,12 +71,14 @@ func (s *server) boxStoreLocked(req *box.PostReq) (box.Entry, error) {
 // the topic and state as the title, the message as the body. Two independent
 // gates stand in front of the pop: a true suppress, for the entry the
 // operator is already looking at, and urgency, for the states not worth an
-// interruption. The entry is logged either way. The caller holds s.mu.
+// interruption. The phone notification renders the same entry behind the same
+// two gates. The entry is logged either way. The caller holds s.mu.
 func (s *server) notifyBoxEntryLocked(e box.Entry, suppress bool) {
 	if suppress || !notify.Urgent(string(e.State)) {
 		return
 	}
 	notify.SystemNotify(e.Key+" "+string(e.State), e.Msg)
+	s.pushBoxEntryLocked(e)
 }
 
 // boxList returns the entries newest first that pass the request's topic and
