@@ -65,6 +65,13 @@ the commit list is not the story: the first tag always, and any release that
 needs a headline or a migration note. With no previous tag the generated body is
 the entire history, which is nobody's idea of a release note.
 
+The generated body groups by subject prefix: `feat`, `fix`, `perf`, `docs`, and
+everything else under Other. Most of this repo's subjects use an area prefix
+(`webui:`, `notify:`, `upgrade:`), which lands in Other. That is fine for a
+patch release, and it is the second reason a release worth reading gets a
+curated file. When a commit is a shipped fix, `fix(<area>):` groups it under
+Fixes.
+
 If the workflow or the release library changed since the last tag, rehearse the
 workflow before tagging. `workflow_dispatch` builds and publishes nothing:
 
