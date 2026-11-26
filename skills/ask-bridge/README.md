@@ -1,5 +1,12 @@
 # ask-bridge
 
+Retired 2026-11-26. `dm provision` installs `skills/dm-agent`, whose `dm_turn`
+tool reaches the same store, so this bridge is no longer linked into a
+harness and the `ask_user_question` tool name is gone. The source stays as the
+reference for the envelope it produced and the tests it carried. Do not
+reinstall it beside `dm_turn`: two tools for one store is the dilution the
+four-tool surface exists to avoid.
+
 A pi extension that registers the tool `ask_user_question` and answers it with
 dm's ask store. The question lands in the session state every dm surface draws:
 the client float, the web form, any other pane. Nothing renders in pi.

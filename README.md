@@ -343,13 +343,13 @@ Three surfaces draw an ask from that one store.
   every question is answered. A refusal keeps its code in the banner and keeps
   every answer. The fleet row of a pane with an open ask says so, and
   `--read-only` shows the questions with no controls.
-- pi. The `ask-bridge` extension registers the tool `ask_user_question`, so an
-  agent asks with the shape it already writes: questions of question, header,
-  multi-select and options, up to four of each. It runs `dm ask open`, polls
-  `dm ask await` and then `dm ask close`, and returns the answers in the
-  envelope pi's tool result expects. With no `DM_PANE`, no `dm` on `PATH` or no
-  daemon it asks through pi's own `select` and `input` instead, and says which
-  path ran in the tool details.
+- pi. The `dm-agent` extension registers `dm_turn`, so an agent asks through
+  dm's own store: `dm ask open` with the pane and the tool call, then
+  `dm ask await` for the answer. The question set is a question, a header,
+  a multi-select flag and options with a description and a preview. Nothing
+  renders in pi, and the answer comes back as the store's JSON. Outside a dm
+  session there is no store to reach, so the agent asks in prose.
+  `dm provision` installs this extension and the fleet skill together.
 
 Esc declines an ask on every surface. The float sends the answer with
 `cancel:true`, the phone's decline sends the same, and a pi ask that is
@@ -360,15 +360,16 @@ The CLI is the store's door: `dm ask list`, `dm ask open --pane <pane>
 --tool-call <id>`, `dm ask await <id>`, `dm ask answer <id>` and `dm ask close
 <id>`. A question set is too big for argv, so the bodies come on stdin.
 
-The pi extension is one symlink and one setting:
+The pi side is one command:
 
 ```sh
-ln -s "$PWD/skills/ask-bridge/ask-bridge.ts" ~/.pi/agent/extensions/ask-bridge.ts
+dm provision              # links skills/dm-agent and skills/dm-fleet into ~/.pi/agent
+dm provision --check      # exits 1 when either link is missing, dangling or foreign
 ```
 
-Drop `rpiv-ask-user-question` from `~/.pi/agent/settings.json` and restart pi.
-The tool name registers once, so rpiv's own `ask_user_question` is dropped
-rather than loaded beside this one.
+Restart pi to load the extension. `skills/ask-bridge/` is retired: `dm_turn`
+reaches the same store and the old tool name is gone, so a question has one
+path and not two.
 
 ## Layouts
 
