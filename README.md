@@ -888,12 +888,16 @@ Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces them and
 `DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns by
 default, at most a third of the screen and never wider than 46 columns;
 `set-rail` changes it. `prefix b` cycles the sidebar through three states:
-full, thin, and hidden. The thin rail is four columns: the agent bar, one state
-glyph per pane, and no names. It always lists panes, folded or not, and packs
-one row per pane, with no header, note or gap row, and no project header or
-bar. A hidden or thin sidebar remembers the last full width.
+full, thin, and hidden. The thin rail is six columns: the project bar, the agent
+mark, one git cell, the state glyph and the question badge, then the grip strip,
+and no names. It always lists panes, folded or not, and packs one row per pane,
+with no project header, workspace row, window row, note or gap row. It gives
+cells up as it narrows: the badge goes first, then the git cell, then the agent
+mark and the bar, and the state stays to the last content cell, so a two column
+rail still says how the pane is doing and a one column rail paints nothing. A
+hidden or thin sidebar remembers the last full width.
 
-The rail's last column is a grab strip: drag it to resize the rail from four
+The rail's last column is a grab strip: drag it to resize the rail from six
 columns up to a third of the screen, capped at 46. A drag to the left collapses
 the rail to its thin form; hiding stays on `prefix b`.
 

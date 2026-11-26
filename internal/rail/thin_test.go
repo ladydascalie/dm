@@ -83,7 +83,9 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 	vt := thinScreen(t, snap)
 	glyphs := []rune{'●', '○', '▲'}
 	for y, id := range want {
-		if g := cellOf(vt, 2, y); g.Char != glyphs[y] {
+		// The state keeps the fourth cell: the bar, the agent mark and the git
+		// cell stand before it.
+		if g := cellOf(vt, 3, y); g.Char != glyphs[y] {
 			t.Fatalf("row %d glyph = %q, want %q for %s", y, g.Char, glyphs[y], id)
 		}
 		if got := RailPaneAt(snap, 2, y, 0); got != id {
@@ -104,7 +106,7 @@ func TestThinRailPaneRowsOnly(t *testing.T) {
 	if g := cellOf(vt, 2, ctrl); g.Char != '▶' {
 		t.Fatalf("control row %d glyph = %q at 2, want the expand caret", ctrl, g.Char)
 	}
-	for _, x := range []int{0, 1, 3} {
+	for _, x := range []int{0, 1, 3, 4, 5} {
 		if g := cellOf(vt, x, ctrl); !thinBlank(g) {
 			t.Fatalf("control row %d holds %q at %d, want a blank", ctrl, g.Char, x)
 		}
@@ -177,28 +179,232 @@ func TestThinRailFoldState(t *testing.T) {
 }
 
 // TestThinRailGlyphColumn draws the two states a thin row can leave empty: a
-// shell with no state shows a blank at the glyph column, an agent with no
-// state shows the fallback mark there.
+// shell with no state and an agent with no state both leave the state cell
+// blank, the silence the full rail keeps, and neither asks a question about a
+// state it does not have.
 func TestThinRailGlyphColumn(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	shell := thinPane("w1p1", "s1", "w1", "", false)
-	agent := thinPane("w1p2", "s1", "w1", "", false)
-	agent.Agent = true
-	snap := thinSnapshot([]wire.AllPane{shell, agent})
+	unknown := thinPane("w1p2", "s1", "w1", "unknown", false)
+	unknown.Agent = true
+	snap := thinSnapshot([]wire.AllPane{shell, unknown})
 	vt := thinScreen(t, snap)
-	if g := cellOf(vt, 2, 0); !thinBlank(g) {
-		t.Fatalf("shell row glyph = %q at column 2, want a blank", g.Char)
+	for y := 0; y < 2; y++ {
+		if g := cellOf(vt, 3, y); !thinBlank(g) {
+			t.Fatalf("row %d state cell = %q at column 3, want a blank", y, g.Char)
+		}
 	}
-	if g := cellOf(vt, 2, 1); g.Char != '?' {
-		t.Fatalf("agent row glyph = %q at column 2, want ?", g.Char)
-	}
-	// The mark sits between the bar and the glyph: the agent mark on the
-	// agent row and a blank on the shell row.
+	// The mark sits between the bar and the git cell: the agent mark on the
+	// agent row and a blank on the shell row, both in the rail's dim tone.
 	if g := cellOf(vt, 1, 1); g.Char != '\u258e' {
 		t.Fatalf("agent row mark = %q at column 1, want the agent bar", g.Char)
 	}
 	if g := cellOf(vt, 1, 0); !thinBlank(g) {
 		t.Fatalf("shell row mark = %q at column 1, want a blank", g.Char)
+	}
+	if g := cellOf(vt, 1, 1); g.FG != railColour(theme.DefaultTheme().Palette.RailDim) {
+		t.Fatalf("agent row mark colour = %v, want the rail's dim tone", g.FG)
+	}
+}
+
+// TestThinRailShellKeepsItsTerminalMark proves a shell keeps the terminal mark
+// the glyph set carries and a blank state cell beside it, so the mark says what
+// runs in the pane and never how it is doing.
+func TestThinRailShellKeepsItsTerminalMark(t *testing.T) {
+	t.Setenv("DM_NERD", "1")
+	shell := thinPane("w1p1", "s1", "w1", "", false)
+	snap := thinSnapshot([]wire.AllPane{shell})
+	var b bytes.Buffer
+	DrawRail(&b, theme.DefaultTheme().For(theme.GlyphNerd), snap, theme.GlyphNerd, Paint{Hover: -1})
+	term := vt.NewTerm(snap.Cols, snap.Rows)
+	term.Write(b.Bytes())
+	term.Flush()
+	// The nerd set's shell mark is the Font Awesome terminal, one cell of a
+	// two cell mark, and the state beside it stays blank.
+	mark := []rune(RailMark(false, "", theme.GlyphNerd))[0]
+	if g := cellOf(term, 1, 0); g.Char != mark {
+		t.Fatalf("shell mark = %q at column 1, want the terminal %q", g.Char, mark)
+	}
+	if g := cellOf(term, 3, 0); !thinBlank(g) {
+		t.Fatalf("shell state cell = %q at column 3, want a blank", g.Char)
+	}
+}
+
+// thinRead is one thin row's six cells, read left to right.
+func thinRead(term *vt.Term, y int) []railCell {
+	out := make([]railCell, layout.CollapsedRail)
+	for x := range out {
+		out[x] = cellOf(term, x, y)
+	}
+	return out
+}
+
+// TestThinRailCells holds the thin row to its composition in every state, for an
+// agent and for a shell: the project bar, the agent mark in the rail's dim tone,
+// the git cell, the state in its own colour, the question badge, and a grip
+// strip that carries nothing. The state is the only coloured cell.
+func TestThinRailCells(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	dim := railColour(th.Palette.RailDim)
+	states := []string{"working", "idle", "blocked", "done", "error", "unknown", ""}
+	for _, agent := range []bool{true, false} {
+		var panes []wire.AllPane
+		for i, status := range states {
+			p := thinPane(fmt.Sprintf("p%d", i+1), "s1", "w1", status, false)
+			p.Agent = agent
+			p.Project = "dm"
+			panes = append(panes, p)
+		}
+		snap := thinSnapshot(panes)
+		// Every state needs a row of its own above the control row.
+		snap.Rows = len(states) + 3
+		term := thinScreen(t, snap)
+		mark := string([]rune(RailMark(agent, "", theme.GlyphUnicode))[0])
+		for y, status := range states {
+			cells := thinRead(term, y)
+			if len(cells) != 6 {
+				t.Fatalf("row %d has %d cells, want six", y, len(cells))
+			}
+			// The bar, in the project's accent.
+			if cells[0].Char != theBar() {
+				t.Fatalf("agent %v row %d bar = %q, want %q", agent, y, cells[0].Char, theBar())
+			}
+			// The agent mark, neutral: the rail's dim tone for both marks.
+			if string(cells[1].Char) != mark {
+				t.Fatalf("agent %v row %d mark = %q, want %q", agent, y, cells[1].Char, mark)
+			}
+			if cells[1].FG != dim {
+				t.Fatalf("agent %v row %d mark colour = %v, want the rail dim", agent, y, cells[1].FG)
+			}
+			// The git cell: blank, because the pane sits outside git.
+			if !thinBlank(cells[2]) {
+				t.Fatalf("agent %v row %d git cell = %q, want a blank", agent, y, cells[2].Char)
+			}
+			// The state: blank for unknown and empty, else the glyph in its
+			// own colour.
+			if status == "" || status == "unknown" {
+				if !thinBlank(cells[3]) {
+					t.Fatalf("state %q paints %q, want a blank state cell", status, cells[3].Char)
+				}
+			} else {
+				glyph, colour := RailGlyph(th, status, theme.GlyphUnicode)
+				if string(cells[3].Char) != glyph {
+					t.Fatalf("state %q paints %q, want %q", status, cells[3].Char, glyph)
+				}
+				if cells[3].FG != railColour(colour) {
+					t.Fatalf("state %q colour = %v, want %v", status, cells[3].FG, railColour(colour))
+				}
+			}
+			// The badge cell, and the grip strip beyond it. The strip carries
+			// the grip at its own row and nothing anywhere else.
+			if !thinBlank(cells[4]) {
+				t.Fatalf("agent %v row %d badge cell = %q, want a blank", agent, y, cells[4].Char)
+			}
+			if y == (snap.Rows-2)/2 {
+				if cells[5].Char != []rune(th.Glyphs.Grip)[0] {
+					t.Fatalf("agent %v row %d strip = %q, want the grip", agent, y, cells[5].Char)
+				}
+				continue
+			}
+			if !thinBlank(cells[5]) {
+				t.Fatalf("agent %v row %d strip = %q, want a blank", agent, y, cells[5].Char)
+			}
+		}
+	}
+}
+
+// TestThinRailBadgeCell proves the question badge has a cell of its own: it
+// paints in the last content cell, the state keeps the cell before it, and the
+// grip strip is never asked to carry it.
+func TestThinRailBadgeCell(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	pane := thinPane("w1p1", "s1", "w1", "working", true)
+	pane.Agent = true
+	snap := thinSnapshot([]wire.AllPane{pane})
+	snap.Ask = []wire.Ask{{ID: "ask1", Pane: "w1p1", ToolCallID: "tc1"}}
+	vt := thinScreen(t, snap)
+	cells := thinRead(vt, 0)
+	glyph, _ := RailGlyph(th, "working", theme.GlyphUnicode)
+	if string(cells[3].Char) != glyph {
+		t.Fatalf("state cell = %q, want %q beside the badge", cells[3].Char, glyph)
+	}
+	if cells[4].Char != '?' {
+		t.Fatalf("badge cell = %q at column 4, want ?", cells[4].Char)
+	}
+	if cells[4].FG != railColour(th.Palette.BarAccent) {
+		t.Fatalf("badge colour = %v, want the rail accent", cells[4].FG)
+	}
+	if !thinBlank(cells[5]) {
+		t.Fatalf("the badge landed on the grip strip: %q", cells[5].Char)
+	}
+}
+
+// TestThinRailGitCell proves the git cell says what the full rail's mark says:
+// the glyph in the quiet accent when the worktree has work or the branch is off
+// its upstream, a blank cell when the row is clean, the glyph under the pointer
+// on such a row, and the pane's own mark as the cell's hit box either way.
+func TestThinRailGitCell(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	glyph := []rune(th.Glyphs.GitMark)[0]
+	pane := thinPane("w1p1", "s1", "w1", "idle", false)
+	pane.InRepo, pane.Root, pane.Branch = true, "/work/dm", "dm"
+	snap := thinSnapshot([]wire.AllPane{pane})
+	// A clean pane in step with its upstream paints the cell blank at rest.
+	rest := thinScreen(t, snap)
+	if g := cellOf(rest, 2, 0); !thinBlank(g) {
+		t.Fatalf("a clean row paints %q in the git cell, want a blank", g.Char)
+	}
+	if got := RailPaneGitMarkAt(snap, 2, 0, 0); got != "w1p1" {
+		t.Fatalf("RailPaneGitMarkAt(2,0) = %q, want the pane", got)
+	}
+	// The pointer takes the glyph to the full accent, so the cell is reachable
+	// on a row with nothing to report.
+	var b bytes.Buffer
+	DrawRail(&b, th, snap, theme.GlyphUnicode, Paint{Hover: 0})
+	hover := vt.NewTerm(snap.Cols, snap.Rows)
+	hover.Write(b.Bytes())
+	hover.Flush()
+	if g := cellOf(hover, 2, 0); g.Char != glyph || g.FG != railColour(th.Palette.BarAccent) {
+		t.Fatalf("the hovered git cell = %+v, want the glyph in the full accent", g)
+	}
+	// Work in the tree paints it at rest, in the quiet accent.
+	for _, dirty := range []struct {
+		name string
+		set  func(p *wire.AllPane)
+	}{
+		{"dirty", func(p *wire.AllPane) { p.Dirty = true }},
+		{"ahead", func(p *wire.AllPane) { p.Ahead = 2 }},
+		{"behind", func(p *wire.AllPane) { p.Behind = 1 }},
+	} {
+		marked := thinPane("w1p1", "s1", "w1", "idle", false)
+		marked.InRepo, marked.Root, marked.Branch = true, "/work/dm", "dm"
+		dirty.set(&marked)
+		snap := thinSnapshot([]wire.AllPane{marked})
+		vt := thinScreen(t, snap)
+		g := cellOf(vt, 2, 0)
+		if g.Char != glyph {
+			t.Fatalf("%s: the git cell = %q, want the mark", dirty.name, g.Char)
+		}
+		if g.FG != railColour(gitMarkQuiet(th.Palette)) {
+			t.Fatalf("%s: the git cell colour = %v, want the quiet accent", dirty.name, g.FG)
+		}
+	}
+}
+
+// TestThinRailGitCellOutsideRepo proves a pane outside git paints no mark and
+// answers no click: there is no repository to describe.
+func TestThinRailGitCellOutsideRepo(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	snap := thinSnapshot([]wire.AllPane{thinPane("w1p1", "s1", "w1", "idle", false)})
+	vt := thinScreen(t, snap)
+	if g := cellOf(vt, 2, 0); !thinBlank(g) {
+		t.Fatalf("a pane outside git paints %q in the git cell", g.Char)
+	}
+	if got := RailPaneGitMarkAt(snap, 2, 0, 0); got != "" {
+		t.Fatalf("a pane outside git answers %q, want nothing", got)
 	}
 }
 
@@ -226,11 +432,11 @@ func TestThinRailFocusBackground(t *testing.T) {
 		}
 	}
 	// The focused row is the bold one, on its glyph cell.
-	focus := cellOf(screen, 2, 1)
+	focus := cellOf(screen, 3, 1)
 	if focus.Char != '○' || !focus.Bold {
 		t.Fatalf("focused glyph = %q bold %v, want a bold ○", focus.Char, focus.Bold)
 	}
-	if g := cellOf(screen, 2, 0); g.Bold {
+	if g := cellOf(screen, 3, 0); g.Bold {
 		t.Fatalf("unfocused glyph is bold")
 	}
 }
@@ -262,7 +468,7 @@ func TestThinRailClips(t *testing.T) {
 		if got := RailPaneAt(snap, 2, y, 0); got != items[y].Pane {
 			t.Fatalf("RailPaneAt(2,%d) = %q, want %q", y, got, items[y].Pane)
 		}
-		if g := cellOf(vt, 2, y); g.Char != '●' {
+		if g := cellOf(vt, 3, y); g.Char != '●' {
 			t.Fatalf("row %d glyph = %q, want the pane glyph", y, g.Char)
 		}
 	}
@@ -277,6 +483,93 @@ func TestThinRailClips(t *testing.T) {
 				t.Fatalf("thin rail wrote %q at %d,%d, past column %d",
 					g.Char, x, y, layout.CollapsedRail-1)
 			}
+		}
+	}
+}
+
+// TestThinRailNarrowComposition proves the thin row gives up its cells in one
+// order as the rail narrows: the badge first, then the git cell, then the agent
+// mark and the bar, and the state last of all. A rail of six paints all five
+// cells, five drops the badge, four drops the git cell too, and a row with one
+// cell still says how the pane is doing. The git cell answers the cell it is
+// painted in and no other, so a narrow rail never leaves a glyph with nothing
+// behind it.
+func TestThinRailNarrowComposition(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	state, _ := RailGlyph(th, "working", theme.GlyphUnicode)
+	mark := []rune(th.Glyphs.GitMark)[0]
+	for _, tc := range []struct {
+		name string
+		rail int
+		// cells is what the row paints, left to right, before the grip strip.
+		cells []rune
+	}{
+		{"six", layout.CollapsedRail, []rune{theBar(), '\u258e', mark, []rune(state)[0], '?'}},
+		{"five", layout.CollapsedRail - 1, []rune{theBar(), '\u258e', mark, []rune(state)[0]}},
+		{"four", layout.CollapsedRail - 2, []rune{theBar(), '\u258e', []rune(state)[0]}},
+		{"three", 3, []rune{theBar(), []rune(state)[0]}},
+		{"two", 2, []rune{[]rune(state)[0]}},
+		{"one", 1, nil},
+		// A twelve column screen caps the rail at four cells, so this is the
+		// narrowest rail a client can open, and it still says how the pane is
+		// doing.
+		{"capped", layout.EffectiveRail(12, 4), []rune{theBar(), '\u258e', []rune(state)[0]}},
+	} {
+		pane := thinPane("w1p1", "s1", "w1", "working", true)
+		pane.Agent, pane.Project = true, "dm"
+		pane.InRepo, pane.Root, pane.Branch = true, "/work/dm", "dm"
+		pane.Dirty = true
+		snap := thinSnapshot([]wire.AllPane{pane})
+		snap.Rail = tc.rail
+		snap.Ask = []wire.Ask{{ID: "ask1", Pane: "w1p1", ToolCallID: "tc1"}}
+		term := thinScreen(t, snap)
+		if len(tc.cells) != tc.rail-1 {
+			t.Fatalf("%s: the case names %d cells for a rail of %d", tc.name, len(tc.cells), tc.rail)
+		}
+		for x, want := range tc.cells {
+			if g := cellOf(term, x, 0); g.Char != want {
+				t.Fatalf("%s: cell %d = %q, want %q", tc.name, x, g.Char, want)
+			}
+		}
+		// The grip strip keeps its own column and the row writes nothing past
+		// the rail.
+		if g := cellOf(term, tc.rail-1, 0); !thinBlank(g) {
+			t.Fatalf("%s: the grip strip carries %q", tc.name, g.Char)
+		}
+		for x := tc.rail; x < snap.Cols; x++ {
+			if g := cellOf(term, x, 0); !thinBlank(g) {
+				t.Fatalf("%s: the row wrote %q past the rail at %d", tc.name, g.Char, x)
+			}
+		}
+		// The git cell answers exactly the cell it was painted in, and the
+		// glyph is painted exactly where a cell answers.
+		painted, answered := -1, -1
+		for x := 0; x < snap.Rail; x++ {
+			if cellOf(term, x, 0).Char == mark {
+				painted = x
+			}
+			if got := RailPaneGitMarkAt(snap, x, 0, 0); got != "" {
+				if got != "w1p1" {
+					t.Fatalf("%s: cell %d answered %q", tc.name, x, got)
+				}
+				if answered >= 0 {
+					t.Fatalf("%s: two cells answer, %d and %d", tc.name, answered, x)
+				}
+				answered = x
+			}
+		}
+		if want := thinGitCol(tc.rail - 1); painted != want || answered != want {
+			t.Fatalf("%s: the git cell is painted at %d and answered at %d, want %d",
+				tc.name, painted, answered, want)
+		}
+		// The float anchors on that same cell or on nothing.
+		row := RailPaneGitMarkRow(snap, "w1p1", 0)
+		if answered >= 0 && row != 0 {
+			t.Fatalf("%s: the anchor row = %d, want 0", tc.name, row)
+		}
+		if answered < 0 && row >= 0 {
+			t.Fatalf("%s: the anchor row = %d with no cell to open", tc.name, row)
 		}
 	}
 }

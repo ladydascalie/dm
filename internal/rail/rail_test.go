@@ -247,14 +247,17 @@ func TestRailRowSegments(t *testing.T) {
 
 	// The thin rail keeps the marker and the glyph, drops the indents, and
 	// puts the project bar cell full left: blank here, since pi has no
-	// project.
-	glyphColour := p.RailWorking
+	// project. The mark takes the rail's dim tone, the git cell is blank
+	// because pi's repository says nothing, and the badge cell stays blank
+	// because no question is listed on it.
 	mark := RailMark(true, "", theme.GlyphUnicode)
 	left, right, tail = RailRow(th, pane, layout.CollapsedRail, true, theme.GlyphUnicode)
 	wantLeft = []railSeg{
 		{Text: " ", FG: p.RailDim},
-		{Text: strings.TrimSuffix(mark, " "), FG: glyphColour},
-		{Text: "\u25cf", FG: glyphColour},
+		{Text: strings.TrimSuffix(mark, " "), FG: p.RailDim},
+		{Text: " ", FG: gitMarkQuiet(p)},
+		{Text: "\u25cf", FG: p.RailWorking},
+		{Text: " ", FG: p.RailDim},
 	}
 	if !reflect.DeepEqual(left, wantLeft) || right != nil || tail != nil {
 		t.Fatalf("thin pane row = %+v / %+v / %+v, want %+v / nil / nil",

@@ -380,10 +380,12 @@ func LowestCommonAncestor(a, b []*Node) *Node {
 // room for a window label and its right-aligned git stats.
 const DefaultRail = 34
 
-// CollapsedRail is the width of the thin rail: an agent mark, the project
-// bar, the state glyph, and the grip strip. The glyph keeps the column it
-// has in the expanded rail, so collapsing does not move the mark.
-const CollapsedRail = 4
+// CollapsedRail is the width of the thin rail: five content cells and the grip
+// strip. The cells are the project bar, the agent mark, the git cell, the state
+// glyph and the question badge, in that order, and the strip owns the last
+// column. The state keeps a cell of its own beside the badge, so a question in
+// a collapsed rail never lands on the strip.
+const CollapsedRail = 6
 
 // RailCompact reports whether a rail width is the thin, glyph-only form.
 func RailCompact(rail int) bool { return rail > 0 && rail <= CollapsedRail }
@@ -400,10 +402,17 @@ func MaxRail(cols int) int {
 	return m
 }
 
-// EffectiveRail clamps a requested width to what the screen can give.
+// EffectiveRail clamps a requested width to what the screen can give. A stored
+// positive width below the thin rail came from a build whose thin rail was
+// narrower, so it opens as today's thin rail: zero stays hidden, a stored four
+// or five lifts to CollapsedRail, and a width at or above it is left as it is
+// unless the screen cannot give it.
 func EffectiveRail(cols, rail int) int {
 	if rail < 0 {
 		rail = 0
+	}
+	if rail > 0 && rail < CollapsedRail {
+		rail = CollapsedRail
 	}
 	if m := MaxRail(cols); rail > m {
 		rail = m

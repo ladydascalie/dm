@@ -2168,7 +2168,8 @@ func (t *tui) handleMouse(ev mouseEvent) {
 	// it, so this must not take the press first. The press itself is not
 	// swallowed: one click both dismisses the box and does what it always did.
 	if t.git != nil && ev.btn&3 == 0 && ev.btn&32 == 0 && ev.btn&64 == 0 && !ev.release &&
-		rail.RailGitMarkAt(t.snap, x, y, t.railOff) == "" {
+		rail.RailGitMarkAt(t.snap, x, y, t.railOff) == "" &&
+		rail.RailPaneGitMarkAt(t.snap, x, y, t.railOff) == "" {
 		t.closeGitFloat()
 	}
 	if t.mode == "layout" {
@@ -2215,7 +2216,8 @@ func (t *tui) handleMouse(ev mouseEvent) {
 				t.swallowRelease = true
 				return
 			}
-			if rail.RailGitMarkAt(t.snap, x, y, t.railOff) != "" {
+			if rail.RailGitMarkAt(t.snap, x, y, t.railOff) != "" ||
+				rail.RailPaneGitMarkAt(t.snap, x, y, t.railOff) != "" {
 				t.closeMenu()
 				return
 			}
@@ -3628,13 +3630,19 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			}
 			return true
 		}
-		// The git mark is checked before the row it closes: the mark's cells are
-		// the window row's cells, so the window branch would focus the window
-		// for a press that asked for facts. A press on the mark opens the box,
-		// moves it, or closes it, and touches nothing else.
+		// A git mark is checked before the row it closes: the mark's cells are
+		// the row's own cells, so the pane branch would focus the pane for a
+		// press that asked for facts. A press on a mark opens the box, moves it,
+		// or closes it, and touches nothing else. A pane's own mark comes first
+		// because it names a pane rather than a window.
+		if id := rail.RailPaneGitMarkAt(t.snap, x, y, t.railOff); id != "" {
+			t.clearRailPress()
+			t.gitPaneMarkPress(id)
+			return true
+		}
 		if id := rail.RailGitMarkAt(t.snap, x, y, t.railOff); id != "" {
 			t.clearRailPress()
-			t.gitMarkPress(id)
+			t.gitWindowMarkPress(id)
 			return true
 		}
 		if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok && it.Kind == rail.Project {

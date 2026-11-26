@@ -56,9 +56,9 @@ func TestGitMarkHitBoxFollowsTheCell(t *testing.T) {
 func TestGitMarkHoverReachesACleanRow(t *testing.T) {
 	t.Setenv("DM_NERD", "0")
 	tui, _ := gitFloatTUI(t, 100, 16, 26)
-	// w2 is clean and in step with its upstream.
-	clean := rail.RailWindowItem
-	it, ok := clean(tui.snap, "w2")
+	// w2's source pane is clean and in step with its upstream.
+	clean := rail.RailPaneItem
+	it, ok := clean(tui.snap, "w2p1")
 	if !ok || it.Dirty || it.Ahead > 0 || it.Behind > 0 {
 		t.Fatalf("the fixture's w2 is not the clean case: %+v", it)
 	}

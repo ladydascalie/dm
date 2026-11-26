@@ -64,7 +64,8 @@ func (t *tui) draw() {
 	// strip its grab zone covers.
 	drawDivider(&div, th, t.padZone, t.padAxis)
 	rail.DrawRail(&railBuf, th, win, t.glyphSet(), rail.Paint{
-		Off: t.railOff, Hover: t.railHoverRow(), Drop: t.railDrop(), Open: t.gitOpen(),
+		Off: t.railOff, Hover: t.railHoverRow(), Drop: t.railDrop(),
+		Open: t.gitOpen(), OpenPane: t.gitOpenPane(),
 	})
 	DrawTabBar(&tabBar, th, win, tabWidthFor(t.km()))
 	badge := t.barBadgeOf(th, t.glyphSet())

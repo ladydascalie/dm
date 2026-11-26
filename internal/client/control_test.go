@@ -137,7 +137,9 @@ func TestRailControlRow(t *testing.T) {
 		// The last item row is drawn, not merely listed. A rail too narrow
 		// for the label elides it, so the pane name is only there when it fits.
 		if c.thin {
-			if g := ctlCell(t, vt, 2, row-1); g.Char != '●' {
+			// The state keeps the fourth cell of a thin row: the bar, the
+			// agent mark and the git cell stand before it.
+			if g := ctlCell(t, vt, 3, row-1); g.Char != '●' {
 				t.Fatalf("rail %d: last item row glyph = %q, want the pane glyph", c.rail, g.Char)
 			}
 		} else if strings.TrimSpace(ctlRow(t, vt, row-1, c.rail)) == "" {
