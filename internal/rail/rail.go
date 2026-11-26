@@ -971,13 +971,62 @@ func railPaneTail(th theme.Theme, it RailItem, w int, set theme.GlyphSet) ([]seg
 	return append(right, railStateSeg(th, it.Status, set)), markAt
 }
 
-// thinRowSegs composes the five content cells of a thin rail row: the project
-// bar, the agent mark, the git cell, the state and the question badge. The agent
-// mark takes the rail's dim tone, so the state is the one coloured cell that
-// says how the pane is doing. A pane that never reported and a shell leave the
-// state cell blank, the same silence the full rail keeps, and a shell keeps its
-// terminal mark: the mark says what runs in the pane, never how it is.
-func thinRowSegs(th theme.Theme, it RailItem, set theme.GlyphSet) []segment.Seg {
+// thinCell names one content cell of a thin rail row.
+type thinCell int
+
+const (
+	thinBar thinCell = iota
+	thinAgent
+	thinGit
+	thinState
+	thinBadge
+)
+
+// thinCells is the composition of a thin row that has w cells to paint, in paint
+// order: the project bar, the agent mark, the git cell, the state and the
+// question badge. The row gives up cells as the rail narrows, the badge first,
+// then the git cell, then the agent mark, and the bar after them: the state is
+// the one cell a row keeps while it has any, so a narrow rail still says how the
+// pane is doing. A rail of four cells paints the bar, the agent mark and the
+// state, five adds the git cell and six adds the badge.
+func thinCells(w int) []thinCell {
+	var out []thinCell
+	if w >= 2 {
+		out = append(out, thinBar)
+	}
+	if w >= 3 {
+		out = append(out, thinAgent)
+	}
+	if w >= 4 {
+		out = append(out, thinGit)
+	}
+	if w >= 1 {
+		out = append(out, thinState)
+	}
+	if w >= thinRowCells {
+		out = append(out, thinBadge)
+	}
+	return out
+}
+
+// thinGitCol is the column of a thin row's git cell among w painted cells, -1
+// when the row has no room for one. The painter and the hit test both read
+// this, so a cell that is not painted is never answered.
+func thinGitCol(w int) int {
+	for i, c := range thinCells(w) {
+		if c == thinGit {
+			return i
+		}
+	}
+	return -1
+}
+
+// thinRowSegs composes a thin rail row of w content cells. The agent mark takes
+// the rail's dim tone, so the state is the one coloured cell that says how the
+// pane is doing. A pane that never reported and a shell leave the state cell
+// blank, the same silence the full rail keeps, and a shell keeps its terminal
+// mark: the mark says what runs in the pane, never how it is.
+func thinRowSegs(th theme.Theme, it RailItem, set theme.GlyphSet, w int) []segment.Seg {
 	p, g := th.Palette, th.Glyphs
 	// The mark takes its first cell: an agent's icon, or a shell's terminal,
 	// which the glyph set decides.
@@ -991,27 +1040,37 @@ func thinRowSegs(th theme.Theme, it RailItem, set theme.GlyphSet) []segment.Seg 
 	if it.Ask {
 		badge = segment.Seg{Text: "?", FG: p.BarAccent, Bold: true}
 	}
-	return []segment.Seg{
-		RailBar(th, it),
-		{Text: agent, FG: p.RailDim},
-		git,
-		railStateSeg(th, it.Status, set),
-		badge,
+	cells := thinCells(w)
+	out := make([]segment.Seg, 0, len(cells))
+	for _, cell := range cells {
+		switch cell {
+		case thinBar:
+			out = append(out, RailBar(th, it))
+		case thinAgent:
+			out = append(out, segment.Seg{Text: agent, FG: p.RailDim})
+		case thinGit:
+			out = append(out, git)
+		case thinState:
+			out = append(out, railStateSeg(th, it.Status, set))
+		case thinBadge:
+			out = append(out, badge)
+		}
 	}
+	return out
 }
 
 // railPaneMarkCol is the screen column of a pane row's own git mark in a rail w
-// cells wide: the third cell of a thin row, and in the full rail the cell before
-// the state, measured from the rail's right edge past the grip strip. The second
-// value reports whether the row carries the mark at all.
+// cells wide: wherever the thin row painted its git cell, and in the full rail
+// the cell before the state, measured from the rail's right edge past the grip
+// strip. The second value reports whether the row carries the mark at all.
 func railPaneMarkCol(it RailItem, w int, compact bool) (int, bool) {
 	if compact {
-		// A thin row composes five cells and paints nothing else, so a rail
-		// too narrow for them has elided the row and carries no mark.
-		if w-1 < thinRowCells {
-			return 0, false
+		// The row composes the cells the strip leaves it, and the git cell is
+		// only there while the composition has room for it.
+		if col := thinGitCol(w - 1); col >= 0 {
+			return col, true
 		}
-		return thinGitCell, true
+		return 0, false
 	}
 	// The grip strip owns the last column, so the row composes w-2 cells and
 	// its right run ends on the state at the margin. The mark stands in the
@@ -1133,12 +1192,10 @@ const (
 	// paneChrome is the cells a pane row spends before its name: four cells of
 	// indent, the agent mark and the space after it.
 	paneChrome = 6
-	// thinRowCells is what a thin rail row composes: the bar, the agent mark,
-	// the git cell, the state and the badge.
+	// thinRowCells is the most a thin rail row composes: the bar, the agent
+	// mark, the git cell, the state and the badge. A narrower rail paints the
+	// first cells of that order, in the order thinCells names.
 	thinRowCells = 5
-	// thinGitCell is the cell of a thin row that carries the pane's own git
-	// mark: the third, one cell right of the agent mark and left of the state.
-	thinGitCell = 2
 )
 
 // gitMarkRot is how far the mark's rest colour walks from the bar accent toward
@@ -1243,10 +1300,9 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			base = p.RailText
 		}
 		if compact {
-			// The thin rail keeps five cells and nothing else: the bar, the
-			// agent mark, the git cell, the state and the badge. It has no
-			// room for a name, so the row is all it can say.
-			left = thinRowSegs(th, it, set)
+			// The thin rail has no room for a name, so the row is all it can
+			// say: the cells that fit, in thinCells' order.
+			left = thinRowSegs(th, it, set, w)
 			break
 		}
 		// Four cells of indent, the agent mark in one cell, a space, then the
@@ -1293,7 +1349,7 @@ func RailRow(th theme.Theme, it RailItem, w int, compact bool, set theme.GlyphSe
 			// A shelf row in the thin rail takes the thin row's composition.
 			// A shelved pane arrives as a PaneInfo, which carries no
 			// repository, so its git cell stays blank.
-			left = thinRowSegs(th, it, set)
+			left = thinRowSegs(th, it, set, w)
 			break
 		}
 		// A shelved pane takes the pane row's shape: six cells of indent, no
@@ -1749,14 +1805,15 @@ func DrawRail(buf *bytes.Buffer, th theme.Theme, snap *wire.Snapshot, set theme.
 				markAt = len(right) - (gitMarkCells + gitAirCells + 1)
 			}
 			// A pane row in a repository of its own carries its own mark: the
-			// third cell of a thin row, and in the full rail the cell before
-			// the state. The same rule decides it here and in the hit test.
+			// git cell of a thin row, wherever the composition put it, and in
+			// the full rail the cell before the state. The same rule decides it
+			// here and in the hit test.
 			if it.Kind == Pane && it.PaneMark && it.InRepo {
 				if compact {
-					// A thin row composes exactly five cells; a rail too
-					// narrow for them elides the run and carries no mark.
-					if len(left) == thinRowCells {
-						markAt, markLeft = thinGitCell, true
+					// The thin row answers the cell its composition painted,
+					// and a rail too narrow to hold that cell carries no mark.
+					if col := thinGitCol(itemW); col >= 0 && col < len(left) {
+						markAt, markLeft = col, true
 					}
 				} else if _, at := railPaneTail(th, it, itemW, set); at >= 0 && len(right) > at {
 					markAt = at

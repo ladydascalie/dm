@@ -136,8 +136,11 @@ counters only grow, so a closed id never returns (`internal/session/state.go#Sta
 
 The server subtracts the rail from the left before the first pane box, and the client paints those
 columns with the workspace, window and pane rows. Its width is the stored `Rail` else `DefaultRail`
-34, clamped by `EffectiveRail`, so 34 becomes 26 on an 80 column screen; `CollapsedRail` is 4, and 0
-hides the rail (`internal/layout/layout.go#DefaultRail`). `DrawRail` paints rows 0 to `Rows-2` of the
+34, clamped by `EffectiveRail`, so 34 becomes 26 on an 80 column screen; `CollapsedRail` is 6, five
+content cells and the grip strip, and 0 hides the rail (`internal/layout/layout.go#DefaultRail`).
+`EffectiveRail` lifts a stored positive width below `CollapsedRail` up to it, so a width an older
+build saved as four opens as today's thin rail rather than a rail too narrow to paint one. `DrawRail`
+paints rows 0 to `Rows-2` of the
 terminal, `Rows` being its height, and keeps `Rows-2` for the control row. Its
 `Paint` carries the client's scroll offset, so the first row shows the item row
 `Off` names rather than the list's head. The rail's last column

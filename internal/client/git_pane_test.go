@@ -239,3 +239,81 @@ func TestPaneMarkLeavesTheCommonWindowAlone(t *testing.T) {
 		}
 	}
 }
+
+// TestNarrowThinMarkOpensTheBox proves the git cell a narrow thin row paints
+// still answers: at five cells the row is the bar, the agent mark, the git cell
+// and the state, so the third cell opens the pane's facts instead of the press
+// falling through and focusing the pane.
+func TestNarrowThinMarkOpensTheBox(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	// A fifteen column screen caps the rail at five cells: the bar, the agent
+	// mark, the git cell and the state. The terminal is wider here so the box
+	// has room to paint its facts.
+	if got := layout.EffectiveRail(15, layout.CollapsedRail); got != 5 {
+		t.Fatalf("a fifteen column screen caps the rail at %d, want five", got)
+	}
+	tui, got := gitPaneTUI(t, 100, 16, 5)
+	paneMarkClick(t, tui, "w1p3")
+	if tui.git == nil || tui.git.pane != "w1p3" {
+		t.Fatalf("the narrow mark opened %+v, want the box on w1p3", tui.git)
+	}
+	// The mark takes the press, so the row never focuses the pane.
+	testutil.NoMsg(t, got)
+	frame := gitScreen(tui)
+	if row := gitFactRow(frame, tui, "branch"); !strings.Contains(row, "web") {
+		t.Fatalf("branch row = %q, want the pane's own branch", row)
+	}
+	// The row keeps the state in its last content cell and gives up the badge,
+	// which has no room at five cells.
+	row := rail.RailPaneGitMarkRow(tui.snap, "w1p3", 0)
+	state, _ := rail.RailGlyph(tui.theme(), "idle", tui.glyphSet())
+	if c := termCell(frame, 3, row); string(c.Char) != state {
+		t.Fatalf("the narrow row's state = %q at 3, want %q", c.Char, state)
+	}
+	if c := termCell(frame, 4, row); c.Char != ' ' {
+		t.Fatalf("the narrow row painted %q in the strip column", c.Char)
+	}
+}
+
+// TestNarrowThinRowWithoutAGitCellFocusesThePane proves the other side of the
+// same rule: at four cells the row has no git cell, so the press is the pane's
+// and focuses it.
+func TestNarrowThinRowWithoutAGitCellFocusesThePane(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	railWidth := layout.EffectiveRail(12, layout.CollapsedRail)
+	tui, got := gitPaneTUI(t, 12, 16, railWidth)
+	// No cell answers a pane mark at this width, so there is no box to open.
+	for x := 0; x < railWidth; x++ {
+		for y := 0; y < tui.snap.Rows; y++ {
+			if id := rail.RailPaneGitMarkAt(tui.snap, x, y, 0); id != "" {
+				t.Fatalf("cell %d,%d answers the pane mark %q with no git cell painted", x, y, id)
+			}
+		}
+	}
+	markRow := -1
+	for i, it := range rail.RailItems(tui.snap) {
+		if it.Kind == rail.Pane && it.Pane == "w1p3" {
+			markRow = i
+		}
+	}
+	if markRow < 0 {
+		t.Fatal("the fixture draws no row for w1p3")
+	}
+	// Not merely unanswered: the row paints no git glyph either, so the two
+	// agree.
+	glyph := []rune(tui.theme().Glyphs.GitMark)[0]
+	frame := gitScreen(tui)
+	for x := 0; x < railWidth; x++ {
+		if c := termCell(frame, x, markRow); c.Char == glyph {
+			t.Fatalf("the four cell row paints the git mark at %d", x)
+		}
+	}
+	tui.handleMouse(mouseEvent{btn: 0, x: 3, y: markRow + 1})
+	if tui.git != nil {
+		t.Fatalf("a narrow press opened a box: %+v", tui.git)
+	}
+	if m := nextMsg(t, got); m.Action != "focus" || m.Target != "w1p3" {
+		t.Fatalf("the narrow row sent %+v, want focus w1p3", m)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: 3, y: markRow + 1})
+}

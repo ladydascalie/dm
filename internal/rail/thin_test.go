@@ -230,8 +230,8 @@ func TestThinRailShellKeepsItsTerminalMark(t *testing.T) {
 	}
 }
 
-// thinCells is one thin row's six cells, read left to right.
-func thinCells(term *vt.Term, y int) []railCell {
+// thinRead is one thin row's six cells, read left to right.
+func thinRead(term *vt.Term, y int) []railCell {
 	out := make([]railCell, layout.CollapsedRail)
 	for x := range out {
 		out[x] = cellOf(term, x, y)
@@ -262,7 +262,7 @@ func TestThinRailCells(t *testing.T) {
 		term := thinScreen(t, snap)
 		mark := string([]rune(RailMark(agent, "", theme.GlyphUnicode))[0])
 		for y, status := range states {
-			cells := thinCells(term, y)
+			cells := thinRead(term, y)
 			if len(cells) != 6 {
 				t.Fatalf("row %d has %d cells, want six", y, len(cells))
 			}
@@ -325,7 +325,7 @@ func TestThinRailBadgeCell(t *testing.T) {
 	snap := thinSnapshot([]wire.AllPane{pane})
 	snap.Ask = []wire.Ask{{ID: "ask1", Pane: "w1p1", ToolCallID: "tc1"}}
 	vt := thinScreen(t, snap)
-	cells := thinCells(vt, 0)
+	cells := thinRead(vt, 0)
 	glyph, _ := RailGlyph(th, "working", theme.GlyphUnicode)
 	if string(cells[3].Char) != glyph {
 		t.Fatalf("state cell = %q, want %q beside the badge", cells[3].Char, glyph)
@@ -483,6 +483,93 @@ func TestThinRailClips(t *testing.T) {
 				t.Fatalf("thin rail wrote %q at %d,%d, past column %d",
 					g.Char, x, y, layout.CollapsedRail-1)
 			}
+		}
+	}
+}
+
+// TestThinRailNarrowComposition proves the thin row gives up its cells in one
+// order as the rail narrows: the badge first, then the git cell, then the agent
+// mark and the bar, and the state last of all. A rail of six paints all five
+// cells, five drops the badge, four drops the git cell too, and a row with one
+// cell still says how the pane is doing. The git cell answers the cell it is
+// painted in and no other, so a narrow rail never leaves a glyph with nothing
+// behind it.
+func TestThinRailNarrowComposition(t *testing.T) {
+	t.Setenv("DM_NERD", "0")
+	th := theme.DefaultTheme()
+	state, _ := RailGlyph(th, "working", theme.GlyphUnicode)
+	mark := []rune(th.Glyphs.GitMark)[0]
+	for _, tc := range []struct {
+		name string
+		rail int
+		// cells is what the row paints, left to right, before the grip strip.
+		cells []rune
+	}{
+		{"six", layout.CollapsedRail, []rune{theBar(), '\u258e', mark, []rune(state)[0], '?'}},
+		{"five", layout.CollapsedRail - 1, []rune{theBar(), '\u258e', mark, []rune(state)[0]}},
+		{"four", layout.CollapsedRail - 2, []rune{theBar(), '\u258e', []rune(state)[0]}},
+		{"three", 3, []rune{theBar(), []rune(state)[0]}},
+		{"two", 2, []rune{[]rune(state)[0]}},
+		{"one", 1, nil},
+		// A twelve column screen caps the rail at four cells, so this is the
+		// narrowest rail a client can open, and it still says how the pane is
+		// doing.
+		{"capped", layout.EffectiveRail(12, 4), []rune{theBar(), '\u258e', []rune(state)[0]}},
+	} {
+		pane := thinPane("w1p1", "s1", "w1", "working", true)
+		pane.Agent, pane.Project = true, "dm"
+		pane.InRepo, pane.Root, pane.Branch = true, "/work/dm", "dm"
+		pane.Dirty = true
+		snap := thinSnapshot([]wire.AllPane{pane})
+		snap.Rail = tc.rail
+		snap.Ask = []wire.Ask{{ID: "ask1", Pane: "w1p1", ToolCallID: "tc1"}}
+		term := thinScreen(t, snap)
+		if len(tc.cells) != tc.rail-1 {
+			t.Fatalf("%s: the case names %d cells for a rail of %d", tc.name, len(tc.cells), tc.rail)
+		}
+		for x, want := range tc.cells {
+			if g := cellOf(term, x, 0); g.Char != want {
+				t.Fatalf("%s: cell %d = %q, want %q", tc.name, x, g.Char, want)
+			}
+		}
+		// The grip strip keeps its own column and the row writes nothing past
+		// the rail.
+		if g := cellOf(term, tc.rail-1, 0); !thinBlank(g) {
+			t.Fatalf("%s: the grip strip carries %q", tc.name, g.Char)
+		}
+		for x := tc.rail; x < snap.Cols; x++ {
+			if g := cellOf(term, x, 0); !thinBlank(g) {
+				t.Fatalf("%s: the row wrote %q past the rail at %d", tc.name, g.Char, x)
+			}
+		}
+		// The git cell answers exactly the cell it was painted in, and the
+		// glyph is painted exactly where a cell answers.
+		painted, answered := -1, -1
+		for x := 0; x < snap.Rail; x++ {
+			if cellOf(term, x, 0).Char == mark {
+				painted = x
+			}
+			if got := RailPaneGitMarkAt(snap, x, 0, 0); got != "" {
+				if got != "w1p1" {
+					t.Fatalf("%s: cell %d answered %q", tc.name, x, got)
+				}
+				if answered >= 0 {
+					t.Fatalf("%s: two cells answer, %d and %d", tc.name, answered, x)
+				}
+				answered = x
+			}
+		}
+		if want := thinGitCol(tc.rail - 1); painted != want || answered != want {
+			t.Fatalf("%s: the git cell is painted at %d and answered at %d, want %d",
+				tc.name, painted, answered, want)
+		}
+		// The float anchors on that same cell or on nothing.
+		row := RailPaneGitMarkRow(snap, "w1p1", 0)
+		if answered >= 0 && row != 0 {
+			t.Fatalf("%s: the anchor row = %d, want 0", tc.name, row)
+		}
+		if answered < 0 && row >= 0 {
+			t.Fatalf("%s: the anchor row = %d with no cell to open", tc.name, row)
 		}
 	}
 }

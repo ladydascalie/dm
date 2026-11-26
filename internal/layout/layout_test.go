@@ -1111,8 +1111,8 @@ func TestEffectiveRailLiftsAStoredThinWidth(t *testing.T) {
 			t.Fatalf("%s: EffectiveRail(%d, %d) = %d, want %d", tc.name, cols, tc.rail, got, tc.want)
 		}
 	}
-	// A stored four is the thin rail after the clamp, not a rail of three
-	// content cells, and it still hides nothing.
+	// A stored four is the thin rail after the clamp: five content cells and
+	// the grip strip, not the three cells an old build painted.
 	for _, stored := range []int{4, 5, 6} {
 		got := EffectiveRail(cols, stored)
 		if !RailCompact(got) {
@@ -1128,5 +1128,13 @@ func TestEffectiveRailLiftsAStoredThinWidth(t *testing.T) {
 	if narrow != MaxRail(12) || !RailCompact(narrow) {
 		t.Fatalf("a four cell rail on a twelve column screen = %d, want the thin rail clamped to %d",
 			narrow, MaxRail(12))
+	}
+	// A capped rail pays the grip strip out of its width, and what is left is
+	// the fewest content cells the thin row paints: the project bar, the agent
+	// mark and the state. The state is the last cell the row gives up, so no
+	// rail a client can open leaves the row silent about how the pane is doing.
+	if content := narrow - 1; content < 3 {
+		t.Fatalf("a capped rail of %d cells leaves %d content cells, fewer than the bar, the agent mark and the state need",
+			narrow, content)
 	}
 }
