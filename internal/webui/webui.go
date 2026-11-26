@@ -200,6 +200,12 @@ func loopback(addr net.Addr) bool {
 // socket, so the web server holds no session state of its own.
 type Handler struct {
 	cfg Config
+	// state is the push half: the VAPID key pair and the one subscription
+	// Store. Both live for the process, so two writes cannot race through two
+	// Stores over one file.
+	state pushState
+	// icons holds the app icons, drawn once per size.
+	icons iconCache
 }
 
 // NewHandler returns the authenticated surface for cfg.
@@ -224,7 +230,36 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("POST /api/msg", h.msg)
 	mux.HandleFunc("POST /api/upload", h.upload)
 	mux.HandleFunc("POST /api/keys", h.keys)
-	return h.auth(mux)
+	mux.HandleFunc("GET /api/push/config", h.pushConfig)
+	mux.HandleFunc("POST /api/push/subscribe", h.pushSubscribe)
+	mux.HandleFunc("POST /api/push/unsubscribe", h.pushUnsubscribe)
+
+	// The public assets sit outside the token: a manifest fetch can omit
+	// credentials, and none of them carries session data. Everything else keeps
+	// the token.
+	root := http.NewServeMux()
+	root.Handle("GET /sw.js", embedFile("static/sw.js", "application/javascript; charset=utf-8"))
+	root.Handle("GET /manifest.webmanifest", embedFile("static/manifest.webmanifest", "application/manifest+json; charset=utf-8"))
+	root.Handle("GET /icon-192.png", h.icon(iconSmall))
+	root.Handle("GET /icon-512.png", h.icon(iconLarge))
+	root.Handle("GET /icon-180.png", h.icon(iconApple))
+	root.Handle("/", h.auth(mux))
+	return root
+}
+
+// embedFile serves one embedded file at a fixed path with the type it must
+// have. The cache is off, so an update reaches the phone on the next load. A
+// missing file is a build error, not a runtime condition.
+func embedFile(name, contentType string) http.Handler {
+	b, err := fs.ReadFile(staticFS, name)
+	if err != nil {
+		panic("webui: " + err.Error())
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(b)
+	})
 }
 
 // index serves the page and remembers a token that arrived in the query.

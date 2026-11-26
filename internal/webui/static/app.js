@@ -1102,6 +1102,207 @@ function setCollapsed(on) {
   }
 }
 
+// --- notifications -------------------------------------------------------
+//
+// One switch for this device's push subscription. iOS grants push only to a
+// page installed on the home screen, and it asks for permission only inside a
+// tap, so the whole subscribe sequence starts from the button and nowhere else.
+
+// NOTIFY_KEY is where this device remembers whether it subscribed. The
+// subscription itself is the truth: the load path reads the device and repairs
+// a stale flag from it.
+const NOTIFY_KEY = "dm.notify";
+
+// notifyOn is what the page believes about the device's subscription, and
+// notifyBusy drops a second tap while the first is still in flight.
+let notifyOn = false;
+let notifyBusy = false;
+
+// notifySupported reports whether this browser has the three APIs a
+// subscription needs. A page opened in a plain tab on a phone that never
+// installed it has no PushManager, and no Notification means no permission.
+function notifySupported() {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+// paintNotify puts the switch in step with the device: unsupported where the
+// APIs are absent, denied where the browser refused, on with a subscription,
+// off without one.
+function paintNotify() {
+  const btn = $("notify-toggle");
+  if (!btn) return;
+  let state = "on";
+  if (!notifySupported()) state = "unsupported";
+  else if (Notification.permission === "denied") state = "denied";
+  else if (!notifyOn) state = "off";
+  btn.dataset.state = state;
+  btn.classList.toggle("on", state === "on");
+  btn.setAttribute("aria-pressed", state === "on" ? "true" : "false");
+  btn.title =
+    state === "on" ? "notifications are on for this device"
+    : state === "denied" ? "notifications are blocked in the browser's site settings"
+    : state === "unsupported" ? "this browser cannot subscribe to notifications"
+    : "turn notifications on for this device";
+}
+
+// storedNotify reads the device's last answer, which is all a browser that will
+// not report its subscription leaves to go on.
+function storedNotify() {
+  try {
+    return localStorage.getItem(NOTIFY_KEY) === "on";
+  } catch (e) {
+    return false;
+  }
+}
+
+// setStoredNotify remembers the answer for the next load.
+function setStoredNotify(on) {
+  try {
+    localStorage.setItem(NOTIFY_KEY, on ? "on" : "off");
+  } catch (e) {
+    // A refused write costs the memory, not the subscription.
+  }
+}
+
+// swRegistration returns the worker registration this page already has. It
+// never registers one: reading the state must not start the worker.
+async function swRegistration() {
+  try {
+    return (await navigator.serviceWorker.getRegistration("/sw.js")) ||
+      (await navigator.serviceWorker.getRegistration()) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// loadNotify reads the device's real subscription and repairs the stored flag
+// from it, so a subscription cleared in the browser's settings does not leave
+// the switch claiming to be on.
+async function loadNotify() {
+  if (!notifySupported()) {
+    notifyOn = false;
+    paintNotify();
+    return;
+  }
+  let known = storedNotify();
+  try {
+    const reg = await swRegistration();
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    known = !!sub;
+  } catch (e) {
+    // A browser that refuses to answer leaves the stored answer in place.
+  }
+  notifyOn = known;
+  setStoredNotify(known);
+  paintNotify();
+}
+
+// b64url is a subscription key in the form dm stores: raw base64url.
+function b64url(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// fromB64url is the applicationServerKey the browser wants: the same bytes.
+function fromB64url(text) {
+  const raw = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+// subscribePush registers the worker, asks for permission and hands the
+// subscription to dm. The registration and the ask both start before the first
+// await, because iOS drops a permission request that does not come straight
+// from the tap.
+async function subscribePush() {
+  const registration = navigator.serviceWorker.register("/sw.js");
+  const ask = Notification.permission === "granted"
+    ? Promise.resolve("granted")
+    : Notification.requestPermission();
+  const [reg, permission] = await Promise.all([registration, ask]);
+  if (permission !== "granted") {
+    banner(permission === "denied"
+      ? "notifications are blocked in the browser's site settings"
+      : "notifications were not allowed");
+    return;
+  }
+  const res = await fetchAPI("/api/push/config");
+  const config = res.ok ? await res.json() : null;
+  if (!config || !config.enabled || !config.publicKey) {
+    banner("this server cannot push");
+    return;
+  }
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: fromB64url(config.publicKey),
+    });
+  }
+  const post = await fetchAPI("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      endpoint: sub.endpoint,
+      p256dh: b64url(sub.getKey("p256dh")),
+      auth: b64url(sub.getKey("auth")),
+    }),
+  });
+  if (!post.ok) {
+    // The server kept nothing, so the browser keeps nothing either: the switch
+    // reads the device, and it would otherwise read on.
+    await sub.unsubscribe();
+    banner("notifications failed: " + (await post.text()));
+    return;
+  }
+  notifyOn = true;
+  setStoredNotify(true);
+  banner("notifications on");
+}
+
+// unsubscribePush drops the subscription on the device first, then tells dm.
+// The local call is the one that must succeed: a server that is down keeps a
+// dead entry it prunes when the push service answers 410.
+async function unsubscribePush() {
+  const reg = await swRegistration();
+  const sub = reg ? await reg.pushManager.getSubscription() : null;
+  if (sub) {
+    const endpoint = sub.endpoint;
+    await sub.unsubscribe();
+    await fetchAPI("/api/push/unsubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ endpoint: endpoint }),
+    });
+  }
+  notifyOn = false;
+  setStoredNotify(false);
+  banner("notifications off");
+}
+
+// toggleNotify is the tap: subscribe when the device has no subscription, drop
+// it when it has one.
+async function toggleNotify() {
+  if (notifyBusy) return;
+  if (!notifySupported()) {
+    banner("this browser cannot subscribe to notifications");
+    return;
+  }
+  notifyBusy = true;
+  try {
+    if (notifyOn) await unsubscribePush();
+    else await subscribePush();
+  } catch (e) {
+    banner("notifications failed: " + (e && e.message ? e.message : e));
+  } finally {
+    notifyBusy = false;
+    paintNotify();
+  }
+}
+
 // --- the three views -----------------------------------------------------
 //
 // One tap apart, and the address bar carries the one on screen. The transcript
@@ -2731,6 +2932,7 @@ window.addEventListener("resize", () => {
 $("skin-toggle").addEventListener("click", () => {
   setSkin(document.documentElement.dataset.skin !== "tui");
 });
+$("notify-toggle").addEventListener("click", toggleNotify);
 $("sheet-close").addEventListener("click", dismissSheet);
 $("sheet").addEventListener("click", (e) => {
   // A tap outside the panel is the sheet's own dismiss.
@@ -2772,6 +2974,12 @@ route();
 if (!location.hash) {
   history.replaceState(null, "", location.pathname + location.search + "#" + tab);
 }
+
+// The switch starts from the device, not from the URL: a subscription made in
+// an earlier visit is what it shows.
+notifyOn = storedNotify();
+paintNotify();
+loadNotify();
 
 // A reloaded page carries no token in the query, and the cookie is the
 // credential. The fleet answers 401 when neither is usable, and that is where

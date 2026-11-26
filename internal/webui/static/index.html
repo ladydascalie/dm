@@ -4,7 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#101418">
+<!-- A phone installs the page from here, and iOS grants push only to the app
+     the home screen opens. The status bar is translucent so the page reaches
+     the top of the screen instead of under a strip of chrome. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>dm</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <link id="icon" rel="icon" href="data:,">
 <script>
   // The skin is a device preference, so the attribute has to be on the root
@@ -86,6 +94,10 @@
     min-height: 44px; min-width: 44px;
   }
   header .toggle.on { border-color: var(--working); color: var(--working); }
+  /* A device that cannot push says so on the switch itself: dashed and dim,
+     where the plain off state is solid. */
+  header .toggle[data-state="denied"],
+  header .toggle[data-state="unsupported"] { color: var(--dim); border-style: dashed; }
 
   /* Two views, one tab each. The tab is a link, so the address bar carries it
      and the back gesture walks the views the reader visited. */
@@ -1035,6 +1047,7 @@
         <button id="sheet-open" class="sheet-open">actions</button>
         <button id="thumbs-toggle" class="toggle">pictures</button>
         <button id="skin-toggle" class="toggle" aria-pressed="false" title="terminal skin">tui</button>
+        <button id="notify-toggle" class="toggle" aria-pressed="false" data-state="off" title="turn notifications on for this device">notify</button>
       </div>
       <div class="counts" id="counts"></div>
     </header>
