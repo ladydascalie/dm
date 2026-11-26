@@ -1213,15 +1213,17 @@ function fromB64url(text) {
   return out;
 }
 
-// dropSubscription removes the device's subscription after dm refused it or
-// could not be reached, so the next load cannot read the switch as on from a
-// device dm has no row for. A browser that refuses the drop leaves the device
-// holding a subscription the next tap finds and posts again.
+// dropSubscription removes the device's subscription and reports whether the
+// device let go. unsubscribe() is a call to the push service, so it can refuse
+// while dm is reachable, and a refused drop leaves a live subscription behind.
+// The caller must not tell dm the phone is gone on the strength of a drop that
+// failed: dm would drop the row for a device that kept it.
 async function dropSubscription(sub) {
   try {
     await sub.unsubscribe();
+    return true;
   } catch (e) {
-    // Nothing better is left to do: the next tap posts the device again.
+    return false;
   }
 }
 
@@ -1271,12 +1273,15 @@ async function subscribePush() {
     post = null;
   }
   if (!post || !post.ok) {
-    // dm kept nothing, so the browser keeps nothing either. A device that held
-    // the subscription would read on at the next load, and nothing would repair
-    // it: dm has no row to deliver to, and the switch reads the device.
-    await dropSubscription(sub);
-    banner("notifications failed: " +
-      (post ? await post.text() : "cannot reach the session"));
+    // dm kept nothing, so the browser is asked for nothing back. A device that
+    // held the subscription would read on at the next load, and nothing would
+    // repair it: dm has no row to deliver to, and the switch reads the device.
+    // A drop that fails is the one case the page cannot repair, so it says so
+    // instead of pretending the device is off.
+    const reason = post ? await post.text() : "cannot reach the session";
+    const dropped = await dropSubscription(sub);
+    banner("notifications failed: " + reason +
+      (dropped ? "" : "; the browser kept the subscription"));
     return;
   }
   notifyOn = true;
@@ -1293,7 +1298,14 @@ async function unsubscribePush() {
   const sub = reg ? await reg.pushManager.getSubscription() : null;
   if (sub) {
     const endpoint = sub.endpoint;
-    await dropSubscription(sub);
+    if (!(await dropSubscription(sub))) {
+      // The device kept the subscription, so the switch reads on after a
+      // reload. Telling dm the phone is gone would drop the row for a device
+      // that still holds it, and the page would then claim off for a phone dm
+      // cannot reach. Leave both sides as they are and say what happened.
+      banner("notifications are still on: the browser kept the subscription");
+      return;
+    }
     try {
       await fetchAPI("/api/push/unsubscribe", {
         method: "POST",
@@ -1301,7 +1313,7 @@ async function unsubscribePush() {
         body: JSON.stringify({ endpoint: endpoint }),
       });
     } catch (e) {
-      // The device is off either way; dm prunes the dead row on a 410.
+      // The device is off; dm prunes the dead row on a 410.
     }
   }
   notifyOn = false;
