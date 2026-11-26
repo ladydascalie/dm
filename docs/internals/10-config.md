@@ -162,6 +162,18 @@ identifiers, strings and braces. The keymap parser, the theme parser and the sec
 `internal/server/server_sync.go` read it. The subset is frozen: a node name, an optional quoted string,
 a `{ }` block, and nothing else, so each reader rejects what it does not know.
 
+## The release environment
+
+Two environment variables belong to shipping, not to `config.kdl`. Both are read
+outside the config parser: the boot check asks the first before it decides to
+refresh (`internal/client/update.go#shouldCheck`), and the release reader asks
+the second once, in `NewReader` (`internal/release/release.go#NewReader`).
+
+| variable | default | effect |
+| --- | --- | --- |
+| `DM_NO_UPDATE_CHECK` | unset | any value stops the attach's background release check (`internal/client/update.go#updateSkipEnv`). It does not suppress a notice already cached; [Shipping](12-release.md) has the rule. |
+| `DM_RELEASE_API` | `https://api.github.com/repos/ladydascalie/dm/releases` (`internal/release/release.go#DefaultAPI`) | names the releases base that `dm upgrade` and the boot check read. It is the one seam a test points at a stub (`internal/release/release.go#APIEnv`). |
+
 ## Where the next thing goes
 
 A new verb is `cliCommands` plus a `Run` case, steps 1 to 6 above, then 10 and 11. A new key is

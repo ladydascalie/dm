@@ -8,9 +8,10 @@ order, and follow the links at the foot of each page.
 
 ## What this tree is for
 
-dm is one Go binary that runs as three processes: a client, a session server and
-a pane daemon per pane. They share a unix socket protocol and a state file, and
-nothing else. That split is the first thing the tree teaches, because it decides
+dm is one Go binary that runs as one of four processes: a client, a session
+server, a pane daemon per pane, or the one-shot release check an attach leaves
+behind. The three long-lived ones share a unix socket protocol and a state file,
+and nothing else. That split is the first thing the tree teaches, because it decides
 where a change belongs. The pages then follow the code in the order the code
 runs: entry, state, protocol, server, pane, client, layout, surfaces and
 secrets, the CLI and config, and the layer gate.
@@ -52,7 +53,7 @@ page unlocks. You do not need every page for every change. You do need 01 to 03
 before any change that crosses a process.
 
 1. [Entry point](01-entry-point.md). Read first because the answer to "which
-   process runs this code" decides everything else. One binary, three roles,
+   process runs this code" decides everything else. One binary, four roles,
    and the sockets between them.
 2. [Lifecycle and state](02-lifecycle.md). Read second because session,
    workspace, window and pane are the nouns every later page uses. This page
@@ -114,6 +115,7 @@ which maps each action to its keys, and a handler in 06. A new binding lands in
 | [09 Secrets](09-secrets.md) | How does a credential reach a program without leaking? |
 | [10 Config and the CLI surface](10-config.md) | Where is the verb table, and how do the config files load? |
 | [11 Layers](11-layers.md) | Which layer may import which, and what enforces it? |
+| [12 Shipping](12-release.md) | How is a release cut and stamped, and how does a binary update itself? |
 | [Generated package graph](generated/package-graph.md) | What is the package graph? Generated, not written by hand. |
 
 ## The systems and the page that owns each
