@@ -1264,12 +1264,19 @@ func (t *tui) exitScroll() {
 	t.openDeferredAsk()
 }
 
+// altScrollRefusal is what an alternate-screen pane answers when the operator
+// asks for scrollback, by key, wheel or menu. The program owns the screen and
+// dm keeps no history of it, so the line names that reason and the action that
+// works. It fits the toast interior: newToastBox elides a longer line, and a cut
+// tail would drop exactly the instruction the operator needs.
+const altScrollRefusal = "program owns the screen: scroll in it"
+
 // startScroll puts a pane in scrollback. The client keeps no history until the
 // operator asks for it, so the first entry requests one replay and shows the
 // pane's live screen until the ring lands. A second entry asks for nothing.
 func (t *tui) startScroll(p *wire.PaneInfo) {
 	if p.Alt {
-		t.notify("app is on the alternate screen; use its own scroll")
+		t.notify(altScrollRefusal)
 		return
 	}
 	// A search belongs to one pane's rows. A wheel to another pane replaces the
@@ -1402,7 +1409,7 @@ func (t *tui) startScrollOnFocus() {
 	}
 	if p.Alt {
 		t.disarm()
-		t.notify("app is on the alternate screen; use its own scroll")
+		t.notify(altScrollRefusal)
 		return
 	}
 	t.startScroll(p)
@@ -1948,7 +1955,7 @@ func (t *tui) wheelSelect(p *wire.PaneInfo, n int) {
 		return
 	}
 	if p.Alt {
-		t.notify("app is on the alternate screen; use its own scroll")
+		t.notify(altScrollRefusal)
 		return
 	}
 	if t.scroll != p.ID {

@@ -206,7 +206,7 @@ func TestWheelOnAlternateScreenKeepsTheClamp(t *testing.T) {
 	if tui.selText == nil || tui.selText.focus != before {
 		t.Fatalf("the wheel moved the focus: %+v", tui.selText)
 	}
-	if len(tui.toasts) != 1 || !strings.Contains(tui.toasts[0].text, "alternate screen") {
+	if len(tui.toasts) != 1 || tui.toasts[0].text != altScrollRefusal {
 		t.Fatalf("toasts = %+v, want the alternate-screen toast", tui.toasts)
 	}
 }

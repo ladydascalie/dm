@@ -164,6 +164,24 @@ func TestDrawToastsClampsToScreen(t *testing.T) {
 	}
 }
 
+// The refusal an alternate-screen pane raises has to survive the toast whole.
+// newToastBox elides a longer line, and the tail it would drop is the half that
+// says what the operator can do instead.
+func TestAltScrollRefusalFitsTheToast(t *testing.T) {
+	t.Parallel()
+	if n := cells.Cells(altScrollRefusal); n > toastWidth {
+		t.Fatalf("the refusal paints %d cells, want at most %d", n, toastWidth)
+	}
+	snap := &wire.Snapshot{Cols: 100, Rows: 12}
+	tui := &tui{}
+	tui.notify(altScrollRefusal)
+	var b bytes.Buffer
+	drawToasts(&b, theme.DefaultTheme(), snap, tui.toasts)
+	if out := b.String(); strings.Contains(out, cells.Ellipsis) {
+		t.Fatalf("the refusal was elided: %q", out)
+	}
+}
+
 // The bar keeps its content and no longer carries the toast suffix.
 func TestBarDropsToastSuffix(t *testing.T) {
 	t.Parallel()
