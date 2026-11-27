@@ -118,6 +118,9 @@ start() {
 		cd "$cwd" || exit 1
 		demo dm new -s "$session" >/dev/null
 	)
+	# A thinner rail than the default 34 leaves the panes more room and still
+	# shows the tree, the project group and the pane state.
+	demo dm exec '{"action":"set-rail","index":17}' -s "$session" >/dev/null
 	# The client draws before the feeder types, and a session that never comes
 	# up records toasts instead of a demo, so this fails instead of shipping one.
 	for _ in $(seq 60); do
