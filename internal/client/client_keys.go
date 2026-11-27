@@ -945,7 +945,7 @@ func (t *tui) runAction(name string) {
 		t.disarm()
 	case "reload":
 		if err := t.reload(); err != nil {
-			t.notify(err.Error())
+			t.configFailed()
 		}
 		t.disarm()
 	default:

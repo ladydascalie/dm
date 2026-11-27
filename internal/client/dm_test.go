@@ -3216,8 +3216,16 @@ keymap "main" {
 	if got := tui.theme().Palette.RailBG; got != (theme.RGB{R: 4, G: 5, B: 6}) {
 		t.Fatalf("running theme rail-bg = %v, want 4 5 6", got)
 	}
-	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "unknown node") {
-		t.Fatalf("failed reload toasts = %+v, want the parse error", tui.toasts)
+	if n := len(tui.toasts); n == 0 || !strings.Contains(tui.toasts[n-1].text, "dm config") {
+		t.Fatalf("failed reload toasts = %+v, want the pointer to dm config", tui.toasts)
+	}
+	// The toast elides the text, so the whole line lands beside the config.
+	data, err := os.ReadFile(path + keymap.ErrorSuffix)
+	if err != nil {
+		t.Fatalf("no %s beside the config: %v", keymap.ErrorSuffix, err)
+	}
+	if !strings.Contains(string(data), "unknown node") {
+		t.Fatalf("%s holds %q, want the parse error", keymap.ErrorSuffix, data)
 	}
 }
 

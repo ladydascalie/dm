@@ -495,6 +495,13 @@ func (t *tui) notify(text string) {
 	t.pushToast(toast{text: text})
 }
 
+// configFailed announces a config load or reload failure in one row. The toast
+// holds forty cells and dies in three seconds, so it names the verb that prints
+// the whole line. The loader also keeps the text in <config>.error.
+func (t *tui) configFailed() {
+	t.notify("config error, see: dm config")
+}
+
 // announceUpdate raises the toast for a line the caller decided is worth
 // saying, such as a newer release. It is the visible half of the boot notice:
 // the stderr line survives in the scrollback, this one is in the operator's
@@ -907,7 +914,7 @@ func attachConn(c *transport.Conn, h Harness, pace *pacer) (string, error) {
 		var err error
 		cfg, err = keymap.LoadDefaultPath(true)
 		if err != nil {
-			t.notify(err.Error())
+			t.configFailed()
 		}
 		// A client that reads the config also has the state tree, so the
 		// choices the operator saved last run are read once, here, for the

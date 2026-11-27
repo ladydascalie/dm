@@ -69,6 +69,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm secret hydrate` | `<name> --to P` | fetch a secret and write it to a file at 0600 | `dm secret hydrate <name> --to P` |
 | `dm secret type` | `<name> --to PANE` | fetch a secret and type it into a pane | `dm secret type gh-cli --to w1p1` |
 | `dm secret sync` | `[--from M] [--trust]` | apply a .dm-secrets.kdl mapping: register its secrets, ingest its files, redact everywhere | `dm secret sync` |
+| `dm config` | `[--json]` | report whether the config file parses, or print the whole error | `dm config` |
 | `dm version` | `[--json]` | print the version, commit and platform | `dm version [--json]` |
 | `dm man` | `[-o path]` | print the man page, or write it to a file | `dm man -o dm.1` |
 | `dm llms` | `[-o path]` | print llms.txt, or write it to a file | `dm llms -o llms.txt` |

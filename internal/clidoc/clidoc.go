@@ -618,6 +618,14 @@ var cliCommands = []cliCommand{
 
 	// Documentation.
 	{
+		name:    "config",
+		args:    "[--json]",
+		summary: "report whether the config file parses, or print the whole error",
+		flags:   []cliFlag{{"json", "", "print JSON"}},
+		example: "dm config",
+		group:   groupDocs,
+	},
+	{
 		name:    "version",
 		args:    "[--json]",
 		summary: "print the version, commit and platform",

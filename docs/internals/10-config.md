@@ -147,6 +147,7 @@ current mode, not as text (`internal/client/client_input.go#tui.processInput`).
 | `$XDG_CONFIG_HOME/dm/config.kdl`, or `$HOME/.config/dm/config.kdl` when `XDG_CONFIG_HOME` is unset | keymap, prefix and options; written on first attach with mode 0600, in a directory created 0700 |
 | `$XDG_CONFIG_HOME/dm/themes/<name>.kdl` | palette, accents, glyphs, state styles |
 | `$XDG_CONFIG_HOME/dm/config.kdl.good` | the last text that parsed, kept as a fallback |
+| `$XDG_CONFIG_HOME/dm/config.kdl.error` | the last load failure, written on a failed load and removed on a clean one |
 
 `defaultConfigPath` (`internal/keymap/config_load.go#defaultConfigPath`) picks
 the path. An attach writes the file when it is missing
@@ -184,10 +185,17 @@ whose key is bound, and one that is the prefix in `main`
 (`internal/keymap/config_parse.go#mergeDefaults`). `"none"` unbinds one action,
 and a duplicate action in one mode is an error.
 
-On a reload, a broken file costs one toast and the client keeps the running
-keymap and theme. On a load, a parse error falls back to `config.kdl.good`, the
+A broken file costs one toast. On a reload the client keeps the running keymap
+and theme. On a load, a parse error falls back to `config.kdl.good`, the
 last text that parsed, when that copy exists. A failed theme read keeps the
 built-in theme.
+
+A toast holds forty cells, elides the text and dies in three seconds, so a load
+records its whole error beside the file and removes that record on the next
+clean load (`internal/keymap/config_load.go#recordLoadError`). `dm config` is
+where the line gets read: it parses the file and prints `ok` with the path, or
+hands back the error and exits non-zero. `dm config --json` carries the same
+facts for a script. The verb writes nothing.
 
 The reload key, `ctrl+r` by default, re-reads `config.kdl` and the theme file it
 names (`internal/client/client_keys.go#tui.reload`). It also asks the server to

@@ -592,6 +592,16 @@ func Run(argv []string) error {
 		}
 		return runProvision(c)
 
+	case "config":
+		c := newFlagsAt(root, "config")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		if err := c.extraArg(0); err != nil {
+			return err
+		}
+		return runConfig(c)
+
 	case "version":
 		c := newFlagsAt(root, "version")
 		if err := c.parse(argv[1:]); err != nil {

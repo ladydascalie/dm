@@ -80,14 +80,14 @@ func TestAttachKeymapSeamSkipsTheConfigPath(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 
 	withSeam := attachFrames(t, keymap.LoadDefault())
-	if strings.Contains(withSeam, "home directory") {
+	if strings.Contains(withSeam, "config error") {
 		t.Fatal("the harness keymap still read the config path and toasted its error")
 	}
 
 	// The same session with no seam does toast it, so the check above proves
 	// the seam removed the toast and not that the frame is empty.
 	without := attachFrames(t, nil)
-	if !strings.Contains(without, "home directory") {
+	if !strings.Contains(without, "config error") {
 		t.Fatal("the file load did not toast, so the test proves nothing")
 	}
 }

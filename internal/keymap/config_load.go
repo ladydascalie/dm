@@ -1,10 +1,11 @@
 package keymap
 
 import (
-	"dm/internal/theme"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"dm/internal/theme"
 )
 
 // DefaultKDL returns the built-in default config text, the text a first run
@@ -45,18 +46,40 @@ func defaultConfigPath() (string, error) {
 // defaults. When write is true and the file is missing, it writes the default
 // file first. A write or parse failure returns the defaults and the error, so
 // the caller can toast it and keep running. It resolves the path from
-// XDG_CONFIG_HOME and $HOME and delegates to LoadDefaultFrom.
+// XDG_CONFIG_HOME and $HOME and delegates to LoadDefaultFrom, then records the
+// outcome beside the file.
 func LoadDefaultPath(write bool) (*Config, error) {
 	path, err := defaultConfigPath()
 	if err != nil {
 		return LoadDefault(), err
 	}
-	return LoadDefaultFrom(path, write)
+	cfg, err := LoadDefaultFrom(path, write)
+	recordLoadError(path, err)
+	return cfg, err
 }
 
 // goodSuffix marks the copy of the config file that last parsed: dm keeps it
 // beside the file and falls back to it when a later edit breaks the parse.
 const goodSuffix = ".good"
+
+// ErrorSuffix marks the file holding the last load error, kept beside the config
+// so a failure outlives the toast that announced it.
+const ErrorSuffix = ".error"
+
+// DefaultPath returns the config path an attach reads and writes.
+func DefaultPath() (string, error) { return defaultConfigPath() }
+
+// recordLoadError keeps the last load failure in <config>.error and removes it
+// on a clean load. A toast elides its text and dies in three seconds, so the
+// file is what `dm config` reads once the toast is gone. Best effort: a folder
+// that cannot be written loses the record, never the session.
+func recordLoadError(path string, err error) {
+	if err == nil {
+		_ = os.Remove(path + ErrorSuffix)
+		return
+	}
+	_ = os.WriteFile(path+ErrorSuffix, []byte(err.Error()+"\n"), 0o600)
+}
 
 // loadKeymap parses one config text, whitelists the action names and merges
 // the defaults.

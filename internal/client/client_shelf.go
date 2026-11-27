@@ -412,7 +412,7 @@ func (t *tui) shelfAction(action string) {
 		// A size or placement change is what the operator wants to see now,
 		// so the config key works with the box up. reload refits the shelf.
 		if err := t.reload(); err != nil {
-			t.notify(err.Error())
+			t.configFailed()
 		}
 	default:
 		t.notify(action + " is not a shelf key")
