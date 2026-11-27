@@ -108,7 +108,9 @@ is armed, `SCROLL <pane> +<offset>/<max>` while you scroll, and
 ## Demos
 
 Two recordings show the basics. A player opens on a still frame, so press play
-once.
+once. Every key the recording sends lands in the bottom right of the terminal as
+a chip, so the demo names the key and shows what it does. `k` turns that overlay
+off and on.
 
 <div data-cast="docs/casts/split.cast"></div>
 

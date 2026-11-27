@@ -26,6 +26,9 @@
       poster: el.dataset.poster || 'npt:0:03',
       terminalFontFamily: '"dm Cast Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace, "Symbols Nerd Font"',
       controls: true,
+      // The recorder keeps the keys in the cast as input events, and the
+      // player shows them as pills. It is off unless a page asks for it.
+      keystrokeOverlay: true,
     };
   }
 
