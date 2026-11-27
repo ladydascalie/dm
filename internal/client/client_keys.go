@@ -297,11 +297,35 @@ func (t *tui) openRailMenu(it rail.RailItem, x, y int) {
 		} else {
 			items = append(items, rename)
 		}
+	case rail.Shelf:
+		title = "pane " + it.Text
+		items = t.shelfRowMenuItems(it)
 	default:
 		return
 	}
 	t.openMenuAt(title, t.hintedItems(items), x, y)
 	t.menuPress = true
+}
+
+// shelfRowMenuItems is the rail shelf row's menu: the actions a shelved pane
+// can take from the sidebar. A shelved pane sits in no tree, so the pane
+// menu's splits, close and scrollback have nothing to act on. Focus is the
+// row's own left press, so the menu offers the shelf's label and its place.
+func (t *tui) shelfRowMenuItems(it rail.RailItem) []menuItem {
+	return []menuItem{
+		{label: "Rename pane", action: "rename-pane", run: func() {
+			t.closeMenu()
+			t.renameShelfMember(it.Pane)
+		}},
+		{label: "Pop pane", action: "pop-pane", run: func() {
+			t.actionOn(it.Pane, "pop-pane", nil)
+		}},
+		{label: "Show shelf", action: "toggle-shelf", run: func() {
+			if t.shelf == nil {
+				t.shelfToggle()
+			}
+		}},
+	}
 }
 
 // openSessionMenu builds the session menu for a right press on the rail's

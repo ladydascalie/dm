@@ -2938,6 +2938,13 @@ func (t *tui) closeRename() {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	// A prompt opened from the shelf closes back onto it: the float still owns
+	// the desk, and the keyboard must land on its member, not a tree pane. The
+	// deferred ask keeps waiting either way, because a mode is what holds it
+	// back.
+	if t.shelf != nil && kind != askPromptKind && kind != askNoteKind {
+		t.mode = "shelf"
+	}
 	if (kind == askPromptKind || kind == askNoteKind) && t.ask != nil {
 		t.mode = "ask"
 		t.askFit()
@@ -3752,11 +3759,18 @@ func (t *tui) railClick(ev mouseEvent, x, y int) bool {
 			return true
 		}
 		if id := rail.RailShelfAt(t.snap, x, y, t.railOff); id != "" {
+			// A second press on the same row within the double click window opens
+			// the rename prompt instead of selecting the member again.
+			if t.isRailDoubleClick(y) {
+				if it, ok := rail.RailItemAt(t.snap, x, y, t.railOff); ok {
+					t.renameShelfMember(it.Pane)
+				}
+				return true
+			}
 			// A shelf row focuses that member. A shelved pane is in no tree,
 			// so the server moves the shelf's active index and leaves the
 			// window focus alone. The float opens when it was closed, so the
 			// click both selects the member and shows it.
-			t.clearRailPress()
 			if t.conn != nil {
 				_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
 			}

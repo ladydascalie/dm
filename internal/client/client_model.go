@@ -274,6 +274,12 @@ type tui struct {
 	lastTabClick    time.Time
 	lastTabClickPos struct{ X, Y int }
 
+	// lastChipClick and lastChipID track the last left press on a shelf strip
+	// chip, so a second press on the same chip within the double-click window
+	// opens that pane's rename prompt instead of focusing it again.
+	lastChipClick time.Time
+	lastChipID    string
+
 	// cp is the open command palette, nil when closed. cpX and cpY are the
 	// query cursor cell its last paint asked for.
 	cp  *commandPalette

@@ -811,6 +811,78 @@ func TestShelfDragCopies(t *testing.T) {
 	}
 }
 
+// TestShelfChipDoubleClickRenamesTheMember proves a second press on one strip
+// chip opens that pane's rename prompt with the member's name, and that the
+// prompt closes back onto the float so the shelf keeps the keyboard.
+func TestShelfChipDoubleClickRenamesTheMember(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	r := tui.shelf.float.Rect
+	_, chips := tui.shelfStrip()
+	if len(chips) < 2 {
+		t.Fatalf("chips = %+v, want one per member", chips)
+	}
+	x, y := r.X+chips[1].lo+1, r.Y+1
+	tui.handleMouse(mouseEvent{btn: 0, x: x, y: y})
+	m := nextMsg(t, got)
+	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p8" {
+		t.Fatalf("the first press sent %+v, want a focus request for w1p8", m)
+	}
+
+	tui.handleMouse(mouseEvent{btn: 0, x: x, y: y})
+	if tui.mode != "rename" || tui.renameKind != "pane" || tui.renameID != "w1p8" {
+		t.Fatalf("the second press gave mode %q kind %q id %q, want the pane prompt for w1p8", tui.mode, tui.renameKind, tui.renameID)
+	}
+	if tui.renameDraft.String() != "waiting" {
+		t.Fatalf("the draft = %q, want the member's name", tui.renameDraft.String())
+	}
+	// The press itself sends nothing: the prompt is the client's.
+	testutil.NoMsg(t, got)
+
+	feed(tui, "\x15web\r")
+	m = nextMsg(t, got)
+	if m.Type != "req" || m.Action != "set-pane-name" || m.Target != "w1p8" || m.Name != "web" {
+		t.Fatalf("the submitted prompt sent %+v, want set-pane-name w1p8 web", m)
+	}
+	if tui.shelf == nil || tui.mode != "shelf" {
+		t.Fatalf("the prompt closed onto shelf %v in mode %q, want the float keeping the keyboard", tui.shelf, tui.mode)
+	}
+}
+
+// TestRailShelfRowDoubleClickRenamesTheMember proves the sidebar's shelf row
+// answers a double click the way its pane rows do.
+func TestRailShelfRowDoubleClickRenamesTheMember(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	row := -1
+	for i, it := range rail.RailItems(tui.snap) {
+		if it.Kind == rail.Shelf && it.Pane == "w1p8" {
+			row = i
+		}
+	}
+	if row < 0 {
+		t.Fatalf("the rail has no shelf row for w1p8: %+v", rail.RailItems(tui.snap))
+	}
+	tui.handleMouse(mouseEvent{btn: 0, x: 6, y: row + 1})
+	m := nextMsg(t, got)
+	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p8" {
+		t.Fatalf("the first press sent %+v, want a focus request for w1p8", m)
+	}
+	drainSummon(t, tui, got)
+
+	tui.handleMouse(mouseEvent{btn: 0, x: 6, y: row + 1})
+	if tui.mode != "rename" || tui.renameKind != "pane" || tui.renameID != "w1p8" {
+		t.Fatalf("the second press gave mode %q kind %q id %q, want the pane prompt for w1p8", tui.mode, tui.renameKind, tui.renameID)
+	}
+	if tui.renameDraft.String() != "waiting" {
+		t.Fatalf("the draft = %q, want the member's name", tui.renameDraft.String())
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestShelfRightPressOpensTheShelfMenu proves a right press inside the shelf
 // offers the shelf's own actions, and that closing that menu hands the keyboard
 // back to the float.

@@ -411,6 +411,22 @@ func (t *tui) shelfChipHit(x, y int) string {
 	return ""
 }
 
+// shelfChipDoubleClick reports whether a left press on chip id is the second
+// one inside the double-click window. The strip is the shelf's tab bar, so a
+// chip answers a double click the way a tab bar tab does: the first press
+// selects the member and the second opens its rename prompt.
+func (t *tui) shelfChipDoubleClick(id string) bool {
+	now := time.Now()
+	double := id != "" && t.lastChipID == id && now.Sub(t.lastChipClick) <= railDoubleClick
+	if double {
+		t.lastChipClick = time.Time{}
+		t.lastChipID = ""
+	} else {
+		t.lastChipClick, t.lastChipID = now, id
+	}
+	return double
+}
+
 // shelfKey consumes one read in shelf mode. The prefix is the only byte the
 // client keeps for itself: with it, F closes the shelf, n and p move the active
 // member and G pops it. Every other byte is the active member's own input and
@@ -585,6 +601,20 @@ func (t *tui) shelfChipAt(x int) bool {
 	return hi > lo && x >= lo && x < hi
 }
 
+// renameShelfMember opens the pane rename prompt for a shelf member. A
+// shelved pane is in no tree, so the prompt is the only way to label what it
+// holds from the shelf's own surfaces.
+func (t *tui) renameShelfMember(id string) {
+	if id == "" {
+		return
+	}
+	name := ""
+	if p := t.paneByID(id); p != nil {
+		name = p.Name
+	}
+	t.openRenamePromptFor("pane", id, name)
+}
+
 // focusShelfMember asks the server to make id the shelf's active member. The
 // server owns the index, so the snapshot that comes back names it. The ask goes
 // out even for the member the client already shows: the client's copy lags the
@@ -621,6 +651,14 @@ func (t *tui) shelfMenuItems() []menuItem {
 		)
 	}
 	return append(items,
+		menuItem{label: "Rename pane", action: "rename-pane", run: func() {
+			if t.shelf == nil {
+				return
+			}
+			member := t.shelf.active
+			t.closeMenu()
+			t.renameShelfMember(member)
+		}},
 		menuItem{label: "Pop pane", action: "pop-pane", run: func() { t.popShelf() }},
 		menuItem{label: "Close shelf", action: "toggle-shelf", run: func() { t.closeShelfFloat() }},
 	)
@@ -671,6 +709,12 @@ func (t *tui) shelfMouse(ev mouseEvent, x, y int) bool {
 	}
 	box := layout.BoxRect(sv.float.Rect, 1)
 	if x < box.X || y < box.Y || x >= box.X+box.W || y >= box.Y+box.H {
+		// The shelf section of the rail names the shelf itself, so a press
+		// there stays the rail's: a shelf row can select or rename a member
+		// without putting the float away. Every other outside point closes it.
+		if t.snap != nil && (rail.RailShelfAt(t.snap, x, y, t.railOff) != "" || rail.RailShelfHeaderAt(t.snap, x, y, t.railOff)) {
+			return false
+		}
 		// A press outside puts the shelf away and is spent on the float: the
 		// click that dismisses it must not also act on what it covers. The
 		// wheel and hover outside do nothing either, so no surface under the
@@ -690,7 +734,11 @@ func (t *tui) shelfMouse(ev mouseEvent, x, y int) bool {
 	}
 	if id := t.shelfChipHit(x, y); id != "" {
 		if ev.btn&3 == 0 && !motion && !ev.release {
-			t.focusShelfMember(id)
+			if t.shelfChipDoubleClick(id) {
+				t.renameShelfMember(id)
+			} else {
+				t.focusShelfMember(id)
+			}
 		}
 		return true
 	}

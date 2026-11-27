@@ -155,6 +155,27 @@ func TestRailMenuWindowRow(t *testing.T) {
 	testutil.NoMsg(t, got)
 }
 
+// TestRailMenuShelfRow proves a shelf row offers only what a shelved pane can
+// take, and that its Rename row opens the pane prompt for that member.
+func TestRailMenuShelfRow(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	row := rail.RailItem{Kind: rail.Shelf, Text: "waiting", Pane: "w1p8", PaneName: "waiting"}
+	tui.openRailMenu(row, 10, 10)
+	if tui.menu == nil {
+		t.Fatal("a shelf row opened no menu")
+	}
+	railWantLabels(t, tui.menu, "Rename pane", "Pop pane", "Show shelf")
+	tui.closeMenu()
+
+	tui.openRailMenu(row, 10, 10)
+	railMenuPick(t, tui, "Rename")
+	if tui.mode != "rename" || tui.renameKind != "pane" || tui.renameID != "w1p8" || tui.renameDraft.String() != "waiting" {
+		t.Fatalf("the shelf row's rename gave mode %q kind %q id %q draft %q", tui.mode, tui.renameKind, tui.renameID, tui.renameDraft.String())
+	}
+	testutil.NoMsg(t, got)
+}
+
 // TestRailMenuRenameTargetsRow picks Rename on each row kind and holds the
 // prompt to that row's kind, id and current label.
 func TestRailMenuRenameTargetsRow(t *testing.T) {
