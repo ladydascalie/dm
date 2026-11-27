@@ -37,7 +37,7 @@ func TestHTMLPageCarriesEverySection(t *testing.T) {
 	page := HTMLPage()
 	for _, id := range []string{
 		"sec-introduction", "sec-commands", "sec-layouts", "sec-keys", "sec-config",
-		"sec-keymaps", "sec-themes", "sec-theme-sample", "sec-prompt-marks",
+		"sec-keymaps", "sec-themes", "sec-theme-sample", "sec-copy", "sec-prompt-marks",
 		"sec-environment", "sec-files", "sec-actions", "sec-action-names",
 		"sec-action-desc",
 		"sec-components",

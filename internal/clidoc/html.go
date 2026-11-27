@@ -222,6 +222,7 @@ dl.flags dd { margin: 0; color: var(--dim); }
 <li><a class="toc-link" href="#sec-keys">Keys</a></li>
 <li><a class="toc-link" href="#sec-config">Config</a></li>
 <li><a class="toc-link" href="#sec-themes">Themes</a></li>
+<li><a class="toc-link" href="#sec-copy">Copy and paste</a></li>
 <li><a class="toc-link" href="#sec-prompt-marks">Prompt marks</a></li>
 <li><a class="toc-link" href="#sec-environment">Environment</a></li>
 <li><a class="toc-link" href="#sec-files">Files</a></li>
@@ -302,7 +303,7 @@ func HTMLPage() string {
 	b.WriteString(`<h2 id="introduction">Introduction</h2>`)
 	b.WriteString(`<p>dm is a durable terminal multiplexer in one binary. One process is the server: it owns the panes and their pty state, and it keeps running after you leave. A second mode is the TUI client, which draws the panes and sends actions. A third is the CLI, which sends the same actions to the same server, so a script and a hand on the keyboard drive one surface. Detach and reattach, and the shells keep running.</p>`)
 	b.WriteString(`<p>A workspace is <code>s1</code>, <code>s2</code>, and so on. A window is <code>w1</code>, <code>w2</code>. A pane is its window id plus <code>p</code> and a per-window sequence: <code>w2p3</code> is the third pane opened in window 2. Ids are readable and constructible, and a counter only moves forward, so a closed id is never reused.</p>`)
-	b.WriteString(`<p class="provenance">Where this page comes from: <code>dm html</code> renders it from the Go tables <code>cliCommands</code>, <code>manActionFields</code>, <code>manActionNames</code>, <code>keymap.LoadDefault().HelpEntries()</code>, the <code>configdoc</code> tables, the layout section, the prompt-mark section and the component tables.</p>`)
+	b.WriteString(`<p class="provenance">Where this page comes from: <code>dm html</code> renders it from the Go tables <code>cliCommands</code>, <code>manActionFields</code>, <code>manActionNames</code>, <code>keymap.LoadDefault().HelpEntries()</code>, the <code>configdoc</code> tables, the copy section, the layout section, the prompt-mark section and the component tables.</p>`)
 	b.WriteString(`</section>`)
 
 	b.WriteString(htmlCommands(ids))
@@ -310,6 +311,7 @@ func HTMLPage() string {
 	b.WriteString(htmlKeys(ids))
 	b.WriteString(htmlConfig(ids))
 	b.WriteString(htmlThemes(ids))
+	b.WriteString(htmlCopySelect())
 	b.WriteString(htmlPromptMarks(ids))
 	b.WriteString(htmlEnvironment(ids))
 	b.WriteString(htmlFiles(ids))
@@ -480,6 +482,23 @@ func htmlThemes(ids *idGen) string {
 	b.WriteString(`<h3 id="sec-theme-sample">Sample theme</h3>`)
 	b.WriteString(`<p>A theme file that names every key at its built-in value. Pasted as a theme, it paints the built-in theme.</p>`)
 	fmt.Fprintf(&b, `<pre><code id="%s">%s</code></pre>`, htmlEscape(ids.id("theme", "sample")), htmlEscape(configdoc.ThemeSampleKDL))
+	b.WriteString(`</section>`)
+	return b.String()
+}
+
+// htmlCopySelect renders the COPY AND PASTE section: the mouse selection, the
+// text it yields, the terminal key that takes a drag back, the clipboard and
+// the iTerm2 settings that change both.
+func htmlCopySelect() string {
+	var b strings.Builder
+	b.WriteString(`<section class="sec" id="sec-copy">`)
+	b.WriteString(`<h2 id="copy">Copy and paste</h2>`)
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(CopyDrag))
+	fmt.Fprintf(&b, "<p>%s %s</p>", htmlEscape(CopyRows), htmlEscape(CopyDrop))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(CopyTerminal))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(CopyClipboard))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(CopyPaste))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(CopyIterm2))
 	b.WriteString(`</section>`)
 	return b.String()
 }

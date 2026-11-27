@@ -282,6 +282,16 @@ An unbound key notifies and disarms. It never reaches a pane, because dm does no
 
 Most overlays resolve keys through a keymap mode: `menu`, `picker`, `switcher`, `layout`, `scroll`, `rename`, `box` (the message view) and `help`. Two keymap mode names differ from the client's `mode` strings. The sessions picker is keymap mode `picker` and client mode `sessions`. The dashboard is `switcher` and `dashboard`. The rest share one name: `menu`, `layout`, `scroll`, `rename`, `box` and `help`. The command palette has neither a `mode` nor a keymap mode. The floating command and the ask floating pane read their keys by hand, inside mode `float` and mode `ask`. A config file that predates a mode falls back to the built-in keymap, as `keymapKey` does for `help` (`internal/client/client_floats.go#tui.keymapKey`).
 
+## Mouse and selection
+
+`handleMouse` decides every pointer event (`internal/client/client_input.go#tui.handleMouse`). The sidebar, the divider between two panes, a ctrl+click on a URL and a right press for the pane menu all take an event before a pane does. A pane sees only what those leave.
+
+A left press on pane content is held, not forwarded. `heldPress` keeps the press and the motion that follows it. The press anchors a `selection` at that cell. Motion under two cells on both axes is jitter, and it keeps the press a click. A release in the same cell sends the press and the release to an app that claims the mouse. A release anywhere else copies.
+
+A selection counts cells in one terminal: the pane's live screen, or the tall terminal its scrollback is drawn from (`selSource`). A wheel turn during the drag scrolls that pane's scrollback. It moves the focus with the rows under the pointer, which is how one drag reaches history (`wheelSelect`, `internal/client/client_input.go#tui.wheelSelect`). A live selection drops when output scrolls the screen (`dropLiveSelection`, `internal/client/client_input.go#tui.dropLiveSelection`). A snapshot that changes the pane's rect drops it too. A selection in frozen scrollback holds until the pane leaves scrollback.
+
+`copySelection` cuts the range out of the VT row by row and drops each row's trailing spaces (`extractSelection`, `internal/client/render_pane.go#extractSelection`, `internal/client/client_input.go#tui.copySelection`). It hands the text to `writeClipboard` (`internal/client/client_clip.go#tui.writeClipboard`). That function sends OSC 52, unless the attach probe went unanswered. An unanswered probe pipes the text to the first clipboard tool the host has: `pbcopy`, `wl-copy` or `xclip`. A browser tab has a page clipboard instead, so it takes the text directly. The toast follows the return value, so a copy that landed nowhere is never reported as one.
+
 ## Reconnect and detach
 
 Detach is local. The `detach` action sets `t.quit`, and `runSession` returns. The deferred close runs, the terminal modes are restored, and the shell returns. Panes and the session file survive. The session file is the saved tree, `state.json` under the session's state directory, written by the server (`paths.StatePath`, `internal/paths/paths.go#StatePathAt`).

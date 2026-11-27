@@ -300,6 +300,14 @@ func LLMsText() string {
 		fmt.Fprintf(&b, "| `%s` | %s | %s |\n", blk.name, llmsCell(blk.keys), llmsCell(blk.desc))
 	}
 
+	b.WriteString("\n## Copy and paste\n\n")
+	b.WriteString(CopyDrag + "\n")
+	b.WriteString(CopyRows + " " + CopyDrop + "\n")
+	b.WriteString(CopyTerminal + "\n")
+	b.WriteString(CopyClipboard + "\n")
+	b.WriteString(CopyPaste + "\n")
+	b.WriteString(CopyIterm2 + "\n")
+
 	b.WriteString("\n## Prompt marks\n\n")
 	b.WriteString(PromptMarkIntro + "\n")
 	b.WriteString(PromptMarkWhere + "\n\n")

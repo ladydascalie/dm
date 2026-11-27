@@ -199,33 +199,81 @@ to the next newer one; both wrap. A query with no match raises `no match: <q>`.
 With an accepted query, the first `esc` clears the search and keeps scrollback
 open, and the next `esc` leaves.
 
-Mouse reporting takes the drag, so hold Shift while dragging to use the
-terminal's own selection. dm selects instead: a left drag highlights the
-row-major range, clamped to the pane it started in, and the release copies it
-and raises a `copied N chars` toast. A press and release in the same cell is
-still a click that reaches the app. A geometry change, or output that scrolls
-the live screen, drops the selection.
+## Copy and paste
+
+### Drag to copy
+
+dm turns mouse reporting on at attach, so every drag on a pane reaches dm and
+never the terminal. A left press on pane content starts a selection. The drag
+highlights the row-major range. The release copies it and raises a
+`copied N chars` toast. The range stops at the pane the drag started in.
+
+A press and release in the same cell stays a click. An app that claims the
+mouse gets that click. A wheel turn during the drag scrolls that pane's
+scrollback three rows a notch, so one drag reaches history. A pane on the
+alternate screen keeps no history, and dm says so in a toast.
+
+The copy is the rows the pane drew, not a logical line. A wrapped line arrives
+in pieces, one per row. A two-column cell arrives once. Trailing spaces are
+dropped. A geometry change drops the selection, and so does output that scrolls
+the live screen. A selection in frozen scrollback holds until the pane leaves
+scrollback.
+
+dm claims the drag first, so the terminal's own selection needs its bypass
+modifier. Hold Shift on most terminals and Option on iTerm2. When neither
+works, the terminal's own mouse preference names the key.
+
+### prefix keys
 
 `prefix i` copies the focused pane's id, the handle every other dm surface names
 a pane by. `prefix y` copies what the focused pane produced since the last Enter
 you sent it, and `dm yank <pane>` prints the same rows. dm records the output
 stream position when it forwards an Enter, so a remote shell needs no setup. A
 pane that has never been sent an Enter falls back to the visible screen, with a
-toast that says so. `prefix Y` copies the visible screen. Both keys write OSC
-52; a terminal that does not answer gets the copy piped to `pbcopy`, `wl-copy`
-or `xclip` instead. A shell that emits OSC 133 prompt marks gets the exact
-range, from the command start mark to the command end mark. Add this line to
-`~/.zshrc`:
+toast that says so. `prefix Y` copies the visible screen.
+
+### The shell marks
+
+A shell that emits OSC 133 prompt marks gives `prefix y` both edges exactly:
+the command start mark and the command end mark. Without them the copy starts
+after the echoed command line. It ends at the last row with content, so the
+trailing prompt comes along. Add this line to `~/.zshrc`, above the line that
+loads your prompt theme. The theme registers its own `precmd` hook, and the last
+one wins:
 
     precmd() { print -Pn '\e]133;D\e\\\e]133;A\e\\' }; preexec() { print -Pn '\e]133;C\e\\' }
 
-The marks travel over ssh like any other output. dm enables bracketed paste on
-attach, so ctrl+shift+v inserts newlines literally, and no byte inside a paste is
-read as a dm key.
+The marks are ordinary output, so they travel over ssh and a nested multiplexer
+like any other bytes. A shell on a remote host needs the same line in its own
+start file. A pane that runs a program instead of a shell has no prompt and no
+marks.
+
+### The clipboard
+
+A copy writes OSC 52. dm probes the terminal once per attach with an OSC 52
+read. A terminal silent for 300 ms gets the copy piped to `pbcopy`, `wl-copy` or
+`xclip` instead. dm raises the toast only when the text landed. When the host
+carries no clipboard tool, the toast names one to install.
+
+dm enables bracketed paste on attach. A paste inserts newlines literally, and no
+byte inside it is read as a dm key.
 
 Copying raises a toast, as does a failed request, an unknown key, an empty
 scrollback and a pane exit. The client keeps up to three toasts above the bar,
 and each expires after three seconds.
+
+### iTerm2 settings
+
+iTerm2 drops OSC 52 writes until Preferences → General → Selection →
+Applications in terminal may access clipboard is on. A dropped write looks the
+same as a taken one, so turn that setting on before you depend on a copy there.
+When dm's read probe goes unanswered, dm pipes the copy to `pbcopy` instead, and
+that copy lands.
+
+iTerm2 pastes with Command+V, and dm reads it as one bracketed paste. Its own
+text selection needs Option (⌥) held, not Shift. iTerm2's shell integration
+writes the same OSC 133 marks, so a pane that runs it gives `prefix y` both
+edges without the line above.
 
 ## Windows and workspaces
 

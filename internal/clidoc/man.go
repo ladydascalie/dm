@@ -13,7 +13,7 @@ import (
 // fails when the two drift.
 
 // manDate is the page date. It changes only when the page changes.
-const manDate = "2026-11-26"
+const manDate = "2026-11-27"
 
 // manField is one JSON field dm exec accepts.
 type manField struct {
@@ -200,6 +200,8 @@ func ManPage() string {
 	b.WriteString(manConfig())
 	b.WriteString(manTheme())
 
+	b.WriteString(manCopySelect())
+
 	b.WriteString(manPromptMarks())
 
 	b.WriteString(manLayouts())
@@ -257,6 +259,33 @@ func manLayouts() string {
 	b.WriteString(roffEscape(LayoutsSample))
 	b.WriteString("\n")
 	b.WriteString(".fi\n")
+	return b.String()
+}
+
+// manCopySelect renders the COPY AND PASTE section: the mouse selection, the
+// text it yields, the terminal key that takes a drag back, and the clipboard.
+func manCopySelect() string {
+	var b strings.Builder
+	b.WriteString(".SH COPY AND PASTE\n")
+	b.WriteString(roffEscape(CopyDrag))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(CopyRows + " " + CopyDrop))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(CopyTerminal))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(CopyClipboard))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(CopyPaste))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffBold("iTerm2"))
+	b.WriteString("\n")
+	b.WriteString(roffEscape(CopyIterm2))
+	b.WriteString("\n")
 	return b.String()
 }
 
