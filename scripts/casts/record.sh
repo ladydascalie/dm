@@ -113,18 +113,11 @@ SHELL
 }
 
 start() {
-	local name=$1
 	demo dm reset -s "$session" --force >/dev/null 2>&1 || true
 	(
 		cd "$cwd" || exit 1
 		demo dm new -s "$session" >/dev/null
 	)
-	# The split demo hides the rail, because the prefix box is wider than a pane
-	# beside it and would float across the rail and both pane borders. The
-	# project demo keeps the rail, because the rail is what it teaches.
-	if [ "$name" = split ]; then
-		demo dm exec '{"action":"set-rail","index":0}' -s "$session" >/dev/null
-	fi
 	# The client draws before the feeder types, and a session that never comes
 	# up records toasts instead of a demo, so this fails instead of shipping one.
 	for _ in $(seq 60); do
@@ -137,14 +130,17 @@ start() {
 
 record() {
 	local name=$1 len cols rows out=$casts/$1.cast events last
-	# The split demo hides the rail, so the help box has the whole screen and
-	# only its longest labels shorten. The project demo needs the rail, and the
-	# dm ls table under it, so it runs on a wider screen.
+	# One screen size for both casts. The player scales the font to the column,
+	# so a wider screen buys room for the help box and the dm ls table and pays
+	# for it in glyph size. The box stops shortening labels at 120 columns; 132
+	# leaves it clear of the rail, the pane borders and the status bar.
+	cols=132
+	rows=34
 	case $name in
-	split) len=16 cols=100 rows=28 ;;
-	project) len=17 cols=120 rows=30 ;;
+	split) len=16 ;;
+	project) len=17 ;;
 	esac
-	start "$name"
+	start
 	"feed_$name" | demo timeout -k 5 $((len * 2 + 20)) "${recorder[@]}" rec \
 		--stdin --overwrite --quiet \
 		--idle-time-limit 2 \
