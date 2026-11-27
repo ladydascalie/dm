@@ -715,6 +715,10 @@ explicit `--addr` or `--token` still binds its own, and with no daemon running
 `dm web` starts one the way it always did. The `U` key opens a temporary float
 with the URL and its QR code under it, read from the daemon rather than from the
 config, so the box shows what actually answers. `esc`, `q` or `U` closes it.
+The daemon's listener is always writable, and a `reload` does not start or stop
+it: both are fixed when the server starts. Set the node before the session you
+want it on, and run `dm web --read-only` by hand when the page must not take
+input.
 
 The token is the whole access model. `dm web` prints the URL with the token on
 it, and the page trades that token for a cookie on the first load. The cookie
