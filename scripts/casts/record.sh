@@ -146,6 +146,37 @@ record() {
 	events=$(grep -c '^\[' "$out" || true)
 	last=$(grep -o '^\[[0-9.]*' "$out" | tail -1 | tr -d '[')
 	printf 'cast: %s: %s events, ends at %ss, %s bytes\n' "$name" "$events" "$last" "$(wc -c <"$out")"
+	gaps=$(font_gaps "$out") || {
+		printf 'record: %s did not parse as a cast\n' "$name" >&2
+		exit 1
+	}
+	if [ -n "$gaps" ]; then
+		printf 'record: %s draws %s, which the webfont lacks. Run make docs-font.\n' "$name" "$gaps" >&2
+		exit 1
+	fi
+}
+
+# A cast carries codepoints, and the webfont carries the shapes. A codepoint the
+# subset lacks is tofu on the page, so a fresh cast is checked against the font
+# that ships beside it.
+font_gaps() {
+	uvx --quiet --with fonttools python - "$1" docs/assets/font/dm-cast-mono.woff2 <<'PY'
+import json, sys
+from fontTools.ttLib import TTFont
+
+cast, font = sys.argv[1], sys.argv[2]
+have = set(TTFont(font).getBestCmap())
+codes = set()
+for line in open(cast, encoding='utf-8', errors='ignore'):
+	line = line.strip()
+	if not line.startswith('['):
+		continue
+	row = json.loads(line)
+	if row[1] == 'o':
+		codes.update(ord(ch) for ch in row[2])
+missing = sorted(c for c in codes if c > 0x7f and c not in have)
+print(' '.join('U+%04X' % c for c in missing))
+PY
 }
 
 names=("$@")

@@ -1,0 +1,19 @@
+dm Cast Mono
+============
+
+docs/assets/font/dm-cast-mono.woff2 is a subset, built by scripts/casts/font.sh
+from Nerd Fonts 3.3.0's patched JetBrains Mono:
+
+  https://github.com/ryanoasis/nerd-fonts/raw/v3.3.0/patched-fonts/JetBrainsMono/Ligatures/Regular/JetBrainsMonoNerdFont-Regular.ttf
+
+It holds printable ASCII, every codepoint dm's Go sources draw, and every
+codepoint the recorded casts carry. The advance is 600 units for text and for
+the patched icons, so the terminal grid stays aligned.
+
+The subset is a modified font, so it carries its own name and not the upstream
+one. The copyright, the trademark and the SIL Open Font License records are
+untouched, and OFL.txt beside this file is the licence the OFL requires the
+subset to travel with. JetBrains Mono is by the JetBrains Mono Project Authors;
+the Nerd Fonts patching is by Ryan L McIntyre and contributors.
+
+Run `make docs-font` after a cast grows a codepoint the font lacks.

@@ -12,3 +12,14 @@
 [data-cast]:has(.ap-player) {
 	min-height: 0;
 }
+
+/* dm draws Nerd Font glyphs into its rail and its status cells, and a cast
+   carries the codepoints, not the shapes. The subset is what dm can draw, so a
+   reader without a patched terminal font still sees the icons. casts.js puts
+   this family first and keeps the player's own stack behind it for every glyph
+   the subset does not hold. */
+@font-face {
+	font-family: "dm Cast Mono";
+	src: url("font/dm-cast-mono.woff2") format("woff2");
+	font-display: swap;
+}

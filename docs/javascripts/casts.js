@@ -26,6 +26,7 @@
       autoPlay: false,
       preload: true,
       poster: 'npt:0:01',
+      terminalFontFamily: '"dm Cast Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace, "Symbols Nerd Font"',
       controls: true,
     };
   }
