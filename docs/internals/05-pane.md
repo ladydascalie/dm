@@ -1,126 +1,164 @@
 # The pane daemon
 
-What this page answers: what one pane daemon is, why each pane is its own process, how it spawns a PTY and a screen from that PTY, how it keeps scrollback and replays it, how it records the last Enter so a copy starts at the right byte, how it answers the OSC 7501 status protocol and consumes the OSC 7502 session report, how a caller waits for output, how it resizes, and where you add its next action. The page stops at the daemon's socket: the protocol and the server side are [The protocol](03-protocol.md) and [The server](04-server.md).
+A pane daemon is the process that owns one pane. It holds the pane's pseudo terminal, its terminal emulator, its scrollback buffer and its status. Read this page to change how a pane runs a program, keeps history or answers the status protocol. The page stops at the daemon's socket. [The protocol](03-protocol.md) owns the frames and [The server](04-server.md) owns the process that starts and watches a daemon.
 
-Six words this page uses, defined here once. A PTY is a pseudo terminal: a master file descriptor the daemon holds, paired with a slave the shell reads and writes. A VT screen is the terminal emulator on the other side of that PTY: it turns the shell's bytes into cells, a cursor and rows. A grid is that screen's table of cells. A scroll ring is a byte buffer of scrollback. A status is a program's report about itself, not about the screen: a state word, the app that reported it and a message, carried by the OSC 7501 protocol below. A picture is that screen as it stands: the cells with the cursor, the styles and the modes, which is what `vt.Snapshot` returns (`internal/vt/snapshot.go#Term.Snapshot`).
+A PTY (pseudo terminal) is a device pair. The daemon holds the master file descriptor and the shell reads and writes the slave. A VT screen is the terminal emulator on the other side of that PTY. It turns the shell's bytes into cells, a cursor and rows. A grid is the screen's table of cells. A scrollback buffer is a fixed-size byte buffer of recent output. A screen snapshot is the screen as it stands: the cells, the cursor, the styles and the modes. `Term.Snapshot` returns one (`internal/vt/snapshot.go#Term.Snapshot`).
 
 ## One process per pane
 
-dm is the terminal multiplexer. A pane daemon is the process that owns one pane: one PTY, one VT screen, one scroll ring and one status. It is `dm __pane` in the process table, started by `Run` (`internal/pane/pane.go#Run`), which fills the `paneProc` struct (`internal/pane/pane.go#paneProc`) that the rest of the package's methods hang off.
+A pane daemon owns one pane: one PTY, one VT screen, one scrollback buffer and one status. It runs as `dm __pane`, which `main` dispatches (`main.go#main`). `Run` fills the `paneProc` struct that the package's methods hang off (`internal/pane/pane.go#Run`, `internal/pane/pane.go#paneProc`).
 
-The pane is a separate process for two reasons. The first is lifetime: the daemon must outlive the server that spawned it. Three lines argue that split:
+The pane is a separate process for two reasons. The first is lifetime: the daemon must outlive the server that spawned it.
 
 - `internal/pane/pane.go#paneProc`: "The session server comes and goes; this process does not."
 - `internal/server/server_core.go#server.ensurePane` starts the daemon with `Setsid: true`, so the pane leaves the server's session and process group. A server crash signals nothing in the pane.
 - `internal/wire/wire.go#Msg`: "pane daemons outlive servers".
 
-The second is memory. A pane's memory limit is a GC setting that belongs to a whole process (`debug.SetMemoryLimit`, `internal/pane/pane.go#Run`), and each pane's ring budget is its own, changeable while it runs (the `set-history` action, `internal/pane/pane.go#paneProc.serve`). A daemon shared by every pane could not hold one limit per pane.
+The second reason is memory. A pane's memory limit is a GC setting for a whole process (`debug.SetMemoryLimit`, `internal/pane/pane.go#Run`). Each pane keeps its own scrollback budget. The pane can change that budget while it runs (`set-history`, `internal/pane/pane.go#paneProc.serve`). A shared daemon could not hold one limit per pane.
 
-So the pane talks to a socket, not to a caller: `sessions/<name>/panes/<id>.sock` from `paths.PaneSock` (`internal/paths/paths.go#PaneSock`), joined in `PaneSockAt` (`internal/paths/paths.go#PaneSockAt`), mode 0600. The server dials it (`ensurePane`, `internal/server/server_core.go#server.ensurePane`), the `dm wait` CLI subcommand dials it directly (`internal/cli/cli.go#runWaitAt`), and any number of connections read from it at once. The daemon never dials out.
+The pane talks to a socket, not to a caller. The socket is `sessions/<name>/panes/<id>.sock`, built by `paths.PaneSock` and `PaneSockAt` (`internal/paths/paths.go#PaneSock`, `internal/paths/paths.go#PaneSockAt`), with mode 0600. The server dials it from `ensurePane` (`internal/server/server_core.go#server.ensurePane`). The `dm wait` subcommand dials it directly (`internal/cli/cli.go#runWaitAt`). Any number of connections may read at once, and the daemon never dials out.
 
-The daemon does police its own lifetime. `reapOrphans` (`internal/pane/pane.go#paneProc.reapOrphans`) stats the socket every 5 seconds and kills the shell's process group and exits when the path is gone or names another file. When the shell itself exits, the daemon shuts the pty, waits 2 seconds for attach clients to read the exit, removes the socket and exits (`startShell`, `internal/pane/pane.go#paneProc.startShell`).
+The daemon also guards its own lifetime. `reapOrphans` stats the socket every 5 seconds. It kills the shell's process group and exits when the path is gone or names another file (`internal/pane/pane.go#paneProc.reapOrphans`). When the shell exits, the daemon shuts the PTY and waits 2 seconds for attach clients to read the exit. Then it removes the socket and exits (`startShell`, `internal/pane/pane.go#paneProc.startShell`).
 
-## The spawn and its environment
+## The spawn
 
-The server builds the command in `paneCommand` (`internal/server/server_core.go#paneCommand`): `--id`, `--session`, `--cwd`, `--shell`, `--cols`, `--rows`, `--history`, then optional `--argv` (a comma separated program and arguments) and `--plugin-env` (a JSON array of `KEY=VALUE` pairs), then optional `--fg` and `--bg` when the client reported its terminal colours. `parsePaneArgs` (`internal/pane/pane.go#parsePaneArgs`) validates all of it into a `paneOpts` before `Run` touches a pty or a socket.
+The server builds the command in `paneCommand` (`internal/server/server_core.go#paneCommand`). It passes `--id`, `--session`, `--cwd`, `--shell`, `--cols`, `--rows` and `--history` first. It adds `--argv` (a comma separated program and arguments) and `--plugin-env` (a JSON array of `KEY=VALUE` pairs). It adds `--fg` and `--bg` when the client reported its terminal colours. `parsePaneArgs` validates all of it into a `paneOpts` before `Run` touches a PTY or a socket (`internal/pane/pane.go#parsePaneArgs`).
 
-A pane with no `--argv` runs the shell the server passed, with `-l` and nothing else (`paneCmd`, `internal/pane/pane.go#paneCmd`), so the child gets exactly the `--shell` value, and an absent `--shell` execs an empty program name. The server fills that flag from `os.Getenv("SHELL")` (`internal/server/server_core.go#server.addPaneStateAt`). `Run` computes `resolveShell` (`internal/pane/pane.go#resolveShell`) into `paneProc.shell`, but no spawn path reads that field, so the `$SHELL` and `/bin/sh` fallbacks there do not reach the child today. The program runs in `--cwd` and is told its own ids: `DM_PANE` and `DM_SESSION`, set last, always.
+A pane with no `--argv` runs the shell the server passed, with `-l` and nothing else (`paneCmd`, `internal/pane/pane.go#paneCmd`). The child gets exactly the `--shell` value, and an absent `--shell` execs an empty program name. The server fills that flag from `os.Getenv("SHELL")` (`internal/server/server_core.go#server.addPaneStateAt`). `Run` computes `resolveShell` into `paneProc.shell` (`internal/pane/pane.go#resolveShell`). No spawn path reads that field, so its `$SHELL` and `/bin/sh` fallbacks never reach the child. The program runs in `--cwd` and learns its own ids last: `DM_PANE` and `DM_SESSION`, always.
 
-The rest of the environment is an allowlist, not an inheritance (`Env`, `internal/pane/env.go#Env`). A name survives when it is in `paneEnvKeep` (PATH, HOME, USER, LOGNAME, SHELL, TERM, TERM_PROGRAM, COLORTERM, LANG, TZ, TMPDIR, WAYLAND_DISPLAY, DISPLAY, SSH_AUTH_SOCK, XAUTHORITY, DM_STATE), when it starts with `LC_` or `XDG_`, or when it ends in `_SOCK`, holds an absolute path, and its name carries no credential word: no TOKEN, SECRET, PASSWD, PASSWORD, CREDENTIAL, API_KEY, PRIVATE_KEY, AUTH or COOKIE (`envPathName`, `internal/pane/env.go#envPathName`). So `MY_SOCK=/run/x.sock` passes, `MY_SOCK=pass:secret` fails on the value and `MY_TOKEN_SOCK=/run/t.sock` fails on the name. Everything else is dropped. The reason is not secrecy, the comment says so at `internal/pane/env.go#Env`: a variable that reaches a shell is published twice, on the screen and in every read-back, and the server's redaction only knows the values it registered. Plugin pairs ride on top of the allowlist.
+The rest of the environment is an allowlist, not an inheritance (`Env`, `internal/pane/env.go#Env`). A name survives in one of three cases. It is in `paneEnvKeep` (PATH, HOME, USER, LOGNAME, SHELL, TERM, TERM_PROGRAM, COLORTERM, LANG, TZ, TMPDIR, WAYLAND_DISPLAY, DISPLAY, SSH_AUTH_SOCK, XAUTHORITY, DM_STATE). It starts with `LC_` or `XDG_`. It ends in `_SOCK`, holds an absolute path, and carries no credential word in its name. The credential words are TOKEN, SECRET, PASSWD, PASSWORD, CREDENTIAL, API_KEY, PRIVATE_KEY, AUTH and COOKIE, as `envPathName` decides (`internal/pane/env.go#envPathName`). Everything else is dropped. So `MY_SOCK=/run/x.sock` passes, `MY_SOCK=pass:secret` fails on the value, and `MY_TOKEN_SOCK=/run/t.sock` fails on the name. The reason is not secrecy, and the comment at `internal/pane/env.go#Env` says so. A variable that reaches a shell is published twice: on the screen and in every read-back. The server's redaction only knows the values it registered. Plugin pairs ride on top of the allowlist.
 
-## The PTY and its two loops
+## The two loops
 
-`startShell` (`internal/pane/pane.go#paneProc.startShell`) calls `pty.StartWithSize` with the grid's current size, then starts `readLoop` and `watchShell`, then waits on the shell process. One goroutine reads the master; one dedicated goroutine writes it.
+`startShell` calls `pty.StartWithSize` with the grid's current size (`internal/pane/pane.go#paneProc.startShell`). It starts `readLoop` and `watchShell`, then waits on the shell process. One goroutine reads the master and one dedicated goroutine writes it.
 
-- Inbound: `queueWrite` (`internal/pane/pane.go#paneProc.queueWrite`) never blocks. It pushes one `ptyWrite{b, enter}` onto a 256 deep channel and counts a drop when the channel is full. `drainPtyWrites` (`internal/pane/pane.go#paneProc.drainPtyWrites`) is the only writer, and writes `\r` after the payload when `enter` is set. A pty whose reader is gone cannot stall the control socket.
-- Outbound: `readLoop` (`internal/pane/pane.go#paneProc.readLoop`) reads 32 KiB at a time, runs the OSC filter, runs the redaction stage, and hands the clean bytes to `publishLocked` (`internal/pane/pane.go#paneProc.publishLocked`).
+- Inbound: `queueWrite` never blocks (`internal/pane/pane.go#paneProc.queueWrite`). It pushes one `ptyWrite{b, enter}` onto a 256 deep channel and counts a drop when the channel is full. `drainPtyWrites` is the only writer, and it writes `\r` after the payload when `enter` is set (`internal/pane/pane.go#paneProc.drainPtyWrites`). A PTY whose reader is gone cannot stall the control socket.
+- Outbound: `readLoop` reads 32 KiB at a time (`internal/pane/pane.go#paneProc.readLoop`). It runs the OSC filter, then the redaction stage, and hands the clean bytes to `publishLocked` (`internal/pane/pane.go#paneProc.publishLocked`).
 
-`publishLocked` is the one place output becomes state. It writes the chunk to the VT, writes it to the ring, adds to `produced`, the count of bytes the pty has produced after the filter, broadcasts a `bytes` frame, and arms the quiet flush timer. It then clears the yank anchor if the alternate screen was entered or left inside that chunk, and broadcasts a `mode` frame when the alternate screen, mouse reporting or bracketed paste changed.
+`publishLocked` is the one place output becomes state. It writes the chunk to the VT and to the scrollback buffer. Then it adds to `produced`, the count of bytes the PTY has produced after the filter. It broadcasts a `bytes` frame and arms the quiet flush timer. It clears the Enter anchor if the alternate screen was entered or left inside that chunk. It broadcasts a `mode` frame when the alternate screen, mouse reporting or bracketed paste changed.
 
-The flush matters. The parser holds the last grapheme cluster until the next rune proves it complete, because one rune on its own cannot say whether the next one joins it, and a cluster placed early would paint one cell for the base and another for the mark that belonged to it (`internal/vt/parser.go#parser.rune`). So `armFlushLocked` (`internal/pane/pane.go#paneProc.armFlushLocked`) places it after 16 ms of quiet (`flushIdle`). A program that writes once and waits still sees its last character on the grid.
+The flush matters. The parser holds the last grapheme cluster until the next rune proves it complete. One rune cannot say whether the next one joins it. A cluster placed early would paint one cell for the base and another for the mark that belonged to it (`internal/vt/parser.go#parser.rune`). So `armFlushLocked` places the cluster after 16 ms of quiet (`internal/pane/pane.go#paneProc.armFlushLocked`, `flushIdle`). A program that writes once and waits sees its last character on the grid.
 
-## The screen model, and where the parser lives
+## The screen model
 
-The screen is `internal/vt`, not `internal/pane`. `vt.Term` (`internal/vt/term.go#Term`) holds a grid, a parser and the parser's pending state; `vt.Term.Write` (`internal/vt/term.go#Term.Write`) is the whole entry point. The pane never parses bytes itself: it holds a `*vt.Term` and calls `Write`, `Flush`, `Grid()`, `Snapshot()` and the OSC 133 mark readers.
+The screen is `internal/vt`, not `internal/pane`. `vt.Term` holds a grid, a parser and the parser's pending state (`internal/vt/term.go#Term`). `vt.Term.Write` is the whole entry point (`internal/vt/term.go#Term.Write`). The pane never parses bytes itself: it holds a `*vt.Term` and calls `Write`, `Flush`, `Grid()`, `Snapshot()` and the OSC 133 mark readers.
 
-The parser is a byte state machine (`internal/vt/parser.go#parserState`): ground, escape, CSI, OSC, DCS, charset. Each state survives a chunk boundary, so a sequence split across two pty reads parses exactly as one read would. Ground state accumulates one grapheme cluster at a time and calls back into `Term.place`; the CSI families are split by concern in `csi_cursor.go`, `csi_edit.go`, `csi_erase.go`, `csi_margin.go`, `csi_rect.go`, `csi_report.go`, `csi_scroll.go`, `csi_sgr.go`, `csi_tab.go` and `csi_mode.go`. OSC is one file, `internal/vt/osc.go`; an OSC is a string the terminal reads, `ESC ]`, a number, `;`, the body, then `ESC \\`; the grid that owns the cells, the scroll region, the modes and the saved cursors is `internal/vt/grid.go`.
+The parser is a byte state machine (`internal/vt/parser.go#parserState`). Its states are ground, escape, CSI, OSC, DCS and charset. Each state survives a chunk boundary, so a sequence split across two reads parses as one read would. Ground state accumulates one grapheme cluster at a time and calls back into `Term.place`. The CSI families sit in their own files: `csi_cursor.go`, `csi_edit.go`, `csi_erase.go`, `csi_margin.go`, `csi_rect.go`, `csi_report.go`, `csi_scroll.go`, `csi_sgr.go`, `csi_tab.go` and `csi_mode.go`. OSC is one file, `internal/vt/osc.go`. An OSC is a string the terminal reads: `ESC ]`, a number, `;`, the body, then `ESC \\`. The grid that owns the cells, the scroll region, the modes and the saved cursors is `internal/vt/grid.go`.
 
-Two stages sit before the VT. `osc.Filter` (`internal/osc/osc.go#Filter`) answers the queries a terminal is expected to answer (OSC 10/11/12/4 colours, the cursor position report, and the primary and secondary device attributes, DA1 and DA2) and consumes OSC 7501 and OSC 7502 entirely: 7501 reports the program's status, and 7502 names the JSONL session file it writes (`osc.ParseSession`, `internal/osc/osc.go#ParseSession`). Neither frame reaches the VT. The redaction stage (`internal/pane/scrub.go`) then rewrites secret values. Everything downstream sees those bytes already cleaned: the grid, the ring, the broadcasts and every read-back. That is why a yank and a replay cannot leak a value the pane was told to hide: both read the ring, and the ring only ever holds scrubbed bytes.
+Two stages sit before the VT. `osc.Filter` answers the queries a terminal is expected to answer (`internal/osc/osc.go#Filter`). Those are the OSC 10, 11, 12 and 4 colours and the cursor position report. They also include the primary and secondary device attributes, DA1 and DA2. The same filter consumes OSC 7501 and OSC 7502 entirely, so neither frame reaches the VT. OSC 7501 reports the program's status and OSC 7502 names the JSONL session file it writes (`osc.ParseSession`, `internal/osc/osc.go#ParseSession`). The redaction stage (`internal/pane/scrub.go`) then rewrites secret values. Everything downstream sees the cleaned bytes: the grid, the scrollback buffer, the broadcasts and every read-back. That is why a copy and a replay cannot leak a value the pane was told to hide. Both read the scrollback buffer, and the buffer only ever holds redacted bytes.
 
-## The ring, the scrollback and the replay
+## The scrollback buffer
 
-The ring is a fixed circular byte buffer, `scrollRing` (`internal/pane/pane.go#scrollRing`), created by `NewRing` (`internal/pane/pane.go#NewRing`). It holds the raw filtered output stream, not rows. Its budget comes from the `history-lines` config key (`internal/keymap/config_parse.go#parseKeymaps`), which `HistoryBytes` (`internal/keymap/config_model.go#Config.HistoryBytes`) turns into bytes at 256 per line, keeps at 512 KiB or above and caps at 8 MiB. The pane accepts a budget from 64 KiB to 8 MiB and refuses anything else (`historyBudget`, `internal/pane/pane.go#historyBudget`). `Run` sets the daemon's GC memory limit to that budget plus 32 MiB of headroom (`debug.SetMemoryLimit`, `internal/pane/pane.go#Run`). Writing wraps in place, so a burst never grows the heap. `Resize` copies the newest bytes into a fresh buffer.
+The scrollback buffer is `scrollRing`, a fixed circular byte buffer created by `NewRing` (`internal/pane/pane.go#scrollRing`, `internal/pane/pane.go#NewRing`). It holds the raw filtered output stream, not rows. Its budget comes from the `history-lines` config key (`internal/keymap/config_parse.go#parseKeymaps`). `HistoryBytes` turns that row count into bytes at 256 per line, keeps at least 512 KiB and caps at 8 MiB (`internal/keymap/config_model.go#Config.HistoryBytes`). The pane accepts a budget from 64 KiB to 8 MiB and refuses anything else (`historyBudget`, `internal/pane/pane.go#historyBudget`). `Run` sets the daemon's GC memory limit to that budget plus 32 MiB of headroom (`debug.SetMemoryLimit`, `internal/pane/pane.go#Run`). Writing wraps in place, so a burst never grows the heap. `Resize` copies the newest bytes into a fresh buffer.
 
-The ring is not the TUI's scrollback. The TUI is the terminal client in `internal/client`, the program that paints the screen at the other end of the server's socket. Three consumers exist, and they differ:
+Three consumers read that buffer, and they differ:
 
-- The TUI asks the server for the ring with a `replay` request when the operator scrolls (`internal/client/client_input.go#tui.requestHistory`), caches it in `t.hist` (the per-pane ring map on `tui`, the client's model struct, `internal/client/client_model.go#tui.hist`), and builds a tall terminal from it with `vt.ReplayRows` (`internal/client/client_input.go#tui.buildScroll`). The ring arrives on a `replay` frame (`internal/client/client_model.go#tui.apply`). The `bytes` frames feed the live screen and drop the cached ring, so the next scrollback asks again (`internal/client/client_model.go#tui.apply`).
-- The pane's ring is the authority. `replay` hands the whole ring to the server (`case "replay"`, `internal/pane/pane.go#paneProc.serve`), which is how a client that fell behind, or a scrollback opened after a redaction toggle, gets a scrubbed copy.
-- `dm history` replays the pane's ring into a terminal of the pane's own pty size, never the layout rect (the rectangle the layout gives the pane on screen), and returns the rows above the live screen (`paneHistory`, `internal/server/server_mutate.go#server.paneHistory`).
+- The client asks the server for a `replay` when the operator scrolls (`internal/client/client_input.go#tui.requestHistory`). It caches the reply in `t.hist`, the per-pane buffer map on `tui` (`internal/client/client_model.go#tui.hist`). It builds a tall terminal from the reply with `vt.ReplayRows` (`internal/client/client_input.go#tui.buildScroll`). A later `bytes` frame drops the cached copy, so the next scrollback asks again (`internal/client/client_model.go#tui.apply`).
+- The pane's buffer is the authority. The `replay` action hands the whole buffer to the server (`case "replay"`, `internal/pane/pane.go#paneProc.serve`). That is how a client that fell behind, or a scrollback opened after a redaction toggle, gets a clean copy.
+- `dm read <pane> --scrollback N` replays the pane's buffer into a terminal of the pane's own PTY size. It never uses the layout rect, and it returns the rows above the live screen (`paneHistory`, `internal/server/server_mutate.go#server.paneHistory`).
 
-`vt.ReplayRows` (`internal/vt/replay.go#ReplayRows`) is why replay is correct at all. The app wrote its escapes for its own screen size, so the replay uses that size and counts scrolls itself; a taller terminal loses the picture. A scroll region is the row band a program sets with DECSTBM to keep its own output inside it, and a clear inside one must push the rows it clears into the ring first, or they are gone from the history. Nothing is captured while the alternate screen is up.
+`vt.ReplayRows` is why a replay is correct at all (`internal/vt/replay.go#ReplayRows`). The program wrote its escapes for its own screen size, so the replay uses that size and counts scrolls itself. A taller terminal loses the screen. A scroll region is the row range a program sets with DECSTBM to keep its own output inside it. A clear inside a scroll region must push the rows it clears into the buffer first, or the history loses them. Nothing is captured while the alternate screen is up.
 
-## The Enter anchor and the echo record
+## The Enter anchor
 
-`yank` and `wait` must answer one question: where does the last command's output start and end in a byte stream? A prompt redraw puts bytes before the output, the pty echoes the command line back, and the prompt after the command is not output.
+`yank` and `wait` must answer one question. Where does the last command's output start and end in a byte stream? A prompt redraw puts bytes before the output. The PTY echoes the command line back. The prompt after the command is not output.
 
-The shell can help. With shell integration on, it writes OSC 133 marks into its own output: `A` before the prompt, `B` after the prompt, `C` at the command start, `D` at the command end, and a `D` may carry the exit status, as in `D;0;130`, where `130` is the status and the leading `0` is padding the shell integration adds (`internal/vt/osc.go#Term.oscPrompt`). The VT records each mark as a stream byte offset, in the same coordinates as `produced`.
+The shell can help. With shell integration on, it writes OSC 133 marks into its own output. `A` comes before the prompt, `B` after it, `C` at the command start and `D` at the command end. A `D` can carry the exit status, as in `D;0;130`. There `130` is the status and the leading `0` is padding the shell integration adds (`internal/vt/osc.go#Term.oscPrompt`). The VT records each mark as a stream byte offset, in the same coordinates as `produced`.
 
-The pane records a position, not a picture. `write` with `enter` set, or with a CR or LF in the bytes, stores `anchor = produced` and sets `anchorSet`, before the write reaches the pty, so the output the Enter causes lands after it (`internal/pane/pane.go#paneProc.serve`). It also stores the text it wrote in `echo`, capped at 4096 bytes (`echoMax`), because a longer write is a paste and not a command line.
+The pane records a position, not a screen. A `write` with `enter` set, or with a CR or LF in the bytes, stores `anchor = produced`. It sets `anchorSet` before the write reaches the PTY (`internal/pane/pane.go#paneProc.serve`). The output the Enter causes therefore lands after the anchor. The pane also stores the text it wrote in `echo`, capped at 4096 bytes (`echoMax`). A longer write is a paste, not a command line.
 
-`yankTailLocked` (`internal/pane/pane.go#paneProc.yankTailLocked`) then slices the ring:
+`yankTailLocked` then slices the buffer (`internal/pane/pane.go#paneProc.yankTailLocked`):
 
-1. Start at the anchor. Prefer the shell's OSC 133 C mark when the shell reported one at or after the anchor, because a prompt that repaints the line on Enter puts non-output between the two.
-2. Without a mark, drop the recorded echo when the ring bytes at that offset still match it, then drop the CR/LF the pty echoed, but only when nothing but line ends sits before the newline.
-3. End at the OSC 133 D mark, or at the next A mark, or at the current end of the stream.
-4. Replay the slice through a terminal at the pane's size and skip leading blank rows (`yankRows`, `internal/pane/pane.go#yankRows`). Trailing blank rows are dropped by the client, at `internal/client/client_input.go#tui.takeYank`.
+1. Start at the anchor. Prefer the shell's OSC 133 C mark when the shell reported one at or after the anchor. A prompt that repaints the line on Enter puts non-output between the two.
+2. Without a mark, drop the recorded echo when the buffer bytes at that offset match it. Then drop the CR or LF the PTY echoed, but only when nothing but line ends sits before the newline.
+3. End at the OSC 133 D mark, at the next A mark, or at the current end of the stream.
+4. Replay the slice through a terminal at the pane's size and skip leading blank rows (`yankRows`, `internal/pane/pane.go#yankRows`). The client drops trailing blank rows at `internal/client/client_input.go#tui.takeYank`.
 
-The resize case never reads or writes `p.anchor`. Only a write records it (`internal/pane/pane.go#paneProc.serve`), and only an alternate-screen excursion clears it (`internal/pane/pane.go#paneProc.publishLocked`).
+A resize never reads or writes `p.anchor`. Only a write records it (`internal/pane/pane.go#paneProc.serve`), and only an alternate-screen excursion clears it (`internal/pane/pane.go#paneProc.publishLocked`).
 
-## OSC 7501 status, and what the server does with it
+## The status protocol
 
-A program reports its state by writing an OSC 7501 sequence into its own stdout. The filter parses it with `osc.ParseStatus` (`internal/osc/osc.go#ParseStatus`) and never forwards the sequence. The wire format is `state=working:app=pi:msg=<b64>`; the JSON and bare-state forms are still accepted. The state is validated against a closed set, `idle`, `working`, `blocked`, `done`, `error`, `unknown` (`knownState`, `internal/osc/osc.go#knownState`); `clear` and any unknown word become `unknown`, so a report can never put free text into a place the CLI prints.
+A program reports its state by writing an OSC 7501 sequence into its own stdout: `ESC ] 7501 ; state=working:app=pi:msg=<b64> ESC \`. The filter parses it with `osc.ParseStatus` and never forwards it (`internal/osc/osc.go#ParseStatus`). The protocol also accepts a JSON form and a bare state. The state is validated against a closed set: `idle`, `working`, `blocked`, `done`, `error` and `unknown` (`knownState`, `internal/osc/osc.go#knownState`). `clear` and any unknown word become `unknown`, so a report can never put free text into a place the CLI prints. A status is that report: the state word, the app that sent it and an optional message.
 
-`setStatus` (`internal/pane/pane.go#paneProc.setStatus`) redacts the message and the app name under the pane lock, stores the result and broadcasts a `status` frame when it changed. The server's `watchConn` (`internal/server/server_core.go#server.watchConn`) takes that frame and does four things: records the state on the pane conn, persists the reporting app and the "this pane is an agent" mark in the state file (`noteStatus`, `internal/server/server_view.go#server.noteStatus`), stamps the second the state moved (`noteStatusChange`, `internal/server/server_view.go#server.noteStatusChange`), and pushes the session snapshot so the rail repaints. The session snapshot is the server's whole state (`wire.Snapshot`, `internal/wire/wire.go#Snapshot`): the session, its workspaces, windows and panes. The rail is the sidebar that paints that tree (`internal/rail`). On a transition into `blocked`, `done` or `error` it also posts to the pane's notify topic (`notifyPaneState`, `internal/server/notify_server.go#server.notifyPaneState`).
+`setStatus` redacts the message and the app name under the pane lock (`internal/pane/pane.go#paneProc.setStatus`). It stores the result and broadcasts a `status` frame when the status changed. The server's `watchConn` takes that frame and does four things (`internal/server/server_core.go#server.watchConn`). It records the state on the pane connection. It persists the reporting app and the agent mark in the state file (`noteStatus`, `internal/server/server_view.go#server.noteStatus`). It stamps the second the state moved (`noteStatusChange`, `internal/server/server_view.go#server.noteStatusChange`). It pushes the session snapshot, which is the server's whole state (`wire.Snapshot`, `internal/wire/wire.go#Snapshot`), so the sidebar repaints. On a transition into `blocked`, `done` or `error`, it also posts to the pane's notify topic (`notifyPaneState`, `internal/server/notify_server.go#server.notifyPaneState`).
 
-The pane answers a probe. An application that writes `ESC ] 7501 ; ?` asks whether the terminal speaks the protocol; `replyQuery` (`internal/pane/pane.go#paneProc.cursorPos`) writes back the pane's current status with the leading `?` echoed, so the reply reads `ESC ] 7501 ; ? state=<state>[:app=<app>][:msg=<b64>] ESC \` (`formatStatusQuery`, `internal/pane/pane.go#formatStatusQuery`). The pane is the program's terminal, so the status it already holds is the honest answer. These replies go into the pty through the same write queue as keystrokes.
+An application probes support before it reports. It writes `ESC ] 7501 ; ?`, and `replyQuery` answers with the pane's current status and the leading `?` echoed (`internal/pane/pane.go#paneProc.cursorPos`). The reply reads `ESC ] 7501 ; ? state=<state>[:app=<app>][:msg=<b64>] ESC \` (`formatStatusQuery`, `internal/pane/pane.go#formatStatusQuery`). The pane is the program's terminal, so the status it already holds is the honest answer. These replies enter the PTY through the same write queue as keystrokes.
+
+`dm __probe` is the test harness for that handshake (`probe.go#runProbe`). It reports, clears and prints `PROBE-REPLY=ok`, `PROBE-REPORTED` and `PROBE-CLEARED` inside a pane. Run it in a pane to check a build.
 
 ## OSC 7502 session
 
-A program that writes a structured session names its file with an OSC 7502 frame, `session=<base64 path>;id=<id>`. The filter parses it with `osc.ParseSession` (`internal/osc/osc.go#ParseSession`) and never forwards it. Three outcomes exist. A decoded path sets the session. An empty `session=` value clears it, because the agent that wrote the file is gone. A frame with no `session` key, or a path that does not decode, is ignored, and the pane keeps the last good value.
+A program that writes a structured session names its file with an OSC 7502 frame: `session=<base64 path>;id=<id>`. The filter parses it with `osc.ParseSession` and never forwards it (`internal/osc/osc.go#ParseSession`). Three outcomes exist. A decoded path sets the session. An empty `session=` value clears it, because the agent that wrote the file is gone. A frame with no `session` key, or a path that does not decode, changes nothing. The pane keeps the last good value.
 
-`setSession` (`internal/pane/pane.go#paneProc.setSession`) keeps the pair on the pane and broadcasts a `session` frame when the pair changed, so a reader that attaches later draws it from the replay reply. The server's `watchConn` (`internal/server/server_core.go#server.watchConn`) records it on the pane conn, `allPanesLocked` (`internal/server/server_view.go#server.allPanesLocked`) publishes it as `SessionFile` and `SessionID`, and an empty pair clears it. A pane exit drops it. The session is never persisted: a restart or a respawn means the program starts a new one.
+`setSession` keeps the pair on the pane and broadcasts a `session` frame when the pair changed (`internal/pane/pane.go#paneProc.setSession`). A reader that attaches later draws it from the replay reply. The server's `watchConn` records it on the pane connection (`internal/server/server_core.go#server.watchConn`). `allPanesLocked` publishes it as `SessionFile` and `SessionID`, and an empty pair clears it (`internal/server/server_view.go#server.allPanesLocked`). A pane exit drops it. The session is never persisted, so a restart or a respawn means the program starts a new one.
 
 ## Waiting for output
 
-`wait` is a streaming request on the pane socket, used by `dm wait`. It sends a `resp` first, the yank-shaped tail of the command in flight, then streams the pane's `bytes` frames to that connection, then sends one final `resp` carrying `exit` and `waitReason`.
+`wait` is a streaming request on the pane socket, used by `dm wait`. It sends a `resp` first: the yank-shaped tail of the command in flight. It then streams the pane's `bytes` frames to that connection. It ends with one final `resp` carrying `exit` and `waitReason`.
 
 Two completion paths exist, and the pane picks by what the shell told it:
 
-- Mark path. When the VT has seen an OSC 133 prompt or command mark, the wait ends on a D mark at or after its start anchor. The exit code comes from the most recent D mark at or after that anchor that carried one, not from the latest D, because the shell's prompt hook can print a bare D after the command's own coded mark (`waitEndLocked`, `internal/pane/pane.go#paneProc.waitEndLocked`). Publish runs the same check, so the final reply lands after the bytes it belongs to and before anything later.
-- Children path. With no marks, `pollWaitChildren` (`internal/pane/pane.go#paneProc.pollWaitChildren`) samples the shell's direct children from `/proc` every 500 ms. The wait records `childSeen` from the sample it takes before it registers, and the poll ends the wait on the first empty sample once `childSeen` is set. A wait that a reflow demotes gets `looseStart`, the flag that drops the `childSeen` requirement: the command may have started and finished before the demotion, so an empty sample alone ends it. The exit code is unobservable there, so the reason is `children`, not `mark`.
+- Mark path. When the VT has seen an OSC 133 prompt or command mark, the wait ends on a D mark. That mark must sit at or after the start anchor. The exit code comes from the most recent D mark at or after that anchor that carried one. It does not come from the latest D. The shell's prompt hook can print a bare D after the command's own coded mark (`waitEndLocked`, `internal/pane/pane.go#paneProc.waitEndLocked`). Publish runs the same check, so the final reply lands after the bytes it belongs to and before anything later.
+- Children path. With no marks, `pollWaitChildren` samples the shell's direct children from `/proc` every 500 ms (`internal/pane/pane.go#paneProc.pollWaitChildren`). The wait records `childSeen` from the sample it takes before it registers. The poll ends the wait on the first empty sample once `childSeen` is set. A wait that a reflow demotes gets `looseStart`, the flag that drops the `childSeen` requirement. The command can start and finish before the demotion, so an empty sample alone ends it. The exit code is unobservable there, so the reason is `children`, not `mark`.
 
 A shell that is already dead ends the wait at once with reason `dead`. A second concurrent wait on the same pane is refused with `a wait is already running`. A reflow demotes a marked wait to the children path: the `reflow` case sets `looseStart` and starts the poll itself (`internal/pane/pane.go#paneProc.serve`).
 
-`read` is the simpler sibling: it returns the visible screen as lines, plus the status and `{title, dead}`. The ring keeps output whether or not anyone is attached, so `read` always sees the current screen, but a caller that wants the stream must connect before the bytes it wants.
+`read` is the simpler sibling. It returns the visible screen as lines, plus the status and `{title, dead}`. The scrollback buffer keeps output whether or not anyone is attached, so `read` always sees the current screen. A caller that wants the stream must connect before the bytes it wants.
 
 ## Resize and reflow
 
-The server pushes `resize` with the pane's `cols` and `rows` (`syncSizes`, `internal/server/server_view.go#server.syncSizes`), and the pane takes one of two paths (`case "resize"`, `internal/pane/pane.go#paneProc.serve`):
+The server pushes `resize` with the pane's `cols` and `rows` (`syncSizes`, `internal/server/server_view.go#server.syncSizes`). The pane takes one of two paths (`case "resize"`, `internal/pane/pane.go#paneProc.serve`):
 
-- Width changed, with or without the height: try `Grid.Rewrap` (`internal/vt/csi_margin.go#csiSetTopBottomMargins`). It joins autowrapped rows into logical lines and wraps them again at the new width, trimming trailing blanks, moving the cursor with its line, and keeping rows that fall off the top in the ring. It refuses on the alternate screen or under an application scroll region (`internal/vt/csi_margin.go#csiSetTopBottomMargins`) and returns false; the pane then takes the plain `Grid.Resize`.
-- Height alone: plain `Grid.Resize`. There is nothing to re-wrap.
+- A width change, with or without a height change: try `Grid.Rewrap` (`internal/vt/csi_margin.go#csiSetTopBottomMargins`). It joins autowrapped rows into logical lines and wraps them at the new width. It refuses on the alternate screen or under an application scroll region, and returns false. The pane then takes the plain `Grid.Resize`.
+- A height change alone: plain `Grid.Resize`. There is nothing to re-wrap.
 
 The grid takes the new size before the shell is signalled, so a spawn that has not happened yet picks it up. Then `pty.Setsize` tells the shell.
 
-A drag produces many width changes. The server merges them and, 150 ms after the last one, asks each affected pane for `reflow` (`settleReflow`, `internal/server/server_view.go#server.settleReflow`). `reflow` replays nothing and re-wraps nothing: it returns the picture plus the modes, and the server broadcasts it. That is the picture handshake, and it is why a drag repaints once at its final width instead of on every column.
+A drag produces many width changes. The server merges them, waits 150 ms after the last one, and then asks each affected pane for `reflow` (`settleReflow`, `internal/server/server_view.go#server.settleReflow`). `reflow` replays nothing and re-wraps nothing. It returns the screen snapshot plus the modes, and the server broadcasts it. A drag therefore repaints once at its final width, not on every column.
 
-## The pane's own actions
+## The pane's actions
 
-The pane switches on `Action` only and has no default case (`serve`, `internal/pane/pane.go#paneProc.serve`). Sixteen actions exist: `write`, `resize`, `read`, `screen`, `reflow`, `yank`, `replay`, `status`, `cwd`, `term-colours`, `set-history`, `set-secrets`, `toggle-secrets`, `ping`, `wait`, `kill`. An unknown action gets no reply at all, so a caller must set a read deadline and must filter frames by `Type`: the pane also pushes `bytes`, `status`, `cwd`, `title`, `mode`, `scrub` and `exit` unasked. `scrub` is the repaint after the redaction switch is turned back on (`internal/pane/pane.go#paneProc.scrubPaintedLocked`): the pane rewrites its ring and its grid from the same value list and sends a fresh picture of the result.
+The pane switches on `Action` only and has no default case (`serve`, `internal/pane/pane.go#paneProc.serve`). Seventeen actions exist.
 
-The rest of what the daemon produces is sampling, not requests: `watchShell` (`internal/pane/pane.go#paneProc.watchShell`) reads the shell's cwd from `/proc/<pid>/cwd` and its title from the VT every 500 ms, and broadcasts only on a change.
+| action | what it does |
+| --- | --- |
+| `write` | writes keys to the PTY, with an Enter when the frame sets it |
+| `resize` | takes a new size, then rewraps or resizes the grid |
+| `read` | returns the visible screen as lines, plus the status, title and dead flag |
+| `screen` | returns a screen snapshot and the modes |
+| `reflow` | returns a screen snapshot after a drag, with no replay |
+| `screen-sub` | returns a snapshot at once, then one after every output burst |
+| `yank` | returns the rows the last command produced |
+| `replay` | returns the scrollback buffer, plus the status, title and modes |
+| `status` | returns the current status |
+| `cwd` | returns the shell's working directory |
+| `term-colours` | takes the terminal's foreground and background colours |
+| `set-history` | sets the scrollback budget |
+| `set-secrets` | sets the values the redaction stage hides |
+| `toggle-secrets` | masks or reveals the registered secret values |
+| `ping` | answers to prove the daemon is alive |
+| `wait` | streams output until the command ends |
+| `kill` | answers, then shuts the daemon down |
 
-## The key bytes in, and the read reply out
+An unknown action gets no reply at all. A caller must set a read deadline and filter frames by `Type`, because the pane also pushes frames unasked.
+
+| pushed frame | meaning |
+| --- | --- |
+| `bytes` | new output for the pane |
+| `status` | the program's status changed |
+| `cwd` | the shell's working directory changed |
+| `title` | the terminal title changed |
+| `mode` | the alternate screen, mouse reporting or bracketed paste changed |
+| `scrub` | the pane repainted after the redaction switch came back on |
+| `exit` | the shell exited |
+
+`screen-sub` is for a renderer that wants screens, not bytes. It sends one snapshot at once, then a coalesced snapshot after every burst of output. The frames queue under the lock, so an older screen cannot land after a newer one.
+
+`scrub` is the repaint after the redaction switch is turned back on (`internal/pane/pane.go#paneProc.scrubPaintedLocked`). The pane rewrites its scrollback buffer and its grid from the same value list. Then it sends a fresh screen snapshot of the result.
+
+The rest of what the daemon produces is sampling, not requests. `watchShell` reads the shell's cwd from `/proc/<pid>/cwd` and its title from the VT every 500 ms. It broadcasts only on a change (`internal/pane/pane.go#paneProc.watchShell`).
+
+## Write and read
 
 `target` in the diagram is the pane id, `id` the request id, `st` the status and `produced` the byte counter.
 
@@ -149,18 +187,18 @@ sequenceDiagram
     S-->>C: resp {lines}
 ```
 
-## What the pane daemon does not know
+## What it cannot see
 
-It has no idea what a window is. It does not import the layout, session or keymap packages. It knows its own id, its session name, a cwd, a shell, a size, a screen, a ring and a status. It cannot see a workspace, a window, a focus change, a split ratio, a sibling pane, a client or a name. It does not know how many readers it has beyond a subscriber set, and it does not care which one is focused.
+The daemon has no idea what a window is. It does not import the layout, session or keymap packages. It knows its own id, its session name, a cwd, a shell, a size, a screen, a scrollback buffer and a status. It cannot see a workspace, a window, a focus change, a split ratio, a sibling pane, a client or a name. It does not know how many readers it has beyond a subscriber set, and it does not care which one is focused.
 
-Three consequences follow. Sizing arrives as `cols` and `rows`, never as a rectangle, so a pane in a hidden workspace keeps its old size until the server syncs it. Closing a pane is the server's decision: it sends `kill` (`internal/server/server_mutate.go#killPanes`) or removes the socket, and the reaper collects the daemon. And a pane cannot answer a question about the session, so anything naming a window belongs in the server's session snapshot.
+Three consequences follow. Sizing arrives as `cols` and `rows`, never as a rectangle. A pane in a hidden workspace keeps its old size until the server syncs it. Closing a pane is the server's decision: it sends `kill` (`internal/server/server_mutate.go#killPanes`) or removes the socket, and the reaper collects the daemon. A pane cannot answer a question about the session, so anything naming a window belongs in the server's session snapshot.
 
-## Where the next pane action goes
+## Adding an action
 
 1. Add the case to the `serve` switch in `internal/pane/pane.go#paneProc.serve`, in action name order with its neighbours.
-2. Give it a field on `wire.Msg` (`internal/wire/wire.go#Msg`, the one struct every frame is encoded from) if an existing one will not do. Add the key additively and pin the encoding with a test in `internal/wire/wire_test.go`.
-3. Add the forwarding case to `handleReq` in `internal/server/server_rpc.go#server.handleReq` if a client should reach it, and send the frame with `pc.send` (the pane connection's send, `internal/server/server_core.go#paneConn.send`) or `paneRequest` (`internal/server/server_view.go#paneRequest`).
-4. If it reads a picture or the ring, lock `p.mu` (the pane's mutex, which guards the VT, the ring and the status), copy, and do the expensive work outside the lock, the way `yank` does.
+2. Give it a field on `wire.Msg` (`internal/wire/wire.go#Msg`, the one struct every frame is encoded from) if an existing field will not do. Add the key additively and pin the encoding with a test in `internal/wire/wire_test.go`.
+3. Add the forwarding case to `handleReq` in `internal/server/server_rpc.go#server.handleReq` when a client must reach it. Send the frame with `pc.send` (`internal/server/server_core.go#paneConn.send`) or `paneRequest` (`internal/server/server_view.go#paneRequest`).
+4. If the action reads a screen snapshot or the scrollback buffer, lock `p.mu`. That mutex guards the VT, the buffer and the status. Copy, then do the expensive work outside the lock, the way `yank` does.
 5. Answer with an `ID` echo when the server is expected to match a reply. `screen` and `replay` do not, and their readers filter by `Type` instead.
 
 ## See also
@@ -168,6 +206,6 @@ Three consequences follow. Sizing arrives as `cols` and `rows`, never as a recta
 - [The protocol](03-protocol.md) for the frame, the envelope and the full action matrix.
 - [The server](04-server.md) for the pane spawn, the watcher and the resync.
 - [Layout](07-layout.md) for the rectangles a pane is sized to.
-- [The client](06-client.md) for the TUI's own ring and its scrollback.
+- [The client](06-client.md) for the client's own scrollback and its sidebar.
 - [Secrets](09-secrets.md) for the redaction stage this daemon runs.
 - [README](../../README.md) for the OSC 7501 protocol as a program author writes it.
