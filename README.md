@@ -436,8 +436,8 @@ One file: two panes in a column, the first running pi in the project.
     }]
   }],
   "panes": {
-    "w1p1": {"cwd": "/home/b/Code/Personal/go-backend", "argv": ["pi"]},
-    "w1p2": {"cwd": "/home/b/Code/Personal/go-backend"}
+    "w1p1": {"cwd": "/home/you/src/go-backend", "argv": ["pi"]},
+    "w1p2": {"cwd": "/home/you/src/go-backend"}
   }
 }
 ```

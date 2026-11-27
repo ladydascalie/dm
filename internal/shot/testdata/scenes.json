@@ -166,7 +166,7 @@
           "agent": true,
           "title": "go vet",
           "project": "dm",
-          "content": "beta pane\n$ pwd\n/home/b/Code/Personal/dm"
+          "content": "beta pane\n$ pwd\n/home/you/src/dm"
         }
       ],
       "windows": [

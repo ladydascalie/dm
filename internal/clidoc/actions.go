@@ -88,9 +88,9 @@ var actionExamples = []actionExample{
 	{"secret-list", `{"action":"secret-list"}`},
 	{"secret-revoke", `{"action":"secret-revoke","name":"gh-cli"}`},
 	{"secret-use", `{"action":"secret-use","name":"gh-cli"}`},
-	{"secret-hydrate", `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`},
+	{"secret-hydrate", `{"action":"secret-hydrate","name":"gh-cli","path":"/home/you/.config/gh/token"}`},
 	{"secret-type", `{"action":"secret-type","name":"gh-cli","target":"w1p1"}`},
-	{"secret-sync", `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}`},
+	{"secret-sync", `{"action":"secret-sync","path":"/home/you/src/proj/.dm-secrets.kdl","trust":true}`},
 
 	{"ask-open", `{"action":"ask-open","target":"w1p1","res":{"toolCallId":"toolu_1","questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}}`},
 	{"ask-await", `{"action":"ask-await","target":"a1","res":{"timeoutMs":25000}}`},

@@ -19,7 +19,7 @@ func TestEnvMatrix(t *testing.T) {
 	}{
 		// A shell and a terminal need these.
 		{"PATH", "/usr/bin", true},
-		{"HOME", "/home/b", true},
+		{"HOME", "/home/you", true},
 		{"USER", "b", true},
 		{"LOGNAME", "b", true},
 		{"SHELL", "/bin/sh", true},
@@ -31,7 +31,7 @@ func TestEnvMatrix(t *testing.T) {
 		{"LC_CTYPE", "en_GB.UTF-8", true},
 		{"TZ", "Europe/London", true},
 		{"TMPDIR", "/tmp", true},
-		{"XDG_CONFIG_HOME", "/home/b/.config", true},
+		{"XDG_CONFIG_HOME", "/home/you/.config", true},
 		{"XDG_RUNTIME_DIR", "/run/user/1000", true},
 		{"WAYLAND_DISPLAY", "wayland-1", true},
 		{"DISPLAY", ":0", true},
@@ -40,7 +40,7 @@ func TestEnvMatrix(t *testing.T) {
 		{"DM_STATE", "/tmp/state", true},
 		// The path exemptions: an absolute socket path or the cookie path.
 		{"SSH_AUTH_SOCK", "/tmp/agent.sock", true},
-		{"XAUTHORITY", "/home/b/.Xauthority", true},
+		{"XAUTHORITY", "/home/you/.Xauthority", true},
 		{"MY_SOCK", "/run/my.sock", true},
 		// Proved to reach a pane while nine hint words were the whole rule.
 		{"AWS_ACCESS_KEY_ID", "poc-awsid", false},
@@ -49,7 +49,7 @@ func TestEnvMatrix(t *testing.T) {
 		{"DATABASE_URL", "postgres://u:poc@h/db", false},
 		{"STRIPE_KEY", "sk_poc", false},
 		{"GIT_ASKPASS", "/usr/bin/askpass", false},
-		{"KUBECONFIG", "/home/b/.kube/config", false},
+		{"KUBECONFIG", "/home/you/.kube/config", false},
 		{"OP_SERVICE_ACCOUNT_TOKEN", "poc-op", false},
 		{"GITHUB_TOKEN", "poc-gh", false},
 		{"PASSWORD", "poc-pw", false},
@@ -68,7 +68,7 @@ func TestEnvMatrix(t *testing.T) {
 		{"EDITOR", "vi", false},
 		{"GPG_KEY", "ABCDEF12", false},
 		{"DM_NERD", "1", false},
-		{"PWD", "/home/b", false},
+		{"PWD", "/home/you", false},
 	}
 	for _, c := range cases {
 		c := c
@@ -128,7 +128,7 @@ func TestEnvKeepsSocketAndCookiePaths(t *testing.T) {
 	t.Parallel()
 	got := Env([]string{
 		"SSH_AUTH_SOCK=/tmp/agent.sock",
-		"XAUTHORITY=/home/b/.Xauthority",
+		"XAUTHORITY=/home/you/.Xauthority",
 		"MY_SOCK=/run/my.sock",
 		"DOCKER_AUTH_TOKEN=secret",
 		"MY_TOKEN_SOCK=/run/token.sock",
@@ -136,7 +136,7 @@ func TestEnvKeepsSocketAndCookiePaths(t *testing.T) {
 	}, "p", "s")
 	for _, keep := range []string{
 		"SSH_AUTH_SOCK=/tmp/agent.sock",
-		"XAUTHORITY=/home/b/.Xauthority",
+		"XAUTHORITY=/home/you/.Xauthority",
 	} {
 		if !containsExact(got, keep) {
 			t.Errorf("%s stripped, want kept: %q", keep, got)

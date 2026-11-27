@@ -229,10 +229,10 @@ func TestSecretsNeverCarryValues(t *testing.T) {
 func TestSecretEnvValidation(t *testing.T) {
 	t.Parallel()
 	good := []*Secret{
-		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"PASSWORD_STORE_DIR=/home/b/.pass"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"PASSWORD_STORE_DIR=/home/you/.pass"}},
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"GNUPGHOME=/x", "LANG=C.UTF-8"}},
 		{Name: "gh", Tool: ToolOp, Reference: "op://v/i/f", Env: []string{"OP_ACCOUNT=my.1password.com"}},
-		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"HOME=/home/b", "XDG_CONFIG_HOME=/home/b/.config"}},
+		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"HOME=/home/you", "XDG_CONFIG_HOME=/home/you/.config"}},
 		{Name: "gh", Tool: ToolPass, Reference: "dev/t", Env: []string{"GNUPGHOME="}},
 	}
 	for _, s := range good {

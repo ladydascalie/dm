@@ -582,7 +582,7 @@ These were attacked and held. The absence of a finding is evidence too.
 
 ## Evidence index
 
-The eight reports are under `/home/b/Code/Personal/dm/.dungeon/adversarial-review/reports/`.
+The eight reports are under `.dungeon/adversarial-review/reports/`.
 
 - `review-wire.md`: `go test ./internal/wire/ ./internal/transport/ -race -count=1`; `go test ./internal/server/ -race -run Sync -count=1`; a re-implemented framing client under `/tmp/wireprobe` against a scratch server; `VmSize` measured with 40 stalled connections.
 - `review-concurrency.md`: `go test -race -count=1 ./internal/server/ ./internal/websession/ ./internal/transport/`, then the same with `./internal/pane/`; two race probes and a save-cost probe in a /tmp copy; split, close and attach stress loops; 6 rounds of two concurrent clients.

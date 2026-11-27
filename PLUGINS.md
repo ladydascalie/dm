@@ -17,8 +17,8 @@ Add a `plugin` block to `$XDG_CONFIG_HOME/dm/config.kdl`:
 
 ```kdl
 plugin "git-rail" {
-    exec "/home/b/rail/run" "--watch"
-    cwd "/home/b/rail"
+    exec "/home/you/rail/run" "--watch"
+    cwd "/home/you/rail"
     where "split"
     env "RAIL_DEPTH=2"
 }
@@ -83,7 +83,7 @@ The context is one JSON object, fixed at launch:
   "plugin": "git-rail",
   "workspace": {"id": "s1", "name": "dm"},
   "window": {"id": "w1", "name": "shell"},
-  "pane": {"id": "w1p1", "cwd": "/home/b/Code/Personal/dm", "agent": "pi",
+  "pane": {"id": "w1p1", "cwd": "/home/you/src/dm", "agent": "pi",
            "app": "pi", "status": "working"}
 }
 ```
@@ -165,7 +165,7 @@ Make it executable, then declare it. The path must be absolute:
 
 ```kdl
 plugin "echo" {
-    exec "/home/you/Code/Personal/dm/examples/echo-plugin/echo.sh"
+    exec "/home/you/src/dm/examples/echo-plugin/echo.sh"
     where "split"
 }
 keymap "main" {

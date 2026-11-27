@@ -916,7 +916,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 .TP
 \fBsecret-hydrate\fP
 .nf
-{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}
+{"action":"secret-hydrate","name":"gh-cli","path":"/home/you/.config/gh/token"}
 .fi
 .TP
 \fBsecret-type\fP
@@ -926,7 +926,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 .TP
 \fBsecret-sync\fP
 .nf
-{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}
+{"action":"secret-sync","path":"/home/you/src/proj/.dm-secrets.kdl","trust":true}
 .fi
 .TP
 \fBask-open\fP
@@ -1401,8 +1401,8 @@ One layout file:
     }]
   }],
   "panes": {
-    "w1p1": {"cwd": "/home/b/Code/Personal/go-backend", "argv": ["pi"]},
-    "w1p2": {"cwd": "/home/b/Code/Personal/go-backend"}
+    "w1p1": {"cwd": "/home/you/src/go-backend", "argv": ["pi"]},
+    "w1p2": {"cwd": "/home/you/src/go-backend"}
   }
 }
 .fi

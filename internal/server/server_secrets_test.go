@@ -573,13 +573,13 @@ func TestSecretRegisterRefusesOneSidedProxyShapes(t *testing.T) {
 	// A well-shaped env entry registers and reaches the state file.
 	rep := secretCall(t, s, cl, conn, wire.Msg{
 		Action: "secret-register", Name: "ok", Tool: "pass", Ref: "dev/t",
-		Env: []string{"PASSWORD_STORE_DIR=/home/b/.pass"},
+		Env: []string{"PASSWORD_STORE_DIR=/home/you/.pass"},
 	})
 	if !rep.OK {
 		t.Fatalf("register with env: %s", rep.Error)
 	}
 	sec := s.st.Secret("ok")
-	if sec == nil || len(sec.Env) != 1 || sec.Env[0] != "PASSWORD_STORE_DIR=/home/b/.pass" {
+	if sec == nil || len(sec.Env) != 1 || sec.Env[0] != "PASSWORD_STORE_DIR=/home/you/.pass" {
 		t.Fatalf("state lost the env: %+v", sec)
 	}
 	tool := secretTool(sec)

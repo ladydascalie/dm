@@ -1994,8 +1994,8 @@ func TestConfigCommandDuplicateName(t *testing.T) {
 // accessor, and binds it as plugin:<name>.
 func TestConfigPlugin(t *testing.T) {
 	cfg, err := parseConfig(`plugin "rail" {
-	exec "/home/b/rail/run" "--watch"
-	cwd "/home/b/rail"
+	exec "/home/you/rail/run" "--watch"
+	cwd "/home/you/rail"
 	where "window"
 	env "A=1"
 	env "B=2"
@@ -2008,8 +2008,8 @@ keymap "main" {
 	}
 	want := []Plugin{{
 		Name:  "rail",
-		Exec:  []string{"/home/b/rail/run", "--watch"},
-		Cwd:   "/home/b/rail",
+		Exec:  []string{"/home/you/rail/run", "--watch"},
+		Cwd:   "/home/you/rail",
 		Where: "window",
 		Env:   []string{"A=1", "B=2"},
 	}}

@@ -28,7 +28,7 @@ func TestFloatEnvAllowlist(t *testing.T) {
 		"MYSQL_PWD=poc-mysql",
 		"DATABASE_URL=postgres://u:poc@h/db",
 		"STRIPE_KEY=sk_poc",
-		"KUBECONFIG=/home/b/.kube/config",
+		"KUBECONFIG=/home/you/.kube/config",
 		"DM_STATE=/tmp/dmt-state",
 		"DM_PANE=stale",
 		"DM_SESSION=stale",

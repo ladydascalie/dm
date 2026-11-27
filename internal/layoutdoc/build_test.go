@@ -46,7 +46,7 @@ func TestBuildIntoFresh(t *testing.T) {
 	if !reflect.DeepEqual(w.Root.Sizes, []float64{0.6, 0.4}) {
 		t.Errorf("sizes = %v, want the doc's", w.Root.Sizes)
 	}
-	if p := st.Panes["w1p1"]; p == nil || p.Cwd != "/home/b/Code/Personal/go-backend" || !reflect.DeepEqual(p.Argv, []string{"pi"}) {
+	if p := st.Panes["w1p1"]; p == nil || p.Cwd != "/home/you/src/go-backend" || !reflect.DeepEqual(p.Argv, []string{"pi"}) {
 		t.Fatalf("pane w1p1 = %+v, want the doc's cwd and argv", st.Panes["w1p1"])
 	}
 	if p := st.Panes["w1p2"]; p == nil || len(p.Argv) != 0 {

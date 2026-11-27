@@ -23,9 +23,9 @@ func TestDirHonoursXDG(t *testing.T) {
 		t.Fatalf("Dir() = %q, %v, want /xdg/dm/layouts", got, err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("HOME", "/home/b")
-	if got, err := Dir(); err != nil || got != "/home/b/.config/dm/layouts" {
-		t.Fatalf("Dir() = %q, %v, want /home/b/.config/dm/layouts", got, err)
+	t.Setenv("HOME", "/home/you")
+	if got, err := Dir(); err != nil || got != "/home/you/.config/dm/layouts" {
+		t.Fatalf("Dir() = %q, %v, want /home/you/.config/dm/layouts", got, err)
 	}
 }
 

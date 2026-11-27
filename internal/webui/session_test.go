@@ -151,7 +151,7 @@ func TestSessionTurns(t *testing.T) {
 	}
 
 	read := turn.Steps[3]
-	if read.Tool != "read" || read.Summary != "/home/b/.pi/agent/sessions/s.jsonl" || read.MS != 30 {
+	if read.Tool != "read" || read.Summary != "/home/you/.pi/agent/sessions/s.jsonl" || read.MS != 30 {
 		t.Fatalf("read step = %+v", read)
 	}
 	if read.OK == nil || !*read.OK {

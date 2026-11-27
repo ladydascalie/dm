@@ -7,7 +7,7 @@ Declare it, with an absolute path, and bind a key:
 
 ```kdl
 plugin "echo" {
-    exec "/home/you/Code/Personal/dm/examples/echo-plugin/echo.sh"
+    exec "/home/you/src/dm/examples/echo-plugin/echo.sh"
     where "split"
 }
 keymap "main" {

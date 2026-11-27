@@ -155,8 +155,8 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `msg-sub` | `{"action":"msg-sub","res":{"keyPrefix":"lane/","afterSeq":0}}` |
 | `msg-watchers`, `msg-schema` | `{"action":"msg-watchers","res":{}}`, `{"action":"msg-schema","res":{}}` |
 | `secret-register`, `secret-list`, `secret-revoke` | `{"action":"secret-register","name":"gh-cli","tool":"op","ref":"op://Personal/gh/token"}`, `{"action":"secret-list"}`, `{"action":"secret-revoke","name":"gh-cli"}` |
-| `secret-use`, `secret-hydrate`, `secret-type` | `{"action":"secret-use","name":"gh-cli"}`, `{"action":"secret-hydrate","name":"gh-cli","path":"/home/b/.config/gh/token"}`, `{"action":"secret-type","name":"gh-cli","target":"w1p1"}` |
-| `secret-sync` | `{"action":"secret-sync","path":"/home/b/proj/.dm-secrets.kdl","trust":true}` |
+| `secret-use`, `secret-hydrate`, `secret-type` | `{"action":"secret-use","name":"gh-cli"}`, `{"action":"secret-hydrate","name":"gh-cli","path":"/home/you/.config/gh/token"}`, `{"action":"secret-type","name":"gh-cli","target":"w1p1"}` |
+| `secret-sync` | `{"action":"secret-sync","path":"/home/you/src/proj/.dm-secrets.kdl","trust":true}` |
 | `ask-open`, `ask-await` | `{"action":"ask-open","target":"w1p1","res":{"toolCallId":"toolu_1","questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}}`, `{"action":"ask-await","target":"a1","res":{"timeoutMs":25000}}` |
 | `ask-answer`, `ask-close`, `ask-list` | `{"action":"ask-answer","target":"a1","res":{"items":[{"questionIndex":0,"optionIndexes":[0]}]}}`, `{"action":"ask-close","target":"a1"}`, `{"action":"ask-list"}` |
 

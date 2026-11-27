@@ -29,8 +29,8 @@ func sample() *Doc {
 			}},
 		}},
 		Panes: map[string]Pane{
-			"w1p1": {Cwd: "/home/b/Code/Personal/go-backend", Argv: []string{"pi"}},
-			"w1p2": {Cwd: "/home/b/Code/Personal/go-backend"},
+			"w1p1": {Cwd: "/home/you/src/go-backend", Argv: []string{"pi"}},
+			"w1p2": {Cwd: "/home/you/src/go-backend"},
 		},
 	}
 }
@@ -83,9 +83,9 @@ func nested() *Doc {
 			}},
 		}},
 		Panes: map[string]Pane{
-			"a1": {Cwd: "/home/b/Code/Personal/go-backend", Argv: []string{"pi"}},
-			"a2": {Cwd: "/home/b/Code/Personal/go-backend", Argv: []string{"go", "test", "./..."}},
-			"a3": {Cwd: "/home/b/Code/Personal/go-backend"},
+			"a1": {Cwd: "/home/you/src/go-backend", Argv: []string{"pi"}},
+			"a2": {Cwd: "/home/you/src/go-backend", Argv: []string{"go", "test", "./..."}},
+			"a3": {Cwd: "/home/you/src/go-backend"},
 			"b1": {Cwd: "/var/log/dm"},
 		},
 	}
@@ -292,7 +292,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if win.Focus != "w1p1" {
 		t.Fatalf("focus = %q, want w1p1", win.Focus)
 	}
-	if p := got.Panes["w1p1"]; p.Cwd != "/home/b/Code/Personal/go-backend" || !reflect.DeepEqual(p.Argv, []string{"pi"}) {
+	if p := got.Panes["w1p1"]; p.Cwd != "/home/you/src/go-backend" || !reflect.DeepEqual(p.Argv, []string{"pi"}) {
 		t.Fatalf("pane launch data changed: %+v", p)
 	}
 	if err := Save(path, got); err != nil {

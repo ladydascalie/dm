@@ -3,7 +3,7 @@ package wlabel
 import "testing"
 
 func TestRender(t *testing.T) {
-	v := Vars{ID: "w1", Name: "user-provided-name", Named: true, Cwd: "/home/b/Code/Personal/dm", Root: "/home/b/Code/Personal/dm"}
+	v := Vars{ID: "w1", Name: "user-provided-name", Named: true, Cwd: "/home/you/src/dm", Root: "/home/you/src/dm"}
 	cases := []struct {
 		tmpl string
 		want string
@@ -11,7 +11,7 @@ func TestRender(t *testing.T) {
 		{"", "user-provided-name"},
 		{"{{.Name}}", "user-provided-name"},
 		{"{{.ID}} - {{.Name}} - {{base .Cwd}}", "w1 - user-provided-name - dm"},
-		{"{{.Cwd}}", "/home/b/Code/Personal/dm"},
+		{"{{.Cwd}}", "/home/you/src/dm"},
 		{"{{base .Root}}", "dm"},
 		{"plain", "plain"},
 		{"{{.Name}}/{{.ID}}", "user-provided-name/w1"},
