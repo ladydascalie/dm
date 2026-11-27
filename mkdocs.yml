@@ -80,6 +80,7 @@ nav:
       - Harnesses: docs/internals/13-harnesses.md
       - Package graph: docs/internals/generated/package-graph.md
   - Releases:
+      - v0.1.2: docs/releases/v0.1.2.md
       - v0.1.0: docs/releases/v0.1.0.md
   - Skills:
       - Fleet judgement: skills/dm-fleet/index.md
