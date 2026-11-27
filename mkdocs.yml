@@ -17,7 +17,6 @@ site_url: https://ladydascalie.github.io/dm/
 site_description: A durable terminal multiplexer for coding agents.
 repo_url: https://github.com/ladydascalie/dm
 repo_name: ladydascalie/dm
-edit_uri: edit/main/
 docs_dir: .site
 site_dir: site
 strict: true
@@ -83,7 +82,7 @@ nav:
   - Releases:
       - v0.1.0: docs/releases/v0.1.0.md
   - Skills:
-      - Fleet judgement: skills/dm-fleet/SKILL.md
-      - The dm-agent extension: skills/dm-agent/README.md
-      - Cutting a release: skills/dm-release/SKILL.md
-      - Adding a harness: skills/dm-add-harness/SKILL.md
+      - Fleet judgement: skills/dm-fleet/index.md
+      - The dm-agent extension: skills/dm-agent/index.md
+      - Cutting a release: skills/dm-release/index.md
+      - Adding a harness: skills/dm-add-harness/index.md

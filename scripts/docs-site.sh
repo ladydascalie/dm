@@ -23,16 +23,22 @@ mkdir -p "$stage"
 staged=0
 while IFS= read -r -d '' file; do
 	case "$file" in
-	README.md | PLUGINS.md | \
-		docs/internals/* | docs/releases/* | \
-		skills/dm-fleet/SKILL.md | skills/dm-agent/README.md)
+	README.md | PLUGINS.md | docs/internals/* | docs/releases/*)
 		install -D -m 0644 "$file" "$stage/$file"
 		staged=$((staged + 1))
 		;;
+	# A skill is a directory whose page is SKILL.md or README.md. Both stage as
+	# index.md, so the page answers at /skills/<name>/ rather than at
+	# /skills/<name>/SKILL/. The repo skill also moves out of .agents, which the
+	# build ignores as a dot directory.
+	skills/dm-fleet/SKILL.md | skills/dm-agent/README.md)
+		name=${file#skills/}
+		install -D -m 0644 "$file" "$stage/skills/${name%/*}/index.md"
+		staged=$((staged + 1))
+		;;
 	.agents/skills/*/SKILL.md)
-		# MkDocs ignores a dot directory, so the repo skill lands beside the
-		# harness skills. It has no relative links of its own.
-		install -D -m 0644 "$file" "$stage/skills/${file#.agents/skills/}"
+		name=${file#.agents/skills/}
+		install -D -m 0644 "$file" "$stage/skills/${name%/SKILL.md}/index.md"
 		staged=$((staged + 1))
 		;;
 	esac
