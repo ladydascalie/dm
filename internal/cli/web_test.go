@@ -56,20 +56,20 @@ func TestWebAddrDefault(t *testing.T) {
 // the source, which is the case the brief is about: the tailnet address needs
 // no retyped --addr.
 func TestWebAddrFromConfig(t *testing.T) {
-	c := webFlags(t, `web-addr "100.71.227.52:8099"`+"\n")
+	c := webFlags(t, `web-addr "you.ts.net:8099"`+"\n")
 	addr, fromConfig, err := webAddr(c)
 	if err != nil {
 		t.Fatalf("webAddr: %v", err)
 	}
-	if addr != "100.71.227.52:8099" {
-		t.Fatalf("addr = %q, want the configured 100.71.227.52:8099", addr)
+	if addr != "you.ts.net:8099" {
+		t.Fatalf("addr = %q, want the configured you.ts.net:8099", addr)
 	}
 	if !fromConfig {
 		t.Fatal("fromConfig = false, want true")
 	}
 	var out bytes.Buffer
 	announceWebAddr(&out, addr, fromConfig)
-	if got := out.String(); !strings.Contains(got, "100.71.227.52:8099") || !strings.Contains(got, "web-addr") {
+	if got := out.String(); !strings.Contains(got, "you.ts.net:8099") || !strings.Contains(got, "web-addr") {
 		t.Fatalf("announce line = %q, want the configured address and the key", got)
 	}
 }
@@ -78,7 +78,7 @@ func TestWebAddrFromConfig(t *testing.T) {
 // value equal to the built-in default: the flag's Changed bit decides, so
 // `dm web --addr 127.0.0.1:8099` is respected over a tailnet key.
 func TestWebAddrFlagWins(t *testing.T) {
-	c := webFlags(t, `web-addr "100.71.227.52:8099"`+"\n", "--addr", keymap.DefaultWebAddr)
+	c := webFlags(t, `web-addr "you.ts.net:8099"`+"\n", "--addr", keymap.DefaultWebAddr)
 	addr, fromConfig, err := webAddr(c)
 	if err != nil {
 		t.Fatalf("webAddr: %v", err)
@@ -94,7 +94,7 @@ func TestWebAddrFlagWins(t *testing.T) {
 // TestWebAddrFlagWinsWithAnotherValue proves the flag wins when it names a
 // value the config does not.
 func TestWebAddrFlagWinsWithAnotherValue(t *testing.T) {
-	c := webFlags(t, `web-addr "100.71.227.52:8099"`+"\n", "--addr", "127.0.0.1:9100")
+	c := webFlags(t, `web-addr "you.ts.net:8099"`+"\n", "--addr", "127.0.0.1:9100")
 	addr, fromConfig, err := webAddr(c)
 	if err != nil {
 		t.Fatalf("webAddr: %v", err)
@@ -143,11 +143,11 @@ func TestWebAddrRefused(t *testing.T) {
 // address did not come from the config.
 func TestAnnounceWebAddrSilent(t *testing.T) {
 	var out bytes.Buffer
-	announceWebAddr(&out, "100.71.227.52:8099", false)
+	announceWebAddr(&out, "you.ts.net:8099", false)
 	if out.Len() != 0 {
 		t.Fatalf("announce printed %q, want nothing", out.String())
 	}
-	announceWebAddr(&out, "100.71.227.52:8099", true)
+	announceWebAddr(&out, "you.ts.net:8099", true)
 	if got := strings.Count(out.String(), "\n"); got != 1 {
 		t.Fatalf("announce printed %d lines, want one: %q", got, out.String())
 	}

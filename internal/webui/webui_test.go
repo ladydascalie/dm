@@ -421,7 +421,7 @@ func TestFleetStartsASession(t *testing.T) {
 // TestQRText proves the art is a square of equal width lines, one module per
 // cell, and that a longer link needs a wider code.
 func TestQRText(t *testing.T) {
-	url := "http://100.71.227.52:8099/?t=c33beba64055b013"
+	url := "http://you.ts.net:8099/?t=c33beba64055b013"
 	art, err := qrText(url)
 	if err != nil {
 		t.Fatal(err)

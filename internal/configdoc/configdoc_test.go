@@ -151,7 +151,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"ask-cols":          `ask-cols 120`,
 		"ask-split":         `ask-split 70`,
 		"diff-command":      `diff-command "git diff --stat"`,
-		"web-addr":          `web-addr "100.71.227.52:8099"`,
+		"web-addr":          `web-addr "you.ts.net:8099"`,
 		"dashboard-layout":  `dashboard-layout "float"`,
 		"dashboard-peek":    `dashboard-peek "right"`,
 		"shelf-layout":      `shelf-layout "pane"`,
@@ -213,8 +213,8 @@ func TestConfigNodesParse(t *testing.T) {
 	if got := cfg.DiffCommand(); got != "git diff --stat" {
 		t.Errorf("DiffCommand = %q, want %q", got, "git diff --stat")
 	}
-	if got := cfg.WebAddr(); got != "100.71.227.52:8099" {
-		t.Errorf("WebAddr = %q, want %q", got, "100.71.227.52:8099")
+	if got := cfg.WebAddr(); got != "you.ts.net:8099" {
+		t.Errorf("WebAddr = %q, want %q", got, "you.ts.net:8099")
 	}
 	if !cfg.WebAddrSet() {
 		t.Error("WebAddrSet = false, want true")

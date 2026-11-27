@@ -1528,7 +1528,7 @@ func TestConfigWebAddr(t *testing.T) {
 		set  bool
 	}{
 		{"absent", `prefix "ctrl+b"`, DefaultWebAddr, false},
-		{"set", `web-addr "100.71.227.52:8099"`, "100.71.227.52:8099", true},
+		{"set", `web-addr "you.ts.net:8099"`, "you.ts.net:8099", true},
 		{"empty", `web-addr ""`, DefaultWebAddr, false},
 		{"wildcard", `web-addr ":8099"`, ":8099", true},
 		{"ipv6", `web-addr "[::1]:8099"`, "[::1]:8099", true},
