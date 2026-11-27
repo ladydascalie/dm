@@ -1,0 +1,13 @@
+hex
+===
+
+tokens.css, fonts.css, LICENSE and fonts/ are copied from the hex repository at
+tag v0.1.0:
+
+  https://github.com/ladydascalie/hex
+
+DESIGN.md there is the contract for these tokens. hex.css beside this file is
+not vendored: it maps the tokens onto Material, which is this site's stack.
+
+Move the pin with ./scripts/hex-vendor.sh <tag>, update the default in that
+script, then rebuild the site and read both tiers.

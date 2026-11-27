@@ -82,12 +82,13 @@ therefore needs a nav entry in `mkdocs.yml`, and nothing else. `make docs-site`
 runs the same script. The pages workflow publishes the site at
 `https://darkmage.dev/dm/`, and `mkdocs.yml` sets `site_url`.
 
-The site wears hex, the theme in `docs/assets/hex/`. That directory holds the
-token layer, the self-hosted fonts and `hex.css`, which maps the tokens onto
+The site wears [hex](https://github.com/ladydascalie/hex), a design language
+with its own repository. `make hex-vendor` downloads the pinned tag's tokens,
+fonts and licence into `docs/assets/hex/`, and `hex.css` there maps them onto
 Material and squares off the components Material draws round. A host that is
-not Material links `tokens.css` and `fonts.css` and skips `hex.css`, and the
-tokens answer `data-theme="light"` on `<html>` as well as Material's scheme
-attribute. `docs-site.sh` stages the directory like any other asset.
+not Material links `tokens.css` and `fonts.css` and skips `hex.css`; the tokens
+answer `data-theme="light"` on `<html>` as well as Material's scheme attribute.
+`docs-site.sh` stages the directory like any other asset.
 
 `PLUGINS.md` is the plugin contract by hand. It covers a program in a pane, the
 declaration, the environment, the message log topics and the example under

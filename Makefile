@@ -44,6 +44,7 @@ help:
 		release-check "go test the release packages, then make dist" \
 		provision-check "fail unless this checkout's extension and skill are linked into the harness" \
 		docs-site "stage the published markdown and build the GitHub Pages site into site/" \
+		hex-vendor "copy the pinned hex theme into docs/assets/hex" \
 		docs-casts "record the demo casts the docs site plays, from a scratch state" \
 		docs-casts-check "re-check the recorded casts: header, events, input, last frame, webfont" \
 		docs-font "rebuild docs/assets/font/dm-cast-mono.woff2 from its upstream" \
@@ -160,6 +161,13 @@ docs-internals:
 .PHONY: docs-site
 docs-site:
 	uv run --quiet --with-requirements requirements-docs.txt ./scripts/docs-site.sh
+
+# hex is a separate repository, and the docs build fetches nothing. This copies
+# the pinned tag's release assets into docs/assets/hex; the Material map in
+# that directory stays dm's own.
+.PHONY: hex-vendor
+hex-vendor:
+	./scripts/hex-vendor.sh
 
 # A cast is recorded from a live session, by a feeder script and an asciinema
 # pty. The taping is local: it needs a terminal, real timing and a whole dm

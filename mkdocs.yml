@@ -52,9 +52,9 @@ theme:
     - content.code.copy
 
 
-# The theme is hex: docs/assets/hex holds its tokens and fonts, and hex.css maps
-# them onto Material. The theme loads before the player, so a cast inherits the
-# theme's corners and colours.
+# The theme is hex: docs/assets/hex holds its tokens and fonts, taken from the
+# pinned tag's release by `make hex-vendor`, and hex.css maps them onto Material.
+# The theme loads before the player, so a cast inherits the theme's corners.
 #
 # The player is a vendored bundle and the mount script is ours, so a page that
 # carries data-cast plays a recorded session with no network at runtime.

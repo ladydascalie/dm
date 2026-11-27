@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: FSL-1.1-MIT */
 
-/* hex theme tokens: dark-first.
+/* hex tokens: dark-first.
    The palette is roles, not decoration: head green is the brand accent, wing
    slate the surfaces, neck lavender the text, speculum periwinkle the links,
    oxblood the danger, and the bill amber is derived for warn. Status is never
    the brand accent.
 
-   The dark tier sits on :root. The light tier answers both light hooks, so a
-   host can key it on <html data-theme="light"> or on the scheme attribute
-   Material writes to <body>. */
+   The dark tier sits on :root, so a host needs no attribute for it. The light
+   tier answers the hooks below: data-theme on <html> is hex's own, and the
+   body attribute is the one Material writes. */
 
 :root {
 	color-scheme: dark;
@@ -124,6 +124,7 @@
 	--ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* Light tier: hex's hook first, then Material's integration hook. */
 html[data-theme="light"],
 body[data-md-color-scheme="default"] {
 	color-scheme: light;
