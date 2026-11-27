@@ -24,6 +24,13 @@ copyright: MIT licensed
 
 theme:
   name: material
+  # hex's fonts are self-hosted beside its tokens, so Material must not reach
+  # for Google Fonts. docs/assets/hex/hex.css names the families.
+  font: false
+  # One mark for the header and the tab: a prompt and a cursor on a terminal
+  # plate, so the tab reads at 16px and the mark carries no other product.
+  logo: docs/assets/dm-mark.svg
+  favicon: docs/assets/dm-mark.svg
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -45,9 +52,16 @@ theme:
     - content.code.copy
 
 
+# The theme is hex: docs/assets/hex holds its tokens and fonts, and hex.css maps
+# them onto Material. The theme loads before the player, so a cast inherits the
+# theme's corners and colours.
+#
 # The player is a vendored bundle and the mount script is ours, so a page that
 # carries data-cast plays a recorded session with no network at runtime.
 extra_css:
+  - docs/assets/hex/tokens.css
+  - docs/assets/hex/fonts.css
+  - docs/assets/hex/hex.css
   - docs/assets/asciinema/asciinema-player.css
   - docs/assets/casts.css
 extra_javascript:

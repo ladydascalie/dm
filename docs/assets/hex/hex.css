@@ -1,0 +1,288 @@
+/* hex, mapped onto Material.
+   tokens.css beside this file carries the palette and fonts. This file maps
+   those tokens onto Material's variables and squares off the components
+   Material draws round. It invents no colour: every value below is a token.
+
+   Material writes the colour scheme onto <body>, and the palette script in the
+   theme sets it before the first paint, so the tokens resolve to the reader's
+   scheme with no flash. A host that is not Material links tokens.css and
+   fonts.css and skips this file. */
+
+/* The scheme attribute sits on <body>, which leaves <html> in the dark tier.
+   Mirror it, so the scrollbar and the form controls follow the reader too. */
+html:has(body[data-md-color-scheme="default"]) {
+	color-scheme: light;
+}
+
+/* Code surfaces stay dark in both schemes, so their syntax roles cannot be
+   theme roles, and hex publishes no syntax palette. These are the dark-tier
+   tokens pinned as constants; the roles repeat the editor themes built on hex:
+   keyword and statement accent, string success, constant and number warn,
+   function link, comment muted, special plum, operator lavender. */
+:root {
+	--hex-hl-keyword: #6aa88d;
+	--hex-hl-string: #5fa887;
+	--hex-hl-number: #e0a94c;
+	--hex-hl-constant: #e0a94c;
+	--hex-hl-function: #9fb0cf;
+	--hex-hl-special: #b39dcc;
+	--hex-hl-operator: #acafc4;
+	--hex-hl-comment: #80849a;
+	--hex-hl-generic: #9a9db2;
+}
+
+body {
+	font-family: var(--font-sans);
+	background-color: var(--bg);
+	color: var(--text);
+}
+
+::selection {
+	background-color: var(--row-sel);
+}
+
+/* Material's variable surface, filled from the tokens. Both schemes land here:
+   the token a variable points at is the one the scheme swapped. */
+body[data-md-color-scheme] {
+	--md-text-font-family: var(--font-sans);
+	--md-code-font-family: var(--font-mono);
+
+	/* Chrome: the header and the footer are nav surfaces, not page surfaces. */
+	--md-primary-fg-color: var(--nav-bg);
+	--md-primary-fg-color--light: var(--surface-2);
+	--md-primary-fg-color--dark: var(--nav-bg);
+	--md-primary-bg-color: var(--nav-text);
+	--md-primary-bg-color--light: var(--nav-muted);
+	--md-accent-fg-color: var(--accent-strong);
+	--md-accent-fg-color--transparent: var(--accent-lt);
+	--md-accent-bg-color: var(--on-accent);
+	--md-accent-bg-color--light: var(--nav-muted);
+
+	/* The page. Material's alpha ladder keeps its shape: 54/26/7 percent of a
+	   surface over whatever sits behind it. */
+	--md-default-fg-color: var(--text);
+	--md-default-fg-color--light: var(--muted);
+	--md-default-fg-color--lighter: color-mix(in srgb, var(--text) 32%, transparent);
+	--md-default-fg-color--lightest: color-mix(in srgb, var(--text) 12%, transparent);
+	--md-default-bg-color: var(--bg);
+	--md-default-bg-color--light: color-mix(in srgb, var(--surface) 54%, transparent);
+	--md-default-bg-color--lighter: color-mix(in srgb, var(--surface) 26%, transparent);
+	--md-default-bg-color--lightest: color-mix(in srgb, var(--surface) 7%, transparent);
+
+	/* Prose */
+	--md-typeset-color: var(--text);
+	--md-typeset-a-color: var(--link);
+	--md-typeset-mark-color: color-mix(in srgb, var(--warn) 40%, transparent);
+	--md-typeset-del-color: color-mix(in srgb, var(--danger) 22%, transparent);
+	--md-typeset-ins-color: color-mix(in srgb, var(--success) 22%, transparent);
+	--md-typeset-table-color: var(--border);
+	--md-typeset-table-color--light: var(--row-hover);
+	--md-typeset-kbd-color: var(--surface-2);
+	--md-typeset-kbd-accent-color: var(--surface);
+	--md-typeset-kbd-border-color: var(--border-strong);
+
+	/* Footer */
+	--md-footer-bg-color: var(--nav-bg);
+	--md-footer-bg-color--dark: var(--nav-bg);
+	--md-footer-fg-color: var(--nav-text);
+	--md-footer-fg-color--light: var(--nav-muted);
+	--md-footer-fg-color--lighter: color-mix(in srgb, var(--nav-muted) 62%, transparent);
+
+	/* Depth */
+	--md-shadow-z1: var(--shadow-sm);
+	--md-shadow-z2: var(--shadow-md);
+	--md-shadow-z3: var(--shadow-lg);
+
+	/* Inline code is typography: a tinted chip on the page surface. A code
+	   block is a terminal and keeps the constant dark surface, set below. */
+	--md-code-bg-color: var(--surface-2);
+	--md-code-fg-color: var(--text);
+	--md-code-bg-color--light: var(--surface-2);
+	--md-code-bg-color--lighter: var(--surface);
+	--md-code-hl-color: var(--hex-hl-keyword);
+	--md-code-hl-color--light: color-mix(in srgb, var(--hex-hl-keyword) 14%, transparent);
+	--md-code-hl-name-color: var(--code-text);
+	--md-code-hl-number-color: var(--hex-hl-number);
+	--md-code-hl-string-color: var(--hex-hl-string);
+	--md-code-hl-function-color: var(--hex-hl-function);
+	--md-code-hl-constant-color: var(--hex-hl-constant);
+	--md-code-hl-keyword-color: var(--hex-hl-keyword);
+	--md-code-hl-special-color: var(--hex-hl-special);
+	--md-code-hl-operator-color: var(--hex-hl-operator);
+	--md-code-hl-comment-color: var(--hex-hl-comment);
+	--md-code-hl-generic-color: var(--hex-hl-generic);
+	--md-code-hl-variable-color: var(--code-text);
+	--md-code-hl-punctuation-color: var(--hex-hl-operator);
+}
+
+/* The header is a nav bar, not frosted glass. */
+.md-header {
+	background-color: var(--nav-bg);
+	border-bottom: 1px solid var(--nav-border);
+	backdrop-filter: none;
+	-webkit-backdrop-filter: none;
+}
+
+body[data-md-color-scheme] .md-header__title,
+body[data-md-color-scheme] .md-typeset h1,
+body[data-md-color-scheme] .md-typeset h2,
+body[data-md-color-scheme] .md-typeset h3,
+body[data-md-color-scheme] .md-typeset h4,
+body[data-md-color-scheme] .md-typeset h5,
+body[data-md-color-scheme] .md-typeset h6 {
+	color: var(--text);
+}
+
+.md-header__title {
+	font-weight: 600;
+}
+
+.md-header__button:hover {
+	color: var(--nav-active-text);
+}
+
+/* Search reads as an input on the nav bar, squared like every other control. */
+.md-search__button {
+	background-color: var(--surface);
+	border: 1px solid var(--nav-border);
+	border-radius: var(--radius-sm);
+	color: var(--muted);
+}
+
+.md-search__button:hover {
+	background-color: var(--surface-2);
+	color: var(--text);
+}
+
+/* The sidebar is the same nav surface as the header. */
+.md-sidebar {
+	color: var(--nav-text);
+}
+
+.md-nav__link {
+	border-radius: var(--radius-sm);
+}
+
+.md-nav__link--active,
+.md-nav__link--active code {
+	color: var(--nav-active-text);
+	font-weight: 500;
+}
+
+.md-nav__link:hover,
+.md-nav__link:focus {
+	color: var(--nav-text);
+}
+
+.md-nav__item .md-nav__link--active {
+	background-color: var(--nav-active-bg);
+}
+
+/* Prose */
+.md-typeset {
+	line-height: var(--leading-normal);
+}
+
+.md-typeset h1,
+.md-typeset h2 {
+	letter-spacing: -0.01em;
+}
+
+.md-typeset h1 {
+	font-weight: 650;
+}
+
+.md-typeset h2 {
+	font-weight: 600;
+}
+
+.md-typeset a {
+	color: var(--link);
+}
+
+.md-typeset a:hover {
+	color: var(--accent-strong);
+}
+
+.md-typeset hr {
+	border-bottom: 1px solid var(--border);
+}
+
+.md-typeset blockquote {
+	color: var(--muted);
+	border-left: 2px solid var(--accent);
+}
+
+/* Commands and code carry their own weight, as the design system asks: a
+   light-on-dark stroke reads thinner, so the mono sits above regular. */
+.md-typeset code,
+.md-typeset kbd,
+.md-typeset pre {
+	font-weight: var(--mono-weight);
+}
+
+.md-typeset code {
+	background-color: var(--surface-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+}
+
+.md-typeset .highlight,
+.md-typeset pre {
+	border-radius: var(--radius-md);
+}
+
+/* A block is a terminal: the dark surface stays dark in both schemes. */
+.md-typeset .highlight > pre > code,
+.md-typeset pre > code {
+	background-color: var(--code-bg);
+	border: 1px solid var(--code-border);
+	border-radius: var(--radius-md);
+	color: var(--code-text);
+}
+
+/* The copy control sits on the terminal surface, so it takes the terminal's
+   ink and no plate of its own. */
+.md-typeset .md-code__nav {
+	background-color: transparent;
+}
+
+.md-typeset .md-code__button {
+	color: color-mix(in srgb, var(--code-text) 55%, transparent);
+}
+
+.md-typeset .md-code__button:hover,
+.md-typeset .md-code__button.focus-visible {
+	color: var(--code-text);
+}
+
+/* A table is a grid of rows, not a card: hairlines, a nav-surface header and
+   no rounding. */
+.md-typeset table:not([class]) {
+	border-radius: 0;
+}
+
+.md-typeset table:not([class]) th {
+	background-color: var(--surface);
+	color: var(--text);
+	font-weight: 600;
+}
+
+.md-typeset table:not([class]) th,
+.md-typeset table:not([class]) td {
+	border: 1px solid var(--border);
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+	background-color: var(--row-hover);
+}
+
+/* The footer closes the page on the same nav surface the header opens it on. */
+.md-footer {
+	border-top: 1px solid var(--nav-border);
+}
+
+.md-footer-meta {
+	background-color: var(--nav-bg);
+}

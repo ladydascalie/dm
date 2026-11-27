@@ -51,6 +51,11 @@ done < <(git ls-files -z -- '*.md')
 
 staged_assets=0
 while IFS= read -r -d '' file; do
+	# The theme's README tells a host how to lift hex into another project. It is
+	# repository documentation, not a page, and it would be an orphaned one.
+	case "$file" in
+	docs/assets/hex/README.md) continue ;;
+	esac
 	install -D -m 0644 "$file" "$stage/$file"
 	staged_assets=$((staged_assets + 1))
 done < <(git ls-files -z -- 'docs/casts/*.cast' 'docs/assets/*' 'docs/javascripts/*.js')
