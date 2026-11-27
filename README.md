@@ -67,6 +67,10 @@ declaration, the environment, the box topics and the example under
 
 The architecture and internals entry point is [docs/internals/README.md](docs/internals/README.md).
 
+Every page above is also published as a site, with a sidebar and search, at
+https://darkmage.dev/dm/. `make docs-site` builds it; the pages workflow
+deploys it from the same markdown.
+
 ## Code layout
 
 `main.go` dispatches the internal verbs and hands everything else to the CLI.
