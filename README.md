@@ -1838,3 +1838,8 @@ rail resize, window and workspace switching, the JSON action path, OSC 7501
 status, the message box CLI and desktop notifications. Unit tests hold each
 generated document to its renderer: `docs/dm.1` and `docs/llms.txt` fail the
 gate when stale.
+
+## Licence
+
+MIT. The text is in [LICENSE](LICENSE), and every release carries it beside the
+tarballs, because an archive holds one file and a checksum line is a tarball.

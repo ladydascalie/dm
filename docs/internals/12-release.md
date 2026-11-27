@@ -62,6 +62,12 @@ before anything is uploaded. The reader accepts that format and refuses a
 missing line, a duplicate and a digest of the wrong shape
 (`internal/release/download.go#Checksum`).
 
+`LICENSE` is published as its own asset beside the four tarballs.
+`checksums.txt` covers the tarballs only, because the licence is not what runs.
+It stays out of the archive on purpose: `Extract` refuses a tarball holding a
+second entry (`internal/release/extract.go#Extract`), so a licence inside would
+break the upgrade of every binary already installed.
+
 The release notes come from the commits between the previous tag and this one.
 `scripts/release-notes.sh` prints `## New in <tag>` and then the groups that
 hold a commit, in this order: Features, Fixes, Performance, Docs, Other. One

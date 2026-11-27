@@ -175,7 +175,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # The licence rides beside the tarballs, never inside them: an
+          # installed dm refuses an archive with a second entry, so a licence
+          # in the tarball would break every older client's upgrade.
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --notes-file "${RUNNER_TEMP}/notes.md" \
-            dm_*.tar.gz checksums.txt
+            dm_*.tar.gz checksums.txt ../LICENSE

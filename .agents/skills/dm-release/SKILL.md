@@ -106,7 +106,7 @@ tar xzf /tmp/dm-release/dm_linux_amd64.tar.gz -C /tmp/dm-release
 
 Check three things beyond a green run:
 
-- four assets plus `checksums.txt`, and no windows asset;
+- four tarballs, `checksums.txt` and `LICENSE`, and no windows asset;
 - the body is `docs/releases/v<next>.md` when you wrote one, else only the
   commits in `v<prev>..v<next>` grouped under Features, Fixes, Performance,
   Docs, Other;
