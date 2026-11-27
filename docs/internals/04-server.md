@@ -64,7 +64,7 @@ Past the 1 MiB cap the server marks the client stale and rebuilds it from a snap
 | `server_mutate.go` | layout changes, `mutation`, `resync`, `writeTo`, `sendKeys` |
 | `server_view.go` | snapshot, size fit, `syncSizes`, screens, `reply`, `serve` |
 | `server_box.go` | message log writes, waiters, subscribers, reader positions, trimming |
-| `server_ask.go` | the question store: open, await, answer, close, list, its caps, the pane prune, and the snapshot's listed questions |
+| `server_ask.go` | the question store: open, await, answer, close, list, its caps, the pane prune, the snapshot's listed questions, and the focus an open takes |
 | `server_secrets.go` | the secret list, activation, proxy, cover (other sessions), type (into a pane), hydrate (to a file) |
 | `server_sync.go` | the `.dm-secrets.kdl` file the `secret-sync` action applies: secrets to register, files to ingest |
 | `server_float.go` | floating panes and their lifetime |

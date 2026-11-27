@@ -237,6 +237,10 @@ The store is bounded. One session lists at most 64 asks (`MaxListed`, `internal/
 
 The store refuses an `ask-open` past either cap with `E_FULL`, so a refused open leaves it untouched. It refuses a second open for a tool call an ask already covers with `E_EXISTS`. It refuses an `ask-open` on a pane outside the tree with `invalid_payload`.
 
+An `ask-open` gives the pane the focus as well as the question. The client paints a question only on the focused pane of the active window. A question on any other pane would arrive unseen. `askOpen` (`internal/server/server_ask.go#server.askOpen`) stores the question, then calls `askFocus` (`internal/server/server_ask.go#server.askFocus`). `askFocus` activates the pane's workspace and its window, then sets the window focus. The focus is session state, so every client sees it and a detach keeps it.
+
+A reader who already has an open ask on screen keeps the focus. The question panel in front of them carries picks they typed. Taking the focus would throw those picks away. A second question therefore waits in the store (`openAskOnLocked`, `internal/server/server_ask.go#server.openAskOnLocked`). A focus that moves drops the zoom. The zoom is one view of one focus, so that open resyncs instead of pushing a snapshot.
+
 `ask-await` parks for at most 25 seconds (`DefaultAwait`, `internal/ask/ask.go#DefaultAwait`) and then replies `pending`.
 
 An answer is not part of a snapshot. A client that attaches between the answer and the close draws the question as open. `ask-list` carries the answers. A closed or dead pane takes its questions with it, answered or not. The store drops an answered question after `SettleGrace`, ten minutes (`internal/ask/ask.go#SettleGrace`).

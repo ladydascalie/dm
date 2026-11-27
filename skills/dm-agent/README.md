@@ -83,6 +83,10 @@ clidoc caps one await at 25 seconds. The tool chains calls until the caller's
 own `timeout` runs out, and reports `pending` once it does. Give `pane` on
 `ask`. Give `askId` on `answer` and `await`.
 
+Name the pane you run in. An ask gives that pane the focus, so the question
+stands in front of the operator wherever they were. The question panel holds the
+keys until they answer or decline it.
+
 ## Reaching the tools
 
 `dm_turn` is `model-only`, pi's rule for a tool that asks the user. The other

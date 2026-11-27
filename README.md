@@ -726,8 +726,8 @@ session at 64 listed asks, and the listed text at 256 KiB.
   question is answered, and `esc` declines.
   Those keys take rows of their own above the closing rule, so every binding is
   on screen at any width. A second question waits in the store, and the sidebar
-  marks its pane with a `?` badge. The status strip names a question the desk is
-  not showing as `ask <pane>`, with the key that reaches it. While a question
+  marks its pane with a `?` badge. The status strip names a question the screen
+  is not showing as `ask <pane>`, with the key that reaches it. While a question
   panel is up the strip stays quiet, because that key would hide the panel
   instead of reaching the other question.
 - The phone. `dm web` paints the ask as a form above the pane's views: one
@@ -746,9 +746,11 @@ Esc declines an ask on every surface. The floating pane and the phone send
 declined too. A decline is an answer: the agent reads it and stops waiting. An
 ask takes the focus of the pane it belongs to, across windows and workspaces, so
 the question panel stands in front of the reader instead of waiting on another
-pane. The CLI is the store's door: `dm ask list`, `dm ask open --pane <pane>
---tool-call <id>`, `dm ask await <id>`, `dm ask answer <id>` and `dm ask close
-<id>`. A question set is too big for argv, so the bodies come on stdin.
+pane. Answering a question leaves the screen where the answer was sent. The next
+question waits on the status strip, and `A` reaches it. The CLI is the store's
+door: `dm ask list`, `dm ask open --pane <pane> --tool-call <id>`, `dm ask
+await <id>`, `dm ask answer <id>` and `dm ask close <id>`. A question set is too
+big for argv, so the bodies come on stdin.
 
 ## Message log
 

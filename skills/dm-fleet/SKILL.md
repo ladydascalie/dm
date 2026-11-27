@@ -98,6 +98,11 @@ The three states that matter here:
 | `blocked` | it cannot proceed without a decision | Decide now. The entry names the decision and what the worker agent already tried |
 | `done` | the work is in the worktree and its accept command passed | Read the report path the entry names. Nothing else is proof |
 
+An ask belongs to the operator, not to the parent. It moves their screen to
+the asking pane and holds their keys until they answer. A decision the parent
+can take goes on the message log. A worker agent that cannot proceed writes
+`blocked` there. Reach for `dm_turn ask` only when the person must decide.
+
 A worker agent never commits. It leaves uncommitted changes in its worktree and
 hands over a report. The parent runs the accept command and reads the diff, then
 commits on the worker's branch. A worker agent that commits has taken a decision
