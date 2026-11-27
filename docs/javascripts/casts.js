@@ -19,13 +19,11 @@
 
   function options(el) {
     return {
-      cols: Number(el.dataset.cols || 100),
-      rows: Number(el.dataset.rows || 26),
       theme: theme(),
       fit: 'width',
       autoPlay: false,
       preload: true,
-      poster: 'npt:0:01',
+      poster: el.dataset.poster || 'npt:0:03',
       terminalFontFamily: '"dm Cast Mono", "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace, "Symbols Nerd Font"',
       controls: true,
     };

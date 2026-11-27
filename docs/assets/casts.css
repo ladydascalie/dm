@@ -23,3 +23,11 @@
 	src: url("font/dm-cast-mono.woff2") format("woff2");
 	font-display: swap;
 }
+
+/* The demos want the column the table of contents takes. A page that plays a
+   cast gives that column up, and the player stays the width it needs. */
+@media screen and (min-width: 76.25em) {
+	body:has([data-cast]) .md-sidebar--secondary {
+		display: none;
+	}
+}

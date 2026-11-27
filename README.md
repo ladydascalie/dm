@@ -110,13 +110,13 @@ is armed, `SCROLL <pane> +<offset>/<max>` while you scroll, and
 Two recordings show the basics. A player opens on a still frame, so press play
 once.
 
-<div data-cast="docs/casts/split.cast" data-cols="100" data-rows="26"></div>
+<div data-cast="docs/casts/split.cast"></div>
 
 `ctrl+b` arms the prefix, and the box lists every key. `|` splits right, `h`
 moves focus left, and `-` splits the left pane down. Every pane keeps its own
 shell.
 
-<div data-cast="docs/casts/project.cast" data-cols="100" data-rows="26"></div>
+<div data-cast="docs/casts/project.cast" data-poster="npt:0:09"></div>
 
 `ctrl+b P` opens the project prompt on the active workspace, and the sidebar
 regroups that workspace under its project. `dm ls` prints the same project, so
