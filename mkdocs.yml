@@ -13,7 +13,7 @@
 # `strict: true` is the gate: a broken link, or a page staged but missing from
 # the nav, fails the build instead of shipping a dead site.
 site_name: dm
-site_url: https://ladydascalie.github.io/dm/
+site_url: https://darkmage.dev/dm/
 site_description: A durable terminal multiplexer for coding agents.
 repo_url: https://github.com/ladydascalie/dm
 repo_name: ladydascalie/dm
