@@ -24,6 +24,8 @@ A plugin cannot:
 - set a `DM_` environment name. dm sets those.
 - be stopped by a command. There is no `dm plugin stop`. Close the pane instead.
 - be sandboxed or reviewed. dm validates the declaration and nothing else.
+- be a program that returns. The pane ends with it, so a one-shot script
+  reads as a flicker with no error on screen.
 - get its declaration re-read on respawn. The pane records its argv at launch.
 - be restarted after a crash. dm has no restart policy.
 
@@ -47,6 +49,17 @@ plugin "git-rail" {
 | `where` | Required. `split` or `window`. dm refuses a floating pane, because a floating pane ends with the client that opened it and a plugin outlives a detach. |
 | `env` | Optional `KEY=VALUE`, for the plugin's own configuration. dm applies it after the pane allowlist. A `DM_` name is refused, because dm sets those. A duplicate key is refused. |
 
+The name follows the shared declaration rule: letters, digits, `_` and `-`, 1
+to 32 bytes. It may not be a built-in action name, because `plugin:<name>` and
+the built-in actions share one namespace in the keymap and in the help box.
+dm refuses the file rather than renaming the plugin, so a declaration called
+`top`, `filter`, `diff` or `search` fails at load with its line, and `dm config`
+prints that line in full. Rename the declaration and keep the program.
+
+The flat namespace is the trade: a plugin row sits beside the built-in rows in
+one help box, so a name that means two things cannot be expressed. The cost
+lands on the operator once, at load, with the line named.
+
 Bind it in a keymap:
 
 ```kdl
@@ -68,6 +81,43 @@ dm plugin start git-rail [--split|--window] [--target w1p1]
 `dm plugin start` defaults to the declaration's `where` and the focused pane. The
 server resolves the name from the config it already loads. Edit the file, reload
 (`prefix ctrl+r` in the client), and the next launch sees it.
+
+## Any long-lived program
+
+The pane is a real PTY, so a full-screen program is a plugin and needs no
+wrapper. dm starts it, hands it the terminal and never supervises it: there is
+no restart policy, and the program owning the pane is the whole story.
+
+```kdl
+plugin "mon" {
+    exec "/usr/bin/top"
+    where "split"
+}
+keymap "main" {
+    "plugin:mon" "m"
+}
+```
+
+`top` draws its process table, answers the keys you press, and runs until you
+press `q`, exactly as in a shell. Two details make this declaration work. The
+declaration is `mon` because `top` is a built-in action name. The program is an
+absolute path, because a relative one is a load error.
+
+The failure mode is a program that returns. **The pane closes with it.** A
+script that ends after printing a line opens a pane, prints it and closes in
+one frame, and that reads as a flicker with no error on screen. Ask for a
+program that waits. A TUI waits for your keys, and a loop on `dm msg sub`
+waits for an entry. A plain `sleep 60` is not a plugin: it returns after a
+minute and closes the pane under you.
+
+For a program you want once rather than on a key, skip the declaration:
+
+```sh
+dm split w1p1 --argv /usr/bin/top
+```
+
+The argv is durable in `state.json`, so the pane respawns with the same
+program, and the config carries no row for it.
 
 ## What the pane gets
 
