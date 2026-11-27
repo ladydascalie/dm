@@ -91,6 +91,7 @@ before it cuts a key.
 | `a` | dashboard: every pane in a full-screen table |
 | `m` | message log: the session's entries as a floating pane |
 | `N` | message log opened on the `notify/` entries, the notification filter on |
+| `U` | the URL the session daemon serves the page on, with its QR code, in a temporary float |
 | `A` | show or hide the question panel, or reach the oldest one waiting elsewhere |
 | `?` | all keymaps, in a floating pane |
 | `)` | next workspace |
@@ -531,6 +532,7 @@ optional and each one overrides its built-in value.
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
 | `web-addr` | a quoted host:port, as in `"you.ts.net:8099"` | `"127.0.0.1:8099"` | Set the host:port `dm web` listens on when `--addr` is not passed. An absent or empty node keeps the loopback default. |
 | `web-token` | a quoted token of letters, digits, underscore or hyphen | none | Set the token `dm web` serves when `--token` is not passed. A pinned token never changes, so a bookmarked URL and an installed phone app keep working across restarts, new session directories and a moved state tree. An absent or empty node lets the session's `web.token` decide. |
+| `web-auto` | `true` or `false` | `false` | Start the web listener with the session daemon, so the page is live with no `dm web` in a pane. It binds `web-addr` with the pinned `web-token`, else the session's `web.token`. A later `dm web` with no `--addr` and no `--token` prints that URL instead of binding a second listener, and `U` shows the URL and its QR. A failed bind leaves the session running and reports the error to `U`. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 | `command` | a quoted name and a `{ run "..." }` block | none | Define a command a keymap can run; bind `command:<name>` to a key, and the row runs the run text in a floating pane. |
@@ -702,6 +704,17 @@ dm web                                        # loopback only
 dm web --addr you.ts.net:8099                 # your own host, reachable from the phone
 dm web --addr you.ts.net:8099 --read-only     # no input, no compose, no actions
 ```
+
+With `web-auto` true in `config.kdl` the session daemon owns the listener, so
+the page is live from the first attach and needs no `dm web` in a pane. The
+daemon binds `web-addr` when the server starts, with the token `web-token` pins
+or the one the session keeps in `web.token`; a bind that fails leaves the
+session running and holds the error. A bare `dm web` then asks the daemon and
+prints that URL instead of binding a second listener on the same address; an
+explicit `--addr` or `--token` still binds its own, and with no daemon running
+`dm web` starts one the way it always did. The `U` key opens a temporary float
+with the URL and its QR code under it, read from the daemon rather than from the
+config, so the box shows what actually answers. `esc`, `q` or `U` closes it.
 
 The token is the whole access model. `dm web` prints the URL with the token on
 it, and the page trades that token for a cookie on the first load. The cookie

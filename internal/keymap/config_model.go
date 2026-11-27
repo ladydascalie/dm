@@ -138,6 +138,11 @@ type Config struct {
 	// and the session's web.token decides.
 	webToken    string
 	webTokenSet bool
+	// webAuto is true when the session daemon starts the web listener on its
+	// own, so the page is live without a `dm web` in a pane. Absent or false
+	// means off: a listener nobody asked for is a listener nobody watches.
+	webAuto    bool
+	webAutoSet bool
 	// commands maps a command name to its run text. A config without a
 	// command block carries an empty map.
 	commands map[string]string
@@ -377,6 +382,13 @@ func (c *Config) WebToken() string {
 // caller can say where the token came from.
 func (c *Config) WebTokenSet() bool {
 	return c != nil && c.webTokenSet && c.webToken != ""
+}
+
+// WebAuto reports whether the session daemon starts the web listener on its
+// own. A config without the node reports false: the listener is a choice, not
+// a default.
+func (c *Config) WebAuto() bool {
+	return c != nil && c.webAuto
 }
 
 // Commands returns every command the config defines, sorted by name.
@@ -630,8 +642,11 @@ var helpRows = []helpRow{
 	{[]string{"command-palette"}, "command palette"},
 	{[]string{"rename-workspace"}, "rename workspace"},
 	{[]string{"set-project"}, "set project"},
-	{[]string{"message-box"}, "message box"},
-	{[]string{"notification-centre"}, "notifications"},
+	// One float, two filters: the message box and its notify branch share a
+	// row, which keeps the table inside the 40-row screen the help overlay
+	// promises while the web URL key takes a row of its own.
+	{[]string{"message-box", "notification-centre"}, "message box / notify"},
+	{[]string{"web-url"}, "web URL and QR"},
 	{[]string{"toggle-rail"}, "cycle rail: full, thin, hidden"},
 	{[]string{"detach", "detach-alt"}, "detach"},
 	{[]string{"toggle-ask"}, "show / hide question"},

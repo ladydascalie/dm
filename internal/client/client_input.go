@@ -307,6 +307,18 @@ func (t *tui) processInput() {
 			t.closeGitFloat()
 			continue
 		}
+		// The web URL box takes its two close keys the same way: esc and q
+		// close it and go no further, so the pane under it never sees them.
+		// The key is dropped here, the way the facts box drops its esc: a close
+		// from the desk or from a snapshot keeps whatever the operator typed.
+		// The box's third close key is the web-url action, which reaches it
+		// through the prefix and the keymap below.
+		if t.webOpen() && len(t.inbuf) == 1 && (t.inbuf[0] == 0x1b || t.inbuf[0] == 'q') {
+			t.inbuf = nil
+			t.pending = false
+			t.closeWebFloat()
+			continue
+		}
 		if !t.termOff {
 			if kind, value, n, started := takeOSCReply(t.inbuf); started {
 				if n == 0 {

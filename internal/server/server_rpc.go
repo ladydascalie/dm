@@ -84,6 +84,12 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.mu.Unlock()
 		s.reply(cl, m, map[string]any{"layout": doc}, nil)
 
+	case "web-info":
+		// A read: where the daemon's own web listener stands. The client's
+		// URL float paints it, and `dm web` stays out of the way when the
+		// daemon already serves the page. Nothing here mutates.
+		s.reply(cl, m, s.webInfo(), nil)
+
 	case "read":
 		lines, st, err := s.paneLines(m.Target)
 		if err != nil {

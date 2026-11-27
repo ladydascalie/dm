@@ -57,21 +57,79 @@ type Config struct {
 // Run serves cfg until the listener fails. It prints the URL that carries the
 // token, because a token nobody can see is a token nobody uses.
 func Run(cfg Config) error {
-	tok, reused, err := webToken(cfg.Root, cfg.Session, cfg.Token)
+	srv, err := Listen(cfg)
 	if err != nil {
 		return err
+	}
+	srv.announce()
+	return srv.Serve()
+}
+
+// Server is a bound web listener: the address and the URL are known before the
+// first request, so a caller that is not a terminal can announce them, and the
+// daemon can hand the URL to a client. Listen binds, Serve serves and Close
+// stops.
+type Server struct {
+	cfg Config
+	ln  net.Listener
+	// reused says the token came from the session file, not from this run.
+	reused bool
+	http   *http.Server
+}
+
+// Listen resolves the token and binds the address. It prints nothing: the
+// caller decides what the operator sees, and a daemon binding at startup has
+// no terminal to print to. A failed bind returns no server.
+func Listen(cfg Config) (*Server, error) {
+	tok, reused, err := webToken(cfg.Root, cfg.Session, cfg.Token)
+	if err != nil {
+		return nil, err
 	}
 	cfg.Token = tok
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	announce(cfg.Session, ln.Addr(), tok, reused)
-	srv := &http.Server{
-		Handler:           NewHandler(cfg),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	return srv.Serve(ln)
+	return &Server{
+		cfg:    cfg,
+		ln:     ln,
+		reused: reused,
+		http: &http.Server{
+			Handler:           NewHandler(cfg),
+			ReadHeaderTimeout: 10 * time.Second,
+		},
+	}, nil
+}
+
+// URL is the link the listener answers on, token included. It names the real
+// address a wildcard bind landed on, so a caller never has to guess the port.
+func (s *Server) URL() string {
+	return urlFor(s.ln.Addr().String(), s.cfg.Token)
+}
+
+// Addr is the bound address, so a caller can compare it with what it asked
+// for: `127.0.0.1:0` answers the port the kernel picked.
+func (s *Server) Addr() net.Addr {
+	return s.ln.Addr()
+}
+
+// Serve answers requests until the listener fails. A Close in another
+// goroutine makes it return http.ErrServerClosed.
+func (s *Server) Serve() error {
+	return s.http.Serve(s.ln)
+}
+
+// Close stops the listener and every connection. It is safe on a server whose
+// Serve never ran.
+func (s *Server) Close() error {
+	return s.http.Close()
+}
+
+// announce prints what the operator needs to open the page: the URL that
+// carries the token, whether the token survived a restart, and how far the
+// listener reaches.
+func (s *Server) announce() {
+	announce(s.cfg.Session, s.ln.Addr(), s.cfg.Token, s.reused)
 }
 
 // announce prints what the operator needs to open the page: the URL that

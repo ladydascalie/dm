@@ -107,6 +107,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the token dm web serves. It applies only when --token is not passed. A pinned token never changes, so a bookmarked URL and an installed phone app keep working across restarts, new session directories and a moved state tree; an absent or empty node lets the session's web.token decide.",
 	},
 	{
+		Name:    "web-auto",
+		Value:   "true or false",
+		Default: "false",
+		Desc:    "Start the web listener with the session daemon, the moment the server starts, so the page is live with no dm web in a pane. It binds web-addr with the token web-token pins, else the session's web.token, and a later dm web with no --addr and no --token prints that URL instead of binding a second listener. The web-url key shows the URL and its QR. A failed bind leaves the session running and reports the error to that key.",
+	},
+	{
 		Name:    "dashboard-layout",
 		Value:   `"full" or "float"`,
 		Default: `"float"`,
@@ -217,7 +223,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, web-token, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, web-token, web-auto, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{
@@ -273,6 +279,7 @@ var ActionDesc = map[string]string{
 	"toggle-rail":         "Cycle the rail between full, thin and hidden.",
 	"message-box":         "Open the message box.",
 	"notification-centre": "Open the message box filtered to notify/ entries.",
+	"web-url":             "Open the URL the session daemon serves the page on, with its QR code under it; when the web listener is off, the reason and the command that starts it by hand.",
 	"toggle-ask":          "Put the question float away so the pane takes the keys again, or bring it back with the answers so far.",
 	"detach":              "Detach the client and leave the session running.",
 	"detach-alt":          "Detach the client and leave the session running; alternative key.",

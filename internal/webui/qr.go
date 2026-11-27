@@ -13,9 +13,10 @@ import (
 // held at an angle or a little glare, and stays small enough to fit a pane.
 const qrLevel = qrcode.Medium
 
-// qrText renders text as a QR code for a terminal: each module is two cells
+// QRArt renders text as a QR code for a terminal: each module is two cells
 // wide and one cell tall, painted as a solid background colour with spaces in
-// front of it.
+// front of it. A client that paints the code itself calls this, so it never
+// imports the encoder.
 //
 // Two cells per module is the whole trick: a terminal cell is about twice as
 // tall as it is wide, so this makes a module square in pixels without any
@@ -27,7 +28,7 @@ const qrLevel = qrcode.Medium
 // The colours are explicit rather than the terminal's own pair: a dark theme
 // would otherwise paint the code light on dark, and contrast and inversion
 // handling are not something to leave to a theme.
-func qrText(text string) (string, error) {
+func QRArt(text string) (string, error) {
 	code, err := qrcode.New(text, qrLevel)
 	if err != nil {
 		return "", err
@@ -58,6 +59,12 @@ func qrText(text string) (string, error) {
 	return b.String(), nil
 }
 
+// QRSize is the rendered size in cells: two per module across, one per module
+// down, so the code is twice as wide as it is tall in cells. A caller that
+// paints the art sizes its box from it, and a box too small for the size drops
+// the code.
+func QRSize(text string) (cols, rows int) { return qrSize(text) }
+
 // qrSize is the rendered size in cells: two per module across, one per module
 // down, so the code is twice as wide as it is tall in cells.
 func qrSize(text string) (cols, rows int) {
@@ -77,7 +84,7 @@ func printQR(url string) {
 	if !term.IsTerminal(int(os.Stdout.Fd())) {
 		return
 	}
-	art, err := qrText(url)
+	art, err := QRArt(url)
 	if err != nil {
 		return
 	}

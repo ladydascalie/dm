@@ -48,6 +48,9 @@ func (t *tui) draw() {
 	// moves with a scroll, a fold and the terminal, so the box re-places itself
 	// before the bands are laid out, and leaves when its row is gone.
 	t.syncGit()
+	// The web URL box centres itself and refits every frame, so a resize moves
+	// it and a narrow terminal drops its QR before the bands are laid out.
+	t.syncWeb()
 
 	// The bands that own a whole buffer of bytes. Each one is rendered every
 	// frame and written only when its bytes differ from the last frame's.

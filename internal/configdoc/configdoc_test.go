@@ -153,6 +153,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"diff-command":      `diff-command "git diff --stat"`,
 		"web-addr":          `web-addr "you.ts.net:8099"`,
 		"web-token":         `web-token "phonepin0001"`,
+		"web-auto":          `web-auto true`,
 		"dashboard-layout":  `dashboard-layout "float"`,
 		"dashboard-peek":    `dashboard-peek "right"`,
 		"shelf-layout":      `shelf-layout "pane"`,
@@ -225,6 +226,9 @@ func TestConfigNodesParse(t *testing.T) {
 	}
 	if !cfg.WebTokenSet() {
 		t.Error("WebTokenSet = false, want true")
+	}
+	if !cfg.WebAuto() {
+		t.Error("WebAuto = false, want true")
 	}
 	if !cfg.FloatShadow() {
 		t.Error("FloatShadow = false, want true")
@@ -308,6 +312,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"diff-command":      `"` + cfg.DiffCommand() + `"`,
 		"web-addr":          `"` + cfg.WebAddr() + `"`,
 		"web-token":         "",
+		"web-auto":          either(cfg.WebAuto(), "true", "false"),
 		"dashboard-layout":  either(cfg.DashboardFullScreen(), `"full"`, `"float"`),
 		"dashboard-peek":    either(cfg.DashboardPeekDown(), `"down"`, `"right"`),
 		"shelf-layout":      either(cfg.ShelfCentered(), `"centered"`, `"pane"`),

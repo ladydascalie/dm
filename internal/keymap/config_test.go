@@ -495,8 +495,8 @@ func TestConfigHelpRows(t *testing.T) {
 		{"K", "command palette"},
 		{"r", "rename workspace"},
 		{"P", "set project"},
-		{"m", "message box"},
-		{"N", "notifications"},
+		{"m / N", "message box / notify"},
+		{"U", "web URL and QR"},
 		{"b", "cycle rail: full, thin, hidden"},
 		{"d / q", "detach"},
 		{"A", "show / hide question"},
@@ -1663,6 +1663,72 @@ func TestConfigWebTokenRefused(t *testing.T) {
 	}
 	if _, err := parseConfig(`web-token ""` + "\n" + `web-token "phonepin0002"`); err == nil {
 		t.Fatal("parseConfig accepted two web-token nodes, the first empty")
+	}
+}
+
+// TestConfigWebAuto reads the always-on web listener switch: the node, the
+// built-in default an absent node keeps, and the two values it accepts.
+func TestConfigWebAuto(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want bool
+	}{
+		{"absent", `prefix "ctrl+b"`, false},
+		{"on", "web-auto true", true},
+		{"off", "web-auto false", false},
+		{"beside the other web keys", "web-addr \"127.0.0.1:8099\"\nweb-auto true", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.WebAuto(); got != c.want {
+				t.Fatalf("WebAuto() = %v, want %v", got, c.want)
+			}
+		})
+	}
+	if LoadDefault().WebAuto() {
+		t.Fatal("LoadDefault().WebAuto() = true, want false: the node is off unless named")
+	}
+}
+
+// TestConfigWebAutoRefused proves only KDL true and false are accepted, with
+// the line and the value named, and a second node is a duplicate.
+func TestConfigWebAutoRefused(t *testing.T) {
+	for _, src := range []string{
+		`web-auto "true"`,
+		`web-auto "false"`,
+		`web-auto on`,
+		`web-auto 1`,
+	} {
+		_, err := parseConfig(src)
+		if err == nil {
+			t.Fatalf("parseConfig accepted %q", src)
+		}
+		if !strings.Contains(err.Error(), "web-auto") {
+			t.Fatalf("error = %q, want the node name", err)
+		}
+		if !strings.Contains(err.Error(), "line 1") {
+			t.Fatalf("error = %q, want the line", err)
+		}
+	}
+	_, err := parseConfig(`web-auto "true"`)
+	if err == nil || !strings.Contains(err.Error(), `web-auto must be the bare word true or false, got "true"`) {
+		t.Fatalf("error = %q, want the value quoted", err)
+	}
+	if _, err := parseConfig("web-auto"); err == nil || !strings.Contains(err.Error(), "web-auto") {
+		t.Fatalf("error = %v, want the node name", err)
+	}
+	_, err = parseConfig("web-auto\nfalse")
+	if err == nil || !strings.Contains(err.Error(), "expected true or false after web-auto") {
+		t.Fatalf("error = %q, want the missing value named", err)
+	}
+	_, err = parseConfig("web-auto true\nweb-auto false")
+	if err == nil || !strings.Contains(err.Error(), "line 2") || !strings.Contains(err.Error(), "duplicate web-auto node") {
+		t.Fatalf("error = %q, want a duplicate on line 2", err)
 	}
 }
 

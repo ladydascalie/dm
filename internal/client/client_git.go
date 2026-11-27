@@ -148,6 +148,7 @@ func (t *tui) closeGitFloat() {
 // float stack after the box, so it paints on top of it and needs no hand-over.
 func (t *tui) takeDesk() {
 	t.closeGitFloat()
+	t.closeWebFloat()
 }
 
 // gitOpen is the window whose git mark the box has open, "" when none, so the

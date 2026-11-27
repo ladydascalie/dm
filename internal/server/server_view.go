@@ -613,6 +613,9 @@ func (s *server) terminate() {
 	if s.ln != nil {
 		_ = s.ln.Close()
 	}
+	// The web listener is the daemon's own: it goes with the daemon, so a
+	// later `dm web` on the same address binds instead of failing.
+	s.closeWeb()
 	s.exitFunc()(0)
 }
 

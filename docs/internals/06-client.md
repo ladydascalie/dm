@@ -76,6 +76,7 @@ All paths are `internal/client/`. One row per file, and what that file owns.
 | `client_notify.go` | the notify catch-up, its toasts and the status bar badge |
 | `client_shelf.go` | the shelved panes tray |
 | `client_view.go` | `draw`, the screen strips, the row diff, the frame writer, the cursor block |
+| `client_web.go` | the web URL box: the `web-info` request, the URL and its QR, the close keys |
 | `command_palette.go` | the command palette |
 | `layout_switcher.go` | the layout palette |
 | `pacing.go` | the frame pacer |
@@ -225,6 +226,8 @@ The dashboard's diff key is one instance of the request. It sends no command, so
 
 The server owns the floating pane's PTY. Its bytes arrive as `bytes` messages with its id, and its exit arrives as `exit`. The client routes keys to it with a target. `floatRect` centres the floating pane eight cells clear of the screen sides. It is at most 110 columns wide and four rows shorter than the screen (`internal/client/client_float_cmd.go#floatRect`). A floating pane under 10 rows or 60 columns drops the dashboard's preview screen strip whatever the toggle says.
 
+The web URL box is the second float with no terminal. It is one temporary panel: the `web-url` key sends one `web-info` request and paints the answer, the URL the session daemon serves the page on with its QR code under it, or the reason there is none (`internal/client/client_web.go#tui.openWebFloat`). It reads the flag from the daemon and never from the client's own config, because the daemon owns the listener. `webRect` centres the box and sizes it from the link and the code; a terminal too narrow or too short for the code keeps the URL alone rather than painting a QR that would not scan (`internal/client/client_web.go#tui.webRect`). `esc` and `q` close it in `processInput`, the `web-url` action toggles it, and every other byte reaches the pane under it, so the box carries no `mode`. A surface that takes the desk closes it with the git facts box.
+
 ## The dashboard
 
 The dashboard is a table of every pane in the session, one row per pane (`openSwitcher`, `internal/client/switcher_wire.go#openSwitcher`). It starts when the operator asks and ends when the choice is taken. It never enters the session tree and never survives a detach.
@@ -253,6 +256,7 @@ Every overlay is one field, one open and close pair, one key handler and one pai
 | rename prompt | `openRenamePrompt` (`internal/client/client_input.go#tui.openRenamePrompt`) | `rename` | `renameKey` |
 | ask floating pane | `syncAsk` on a snapshot (`internal/client/client_ask.go#tui.syncAsk`) | `ask` | `askKey` |
 | shelf float | `shelfToggle` (`internal/client/client_shelf.go#tui.shelfToggle`) | `shelf` | `shelfKey` |
+| web URL box | `openWebFloat` (`internal/client/client_web.go#tui.openWebFloat`) | none | `processInput` for `esc` and `q`, `runAction` for the key |
 
 The ask floating pane opens from a snapshot, not from a key. `syncAsk` runs on every snapshot and opens the pane on the focused pane's listed ask (`Snap.Ask`, `internal/wire/wire.go#Snapshot.Ask`). It refreshes that pane and closes it when the ask is answered or gone. An ask that arrives while another overlay owns the keyboard waits on `askDeferred`. Each overlay close re-checks, so a question never paints over a screen in use. The pane shows one question at a time and draws it from the snapshot alone. It shows the header, the question, and each option with its description and preview. On a single-select question it adds a last row that opens the one-line input for a typed answer. That input is mode `rename` with kind `ask`, so the input has one implementation. `enter` sends `ask-answer` with the items and `esc` sends it with `cancel:true`. The reply is the daemon's verdict, and a refusal leaves the pane open with the code on it (`takeAskAnswer`, `internal/client/client_ask.go#tui.takeAskAnswer`).
 

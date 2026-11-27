@@ -161,6 +161,8 @@ current mode, not as text (`internal/client/client_input.go#tui.processInput`).
 the path. An attach writes the file when it is missing
 (`internal/client/client_model.go#attachConn`).
 
+A boolean node is the bare word: `web-auto true` turns the session daemon's web listener on, and any other value than KDL `true` or `false` is a load error with the line. Its neighbours `web-addr` and `web-token` only shape that listener, and their flat keys beside it mean neither value has a second home.
+
 The node table is data: `configdoc.ConfigNodes`
 (`internal/configdoc/tables.go#ConfigNodes`) holds every node, its value, its
 default and its effect. `dm man` and `dm html` print it. `dm html` opens every

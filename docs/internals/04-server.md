@@ -24,6 +24,8 @@ Clients sit in `s.clients` and pane connections in `s.panes`, with the spawn, ad
 
 Every client draws the same layout, so the largest client's terminal sets the size (`fitToClientsLocked`, `internal/server/server_view.go#server.fitToClientsLocked`). `snapshotLocked` (`internal/server/server_view.go#server.snapshotLocked`) builds the frame they all draw.
 
+The web listener is the server's too, when the config's `web-auto` node is true. `Run` binds it after the session socket and before the accept loop (`startWeb`, `internal/server/server_web.go#server.startWeb`), on the `web-addr` node, with the token `web-token` pins or the one the session keeps in `web.token`. The listener, its URL and any bind failure live on the server under `s.mu`, so a bind that fails costs the page and never the session. `terminate` closes it, and the `web-info` action answers what the daemon holds right now, because a client must never guess a URL from its own copy of the config. That answer follows the listener and not the flag: `startWeb` runs once at boot, while `reload` swaps `s.cfg`, so a reload that turned `web-auto` off leaves the port serving and must keep answering true, and one that turned it on binds nothing and must answer false. A later `dm web` with no `--addr` and no `--token` reads that answer and prints the URL instead of binding a second listener.
+
 The server starts the subprocesses a client cannot: pane daemons, floating panes and plugin panes. A floating pane is a command the client opens in a panel of its own. The client types into it, and it dies with the client. A plugin pane is one a `plugin` declaration in the operator's config file launches.
 
 ## Durability rules
@@ -68,6 +70,7 @@ Past the 1 MiB cap the server marks the client stale and rebuilds it from a snap
 | `server_secrets.go` | the secret list, activation, proxy, cover (other sessions), type (into a pane), hydrate (to a file) |
 | `server_sync.go` | the `.dm-secrets.kdl` file the `secret-sync` action applies: secrets to register, files to ingest |
 | `server_float.go` | floating panes and their lifetime |
+| `server_web.go` | the always-on web listener: `startWeb`, `closeWeb`, the `web-info` answer |
 | `server_labels.go` | git branch and uncommitted line counts |
 | `server_plugin.go` | plugin declarations and the launch context |
 | `server_state.go` | which group colour each project gets |
@@ -89,7 +92,7 @@ flowchart LR
 
 `serve` (`internal/server/server_view.go#server.serve`) switches on `Type`. `attach` registers the client, `keys` writes to a pane or a floating pane, `resize` refits, and `req` goes to `handleReq`.
 
-`handleReq` (`internal/server/server_rpc.go#server.handleReq`) switches on `Action`: 71 `case` clauses over 76 actions, five cases naming two each. A branch answers through `s.reply` (`internal/server/server_view.go#server.reply`). The `msg-sub` action streams message log entries and never answers.
+`handleReq` (`internal/server/server_rpc.go#server.handleReq`) switches on `Action`: 72 `case` clauses over 77 actions, five cases naming two each. A branch answers through `s.reply` (`internal/server/server_view.go#server.reply`). The `msg-sub` action streams message log entries and never answers.
 
 ## Mutation path
 

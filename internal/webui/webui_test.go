@@ -3,6 +3,7 @@ package webui
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -426,11 +427,60 @@ func TestFleetStartsASession(t *testing.T) {
 	}
 }
 
+// TestListenBindsAndServes proves the split half: Listen binds the address,
+// the URL carries the token, Addr reports the port the kernel gave, the page
+// answers HTTP, and Close makes Serve return.
+func TestListenBindsAndServes(t *testing.T) {
+	dir := root(t, "main")
+	srv, err := Listen(Config{Addr: "127.0.0.1:0", Session: "main", Root: dir})
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	tcp, ok := srv.Addr().(*net.TCPAddr)
+	if !ok || tcp.Port == 0 {
+		t.Fatalf("Addr() = %v, want the bound 127.0.0.1:0 port", srv.Addr())
+	}
+	tok, err := os.ReadFile(filepath.Join(paths.SessionDirAt(dir, "main"), "web.token"))
+	if err != nil {
+		t.Fatalf("token file: %v", err)
+	}
+	url := srv.URL()
+	if want := "http://127.0.0.1:" + fmt.Sprint(tcp.Port) + "/?t=" + strings.TrimSpace(string(tok)); url != want {
+		t.Fatalf("URL() = %q, want %q", url, want)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve() }()
+	res, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200; body %s", res.StatusCode, body)
+	}
+
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("Serve = %v, want http.ErrServerClosed", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after Close")
+	}
+}
+
 // TestQRText proves the art is a square of equal width lines, one module per
 // cell, and that a longer link needs a wider code.
 func TestQRText(t *testing.T) {
 	url := "http://you.ts.net:8099/?t=c33beba64055b013"
-	art, err := qrText(url)
+	art, err := QRArt(url)
 	if err != nil {
 		t.Fatal(err)
 	}

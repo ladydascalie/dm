@@ -26,6 +26,7 @@ import (
 	"dm/internal/proxy"
 	"dm/internal/secrets"
 	"dm/internal/session"
+	"dm/internal/webui"
 	"dm/internal/wire"
 )
 
@@ -695,6 +696,14 @@ type server struct {
 	// and the timer restarts; one settle asks each pane once at its final size.
 	reflowTimer *time.Timer
 	reflowWait  map[string]bool
+
+	// web, webURL and webErr are the always-on web listener the config's
+	// web-auto node asks for: the bound server, the link that carries its
+	// token, and the bind failure. All three are guarded by mu. web is nil
+	// when the key is off. terminate closes it.
+	web    *webui.Server
+	webURL string
+	webErr error
 }
 
 func Run(args []string) error {
@@ -819,6 +828,10 @@ func Run(args []string) error {
 		log.Printf("ask reap: %v", err)
 	}
 	go s.reapAsksLoop()
+	// The web listener starts here, after the socket exists and before any
+	// client can ask where it is: a bind failure is remembered for web-info
+	// rather than refusing the session its socket.
+	s.startWeb(root)
 	close(started)
 
 	log.Printf("session %q listening on %s", *name, sock)

@@ -102,7 +102,7 @@ func TestQRArtScans(t *testing.T) {
 		t.Skip("no zbarimg")
 	}
 	url := "http://you.ts.net:8099/?t=c33beba64055b013"
-	art, err := qrText(url)
+	art, err := QRArt(url)
 	if err != nil {
 		t.Fatal(err)
 	}

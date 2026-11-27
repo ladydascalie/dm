@@ -72,7 +72,7 @@ var manActionNames = []string{
 	"focus-window", "focus-workspace", "close-workspace",
 	"rename-window", "rename-workspace", "set-project",
 	"swap-panes", "move-pane", "move-window", "move-workspace",
-	"select-layout", "layout", "synchronize-panes",
+	"select-layout", "layout", "web-info", "synchronize-panes",
 	"float-open", "float-close",
 	"shelve-pane", "pop-pane",
 	"msg-post", "msg-list", "msg-clear", "msg-wait", "msg-sub",
@@ -193,6 +193,9 @@ func ManPage() string {
 	}
 	b.WriteString(".PP\n")
 	b.WriteString(roffEscape(ToggleSecretsNote))
+	b.WriteString("\n")
+	b.WriteString(".PP\n")
+	b.WriteString(roffEscape(WebNote))
 	b.WriteString("\n")
 
 	b.WriteString(manKeymaps())

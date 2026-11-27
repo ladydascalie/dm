@@ -5,12 +5,16 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"dm/internal/keymap"
+	"dm/internal/paths"
+	"dm/internal/wire"
 )
 
 // webFlags parses a bare `dm web` against a config that holds src. An empty
@@ -190,5 +194,81 @@ func TestAnnounceWebAddrSilent(t *testing.T) {
 	announceWebAddr(&out, "you.ts.net:8099", true)
 	if got := strings.Count(out.String(), "\n"); got != 1 {
 		t.Fatalf("announce printed %d lines, want one: %q", got, out.String())
+	}
+}
+
+// TestDaemonWebAsks proves the probe reads web-info from a daemon that answers
+// and reports no answer when no daemon listens. Asking must never start one:
+// dm web has to work before the first attach.
+func TestDaemonWebAsks(t *testing.T) {
+	const reply = `{"auto":true,"url":"http://127.0.0.1:9/?t=abc","addr":"127.0.0.1:9"}`
+	startFakeServer(t, "web", func(_ net.Conn, req wire.Msg) (wire.Msg, bool) {
+		if req.Action != "web-info" {
+			return wire.Msg{OK: false, Error: "unknown action"}, false
+		}
+		return wire.Msg{OK: true, Res: json.RawMessage(reply)}, true
+	})
+
+	info, answered := daemonWeb(paths.StateDir(), "web")
+	if !answered {
+		t.Fatal("daemonWeb answered nothing for a live daemon")
+	}
+	if !info.Auto || info.URL != "http://127.0.0.1:9/?t=abc" || info.Addr != "127.0.0.1:9" {
+		t.Fatalf("web-info = %+v", info)
+	}
+	if _, answered := daemonWeb(paths.StateDir(), "ghost"); answered {
+		t.Fatal("daemonWeb answered for a session with no daemon")
+	}
+	if _, err := os.Stat(paths.SessionDirAt(paths.StateDir(), "ghost")); !os.IsNotExist(err) {
+		t.Fatalf("the probe created a session directory: %v", err)
+	}
+}
+
+// TestWebHandledByDaemon pins who owns the listener: the daemon only when the
+// command asked for nothing and the daemon reports the key on with a URL.
+func TestWebHandledByDaemon(t *testing.T) {
+	const url = "http://127.0.0.1:8099/?t=abc"
+	cases := []struct {
+		name     string
+		explicit bool
+		info     webInfo
+		answered bool
+		served   bool
+	}{
+		{"daemon serves it", false, webInfo{Auto: true, URL: url}, true, true},
+		{"auto off", false, webInfo{Auto: false}, true, false},
+		{"bind failed", false, webInfo{Auto: true, Error: "bind: address already in use"}, true, false},
+		{"auto on, no url", false, webInfo{Auto: true}, true, false},
+		{"no daemon", false, webInfo{}, false, false},
+		{"explicit addr", true, webInfo{Auto: true, URL: url}, true, false},
+		{"explicit addr, no daemon", true, webInfo{}, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, served := webHandledByDaemon(c.explicit, c.info, c.answered)
+			if served != c.served {
+				t.Fatalf("served = %v, want %v", served, c.served)
+			}
+			if served != (got != "") {
+				t.Fatalf("url = %q with served = %v", got, served)
+			}
+			if c.served && got != url {
+				t.Fatalf("url = %q, want %q", got, url)
+			}
+		})
+	}
+}
+
+// TestAnnounceWebServed proves the delegated run prints the daemon's link and
+// says the daemon serves it, so an operator is not left waiting for a listener
+// this command never bound.
+func TestAnnounceWebServed(t *testing.T) {
+	var out bytes.Buffer
+	announceWebServed(&out, "main", "http://127.0.0.1:8099/?t=abc")
+	got := out.String()
+	for _, want := range []string{"session main", "http://127.0.0.1:8099/?t=abc", "already serves it"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output %q does not name %q", got, want)
+		}
 	}
 }

@@ -952,6 +952,10 @@ func (t *tui) runAction(name string) {
 		t.openProjectPrompt()
 	case "toggle-rail":
 		t.toggleRail()
+	case "web-url":
+		// One temporary float with the link the daemon serves and its QR. The
+		// same key closes it, which is why the action toggles here.
+		t.openWebFloat()
 	case "message-box":
 		openBoxView(t, "")
 	case "notification-centre":

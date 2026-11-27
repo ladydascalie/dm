@@ -428,6 +428,7 @@ func htmlKeys(ids *idGen) string {
 	}
 	b.WriteString("</tbody></table>")
 	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(ToggleSecretsNote))
+	fmt.Fprintf(&b, "<p>%s</p>", htmlEscape(WebNote))
 	b.WriteString("</section>")
 	return b.String()
 }

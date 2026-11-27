@@ -130,7 +130,7 @@ The envelope has forty five fields.
 
 ## The action matrix
 
-`handleReq` (`internal/server/server_rpc.go#server.handleReq`) switches on `Action` and has 71 cases over 76 names. The pane switches on `Action` alone (`internal/pane/pane.go#paneProc.serve`). The server switches on `Type` first (`internal/server/server_view.go#server.serve`).
+`handleReq` (`internal/server/server_rpc.go#server.handleReq`) switches on `Action` and has 72 cases over 77 names. The pane switches on `Action` alone (`internal/pane/pane.go#paneProc.serve`). The server switches on `Type` first (`internal/server/server_view.go#server.serve`).
 
 Every action ends in a `resp` frame, except `msg-sub`, which streams.
 
@@ -158,6 +158,7 @@ The sender column names the caller. `cli` is a `dm` verb and `tui` is the client
 | `move-pane` | `target`, `other`, `dir` | `pane` | exec |
 | `select-layout` | `layout` | `layout` | tui |
 | `layout` | none | `layout` (a layout document) | cli |
+| `web-info` | none | `auto`, `url`, `addr`, `error` (the web listener the daemon holds right now) | cli, tui |
 | `focus` | `target` | none | cli, tui |
 | `focus-dir` | `dir` | none | tui |
 | `focus-window` | `target` | none | tui |

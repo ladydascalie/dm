@@ -12,7 +12,21 @@ import (
 
 // runWeb serves the session to a browser, so a phone can watch the fleet and
 // one pane without holding a terminal. It blocks until the listener fails.
+//
+// A bare `dm web` first asks the running daemon: when the config turned the
+// listener on there, the daemon already owns the address, and a second one
+// would only fail. An explicit flag keeps today's path, so an operator can
+// always bind their own.
 func runWeb(c *cmdFlags) error {
+	explicit := c.flagGiven("addr") || c.flagGiven("token")
+	info, answered := webInfo{}, false
+	if !explicit {
+		info, answered = daemonWeb(c.root, c.session)
+	}
+	if url, served := webHandledByDaemon(explicit, info, answered); served {
+		announceWebServed(os.Stdout, c.session, url)
+		return nil
+	}
 	addr, fromConfig, err := webAddr(c)
 	if err != nil {
 		return err

@@ -112,6 +112,11 @@ type tui struct {
 	// takes no keys but esc, so the desk keeps typing under it. It follows the
 	// rail's git mark and closes when that mark leaves the rail.
 	git *gitFloat
+	// web is the web URL float, nil when closed. It carries no mode: it takes
+	// esc, q and its own action key, and the desk keeps typing under it.
+	// webID numbers the web-info request whose reply the box reads.
+	web   *webFloat
+	webID int
 	// ask is the ask float, nil when closed. It owns mode "ask": the focused
 	// pane's open question, one question at a time. askDeferred holds an ask
 	// that arrived while another overlay had the keyboard, and askAnswerID
@@ -1241,6 +1246,13 @@ func (t *tui) apply(m wire.Msg) {
 		// and opens nothing.
 		if m.Action == "float-open" && m.ID > 0 && m.ID == t.floatID {
 			t.takeFloatOpen(m)
+			break
+		}
+		// The web URL box reads the daemon's own answer about its listener.
+		// It outranks the plain error toast: a refusal is painted on the box,
+		// beside the link it would have shown.
+		if m.Action == "web-info" && m.ID > 0 && t.web != nil && m.ID == t.web.id {
+			t.takeWebInfo(m)
 			break
 		}
 		// The answer's reply is the daemon's verdict on the float's send. A

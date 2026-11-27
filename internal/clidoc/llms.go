@@ -194,7 +194,7 @@ var llmsActionGroups = [][]string{
 	{"focus-window", "focus-workspace"},
 	{"rename-window", "rename-workspace", "set-project"},
 	{"swap-panes", "move-pane"}, {"move-window", "move-workspace"},
-	{"select-layout", "layout", "synchronize-panes"},
+	{"select-layout", "layout", "web-info", "synchronize-panes"},
 	{"float-open", "float-close", "shelve-pane", "pop-pane"},
 	{"msg-post"}, {"msg-list"}, {"msg-clear"}, {"msg-wait"}, {"msg-sub"},
 	{"msg-watchers", "msg-schema"},
@@ -259,7 +259,7 @@ func LLMsText() string {
 	}
 
 	b.WriteString("\n## Keys\n\n")
-	b.WriteString("The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use. " + ToggleSecretsNote + "\n\n")
+	b.WriteString("The prefix key is `ctrl+b` by default. A key label is the key pressed after the prefix. The help overlay prints the label; the action name is the one `dm exec` and the config use. " + ToggleSecretsNote + " " + WebNote + "\n\n")
 	b.WriteString("| Keys | Action | Help label |\n")
 	b.WriteString("| --- | --- | --- |\n")
 	for _, k := range llmsKeys() {

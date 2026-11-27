@@ -375,6 +375,23 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.webToken = v.Value
 			cfg.webTokenSet = true
 			i += 2
+		case "web-auto":
+			// KDL true and false only. A quoted "true" or any other bare word
+			// is refused with the line, so a typo never reads as off while the
+			// operator believes the page is live.
+			if cfg.webAutoSet {
+				return fmt.Errorf("line %d: duplicate web-auto node", t.Line)
+			}
+			if i+1 >= len(toks) || (toks[i+1].Kind != kdl.Ident && toks[i+1].Kind != kdl.String) || toks[i+1].Bol {
+				return fmt.Errorf("line %d: expected true or false after web-auto", t.Line)
+			}
+			v := toks[i+1]
+			if v.Kind != kdl.Ident || (v.Value != "true" && v.Value != "false") {
+				return fmt.Errorf("line %d: web-auto must be the bare word true or false, got %q", v.Line, v.Value)
+			}
+			cfg.webAuto = v.Value == "true"
+			cfg.webAutoSet = true
+			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
 				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
@@ -1168,6 +1185,7 @@ keymap "main" {
     "toggle-rail" "b"
     "message-box" "m"
     "notification-centre" "N"
+    "web-url" "U"
     "toggle-ask" "A"
     "detach" "d"
     "detach-alt" "q"
