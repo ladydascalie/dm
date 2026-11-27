@@ -1092,7 +1092,8 @@ func (t *tui) apply(m wire.Msg) {
 		}
 		if t.selText != nil {
 			p := t.paneByID(t.selText.pane)
-			if p == nil || p.Rect.W != t.selText.w || p.Rect.H != t.selText.h {
+			r := t.paneRect(p)
+			if p == nil || r.W != t.selText.w || r.H != t.selText.h {
 				// The anchor and focus are in the old geometry.
 				t.clearSelection()
 			}

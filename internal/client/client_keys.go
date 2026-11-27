@@ -28,6 +28,9 @@ type menu struct {
 	pane  string
 	items []menuItem
 	sel   int
+	// back is the mode the menu closes into. The shelf opens its own menu over
+	// the float, so closing that menu must hand the keyboard back to it.
+	back string
 }
 
 type menuItem struct {
@@ -326,8 +329,12 @@ func clampInt(v, lo, hi int) int {
 }
 
 func (t *tui) closeMenu() {
+	m := t.menu
 	t.menu = nil
 	t.mode = ""
+	if m != nil && m.back == "shelf" && t.shelf != nil {
+		t.mode = "shelf"
+	}
 	t.inbuf = nil
 	t.dirty = true
 	t.openDeferredAsk()

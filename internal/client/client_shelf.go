@@ -32,6 +32,24 @@ type shelfView struct {
 	rows   int
 }
 
+// shelfChip is one member's chip on the strip row: the cell span it paints,
+// counted from the strip's first cell, and the member it names.
+type shelfChip struct {
+	id     string
+	lo, hi int
+}
+
+// shelfBody is the cells the active member's screen fills: the box inside its
+// border with the strip row taken off. A box too short for a row of screen
+// answers an empty rect.
+func (t *tui) shelfBody() layout.Rect {
+	sv := t.shelf
+	if sv == nil || sv.float == nil || sv.cols < 1 || sv.rows < 1 {
+		return layout.Rect{}
+	}
+	return layout.Rect{X: sv.float.Rect.X, Y: sv.float.Rect.Y + 1, W: sv.cols, H: sv.rows}
+}
+
 // shelfActiveIndex is the index of the shelf's active member, clamped the way
 // the server clamps the state so a stale snapshot cannot index past the slice.
 func shelfActiveIndex(snap *wire.Snapshot, members []wire.PaneInfo) int {
@@ -174,6 +192,10 @@ func (t *tui) closeShelfFloat() {
 	}
 	t.RemoveFloatingPane(sv.float.ID)
 	t.shelf = nil
+	// A menu the shelf opened has nowhere to close back into.
+	if t.menu != nil && t.menu.back == "shelf" {
+		t.closeMenu()
+	}
 	t.mode = ""
 	// The close key stays in the buffer while the pending timer waits. Drop
 	// the whole buffer, so a later keypress cannot forward a stray byte to a
@@ -181,7 +203,16 @@ func (t *tui) closeShelfFloat() {
 	t.inbuf = nil
 	t.pending = false
 	t.dirty = true
+	t.dropShelfSelection(sv.active)
 	t.openDeferredAsk()
+}
+
+// dropShelfSelection drops a selection the shelf body held. The body is gone
+// or shows another member, so its cells no longer name the text.
+func (t *tui) dropShelfSelection(member string) {
+	if member != "" && t.selText != nil && t.selText.pane == member {
+		t.clearSelection()
+	}
 }
 
 // summonShelf readies the active member's terminal at the box's size and asks
@@ -232,6 +263,7 @@ func (t *tui) syncShelf(snap *wire.Snapshot) {
 		sv.cols, sv.rows = r.W, r.H-1
 	}
 	if id := members[at].ID; id != sv.active || moved {
+		t.dropShelfSelection(sv.active)
 		sv.active = id
 		t.summonShelf()
 	}
@@ -276,7 +308,11 @@ func (t *tui) shelfPaint() func(*bytes.Buffer, layout.Rect) {
 		t.paintShelfStrip(buf, inner)
 		body := layout.Rect{X: inner.X, Y: inner.Y + 1, W: inner.W, H: inner.H - 1}
 		if body.H > 0 {
-			drawPaneFrom(buf, t.vts[sv.active], body, 0, nil, nil)
+			var sel *selRange
+			if t.selText != nil && t.selText.pane == sv.active && t.selText.src == selLive {
+				sel = t.selText.rangeIn()
+			}
+			drawPaneFrom(buf, t.vts[sv.active], body, 0, sel, nil)
 		}
 	}
 }
@@ -286,6 +322,31 @@ func (t *tui) shelfPaint() func(*bytes.Buffer, layout.Rect) {
 // the bold weight, so the member whose screen fills the box below is the one
 // that reads as selected. The row is elided to the box's width as one run set.
 func (t *tui) paintShelfStrip(buf *bytes.Buffer, inner layout.Rect) {
+	th := t.theme()
+	p := th.Palette
+	segs, _ := t.shelfStrip()
+	if segment.SegCells(segs) > inner.W {
+		segs = segment.ElideSegs(th, segs, inner.W)
+	}
+	fmt.Fprintf(buf, "\x1b[%d;%dH", inner.Y+1, inner.X+1)
+	buf.WriteString("\x1b[0m")
+	buf.WriteString(groundSGR(p.RailBG))
+	for _, s := range segs {
+		segment.Write(buf, s)
+	}
+	if n := inner.W - segment.SegCells(segs); n > 0 {
+		buf.WriteString(strings.Repeat(" ", n))
+	}
+	buf.WriteString("\x1b[0m")
+}
+
+// shelfStrip builds the strip row's runs and the cell span of each member's
+// chip. The paint and the hit test read this one layout, so a click on a chip
+// selects the member the operator sees under the pointer.
+func (t *tui) shelfStrip() ([]segment.Seg, []shelfChip) {
+	if t.snap == nil {
+		return nil, nil
+	}
 	th, set := t.theme(), t.glyphSet()
 	p := th.Palette
 	members := rail.ShelfPanes(t.snap)
@@ -314,20 +375,40 @@ func (t *tui) paintShelfStrip(buf *bytes.Buffer, inner layout.Rect) {
 		}
 		groups = append(groups, chip)
 	}
-	segs := segment.Join(groups, segment.Seg{Text: " ", FG: p.RailDim, BG: p.RailBG})
-	if segment.SegCells(segs) > inner.W {
-		segs = segment.ElideSegs(th, segs, inner.W)
+	gap := segment.Seg{Text: " ", FG: p.RailDim, BG: p.RailBG}
+	chips := make([]shelfChip, 0, len(members))
+	col := 0
+	for i, g := range groups {
+		if i > 0 {
+			col++ // the gap the join paints before this group
+		}
+		w := segment.SegCells(g)
+		if i > 0 {
+			chips = append(chips, shelfChip{id: members[i-1].ID, lo: col, hi: col + w})
+		}
+		col += w
 	}
-	fmt.Fprintf(buf, "\x1b[%d;%dH", inner.Y+1, inner.X+1)
-	buf.WriteString("\x1b[0m")
-	buf.WriteString(groundSGR(p.RailBG))
-	for _, s := range segs {
-		segment.Write(buf, s)
+	return segment.Join(groups, gap), chips
+}
+
+// shelfChipHit is the member whose chip holds the zero-based point, "" when the
+// point rests on the strip's own ground, on an elided chip or on another row.
+func (t *tui) shelfChipHit(x, y int) string {
+	sv := t.shelf
+	if sv == nil || y != sv.float.Rect.Y {
+		return ""
 	}
-	if n := inner.W - segment.SegCells(segs); n > 0 {
-		buf.WriteString(strings.Repeat(" ", n))
+	segs, chips := t.shelfStrip()
+	col := x - sv.float.Rect.X
+	if col < 0 || col >= sv.float.Rect.W || col >= segment.SegCells(segs) {
+		return ""
 	}
-	buf.WriteString("\x1b[0m")
+	for _, c := range chips {
+		if col >= c.lo && col < c.hi {
+			return c.id
+		}
+	}
+	return ""
 }
 
 // shelfKey consumes one read in shelf mode. The prefix is the only byte the
@@ -432,7 +513,7 @@ func (t *tui) moveShelf(step int) {
 	}
 	at := shelfActiveIndex(t.snap, members)
 	next := members[(at+step+len(members))%len(members)]
-	_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: next.ID})
+	t.focusShelfMember(next.ID)
 }
 
 // popShelf puts the active member back in the layout and closes the float. The
@@ -502,4 +583,145 @@ func (t *tui) shelfChipSpan() (int, int) {
 func (t *tui) shelfChipAt(x int) bool {
 	lo, hi := t.shelfChipSpan()
 	return hi > lo && x >= lo && x < hi
+}
+
+// focusShelfMember asks the server to make id the shelf's active member. The
+// server owns the index, so the snapshot that comes back names it. The ask goes
+// out even for the member the client already shows: the client's copy lags the
+// server, and the server is the one that decides.
+func (t *tui) focusShelfMember(id string) {
+	if t.conn == nil || id == "" {
+		return
+	}
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: id})
+}
+
+// paneRect is the rect a pane's pointer input and its selection are counted in:
+// the pane's own, or the shelf body when the shelf float shows it. A shelved
+// pane carries no rect of its own.
+func (t *tui) paneRect(p *wire.PaneInfo) layout.Rect {
+	if p == nil {
+		return layout.Rect{}
+	}
+	if t.shelf != nil && p.Shelf && p.ID == t.shelf.active {
+		return t.shelfBody()
+	}
+	return p.Rect
+}
+
+// shelfMenuItems is the item list for the shelf float's menu: the shelf's own
+// actions. A shelved pane has no rect, so the pane menu's split, scrollback and
+// layout moves cannot act on it.
+func (t *tui) shelfMenuItems() []menuItem {
+	items := make([]menuItem, 0, 4)
+	if t.snap != nil && len(rail.ShelfPanes(t.snap)) > 1 {
+		items = append(items,
+			menuItem{label: "Next pane", action: "next-pane", run: func() { t.moveShelf(1) }},
+			menuItem{label: "Previous pane", action: "prev-pane", run: func() { t.moveShelf(-1) }},
+		)
+	}
+	return append(items,
+		menuItem{label: "Pop pane", action: "pop-pane", run: func() { t.popShelf() }},
+		menuItem{label: "Close shelf", action: "toggle-shelf", run: func() { t.closeShelfFloat() }},
+	)
+}
+
+// openShelfMenu builds the shelf's own menu at a zero-based point. It closes
+// back into the shelf, so the float keeps the keyboard once the menu goes.
+func (t *tui) openShelfMenu(x, y int) {
+	if t.snap == nil || t.shelf == nil {
+		return
+	}
+	t.openMenuAt("shelf", t.hintedItems(t.shelfMenuItems()), x, y)
+	if t.menu != nil {
+		t.menu.back = "shelf"
+	}
+}
+
+// shelfMouse routes one pointer event to the shelf float: a chip selects the
+// member it names, a left press inside the screen starts a selection, a right
+// press opens the shelf menu, and an app that claims the mouse gets the rest. A
+// press outside the box closes the shelf and is spent on it: closing the float
+// is not popping its members, and the click that dismisses it must not also act
+// on the pane it covers.
+func (t *tui) shelfMouse(ev mouseEvent, x, y int) bool {
+	sv := t.shelf
+	if sv == nil {
+		return false
+	}
+	motion := ev.btn&32 != 0
+	wheel := ev.btn&64 != 0
+	// A held left press keeps the pointer wherever it goes: a drag out of the
+	// box still selects, and its release still copies.
+	if t.press != nil {
+		if ev.release && ev.btn&3 == 0 {
+			t.finishPress(x, y, ev)
+			return true
+		}
+		if motion && ev.btn&3 == 0 {
+			t.press.evs = append(t.press.evs, ev)
+			t.selFocus(x, y)
+			return true
+		}
+	}
+	if motion && ev.btn&3 == 3 {
+		// Pointer motion with no button is dm's own: an app that asked for
+		// button motion alone never sees it.
+		return true
+	}
+	box := layout.BoxRect(sv.float.Rect, 1)
+	if x < box.X || y < box.Y || x >= box.X+box.W || y >= box.Y+box.H {
+		// A press outside puts the shelf away and is spent on the float: the
+		// click that dismisses it must not also act on what it covers. The
+		// wheel and hover outside do nothing either, so no surface under the
+		// float moves under a shelf the operator still sees.
+		if !ev.release && ev.btn&3 != 3 && !motion && !wheel {
+			t.closeShelfFloat()
+		}
+		return true
+	}
+	if wheel {
+		// A member that claims the mouse gets the wheel as its own; the shelf
+		// has no scrollback view to turn otherwise.
+		if p := t.paneByID(sv.active); p != nil && p.Mouse && t.conn != nil {
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouseIn(t.shelfBody(), ev)})
+		}
+		return true
+	}
+	if id := t.shelfChipHit(x, y); id != "" {
+		if ev.btn&3 == 0 && !motion && !ev.release {
+			t.focusShelfMember(id)
+		}
+		return true
+	}
+	if y == sv.float.Rect.Y {
+		return true // the strip's own ground
+	}
+	if ev.btn&3 == 2 && !motion && !ev.release {
+		t.openShelfMenu(x, y)
+		return true
+	}
+	body := t.shelfBody()
+	p := t.paneByID(sv.active)
+	if p == nil || body.W < 1 || body.H < 1 {
+		return true
+	}
+	inside := x >= body.X && y >= body.Y && x < body.X+body.W && y < body.Y+body.H
+	if ev.btn&3 == 0 && !motion && !wheel && !ev.release && inside {
+		// A press on the screen starts a selection on the active member. The
+		// press is held: a drag copies on release, and a release in the same
+		// cell forwards a click to an app that claims the mouse.
+		t.clearSelection()
+		t.press = &heldPress{pane: p.ID, mouse: p.Mouse, evs: []mouseEvent{ev}}
+		s := &selection{pane: p.ID, w: body.W, h: body.H}
+		s.anchor = (y-body.Y)*body.W + (x - body.X)
+		s.focus = s.anchor
+		t.selText = s
+		t.dirty = true
+		return true
+	}
+	if p.Mouse && t.conn != nil {
+		_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouseIn(body, ev)})
+	}
+	return true
 }

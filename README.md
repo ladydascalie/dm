@@ -457,7 +457,10 @@ a second press puts it away. The floating pane carries a strip of one chip per
 shelved pane, its state glyph and its name, with the active member's screen
 under it. Keys go to the active member. The prefix is the only key the shelf
 keeps, so `prefix n` and `prefix p` move between members and `prefix G` pops the
-active member back into the layout.
+active member back into the layout. The mouse works inside the float: a chip
+selects its member, a drag over the screen copies the selected text, a right
+press opens the shelf's own menu, and a press anywhere else puts the shelf away
+without touching the panes.
 
 `prefix G` pops the active member: the pane returns to the split tree as a split
 off the focused pane, and it takes the focus. The shelf keeps its ids, so a

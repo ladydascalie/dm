@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -697,4 +698,181 @@ func TestShelfBarChipSpanClampsToThePaintedCells(t *testing.T) {
 	if tui.shelf == nil {
 		t.Fatalf("a click at cell %d inside the painted chip %d..%d did not summon it", hi-1, lo, hi)
 	}
+}
+
+// TestShelfMouseOutsideClosesTheFloat proves a press outside the float puts
+// the shelf away and is spent on the float: the pane under it keeps its focus
+// and no pane is popped or closed.
+func TestShelfMouseOutsideClosesTheFloat(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	area := layout.PaneAreaForWithTabBar(tui.snap.Cols, tui.snap.Rows, tui.snap.Rail)
+	box := layout.BoxRect(tui.shelf.float.Rect, 1)
+	if area.X >= box.X && area.X < box.X+box.W && area.Y >= box.Y && area.Y < box.Y+box.H {
+		t.Fatalf("the pane area's first cell %d,%d sits inside the shelf box %+v", area.X, area.Y, box)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, x: area.X + 1, y: area.Y + 1})
+	if tui.shelf != nil || tui.mode != "" {
+		t.Fatalf("a press outside left shelf %v in mode %q, want the float closed", tui.shelf, tui.mode)
+	}
+	if len(tui.floats) != 0 {
+		t.Fatalf("floats = %d, want the shelf float removed", len(tui.floats))
+	}
+	if tui.press != nil || tui.selText != nil {
+		t.Fatal("the dismissing press started a selection on the pane under the shelf")
+	}
+	if members := rail.ShelfPanes(tui.snap); len(members) != 2 {
+		t.Fatalf("shelf members = %d, want the two panes kept", len(members))
+	}
+	// The release that follows belongs to nobody: nothing reaches a pane.
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: area.X + 1, y: area.Y + 1})
+	testutil.NoMsg(t, got)
+}
+
+// TestShelfChipClickFocusesTheMember proves a click on a chip switches the
+// member the shelf shows, at the cell span the strip paints it in.
+func TestShelfChipClickFocusesTheMember(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	segs, chips := tui.shelfStrip()
+	if len(chips) != 2 {
+		t.Fatalf("chips = %+v, want one per member", chips)
+	}
+	r := tui.shelf.float.Rect
+	for _, c := range chips {
+		if c.hi > segment.SegCells(segs) || c.lo >= c.hi {
+			t.Fatalf("chip %+v reaches outside the %d painted cells", c, segment.SegCells(segs))
+		}
+		if got := tui.shelfChipHit(r.X+c.lo, r.Y); got != c.id {
+			t.Fatalf("shelfChipHit at %d = %q, want %q", r.X+c.lo, got, c.id)
+		}
+		if got := tui.shelfChipHit(r.X+c.hi-1, r.Y); got != c.id {
+			t.Fatalf("shelfChipHit at the last cell %d = %q, want %q", r.X+c.hi-1, got, c.id)
+		}
+	}
+	if got := tui.shelfChipHit(r.X, r.Y+1); got != "" {
+		t.Fatalf("shelfChipHit one row under the strip = %q, want no chip", got)
+	}
+
+	second := chips[1]
+	tui.handleMouse(mouseEvent{btn: 0, x: r.X + second.lo + 1, y: r.Y + 1})
+	m := nextMsg(t, got)
+	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p8" {
+		t.Fatalf("a chip click sent %+v, want a focus request for w1p8", m)
+	}
+	if tui.shelf == nil || tui.mode != "shelf" {
+		t.Fatalf("a chip click left shelf %v in mode %q, want the float open", tui.shelf, tui.mode)
+	}
+}
+
+// TestShelfDragCopies proves a left press inside the shelf's screen selects the
+// member's text and a release copies it, the way a drag inside a pane does.
+func TestShelfDragCopies(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	body := tui.shelfBody()
+	if body.W < 6 || body.H < 1 {
+		t.Fatalf("shelf body = %+v, want room for a drag", body)
+	}
+	tui.vts["w1p7"] = testutil.TestVT(t, body.W, body.H, "hello world")
+	oscOut := testutil.CaptureStdout(t, func() {
+		tui.handleMouse(mouseEvent{
+			btn: 0, x: body.X + 1, y: body.Y + 1,
+			raw: []byte("\x1b[<0;1;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 32, x: body.X + 5, y: body.Y + 1,
+			raw: []byte("\x1b[<32;5;1M"),
+		})
+		tui.handleMouse(mouseEvent{
+			btn: 0, release: true, x: body.X + 5, y: body.Y + 1,
+			raw: []byte("\x1b[<0;5;1m"),
+		})
+	})
+	testutil.NoMsg(t, got)
+	if len(tui.toasts) != 1 || tui.toasts[0].text != "copied 5 chars" {
+		t.Fatalf("toasts = %+v, want copied 5 chars", tui.toasts)
+	}
+	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hello")) + "\x1b\\"
+	if !strings.Contains(oscOut, want) {
+		t.Fatalf("clipboard payload missing from %q", oscOut)
+	}
+	if tui.selText != nil || tui.press != nil {
+		t.Fatal("the drag left selection state behind")
+	}
+}
+
+// TestShelfRightPressOpensTheShelfMenu proves a right press inside the shelf
+// offers the shelf's own actions, and that closing that menu hands the keyboard
+// back to the float.
+func TestShelfRightPressOpensTheShelfMenu(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	body := tui.shelfBody()
+	tui.handleMouse(mouseEvent{btn: 2, x: body.X + 1, y: body.Y + 1})
+	if tui.menu == nil || tui.mode != "menu" {
+		t.Fatalf("a right press left menu %v in mode %q, want the shelf menu open", tui.menu, tui.mode)
+	}
+	if tui.menu.title != "shelf" {
+		t.Fatalf("menu title = %q, want shelf", tui.menu.title)
+	}
+	for _, it := range tui.menu.items {
+		if it.action == "split-right" || it.action == "scrollback" {
+			t.Fatalf("the shelf menu offers %q, which a shelved pane cannot take", it.action)
+		}
+	}
+	// A press inside the float but off the menu dismisses the menu and leaves
+	// the shelf up with the keyboard.
+	corner := layout.Rect{X: body.X + body.W - 1, Y: body.Y + body.H - 1}
+	m := tui.menu
+	if corner.X < m.x+m.w && corner.Y < m.y+len(m.items)+2 {
+		t.Fatalf("the corner %+v sits inside the menu", corner)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, x: corner.X + 1, y: corner.Y + 1})
+	if tui.menu != nil {
+		t.Fatal("a press outside the menu left it open")
+	}
+	if tui.shelf == nil || tui.mode != "shelf" {
+		t.Fatalf("closing the shelf menu left shelf %v in mode %q", tui.shelf, tui.mode)
+	}
+	tui.handleMouse(mouseEvent{btn: 0, release: true, x: corner.X + 1, y: corner.Y + 1})
+	testutil.NoMsg(t, got)
+}
+
+// TestShelfMouseBytesReachTheShelf proves the input loop hands a pointer event
+// in shelf mode to the shelf: a chip press in an SGR sequence switches the
+// member, and a press outside the float puts it away.
+func TestShelfMouseBytesReachTheShelf(t *testing.T) {
+	t.Parallel()
+	tui, got := shelfTUI(t)
+	feed(tui, "\x02F")
+	drainSummon(t, tui, got)
+
+	r := tui.shelf.float.Rect
+	_, chips := tui.shelfStrip()
+	if len(chips) < 2 {
+		t.Fatalf("chips = %+v, want one per member", chips)
+	}
+	feed(tui, fmt.Sprintf("\x1b[<0;%d;%dM", r.X+chips[1].lo+1, r.Y+1))
+	m := nextMsg(t, got)
+	if m.Type != "req" || m.Action != "focus" || m.Target != "w1p8" {
+		t.Fatalf("a chip press sent %+v, want a focus request for w1p8", m)
+	}
+	feed(tui, "\x1b[<0;1;1M")
+	if tui.shelf != nil || tui.mode != "" {
+		t.Fatalf("a press at the screen's first cell left shelf %v in mode %q", tui.shelf, tui.mode)
+	}
+	testutil.NoMsg(t, got)
 }

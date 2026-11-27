@@ -525,10 +525,10 @@ func (t *tui) processInput() {
 			continue
 		}
 		if t.mode == "shelf" {
-			// The shelf owns its strip and the prefix; the active member gets
-			// every other byte. A lone esc is a key for that pane, so it skips
-			// the mouse and paste checks. A pointer event over the shelf goes
-			// to nobody, so a click on the strip never falls through to the
+			// The shelf owns its strip, its box and the prefix; the active
+			// member gets every other byte. A lone esc is a key for that pane,
+			// so it skips the mouse and paste checks. A pointer event belongs
+			// to the shelf, so a click on the strip never falls through to the
 			// pane under it.
 			if len(t.inbuf) == 1 && t.inbuf[0] == 0x1b {
 				if !t.shelfKey() {
@@ -536,8 +536,9 @@ func (t *tui) processInput() {
 				}
 				continue
 			}
-			if _, n, ok := parseMouse(t.inbuf); ok {
+			if ev, n, ok := parseMouse(t.inbuf); ok {
 				t.inbuf = t.inbuf[n:]
+				t.handleMouse(ev)
 				continue
 			} else if n == 0 {
 				return // partial sequence, wait for the rest
@@ -1602,27 +1603,28 @@ func (t *tui) selFocus(x, y int) {
 		return
 	}
 	p := t.paneByID(s.pane)
-	if p == nil || p.Rect.W < 1 || p.Rect.H < 1 {
+	r := t.paneRect(p)
+	if p == nil || r.W < 1 || r.H < 1 {
 		return
 	}
-	cx := x - p.Rect.X
-	cy := y - p.Rect.Y
+	cx := x - r.X
+	cy := y - r.Y
 	if cx < 0 {
 		cx = 0
 	}
 	if cy < 0 {
 		cy = 0
 	}
-	if cx >= p.Rect.W {
-		cx = p.Rect.W - 1
+	if cx >= r.W {
+		cx = r.W - 1
 	}
-	if cy >= p.Rect.H {
-		cy = p.Rect.H - 1
+	if cy >= r.H {
+		cy = r.H - 1
 	}
 	row0 := t.selRow0(s, p)
-	off := (row0+cy)*p.Rect.W + cx
+	off := (row0+cy)*r.W + cx
 	if !s.moved {
-		ax, ay := s.anchor%p.Rect.W, s.anchor/p.Rect.W
+		ax, ay := s.anchor%r.W, s.anchor/r.W
 		dx, dy := cx-ax, (row0+cy)-ay
 		if dx < 0 {
 			dx = -dx
@@ -1703,7 +1705,7 @@ func (t *tui) finishPress(x, y int, ev mouseEvent) {
 	}
 	var keys []byte
 	for _, e := range append(pr.evs, ev) {
-		keys = append(keys, paneMouse(p, e)...)
+		keys = append(keys, paneMouseIn(t.paneRect(p), e)...)
 	}
 	if len(keys) > 0 {
 		_ = t.conn.Send(wire.Msg{Type: "keys", Keys: keys})
@@ -1733,7 +1735,7 @@ func (t *tui) copySelection() {
 	if term == nil {
 		return
 	}
-	text := extractSelection(term, p.Rect.W, s.anchor, s.focus)
+	text := extractSelection(term, t.paneRect(p).W, s.anchor, s.focus)
 	if t.writeClipboard(text) {
 		t.notify(fmt.Sprintf("copied %d chars", len(text)))
 	}
@@ -2252,6 +2254,14 @@ func (t *tui) handleMouse(ev mouseEvent) {
 			return
 		}
 	}
+	// The shelf owns the pointer over its box: a chip selects a member, a
+	// press on the screen selects text, a right press opens the shelf menu, and
+	// a press outside closes the float and is spent on it. The check sits after
+	// the menu's own, because a menu the shelf opened closes back into the
+	// float, and the press that dismissed it is the shelf's.
+	if t.mode == "shelf" && t.shelfMouse(ev, x, y) {
+		return
+	}
 	// A tab bar click belongs to the tab bar before any rail or pane logic.
 	// A tab selects its window; a double click opens the window rename prompt.
 	if t.mode == "" && t.tabBarClick(ev, x, y) {
@@ -2420,7 +2430,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		}
 		// A press on the frame is not a selection: the app gets it as before.
 		if p.Mouse && t.conn != nil {
-			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouse(p, ev)})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouseIn(p.Rect, ev)})
 		}
 		return
 	}
@@ -2433,7 +2443,7 @@ func (t *tui) handleMouse(ev mouseEvent) {
 		// The pane daemon owns the mode; the client's VT may have missed the
 		// enable sequence if it scrolled out of the replay ring.
 		if t.conn != nil {
-			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouse(p, ev)})
+			_ = t.conn.Send(wire.Msg{Type: "keys", Keys: paneMouseIn(p.Rect, ev)})
 		}
 		return
 	}
@@ -2691,14 +2701,13 @@ type mouseEvent struct {
 	raw     []byte
 }
 
-// paneMouse rewrites an SGR mouse event for the program in p: the program
-// sees its own screen, so the point must be relative to the pane's content
-// rect. An absolute point names a cell the program does not have, and it
-// drops the wheel and the click. A point outside the content rect clamps to
-// its nearest edge, so a press on the border still lands on the app. A rect
-// with no area cannot map a point, and the bytes go through unchanged.
-func paneMouse(p *wire.PaneInfo, ev mouseEvent) []byte {
-	r := p.Rect
+// paneMouseIn rewrites an SGR mouse event for the program in the rect: the
+// program sees its own screen, so the point must be relative to the rect the
+// pane or float is drawn in. An absolute point names a cell the program does
+// not have, and it drops the wheel and the click. A point outside the rect
+// clamps to its nearest edge, so a press on the border still lands on the app.
+// A rect with no area cannot map a point, and the bytes go through unchanged.
+func paneMouseIn(r layout.Rect, ev mouseEvent) []byte {
 	if r.W < 1 || r.H < 1 {
 		return ev.raw
 	}
@@ -2779,10 +2788,10 @@ func (t *tui) floatMouse(ev mouseEvent) {
 		return
 	}
 	// The command sees its own screen, so the point maps into the float's
-	// rect, the way paneMouse maps a point into a pane's.
+	// rect, the way paneMouseIn maps a point into a pane's.
 	_ = t.conn.Send(wire.Msg{
 		Type: "keys", Target: f.id,
-		Keys: paneMouse(&wire.PaneInfo{Rect: f.float.Rect}, ev),
+		Keys: paneMouseIn(f.float.Rect, ev),
 	})
 }
 
