@@ -697,10 +697,17 @@ state and a message through `msg-post`. One pane opens in one of three views, a
 tap apart: the transcript of the agent's session file, the steps flattened to
 one row each, and the screen the pane printed. The action sheet gives one large
 row per command, with a target picker for panes, windows, workspaces, split sites
-and layout presets. The screen grid paints the active window's panes as blocks.
+and layout presets. Its foot carries one row that reloads the page: an installed
+app has no reload button, and the server sends the page and its script with no
+cache, so that tap is the whole way a new build arrives. The screen grid paints
+the active window's panes as blocks.
 A tile is a link only when every tile is at least 44 points each way. A grid
 too dense for that is a screen snapshot, and the pane list below it stays the
 way in.
+
+The page looks like the desk it mirrors: one mono face, square corners,
+bracketed headers, and a state word in capitals. There is no second skin, so
+nothing on the page is a switch between looks.
 
 A pane that reported a session opens on the transcript and offers every view. A
 pane that reported none, a shell for example, opens on the screen and offers no

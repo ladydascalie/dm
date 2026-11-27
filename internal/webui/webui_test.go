@@ -1599,51 +1599,53 @@ func TestPageCarriesTheOutsideMarks(t *testing.T) {
 	}
 }
 
-// TestPageCarriesTheTerminalSkin proves the skin is a coat and not a
-// replacement: a switch in the header, a root attribute, a key the device
-// remembers, and every rule it adds scoped to that attribute. A rule that
-// escaped the scope would dress the page it promises not to touch.
-func TestPageCarriesTheTerminalSkin(t *testing.T) {
+// TestPageReloadsItself proves the actions sheet carries the one row an
+// installed app needs to pick up a new build. The page and its script are
+// served with no cache, so the tap is the whole update path: a phone with no
+// address bar and no reload button has no other way in.
+func TestPageReloadsItself(t *testing.T) {
 	t.Parallel()
 	page := pageSource(t)
 	for _, want := range []string{
-		`<button id="skin-toggle"`,
-		`localStorage.getItem("dm.skin")`,
-		`html[data-skin="tui"] body`,
+		`<button id="app-reload"`,
+		`reload the page`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the page misses %q", want)
 		}
 	}
-	at := strings.Index(page, "--- the terminal skin")
-	if at < 0 {
-		t.Fatal("the page carries no terminal skin block")
-	}
-	block := page[at:]
-	for _, line := range strings.Split(block, "\n") {
-		rule := strings.TrimSpace(line)
-		if !strings.HasSuffix(rule, "{") || strings.HasPrefix(rule, "/*") {
-			continue
-		}
-		if !strings.HasPrefix(rule, `html[data-skin="tui"]`) {
-			t.Fatalf("the skin's rule %q is not scoped to the attribute", rule)
-		}
+	if src := appScript(t); !strings.Contains(src, `$("app-reload").addEventListener("click", () => location.reload());`) {
+		t.Fatal("app.js does not reload the page from the sheet's own row")
 	}
 }
 
-// TestSetSkinRemembersTheChoice proves the switch writes the attribute the
-// stylesheet reads and stores the answer, so a phone keeps the coat across
-// visits and a reader who never taps it keeps the page as it ships.
-func TestSetSkinRemembersTheChoice(t *testing.T) {
+// TestPageIsOneLook proves the page carries the desk's own look and no switch
+// between looks: the mono face is the page's, no root attribute selects a
+// second skin, and the header holds no skin toggle. A plain page that came back
+// as an option would bring its own rules with it.
+func TestPageIsOneLook(t *testing.T) {
 	t.Parallel()
-	src := funcSource(t, appScript(t), "setSkin")
+	page := pageSource(t)
 	for _, want := range []string{
-		`document.documentElement.dataset.skin`,
-		`localStorage.setItem(SKIN_KEY`,
+		`--mono: "JetBrains Mono"`,
+		`font: 13px/1.5 var(--mono)`,
+		`button, input, select, textarea { font-family: var(--mono); }`,
 	} {
-		if !strings.Contains(src, want) {
-			t.Fatalf("setSkin misses %q:\n%s", want, src)
+		if !strings.Contains(page, want) {
+			t.Fatalf("the page misses %q", want)
 		}
+	}
+	for _, banned := range []string{
+		"data-skin",
+		"skin-toggle",
+		"dm.coat",
+	} {
+		if strings.Contains(page, banned) {
+			t.Fatalf("the page still carries %q: one look, no switch", banned)
+		}
+	}
+	if src := appScript(t); strings.Contains(src, "setSkin") || strings.Contains(src, "SKIN_KEY") {
+		t.Fatal("the page's script still carries the skin switch")
 	}
 }
 

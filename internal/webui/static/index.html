@@ -17,16 +17,6 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon-180.png">
 <link id="icon" rel="icon" href="data:,">
-<script>
-  // The skin is a device preference, so the attribute has to be on the root
-  // before the first paint: a page that painted plain and swapped after the
-  // script ran would flash.
-  try {
-    if (localStorage.getItem("dm.skin") === "tui") document.documentElement.dataset.skin = "tui";
-  } catch (e) {
-    // Storage that refuses reads simply gets the page as it ships.
-  }
-</script>
 <style>
   :root {
     --bg: #101418;
@@ -47,6 +37,10 @@
     --accent-3: #7ea9ff;
     --accent-4: #f0a05a;
     --accent-5: #8cd79b;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --accent: #7ac0eb;
+    --hard: #070a0d;
+    --focus: #1b2530;
   }
   .a0 { --acc: var(--accent-0); }
   .a1 { --acc: var(--accent-1); }
@@ -59,24 +53,27 @@
     margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font: 15px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 13px/1.5 var(--mono);
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
+  button, input, select, textarea { font-family: var(--mono); }
   /* The header and the tabs stay together at the top: the tab is the one
      control a thumb reaches for, so it never scrolls away. */
   .topbar { position: sticky; top: 0; z-index: 2; }
   header {
     display: flex; align-items: baseline; gap: 8px;
-    padding: 10px 12px;
+    padding: .5lh 1ch;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
   /* The session name never wraps: a second line in the header would eat the
      screen the tabs just bought. */
   header h1 {
-    flex: none; font-size: 15px; margin: 0; font-weight: 600;
+    flex: none; font-size: 13px; margin: 0; font-weight: 700;
     white-space: nowrap;
   }
+  header h1::before { content: "["; color: var(--dim); }
+  header h1::after { content: "]"; color: var(--dim); }
   /* The fleet header carries the tab's summary on a line of its own: one row
      of title and buttons leaves the counts too narrow to read at 320. */
   header.fleet { display: block; }
@@ -86,15 +83,19 @@
     overflow: hidden; text-overflow: ellipsis;
   }
   header.fleet .counts {
-    margin-top: 4px; font-size: 12px; color: var(--dim);
+    margin-top: 4px; font-size: 11px; color: var(--dim);
     overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   header .sheet-open, header .toggle {
     flex: none;
     display: inline-flex; align-items: center; justify-content: center;
     background: none; border: 1px solid var(--line); color: var(--fg);
-    border-radius: 6px; padding: 4px 12px; font-size: 13px;
-    min-height: 44px; min-width: 44px;
+    padding: 0 1ch; font-size: 11px;
+    min-height: 36px; min-width: 44px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   header .toggle.on { border-color: var(--working); color: var(--working); }
   /* A device that cannot push says so on the switch itself: dashed and dim,
@@ -113,12 +114,14 @@
     flex: 1 1 0;
     display: flex; align-items: center; justify-content: center;
     min-height: 44px; min-width: 44px;
-    font-size: 14px; font-weight: 600;
+    font-size: 11px; font-weight: 600;
     color: var(--dim); text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   nav.tabs a[aria-selected="true"] {
-    color: var(--fg);
-    box-shadow: inset 0 -2px 0 var(--working);
+    color: var(--accent);
+    box-shadow: inset 0 2px 0 0 var(--accent);
   }
   body.tab-panes #view-box, body.tab-box #view-panes { display: none; }
 
@@ -142,10 +145,11 @@
     display: block;
     padding: 8px 10px 8px 14px;
     background: var(--bg);
-    border: 1px solid var(--line); border-radius: 8px;
+    border: 1px solid var(--line);
     min-height: 44px;
     text-decoration: none; color: inherit;
     overflow: hidden;
+    box-shadow: inset 3px 0 0 0 var(--accent);
   }
   /* The project's accent stands on the card's edge, so a card names the
      section it came from. */
@@ -167,7 +171,10 @@
     font-size: 11px; color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  #needs .cwant { flex: none; font-size: 10px; }
+  #needs .cwant {
+    flex: none; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: .06em;
+  }
   #needs .ago { flex: none; font-size: 10px; color: var(--dim); }
   /* The message is the reason the card exists, so it keeps two lines and no
      more: a third line would push the next card out of the strip. */
@@ -185,10 +192,10 @@
   .project h2.proj {
     display: flex; align-items: center; gap: 8px;
     margin: 14px 12px 2px;
-    font-size: inherit; letter-spacing: 0; text-transform: none;
+    font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
   }
   .project .mark {
-    flex: none; width: 4px; height: 12px; border-radius: 2px;
+    flex: none; width: 4px; height: 12px;
     background: var(--acc);
   }
   .project .pname {
@@ -236,7 +243,6 @@
     height: 56vh;
     margin: 10px 12px 0;
     border: 1px solid var(--line);
-    border-radius: 8px;
     overflow: hidden;
   }
   body.thumbs #thumbs { display: block; }
@@ -244,14 +250,13 @@
   #thumbs .tile:not([href]) { cursor: default; }
   #thumbs .frame {
     position: relative; width: 100%; height: 100%;
-    border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
+    border: 1px solid var(--line); overflow: hidden;
     background: var(--bg);
   }
   #thumbs .label {
     position: absolute; left: 0; top: 0; z-index: 1;
     padding: 1px 4px; font-size: 10px; line-height: 1.3;
     color: var(--fg); background: var(--panel);
-    border-bottom-right-radius: 4px;
     max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   }
   #thumbs canvas { display: block; width: 100%; height: 100%; }
@@ -260,7 +265,7 @@
     display: none;
     margin: 10px 12px 0; padding: 8px 10px;
     border: 1px solid var(--error); color: var(--error);
-    border-radius: 6px; font-size: 13px;
+    font-size: 13px;
   }
   #banner.show { display: block; }
   h2 {
@@ -281,10 +286,10 @@
   .row .title { display: flex; align-items: baseline; gap: 10px; }
   .row .title .name {
     flex: 1 1 auto; min-width: 0;
-    font-weight: 600;
+    font-weight: 700;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .row .title .state { flex: none; }
+  .row .title .state { flex: none; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;}
   .row .id { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); }
   /* A message can carry a path with no break in it: break it inside the row,
      whatever the width. The row is one tap target, so nothing in it may widen
@@ -311,13 +316,13 @@
     direction: rtl; text-align: left;
   }
   .row .where .cwd bdi { direction: ltr; unicode-bidi: isolate; }
-  .state { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+  .state { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; }
   .state.note { color: var(--note); }
   .state.working { color: var(--working); }
   .state.blocked { color: var(--blocked); }
   .state.done { color: var(--done); }
   .state.error { color: var(--error); }
-  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; }
   .dot.working { background: var(--working); }
   .dot.blocked { background: var(--blocked); }
   .dot.done { background: var(--done); }
@@ -336,14 +341,14 @@
   }
   #compose input, #compose select {
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 10px; font-size: 15px; min-width: 0; min-height: 44px;
+    border: 1px solid var(--line);
+    padding: 9px 10px; font-size: 15px; min-width: 0; min-height: 40px;
   }
   #compose #compose-msg, #compose button { grid-column: 1 / -1; }
   #compose button {
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
-    padding: 10px 12px; font-size: 14px; min-height: 44px;
+    border: 1px solid var(--line);
+    padding: 10px 12px; font-size: 14px; min-height: 40px;
   }
 
   /* The actions sheet: full height, one thumb wide, dismissed by a tap on the
@@ -358,17 +363,21 @@
     width: calc(100% - 56px); max-width: 380px; height: 100%;
     display: flex; flex-direction: column;
     background: var(--panel);
-    border-left: 1px solid var(--line);
     overflow: hidden;
+    border: 1px solid var(--line);
+    box-shadow: 4px 4px 0 0 var(--hard);
   }
   #sheet .panel > header { position: static; }
+  #sheet .panel > header h1 {
+    text-transform: uppercase; font-size: 11px; letter-spacing: .08em;
+  }
   #sheet .close {
     margin-left: auto; background: none; border: 1px solid var(--line);
-    color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
+    color: var(--fg); padding: 4px 12px; font-size: 13px;
     min-height: 44px; min-width: 44px;
   }
   #sheet-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-  #sheet-body h2 { margin: 16px 12px 6px; }
+  #sheet-body h2 { margin: 16px 12px 6px; text-transform: uppercase; font-size: 11px; letter-spacing: .08em;}
   .targets {
     display: flex; align-items: center; gap: 8px;
     padding: 2px 12px 8px; font-size: 12px; color: var(--dim);
@@ -376,7 +385,7 @@
   .targets select {
     flex: 1; min-width: 0;
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
+    border: 1px solid var(--line);
     padding: 7px 8px; font-size: 13px; min-height: 44px;
   }
   .cmd { border-top: 1px solid var(--line); }
@@ -386,14 +395,17 @@
     font: inherit; font-size: 16px;
     padding: 15px 12px; min-height: 52px;
   }
+  .cmd > button { min-height: 44px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
   .cmd .cmd-label { color: var(--dim); padding-bottom: 4px; min-height: 0; }
   .cmd > button:active { background: var(--bg); }
   .cmd > button.armed { color: var(--error); }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 12px 12px; }
   .chips button {
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
-    padding: 9px 12px; font-size: 14px; min-height: 44px; min-width: 44px;
+    border: 1px solid var(--line);
+    padding: 9px 12px; font-size: 11px; min-height: 40px; min-width: 44px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   .chips button:active { border-color: var(--working); color: var(--working); }
 
@@ -418,12 +430,17 @@
     flex: 0 1 auto; min-width: 0; max-width: 50%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  #pane header h1::before { content: "["; color: var(--dim); }
+  #pane header h1::after { content: "]"; color: var(--dim); }
   /* The word never shrinks, so a clipped line still names the state and still
      says a message is there; the message takes what room is left of the line. */
   #pane header #pane-state {
     flex: 1 1 0; min-width: 0;
     display: flex; align-items: baseline;
     overflow: hidden; white-space: nowrap;
+    text-transform: uppercase;
+    font-size: 10.5px;
+    letter-spacing: .06em;
   }
   #pane-state-word { flex: none; font-weight: inherit; }
   #pane-state-msg {
@@ -433,8 +450,10 @@
   #pane .close {
     flex: none;
     margin-left: auto; background: none; border: 1px solid var(--line);
-    color: var(--fg); border-radius: 6px; padding: 4px 12px; font-size: 13px;
-    min-height: 44px; min-width: 44px;
+    color: var(--fg); padding: 4px 12px; font-size: 11px;
+    min-height: 36px; min-width: 44px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   /* The stop control appears only while the pane is busy. A phone has no
      Escape, and a run nobody can interrupt owns the desk until someone finds a
@@ -442,8 +461,10 @@
   #pane .stop {
     display: none; flex: none;
     background: none; border: 1px solid var(--line);
-    color: var(--error); border-radius: 6px; padding: 4px 10px; font-size: 13px;
-    min-height: 44px; min-width: 44px;
+    color: var(--error); padding: 4px 10px; font-size: 11px;
+    min-height: 36px; min-width: 44px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   #pane .stop.show {
     display: inline-flex; align-items: center; justify-content: center;
@@ -455,8 +476,10 @@
   #pane .collapse {
     flex: none;
     background: none; border: 1px solid var(--line);
-    color: var(--fg); border-radius: 6px; padding: 4px 10px; font-size: 14px;
-    line-height: 1; min-height: 44px; min-width: 44px;
+    color: var(--fg); padding: 4px 10px; font-size: 11px;
+    line-height: 1; min-height: 36px; min-width: 44px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   /* Folded, the bar takes no room at all. The switch and the note carry their
      own display rules, so each one is named here to win over them. */
@@ -476,16 +499,19 @@
   #views .seg {
     display: flex; overflow: hidden;
     background: var(--bg);
-    border: 1px solid var(--line); border-radius: 8px;
+    border: 1px solid var(--line);
   }
   #views .seg a {
     flex: 1 1 0; min-height: 44px; min-width: 44px;
     display: flex; align-items: center; justify-content: center;
     border-left: 1px solid var(--line);
-    font-size: 12px; letter-spacing: .04em;
+    font-size: 11px; letter-spacing: .06em;
     color: var(--dim); text-decoration: none;
+    text-transform: uppercase;
   }
   #views .seg a:first-child { border-left: 0; }
+  /* The chosen view is the one filled cell, so its label goes dark on the fill:
+     a blue label on the blue fill is a label a thumb has to hunt for. */
   #views .seg a[aria-selected="true"] {
     background: var(--working); color: #0b1013; font-weight: 650;
   }
@@ -511,10 +537,12 @@
   #pane-actions button {
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
-    padding: 8px 4px; font-size: 13px; min-height: 44px;
+    border: 1px solid var(--line);
+    padding: 8px 4px; font-size: 11px; min-height: 44px;
     min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   #pane-actions button.armed { border-color: var(--error); color: var(--error); }
   /* The screen holds the text and the one control that floats over it. */
@@ -523,9 +551,11 @@
     position: absolute; right: 10px; bottom: 10px;
     display: none; align-items: center; justify-content: center;
     min-height: 44px; min-width: 44px;
-    padding: 0 12px; font-size: 12px;
+    padding: 0 12px; font-size: 11px;
     background: var(--panel); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
+    border: 1px solid var(--line);
+    text-transform: uppercase;
+    letter-spacing: .06em;
   }
   #latest.show { display: inline-flex; }
   /* One of the three views is on screen at a time, and each one scrolls on its
@@ -561,7 +591,6 @@
     border-left: 2px solid var(--accent-0);
     background: #171a24;
     padding: 9px 11px;
-    border-radius: 0 9px 9px 0;
     margin: 0 0 12px;
     font-size: 14px; color: #cfd8e0;
     overflow-wrap: anywhere;
@@ -595,12 +624,12 @@
   .md a { color: var(--working); text-underline-offset: 2px; }
   .md code {
     font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-    background: #0c1013; border: 1px solid var(--line); border-radius: 4px;
+    background: #0c1013; border: 1px solid var(--line);
     padding: 1px 4px; overflow-wrap: anywhere;
   }
   .md pre {
     margin: 0 0 10px; padding: 8px 10px;
-    background: #0c1013; border: 1px solid var(--line); border-radius: 7px;
+    background: #0c1013; border: 1px solid var(--line);
     overflow-x: auto;
   }
   .md pre code { background: none; border: 0; padding: 0; font-size: 12px; }
@@ -665,7 +694,7 @@
     grid-column: 2 / -1; margin: 4px 0 2px; padding: 6px 8px;
     font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     color: #a9b8c6;
-    background: #0c1013; border: 1px solid var(--line); border-radius: 7px;
+    background: #0c1013; border: 1px solid var(--line);
     white-space: pre-wrap; overflow-wrap: anywhere;
     max-height: 116px; overflow: hidden;
   }
@@ -674,7 +703,7 @@
     grid-column: 2 / -1; margin: 4px 0 2px;
     font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     color: var(--dim);
-    background: #0c1013; border: 1px solid var(--line); border-radius: 7px;
+    background: #0c1013; border: 1px solid var(--line);
     white-space: pre-wrap; overflow-wrap: anywhere;
     max-height: 116px; overflow: hidden;
   }
@@ -749,7 +778,7 @@
   #send textarea {
     flex: 1; min-width: 0;
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
+    border: 1px solid var(--line);
     padding: 9px 10px; font-family: inherit; font-size: 15px; line-height: 21px;
     min-height: 44px; max-height: 30vh;
     resize: none; overflow-y: hidden;
@@ -760,13 +789,14 @@
   #send button {
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
-    padding: 0 10px; min-height: 44px; min-width: 44px;
+    border: 1px solid var(--line);
+    padding: 0; min-height: 44px; min-width: 44px;
+    width: 44px;
   }
   /* The two glyphs do not fill their grid equally: a paper plane reaches the
      viewBox edges, a camera is a wide, short rectangle inside it. Equal boxes
      therefore read as unequal icons, so each is sized to look the same weight. */
-  #send button svg { display: block; }
+  #send button svg { display: block; width: 18px; height: 18px;}
   #send-attach svg { width: 23px; height: 23px; }
   #send-submit svg { width: 20px; height: 20px; }
   #send button.enter { border-color: var(--working); color: var(--working); }
@@ -776,27 +806,33 @@
      take the whole phone. */
   #ask {
     display: none;
-    max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
   #ask.show { display: block; }
-  #ask .ask { padding: 10px 12px 12px; }
+  #ask .ask { padding: .5lh 1ch; }
   #ask .ask-hd {
     display: flex; align-items: baseline; gap: 8px;
-    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
     color: var(--dim);
   }
-  #ask .ask-hd b { color: var(--fg); font-weight: 650; }
+  #ask .ask-hd b { color: var(--accent); font-weight: 650; }
   #ask .ask-hd .ago { margin-left: auto; }
   #ask .ask-q { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   #ask .ask-q:first-of-type { margin-top: 8px; padding-top: 0; border-top: 0; }
   #ask .ask-qh {
-    font-size: 11px; font-weight: 650; letter-spacing: .06em;
-    text-transform: uppercase; color: var(--accent-1);
+    font-size: 10.5px; font-weight: 650; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 1ch;
+  }
+  #ask .ask-qh::after {
+    content: ""; flex: 1; height: 1px; background: #3a4a57;
   }
   #ask .ask-qt {
-    margin-top: 2px; font-size: 14.5px; line-height: 1.45; color: var(--fg);
+    margin-top: 2px; font-size: 13.5px; line-height: 1.45; color: var(--fg);
     overflow-wrap: anywhere;
   }
   #ask .ask-hint { margin-top: 3px; font-size: 11px; color: var(--dim); }
@@ -804,41 +840,47 @@
      under it, and the preview behind its own button, which a tap on the row
      never hits. */
   #ask .ask-opt {
-    display: block; width: 100%; margin-top: 6px; padding: 8px 10px;
-    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    display: block; width: 100%; margin-top: 0; padding: .25lh 1ch;
+    background: transparent; border: 0;
     color: inherit; text-align: left; min-height: 44px;
+    border-top: 1px solid var(--line);
   }
-  #ask .ask-opt:active { border-color: var(--working); }
-  #ask .ask-opt.picked { border-color: var(--working); }
+  #ask .ask-opt:active { border-color: var(--working); background: var(--focus);}
+  #ask .ask-opt.picked { border-color: var(--working); background: var(--focus); box-shadow: inset 3px 0 0 0 var(--accent);}
+  #ask .ask-opt.picked .ask-label { font-weight: 700; }
   #ask .ask-line { display: flex; align-items: baseline; gap: 8px; }
-  #ask .ask-tick { flex: none; font-size: 13px; color: var(--dim); }
+  #ask .ask-tick { flex: none; font-size: 0; color: var(--accent); }
+  #ask .ask-tick::before { content: "[ ]"; font-size: 12.5px; }
+  #ask .ask-opt[role="radio"].picked .ask-tick::before { content: "[\25cf]"; }
+  #ask .ask-opt[role="checkbox"].picked .ask-tick::before { content: "[x]"; }
   #ask .ask-opt.picked .ask-tick { color: var(--working); }
   #ask .ask-label {
     flex: 1 1 auto; min-width: 0;
-    font-size: 14px; font-weight: 600; overflow-wrap: anywhere;
+    font-size: 13px; font-weight: 400; overflow-wrap: anywhere;
   }
   #ask .ask-desc {
-    margin-top: 1px; font-size: 12.5px; color: var(--dim);
+    margin-top: 1px; font-size: 12px; color: var(--dim);
     overflow-wrap: anywhere;
   }
   #ask .ask-more {
     margin-top: 5px; background: none; border: 1px solid var(--line);
-    color: var(--dim); border-radius: 6px; padding: 3px 8px; font-size: 11.5px;
+    color: var(--dim); padding: 3px 8px; font-size: 11.5px;
     min-height: 30px;
   }
   #ask .ask-preview {
     margin: 6px 0 0; padding: 6px 8px;
     font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
     color: #a9b8c6; background: #0c1013;
-    border: 1px solid var(--line); border-radius: 7px;
+    border: 1px solid var(--line);
     white-space: pre-wrap; overflow-wrap: anywhere;
     max-height: 160px; overflow: auto;
   }
   #ask .ask-text {
     display: block; width: 100%; margin-top: 8px;
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
+    border: 1px solid var(--line);
     padding: 9px 10px; font-size: 15px; min-height: 44px;
+    font-family: var(--mono);
   }
   /* The note is the second field of a question, quieter than the answer above
      it: one row tall, and the line above it is the trimmed note the model will
@@ -852,13 +894,15 @@
   #ask .ask-note {
     display: block; width: 100%; height: 34px; margin-top: 4px;
     background: var(--bg); color: var(--fg);
-    border: 1px dashed var(--line); border-radius: 6px;
+    border: 1px dashed var(--line);
     padding: 6px 9px; font-size: 16px;
+    min-height: 44px;
+    font-family: var(--mono);
   }
   #ask .ask-note:focus { border-style: solid; border-color: var(--working); }
   #ask .ask-err {
     margin-top: 10px; padding: 6px 8px;
-    border: 1px solid var(--error); border-radius: 6px;
+    border: 1px solid var(--error);
     color: var(--error); font-size: 12px; overflow-wrap: anywhere;
   }
   /* Send and decline ride the bottom of the form while the questions scroll
@@ -873,17 +917,21 @@
   }
   #ask .ask-controls button {
     background: var(--bg); color: var(--fg);
-    border: 1px solid var(--line); border-radius: 6px;
-    padding: 10px 12px; font-size: 14px; min-height: 44px;
+    border: 1px solid var(--line);
+    padding: 10px 12px; font-size: 11px; min-height: 44px;
+    flex: 1;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-weight: 400;
   }
   #ask .ask-controls button.send {
-    border-color: var(--working); color: var(--working); font-weight: 650;
+    border-color: var(--accent); color: var(--accent); font-weight: 650;
   }
   #ask .ask-controls button[disabled] { opacity: .45; }
   #ask .ask-done { margin-top: 8px; font-size: 12.5px; color: var(--done); }
   /* A question that closed before the reader answered is not a success: the
      blocked colour says a decision left without them. */
-  #ask .ask-gone { margin-top: 8px; font-size: 12.5px; color: var(--blocked); }
+  #ask .ask-gone { margin-top: 8px; font-size: 11px; color: var(--blocked); text-transform: uppercase; letter-spacing: .06em;}
   #ask .ask.settled .ask-opt, #ask .ask.settled .ask-text { opacity: .6; }
   #ask .ask.settled .ask-opt { cursor: default; }
 
@@ -896,151 +944,7 @@
   @media (max-width: 900px) {
     #compose input, #compose select, #send textarea,
     #ask .ask-text, #ask .ask-note, .targets select { font-size: 16px; }
-  }
-
-  /* --- the terminal skin -------------------------------------------------
-     A coat, not a replacement: every rule below starts with the root
-     attribute, so the page ships exactly as it was and the switch in the
-     header puts this on. The attribute is written before the first paint by
-     the script in the head, and remembered on the device. */
-  html[data-skin="tui"] {
-    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    --accent: #7ac0eb;
-    --hard: #070a0d;
-    --focus: #1b2530;
-  }
-  /* One face, one size, no rounded corner anywhere: the skin's whole premise.
-     The radius sweep is blunt on purpose, because a single rounded chip would
-     be the one thing that reads as a web page. */
-  html[data-skin="tui"] body { font: 13px/1.5 var(--mono); }
-  html[data-skin="tui"] button,
-  html[data-skin="tui"] input,
-  html[data-skin="tui"] select,
-  html[data-skin="tui"] textarea { font-family: var(--mono); }
-  html[data-skin="tui"] *,
-  html[data-skin="tui"] *::before,
-  html[data-skin="tui"] *::after { border-radius: 0 !important; }
-  /* The one shape the sweep must not take: a running tool call is a border
-     turning round a circle, and a square does not turn. The state dots stay
-     square with the rest. */
-  html[data-skin="tui"] .spin { border-radius: 50% !important; }
-
-  /* header, tab strip and the two switches */
-  html[data-skin="tui"] header { padding: .5lh 1ch; }
-  html[data-skin="tui"] header h1 { font-size: 13px; font-weight: 700; }
-  html[data-skin="tui"] header h1::before { content: "["; color: var(--dim); }
-  html[data-skin="tui"] header h1::after { content: "]"; color: var(--dim); }
-  html[data-skin="tui"] .bar button {
-    min-height: 36px; padding: 0 1ch; text-transform: uppercase;
-    font-size: 11px; letter-spacing: .06em;
-  }
-  html[data-skin="tui"] .tabs a {
-    display: flex; align-items: center; justify-content: center;
-    min-height: 44px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em;
-  }
-  html[data-skin="tui"] .tabs a[aria-selected="true"] {
-    color: var(--accent); box-shadow: inset 0 2px 0 0 var(--accent);
-  }
-  html[data-skin="tui"] #skin-toggle[aria-pressed="true"] {
-    color: var(--accent); border-color: var(--accent);
-  }
-
-  /* the fleet */
-  html[data-skin="tui"] #needs .card { box-shadow: inset 3px 0 0 0 var(--accent); }
-  html[data-skin="tui"] .counts { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
-  html[data-skin="tui"] #needs .cwant,
-  html[data-skin="tui"] .state {
-    text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em;
-  }
-  html[data-skin="tui"] .row .title .state { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; }
-  html[data-skin="tui"] .row .title .name { font-weight: 700; }
-  html[data-skin="tui"] .row .id { color: var(--dim); }
-  html[data-skin="tui"] .project h2.proj { text-transform: uppercase; font-size: 10.5px; letter-spacing: .08em; }
-
-  /* the pane: header, actions, view tabs */
-  html[data-skin="tui"] #pane header h1::before { content: "["; color: var(--dim); }
-  html[data-skin="tui"] #pane header h1::after { content: "]"; color: var(--dim); }
-  html[data-skin="tui"] #pane-state { text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em; }
-  html[data-skin="tui"] #pane .close,
-  html[data-skin="tui"] #pane .collapse,
-  html[data-skin="tui"] #pane .stop { min-height: 36px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
-  html[data-skin="tui"] #pane-actions button {
-    min-height: 44px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em;
-  }
-  html[data-skin="tui"] #views .seg a {
-    display: flex; align-items: center; justify-content: center; min-height: 44px;
-    text-transform: uppercase; font-size: 11px; letter-spacing: .06em;
-  }
-  html[data-skin="tui"] #views .seg a[aria-selected="true"] {
-    color: var(--accent); box-shadow: inset 0 2px 0 0 var(--accent);
-  }
-
-  /* the ask form: a label row, a labelled rule, option rows, a bracket mark */
-  /* The skin's controls are taller, so the capped panel gives them back the
-     rows they spend: a short form fits whole and a long one still scrolls
-     under its sticky send row. */
-  html[data-skin="tui"] #ask { max-height: 60vh; }
-  html[data-skin="tui"] #ask .ask { padding: .5lh 1ch; }
-  html[data-skin="tui"] #ask .ask-hd {
-    text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em;
-  }
-  html[data-skin="tui"] #ask .ask-hd b { color: var(--accent); }
-  /* The label opens a rule, the way a desk section header does. */
-  html[data-skin="tui"] #ask .ask-qh {
-    color: var(--accent); text-transform: uppercase; font-size: 10.5px; letter-spacing: .06em;
-    display: flex; align-items: center; gap: 1ch;
-  }
-  html[data-skin="tui"] #ask .ask-qh::after {
-    content: ""; flex: 1; height: 1px; background: #3a4a57;
-  }
-  html[data-skin="tui"] #ask .ask-hint { font-size: 11px; }
-  html[data-skin="tui"] #ask .ask-opt {
-    border: 0; border-top: 1px solid var(--line); background: transparent;
-    padding: .25lh 1ch; margin-top: 0;
-  }
-  html[data-skin="tui"] #ask .ask-opt.picked {
-    background: var(--focus); box-shadow: inset 3px 0 0 0 var(--accent);
-  }
-  html[data-skin="tui"] #ask .ask-opt.picked .ask-label { font-weight: 700; }
-  html[data-skin="tui"] #ask .ask-label { font-size: 13px; font-weight: 400; }
-  html[data-skin="tui"] #ask .ask-qt { font-size: 13.5px; }
-  html[data-skin="tui"] #ask .ask-opt:active { background: var(--focus); }
-  /* The glyph gives way to the box: the row says whether it wants one answer or
-     any, so the mark can be the squared one in both cases. */
-  html[data-skin="tui"] #ask .ask-tick { font-size: 0; color: var(--accent); }
-  html[data-skin="tui"] #ask .ask-tick::before { content: "[ ]"; font-size: 12.5px; }
-  html[data-skin="tui"] #ask .ask-opt[role="radio"].picked .ask-tick::before { content: "[\25cf]"; }
-  html[data-skin="tui"] #ask .ask-opt[role="checkbox"].picked .ask-tick::before { content: "[x]"; }
-  html[data-skin="tui"] #ask .ask-desc { font-size: 12px; }
-  html[data-skin="tui"] #ask .ask-text,
-  html[data-skin="tui"] #ask .ask-note { min-height: 44px; font-family: var(--mono); }
-  html[data-skin="tui"] #ask .ask-controls button {
-    flex: 1; min-height: 44px; text-transform: uppercase;
-    font-size: 11px; letter-spacing: .06em; font-weight: 400;
-  }
-  html[data-skin="tui"] #ask .ask-controls .send { color: var(--accent); border-color: var(--accent); }
-  html[data-skin="tui"] #ask .ask-gone { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
-
-  /* the composer: one prompt row, two square targets */
-  html[data-skin="tui"] #send { border-top: 1px solid var(--line); }
-  html[data-skin="tui"] #send input { min-height: 44px; font-family: var(--mono); }
-  html[data-skin="tui"] #send button { min-width: 44px; width: 44px; min-height: 44px; padding: 0; }
-  html[data-skin="tui"] #send button svg { width: 18px; height: 18px; }
-
-  /* the sheet and the box's composer */
-  html[data-skin="tui"] #sheet .panel { border: 1px solid var(--line); box-shadow: 4px 4px 0 0 var(--hard); }
-  html[data-skin="tui"] #sheet-body h2,
-  html[data-skin="tui"] #sheet .panel > header h1 {
-    text-transform: uppercase; font-size: 11px; letter-spacing: .08em;
-  }
-  html[data-skin="tui"] .cmd > button { min-height: 44px; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
-  html[data-skin="tui"] .chips button,
-  html[data-skin="tui"] #compose button,
-  html[data-skin="tui"] #compose input,
-  html[data-skin="tui"] #compose select { min-height: 40px; }
-  html[data-skin="tui"] .chips button { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
-  html[data-skin="tui"] #latest { text-transform: uppercase; font-size: 11px; letter-spacing: .06em; }
-</style>
+  }</style>
 </head>
 <body class="tab-panes">
   <div class="topbar">
@@ -1049,7 +953,6 @@
         <h1 id="session">dm</h1>
         <button id="sheet-open" class="sheet-open">actions</button>
         <button id="thumbs-toggle" class="toggle">pictures</button>
-        <button id="skin-toggle" class="toggle" aria-pressed="false" title="terminal skin">tui</button>
         <button id="notify-toggle" class="toggle" aria-pressed="false" data-state="off" title="turn notifications on for this device">notify</button>
       </div>
       <div class="counts" id="counts"></div>
@@ -1092,6 +995,13 @@
         <button class="close" id="sheet-close">close</button>
       </header>
       <div id="sheet-body"><div class="empty">loading</div></div>
+      <!-- The page's own row, pinned under the scrolling commands: an installed
+           app has no reload button and no address bar, so this is how a new
+           build reaches the phone without deleting the icon. It reads nothing
+           from the daemon, so it works even when the command list does not. -->
+      <div class="cmd">
+        <button id="app-reload" title="fetch this page and its script again, so a new build shows">reload the page</button>
+      </div>
     </div>
   </div>
 

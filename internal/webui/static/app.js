@@ -1043,37 +1043,6 @@ async function stopPane() {
 // The device remembers the answer: a reader who wants the text wants it on
 // the next visit too.
 
-// SKIN_KEY is where this device keeps its page skin. The terminal coat is a
-// preference, not a replacement: the page ships as it was, and one root
-// attribute turns the coat on. A refused read, as in a private tab, is the
-// plain page.
-const SKIN_KEY = "dm.skin";
-
-// storedSkin reads the device's answer.
-function storedSkin() {
-  try {
-    return localStorage.getItem(SKIN_KEY) === "tui";
-  } catch (e) {
-    return false;
-  }
-}
-
-// setSkin turns the coat on or off and remembers the answer. The stylesheet
-// does the work; this only names the state and keeps the switch honest.
-function setSkin(on) {
-  document.documentElement.dataset.skin = on ? "tui" : "";
-  const btn = $("skin-toggle");
-  if (btn) {
-    btn.setAttribute("aria-pressed", on ? "true" : "false");
-    btn.title = on ? "plain skin" : "terminal skin";
-  }
-  try {
-    localStorage.setItem(SKIN_KEY, on ? "tui" : "plain");
-  } catch (e) {
-    // A refused write costs the memory, not the coat.
-  }
-}
-
 // COLLAPSE_KEY is where this device keeps its answer.
 const COLLAPSE_KEY = "dm.paneCollapsed";
 
@@ -3006,9 +2975,9 @@ window.addEventListener("resize", () => {
   renderThumbs(fleet);
   repaintThumbs();
 });
-$("skin-toggle").addEventListener("click", () => {
-  setSkin(document.documentElement.dataset.skin !== "tui");
-});
+// reload fetches the page and its script again. The server sends both with no
+// cache, so one tap is what an installed app otherwise needs a force-quit for.
+$("app-reload").addEventListener("click", () => location.reload());
 $("notify-toggle").addEventListener("click", toggleNotify);
 $("sheet-close").addEventListener("click", dismissSheet);
 $("sheet").addEventListener("click", (e) => {
@@ -3043,10 +3012,6 @@ renderPaneActions();
 
 // The address bar carries the tab, so a reload lands where the reader stood; a
 // page opened without one starts on the panes.
-// The head script already applied the remembered skin before the first paint;
-// this puts the switch in step with it, and lets a link carry the choice.
-const wantSkin = new URLSearchParams(location.search).get("skin");
-setSkin(wantSkin === "tui" ? true : wantSkin === "plain" ? false : storedSkin());
 route();
 if (!location.hash) {
   history.replaceState(null, "", location.pathname + location.search + "#" + tab);
