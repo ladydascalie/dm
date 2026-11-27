@@ -6,10 +6,13 @@
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#101418">
 <!-- A phone installs the page from here, and iOS grants push only to the app
-     the home screen opens. The status bar is translucent so the page reaches
-     the top of the screen instead of under a strip of chrome. -->
+     the home screen opens. The status bar is opaque, so the page starts below
+     it and its viewport ends at the bottom of the phone. A translucent bar
+     leaves the installed app a viewport one status bar shorter than the screen
+     and no way to paint the strip it gives up: the composer floated above the
+     home indicator with dead screen under it. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <title>dm</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon-180.png">
