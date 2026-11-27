@@ -495,6 +495,17 @@ func (t *tui) notify(text string) {
 	t.pushToast(toast{text: text})
 }
 
+// announceUpdate raises the toast for a line the caller decided is worth
+// saying, such as a newer release. It is the visible half of the boot notice:
+// the stderr line survives in the scrollback, this one is in the operator's
+// face for a few seconds. An empty line says nothing.
+func (t *tui) announceUpdate(line string) {
+	if line == "" {
+		return
+	}
+	t.pushToast(toast{text: line})
+}
+
 // notifyEntry raises the toast a notify entry deserves: the state in the title
 // bar, the topic above the message, and the message itself when the entry has
 // one.
@@ -605,8 +616,9 @@ func RunWithLayout(name, layoutPath string) error {
 	// it survives on exit. A stale cache leaves a detached refresh behind; the
 	// attach never waits for it and a failed spawn is not a failure to attach.
 	stateDir := paths.StateDir()
-	if line := updateNotice(stateDir, version.Version, time.Now()); line != "" {
-		fmt.Fprintln(os.Stderr, line)
+	notice := updateNotice(stateDir, version.Version, time.Now())
+	if notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
 	}
 	if shouldCheck(stateDir, time.Now()) {
 		spawnUpdateCheck()
@@ -644,7 +656,7 @@ func RunWithLayout(name, layoutPath string) error {
 	}()
 
 	for {
-		next, err := runSession(fd, name, layoutPath, keys, winch, &pace)
+		next, err := runSession(fd, name, layoutPath, notice, keys, winch, &pace)
 		if err != nil {
 			return err
 		}
@@ -652,8 +664,9 @@ func RunWithLayout(name, layoutPath string) error {
 			return nil
 		}
 		name = next
-		// The layout already did its work on the first start.
-		layoutPath = ""
+		// The layout already did its work on the first start, and the update
+		// notice was announced by the first frame.
+		layoutPath, notice = "", ""
 		_, _ = os.Stdout.WriteString("\x1b[0m\x1b[2J\x1b[H")
 	}
 }
@@ -753,7 +766,7 @@ func (t *tui) frame(now time.Time, pace *pacer, sink *frameSink) {
 // runSession dials the session and hands it to attachConn over the connection
 // it owns. A layout path rides the dial, so the server it spawns seeds from the
 // file; an already-running session ignores it.
-func runSession(fd int, name, layoutPath string, keys <-chan []byte, winch <-chan os.Signal, pace *pacer) (string, error) {
+func runSession(fd int, name, layoutPath, notice string, keys <-chan []byte, winch <-chan os.Signal, pace *pacer) (string, error) {
 	c, err := transport.DialWithLayout(name, layoutPath)
 	if err != nil {
 		return "", err
@@ -763,7 +776,7 @@ func runSession(fd int, name, layoutPath string, keys <-chan []byte, winch <-cha
 		cols, rows, _ := term.GetSize(fd)
 		return cols, rows
 	}
-	return attachConn(c, Harness{Out: os.Stdout, Keys: keys, Winch: winch, Size: size, Session: name}, pace)
+	return attachConn(c, Harness{Out: os.Stdout, Keys: keys, Winch: winch, Size: size, Session: name, Notice: notice}, pace)
 }
 
 // Event is one thing the operator did, reported to a harness that wants to
@@ -814,6 +827,11 @@ type Harness struct {
 	// ask float offers no send and no decline there, so a viewer cannot answer
 	// a question put to the operator. No shipped harness sets it yet.
 	ReadOnly bool
+	// Notice is one line the first frame announces as a toast, such as a newer
+	// release. The caller owns the decision and its once-a-day gate; the client
+	// only makes it visible where the operator is already looking. Empty says
+	// nothing.
+	Notice string
 }
 
 // Attach runs one attached session over a connection the caller made. It
@@ -902,6 +920,7 @@ func attachConn(c *transport.Conn, h Harness, pace *pacer) (string, error) {
 		t.keymapSeam = true
 	}
 	t.keymap = cfg
+	t.announceUpdate(h.Notice)
 	t.readOnly = h.ReadOnly
 	t.histRows = cfg.HistoryLines()
 	t.glyphs = rail.ResolveGlyphs(cfg.GlyphSet())

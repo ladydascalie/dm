@@ -41,8 +41,9 @@ proves the tarball before you install it.
 
 ## Updating
 
-An attach tells you when a newer release is out, in one line before the session
-draws: `dm 1.4.0 is out, run dm upgrade`. `dm upgrade` installs the latest
+An attach tells you when a newer release is out, twice: one line before the
+session draws, and a toast in the session itself, both reading
+`dm 1.4.0 is out, run dm upgrade`. `dm upgrade` installs the latest
 release over the binary you ran, after checking the tarball's sha256, and
 `dm upgrade --check` only reports. A session that is already running keeps the
 old binary until it restarts, so upgrade at a moment you can detach. Set

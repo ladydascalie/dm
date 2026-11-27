@@ -201,7 +201,12 @@ is simply a cache that is not there (`internal/client/update.go#readUpdateCache`
 `RunWithLayout` runs the check on every attach, after the tty check and before
 the alternate screen is entered (`internal/client/client_model.go#RunWithLayout`).
 It prints the notice to stderr, so the line survives the frame that follows and
-is still there when the client exits. When the cache is stale it leaves one
+is still there when the client exits, and it hands the same line to the client
+as `Harness.Notice` (`internal/client/client_model.go#Harness.Notice`), which
+the first frame raises as a toast
+(`internal/client/client_model.go#tui.announceUpdate`). The stderr line is the
+history, the toast is the ping: a line written above the alternate screen is
+easy to miss while a session starts. When the cache is stale it leaves one
 detached refresh behind: the child gets its own session
 (`internal/client/update_unix.go#detachUpdate`, and the browser build's
 `internal/client/update_js.go#detachUpdate` does nothing), its stdin, stdout and

@@ -54,6 +54,30 @@ func TestFrameToastSparesTheChrome(t *testing.T) {
 	}
 }
 
+// The update notice is announced where the operator is looking, not only in
+// the scrollback above the alternate screen. The stderr line stays for the
+// history; this is the ping.
+func TestUpdateNoticeToasts(t *testing.T) {
+	t.Parallel()
+	f := newFrameTUI(t, 100, 20, 34)
+	f.frame()
+
+	f.tui.announceUpdate("dm 9.9.9 is out, run dm upgrade")
+	if len(f.tui.toasts) != 1 {
+		t.Fatalf("toasts = %d, want the notice", len(f.tui.toasts))
+	}
+	if got := f.frame(); !strings.Contains(got, "dm 9.9.9 is out, run dm upgrade") {
+		t.Fatalf("the notice is not in the frame: %q", got)
+	}
+
+	// An empty line is not a toast, and nothing is announced twice.
+	f.tui.toasts = nil
+	f.tui.announceUpdate("")
+	if len(f.tui.toasts) != 0 {
+		t.Fatalf("an empty notice toasted %d times", len(f.tui.toasts))
+	}
+}
+
 // A frame that closes one float and opens another keeps the float count
 // equal, so a prune gated on the count would keep the closed float's paint
 // entry forever. The prune runs against the live set every frame.
