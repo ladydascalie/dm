@@ -1051,9 +1051,17 @@ func (s *server) resizeSplit(first, second string, ratio float64) error {
 	return fmt.Errorf("no pane %q", first)
 }
 
+// setFocus takes the lock and moves the focus to a pane.
 func (s *server) setFocus(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.setFocusLocked(id)
+}
+
+// setFocusLocked moves the focus to a pane, activating its workspace and its
+// window, so a client standing in another workspace follows. The caller holds
+// s.mu.
+func (s *server) setFocusLocked(id string) error {
 	for i, ws := range s.st.Workspaces {
 		for j, w := range ws.Windows {
 			if layout.FindLeaf(w.Root, id) {

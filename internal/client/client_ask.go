@@ -24,8 +24,9 @@ package client
 // input prompt and the send carries it.
 //
 // The float opens by itself on the focused pane's open ask and closes when the
-// ask is answered or gone. A pane that is not focused gets a rail badge
-// instead, so a question elsewhere cannot steal the desk.
+// ask is answered or gone. A pane that is not focused gets a rail badge:
+// the daemon moves the focus when an ask opens, and this client still refuses
+// to paint a question over a window the reader is not in.
 
 import (
 	"bytes"

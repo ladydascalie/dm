@@ -58,7 +58,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm msg watchers` | `[--json]` | print the live watches | `dm msg watchers` |
 | `dm msg schema` | `-` | print the box schema the server serves | `dm msg schema` |
 | `dm ask list` | `[--json]` | print the questions the session lists, oldest first | `dm ask list [--json]` |
-| `dm ask open` | `--pane P --tool-call ID [--json]` | open an ask on a pane, reading {questions} on stdin | `echo '{"questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}' \| dm ask open --pane w1p1 --tool-call toolu_1` |
+| `dm ask open` | `--pane P --tool-call ID [--json]` | open an ask on a pane and give it the focus, reading {questions} on stdin | `echo '{"questions":[{"question":"Which base?","header":"base","options":[{"label":"main"}]}]}' \| dm ask open --pane w1p1 --tool-call toolu_1` |
 | `dm ask await` | `<id> [--timeout 25s] [--json]` | block until the ask is answered, or print pending | `dm ask await a1 --json` |
 | `dm ask answer` | `<id> [--json]` | answer an ask, reading {items,globalNote,cancel} on stdin | `echo '{"items":[{"questionIndex":0,"optionIndexes":[0]}]}' \| dm ask answer a1` |
 | `dm ask close` | `<id> [--json]` | drop an ask from the store, idempotently | `dm ask close <id> [--json]` |

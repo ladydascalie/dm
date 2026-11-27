@@ -60,11 +60,67 @@ func (s *server) askWakeLocked() {
 	}
 }
 
-// askOpen lists one ask on a pane and returns the id the server gave it. A tool
-// call already covered by a listed ask is refused as E_EXISTS: an open ask
+// askOpen lists one ask on a pane, then gives that pane the focus: the desk
+// stands the question box only on the focused pane of the active window, so a
+// question on any other pane would arrive invisible while the agent blocked on
+// an await nobody saw.
+func (s *server) askOpen(pane string, req *ask.OpenReq) (string, error) {
+	id, err := s.askStore(pane, req)
+	if err != nil {
+		return "", err
+	}
+	s.askFocus(pane)
+	return id, nil
+}
+
+// askFocus moves the focus to the pane a question sits on, then pushes the
+// snapshot that shows it. A reader already standing on an open ask keeps their
+// place: the box in front of them carries picks they typed, and stealing it
+// would throw them away. That leaves a second question queued behind the first,
+// which the rail badge and dm ask list still name.
+//
+// The zoom is one view of one focus, so a focus that moves drops it. Dropping
+// it changes every rect in the old window, which owes the panes their new size
+// and the client a rebuilt screen: the resync carries that snapshot instead.
+func (s *server) askFocus(pane string) {
+	s.mu.Lock()
+	win := s.st.ActiveWindow()
+	moved := win.Focus != pane && !s.openAskOnLocked(win.Focus) &&
+		s.setFocusLocked(pane) == nil
+	zoomed := moved && s.zoom != ""
+	if moved {
+		s.zoom = ""
+		_ = s.st.Save()
+	}
+	s.mu.Unlock()
+	if zoomed {
+		s.resync()
+		return
+	}
+	if moved {
+		s.pushSnapshot()
+	}
+}
+
+// openAskOnLocked reports whether a pane carries an unanswered ask, the one the
+// desk is showing. The caller holds s.mu.
+func (s *server) openAskOnLocked(pane string) bool {
+	if pane == "" {
+		return false
+	}
+	for i := range s.st.Ask {
+		if s.st.Ask[i].Answer == nil && s.st.Ask[i].Pane == pane {
+			return true
+		}
+	}
+	return false
+}
+
+// askStore lists one ask on a pane and returns the id the server gave it. A
+// tool call already covered by a listed ask is refused as E_EXISTS: an open ask
 // replaces nothing, and a retried tool call must not stack a second question
 // set on the reader.
-func (s *server) askOpen(pane string, req *ask.OpenReq) (string, error) {
+func (s *server) askStore(pane string, req *ask.OpenReq) (string, error) {
 	if pane == "" {
 		return "", ask.Refuse(ask.CodeInvalidPayload, "ask-open needs a pane")
 	}

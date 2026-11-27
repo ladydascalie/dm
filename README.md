@@ -352,10 +352,13 @@ Three surfaces draw an ask from that one store.
   counts the rows it hides above and below the window, so nothing in an option's
   detail is unreachable. The box reserves at least `ask-rows` interior rows, and
   the detail pane fills whatever that floor leaves.
-  A pane that is not focused keeps only a `?` badge on its rail row, so a
-  question in another window cannot take the desk. The float closes on the next
-  snapshot once the ask is answered or gone. A refused answer keeps it open
-  with the daemon's code on it.
+  An ask takes the focus of the pane it belongs to, across windows and
+  workspaces, so the box stands in front of the reader instead of waiting on a
+  pane they are not looking at. A reader already standing on an open ask keeps
+  their place and their picks; a second question waits in the store, and the
+  rail marks its pane with a `?` badge. The float closes on the next snapshot
+  once the ask is answered or gone. A refused answer keeps it open with the
+  daemon's code on it.
 - The phone. `dm web` paints the ask as a form above the pane's views: one
   block per question, options as tappable rows, the description inline and the
   preview behind its own toggle, a text field for something else on every

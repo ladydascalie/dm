@@ -500,7 +500,7 @@ var cliCommands = []cliCommand{
 	{
 		name:    "ask open",
 		args:    "--pane P --tool-call ID [--json]",
-		summary: "open an ask on a pane, reading {questions} on stdin",
+		summary: "open an ask on a pane and give it the focus, reading {questions} on stdin",
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"pane", "P", "pane the ask belongs to"},

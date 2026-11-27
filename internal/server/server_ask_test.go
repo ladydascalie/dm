@@ -130,6 +130,55 @@ func TestAskOpenRefusesUnknownPane(t *testing.T) {
 	}
 }
 
+// TestAskOpenTakesTheFocusToItsPane proves the question reaches the reader: the
+// desk stands the box only on the focused pane of the active window, so the
+// open moves the focus to the pane it names, across a workspace and a window.
+func TestAskOpenTakesTheFocusToItsPane(t *testing.T) {
+	t.Parallel()
+	st := captureState(t)
+	s := railServer(st)
+	if got := st.ActiveWindow().Focus; got != "w2p1" {
+		t.Fatalf("focus starts on %q, want w2p1", got)
+	}
+	askOpen(t, s, "w3p2", "toolu_1")
+	if got := st.ActiveWorkspace().ID; got != "s2" {
+		t.Errorf("active workspace = %q, want s2", got)
+	}
+	if got := st.ActiveWindow().ID; got != "w3" {
+		t.Errorf("active window = %q, want w3", got)
+	}
+	if got := snapshot(s).Focus; got != "w3p2" {
+		t.Errorf("snapshot focus = %q, want w3p2", got)
+	}
+	reloaded, err := session.LoadStateAt(s.st.Dir(), s.st.Name)
+	if err != nil {
+		t.Fatalf("reload state: %v", err)
+	}
+	if got := reloaded.ActiveWindow().ID; got != "w3" {
+		t.Errorf("saved active window = %q, want w3", got)
+	}
+}
+
+// TestAskOpenLeavesAnAskAlreadyInFront proves a second question does not steal
+// the first: a reader part way through a box keeps their place and the picks
+// they typed, so the ask on another pane waits in the store instead.
+func TestAskOpenLeavesAnAskAlreadyInFront(t *testing.T) {
+	t.Parallel()
+	st := captureState(t)
+	s := railServer(st)
+	askOpen(t, s, "w2p1", "toolu_1")
+	second := askOpen(t, s, "w3p1", "toolu_2")
+	if second == "" {
+		t.Fatal("the second ask was refused")
+	}
+	if got := snapshot(s).Focus; got != "w2p1" {
+		t.Fatalf("focus = %q, want the first ask's pane w2p1", got)
+	}
+	if list := s.askList(); len(list) != 2 {
+		t.Fatalf("store lists %d asks, want the second one waiting", len(list))
+	}
+}
+
 // TestAskAnswerSettlesAndAwaitReturns proves an await parks until the answer
 // lands, and returns the answer once it does.
 func TestAskAnswerSettlesAndAwaitReturns(t *testing.T) {
