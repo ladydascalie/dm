@@ -261,18 +261,19 @@ func (t *tui) closeAskFloat() {
 }
 
 // barAskOf is the question the status strip pins: the focused pane's open ask
-// while its float is out of the way. The box is louder than any chip when it is
-// up, and the rail badge names an ask on another pane, so the strip carries the
-// one case neither covers.
+// while its float is out of the way, and the oldest question the store lists on
+// another pane when the desk has none. The box is louder than any chip when it
+// is up, and the rail badge names an ask on another pane, so the strip carries
+// the case neither covers: a question that arrived while the reader stood
+// elsewhere, or one they put away.
 func (t *tui) barAskOf() barAsk {
-	if t.snap == nil {
-		return barAsk{}
-	}
 	if t.ask != nil && t.askHidden != t.ask.id {
+		// The box is up and owns the keys: a chip would name a question the
+		// strip's own key cannot reach.
 		return barAsk{}
 	}
-	a := askOnPane(t.snap, t.snap.Focus)
-	if a == nil || !onScreen(t.snap, a.Pane) {
+	a := t.waitingAsk()
+	if a == nil {
 		return barAsk{}
 	}
 	index := 1
@@ -286,6 +287,38 @@ func (t *tui) barAskOf() barAsk {
 		}
 	}
 	return barAsk{pane: a.Pane, index: index, total: len(a.Questions), key: key}
+}
+
+// waitingAsk is the question the desk is not showing, the one the strip names
+// and the toggle key reaches: the focused pane's own ask first, then the oldest
+// question any other pane holds. A dismissed ask stays dismissed. Both callers
+// run with no float on screen, so the ask whose box is up never reaches here.
+func (t *tui) waitingAsk() *wire.Ask {
+	if t.snap == nil {
+		return nil
+	}
+	if a := askOnPane(t.snap, t.snap.Focus); a != nil && a.ID != t.askClosed {
+		return a
+	}
+	for i := range t.snap.Ask {
+		if a := &t.snap.Ask[i]; a.ID != t.askClosed {
+			return a
+		}
+	}
+	return nil
+}
+
+// jumpToAsk asks the server for the focus of the pane a waiting question sits
+// on. One request is the whole jump: the focus arrives in the snapshot that
+// follows, and that snapshot opens the float on it.
+func (t *tui) jumpToAsk() {
+	a := t.waitingAsk()
+	if a == nil || t.conn == nil {
+		return
+	}
+	t.askHidden = ""
+	_ = t.conn.Send(wire.Msg{Type: "req", Action: "focus", Target: a.Pane})
+	t.dirty = true
 }
 
 // toggleAsk puts the question float away, or brings it back. Hiding keeps the
@@ -320,16 +353,17 @@ func (t *tui) hideAsk() {
 }
 
 // showAsk puts a hidden ask back, or opens the focused pane's ask when the
-// reader reaches for one that is not up. A settled ask never comes back.
+// reader reaches for one that is not up. With no question the desk can put up
+// where it stands, it reaches the oldest one waiting on another pane, so a
+// question the reader was never handed is one keypress away. A settled ask never
+// comes back.
 func (t *tui) showAsk() {
 	if t.snap == nil {
 		return
 	}
 	a := askOnPane(t.snap, t.snap.Focus)
-	if a == nil || a.ID == t.askClosed {
-		return
-	}
-	if !onScreen(t.snap, a.Pane) {
+	if a == nil || a.ID == t.askClosed || !onScreen(t.snap, a.Pane) {
+		t.jumpToAsk()
 		return
 	}
 	if t.ask != nil && t.ask.id == a.ID {

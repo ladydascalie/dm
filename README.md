@@ -344,8 +344,9 @@ Three surfaces draw an ask from that one store.
   arrows move, `J`/`K` scroll the detail, a digit picks that option, `space`
   picks on a single select and toggles on a multi-select, `t` types a custom
   answer, `n` attaches a note to the option under the cursor, `tab` and
-  shift-tab move between questions, `A` puts the box away, `enter` sends once
-  every question is answered, and `esc` declines. Those keys take rows of their
+  shift-tab move between questions, `A` puts the box away and, on a pane with no
+  question, reaches the oldest one waiting elsewhere, `enter` sends once every
+  question is answered, and `esc` declines. Those keys take rows of their
   own above the closing rule and wrap to the box's width, so every binding is on
   screen at any width; the border is a plain rule. A description or preview
   taller than its pane scrolls with `J`/`K`, and the row the pane elides to
@@ -356,7 +357,9 @@ Three surfaces draw an ask from that one store.
   workspaces, so the box stands in front of the reader instead of waiting on a
   pane they are not looking at. A reader already standing on an open ask keeps
   their place and their picks; a second question waits in the store, and the
-  rail marks its pane with a `?` badge. The float closes on the next snapshot
+  rail marks its pane with a `?` badge. A question the desk is not showing is
+  never silent: the status strip names it as `ask <pane>` with the key that
+  reaches it. The float closes on the next snapshot
   once the ask is answered or gone. A refused answer keeps it open with the
   daemon's code on it.
 - The phone. `dm web` paints the ask as a form above the pane's views: one

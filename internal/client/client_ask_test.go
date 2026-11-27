@@ -250,6 +250,54 @@ func TestAskFloatOnlyOnTheScreen(t *testing.T) {
 	_ = got
 }
 
+// TestAskJumpReachesAWaitingQuestion: with no question on the focused pane, the
+// strip names the oldest one the store lists, and the toggle key moves the desk
+// to its pane. The snapshot that follows is what opens the float.
+func TestAskJumpReachesAWaitingQuestion(t *testing.T) {
+	t.Parallel()
+	tui, got := switcherTUI(t)
+	tui.snap.Ask = []wire.Ask{{
+		ID: "ask2", Pane: "w1p2", ToolCallID: "tc2", Questions: askQuestions(),
+	}}
+	tui.syncAsk()
+	if tui.ask != nil {
+		t.Fatal("an ask on another pane opened a float")
+	}
+	if got := tui.barAskOf().pane; got != "w1p2" {
+		t.Fatalf("strip names %q, want the waiting ask on w1p2", got)
+	}
+	tui.runAction("toggle-ask")
+	m := nextBoxMsg(t, got)
+	if m.Action != "focus" || m.Target != "w1p2" {
+		t.Fatalf("jump sent %+v, want a focus on w1p2", m)
+	}
+	// The server moves the focus, and the snapshot that follows puts the box up.
+	tui.snap.Focus = "w1p2"
+	tui.snap.Panes = append(tui.snap.Panes, wire.PaneInfo{ID: "w1p2"})
+	tui.apply(wire.Msg{Type: "snapshot", Snap: tui.snap})
+	if tui.ask == nil || tui.ask.id != "ask2" || tui.mode != "ask" {
+		t.Fatalf("the jump did not open the float: %+v mode %q", tui.ask, tui.mode)
+	}
+}
+
+// TestAskStripSilentWhileABoxIsUp: a question queued on another pane puts no
+// chip on the strip while the reader has a box in front of them, because the
+// strip's key would hide that box instead of reaching the other one.
+func TestAskStripSilentWhileABoxIsUp(t *testing.T) {
+	t.Parallel()
+	tui, _ := askTUI(t, askQuestions())
+	tui.snap.Ask = append(tui.snap.Ask, wire.Ask{
+		ID: "ask3", Pane: "w1p2", ToolCallID: "tc3", Questions: askQuestions(),
+	})
+	tui.syncAsk()
+	if tui.ask == nil || tui.mode != "ask" || tui.ask.id != "ask1" {
+		t.Fatalf("the first ask's box left the desk: %+v mode %q", tui.ask, tui.mode)
+	}
+	if a := tui.barAskOf(); a.pane != "" {
+		t.Fatalf("strip names %q while the box is up", a.pane)
+	}
+}
+
 // TestAskFloatSettledElsewhereLetsGo: an ask answered on another surface is
 // refused with E_EXISTS, and that must free the desk instead of pinning a code
 // the reader cannot clear. The ask stays listed, so the float must also refuse
@@ -530,8 +578,10 @@ func TestAskFloatKeysWrapToTheWidth(t *testing.T) {
 	tui.snap.Cols = 44
 	tui.askFit()
 	text := askScreenText(t, tui.ask, tui.snap.Cols, tui.snap.Rows)
-	for _, want := range []string{"j/k", "move", "J/K", "detail", "1-9", "pick",
-		"space", "t", "type", "A", "hide", "n", "note", "enter", "send", "esc", "decline"} {
+	for _, want := range []string{
+		"j/k", "move", "J/K", "detail", "1-9", "pick",
+		"space", "t", "type", "A", "hide", "n", "note", "enter", "send", "esc", "decline",
+	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the box misses %q on a narrow float:\n%s", want, text)
 		}
