@@ -1,0 +1,14 @@
+/* A cast is a terminal, so it keeps its own corners and its own margin. The
+   box reserves its height before casts.js mounts the player, and the page does
+   not jump when the player arrives. */
+[data-cast] {
+	display: block;
+	margin: 1rem 0;
+	min-height: 15rem;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+[data-cast]:has(.ap-player) {
+	min-height: 0;
+}

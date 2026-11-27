@@ -43,7 +43,8 @@ help:
 		dist "build and tar $(DIST_PAIRS) into out/, then write out/checksums.txt" \
 		release-check "go test the release packages, then make dist" \
 		provision-check "fail unless this checkout's extension and skill are linked into the harness" \
-		docs-site "stage the published markdown and build the GitHub Pages site into site/"
+		docs-site "stage the published markdown and build the GitHub Pages site into site/" \
+		docs-casts "record the demo casts the docs site plays, from a scratch state" \
 
 .PHONY: test
 test:
@@ -157,3 +158,11 @@ docs-internals:
 .PHONY: docs-site
 docs-site:
 	uv run --quiet --with-requirements requirements-docs.txt ./scripts/docs-site.sh
+
+# A cast is recorded from a live session, by a feeder script and an asciinema
+# pty. The taping is local: it needs a terminal, real timing and a whole dm
+# server, none of which belong in CI. The recipe is in the tree, so the casts
+# are checked in beside the pages that play them.
+.PHONY: docs-casts
+docs-casts:
+	./scripts/casts/record.sh

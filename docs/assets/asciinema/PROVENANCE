@@ -1,0 +1,10 @@
+asciinema-player 3.19.0
+https://github.com/asciinema/asciinema-player
+
+The two files beside this one are the upstream bundle, copied byte for byte
+from https://cdn.jsdelivr.net/npm/asciinema-player@3.19.0/dist/bundle/ and
+committed so the docs build fetches nothing at build time. Apache-2.0, and the
+minified bundle carries its own licence header.
+
+To move to a new version, replace both files and this line, then record the
+casts again only if the player's handling of them changed.

@@ -105,6 +105,26 @@ The status bar reads back three states you look for: `PREFIX ` while the prefix
 is armed, `SCROLL <pane> +<offset>/<max>` while you scroll, and
 ` SEARCH <query> <i>/<n>` on an accepted query.
 
+## Demos
+
+Two recordings show the basics. A player opens on a still frame, so press play
+once.
+
+<div data-cast="docs/casts/split.cast" data-cols="100" data-rows="26"></div>
+
+`ctrl+b` arms the prefix, and the box lists every key. `|` splits right, `h`
+moves focus left, and `-` splits the left pane down. Every pane keeps its own
+shell.
+
+<div data-cast="docs/casts/project.cast" data-cols="100" data-rows="26"></div>
+
+`ctrl+b P` opens the project prompt on the active workspace, and the sidebar
+regroups that workspace under its project. `dm ls` prints the same project, so
+the name lives in the session and not on the screen.
+
+`scripts/casts/record.sh` records both casts against a scratch state and
+config. The page plays whatever that script last wrote.
+
 ## Sessions and panes
 
 Ids are addressable, not opaque counters behind a random string:

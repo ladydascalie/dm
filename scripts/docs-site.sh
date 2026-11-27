@@ -8,6 +8,11 @@
 # a developer README stays out by not being named, so nothing leaks onto the
 # site because it happened to be markdown in the tree.
 #
+# A page may also name a file beside it: a recorded cast and the player that
+# plays it. Those stage by the same allowlist, and a page that names a cast
+# which did not stage fails the build. The link checker cannot see that one,
+# because a cast is named in an attribute rather than in a link.
+#
 # The staging tree mirrors the repo layout, which is what keeps the relative
 # links between pages working unchanged. Only tracked files are read, so an
 # ignored scratch file cannot appear either.
@@ -44,6 +49,12 @@ while IFS= read -r -d '' file; do
 	esac
 done < <(git ls-files -z -- '*.md')
 
+staged_assets=0
+while IFS= read -r -d '' file; do
+	install -D -m 0644 "$file" "$stage/$file"
+	staged_assets=$((staged_assets + 1))
+done < <(git ls-files -z -- 'docs/casts/*.cast' 'docs/assets/*' 'docs/javascripts/*.js')
+
 if [ "$staged" -eq 0 ]; then
 	echo "docs-site: no page matched the allowlist" >&2
 	exit 1
@@ -53,13 +64,30 @@ if [ ! -f "$stage/README.md" ]; then
 	exit 1
 fi
 
+# A page names a cast by its path in the repo, and the browser resolves that
+# path against the site root. A name with no file behind it is a dead player,
+# and nothing else in the build would notice.
+missing=0
+while IFS= read -r -d '' page; do
+	while IFS= read -r cast; do
+		[ -n "$cast" ] || continue
+		if [ ! -f "$stage/$cast" ]; then
+			printf 'docs-site: %s plays %s, which is not staged\n' "${page#"$stage/"}" "$cast" >&2
+			missing=1
+		fi
+	done < <(grep -o 'data-cast="[^"]*"' "$page" | sed 's|^data-cast="||; s|"$||')
+done < <(find "$stage" -name '*.md' -print0)
+if [ "$missing" -ne 0 ]; then
+	exit 1
+fi
+
 # The README links its licence, so the site carries it beside the pages.
 if [ -f LICENSE ]; then
 	install -D -m 0644 LICENSE "$stage/LICENSE"
 fi
 
 if [ "${1:-}" = "--stage" ]; then
-	printf 'docs-site: staged %d pages in %s/\n' "$staged" "$stage"
+	printf 'docs-site: staged %d pages and %d assets in %s/\n' "$staged" "$staged_assets" "$stage"
 	exit 0
 fi
 

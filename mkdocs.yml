@@ -44,6 +44,16 @@ theme:
     - search.suggest
     - content.code.copy
 
+
+# The player is a vendored bundle and the mount script is ours, so a page that
+# carries data-cast plays a recorded session with no network at runtime.
+extra_css:
+  - docs/assets/asciinema/asciinema-player.css
+  - docs/assets/casts.css
+extra_javascript:
+  - docs/assets/asciinema/asciinema-player.min.js
+  - docs/javascripts/casts.js
+
 markdown_extensions:
   - admonition
   - attr_list
