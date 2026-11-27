@@ -96,6 +96,62 @@ func TestNewNamesTwoTargets(t *testing.T) {
 	}
 }
 
+// TestNewSecondHarness proves the seam the docs promise: a harness that is not
+// pi, with one mount and no extension, gets a plan the link rules carry out. A
+// second adapter is this test's harness, not a change to the engine.
+func TestNewSecondHarness(t *testing.T) {
+	repo := t.TempDir()
+	writeArtefacts(t, repo)
+	home := t.TempDir()
+	// A skills-only harness: it reads SKILL.md directories and has no
+	// extension concept at all.
+	h := Harness{
+		Name:   "acme",
+		Dir:    home,
+		Mounts: []Mount{{Kind: KindSkill, Dir: filepath.Join(home, "skills"), Name: "dm-fleet"}},
+	}
+	p, err := New(repo, h)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if len(p.Targets) != 1 {
+		t.Fatalf("targets = %d, want the one skill mount", len(p.Targets))
+	}
+	got := p.Targets[0]
+	if want := filepath.Join(home, "skills", "dm-fleet"); got.Link != want {
+		t.Errorf("link = %s, want %s", got.Link, want)
+	}
+	if want := filepath.Join(repo, "skills/dm-fleet"); got.Source != want {
+		t.Errorf("source = %s, want %s", got.Source, want)
+	}
+	changes, err := Apply(p)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(changes) != 1 || changes[0].Action != ActionCreated {
+		t.Fatalf("Apply = %+v, want one created link", changes)
+	}
+	statuses, err := Check(p)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].State != StateOK {
+		t.Fatalf("Check = %+v, want one ok link", statuses)
+	}
+}
+
+func TestNewRefusesEmptyPlan(t *testing.T) {
+	repo := t.TempDir()
+	writeArtefacts(t, repo)
+	if _, err := New(repo, Harness{Name: "acme", Dir: t.TempDir()}); err == nil {
+		t.Fatal("New with no mount succeeded, want a refusal")
+	}
+	h := Harness{Name: "acme", Dir: t.TempDir(), Mounts: []Mount{{Kind: "widget", Dir: t.TempDir(), Name: "w"}}}
+	if _, err := New(repo, h); err == nil {
+		t.Fatal("New with an unknown artefact kind succeeded, want a refusal")
+	}
+}
+
 func TestNewRefusesAbsentHarness(t *testing.T) {
 	repo := t.TempDir()
 	writeArtefacts(t, repo)
@@ -111,7 +167,10 @@ func TestNewRefusesHarnessFile(t *testing.T) {
 	home := t.TempDir()
 	file := filepath.Join(home, "not-a-dir")
 	writeFile(t, file, "x")
-	h := Harness{Name: "pi", Dir: file, ExtensionsDir: filepath.Join(file, "ext"), SkillsDir: filepath.Join(file, "skills")}
+	h := Harness{Name: "pi", Dir: file, Mounts: []Mount{
+		{Kind: KindExtension, Dir: filepath.Join(file, "ext"), Name: "dm-agent.ts"},
+		{Kind: KindSkill, Dir: filepath.Join(file, "skills"), Name: "dm-fleet"},
+	}}
 	if _, err := New(repo, h); !errors.Is(err, ErrNoHarness) {
 		t.Fatalf("New over a file = %v, want ErrNoHarness", err)
 	}

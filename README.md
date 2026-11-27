@@ -1764,7 +1764,10 @@ harness at once and nothing can go stale.
 
 `dm llms` carries the mechanical surface and needs no install. pi is the only
 adapter today. The link rules live in `internal/provision` and know nothing
-about harnesses, so a second one is one file.
+about harnesses, so a second one is one adapter file: a harness is a name, a
+root and a list of mounts, and a harness with no extension concept mounts the
+skill alone. [13 Harnesses](docs/internals/13-harnesses.md) is the checklist and
+the rule that keeps it cheap.
 
 ## Durability
 

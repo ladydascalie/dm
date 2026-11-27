@@ -229,8 +229,9 @@ func TestProvisionUninstallKeepsAFileItDidNotMake(t *testing.T) {
 	}
 }
 
-// TestProvisionRefusesWithoutPiDir proves an absent harness is a named
-// refusal that says pi is the only adapter.
+// TestProvisionRefusesWithoutPiDir proves an absent harness is a named refusal
+// that says which harness it could not find. The engine names no harness; the
+// verb names pi because pi is the adapter it calls today.
 func TestProvisionRefusesWithoutPiDir(t *testing.T) {
 	newProvisionFixture(t)
 	if err := os.RemoveAll(filepath.Join(os.Getenv("HOME"), ".pi")); err != nil {
@@ -240,7 +241,7 @@ func TestProvisionRefusesWithoutPiDir(t *testing.T) {
 	if err == nil {
 		t.Fatal("dm provision without a pi tree was accepted")
 	}
-	for _, want := range []string{"harness directory is absent", "pi is the only adapter"} {
+	for _, want := range []string{"harness directory is absent", "(pi)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal misses %q: %v", want, err)
 		}

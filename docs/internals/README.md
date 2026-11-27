@@ -116,6 +116,7 @@ which maps each action to its keys, and a handler in 06. A new binding lands in
 | [10 Config and the CLI surface](10-config.md) | Where is the verb table, and how do the config files load? |
 | [11 Layers](11-layers.md) | Which layer may import which, and what enforces it? |
 | [12 Shipping](12-release.md) | How is a release cut and stamped, and how does a binary update itself? |
+| [13 Harnesses](13-harnesses.md) | What does an agent harness have to provide, and what does a second one cost? |
 | [Generated package graph](generated/package-graph.md) | What is the package graph? Generated, not written by hand. |
 
 ## The systems and the page that owns each
