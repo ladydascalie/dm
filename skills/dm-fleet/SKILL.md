@@ -5,131 +5,138 @@ description: "Use when you run, supervise or fan out agents in dm's panes: choos
 
 # dm-fleet
 
-You are one agent among terminals. This skill holds the judgement. The
-mechanical half belongs to `dm llms`: ids, verbs, flags, JSON shapes. Run it
-when this page is not enough.
+You are one agent among other agents, each in a pane. This page carries the
+judgement. It covers when to open a pane, how to brief the agent that works in
+it, and how to read what it sends back. The mechanical half lives in `dm llms`:
+ids, verbs, flags and JSON shapes.
 
-## Gate
+A worker agent is one you start in a pane and supervise. The group of agents is
+every worker agent you have running.
+
+## Inside dm
 
 ```sh
 test -n "${DM_SESSION:-}"
 ```
 
-If the gate fails, you are not inside dm. Say so and stop.
+A failed test means you are not inside dm. Say so and stop.
 
-## Know where you stand
+## Where you stand
 
-`DM_SESSION` names the session. `DM_PANE` names your pane. A pane id is its
-window plus `p` plus a sequence: `w2p3`. Ids are constructible and a counter
-only moves forward, so a closed id is never a target.
+`DM_SESSION` names the session. `DM_PANE` names your pane. A pane id is a window
+id, then `p`, then a sequence: `w2p3`. The counter only moves forward, so a
+closed id never comes back.
 
-Read the tree. Do not guess an id, and do not copy an example id:
+Read the tree. Never guess an id, and never copy an example id:
 
 ```sh
 dm list --json | jq -r '.snapshot.all[] | [.id, .cwd, .agent, .status] | @tsv'
 ```
 
-`dm status` prints the OSC 7501 state a surface draws. It is the cheapest true
-thing about a lane, and reading it costs that lane no turn.
+`dm status` prints the OSC 7501 state that the pane's agent reported. It is the
+cheapest true fact about a worker agent, and reading it costs that agent no
+turn.
 
 ## Shape the work
 
-Pick the smallest shape that holds the work.
+Pick the smallest shape that holds the work. A split shares your window. A new
+window holds its own layout. A plan graph is one graph of units, one worker per
+unit, ordered by dependency. `dungeon init` writes a starter plan, and
+`dungeon up` spawns one pane per worker.
 
-| The work | Shape | Why |
-|---|---|---|
-| One edit you can finish now | no pane | A pane is a context you must watch |
-| Independent, blocks your next step, one command proves it | split a pane | Width without losing your own screen |
+| the work | shape | why |
+| --- | --- | --- |
+| One edit you can finish now | no pane | A pane is a context you then watch |
+| Independent, blocks your next step, one command proves it | split a pane | You keep your screen and gain a second one |
 | Another cwd, branch or repo, or a long build | new window | Separation, not width. One window per line of work |
-| Order, review, a merge gate, or a bug that must be proved | plan graph | The graph holds the order and the proof |
+| Order, review, a merge decision, or a bug that must be proved | plan graph | The graph holds the order and the proof |
 
 Close calls:
 
-- Split for width. `dm split <pane> --dir right` is right when you want both
-  results in view at once.
-- Open a window for separation. Use `dm new-window` when the work has its own
-  branch or checkout. A lane with its own branch inside your window invites a
-  stray write into the wrong pane.
-- Reach for a plan graph when the work needs a second pass, a reviewer, or an
-  order you cannot hold in your head. More than about two dependent chunks is a
-  plan, not a fan-out.
-- Every pane you open owes you a report. A pane with no definition of done is
-  tokens burning.
+- Split for width. Run `dm split <pane> --dir right` when you want both results
+  in view at once.
+- Open a window for separation. Run `dm new-window` when the work has its own
+  branch or checkout. A worker agent on its own branch inside your window
+  invites a stray write into the wrong pane.
+- Open a plan graph when the work needs a second pass, a reviewer, or an order
+  you cannot hold in your head. Two dependent chunks are a plan, not a fan-out.
+- Every pane you open owes you a report. A pane without a definition of done
+  burns tokens.
 
-## When a lane is worth it
+## Worth a worker agent
 
-A lane pays for itself when all three hold:
+Open a worker agent only when all three hold:
 
 1. You can name what finished looks like, and one command proves it.
-2. The work touches no file you hold, and no file another lane holds.
+2. The work touches no file you hold, and no file another worker agent holds.
 3. You will read its report and its diff.
 
-If one fails, do the work yourself. A lane whose output you rewrite line by
-line is slower than the work, and it hides your own progress.
+If one fails, do the work yourself. A worker agent whose output you rewrite line
+by line is slower than the work, and it hides your own progress.
 
-## Write a brief a lane can finish alone
+## The brief
 
-The lane starts with your brief and nothing else. It does not remember your
-conversation.
+The worker agent starts with your brief and nothing else. It does not remember
+your conversation.
 
 - Name the files it owns and the files it must not touch.
 - Name the accept command and the report path.
 - Give the path of every report and spec it needs. Do not make it search.
 - One concern. If the goal needs an "and", write two briefs.
 
-## The lane protocol
+## The worker protocol
 
-A lane talks on the box, under `lane/<encounter>/<minion>`. The key carries the
-encounter, because two encounters may both run a minion called `w1`.
+A plan is one graph of units, and a worker is one agent in it. The worker agent
+talks on the message log, under the key `lane/<plan>/<worker>`. The key carries
+the plan, because two plans may both run a worker called `w1`.
 
-The states that matter here:
+The three states that matter here:
 
-- `working`: alive and on it. Do not help it, and do not type into it. Text
-  lands in its prompt and corrupts the turn.
-- `blocked`: it cannot proceed without a decision. The entry names the decision
-  and what it already tried. A blocked lane waits, and a decision you can make
-  is a decision you should make now.
-- `done`: the work is in the worktree and its accept command passed. The entry
-  names the report path. Nothing else is proof.
+| state | what it means | what you do |
+| --- | --- | --- |
+| `working` | alive and on it | Do not help it, and do not type into it. Typed text corrupts the turn |
+| `blocked` | it cannot proceed without a decision | Decide now. The entry names the decision and what the worker agent already tried |
+| `done` | the work is in the worktree and its accept command passed | Read the report path the entry names. Nothing else is proof |
 
-A lane never commits. It leaves uncommitted changes in its worktree and hands
-over a report. The parent commits, on the lane branch, after the accept command
-passes and the diff is read. A lane that commits has taken a decision the
-parent owns.
+A worker agent never commits. It leaves uncommitted changes in its worktree and
+hands over a report. The parent runs the accept command and reads the diff, then
+commits on the worker's branch. A worker agent that commits has taken a decision
+the parent owns.
 
-A wake-up is not a verdict. A `done` entry means a lane stopped talking. It
-does not mean the work is done. Settle the work yourself: run the accept command
+A wake-up is not a verdict. A `done` entry means a worker agent stopped talking,
+and not that the work is done. Settle the work yourself: run the accept command
 and read the report. A summary that sounds finished is not evidence.
 
 Read every report for three things: what changed, what it ran, and what it did
 not do. A report that claims a test passed without the command and its exit code
-is a claim, not a result.
+states a claim, not a result.
 
-## Read a lane without burning it
+## Read a worker agent
 
 One look, one command, then decide.
 
 ```sh
 dm wait w2p3 --timeout 60                            # the pane's command ended
-dm msg wait --key lane/provision/w3 --timeout 60      # a box entry arrived
+dm msg wait --key lane/provision/w3 --timeout 60      # a message log entry arrived
 ```
 
-Do not poll a pane with `dm read` in a loop. A sleep loop of `dm read` spends a
-turn per tick and hides the thing you are looking for: a lane that repeats the
-same command, re-reads the same file, or retries an accept that already failed.
-Read the pane once per look and compare it with the last look.
+Do not poll a pane with `dm read` in a loop. A sleep loop spends a turn per
+tick. It also hides the thing you look for. That is a worker agent that repeats
+the same command, re-reads the same file, or retries an accept that already
+failed. Read the pane once per look, and compare it with the last look.
 
-A timeout is not a failure. It is a cue to look: check `dm status`, then read
-the pane of every lane that still says `working`.
+A timeout is a cue to look, not a failure. Check `dm status`, then read the pane
+of every worker agent that still says `working`.
 
-Next to a box watch, do your own work: read reports, answer blocked lanes, split
-units. Do not idle on a long wait.
+While a watch runs, do your own work: read reports, answer blocked worker
+agents, split units. Do not idle on a long wait.
 
 ## Do not
 
-- Do not commit a lane's work.
-- Do not type into a working lane.
-- Do not claim a lane passed without its accept output.
+- Do not commit a worker agent's work.
+- Do not type into a worker agent that is `working`.
+- Do not claim a worker agent passed without its accept output.
 - Do not poll a pane with `dm read`.
 - Do not build a pane id by hand.
-- Do not keep a stuck lane alive to save face. Kill it and write a fresh brief.
+- Do not keep a stuck worker agent alive to save face. Kill it, then write a
+  fresh brief.

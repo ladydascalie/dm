@@ -1,117 +1,42 @@
 # dm
 
-A small, durable terminal multiplexer. One static Go binary that carries the
-server, the pane harness, the TUI client, the CLI and the phone page.
+dm is a terminal multiplexer whose panes outlive the server. Read this page to
+install dm, drive a session, and find the command for each surface.
 
-Prototype status: M1 works end to end. Splits, windows, workspaces, OSC 7501
-agent status, durable sessions, a JSON RPC and scrollback search are
-implemented.
-
-## Identifiers
-
-Ids are addressable, not opaque counters behind a random string:
-
-```
-s1        workspace 1
-w1        window 1
-w2p3      window 2, pane 3
-```
-
-A pane id is its window id plus `p` and a per-window sequence that only grows.
-The id tells you where the pane lives and can be typed without a lookup. A
-window id is per session. A workspace id is per session.
-
-Counters only move forward, so an id is never reused after a close. A pane that
-is split off gets the next number in its window; the existing pane keeps its id.
-Names and labels stay separate and editable: a window's name, a workspace's
-name, a pane's recorded agent name. A name is a cosmetic label. Renaming a
-workspace leaves the id alone, so `s1` stays `s1`, and the action takes the
-id, so a background workspace can be renamed.
-
-State written before this scheme is migrated once, in tree order, on load.
+It runs several terminal programs in one window, keeps them running when your
+client quits, and brings them back after a reboot. It is built for coding
+agents: a pane reports its state, asks the reader a question, and posts to a
+message log. Every surface drives one JSON action set, so a script or an agent
+works the screen you work.
 
 ## Install
 
 Download the tarball for your platform from the latest release:
 `dm_linux_amd64.tar.gz`, `dm_linux_arm64.tar.gz`, `dm_darwin_amd64.tar.gz` or
-`dm_darwin_arm64.tar.gz`. Untar it, put `dm` on your `PATH`, and run
-`dm provision` once to link the pi extension and the fleet skill into
-`~/.pi/agent`. Each release also carries `checksums.txt`, so `sha256sum -c`
+`dm_darwin_arm64.tar.gz`. Untar it and put `dm` on your `PATH`. If you use pi,
+the agent harness, run `dm provision` once to link its extension and the skill
+into `~/.pi/agent`. Each release also carries `checksums.txt`, so `sha256sum -c`
 proves the tarball before you install it.
+
+This file is also published, with a sidebar and search, at
+https://darkmage.dev/dm/. `PLUGINS.md` is the plugin contract by hand: the
+declaration, the environment, the message log topics and the example under
+`examples/`.
 
 ## Updating
 
 An attach tells you when a newer release is out, twice: one line before the
 session draws, and a toast in the session itself, both reading
-`dm 1.4.0 is out, run dm upgrade`. `dm upgrade` installs the latest
-release over the binary you ran, after checking the tarball's sha256, and
-`dm upgrade --check` only reports. A session that is already running keeps the
-old binary until it restarts, so upgrade at a moment you can detach. Set
-`DM_NO_UPDATE_CHECK=1` to stop the check; it also stays quiet on CI and in a
-build that carries no version stamp. A `dev` build has no version to compare, so
-`dm upgrade` treats it as older than any release and installs the latest one;
-`--force` reinstalls when you already run the latest.
+`dm 1.4.0 is out, run dm upgrade`. `dm upgrade` installs the latest release over
+the binary you ran, after checking the tarball's sha256, and `dm upgrade --check`
+only reports. A session that is already running keeps the old binary until it
+restarts, so upgrade at a moment you can detach. Set `DM_NO_UPDATE_CHECK=1` to
+stop the check. It also stays quiet on CI and in a build that carries no version
+string. A `dev` build has no version to compare, so `dm upgrade` treats it as
+older than any release and installs the latest one; `--force` reinstalls when you
+already run the latest.
 
-## Docs
-
-The command table in `internal/clidoc/clidoc.go` is the source. `dm man`
-renders it as a man page and `dm llms` renders it as a one-pass teaching
-document. `dm html` renders the whole surface, config, keymaps and themes
-included, as one self-contained page, and opens it in the browser. The page
-paints itself from the built-in theme's palette. The committed files
-`docs/dm.1`, `docs/llms.txt` and `docs/dm.html` are snapshots, and the gate
-fails when one is stale.
-
-`PLUGINS.md` is the plugin contract by hand: a program in a pane, the
-declaration, the environment, the box topics and the example under
-`examples/`.
-
-The architecture and internals entry point is [docs/internals/README.md](docs/internals/README.md).
-
-Every page above is also published as a site, with a sidebar and search, at
-https://darkmage.dev/dm/. `make docs-site` builds it; the pages workflow
-deploys it from the same markdown.
-
-## Code layout
-
-`main.go` dispatches the internal verbs and hands everything else to the CLI.
-`probe.go` is the `__probe` harness. `blackbox/` holds the integration tests and
-`docs/` the generated snapshots.
-
-```
-internal/cli         the CLI verbs
-internal/clidoc      the command table behind usage, dm man and dm llms
-internal/client      the TUI: input, keys, frames, floats and the bar
-internal/server      the session daemon: layout, focus, clients, state, the box
-internal/pane        the pane daemon: PTY, VT screen, status and output ring
-internal/session     the state file model, the id scheme and its migration
-internal/wire        the socket wire contract
-internal/transport   the client side of the session socket
-internal/webui       the phone page: HTTP over the same socket primitives
-internal/ask         the questions an agent puts to the reader, their rules and codes
-internal/box         the message box types, bounds and schema
-internal/osc         the OSC 7501 status filter and parser
-internal/notify      the desktop notification policy
-internal/push        the VAPID keys, the subscription store, Web Push encryption
-internal/layout      the split tree and pane geometry
-internal/rail        the sidebar painter
-internal/switcher    the dashboard model and painter
-internal/boxview     the message box float
-internal/keymapview  the keymap float
-internal/keymap      the keymap model, the KDL loader and the help table
-internal/theme       the palette, glyphs and theme file parser
-internal/kdl         the KDL tokenizer shared by keymap and theme
-internal/cells       cell-width measuring and clipping
-internal/segment     a styled run of text
-internal/hintbar     the one key-hint row: caps, labels and faint pipes
-internal/panel       the bordered box painter
-internal/ui          the scrolling window, the message list and the one-line input
-internal/vt          VT replay and screen serialisation
-internal/paths       the session filesystem layout
-internal/testutil    test helpers shared by more than one package
-```
-
-## Use
+## Start here
 
 ```sh
 dm                      # attach to "main", creating it if missing
@@ -129,15 +54,15 @@ dm html -o - > dm.html  # or write the page to stdout
 dm web                  # serve the session to a browser; see Web below
 ```
 
-Keys inside the TUI. `ctrl+b` arms the prefix and shows the action box,
-bottom right. It stays until an action runs or `esc` dismisses it. The box
-sizes to its widest row. Its top border carries `prefix`, its bottom border
-names `esc`, and a narrow screen drops the action column before it cuts a key.
+`ctrl+b` arms the prefix and shows the prefix help box at the bottom right. The
+box stays until an action runs or `esc` dismisses it. It sizes to its widest row,
+its top border carries `prefix`, and a narrow screen drops the action column
+before it cuts a key.
 
 | key | action |
 | --- | --- |
 | `ctrl+b` | prefix (press it twice to send a literal `ctrl+b`) |
-| `\|` / `-` | split right / down |
+| `\|` / `-` / `_` | split right / down |
 | `<` / `^` | split left / up |
 | `[` | scrollback (also the mouse wheel) |
 | `[` then `/` | search the scrollback, live screen included |
@@ -149,7 +74,7 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `x` | close pane |
 | `X` | close window |
 | `f` | shelve the focused pane |
-| `F` | summon or dismiss the shelf |
+| `F` | restore the shelf as a floating pane, or put it away |
 | `G` | pop the active shelf member back into the layout |
 | `z` | zoom pane |
 | `c` | new window |
@@ -164,9 +89,9 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `S` | synchronize panes |
 | `ctrl+g` | toggle secret redaction; it is not a security control |
 | `a` | dashboard: every pane in a full-screen table |
-| `m` | message box: the session's log as a floating pane |
-| `N` | message box opened on the `notify/` entries, the notification filter on |
-| `A` | show or hide the question float |
+| `m` | message log: the session's entries as a floating pane |
+| `N` | message log opened on the `notify/` entries, the notification filter on |
+| `A` | show or hide the question panel, or reach the oldest one waiting elsewhere |
 | `?` | all keymaps, in a floating pane |
 | `)` | next workspace |
 | `r` | rename the active workspace |
@@ -174,237 +99,204 @@ names `esc`, and a narrow screen drops the action column before it cuts a key.
 | `b` | cycle the sidebar: full, thin, hidden |
 | `ctrl+r` | reload config.kdl and its theme |
 | `d` / `q` | detach |
+| `esc` | dismiss the prefix help box |
 
-The swap and layout actions are reachable from keys too: `o` / `O` swap the
-focused pane with the next / previous pane, `u` cycles the window to the next
-preset layout, and `S` synchronizes panes. A swap that names two panes
-(`swap-panes` with `other`), a `move-pane`, or an explicit preset layout are
-RPC-only, reached through `dm exec` as shown in the RPC section.
+The status bar reads back three states you look for: `PREFIX ` while the prefix
+is armed, `SCROLL <pane> +<offset>/<max>` while you scroll, and
+` SEARCH <query> <i>/<n>` on an accepted query.
 
-`prefix r` opens the rename prompt as a line above the status bar. It starts
-from the workspace's current name, so typing appends to it. Backspace deletes
-one character and `ctrl+u` clears the line. `enter` commits, `esc` cancels, and
-an empty name cancels too. The right-click menu offers the same row.
+## Sessions and panes
 
-`prefix z` zooms the focused pane. The zoomed pane fills the window's pane
-area, and the rail and the status bar stay in place. The program inside
-reflows to that size. `prefix z` again restores the splits. The zoom clears
-when the focus, the window or the workspace changes, and dm does not persist
-it.
-
-The binding comes from the built-in table. A `config.kdl` that leaves out
-`zoom-pane` still gets `z`, because the file is a patch over the defaults. Bind
-it to `none` to drop it, and `prefix z` then toasts `no binding`.
-
-Drag a divider with the left mouse button to resize the split. The client
-sends `resize-split` with the two panes beside the divider and the ratio, at
-most every 30 ms plus a final call on release. Both sides keep at least three
-cells. A divider always belongs to dm, even when a pane claims the mouse: the
-app's PTY covers only its content rect, so the border press is not its event.
-
-## Web
-
-`dm web` serves a session to a browser. The page is a view of the socket
-contract, not a terminal: it reads panes through the same actions the CLI sends,
-so it owns no state, and it never resizes a pane. The page is embedded in the
-binary with no build step and no external asset. The session needs no attached
-client, so a phone can watch a desk nobody sits at.
-
-```sh
-dm web                                        # loopback only
-dm web --addr 100.71.227.52:8099              # the tailnet address a phone reaches
-dm web --addr 100.71.227.52:8099 --read-only  # no input, the box or actions
-```
-
-The token is the whole access model. `dm web` prints the URL with the token on
-it, and the page trades that token for a cookie on the first load. Pass `--token`
-to set one; leave it empty and a token is generated. A listener that is not
-loopback also prints the link as a QR code, so a phone scans it instead of
-typing it.
-
-The page has five parts:
-
-- the fleet: every pane in the session with its agent status, message, branch
-  and folder, the panes that want a decision first
-- the box: the newest entries, with a compose row that posts a key, a state and
-  a message through `msg-post`
-- one pane, in one of three views, a tap apart: the transcript, which reads the
-  agent's session file through `/api/session` and shows each turn's ask, its
-  steps and its summary; the activity feed, the same steps flattened to one row
-  each, newest first, with a divider where a turn starts; and the screen, the
-  text the pane printed, wrapped at the phone's width and polled by text
-  revision. A pane that reported a session opens on the transcript and offers
-  every view. A pane that reported none, a shell for example, opens on the
-  screen and offers no other view. A transcript that cannot be read shows the
-  screen and one line saying why. Agent prose is markdown, and the daemon
-  renders it with goldmark, so a table, a fence and a list read as themselves
-  instead of as punctuation; raw HTML and a scripting link are dropped, because
-  a session holds text an agent read somewhere else. A thought and a tool call
-  are one row each until a tap: the thought's own words, and the call's
-  arguments above the output it answered with. One tap switches, and the
-  choice rides the address hash, so a reload lands on the same view. A pane
-  whose agent asked the reader a question draws the ask form above its view,
-  whichever view is open; Asks below owns it. Every view keeps the input row
-  that types into the pane, with a `pic` button that uploads a photo to the
-  session's `uploads/` folder and types its path, which
-  the agent opens with its own read tool, and one row of three commands:
-  new window, which opens in the folder the pane stands in, rename, and close
-  pane. A chevron in the header folds that row and the view switch away, because
-  the bar took half a phone's pane; the device remembers the answer. While the
-  pane is working or blocked the header also carries `stop`, which sends Escape
-  to the pane through `/api/keys`: the same key interrupts a running turn and
-  declines a question that is waiting, so a run nobody can interrupt never owns
-  the desk until someone finds a keyboard
-- the action sheet: one large row per command, from the catalogue the page
-  fetches once, with a target picker for panes, windows and workspaces, the split
-  sites and the layout presets. A command that destroys something asks once,
-  naming its target
-- the picture grid: the active window's panes painted as blocks in the desk's
-  arrangement, one stream for every tile; a pane daemon that cannot answer
-  `screen-sub` paints `no picture` instead of a blank tile. A tile is a link
-  only when every tile is at least 44 points each way; a grid too dense for that
-  is a picture, and the pane list below it stays the way in
-
-A hidden page makes no request, arms no timer and acts on no reply: the polls
-stop, the picture stream closes, a rotation's repaint is cleared, and a reply
-that lands after the hide changes nothing until the tab comes back. A command
-that fails paints the daemon's message in the banner and changes nothing else.
-
-`--read-only` refuses every write: pane input, the box compose and every action.
-The page hides those commands: the action sheet, the pane action row, the send
-row and the compose. Everything that only reads stays: the fleet, the box, the
-three pane views, the fold and the picture grid.
-
-### Push
-
-Push carries the same interruption to the phone, and the daemon owns the
-decision: it is a second renderer of the `notify/` entry, beside the desktop
-pop. An entry reaches the phone when its state is `blocked` or `error`, and not
-when it is `done`, and an entry for the pane an attached client is looking at
-pops nothing, on the desk or on the phone. A pane that blocks while the operator
-is away buzzes the phone; that same pane with a client watching it stays quiet.
-The title is the pane and the state, as the desktop pop titles it, and the body
-is the entry's message. A tap on the notification opens the page on that pane.
-
-Push needs the phone to trust the page, because a browser subscribes only from a
-secure context: `dm web` must answer on an https name. `tailscale serve`
-terminates that name in front of the loopback listener, and the tailnet
-certificate is enough. A plain `http://` tailnet address is not. The daemon does
-the sending, so `dm web` has to be running when a pane changes state, and the
-phone has to stay subscribed. Each urgent entry then costs one request per
-subscribed device, at most eight, sent off the server's lock under a 15 second
-bound, so a slow push service cannot hold the desk.
-
-iOS ships push for a home-screen web app only, from 16.4 on, so the app is
-installed once by hand:
-
-1. Delete the icon already on the home screen. An icon added before this works
-   opens a Safari tab and cannot subscribe.
-2. Open `dm web`'s URL in Safari. Another browser cannot add the app.
-3. Tap Share, then Add to Home Screen.
-4. Open dm from the new icon. It runs standalone, with no Safari chrome, and
-   that standalone page is the one allowed to notify.
-5. Tap `notify` in the fleet header and allow notifications when the phone asks.
-   The button reads `on` once the subscription is stored, `off` when the device
-   holds none, `denied` when permission was refused, and `unsupported` where
-   the browser has no push at all. A tap while it reads `on` unsubscribes, and
-   the phone stops buzzing.
-
-The subscription and the key pair live in the session directory:
+Ids are addressable, not opaque counters behind a random string:
 
 ```
-sessions/<name>/webpush.json   the subscriptions, one entry per device
-sessions/<name>/webpush.key    the VAPID key pair, mode 0600
+s1        workspace 1
+w1        window 1
+w2p3      window 2, pane 3
 ```
 
-`webpush.json` is a phone's capability to receive, and `webpush.key` signs every
-push. Deleting `webpush.key` invalidates every subscription already handed out,
-because the next pair signs with a key the phone never saw, so delete it only to
-revoke every device at once, and tap `notify` on each device again afterwards. A
-push service that answers `410 Gone` prunes that subscription from
-`webpush.json` on its own, so a phone that was wiped leaves no dead entry.
+A pane id is its window id plus `p` and a per-window sequence that only grows.
+The id tells you where the pane lives and can be typed without a lookup. A
+window id and a workspace id are per session.
 
-## Asks
+Counters only move forward, so an id is never reused after a close. A split
+gives the new pane the next number in its window, and the existing pane keeps
+its id. A window's name, a workspace's name and a pane's recorded agent name are
+cosmetic labels that stay separate from the id and stay editable.
 
-An ask is a question set an agent puts to the reader from a pane. One ask
-belongs to one tool call id, and carries one to many questions: a header, the
-question text, a multi-select flag and options with a label, a description and
-an optional preview. The store is session state, not pane state, so a client
-that attaches mid-question sees the open ones, and the ids it hands out are
-`a1`, `a2`, and so on. An answered ask stays listed until the agent closes it,
-and the snapshot carries no answer, so a client that attaches between the
-answer and the close draws the ask as open; `dm ask list` carries the answers
-themselves. The caps are the store's: 64 questions of 64 options.
+`d` or `q` detaches and loses nothing. The session, its panes, their processes
+and their scrollback stay, and a reattach draws the screen as you left it. More
+than one client may attach. They share one layout: the largest terminal
+sets the size, and the next largest takes over when it detaches.
 
-Three surfaces draw an ask from that one store.
+A pane exports `DM_SESSION` to its shell. `dm` refuses to attach that same
+session from inside one of its own panes. `-s` attaches another session, but
+only a live one.
 
-- The desk. The TUI paints the focused pane's ask as a float, one question at a
-  time: the header, the question, the options with their description and
-  preview, and on a single select a last `Type something.` row. `j`/`k` or the
-  arrows move, `J`/`K` scroll the detail, a digit picks that option, `space`
-  picks on a single select and toggles on a multi-select, `t` types a custom
-  answer, `n` attaches a note to the option under the cursor, `tab` and
-  shift-tab move between questions, `A` puts the box away and, on a pane with no
-  question, reaches the oldest one waiting elsewhere, `enter` sends once every
-  question is answered, and `esc` declines. Those keys take rows of their
-  own above the closing rule and wrap to the box's width, so every binding is on
-  screen at any width; the border is a plain rule. A description or preview
-  taller than its pane scrolls with `J`/`K`, and the row the pane elides to
-  counts the rows it hides above and below the window, so nothing in an option's
-  detail is unreachable. The box reserves at least `ask-rows` interior rows, and
-  the detail pane fills whatever that floor leaves.
-  An ask takes the focus of the pane it belongs to, across windows and
-  workspaces, so the box stands in front of the reader instead of waiting on a
-  pane they are not looking at. A reader already standing on an open ask keeps
-  their place and their picks; a second question waits in the store, and the
-  rail marks its pane with a `?` badge. A question the desk is not showing is
-  never silent: the status strip names it as `ask <pane>` with the key that
-  reaches it. The float closes on the next snapshot
-  once the ask is answered or gone. A refused answer keeps it open with the
-  daemon's code on it.
-- The phone. `dm web` paints the ask as a form above the pane's views: one
-  block per question, options as tappable rows, the description inline and the
-  preview behind its own toggle, a text field for something else on every
-  question, and several picks on a multi-select. Send stays disabled until
-  every question is answered. A refusal keeps its code in the banner and keeps
-  every answer. The fleet row of a pane with an open ask says so, and
-  `--read-only` shows the questions with no controls.
-- pi. The `dm-agent` extension registers `dm_turn`, so an agent asks through
-  dm's own store: `dm ask open` with the pane and the tool call, then
-  `dm ask await` for the answer. The question set is a question, a header,
-  a multi-select flag and options with a description and a preview. Nothing
-  renders in pi, and the answer comes back as the store's JSON. Outside a dm
-  session there is no store to reach, so the agent asks in prose.
-  `dm provision` installs this extension and the fleet skill together.
+The last pane of a window closes the window. The last window ends the session:
+the server removes its state directory, and every attached client returns to
+its shell.
 
-Esc declines an ask on every surface. The float sends the answer with
-`cancel:true`, the phone's decline sends the same, and a pi ask that is
-cancelled, or whose call is aborted, is declined too. A decline is an answer:
-the agent reads it and stops waiting.
+### The sidebar
 
-The CLI is the store's door: `dm ask list`, `dm ask open --pane <pane>
---tool-call <id>`, `dm ask await <id>`, `dm ask answer <id>` and `dm ask close
-<id>`. A question set is too big for argv, so the bodies come on stdin.
+The left columns show a sidebar when the session asks for one. It is a tree: a
+project header, then its workspaces, then each workspace's windows, then each
+window's panes. Workspaces that share a project name form one block, and the
+project name takes one of six group colours. An open pane row leads with an
+icon, then its recorded name, the `app=` it last reported and the pane id, with
+the state glyph in the last content cell in that state's colour. A pane with an
+open question carries a `?` badge, and the shelf adds a collapsible section
+after the last workspace.
 
-The pi side is one command:
+A left press focuses that row's pane, and a pane in another window switches the
+active window too. A press on the arrow toggles that collapsed group, and a
+double-click opens the inline rename prompt. Right click opens the row menu:
+rename, close, new, fold and focus.
 
-```sh
-dm provision              # links skills/dm-agent and skills/dm-fleet into ~/.pi/agent
-dm provision --check      # exits 1 when either link is missing, dangling or foreign
+The sidebar is 34 columns by default, at most a third of the screen and never
+wider than 46 columns; `set-rail` changes it. The thin sidebar is six columns: a
+drag strip and five content cells, which are the project bar, the agent mark,
+one git cell, the state glyph and the question badge. It shows no names.
+`prefix b` cycles full, thin and hidden.
+
+## Scrollback and mouse
+
+Mouse reporting is always on, and disabled again on detach. Left click focuses
+the pane under the pointer, the wheel scrolls that pane, and dragging a divider
+resizes the split. Both sides of a drag keep at least three content cells, and
+hovering a divider shows `drag to resize` in the status bar.
+
+Right click opens the pane menu, even over a program that owns the mouse: it is
+a window-manager gesture, not the app's. Move with `j`/`k` or the arrows, and
+`enter` or a digit runs the row. The menu offers split right/down/left/up, zoom,
+focus, close pane, scrollback, new window, new workspace, rename workspace,
+switch session and detach. A program that enabled mouse reporting itself keeps
+the event instead, which is how `pi`, `htop` and `vim` keep their scrolling.
+
+Ctrl+click on a URL opens it with the system handler. Alternate-screen programs
+have no terminal scrollback to show, so dm refuses to open its own scrollback
+for them and tells you to use the program's. Scrollback is built on demand: the
+first scroll asks the server for that pane's scrollback buffer, replays it into
+a tall terminal, and draws a window into it at the current offset. The tall
+terminal is `history-lines` rows plus the pane's own height. The buffer is a
+frozen snapshot, so new output does not move the view. The replay is approximate
+for full-screen programs; for streamed output it is exact.
+
+The window is a row count and the scrollback buffer is a byte budget, so a wide
+pane holds fewer rows than `history-lines` and a narrow one holds more.
+
+### Scrollback search
+
+`/` opens a query row above the status bar. It takes every key: printable bytes
+append, backspace deletes one character, `ctrl+u` clears the line, `enter`
+accepts and `esc` cancels. No byte reaches the pane while the row is open. A
+match is a literal substring, case-insensitive, and there is no regex. The
+search reads the tall terminal's rows, so the live screen is part of it.
+
+On accept, the view jumps to the nearest match at or above the top of the
+screen, and that row lands at the top. `n` moves to the next older match and `N`
+to the next newer one; both wrap. A query with no match raises `no match: <q>`.
+With an accepted query, the first `esc` clears the search and keeps scrollback
+open, and the next `esc` leaves.
+
+Mouse reporting takes the drag, so hold Shift while dragging to use the
+terminal's own selection. dm selects instead: a left drag highlights the
+row-major range, clamped to the pane it started in, and the release copies it
+and raises a `copied N chars` toast. A press and release in the same cell is
+still a click that reaches the app. A geometry change, or output that scrolls
+the live screen, drops the selection.
+
+`prefix i` copies the focused pane's id, the handle every other dm surface names
+a pane by. `prefix y` copies what the focused pane produced since the last Enter
+you sent it, and `dm yank <pane>` prints the same rows. dm records the output
+stream position when it forwards an Enter, so a remote shell needs no setup. A
+pane that has never been sent an Enter falls back to the visible screen, with a
+toast that says so. `prefix Y` copies the visible screen. Both keys write OSC
+52; a terminal that does not answer gets the copy piped to `pbcopy`, `wl-copy`
+or `xclip` instead. A shell that emits OSC 133 prompt marks gets the exact
+range, from the command start mark to the command end mark. Add this line to
+`~/.zshrc`:
+
+    precmd() { print -Pn '\e]133;D\e\\\e]133;A\e\\' }; preexec() { print -Pn '\e]133;C\e\\' }
+
+The marks travel over ssh like any other output. dm enables bracketed paste on
+attach, so ctrl+shift+v inserts newlines literally, and no byte inside a paste is
+read as a dm key.
+
+Copying raises a toast, as does a failed request, an unknown key, an empty
+scrollback and a pane exit. The client keeps up to three toasts above the bar,
+and each expires after three seconds.
+
+## Windows and workspaces
+
+`prefix c` adds a window to the active workspace, `prefix t` adds a workspace,
+and `prefix 0-9`, `w` and `W` move between windows. `prefix X` closes a window.
+
+A pane keeps the server told where its shell is, so a `cd` moves the folder the
+sidebar shows and the folder the next pane, window or workspace opens in. A new
+window is named after the folder it starts in, and `rename-window` overrides the
+name. `prefix r` opens the rename prompt as a line above the status bar,
+starting from the workspace's current name, so typing appends to it. Backspace
+deletes one character and `ctrl+u` clears the line. `enter` commits, `esc`
+cancels.
+
+`prefix z` zooms the focused pane: it fills the window's pane area, the sidebar
+and the status bar stay in place, and the program inside reflows to that size.
+`prefix z` again restores the splits. The zoom clears when the focus, the window
+or the workspace changes, and dm does not persist it.
+
+A binding comes from the built-in table, so a `config.kdl` that leaves out
+`zoom-pane` still gets `z`. Bind it to `none` to drop it, and `prefix z` then
+toasts `no binding`.
+
+## Window tab bar
+
+One row sits above the pane area, to the right of the sidebar, and it is always
+visible. One tab per window in the active workspace, in window order, with the
+active tab highlighted. Clicking a tab selects that window, and double-clicking
+one opens the inline rename prompt for it. The server reserves the tab bar row
+when it computes pane rectangles, so pane frames start below it.
+
+A tab is its label plus one padding cell on each side, clamped by two bounds in
+`config.kdl`:
+
+```kdl
+tab-min-width 8
+tab-max-width 20
 ```
 
-Restart pi to load the extension. `skills/ask-bridge/` is retired: `dm_turn`
-reaches the same store and the old tool name is gone, so a question has one
-path and not two.
+Both are cell counts and default to the values above. A label wider than the
+maximum is cut with `…`, a minimum below 3 is an error, and so is a maximum
+below the minimum.
+
+The label template is a Go `text/template`. It applies to the tab bar, the
+sidebar window row and the status bar window chip, so one window reads the same
+in every place. The data is a struct with these fields:
+
+- `.ID`: the window id, e.g. `w1`.
+- `.Name`: the window name, the label `rename-window` edits.
+- `.Named`: true when the user set the name with `rename-window`.
+- `.Cwd`: the source pane's working directory.
+- `.Root`: the source pane's repository root, empty outside git.
+
+The `base` function prints the last path element, so `{{base .Root}}` is the
+repository folder name. The default template shows the name of a named window
+and the id plus the repository folder of an unnamed one:
+
+```kdl
+window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
+```
+
+An unnamed window in `.../dm` reads `w1 dm`, and a window renamed to `api` reads
+`api`. A template that does not parse, or names an unknown field, is an error.
 
 ## Layouts
 
-A layout is a named JSON document that holds a session's shape: its
-workspaces, their windows, the split trees, and each pane's launch cwd and
-argv. It is how a working set is rebuilt instead of by hand. Files live at
-`$XDG_CONFIG_HOME/dm/layouts/<name>.json`, or
-`$HOME/.config/dm/layouts/<name>.json` when `XDG_CONFIG_HOME` is unset. The
-name is letters, digits, `_` or `-`, the same rule as a session name.
+A layout is a named JSON document that holds a session's shape: its workspaces,
+their windows, the split trees, and each pane's launch cwd and argv. Files live
+at `$XDG_CONFIG_HOME/dm/layouts/<name>.json`, or
+`$HOME/.config/dm/layouts/<name>.json` when `XDG_CONFIG_HOME` is unset. The name
+is letters, digits, `_` or `-`, the same rule as a session name.
 
 ```sh
 dm layout save work -s go-backend   # capture the live shape under the name work
@@ -418,9 +310,8 @@ dm layout rm work                   # delete it
 `dm -L` seeds an empty session and then attaches, so the first snapshot is the
 whole layout. An existing session wins: a layout never rearranges a live one,
 and `--force` is the only way to replay a file over a session that has state.
-The session defaults to the layout name, so the same command twice reattaches
-instead of stacking sessions. A malformed file fails at the CLI, naming the
-file and the field, before a server starts.
+The session defaults to the layout name, so the same command twice reattaches.
+A malformed file fails at the CLI, naming the file and the field.
 
 One file: two panes in a column, the first running pi in the project.
 
@@ -449,11 +340,91 @@ One file: two panes in a column, the first running pi in the project.
 }
 ```
 
-Pane ids inside a file are local to it: applying one assigns ids from the
-target session's counters, so the same file can seed any session. Only the
-launch argv is durable, so a pane that began as a shell and now runs pi reopens
-as a shell. The session's box, its secrets, the agent state and the rail width
-never travel.
+Pane ids inside a file are local to it, so the same file can seed any session.
+Only the launch argv is durable, so a pane that began as a shell and now runs pi
+reopens as a shell. The message log, the secrets, the agent state and the
+sidebar width never travel.
+
+## Layout palette
+
+`prefix L` opens the layout palette: a panel centred over the live panes. Five
+rows name the presets in cycle order (even-horizontal, even-vertical,
+main-horizontal, main-vertical, tiled) and a last row names the window's custom
+tree. The row matching the window's stored layout name carries a `now` mark; an
+unnamed tree marks the custom row. `j` / `k` or the arrows move the selection and
+wrap, `enter` picks, `q` and `esc` close, and the prefix key closes too. All of
+it lives in the `layout` keymap mode, so `config.kdl` can patch it. The panel
+previews the row the selection sits on, and the focused pane's border carries
+the group colour. On a window with fewer than two panes
+every preset row dims, the footer reads "one pane: every layout is this", and
+picking a preset does nothing. Picking a preset sends `select-layout` with its
+name; the custom row closes with nothing sent.
+
+## Dashboard
+
+`prefix a` opens the dashboard: a table of every pane in the session, one row
+per pane, with no child process and no PTY. `dashboard-layout "full"` draws it
+over the whole screen instead of a centred palette. The default order is recent,
+the newest agent status change first, and `s` saves the mode it lands on in
+`prefs.json` under the state directory.
+
+The columns are the jump key, the project, the agent label, git, the status, the
+time since the last status change and the OSC window title. A pane that never
+reported a state reads as a shell, a pane with an open question leads its agent
+cell with `?`, and shelved panes sit after every live pane. The digits pick: `1`
+to `9` select that row and go to its pane. `j` and `k`, the arrows, or ctrl+n
+and ctrl+p move the selection, and enter goes to the selected pane. The prefix
+key again, ctrl+c or `esc` closes without picking. It takes no mouse input.
+
+`/` filters, and the query row then takes every printable key, so a search holds
+`d`, `s`, `i` and the digits without an action firing mid word. The query
+matches a name, the app, the title, the branch, the worktree, the folder or the
+project. In filter mode `esc` unwinds: the first press clears the query, the next
+leaves the mode, and only the next one closes.
+
+`s` cycles the ordering: recent, then project, then status. Status puts the
+states that want attention first: blocked, error, working, done, idle, unknown,
+then a shell. A preview strip under the table previews the selected pane's live
+screen, and `dashboard-peek "right"` puts it beside the table instead. ctrl+u and
+ctrl+d scroll it, `+` and `-` resize it, and `p` hides it. A floating pane under
+10 rows or 60 columns drops the strip whatever the toggle says.
+
+`i` copies the selected pane's id and leaves the dashboard up. `d` runs the diff
+command, `hunk diff` by default, in a floating terminal in the selected pane's
+folder, through `sh -c`. The floating pane takes every key while the command
+runs, except the prefix: one press of it kills the pane and the command under it.
+`D` runs the command in a split off the selected pane instead, and while a diff
+pane is up `D` is the split chord.
+
+The dashboard is client owned, so it never survives a detach. `dm dash` prints
+the pane rows outside the TUI, and `dm peek <id>` prints one screen.
+
+## Shelved panes
+
+`prefix f` takes the focused pane off the grid and puts it on the shelf. The
+pane keeps running: its process, its scrollback, its status and its id are
+untouched, and it survives a detach and a server restart. It has no rectangle
+and belongs to no window. `prefix F` restores the shelf as a floating pane, and
+a second press puts it away. The floating pane carries a strip of one chip per
+shelved pane, its state glyph and its name, with the active member's screen
+under it. Keys go to the active member. The prefix is the only key the shelf
+keeps, so `prefix n` and `prefix p` move between members and `prefix G` pops the
+active member back into the layout.
+
+`prefix G` pops the active member: the pane returns to the split tree as a split
+off the focused pane, and it takes the focus. The shelf keeps its ids, so a
+shelved pane still answers `dm read`, `dm status` and `dm keys`, and `dm list`
+prints it with `WS shelf`.
+
+The shelf floats as a tray over the pane area, centred, at `shelf-size` percent
+of it. `shelf-layout "pane"` lays it over the focused pane instead, inset one
+cell so its border lands on the pane's own frame. The shelf is one list for the
+whole session, and the server owns the active member.
+
+A window never holds zero panes. Shelving the last pane of a window is refused,
+and so is closing the last tree pane while the shelf holds one: pop a member
+first. A pane that exits as the last pane of its window promotes the active shelf
+member into that window instead.
 
 ## Config
 
@@ -465,23 +436,23 @@ optional and each one overrides its built-in value.
 | node | value | default | does |
 | --- | --- | --- | --- |
 | `prefix` | one key sequence | `"ctrl+b"` | Set the prefix key that opens the main keymap. |
-| `default-fold` | `"fold"` or `"unfold"` | `"unfold"` | Set whether a new window's rail starts folded or unfolded. |
+| `default-fold` | `"fold"` or `"unfold"` | `"unfold"` | Set whether a new window's sidebar starts collapsed or expanded. |
 | `tab-min-width` | an integer of at least 3 cells | `8` | Set the smallest tab width in the window tab bar. |
 | `tab-max-width` | an integer of at least 3 cells, not below `tab-min-width` | `20` | Set the largest tab width before the label is cut. |
 | `padding` | an integer from 0 to 4 cells | `0` | Set the blank cells between a pane's border and its content. A change resizes every pane on reload. |
-| `history-lines` | an integer from 100 to 32768 lines | `10000` | Set the scrollback window in rows and the pane ring budget: about 256 bytes per line, at least 512 KiB and at most 8 MiB. |
+| `history-lines` | an integer from 100 to 32768 lines | `10000` | Set the scrollback window in rows and the buffer budget: about 256 bytes per line, at least 512 KiB and at most 8 MiB. |
 | `glyphs` | `"auto"`, `"ascii"`, `"unicode"` or `"nerd"` | `"auto"` | Choose the glyph vocabulary the chrome draws with. |
-| `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. The Window tab bar section carries the default and its data. |
-| `dashboard-layout` | `"full"` or `"float"` | `"float"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A float leaves the panes live under it. |
-| `dashboard-peek` | `"right"` or `"down"` | `"down"` | Set where the dashboard preview band sits: under the table, or beside it on the right. The peek key still shows and hides the band. |
-| `shelf-layout` | `"centered"` or `"pane"` | `"centered"` | Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both. |
+| `window-label` | a quoted Go template | the id and folder template | Set the template that renders a window label. Window tab bar carries the default and its data. |
+| `dashboard-layout` | `"full"` or `"float"` | `"float"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. A floating pane leaves the panes live under it. |
+| `dashboard-peek` | `"right"` or `"down"` | `"down"` | Set where the dashboard preview strip sits: under the table, or beside it on the right. The peek key still shows and hides the strip. |
+| `shelf-layout` | `"centered"` or `"pane"` | `"centered"` | Place the restored shelf as a centred tray over the pane area, or over the focused pane. |
 | `shelf-size` | an integer from 20 to 100 | `80` | Set the share of the pane area a centred shelf takes, in percent. The strip and at least three rows of screen are always kept. |
-| `float-shadow` | `"off"` or `"on"` | `"off"` | Set the drop shadow the floats paint beside and under their box: the prefix help box, the rename prompt and every floating pane. |
-| `dashboard-preview` | an integer from 0 to 100 | `40` | Set the share of the dashboard body the preview band opens at. Zero opens on the table alone; the peek key still shows the band, and `+`/`-` resize it. |
+| `float-shadow` | `"off"` or `"on"` | `"off"` | Set the drop shadow the floating panes paint beside and under their border: the prefix help box, the rename prompt and every floating pane. |
+| `dashboard-preview` | an integer from 0 to 100 | `40` | Set the share of the dashboard body the preview strip opens at. Zero opens on the table alone; the peek key still shows the strip, and `+`/`-` resize it. |
 | `palette-rows` | an integer of at least 1 | `10` | Set how many entries the command palette shows before it scrolls. A screen too small for the cap holds fewer. |
-| `ask-rows` | an integer from 8 to 64 | `30` | Set the fewest interior rows the ask float reserves. Its detail pane fills the rows the floor leaves, so a taller box reads more of a long description or preview before it elides. |
-| `ask-cols` | an integer from 40 to 240 | `96` | Set the widest the ask float may stand, in columns. It still keeps six columns clear of the screen edge. |
-| `ask-split` | an integer from 20 to 80 | `60` | Set the share of the ask box's width the detail column takes, in percent. The options are labels on one row each, so the detail column takes the larger half. |
+| `ask-rows` | an integer from 8 to 64 | `30` | Set the fewest interior rows the question panel reserves. Its detail pane fills the rows the floor leaves. |
+| `ask-cols` | an integer from 40 to 240 | `96` | Set the widest the question panel may stand, in columns. It still keeps six columns clear of the screen edge. |
+| `ask-split` | an integer from 20 to 80 | `60` | Set the share of the question panel's width the detail column takes, in percent. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
 | `web-addr` | a quoted host:port, as in `"100.71.227.52:8099"` | `"127.0.0.1:8099"` | Set the host:port `dm web` listens on when `--addr` is not passed. An absent or empty node keeps the loopback default. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
@@ -492,9 +463,9 @@ optional and each one overrides its built-in value.
 ### Commands
 
 A command is a named shell text the config carries. Define it at the top level,
-then bind `command:<name>` to a key in a keymap. The key opens a floating pane
-on the focused pane's folder, runs the run text through `sh -c`, and titles the
-panel with the command's name:
+then bind `command:<name>` to a key. The key opens a floating pane on the
+focused pane's folder, runs the run text through `sh -c`, and titles the panel
+with the name:
 
 ```kdl
 command "tests" {
@@ -506,25 +477,20 @@ keymap "main" {
 }
 ```
 
-The help tag works on the row like any other. The name is letters, digits, `_`
-and `-`, 1 to 32 bytes. `run` is required, one quoted string, non-empty. Each
-of these is a config error that names its line: a duplicate command name, a
-second `run` in one block, a missing or empty `run`, an unknown key inside the
-block, and a name that collides with a built-in action. A binding to
-`command:<name>` is an error too when the file defines no command of that name.
+The name is letters, digits, `_` and `-`, 1 to 32 bytes. `run` is required, one
+quoted string, non-empty. Each of these is a config error that names its line: a
+duplicate command name, a second `run` in one block, a missing or empty `run`,
+an unknown key inside the block, and a name that collides with a built-in
+action. A binding to a name the file does not define is an error too.
 
-### What a reload picks up
+### Config reload
 
 `ctrl+r` re-reads `config.kdl` and the theme file it names, and applies every
 node. It also asks the server to re-read the same file, so the server's layout
 follows `padding` and `default-fold` too. A failed read on either side keeps the
-previous values. A padding change resizes every pane, so a reflow follows. A
-`history-lines` change resizes every pane's ring in place and drops the cached
-scrollback, so the next scroll replays at the new height.
-
-A theme file is `$XDG_CONFIG_HOME/dm/themes/<name>.kdl`, or
-`$HOME/.config/dm/themes/<name>.kdl` when `XDG_CONFIG_HOME` is unset. That is
-the `themes/` directory beside `config.kdl`.
+previous values. A padding change resizes every pane, so a reflow follows, and a
+`history-lines` change resizes every scrollback buffer in place and drops the
+cached scrollback.
 
 dm reads these environment variables:
 
@@ -534,7 +500,7 @@ dm reads these environment variables:
 | `XDG_STATE_HOME` | State directory base; dm uses `$XDG_STATE_HOME/dm`. |
 | `XDG_CONFIG_HOME` | Config directory base; dm reads `$XDG_CONFIG_HOME/dm/config.kdl`. |
 | `HOME` | Home directory base; the fallback for both XDG paths. |
-| `DM_SESSION` | The session a pane belongs to; dm refuses to attach that session from inside it, and refuses a name with no live session, which would nest a new one in the pane. |
+| `DM_SESSION` | The session a pane belongs to. |
 | `DM_PANE` | The pane id a pane's shell runs in. |
 | `DM_NERD` | `1` forces Nerd Font glyphs, `0` forces the Unicode fallback. |
 | `DM_NOTIFY` | `0` turns desktop notifications off. |
@@ -544,16 +510,9 @@ dm reads these environment variables:
 | `TMUX` | Set inside tmux; dm uses it to pick its terminal behaviour. |
 | `ESCTEST_DIR` | Test only: the esctest2 directory the conformance harness searches. |
 
-`dm html` opens every table here, with the keymaps and the theme keys, as one
-page in the browser. `dm html -o -` prints it instead, and `dm html -o path`
-writes it.
-
 ## Keybindings
 
-The key table above is the default. dm reads the keymap from
-`$HOME/.config/dm/config.kdl`, or `$XDG_CONFIG_HOME/dm/config.kdl` when
-`XDG_CONFIG_HOME` is set. On first run dm writes that file with the current
-table, then you edit it.
+The key table above is the built-in default. `config.kdl` patches it.
 
 ```kdl
 prefix "ctrl+a"
@@ -564,13 +523,9 @@ keymap "main" {
 }
 ```
 
-The file is a patch over the built-in table. An action the file names takes
-its key, and an action it leaves out keeps the built-in key. Bind an action to
-`none` to unbind it. The prefix line sets the prefix key; a file without one
-keeps `ctrl+b`. Each keymap block maps actions to keys, and a mode the file
-leaves out keeps the built-in mode. `prefix ctrl+r` reloads `config.kdl` and its
-theme without restarting the session. A broken config or theme file leaves the
-running settings in place and toasts the error.
+Each keymap block maps actions to keys, and a mode the file leaves out keeps the
+built-in mode. A broken config or theme file leaves the running settings in
+place and toasts the error.
 
 A binding line in the main keymap may carry a help tag:
 
@@ -580,37 +535,34 @@ keymap "main" {
 }
 ```
 
-The tag moves that row to the named section of the armed help box. An
-untagged row keeps the built-in section. The five built-in names are
-Layout, Pane, Window, Session and Utility, and any other name is a custom
-section.
-
-An old config without tags renders the same help box. The tag moves a row the
-help box already lists. It does not add a row.
+The tag moves that row to the named section of the armed prefix help box, and an
+untagged row keeps the built-in section. The five built-in names are Layout,
+Pane, Window, Session and Utility, and any other name is a custom section. The
+tag moves a row the prefix help box already lists. It does not add a row.
 
 One mode is one keymap.
 
-- `main` is the table the prefix key opens.
-- `menu` is the right-click menu.
-- `picker` is the session picker.
-- `switcher` is the dashboard.
-- `scroll` is scrollback.
-- `rename` is the rename prompt.
-- `box` is the message box.
-- `help` is the keymap view.
+| mode | what it remaps |
+| --- | --- |
+| `main` | the table the prefix key opens |
+| `menu` | the right-click menu |
+| `picker` | the session picker |
+| `switcher` | the dashboard |
+| `layout` | the layout palette |
+| `scroll` | scrollback |
+| `rename` | the rename prompt |
+| `box` | the message log |
+| `help` | the keymap view |
 
-The prefix then `?` opens the keymap view. It lists every mode the config
-defines, in the order above, with each action and its key. `j`/`k` and
-`PgUp`/`PgDn` scroll, `g` and `G` jump to the ends, and `esc` or `q` closes.
-`/` searches the rows: type to match a key or action, `n` and `N` move between matches, `enter` keeps the query and `esc` while typing clears it. The active match is yellow and the others are white. The prefix key and `?` close it too. A config written before this mode falls
-back to the built-in help bindings, so the view always scrolls and closes.
+The prefix then `?` opens the keymap view: every mode the config defines, in the
+order above, with each action and its key. `j`/`k` and `PgUp`/`PgDn` scroll, `g`
+and `G` jump to the ends, `esc` or `q` closes, and `/` searches the rows with
+`n` and `N` between matches.
 
-A key is one key. Arrows and `PgUp`/`PgDn` are named sequences: `up`, `down`,
-`left`, `right`, `pgup`, `pgdn`. The dashboard binds its own letters and digits,
-and takes every other printable key as query text. The rename prompt keeps
-every printable key as text and binds only its control keys. The keymap view,
-the armed help box and the right-click menu take their keys from the config, so
-a remap shows there too.
+A key name is one key. `esc`, `enter`, `tab`, `shift-tab`, `space`, `backspace`
+and `prefix` are named keys, and the arrows and page keys are `up`, `down`,
+`left`, `right`, `pgup` and `pgdn`. The dashboard takes every other printable key
+as query text, and the rename prompt keeps every printable key as text.
 
 ## Themes
 
@@ -621,100 +573,19 @@ with a top-level node:
 theme "night"
 ```
 
-dm reads that theme from `$XDG_CONFIG_HOME/dm/themes/night.kdl`, or
-`$HOME/.config/dm/themes/night.kdl` when `XDG_CONFIG_HOME` is unset. That is the
+dm reads it from `$XDG_CONFIG_HOME/dm/themes/night.kdl`, or
+`$HOME/.config/dm/themes/night.kdl` when `XDG_CONFIG_HOME` is unset: the
 `themes/` directory beside `config.kdl`. At most one `theme` node, and its name
-is letters, digits, `_` and `-`. No node selects the built-in theme. A theme edit
-is picked up by the reload key, so a theme change does not need a quit and
-reattach.
+is letters, digits, `_` and `-`. No node selects the built-in theme.
 
-Every block and every key is optional. An omitted key keeps the built-in
-default, so a theme file names only what it changes. These fail the load, and
-the error names the line: an unknown or duplicate block or key, a colour that
-is not `#rrggbb`, and a glyph that is not one rune of one cell.
-
-The whole shape, at the built-in values:
-
-```kdl
-palette {
-    "rail-bg"       "#14131a"
-    "rail-focus-bg" "#1f1e27"
-    "rail-hover-bg" "#21202d"
-    "rail-text"     "#e9eaf1"
-    "rail-dim"      "#8f93a8"
-    "rail-header"   "#a6a9bd"
-    "rail-window"   "#9599ae"
-    "rail-diff-add" "#78dc82"
-    "rail-diff-del" "#ff7d7d"
-    "rail-working"  "#f5be50"
-    "bar-accent"    "#7ac0eb"
-}
-
-accents {
-    "accent-1" "#bb9af7"
-    "accent-2" "#6edceb"
-    "accent-3" "#f08cd7"
-    "accent-4" "#7ea9ff"
-    "accent-5" "#f0a05a"
-    "accent-6" "#8cd79b"
-}
-
-glyphs {
-    "grip"                "•"
-    "divider-row"         "━"
-    "divider-col"         "┃"
-    "border-top-left"     "╭"
-    "border-top-right"    "╮"
-    "border-bottom-left"  "╰"
-    "border-bottom-right" "╯"
-    "border-horizontal"   "─"
-    "border-vertical"     "│"
-    "border-tee-left"     "├"
-    "border-tee-right"    "┤"
-    "fold-open"           "▾"
-    "fold-closed"         "▸"
-    "active-mark"         "▸"
-    "workspace-bar"       "▌"
-    "dirty"               "●"
-}
-
-states {
-    "working" {
-        "glyph"  "●"
-        "colour" "#f5be50"
-    }
-    "idle" {
-        "glyph"  "○"
-        "colour" "#78c8e1"
-    }
-    "blocked" {
-        "glyph"  "▲"
-        "colour" "#ff6e6e"
-    }
-    "done" {
-        "glyph"  "✓"
-        "colour" "#6ee191"
-    }
-    "error" {
-        "glyph"  "✕"
-        "colour" "#ff82a0"
-    }
-    "unknown" {
-        "glyph"  "?"
-        "colour" "#8f93a8"
-    }
-    "shell" {
-        "glyph"  "▶"
-        "colour" "#8f93a8"
-    }
-}
-```
-
-Pasting that block paints the Unicode glyphs even with Nerd Fonts on: naming a
-glyph replaces its Nerd Font form too.
-
-A colour is `#rrggbb`. A glyph is one cell wide. A minimal theme names a few
-keys and inherits the rest:
+Every block and every key is optional, so a theme file names only what it
+changes. `dm html` prints every theme key with its block and its built-in
+value. These fail the load, and the error names the line: an unknown or
+duplicate key, a colour that is not `#rrggbb`, and a glyph that is not one rune
+of one cell. The blocks are `palette` (the ground and text colours), `accents`
+(the six group colours), `glyphs` (the chrome marks) and `states` (a glyph and a
+colour for each of `working`, `idle`, `blocked`, `done`, `error`, `unknown` and
+`shell`). A minimal theme:
 
 ```kdl
 palette {
@@ -733,641 +604,295 @@ states {
 }
 ```
 
-Where an item has a Nerd Font icon, an explicit theme glyph wins over it. A
-theme's state glyph replaces both the Unicode and the Nerd form. Role icons,
-the agent bar, robot and terminal marks, stay compiled in and are not themeable.
+A named glyph replaces that glyph's Nerd Font form too, so an explicit `grip`
+paints even with Nerd Fonts on, and a state glyph replaces both the Unicode and
+the Nerd form. Role icons, the agent bar, robot and terminal marks, stay
+compiled in and are not themeable.
 
 A missing or malformed theme file toasts the error, and dm runs on the built-in
-theme. The built-in theme reaches WCAG AA on every ground it paints. dm does
-not check a user theme: its contrast is the author's.
+theme. That theme reaches WCAG AA on every ground it paints. dm does not check a
+user theme: its contrast is the author's.
 
-## Dashboard
+## Web
 
-`prefix a` opens the dashboard: a table of every pane in the session, one row
-per pane. It is native: no child process and no PTY. It draws as a palette
-centred over the panes by default; `dashboard-layout "full"` takes the whole
-screen instead and leaves the panes live under it. The default order is
-recent, the newest agent status change first, and the ordering is remembered
-across restarts: the `s` key saves the mode it lands on in `prefs.json` under
-the state directory.
+`dm web` serves a session to a browser. The page is a view of the socket
+contract, not a terminal: it reads panes through the same actions the CLI sends,
+so it owns no state, and it never resizes a pane. The page is embedded in the
+binary with no build step, and the session needs no attached client, so a phone
+can watch a screen nobody sits at.
 
-The columns are the jump key, the project, the agent label, git, the status,
-the time since the last status change and the OSC window title. The label is
-the recorded name, else the reporting app, else the pane id. Git reads `+N -N`
-for the lines the tree gains and loses, or `clean`, and a dash outside a
-repository. The status cell carries the state glyph and its word; a pane that
-never reported a state reads as a shell. The age is seconds under a minute,
-then minutes, hours and days, and a dash when the server has no stamp. The
-title is the program's own window title, elided to its column. A pane with an
-open question leads its agent cell with `?`, the same ask mark the rail paints.
-Shelved panes sit after every live pane, in their own section under a `shelf`
-header.
-
-The letters are keys. The digits pick: `1` to `9` select that row and go to
-its pane. `j` and `k`, the arrows, or ctrl+n and ctrl+p move the selection, and
-enter goes to the selected pane. The prefix key again, ctrl+c or `esc` closes
-without picking. It takes no mouse input.
-
-`/` starts filtering, and the query row then takes every printable key, so a
-search holds `d`, `s`, `i` and the digits without an action firing mid word.
-The query matches a name, the app, the title, the branch, the worktree, the
-folder or the project. Backspace edits it and ctrl+l clears it. In filter mode
-`esc` unwinds: the first press clears the query, the next leaves the mode and
-the table shows every pane again, and only the next one closes the dashboard.
-The arrows and ctrl+n and ctrl+p still move the selection while filtering.
-
-`s` cycles the ordering: recent, then project, then status. Recent puts the
-newest status change first. Project groups the rows by project name, with the
-smallest pane id first inside a group and the panes outside a project last.
-Status puts the states that want attention first: blocked, error, working,
-done, idle, unknown, then a shell.
-
-A band under the table previews the selected pane's live screen: from the
-local VT in the active window, and from a screen request elsewhere. The
-`dashboard-peek "right"` config node puts the band beside the table on the
-right instead, and an absent node keeps it under the table. A read paints the
-far pane first, then the client asks the server for that pane's screen every
-250 ms while it stays selected. ctrl+u and ctrl+d scroll it toward older and
-newer rows, `+` and `-` resize the band, and `p` peeks: it hides the band so
-the table takes the full width. A float under 10 rows or 60 columns drops the
-band whatever the toggle says. The `dashboard-preview` config node sets the
-share the band opens at, from 0 for the table alone to 100; the band keeps its
-own 20 to 85 range, and the peek key uses the configured share.
-
-`i` copies the selected pane's id and leaves the dashboard up, so the next
-command can name the pane. The footer says `i copy id`. `d` runs the diff
-command, `hunk diff` by default, in a floating terminal
-over the panes, in the selected pane's folder, through `sh -c`. The float takes
-every key while the command runs, except the prefix: one press of it kills the
-float and the command under it, so there is no need to quit the program first.
-The command never sees the prefix byte, so a program that wants that key needs
-a different `prefix`. After the command exits the float keeps the screen the
-command left behind until a key is pressed; a full screen program such as tig
-leaves the alternate screen on exit, so its float ends blank. A client that
-falls far enough behind to be resynced loses the float's screen with the
-backlog: close it and press `d` again. The `diff-command` config node sets the
-command, and a reload picks it up with the rest of `config.kdl`.
-`diff-command "tig"` and `diff-command "hunk diff"` are the two examples.
-
-`D` runs the same command in a pane split off the selected one instead: the
-split lands on the right and takes focus, and the command runs through `sh -c`
-the same way. While a diff float is up, `D` is the split chord: it closes the
-float and reruns the command in the split. Only the diff float owns the chord,
-and a remap of `diff-split` in the switcher keymap moves it.
-
-The dashboard is client owned: it starts when the key is pressed and ends when
-the choice is taken, so it never enters the session tree and never survives a
-detach. `dm dash` prints the pane rows outside the TUI, and `dm peek <id>`
-prints the screen a row shows, so the dashboard can be driven from a shell.
-
-## Floats
-
-`float-open` runs a command in a floating pane over the focused pane's folder,
-through `sh -c`. The request carries the command and an optional label: the
-label paints the panel title, and without one the title falls back to the
-command's first word. A label without a command is an error.
-
-The dashboard diff key is one instance of it: the request sends no command, so
-the float runs the `diff-command` config node (`hunk diff` by default) in the
-selected pane's folder and paints the panel the same way. A `command` binding
-is another: the run text opens on the focused pane's folder, titled with the
-command's name. The float takes every key while the command runs, except the
-prefix: one press of it kills the float and the command under it.
-A diff float also answers D: it closes the float and opens the command in a
-pane split off the pane the float sits on.
-
-## Shelf
-
-`prefix f` takes the focused pane off the grid and puts it on the shelf. The
-pane keeps running: its process, its scrollback, its status and its id are
-untouched, and it survives a detach and a server restart. It has no rectangle
-and belongs to no window.
-
-`prefix F` summons the shelf as a float, and a second press puts it away. The
-float carries a strip of one chip per shelved pane, its state glyph and its
-name, with the active member's screen under it. Keys go to the active member.
-The prefix is the only key the shelf keeps, so `prefix n` and `prefix p` move
-between members, `prefix G` pops the active member back into the layout, and
-`prefix ctrl+r` reloads the config and refits the box in place.
-
-`prefix G` pops the active member: the pane returns to the split tree as a
-split off the focused pane, and it takes the focus. The shelf keeps its ids,
-so a shelved pane still answers `dm read`, `dm status` and `dm keys`, and
-`dm list` prints it with `WS shelf`.
-
-The float is a tray over the pane area, centred, at `shelf-size` percent of
-it, so the rail, the tab bar and the status bar stay visible. `shelf-layout
-"pane"` lays it over the focused pane instead, inset one cell so its border
-lands on the pane's own frame. The strip and at least three rows of screen
-are always kept.
-
-The shelf is one list for the whole session, shared by every client, and the
-server owns the active member. The rail carries a foldable shelf section
-after the last workspace, one row per member, and the status bar carries one
-chip while the shelf is not empty.
-
-A window never holds zero panes. Shelving the last pane of a window is
-refused, and so is closing the last tree pane while the shelf holds one: pop
-a member first. A pane that exits as the last pane of its window promotes the
-active shelf member into that window instead, so a live shelf never sits
-behind no windows.
-## Sidebar
-
-The left columns of the screen show a sidebar when the session asks for one.
-It is a tree: a project header, then its workspaces, then each workspace's
-windows, then each window's panes. A workspace starts unfolded. A workspace row
-leads with a caret, then its name in bold, then the pane count at the right
-edge in dim grey. One blank row separates workspace blocks.
-
-A workspace may carry a project name. Workspaces that share a name form one
-group, and the rail paints the group as one block. A group opens with a project
-header row: the bar in column 0, the project name in the project's accent and
-bold, then the group's workspace count at the right edge. Every row of the
-group paints the same bar in column 0, the header included. A row outside a
-project leaves that cell blank, so the fold carets keep one x for the whole
-rail. The bar is the tie. The header is the name.
-
-A project name hashes to one of six accents, with the collision avoidance the
-rail uses elsewhere: a preferred slot, then the next free slot. Two projects in
-one session never share a hue. The project owns the colour, so a workspace name
-drops its own accent: the active workspace name is bright, the rest are header
-grey, both bold.
-
-Workspaces that share a project stay contiguous. The state slice is the order,
-and a group keeps the position of its first workspace; order inside a group
-holds. The rail never re-sorts: it paints the slice order it is given, and
-`next-workspace` and `prev-workspace` walk the same slice, so the keys and the
-rail agree on where the next workspace is. A new workspace lands at the end of
-its project's block, and inherits the project of the workspace it was created
-from. `dm set-project <ws> <name>` tags a workspace; an empty name clears the
-tag. The workspace row menu offers `Set project`, which opens the rename prompt
-with the current project as its draft.
-
-Under an unfolded workspace, each window gets a window row. It leads with a
-caret at the second indent, then the rendered window label, then the branch in
-dim grey, then the dirty counts at the right edge. A window with no rendered
-label falls back to its folder, then to its name. The source pane is the
-focused pane when it carries a branch, else the first pane in the window that
-carries a branch, else the focused pane, else the window's first pane. When
-the source pane has a commit message, a dim note row sits directly under the
-window row. The window's pane rows follow when the window is unfolded.
-
-Fold is two-level. A folded workspace hides its windows and panes and leaves
-only the workspace row. A folded window keeps its row and hides only its panes
-and note row. The caret on either row toggles that level.
-
-An unfolded pane row labels itself with its recorded name, then the `app=` it
-last reported, then the pane id, with a state glyph in a colour per state beside
-the label. A pane counts as an agent when it has a recorded name or has spoken
-the status protocol at least once; the rest are shells. An agent row leads with
-a rocket icon (pi agents get the plain Greek letter `π` in Nerd Fonts, or a
-`▎` bar without them), a shell row with a terminal icon, and a dim shell row
-otherwise leaves those two cells blank, so the state glyph keeps its column.
-The report is sticky: `state=clear` does not demote an agent, and both the
-mark and the last `app=` are stored in the state file. The
-focused pane's row is highlighted.
-
-A left press on a project header row focuses the first pane of the group's
-first workspace. A left press on a workspace row focuses the first available
-pane in that workspace. A left press on the workspace caret toggles the
-workspace fold without changing focus. A left press on a window row focuses the
-first available pane in that window and makes that window the active window. A
-left press on the window caret toggles the window fold without changing focus.
-A left press on a pane row focuses that pane. A pane in another window switches
-the active window as well. Double-clicking a workspace row opens the inline
-rename prompt for that workspace. Double-clicking a window row opens the inline
-rename prompt for that window, the same prompt the tab bar double-click opens.
-Double-clicking a pane row opens the inline rename prompt for that pane. Right
-click opens the row menu for the row under the pointer: rename, close, new,
-fold and focus, as the row allows. The menu takes its keys from the main
-keymap. The bottom row toggles the rail between full and thin.
-
-A pane keeps the server told where its shell is, so a `cd` moves the folder the
-rail shows and the folder the next pane, window or workspace opens in. The
-folder follows the shell, not the launch: a window created after a `cd` belongs
-where the shell went. A new window is named after the folder it starts in, and
-it starts in the folder of the pane it was created from; `rename-window`
-overrides the name. A window whose label is still the old positional number is
-renamed from its pane's folder when the session loads.
-
-A long label is cut with `…` so the right-aligned stats fit. The stats tail
-pays rent in label: it renders while the label fits beside it, and when the
-label must elide, only while the elided label still keeps at least half the
-row. A tail that fails the rent stands down whole, before the branch and the
-label: a dirty row shows nothing, because "clean" would lie, and `clean`
-itself obeys the same rent, so a narrow rail ends at the label alone. The tail
-never renders truncated, never `+1 -`. The smallest dirty pair (`● +1 -1`)
-keeps its cells from about twenty rail columns with a usual label, and no tail
-renders below thirteen. The rail paints its own dark background. The built-in theme uses
-explicit RGB colours, not palette slots, and every label and glyph of it
-reaches WCAG AA contrast on both the rail and the focused row. Icons use Nerd
-Font code points when `fc-list` finds a Nerd font; `DM_NERD=1` forces them and
-`DM_NERD=0` falls back to the Unicode glyphs. The rail is 34 columns by
-default, at most a third of the screen and never wider than 46 columns;
-`set-rail` changes it. `prefix b` cycles the sidebar through three states:
-full, thin, and hidden. The thin rail is six columns: the project bar, the agent
-mark, one git cell, the state glyph and the question badge, then the grip strip,
-and no names. It always lists panes, folded or not, and packs one row per pane,
-with no project header, workspace row, window row, note or gap row. It gives
-cells up as it narrows: the badge goes first, then the git cell, then the agent
-mark and the bar, and the state stays to the last content cell, so a two column
-rail still says how the pane is doing and a one column rail paints nothing. A
-hidden or thin sidebar remembers the last full width.
-
-The rail's last column is a grab strip: drag it to resize the rail from six
-columns up to a third of the screen, capped at 46. A drag to the left collapses
-the rail to its thin form; hiding stays on `prefix b`.
-
-## Window tab bar
-
-One row sits above the pane area, to the right of the rail. It is always
-visible. One tab per window in the active workspace, in window order. The tab
-label and the sidebar window row's leading label come from the `window-label`
-template. The active tab is highlighted. Clicking a tab selects that window.
-Double-clicking a tab opens the inline rename prompt for that window. The
-server reserves the tab bar row when it computes pane rectangles, so pane
-boxes start below it.
-
-A tab is its label plus one padding cell on each side, clamped to a minimum
-and a maximum width. The bounds come from `config.kdl`:
-
-```kdl
-tab-min-width 8
-tab-max-width 20
+```sh
+dm web                                        # loopback only
+dm web --addr 100.71.227.52:8099              # the tailnet address a phone reaches
+dm web --addr 100.71.227.52:8099 --read-only  # no input, no compose, no actions
 ```
 
-Both are cell counts and both default to the values above. A label wider than
-the maximum is cut with `…`. Set the two equal for a constant tab width. A
-minimum below 3 and a maximum below the minimum are config errors.
+The token is the whole access model. `dm web` prints the URL with the token on
+it, and the page trades that token for a cookie on the first load. Pass `--token`
+to set one; leave it empty and a token is generated. A listener that is not
+loopback also prints the link as a QR code.
 
-The label template is a Go `text/template`. It applies to the tab bar, the
-sidebar window row's leading label and the status bar window chip, so one
-window reads the same in every place. The data is a struct with these fields:
+The page has five parts. The pane list shows every pane with its agent status,
+message, branch and folder, and puts the panes that want a decision first. The
+message log shows the newest entries, with a compose row that posts a key, a
+state and a message through `msg-post`. One pane opens in one of three views, a
+tap apart: the transcript of the agent's session file, the steps flattened to
+one row each, and the screen the pane printed. The action sheet gives one large
+row per command, with a target picker for panes, windows, workspaces, split sites
+and layout presets. The screen grid paints the active window's panes as blocks.
+A tile is a link only when every tile is at least 44 points each way. A grid
+too dense for that is a screen snapshot, and the pane list below it stays the
+way in.
 
-- `.ID`: the window id, e.g. `w1`.
-- `.Name`: the window name, the label `rename-window` edits.
-- `.Named`: true when the user set the name with `rename-window`.
-- `.Cwd`: the source pane's working directory.
-- `.Root`: the source pane's repository root, empty outside git.
+A pane that reported a session opens on the transcript and offers every view. A
+pane that reported none, a shell for example, opens on the screen and offers no
+other view. Agent prose is markdown, rendered with goldmark. Every view keeps the
+input row that types into the pane, a `pic` button that uploads a photo to the
+session's `uploads/` folder and types its path, and one row of three commands:
+new window, rename, and close pane. While the pane is working or blocked the
+header carries `stop`, which sends Escape through `/api/keys`: the same key
+interrupts a running turn and declines a waiting question.
 
-The `base` function prints the last path element: `{{base .Root}}` is the
-repository folder name. The default template shows the name of a named window
-and the id plus the repository folder of an unnamed one:
+A pane whose agent asked the reader a question draws the ask form above its
+view. Asks covers it. A command that fails paints the daemon's message in the
+banner and changes nothing else.
 
-```kdl
-window-label "{{if .Named}}{{.Name}}{{else}}{{.ID}}{{with base .Root}} {{.}}{{end}}{{end}}"
-```
+`--read-only` refuses every write: pane input, the message log compose and every
+action. The page hides the action sheet, the pane action row, the send row and
+the compose. Everything that only reads stays: the pane list, the message log,
+the three pane views, the collapse button and the screen grid.
 
-An unnamed window in `.../dm` reads `w1 dm`. A window the user renamed to
-`api` reads `api`. A template that does not parse, or that names an unknown
-field or function, is a config error.
+### Push
 
-## Layout palette
+Push is a second renderer of the `notify/` entry, beside the desktop pop, and
+the daemon owns the decision. An entry reaches the phone when its state is
+`blocked` or `error`, and not when it is `done`, and an entry for the pane an
+attached client is looking at pops nothing. The title is the pane and the state, and a tap opens the page on
+that pane. A browser subscribes only from a secure context, so `dm web` must
+answer on an https name. `tailscale serve` terminates that name in front of the
+loopback listener, and the tailnet certificate is enough; a plain `http://`
+tailnet address is not. The daemon does the sending, so `dm web` has to be
+running when a pane changes state. Each urgent entry costs one request per
+subscribed device, at most eight, under a 15 second bound.
 
-`prefix L` opens the layout palette: a panel centred over the live panes. Five
-rows name the presets in cycle order (even-horizontal, even-vertical,
-main-horizontal, main-vertical, tiled) and a last row names the window's
-custom tree. The row matching the window's stored layout name carries a
-`now` mark; an unnamed tree marks the custom row. `j` / `k` or the arrows move
-the selection and wrap, `enter` picks, `q` and `esc` close, and the prefix key
-closes too. All of it lives in the `layout` keymap mode, so `config.kdl` can
-patch it like the others.
+iOS ships push for a home-screen web app only, from 16.4 on, so the app is
+installed once by hand:
 
-The panel previews the row the selection sits on: each preset renders as real
-rectangles from `ApplyPreset`, the same geometry the server runs, drawn at a
-miniature scale that keeps the pane area's aspect. The focused pane's box
-carries the accent. On a window with fewer than two panes every preset row
-dims, the footer reads "one pane: every layout is this", and picking a preset
-does nothing. Picking a preset sends `select-layout` with its name; picking
-the custom row closes with nothing sent. A pane that exits while the palette
-is open is gone from the next frame's preview. The palette never enters the
-session tree and never survives a detach. Hovering highlights a row, a click
-on a row runs it, and a click outside the palette closes it. A terminal too
-small for the preview shows the list alone with a footer note.
+1. Delete the icon already on the home screen. An icon added before this works
+   opens a Safari tab and cannot subscribe.
+2. Open `dm web`'s URL in Safari, then tap Share and Add to Home Screen. Another
+   browser cannot add the app.
+3. Open dm from the new icon, which runs standalone and may notify.
+4. Tap `notify` in the page header and allow notifications when the phone asks.
 
-## Status bar
+The button reads `on` once the subscription is stored, `off` when the device
+holds none, `denied` when permission was refused, and `unsupported` where the
+browser has no push at all. A tap while it reads `on` unsubscribes.
 
-The last row of the screen is the status bar: one line of segments on explicit
-RGB, one idea per segment, with a single gutter cell of the bar ground between
-neighbours. The order is fixed: the session name, the workspace name, one chip
-per window, the focus chip, then the pinned right block.
-
-- The session name is railText, then the workspace name in railHeader.
-- One chip per window, in window order, is `N label`, where the label comes
-  from the `window-label` template. The number is the window's 1-based
-  position in the window list. A chip keeps its number when a
-  neighbour is dropped. The active window's chip reads as active: a `▸` in
-  barAccent, then the chip in bold railText, both on railFocusBG. The other
-  chips are railDim on the ground.
-- The focus chip sits on railFocusBG. It leads with the focused pane's state
-  glyph in that state's colour, then the pane id in bold railText, then the
-  pane name and the status word in railDim. A missing status reads `unknown`; a
-  shell reports no state at all, so it shows `▶` in railDim instead of a glyph.
-  The focused pane is the entry in the window's pane list whose id is the focus.
-  When the window is synced, the chip paints the sync mark `⧉` in barAccent
-  right after the pane id, before the pane name and status word.
-
-Colours are explicit RGB, never terminal palette slots. The built-in theme
-paints them only on grounds it checks: railBG (#14131a) for the ground and the
-gutter, railFocusBG (#1f1e27) for the active window chip and the focus chip,
-railHoverBG (#21202d) for the row the pointer rests on, railText (#e9eaf1),
-railHeader (#a6a9bd), railDim (#8f93a8), barAccent (#7ac0eb)
-for the active mark, and the state colours of the `states` block in Themes. A
-user theme names its own RGB, so it chooses its own grounds and answers for its
-own contrast. Every footer foreground of the built-in theme reaches WCAG AA,
-4.5:1 or better, on every ground it is painted on: railDim on railHoverBG is the
-tightest at 5.28:1, and the barAccent mark reaches 8.30:1 on the focus fill it
-sits on, 9.29:1 on the ground.
-
-At 80 columns, with the session `pi-footer-2026`, the workspace `main`, three
-windows and the second one active, a blocked focus pane `w1p2` named `shell`,
-the prefix unarmed, and a scroll position pinned at the right. State glyphs are
-drawn here in their Unicode form, without Nerd Fonts:
+The subscription and the key pair live in the session directory:
 
 ```
-pi-footer-2026 main 1 api ▸ 2 web 3 docs ▲ w1p2 shell blocked   SCROLL w1p2 +1/9
+sessions/<name>/webpush.json   the subscriptions, one entry per device
+sessions/<name>/webpush.key    the VAPID key pair, mode 0600
 ```
 
-cells 1-14 the session name, 15 the gutter, 16-19 the workspace name, 20 the
-gutter, 21-25 window 1, 26 the gutter, 27-28 the active window mark, 29-33 the
-active window chip, 34 the gutter, 35-40 window 3, 41 the gutter, 42 the blocked
-glyph, 43-47 the pane id, 48-53 the pane name, 54-61 the status word, 62-64
-padding on the ground, 65-80 the pinned scroll info.
+`webpush.key` signs every push. Deleting it invalidates every subscription
+already handed out, so delete it only to revoke every device at once, and tap
+`notify` on each device again afterwards. A push service that answers `410 Gone`
+prunes that subscription from `webpush.json` on its own.
 
-The pinned right block holds `PREFIX ` while `armed` is set, then the
-transient info text when there is one: `SCROLL <pane> +<offset>/<max>` while
-scrolling, with ` SEARCH <query> <i>/<n>` appended while a query is accepted,
-or `drag to resize` while the pointer rests on a divider. It is
-anchored to the last column, and one cell of ground always separates it from the
-left block, even when the left block would otherwise fill the row. When the
-pinned block cannot fit, its leftmost segment goes whole, `PREFIX ` first and
-then the info, and the survivor is clipped at its right with `…`. The left block
-is dropped entirely before a pinned segment is.
-The bar never paints past the column count, and it pads the rest of its row on
-the ground, so no cell of the previous frame shows through.
+## Asks
 
-At 34 columns, with the session `work-2026`, the prefix armed and no scroll
-position, the ladder runs through five rungs: the chips lose their names, the
-outer chips go, both names shrink to `…`, and the focus chip drops its sync
-mark, then its status word, but keeps its name. `PREFIX ` stays pinned at the
-right, seven cells clear of the last chip:
+An ask is a question set an agent puts to the reader from a pane. One ask
+belongs to one tool call id, and carries one to many questions: a header, the
+question text, a multi-select flag and options with a label, a description and
+an optional preview. The store is session state, not pane state, so a client
+that attaches mid-question sees the open ones, and the ids it hands out are
+`a1`, `a2`, and so on. An answered ask stays listed until the agent closes it,
+and the snapshot carries no answer, so a client that attaches between the answer
+and the close draws the ask as open; `dm ask list` carries the answers
+themselves. The store caps one question set at 64 questions of 64 options, one
+session at 64 listed asks, and the listed text at 256 KiB.
+
+- The TUI. The client paints the focused pane's ask as a floating pane, one
+  question at a time: the header, the question, the options with their
+  description and preview, and on a single select a last `Type something.` row.
+  `j`/`k` or the arrows move, and `J`/`K` scroll the detail. A digit picks that
+  option, and `space` picks on a single select and toggles on a multi-select.
+  `t` types a custom answer, and `n` attaches a note to the option under the
+  cursor. `tab` and shift-tab move between questions, and `A` puts the question
+  panel away and brings it back. On a pane with no question of its own, `A`
+  reaches the oldest question waiting on another pane. `enter` sends once every
+  question is answered, and `esc` declines.
+  Those keys take rows of their own above the closing rule, so every binding is
+  on screen at any width. A second question waits in the store, and the sidebar
+  marks its pane with a `?` badge. The status strip names a question the desk is
+  not showing as `ask <pane>`, with the key that reaches it. While a question
+  panel is up the strip stays quiet, because that key would hide the panel
+  instead of reaching the other question.
+- The phone. `dm web` paints the ask as a form above the pane's views: one
+  block per question, options as tappable rows, the description inline and the
+  preview behind its own toggle, a text field for something else on every
+  question, and several picks on a multi-select. Send stays disabled until
+  every question is answered. A refusal keeps its code in the banner and keeps
+  every answer, and `--read-only` shows the questions with no controls.
+- pi. The `dm-agent` extension registers `dm_turn`, so an agent asks through
+  dm's own store: `dm ask open` with the pane and the tool call, then
+  `dm ask await` for the answer. Nothing renders in pi, and the answer comes
+  back as the store's JSON. Outside a dm session the agent asks in prose.
+
+Esc declines an ask on every surface. The floating pane and the phone send
+`cancel:true`, and a pi ask that is cancelled, or whose call is aborted, is
+declined too. A decline is an answer: the agent reads it and stops waiting. An
+ask takes the focus of the pane it belongs to, across windows and workspaces, so
+the question panel stands in front of the reader instead of waiting on another
+pane. The CLI is the store's door: `dm ask list`, `dm ask open --pane <pane>
+--tool-call <id>`, `dm ask await <id>`, `dm ask answer <id>` and `dm ask close
+<id>`. A question set is too big for argv, so the bodies come on stdin.
+
+## Message log
+
+One session has one message log, and it is append-only. Any pane posts into it,
+and any caller waits on it. It is where a worker agent reports `blocked` and the
+agent supervising it waits for `done`, with no screen polling.
+
+An entry is
+`{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/go-backend/api","state":"done","msg":"accept command green","body":""}`,
+and every field is always present.
+
+| field | is |
+| --- | --- |
+| `seq` | Starts at 1, only grows, never repeats, and a clear does not reset it. |
+| `at` | The post time, truncated to the second, in UTC. |
+| `from` | The posting pane's id, set when the poster runs in a pane of the session, may be empty, and must name a pane in the tree. |
+| `key` | Groups entries, cap 128 bytes. An empty key on list, wait and clear means the whole log. |
+| `state` | `note`, `working`, `blocked`, `done` or `error`. `blocked` waits on someone else, `done` finished well, `error` finished badly. `clear` is a pane status, not a message log state, and post rejects it. |
+| `msg` | The text, cap 2000 bytes. |
+| `body` | The long text under the message line, cap 16 KiB. It may carry newlines. |
+
+Key and message must be valid UTF-8 with no control characters, because an entry
+prints on one row. The log is bounded at 1000 entries and 256 KiB, and past
+either bound the oldest entries go. The log lives in `state.json`, so a restart
+keeps every entry, its order and its `seq`.
+
+The message log is not a queue. Nothing is consumed, so every reader sees the
+whole log for its key, and a clear never resets `seq`. Without `afterSeq` a wait
+reads a status board, where the newest entry under the topic is the state of the
+world, so a newer `blocked` outranks an older `done` on the same key. With
+`afterSeq` a wait reads a stream: the oldest entry past the reader's cursor that
+matches the topic and, when a state is named, that state. The reader keeps the
+cursor, so the server holds no subscription state. A `trimmed` reply says the
+cursor sits behind the oldest row the log keeps, so read from the oldest row it
+still holds.
+
+`dm man` names 71 of the 76 actions, with one example each. The fields are one
+shared list, and `docs/internals/03-protocol.md` carries the action matrix.
+
+The CLI:
+
+```sh
+dm msg post --state blocked --key lane/go-backend/api --msg "ready for review"
+dm msg post --key lane/go-backend/api --state note --msg "log is long" --body-file notes.md
+dm msg show --key lane/go-backend/api [--seq N | --from PANE]
+dm msg list [--key lane/go-backend/api | --prefix lane/] [--after SEQ] [--limit 20] [--json]
+dm msg wait [--key lane/go-backend/api | --prefix lane/] [--state done] [--after SEQ] [--timeout 5m]
+dm msg sub [--key K | --prefix P] [--state S] [--after N] [--json]
+dm msg clear [--key lane/go-backend/api]
+dm msg watchers [--json]
+dm msg schema
+```
+
+`post` prints the stored entry as one row, and `list` prints newest first as
+`SEQ KEY STATE FROM MSG`. `wait` prints the entry it found, or the reply on
+`--json`. `sub` prints each frame as one row, and with `--json` as NDJSON, so an
+agent spawns the sub once and reads lines. `watchers` prints one row per reader
+position as `PANE FILTER CURSOR WAIT`. `list` and `wait` send `from` for you
+inside a pane. The wait timeout defaults to 5 minutes, up to one hour. `--after`
+carries the cursor: leave it off to read the status board. A timeout replies
+with `box: wait timed out` plus the newest entry it saw, and exits 1.
+
+A worker agent and the agent supervising it, in one session:
+
+```sh
+# in the worker's shell, a pane of the session
+dm msg post --key lane/go-backend/api --state blocked --msg "ready for review"
+
+# in the parent: waits until the worker reports done
+dm msg wait --key lane/go-backend/api --state done --timeout 10m
+
+# in the worker's shell, after the accept command
+dm msg post --key lane/go-backend/api --state done --msg "accept command green"
+```
+
+The key is a topic, and it is a flat string, so a publisher names a branch:
+`msg/broadcast`, `reply/w1p1`. A reader names an exact topic with `key` or a
+branch with `keyPrefix`, and keeps its own cursor, so two orchestrators both see
+every report. Post a pointer, not a document, because an entry stays one row.
+A dead pane posts nothing, so an orchestrator treats a timeout as a lost worker.
+
+`prefix m` opens the message log in a floating pane over the panes, and `N` opens
+the same pane on the `notify/` branch. One row per entry, newest first, as
+`MARK COUNT SEQ STATE KEY FROM AGE MSG`, with the state in the colour the
+sidebar gives that status. `j`, `k` and the arrows move the selection one row,
+`PgUp` and `PgDn` one page, the wheel three rows, and `g` and `G` jump to the
+newest and the oldest row. The floating pane grows with the log up to 22 rows
+and then scrolls. `w` shows the reader positions, one row each as
+`PANE FILTER @CURSOR`, with a `wait` mark while a wait is parked. `enter` opens
+the selected entry, `m` toggles the notification filter, `p` focuses the pane
+the entry is about, `x` clears the selected entry's key, and `X` clears what the
+view shows. `esc`, `q` or the prefix key closes it.
+
+A pane that enters `blocked` or `error`, or `done` with a message, or that exits,
+is posted to the message log under its reserved topic `notify/<pane id>`. A
+headless session renders each entry through `notify-send`, and an attached
+client raises a toast for the entries it has not seen. An entry for the pane in
+view is still logged but pops nothing.
+
+## OSC 7501 agent status
+
+`dm` implements the terminal side of the program status protocol. A program
+reports on its own stdout:
 
 ```
-… … ▸ 2 ▲ w1p2 shell       PREFIX 
+ESC ] 7501 ; state=working:app=pi:msg=<base64> ESC \
 ```
 
-cells 1 the session tail, 2 the gutter, 3 the workspace tail, 4 the gutter, 5-6
-the active window mark, 7 its number, 8 the gutter, 9 the blocked glyph, 10-14
-the pane id, 15-20 the pane name, 21-27 padding on the ground, 28-34 `PREFIX `.
+- `state=` is `idle`, `working`, `blocked`, `done`, `error` or `unknown`. `clear`
+  is the removal word. It drops the record, and the pane then reads `unknown`.
+- `app=` is optional and display only: `dm` keeps the last value per pane and
+  uses it as a sidebar label when the pane has no recorded name. `kind=` is
+  optional and unused.
+- `msg=` is optional base64 UTF-8; `dm` decodes it for `dm status` and the bar.
+- Both `BEL` and `ST` terminate the sequence.
 
-The left block elides in a fixed order, stopping as soon as the line fits:
+Programs usually probe support first with `ESC ] 7501 ; ? ESC \` and wait for
+the terminal to echo the body back. `dm` answers that query through the PTY, so
+pi and other conforming programs switch reporting on. The older JSON
+(`{"state":"working"}`) and bare-state forms are accepted.
 
-1. window chips lose their name and keep the number
-2. trailing window chips go, never the active one
-3. the workspace name shrinks with a trailing `…`
-4. the session name shrinks with a trailing `…`
-5. the focus chip drops the sync mark, then the status word, then the pane
-   name
-6. the focus chip keeps its glyph and its pane id last
+## Provision a harness
 
-Width is cells, not runes. A wide rune takes two cells, and a wide rune that
-would straddle a limit is dropped whole rather than split. A width of zero or
-less paints nothing.
+An agent harness runs in a pane and learns dm by reading. `dm provision`
+installs the reading, and the tools, in one step:
 
-The toast stack sits above the bar, bottom right: the bar keeps its full row
-while toasts float over the panes, and no toast is painted on the bar row.
+```sh
+dm provision              # link the extension and the skill into ~/.pi/agent
+dm provision --check      # exit 1 unless both links are in place and inside this repo
+dm provision --print      # say what a run would do, write nothing
+dm provision --uninstall  # remove a link it made, never a file you put there
+```
 
-## Scrollback and mouse
+Both links point into this checkout, so an edit here is live in the harness at
+once. `skills/dm-agent/dm-agent.ts` registers four tools, `dm_layout`,
+`dm_pane`, `dm_box` and `dm_turn`, each an action enum over `dm ... --json`.
+`dm_turn` is model-only: the model can call it, but a codemode script cannot,
+because it asks the operator. The other three are direct, so a codemode script
+can call them too. `skills/dm-fleet/SKILL.md` carries the judgement a tool schema
+cannot: when to split, when a worker agent is worth it, and the
+`lane/<plan>/<worker>` protocol.
 
-Mouse reporting is always on, there is no setting (SGR 1000 + 1002 + 1003 +
-1006, disabled again on detach). Left click focuses the pane under the pointer,
-the wheel scrolls the pane under the pointer, and dragging the divider between
-two boxes resizes that split. Panes are boxed with no gap cell: neighbouring
-boxes touch, so the divider is two adjacent border cells and the visual space
-is one cell on each axis. Both sides of a drag keep at least three content
-cells.
-
-Every divider carries a dim grip dot pair at its midpoint, so the handle is
-visible before the pointer arrives. Hovering repaints the whole divider with
-heavy line glyphs and shows `drag to resize` in the pinned right block of the
-status bar, flush with the last column. The hover and the press resolve through
-the same `padHit` zone, so what lights up is exactly what will drag. No-button
-motion is the mux's own: dm uses it for that hover and does not forward it to
-pane apps, which asked for button motion only.
-
-Right click opens the pane menu, even over a program that owns the mouse: it is
-a window-manager gesture, not the app's. Move with `j`/`k` or the arrows,
-`enter` or a digit to run, `esc` or `q` to close. With the mouse, hovering
-highlights the row under the pointer, a left click on a row runs it, and a
-right press, drag and release runs the row under the release. The release of
-the press that opened the menu, and clicks on the title or border, do not
-dismiss it; a click outside does. The menu
-offers split right/down/left/up, zoom, focus, close pane, scrollback, new
-window, new workspace, rename workspace, switch session and detach. If the
-program in that pane enabled mouse reporting itself, the event is forwarded to
-it instead. That is how `pi`, `htop` and `vim` keep their own scrolling: they
-own the wheel when they ask for it.
-
-A program sees only its own screen, so dm rewrites the point to the pane's
-content rect before it forwards the event; a point on the border clamps to
-the nearest edge cell.
-
-Ctrl+click on a URL opens it with the system handler, and a toast names what
-opened.
-
-Alternate-screen programs have no terminal scrollback to show. Their screen is
-painted in place, not scrolled, so dm refuses to open its own scrollback for
-them and tells you to use the program's. The pane daemon owns this fact: it
-reports `alt` and `mouse` in every snapshot, so a client that attached late
-still knows even when the enabling escape sequence has left the replay ring.
-
-Scrollback is built on demand: the first time you scroll a pane, the client asks
-the server for that pane's output ring, replays it into a tall terminal, and
-draws a window into it at the current offset. The tall terminal is
-`history-lines` rows plus the pane's own height, so 10000 rows by default. The
-ring is cached per pane for that layout, so a second scroll asks for nothing. It
-is a frozen snapshot taken when you scroll, so new output does not move the
-view. The replay is approximate for full-screen programs; for streamed output
-it is exact.
-
-The window is a row count and the ring is a byte budget. A row is budgeted at
-about 256 bytes, the ring is capped at 8 MiB and every pane keeps at least
-512 KiB. A row can take more than 256 bytes, so a wide pane holds fewer rows
-than `history-lines` and a narrow one holds more. A pane reads its budget when
-it starts. A reload sends the new budget to every pane, resizes the ring in
-place, and keeps the newest bytes.
-
-### Scrollback search
-
-`/` opens a query row above the status bar. It reads `search:` and the draft,
-and it takes every key: printable bytes append, backspace deletes one
-character, `ctrl+u` clears the line, `enter` accepts and `esc` cancels. No byte
-reaches the pane while the row is open.
-
-A match is a literal substring, case-insensitive. There is no regex. The search
-reads the tall terminal's rows, so the live screen is part of it. Matching rows
-take the theme's hover ground, and the current match paints reverse video.
-
-On accept, the view jumps to the nearest match at or above the top of the band,
-and that row lands at the top. `n` moves to the next older match and `N` to the
-next newer one; both wrap. A query with no match raises `no match: <q>` and
-leaves the offset alone. While a query is accepted, the status bar's right block
-reads `SCROLL <pane> +<offset>/<max> SEARCH <query> <i>/<n>`.
-
-Esc order: with an accepted query, the first `esc` clears the search and keeps
-scrollback open, and the next `esc` leaves. With no query, `esc` leaves at once.
-Leaving scrollback clears the query, its matches and its highlights.
-
-Mouse reporting means normal drag no longer selects text. Hold Shift while
-dragging to use the terminal's own selection.
-
-dm selects instead. A left drag inside a pane highlights the row-major range
-in reverse video, clamped to the pane it started in, and the release copies it
-to the clipboard, so the text lands there and a `copied N
-chars` toast confirms it. A press and release in the same cell is a click and
-still reaches the app that claims the mouse; dm only takes the drag. Trailing
-spaces go and lines join with a newline. An app's own drag selection loses to
-dm's while dm owns the gesture, which is why Shift exists.
-
-The selection is anchored to the pane's content, not to the cells a frame
-shows. Turning the wheel while the left button is held scrolls the pane's
-scrollback and extends the selection into older rows, even when the pointer
-rests past the pane's top edge. The release copies the scrolled rows. A
-selection made in scrollback copies the scrollback rows, and leaving its own
-pane's scrollback drops it. New output that scrolls the live screen drops a
-live selection, because the text under it has moved; output that does not
-scroll leaves it alone. A geometry change drops the selection. An
-alternate-screen pane has no scrollback, so the wheel keeps the selection
-clamped and says why.
-
-`prefix i` copies the focused pane's id, the handle every other dm surface
-names a pane by: `dm exec`, `dm msg post` and a shell all take it. `prefix y`
-copies what the focused pane produced since the last Enter you sent it, and
-`dm yank <pane>` prints the same rows. The anchor is local: dm records
-the output stream position when it forwards an Enter, so a remote shell needs no
-setup. A pane that has never been sent an Enter has no anchor: the copy falls
-back to the visible screen with a toast that says so, and `dm yank` reports that
-it has nothing to cut at. `prefix Y` copies the visible screen. Both keys write
-OSC 52 and raise one `copied N chars` toast. At start dm asks the terminal for its clipboard over OSC 52; a terminal that answers keeps the sequence, and one that stays silent gets the copy piped to `pbcopy`, `wl-copy` or `xclip` instead, so a terminal with clipboard access switched off still copies.
-
-The copy holds the command's output only. The command line dm wrote is dropped
-by matching the echoed text, and the line end the pty echoes at the anchor is
-dropped by the newline rule. A shell that emits OSC 133 prompt marks gets the
-exact range instead: the copy starts at the command start mark and ends at the
-command end mark, so a prompt that repaints its line on Enter, a trailing
-prompt and the blank rows around them never reach the copy. Add this line to
-`~/.zshrc` to emit the marks:
-
-    precmd() { print -Pn '\e]133;D\e\\\e]133;A\e\\' }; preexec() { print -Pn '\e]133;C\e\\' }
-
-The marks travel over ssh like any other output, so the hook works on the
-remote host too. Without marks, the copy ends at the last row with content and
-the trailing prompt is included. The marks come from the semantic prompts
-proposal:
-<https://gitlab.freedesktop.org/Per_Bothner/specifications/blob/master/proposals/semantic-prompts.md>.
-`dm man`, `dm html` and `dm llms` carry the same section.
-
-dm enables bracketed paste (2004) on attach and disables it again on detach, so
-ctrl+shift+v inserts newlines literally. The client sends a paste to the focused
-pane as one chunk and never reads a byte inside it as a dm key: an embedded
-ctrl+b does not arm the prefix, and newlines do not submit. A paste also closes
-an open menu, picker or scrollback first, and a paste over the dashboard is
-swallowed whole.
-
-The 200~ and 201~ markers go only to a program that asked for bracketed paste.
-A program that never asked, such as a line editor without 2004, gets the text
-alone: it would read the markers as keys and leave their tail on the line, which
-is how a pasted mysql statement showed up as `0~SET GLOBAL ...;1~`.
-
-Small actions answer with a toast, not text in the status bar: the bar's right
-block is reserved for the scroll position, the search match and the divider
-hint. The client keeps up to three, each with the time it was raised, and
-draws them bottom right just above the bar, newest at the bottom. Every toast is
-the same size: 40 cells of interior plus the two border cells, clamped to a
-narrow screen, and three rows, so a short message pads out, a long one elides
-with an ellipsis on a cluster boundary, and the stack never moves. A toast is a
-small closed box on the float ground, and its bottom border is the gauge: one
-track as wide as the interior, the part still to run drawn in the toast's
-colour and the rest left dim, so the bright run shrinks from the right as the
-toast counts down and the box is gone when it has run out. The track is what
-makes the fraction readable: a bright run alone reads as a stray mark once it
-is short. A plain toast holds one row of bright text inside a dim border and a
-dim gauge. An entry posted under `notify/` raises a toast that names the
-entry's state and topic in the top border, in the state's own glyph and colour,
-and holds the message bright inside; an entry with no message keeps the empty
-row, so the box does not change size. The state's colour stays on the border,
-the title and the gauge, so three stacked toasts read as three quiet panels
-instead of three colour blocks. A repeat of the newest announcement within one
-second is the same toast, and every toast expires after three seconds, its
-gauge one cell of colour at the end. Copying raises one, as does a failed request, an unknown key, an
-empty scrollback and a pane exit.
-
-System notifications are for the events worth interrupting for. A pane that
-enters `blocked`, `done` or `error`, or that exits, is posted to the box under
-its reserved topic `notify/<pane id>`: the entered state as the entry's state,
-the message or the exit note as its text. The popups are subscribers of that
-log, not side effects of the transition. A headless session renders each entry
-through `notify-send`; an attached client raises a toast for the entries it has
-not seen and lists the recent ones under `N`, in the message box with the
-notification filter on. An entry for the pane the operator is looking at is
-still logged but pops nothing, so a focused pane with a client attached stays
-quiet. `DM_NOTIFY=0` turns desktop notifications off, and a host without
-`notify-send` gets none.
-
-## Rendering
-
-A frame is an ordered stack of painters. Each painter writes into the caller's
-buffer. `internal/client/render_pane.go` owns the pane painters: `drawPane`,
-`drawPaneFrom` and `drawPaneRow`. The shared primitives are in `internal/cells`,
-`internal/segment` and `internal/panel`.
-
-`cells` measures and cuts: cell width, clipping, padding and elision. `segment`
-is a styled run: text, foreground, background, weight and the pin mark.
-`hintbar` builds the one key-hint row: a filled cap around each key, its label
-after it and a faint pipe between the hints, fitted to the cells the caller
-gives it. Every shortcut row on every surface is that bar.
-`panel` builds a box: `PaintPanel` clips the interior to a rect, writes the
-title row and paints a hint bar on the bottom border, and `DrawPaneBox` paints
-the border around content.
-
-`ui` is the package of values a view shares: a component is a value plus a
-pure draw. The client keeps the state. There is no retained tree.
-
-`ui.Viewport` is the scrolling window a list draws through: row count, height,
-offset and selection, with the steps that move it and keep the selection in
-view. It replaces the offset and selection arithmetic each float and table
-writes for itself. Neither writes an escape sequence.
-
-`ui.MessageList` is the list behind the message view: the entries, the topic
-filter, the selection window, the read mark and the row painter. `Set`,
-`SetFilter` and `ToggleFilter` replace or narrow the rows and keep the selection
-on its entry, `Move`, `Top` and `Bottom` step it, `MarkRead` and `MarkReadAll`
-raise the read mark, and `Draw` paints one row per visible entry into the
-caller's buffer. The float keeps the title, the hint and the watcher page.
-
-`ui.Input` is one line of editable text: the runes and the caret, and the
-methods that insert, delete and move. It is the first component under the
-contract: a value plus a pure draw. `DrawInput` reads the value and writes the
-row, the prompt, the text and the trailing text into the caller's buffer. The
-caret is painted only while the input is active. A head wider than the room is
-elided, so the caret keeps its cell, and the draw returns the caret's cell. The
-panel styles everything else.
-
-On a stable frame, the diff decides what is written. A layout change writes
-every band and row. `PaintPanel` holds no state and keeps no buffer between
-frames. A new overlay is a painter plus a band entry.
-
-`internal/client/damage_test.go` keeps a refactor honest: it pins the steady
-frame, the one-row repaint and the band cursor moves.
-
-## Performance
-
-The client no longer clears the screen and repaints every cell on every frame: a
-steady frame writes nothing. Every written frame is wrapped in a synchronized
-update (`ESC [ ? 2026 h` to `ESC [ ? 2026 l`), so the terminal applies it in one
-go. A frame that clears is a full repaint, and it happens only when the picture
-is not stable: a resize, a pane added, closed or moved, a focus change, or
-entering and leaving scrollback, the menu, the picker or the palette.
+`dm llms` carries the mechanical surface and needs no install. pi is the only
+adapter dm ships.
 
 ## RPC
 
@@ -1386,8 +911,10 @@ dm exec '{"action":"select-layout","layout":"tiled"}'
 dm exec '{"action":"select-layout","layout":"next"}'
 dm exec '{"action":"synchronize-panes","on":true}'
 dm rename-workspace s1 api-work
+dm set-project s1 go-backend
 dm write-to w1p1 --msg "go test ./..." --enter
 dm read w1p1 --lines 20
+dm read w1p1 --scrollback 200
 dm yank w1p1
 dm status
 ```
@@ -1401,438 +928,40 @@ dm exec '{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}'
 
 `new-window` and `new-workspace` take the same field. An empty element or a NUL
 byte is an error. The pane records its argv in the state file, so a server
-restart that spawns the panes fresh respawns the same program. A pane whose argv
-program exits is removed from the layout and its split collapses, exactly like
-a shell exit.
-
-Actions: `ping`, `list` (alias `ls`), `read`, `history`, `yank`, `replay`,
-`status`,
-`write-to`, `exec`, `keys`, `split`, `zoom-pane`, `set-rail`, `resize-split`,
-`swap-panes`, `move-pane`, `select-layout`, `synchronize-panes`,
-`focus`, `focus-dir`, `next-pane`, `prev-pane`, `close-pane`, `close-window`,
-`new-window`, `next-window`, `prev-window`, `select-window`, `new-workspace`,
-`next-workspace`, `prev-workspace`, `list-workspaces`, `list-panes`, `pane`,
-`toggle-fold`, `set-pane-name`, `focus-window`, `focus-workspace`,
-`close-workspace`, `rename-window`, `rename-workspace`, the seven box
-actions `msg-post`, `msg-list`, `msg-wait`, `msg-sub`, `msg-clear`,
-`msg-watchers` and `msg-schema` below, and the five ask actions `ask-open`,
-`ask-await`, `ask-answer`, `ask-close` and `ask-list` under Asks.
-
-`swap-panes` trades two pane ids in place: `target` and `other` swap
-positions, every rectangle keeps its shape, and focus stays on the focused
-pane. A swap naming a pane that is not a leaf of the tree is refused. As an
-alternative to `other`, a `dir` field with no `other` swaps the focused pane
-with the pane it faces in that direction, the same neighbour `focus-dir`
-would reach, and focus stays on the focused pane.
-
-`move-pane` moves a leaf pane to the edge of another: `target` names the pane
-that moves, `other` the pane it lands beside, and `dir` the side (`left`,
-`right`, `up` or `down`). The moved pane takes the focus, and a split left
-with a single child collapses, so no split ever holds exactly one pane. Both
-ids must be leaves of the same window: moving across windows is out of scope
-and a target outside the pane's own window is refused with an error.
-
-`select-layout` rebuilds the active window's panes as one of the five preset
-layouts, over the pane ids in tree order. The pane set is preserved exactly,
-so the focus survives:
-
-- `even-horizontal`: one row split by width
-- `even-vertical`: one column split by height
-- `main-vertical`: one wide pane on the left, the rest stacked to its right
-- `main-horizontal`: the transpose, one tall pane on top
-- `tiled`: the balanced grid, as close to square as the area allows, filled
-  row-major
-
-A layout value of `next` cycles the presets forward from the stored name,
-wrapping to the first. The applied preset is stored on the window, and a
-manual tree change (a split, a move, a close or a swap) clears the stored
-name, so `next` restarts at the first preset. A window with fewer than two
-panes refuses with an error naming the reason.
-
-`synchronize-panes` is tmux's sync for the active window, and only the active
-window: other windows keep their panes independent. A request with no `on`
-field toggles, `"on":true` and `"on":false` set, and the reply carries the new
-value as `sync`. The flag lives in the window state, so it survives a server restart.
-When sync is on, every `write-to`, `exec`, `keys` and paste frame aimed at a
-pane of that window reaches every live pane of the window, in tree order, and
-the target pane is part of the sync: tmux's echo rule, the pane that owns the
-input gets its own keys back. A write aimed at a pane of an unsynced window
-goes nowhere but that pane, exactly as it does today.
-
-`toggle-fold` takes a window id as `target` and replies with the new `unfolded`
-state.
-
-`history` takes `target` and an integer `lines` and replies with
-`{"lines": ["..."]}`: up to `lines` text rows immediately above the live
-screen, oldest first, trailing blanks trimmed. `lines` must be positive.
-`dm read <pane> --scrollback N` prints the same rows.
-
-The visible screen is a snapshot, not a replay. Each pane daemon serialises its
-VT to canonical ANSI (`screen`), and the client writes that into a fresh
-terminal at the pane's rectangle. An attach carries those screens and no
-history. The output ring travels separately as `replay`, sent only when the
-client asks as scrollback opens, and feeds only the scrollback history, so a
-client never rebuilds the picture from raw output.
-
-`dm exec` prints the response as JSON. A failed action exits non-zero.
-
-## OSC 7501 agent status
-
-`dm` implements the terminal side of the program status protocol
-(<https://www.superlogical.com/rex/docs/build/program-status>). A program
-reports on its own stdout:
-
-```
-ESC ] 7501 ; state=working:app=pi:msg=<base64> ESC \
-```
-
-- `state=` is `idle`, `working`, `blocked`, `done`, `error` or `clear`.
-- `app=` is optional and display only: `dm` keeps the last value per pane and
-  uses it as a rail label when the pane has no recorded name. `kind=` is
-  optional and unused.
-- `msg=` is optional base64 UTF-8; `dm` decodes it for `dm status` and the bar.
-- `state=clear` removes the record, shown as `unknown`.
-- Both `BEL` and `ST` terminate the sequence.
-
-Programs usually probe support first with `ESC ] 7501 ; ? ESC \` and wait for
-the terminal to echo the body back. `dm` answers that query through the PTY, so
-pi and other conforming programs switch reporting on. The older JSON
-(`{"state":"working"}`) and bare-state forms are still accepted.
-
-`dm __probe [-hold 2s]` is a test harness that speaks the whole handshake and
-prints `PROBE-REPLY=ok`, `PROBE-REPORTED`, `PROBE-CLEARED` inside a pane. Run it
-from a pane to check a build:
-
-```sh
-dm split w1p1 --dir down
-dm write-to w1p2 --msg "$PWD/dm __probe --hold 5s" --enter
-dm status
-```
-
-## Message box
-
-One session has one message box: an append-only log that any pane can post
-into and any caller can wait on. It is where a lane reports `blocked` and a
-driver waits for `done`, with no screen polling.
-
-An entry is
-`{"seq":7,"at":"2026-11-03T14:40:12Z","from":"w3p1","key":"lane/a","state":"done","msg":"gate green","body":""}`.
-Every field is always present.
-
-- `seq` starts at 1, only grows, and never repeats. A clear does not reset it.
-- `at` is the post time, truncated to the second, in UTC.
-- `from` is the posting pane's id. It is set when the poster runs in a pane of
-  the target session, may be empty, and must name a pane in the session tree.
-- `key` groups entries and may be empty. The cap is 128 bytes. An empty key
-  on list, wait and clear means the whole log.
-- `state` is one of five. `note` carries no progress meaning, `working` means
-  the work is running, `blocked` means it waits on someone else, `done` means it
-  finished well, and `error` means it finished badly. `clear` is an OSC 7501
-  pane status, not a box state, and post rejects it.
-- `msg` is the text. The cap is 2000 bytes.
-- `body` is the long text under the message line. Post leaves it out and the
-  entry still carries it, empty. The cap is 16 KiB.
-
-Key and message must be valid UTF-8 with no control characters, because an
-entry prints on one row. The body follows the same rule with one exception: it
-may carry newlines.
-
-The box is bounded at 1000 entries and 256 KiB. Past either bound the oldest
-entries go. The log lives in `state.json`, so a restart keeps every entry, its
-order and its `seq`.
-
-Seven actions. Each takes its request in the `res` field of the envelope.
-
-| action | request | reply |
-| --- | --- | --- |
-| `msg-post` | `key`, `state`, `msg`, `from`, `body` | `{"entry":{...}}` |
-| `msg-list` | `key` or `keyPrefix`, `afterSeq`, `limit`, `from` | `{"entries":[...],"trimmed":false}`, newest first |
-| `msg-wait` | `key` or `keyPrefix`, `state`, `afterSeq`, `timeoutMs`, `from` | `{"entry":{...},"trimmed":false}` |
-| `msg-sub` | `key` or `keyPrefix`, `state`, `afterSeq`, `from` | one `{"entry":{...},"trimmed":false}` frame per matching entry, until the connection ends |
-| `msg-clear` | `key` | `{"cleared":N}` |
-| `msg-watchers` | none | `{"watchers":[...]}` |
-| `msg-schema` | none | `{"schema":{...}}` |
-
-`state` is required on post and optional on wait, where an empty state asks for
-any state. `timeoutMs` is required on wait. `limit` clamps to the box, and zero
-or less means the whole box. `timeoutMs` runs from 1 to 3600000. `key` and
-`keyPrefix` are exclusive: a read names an exact topic or a branch, never both.
-`afterSeq` takes 0 or more, and leaving it out is not the same as 0. An unknown
-field, an unknown action, an unknown state or a `from` outside the tree fails
-the request, so nothing is silently ignored. `msg-schema` serves these shapes as
-JSON Schema, built from the Go types and the one state enum.
-
-A `msg-sub` reply is a stream. The server sends one frame per matching entry
-and no completion reply, so the connection stays open until either side drops
-it. A parse error or a bad `from` still arrives as a normal reply with an
-error.
-
-On both reads `from` is the reading pane. An empty `from` records no watch, and
-a `from` outside the tree fails the request.
-
-Every list from a pane and every wait from a pane leaves a watch: the pane, its
-filter and the highest seq it served. The registry lives in server memory only.
-It has no `state.json` field and no save, so a restart begins empty and the
-reads rebuild it. The server drops a watch when its pane leaves the tree, and
-drops an unparked watch after 10 minutes without a fresh read. A parked watch
-never ages out. A watch that appears, advances its cursor, changes its parked
-state or drops pushes `{"type":"watch"}` to every attached client.
-
-A pane P received entry E when a watch for P holds `cursor >= E.seq` and its
-filter matches `E.key`. The server stores no delivery state, so that comparison
-is the whole test. A watch is a read left behind, not a pending message. An ack
-is still a post: a reader that wants to record handling posts, or reads again to
-advance its cursor.
-
-The CLI:
-
-```sh
-dm msg post --state blocked --key lane/a --msg "ready for review"
-dm msg post --key lane/a --state note --msg "log is long" --body-file notes.md
-dm msg show --key lane/a [--seq N | --from PANE]
-dm msg list [--key lane/a | --prefix lane/] [--after SEQ] [--limit 20] [--json]
-dm msg wait [--key lane/a | --prefix lane/] [--state done] [--after SEQ] [--timeout 5m]
-dm msg sub [--key K | --prefix P] [--state S] [--after N] [--json]
-dm msg clear [--key lane/a]
-dm msg watchers [--json]
-dm msg schema
-```
-
-`post` prints the stored entry as one row. `list` prints newest first as
-`SEQ KEY STATE FROM MSG` and cuts only the message to the terminal width;
-`--json` prints the reply unchanged. `wait` prints the entry it found, or the
-reply on `--json`. `sub` prints each frame as one row. With `--json` each frame
-prints as its own JSON object on one line, so the output is NDJSON and an agent
-spawns the sub once and reads lines. A server restart does not end the sub: it
-redials with backoff and resumes at the last printed entry. A refused request
-prints the error and exits non-zero. `clear` prints the count. `watchers` prints
-one row per watch as `PANE FILTER CURSOR WAIT`: the filter is the key or the
-prefix with a trailing star, and the wait mark is `wait` while a wait is parked
-and `-` otherwise; `--json` prints the reply unchanged. `schema` prints the
-schema, so `dm msg schema | jq .actions` reads. `list` and `wait` send `from`
-for you when they run inside a pane, so a read in a pane records a watch. A
-read from outside a pane sends no `from` and records nothing. The wait timeout
-defaults to 5 minutes and takes any duration up to one hour. `--after` carries the cursor.
-Leave it off to read the status board; `--after 0` starts at the first entry.
-
-Without `afterSeq` a wait matches the newest entry under its topic, not any
-entry. It returns at once
-when that entry already carries the wanted state. Otherwise it parks until a
-post changes the newest entry for the key, until a clear exposes an older one,
-or until the timeout. Only the newest entry counts, so a newer `blocked`
-outranks an older `done` on the same key. A timeout replies with
-`box: wait timed out` plus the newest entry it saw, and exits 1.
-
-A lane and a driver, in one session:
-
-```sh
-# in the lane's shell, a pane of the session
-dm msg post --key lane/a --state blocked --msg "ready for review"
-
-# in the driver: parks until the lane reports done
-dm msg wait --key lane/a --state done --timeout 10m
-
-# in the lane's shell, after the gate
-dm msg post --key lane/a --state done --msg "gate green"
-```
-
-The wait returns the done entry:
-
-```
-$ dm msg wait --key lane/a --state done --timeout 10m
-2 lane/a done w2p1 gate green
-```
-
-The box is not a queue. Nothing is consumed: a list, a wait and a repeat of
-either read the same entries, and every reader sees the whole log for its
-key. A clear is the only thing that removes entries, apart from the caps
-dropping the oldest at the bound, and a clear never resets `seq`.
-
-## Topics and subscriptions
-
-The key is a topic, and it is a flat string, so a publisher names a branch:
-`msg/broadcast`, `reply/w1p1`. A reader names an exact topic with `key` or a
-branch with `keyPrefix`.
-
-Two read shapes come from the one log.
-
-- Without `afterSeq` a wait reads a status board. The newest entry under the
-  topic is the state of the world, and only it counts, as described above.
-- With `afterSeq` a wait reads a stream. It returns the oldest entry past the
-  cursor that matches the topic and, when a state is named, that state. Nothing
-  already handled comes back and nothing unseen is skipped. The cursor is the
-  `seq` of the last entry the reader handled. The reader keeps it, so the
-  server holds no subscription state.
-
-`trimmed` on a list or wait reply says the cursor sits behind the oldest row
-the box still keeps, so the entries in between are gone. A subscriber that sees
-it has missed messages and should resynchronise.
-
-An orchestrator and three workers:
-
-```sh
-# orchestrator, pane w1p0: one broadcast, no per-worker copy
-dm msg post --key msg/broadcast --state note --msg "read tasklist.md"
-
-# worker w1p1 follows the branch and keeps its own cursor
-c=$(cat .cursor 2>/dev/null || echo 0)
-entry=$(dm msg wait --prefix msg/ --after "$c" --timeout 1h --json)
-jq -r '.entry.msg' <<<"$entry"
-jq -r '.entry.seq' <<<"$entry" > .cursor
-
-# the worker reports on its own reply topic
-dm msg post --key reply/w1p1 --state done --msg "backend done"
-
-# the orchestrator reads the reports in order, from its own cursor
-dm msg wait --prefix reply/ --after "$(cat .orch.cursor)" --state done --timeout 1h
-```
-
-Every reader keeps its own cursor, so two orchestrators both see every report.
-A post wakes every parked wait, and each wait re-reads the log from its own
-cursor. The cursor lives with the reader: a restarted subscriber resumes where
-its cursor file says.
-
-Conventions the box does not enforce, and the ones to keep:
-
-- Post a pointer, not a document. `read tasklist.md`, not the tasklist. An
-  entry stays one row and the structured data stays in a file, passed once.
-- A worker posts `working` before it starts, so a replayed cursor shows the
-  work already began.
-- Liveness is the wait timeout. A dead pane posts nothing, so the orchestrator
-  treats a timeout as a lost worker.
-
-`prefix m` floats the message view over the panes. `N` opens the same float on
-the `notify/` branch: the notification filter is a view over one log, not a
-second surface. One row per entry, newest first, as
-`MARK COUNT SEQ STATE KEY FROM AGE MSG`. `MARK` is `*` while the entry is past
-the read mark and a space once it is read. `COUNT` is the two-cell count of the
-watches that were served the entry; the whole column drops below 60 columns, so
-the message keeps its cells. `AGE` is short: `42s`, `7m`, `3h`, `2d`. The state
-sits in the colour the rail gives that status.
-
-`j`, `k` and the arrows move the selection one row, `PgUp` and `PgDn` one page,
-the wheel three rows, and `g` and `G` jump to the newest and the oldest row. The
-window follows the selection. The float grows with the log up to 22 rows and
-then scrolls. The title names the filter, `box` or `notifications`, the entry
-count, the rows in view, the parked watches as `N watching`, the entries that
-arrived above a scrolled-back window as `+N`, and the unread count. It omits
-each part at zero.
-
-`w` swaps the entry list for the watcher page: one row per watch as
-`PANE FILTER @CURSOR`, with a `wait` mark while a wait is parked. A live `sub`
-shows as parked too. `enter` opens the selected entry over the list in a
-scrolling reader: the summary line, then the body below it, wrapped. The
-overlay is at least twelve rows tall and grows with a longer list, so an entry
-reads even in a short log, and a notification with no body still reads its
-message. `m` toggles the notification filter and keeps the
-selection on its entry. `p` closes the float and focuses the pane the entry is
-about; an entry that names no pane, or a pane the session does not carry, raises
-a toast and changes nothing. `x` clears the selected entry's key; `X` clears
-what the view shows, which is the `notify/` branch under the filter and the
-whole log otherwise.
-
-A window the reader scrolled back stays on its top entry as new entries arrive,
-so the text does not slide. A post or a clear anywhere in the session refreshes
-an open view, and a change in the watch set pushes `{"type":"watch"}`, which
-asks for the list again at most once per 100 ms. The view follows a lane without
-a keypress. Opening a body marks that entry read, and closing the float marks
-the entries the filter shows read, so the bar badge and the row marks count from
-one seq. `esc`, `q` or the prefix key closes it. The hint names every key from
-the box keymap, so a rebind moves it.
-
-## Subscriptions
-
-A subscription is a stream, not a poll. `msg-sub` holds one connection open and
-the server pushes each matching entry as a frame. The watch is parked for its
-life, so a view shows a live sub as a reader that waits. The cursor advances
-over every entry it scans, including the ones its state filter skips. A gap in
-the log is reported once, on the first frame of the stream. A slow reader can
-miss frames: a frame that cannot enter the client's queue ends the connection
-instead of blocking the server. Reconnecting resumes at the last printed entry.
-
-## Teaching a harness
-
-An agent harness runs in a pane and learns dm by reading. `dm provision`
-installs the reading, and the tools, in one step:
-
-```sh
-dm provision              # link the extension and the skill into ~/.pi/agent
-dm provision --check      # exit 1 unless both links are in place and inside this repo
-dm provision --print      # say what a run would do, write nothing
-dm provision --uninstall  # remove a link it made, never a file you put there
-```
-
-Both artefacts are symlinks into this checkout, so an edit here is live in the
-harness at once and nothing can go stale.
-
-- `skills/dm-agent/dm-agent.ts` registers four tools, `dm_layout`, `dm_pane`,
-  `dm_box` and `dm_turn`, each an action enum over `dm ... --json`. `dm_turn`
-  is `model-only` because it asks the operator. The other three stay `direct`,
-  so a codemode script reaches them for a filtered tree read or a join across
-  dm state. Fleet supervision is dungeon's job, not a script's.
-- `skills/dm-fleet/SKILL.md` carries the judgement a tool schema cannot: when
-  to split, when a lane is worth it, and the `lane/` box protocol.
-
-`dm llms` carries the mechanical surface and needs no install. pi is the only
-adapter today. The link rules live in `internal/provision` and know nothing
-about harnesses, so a second one is one adapter file: a harness is a name, a
-root and a list of mounts, and a harness with no extension concept mounts the
-skill alone. [13 Harnesses](docs/internals/13-harnesses.md) is the checklist and
-the rule that keeps it cheap.
+restart that spawns the panes fresh respawns the same program.
+
+`dm exec` prints the response as JSON, and a failed action exits non-zero.
+`dm man` names 71 of the 76 actions, with one example each, and the fields are
+one shared list. This page names the common ones only.
 
 ## Durability
 
-Two processes per session:
+A detach loses nothing: the panes, their processes and their scrollback stay,
+and a reattach draws the screen as you left it.
 
-```
-dm __server   owns layout, focus, clients; persists state.json on every change
-dm __pane     one per pane; owns the PTY, VT screen, status and a byte-budgeted ring
-```
+Kill the server (`kill -9`, crash, logout) and the panes keep running, including
+their shells, because each pane daemon has its own unix socket and is started
+with `setsid`. The next CLI call or attach restarts the server, which reads
+`state.json` and adopts the live pane daemons instead of respawning them. A pane
+whose shell or argv program exits is removed from the layout and its split
+collapses, and focus moves to a live neighbour. After a reboot the pane
+processes are gone, but layout, focus, window names, cwd and each pane's argv
+are in `state.json`. The server spawns fresh shells, or the recorded argv
+program, in the same places and marks them `restart: true`.
 
-Each pane daemon has its own unix socket and is started with `setsid`, so it
-survives the server. The server, on start, reads `state.json` and **adopts** the
-still-running pane daemons instead of respawning them.
-
-A pane daemon watches its own socket path. When the path is gone, or names a
-different file, no client can reach that daemon, so it stops its shell and
-exits. An intact path is the normal state while the server restarts, so the
-daemon stays.
-
-A pane daemon holds an output ring sized from `history-lines`: about 256 bytes
-per line, at least 512 KiB and at most 8 MiB. It runs with a memory ceiling
-32 MiB above that budget. A pane is still its own Go process, and that process
-is the floor: the ceiling bounds a burst, it does not lower the floor.
-
-- Kill the client: nothing is lost, reattach.
-- More than one client may attach. They share one layout: the largest attached
-  terminal sets the size, and when it detaches the next largest takes over, so
-  a small client cannot shrink everyone. A smaller client shows the layout
-  clipped to its own screen.
-- A pane exports `DM_SESSION` to its shell. `dm` refuses to attach that same
-  session from inside one of its own panes, because the mirror is useless and
-    competes for the shared size. `-s` attaches another session, but only a live
-  one; a name with no live session would nest a new one in the pane.
-- Kill the server (`kill -9`, crash, logout): panes keep running, including
-  their shells, because their sockets stay intact. The next CLI call or attach
-  restarts the server and reconnects the same pane processes. Content and
-  status are still there.
-- A pane whose shell or argv program exits is removed from the layout and its
-  split collapses. Focus moves to a live neighbour.
-- The last pane of a window closes the window. The last window ends the session:
-  the server removes its state directory and every attached client returns to
-  its shell. This is the tmux behaviour, not a respawn.
-- Reboot: pane processes are gone, but layout, focus, window names, cwd and
-  each pane's argv are in `state.json`. The server spawns fresh shells, or the
-  recorded argv program, in the same places and marks them `restart: true`.
+A pane daemon watches its own socket path: when the path is gone, or names a
+different file, no client can reach it, so it stops its shell and exits. It runs
+with a memory ceiling 32 MiB above its scrollback budget.
 
 State lives in `$DM_STATE`, else `$XDG_STATE_HOME/dm`, else
 `~/.local/state/dm`.
 
 ```
-sessions/<name>/state.json           layout, focus, names, cwd, the box
+sessions/<name>/state.json           layout, focus, names, cwd, the message log
 sessions/<name>/webpush.json         the phone push subscriptions
 sessions/<name>/webpush.key          the VAPID key pair that signs them
 sessions/<name>/server.sock          RPC and client socket
+sessions/<name>/server.lock          the flock that keeps one server per session
 sessions/<name>/server.pid           the server process id
 sessions/<name>/server.log           server stderr
 sessions/<name>/panes/<id>.sock      one per pane
@@ -1840,20 +969,15 @@ sessions/<name>/panes/<id>.log       pane daemon stderr
 sessions/<name>/panes/<id>.sock.pid  the pane process id
 ```
 
-## Tests
+## Tests and licence
 
 ```sh
 go test ./...
 ```
 
 The integration tests in `blackbox/` run the built binary against a temp state
-dir. They cover the pane-survives-server-kill path, split/close layout, zoom and
-rail resize, window and workspace switching, the JSON action path, OSC 7501
-status, the message box CLI and desktop notifications. Unit tests hold each
-generated document to its renderer: `docs/dm.1` and `docs/llms.txt` fail the
-gate when stale.
+dir. [docs/internals/README.md](docs/internals/README.md) lists the commands that
+keep the tree honest, in reading order for a contributor.
 
-## Licence
-
-MIT. The text is in [LICENSE](LICENSE), and every release carries it beside the
-tarballs, because an archive holds one file and a checksum line is a tarball.
+dm is MIT. The text is in [LICENSE](LICENSE), and every release carries it
+beside the tarballs.

@@ -1,15 +1,31 @@
 # dm plugins
 
-Status: the v1 contract. The design and the rejected alternatives live in
-`~/.agents/store/plans/specs/dm/plugin-system`. This file is what a plugin
-author reads.
+This page is the v1 contract for dm plugins. Read it before you write one.
 
 ## What a plugin is
 
-A plugin is a program in a pane. dm starts it, hands it a PTY and an
-invocation, and gets out of the way. There is no SDK and no ABI: the `dm` CLI
-and the message box are the whole API. A plugin can be a shell script, a TUI, a
-Go binary or anything else that runs.
+A plugin is a program in a pane. dm starts it, hands it a PTY and an invocation,
+and gets out of the way. There is no SDK and no ABI: the `dm` CLI and the message
+log are the whole API. A plugin can be a shell script, a TUI, a Go binary or
+anything else that runs.
+
+A plugin can:
+
+- open beside the focused pane, or in a new window
+- start from a key binding or from `dm plugin start`
+- run the whole CLI, from `dm exec` to `dm msg`
+- keep durable state in `DM_PLUGIN_STATE_DIR`
+- report status on OSC 7501, and its structured session file on OSC 7502
+- survive a client detach and a server restart
+
+A plugin cannot:
+
+- open in a floating pane. A floating pane ends with the client that opened it.
+- set a `DM_` environment name. dm sets those.
+- be stopped by a command. There is no `dm plugin stop`. Close the pane instead.
+- be sandboxed or reviewed. dm validates the declaration and nothing else.
+- get its declaration re-read on respawn. The pane records its argv at launch.
+- be restarted after a crash. dm has no restart policy.
 
 ## Declare it
 
@@ -24,16 +40,12 @@ plugin "git-rail" {
 }
 ```
 
-- `exec` is argv, and the program is an absolute path. dm runs no shell, so
-  there is no quoting and no expansion.
-- `cwd` is the folder the program runs in. Absent means the invoking pane's
-  folder.
-- `where` is `split` or `window`, and it is required. A float is refused: a
-  float ends with the client that opened it, and a plugin outlives a detach.
-- `env` is optional `KEY=VALUE`, for the plugin's own configuration. dm applies
-  it after the pane allowlist. A `DM_` name is refused; dm sets those.
-- An `exec` word may not be empty, and may not contain a comma or a NUL. The
-  comma is the separator the pane state and the daemon flag already use.
+| key | value |
+| --- | --- |
+| `exec` | Required. The argv, program first. The program is an absolute path, and dm runs no shell, so there is no quoting and no expansion. A word may not be empty, and may not contain a comma or a NUL. The comma is the separator the pane state and the daemon flag already use. |
+| `cwd` | The absolute folder the program runs in. Absent means the invoking pane's folder. |
+| `where` | Required. `split` or `window`. dm refuses a floating pane, because a floating pane ends with the client that opened it and a plugin outlives a detach. |
+| `env` | Optional `KEY=VALUE`, for the plugin's own configuration. dm applies it after the pane allowlist. A `DM_` name is refused, because dm sets those. A duplicate key is refused. |
 
 Bind it in a keymap:
 
@@ -43,9 +55,8 @@ keymap "main" {
 }
 ```
 
-A binding to a name the same file does not declare fails at load, with the
-line. The player key and the action are separate: the binding names the
-plugin, not its argv.
+A binding to a name the same file does not declare fails at load, with the line.
+The key and the action are separate. The binding names the plugin, not its argv.
 
 From a shell:
 
@@ -54,14 +65,13 @@ dm plugin list
 dm plugin start git-rail [--split|--window] [--target w1p1]
 ```
 
-`dm plugin start` defaults to the declaration's `where` and the focused pane.
-The server resolves the name from the config it already loads, so edit the
-file, reload (`prefix ctrl+r` in the client), and the next launch sees it.
+`dm plugin start` defaults to the declaration's `where` and the focused pane. The
+server resolves the name from the config it already loads. Edit the file, reload
+(`prefix ctrl+r` in the client), and the next launch sees it.
 
 ## What the pane gets
 
-Every pane gets `DM_SESSION`, `DM_PANE` and `DM_STATE`. A plugin pane also
-gets:
+Every pane gets `DM_SESSION`, `DM_PANE` and `DM_STATE`. A plugin pane also gets:
 
 | Name | Value |
 | --- | --- |
@@ -89,41 +99,43 @@ The context is one JSON object, fixed at launch:
 ```
 
 `source` is `key` when a keymap started it, `cli` from `dm plugin start`, and
-absent from a raw `dm exec`. Every field is optional. The context is a
-snapshot: a long-lived plugin reads `dm list --json`, `dm status` and `dm
-wait` for the present.
+absent from a raw `dm exec`. Every field is optional. The context is a snapshot.
+A long-lived plugin reads `dm list --json`, `dm status` and `dm wait` for the
+present.
 
-## Lifecycle
+## Plugin lifecycle
 
-- The pane is server-owned. It survives a client detach and a server restart.
-  A live pane is adopted; a dead one respawns with the argv recorded at launch.
-- Close the pane to stop the plugin. There is no `dm plugin stop`.
+- The pane is server-owned. A live pane is adopted after a server restart, and
+  a dead one respawns with the argv recorded at launch.
+- Close the pane to stop the plugin.
 - Updating the declaration does not change a running pane. Relaunch it.
 - A plugin that must survive its own crash runs under a wrapper loop in the
-  same pane. dm has no restart policy.
+  same pane.
 - The plugin's `dm` calls fail while the server restarts. A `dm msg sub`
-  connection ends and must be re-established from the last `seq`.
+  connection ends, and the plugin re-establishes it from the last `seq`.
 
 ## Talk to the session
 
-A plugin has the whole CLI: `dm exec`, `dm msg ...`, `dm read`, `dm
-write-to`, `dm list`, `dm status`, `dm wait`. Run `dm llms` for the one-pass
-reference.
+A plugin has the whole CLI: `dm exec`, `dm msg ...`, `dm read`, `dm write-to`,
+`dm list`, `dm status`, `dm wait`. Run `dm llms` for the one-pass reference.
 
-The message box is the event bus. `dm msg sub --prefix notify/ --json` streams
-pane state changes and exits; `notify/<pane>` is the only producer today. For
-the plugin's own traffic:
+The message log is the event bus. `dm msg sub --prefix notify/ --json` streams
+pane state changes until you kill it. It redials when the connection drops. The
+one producer is `notify/<pane>`. For the plugin's own traffic:
 
-- Reserve `plugin/<name>/...`.
-- `plugin/<name>/state` is a status board: the newest entry wins.
-- `plugin/<name>/cmd/...` is a command channel.
-- `plugin/<name>/events` is a stream.
+| topic | use |
+| --- | --- |
+| `plugin/<name>/...` | the namespace the plugin reserves |
+| `plugin/<name>/state` | a status board: the newest entry wins |
+| `plugin/<name>/cmd/...` | a command channel |
+| `plugin/<name>/events` | a stream |
 
-The box is one append-only log per session, capped at 1000 entries and 256 KiB.
-`seq` only grows; a reader persists the last `seq` in its own state directory
-and resumes with `--after`. Post on change, not on tick.
+One message log serves a session. It is append-only, capped at 1000 entries and
+256 KiB. `seq` only grows. A reader keeps the last `seq` in its own state
+directory and resumes with `--after`. Post on change, not on tick.
 
-To report status to the rail, the bar and the notifications, speak OSC 7501:
+To report status to the sidebar, the status bar and the notifications, speak
+OSC 7501:
 
 ```
 ESC ] 7501 ; state=working:app=myapp:msg=<base64> ESC \
@@ -146,7 +158,7 @@ ESC ] 7502 ; session=<base64 path> ; id=<id> ESC \
 - A frame has three outcomes. A `session=` value that decodes names a session.
   An empty `session=` value clears it, because the agent that wrote the file is
   gone. A frame with no `session` key at all, or a value that does not decode, is
-  ignored, and the pane keeps the last good value.
+  ignored. The pane keeps the last good value.
 - Send the clear frame when your agent exits. If you do not, the pane keeps the
   session it was given, and a viewer paints a transcript over a bare shell
   prompt.
@@ -155,7 +167,7 @@ ESC ] 7502 ; session=<base64 path> ; id=<id> ESC \
 - A program is free to emit nothing. A shell pane has no session, and that is
   normal: a viewer falls back to the screen.
 
-## Example
+## Worked example
 
 `examples/echo-plugin/echo.sh` posts `ready`, then echoes every command posted
 to `plugin/echo/cmd/...` back on `plugin/echo/state`. It uses `dm` from `PATH`
@@ -181,23 +193,22 @@ dm msg post --key plugin/echo/cmd/one --state note --msg hello
 dm msg list --prefix plugin/echo/
 ```
 
-The pane prints nothing but the shell's own output; the conversation is on the
-box, where any pane, agent or script can join it.
+The pane prints nothing but the shell's own output. The conversation is on the
+message log, where any pane, agent or script can join it.
 
 ## Trust and limits
 
 A plugin runs as you, with your environment and your access. dm validates the
-declaration and nothing else. It does not sandbox or review plugin code.
-Install or write only what you trust.
+declaration and nothing else. It does not sandbox or review plugin code. Install
+or write only what you trust.
 
 Known limits:
 
-- A plugin's pane is a real pane. The layout holds it and closing it ends the
+- A plugin's pane is a real pane. The layout holds it, and closing it ends the
   plugin.
-- The box is shared with lanes and agents. A chatty plugin evicts their
-  history.
+- The message log is shared with the agents in other panes. A chatty plugin
+  evicts their history.
 - The context is a launch snapshot, not a live view.
-- The pane's argv is pinned in `state.json`; a respawn does not re-read the
-  declaration.
-- Host-rendered plugin surfaces, a bar cell or a float over a box topic, are
-  deferred. v1 gives the plugin its pane.
+- The pane's argv is pinned in `state.json`.
+- A host-rendered surface, a status bar cell or a floating pane over a
+  message-log topic, is not built. v1 gives the plugin its pane.
