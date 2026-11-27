@@ -152,6 +152,7 @@ func TestConfigNodesParse(t *testing.T) {
 		"ask-split":         `ask-split 70`,
 		"diff-command":      `diff-command "git diff --stat"`,
 		"web-addr":          `web-addr "you.ts.net:8099"`,
+		"web-token":         `web-token "phonepin0001"`,
 		"dashboard-layout":  `dashboard-layout "float"`,
 		"dashboard-peek":    `dashboard-peek "right"`,
 		"shelf-layout":      `shelf-layout "pane"`,
@@ -218,6 +219,12 @@ func TestConfigNodesParse(t *testing.T) {
 	}
 	if !cfg.WebAddrSet() {
 		t.Error("WebAddrSet = false, want true")
+	}
+	if got := cfg.WebToken(); got != "phonepin0001" {
+		t.Errorf("WebToken = %q, want %q", got, "phonepin0001")
+	}
+	if !cfg.WebTokenSet() {
+		t.Error("WebTokenSet = false, want true")
 	}
 	if !cfg.FloatShadow() {
 		t.Error("FloatShadow = false, want true")
@@ -300,6 +307,7 @@ func TestConfigNodeDefaults(t *testing.T) {
 		"ask-split":         strconv.Itoa(cfg.AskSplit()),
 		"diff-command":      `"` + cfg.DiffCommand() + `"`,
 		"web-addr":          `"` + cfg.WebAddr() + `"`,
+		"web-token":         "",
 		"dashboard-layout":  either(cfg.DashboardFullScreen(), `"full"`, `"float"`),
 		"dashboard-peek":    either(cfg.DashboardPeekDown(), `"down"`, `"right"`),
 		"shelf-layout":      either(cfg.ShelfCentered(), `"centered"`, `"pane"`),

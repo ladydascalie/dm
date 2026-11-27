@@ -101,6 +101,12 @@ var ConfigNodes = []ConfigNode{
 		Desc:    "Set the host:port dm web listens on. It applies only when --addr is not passed, so an explicit flag always wins. An absent or empty node keeps the loopback default; a value that is not host:port is refused when the config loads.",
 	},
 	{
+		Name:    "web-token",
+		Value:   "a quoted token of letters, digits, underscore or hyphen",
+		Default: "",
+		Desc:    "Set the token dm web serves. It applies only when --token is not passed. A pinned token never changes, so a bookmarked URL and an installed phone app keep working across restarts, new session directories and a moved state tree; an absent or empty node lets the session's web.token decide.",
+	},
+	{
 		Name:    "dashboard-layout",
 		Value:   `"full" or "float"`,
 		Default: `"float"`,
@@ -211,7 +217,7 @@ var Files = []File{
 	},
 	{
 		Path:  "$XDG_CONFIG_HOME/dm/config.kdl",
-		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
+		Desc:  "Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, web-token, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.",
 		Write: true,
 	},
 	{

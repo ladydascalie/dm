@@ -503,6 +503,7 @@ optional and each one overrides its built-in value.
 | `ask-split` | an integer from 20 to 80 | `60` | Set the share of the question panel's width the detail column takes, in percent. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
 | `web-addr` | a quoted host:port, as in `"you.ts.net:8099"` | `"127.0.0.1:8099"` | Set the host:port `dm web` listens on when `--addr` is not passed. An absent or empty node keeps the loopback default. |
+| `web-token` | a quoted token of letters, digits, underscore or hyphen | none | Set the token `dm web` serves when `--token` is not passed. A pinned token never changes, so a bookmarked URL and an installed phone app keep working across restarts, new session directories and a moved state tree. An absent or empty node lets the session's `web.token` decide. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 | `command` | a quoted name and a `{ run "..." }` block | none | Define a command a keymap can run; bind `command:<name>` to a key, and the row runs the run text in a floating pane. |
@@ -676,9 +677,18 @@ dm web --addr you.ts.net:8099 --read-only     # no input, no compose, no actions
 ```
 
 The token is the whole access model. `dm web` prints the URL with the token on
-it, and the page trades that token for a cookie on the first load. Pass `--token`
-to set one; leave it empty and a token is generated. A listener that is not
-loopback also prints the link as a QR code.
+it, and the page trades that token for a cookie on the first load. The cookie
+lasts 400 days, so bookmark the bare address: after the first visit the token
+never has to appear again. A listener that is not loopback also prints the link
+as a QR code.
+
+Pin the token in `config.kdl` with `web-token` and it never changes, which is
+what keeps a bookmark and an installed app working across restarts, new session
+directories and a moved state tree. Without the node the session keeps a
+generated token in `sessions/<name>/web.token`, so it already survives a
+restart; a new session directory starts a new one. `--token` overrides both for
+a single run. A page that a rotated token locked out answers the next `GET /`
+with a field for the current token, so a phone recovers without the old URL.
 
 The page has five parts. The pane list shows every pane with its agent status,
 message, branch and folder, and puts the panes that want a decision first. The

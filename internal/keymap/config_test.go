@@ -1596,6 +1596,76 @@ func TestConfigWebAddrRefused(t *testing.T) {
 	}
 }
 
+// TestConfigWebToken reads the token dm web serves: the node, the empty value
+// that lets the session file decide, and the shape a token must have.
+func TestConfigWebToken(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+		set  bool
+	}{
+		{"absent", `prefix "ctrl+b"`, "", false},
+		{"set", `web-token "phonepin0001"`, "phonepin0001", true},
+		{"empty", `web-token ""`, "", false},
+		{"dash", `web-token "a-b_c-1234"`, "a-b_c-1234", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg, err := parseConfig(c.src)
+			if err != nil {
+				t.Fatalf("parseConfig: %v", err)
+			}
+			if got := cfg.WebToken(); got != c.want {
+				t.Fatalf("WebToken() = %q, want %q", got, c.want)
+			}
+			if got := cfg.WebTokenSet(); got != c.set {
+				t.Fatalf("WebTokenSet() = %v, want %v", got, c.set)
+			}
+		})
+	}
+	if LoadDefault().WebTokenSet() {
+		t.Fatal("LoadDefault().WebTokenSet() = true, want false: the node is optional")
+	}
+}
+
+// TestConfigWebTokenRefused proves a token a URL cannot carry, or one too short
+// to be a guard, is refused at parse time with the key named and the value
+// quoted, and a second node is a duplicate.
+func TestConfigWebTokenRefused(t *testing.T) {
+	for _, value := range []string{
+		"short",
+		"has space here",
+		"has/slash01",
+		"has?query01",
+		strings.Repeat("a", 129),
+	} {
+		src := `web-token "` + value + `"`
+		_, err := parseConfig(src)
+		if err == nil {
+			t.Fatalf("parseConfig accepted %q", src)
+		}
+		if !strings.Contains(err.Error(), "web-token") {
+			t.Fatalf("error = %q, want the node name", err)
+		}
+		if !strings.Contains(err.Error(), `"`+value+`"`) {
+			t.Fatalf("error = %q, want the value quoted", err)
+		}
+	}
+	if _, err := parseConfig("web-token"); err == nil || !strings.Contains(err.Error(), "web-token") {
+		t.Fatalf("error = %v, want the node name", err)
+	}
+	if _, err := parseConfig(`web-token 12345678`); err == nil || !strings.Contains(err.Error(), "web-token") {
+		t.Fatalf("error = %v, want the node name", err)
+	}
+	if _, err := parseConfig("web-token \"phonepin0001\"\nweb-token \"phonepin0002\""); err == nil {
+		t.Fatal("parseConfig accepted two web-token nodes")
+	}
+	if _, err := parseConfig(`web-token ""` + "\n" + `web-token "phonepin0002"`); err == nil {
+		t.Fatal("parseConfig accepted two web-token nodes, the first empty")
+	}
+}
+
 // TestConfigDefaultFold proves the default fold setting: absent means unfolded,
 // "fold" means folded and "unfold" means unfolded.
 func TestConfigDefaultFold(t *testing.T) {

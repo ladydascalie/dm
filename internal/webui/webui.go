@@ -262,6 +262,12 @@ func embedFile(name, contentType string) http.Handler {
 	})
 }
 
+// cookieDays is how long a paired device stays paired. It is the longest life
+// a browser honours, because the cookie is what a bookmark leans on: a phone
+// that has to trade the token again every month is a phone whose bookmark
+// breaks, and an installed app has no address bar to paste one into.
+const cookieDays = 400
+
 // index serves the page and remembers a token that arrived in the query.
 func (h *Handler) index(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("t") != "" {
@@ -269,7 +275,7 @@ func (h *Handler) index(w http.ResponseWriter, r *http.Request) {
 			Name:     tokenCookie,
 			Value:    h.cfg.Token,
 			Path:     "/",
-			MaxAge:   30 * 24 * 60 * 60,
+			MaxAge:   cookieDays * 24 * 60 * 60,
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
 		})

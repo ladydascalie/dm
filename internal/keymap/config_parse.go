@@ -361,6 +361,20 @@ func parseKeymaps(toks []kdl.Token, cfg *Config) error {
 			cfg.webAddr = v.Value
 			cfg.webAddrSet = true
 			i += 2
+		case "web-token":
+			if cfg.webTokenSet {
+				return fmt.Errorf("line %d: duplicate web-token node", t.Line)
+			}
+			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
+				return fmt.Errorf("line %d: expected a quoted token after web-token", t.Line)
+			}
+			v := toks[i+1]
+			if err := checkWebToken(v.Value); err != nil {
+				return fmt.Errorf("line %d: web-token %s, got %q", v.Line, err, v.Value)
+			}
+			cfg.webToken = v.Value
+			cfg.webTokenSet = true
+			i += 2
 		case "theme":
 			if i+1 >= len(toks) || toks[i+1].Kind != kdl.String {
 				return fmt.Errorf("line %d: expected quoted theme name after theme", t.Line)
@@ -956,6 +970,31 @@ func checkWebAddr(v string) error {
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 0 || n > 65535 {
 		return errors.New("must be host:port with a numeric port")
+	}
+	return nil
+}
+
+// checkWebToken holds a web-token value to what a URL can carry and a hand can
+// retype: at least eight characters of letters, digits, underscore or hyphen.
+// A short token is a guessable one, and this token is the only guard a listener
+// off loopback has. An empty value keeps the session file's token, so it stays
+// valid.
+func checkWebToken(v string) error {
+	if v == "" {
+		return nil
+	}
+	if len(v) < 8 {
+		return errors.New("must be at least 8 characters")
+	}
+	if len(v) > 128 {
+		return errors.New("must be at most 128 characters")
+	}
+	for _, r := range v {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return errors.New("must be letters, digits, underscore or hyphen")
+		}
 	}
 	return nil
 }

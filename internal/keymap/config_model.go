@@ -132,6 +132,12 @@ type Config struct {
 	// webAddrSet separates a named empty value from a config with no node.
 	webAddr    string
 	webAddrSet bool
+	// webToken is the access token dm web serves when --token is absent, so a
+	// phone's URL survives every restart, every state tree move and every new
+	// session directory. An empty value means the config never named the node,
+	// and the session's web.token decides.
+	webToken    string
+	webTokenSet bool
 	// commands maps a command name to its run text. A config without a
 	// command block carries an empty map.
 	commands map[string]string
@@ -354,6 +360,23 @@ func (c *Config) WebAddr() string {
 // built-in default and reports false.
 func (c *Config) WebAddrSet() bool {
 	return c != nil && c.webAddrSet && c.webAddr != ""
+}
+
+// WebToken returns the access token dm web serves when --token is not passed.
+// A named token never rotates, so the URL a phone paired with keeps working
+// even when the session directory is new. An empty value means the config
+// never named the node, and the session's web.token decides instead.
+func (c *Config) WebToken() string {
+	if c == nil {
+		return ""
+	}
+	return c.webToken
+}
+
+// WebTokenSet reports whether the config named a non-empty web-token, so a
+// caller can say where the token came from.
+func (c *Config) WebTokenSet() bool {
+	return c != nil && c.webTokenSet && c.webToken != ""
 }
 
 // Commands returns every command the config defines, sorted by name.

@@ -171,6 +171,14 @@ func TestIndexSetsCookie(t *testing.T) {
 			if c.Value != "s3cret" {
 				t.Fatalf("cookie %q", c.Value)
 			}
+			// The cookie is what a bookmark and an installed app lean on, so
+			// it has to outlive a month of not opening the page.
+			if want := cookieDays * 24 * 60 * 60; c.MaxAge != want {
+				t.Fatalf("cookie MaxAge = %d, want %d", c.MaxAge, want)
+			}
+			if cookieDays < 365 {
+				t.Fatalf("cookieDays = %d, want a year or more", cookieDays)
+			}
 			return
 		}
 	}

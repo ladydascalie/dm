@@ -139,6 +139,46 @@ func TestWebAddrRefused(t *testing.T) {
 	}
 }
 
+// TestWebTokenFromConfig proves a bare dm web serves the pinned token, which is
+// the whole point of the node: a phone's URL keeps working across restarts and
+// new session directories.
+func TestWebTokenFromConfig(t *testing.T) {
+	c := webFlags(t, `web-token "phonepin0001"`+"\n")
+	token, fromConfig := webToken(c)
+	if token != "phonepin0001" {
+		t.Fatalf("token = %q, want the config's phonepin0001", token)
+	}
+	if !fromConfig {
+		t.Fatal("fromConfig = false, want true: the config supplied the token")
+	}
+}
+
+// TestWebTokenFlagWins proves --token beats the node, so a one-off run never
+// rewrites the pinned token.
+func TestWebTokenFlagWins(t *testing.T) {
+	c := webFlags(t, `web-token "phonepin0001"`+"\n", "--token", "oneoff0002")
+	token, fromConfig := webToken(c)
+	if token != "oneoff0002" {
+		t.Fatalf("token = %q, want the flag's oneoff0002", token)
+	}
+	if fromConfig {
+		t.Fatal("fromConfig = true, want false: the flag supplied the token")
+	}
+}
+
+// TestWebTokenAbsent proves a config without the node names no token, so the
+// session file keeps whatever the last run used.
+func TestWebTokenAbsent(t *testing.T) {
+	c := webFlags(t, "")
+	token, fromConfig := webToken(c)
+	if token != "" {
+		t.Fatalf("token = %q, want empty: the session file decides", token)
+	}
+	if fromConfig {
+		t.Fatal("fromConfig = true, want false: no node names the token")
+	}
+}
+
 // TestAnnounceWebAddrSilent proves the line is printed once and never when the
 // address did not come from the config.
 func TestAnnounceWebAddrSilent(t *testing.T) {

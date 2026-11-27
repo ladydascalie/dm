@@ -17,12 +17,14 @@ func runWeb(c *cmdFlags) error {
 	if err != nil {
 		return err
 	}
+	token, tokenFromConfig := webToken(c)
 	announceWebAddr(os.Stdout, addr, fromConfig)
+	announceWebToken(os.Stdout, tokenFromConfig)
 	return webui.Run(webui.Config{
 		Addr:     addr,
 		Session:  c.session,
 		Root:     c.root,
-		Token:    c.token,
+		Token:    token,
 		ReadOnly: c.readOnly,
 	})
 }
@@ -45,6 +47,36 @@ func webAddr(c *cmdFlags) (string, bool, error) {
 		return "", false, err
 	}
 	return cfg.WebAddr(), cfg.WebAddrSet(), nil
+}
+
+// webToken resolves the access token. An explicit --token wins, so a one-off
+// run never rewrites the pinned one. Without the flag the config's web-token
+// decides, and a config that never names it returns "", which lets the session
+// file keep the token the last run used.
+func webToken(c *cmdFlags) (string, bool) {
+	if c.flagGiven("token") {
+		return c.token, false
+	}
+	cfg, err := keymap.LoadDefaultPath(false)
+	if err != nil {
+		// webAddr already refuses an unparsable config, so this run has a
+		// listener address and a broken config only in a test that calls the
+		// resolver alone. A generated token is still better than none.
+		return "", false
+	}
+	if !cfg.WebTokenSet() {
+		return "", false
+	}
+	return cfg.WebToken(), true
+}
+
+// announceWebToken prints where the token came from, so an operator who cannot
+// find the URL knows which node pins it.
+func announceWebToken(w io.Writer, fromConfig bool) {
+	if !fromConfig {
+		return
+	}
+	fmt.Fprintln(w, "dm web: token from config.kdl web-token: this URL never changes")
 }
 
 // flagGiven reports whether argv carried the named flag. It reads the flag

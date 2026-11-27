@@ -116,7 +116,7 @@ var cliCommands = []cliCommand{
 		flags: []cliFlag{
 			{"s", "name", "session name"},
 			{"addr", "host:port", "listen address"},
-			{"token", "t", "access token, generated when empty"},
+			{"token", "t", "access token; config.kdl web-token pins it, and one is generated when neither is set"},
 			{"read-only", "", "refuse keys, messages and actions"},
 		},
 		example: "dm web --addr you.ts.net:8099",

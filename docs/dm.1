@@ -46,7 +46,7 @@ serve the session to a browser, for a phone on your tailnet
 .br
 \fB--addr host:port\fP listen address
 .br
-\fB--token t\fP access token, generated when empty
+\fB--token t\fP access token; config.kdl web-token pins it, and one is generated when neither is set
 .br
 \fB--read-only\fP refuse keys, messages and actions
 .br
@@ -1164,6 +1164,10 @@ Set the command the dashboard diff key runs in a floating pane, or in a split pa
 Value: \fIa quoted host:port, as in "you.ts.net:8099"\fP. Default: \fI"127.0.0.1:8099"\fP.
 Set the host:port dm web listens on. It applies only when --addr is not passed, so an explicit flag always wins. An absent or empty node keeps the loopback default; a value that is not host:port is refused when the config loads.
 .TP
+\fBweb-token\fP
+Value: \fIa quoted token of letters, digits, underscore or hyphen\fP. Default: none.
+Set the token dm web serves. It applies only when --token is not passed. A pinned token never changes, so a bookmarked URL and an installed phone app keep working across restarts, new session directories and a moved state tree; an absent or empty node lets the session's web.token decide.
+.TP
 \fBdashboard-layout\fP
 Value: \fI"full" or "float"\fP. Default: \fI"float"\fP.
 Draw the dashboard over the whole screen, or as a palette centred over the panes.
@@ -1442,7 +1446,7 @@ Unix socket one pane's mux listens on.
 Pane output log.
 .TP
 \fB$XDG_CONFIG_HOME/dm/config.kdl\fP
-Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.
+Holds prefix, keymaps, commands, plugins, default-fold, tab-min-width, tab-max-width, padding, history-lines, glyphs, window-label, dashboard-preview, palette-rows, ask-rows, ask-cols, ask-split, diff-command, web-addr, web-token, dashboard-layout, dashboard-peek, shelf-layout, shelf-size, float-shadow and theme name; written on first run.
 .TP
 \fB$XDG_CONFIG_HOME/dm/themes/<name>.kdl\fP
 Theme palette, accents, glyphs and state styles.
