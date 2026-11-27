@@ -1,6 +1,6 @@
 ---
 name: dm-release
-description: Cut a dm release: choose the next version, prove the artifacts locally, tag, watch the GitHub workflow, verify the published assets, and recover a failed publish. Use when asked to bump dm's version, ship a release, publish a tag, or check why a release run failed.
+description: "Cut a dm release: choose the next version, prove the artifacts locally, tag, watch the GitHub workflow, verify the published assets, and recover a failed publish. Use when asked to bump dm's version, ship a release, publish a tag, or check why a release run failed."
 ---
 
 # dm release

@@ -3,3 +3,5 @@ dm
 internal/esctest/testdata/esctest/
 gremlins-results/
 out/
+.site
+site

@@ -1,0 +1,65 @@
+# Build the markdown in this repo into the GitHub Pages site.
+#
+# The site is the same files a reader finds in the tree: scripts/docs-site.sh
+# stages the published pages and builds them, so the workflow holds no
+# knowledge of the docs. A page that is staged but missing from mkdocs.yml's
+# nav fails the build, and so does a broken link.
+#
+# Deploying is the only thing this workflow does that a push cannot undo: it
+# publishes to https://ladydascalie.github.io/dm/.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.md'
+      - mkdocs.yml
+      - requirements-docs.txt
+      - scripts/docs-site.sh
+      - .github/workflows/pages.yaml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and a queued run is never cancelled mid-publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+
+      - name: install the docs toolchain
+        run: pip install -r requirements-docs.txt
+
+      - name: build
+        run: ./scripts/docs-site.sh
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

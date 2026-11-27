@@ -42,7 +42,8 @@ help:
 		docs-internals "regenerate docs/internals/generated/package-graph.md" \
 		dist "build and tar $(DIST_PAIRS) into out/, then write out/checksums.txt" \
 		release-check "go test the release packages, then make dist" \
-		provision-check "fail unless this checkout's extension and skill are linked into the harness"
+		provision-check "fail unless this checkout's extension and skill are linked into the harness" \
+		docs-site "stage the published markdown and build the GitHub Pages site into site/"
 
 .PHONY: test
 test:
@@ -149,3 +150,10 @@ provision-check:
 .PHONY: docs-internals
 docs-internals:
 	go test -count=1 -run TestGenerated ./internal/archdoc -update
+
+# The Pages site. Never a gate: it needs zensical from requirements-docs.txt,
+# which the Go build does not. The workflow runs the same script, so a local
+# build and the deployed site cannot disagree.
+.PHONY: docs-site
+docs-site:
+	uv run --quiet --with-requirements requirements-docs.txt ./scripts/docs-site.sh

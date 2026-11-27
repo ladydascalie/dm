@@ -1,0 +1,89 @@
+# The dm documentation site, built from the markdown the repo already holds.
+#
+# The build tool is Zensical, Material for MkDocs's maintained successor, and
+# it reads this file unchanged: mkdocs.yml is the migration format. Pin the
+# tool in requirements-docs.txt and a config that builds today keeps building.
+# `scripts/docs-site.sh` stages the published pages into .site/ first, so
+# docs_dir is that staging tree and never the repo root: a working note, a
+# generated binary or an out/ tarball cannot reach the site by existing. The
+# staging tree mirrors the repo layout exactly, so every relative link in the
+# markdown resolves unchanged (`../../README.md` from an internals page is the
+# same file in the same place).
+#
+# `strict: true` is the gate: a broken link, or a page staged but missing from
+# the nav, fails the build instead of shipping a dead site.
+site_name: dm
+site_url: https://ladydascalie.github.io/dm/
+site_description: A durable terminal multiplexer for coding agents.
+repo_url: https://github.com/ladydascalie/dm
+repo_name: ladydascalie/dm
+edit_uri: edit/main/
+docs_dir: .site
+site_dir: site
+strict: true
+copyright: MIT licensed
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.tracking
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+
+plugins:
+  - search
+
+nav:
+  - Home: README.md
+  - Plugin protocol: PLUGINS.md
+  - Internals:
+      - docs/internals/README.md
+      - Entry point: docs/internals/01-entry-point.md
+      - Lifecycle and state: docs/internals/02-lifecycle.md
+      - The protocol: docs/internals/03-protocol.md
+      - The server: docs/internals/04-server.md
+      - The pane daemon: docs/internals/05-pane.md
+      - The client: docs/internals/06-client.md
+      - Layout: docs/internals/07-layout.md
+      - Surfaces: docs/internals/08-surfaces.md
+      - Secrets: docs/internals/09-secrets.md
+      - Config and the CLI: docs/internals/10-config.md
+      - Layers: docs/internals/11-layers.md
+      - Shipping: docs/internals/12-release.md
+      - Harnesses: docs/internals/13-harnesses.md
+      - Package graph: docs/internals/generated/package-graph.md
+  - Releases:
+      - v0.1.0: docs/releases/v0.1.0.md
+  - Skills:
+      - Fleet judgement: skills/dm-fleet/SKILL.md
+      - The dm-agent extension: skills/dm-agent/README.md
+      - Cutting a release: skills/dm-release/SKILL.md
+      - Adding a harness: skills/dm-add-harness/SKILL.md
