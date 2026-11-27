@@ -45,6 +45,7 @@ help:
 		provision-check "fail unless this checkout's extension and skill are linked into the harness" \
 		docs-site "stage the published markdown and build the GitHub Pages site into site/" \
 		docs-casts "record the demo casts the docs site plays, from a scratch state" \
+		docs-casts-check "re-check the recorded casts: header, events, input, last frame, webfont" \
 		docs-font "rebuild docs/assets/font/dm-cast-mono.woff2 from its upstream" \
 
 .PHONY: test
@@ -163,10 +164,17 @@ docs-site:
 # A cast is recorded from a live session, by a feeder script and an asciinema
 # pty. The taping is local: it needs a terminal, real timing and a whole dm
 # server, none of which belong in CI. The recipe is in the tree, so the casts
-# are checked in beside the pages that play them.
+# are checked in beside the pages that play them. One demo is one file in
+# scripts/casts/scenario, and `record.sh --dry-run` prints what each one would
+# record. Pass a name to tape one: `make docs-casts CASTS=split`.
 .PHONY: docs-casts
 docs-casts:
-	./scripts/casts/record.sh
+	./scripts/casts/record.sh $(CASTS)
+
+# check.sh needs no recorder and no terminal: it reads the checked-in casts.
+.PHONY: docs-casts-check
+docs-casts-check:
+	./scripts/casts/check.sh docs/casts/*.cast
 
 # The subset carries the glyphs dm draws, and the recorder fails when a cast
 # grows one the font lacks. Rebuild it after such a failure, and after a dm

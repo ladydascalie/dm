@@ -73,6 +73,7 @@ plugins:
 nav:
   - Home: README.md
   - Plugin protocol: PLUGINS.md
+  - Demos: docs/demos.md
   - Internals:
       - docs/internals/README.md
       - Entry point: docs/internals/01-entry-point.md

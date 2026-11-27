@@ -107,10 +107,8 @@ is armed, `SCROLL <pane> +<offset>/<max>` while you scroll, and
 
 ## Demos
 
-Two recordings show the basics. A player opens on a still frame, so press play
-once. Every key the recording sends lands in the bottom right of the terminal as
-a chip, so the demo names the key and shows what it does. `k` turns that overlay
-off and on.
+Two recordings show the basics. Press play once, and `k` turns the key chip in
+the bottom right off and on.
 
 <div data-cast="docs/casts/split.cast"></div>
 
@@ -124,8 +122,8 @@ shell.
 regroups that workspace under its project. `dm ls` prints the same project, so
 the name lives in the session and not on the screen.
 
-`scripts/casts/record.sh` records both casts against a scratch state and
-config. The page plays whatever that script last wrote.
+[The Demos page](docs/demos.md) plays five more: windows, panes, scrollback, the
+dashboard and the command palette.
 
 ## Sessions and panes
 

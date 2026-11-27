@@ -28,7 +28,7 @@ mkdir -p "$stage"
 staged=0
 while IFS= read -r -d '' file; do
 	case "$file" in
-	README.md | PLUGINS.md | docs/internals/* | docs/releases/*)
+	README.md | PLUGINS.md | docs/demos.md | docs/internals/* | docs/releases/*)
 		install -D -m 0644 "$file" "$stage/$file"
 		staged=$((staged + 1))
 		;;
