@@ -454,7 +454,7 @@ optional and each one overrides its built-in value.
 | `ask-cols` | an integer from 40 to 240 | `96` | Set the widest the question panel may stand, in columns. It still keeps six columns clear of the screen edge. |
 | `ask-split` | an integer from 20 to 80 | `60` | Set the share of the question panel's width the detail column takes, in percent. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through `sh -c` in the selected pane's folder. |
-| `web-addr` | a quoted host:port, as in `"100.71.227.52:8099"` | `"127.0.0.1:8099"` | Set the host:port `dm web` listens on when `--addr` is not passed. An absent or empty node keeps the loopback default. |
+| `web-addr` | a quoted host:port, as in `"you.ts.net:8099"` | `"127.0.0.1:8099"` | Set the host:port `dm web` listens on when `--addr` is not passed. An absent or empty node keeps the loopback default. |
 | `theme` | a quoted theme name matching `[A-Za-z0-9_-]+` | none | Select a theme from the themes directory beside `config.kdl`. No node keeps the built-in theme. |
 | `keymap` | a quoted mode name and a `{ "action" "key" }` block | the built-in table | Patch one keymap mode; an action the file leaves out keeps its built-in key. |
 | `command` | a quoted name and a `{ run "..." }` block | none | Define a command a keymap can run; bind `command:<name>` to a key, and the row runs the run text in a floating pane. |
@@ -623,8 +623,8 @@ can watch a screen nobody sits at.
 
 ```sh
 dm web                                        # loopback only
-dm web --addr 100.71.227.52:8099              # the tailnet address a phone reaches
-dm web --addr 100.71.227.52:8099 --read-only  # no input, no compose, no actions
+dm web --addr you.ts.net:8099                 # your own host, reachable from the phone
+dm web --addr you.ts.net:8099 --read-only     # no input, no compose, no actions
 ```
 
 The token is the whole access model. `dm web` prints the URL with the token on

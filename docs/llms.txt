@@ -20,7 +20,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm attach` | `[-s name] [-L layout [--force]]` | attach to a session, creating it if needed (alias: a) | `dm attach -s work` |
 | `dm new` | `[-s name] [-L layout [--force]]` | start a session without attaching | `dm new -s work` |
 | `dm ls` | `-` | list sessions with pane counts and project (alias: list-sessions) | `dm ls` |
-| `dm web` | `[-s name] [--addr host:port] [--token t] [--read-only]` | serve the session to a browser, for a phone on your tailnet | `dm web --addr 100.71.227.52:8099` |
+| `dm web` | `[-s name] [--addr host:port] [--token t] [--read-only]` | serve the session to a browser, for a phone on your tailnet | `dm web --addr you.ts.net:8099` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
 | `dm reset` | `[-s name \| --all] --force` | discard a session and its panes for a full restart | `dm reset -s work --force` |
@@ -221,7 +221,7 @@ The sidebar is a tree of workspaces, windows and panes. A workspace row is a fol
 | `ask-cols` | an integer from 40 to 240 | `96` | Set the widest the ask float may stand, in columns. The float still keeps six columns clear of the screen edge, so a value wider than the terminal only uses what is there. |
 | `ask-split` | an integer from 20 to 80 | `60` | Set the share of the ask box's width the detail column takes, in percent. The options are labels on one row each, so the detail column, which carries the description and the preview, takes the larger half. |
 | `diff-command` | a quoted shell command | `"hunk diff"` | Set the command the dashboard diff key runs in a floating pane, or in a split pane with the dashboard's diff-split key. It runs through sh -c in the selected pane folder. |
-| `web-addr` | a quoted host:port, as in "100.71.227.52:8099" | `"127.0.0.1:8099"` | Set the host:port dm web listens on. It applies only when --addr is not passed, so an explicit flag always wins. An absent or empty node keeps the loopback default; a value that is not host:port is refused when the config loads. |
+| `web-addr` | a quoted host:port, as in "you.ts.net:8099" | `"127.0.0.1:8099"` | Set the host:port dm web listens on. It applies only when --addr is not passed, so an explicit flag always wins. An absent or empty node keeps the loopback default; a value that is not host:port is refused when the config loads. |
 | `dashboard-layout` | "full" or "float" | `"float"` | Draw the dashboard over the whole screen, or as a palette centred over the panes. |
 | `dashboard-peek` | "right" or "down" | `"down"` | Set where the dashboard preview band sits: under the table, or beside it on the right. The peek key still shows and hides the band. |
 | `shelf-layout` | "centered" or "pane" | `"centered"` | Place the summoned shelf as a centred tray over the pane area, or over the focused pane. The rail, the tab bar and the status bar stay visible in both. |

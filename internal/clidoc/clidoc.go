@@ -119,7 +119,7 @@ var cliCommands = []cliCommand{
 			{"token", "t", "access token, generated when empty"},
 			{"read-only", "", "refuse keys, messages and actions"},
 		},
-		example: "dm web --addr 100.71.227.52:8099",
+		example: "dm web --addr you.ts.net:8099",
 		group:   groupSessions,
 	},
 	{

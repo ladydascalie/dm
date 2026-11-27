@@ -96,7 +96,7 @@ var ConfigNodes = []ConfigNode{
 	},
 	{
 		Name:    "web-addr",
-		Value:   `a quoted host:port, as in "100.71.227.52:8099"`,
+		Value:   `a quoted host:port, as in "you.ts.net:8099"`,
 		Default: `"` + keymap.DefaultWebAddr + `"`,
 		Desc:    "Set the host:port dm web listens on. It applies only when --addr is not passed, so an explicit flag always wins. An absent or empty node keeps the loopback default; a value that is not host:port is refused when the config loads.",
 	},
