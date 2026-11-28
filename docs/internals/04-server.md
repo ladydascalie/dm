@@ -38,7 +38,9 @@ A pane whose shell or `argv` program exits leaves the layout, and its split coll
 
 The last pane of a window closes the window. The last window ends the session, and `endSession` (`internal/server/server_view.go#server.endSession`) removes the state directory. A live shelved pane keeps a window. When the exit empties the last window, the active shelved pane takes it.
 
-A SIGTERM is not a session end. `terminate` (`internal/server/server_view.go#server.terminate`) keeps the session directory, so the panes keep their sockets and stay adoptable.
+A SIGTERM is not a session end. `terminate` (`internal/server/server_view.go#server.terminate`) keeps the session directory, so the panes keep their sockets and stay adoptable. It asks no client back.
+
+A `restart` request goes further than a SIGTERM in one way: `restartServer` removes the socket before it tells the clients anything, so none can dial the server that is leaving, then sends `close` with `wire.CloseRestart` and drains that frame through each client's writer before `leave` exits. A client that hears it re-execs the binary on disk and reconnects, so a restart is where an upgrade reaches both sides of the socket while the panes keep their screens.
 
 ## Concurrency model
 
@@ -92,7 +94,7 @@ flowchart LR
 
 `serve` (`internal/server/server_view.go#server.serve`) switches on `Type`. `attach` registers the client, `keys` writes to a pane or a floating pane, `resize` refits, and `req` goes to `handleReq`.
 
-`handleReq` (`internal/server/server_rpc.go#server.handleReq`) switches on `Action`: 72 `case` clauses over 77 actions, five cases naming two each. A branch answers through `s.reply` (`internal/server/server_view.go#server.reply`). The `msg-sub` action streams message log entries and never answers.
+`handleReq` (`internal/server/server_rpc.go#server.handleReq`) switches on `Action`: 73 `case` clauses over 78 actions, five cases naming two each. A branch answers through `s.reply` (`internal/server/server_view.go#server.reply`). The `msg-sub` action streams message log entries and never answers.
 
 ## Mutation path
 

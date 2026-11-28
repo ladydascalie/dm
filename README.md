@@ -30,11 +30,12 @@ session draws, and a toast in the session itself, both reading
 `dm 1.4.0 is out, run dm upgrade`. `dm upgrade` installs the latest release over
 the binary you ran, after checking the tarball's sha256, and `dm upgrade --check`
 only reports. A session that is already running keeps the old binary until it
-restarts, so upgrade at a moment you can detach. Set `DM_NO_UPDATE_CHECK=1` to
-stop the check. It also stays quiet on CI and in a build that carries no version
-string. A `dev` build has no version to compare, so `dm upgrade` treats it as
-older than any release and installs the latest one; `--force` reinstalls when you
-already run the latest.
+restarts: run `dm restart -s <name>`, or press `R` after the prefix, and the
+server and the attached clients start again from the binary on disk while every
+pane keeps running. Set `DM_NO_UPDATE_CHECK=1` to stop the check. It also stays
+quiet on CI and in a build that carries no version string. A `dev` build has no
+version to compare, so `dm upgrade` treats it as older than any release and
+installs the latest one; `--force` reinstalls when you already run the latest.
 
 ## Start here
 
@@ -44,6 +45,7 @@ dm attach -s work       # resume a session (durable, see below)
 dm ls                   # sessions with pane counts and project
 dm list                 # panes as a table
 dm new -s work          # start a session without attaching
+dm restart -s work      # restart server and clients; panes keep running
 dm kill -s work         # stop the server; panes keep running
 dm purge                # remove dead sessions whose panes are gone
 dm reset -s work --force  # discard a session and its panes for a full restart
@@ -99,6 +101,7 @@ before it cuts a key.
 | `P` | set the active workspace's project, or clear it |
 | `b` | cycle the sidebar: full, thin, hidden |
 | `ctrl+r` | reload config.kdl and its theme |
+| `R` | restart the server and this client from the binary on disk; panes keep running |
 | `d` / `q` | detach |
 | `esc` | dismiss the prefix help box |
 
@@ -1049,6 +1052,12 @@ one shared list. This page names the common ones only.
 
 A detach loses nothing: the panes, their processes and their scrollback stay,
 and a reattach draws the screen as you left it.
+
+A restart loses nothing either, and it needs no detach. `dm restart -s <name>`,
+or the restart key, stops the server in order and starts the one that follows.
+An attached client re-execs the binary on disk and reconnects, so both sides of
+the socket run the new build, and every pane keeps its daemon, its screen and
+its scrollback. That is how an upgrade reaches a live session.
 
 Kill the server (`kill -9`, crash, logout) and the panes keep running, including
 their shells, because each pane daemon has its own unix socket and is started

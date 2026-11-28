@@ -130,6 +130,13 @@ var cliCommands = []cliCommand{
 		group:   groupSessions,
 	},
 	{
+		name:    "restart",
+		args:    "[-s name]",
+		summary: "restart a session's server and its clients, keeping the panes",
+		flags:   []cliFlag{{"s", "name", "session name"}},
+		group:   groupSessions,
+	},
+	{
 		name:    "purge",
 		args:    "[--dry-run]",
 		summary: "remove dead sessions whose panes are gone",

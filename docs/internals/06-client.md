@@ -307,6 +307,8 @@ A session switch is the same exit with a name. `pickSession` sets `switchTo`, an
 
 When the server closes the socket, the reader goroutine returns, `msgs` is closed, and the client leaves the alternate screen. The server sends `close` when the last pane ends the session, so that path quits without a read error. To get back in, attach again.
 
+A `close` frame whose `Msg` is `wire.CloseRestart` is the exception: the server is going away on purpose and expects the client back. `attachConn` returns `errServerRestart` (`internal/client/client_model.go#errServerRestart`), and `Run` restores the terminal, leaves the alternate screen and calls `syscall.Exec` on the binary on disk with its own argv (`reexecSelf`, `internal/client/reexec_unix.go#reexecSelf`). An exec runs no defer, so those two steps happen before it. The new client dials the successor, and `EnsureAt` waits for the departing server's flock to free before it spawns one, so the reconnect never races a locked session (`internal/transport/transport.go#waitUnlocked`). A harness has no binary to replace, so it treats the same frame as a detach.
+
 Panes keep running across a server restart. Re-attaching rebuilds the client from one snapshot and one screen per pane (`s.attach`, `internal/server/server_view.go#server.attach`). The one resync inside a connection is the server's: a client whose queue overflowed is rebuilt the same way (`resyncClient`, `internal/server/server_view.go#server.resyncClient`). The client handles it as an ordinary `snapshot` plus `screen` message pair.
 
 ## The server contract

@@ -81,6 +81,14 @@ func EnsureAtWithLayout(root, name, layoutPath string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A session whose server is leaving still holds its flock for a moment,
+	// and its socket is already gone. Spawning into that window starts a
+	// server that dies on the lock and reports a locked session instead of the
+	// server that is coming up, so wait for the lock to free first: this is the
+	// path a client takes when it reconnects across a restart.
+	if err := waitUnlocked(root, name, spawnWait); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(paths.SessionDirAt(root, name), 0o700); err != nil {
 		return nil, err
 	}
@@ -127,6 +135,34 @@ func EnsureAtWithLayout(root, name, layoutPath string) (net.Conn, error) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return nil, fmt.Errorf("server for %q did not start%s", name, logTail(logPath))
+}
+
+// spawnWait bounds how long Ensure waits for a session lock to come free. It
+// covers a restart, where the successor and the client both race the server
+// that is leaving, and a boot in progress, which a second client sees as a lock
+// with no socket to dial. It matches the read deadline RPCAt gives a live but
+// silent server, so an Ensure never buys more patience than a request does.
+const spawnWait = 10 * time.Second
+
+// waitUnlocked waits for the session lock to come free. A spawn that runs
+// while another process holds it starts a server that exits on the lock, and
+// the caller's error would name a locked session instead of the server that is
+// coming up.
+func waitUnlocked(root, name string, d time.Duration) error {
+	deadline := time.Now().Add(d)
+	for {
+		held, err := paths.SessionLockHeld(root, name)
+		if err != nil {
+			return err
+		}
+		if !held {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("session %q is locked: a server is starting or stopping", name)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 // logTail returns the last lines of the server log for an error message. A
@@ -231,6 +267,34 @@ func ListSessionsAt(root string) ([]SessionInfo, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// RestartSession stops a session's server in order and starts the one that
+// follows. The panes never move, so the successor adopts them with their
+// screens and their scrollback: a restart is where a new binary takes over a
+// live session.
+func RestartSession(name string) error { return RestartSessionAt(paths.StateDir(), name) }
+
+// RestartSessionAt is RestartSession with an explicit state root instead of
+// paths.StateDir(). A session with no server is restarted by the dial at the
+// end: Ensure spawns it, and the first start of a dead session is a restart.
+func RestartSessionAt(root, name string) error {
+	if !paths.ValidSessionName(name) {
+		return fmt.Errorf("invalid session name %q", name)
+	}
+	if c, err := net.DialTimeout("unix", paths.ServerSockAt(root, name), 300*time.Millisecond); err == nil {
+		_ = c.Close()
+		if _, err := RPCAt(root, name, wire.Msg{Action: "restart"}); err != nil {
+			return fmt.Errorf("restart %q: %w", name, err)
+		}
+	}
+	// Hold the caller until the successor answers, so a script that restarts
+	// and then asks the session a question never races the server it asked for.
+	nc, err := EnsureAt(root, name)
+	if err != nil {
+		return fmt.Errorf("restart %q: %w", name, err)
+	}
+	return nc.Close()
 }
 
 // KillSession stops the daemon for a session and removes its socket.

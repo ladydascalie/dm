@@ -22,6 +22,7 @@ A command is the first word after `dm`. With no command, `dm` attaches to a sess
 | `dm ls` | `-` | list sessions with pane counts and project (alias: list-sessions) | `dm ls` |
 | `dm web` | `[-s name] [--addr host:port] [--token t] [--read-only]` | serve the session to a browser, for a phone on your tailnet | `dm web --addr you.ts.net:8099` |
 | `dm kill` | `[-s name]` | stop a session's server (panes survive) | `dm kill -s work` |
+| `dm restart` | `[-s name]` | restart a session's server and its clients, keeping the panes | `dm restart [-s name]` |
 | `dm purge` | `[--dry-run]` | remove dead sessions whose panes are gone | `dm purge --dry-run` |
 | `dm reset` | `[-s name \| --all] --force` | discard a session and its panes for a full restart | `dm reset -s work --force` |
 | `dm upgrade` | `[--check] [--force]` | move this binary to the latest release | `dm upgrade --check` |
@@ -128,7 +129,7 @@ The action field names one of these. Each example is one JSON object, carrying o
 | `replay`, `status` | `{"action":"replay","target":"w1p1"}`, `{"action":"status","target":"w1p1"}` |
 | `write-to`, `exec`, `keys` | `{"action":"write-to","target":"w1p1","msg":"go test ./...","enter":true}`, `{"action":"exec","target":"w1p1","msg":"go test ./..."}`, `{"action":"keys","target":"w1p1","keys":"Aw=="}` |
 | `split`, `zoom-pane` | `{"action":"split","target":"w1p1","dir":"right","argv":["htop"]}`, `{"action":"zoom-pane"}` |
-| `set-rail`, `reload` | `{"action":"set-rail","index":30}`, `{"action":"reload"}` |
+| `set-rail`, `reload`, `restart` | `{"action":"set-rail","index":30}`, `{"action":"reload"}`, `{"action":"restart"}` |
 | `resize-split` | `{"action":"resize-split","target":"w1p1","other":"w1p2","ratio":0.7}` |
 | `focus` | `{"action":"focus","target":"w1p2"}` |
 | `focus-dir` | `{"action":"focus-dir","dir":"left"}` |
@@ -243,6 +244,7 @@ Each mode is a table of actions. The table lists the built-in binding; `dm exec`
 | --- | --- | --- |
 | `main` | `send-prefix` | `ctrl+b` |
 | `main` | `reload` | `ctrl+r` |
+| `main` | `restart-server` | `R` |
 | `main` | `split-right` | `\|` |
 | `main` | `split-down` | `-` |
 | `main` | `split-down-alt` | `_` |

@@ -32,6 +32,7 @@ var actionExamples = []actionExample{
 	{"zoom-pane", `{"action":"zoom-pane"}`},
 	{"set-rail", `{"action":"set-rail","index":30}`},
 	{"reload", `{"action":"reload"}`},
+	{"restart", `{"action":"restart"}`},
 	{"resize-split", `{"action":"resize-split","target":"w1p1","other":"w1p2","ratio":0.7}`},
 
 	{"focus", `{"action":"focus","target":"w1p2"}`},

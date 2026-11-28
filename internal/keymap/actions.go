@@ -13,6 +13,7 @@ package keymap
 var builtinActions = map[string]bool{
 	"send-prefix":         true,
 	"reload":              true,
+	"restart-server":      true,
 	"split-right":         true,
 	"split-down":          true,
 	"split-down-alt":      true,

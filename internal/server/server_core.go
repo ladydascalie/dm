@@ -243,11 +243,18 @@ type client struct {
 	// already type keys and read panes. The real boundary is sandboxing.
 	attached bool
 	closed   bool
-	writer   sync.Once
+	// finishing is set when the server is leaving: the writer flushes the
+	// frames it is owed, the close frame among them, and returns.
+	finishing bool
+	// drained closes when the writer returns, so a restart can wait for the
+	// last frame before it exits. A client with no goroutine behind it, which
+	// a test builds, leaves it nil and waits for nothing.
+	drained chan struct{}
+	writer  sync.Once
 }
 
 func newClient(c net.Conn) *client {
-	cl := &client{c: c}
+	cl := &client{c: c, drained: make(chan struct{})}
 	cl.cond = sync.NewCond(&cl.mu)
 	return cl
 }
@@ -408,6 +415,30 @@ func (c *client) popLocked() wire.Msg {
 	return m
 }
 
+// finish tells the writer that the server is leaving: it flushes the frames it
+// is owed and returns, so the last frame of a leaving server still lands. A
+// writer that already stopped, or a client with none behind it, is left alone.
+func (c *client) finish() {
+	c.mu.Lock()
+	c.finishing = true
+	if c.cond != nil {
+		c.cond.Broadcast()
+	}
+	c.mu.Unlock()
+}
+
+// waitDrained blocks until the writer has returned, or d passes, so a client
+// that stopped reading never holds a leaving server forever.
+func (c *client) waitDrained(d time.Duration) {
+	if c.drained == nil {
+		return
+	}
+	select {
+	case <-c.drained:
+	case <-time.After(d):
+	}
+}
+
 // startWriter runs the one goroutine that owns the socket. Every client frame,
 // including replies, leaves through it.
 func (c *client) startWriter() {
@@ -415,6 +446,11 @@ func (c *client) startWriter() {
 }
 
 func (c *client) writeLoop() {
+	defer func() {
+		if c.drained != nil {
+			close(c.drained)
+		}
+	}()
 	for {
 		m, ok := c.next()
 		if !ok {
@@ -441,6 +477,12 @@ func (c *client) next() (wire.Msg, bool) {
 		}
 		if !c.paused && len(c.queue) > 0 {
 			return c.popLocked(), true
+		}
+		if c.finishing && !c.paused {
+			// The server is leaving and this client is owed no more frames:
+			// the writer stops here, after the close frame it just flushed.
+			c.closed = true
+			return wire.Msg{}, false
 		}
 		c.cond.Wait()
 	}
@@ -558,6 +600,10 @@ type server struct {
 	cfg     *keymap.Config
 	panes   map[string]*paneConn
 	clients map[*client]bool
+	// conns is every open connection, attached or not. An RPC client that never
+	// sent an attach frame is not in clients, yet a restart still owes it its
+	// reply, so the drain reads this set and the broadcast reads clients.
+	conns map[*client]bool
 	// lock is the session lock this server took at startup, held for the
 	// process's whole life. endSession checks it still owns the path before it
 	// removes the directory. It is nil only for a server a test builds without
@@ -844,6 +890,7 @@ func Run(args []string) error {
 func newServer(st *session.State, cfg *keymap.Config, adopt map[string]bool) *server {
 	return &server{
 		st: st, cfg: cfg, panes: map[string]*paneConn{}, paneSpawn: map[string]*sync.Mutex{}, clients: map[*client]bool{},
+		conns:  map[*client]bool{},
 		floats: map[string]*floatProc{},
 		cols:   st.Cols, rows: st.Rows, adopt: adopt,
 		branches: map[string]*branchEntry{}, watches: map[boxWatchKey]box.Watch{},

@@ -239,6 +239,7 @@ var ActionDesc = map[string]string{
 	// main
 	"send-prefix":         "Send the prefix key through to the pane instead of waiting for a key command.",
 	"reload":              "Reload config.kdl and its theme file.",
+	"restart-server":      "Restart the session's server and this client, keeping every pane running. Both settle on the binary on disk, so an upgrade lands without a detach.",
 	"split-right":         "Split the focused pane side by side, with the new pane on the right.",
 	"split-down":          "Split the focused pane top and bottom, with the new pane below.",
 	"split-down-alt":      "Split the focused pane top and bottom, with the new pane below; alternative key.",

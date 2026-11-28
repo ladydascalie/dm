@@ -2,6 +2,7 @@ package client
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -193,7 +194,12 @@ type tui struct {
 	maxOff   int
 	scrollVT *vt.Term
 
-	quit     bool
+	quit bool
+	// restart is set when the server left on purpose and asked the client to
+	// come back. It is not a detach: the client reconnects to the server that
+	// follows, or hands the process over to the binary on disk first when it
+	// has one.
+	restart  bool
 	switchTo string
 
 	escAt   time.Time
@@ -648,7 +654,11 @@ func RunWithLayout(name, layoutPath string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = term.Restore(fd, old) }()
+	// restore and leaveScreen are the two things a re-exec must do for itself:
+	// an exec never runs a defer, so the shell the new binary starts from owns
+	// a cooked terminal outside the alternate screen.
+	restore := func() { _ = term.Restore(fd, old) }
+	defer restore()
 
 	// Ask the outer terminal for its colours once per attach, before the
 	// alternate screen. The reply arrives on stdin and the detector consumes
@@ -669,12 +679,21 @@ func RunWithLayout(name, layoutPath string) error {
 	var out bytes.Buffer
 	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h")
 	_, _ = os.Stdout.Write(out.Bytes())
-	defer func() {
+	leaveScreen := func() {
 		_, _ = os.Stdout.WriteString("\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
-	}()
+	}
+	defer leaveScreen()
 
 	for {
 		next, err := runSession(fd, name, layoutPath, notice, keys, winch, &pace)
+		if errors.Is(err, errServerRestart) {
+			// Hand the terminal back and become the binary on disk. Server and
+			// client then run the same build, which is the whole point of a
+			// restart: an upgrade lands on both sides without a detach.
+			restore()
+			leaveScreen()
+			return reexecSelf(name)
+		}
 		if err != nil {
 			return err
 		}
@@ -852,6 +871,11 @@ type Harness struct {
 	Notice string
 }
 
+// errServerRestart ends one attach because the server left on purpose and asked
+// the client back. It is not a failure: Run hands the process to the binary on
+// disk, and a harness with no binary to exec treats it as a detach.
+var errServerRestart = errors.New("server restarted")
+
 // Attach runs one attached session over a connection the caller made. It
 // returns the session to switch to, empty when the client is done.
 func Attach(h Harness) (string, error) {
@@ -862,7 +886,13 @@ func Attach(h Harness) (string, error) {
 	} else {
 		theme.SetDepth(theme.DetectDepth(os.Getenv))
 	}
-	return attachConn(&transport.Conn{Conn: h.Conn}, h, &pacer{})
+	next, err := attachConn(&transport.Conn{Conn: h.Conn}, h, &pacer{})
+	if errors.Is(err, errServerRestart) {
+		// A harness has no process to replace: its host reconnects or reloads
+		// on its own terms, so one restart ends the attach like a detach.
+		return next, nil
+	}
+	return next, err
 }
 
 // lastState is what the harness heard last, so a snapshot that changes nothing
@@ -1007,6 +1037,9 @@ func attachConn(c *transport.Conn, h Harness, pace *pacer) (string, error) {
 			tickEvery = every
 		}
 		if t.quit {
+			if t.restart {
+				return "", errServerRestart
+			}
 			return "", nil
 		}
 		if t.switchTo != "" {
@@ -1220,7 +1253,10 @@ func (t *tui) apply(m wire.Msg) {
 		delete(t.hist, m.Target)
 		delete(t.histMeta, m.Target)
 	case "close":
+		// A plain close is a detach by another hand: the client is done. The
+		// restart reason says the panes stay and the client is expected back.
 		t.quit = true
+		t.restart = m.Msg == wire.CloseRestart
 	case "exit":
 		// A float's exit never toasts: the live float keeps its last screen
 		// and says so, and a closed float is already off the screen.

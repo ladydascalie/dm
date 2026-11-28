@@ -21,7 +21,7 @@ type Msg struct {
 	Target string `json:"target,omitempty"` // pane id
 	Dir    string `json:"dir,omitempty"`    // left right up down
 	Other  string `json:"other,omitempty"`  // resize-split, swap-panes, move-pane: the other pane id
-	Msg    string `json:"msg,omitempty"`
+	Msg    string `json:"msg,omitempty"`    // typed text, or the close frame's reason
 	// Project is the explicit project name on new-workspace. Empty means the
 	// new workspace inherits the project of the one it was created from.
 	Project string `json:"project,omitempty"`
@@ -152,6 +152,12 @@ type PaneInfo struct {
 	// feeds geometry may count it.
 	Shelf bool `json:"shelf,omitempty"`
 }
+
+// CloseRestart is the Msg a close frame carries when the server is leaving on
+// purpose and the panes stay up. The client reconnects instead of quitting, and
+// a client with a binary to exec hands the process over to it before it dials,
+// so one restart is where an upgrade lands on both sides of the socket.
+const CloseRestart = "restart"
 
 // ShelfFoldTarget is the toggle-fold target of the rail's shelf section, the
 // way ProjectTargetPrefix marks a project name.

@@ -364,6 +364,14 @@ func (s *server) handleReq(cl *client, m wire.Msg) {
 		s.mu.Unlock()
 		s.reply(cl, m, map[string]any{"pad": pad}, nil)
 
+	case "restart":
+		// The operator wants the binary on disk to own the session again: an
+		// upgrade, or a wedged server. The reply leaves first, then the server
+		// goes in order and every client reconnects to the one that follows.
+		// The panes never move, so nothing on screen is lost.
+		s.reply(cl, m, map[string]any{"session": s.st.Name}, nil)
+		s.restartServer()
+
 	case "set-rail":
 		rail := s.setRail(m.Index)
 		s.syncSizes()

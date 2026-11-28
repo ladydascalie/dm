@@ -983,6 +983,14 @@ func (t *tui) runAction(name string) {
 			t.configFailed()
 		}
 		t.disarm()
+	case "restart-server":
+		// The server answers by asking every client back, this one included:
+		// the attach ends on the close frame and Run reconnects, or re-execs
+		// the binary on disk first.
+		if t.conn != nil {
+			_ = t.conn.Send(wire.Msg{Type: "req", Action: "restart"})
+		}
+		t.disarm()
 	default:
 		if strings.HasPrefix(name, "plugin:") {
 			t.runPlugin(strings.TrimPrefix(name, "plugin:"))

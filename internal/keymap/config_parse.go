@@ -1145,6 +1145,7 @@ shelf-size 80
 keymap "main" {
     "send-prefix" "prefix"
     "reload" "ctrl+r"
+    "restart-server" "R" help "Session"
     "split-right" "|"
     "split-down" "-"
     "split-down-alt" "_"

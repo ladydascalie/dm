@@ -590,10 +590,65 @@ func (s *server) ownsDirectory() bool {
 	return s.lock == nil || s.lock.StillOurs()
 }
 
+// restartDrain bounds the whole drain of an orderly restart, however many
+// clients it owes a close frame. A client that stopped reading costs the
+// restart this moment, never the session.
+const restartDrain = 2 * time.Second
+
+// dropSock removes the socket and the pid file: nothing can dial a server that
+// is leaving, and nothing can signal it by the pid it left behind. A second
+// call finds neither and is quiet.
+func (s *server) dropSock() {
+	st := s.st
+	_ = os.Remove(st.ServerSock())
+	_ = os.Remove(filepath.Join(st.SessionDir(), "server.pid"))
+}
+
+// leave drops the listener and the web page, then exits. The session directory
+// and the panes stay: the server that follows adopts every pane with its screen
+// and its scrollback.
+func (s *server) leave() {
+	s.dropSock()
+	if s.ln != nil {
+		_ = s.ln.Close()
+	}
+	s.closeWeb()
+	s.exitFunc()(0)
+}
+
+// restartServer is the orderly restart: the socket and the pid file go first,
+// so no client can dial the server that is leaving, then every client is told
+// to reconnect rather than quit and given a moment to flush that frame. The
+// panes are untouched, so the server that follows adopts them.
+func (s *server) restartServer() {
+	s.dropSock()
+
+	s.mu.Lock()
+	s.ending = true
+	s.stopReflowLocked()
+	clients := make([]*client, 0, len(s.conns))
+	for c := range s.conns {
+		clients = append(clients, c)
+	}
+	s.broadcastLocked(wire.Msg{Type: "close", Msg: wire.CloseRestart})
+	s.mu.Unlock()
+
+	for _, c := range clients {
+		c.finish()
+	}
+	// One deadline for the whole drain, not one per client: a stalled reader
+	// costs the restart its window and never a multiple of it.
+	deadline := time.Now().Add(restartDrain)
+	for _, c := range clients {
+		c.waitDrained(time.Until(deadline))
+	}
+	s.leave()
+}
+
 // terminate is the SIGTERM handler: it closes the clients, removes the
 // socket and the pid file, and exits. It keeps the session directory, so the
 // panes keep their sockets and stay adoptable, the same panes a crash leaves
-// behind.
+// behind. Unlike restartServer it asks no client to come back.
 func (s *server) terminate() {
 	s.mu.Lock()
 	s.ending = true
@@ -605,19 +660,10 @@ func (s *server) terminate() {
 	s.broadcastLocked(wire.Msg{Type: "close"})
 	s.mu.Unlock()
 
-	st := s.st
-	_ = os.Remove(st.ServerSock())
-	_ = os.Remove(filepath.Join(st.SessionDir(), "server.pid"))
 	for _, c := range clients {
 		_ = c.c.Close()
 	}
-	if s.ln != nil {
-		_ = s.ln.Close()
-	}
-	// The web listener is the daemon's own: it goes with the daemon, so a
-	// later `dm web` on the same address binds instead of failing.
-	s.closeWeb()
-	s.exitFunc()(0)
+	s.leave()
 }
 
 func (s *server) pushSnapshot() {
@@ -810,8 +856,23 @@ func (s *server) syncSizes() {
 
 func (s *server) serve(c net.Conn) {
 	cl := newClient(c)
+	s.mu.Lock()
+	// A server a test builds may carry no registry: the first conn makes one,
+	// so no constructor has to remember it.
+	if s.conns == nil {
+		s.conns = map[*client]bool{}
+	}
+	s.conns[cl] = true
+	s.mu.Unlock()
+	// Every conn gets its writer at birth, not at its first frame, so a restart
+	// can drain a conn that never asked for anything without waiting out the
+	// window.
+	cl.startWriter()
 	registered := false
 	defer func() {
+		s.mu.Lock()
+		delete(s.conns, cl)
+		s.mu.Unlock()
 		if registered {
 			s.mu.Lock()
 			delete(s.clients, cl)

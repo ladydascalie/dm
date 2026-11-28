@@ -154,6 +154,7 @@ The sender column names the caller. `cli` is a `dm` verb and `tui` is the client
 | `split` | `target`, `dir`, `cwd`, `ratio`, `nofocus`, `argv` | `pane` | cli, tui |
 | `zoom-pane` | none | `zoom` (the zoomed pane id, empty for none) | tui |
 | `reload` | none | `pad` (the pane padding in cells) | tui |
+| `restart` | none | `session`. The reply leaves first, then the server removes its socket and exits, and every client is told to reconnect (`wire.CloseRestart`) | cli, tui |
 | `set-rail` | `index` | `rail` (the sidebar width in cells) | tui |
 | `move-pane` | `target`, `other`, `dir` | `pane` | exec |
 | `select-layout` | `layout` | `layout` | tui |

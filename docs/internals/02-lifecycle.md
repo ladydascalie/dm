@@ -133,7 +133,7 @@ their scrollback come back.
 
 | Crash | Panes | Session directory | Recovery |
 |---|---|---|---|
-| the server dies or exits, by `kill -9` or a logout | keep running, sockets intact | untouched | the client exits. The next dial spawns a server that adopts each pane |
+| the server dies or exits, by `kill -9` or a logout | keep running, sockets intact | untouched | the client exits. The next dial spawns a server that adopts each pane, and a client that heard `close` with the restart reason re-execs and redials instead |
 | a pane daemon dies | its shell loses the PTY and exits | kept, and `state.json` is rewritten when the record goes (`internal/server/server_view.go#server.paneExited`) | `server.watcherLoop` re-dials a lost connection (`internal/server/server_core.go#server.watcherLoop`). When that dial is refused or finds the socket gone, the record goes and the split collapses. Focus moves to a live neighbour |
 | the last pane exits | none left | removed by `server.endSession` (`internal/server/server_view.go#server.endSession`) | the session is gone, and every attached client returns to its shell |
 | machine reboot | gone | intact | fresh panes spawn from the state, each marked `restarted` (`internal/server/server_core.go#server.ensurePane`) |
@@ -148,6 +148,7 @@ answers the OSC 10 and OSC 11 queries with.
 | Word or actor | What it does | Panes | Session directory |
 |---|---|---|---|
 | `dm kill` | SIGTERM to the pid in `server.pid`, after checking that `/proc` names `__server` (`internal/transport/transport.go#KillSessionAt`) | survive | kept |
+| `dm restart`, or the restart key | a `restart` request. The server removes its socket and pid file, tells every client to reconnect rather than quit, drains that frame, and exits (`internal/server/server_view.go#server.restartServer`). Each client re-execs the binary on disk and dials the successor, which adopts the panes | survive | kept |
 | `dm reset --force` | SIGTERM, then SIGKILL the server, reap every pane group, remove the directory (`internal/transport/transport.go#ResetSessionAt`) | killed | removed |
 | `dm purge` | remove a directory whose server does not answer and whose pids are dead (`internal/cli/cli.go#runPurge`) | already gone | removed |
 | the pane, every 5 s | check its own socket path (`internal/pane/pane.go#paneProc.reapOrphans`). If the path is gone or names another file, kill the shell group and exit | itself | untouched |

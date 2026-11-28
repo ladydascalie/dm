@@ -60,12 +60,13 @@ func TestLLMSCommandWritesFile(t *testing.T) {
 
 // TestLLMSTextStaysOnePass proves the document stays short enough to read in
 // one pass. The budget rose from 480 to 500 when the ask verbs and their
-// actions joined the page, and to 510 when the copy section did; each section
-// carries its own lines, so the page still reads in one pass.
+// actions joined the page, to 510 when the copy section did, and to 512 when
+// the restart word took a command row and a keymap row; each section carries
+// its own lines, so the page still reads in one pass.
 func TestLLMSTextStaysOnePass(t *testing.T) {
 	t.Parallel()
-	if n := strings.Count(clidoc.LLMsText(), "\n"); n >= 510 {
-		t.Fatalf("llms.txt is %d lines, want under 510", n)
+	if n := strings.Count(clidoc.LLMsText(), "\n"); n >= 512 {
+		t.Fatalf("llms.txt is %d lines, want under 512", n)
 	}
 }
 

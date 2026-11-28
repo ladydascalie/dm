@@ -552,6 +552,20 @@ func Run(argv []string) error {
 		}
 		return transport.KillSession(name)
 
+	case "restart":
+		c := newFlagsAt(root, "restart")
+		if err := c.parse(argv[1:]); err != nil {
+			return err
+		}
+		if err := c.extraArg(1); err != nil {
+			return err
+		}
+		name := c.session
+		if len(c.args) > 0 {
+			name = c.args[0]
+		}
+		return transport.RestartSession(name)
+
 	case "reset":
 		c := newFlagsAt(root, "reset")
 		if err := c.parse(argv[1:]); err != nil {
