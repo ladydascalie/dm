@@ -42,7 +42,7 @@ var asciiGlyphs = map[string]string{
 	"─": "-", "│": "|", "├": "+", "┤": "+",
 	"▾": "v", "▸": ">", "▌": "|", "●": "*", "○": "o",
 	"▲": "!", "✓": "+", "✕": "x", "▶": ">",
-	"⧉": "S",
+	"⧉": "S", "◉": "w",
 	"⎇": "g",
 	"…": ">",
 	"░": ":",
@@ -87,6 +87,7 @@ func (g Glyphs) For(set GlyphSet) Glyphs {
 	g.Dirty = ASCII(g.Dirty)
 	g.GitMark = ASCII(g.GitMark)
 	g.SyncMark = ASCII(g.SyncMark)
+	g.WebMark = ASCII(g.WebMark)
 	g.Shadow = ASCII(g.Shadow)
 	return g
 }
@@ -133,6 +134,9 @@ func (t Theme) For(set GlyphSet) Theme {
 		}
 		if t.Glyphs.NerdSyncMark != "" {
 			t.Glyphs.SyncMark = t.Glyphs.NerdSyncMark
+		}
+		if t.Glyphs.NerdWebMark != "" {
+			t.Glyphs.WebMark = t.Glyphs.NerdWebMark
 		}
 		if t.Glyphs.NerdGitMark != "" {
 			t.Glyphs.GitMark = t.Glyphs.NerdGitMark

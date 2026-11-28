@@ -136,6 +136,7 @@ func (s *server) snapshotLocked() *wire.Snapshot {
 		Pad:          s.cfg.Padding(),
 		Root:         cloneTree(win.Root),
 		Sync:         win.Sync,
+		Web:          s.web != nil,
 		Ask:          wireAsks(s.st.Ask),
 	}
 	for _, w := range s.st.ActiveWorkspace().Windows {

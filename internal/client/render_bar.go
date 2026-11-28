@@ -406,14 +406,17 @@ type barAsk struct {
 	key   string
 }
 
-// barPinned is the right block: the prefix flag while armed, then the scroll
-// info, then the unread badge, then the question the reader has not answered.
-// All are anchored to the last column, so all are pinned, and the fit drops
-// them left to right: an unread entry gives way before a pane stopped and
-// waiting on the operator.
-func barPinned(th theme.Theme, set theme.GlyphSet, armed bool, info string, badge barBadge) []segment.Seg {
+// barPinned is the right block: the live web mark, then the prefix flag while
+// armed, then the scroll info, then the unread badge, then the question the
+// reader has not answered. All are anchored to the last column, so all are
+// pinned, and the fit drops them left to right: the web mark goes first, then
+// the info, then an unread entry, and the open question last.
+func barPinned(th theme.Theme, set theme.GlyphSet, armed bool, info string, badge barBadge, web bool) []segment.Seg {
 	p := th.Palette
 	var out []segment.Seg
+	if web {
+		out = append(out, segment.Seg{Text: th.Glyphs.WebMark + " ", FG: p.BarAccent, BG: p.RailBG, Pin: true})
+	}
 	if armed {
 		out = append(out, segment.Seg{Text: "PREFIX ", FG: p.RailText, BG: p.RailBG, Bold: true, Pin: true})
 	}
@@ -476,7 +479,7 @@ func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, s
 	if len(badge) > 0 {
 		b = badge[0]
 	}
-	right := barFitPinned(barPinned(th, set, armed, info, b), snap.Cols, th.Glyphs.ElideMark())
+	right := barFitPinned(barPinned(th, set, armed, info, b, snap.Web), snap.Cols, th.Glyphs.ElideMark())
 	left := barLeftFor(th, snap, set).fit(th, barLeftBudget(th, snap, set, armed, info, b))
 	return append(left, right...)
 }
@@ -485,7 +488,7 @@ func barSegments(th theme.Theme, snap *wire.Snapshot, armed bool, info string, s
 // cell short. A bar that pins nothing leaves the whole row. The click handler
 // re-runs it so a click is tested against the same elision the frame painted.
 func barLeftBudget(th theme.Theme, snap *wire.Snapshot, set theme.GlyphSet, armed bool, info string, badge barBadge) int {
-	right := barFitPinned(barPinned(th, set, armed, info, badge), snap.Cols, th.Glyphs.ElideMark())
+	right := barFitPinned(barPinned(th, set, armed, info, badge, snap.Web), snap.Cols, th.Glyphs.ElideMark())
 	budget := snap.Cols - segment.SegCells(right)
 	if len(right) > 0 {
 		// Keep one gutter cell between the blocks. drawBar spends it as part of

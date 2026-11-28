@@ -289,6 +289,10 @@ type Snapshot struct {
 	// Sync is the active window's synchronize-panes flag, so the client can
 	// paint the focus chip's sync mark.
 	Sync bool `json:"sync,omitempty"`
+	// Web is true while the session daemon serves its web page. A client
+	// cannot read this from its own config: the listener belongs to the
+	// daemon, and a reload may have flipped web-auto after it started.
+	Web bool `json:"web,omitempty"`
 	// ShelfActive indexes the shelved pane the shelf shows, in the order the
 	// shelved panes appear in Panes. It is session-wide, not per client: two
 	// clients share one active member. Zero covers both "no shelf" and "the

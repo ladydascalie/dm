@@ -186,3 +186,18 @@ func TestTerminateClosesWeb(t *testing.T) {
 		t.Fatalf("GET %s answered %d after terminate, want a closed listener", got.URL, res.StatusCode)
 	}
 }
+
+// TestSnapshotCarriesWeb proves the snapshot tells the client where the
+// listener stands. The client paints the status bar's web mark from this flag,
+// so it must follow the listener and not the config: web-auto on carries true
+// and an absent key carries false.
+func TestSnapshotCarriesWeb(t *testing.T) {
+	on, _ := webAutoServer(t, "prefix \"ctrl+b\"\nweb-auto true\nweb-addr \"127.0.0.1:0\"")
+	if !snapshot(on).Web {
+		t.Fatal("snapshot web = false, want true while the daemon serves the page")
+	}
+	off, _ := webAutoServer(t, `prefix "ctrl+b"`)
+	if snapshot(off).Web {
+		t.Fatal("snapshot web = true, want false with no listener")
+	}
+}

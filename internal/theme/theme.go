@@ -121,6 +121,11 @@ type Glyphs struct {
 	// mark chooses one.
 	SyncMark     string
 	NerdSyncMark string
+	// WebMark is the status bar's mark while the session daemon serves its
+	// web page. NerdWebMark is its Nerd Font form, chosen by Theme.For the
+	// way a state mark chooses one.
+	WebMark     string
+	NerdWebMark string
 	// Shadow is the mark a float paints beside and under its box: the drop
 	// shadow the float-shadow option turns on.
 	Shadow string
@@ -187,6 +192,8 @@ func DefaultTheme() Theme {
 			NerdGitMark:       "\ue702",
 			SyncMark:          "⧉",
 			NerdSyncMark:      "\uf0e2",
+			WebMark:           "◉",
+			NerdWebMark:       "\uf0ac",
 			Shadow:            "░",
 			Ellipsis:          "…",
 		},

@@ -61,6 +61,8 @@ func TestThemeDefaults(t *testing.T) {
 		NerdGitMark:       "\ue702",
 		SyncMark:          "⧉",
 		NerdSyncMark:      "\uf0e2",
+		WebMark:           "◉",
+		NerdWebMark:       "\uf0ac",
 		Shadow:            "░",
 		Ellipsis:          "…",
 	}
