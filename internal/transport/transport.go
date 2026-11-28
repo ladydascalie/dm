@@ -282,11 +282,12 @@ func RestartSessionAt(root, name string) error {
 	if !paths.ValidSessionName(name) {
 		return fmt.Errorf("invalid session name %q", name)
 	}
-	if c, err := net.DialTimeout("unix", paths.ServerSockAt(root, name), 300*time.Millisecond); err == nil {
-		_ = c.Close()
-		if _, err := RPCAt(root, name, wire.Msg{Action: "restart"}); err != nil {
-			return fmt.Errorf("restart %q: %w", name, err)
-		}
+	if !requestRestart(root, name) {
+		// A server older than the restart action, or one that will not answer,
+		// takes the hard path: stop it the way dm kill does and let the start
+		// below be the restart. The panes survive either way, and a session
+		// with no server has nothing to signal.
+		_ = KillSessionAt(root, name)
 	}
 	// Hold the caller until the successor answers, so a script that restarts
 	// and then asks the session a question never races the server it asked for.
@@ -295,6 +296,38 @@ func RestartSessionAt(root, name string) error {
 		return fmt.Errorf("restart %q: %w", name, err)
 	}
 	return nc.Close()
+}
+
+// restartProbe bounds how long requestRestart waits for the server's answer. It
+// is a question about the running code, not work of its own: a server that has
+// the action answers at once, and one that does not must not cost the caller the
+// ten seconds a silent RPC would.
+const restartProbe = 2 * time.Second
+
+// requestRestart asks the live server to leave in order, and reports whether it
+// took the request. A session with no server answers nothing and a server from
+// before the action answers with an error, so both come back false and take the
+// hard path. The reply is the whole signal: a server that leaves mid-answer
+// leaves anyway, and the start that follows copes with that.
+func requestRestart(root, name string) bool {
+	c, err := net.DialTimeout("unix", paths.ServerSockAt(root, name), 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(restartProbe))
+	if err := wire.WriteMsg(c, wire.Msg{Type: "req", ID: 1, Action: "restart"}); err != nil {
+		return false
+	}
+	for {
+		got, err := wire.ReadMsg(c)
+		if err != nil {
+			return false
+		}
+		if got.Type == "resp" {
+			return got.OK
+		}
+	}
 }
 
 // KillSession stops the daemon for a session and removes its socket.

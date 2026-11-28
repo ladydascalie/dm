@@ -1168,3 +1168,56 @@ func TestLogTail(t *testing.T) {
 		t.Fatalf("logTail = %q, want the last line", tail)
 	}
 }
+
+// TestRequestRestartAsksTheLiveServer proves the restart request reads the
+// answer rather than the connection: only a server that replies OK is asked to
+// leave in order. An older server replies with an error instead, and a session
+// with no server has nobody to ask, so both hand the CLI the hard path.
+func TestRequestRestartAsksTheLiveServer(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// reply is what the fake server answers, nil for no server at all.
+		reply  func(net.Conn) bool
+		accept bool
+	}{
+		{name: "ok", reply: func(c net.Conn) bool {
+			_, _ = wire.ReadMsg(c)
+			_ = wire.WriteMsg(c, wire.Msg{Type: "resp", Action: "restart", OK: true})
+			return true
+		}, accept: true},
+		{name: "unknown action", reply: func(c net.Conn) bool {
+			_, _ = wire.ReadMsg(c)
+			_ = wire.WriteMsg(c, wire.Msg{Type: "resp", Action: "restart", Error: `unknown action "restart"`})
+			return true
+		}},
+		{name: "no server"},
+		{name: "server gone", reply: func(c net.Conn) bool { _ = c.Close(); return false }},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			if tc.reply != nil {
+				ln := listenSessionAt(t, root, "rs")
+				go func() {
+					for {
+						c, err := ln.Accept()
+						if err != nil {
+							return
+						}
+						if tc.reply(c) {
+							_ = c.Close()
+							return
+						}
+						_ = c.Close()
+					}
+				}()
+			}
+			if got := requestRestart(root, "rs"); got != tc.accept {
+				t.Fatalf("requestRestart = %v, want %v", got, tc.accept)
+			}
+		})
+	}
+}
