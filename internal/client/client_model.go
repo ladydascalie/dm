@@ -599,7 +599,16 @@ func Run(name string) error { return RunWithLayout(name, "") }
 // client then attaches the normal way. An empty path is Run. The layout
 // applies to the first start only, so a session switch from inside the client
 // attaches the next session as it stands.
-func RunWithLayout(name, layoutPath string) error {
+func RunWithLayout(name, layoutPath string) error { return run(name, layoutPath, false) }
+
+// RunResumed is Run for the client a restart hands the process to. The
+// terminal is already in the alternate screen and is already raw, so this
+// client clears the screen it inherits and draws on it instead of leaving the
+// screen and entering it again. That is what makes a restart invisible: no
+// flash of the shell between one client and the next.
+func RunResumed(name string) error { return run(name, "", true) }
+
+func run(name, layoutPath string, resumed bool) error {
 	// The pacer spans session switches so the stats describe the process.
 	var pace pacer
 	// DM_STATS asks for the render's cache and pacing tallies when the
@@ -677,7 +686,15 @@ func RunWithLayout(name, layoutPath string) error {
 	defer signal.Stop(winch)
 
 	var out bytes.Buffer
-	out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h")
+	if resumed {
+		// The screen is the one the client before this process was painting,
+		// and the terminal saved its main screen when that client entered it.
+		// Clearing in place keeps that save intact for the exit that ends the
+		// session, and the operator never sees the shell behind it.
+		out.WriteString("\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h")
+	} else {
+		out.WriteString("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h")
+	}
 	_, _ = os.Stdout.Write(out.Bytes())
 	leaveScreen := func() {
 		_, _ = os.Stdout.WriteString("\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?25h\x1b[?1049l\x1b[0m")
@@ -687,11 +704,12 @@ func RunWithLayout(name, layoutPath string) error {
 	for {
 		next, err := runSession(fd, name, layoutPath, notice, keys, winch, &pace)
 		if errors.Is(err, errServerRestart) {
-			// Hand the terminal back and become the binary on disk. Server and
-			// client then run the same build, which is the whole point of a
-			// restart: an upgrade lands on both sides without a detach.
+			// Become the binary on disk. Server and client then run the same
+			// build, which is the whole point of a restart: an upgrade lands on
+			// both sides without a detach. The alternate screen stays up across
+			// the exec, so the handover shows nothing; the terminal goes
+			// cooked first so the client that follows owns a restore.
 			restore()
-			leaveScreen()
 			return reexecSelf(name)
 		}
 		if err != nil {

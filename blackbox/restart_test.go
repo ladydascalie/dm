@@ -132,3 +132,99 @@ func (a *attachTerm) count(needle string) int {
 	defer a.mu.Unlock()
 	return strings.Count(a.out.String(), needle)
 }
+
+// TestRestartLandsAnUpgrade is the flow the operator asked for: dm upgrade, dm
+// restart, and the session runs the new build with no detach. The install step
+// of dm upgrade is a rename over the running binary, so the proofs read the
+// inode each process is really executing instead of trusting the word.
+func TestRestartLandsAnUpgrade(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.run("new", "-s", "ru")
+	root := h.focus("ru")
+
+	a := startAttach(t, h, "ru")
+	a.waitContains(t, firstPaint)
+	h.run("write-to", root, "-s", "ru", "--msg", "echo BEFORE-UPGRADE", "--enter")
+	a.waitContains(t, "BEFORE-UPGRADE")
+
+	serverBefore := readPIDFile(t, h, "ru", "server.pid")
+	paneBefore := readPIDFile(t, h, "ru", filepath.Join("panes", root+".sock.pid"))
+	clientPID := a.cmd.Process.Pid
+
+	// What dm upgrade does to the install: the new file takes the path the
+	// running processes were started from. Their /proc entries keep the old
+	// inode, which is exactly the state the restart has to climb out of.
+	stamped := buildStamped(t, "9.9.9")
+	if err := os.Rename(stamped, h.bin); err != nil {
+		t.Fatalf("install the new binary: %v", err)
+	}
+	if sameFile(t, fmt.Sprintf("/proc/%d/exe", clientPID), h.bin) {
+		t.Fatal("the running client already executes the new file: nothing to prove")
+	}
+
+	a.write(prefixKey + "R")
+	waitPIDChange(t, h, "ru", "server.pid", serverBefore)
+	if got := a.count(altScreenEnter); got != 1 {
+		t.Fatalf("the alternate screen was entered %d times, want 1: the restart left the screen and came back", got)
+	}
+
+	// The client is the same process, and it now executes the installed file.
+	if pid := a.cmd.Process.Pid; pid != clientPID {
+		t.Fatalf("client pid = %d, want %d: a restart must exec, not respawn", pid, clientPID)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for !sameFile(t, fmt.Sprintf("/proc/%d/exe", clientPID), h.bin) {
+		if time.Now().After(deadline) {
+			t.Fatal("the client still executes the old binary after the restart")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// The successor server came from the same install, so both sides moved.
+	serverPID := readPIDFile(t, h, "ru", "server.pid")
+	if !sameFile(t, fmt.Sprintf("/proc/%d/exe", serverPID), h.bin) {
+		t.Fatal("the server the restart started executes an older binary than the install")
+	}
+	// The panes are untouched, and the session still works through them.
+	if got := readPIDFile(t, h, "ru", filepath.Join("panes", root+".sock.pid")); got != paneBefore {
+		t.Fatalf("pane daemon pid = %d, want %d: an upgrade must not respawn a pane", got, paneBefore)
+	}
+	h.run("write-to", root, "-s", "ru", "--msg", "echo AFTER-UPGRADE", "--enter")
+	a.waitContains(t, "AFTER-UPGRADE")
+
+	a.write(prefixKey + "d")
+	a.waitExit(t, 15*time.Second)
+
+	// The restarted client exits cleanly: it inherited the alternate screen, so
+	// its own exit has to be the one that gives it back, once.
+	if a.readErr != nil && !strings.Contains(a.readErr.Error(), "input/output error") {
+		t.Fatalf("the client left the pty with %v", a.readErr)
+	}
+	if got := a.count(altScreenLeave); got != 1 {
+		t.Fatalf("the alternate screen was left %d times, want 1: the session did not hand the screen back once", got)
+	}
+}
+
+// sameFile reports whether two paths reach the same inode. A path through
+// /proc/<pid>/exe resolves to the file that process is executing.
+func sameFile(t *testing.T, a, b string) bool {
+	t.Helper()
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	if err != nil {
+		t.Fatalf("stat %s: %v", b, err)
+	}
+	return os.SameFile(fa, fb)
+}
+
+// altScreenEnter and altScreenLeave are the sequences that open and close the
+// alternate screen. The count of each is how these tests tell a handover from a
+// detach: a seamless restart writes the enter sequence once and the leave
+// sequence once, at the very end.
+const (
+	altScreenEnter = "\x1b[?1049h"
+	altScreenLeave = "\x1b[?1049l"
+)

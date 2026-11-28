@@ -99,7 +99,7 @@ func TestUpgrade(t *testing.T) {
 		for _, want := range []string{
 			"dm 0.1.0 to 9.9.9\n",
 			"installed " + installed.real + "\n",
-			"live sessions keep the old binary until they restart\n",
+			"live sessions keep the old binary until they restart: run dm restart, or press R inside the session\n",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("upgrade output %q misses %q", out, want)

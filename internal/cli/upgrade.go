@@ -98,7 +98,7 @@ func runUpgrade(c *cmdFlags) error {
 	}
 	fmt.Printf("dm %s to %s\n", version.String(), to)
 	fmt.Printf("installed %s\n", target)
-	fmt.Println("live sessions keep the old binary until they restart")
+	fmt.Println("live sessions keep the old binary until they restart: run dm restart, or press R inside the session")
 	return nil
 }
 

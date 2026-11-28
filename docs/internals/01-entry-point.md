@@ -12,7 +12,7 @@ directory, `sessions/<name>` under the state root
 tree of workspaces, a workspace holds windows, a window splits into panes, and
 a pane is one terminal.
 
-## The five roles
+## The six roles
 
 `main` (`main.go#main`) switches on `os.Args[1]` before anything else. A
 sentinel word stops there. A sentinel word is a first argument that names a
@@ -23,6 +23,7 @@ parser behind every user-facing word (`internal/cli/cli.go#Run`).
 |---|---|---|---|
 | `__server` | `server.Run` (`internal/server/server_core.go#Run`) | one per session: the state (`state.json`, the saved layout and pane records), its clients, one connection per pane | pane daemons |
 | `__pane` | `pane.Run` (`internal/pane/pane.go#Run`) | one per pane: a PTY, the screen (the cell grid parsed from its output), the scrollback buffer (a byte budget from `history-lines`: 2.5 MiB at the default 10000 lines, `internal/keymap/config_model.go#Config.HistoryBytes`) | a shell or a named program |
+| `__client` | `client.RunResumed` (`internal/client/client_model.go#RunResumed`) | a restart's continuation: the same terminal and the same alternate screen, so the client that follows draws over the handover instead of leaving and re-entering the screen | a server, on its first dial |
 | `__probe` | `runProbe` (`probe.go#runProbe`) | a terminal test harness, with no state and no daemon | nothing |
 | `__update-check` | `client.RunUpdateCheck` (`internal/client/update.go#RunUpdateCheck`) | a one-shot release refresh: one read of the latest tag, one cache write, then exit | nothing |
 | anything else, once the `help` branch has passed (`main.go#main`) | `cli.Run` (`internal/cli/cli.go#Run`) | the CLI, and the client for an attach | the server, on its first dial |

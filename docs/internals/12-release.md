@@ -177,7 +177,8 @@ An install runs these steps in this order
 Nothing writes into the target's directory until the digest matched, and both
 temp directories go in a deferred cleanup. A failure leaves the old binary where
 it was. On success the verb prints three lines: the move, the installed path,
-and `live sessions keep the old binary until they restart`.
+and `live sessions keep the old binary until they restart: run dm restart, or
+press R inside the session`.
 
 That line holds because a running server and pane daemon keep the code they
 started with in memory. Neither reads the executable again.

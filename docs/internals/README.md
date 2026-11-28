@@ -57,7 +57,7 @@ Read the numbered path from the top. The reason beside each stop says what the
 page unlocks. You do not need every page for every change. You do need 01 to 03
 before any change that crosses a process.
 
-1. [Entry point](01-entry-point.md). Which word starts which of the five roles,
+1. [Entry point](01-entry-point.md). Which word starts which of the six roles,
    who spawns whom, and where the files live. Read it to learn which process
    runs the code you are changing.
 2. [Lifecycle and state](02-lifecycle.md). The four nouns, the state file and

@@ -22,6 +22,12 @@ func main() {
 		case "__pane":
 			exit(pane.Run(args[1:]))
 			return
+		case "__client":
+			// The client a restart hands the process to: same terminal, same
+			// alternate screen. It is not a word anyone types, and it is not in
+			// the man page, so the resumed start has no flag to document.
+			exit(client.RunResumed(attachName(args[1:])))
+			return
 		case "__probe":
 			exit(runProbe(args[1:]))
 			return
@@ -47,6 +53,20 @@ func main() {
 		}
 	}
 	exit(cli.Run(args))
+}
+
+// attachName reads the -s of a __client command line. It is the one flag the
+// resumed client takes, and the caller is this binary, so a bad one is a bug
+// and not a refusal to explain.
+func attachName(args []string) string {
+	name := "main"
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-s" && i+1 < len(args) {
+			name = args[i+1]
+			i++
+		}
+	}
+	return name
 }
 
 func exit(err error) {
